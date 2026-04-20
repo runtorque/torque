@@ -1171,7 +1171,9 @@ def _build_loom_context(state: MatrixState, cell, task) -> dict:
     worktree_base_branch = getattr(cell, "worktree_base_branch", "") or ""
     worktree_dirty = bool(getattr(cell, "worktree_dirty", False))
     worktree_diff = getattr(cell, "worktree_diff", {}) or {}
-    worktree_checkpoints = getattr(cell, "worktree_checkpoints", []) or []
+    worktree_checkpoints = int(
+        getattr(cell, "worktree_checkpoints", 0) or 0
+    )
     agent_ctx = {
         "name": getattr(cell, "name", ""),
         "slug": getattr(cell, "slug", ""),

@@ -280,6 +280,22 @@ class DispatchPreambleTests(unittest.TestCase):
 
         self.assertEqual(dispatch_prompt, preview_prompt)
 
+    def test_worktree_checkpoint_context_preserves_integer_zero(self):
+        self.worker.worktree_checkpoints = 0
+
+        loom_ctx = self.server_mod._build_loom_context(
+            self.state, self.worker, self.task
+        )
+        self.assertIsInstance(loom_ctx["worktree"]["checkpoints"], int)
+        self.assertEqual(loom_ctx["worktree"]["checkpoints"], 0)
+
+        rendered = self._render_action(
+            "name: preview\nprompt: |\n"
+            "  checkpoints={{ loom.worktree.checkpoints }}\n",
+            loom_context=loom_ctx,
+        )
+        self.assertEqual(rendered["prompt"], "checkpoints=0")
+
     def test_inline_role_preview_worker_without_agent_builds_context_safely(self):
         self.role_mgr.save_role(
             "reviewer",
@@ -339,10 +355,15 @@ class DispatchPreambleTests(unittest.TestCase):
         self.assertTrue(loom_ctx["context"]["is_clean"])
         self.assertEqual(loom_ctx["context"]["tasks_dispatched"], 0)
         self.assertEqual(loom_ctx["worktree"]["path"], "")
+        self.assertIsInstance(loom_ctx["worktree"]["checkpoints"], int)
+        self.assertEqual(loom_ctx["worktree"]["checkpoints"], 0)
         self.assertEqual(loom_ctx["agent"]["role"], "reviewer")
 
         rendered = self._render_action(
-            "name: preview\nprompt: |\n  role={{ loom.agent.role }}\n  {{ TASK }}\n",
+            "name: preview\nprompt: |\n"
+            "  role={{ loom.agent.role }}\n"
+            "  checkpoints={{ loom.worktree.checkpoints }}\n"
+            "  {{ TASK }}\n",
             loom_context=loom_ctx,
         )
         prompt = self.server_mod._assemble_worker_prompt(
@@ -356,5 +377,6 @@ class DispatchPreambleTests(unittest.TestCase):
 
         self.assertEqual(
             prompt,
-            "Be careful.\n\nrole=reviewer\nImplement feature\n\nLOOM POSTSCRIPT\n",
+            "Be careful.\n\nrole=reviewer\ncheckpoints=0\n"
+            "Implement feature\n\nLOOM POSTSCRIPT\n",
         )
