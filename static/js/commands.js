@@ -232,12 +232,6 @@ function newAgentFromTemplate(group, templateName) {
   send({ cmd: 'add_agent', group, template: templateName || '' });
 }
 
-function newWeaver(group) {
-  const gs = (state.group_settings || {})[group] || {};
-  if (gs.weaver_agent_id) return;
-  openWeaverLaunchDialog(group);
-}
-
 function quickAddTerminal(group, parentId) {
   const gs = (state.group_settings || {})[group] || {};
   if (gs.terminal_always_custom_dialog) { openAddTerminal(group, parentId); return; }

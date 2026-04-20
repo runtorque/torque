@@ -101,11 +101,6 @@ function _renderAgentTemplateMenuItems(group) {
   return html;
 }
 
-function _renderWeaverMenuItem(group, groupSettings) {
-  if ((groupSettings || {}).weaver_agent_id) return '';
-  return `<button onclick="event.stopPropagation();closeMenus();newWeaver('${esc(group)}')">Weaver</button>`;
-}
-
 function _workerOwnerEngineerId(agent, visibleById) {
   if (!agent) return '';
   const ownerId = String(
@@ -542,7 +537,9 @@ function render() {
       html += `  <div class="cell-name">New</div>`;
       html += `  <button class="cell-add-drop" onclick="event.stopPropagation();toggleMenu(this)">\u25BE</button>`;
       html += `  <div class="split-menu">`;
-      html += _renderWeaverMenuItem(gname, gsLocal);
+      html += `<button onclick="event.stopPropagation();closeMenus();openAddArchitectModal('${esc(gname)}')">Architect</button>`;
+      html += `<button onclick="event.stopPropagation();closeMenus();openAddEngineerModal()">Engineer</button>`;
+      html += `<div class="split-sep"></div>`;
       html += _renderAgentTemplateMenuItems(gname);
       html += `<button onclick="event.stopPropagation();closeMenus();${createMenu.action}">${createMenu.label}</button>`;
       html += `</div>`;
