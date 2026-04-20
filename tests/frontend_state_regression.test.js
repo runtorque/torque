@@ -3513,6 +3513,165 @@ test('renderAgentDetails adds clickable diff, checkpoint, and preserved-merge af
   assert.match(html, /<span class="detail-wt-tag detail-wt-merged">merged<\/span>/);
 });
 
+test('renderAgentDetails shows architect pending hires and decisions', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/render.js');
+
+  context.state.agents = {
+    'arch-1': {
+      id: 'arch-1',
+      name: 'Architect',
+      kind: 'architect',
+      group: 'alpha',
+      cell_type: 'agent',
+      status: 'running',
+      mcp_messages: [],
+    },
+  };
+  context.state.pending_hires = {
+    'hire-1': {
+      id: 'hire-1',
+      architect_id: 'arch-1',
+      requested_name: 'Alice',
+      requested_provider: 'codex',
+      requested_command: 'codex --profile engineer',
+      requested_directory: '/repo/services/api',
+      created_at: 1712345678,
+    },
+    'hire-hidden': {
+      id: 'hire-hidden',
+      architect_id: 'arch-2',
+      requested_name: 'Hidden engineer',
+      created_at: 1712345678,
+    },
+  };
+  context.state.decisions = {
+    'decision-1': {
+      id: 'decision-1',
+      architect_id: 'arch-1',
+      title: 'Define the API cut line',
+      rationale: 'Ship the API before the CLI.\nHold the dashboard until validation lands.',
+      status: 'approved',
+      linked_task_ids: ['task-1'],
+      linked_engineer_ids: ['eng-1', 'eng-2'],
+      updated_at: 1712345680,
+    },
+    'decision-hidden': {
+      id: 'decision-hidden',
+      architect_id: 'arch-2',
+      title: 'Hidden decision',
+      rationale: 'Do not show this row',
+      status: 'proposed',
+      updated_at: 1712345681,
+    },
+  };
+
+  const html = runInContext(context, `renderAgentDetails(state.agents["arch-1"])`);
+
+  assert.match(html, /Pending hires/);
+  assert.match(html, /Alice/);
+  assert.match(html, /codex --profile engineer/);
+  assert.match(html, /approvePendingHire\("hire-1"\)/);
+  assert.match(html, /rejectPendingHire\("hire-1"\)/);
+  assert.doesNotMatch(html, /Hidden engineer/);
+
+  assert.match(html, /Decisions/);
+  assert.match(html, /Define the API cut line/);
+  assert.match(html, /Ship the API before the CLI\.<br>Hold the dashboard until validation lands\./);
+  assert.match(html, /Linked to 1 task/);
+  assert.match(html, /2 engineers/);
+  assert.doesNotMatch(html, /Hidden decision/);
+});
+
+test('architect pending-hire actions send approve and reject commands', () => {
+  const { sandbox } = createSandbox();
+  sandbox.window.prompt = function(message, initialValue) {
+    sandbox.promptArgs = [message, initialValue];
+    return 'Needs a narrower scope';
+  };
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/render.js');
+
+  runInContext(context, `approvePendingHire('hire-1')`);
+  runInContext(context, `rejectPendingHire('hire-2')`);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
+    { cmd: 'pending_hire_approve', id: 'hire-1' },
+    { cmd: 'pending_hire_reject', id: 'hire-2', note: 'Needs a narrower scope' },
+  ]);
+  assert.deepEqual(sandbox.promptArgs, ['Optional rejection note', '']);
+
+  sandbox.sendCalls.length = 0;
+  sandbox.window.prompt = function() { return null; };
+  runInContext(context, `rejectPendingHire('hire-3')`);
+  assert.equal(sandbox.sendCalls.length, 0);
+});
+
+test('decision and pending-hire deltas invalidate the main surface', () => {
+  const { sandbox } = createSandbox({
+    renderInvalidatedSurfaces(flags) {
+      sandbox.lastInvalidations = JSON.parse(JSON.stringify(flags));
+    },
+  });
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/ws.js');
+
+  runInContext(context, `_expectedSeq = 1;`);
+  context._handleDelta({
+    seq: 1,
+    ops: [
+      { op: 'pending_hire_upsert', id: 'hire-1', architect_id: 'arch-1', requested_name: 'Alice' },
+      { op: 'decision_upsert', id: 'decision-1', architect_id: 'arch-1', title: 'Define scope' },
+    ],
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.lastInvalidations)), {
+    main: true,
+    board: false,
+    context: false,
+    events: false,
+    weaver: false,
+    templates: false,
+  });
+  assert.deepEqual(jsonValue(context, `state.pending_hires["hire-1"]`), {
+    id: 'hire-1',
+    architect_id: 'arch-1',
+    requested_name: 'Alice',
+  });
+  assert.deepEqual(jsonValue(context, `state.decisions["decision-1"]`), {
+    id: 'decision-1',
+    architect_id: 'arch-1',
+    title: 'Define scope',
+  });
+
+  runInContext(context, `_expectedSeq = 2;`);
+  context._handleDelta({
+    seq: 2,
+    ops: [
+      { op: 'pending_hire_resolve', id: 'hire-1' },
+      { op: 'decision_remove', id: 'decision-1' },
+    ],
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.lastInvalidations)), {
+    main: true,
+    board: false,
+    context: false,
+    events: false,
+    weaver: false,
+    templates: false,
+  });
+  assert.equal(
+    jsonValue(context, `Object.prototype.hasOwnProperty.call(state.pending_hires || {}, "hire-1")`),
+    false,
+  );
+  assert.equal(
+    jsonValue(context, `Object.prototype.hasOwnProperty.call(state.decisions || {}, "decision-1")`),
+    false,
+  );
+});
+
 test('backlog dispatch note ignores overlap warnings for ready work', () => {
   const { context } = createBoardHarness();
   context.state.board_tasks = {

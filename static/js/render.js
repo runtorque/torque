@@ -816,6 +816,50 @@ function _detailTaskLinkHtml(taskId) {
     + esc(taskId) + '\');}">\u2192</button>';
 }
 
+function _architectPendingHiresForAgent(agentId) {
+  if (!state || !state.pending_hires) return [];
+  const architectId = String(agentId || '');
+  return Object.values(state.pending_hires).filter(function(hire) {
+    return String((hire && hire.architect_id) || '') === architectId;
+  }).sort(function(a, b) {
+    const aTs = Number((a && (a.created_at || a.updated_at)) || 0);
+    const bTs = Number((b && (b.created_at || b.updated_at)) || 0);
+    if (aTs !== bTs) return bTs - aTs;
+    return String((a && a.id) || '').localeCompare(String((b && b.id) || ''));
+  });
+}
+
+function _architectDecisionsForAgent(agentId) {
+  if (!state || !state.decisions) return [];
+  const architectId = String(agentId || '');
+  return Object.values(state.decisions).filter(function(decision) {
+    return String((decision && decision.architect_id) || '') === architectId;
+  }).sort(function(a, b) {
+    const aTs = Number((a && (a.updated_at || a.created_at)) || 0);
+    const bTs = Number((b && (b.updated_at || b.created_at)) || 0);
+    if (aTs !== bTs) return bTs - aTs;
+    return String((a && a.id) || '').localeCompare(String((b && b.id) || ''));
+  });
+}
+
+function approvePendingHire(hireId) {
+  const id = String(hireId || '').trim();
+  if (!id || typeof send !== 'function') return;
+  send({ cmd: 'pending_hire_approve', id: id });
+}
+
+function rejectPendingHire(hireId) {
+  const id = String(hireId || '').trim();
+  if (!id || typeof send !== 'function') return;
+  const note = (typeof window !== 'undefined'
+    && window
+    && typeof window.prompt === 'function')
+    ? window.prompt('Optional rejection note', '')
+    : '';
+  if (note === null) return;
+  send({ cmd: 'pending_hire_reject', id: id, note: String(note || '') });
+}
+
 function _renderAgentDetailDescription(agentId, task) {
   if (!task) return '';
   const editor = _agentDetailDescriptionState(agentId, task);
@@ -1082,6 +1126,7 @@ function renderAgentDetails(a) {
   const statusCls = agentStatusClass(a);
   const typeInfo = a.agent_type ? (AGENT_TYPE_LABELS[a.agent_type] || { label: a.agent_type }) : null;
   const detailState = _agentDetailState(a.id);
+  const isArchitect = (a.kind || '') === 'architect';
 
   let h = `<div class="agent-details">`;
   h += `<div class="detail-hdr">`;
@@ -1163,6 +1208,60 @@ function renderAgentDetails(a) {
       h += `</div>`;
     }
     h += `</div></div>`;
+  }
+
+  if (isArchitect) {
+    const pendingHires = _architectPendingHiresForAgent(a.id);
+    const decisions = _architectDecisionsForAgent(a.id);
+    if (pendingHires.length) {
+      h += `<div class="detail-section"><div class="detail-section-head"><span class="detail-section-title">Pending hires</span><span class="detail-section-count">${pendingHires.length}</span></div><div class="detail-section-list">`;
+      for (let i = 0; i < pendingHires.length; i++) {
+        const hire = pendingHires[i] || {};
+        const hireIdJs = JSON.stringify(String(hire.id || ''));
+        const summaryParts = [];
+        if (hire.requested_provider) summaryParts.push(String(hire.requested_provider));
+        if (hire.requested_command) summaryParts.push(String(hire.requested_command));
+        if (hire.requested_directory) summaryParts.push(String(hire.requested_directory));
+        h += `<div class="detail-section-card">`;
+        h += `<div class="detail-section-card-head"><span class="detail-section-primary" title="${esc(hire.requested_name || '')}">${esc(hire.requested_name || 'Engineer')}</span><span class="detail-task-status">pending</span></div>`;
+        if (summaryParts.length) {
+          const summary = summaryParts.join(' • ');
+          h += `<div class="detail-section-card-meta" title="${esc(summary)}">${esc(summary)}</div>`;
+        }
+        if (hire.created_at) {
+          h += `<div class="detail-section-card-meta">Requested ${esc(_relativeTime(hire.created_at))}</div>`;
+        }
+        h += `<div class="detail-section-card-actions">`;
+        h += `<button type="button" class="detail-inline-editor-btn detail-inline-editor-btn-primary" data-focus-key="detail-pending-hire-approve:${esc(hire.id || '')}" onclick='event.stopPropagation();approvePendingHire(${hireIdJs})'>Approve</button>`;
+        h += `<button type="button" class="detail-inline-editor-btn" data-focus-key="detail-pending-hire-reject:${esc(hire.id || '')}" onclick='event.stopPropagation();rejectPendingHire(${hireIdJs})'>Reject</button>`;
+        h += `</div></div>`;
+      }
+      h += `</div></div>`;
+    }
+    if (decisions.length) {
+      h += `<div class="detail-section"><div class="detail-section-head"><span class="detail-section-title">Decisions</span><span class="detail-section-count">${decisions.length}</span></div><div class="detail-section-list">`;
+      for (let i = 0; i < decisions.length; i++) {
+        const decision = decisions[i] || {};
+        const linkedTaskIds = Array.isArray(decision.linked_task_ids) ? decision.linked_task_ids : [];
+        const linkedEngineerIds = Array.isArray(decision.linked_engineer_ids) ? decision.linked_engineer_ids : [];
+        h += `<div class="detail-section-card">`;
+        h += `<div class="detail-section-card-head"><span class="detail-section-primary" title="${esc(decision.title || '')}">${esc(decision.title || 'Decision')}</span><span class="detail-task-status">${esc(decision.status || 'proposed')}</span></div>`;
+        if (decision.rationale) {
+          h += `<div class="detail-section-card-body">${_detailMultilineHtml(decision.rationale)}</div>`;
+        }
+        if (linkedTaskIds.length || linkedEngineerIds.length) {
+          const linkParts = [];
+          if (linkedTaskIds.length) linkParts.push(`${linkedTaskIds.length} task${linkedTaskIds.length === 1 ? '' : 's'}`);
+          if (linkedEngineerIds.length) linkParts.push(`${linkedEngineerIds.length} engineer${linkedEngineerIds.length === 1 ? '' : 's'}`);
+          h += `<div class="detail-section-card-meta">Linked to ${esc(linkParts.join(' • '))}</div>`;
+        }
+        if (decision.updated_at || decision.created_at) {
+          h += `<div class="detail-section-card-meta">Updated ${esc(_relativeTime(decision.updated_at || decision.created_at))}</div>`;
+        }
+        h += `</div>`;
+      }
+      h += `</div></div>`;
+    }
   }
 
   /* Branch — worktree branch takes priority, then regular git branch */

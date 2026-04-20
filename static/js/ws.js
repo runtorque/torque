@@ -406,6 +406,7 @@ function _deltaSurfaceInvalidations(ops) {
       case 'decision_remove':
       case 'pending_hire_upsert':
       case 'pending_hire_resolve':
+        _markSurface(flags, 'main');
         break;
       case 'ui_update':
         _applyUiSurfaceInvalidation(flags, op.key);
