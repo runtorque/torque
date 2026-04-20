@@ -3985,7 +3985,7 @@ body.runtime-embedded .board-empty-action:focus-visible {
 }
 
 /* ------------------------------------------------------------------ */
-/* Agent templates panel                                               */
+/* Roles panel                                                         */
 /* ------------------------------------------------------------------ */
 #panel-templates {
   display: flex; flex-direction: column;
@@ -4079,6 +4079,30 @@ body.runtime-embedded .board-empty-action:focus-visible {
   min-height: 24px;
   font-family: var(--mono, monospace);
   line-height: 1.4;
+}
+.tpled-priority-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) 20px;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.tpled-priority-grip {
+  color: var(--text-dim);
+  font-size: 11px;
+  text-align: center;
+  user-select: none;
+}
+.tpled-priority-remove {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  color: var(--text-dim);
+  border-radius: 4px;
+}
+.tpled-priority-remove:hover {
+  background: var(--red);
+  color: #fff;
 }
 
 /* Jinja2 highlight overlay */

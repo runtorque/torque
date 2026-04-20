@@ -82,7 +82,7 @@
       <label>Group</label>
       <select id="add-group-select"></select>
       <div id="add-template-row" class="hidden">
-        <label>Template</label>
+        <label>Role</label>
         <select id="add-template-select" onchange="onAddTemplateChange()">
           <option value="">None</option>
         </select>
@@ -347,7 +347,7 @@
         <div class="color-swatches" id="gs-agent-color-swatches"></div>
         <label>Agent CLI</label>
         <select id="gs-agent-provider" onchange="onGsProviderChange()"></select>
-        <label>Default agent template</label>
+        <label>Default role</label>
         <select id="gs-default-agent-template"></select>
         <div id="gs-agent-boot-cmd-row" class="hidden">
           <label>Boot command</label>
@@ -822,8 +822,8 @@
             onkeydown="if(event.key==='Escape')closeModals();">
       <option value="">None</option>
     </select>
-    <label>Agent template
-      <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Optional agent template used when this task creates a new agent during dispatch.">?</span>
+    <label>Role
+      <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Optional role used when this task creates a new agent during dispatch.">?</span>
     </label>
     <select id="task-template-select"
             onchange="taskPersistDraft()"

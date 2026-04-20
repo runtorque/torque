@@ -1,10 +1,13 @@
 import asyncio
 import importlib
 import json
+import os
 import tempfile
 import types
 import unittest
 from pathlib import Path
+
+import yaml
 
 try:
     from helpers import install_aiohttp_stub
@@ -67,6 +70,15 @@ class ServerModuleExtractionTests(unittest.TestCase):
 
         self.assertIn('auto_close_on_done: true', yaml_text)
 
+    def test_action_to_yaml_round_trips_disable_role_preamble(self):
+        yaml_text = self.server_actions._action_to_yaml('diagnostic/run', {
+            'description': 'Diagnostic action',
+            'disable_role_preamble': True,
+            'prompt': '{{ TASK }}\n',
+        })
+
+        self.assertIn('disable_role_preamble: true', yaml_text)
+
     def test_dispatch_queue_helper_respects_self_dispatch(self):
         active = self.state_mod.BoardTask(
             id='task-1',
@@ -87,11 +99,10 @@ class ServerModuleExtractionTests(unittest.TestCase):
         ))
 
     def test_standalone_mode_skips_keybinding_installation(self):
-        self.assertFalse(self.server_mod.STANDALONE)
-        self.assertTrue(self.server_mod._should_install_keybindings())
-
         old = self.server_mod.STANDALONE
         try:
+            self.server_mod.STANDALONE = False
+            self.assertTrue(self.server_mod._should_install_keybindings())
             self.server_mod.STANDALONE = True
             self.assertFalse(self.server_mod._should_install_keybindings())
         finally:
@@ -247,6 +258,184 @@ class ServerModuleExtractionTests(unittest.TestCase):
         self.assertEqual(calls[0]['task_id'], 'task-1')
         self.assertIn('/attachments/task-1/pytest.log', calls[0]['message'])
         self.assertIn('E assert 1 == 2', calls[0]['message'])
+
+    def test_role_commands_and_template_compat_dispatch_through_helper(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project = root / 'repo' / 'subdir'
+            project.mkdir(parents=True)
+            (root / 'repo' / '.loom' / 'agents').mkdir(parents=True)
+            home = root / 'home'
+            (home / '.loom').mkdir(parents=True)
+            (home / '.loom' / 'agents').mkdir(parents=True)
+            prev_home = os.environ.get('HOME')
+            os.environ['HOME'] = str(home)
+            self.addCleanup(
+                lambda: os.environ.__setitem__('HOME', prev_home)
+                if prev_home is not None
+                else os.environ.pop('HOME', None)
+            )
+
+            roles_mod = importlib.import_module('loom.roles')
+            roles_mod = importlib.reload(roles_mod)
+            role_mgr = roles_mod.RoleManager()
+
+            async def resolve_base_dir(_group):
+                return str(project)
+
+            save_role = asyncio.run(
+                self.server_mod._handle_role_template_command(
+                    {
+                        'cmd': 'save_role',
+                        'group': 'g',
+                        'name': 'demo',
+                        'scope': 'user',
+                        'data': {
+                            'name': 'demo',
+                            'preamble': 'Be careful.',
+                            'priorities': ['ship small', 'test first'],
+                        },
+                    },
+                    role_mgr,
+                    resolve_base_dir,
+                )
+            )
+
+            self.assertEqual(save_role['type'], 'roles')
+            demo = next(item for item in save_role['roles']
+                        if item['name'] == 'demo')
+            self.assertEqual(demo['preamble'], 'Be careful.')
+            self.assertEqual(demo['priorities'], ['ship small', 'test first'])
+            saved_role = yaml.safe_load(
+                (home / '.loom' / 'roles' / 'demo.yaml').read_text(
+                    encoding='utf-8'
+                )
+            )
+            self.assertEqual(saved_role['preamble'], 'Be careful.\n')
+            self.assertEqual(
+                saved_role['priorities'],
+                ['ship small', 'test first'],
+            )
+            self.assertEqual(
+                role_mgr.load_role('demo', base_dir=str(project)),
+                {
+                    'name': 'demo',
+                    'preamble': 'Be careful.',
+                    'priorities': ['ship small', 'test first'],
+                },
+            )
+
+            list_roles = asyncio.run(
+                self.server_mod._handle_role_template_command(
+                    {'cmd': 'list_roles', 'group': 'g'},
+                    role_mgr,
+                    resolve_base_dir,
+                )
+            )
+            self.assertEqual(list_roles['type'], 'roles')
+            self.assertEqual(
+                [item['name'] for item in list_roles['roles']],
+                ['demo'],
+            )
+
+            save_template = asyncio.run(
+                self.server_mod._handle_role_template_command(
+                    {
+                        'cmd': 'save_template',
+                        'group': 'g',
+                        'name': 'compat',
+                        'scope': 'project',
+                        'template': {
+                            'name': 'compat',
+                            'description': 'Compat save',
+                        },
+                    },
+                    role_mgr,
+                    resolve_base_dir,
+                )
+            )
+
+            self.assertEqual(save_template['type'], 'templates')
+            self.assertTrue((root / 'repo' / '.loom' / 'roles' / 'compat.yaml').is_file())
+            self.assertFalse((root / 'repo' / '.loom' / 'agents' / 'compat.yaml').exists())
+
+            legacy_user_template = home / '.loom' / 'agents' / 'legacy.yaml'
+            legacy_user_template.write_text('name: legacy\ndescription: Legacy\n')
+            delete_role_legacy = asyncio.run(
+                self.server_mod._handle_role_template_command(
+                    {
+                        'cmd': 'delete_role',
+                        'group': 'g',
+                        'name': 'legacy',
+                        'scope': 'user',
+                    },
+                    role_mgr,
+                    resolve_base_dir,
+                )
+            )
+
+            self.assertEqual(delete_role_legacy['type'], 'roles')
+            self.assertEqual(delete_role_legacy['deleted'], 'legacy')
+            self.assertFalse(legacy_user_template.exists())
+
+            legacy_user_template.write_text('name: legacy\ndescription: Legacy\n')
+            delete_template = asyncio.run(
+                self.server_mod._handle_role_template_command(
+                    {
+                        'cmd': 'delete_template',
+                        'group': 'g',
+                        'name': 'legacy',
+                        'scope': 'user',
+                    },
+                    role_mgr,
+                    resolve_base_dir,
+                )
+            )
+
+            self.assertEqual(delete_template['type'], 'templates')
+            self.assertEqual(delete_template['deleted'], 'legacy')
+            self.assertFalse(legacy_user_template.exists())
+
+            legacy_rename_path = home / '.loom' / 'agents' / 'rename-me.yaml'
+            legacy_rename_path.write_text('name: rename-me\ndescription: Legacy\n')
+            rename_template = asyncio.run(
+                self.server_mod._handle_role_template_command(
+                    {
+                        'cmd': 'save_template',
+                        'group': 'g',
+                        'name': 'renamed',
+                        'old_name': 'rename-me',
+                        'scope': 'user',
+                        'template': {
+                            'name': 'renamed',
+                            'description': 'Renamed compat save',
+                        },
+                    },
+                    role_mgr,
+                    resolve_base_dir,
+                )
+            )
+
+            self.assertEqual(rename_template['type'], 'templates')
+            self.assertFalse(legacy_rename_path.exists())
+            self.assertTrue((home / '.loom' / 'roles' / 'renamed.yaml').is_file())
+
+            delete_role = asyncio.run(
+                self.server_mod._handle_role_template_command(
+                    {
+                        'cmd': 'delete_role',
+                        'group': 'g',
+                        'name': 'demo',
+                        'scope': 'user',
+                    },
+                    role_mgr,
+                    resolve_base_dir,
+                )
+            )
+
+            self.assertEqual(delete_role['type'], 'roles')
+            self.assertEqual(delete_role['deleted'], 'demo')
+            self.assertFalse((home / '.loom' / 'roles' / 'demo.yaml').exists())
 
 
 class ServerPromptQueueTests(unittest.IsolatedAsyncioTestCase):

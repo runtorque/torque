@@ -1,5 +1,5 @@
 /* ------------------------------------------------------------------ */
-/* Agent templates editor + history                                    */
+/* Roles editor + history                                              */
 /* ------------------------------------------------------------------ */
 
 var _agentsPanelView = 'history';  // 'templates' | 'history'
@@ -23,11 +23,11 @@ function _agentTplSelectedName() {
 
 function agentTemplateEditorLoad() {
   send({ cmd: 'get_config', group: _currentGroup() });
-  send({ cmd: 'list_templates', group: _currentGroup() });
+  send({ cmd: 'list_roles', group: _currentGroup() });
 }
 
 function agentTemplateReceiveList(msg) {
-  _agentTplList = msg.templates || [];
+  _agentTplList = msg.roles || msg.templates || [];
   if (msg.saved) {
     var match = _agentTplList.find(function(t) { return t.name === msg.saved; });
     if (match) _agentTplSelected = _agentTplKey(match);
@@ -73,16 +73,16 @@ function renderAgentTemplatesPanel() {
   html += '<div class="tpled-header">';
   html += '<div class="tpled-header-copy">';
   html += '<div class="tpled-header-title-row">';
-  html += '<span class="tpled-header-title">Agent Library</span>';
+  html += '<span class="tpled-header-title">Role Library</span>';
   if (scopeGroup) html += '<span class="tpled-scope-pill">Group: ' + esc(scopeGroup) + '</span>';
   html += '</div>';
-  html += '<div class="tpled-header-subtitle">Templates and historical runs. Live agents stay in the left column.</div>';
+  html += '<div class="tpled-header-subtitle">Roles and historical runs. Live agents stay in the left column.</div>';
   html += '</div>';
   html += '<div class="tpled-header-controls">';
 
-  // View toggle (Templates | History)
+  // View toggle (Roles | History)
   html += '<div class="tpled-view-toggle">';
-  html += '<button class="tpled-view-btn' + (_agentsPanelView === 'templates' ? ' active' : '') + '" onclick="agentsPanelSwitchView(\'templates\')">Templates</button>';
+  html += '<button class="tpled-view-btn' + (_agentsPanelView === 'templates' ? ' active' : '') + '" onclick="agentsPanelSwitchView(\'templates\')">Roles</button>';
   html += '<button class="tpled-view-btn' + (_agentsPanelView === 'history' ? ' active' : '') + '" onclick="agentsPanelSwitchView(\'history\')">History</button>';
   html += '</div>';
 
@@ -95,7 +95,7 @@ function renderAgentTemplatesPanel() {
     return;
   }
 
-  // Templates view (existing)
+  // Roles view
   html += '<select class="tpled-select" id="agent-tpl-select" onchange="agentTemplateSelect(this.value)">';
   html += '<option value="">Select\u2026</option>';
   var project = _agentTplList.filter(function(t) { return !t.global; });
@@ -120,7 +120,7 @@ function renderAgentTemplatesPanel() {
     html += '</optgroup>';
   }
   html += '</select>';
-  html += '<button class="tpled-new-btn" onclick="agentTemplateNew()" title="New template">+</button>';
+  html += '<button class="tpled-new-btn" onclick="agentTemplateNew()" title="New role">+</button>';
   html += '<button class="tpled-new-btn" onclick="agentTemplateEditorLoad()" title="Refresh">&#x21BB;</button>';
   html += '</div>';
   html += '</div>';
@@ -170,9 +170,9 @@ function renderAgentTemplatesEditor() {
   if (!el) return;
   if (!_agentTplData && !_agentTplNew) {
     if (_agentTplList.length === 0) {
-      el.innerHTML = '<div class="tpled-empty">No agent templates found.<br>Click <b>+</b> to save a launch preset,<br>or add <code>.yaml</code> files to <code>.loom/agents/</code>.</div>';
+      el.innerHTML = '<div class="tpled-empty">No roles found.<br>Click <b>+</b> to save a launch preset,<br>or add <code>.yaml</code> files to <code>.loom/roles/</code>.</div>';
     } else {
-      el.innerHTML = '<div class="tpled-empty">Pick a template from the library above.</div>';
+      el.innerHTML = '<div class="tpled-empty">Pick a role from the library above.</div>';
     }
     return;
   }
@@ -183,8 +183,8 @@ function renderAgentTemplatesEditor() {
   html += '<input id="agent-template-name" value="' + esc(d.name || '') + '" onchange="agentTemplateMarkDirty()" autocomplete="off">';
   html += '<label>Scope</label>';
   html += '<select id="agent-template-scope" onchange="agentTemplateMarkDirty()">';
-  html += '<option value="project"' + (_agentTplScope === 'project' ? ' selected' : '') + '>Project (.loom/agents/)</option>';
-  html += '<option value="user"' + (_agentTplScope === 'user' ? ' selected' : '') + '>User (~/.loom/agents/)</option>';
+  html += '<option value="project"' + (_agentTplScope === 'project' ? ' selected' : '') + '>Project (.loom/roles/)</option>';
+  html += '<option value="user"' + (_agentTplScope === 'user' ? ' selected' : '') + '>User (~/.loom/roles/)</option>';
   html += '</select>';
   html += '<label>Display name</label>';
   html += '<input id="agent-template-display" value="' + esc(d.display_name || '') + '" onchange="agentTemplateMarkDirty()" autocomplete="off">';
@@ -199,7 +199,16 @@ function renderAgentTemplatesEditor() {
   html += '<label>Max turns</label><input id="agent-template-max-turns" type="number" min="0" value="' + esc(d.max_turns || '') + '" onchange="agentTemplateMarkDirty()">';
   html += '</details>';
 
-  html += '<details class="tpled-section"' + (d.system_prompt || d.initial_prompt ? ' open' : '') + '><summary>Behavior</summary>';
+  html += '<details class="tpled-section"' + (d.system_prompt || d.initial_prompt || d.preamble || (d.priorities || []).length ? ' open' : '') + '><summary>Behavior</summary>';
+  html += '<label>Preamble (behavior) <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Injected at the top of dispatch prompts for workers with this role. Acts as a persistent persona layer, distinct from per-task actions.">?</span></label>';
+  html += '<textarea id="agent-template-preamble" rows="4" oninput="_tplAutoResize(this)" onchange="agentTemplateMarkDirty()" placeholder="Behavior guidance for workers with this role. Rendered at the top of every dispatch. Supports Jinja.">' + esc(d.preamble || '') + '</textarea>';
+  html += '<label>Priorities <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Ordered bullet list rendered inside the preamble. Short lines. Use for high-level reminders.">?</span></label>';
+  html += '<div id="agent-template-priorities">';
+  for (var pi = 0; pi < (d.priorities || []).length; pi++) {
+    html += _agentTemplatePriorityRow(pi, d.priorities[pi]);
+  }
+  html += '</div>';
+  html += '<button class="tpled-transition-add" onclick="agentTemplateAddPriority()">+ Add priority</button>';
   html += '<label>System prompt</label><textarea id="agent-template-system-prompt" rows="4" oninput="_tplAutoResize(this)" onchange="agentTemplateMarkDirty()">' + esc(d.system_prompt || '') + '</textarea>';
   html += '<label>Initial prompt</label><textarea id="agent-template-initial-prompt" rows="3" oninput="_tplAutoResize(this)" onchange="agentTemplateMarkDirty()">' + esc(d.initial_prompt || '') + '</textarea>';
   html += '<label class="gs-checkbox"><input id="agent-template-session-resume" type="checkbox"' + (d.session_resume !== false ? ' checked' : '') + ' onchange="agentTemplateMarkDirty()"> Resume session on relaunch</label>';
@@ -254,6 +263,15 @@ function _agentTemplateTerminalRow(idx, term) {
   return html;
 }
 
+function _agentTemplatePriorityRow(idx, value) {
+  var html = '<div class="tpled-priority-row" data-idx="' + idx + '">';
+  html += '<span class="tpled-priority-grip" aria-hidden="true">\u22EE\u22EE</span>';
+  html += '<input type="text" class="agent-template-priority-input" value="' + esc(value || '') + '" onchange="agentTemplateMarkDirty()" autocomplete="off" placeholder="e.g. ship small">';
+  html += '<button class="tpled-priority-remove" onclick="agentTemplateRemovePriority(' + idx + ')" title="Remove priority">\u2715</button>';
+  html += '</div>';
+  return html;
+}
+
 function agentTemplateAddTerminal() {
   var el = document.getElementById('agent-template-terminals');
   if (!el) return;
@@ -266,6 +284,22 @@ function agentTemplateRemoveTerminal(idx) {
   var el = document.getElementById('agent-template-terminals');
   if (!el) return;
   var rows = el.querySelectorAll('.tpled-transition-entry');
+  if (rows[idx]) rows[idx].remove();
+  agentTemplateMarkDirty();
+}
+
+function agentTemplateAddPriority() {
+  var el = document.getElementById('agent-template-priorities');
+  if (!el) return;
+  var idx = el.querySelectorAll('.tpled-priority-row').length;
+  el.insertAdjacentHTML('beforeend', _agentTemplatePriorityRow(idx, ''));
+  agentTemplateMarkDirty();
+}
+
+function agentTemplateRemovePriority(idx) {
+  var el = document.getElementById('agent-template-priorities');
+  if (!el) return;
+  var rows = el.querySelectorAll('.tpled-priority-row');
   if (rows[idx]) rows[idx].remove();
   agentTemplateMarkDirty();
 }
@@ -285,10 +319,16 @@ function agentTemplateMarkDirty() {
 
 function _agentTemplateReadForm() {
   var terminals = [];
+  var priorities = [];
   document.querySelectorAll('#agent-template-terminals .tpled-transition-entry').forEach(function(row) {
     var name = (row.querySelector('.agent-template-terminal-name').value || '').trim();
     var command = (row.querySelector('.agent-template-terminal-command').value || '').trim();
     if (name || command) terminals.push({ name: name, command: command });
+  });
+  document.querySelectorAll('#agent-template-priorities .tpled-priority-row').forEach(function(row) {
+    var input = row.querySelector('.agent-template-priority-input');
+    var value = input ? (input.value || '').trim() : '';
+    if (value) priorities.push(value);
   });
   return {
     name: (document.getElementById('agent-template-name').value || '').trim(),
@@ -299,6 +339,8 @@ function _agentTemplateReadForm() {
     model: (document.getElementById('agent-template-model').value || '').trim(),
     permissions: (document.getElementById('agent-template-permissions').value || '').trim(),
     max_turns: parseInt(document.getElementById('agent-template-max-turns').value, 10) || 0,
+    preamble: document.getElementById('agent-template-preamble').value || '',
+    priorities: priorities,
     system_prompt: document.getElementById('agent-template-system-prompt').value || '',
     initial_prompt: document.getElementById('agent-template-initial-prompt').value || '',
     session_resume: document.getElementById('agent-template-session-resume').checked,
@@ -323,9 +365,9 @@ function agentTemplateSave() {
   }
   data.name = name;
   var msg = {
-    cmd: 'save_template',
+    cmd: 'save_role',
     name: name,
-    template: data,
+    role: data,
     scope: document.getElementById('agent-template-scope').value || 'project',
     group: _currentGroup(),
   };
@@ -343,10 +385,10 @@ function agentTemplateSave() {
 
 function agentTemplateDelete() {
   var name = _agentTplSelectedName();
-  showConfirm('Delete template "' + name + '"?').then(function(yes) {
+  showConfirm('Delete role "' + name + '"?').then(function(yes) {
     if (!yes) return;
     send({
-      cmd: 'delete_template',
+      cmd: 'delete_role',
       name: name,
       scope: _agentTplScope,
       group: _currentGroup(),
@@ -356,7 +398,7 @@ function agentTemplateDelete() {
 
 function agentTemplateDuplicate() {
   _agentTplData = _agentTemplateReadForm();
-  _agentTplData.name = (_agentTplData.name || 'template') + '-copy';
+  _agentTplData.name = (_agentTplData.name || 'role') + '-copy';
   _agentTplSelected = '';
   _agentTplNew = true;
   _agentTplDirty = true;
@@ -576,7 +618,7 @@ function renderAgentHistoryExpanded() {
 
   // Info grid
   html += '<div class="ah-info">';
-  html += '<div class="ah-info-row"><span class="ah-label">Template</span><span>' + esc(r.template || '\u2014') + '</span></div>';
+  html += '<div class="ah-info-row"><span class="ah-label">Role</span><span>' + esc(r.template || '\u2014') + '</span></div>';
   html += '<div class="ah-info-row"><span class="ah-label">Branch</span><span>' + esc(r.worktree_branch || '\u2014') + '</span></div>';
   html += '<div class="ah-info-row"><span class="ah-label">Created</span><span>' + _ahFmtTs(r.created_at) + '</span></div>';
   if (r.removed_at) {

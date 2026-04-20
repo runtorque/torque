@@ -190,7 +190,9 @@ def _migrate_syntax(text):
 # Stub loom context for preview renders (no real agent/task).
 # Templates referencing loom.* get safe defaults instead of StrictUndefined errors.
 LOOM_CONTEXT_STUB = {
-    "agent":     {"name": "", "slug": "", "type": "", "group": "", "directory": ""},
+    "agent":     {"name": "", "slug": "", "type": "", "group": "",
+                  "directory": "", "kind": "", "role": "",
+                  "owner_engineer": ""},
     "context":   {"is_clean": True, "tasks_dispatched": 0, "previous_tasks": []},
     "worktree":  {"active": False, "path": "", "branch": "", "base_branch": "",
                   "dirty": False, "diff": {}, "checkpoints": 0},
@@ -515,6 +517,9 @@ class ActionManager:
             "labels": act.get("labels", []),
             "worktree": act.get("worktree", None),
             "auto_close_on_done": bool(act.get("auto_close_on_done", False)),
+            "disable_role_preamble": bool(
+                act.get("disable_role_preamble", False)
+            ),
             "terminals": act.get("terminals", []),
             "transitions": act.get("transitions", []),
             "max_depth": act.get("max_depth", None),
@@ -689,8 +694,24 @@ class ActionManager:
         return self._fallback_render(text, variables)
 
     @staticmethod
+    def _flatten_render_vars(variables: dict, prefix: str = "") -> dict[str, str]:
+        flat = {}
+        for key, value in (variables or {}).items():
+            key_text = str(key)
+            path = f"{prefix}.{key_text}" if prefix else key_text
+            if isinstance(value, dict):
+                flat.update(ActionManager._flatten_render_vars(value, path))
+            else:
+                flat[path] = str(value)
+        return flat
+
+    @staticmethod
     def _fallback_render(text: str, variables: dict) -> str:
-        for key, value in variables.items():
-            text = text.replace('{{ ' + key + ' }}', str(value))
-            text = text.replace('{{' + key + '}}', str(value))
+        flat = dict(ActionManager._flatten_render_vars(variables))
+        for key, value in (variables or {}).items():
+            if not isinstance(value, dict):
+                flat[str(key)] = str(value)
+        for key, value in flat.items():
+            text = text.replace('{{ ' + key + ' }}', value)
+            text = text.replace('{{' + key + '}}', value)
         return text

@@ -80,7 +80,7 @@ from .memory import (
     normalize_link_target_kind,
     normalize_retention_kind,
 )
-from .templates import TemplateManager
+from .roles import RoleManager
 from .external_tickets import (
     ExternalTicketError,
     build_completion_comment,
@@ -1002,6 +1002,289 @@ def _handle_doctor_command(db: LoomDB) -> dict:
     return build_doctor_report(db._conn, db.db_path)
 
 
+async def _handle_role_template_command(data: dict, role_mgr,
+                                        resolve_base_dir) -> dict | None:
+    cmd = data.get("cmd", "")
+    response_type = ""
+    item_key = ""
+    item_name = ""
+
+    if cmd == "list_roles":
+        response_type = "roles"
+        item_key = "roles"
+    elif cmd == "list_templates":
+        response_type = "templates"
+        item_key = "templates"
+    elif cmd == "save_role":
+        response_type = "roles"
+        item_key = "roles"
+        item_name = "Role"
+    elif cmd == "save_template":
+        response_type = "templates"
+        item_key = "templates"
+        item_name = "Template"
+    elif cmd == "delete_role":
+        response_type = "roles"
+        item_key = "roles"
+        item_name = "Role"
+    elif cmd == "delete_template":
+        response_type = "templates"
+        item_key = "templates"
+        item_name = "Template"
+    else:
+        return None
+
+    base_dir = await resolve_base_dir(data.get("group", ""))
+    group = data.get("group", "")
+
+    if cmd in {"list_roles", "list_templates"}:
+        return {
+            "type": response_type,
+            "group": group,
+            item_key: role_mgr.list_roles(base_dir),
+        }
+
+    name = data.get("name", "").strip()
+    if not name:
+        return {"type": "error", "message": f"{item_name} name required"}
+
+    if cmd in {"save_role", "save_template"}:
+        scope = data.get("scope", "project")
+        old_name = data.get("old_name", "").strip()
+        payload = data.get("data")
+        if payload is None:
+            payload = data.get("role")
+        if payload is None:
+            payload = data.get("template", {})
+        if old_name and old_name != name:
+            role_mgr.delete_template(old_name, base_dir=base_dir)
+            role_mgr.delete_template(old_name, scope="user",
+                                     base_dir=base_dir)
+        role_mgr.save_role(
+            name, payload, scope=scope, base_dir=base_dir)
+        return {
+            "type": response_type,
+            "group": group,
+            item_key: role_mgr.list_roles(base_dir),
+            "saved": name,
+        }
+
+    delete_fn = role_mgr.delete_role if cmd == "delete_role" else (
+        role_mgr.delete_template
+    )
+    deleted = delete_fn(
+        name, scope=data.get("scope", ""), base_dir=base_dir)
+    if not deleted:
+        return {"type": "error", "message": f"{item_name} \"{name}\" not found"}
+    return {
+        "type": response_type,
+        "group": group,
+        item_key: role_mgr.list_roles(base_dir),
+        "deleted": name,
+    }
+
+
+def _agent_kind_for_context(cell) -> str:
+    kind = str(getattr(cell, "kind", "") or "").strip()
+    if kind in {"worker", "engineer", "architect"}:
+        return kind
+    return ""
+
+
+def _agent_is_worker_for_role_preamble(cell) -> bool:
+    if not cell or getattr(cell, "cell_type", "agent") != "agent":
+        return False
+    kind = str(getattr(cell, "kind", "") or "").strip()
+    if kind == "worker":
+        return True
+    if kind in {"engineer", "architect", "terminal"}:
+        return False
+    return bool(str(getattr(cell, "created_by_weaver_id", "") or "").strip())
+
+
+def _agent_role_slug(cell) -> str:
+    return str(
+        getattr(cell, "role", "")
+        or getattr(cell, "template", "")
+        or ""
+    ).strip()
+
+
+def _agent_owner_engineer_name(state: MatrixState, cell) -> str:
+    owner_id = str(getattr(cell, "owner_engineer_id", "") or "").strip()
+    if not owner_id:
+        owner_id = str(getattr(cell, "created_by_weaver_id", "") or "").strip()
+    if not owner_id:
+        return ""
+    owner = state.agents.get(owner_id)
+    return owner.name if owner else ""
+
+
+def _normalize_prompt_block(text: str) -> str:
+    return str(text or "").strip("\n")
+
+
+def _assemble_worker_prompt(*, role_mgr, cell, base_dir: str = "",
+                            prompt_body: str = "", postscript: str = "",
+                            disable_role_preamble: bool = False) -> str:
+    """Assemble the final worker prompt with optional role preamble.
+
+    The final shape is:
+    {role preamble block}
+
+    {task/action prompt block}
+
+    {loom postscript}
+
+    Empty blocks are omitted. Exactly one blank line is inserted between
+    included blocks, and the final prompt always ends with a trailing newline.
+    """
+    blocks = []
+
+    if role_mgr and cell and not disable_role_preamble \
+            and _agent_is_worker_for_role_preamble(cell):
+        role_slug = _agent_role_slug(cell)
+        if role_slug:
+            role = role_mgr.load_role(role_slug, base_dir=base_dir) or {}
+            preamble = role_mgr.render_preamble(role)
+            if preamble:
+                blocks.append(_normalize_prompt_block(preamble))
+
+    body_block = _normalize_prompt_block(prompt_body)
+    if body_block:
+        blocks.append(body_block)
+
+    postscript_block = _normalize_prompt_block(postscript)
+    if postscript_block:
+        blocks.append(postscript_block)
+
+    if not blocks:
+        return ""
+    return "\n\n".join(blocks) + "\n"
+
+
+def _build_loom_context(state: MatrixState, cell, task) -> dict:
+    """Build the ``loom`` namespace dict for Jinja2 template rendering."""
+    workerish = _agent_is_worker_for_role_preamble(cell)
+    cell_id = getattr(cell, "id", "")
+    tasks_dispatched = int(getattr(cell, "tasks_dispatched", 0) or 0)
+    worktree_path = getattr(cell, "worktree_path", "") or ""
+    worktree_branch = getattr(cell, "worktree_branch", "") or ""
+    worktree_base_branch = getattr(cell, "worktree_base_branch", "") or ""
+    worktree_dirty = bool(getattr(cell, "worktree_dirty", False))
+    worktree_diff = getattr(cell, "worktree_diff", {}) or {}
+    worktree_checkpoints = int(
+        getattr(cell, "worktree_checkpoints", 0) or 0
+    )
+    agent_ctx = {
+        "name": getattr(cell, "name", ""),
+        "slug": getattr(cell, "slug", ""),
+        "type": getattr(cell, "agent_type", ""),
+        "group": getattr(cell, "group", ""),
+        "directory": getattr(cell, "directory", ""),
+        "kind": _agent_kind_for_context(cell),
+        "role": _agent_role_slug(cell) if workerish else "",
+        "owner_engineer": _agent_owner_engineer_name(
+            state, cell) if workerish else "",
+    }
+
+    linked = sorted(
+        (t for t in state.board_tasks.values()
+         if t.agent_id == cell_id and t.id != getattr(task, "id", "")),
+        key=lambda t: t.created_at,
+    )
+    context_ctx = {
+        "is_clean": tasks_dispatched == 0,
+        "tasks_dispatched": tasks_dispatched,
+        "previous_tasks": [
+            {"task": t.task, "lane": t.lane, "action": t.action_name}
+            for t in linked
+        ],
+    }
+
+    worktree_ctx = {
+        "active": bool(worktree_path),
+        "path": worktree_path,
+        "branch": worktree_branch,
+        "base_branch": worktree_base_branch,
+        "dirty": worktree_dirty,
+        "diff": worktree_diff,
+        "checkpoints": worktree_checkpoints,
+    }
+
+    parent_agent_slug = ""
+    parent_agent_name = ""
+    parent_agent_id = ""
+    parent_task_id = getattr(task, "parent_task_id", "")
+    if parent_task_id:
+        pt = state.board_tasks.get(parent_task_id)
+        if pt and pt.agent_id:
+            pa = state.agents.get(pt.agent_id)
+            if pa:
+                parent_agent_id = pa.id
+                parent_agent_name = pa.name
+                parent_agent_slug = pa.slug or pa.name
+
+    attachments = list(getattr(task, "attachments", []) or [])
+    artifacts = list(getattr(task, "artifacts", []) or [])
+    task_ctx = {
+        "id": getattr(task, "id", ""),
+        "title": getattr(task, "task", ""),
+        "slug": getattr(task, "slug", ""),
+        "description": getattr(task, "description", ""),
+        "depth": getattr(task, "pipeline_depth", 0),
+        "is_derived": bool(parent_task_id),
+        "parent_task_id": parent_task_id,
+        "parent_agent_id": parent_agent_id,
+        "parent_agent_name": parent_agent_name,
+        "parent_agent_slug": parent_agent_slug,
+        "labels": list(getattr(task, "labels", []) or []),
+        "group": getattr(task, "group", ""),
+        "status": getattr(task, "status", ""),
+        "verification_mode": getattr(task, "verification_mode", ""),
+        "verification_state": getattr(task, "verification_state", ""),
+        "verification_notes": getattr(task, "verification_notes", ""),
+        "verification_updated_at": getattr(
+            task, "verification_updated_at", ""),
+        "verification_updated_by": getattr(
+            task, "verification_updated_by", ""),
+        "verification_summary": getattr(task, "verification_summary", {}) or {},
+        "worktree_boundary": getattr(task, "worktree_boundary", {}) or {},
+        "resume_after_boundary_task_id": getattr(
+            task, "resume_after_boundary_task_id", "") or "",
+        "attachments": [
+            {"path": a.get("path", ""), "filename": a.get("filename", "")}
+            for a in attachments
+            if isinstance(a, dict)
+        ],
+        "artifacts": task_artifacts(attachments, artifacts),
+        "upstream_artifacts": serialize_upstream_task_artifacts(
+            task,
+            tasks_by_id=state.board_tasks,
+        ),
+    }
+
+    terminals_ctx = []
+    for cid in state._children.get(cell_id, []):
+        ch = state.agents.get(cid)
+        if ch:
+            terminals_ctx.append({
+                "name": getattr(ch, "name", ""),
+                "slug": getattr(ch, "slug", ""),
+                "current_path": getattr(ch, "current_path", ""),
+                "current_process": getattr(ch, "current_process", ""),
+                "current_branch": getattr(ch, "current_branch", ""),
+            })
+
+    return {
+        "agent": agent_ctx,
+        "context": context_ctx,
+        "worktree": worktree_ctx,
+        "task": task_ctx,
+        "terminals": terminals_ctx,
+    }
+
+
 def _resolve_memory_cell_and_task(state, cell_id: str = "",
                                   task_id: str = ""):
     """Resolve best-effort agent/task context for memory commands."""
@@ -1299,7 +1582,7 @@ async def main(connection=None):
         bridge = ITerm2Adapter(connection, state)
     worktree_mgr = WorktreeManager()
     action_mgr = ActionManager()
-    template_mgr = TemplateManager()
+    template_mgr = RoleManager()
     agent_launch = AgentLaunchService(
         state=state,
         connection=connection,
@@ -2167,119 +2450,6 @@ async def main(connection=None):
             pipeline_context=pipeline_context,
         )
 
-    # -- Loom context builder -----------------------------------------------
-
-    def _build_loom_context(cell, task):
-        """Build the ``loom`` namespace dict for Jinja2 template rendering.
-
-        Provides agent identity, dispatch history, worktree state, task
-        metadata, and child terminal info — all derived from existing
-        state at render time.
-        """
-        # Agent identity
-        agent_ctx = {
-            "name": cell.name,
-            "slug": cell.slug,
-            "type": cell.agent_type,
-            "group": cell.group,
-            "directory": cell.directory,
-        }
-
-        # Dispatch history
-        linked = sorted(
-            (t for t in state.board_tasks.values()
-             if t.agent_id == cell.id and t.id != task.id),
-            key=lambda t: t.created_at,
-        )
-        context_ctx = {
-            "is_clean": cell.tasks_dispatched == 0,
-            "tasks_dispatched": cell.tasks_dispatched,
-            "previous_tasks": [
-                {"task": t.task, "lane": t.lane, "action": t.action_name}
-                for t in linked
-            ],
-        }
-
-        # Worktree state
-        worktree_ctx = {
-            "active": bool(cell.worktree_path),
-            "path": cell.worktree_path,
-            "branch": cell.worktree_branch,
-            "base_branch": cell.worktree_base_branch,
-            "dirty": cell.worktree_dirty,
-            "diff": cell.worktree_diff or {},
-            "checkpoints": cell.worktree_checkpoints,
-        }
-
-        # Current task metadata
-        parent_agent_slug = ""
-        parent_agent_name = ""
-        parent_agent_id = ""
-        if task.parent_task_id:
-            pt = state.board_tasks.get(task.parent_task_id)
-            if pt and pt.agent_id:
-                pa = state.agents.get(pt.agent_id)
-                if pa:
-                    parent_agent_id = pa.id
-                    parent_agent_name = pa.name
-                    parent_agent_slug = pa.slug or pa.name
-        task_ctx = {
-            "id": task.id,
-            "title": task.task,
-            "slug": task.slug,
-            "description": task.description,
-            "depth": task.pipeline_depth,
-            "is_derived": bool(task.parent_task_id),
-            "parent_task_id": task.parent_task_id,
-            "parent_agent_id": parent_agent_id,
-            "parent_agent_name": parent_agent_name,
-            "parent_agent_slug": parent_agent_slug,
-            "labels": list(task.labels),
-            "group": task.group,
-            "status": task.status,
-            "verification_mode": task.verification_mode,
-            "verification_state": task.verification_state,
-            "verification_notes": task.verification_notes,
-            "verification_updated_at": task.verification_updated_at,
-            "verification_updated_by": task.verification_updated_by,
-            "verification_summary": task.verification_summary or {},
-            "worktree_boundary": task.worktree_boundary or {},
-            "resume_after_boundary_task_id": (
-                task.resume_after_boundary_task_id or ""
-            ),
-            "attachments": [
-                {"path": a["path"], "filename": a["filename"]}
-                for a in (task.attachments or [])
-            ],
-            "artifacts": task_artifacts(task.attachments or [],
-                                         task.artifacts or []),
-            "upstream_artifacts": serialize_upstream_task_artifacts(
-                task,
-                tasks_by_id=state.board_tasks,
-            ),
-        }
-
-        # Child terminals of the target agent
-        terminals_ctx = []
-        for cid in state._children.get(cell.id, []):
-            ch = state.agents.get(cid)
-            if ch:
-                terminals_ctx.append({
-                    "name": ch.name,
-                    "slug": ch.slug,
-                    "current_path": ch.current_path,
-                    "current_process": ch.current_process,
-                    "current_branch": ch.current_branch,
-                })
-
-        return {
-            "agent": agent_ctx,
-            "context": context_ctx,
-            "worktree": worktree_ctx,
-            "task": task_ctx,
-            "terminals": terminals_ctx,
-        }
-
     # -- Command handler ----------------------------------------------------
 
     async def handle_command(data: dict) -> dict | None:
@@ -2511,13 +2681,10 @@ async def main(connection=None):
             return {"type": "actions", "group": data.get("group", ""),
                     "actions": actions}
 
-        if cmd == "list_templates":
-            base_dir = await _resolve_base_dir(data.get("group", ""))
-            return {
-                "type": "templates",
-                "group": data.get("group", ""),
-                "templates": template_mgr.list_templates(base_dir),
-            }
+        role_template_result = await _handle_role_template_command(
+            data, template_mgr, _resolve_base_dir)
+        if role_template_result is not None:
+            return role_template_result
 
         if cmd == "get_template":
             base_dir = await _resolve_base_dir(data.get("group", ""))
@@ -2529,43 +2696,6 @@ async def main(connection=None):
                         "message": f"Template \"{data['name']}\" not found"}
             return {"type": "template_detail", "name": data["name"],
                     "template": tpl}
-
-        if cmd == "save_template":
-            name = data.get("name", "").strip()
-            if not name:
-                return {"type": "error", "message": "Template name required"}
-            base_dir = await _resolve_base_dir(data.get("group", ""))
-            scope = data.get("scope", "project")
-            old_name = data.get("old_name", "").strip()
-            if old_name and old_name != name:
-                template_mgr.delete_template(old_name, base_dir=base_dir)
-                template_mgr.delete_template(old_name, scope="user",
-                                             base_dir=base_dir)
-            template_mgr.save_template(
-                name, data.get("template", {}), scope=scope, base_dir=base_dir)
-            return {
-                "type": "templates",
-                "group": data.get("group", ""),
-                "templates": template_mgr.list_templates(base_dir),
-                "saved": name,
-            }
-
-        if cmd == "delete_template":
-            name = data.get("name", "").strip()
-            if not name:
-                return {"type": "error", "message": "Template name required"}
-            base_dir = await _resolve_base_dir(data.get("group", ""))
-            deleted = template_mgr.delete_template(
-                name, scope=data.get("scope", ""), base_dir=base_dir)
-            if not deleted:
-                return {"type": "error",
-                        "message": f"Template \"{name}\" not found"}
-            return {
-                "type": "templates",
-                "group": data.get("group", ""),
-                "templates": template_mgr.list_templates(base_dir),
-                "deleted": name,
-            }
 
         if cmd == "render_template":
             base_dir = await _resolve_base_dir(data.get("group", ""))
@@ -4619,10 +4749,12 @@ async def main(connection=None):
                                 )
                             else:
                                 # Build loom context for template rendering
-                                loom_ctx = _build_loom_context(cell, task)
+                                loom_ctx = _build_loom_context(
+                                    state, cell, task)
                                 # Compose prompt: action-aware
                                 prompt = None
                                 base_dir = ""
+                                disable_role_preamble = False
                                 if task.action_name \
                                         and not data.get("force_no_action"):
                                     base_dir = cell.worktree_repo_root \
@@ -4630,11 +4762,11 @@ async def main(connection=None):
                                         or await _resolve_base_dir(group)
                                     tvars = {"TASK": task.task,
                                              **(task.action_vars or {})}
-                                    rendered = action_mgr.render_prompt(
+                                    rendered_action = action_mgr.render_action(
                                         task.action_name, tvars,
                                         base_dir=base_dir,
                                         loom_context=loom_ctx)
-                                    if rendered is None:
+                                    if not rendered_action:
                                         # Action deleted — warn frontend
                                         result = {
                                             "type":
@@ -4644,7 +4776,14 @@ async def main(connection=None):
                                                 task.action_name}
                                         prompt = None
                                     else:
-                                        prompt = rendered
+                                        prompt = rendered_action.get(
+                                            "prompt", "")
+                                        disable_role_preamble = bool(
+                                            rendered_action.get(
+                                                "disable_role_preamble",
+                                                False,
+                                            )
+                                        )
                                 elif task.instructions or task.context \
                                         or task.criteria:
                                     # Legacy fallback for old tasks
@@ -4673,14 +4812,25 @@ async def main(connection=None):
                                     )
                                     is_clean = \
                                         loom_ctx["context"]["is_clean"]
-                                    final_prompt = prompt
-                                    final_prompt += shared_context_block
-                                    final_prompt += _build_postscript(
+                                    prompt += shared_context_block
+                                    postscript = _build_postscript(
                                         task, action_mgr,
                                         base_dir if task.action_name
                                         else "",
                                         is_clean=is_clean,
                                         cell=cell)
+                                    final_prompt = _assemble_worker_prompt(
+                                        role_mgr=template_mgr,
+                                        cell=cell,
+                                        base_dir=base_dir or (
+                                            cell.worktree_repo_root
+                                            or cell.directory
+                                        ),
+                                        prompt_body=prompt,
+                                        postscript=postscript,
+                                        disable_role_preamble=
+                                        disable_role_preamble,
+                                    )
 
                             if not result and not final_prompt:
                                 result = {
@@ -4894,6 +5044,9 @@ async def main(connection=None):
                 # Preview rendered prompt for a task or inline params
                 tid = data.get("id", "")
                 act_name = data.get("action_name", "")
+                preview_role_slug = str(
+                    data.get("agent_template", "") or ""
+                ).strip()
                 task_text = data.get("task", "")
                 avars = data.get("action_vars", {})
                 act_group = data.get("group", "")
@@ -4905,6 +5058,10 @@ async def main(connection=None):
                     if t:
                         task_text = t.task
                         act_name = act_name or t.action_name
+                        preview_role_slug = (
+                            preview_role_slug
+                            or str(t.agent_template or "").strip()
+                        )
                         avars = avars or t.action_vars or {}
                         act_group = act_group or t.group
                         attachments = t.attachments or []
@@ -4916,18 +5073,76 @@ async def main(connection=None):
                     if t:
                         task_desc = t.description or ""
 
-                preview_task = None
-                if tid:
-                    preview_task = state.board_tasks.get(tid)
+                preview_task = state.board_tasks.get(tid) if tid else None
+                preview_cell = None
+                preview_agent_id = str(data.get("agent_id", "") or "").strip()
+                if preview_agent_id:
+                    preview_cell = state.agents.get(preview_agent_id)
+                elif preview_task and preview_task.agent_id:
+                    preview_cell = state.agents.get(preview_task.agent_id)
+                elif preview_role_slug:
+                    preview_cell = SimpleNamespace(
+                        id="",
+                        name="",
+                        slug="",
+                        group=act_group,
+                        cell_type="agent",
+                        agent_type="",
+                        directory="",
+                        kind="worker",
+                        role=preview_role_slug,
+                        template=preview_role_slug,
+                        owner_engineer_id="",
+                        created_by_weaver_id="",
+                        worktree_repo_root="",
+                        git_root="",
+                        worktree_branch="",
+                        worktree_auto_checkpoint=False,
+                        checkpoint_on_progress=False,
+                    )
+
+                preview_task_obj = preview_task or SimpleNamespace(
+                    id=tid,
+                    task=task_text,
+                    slug="",
+                    description=task_desc,
+                    pipeline_depth=0,
+                    parent_task_id=str(data.get("parent_task_id", "") or ""),
+                    pipeline_root_id="",
+                    labels=[],
+                    group=act_group,
+                    status="",
+                    verification_mode="",
+                    verification_state="",
+                    verification_notes="",
+                    verification_updated_at="",
+                    verification_updated_by="",
+                    verification_summary={},
+                    worktree_boundary={},
+                    resume_after_boundary_task_id="",
+                    attachments=attachments or [],
+                    artifacts=artifacts or [],
+                    action_name=act_name,
+                    agent_template=preview_role_slug,
+                    created_at="",
+                    updated_at="",
+                    agent_id=preview_agent_id,
+                )
                 preview_upstream_artifacts = serialize_upstream_task_artifacts(
-                    preview_task or {
-                        "parent_task_id": data.get("parent_task_id", ""),
-                    },
+                    preview_task_obj,
                     tasks_by_id=state.board_tasks,
                 )
 
-                if act_name:
-                    base_dir = await _resolve_base_dir(act_group)
+                if preview_cell:
+                    loom_ctx = _build_loom_context(
+                        state, preview_cell, preview_task_obj)
+                    is_clean = loom_ctx["context"]["is_clean"]
+                    shared_context_block = build_prompt_memory_block(
+                        state.db,
+                        cell=preview_cell,
+                        task=preview_task_obj,
+                    )
+                else:
                     loom_ctx = {
                         **LOOM_CONTEXT_STUB,
                         "task": {
@@ -4939,6 +5154,7 @@ async def main(connection=None):
                                 {"path": a.get("path", ""),
                                  "filename": a.get("filename", "")}
                                 for a in (attachments or [])
+                                if isinstance(a, dict)
                             ],
                             "artifacts": task_artifacts(
                                 attachments or [],
@@ -4947,32 +5163,62 @@ async def main(connection=None):
                             "upstream_artifacts": preview_upstream_artifacts,
                         },
                     }
-                    rendered = action_mgr.render_prompt(
+                    is_clean = True
+                    shared_context_block = ""
+
+                base_dir = (
+                    preview_cell.worktree_repo_root
+                    or preview_cell.directory
+                ) if preview_cell else ""
+                if not base_dir:
+                    base_dir = await _resolve_base_dir(act_group)
+
+                prompt_text = task_text
+                disable_role_preamble = False
+                if act_name:
+                    rendered_action = action_mgr.render_action(
                         act_name,
                         {"TASK": task_text, **avars},
                         base_dir=base_dir,
                         loom_context=loom_ctx)
-                    if rendered is None:
+                    if not rendered_action:
                         result = {"type": "prompt_preview",
                                   "prompt": task_text,
                                   "warning": f"Action "
                                              f"\"{act_name}\" not found"}
                     else:
-                        result = {"type": "prompt_preview",
-                                  "prompt": _append_task_artifacts(
-                                      rendered,
-                                      attachments,
-                                      artifacts,
-                                      preview_upstream_artifacts,
-                                  )}
-                else:
-                    result = {"type": "prompt_preview",
-                              "prompt": _append_task_artifacts(
-                                  task_text,
-                                  attachments,
-                                  artifacts,
-                                  preview_upstream_artifacts,
-                              )}
+                        prompt_text = rendered_action.get("prompt", "")
+                        disable_role_preamble = bool(
+                            rendered_action.get(
+                                "disable_role_preamble", False)
+                        )
+
+                if result is None:
+                    prompt_text = _append_task_artifacts(
+                        prompt_text,
+                        attachments,
+                        artifacts,
+                        preview_upstream_artifacts,
+                    )
+                    prompt_text += shared_context_block
+                    postscript = _build_postscript(
+                        preview_task_obj,
+                        action_mgr,
+                        base_dir if act_name else "",
+                        is_clean=is_clean,
+                        cell=preview_cell,
+                    )
+                    result = {
+                        "type": "prompt_preview",
+                        "prompt": _assemble_worker_prompt(
+                            role_mgr=template_mgr,
+                            cell=preview_cell,
+                            base_dir=base_dir,
+                            prompt_body=prompt_text,
+                            postscript=postscript,
+                            disable_role_preamble=disable_role_preamble,
+                        ),
+                    }
 
             elif cmd == "memory_list":
                 if not state.db:

@@ -5,9 +5,9 @@ let _taskOriginalAttachments = []; // attachments at modal open (for cancel clea
 let _taskArtifacts = [];        // structured task artifacts
 let _taskOriginalArtifacts = []; // artifacts at modal open (for cancel cleanup)
 let _taskActions = [];          // cached action list for task modal
-let _taskTemplates = [];        // cached templates for task modal
+let _taskTemplates = [];        // cached roles/templates for task modal
 let _taskSelectedAction = '';   // selected action name
-let _taskSelectedTemplate = ''; // selected template name
+let _taskSelectedTemplate = ''; // selected role name
 let _taskActionVars = [];       // variable definitions for selected action
 let _taskActionVarValues = {};  // pre-filled variable values (from edit)
 let _taskModalWaiting = false;  // waiting for action list to populate picker
@@ -92,6 +92,7 @@ function _taskReadDraftFromDom() {
     description: descEl ? descEl.value : '',
     group: groupEl ? groupEl.value : '',
     action_name: actionEl ? (actionEl.value || _taskSelectedAction || '') : (_taskSelectedAction || ''),
+    // wire field 'agent_template' is the legacy name; semantically this is the role slug (stage 2).
     agent_template: tplEl ? (tplEl.value || _taskSelectedTemplate || '') : (_taskSelectedTemplate || ''),
     scheduled_input: schedEl ? schedEl.value : '',
     pending_label: labelsEl ? labelsEl.value : '',
@@ -244,7 +245,7 @@ function _taskOpenModal(config) {
   _taskModalWaiting = true;
   _taskTemplateWaiting = true;
   send({ cmd: 'list_actions', group: (groupEl && groupEl.value) || _currentGroup() });
-  send({ cmd: 'list_templates', group: (groupEl && groupEl.value) || _currentGroup() });
+  send({ cmd: 'list_roles', group: (groupEl && groupEl.value) || _currentGroup() });
 
   modal.classList.add('visible');
   var bodyEl = document.getElementById('task-modal-body');
@@ -762,6 +763,7 @@ function previewTaskPrompt() {
     description: description,
     action_name: _taskSelectedAction,
     action_vars: actionVars,
+    agent_template: _taskSelectedTemplate,
     group: document.getElementById('task-group-select').value,
     attachments: _taskAttachments.slice(),
     artifacts: _taskArtifacts.slice(),
@@ -778,7 +780,7 @@ function _handleTaskActionList(msg) {
 
 function _handleTaskTemplateList(msg) {
   _taskTemplateWaiting = false;
-  _populateTaskTemplateSelect(msg.templates || []);
+  _populateTaskTemplateSelect(msg.roles || msg.templates || []);
 }
 
 function taskAutoResize(el) {
