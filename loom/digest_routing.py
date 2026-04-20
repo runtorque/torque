@@ -34,7 +34,13 @@ def candidate_digest_recipients(state, event: dict) -> list[str]:
     """Return the unfiltered recipient chain for a panel event."""
     source = state.agents.get(str(event.get("cell_id", "") or "").strip())
     if not source:
-        return []
+        group = str(event.get("group", "") or "").strip()
+        if not group:
+            return []
+        legacy_weaver = getattr(state, "get_weaver_for_group", lambda _group: None)(group)
+        if not legacy_weaver:
+            return []
+        source = legacy_weaver
 
     kind = _cell_kind(source)
     recipients: list[str] = []
@@ -60,6 +66,8 @@ def candidate_digest_recipients(state, event: dict) -> list[str]:
             recipients.append(architect.id)
     elif kind == "architect":
         return []
+    elif str(getattr(source, "id", "") or "").strip():
+        recipients.append(source.id)
 
     seen: set[str] = set()
     ordered: list[str] = []

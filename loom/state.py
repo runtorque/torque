@@ -1793,14 +1793,21 @@ class MatrixState:
                 architect_digest=(cell.kind == "architect"),
             )
         ws = self.get_weaver_settings(cell.group)
+        push_interval = getattr(ws, "push_interval", 60)
+        if push_interval is None:
+            push_interval = 60
+        max_interval = getattr(ws, "max_interval", 300)
+        if max_interval is None:
+            max_interval = 300
+        heartbeat_interval = getattr(ws, "heartbeat_interval", 300)
+        if heartbeat_interval is None:
+            heartbeat_interval = 300
         return AgentDigestSettings(
             agent_id=agent_id,
             paused=bool(getattr(ws, "paused", False)),
-            push_interval=int(getattr(ws, "push_interval", 60) or 60),
-            max_interval=int(getattr(ws, "max_interval", 300) or 300),
-            heartbeat_interval=int(
-                getattr(ws, "heartbeat_interval", 300) or 300
-            ),
+            push_interval=int(push_interval),
+            max_interval=int(max_interval),
+            heartbeat_interval=int(heartbeat_interval),
             digest_verbosity=normalize_weaver_digest_verbosity(
                 getattr(ws, "digest_verbosity", "balanced")
             ),
@@ -1894,6 +1901,22 @@ class MatrixState:
         self._emit("weaver_settings_update", group=group, **d)
         if self.db:
             self.db.save_weaver_settings(group, asdict(ws))
+        legacy_weaver = self.get_weaver_for_group(group)
+        if legacy_weaver and legacy_weaver.id in self.agent_digest_settings:
+            digest_fields = {
+                key: fields[key]
+                for key in (
+                    "paused",
+                    "push_interval",
+                    "max_interval",
+                    "heartbeat_interval",
+                    "digest_verbosity",
+                    "enabled_events",
+                )
+                if key in fields
+            }
+            if digest_fields:
+                self.update_agent_digest_settings(legacy_weaver.id, **digest_fields)
 
     def weaver_restricts_to_created_agents(self, group: str) -> bool:
         """Return whether the group's Weaver is restricted to owned agents."""

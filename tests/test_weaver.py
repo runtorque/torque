@@ -176,7 +176,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         buffer.stop()
 
     async def test_manual_flush_sends_queued_events_before_push_interval(self):
-        state, group, _ = self._make_state()
+        state, group, weaver = self._make_state()
         state.weaver_settings[group] = self.state_mod.WeaverSettings(
             group=group,
             push_interval=60,
@@ -210,7 +210,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         buffer.stop()
 
     async def test_manual_flush_rejects_paused_delivery_without_dropping_queue(self):
-        state, group, _ = self._make_state()
+        state, group, weaver = self._make_state()
         state.weaver_settings[group] = self.state_mod.WeaverSettings(
             group=group,
             paused=True,
@@ -235,7 +235,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         buffer.stop()
 
     async def test_overdue_idle_push_uses_digest_format(self):
-        state, group, _ = self._make_state()
+        state, group, weaver = self._make_state()
         task = state.board_add_task(
             "Investigate blocked review",
             group,
@@ -407,7 +407,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("Smoke tests already passed", digest)
 
     def test_compact_ask_created_digest_clips_long_context(self):
-        state, group, _ = self._make_state()
+        state, group, weaver = self._make_state()
         state.weaver_settings[group] = self.state_mod.WeaverSettings(
             group=group,
             digest_verbosity="compact",
@@ -444,7 +444,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("support signs off", digest)
 
     async def test_task_artifact_uploaded_digest_includes_ref_and_preview(self):
-        state, group, _ = self._make_state()
+        state, group, weaver = self._make_state()
         state.weaver_settings[group] = self.state_mod.WeaverSettings(
             group=group,
             enabled_events=["task_artifact_uploaded"],
@@ -497,11 +497,11 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("First session", text)
         self.assertIn("do a short reconnaissance pass before dispatching", text)
         self.assertIn("inspect the action catalog", text)
-        self.assertIn("call `weaver_ask`", text)
+        self.assertIn("call `engineer_ask`", text)
         self.assertNotIn("Don't start dispatching tasks without human guidance.", text)
 
     async def test_idle_heartbeat_surfaces_stale_in_progress_attention(self):
-        state, group, _ = self._make_state()
+        state, group, weaver = self._make_state()
         task = state.board_add_task(
             "Close the loop on merge",
             group,
