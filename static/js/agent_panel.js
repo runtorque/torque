@@ -178,7 +178,7 @@ function _agentPanelRenderTabs(kind, activeTab) {
   return html;
 }
 
-function _agentPanelShell(title, subtitle, kind, activeTab, bodyHtml) {
+function _agentPanelShell(title, subtitle, kind, activeTab, bodyHtml, headerRightHtml) {
   var html = '<div class="agent-panel-panel"';
   if (kind) html += ' data-agent-panel-kind="' + _agentPanelEsc(kind) + '"';
   if (activeTab) html += ' data-agent-panel-tab="' + _agentPanelEsc(activeTab) + '"';
@@ -190,6 +190,9 @@ function _agentPanelShell(title, subtitle, kind, activeTab, bodyHtml) {
     html += '<div class="agent-panel-subtitle">' + _agentPanelEsc(subtitle) + '</div>';
   }
   html += '</div>';
+  if (headerRightHtml) {
+    html += '<div class="agent-panel-header-right">' + headerRightHtml + '</div>';
+  }
   html += '</div>';
   html += _agentPanelRenderTabs(kind, activeTab);
   html += '<div class="agent-panel-content">' + (bodyHtml || '') + '</div>';
@@ -207,6 +210,120 @@ function _agentPanelWeaverAgent(group) {
   if (!group || !state || !state.group_settings || !state.agents) return null;
   var settings = state.group_settings[group];
   return settings && settings.weaver_agent_id ? (state.agents[settings.weaver_agent_id] || null) : null;
+}
+
+function _agentPanelDigestSettings(agent) {
+  var agentId = String((agent && agent.id) || '');
+  if (!agentId || !state) return null;
+  if (state.agent_digest_settings && state.agent_digest_settings[agentId]) {
+    return state.agent_digest_settings[agentId];
+  }
+  var group = String((agent && agent.group) || '');
+  var legacyWeaver = group ? _agentPanelWeaverAgent(group) : null;
+  if (legacyWeaver && String(legacyWeaver.id || '') === agentId) {
+    return _agentPanelWeaverSettings(group);
+  }
+  return null;
+}
+
+function _agentPanelDigestBufferStats(agent) {
+  var agentId = String((agent && agent.id) || '');
+  if (!agentId || !state) return null;
+  if (state.digest_buffer_stats && state.digest_buffer_stats[agentId]) {
+    return state.digest_buffer_stats[agentId];
+  }
+  var group = String((agent && agent.group) || '');
+  var legacyWeaver = group ? _agentPanelWeaverAgent(group) : null;
+  if (
+    legacyWeaver
+    && String(legacyWeaver.id || '') === agentId
+    && state.weaver_buffer_stats
+    && state.weaver_buffer_stats[group]
+  ) {
+    return state.weaver_buffer_stats[group];
+  }
+  return null;
+}
+
+function _agentPanelDigestSentEvents(agent) {
+  var agentId = String((agent && agent.id) || '');
+  if (!agentId || !state) return [];
+  if (state.digest_sent_events && state.digest_sent_events[agentId]) {
+    return state.digest_sent_events[agentId].slice();
+  }
+  var group = String((agent && agent.group) || '');
+  var legacyWeaver = group ? _agentPanelWeaverAgent(group) : null;
+  if (
+    legacyWeaver
+    && String(legacyWeaver.id || '') === agentId
+    && state.weaver_sent_events
+    && state.weaver_sent_events[group]
+  ) {
+    return state.weaver_sent_events[group].slice();
+  }
+  return [];
+}
+
+function _agentPanelDigestPauseButton(agent) {
+  var agentId = String((agent && agent.id) || '');
+  if (!agentId) return '';
+  var settings = _agentPanelDigestSettings(agent);
+  var paused = !!(settings && settings.paused);
+  return '<button id="agent-panel-pause-btn" class="agent-panel-pause-btn'
+    + (paused ? ' paused' : '')
+    + '" onclick="agentPanelTogglePauseForAgent(\'' + _agentPanelEsc(agentId) + '\')">'
+    + (paused ? '&#x25B6;' : '&#x23F8;')
+    + '</button>';
+}
+
+function _agentPanelDigestHeaderRight(agent) {
+  if (!agent) return '';
+  var bstats = _agentPanelDigestBufferStats(agent);
+  var settings = _agentPanelDigestSettings(agent);
+  var paused = !!(settings && settings.paused);
+  var html = '';
+  if (bstats && bstats.buffered_events > 0) {
+    html += '<span class="agent-panel-buffer-stats">'
+      + _agentPanelEsc(_weaverHeaderBufferStats(bstats, paused, agent))
+      + '</span>';
+  }
+  html += _agentPanelDigestPauseButton(agent);
+  return html;
+}
+
+function _agentPanelRenderEventsTab(bstats, sentEvents, paused, recipient, sendNowExpr, sentTitle) {
+  var queued = (bstats && bstats.queued_events) ? bstats.queued_events.slice() : [];
+  var sent = Array.isArray(sentEvents) ? sentEvents.slice() : [];
+  var sendDisabled = paused || !queued.length;
+  var statusText = _weaverEventsStatusText(bstats, paused, recipient);
+
+  sent.sort(function(a, b) {
+    var deliveredDiff = (b.delivered_at || 0) - (a.delivered_at || 0);
+    if (deliveredDiff) return deliveredDiff;
+    return (b.id || 0) - (a.id || 0);
+  });
+
+  var html = '<div class="agent-panel-events-tab">';
+  html += '<div class="agent-panel-events-toolbar">';
+  html += '<div class="agent-panel-events-countdown">' + _esc(statusText) + '</div>';
+  html += '<button id="weaver-send-now-btn" class="agent-panel-send-now-btn"'
+    + (sendDisabled ? ' disabled' : '')
+    + ' onclick="' + _agentPanelEsc(sendNowExpr || 'weaverSendNow()') + '">Send queued now</button>';
+  html += '</div>';
+  html += _agentPanelLegacyRenderEventSection(
+    'Queued for next digest',
+    queued,
+    'queued',
+    'No queued events.'
+  );
+  html += _agentPanelLegacyRenderEventSection(
+    sentTitle || 'Already sent to Weaver',
+    sent,
+    'sent',
+    'No digested events yet.'
+  );
+  html += '</div>';
+  return html;
 }
 
 function _agentPanelArchitectDecisions(agentId) {
@@ -262,11 +379,19 @@ function _renderEngineerJournal(agent) {
 
 function _renderEngineerEvents(agent) {
   var group = String((agent && agent.group) || '');
-  var ws = _agentPanelWeaverSettings(group);
-  var weaver = _agentPanelWeaverAgent(group);
-  var bstats = (state && state.weaver_buffer_stats && state.weaver_buffer_stats[group]) || null;
-  if (typeof _agentPanelLegacyRenderEvents === 'function') return _agentPanelLegacyRenderEvents(group, ws, weaver, bstats);
-  return '<div class="agent-panel-empty">No group events yet.</div>';
+  var bstats = _agentPanelDigestBufferStats(agent);
+  var sentEvents = _agentPanelDigestSentEvents(agent);
+  var settings = _agentPanelDigestSettings(agent);
+  var paused = !!(settings && settings.paused);
+  if (!group) return '<div class="agent-panel-empty">No group events yet.</div>';
+  return _agentPanelRenderEventsTab(
+    bstats,
+    sentEvents,
+    paused,
+    agent,
+    'agentPanelSendNow(\'' + _agentPanelEsc((agent && agent.id) || '') + '\')',
+    'Already sent to ' + _agentPanelEsc((agent && (agent.name || agent.id)) || 'engineer')
+  );
 }
 
 function _renderEngineerWorklog(agent) {
@@ -280,7 +405,9 @@ function _renderEngineerPanel(agent) {
   var group = String((agent && agent.group) || '');
   var activeTab = _agentPanelActiveTab('engineer');
   var body = _agentPanelGroupWideNote(group);
+  var headerRightHtml = '';
   if (activeTab === 'events') {
+    headerRightHtml = _agentPanelDigestHeaderRight(agent);
     body += _renderEngineerEvents(agent);
   } else if (activeTab === 'worklog') {
     body += _renderEngineerWorklog(agent);
@@ -292,7 +419,8 @@ function _renderEngineerPanel(agent) {
     'Journal, digest queue, and worklog for this engineer\'s group.',
     'engineer',
     activeTab,
-    body
+    body,
+    headerRightHtml
   );
 }
 
@@ -1303,7 +1431,9 @@ function renderLegacyGroupPanel() {
   var ws = _weaverGetSettings(group);
   var weaver = group ? _weaverGetAgent(group) : null;
   var bstats = (state.weaver_buffer_stats && state.weaver_buffer_stats[group]) || null;
-  var paused = !!(ws && ws.paused);
+  var paused = weaver
+    ? !!(_agentPanelDigestSettings(weaver) && _agentPanelDigestSettings(weaver).paused)
+    : !!(ws && ws.paused);
   var activeTab = _weaverActiveTab(group);
   var emptyMessage = _weaverPanelEmptyMessage(group, ws, weaver, bstats);
 
@@ -1327,10 +1457,9 @@ function renderLegacyGroupPanel() {
            + _esc(_weaverHeaderBufferStats(bstats, paused, weaver))
            + '</span>';
     }
-    html += '<button id="weaver-pause-btn" class="agent-panel-pause-btn' + (paused ? ' paused' : '') + '" '
-         + 'onclick="weaverTogglePause()">'
-         + (paused ? '&#x25B6;' : '&#x23F8;')
-         + '</button>';
+    if (weaver && weaver.id) {
+      html += _agentPanelDigestPauseButton(weaver);
+    }
   }
   html += '</div>';
   html += '</div>';
@@ -1366,6 +1495,15 @@ function weaverTogglePauseForGroup(group) {
   send({ cmd: cmd, group: group });
 }
 
+function agentPanelTogglePauseForAgent(agentId) {
+  agentId = String(agentId || '');
+  if (!agentId) return;
+  var agent = (state && state.agents && state.agents[agentId]) || { id: agentId };
+  var settings = _agentPanelDigestSettings(agent);
+  var cmd = (settings && settings.paused) ? 'digest_resume' : 'digest_pause';
+  send({ cmd: cmd, agent_id: agentId });
+}
+
 function weaverSelectTab(tab, group) {
   group = group || _agentPanelCurrentGroup();
   if (!group) return;
@@ -1385,6 +1523,12 @@ function weaverSendNow() {
   var group = _agentPanelCurrentGroup();
   if (!group) return;
   send({ cmd: 'weaver_flush_now', group: group });
+}
+
+function agentPanelSendNow(agentId) {
+  agentId = String(agentId || '');
+  if (!agentId) return;
+  send({ cmd: 'weaver_flush_now', agent_id: agentId });
 }
 
 function _weaverActiveTab(group) {
@@ -1532,42 +1676,18 @@ function _agentPanelLegacyRenderEvents(group, ws, weaver, bstats) {
   if (!group) {
     return '<div class="agent-panel-empty">No weaver configured for any group.</div>';
   }
-
-  var queued = (bstats && bstats.queued_events) ? bstats.queued_events.slice() : [];
+  var paused = !!(ws && ws.paused);
   var sent = (state.weaver_sent_events && state.weaver_sent_events[group])
     ? state.weaver_sent_events[group].slice()
     : [];
-  var paused = !!(ws && ws.paused);
-  var sendDisabled = paused || !queued.length;
-  var statusText = _weaverEventsStatusText(bstats, paused, weaver);
-
-  sent.sort(function(a, b) {
-    var deliveredDiff = (b.delivered_at || 0) - (a.delivered_at || 0);
-    if (deliveredDiff) return deliveredDiff;
-    return (b.id || 0) - (a.id || 0);
-  });
-
-  var html = '<div class="agent-panel-events-tab">';
-  html += '<div class="agent-panel-events-toolbar">';
-  html += '<div class="agent-panel-events-countdown">' + _esc(statusText) + '</div>';
-  html += '<button id="weaver-send-now-btn" class="agent-panel-send-now-btn"'
-    + (sendDisabled ? ' disabled' : '')
-    + ' onclick="weaverSendNow()">Send queued now</button>';
-  html += '</div>';
-  html += _agentPanelLegacyRenderEventSection(
-    'Queued for next digest',
-    queued,
-    'queued',
-    'No queued events.'
-  );
-  html += _agentPanelLegacyRenderEventSection(
-    'Already sent to Weaver',
+  return _agentPanelRenderEventsTab(
+    bstats,
     sent,
-    'sent',
-    'No digested events yet.'
+    paused,
+    weaver,
+    'weaverSendNow()',
+    'Already sent to Weaver'
   );
-  html += '</div>';
-  return html;
 }
 
 function _agentPanelLegacyRenderEventSection(title, events, mode, emptyText) {
@@ -1640,6 +1760,7 @@ function _weaverHeaderBufferStats(bstats, paused, weaver) {
 }
 
 function _weaverEventsStatusText(bstats, paused, weaver) {
+  var recipientName = String((weaver && (weaver.name || weaver.id)) || 'recipient');
   if (!bstats || !bstats.buffered_events) {
     return 'No queued events.';
   }
@@ -1648,14 +1769,14 @@ function _weaverEventsStatusText(bstats, paused, weaver) {
   }
   if (bstats.manual_flush_requested) {
     if (weaver && weaver.activity && weaver.activity !== 'waiting') {
-      return 'Send requested — queued events will deliver when Weaver goes idle.';
+      return 'Send requested — queued events will deliver when ' + recipientName + ' goes idle.';
     }
     return 'Sending queued events now.';
   }
   var nextPushIn = _weaverCountdownSeconds(bstats);
   if (nextPushIn <= 0) {
     if (weaver && weaver.activity && weaver.activity !== 'waiting') {
-      return 'Eligible now — waiting for Weaver to go idle.';
+      return 'Eligible now — waiting for ' + recipientName + ' to go idle.';
     }
     return 'Eligible to send now.';
   }
@@ -1680,13 +1801,13 @@ function _weaverCountdownSeconds(bstats) {
 }
 
 function _weaverShouldLiveUpdateCountdown(group, activeTab) {
-  if (!group || activeTab !== 'events') return false;
-  var ws = _weaverGetSettings(group);
-  var bstats = (state.weaver_buffer_stats && state.weaver_buffer_stats[group]) || null;
-  if (!bstats || !bstats.buffered_events) return false;
-  if (ws && ws.paused) return false;
-  if (bstats.manual_flush_requested) return false;
-  return _weaverCountdownSeconds(bstats) > 0;
+  var surfaceState = _weaverVisibleEventsSurfaceState(group, activeTab);
+  if (!surfaceState.group || surfaceState.tab !== 'events') return false;
+  var payload = _weaverEventsSurfacePayload(surfaceState);
+  if (!payload.bstats || !payload.bstats.buffered_events) return false;
+  if (payload.paused) return false;
+  if (payload.bstats.manual_flush_requested) return false;
+  return _weaverCountdownSeconds(payload.bstats) > 0;
 }
 
 function _weaverStopEventsCountdownTimer() {
@@ -1705,6 +1826,7 @@ function _weaverVisibleEventsSurfaceState(group, activeTab) {
     var focused = _resolveFocusedAgent();
     if (focused && _agentPanelKind(focused) === 'engineer') {
       return {
+        agentId: String(focused.id || ''),
         group: String(focused.group || fallbackGroup || ''),
         tab: String(_agentPanelActiveTab('engineer') || fallbackTab || 'journal'),
       };
@@ -1712,8 +1834,29 @@ function _weaverVisibleEventsSurfaceState(group, activeTab) {
   }
   var currentGroup = String(_agentPanelCurrentGroup() || fallbackGroup || '');
   return {
+    agentId: '',
     group: currentGroup,
     tab: String(_weaverActiveTab(currentGroup) || fallbackTab || 'journal'),
+  };
+}
+
+function _weaverEventsSurfacePayload(surfaceState) {
+  var agentId = String((surfaceState && surfaceState.agentId) || '');
+  var group = String((surfaceState && surfaceState.group) || '');
+  if (agentId && state && state.agents && state.agents[agentId]) {
+    var recipient = state.agents[agentId];
+    var settings = _agentPanelDigestSettings(recipient);
+    return {
+      recipient: recipient,
+      paused: !!(settings && settings.paused),
+      bstats: _agentPanelDigestBufferStats(recipient),
+    };
+  }
+  var ws = _weaverGetSettings(group);
+  return {
+    recipient: group ? _weaverGetAgent(group) : null,
+    paused: !!(ws && ws.paused),
+    bstats: (state.weaver_buffer_stats && state.weaver_buffer_stats[group]) || null,
   };
 }
 
@@ -1724,13 +1867,11 @@ function _weaverSyncEventsCountdown(panel, group, activeTab) {
   var surfaceState = _weaverVisibleEventsSurfaceState(group, activeTab);
   var surfaceGroup = surfaceState.group;
   var surfaceTab = surfaceState.tab;
-  var ws = _weaverGetSettings(surfaceGroup);
-  var weaver = surfaceGroup ? _weaverGetAgent(surfaceGroup) : null;
-  var bstats = (state.weaver_buffer_stats && state.weaver_buffer_stats[surfaceGroup]) || null;
+  var payload = _weaverEventsSurfacePayload(surfaceState);
   countdownEl.textContent = _weaverEventsStatusText(
-    bstats,
-    !!(ws && ws.paused),
-    weaver
+    payload.bstats,
+    payload.paused,
+    payload.recipient
   );
   if (!_weaverShouldLiveUpdateCountdown(surfaceGroup, surfaceTab)
       || typeof setInterval !== 'function') {
@@ -1750,15 +1891,11 @@ function _weaverSyncEventsCountdown(panel, group, activeTab) {
       _weaverStopEventsCountdownTimer();
       return;
     }
-    var currentSettings = _weaverGetSettings(currentGroup);
-    var currentWeaver = currentGroup ? _weaverGetAgent(currentGroup) : null;
-    var currentStats = (
-      state.weaver_buffer_stats && state.weaver_buffer_stats[currentGroup]
-    ) || null;
+    var currentPayload = _weaverEventsSurfacePayload(currentState);
     currentCountdown.textContent = _weaverEventsStatusText(
-      currentStats,
-      !!(currentSettings && currentSettings.paused),
-      currentWeaver
+      currentPayload.bstats,
+      currentPayload.paused,
+      currentPayload.recipient
     );
     if (!_weaverShouldLiveUpdateCountdown(currentGroup, currentTab)) {
       _weaverStopEventsCountdownTimer();

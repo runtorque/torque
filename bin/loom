@@ -3367,6 +3367,31 @@ def cmd_ai_reply(args):
     print("Reply sent to weaver.")
 
 
+def _resolve_digest_agent(args):
+    state_data = get_state(args.port)
+    cell = resolve_cell(state_data, args.identifier)
+    if cell.get("cell_type") != "agent":
+        die(f"Digest target must be an agent: {args.identifier}")
+    return cell
+
+
+def _cmd_digest_pause_toggle(args, *, paused):
+    cell = _resolve_digest_agent(args)
+    cmd = "digest_pause" if paused else "digest_resume"
+    resp = api_call(cmd, port=args.port, agent_id=cell["id"])
+    check_ok(resp)
+    state = "paused" if paused else "resumed"
+    print(f"Digest {state} for \"{cell['name']}\"")
+
+
+def cmd_digest_pause(args):
+    _cmd_digest_pause_toggle(args, paused=True)
+
+
+def cmd_digest_resume(args):
+    _cmd_digest_pause_toggle(args, paused=False)
+
+
 def cmd_memory_add(args):
     cell_id = os.environ.get("LOOM_CELL_ID", "")
     kwargs = {
@@ -4713,6 +4738,20 @@ def build_parser():
     p = sch_sub.add_parser("run", help="Manually trigger a schedule now")
     p.add_argument("identifier", help="Schedule ID, slug, or name")
     p.set_defaults(func=cmd_schedule_run)
+
+    # -- digest ------------------------------------------------------------
+    dig = sub.add_parser("digest", aliases=["dg"],
+                         help="Per-agent digest controls")
+    dig.set_defaults(func=None, _sub_parser=dig)
+    dig_sub = dig.add_subparsers(dest="digest_cmd")
+
+    p = dig_sub.add_parser("pause", help="Pause digest delivery for one agent")
+    p.add_argument("identifier", help="Agent ID, slug, name, or ID prefix")
+    p.set_defaults(func=cmd_digest_pause)
+
+    p = dig_sub.add_parser("resume", help="Resume digest delivery for one agent")
+    p.add_argument("identifier", help="Agent ID, slug, name, or ID prefix")
+    p.set_defaults(func=cmd_digest_resume)
 
     # -- weaver -------------------------------------------------------------
     weav = sub.add_parser("weaver", aliases=["w"],

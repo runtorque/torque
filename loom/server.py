@@ -917,11 +917,37 @@ def _handle_weaver_reply(state: MatrixState, cell, *, message: str,
 
 
 def _handle_weaver_flush_now_command(weaver_buffer, data: dict) -> dict:
-    group = data.get("group", "")
-    ok, message = weaver_buffer.request_manual_flush(group)
+    recipient_or_group = data.get("agent_id", "") or data.get("group", "")
+    ok, message = weaver_buffer.request_manual_flush(recipient_or_group)
     if ok:
         return {"type": "ok"}
     return {"type": "error", "message": message or "Unable to send queued events"}
+
+
+def _handle_digest_pause_resume_command(
+    state: MatrixState,
+    weaver_buffer,
+    data: dict,
+    *,
+    paused: bool,
+) -> dict:
+    agent_ident = data.get("agent_id", "")
+    agent_id = _resolve_agent_id(state, agent_ident)
+    if not agent_id:
+        return {
+            "type": "error",
+            "message": f"Agent not found: {agent_ident}",
+        }
+    state.update_agent_digest_settings(agent_id, paused=paused)
+    if paused:
+        weaver_buffer.on_delivery_paused(agent_id)
+    else:
+        weaver_buffer.on_delivery_resumed(agent_id)
+    return {
+        "type": "ok",
+        "agent_id": agent_id,
+        "paused": paused,
+    }
 
 
 def _is_closing_ui_ws_error(exc: Exception) -> bool:
@@ -7842,6 +7868,22 @@ async def main(connection=None):
                     group, paused=False, pending_question="")
                 weaver_buffer.on_delivery_resumed(group)
                 result = {"type": "ok"}
+
+            elif cmd == "digest_pause":
+                result = _handle_digest_pause_resume_command(
+                    state,
+                    weaver_buffer,
+                    data,
+                    paused=True,
+                )
+
+            elif cmd == "digest_resume":
+                result = _handle_digest_pause_resume_command(
+                    state,
+                    weaver_buffer,
+                    data,
+                    paused=False,
+                )
 
             elif cmd == "weaver_flush_now":
                 result = _handle_weaver_flush_now_command(

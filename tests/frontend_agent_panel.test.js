@@ -21,6 +21,7 @@ function createHarness() {
   const restoreCalls = [];
   const intervalCalls = [];
   const clearIntervalCalls = [];
+  const sendCalls = [];
   const sandbox = {
     console,
     Date,
@@ -34,6 +35,9 @@ function createHarness() {
       weaver_worklog: {},
       weaver_journal: {},
       weaver_session_maps: {},
+      agent_digest_settings: {},
+      digest_buffer_stats: {},
+      digest_sent_events: {},
       panel_events: [],
       decisions: {},
       group_settings: {},
@@ -59,7 +63,7 @@ function createHarness() {
     _currentGroup() { return 'alpha'; },
     setInterval(fn, ms) { intervalCalls.push({ fn, ms }); return intervalCalls.length; },
     clearInterval(id) { clearIntervalCalls.push(id); },
-    send() {},
+    send(message) { sendCalls.push(message); },
     window: { prompt() { return null; } },
   };
   sandbox.global = sandbox;
@@ -67,7 +71,15 @@ function createHarness() {
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/agent_panel.js');
   loadScript(context, 'static/js/agent_panel.js');
-  return { context, panel, captureCalls, restoreCalls, intervalCalls, clearIntervalCalls };
+  return {
+    context,
+    panel,
+    captureCalls,
+    restoreCalls,
+    intervalCalls,
+    clearIntervalCalls,
+    sendCalls,
+  };
 }
 
 function setFocusedAgent(context, agent) {
@@ -172,11 +184,13 @@ test('engineer panel renders journal, events, and worklog from the focused engin
   const { context, panel } = createHarness();
   context.state.group_settings = { alpha: { weaver_agent_id: 'weaver-1' } };
   context.state.agents['weaver-1'] = { id: 'weaver-1', name: 'Weaver', group: 'alpha' };
-  context.state.weaver_settings.alpha = { paused: false };
+  context.state.agent_digest_settings['eng-1'] = { agent_id: 'eng-1', paused: false };
   context.state.weaver_journal.alpha = [
     { id: 2, type: 'decision', entry: 'Approved the refactor', timestamp: 50 },
   ];
-  context.state.weaver_buffer_stats.alpha = {
+  context.state.digest_buffer_stats['eng-1'] = {
+    agent_id: 'eng-1',
+    group: 'alpha',
     buffered_events: 1,
     next_push_at: Math.floor(Date.now() / 1000) + 60,
     queued_events: [
@@ -184,7 +198,7 @@ test('engineer panel renders journal, events, and worklog from the focused engin
     ],
     manual_flush_requested: false,
   };
-  context.state.weaver_sent_events.alpha = [
+  context.state.digest_sent_events['eng-1'] = [
     { id: 2, kind: 'task_completed', message: 'Delivered digest item', timestamp: 35, delivered_at: 38 },
   ];
   context.state.weaver_worklog.alpha = [
@@ -219,7 +233,9 @@ test('engineer panel renders journal, events, and worklog from the focused engin
   assert.match(panel.innerHTML, /Group: alpha \(group-wide\)/);
 
   context.agentPanelSelectTab('events');
+  assert.match(panel.innerHTML, /id="agent-panel-pause-btn"/);
   assert.match(panel.innerHTML, /Queued digest item/);
+  assert.match(panel.innerHTML, /Already sent to Builder/);
   assert.match(panel.innerHTML, /Delivered digest item/);
 
   context.agentPanelSelectTab('worklog');
@@ -363,7 +379,10 @@ test('focused engineer events tab starts the live countdown timer', () => {
     group: 'alpha',
     cell_type: 'agent',
   });
-  context.state.weaver_buffer_stats.alpha = {
+  context.state.agent_digest_settings['eng-1'] = { agent_id: 'eng-1', paused: false };
+  context.state.digest_buffer_stats['eng-1'] = {
+    agent_id: 'eng-1',
+    group: 'alpha',
     buffered_events: 1,
     next_push_at: Math.floor(Date.now() / 1000) + 45,
     queued_events: [
@@ -379,6 +398,33 @@ test('focused engineer events tab starts the live countdown timer', () => {
   assert.match(countdownEl.textContent, /Next eligible send in/);
   assert.equal(intervalCalls.length, 1);
   assert.equal(intervalCalls[0].ms, 1000);
+});
+
+test('focused engineer pause toggle sends per-agent digest pause and resume commands', () => {
+  const { context, panel, sendCalls } = createHarness();
+  setFocusedAgent(context, {
+    id: 'eng-1',
+    name: 'Builder',
+    kind: 'engineer',
+    group: 'alpha',
+    cell_type: 'agent',
+  });
+  context.state.agent_digest_settings['eng-1'] = { agent_id: 'eng-1', paused: false };
+  vm.runInContext(`_agentPanelLastSelectedTabByKind.engineer = 'events';`, context);
+
+  context.renderAgentPanel();
+  assert.match(panel.innerHTML, /id="agent-panel-pause-btn" class="agent-panel-pause-btn"/);
+
+  vm.runInContext(`agentPanelTogglePauseForAgent('eng-1')`, context);
+  context.state.agent_digest_settings['eng-1'].paused = true;
+  context.renderAgentPanel();
+  vm.runInContext(`agentPanelTogglePauseForAgent('eng-1')`, context);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sendCalls)), [
+    { cmd: 'digest_pause', agent_id: 'eng-1' },
+    { cmd: 'digest_resume', agent_id: 'eng-1' },
+  ]);
+  assert.match(panel.innerHTML, /id="agent-panel-pause-btn" class="agent-panel-pause-btn paused"/);
 });
 
 test('worker worklog updates after task changes and preserves the current anchor across rerenders', () => {

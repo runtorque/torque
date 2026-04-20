@@ -193,6 +193,89 @@ class ServerModuleExtractionTests(unittest.TestCase):
         self.assertEqual(calls, ['g'])
         self.assertEqual(result, {'type': 'ok'})
 
+    def test_weaver_flush_now_command_accepts_agent_id(self):
+        calls = []
+
+        class FakeBuffer:
+            def request_manual_flush(self, recipient_or_group):
+                calls.append(recipient_or_group)
+                return True, ""
+
+        result = self.server_mod._handle_weaver_flush_now_command(
+            FakeBuffer(),
+            {'agent_id': 'eng-1'},
+        )
+
+        self.assertEqual(calls, ['eng-1'])
+        self.assertEqual(result, {'type': 'ok'})
+
+    def test_digest_pause_command_updates_agent_settings_and_pauses_buffer(self):
+        state = self.state_mod.MatrixState()
+        state.agents['eng-1'] = self.state_mod.AgentCell(
+            id='eng-1',
+            name='Panelsmith',
+            slug='panelsmith',
+            group='g',
+            kind='engineer',
+            cell_type='agent',
+        )
+        calls = []
+
+        class FakeBuffer:
+            def on_delivery_paused(self, agent_id):
+                calls.append(('paused', agent_id))
+
+            def on_delivery_resumed(self, agent_id):
+                calls.append(('resumed', agent_id))
+
+        result = self.server_mod._handle_digest_pause_resume_command(
+            state,
+            FakeBuffer(),
+            {'agent_id': 'panelsmith'},
+            paused=True,
+        )
+
+        self.assertEqual(
+            result,
+            {'type': 'ok', 'agent_id': 'eng-1', 'paused': True},
+        )
+        self.assertTrue(state.get_agent_digest_settings('eng-1').paused)
+        self.assertEqual(calls, [('paused', 'eng-1')])
+
+    def test_digest_resume_command_updates_agent_settings_and_resumes_buffer(self):
+        state = self.state_mod.MatrixState()
+        state.agents['eng-1'] = self.state_mod.AgentCell(
+            id='eng-1',
+            name='Panelsmith',
+            slug='panelsmith',
+            group='g',
+            kind='engineer',
+            cell_type='agent',
+        )
+        state.update_agent_digest_settings('eng-1', paused=True)
+        calls = []
+
+        class FakeBuffer:
+            def on_delivery_paused(self, agent_id):
+                calls.append(('paused', agent_id))
+
+            def on_delivery_resumed(self, agent_id):
+                calls.append(('resumed', agent_id))
+
+        result = self.server_mod._handle_digest_pause_resume_command(
+            state,
+            FakeBuffer(),
+            {'agent_id': 'eng-1'},
+            paused=False,
+        )
+
+        self.assertEqual(
+            result,
+            {'type': 'ok', 'agent_id': 'eng-1', 'paused': False},
+        )
+        self.assertFalse(state.get_agent_digest_settings('eng-1').paused)
+        self.assertEqual(calls, [('resumed', 'eng-1')])
+
     def test_weaver_flush_now_command_surfaces_pause_error(self):
         class FakeBuffer:
             def request_manual_flush(self, group):
