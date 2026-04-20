@@ -1,5 +1,9 @@
 """Agent template discovery, validation, storage, and config resolution."""
 
+# DEPRECATED: new code should use ``loom.roles`` instead. ``TemplateManager``
+# remains in place during the stage-2 roles migration because several callers
+# still import it directly.
+
 import os
 
 import yaml

@@ -80,7 +80,7 @@ from .memory import (
     normalize_link_target_kind,
     normalize_retention_kind,
 )
-from .templates import TemplateManager
+from .roles import RoleManager
 from .external_tickets import (
     ExternalTicketError,
     build_completion_comment,
@@ -1002,6 +1002,83 @@ def _handle_doctor_command(db: LoomDB) -> dict:
     return build_doctor_report(db._conn, db.db_path)
 
 
+async def _handle_role_template_command(data: dict, role_mgr,
+                                        resolve_base_dir) -> dict | None:
+    cmd = data.get("cmd", "")
+    response_type = ""
+    item_key = ""
+    item_name = ""
+
+    if cmd == "list_roles":
+        response_type = "roles"
+        item_key = "roles"
+    elif cmd == "list_templates":
+        response_type = "templates"
+        item_key = "templates"
+    elif cmd == "save_role":
+        response_type = "roles"
+        item_key = "roles"
+        item_name = "Role"
+    elif cmd == "save_template":
+        response_type = "templates"
+        item_key = "templates"
+        item_name = "Template"
+    elif cmd == "delete_role":
+        response_type = "roles"
+        item_key = "roles"
+        item_name = "Role"
+    elif cmd == "delete_template":
+        response_type = "templates"
+        item_key = "templates"
+        item_name = "Template"
+    else:
+        return None
+
+    base_dir = await resolve_base_dir(data.get("group", ""))
+    group = data.get("group", "")
+
+    if cmd in {"list_roles", "list_templates"}:
+        return {
+            "type": response_type,
+            "group": group,
+            item_key: role_mgr.list_roles(base_dir),
+        }
+
+    name = data.get("name", "").strip()
+    if not name:
+        return {"type": "error", "message": f"{item_name} name required"}
+
+    if cmd in {"save_role", "save_template"}:
+        scope = data.get("scope", "project")
+        old_name = data.get("old_name", "").strip()
+        payload = data.get("role")
+        if payload is None:
+            payload = data.get("template", {})
+        if old_name and old_name != name:
+            role_mgr.delete_role(old_name, base_dir=base_dir)
+            role_mgr.delete_role(old_name, scope="user",
+                                 base_dir=base_dir)
+        role_mgr.save_role(
+            name, payload, scope=scope, base_dir=base_dir)
+        return {
+            "type": response_type,
+            "group": group,
+            item_key: role_mgr.list_roles(base_dir),
+            "saved": name,
+        }
+
+    deleted = role_mgr.delete_role(
+        name, scope=data.get("scope", ""), base_dir=base_dir)
+    if not deleted:
+        return {"type": "error", "message": f"{item_name} \"{name}\" not found"}
+    return {
+        "type": response_type,
+        "group": group,
+        item_key: role_mgr.list_roles(base_dir),
+        "deleted": name,
+    }
+
+
 def _resolve_memory_cell_and_task(state, cell_id: str = "",
                                   task_id: str = ""):
     """Resolve best-effort agent/task context for memory commands."""
@@ -1299,7 +1376,7 @@ async def main(connection=None):
         bridge = ITerm2Adapter(connection, state)
     worktree_mgr = WorktreeManager()
     action_mgr = ActionManager()
-    template_mgr = TemplateManager()
+    template_mgr = RoleManager()
     agent_launch = AgentLaunchService(
         state=state,
         connection=connection,
@@ -2511,13 +2588,10 @@ async def main(connection=None):
             return {"type": "actions", "group": data.get("group", ""),
                     "actions": actions}
 
-        if cmd == "list_templates":
-            base_dir = await _resolve_base_dir(data.get("group", ""))
-            return {
-                "type": "templates",
-                "group": data.get("group", ""),
-                "templates": template_mgr.list_templates(base_dir),
-            }
+        role_template_result = await _handle_role_template_command(
+            data, template_mgr, _resolve_base_dir)
+        if role_template_result is not None:
+            return role_template_result
 
         if cmd == "get_template":
             base_dir = await _resolve_base_dir(data.get("group", ""))
@@ -2529,43 +2603,6 @@ async def main(connection=None):
                         "message": f"Template \"{data['name']}\" not found"}
             return {"type": "template_detail", "name": data["name"],
                     "template": tpl}
-
-        if cmd == "save_template":
-            name = data.get("name", "").strip()
-            if not name:
-                return {"type": "error", "message": "Template name required"}
-            base_dir = await _resolve_base_dir(data.get("group", ""))
-            scope = data.get("scope", "project")
-            old_name = data.get("old_name", "").strip()
-            if old_name and old_name != name:
-                template_mgr.delete_template(old_name, base_dir=base_dir)
-                template_mgr.delete_template(old_name, scope="user",
-                                             base_dir=base_dir)
-            template_mgr.save_template(
-                name, data.get("template", {}), scope=scope, base_dir=base_dir)
-            return {
-                "type": "templates",
-                "group": data.get("group", ""),
-                "templates": template_mgr.list_templates(base_dir),
-                "saved": name,
-            }
-
-        if cmd == "delete_template":
-            name = data.get("name", "").strip()
-            if not name:
-                return {"type": "error", "message": "Template name required"}
-            base_dir = await _resolve_base_dir(data.get("group", ""))
-            deleted = template_mgr.delete_template(
-                name, scope=data.get("scope", ""), base_dir=base_dir)
-            if not deleted:
-                return {"type": "error",
-                        "message": f"Template \"{name}\" not found"}
-            return {
-                "type": "templates",
-                "group": data.get("group", ""),
-                "templates": template_mgr.list_templates(base_dir),
-                "deleted": name,
-            }
 
         if cmd == "render_template":
             base_dir = await _resolve_base_dir(data.get("group", ""))

@@ -1,6 +1,7 @@
 import asyncio
 import importlib
 import json
+import os
 import tempfile
 import types
 import unittest
@@ -247,6 +248,104 @@ class ServerModuleExtractionTests(unittest.TestCase):
         self.assertEqual(calls[0]['task_id'], 'task-1')
         self.assertIn('/attachments/task-1/pytest.log', calls[0]['message'])
         self.assertIn('E assert 1 == 2', calls[0]['message'])
+
+    def test_role_commands_and_template_compat_dispatch_through_helper(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project = root / 'repo' / 'subdir'
+            project.mkdir(parents=True)
+            (root / 'repo' / '.loom' / 'agents').mkdir(parents=True)
+            home = root / 'home'
+            (home / '.loom').mkdir(parents=True)
+            prev_home = os.environ.get('HOME')
+            os.environ['HOME'] = str(home)
+            self.addCleanup(
+                lambda: os.environ.__setitem__('HOME', prev_home)
+                if prev_home is not None
+                else os.environ.pop('HOME', None)
+            )
+
+            roles_mod = importlib.import_module('loom.roles')
+            roles_mod = importlib.reload(roles_mod)
+            role_mgr = roles_mod.RoleManager()
+
+            async def resolve_base_dir(_group):
+                return str(project)
+
+            save_role = asyncio.run(
+                self.server_mod._handle_role_template_command(
+                    {
+                        'cmd': 'save_role',
+                        'group': 'g',
+                        'name': 'demo',
+                        'scope': 'user',
+                        'template': {
+                            'name': 'demo',
+                            'preamble': 'Be careful.',
+                            'priorities': ['ship small', 'test first'],
+                        },
+                    },
+                    role_mgr,
+                    resolve_base_dir,
+                )
+            )
+
+            self.assertEqual(save_role['type'], 'roles')
+            demo = next(item for item in save_role['roles']
+                        if item['name'] == 'demo')
+            self.assertEqual(demo['preamble'], 'Be careful.')
+            self.assertEqual(demo['priorities'], ['ship small', 'test first'])
+
+            list_roles = asyncio.run(
+                self.server_mod._handle_role_template_command(
+                    {'cmd': 'list_roles', 'group': 'g'},
+                    role_mgr,
+                    resolve_base_dir,
+                )
+            )
+            self.assertEqual(list_roles['type'], 'roles')
+            self.assertEqual(
+                [item['name'] for item in list_roles['roles']],
+                ['demo'],
+            )
+
+            save_template = asyncio.run(
+                self.server_mod._handle_role_template_command(
+                    {
+                        'cmd': 'save_template',
+                        'group': 'g',
+                        'name': 'compat',
+                        'scope': 'project',
+                        'template': {
+                            'name': 'compat',
+                            'description': 'Compat save',
+                        },
+                    },
+                    role_mgr,
+                    resolve_base_dir,
+                )
+            )
+
+            self.assertEqual(save_template['type'], 'templates')
+            self.assertTrue((root / 'repo' / '.loom' / 'roles' / 'compat.yaml').is_file())
+            self.assertFalse((root / 'repo' / '.loom' / 'agents' / 'compat.yaml').exists())
+
+            delete_role = asyncio.run(
+                self.server_mod._handle_role_template_command(
+                    {
+                        'cmd': 'delete_role',
+                        'group': 'g',
+                        'name': 'demo',
+                        'scope': 'user',
+                    },
+                    role_mgr,
+                    resolve_base_dir,
+                )
+            )
+
+            self.assertEqual(delete_role['type'], 'roles')
+            self.assertEqual(delete_role['deleted'], 'demo')
+            self.assertFalse((home / '.loom' / 'roles' / 'demo.yaml').exists())
 
 
 class ServerPromptQueueTests(unittest.IsolatedAsyncioTestCase):
