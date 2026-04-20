@@ -84,4 +84,5 @@ def serve_http_proxy(caller_id: str) -> int:
                 "id": request_id,
                 "error": {"code": -32000, "message": str(exc)},
             }).encode("utf-8")
-        _write_framed_message(writer, response_payload)
+        if response_payload:
+            _write_framed_message(writer, response_payload)
