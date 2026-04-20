@@ -1175,6 +1175,79 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(loaded["weaver_shell"], "")
         self.assertEqual(loaded["weaver_tab_color"], "")
 
+    def test_agent_digest_settings_roundtrip(self):
+        self.db.save_agent_digest_settings(
+            "eng-1",
+            {
+                "agent_id": "eng-1",
+                "paused": True,
+                "push_interval": 45,
+                "max_interval": 180,
+                "heartbeat_interval": 240,
+                "digest_verbosity": "detailed",
+                "enabled_events": ["task_completed", "task_derived"],
+                "architect_digest": True,
+                "wake_on_digest": True,
+            },
+        )
+
+        loaded = self.db.load_agent_digest_settings("eng-1")
+
+        self.assertIsNotNone(loaded)
+        self.assertTrue(loaded["paused"])
+        self.assertEqual(loaded["push_interval"], 45)
+        self.assertEqual(loaded["max_interval"], 180)
+        self.assertEqual(loaded["heartbeat_interval"], 240)
+        self.assertEqual(loaded["digest_verbosity"], "detailed")
+        self.assertEqual(
+            loaded["enabled_events"], ["task_completed", "task_derived"]
+        )
+        self.assertTrue(loaded["architect_digest"])
+        self.assertTrue(loaded["wake_on_digest"])
+
+    def test_init_migrates_legacy_weaver_settings_to_agent_digest_settings(self):
+        self.db.save_group("g", 0)
+        self.db.save_group_settings(
+            "g",
+            GroupSettings(weaver_agent_id="eng-1"),
+        )
+        self.db.save_agent(
+            AgentCell(
+                id="eng-1",
+                name="Engineer One",
+                group="g",
+                kind="engineer",
+                persistent=True,
+            )
+        )
+        self.db.save_weaver_settings(
+            "g",
+            {
+                "group": "g",
+                "paused": True,
+                "push_interval": 30,
+                "max_interval": 120,
+                "heartbeat_interval": 240,
+                "digest_verbosity": "compact",
+                "enabled_events": ["task_completed"],
+            },
+        )
+        self.db.close()
+
+        reopened = LoomDB(self.db.db_path)
+        reopened.init()
+        self.addCleanup(reopened.close)
+
+        loaded = reopened.load_agent_digest_settings("eng-1")
+
+        self.assertIsNotNone(loaded)
+        self.assertTrue(loaded["paused"])
+        self.assertEqual(loaded["push_interval"], 30)
+        self.assertEqual(loaded["max_interval"], 120)
+        self.assertEqual(loaded["heartbeat_interval"], 240)
+        self.assertEqual(loaded["digest_verbosity"], "compact")
+        self.assertEqual(loaded["enabled_events"], ["task_completed"])
+
     def test_weaver_task_log_roundtrip_and_group_rename(self):
         first_id = self.db.save_weaver_task_log_entry(
             {

@@ -620,6 +620,24 @@ class WeaverSettings:
     )
 
 
+@dataclass
+class AgentDigestSettings:
+    """Per-agent digest delivery settings."""
+    agent_id: str = ""
+    paused: bool = False
+    push_interval: int = 60
+    max_interval: int = 300
+    heartbeat_interval: int = 300
+    digest_verbosity: str = "balanced"
+    enabled_events: list[str] = field(
+        default_factory=lambda: list(
+            _WEAVER_NOTIFICATION_PRESETS["normal"]["enabled_events"]
+        )
+    )
+    architect_digest: bool = False
+    wake_on_digest: bool = False
+
+
 # Mandatory events — always included in weaver digests regardless of enabled_events.
 WEAVER_MANDATORY_EVENTS = frozenset({
     "task_completed", "agent_reply", "agent_error",
@@ -686,6 +704,7 @@ class MatrixState:
         self.panel_log = None  # PanelEventLog, set from server.py
         # Weaver settings (per-group)
         self.weaver_settings: dict[str, WeaverSettings] = {}
+        self.agent_digest_settings: dict[str, AgentDigestSettings] = {}
         self.weaver_worklog: dict[str, list[dict]] = {}
         # Delta broadcast accumulator
         self._delta_ops: list[dict] = []
@@ -1019,6 +1038,10 @@ class MatrixState:
             "panel_events": self.panel_log.get_recent(50) if self.panel_log else [],
             "weaver_settings": {
                 n: asdict(ws) for n, ws in self.weaver_settings.items()
+            },
+            "agent_digest_settings": {
+                agent_id: asdict(settings)
+                for agent_id, settings in self.agent_digest_settings.items()
             },
             "weaver_journal": {
                 g: self.journal_read(g, limit=50)
@@ -1676,6 +1699,22 @@ class MatrixState:
                                 filtered["escalation_style"])
                         )
                     self.weaver_settings[gname] = WeaverSettings(**filtered)
+                ads_fields = set(AgentDigestSettings.__dataclass_fields__)
+                for agent_id, raw in self.db.load_all_agent_digest_settings().items():
+                    if agent_id not in self.agents:
+                        continue
+                    filtered = {
+                        k: v for k, v in raw.items() if k in ads_fields
+                    }
+                    if "digest_verbosity" in filtered:
+                        filtered["digest_verbosity"] = (
+                            normalize_weaver_digest_verbosity(
+                                filtered["digest_verbosity"]
+                            )
+                        )
+                    self.agent_digest_settings[agent_id] = (
+                        AgentDigestSettings(**filtered)
+                    )
                 for gname in self.groups:
                     entries = self.db.load_weaver_task_log(
                         gname,
@@ -1741,6 +1780,84 @@ class MatrixState:
     def get_weaver_settings(self, group: str) -> WeaverSettings:
         """Return weaver settings for a group, creating defaults if needed."""
         return self.weaver_settings.get(group, WeaverSettings(group=group))
+
+    def _legacy_agent_digest_settings(self, agent_id: str) -> AgentDigestSettings:
+        agent_id = str(agent_id or "").strip()
+        cell = self.agents.get(agent_id)
+        if not cell:
+            return AgentDigestSettings(agent_id=agent_id)
+        legacy_weaver = self.get_weaver_for_group(cell.group)
+        if not legacy_weaver or legacy_weaver.id != agent_id:
+            return AgentDigestSettings(
+                agent_id=agent_id,
+                architect_digest=(cell.kind == "architect"),
+            )
+        ws = self.get_weaver_settings(cell.group)
+        return AgentDigestSettings(
+            agent_id=agent_id,
+            paused=bool(getattr(ws, "paused", False)),
+            push_interval=int(getattr(ws, "push_interval", 60) or 60),
+            max_interval=int(getattr(ws, "max_interval", 300) or 300),
+            heartbeat_interval=int(
+                getattr(ws, "heartbeat_interval", 300) or 300
+            ),
+            digest_verbosity=normalize_weaver_digest_verbosity(
+                getattr(ws, "digest_verbosity", "balanced")
+            ),
+            enabled_events=list(getattr(ws, "enabled_events", []) or []),
+            architect_digest=(cell.kind == "architect"),
+            wake_on_digest=False,
+        )
+
+    def get_agent_digest_settings(self, agent_id: str) -> AgentDigestSettings:
+        """Return digest settings for one engineer/architect recipient."""
+        agent_id = str(agent_id or "").strip()
+        if not agent_id:
+            return AgentDigestSettings()
+        settings = self.agent_digest_settings.get(agent_id)
+        if settings is not None:
+            return settings
+        return self._legacy_agent_digest_settings(agent_id)
+
+    def update_agent_digest_settings(self, agent_id: str, **fields):
+        """Update digest settings for one engineer/architect recipient."""
+        agent_id = str(agent_id or "").strip()
+        if not agent_id:
+            return
+        settings = self.agent_digest_settings.get(agent_id)
+        if settings is None:
+            settings = AgentDigestSettings(
+                **asdict(self.get_agent_digest_settings(agent_id))
+            )
+            settings.agent_id = agent_id
+            self.agent_digest_settings[agent_id] = settings
+        valid = set(AgentDigestSettings.__dataclass_fields__)
+        for key, value in fields.items():
+            if key not in valid:
+                continue
+            if key == "digest_verbosity":
+                value = normalize_weaver_digest_verbosity(value)
+            elif key in {"paused", "architect_digest", "wake_on_digest"}:
+                value = bool(value)
+            setattr(settings, key, value)
+        payload = asdict(settings)
+        self._emit(
+            "agent_digest_update",
+            group=getattr(self.agents.get(agent_id), "group", "") or "",
+            **payload,
+        )
+        if self.db:
+            self.db.save_agent_digest_settings(agent_id, payload)
+
+    def ensure_agent_digest_settings(self, agent_id: str) -> AgentDigestSettings | None:
+        """Persist a default digest-settings row when one does not exist yet."""
+        agent_id = str(agent_id or "").strip()
+        if not agent_id:
+            return None
+        if agent_id in self.agent_digest_settings:
+            return self.agent_digest_settings[agent_id]
+        self.update_agent_digest_settings(agent_id)
+        return self.agent_digest_settings.get(agent_id)
 
     def update_weaver_settings(self, group: str, **fields):
         """Update weaver settings for a group."""
@@ -1813,6 +1930,14 @@ class MatrixState:
             self._emit("weaver_settings_update", group=group, **d)
         if self.db:
             self.db.save_weaver_settings(group, asdict(ws))
+
+    def delete_agent_digest_settings(self, agent_id: str):
+        agent_id = str(agent_id or "").strip()
+        if not agent_id:
+            return
+        self.agent_digest_settings.pop(agent_id, None)
+        if self.db:
+            self.db.delete_agent_digest_settings(agent_id)
 
     def _open_human_asks_for_parent(self, parent_task_id: str,
                                     exclude_task_id: str = "") -> list[BoardTask]:
@@ -2365,6 +2490,8 @@ class MatrixState:
             self._db_delete_auto_dispatch_queue(name)
             self.weaver_settings.pop(name, None)
             self.weaver_worklog.pop(name, None)
+            for r in removed:
+                self.delete_agent_digest_settings(r.id)
             if self.db:
                 self.db.delete_weaver_settings(name)
             self._emit("group_remove", name=name)
@@ -2594,6 +2721,8 @@ class MatrixState:
             gs.weaver_agent_id = ""
             self._emit("group_settings_update", name=cell.group, **asdict(gs))
             self._db_save_group_settings(cell.group)
+        for r in removed:
+            self.delete_agent_digest_settings(r.id)
         for r in removed:
             self._db_delete_agent(r.id)
         self._db_save_groups()

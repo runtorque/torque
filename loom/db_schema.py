@@ -289,6 +289,18 @@ CREATE TABLE IF NOT EXISTS weaver_settings (
     weaver_tab_color   TEXT NOT NULL DEFAULT ''
 );
 
+CREATE TABLE IF NOT EXISTS agent_digest_settings (
+    agent_id           TEXT PRIMARY KEY,
+    paused             INTEGER NOT NULL DEFAULT 0,
+    push_interval      INTEGER NOT NULL DEFAULT 60,
+    max_interval       INTEGER NOT NULL DEFAULT 300,
+    heartbeat_interval INTEGER NOT NULL DEFAULT 300,
+    digest_verbosity   TEXT NOT NULL DEFAULT 'balanced',
+    enabled_events     TEXT NOT NULL DEFAULT '["agent_started","task_dispatched","task_derived","task_health_alert"]',
+    architect_digest   INTEGER NOT NULL DEFAULT 0,
+    wake_on_digest     INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS weaver_journal (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     group_name  TEXT NOT NULL,
@@ -861,6 +873,21 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
         conn.commit()
     except sqlite3.OperationalError:
         pass
+    for col, default in (
+        ("architect_digest", "0"),
+        ("wake_on_digest", "0"),
+    ):
+        try:
+            conn.execute(
+                f"SELECT {col} FROM agent_digest_settings LIMIT 0")
+        except sqlite3.OperationalError:
+            try:
+                conn.execute(
+                    f"ALTER TABLE agent_digest_settings ADD COLUMN "
+                    f"{col} INTEGER NOT NULL DEFAULT {default}")
+                conn.commit()
+            except sqlite3.OperationalError:
+                pass
     try:
         conn.execute(
             "SELECT weaver_owner_id FROM auto_dispatch_queue LIMIT 0")
