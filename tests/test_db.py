@@ -562,6 +562,24 @@ class LoomDBTests(unittest.TestCase):
             ("engineer-legacy", "engineer-legacy"),
         )
 
+    def test_save_board_task_ignores_legacy_owner_when_column_is_absent(self):
+        self.db.save_board_task(
+            {
+                "id": "task-no-legacy-owner",
+                "task": "No legacy owner column",
+                "group": "g",
+                "weaver_owner_id": "engineer-legacy",
+            }
+        )
+
+        self.assertEqual(
+            self.db._conn.execute(
+                "SELECT assigned_engineer_id FROM board_tasks "
+                "WHERE id='task-no-legacy-owner'"
+            ).fetchone(),
+            ("",),
+        )
+
     def test_load_all_restores_board_filters_by_group(self):
         filters = {
             "alpha": {
@@ -1981,6 +1999,9 @@ class LoomDBTests(unittest.TestCase):
                 ),
             ],
             tasks=[BoardTask(id="LOOM:1", task="Task", group="loom")],
+            group_settings={
+                "loom": GroupSettings(weaver_agent_id="weaver-b"),
+            },
         )
 
         migrated = LoomDB(path)
@@ -2048,9 +2069,6 @@ class LoomDBTests(unittest.TestCase):
                 ),
             ],
             tasks=[BoardTask(id="LOOM:1", task="Task", group="loom")],
-            group_settings={
-                "loom": GroupSettings(weaver_agent_id="weaver-b"),
-            },
         )
 
         migrated = LoomDB(path)
@@ -2188,6 +2206,10 @@ class LoomDBTests(unittest.TestCase):
         )
         conn.execute(
             "UPDATE agents SET kind='worker', role='researcher' WHERE id='worker-1'"
+        )
+        conn.execute(
+            "UPDATE board_tasks SET assigned_engineer_id='explicit-owner' "
+            "WHERE id='ALPHA:1'"
         )
         conn.execute(
             "UPDATE board_tasks SET assigned_engineer_id='' WHERE id='LOOM:1'"
