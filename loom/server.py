@@ -1164,12 +1164,20 @@ def _assemble_worker_prompt(*, role_mgr, cell, base_dir: str = "",
 def _build_loom_context(state: MatrixState, cell, task) -> dict:
     """Build the ``loom`` namespace dict for Jinja2 template rendering."""
     workerish = _agent_is_worker_for_role_preamble(cell)
+    cell_id = getattr(cell, "id", "")
+    tasks_dispatched = int(getattr(cell, "tasks_dispatched", 0) or 0)
+    worktree_path = getattr(cell, "worktree_path", "") or ""
+    worktree_branch = getattr(cell, "worktree_branch", "") or ""
+    worktree_base_branch = getattr(cell, "worktree_base_branch", "") or ""
+    worktree_dirty = bool(getattr(cell, "worktree_dirty", False))
+    worktree_diff = getattr(cell, "worktree_diff", {}) or {}
+    worktree_checkpoints = getattr(cell, "worktree_checkpoints", []) or []
     agent_ctx = {
-        "name": cell.name,
-        "slug": cell.slug,
-        "type": cell.agent_type,
-        "group": cell.group,
-        "directory": cell.directory,
+        "name": getattr(cell, "name", ""),
+        "slug": getattr(cell, "slug", ""),
+        "type": getattr(cell, "agent_type", ""),
+        "group": getattr(cell, "group", ""),
+        "directory": getattr(cell, "directory", ""),
         "kind": _agent_kind_for_context(cell),
         "role": _agent_role_slug(cell) if workerish else "",
         "owner_engineer": _agent_owner_engineer_name(
@@ -1178,12 +1186,12 @@ def _build_loom_context(state: MatrixState, cell, task) -> dict:
 
     linked = sorted(
         (t for t in state.board_tasks.values()
-         if t.agent_id == cell.id and t.id != getattr(task, "id", "")),
+         if t.agent_id == cell_id and t.id != getattr(task, "id", "")),
         key=lambda t: t.created_at,
     )
     context_ctx = {
-        "is_clean": cell.tasks_dispatched == 0,
-        "tasks_dispatched": cell.tasks_dispatched,
+        "is_clean": tasks_dispatched == 0,
+        "tasks_dispatched": tasks_dispatched,
         "previous_tasks": [
             {"task": t.task, "lane": t.lane, "action": t.action_name}
             for t in linked
@@ -1191,13 +1199,13 @@ def _build_loom_context(state: MatrixState, cell, task) -> dict:
     }
 
     worktree_ctx = {
-        "active": bool(cell.worktree_path),
-        "path": cell.worktree_path,
-        "branch": cell.worktree_branch,
-        "base_branch": cell.worktree_base_branch,
-        "dirty": cell.worktree_dirty,
-        "diff": cell.worktree_diff or {},
-        "checkpoints": cell.worktree_checkpoints,
+        "active": bool(worktree_path),
+        "path": worktree_path,
+        "branch": worktree_branch,
+        "base_branch": worktree_base_branch,
+        "dirty": worktree_dirty,
+        "diff": worktree_diff,
+        "checkpoints": worktree_checkpoints,
     }
 
     parent_agent_slug = ""
@@ -1253,15 +1261,15 @@ def _build_loom_context(state: MatrixState, cell, task) -> dict:
     }
 
     terminals_ctx = []
-    for cid in state._children.get(cell.id, []):
+    for cid in state._children.get(cell_id, []):
         ch = state.agents.get(cid)
         if ch:
             terminals_ctx.append({
-                "name": ch.name,
-                "slug": ch.slug,
-                "current_path": ch.current_path,
-                "current_process": ch.current_process,
-                "current_branch": ch.current_branch,
+                "name": getattr(ch, "name", ""),
+                "slug": getattr(ch, "slug", ""),
+                "current_path": getattr(ch, "current_path", ""),
+                "current_process": getattr(ch, "current_process", ""),
+                "current_branch": getattr(ch, "current_branch", ""),
             })
 
     return {

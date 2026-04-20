@@ -3,6 +3,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 try:
     from helpers import install_aiohttp_stub
@@ -278,3 +279,82 @@ class DispatchPreambleTests(unittest.TestCase):
         )
 
         self.assertEqual(dispatch_prompt, preview_prompt)
+
+    def test_inline_role_preview_worker_without_agent_builds_context_safely(self):
+        self.role_mgr.save_role(
+            "reviewer",
+            {"name": "reviewer", "preamble": "Be careful."},
+            scope="project",
+            base_dir=str(self.project),
+        )
+        preview_cell = SimpleNamespace(
+            id="",
+            name="",
+            slug="",
+            group="g",
+            cell_type="agent",
+            agent_type="",
+            directory="",
+            kind="worker",
+            role="reviewer",
+            template="reviewer",
+            owner_engineer_id="",
+            created_by_weaver_id="",
+            worktree_repo_root="",
+            git_root="",
+            worktree_branch="",
+            worktree_auto_checkpoint=False,
+            checkpoint_on_progress=False,
+        )
+        preview_task = SimpleNamespace(
+            id="",
+            task=self.task.task,
+            slug="",
+            description="",
+            pipeline_depth=0,
+            parent_task_id="",
+            pipeline_root_id="",
+            labels=[],
+            group="g",
+            status="",
+            verification_mode="",
+            verification_state="",
+            verification_notes="",
+            verification_updated_at="",
+            verification_updated_by="",
+            verification_summary={},
+            worktree_boundary={},
+            resume_after_boundary_task_id="",
+            attachments=[],
+            artifacts=[],
+            action_name="review/code",
+            created_at="",
+            updated_at="",
+            agent_id="",
+        )
+
+        loom_ctx = self.server_mod._build_loom_context(
+            self.state, preview_cell, preview_task
+        )
+        self.assertTrue(loom_ctx["context"]["is_clean"])
+        self.assertEqual(loom_ctx["context"]["tasks_dispatched"], 0)
+        self.assertEqual(loom_ctx["worktree"]["path"], "")
+        self.assertEqual(loom_ctx["agent"]["role"], "reviewer")
+
+        rendered = self._render_action(
+            "name: preview\nprompt: |\n  role={{ loom.agent.role }}\n  {{ TASK }}\n",
+            loom_context=loom_ctx,
+        )
+        prompt = self.server_mod._assemble_worker_prompt(
+            role_mgr=self.role_mgr,
+            cell=preview_cell,
+            base_dir=str(self.project),
+            prompt_body=rendered["prompt"],
+            postscript="LOOM POSTSCRIPT",
+            disable_role_preamble=rendered["disable_role_preamble"],
+        )
+
+        self.assertEqual(
+            prompt,
+            "Be careful.\n\nrole=reviewer\nImplement feature\n\nLOOM POSTSCRIPT\n",
+        )
