@@ -87,7 +87,7 @@ Data backfill on first load:
 
 Old columns (`template`, `weaver_owner_id`, `created_by_weaver_id`) stay writable for one release to keep rollback safe, then are removed.
 
-## 2. Tool surface split
+## 2. Tool surface split ✓ shipped
 
 Currently one MCP surface (`weaver_*`) does everything. Split by kind:
 
@@ -277,7 +277,7 @@ Six stages, each independently shippable with a concrete acceptance criterion.
 
 **Acceptance criterion**: the end-to-end scenario above runs green. `loom doctor` still reports zero drift. No `weaver_*` alias call makes it to an unintended surface.
 
-### Stage 6 — Cleanup & compatibility sunset
+### Stage 6 — Cleanup & compatibility sunset ✓ shipped
 
 **Deliverable**: legacy names and columns are removed; upgrade path is explicit.
 

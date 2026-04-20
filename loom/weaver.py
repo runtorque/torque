@@ -66,20 +66,20 @@ context after a /clear.
 
 ## Available tools
 
-You have access to weaver_* MCP tools:
+You have access to engineer_* MCP tools:
 
-**Read**: weaver_board_list, weaver_task_show, weaver_agents_list, \
-weaver_agent_show, weaver_actions_list, weaver_action_show, \
-weaver_board_summary, weaver_session_map, weaver_streams_list, \
-weaver_stream_show
-**Write**: weaver_task_create, weaver_task_edit, weaver_task_verify, weaver_task_move, \
-weaver_task_dispatch, weaver_batch_dispatch, weaver_task_resolve
-**Events**: weaver_events, weaver_notifications, weaver_resume
-**Journal**: weaver_journal, weaver_journal_read
-**Interaction**: weaver_agent_message, weaver_note, weaver_ask, weaver_agent_close, \
-weaver_agent_relaunch
-**Worktree**: weaver_merge, weaver_rebase, weaver_create_pr, \
-weaver_diff, weaver_worktree_remove, weaver_worktree_checkpoint
+**Read**: engineer_board_list, engineer_task_show, engineer_agents_list, \
+engineer_agent_show, engineer_actions_list, engineer_action_show, \
+engineer_board_summary, engineer_session_map, engineer_streams_list, \
+engineer_stream_show
+**Write**: engineer_task_create, engineer_task_edit, engineer_task_verify, engineer_task_move, \
+engineer_task_dispatch, engineer_batch_dispatch, engineer_task_resolve
+**Events**: engineer_events, engineer_notifications, engineer_resume
+**Journal**: engineer_journal, engineer_journal_read
+**Interaction**: engineer_agent_message, engineer_note, engineer_ask, engineer_agent_close, \
+engineer_agent_relaunch
+**Worktree**: engineer_merge, engineer_rebase, engineer_create_pr, \
+engineer_diff, engineer_worktree_remove, engineer_worktree_checkpoint
 
 ## Core orchestration model
 
@@ -121,7 +121,7 @@ Operational rules:
   root/product work or as reasons to widen the wave.
 - Prefer stream-level reasoning first: identify the stream's state, gate, and
   recommended next action before reacting to individual workflow tasks.
-- Use `weaver_streams_list` and `weaver_stream_show` when branch/worktree
+- Use `engineer_streams_list` and `engineer_stream_show` when branch/worktree
   continuity matters; use task views for detailed audit/history.
 
 ## Operating guidelines
@@ -134,15 +134,15 @@ Operational rules:
 
 2. **Project reconnaissance** — Before planning or dispatching, learn the
    repo before trusting the board.  Read `AGENTS.md`, `README.md`, relevant
-   docs, and inspect the action catalog with `weaver_actions_list`.  When the
+   docs, and inspect the action catalog with `engineer_actions_list`.  When the
    work touches an unfamiliar area, inspect the codebase, tests, and likely
    entrypoints first.  Journal a compact project map: architecture, test/run
    commands, risky surfaces, and any deploy or verification expectations.
 
 3. **Action discipline** — Actions are contracts, not labels.  Never copy an
    action from another task just because it looks nearby or familiar.  Before
-   creating, editing, or dispatching a task, consult `weaver_actions_list`
-   and `weaver_action_show` to choose the right action, understand its prompt
+   creating, editing, or dispatching a task, consult `engineer_actions_list`
+   and `engineer_action_show` to choose the right action, understand its prompt
    shape, and fill any required variables deliberately.  Prefer the action
    catalog over task imitation.
 
@@ -168,9 +168,9 @@ Operational rules:
    - task_verification_updated → review pending/failed verification before sending the next wave
 
 7. **Context recovery** — After a /clear or restart, your first actions
-   should be: weaver_journal_read → weaver_session_map → weaver_events.
-   Use `weaver_board_summary` when you want the compact snapshot and
-   `weaver_board_list` only when you need the full task inventory. Then
+   should be: engineer_journal_read → engineer_session_map → engineer_events.
+   Use `engineer_board_summary` when you want the compact snapshot and
+   `engineer_board_list` only when you need the full task inventory. Then
    rebuild context from the repo and action catalog before widening work.
 
 8. **Dispatch strategy** — Reuse context, but keep branch boundaries
@@ -190,7 +190,7 @@ Operational rules:
    to that agent or clean up the agent/worktree intentionally.
 
 9. **Diff review** — For large changes, start with
-   `weaver_diff(..., summary_only=true)` to get structured changed-file
+   `engineer_diff(..., summary_only=true)` to get structured changed-file
    signals, use `stat_only=true` if you want a quick text diffstat, then
    inspect risky files first: deletes, config changes, auth,
    migrations, prompts, scripts, and build/test plumbing.
@@ -219,36 +219,36 @@ Operational rules:
    there's nothing else worth dispatching yet, wait for Loom digests.
    But when there are 0 active agents, 0 in-progress tasks, and ready or
    backlog work remains, treat that as the next planning turn rather than
-   a terminal steady state.  Read `weaver_board_summary`, then either
+   a terminal steady state.  Read `engineer_board_summary`, then either
    dispatch the next best wave according to the human's standing priority
-   instructions or post a non-blocking `weaver_note` that proposes the
+   instructions or post a non-blocking `engineer_note` that proposes the
    next wave and names the constraint that prevents automatic dispatch.
    Stay idle only when the backlog is actually exhausted or the board is
    paused on a human checkpoint, approval, or blocking question.
 
-13. **Human interaction** — Use `weaver_note` for non-blocking notes,
+13. **Human interaction** — Use `engineer_note` for non-blocking notes,
    soft questions, status/context, or proposed next-wave plans that
    should stay visible without pausing orchestration.  Use
-   `weaver_ask` only when you need a blocking human decision and the
+   `engineer_ask` only when you need a blocking human decision and the
    board should stop widening work until the answer arrives.  If the
    board is idle with backlog remaining and you only need to surface the
-   next recommended wave or a soft priority question, use `weaver_note`
-   instead of `weaver_ask`.  The human will reply via the panel or
+   next recommended wave or a soft priority question, use `engineer_note`
+   instead of `engineer_ask`.  The human will reply via the panel or
    directly in your terminal.  After receiving their answer, call
-   `weaver_resume` to unpause events.
+   `engineer_resume` to unpause events.
 
 14. **First session** — When starting a new session (no journal history),
    do a short reconnaissance pass before dispatching: read the repo guidance,
    inspect the action catalog, and understand the current board.  If standing
-   priorities are missing or ambiguous after that, call `weaver_ask` to get
+   priorities are missing or ambiguous after that, call `engineer_ask` to get
    direction.  Do not dispatch blindly, but do not skip repo learning either.
 
 15. **Loom mechanics** — Loom can dispatch multiple tasks to the same
-   agent. Use `weaver_batch_dispatch` with a shared `agent_group` when
+   agent. Use `engineer_batch_dispatch` with a shared `agent_group` when
    several ordered tasks should stay on one worker so later tasks queue
    behind earlier ones. Capacity-limited entries are stored in Loom's
    persistent auto-dispatch queue and resume automatically after
-   restart. Use `weaver_task_dispatch(agent=...)` to
+   restart. Use `engineer_task_dispatch(agent=...)` to
    target an existing agent directly. Same-agent queued tasks usually
    share one worktree/branch until merge or cleanup, so use this for
    short tightly coupled follow-ups, not long stacks of medium-sized
@@ -330,18 +330,18 @@ def _autonomy_policy_lines(mode: str) -> list[str]:
     if mode == "suggest_only":
         return [
             "- Do not widen the wave automatically just because work exists.",
-            "- When backlog remains and the next step looks plausible, prefer `weaver_note` with a proposed wave over dispatching immediately.",
+            "- When backlog remains and the next step looks plausible, prefer `engineer_note` with a proposed wave over dispatching immediately.",
             "- Ask or wait for human direction before dispatching, merging, or cleaning up when intent is not already explicit.",
         ]
     if mode == "aggressive_auto_continue":
         return [
             "- Treat an idle board with actionable backlog as permission to keep moving unless a real approval gate or blocker exists.",
-            "- Prefer `weaver_note` over `weaver_ask` for soft ambiguity; reserve blocking asks for true human decisions.",
+            "- Prefer `engineer_note` over `engineer_ask` for soft ambiguity; reserve blocking asks for true human decisions.",
             "- Keep workers busy up to the default concurrency when the next wave is reasonably clear and risk is modest.",
         ]
     return [
         "- Dispatch automatically when priorities and the next wave are clear from standing instructions and recent board state.",
-        "- Use `weaver_note` for soft ambiguity; reserve `weaver_ask` for blocking human decisions or approvals.",
+        "- Use `engineer_note` for soft ambiguity; reserve `engineer_ask` for blocking human decisions or approvals.",
         "- Keep waves reviewable and avoid widening work when verification, review boundaries, or shared-surface risk says to pause.",
     ]
 
@@ -380,15 +380,15 @@ def _escalation_policy_lines(mode: str) -> list[str]:
     if mode == "ask_early":
         return [
             "- Escalate sooner when priorities, approvals, or product intent are even moderately ambiguous.",
-            "- Prefer `weaver_ask` over prolonged autonomous interpretation when a human decision could materially change the plan.",
+            "- Prefer `engineer_ask` over prolonged autonomous interpretation when a human decision could materially change the plan.",
         ]
     if mode == "keep_moving":
         return [
             "- Keep moving through soft ambiguity when the likely next step is low-risk and reversible.",
-            "- Prefer `weaver_note` for visibility and reserve `weaver_ask` for true blockers or approvals.",
+            "- Prefer `engineer_note` for visibility and reserve `engineer_ask` for true blockers or approvals.",
         ]
     return [
-        "- Prefer `weaver_note` for soft ambiguity and use `weaver_ask` only when the board should genuinely pause for a human decision.",
+        "- Prefer `engineer_note` for soft ambiguity and use `engineer_ask` only when the board should genuinely pause for a human decision.",
     ]
 
 
@@ -436,7 +436,7 @@ def _build_policy_section(weaver_settings=None, group_settings=None) -> str:
         *_same_agent_policy_lines(same_agent),
         *_escalation_policy_lines(escalation_style),
         (
-            "- When calling `weaver_batch_dispatch` without `max_concurrent`, "
+            "- When calling `engineer_batch_dispatch` without `max_concurrent`, "
             f"use {concurrency} as the default limit."
         ),
         (

@@ -1,8 +1,8 @@
 """Shared MCP tool implementation for engineer-scoped orchestration tools.
 
-This module contains the shared read/write tool logic used by the new
-``engineer_*`` namespace and by the legacy ``weaver_*`` compatibility
-aliases. Scoping is caller-driven via ``caller_kind`` + ``caller_id``.
+This module contains the shared read/write tool logic used by the
+``engineer_*`` and ``architect_*`` namespaces. Scoping is caller-driven
+via ``caller_kind`` + ``caller_id``.
 
 Security note: v1 keeps Loom's local-trust model. Environment/header
 spoofing protections are out of scope for this stage. The server HTTP
@@ -56,11 +56,6 @@ _JOURNAL_ENTRY_TYPES = {"decision", "observation", "checkpoint", "plan"}
 # Shared scoping helpers
 # ---------------------------------------------------------------------------
 
-NO_ENGINEER_ALIAS_ERROR = (
-    "no engineer exists; create one via the Engineers panel or the "
-    "add_engineer server command"
-)
-
 
 def engineer_not_found_error(caller_id: str) -> str:
     return json.dumps({
@@ -94,12 +89,7 @@ def _effective_assigned_engineer_id(task) -> str:
 def _is_engineer_like_cell(state, cell) -> bool:
     if not cell or getattr(cell, "cell_type", "") != "agent":
         return False
-    if str(getattr(cell, "kind", "") or "").strip() == "engineer":
-        return True
-    group = str(getattr(cell, "group", "") or "").strip()
-    if not group:
-        return False
-    return bool(state.get_group_settings(group).weaver_agent_id == cell.id)
+    return str(getattr(cell, "kind", "") or "").strip() == "engineer"
 
 
 def _is_architect_cell(cell) -> bool:
@@ -321,25 +311,6 @@ def _deliver_architect_engineer_message(state, sender, recipient, *,
 
 def _visible_agent_ids_for_caller(state, caller_kind: str,
                                   caller_id: str) -> set[str]:
-    if caller_kind == "legacy_weaver":
-        weaver = state.agents.get(str(caller_id or "").strip())
-        if not weaver or getattr(weaver, "cell_type", "") != "agent":
-            return set()
-        group = str(getattr(weaver, "group", "") or "").strip()
-        if not group:
-            return set()
-        visible = set()
-        restrict = bool(state.weaver_restricts_to_created_agents(group))
-        for cell in state.agents.values():
-            if getattr(cell, "cell_type", "") != "agent":
-                continue
-            if str(getattr(cell, "group", "") or "").strip() != group:
-                continue
-            if not restrict or str(
-                getattr(cell, "created_by_weaver_id", "") or ""
-            ).strip() == str(caller_id or "").strip():
-                visible.add(cell.id)
-        return visible
     if caller_kind == "architect":
         caller_id = str(caller_id or "").strip()
         visible = {caller_id} if caller_id in state.agents else set()
@@ -382,16 +353,6 @@ def _filter_agents_for_caller(state, caller_kind: str,
 
 def _filter_tasks_for_caller(state, caller_kind: str,
                              caller_id: str) -> dict[str, object]:
-    if caller_kind == "legacy_weaver":
-        caller = state.agents.get(str(caller_id or "").strip())
-        caller_group = str(getattr(caller, "group", "") or "").strip() if caller else ""
-        if not caller_group:
-            return {}
-        return {
-            task.id: task
-            for task in state.board_tasks.values()
-            if str(getattr(task, "group", "") or "").strip() == caller_group
-        }
     if caller_kind == "architect":
         caller_id = str(caller_id or "").strip()
         caller_group = _caller_group(state, caller_id)
@@ -448,74 +409,13 @@ def _resolve_visible_agent(state, caller_kind: str, caller_id: str,
     return agent_id, ""
 
 
-def resolve_default_engineer(state) -> str | None:
-    engineers = [
-        cell for cell in state.agents.values()
-        if getattr(cell, "cell_type", "") == "agent"
-        and str(getattr(cell, "kind", "") or "").strip() == "engineer"
-    ]
-    if not engineers:
-        engineers = []
-        seen = set()
-        for group_name in list(getattr(state, "groups", {}).keys()):
-            weaver_id = str(
-                state.get_group_settings(group_name).weaver_agent_id or ""
-            ).strip()
-            if not weaver_id or weaver_id in seen:
-                continue
-            cell = state.agents.get(weaver_id)
-            if not cell or getattr(cell, "cell_type", "") != "agent":
-                continue
-            engineers.append(cell)
-            seen.add(weaver_id)
-        if not engineers:
-            return None
-    if len(engineers) == 1:
-        return engineers[0].id
-
-    weaver_named = [
-        cell for cell in engineers
-        if str(getattr(cell, "name", "") or "") == "Weaver"
-    ]
-    if len(weaver_named) == 1:
-        return weaver_named[0].id
-    if weaver_named:
-        engineers = weaver_named
-
-    order_map = {
-        cell.id: index for index, cell in enumerate(state.agents.values())
-    }
-
-    def sort_key(cell):
-        created_at = getattr(cell, "created_at", "")
-        if isinstance(created_at, (int, float)) and created_at:
-            return (0, float(created_at), order_map.get(cell.id, 0), cell.id)
-        if isinstance(created_at, str) and created_at:
-            return (1, created_at, order_map.get(cell.id, 0), cell.id)
-        created_ts = None
-        db = getattr(state, "db", None)
-        if db:
-            try:
-                record = db.load_agent_history_detail(cell.id) or {}
-                created_ts = record.get("created_at")
-            except Exception:
-                created_ts = None
-        if isinstance(created_ts, (int, float)) and created_ts:
-            return (0, float(created_ts), order_map.get(cell.id, 0), cell.id)
-        return (2, order_map.get(cell.id, 0), order_map.get(cell.id, 0), cell.id)
-
-    engineers.sort(key=sort_key)
-    return engineers[0].id if engineers else None
-
-
 def authorize_caller(state, *, caller_kind: str, caller_id: str):
     caller_id = str(caller_id or "").strip()
     label = {
         "engineer": "engineer",
-        "legacy_weaver": "weaver",
         "architect": "architect",
     }.get(caller_kind, caller_kind)
-    if caller_kind not in {"engineer", "legacy_weaver", "architect"}:
+    if caller_kind not in {"engineer", "architect"}:
         return None, "", caller_kind, json.dumps({
             "type": "error",
             "message": f"unsupported caller kind: {caller_kind}",
@@ -526,7 +426,7 @@ def authorize_caller(state, *, caller_kind: str, caller_id: str):
             if caller_kind == "engineer"
             else "LOOM_ARCHITECT_ID is required"
             if caller_kind == "architect"
-            else "legacy weaver session id is required"
+            else "caller id is required"
         )
         return None, "", caller_kind, json.dumps({
             "type": "error",
@@ -546,11 +446,6 @@ def authorize_caller(state, *, caller_kind: str, caller_id: str):
             if caller_kind == "architect"
             else
             engineer_not_found_error(caller_id)
-            if caller_kind == "engineer"
-            else json.dumps({
-                "type": "error",
-                "message": f"no weaver with id={caller_id} exists",
-            })
         )
         return None, "", caller_kind, error_text, True
     group = str(getattr(cell, "group", "") or "").strip()
@@ -559,15 +454,7 @@ def authorize_caller(state, *, caller_kind: str, caller_id: str):
             "type": "error",
             "message": f"{label} {caller_id} is not assigned to a group",
         }), True
-    effective_kind = (
-        "architect"
-        if caller_kind == "architect"
-        else
-        "engineer"
-        if str(getattr(cell, "kind", "") or "").strip() == "engineer"
-        else "legacy_weaver"
-    )
-    return cell, group, effective_kind, "", False
+    return cell, group, caller_kind, "", False
 
 
 def build_scoped_state_view(state, *, caller_kind: str, caller_id: str,
@@ -578,26 +465,7 @@ def build_scoped_state_view(state, *, caller_kind: str, caller_id: str,
         cell_id for cell_id, cell in visible_agents.items()
         if getattr(cell, "cell_type", "") == "agent"
     }
-    if caller_kind == "legacy_weaver":
-        scoped_agents = {}
-        same_group_agent_ids = {
-            cell.id for cell in state.agents.values()
-            if getattr(cell, "cell_type", "") == "agent"
-            and str(getattr(cell, "group", "") or "").strip() == caller_group
-        }
-        for cell in state.agents.values():
-            if getattr(cell, "cell_type", "") == "agent":
-                if str(getattr(cell, "group", "") or "").strip() == caller_group:
-                    scoped_agents[cell.id] = cell
-                continue
-            parent_id = str(getattr(cell, "parent_id", "") or "").strip()
-            if (
-                str(getattr(cell, "group", "") or "").strip() == caller_group
-                or parent_id in same_group_agent_ids
-            ):
-                scoped_agents[cell.id] = cell
-    else:
-        scoped_agents = dict(visible_agents)
+    scoped_agents = dict(visible_agents)
 
     view_state = copy.copy(state)
     view_state.agents = scoped_agents
@@ -634,12 +502,7 @@ def build_scoped_state_view(state, *, caller_kind: str, caller_id: str,
         lambda _weaver_id, agent_id: str(agent_id or "").strip()
         in visible_agent_ids
     )
-    if caller_kind == "legacy_weaver":
-        view_state.weaver_restricts_to_created_agents = (
-            lambda group: state.weaver_restricts_to_created_agents(group)
-        )
-    else:
-        view_state.weaver_restricts_to_created_agents = lambda _group: False
+    view_state.weaver_restricts_to_created_agents = lambda _group: False
     return view_state
 
 

@@ -26,8 +26,8 @@ class LoomSmokeFlowTests(unittest.IsolatedAsyncioTestCase):
         _install_aiohttp_stub()
         self.state_mod = importlib.import_module("loom.state")
         self.state_mod = importlib.reload(self.state_mod)
-        self.mcp_weaver_mod = importlib.import_module("loom.mcp_weaver")
-        self.mcp_weaver_mod = importlib.reload(self.mcp_weaver_mod)
+        self.mcp_engineer_mod = importlib.import_module("loom.mcp_engineer")
+        self.mcp_engineer_mod = importlib.reload(self.mcp_engineer_mod)
         self.worktree_mod = importlib.import_module("loom.worktree")
         self.worktree_mod = importlib.reload(self.worktree_mod)
 
@@ -38,20 +38,21 @@ class LoomSmokeFlowTests(unittest.IsolatedAsyncioTestCase):
         self.state = self.state_mod.MatrixState()
         self.state.add_group("g")
 
-        self.weaver = self.state_mod.AgentCell(
-            id="weaver-1",
-            name="Weaver",
-            slug="weaver",
+        self.engineer = self.state_mod.AgentCell(
+            id="engineer-1",
+            name="Engineer",
+            slug="engineer",
             group="g",
             cell_type="agent",
-            session_id="weaver-session",
+            kind="engineer",
+            session_id="engineer-session",
             status="running",
         )
-        self.state.agents[self.weaver.id] = self.weaver
-        self.state.groups["g"].append(self.weaver.id)
+        self.state.agents[self.engineer.id] = self.engineer
+        self.state.groups["g"].append(self.engineer.id)
         self.state.update_group_settings(
             "g",
-            weaver_agent_id=self.weaver.id,
+            weaver_agent_id=self.engineer.id,
             dispatch_lane="In Progress",
         )
 
@@ -82,12 +83,12 @@ class LoomSmokeFlowTests(unittest.IsolatedAsyncioTestCase):
         return stdout.decode().strip()
 
     async def _run_tool(self, name, args):
-        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+        text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
             name,
             args,
             self._handle_command,
             self.state,
-            cell_id=self.weaver.id,
+            caller_id=self.engineer.id,
         )
         self.assertFalse(is_error, text)
         return json.loads(text)
@@ -105,6 +106,10 @@ class LoomSmokeFlowTests(unittest.IsolatedAsyncioTestCase):
                 parent_task_id=payload.get("parent_task_id", ""),
                 pipeline_root_id=payload.get("pipeline_root_id", ""),
                 pipeline_depth=payload.get("pipeline_depth", 0),
+                assigned_engineer_id=payload.get("assigned_engineer_id", ""),
+                created_by_architect_id=payload.get(
+                    "created_by_architect_id", ""
+                ),
             )
             if not task:
                 return {"type": "error", "message": "Task creation failed"}
@@ -154,6 +159,11 @@ class LoomSmokeFlowTests(unittest.IsolatedAsyncioTestCase):
                 )
                 if not agent:
                     return {"type": "error", "message": "Agent creation failed"}
+                agent.kind = "worker"
+                agent.owner_engineer_id = payload.get("owner_engineer_id", "")
+                agent.created_by_weaver_id = payload.get(
+                    "_created_by_weaver_id", ""
+                )
                 agent.agent_type = payload.get("agent_type", "") or "codex"
                 agent.status = "running"
                 wt_path = await self.worktree_mgr.create(
@@ -240,9 +250,9 @@ class LoomSmokeFlowTests(unittest.IsolatedAsyncioTestCase):
         agent.current_task_id = ""
         agent.status = "idle"
 
-    async def test_smoke_task_lifecycle_runs_from_weaver_creation_to_merge_cleanup(self):
+    async def test_smoke_task_lifecycle_runs_from_engineer_creation_to_merge_cleanup(self):
         created = await self._run_tool(
-            "weaver_task_create",
+            "engineer_task_create",
             {
                 "title": "Implement smoke path",
                 "description": "Exercise the critical Loom task lifecycle.",
@@ -252,7 +262,7 @@ class LoomSmokeFlowTests(unittest.IsolatedAsyncioTestCase):
         task_id = created["id"]
 
         dispatched = await self._run_tool(
-            "weaver_task_dispatch",
+            "engineer_task_dispatch",
             {
                 "task": task_id,
                 "name": "Smoke Worker",
@@ -289,7 +299,7 @@ class LoomSmokeFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(agent.worktree_path, "")
         self.state.remove_agent(agent.id)
 
-        summary = await self._run_tool("weaver_board_summary", {})
+        summary = await self._run_tool("engineer_board_summary", {})
         task_after = self.state.board_tasks[task_id]
         self.assertEqual(task_after.lane, "Done")
         self.assertEqual(task_after.agent_id, "")
@@ -297,13 +307,13 @@ class LoomSmokeFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(summary["agents"]["active_count"], 0)
         self.assertEqual(summary["asks"]["count"], 0)
 
-    async def test_smoke_weaver_orchestration_blocks_dependencies_until_ready(self):
+    async def test_smoke_engineer_orchestration_blocks_dependencies_until_ready(self):
         blocker = await self._run_tool(
-            "weaver_task_create",
+            "engineer_task_create",
             {"title": "Land schema change"},
         )
         dependent = await self._run_tool(
-            "weaver_task_create",
+            "engineer_task_create",
             {"title": "Ship API cleanup"},
         )
         self.state.board_update_task(
@@ -312,7 +322,7 @@ class LoomSmokeFlowTests(unittest.IsolatedAsyncioTestCase):
         )
 
         batch = await self._run_tool(
-            "weaver_batch_dispatch",
+            "engineer_batch_dispatch",
             {
                 "tasks": [
                     {"task": blocker["id"]},
@@ -351,7 +361,7 @@ class LoomSmokeFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(ask)
 
         resolved = await self._run_tool(
-            "weaver_task_resolve",
+            "engineer_task_resolve",
             {
                 "task": ask.id,
                 "answer": "Approved for rollout",
@@ -361,7 +371,7 @@ class LoomSmokeFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.state.board_tasks[ask.id].lane, "Done")
 
         dispatched = await self._run_tool(
-            "weaver_task_dispatch",
+            "engineer_task_dispatch",
             {
                 "task": dependent["id"],
                 "agent": blocker_agent.id,
