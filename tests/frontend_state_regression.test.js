@@ -3513,6 +3513,165 @@ test('renderAgentDetails adds clickable diff, checkpoint, and preserved-merge af
   assert.match(html, /<span class="detail-wt-tag detail-wt-merged">merged<\/span>/);
 });
 
+test('renderAgentDetails shows architect pending hires and decisions', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/render.js');
+
+  context.state.agents = {
+    'arch-1': {
+      id: 'arch-1',
+      name: 'Architect',
+      kind: 'architect',
+      group: 'alpha',
+      cell_type: 'agent',
+      status: 'running',
+      mcp_messages: [],
+    },
+  };
+  context.state.pending_hires = {
+    'hire-1': {
+      id: 'hire-1',
+      architect_id: 'arch-1',
+      requested_name: 'Alice',
+      requested_provider: 'codex',
+      requested_command: 'codex --profile engineer',
+      requested_directory: '/repo/services/api',
+      created_at: 1712345678,
+    },
+    'hire-hidden': {
+      id: 'hire-hidden',
+      architect_id: 'arch-2',
+      requested_name: 'Hidden engineer',
+      created_at: 1712345678,
+    },
+  };
+  context.state.decisions = {
+    'decision-1': {
+      id: 'decision-1',
+      architect_id: 'arch-1',
+      title: 'Define the API cut line',
+      rationale: 'Ship the API before the CLI.\nHold the dashboard until validation lands.',
+      status: 'approved',
+      linked_task_ids: ['task-1'],
+      linked_engineer_ids: ['eng-1', 'eng-2'],
+      updated_at: 1712345680,
+    },
+    'decision-hidden': {
+      id: 'decision-hidden',
+      architect_id: 'arch-2',
+      title: 'Hidden decision',
+      rationale: 'Do not show this row',
+      status: 'proposed',
+      updated_at: 1712345681,
+    },
+  };
+
+  const html = runInContext(context, `renderAgentDetails(state.agents["arch-1"])`);
+
+  assert.match(html, /Pending hires/);
+  assert.match(html, /Alice/);
+  assert.match(html, /codex --profile engineer/);
+  assert.match(html, /approvePendingHire\("hire-1"\)/);
+  assert.match(html, /rejectPendingHire\("hire-1"\)/);
+  assert.doesNotMatch(html, /Hidden engineer/);
+
+  assert.match(html, /Decisions/);
+  assert.match(html, /Define the API cut line/);
+  assert.match(html, /Ship the API before the CLI\.<br>Hold the dashboard until validation lands\./);
+  assert.match(html, /Linked to 1 task/);
+  assert.match(html, /2 engineers/);
+  assert.doesNotMatch(html, /Hidden decision/);
+});
+
+test('architect pending-hire actions send approve and reject commands', () => {
+  const { sandbox } = createSandbox();
+  sandbox.window.prompt = function(message, initialValue) {
+    sandbox.promptArgs = [message, initialValue];
+    return 'Needs a narrower scope';
+  };
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/render.js');
+
+  runInContext(context, `approvePendingHire('hire-1')`);
+  runInContext(context, `rejectPendingHire('hire-2')`);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
+    { cmd: 'pending_hire_approve', id: 'hire-1' },
+    { cmd: 'pending_hire_reject', id: 'hire-2', note: 'Needs a narrower scope' },
+  ]);
+  assert.deepEqual(sandbox.promptArgs, ['Optional rejection note', '']);
+
+  sandbox.sendCalls.length = 0;
+  sandbox.window.prompt = function() { return null; };
+  runInContext(context, `rejectPendingHire('hire-3')`);
+  assert.equal(sandbox.sendCalls.length, 0);
+});
+
+test('decision and pending-hire deltas invalidate the main surface', () => {
+  const { sandbox } = createSandbox({
+    renderInvalidatedSurfaces(flags) {
+      sandbox.lastInvalidations = JSON.parse(JSON.stringify(flags));
+    },
+  });
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/ws.js');
+
+  runInContext(context, `_expectedSeq = 1;`);
+  context._handleDelta({
+    seq: 1,
+    ops: [
+      { op: 'pending_hire_upsert', id: 'hire-1', architect_id: 'arch-1', requested_name: 'Alice' },
+      { op: 'decision_upsert', id: 'decision-1', architect_id: 'arch-1', title: 'Define scope' },
+    ],
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.lastInvalidations)), {
+    main: true,
+    board: false,
+    context: false,
+    events: false,
+    weaver: true,
+    templates: false,
+  });
+  assert.deepEqual(jsonValue(context, `state.pending_hires["hire-1"]`), {
+    id: 'hire-1',
+    architect_id: 'arch-1',
+    requested_name: 'Alice',
+  });
+  assert.deepEqual(jsonValue(context, `state.decisions["decision-1"]`), {
+    id: 'decision-1',
+    architect_id: 'arch-1',
+    title: 'Define scope',
+  });
+
+  runInContext(context, `_expectedSeq = 2;`);
+  context._handleDelta({
+    seq: 2,
+    ops: [
+      { op: 'pending_hire_resolve', id: 'hire-1' },
+      { op: 'decision_remove', id: 'decision-1' },
+    ],
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.lastInvalidations)), {
+    main: true,
+    board: false,
+    context: false,
+    events: false,
+    weaver: true,
+    templates: false,
+  });
+  assert.equal(
+    jsonValue(context, `Object.prototype.hasOwnProperty.call(state.pending_hires || {}, "hire-1")`),
+    false,
+  );
+  assert.equal(
+    jsonValue(context, `Object.prototype.hasOwnProperty.call(state.decisions || {}, "decision-1")`),
+    false,
+  );
+});
+
 test('backlog dispatch note ignores overlap warnings for ready work', () => {
   const { context } = createBoardHarness();
   context.state.board_tasks = {
@@ -5950,6 +6109,126 @@ test('renderWeaverPanel preserves focused reply draft across rerenders', () => {
   assert.equal(input.selectionEnd, 13);
 });
 
+test('renderWeaverPanel preserves focused architect decision title editor across rerenders', () => {
+  const { context, document } = createWeaverHarness();
+  const panel = document.register('panel-weaver');
+  const content = document.createElement('div');
+  content.classList.add('weaver-content');
+  panel.setQuerySelector('.weaver-content', content);
+
+  context.state.agents = {
+    'arch-1': {
+      id: 'arch-1',
+      name: 'Productmind',
+      slug: 'productmind',
+      kind: 'architect',
+      group: 'alpha',
+      cell_type: 'agent',
+      status: 'running',
+      created_at: 10,
+    },
+  };
+  context.state.decisions = {
+    'decision-1': {
+      id: 'decision-1',
+      architect_id: 'arch-1',
+      title: 'Initial title',
+      rationale: 'Initial rationale',
+      status: 'proposed',
+      updated_at: 20,
+    },
+  };
+
+  runInContext(context, `
+    _weaverArchitectExpanded['arch-1'] = true;
+    weaverStartDecisionEdit('decision-1');
+    weaverDecisionDraftInput('decision-1', 'title', 'Updated direction');
+  `);
+
+  const oldInput = document.createElement('input');
+  oldInput.dataset.focusKey = 'weaver-decision-title:decision-1';
+  oldInput.value = 'Updated direction';
+  oldInput.selectionStart = 7;
+  oldInput.selectionEnd = 16;
+  panel.appendChild(oldInput);
+  document.activeElement = oldInput;
+
+  const restoredInput = document.createElement('input');
+  restoredInput.dataset.focusKey = 'weaver-decision-title:decision-1';
+  panel.setQuerySelector('[data-focus-key="weaver-decision-title:decision-1"]', restoredInput);
+
+  context.renderWeaverPanel();
+
+  assert.equal(restoredInput.focused, true);
+  assert.equal(restoredInput.value, 'Updated direction');
+  assert.equal(restoredInput.selectionStart, 7);
+  assert.equal(restoredInput.selectionEnd, 16);
+  assert.equal(
+    jsonValue(context, `_weaverArchitectDecisionUi['decision-1'].draft.title`),
+    'Updated direction',
+  );
+});
+
+test('renderWeaverPanel preserves focused architect decision rationale editor across rerenders', () => {
+  const { context, document } = createWeaverHarness();
+  const panel = document.register('panel-weaver');
+  const content = document.createElement('div');
+  content.classList.add('weaver-content');
+  panel.setQuerySelector('.weaver-content', content);
+
+  context.state.agents = {
+    'arch-1': {
+      id: 'arch-1',
+      name: 'Productmind',
+      slug: 'productmind',
+      kind: 'architect',
+      group: 'alpha',
+      cell_type: 'agent',
+      status: 'running',
+      created_at: 10,
+    },
+  };
+  context.state.decisions = {
+    'decision-1': {
+      id: 'decision-1',
+      architect_id: 'arch-1',
+      title: 'Initial title',
+      rationale: 'Initial rationale',
+      status: 'proposed',
+      updated_at: 20,
+    },
+  };
+
+  runInContext(context, `
+    _weaverArchitectExpanded['arch-1'] = true;
+    weaverStartDecisionEdit('decision-1');
+    weaverDecisionDraftInput('decision-1', 'rationale', 'Keep the UI stable across refreshes');
+  `);
+
+  const oldTextarea = document.createElement('textarea');
+  oldTextarea.dataset.focusKey = 'weaver-decision-rationale:decision-1';
+  oldTextarea.value = 'Keep the UI stable across refreshes';
+  oldTextarea.selectionStart = 9;
+  oldTextarea.selectionEnd = 18;
+  panel.appendChild(oldTextarea);
+  document.activeElement = oldTextarea;
+
+  const restoredTextarea = document.createElement('textarea');
+  restoredTextarea.dataset.focusKey = 'weaver-decision-rationale:decision-1';
+  panel.setQuerySelector('[data-focus-key="weaver-decision-rationale:decision-1"]', restoredTextarea);
+
+  context.renderWeaverPanel();
+
+  assert.equal(restoredTextarea.focused, true);
+  assert.equal(restoredTextarea.value, 'Keep the UI stable across refreshes');
+  assert.equal(restoredTextarea.selectionStart, 9);
+  assert.equal(restoredTextarea.selectionEnd, 18);
+  assert.equal(
+    jsonValue(context, `_weaverArchitectDecisionUi['decision-1'].draft.rationale`),
+    'Keep the UI stable across refreshes',
+  );
+});
+
 test('renderWeaverPanel preserves the selected Events tab across rerenders', () => {
   const { context, document } = createWeaverHarness();
   const panel = document.register('panel-weaver');
@@ -7843,6 +8122,31 @@ test('Cmd+Option+E opens the add engineer modal through the shared key handler',
   assert.equal(sandbox.addEngineerModalCalls, 1);
 });
 
+test('Cmd+Option+P opens the add architect modal through the shared key handler', () => {
+  const { document, sandbox } = createMainHarness({
+    openAddArchitectModal(group) {
+      sandbox.addArchitectModalCalls = (sandbox.addArchitectModalCalls || []);
+      sandbox.addArchitectModalCalls.push(group);
+    },
+    _weaverCurrentGroup() {
+      return 'loom';
+    },
+  });
+  let prevented = false;
+
+  document.listeners.keydown({
+    key: 'P',
+    metaKey: true,
+    altKey: true,
+    ctrlKey: false,
+    shiftKey: false,
+    preventDefault() { prevented = true; },
+  });
+
+  assert.equal(prevented, true);
+  assert.deepEqual(sandbox.addArchitectModalCalls, ['loom']);
+});
+
 test('full state toggles embedded runtime body class', () => {
   const { context, document } = createWsRenderHarness();
 
@@ -8289,6 +8593,107 @@ test('main render preserves manual state.groups ordering within engineer hierarc
     'agent-user',
   ]);
   assert.match(main.innerHTML, /Bob[\s\S]*Worker B2[\s\S]*Worker B1[\s\S]*Alice[\s\S]*Worker A2[\s\S]*Worker A1[\s\S]*User Worker/);
+});
+
+test('main render orders architects above hired engineers, then user-owned engineers and orphan workers', () => {
+  const { context, document, sandbox } = createMainRenderHarness();
+  const main = document.getElementById('main');
+
+  sandbox.state.groups = {
+    loom: ['worker-user', 'eng-user', 'worker-hired', 'arch-a', 'eng-hired', 'orphan', 'arch-b'],
+  };
+  sandbox.state.group_settings = {
+    loom: { collapsed_default: false, weaver_agent_id: '' },
+  };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'arch-a': {
+      id: 'arch-a',
+      name: 'Architect A',
+      kind: 'architect',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'A',
+      status: 'running',
+      session_id: 'sess-arch-a',
+    },
+    'arch-b': {
+      id: 'arch-b',
+      name: 'Architect B',
+      kind: 'architect',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'B',
+      status: 'running',
+      session_id: 'sess-arch-b',
+    },
+    'eng-hired': {
+      id: 'eng-hired',
+      name: 'Alice',
+      kind: 'engineer',
+      hired_by_architect_id: 'arch-a',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'E',
+      status: 'running',
+      session_id: 'sess-eng-hired',
+    },
+    'worker-hired': {
+      id: 'worker-hired',
+      name: 'Worker A',
+      owner_engineer_id: 'eng-hired',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'W',
+      status: 'running',
+      session_id: 'sess-worker-hired',
+    },
+    'eng-user': {
+      id: 'eng-user',
+      name: 'Bob',
+      kind: 'engineer',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'U',
+      status: 'running',
+      session_id: 'sess-eng-user',
+    },
+    'worker-user': {
+      id: 'worker-user',
+      name: 'Worker B',
+      owner_engineer_id: 'eng-user',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'V',
+      status: 'running',
+      session_id: 'sess-worker-user',
+    },
+    'orphan': {
+      id: 'orphan',
+      name: 'Orphan Worker',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'O',
+      status: 'running',
+      session_id: 'sess-orphan',
+    },
+  };
+
+  runInContext(context, `render();`);
+
+  assert.deepEqual(jsonValue(context, `window._navAgents`), [
+    'arch-a',
+    'eng-hired',
+    'worker-hired',
+    'arch-b',
+    'eng-user',
+    'worker-user',
+    'orphan',
+  ]);
+  assert.match(main.innerHTML, /Architect A[\s\S]*Alice[\s\S]*Worker A[\s\S]*Architect B[\s\S]*Bob[\s\S]*Worker B[\s\S]*Orphan Worker/);
+  assert.match(main.innerHTML, /cell-architect-badge/);
+  assert.match(main.innerHTML, /architect-owned-engineer/);
+  assert.match(main.innerHTML, /architect-owned-worker/);
 });
 
 test('main render restores the main scroll position across rerenders', () => {

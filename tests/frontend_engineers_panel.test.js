@@ -81,9 +81,10 @@ test('renderWeaverPanel shows the Engineers header and empty roster when there a
 
   vm.runInContext('renderWeaverPanel()', context);
 
-  assert.match(panel.innerHTML, /Engineers — loom/);
+  assert.match(panel.innerHTML, /Architects &amp; Engineers — loom/);
+  assert.match(panel.innerHTML, />\+ Add Architect</);
   assert.match(panel.innerHTML, />\+ Add Engineer</);
-  assert.match(panel.innerHTML, /No engineers yet/);
+  assert.match(panel.innerHTML, /No user-owned engineers yet/);
 });
 
 test('renderWeaverPanel lists one engineer in the roster', () => {
@@ -92,7 +93,8 @@ test('renderWeaverPanel lists one engineer in the roster', () => {
 
   vm.runInContext('renderWeaverPanel()', context);
 
-  assert.equal((panel.innerHTML.match(/class="engineer-row"/g) || []).length, 1);
+  assert.equal((panel.innerHTML.match(/engineer-row-kind">engineer</g) || []).length, 1);
+  assert.match(panel.innerHTML, /User/);
   assert.match(panel.innerHTML, /Alice/);
   assert.match(panel.innerHTML, /eng-alice/);
 });
@@ -104,7 +106,7 @@ test('renderWeaverPanel lists two engineers in created_at order', () => {
 
   vm.runInContext('renderWeaverPanel()', context);
 
-  assert.equal((panel.innerHTML.match(/class="engineer-row"/g) || []).length, 2);
+  assert.equal((panel.innerHTML.match(/engineer-row-kind">engineer</g) || []).length, 2);
   assert.match(panel.innerHTML, /Alice[\s\S]*Bob/);
 });
 
@@ -116,6 +118,6 @@ test('renderWeaverPanel lists three engineers in created_at order', () => {
 
   vm.runInContext('renderWeaverPanel()', context);
 
-  assert.equal((panel.innerHTML.match(/class="engineer-row"/g) || []).length, 3);
+  assert.equal((panel.innerHTML.match(/engineer-row-kind">engineer</g) || []).length, 3);
   assert.match(panel.innerHTML, /Alice[\s\S]*Bob[\s\S]*Cara/);
 });

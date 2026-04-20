@@ -402,6 +402,12 @@ function _deltaSurfaceInvalidations(ops) {
       case 'weaver_settings_update':
         _markSurface(flags, 'main', 'weaver');
         break;
+      case 'decision_upsert':
+      case 'decision_remove':
+      case 'pending_hire_upsert':
+      case 'pending_hire_resolve':
+        _markSurface(flags, 'main', 'weaver');
+        break;
       case 'ui_update':
         _applyUiSurfaceInvalidation(flags, op.key);
         break;
@@ -807,6 +813,36 @@ function _applyDelta(ops) {
         break;
       }
 
+      case 'decision_upsert': {
+        if (!state.decisions) state.decisions = {};
+        var decisionId = op.id;
+        if (decisionId) {
+          var decision = Object.assign({}, op);
+          delete decision.op;
+          state.decisions[decisionId] = decision;
+        }
+        break;
+      }
+
+      case 'decision_remove':
+        if (state.decisions) delete state.decisions[op.id];
+        break;
+
+      case 'pending_hire_upsert': {
+        if (!state.pending_hires) state.pending_hires = {};
+        var pendingHireId = op.id;
+        if (pendingHireId) {
+          var pendingHire = Object.assign({}, op);
+          delete pendingHire.op;
+          state.pending_hires[pendingHireId] = pendingHire;
+        }
+        break;
+      }
+
+      case 'pending_hire_resolve':
+        if (state.pending_hires) delete state.pending_hires[op.id];
+        break;
+
       case 'focus_update':
         if ('active_session_id' in op) {
           const prevActive = state.active_session_id;
@@ -877,6 +913,8 @@ function handleAction(msg) {
     if (msg.group) quickAddAgent(msg.group);
   } else if (msg.action === 'add_engineer') {
     if (typeof openAddEngineerModal === 'function') openAddEngineerModal();
+  } else if (msg.action === 'add_architect') {
+    if (typeof openAddArchitectModal === 'function') openAddArchitectModal(msg.group || '');
   } else if (msg.action === 'add_terminal') {
     if (msg.group && msg.parent_id) quickAddTerminal(msg.group, msg.parent_id);
   }

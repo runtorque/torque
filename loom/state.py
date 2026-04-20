@@ -2,14 +2,16 @@
 
 import asyncio
 import json
+import os
 import re
 import uuid
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Optional
 
 from aiohttp import web
 
-from .config import DEFAULT_COMMAND, log
+from .config import DATA_DIR, DEFAULT_COMMAND, log
 from .artifacts import normalize_artifacts, normalize_attachments
 from .db import LoomDB
 from .task_ids import (
@@ -396,6 +398,11 @@ def _unique_slug(base: str, existing: set) -> str:
     return f"{base}-{i}"
 
 
+def _safe_journal_filename(value: str) -> str:
+    token = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value or "").strip())
+    return token or "architect"
+
+
 def _normalize_board_lanes(lanes) -> list[str]:
     current = []
     seen = set()
@@ -713,6 +720,23 @@ class MatrixState:
                    slug=self.group_slugs.get(name, ""),
                    agents=list(self.groups.get(name, [])))
 
+    def _emit_decision(self, decision: dict | None):
+        """Emit a decision delta for live UI sync."""
+        if not decision:
+            return
+        payload = dict(decision)
+        op = "decision_remove" if payload.get("archived") else "decision_upsert"
+        self._emit(op, **payload)
+
+    def _emit_pending_hire(self, pending_hire: dict | None):
+        """Emit a pending-hire delta for live UI sync."""
+        if not pending_hire:
+            return
+        payload = dict(pending_hire)
+        status = str(payload.get("status", "") or "").strip()
+        op = "pending_hire_upsert" if status == "pending" else "pending_hire_resolve"
+        self._emit(op, **payload)
+
     # -- Task indexes --------------------------------------------------------
 
     def _index_task(self, task: "BoardTask") -> None:
@@ -938,6 +962,27 @@ class MatrixState:
     # -- Serialization ------------------------------------------------------
 
     def to_dict(self) -> dict:
+        decisions = {}
+        pending_hires = {}
+        if self.db:
+            try:
+                decisions = {
+                    decision["id"]: decision
+                    for decision in self.db.load_all_decisions(
+                        include_archived=False
+                    )
+                }
+            except Exception:
+                log.exception("Failed to load decisions snapshot")
+            try:
+                pending_hires = {
+                    pending_hire["id"]: pending_hire
+                    for pending_hire in self.db.load_pending_hires(
+                        status_filter="pending"
+                    )
+                }
+            except Exception:
+                log.exception("Failed to load pending hires snapshot")
         return {
             "agents": {aid: asdict(a) for aid, a in self.agents.items()},
             "groups": self.groups,
@@ -984,6 +1029,8 @@ class MatrixState:
                 for g, entries in self.weaver_worklog.items()
             },
             "weaver_streams": self._weaver_streams_snapshot(),
+            "decisions": decisions,
+            "pending_hires": pending_hires,
         }
 
     # -- Targeted persistence helpers ----------------------------------------
@@ -1915,6 +1962,213 @@ class MatrixState:
         if self.db:
             return self.db.load_journal_entries(group, limit, entry_type)
         return []
+
+    def load_decision(self, decision_id: str) -> dict | None:
+        """Load one persisted architect decision."""
+        if self.db:
+            try:
+                return self.db.load_decision(decision_id)
+            except Exception:
+                log.exception("Failed to load decision %s", decision_id)
+        return None
+
+    def save_decision(self, row_dict: dict) -> dict | None:
+        """Persist one architect decision and return the normalized row."""
+        if self.db:
+            try:
+                saved = self.db.save_decision(row_dict)
+                self._emit_decision(saved)
+                return saved
+            except Exception:
+                log.exception(
+                    "Failed to save decision %s",
+                    str((row_dict or {}).get("id", "") or ""),
+                )
+        return None
+
+    def load_decisions_for_architect(self, architect_id: str, *,
+                                     include_archived: bool = False) -> list[dict]:
+        """Load persisted decisions for one architect."""
+        if self.db:
+            try:
+                return self.db.load_decisions_for_architect(
+                    architect_id,
+                    include_archived=include_archived,
+                )
+            except Exception:
+                log.exception(
+                    "Failed to load decisions for architect %s",
+                    architect_id,
+                )
+        return []
+
+    def load_all_decisions(self, *, include_archived: bool = False) -> list[dict]:
+        """Load all persisted architect decisions."""
+        if self.db:
+            try:
+                return self.db.load_all_decisions(
+                    include_archived=include_archived,
+                )
+            except Exception:
+                log.exception("Failed to load decisions")
+        return []
+
+    def delete_decision(self, decision_id: str) -> dict | None:
+        """Soft-delete one architect decision."""
+        if self.db:
+            try:
+                deleted = self.db.delete_decision(decision_id)
+                self._emit_decision(deleted)
+                return deleted
+            except Exception:
+                log.exception("Failed to delete decision %s", decision_id)
+        return None
+
+    def hard_delete_decision(self, decision_id: str) -> None:
+        """Permanently delete one architect decision."""
+        if self.db:
+            try:
+                self.db.hard_delete_decision(decision_id)
+                self._emit("decision_remove", id=str(decision_id or "").strip())
+            except Exception:
+                log.exception("Failed to hard-delete decision %s", decision_id)
+
+    def load_pending_hire(self, hire_id: str) -> dict | None:
+        """Load one persisted pending hire."""
+        if self.db:
+            try:
+                return self.db.load_pending_hire(hire_id)
+            except Exception:
+                log.exception("Failed to load pending hire %s", hire_id)
+        return None
+
+    def save_pending_hire(self, row_dict: dict) -> dict | None:
+        """Persist one pending-hire row and emit the matching delta."""
+        if self.db:
+            try:
+                saved = self.db.save_pending_hire(row_dict)
+                self._emit_pending_hire(saved)
+                return saved
+            except Exception:
+                log.exception(
+                    "Failed to save pending hire %s",
+                    str((row_dict or {}).get("id", "") or ""),
+                )
+        return None
+
+    def load_pending_hires(self, *, status_filter: str = "",
+                           architect_id: str = "") -> list[dict]:
+        """Load pending-hire rows from persistence."""
+        if self.db:
+            try:
+                return self.db.load_pending_hires(
+                    status_filter=status_filter,
+                    architect_id=architect_id,
+                )
+            except Exception:
+                log.exception(
+                    "Failed to load pending hires status=%s architect=%s",
+                    status_filter,
+                    architect_id,
+                )
+        return []
+
+    def delete_pending_hire(self, hire_id: str) -> None:
+        """Permanently delete one pending-hire row."""
+        if self.db:
+            try:
+                self.db.delete_pending_hire(hire_id)
+                self._emit("pending_hire_resolve", id=str(hire_id or "").strip())
+            except Exception:
+                log.exception("Failed to delete pending hire %s", hire_id)
+
+    def _architect_journal_path(self, architect_id: str) -> Path:
+        return Path(DATA_DIR) / "architect_journals" / (
+            _safe_journal_filename(architect_id) + ".jsonl"
+        )
+
+    def architect_journal_append(self, architect_id: str, entry_type: str,
+                                 entry: str) -> dict:
+        """Append one architect journal entry to its JSONL file."""
+        import time
+
+        architect_id = str(architect_id or "").strip()
+        if not architect_id:
+            raise ValueError("architect_id is required")
+        record = {
+            "id": uuid.uuid4().hex[:12],
+            "architect_id": architect_id,
+            "timestamp": time.time(),
+            "type": str(entry_type or "").strip(),
+            "entry": str(entry or ""),
+        }
+        path = self._architect_journal_path(architect_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(
+            path,
+            os.O_APPEND | os.O_CREAT | os.O_WRONLY,
+            0o600,
+        )
+        with os.fdopen(fd, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+        return record
+
+    def architect_journal_read(self, architect_id: str, *,
+                               since: float = 0,
+                               limit: int = 20) -> list[dict]:
+        """Read recent architect journal entries, newest first."""
+        architect_id = str(architect_id or "").strip()
+        if not architect_id:
+            return []
+        try:
+            since_value = float(since or 0)
+        except (TypeError, ValueError):
+            since_value = 0.0
+        try:
+            limit_value = int(limit or 20)
+        except (TypeError, ValueError):
+            limit_value = 20
+        if limit_value <= 0:
+            return []
+
+        path = self._architect_journal_path(architect_id)
+        if not path.exists():
+            return []
+
+        entries = []
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                raw = str(line or "").strip()
+                if not raw:
+                    continue
+                try:
+                    item = json.loads(raw)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                if not isinstance(item, dict):
+                    continue
+                item_architect_id = str(
+                    item.get("architect_id", architect_id) or architect_id
+                ).strip()
+                if item_architect_id != architect_id:
+                    continue
+                try:
+                    timestamp = float(item.get("timestamp", 0) or 0)
+                except (TypeError, ValueError):
+                    timestamp = 0.0
+                if since_value and timestamp <= since_value:
+                    continue
+                item["architect_id"] = architect_id
+                item["timestamp"] = timestamp
+                entries.append(item)
+        if len(entries) > limit_value:
+            entries = entries[-limit_value:]
+        entries.reverse()
+        return entries
 
     def _append_weaver_worklog_entry(self, group: str, entry: dict):
         """Append a Weaver worklog entry to in-memory state and emit it."""

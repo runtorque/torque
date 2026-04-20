@@ -65,6 +65,11 @@ _ACTION_DEFAULTS = {
                       iterm2.keyboard.Modifier.OPTION],
                      iterm2.keyboard.Keycode.ANSI_E,
                      "loom_add_engineer()"),
+    "add_architect": (ord('P'),
+                      [iterm2.keyboard.Modifier.COMMAND,
+                       iterm2.keyboard.Modifier.OPTION],
+                      iterm2.keyboard.Keycode.ANSI_P,
+                      "loom_add_architect()"),
     "add_terminal": (ord('T'),
                      [iterm2.keyboard.Modifier.COMMAND,
                       iterm2.keyboard.Modifier.OPTION],
@@ -81,6 +86,7 @@ _ACTION_LABELS = {
     "close_cell": "Close cell",
     "add_agent": "Add agent",
     "add_engineer": "Add engineer",
+    "add_architect": "Add architect",
     "add_terminal": "Add terminal",
 }
 
@@ -225,8 +231,9 @@ def _get_group_display_ids(state, group_name):
     """Return top-level cell ids in the same effective order as the UI.
 
     The rendered grid uses a stable hierarchy:
-    architects → engineers → each engineer's owned workers → user-owned
-    workers, with standalone terminals left in their existing order.
+    architects → each architect's hired engineers → each engineer's owned
+    workers → user-owned engineers → their workers → orphan workers, with
+    standalone terminals left in their existing order.
     Keyboard navigation should follow that same top-level order while still
     letting child terminals stay adjacent to their parent agent during
     traversal.
@@ -244,7 +251,8 @@ def _get_group_display_ids(state, group_name):
             standalone.append(cell_id)
 
     architects = []
-    engineers = []
+    engineers_by_architect = {}
+    user_engineers = []
     user_owned = []
     workers_by_engineer = {}
     for cell_id in ordered_ids:
@@ -256,9 +264,20 @@ def _get_group_display_ids(state, group_name):
             architects.append(cell)
             continue
         if kind == "engineer":
-            engineers.append(cell)
+            architect_id = str(
+                getattr(cell, "hired_by_architect_id", "") or ""
+            ).strip()
+            architect = visible_agents.get(architect_id) if architect_id else None
+            if architect and str(getattr(architect, "kind", "") or "").strip() == "architect":
+                engineers_by_architect.setdefault(architect_id, []).append(cell)
+            else:
+                user_engineers.append(cell)
             continue
-        owner_id = str(getattr(cell, "owner_engineer_id", "") or "").strip()
+        owner_id = str(
+            getattr(cell, "owner_engineer_id", "")
+            or getattr(cell, "created_by_weaver_id", "")
+            or ""
+        ).strip()
         owner = visible_agents.get(owner_id) if owner_id else None
         if owner and str(getattr(owner, "kind", "") or "").strip() == "engineer":
             workers_by_engineer.setdefault(owner_id, []).append(cell)
@@ -268,7 +287,12 @@ def _get_group_display_ids(state, group_name):
     ordered = []
     for cell in architects:
         ordered.append(cell.id)
-    for cell in engineers:
+        for engineer in engineers_by_architect.get(cell.id, []):
+            ordered.append(engineer.id)
+            ordered.extend(
+                worker.id for worker in workers_by_engineer.get(engineer.id, [])
+            )
+    for cell in user_engineers:
         ordered.append(cell.id)
         ordered.extend(worker.id for worker in workers_by_engineer.get(cell.id, []))
     ordered.extend(cell.id for cell in user_owned)
@@ -517,6 +541,18 @@ async def setup(connection, state, bridge, overrides=None, *,
         await _send_action("add_engineer")
 
     @iterm2.RPC
+    async def loom_add_architect(session_id=iterm2.Reference("id")):
+        source_cell = _find_cell_for_session(state, session_id)
+        group = source_cell.group if source_cell else None
+        if not group:
+            groups = list(state.groups.keys())
+            group = groups[0] if groups else None
+        if group:
+            await _send_action("add_architect", group=group)
+        else:
+            log.info("Add-architect shortcut ignored — no Loom group available")
+
+    @iterm2.RPC
     async def loom_add_terminal(session_id=iterm2.Reference("id")):
         # Find the agent associated with the active session
         current_agent, _ = _find_current_agent(state, session_id)
@@ -545,6 +581,7 @@ async def setup(connection, state, bridge, overrides=None, *,
     await loom_close_cell.async_register(connection, timeout=10)
     await loom_add_agent.async_register(connection, timeout=10)
     await loom_add_engineer.async_register(connection, timeout=10)
+    await loom_add_architect.async_register(connection, timeout=10)
     await loom_add_terminal.async_register(connection, timeout=10)
     log.info("Loom RPCs registered")
 

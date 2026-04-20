@@ -106,11 +106,25 @@ function _renderWeaverMenuItem(group, groupSettings) {
   return `<button onclick="event.stopPropagation();closeMenus();newWeaver('${esc(group)}')">Weaver</button>`;
 }
 
+function _workerOwnerEngineerId(agent, visibleById) {
+  if (!agent) return '';
+  const ownerId = String(
+    agent.owner_engineer_id
+    || agent.created_by_weaver_id
+    || ''
+  ).trim();
+  if (!ownerId) return '';
+  const owner = visibleById && visibleById[ownerId] ? visibleById[ownerId] : null;
+  if (!owner || (owner.kind || '') !== 'engineer') return '';
+  return ownerId;
+}
+
 function _sortAgentsHierarchically(agents) {
   const visibleById = {};
   const architects = [];
-  const engineers = [];
-  const userOwned = [];
+  const userEngineers = [];
+  const orphans = [];
+  const engineersByArchitect = {};
   const workersByEngineer = {};
   const list = Array.isArray(agents) ? agents.slice() : [];
 
@@ -126,27 +140,41 @@ function _sortAgentsHierarchically(agents) {
       continue;
     }
     if ((agent.kind || '') === 'engineer') {
-      engineers.push(agent);
+      const architectId = String(agent.hired_by_architect_id || '').trim();
+      const architect = architectId ? visibleById[architectId] : null;
+      if (architect && (architect.kind || '') === 'architect') {
+        if (!engineersByArchitect[architectId]) engineersByArchitect[architectId] = [];
+        engineersByArchitect[architectId].push(agent);
+      } else {
+        userEngineers.push(agent);
+      }
       continue;
     }
-    const ownerId = String(agent.owner_engineer_id || '');
-    const owner = ownerId ? visibleById[ownerId] : null;
-    if (owner && (owner.kind || '') === 'engineer') {
+    const ownerId = _workerOwnerEngineerId(agent, visibleById);
+    if (ownerId) {
       if (!workersByEngineer[ownerId]) workersByEngineer[ownerId] = [];
       workersByEngineer[ownerId].push(agent);
       continue;
     }
-    userOwned.push(agent);
+    orphans.push(agent);
   }
 
   const ordered = [];
-  for (const architect of architects) ordered.push(architect);
-  for (const engineer of engineers) {
+  for (const architect of architects) {
+    ordered.push(architect);
+    const hiredEngineers = engineersByArchitect[architect.id] || [];
+    for (const engineer of hiredEngineers) {
+      ordered.push(engineer);
+      const hiredWorkers = workersByEngineer[engineer.id] || [];
+      for (const worker of hiredWorkers) ordered.push(worker);
+    }
+  }
+  for (const engineer of userEngineers) {
     ordered.push(engineer);
     const workers = workersByEngineer[engineer.id] || [];
     for (const worker of workers) ordered.push(worker);
   }
-  for (const worker of userOwned) ordered.push(worker);
+  for (const worker of orphans) ordered.push(worker);
   return ordered;
 }
 
@@ -469,8 +497,10 @@ function render() {
 
     /* Agent grid (+ New cell is part of the grid) — hierarchical by kind/owner */
     const sortedAgents = _sortAgentsHierarchically(agents);
+    const visibleAgentById = {};
     const visibleEngineerIds = {};
     for (const agent of sortedAgents) {
+      visibleAgentById[agent.id] = agent;
       if ((agent.kind || '') === 'engineer') visibleEngineerIds[agent.id] = true;
     }
     html += `<div class="agent-grid" data-drop-group="${esc(gname)}" data-drop-type="agent">`;
@@ -491,7 +521,7 @@ function render() {
           }
         }
       }
-      html += renderAgentCell(a, { visibleEngineerIds });
+      html += renderAgentCell(a, { visibleEngineerIds, visibleAgentById });
     }
     if (!collapsed) {
       for (const t of standaloneTerms) {
@@ -582,6 +612,7 @@ function render() {
 
   if (oldRects) _applyFlip(main, oldRects);
   _restoreSurfaceState(main, mainState);
+  renderPendingHireBanner();
   _updateWeaverTaskbarBadge();
   if (typeof updateEventsAttentionBadge === 'function') updateEventsAttentionBadge();
   if (typeof renderTerminalWorkspace === 'function') renderTerminalWorkspace();
@@ -816,6 +847,144 @@ function _detailTaskLinkHtml(taskId) {
     + esc(taskId) + '\');}">\u2192</button>';
 }
 
+function _architectPendingHiresForAgent(agentId) {
+  if (!state || !state.pending_hires) return [];
+  const architectId = String(agentId || '');
+  return Object.values(state.pending_hires).filter(function(hire) {
+    return String((hire && hire.architect_id) || '') === architectId;
+  }).sort(function(a, b) {
+    const aTs = Number((a && (a.created_at || a.updated_at)) || 0);
+    const bTs = Number((b && (b.created_at || b.updated_at)) || 0);
+    if (aTs !== bTs) return bTs - aTs;
+    return String((a && a.id) || '').localeCompare(String((b && b.id) || ''));
+  });
+}
+
+function _architectDecisionsForAgent(agentId) {
+  if (!state || !state.decisions) return [];
+  const architectId = String(agentId || '');
+  return Object.values(state.decisions).filter(function(decision) {
+    return String((decision && decision.architect_id) || '') === architectId;
+  }).sort(function(a, b) {
+    const aTs = Number((a && (a.updated_at || a.created_at)) || 0);
+    const bTs = Number((b && (b.updated_at || b.created_at)) || 0);
+    if (aTs !== bTs) return bTs - aTs;
+    return String((a && a.id) || '').localeCompare(String((b && b.id) || ''));
+  });
+}
+
+var _dismissedPendingHireIds = {};
+
+function _activePendingHireItems() {
+  if (!state || !state.pending_hires) return [];
+  return Object.values(state.pending_hires).filter(function(hire) {
+    return String((hire && hire.status) || 'pending') === 'pending';
+  }).sort(function(a, b) {
+    const aTs = Number((a && (a.created_at || a.updated_at)) || 0);
+    const bTs = Number((b && (b.created_at || b.updated_at)) || 0);
+    if (aTs !== bTs) return aTs - bTs;
+    return String((a && a.id) || '').localeCompare(String((b && b.id) || ''));
+  });
+}
+
+function _pruneDismissedPendingHireIds() {
+  const liveIds = new Set(_activePendingHireItems().map(function(hire) {
+    return String((hire && hire.id) || '');
+  }));
+  Object.keys(_dismissedPendingHireIds || {}).forEach(function(id) {
+    if (!liveIds.has(id)) delete _dismissedPendingHireIds[id];
+  });
+}
+
+function _pendingHireBannerItem() {
+  _pruneDismissedPendingHireIds();
+  const hires = _activePendingHireItems().filter(function(hire) {
+    return !_dismissedPendingHireIds[String((hire && hire.id) || '')];
+  });
+  return {
+    current: hires.length ? hires[0] : null,
+    remaining: Math.max(0, hires.length - 1),
+  };
+}
+
+function _dismissPendingHire(id) {
+  const key = String(id || '').trim();
+  if (!key) return;
+  _dismissedPendingHireIds[key] = Date.now();
+}
+
+function renderPendingHireBanner() {
+  const el = document.getElementById('pending-hire-banner');
+  if (!el) return;
+  const banner = _pendingHireBannerItem();
+  const hire = banner.current;
+  if (!hire) {
+    el.hidden = true;
+    el.innerHTML = '';
+    return;
+  }
+  const architect = state && state.agents ? state.agents[hire.architect_id] : null;
+  const architectName = architect ? (architect.name || architect.id) : (hire.architect_id || 'Architect');
+  const hireIdJs = JSON.stringify(String(hire.id || ''));
+  const moreText = banner.remaining > 0
+    ? `<span class="pending-hire-banner-more">+${banner.remaining} more hire request${banner.remaining === 1 ? '' : 's'}</span>`
+    : '';
+  el.hidden = false;
+  el.innerHTML = ''
+    + `<div class="pending-hire-banner-body">`
+    + `<div class="pending-hire-banner-copy">Architect <strong>${esc(architectName)}</strong> is requesting to hire a new engineer <strong>"${esc(hire.requested_name || 'Engineer')}"</strong>. ${moreText}</div>`
+    + `<div class="pending-hire-banner-actions">`
+    + `<button type="button" class="pending-hire-banner-btn pending-hire-banner-btn-primary" onclick='approvePendingHire(${hireIdJs})'>Approve</button>`
+    + `<button type="button" class="pending-hire-banner-btn" onclick='rejectPendingHire(${hireIdJs})'>Reject with note</button>`
+    + `</div></div>`;
+}
+
+function approvePendingHire(hireId) {
+  const id = String(hireId || '').trim();
+  if (!id || typeof send !== 'function') return;
+  _dismissPendingHire(id);
+  renderPendingHireBanner();
+  send({ cmd: 'pending_hire_approve', id: id });
+  if (typeof _showToast === 'function') {
+    _showToast('Approved hire request', 'success');
+  }
+}
+
+function rejectPendingHire(hireId) {
+  const id = String(hireId || '').trim();
+  if (!id) return;
+  const hire = state && state.pending_hires ? state.pending_hires[id] : null;
+  const architect = hire && state && state.agents ? state.agents[hire.architect_id] : null;
+  const architectName = architect ? (architect.name || architect.id) : (hire && hire.architect_id) || 'Architect';
+  const summary = hire
+    ? 'Reject ' + (hire.requested_name || 'this engineer')
+      + ' for ' + architectName + ' with an optional note.'
+    : 'Add an optional note for the architect.';
+  if (typeof openPendingHireRejectModal === 'function') {
+    openPendingHireRejectModal(id, summary);
+    return;
+  }
+  if (typeof send !== 'function') return;
+  const note = (typeof window !== 'undefined'
+    && window
+    && typeof window.prompt === 'function')
+    ? window.prompt('Optional rejection note', '')
+    : '';
+  if (note === null) return;
+  rejectPendingHireWithNote(id, String(note || ''));
+}
+
+function rejectPendingHireWithNote(hireId, note) {
+  const id = String(hireId || '').trim();
+  if (!id || typeof send !== 'function') return;
+  _dismissPendingHire(id);
+  renderPendingHireBanner();
+  send({ cmd: 'pending_hire_reject', id: id, note: String(note || '') });
+  if (typeof _showToast === 'function') {
+    _showToast('Rejected hire request', 'success');
+  }
+}
+
 function _renderAgentDetailDescription(agentId, task) {
   if (!task) return '';
   const editor = _agentDetailDescriptionState(agentId, task);
@@ -1010,15 +1179,32 @@ function renderAgentCell(a, options) {
   const _weaverAsking = _weaverWs && _weaverWs.pending_question;
   if (_weaverAsking) cls.push('weaver-asking');
   if (_isWeaver) cls.push(_weaverPaused ? 'weaver-paused' : 'weaver-running');
+  const _isArchitect = (a.kind || '') === 'architect';
   const _isEngineer = (a.kind || '') === 'engineer';
+  const visibleAgentById = options.visibleAgentById || null;
   const visibleEngineerIds = options.visibleEngineerIds || null;
+  const ownerId = _workerOwnerEngineerId(a, visibleAgentById);
+  const ownerEngineer = ownerId && visibleAgentById ? visibleAgentById[ownerId] : null;
+  const ownerArchitectId = ownerEngineer ? String(ownerEngineer.hired_by_architect_id || '').trim() : '';
+  const ownerArchitect = ownerArchitectId && visibleAgentById ? visibleAgentById[ownerArchitectId] : null;
+  const _isArchitectOwnedEngineer = !!(
+    _isEngineer
+    && visibleAgentById
+    && a.hired_by_architect_id
+    && visibleAgentById[String(a.hired_by_architect_id || '').trim()]
+    && (visibleAgentById[String(a.hired_by_architect_id || '').trim()].kind || '') === 'architect'
+  );
   const _isOwnedWorker = !!(
     !_isEngineer
-    && a.owner_engineer_id
-    && (!visibleEngineerIds || visibleEngineerIds[a.owner_engineer_id])
+    && ownerId
+    && (!visibleEngineerIds || visibleEngineerIds[ownerId])
   );
+  const _isArchitectOwnedWorker = !!(_isOwnedWorker && ownerArchitect);
+  if (_isArchitect) cls.push('architect');
   if (_isEngineer) cls.push('engineer');
-  if (_isOwnedWorker) cls.push('engineer-owned-worker');
+  if (_isArchitectOwnedEngineer) cls.push('architect-owned-engineer');
+  if (_isArchitectOwnedWorker) cls.push('architect-owned-worker');
+  else if (_isOwnedWorker) cls.push('engineer-owned-worker');
 
   const statusCls = agentStatusClass(a);
   const titleParts = [a.name, `(${a.status})`];
@@ -1051,7 +1237,9 @@ function renderAgentCell(a, options) {
   h += `</div>`;
   h += `<div class="cell-icon">${a.icon || agentIcon(a.name)}</div>`;
   h += `<div class="cell-name">${esc(a.name)}</div>`;
-  if (_isEngineer) {
+  if (_isArchitect) {
+    h += `<div class="cell-architect-badge">architect</div>`;
+  } else if (_isEngineer) {
     h += `<div class="cell-engineer-badge">engineer</div>`;
   }
   if (_weaverAsking) {
@@ -1082,6 +1270,7 @@ function renderAgentDetails(a) {
   const statusCls = agentStatusClass(a);
   const typeInfo = a.agent_type ? (AGENT_TYPE_LABELS[a.agent_type] || { label: a.agent_type }) : null;
   const detailState = _agentDetailState(a.id);
+  const isArchitect = (a.kind || '') === 'architect';
 
   let h = `<div class="agent-details">`;
   h += `<div class="detail-hdr">`;
@@ -1163,6 +1352,60 @@ function renderAgentDetails(a) {
       h += `</div>`;
     }
     h += `</div></div>`;
+  }
+
+  if (isArchitect) {
+    const pendingHires = _architectPendingHiresForAgent(a.id);
+    const decisions = _architectDecisionsForAgent(a.id);
+    if (pendingHires.length) {
+      h += `<div class="detail-section"><div class="detail-section-head"><span class="detail-section-title">Pending hires</span><span class="detail-section-count">${pendingHires.length}</span></div><div class="detail-section-list">`;
+      for (let i = 0; i < pendingHires.length; i++) {
+        const hire = pendingHires[i] || {};
+        const hireIdJs = JSON.stringify(String(hire.id || ''));
+        const summaryParts = [];
+        if (hire.requested_provider) summaryParts.push(String(hire.requested_provider));
+        if (hire.requested_command) summaryParts.push(String(hire.requested_command));
+        if (hire.requested_directory) summaryParts.push(String(hire.requested_directory));
+        h += `<div class="detail-section-card">`;
+        h += `<div class="detail-section-card-head"><span class="detail-section-primary" title="${esc(hire.requested_name || '')}">${esc(hire.requested_name || 'Engineer')}</span><span class="detail-task-status">pending</span></div>`;
+        if (summaryParts.length) {
+          const summary = summaryParts.join(' • ');
+          h += `<div class="detail-section-card-meta" title="${esc(summary)}">${esc(summary)}</div>`;
+        }
+        if (hire.created_at) {
+          h += `<div class="detail-section-card-meta">Requested ${esc(_relativeTime(hire.created_at))}</div>`;
+        }
+        h += `<div class="detail-section-card-actions">`;
+        h += `<button type="button" class="detail-inline-editor-btn detail-inline-editor-btn-primary" data-focus-key="detail-pending-hire-approve:${esc(hire.id || '')}" onclick='event.stopPropagation();approvePendingHire(${hireIdJs})'>Approve</button>`;
+        h += `<button type="button" class="detail-inline-editor-btn" data-focus-key="detail-pending-hire-reject:${esc(hire.id || '')}" onclick='event.stopPropagation();rejectPendingHire(${hireIdJs})'>Reject</button>`;
+        h += `</div></div>`;
+      }
+      h += `</div></div>`;
+    }
+    if (decisions.length) {
+      h += `<div class="detail-section"><div class="detail-section-head"><span class="detail-section-title">Decisions</span><span class="detail-section-count">${decisions.length}</span></div><div class="detail-section-list">`;
+      for (let i = 0; i < decisions.length; i++) {
+        const decision = decisions[i] || {};
+        const linkedTaskIds = Array.isArray(decision.linked_task_ids) ? decision.linked_task_ids : [];
+        const linkedEngineerIds = Array.isArray(decision.linked_engineer_ids) ? decision.linked_engineer_ids : [];
+        h += `<div class="detail-section-card">`;
+        h += `<div class="detail-section-card-head"><span class="detail-section-primary" title="${esc(decision.title || '')}">${esc(decision.title || 'Decision')}</span><span class="detail-task-status">${esc(decision.status || 'proposed')}</span></div>`;
+        if (decision.rationale) {
+          h += `<div class="detail-section-card-body">${_detailMultilineHtml(decision.rationale)}</div>`;
+        }
+        if (linkedTaskIds.length || linkedEngineerIds.length) {
+          const linkParts = [];
+          if (linkedTaskIds.length) linkParts.push(`${linkedTaskIds.length} task${linkedTaskIds.length === 1 ? '' : 's'}`);
+          if (linkedEngineerIds.length) linkParts.push(`${linkedEngineerIds.length} engineer${linkedEngineerIds.length === 1 ? '' : 's'}`);
+          h += `<div class="detail-section-card-meta">Linked to ${esc(linkParts.join(' • '))}</div>`;
+        }
+        if (decision.updated_at || decision.created_at) {
+          h += `<div class="detail-section-card-meta">Updated ${esc(_relativeTime(decision.updated_at || decision.created_at))}</div>`;
+        }
+        h += `</div>`;
+      }
+      h += `</div></div>`;
+    }
   }
 
   /* Branch — worktree branch takes priority, then regular git branch */

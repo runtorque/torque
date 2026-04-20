@@ -246,6 +246,8 @@ function closeModals() {
   document.querySelectorAll('.hint-pop').forEach(p => p.remove());
   if (_confirmResolve) { _confirmResolve(false); _confirmResolve = null; }
   if (typeof _glsCapturing !== 'undefined' && _glsCapturing) _cancelCapture();
+  _pendingHireRejectId = '';
+  _architectDecisionModalArchitectId = '';
 }
 
 /* -- Confirm dialog (replaces window.confirm for WKWebView) ----------- */
@@ -346,6 +348,158 @@ function submitAddEngineer() {
   const payload = { cmd: 'add_engineer', name };
   if (command) payload.command = command;
   send(payload);
+  closeModals();
+}
+
+/* -- Add Architect ---------------------------------------------------- */
+let _addArchitectGroup = '';
+let _pendingHireRejectId = '';
+let _architectDecisionModalArchitectId = '';
+
+function openAddArchitectModal(group) {
+  const modal = document.getElementById('modal-architect');
+  if (!modal) return;
+  const nameInput = document.getElementById('architect-name-input');
+  const commandInput = document.getElementById('architect-command-input');
+  const summary = document.getElementById('modal-architect-summary');
+  _addArchitectGroup = String(group || '').trim();
+  if (summary) {
+    const summaryText = _addArchitectGroup
+      ? 'Create a persistent architect session for ' + _addArchitectGroup + '.'
+      : 'Create a persistent architect session with its own MCP scope and launch command.';
+    summary.textContent = summaryText;
+    summary.classList.remove('hidden');
+  }
+  if (nameInput) nameInput.value = '';
+  if (commandInput) commandInput.value = '';
+  modal.classList.add('visible');
+  if (nameInput && typeof nameInput.focus === 'function') nameInput.focus();
+  if (nameInput && typeof nameInput.select === 'function') nameInput.select();
+}
+
+function submitAddArchitect() {
+  const nameInput = document.getElementById('architect-name-input');
+  const commandInput = document.getElementById('architect-command-input');
+  const name = nameInput ? nameInput.value.trim() : '';
+  const command = commandInput ? commandInput.value.trim() : '';
+  if (!name) return;
+  const payload = { cmd: 'add_architect', name };
+  if (_addArchitectGroup) payload.group = _addArchitectGroup;
+  if (command) payload.command = command;
+  send(payload);
+  if (typeof _showToast === 'function') {
+    _showToast('Architect requested', 'success');
+  }
+  closeModals();
+}
+
+function openPendingHireRejectModal(hireId, summaryText) {
+  const modal = document.getElementById('modal-pending-hire-reject');
+  if (!modal) return;
+  _pendingHireRejectId = String(hireId || '').trim();
+  const summary = document.getElementById('pending-hire-reject-summary');
+  const note = document.getElementById('pending-hire-reject-note');
+  if (summary) {
+    summary.textContent = String(summaryText || '').trim() || 'Add an optional note for the architect.';
+    summary.classList.remove('hidden');
+  }
+  if (note) note.value = '';
+  modal.classList.add('visible');
+  if (note && typeof note.focus === 'function') note.focus();
+}
+
+function submitPendingHireReject() {
+  if (!_pendingHireRejectId) return;
+  const note = document.getElementById('pending-hire-reject-note');
+  const value = note ? String(note.value || '').trim() : '';
+  if (typeof rejectPendingHireWithNote === 'function') {
+    rejectPendingHireWithNote(_pendingHireRejectId, value);
+  } else {
+    send({ cmd: 'pending_hire_reject', id: _pendingHireRejectId, note: value });
+  }
+  _pendingHireRejectId = '';
+  closeModals();
+}
+
+function _setArchitectDecisionSelectOptions(selectId, options, selectedValues) {
+  const select = document.getElementById(selectId);
+  if (!select) return;
+  const chosen = new Set((selectedValues || []).map((value) => String(value || '')));
+  select.innerHTML = '';
+  const rows = Array.isArray(options) ? options : [];
+  for (let i = 0; i < rows.length; i++) {
+    const option = document.createElement('option');
+    option.value = String(rows[i].value || '');
+    option.textContent = String(rows[i].label || rows[i].value || '');
+    option.selected = chosen.has(option.value);
+    select.appendChild(option);
+  }
+}
+
+function openArchitectDecisionModal(architectId) {
+  const modal = document.getElementById('modal-architect-decision');
+  if (!modal) return;
+  _architectDecisionModalArchitectId = String(architectId || '').trim();
+  const architect = state && state.agents ? state.agents[_architectDecisionModalArchitectId] : null;
+  const summary = document.getElementById('architect-decision-modal-summary');
+  const titleInput = document.getElementById('architect-decision-title-input');
+  const rationaleInput = document.getElementById('architect-decision-rationale-input');
+  if (summary) {
+    summary.textContent = architect
+      ? 'Record a product or scope decision for ' + (architect.name || architect.id) + '.'
+      : 'Record an architect decision.';
+    summary.classList.remove('hidden');
+  }
+  if (titleInput) titleInput.value = '';
+  if (rationaleInput) rationaleInput.value = '';
+  if (typeof getArchitectDecisionTaskOptions === 'function') {
+    _setArchitectDecisionSelectOptions(
+      'architect-decision-task-select',
+      getArchitectDecisionTaskOptions(_architectDecisionModalArchitectId),
+      [],
+    );
+  }
+  if (typeof getArchitectDecisionEngineerOptions === 'function') {
+    _setArchitectDecisionSelectOptions(
+      'architect-decision-engineer-select',
+      getArchitectDecisionEngineerOptions(_architectDecisionModalArchitectId),
+      [],
+    );
+  }
+  modal.classList.add('visible');
+  if (titleInput && typeof titleInput.focus === 'function') titleInput.focus();
+}
+
+function _selectedMultiValues(selectId) {
+  const select = document.getElementById(selectId);
+  if (!select || !select.options) return [];
+  const values = [];
+  for (let i = 0; i < select.options.length; i++) {
+    const option = select.options[i];
+    if (option && option.selected) values.push(String(option.value || ''));
+  }
+  return values;
+}
+
+function submitArchitectDecision() {
+  const architectId = String(_architectDecisionModalArchitectId || '').trim();
+  if (!architectId) return;
+  const titleInput = document.getElementById('architect-decision-title-input');
+  const rationaleInput = document.getElementById('architect-decision-rationale-input');
+  const title = titleInput ? String(titleInput.value || '').trim() : '';
+  const rationale = rationaleInput ? String(rationaleInput.value || '').trim() : '';
+  if (!title || !rationale) return;
+  send({
+    cmd: 'architect_decision_create',
+    architect_id: architectId,
+    title: title,
+    rationale: rationale,
+    linked_task_ids: _selectedMultiValues('architect-decision-task-select'),
+    linked_engineer_ids: _selectedMultiValues('architect-decision-engineer-select'),
+  });
+  if (typeof _showToast === 'function') {
+    _showToast('Decision saved', 'success');
+  }
   closeModals();
 }
 

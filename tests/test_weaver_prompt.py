@@ -143,3 +143,11 @@ class WeaverPromptTests(unittest.TestCase):
 
         self.assertIn("## Custom Instructions", prompt)
         self.assertIn("Use concise notes.", prompt)
+
+    def test_engineer_prompt_includes_architect_escalation_guidance(self):
+        prompt = self.weaver_mod.build_engineer_system_prompt("Loom")
+
+        self.assertIn("## Architect escalation", prompt)
+        self.assertIn("engineer_message_architect", prompt)
+        self.assertIn("non-trivial product or scope decision", prompt)
+        self.assertIn("If you are user-owned", prompt)

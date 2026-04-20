@@ -1,0 +1,205 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+
+const repoRoot = path.resolve(__dirname, '..');
+
+function loadScript(context, relPath) {
+  const filename = path.join(repoRoot, relPath);
+  const source = fs.readFileSync(filename, 'utf8');
+  vm.runInContext(source, context, { filename });
+}
+
+function baseSandbox() {
+  const content = { scrollTop: 0 };
+  const panel = {
+    innerHTML: '',
+    querySelector(selector) {
+      return selector === '.weaver-content' ? content : null;
+    },
+  };
+  const pendingHireBanner = { innerHTML: '', hidden: true };
+  const sandbox = {
+    console,
+    Date: { now: () => Date.now() },
+    state: {
+      groups: { loom: [] },
+      group_settings: { loom: {} },
+      agents: {},
+      board_tasks: {},
+      children: {},
+      weaver_settings: {},
+      pending_hires: {},
+      decisions: {},
+    },
+    document: {
+      activeElement: null,
+      getElementById(id) {
+        if (id === 'panel-weaver') return panel;
+        if (id === 'pending-hire-banner') return pendingHireBanner;
+        return null;
+      },
+      querySelector() { return null; },
+      querySelectorAll() { return []; },
+    },
+    window: {
+      prompt() { return null; },
+    },
+    _cachedProviders: [],
+    _esc(value) { return String(value); },
+    _currentGroup() { return 'loom'; },
+    _focusedGroup() { return 'loom'; },
+    _captureSurfaceState(_root, options) {
+      return { scrollTop: (options && options.scrollSelectors ? content.scrollTop : 0) };
+    },
+    _restoreSurfaceState(_root, snapshot) {
+      if (snapshot) content.scrollTop = snapshot.scrollTop;
+    },
+    _showToast() {},
+    showConfirm() { return Promise.resolve(true); },
+    requestAnimationFrame(fn) { if (typeof fn === 'function') fn(); },
+    setInterval() { return 1; },
+    clearInterval() {},
+    sendCalls: [],
+  };
+  sandbox.send = function(message) {
+    sandbox.sendCalls.push(message);
+  };
+  sandbox.global = sandbox;
+  sandbox.globalThis = sandbox;
+  return { sandbox, panel, content, pendingHireBanner };
+}
+
+function createWeaverHarness() {
+  const { sandbox, panel, content, pendingHireBanner } = baseSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/render.js');
+  loadScript(context, 'static/js/weaver.js');
+  return { context, sandbox, panel, content, pendingHireBanner };
+}
+
+function createBannerHarness() {
+  const { sandbox, pendingHireBanner } = baseSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/render.js');
+  return { context, sandbox, pendingHireBanner };
+}
+
+function architect(id, name, createdAt) {
+  return {
+    id,
+    name,
+    slug: id,
+    kind: 'architect',
+    group: 'loom',
+    cell_type: 'agent',
+    status: 'running',
+    created_at: createdAt,
+  };
+}
+
+function engineer(id, name, createdAt, hiredByArchitectId = '') {
+  return {
+    id,
+    name,
+    slug: id,
+    kind: 'engineer',
+    hired_by_architect_id: hiredByArchitectId,
+    group: 'loom',
+    cell_type: 'agent',
+    status: 'running',
+    created_at: createdAt,
+  };
+}
+
+function worker(id, name, ownerEngineerId, createdAt) {
+  return {
+    id,
+    name,
+    slug: id,
+    owner_engineer_id: ownerEngineerId,
+    group: 'loom',
+    cell_type: 'agent',
+    status: 'running',
+    created_at: createdAt,
+  };
+}
+
+test('renderWeaverPanel shows the Architects section and add button when there are zero architects', () => {
+  const { context, panel } = createWeaverHarness();
+
+  vm.runInContext('renderWeaverPanel()', context);
+
+  assert.match(panel.innerHTML, /Architects &amp; Engineers — loom/);
+  assert.match(panel.innerHTML, />Architects</);
+  assert.match(panel.innerHTML, />\+ Add Architect</);
+  assert.match(panel.innerHTML, /No architects yet/);
+});
+
+test('renderWeaverPanel nests hired engineers and workers under an architect and keeps user-owned engineers under User', () => {
+  const { context, panel, sandbox } = createWeaverHarness();
+  sandbox.state.agents['arch-1'] = architect('arch-1', 'Productmind', 10);
+  sandbox.state.agents['eng-hired'] = engineer('eng-hired', 'Alice', 20, 'arch-1');
+  sandbox.state.agents['worker-hired'] = worker('worker-hired', 'Worker A', 'eng-hired', 30);
+  sandbox.state.agents['eng-user'] = engineer('eng-user', 'Bob', 40, '');
+  sandbox.state.agents['worker-user'] = worker('worker-user', 'Worker B', 'eng-user', 50);
+
+  vm.runInContext(`_weaverArchitectExpanded['arch-1'] = true; renderWeaverPanel()`, context);
+
+  assert.match(panel.innerHTML, /Productmind/);
+  assert.match(panel.innerHTML, /architect-parent-row[\s\S]*Productmind/);
+  assert.match(panel.innerHTML, /architect-roster-level-1[\s\S]*Alice/);
+  assert.match(panel.innerHTML, /architect-roster-level-2[\s\S]*Worker A/);
+  assert.match(panel.innerHTML, /engineer-row-virtual-parent[\s\S]*User/);
+  assert.match(panel.innerHTML, /architect-roster-level-1[\s\S]*Bob/);
+  assert.match(panel.innerHTML, /architect-roster-level-2[\s\S]*Worker B/);
+});
+
+test('pending hire banner approves a request and hides optimistically', () => {
+  const { context, sandbox, pendingHireBanner } = createBannerHarness();
+  sandbox.state.agents['arch-1'] = architect('arch-1', 'Productmind', 10);
+  sandbox.state.pending_hires['hire-1'] = {
+    id: 'hire-1',
+    architect_id: 'arch-1',
+    requested_name: 'Alice',
+    created_at: 1712345678,
+    status: 'pending',
+  };
+
+  vm.runInContext('renderPendingHireBanner()', context);
+  assert.equal(pendingHireBanner.hidden, false);
+  assert.match(pendingHireBanner.innerHTML, /Productmind/);
+  assert.match(pendingHireBanner.innerHTML, /Approve/);
+
+  vm.runInContext(`approvePendingHire('hire-1')`, context);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
+    { cmd: 'pending_hire_approve', id: 'hire-1' },
+  ]);
+  assert.equal(pendingHireBanner.hidden, true);
+});
+
+test('decision log expand and collapse preserves scroll position', () => {
+  const { context, sandbox, content } = createWeaverHarness();
+  sandbox.state.agents['arch-1'] = architect('arch-1', 'Productmind', 10);
+  sandbox.state.decisions['decision-1'] = {
+    id: 'decision-1',
+    architect_id: 'arch-1',
+    title: 'Scope the API first',
+    rationale: 'Keep the dashboard for later.',
+    status: 'proposed',
+    updated_at: 1712345679,
+  };
+
+  vm.runInContext(`_weaverArchitectExpanded['arch-1'] = true; renderWeaverPanel()`, context);
+  content.scrollTop = 180;
+
+  vm.runInContext(`weaverToggleDecision('decision-1')`, context);
+  assert.equal(content.scrollTop, 180);
+
+  content.scrollTop = 180;
+  vm.runInContext(`weaverToggleDecision('decision-1')`, context);
+  assert.equal(content.scrollTop, 180);
+});
