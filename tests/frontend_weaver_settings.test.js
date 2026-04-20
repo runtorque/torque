@@ -69,7 +69,7 @@ test('renderWeaverPanel shows Journal and Events tabs without settings tabs when
 
   vm.runInContext('renderWeaverPanel()', context);
 
-  assert.match(panel.innerHTML, /Weaver — alpha/);
+  assert.match(panel.innerHTML, /Engineers — alpha/);
   assert.match(panel.innerHTML, />Journal</);
   assert.match(panel.innerHTML, />Events</);
   assert.match(panel.innerHTML, />Worklog</);
@@ -540,7 +540,7 @@ test('renderWeaverPanel uses the focused group in multi-project workspaces', () 
 
   vm.runInContext('renderWeaverPanel()', context);
 
-  assert.match(panel.innerHTML, /Weaver — beta/);
+  assert.match(panel.innerHTML, /Engineers — beta/);
   assert.match(panel.innerHTML, /No Weaver configured for beta/);
-  assert.doesNotMatch(panel.innerHTML, /Weaver — alpha/);
+  assert.doesNotMatch(panel.innerHTML, /Engineers — alpha/);
 });

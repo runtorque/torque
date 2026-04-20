@@ -727,6 +727,8 @@ function createMainHarness(overrides = {}) {
     'add-dir-input',
     'add-args-input',
     'add-init-input',
+    'engineer-name-input',
+    'engineer-command-input',
     'gs-directory',
     'gs-agent-directory',
     'gs-terminal-prefix',
@@ -852,6 +854,8 @@ function createPanelHarness() {
     'add-dir-input',
     'add-args-input',
     'add-init-input',
+    'engineer-name-input',
+    'engineer-command-input',
     'gs-directory',
     'gs-agent-directory',
     'gs-terminal-prefix',
@@ -893,6 +897,8 @@ function createWorkspaceResizeHarness() {
     'add-dir-input',
     'add-args-input',
     'add-init-input',
+    'engineer-name-input',
+    'engineer-command-input',
     'gs-directory',
     'gs-agent-directory',
     'gs-terminal-prefix',
@@ -978,6 +984,8 @@ function createDiffKeyHarness() {
     'add-dir-input',
     'add-args-input',
     'add-init-input',
+    'engineer-name-input',
+    'engineer-command-input',
     'gs-directory',
     'gs-agent-directory',
     'gs-terminal-prefix',
@@ -1019,6 +1027,8 @@ function createTaskHistoryHarness(options = {}) {
       'add-dir-input',
       'add-args-input',
       'add-init-input',
+      'engineer-name-input',
+      'engineer-command-input',
       'gs-directory',
       'gs-agent-directory',
       'gs-terminal-prefix',
@@ -7812,6 +7822,27 @@ test('Escape closes task history through the shared overlay key handler', () => 
   assert.equal(document.getElementById('task-history-root').innerHTML, '');
 });
 
+test('Cmd+Option+E opens the add engineer modal through the shared key handler', () => {
+  const { document, sandbox } = createMainHarness({
+    openAddEngineerModal() {
+      sandbox.addEngineerModalCalls = (sandbox.addEngineerModalCalls || 0) + 1;
+    },
+  });
+  let prevented = false;
+
+  document.listeners.keydown({
+    key: 'E',
+    metaKey: true,
+    altKey: true,
+    ctrlKey: false,
+    shiftKey: false,
+    preventDefault() { prevented = true; },
+  });
+
+  assert.equal(prevented, true);
+  assert.equal(sandbox.addEngineerModalCalls, 1);
+});
+
 test('full state toggles embedded runtime body class', () => {
   const { context, document } = createWsRenderHarness();
 
@@ -8081,53 +8112,141 @@ test('classic runtime keeps the shared left rail filtered to the current window'
   assert.deepEqual(jsonValue(context, `window._navAgents`), ['agent-a']);
 });
 
-test('main render pins the weaver first in the visible and navigable agent order', () => {
+test('main render uses engineer hierarchy in the visible and navigable agent order', () => {
   const { context, document, sandbox } = createMainRenderHarness();
   const main = document.getElementById('main');
 
-  sandbox.state.groups = { alpha: ['agent-1', 'weaver-1', 'agent-2'] };
+  sandbox.state.groups = {
+    loom: ['eng-a', 'worker-a', 'eng-b', 'worker-b', 'agent-user'],
+  };
   sandbox.state.group_settings = {
-    alpha: { collapsed_default: false, weaver_agent_id: 'weaver-1' },
+    loom: { collapsed_default: false, weaver_agent_id: 'eng-a' },
   };
   sandbox.state.children = {};
   sandbox.state.agents = {
-    'agent-1': {
-      id: 'agent-1',
-      name: 'Worker One',
-      group: 'alpha',
+    'eng-a': {
+      id: 'eng-a',
+      name: 'Alice',
+      kind: 'engineer',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'A',
+      status: 'running',
+      session_id: 'sess-eng-a',
+      created_at: 10,
+    },
+    'worker-a': {
+      id: 'worker-a',
+      name: 'Worker A',
+      owner_engineer_id: 'eng-a',
+      group: 'loom',
       cell_type: 'agent',
       icon: '1',
       status: 'running',
-      session_id: 'sess-1',
+      session_id: 'sess-worker-a',
+      created_at: 11,
     },
-    'weaver-1': {
-      id: 'weaver-1',
-      name: 'Weaver Prime',
-      group: 'alpha',
-      cell_type: 'agent',
-      icon: 'W',
-      status: 'running',
-      session_id: 'sess-weaver',
-    },
-    'agent-2': {
-      id: 'agent-2',
-      name: 'Worker Two',
-      group: 'alpha',
+    'eng-b': {
+      id: 'eng-b',
+      name: 'Bob',
+      kind: 'engineer',
+      group: 'loom',
       cell_type: 'agent',
       icon: '2',
       status: 'running',
-      session_id: 'sess-2',
+      session_id: 'sess-eng-b',
+      created_at: 20,
+    },
+    'worker-b': {
+      id: 'worker-b',
+      name: 'Worker B',
+      owner_engineer_id: 'eng-b',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: '3',
+      status: 'running',
+      session_id: 'sess-worker-b',
+      created_at: 21,
+    },
+    'agent-user': {
+      id: 'agent-user',
+      name: 'User Worker',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'U',
+      status: 'running',
+      session_id: 'sess-user',
+      created_at: 30,
     },
   };
 
   runInContext(context, `render();`);
 
   assert.deepEqual(jsonValue(context, `window._navAgents`), [
-    'weaver-1',
-    'agent-1',
-    'agent-2',
+    'eng-a',
+    'worker-a',
+    'eng-b',
+    'worker-b',
+    'agent-user',
   ]);
-  assert.match(main.innerHTML, /Weaver Prime[\s\S]*Worker One[\s\S]*Worker Two/);
+  assert.match(main.innerHTML, /Alice[\s\S]*Worker A[\s\S]*Bob[\s\S]*Worker B[\s\S]*User Worker/);
+  assert.match(main.innerHTML, /cell-engineer-badge/);
+  assert.match(main.innerHTML, /engineer-owned-worker/);
+});
+
+test('main render restores the main scroll position across rerenders', () => {
+  const { context, document, sandbox } = createMainRenderHarness();
+  const main = document.getElementById('main');
+  let renderCount = 0;
+  Object.defineProperty(main, 'innerHTML', {
+    configurable: true,
+    get() {
+      return this._innerHTML || '';
+    },
+    set(value) {
+      this._innerHTML = value;
+      renderCount += 1;
+      this.scrollTop = 0;
+    },
+  });
+
+  sandbox.state.groups = { loom: ['eng-a'] };
+  sandbox.state.group_settings = { loom: { collapsed_default: false } };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'eng-a': {
+      id: 'eng-a',
+      name: 'Alice',
+      kind: 'engineer',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'A',
+      status: 'running',
+      session_id: 'sess-eng-a',
+      created_at: 10,
+    },
+  };
+
+  runInContext(context, `render();`);
+  main.scrollTop = 135;
+
+  sandbox.state.agents['worker-a'] = {
+    id: 'worker-a',
+    name: 'Worker A',
+    owner_engineer_id: 'eng-a',
+    group: 'loom',
+    cell_type: 'agent',
+    icon: '1',
+    status: 'running',
+    session_id: 'sess-worker-a',
+    created_at: 11,
+  };
+  sandbox.state.groups.loom = ['eng-a', 'worker-a'];
+
+  runInContext(context, `render();`);
+
+  assert.equal(renderCount, 2);
+  assert.equal(main.scrollTop, 135);
 });
 
 test('main render restores the inline task description editor caret across rerenders', () => {

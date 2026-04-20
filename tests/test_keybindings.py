@@ -1,3 +1,4 @@
+import json
 from enum import Enum, auto
 import importlib
 import sys
@@ -37,6 +38,7 @@ def _install_iterm2_stub():
         ANSI_A = auto()
         ANSI_B = auto()
         ANSI_C = auto()
+        ANSI_E = auto()
         ANSI_T = auto()
 
     class BindingAction(Enum):
@@ -180,55 +182,76 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(current_agent.id, "agent-1")
         self.assertTrue(is_on_terminal)
 
-    async def test_weaver_is_pinned_first_in_navigation_order(self):
+    async def test_engineer_hierarchy_drives_navigation_order(self):
         state = self.state_mod.MatrixState()
-        state.groups = {"g": ["agent-1", "weaver-1", "agent-2"]}
-        state.group_settings["g"] = self.state_mod.GroupSettings(
-            weaver_agent_id="weaver-1"
-        )
-        state._children = {"agent-1": ["term-1"], "weaver-1": [], "agent-2": []}
+        state.groups = {"loom": ["eng-a", "worker-a", "eng-b", "worker-b", "user-1"]}
+        state._children = {"eng-a": [], "worker-a": ["term-1"], "eng-b": [], "worker-b": [], "user-1": []}
 
-        first = self.state_mod.AgentCell(
-            id="agent-1",
-            name="One",
-            group="g",
-            slug="one",
+        engineer_a = self.state_mod.AgentCell(
+            id="eng-a",
+            name="Alice",
+            kind="engineer",
+            group="loom",
+            slug="alice",
             cell_type="agent",
-            session_id="session-1",
+            session_id="session-eng-a",
             window_id="window-a",
         )
-        weaver = self.state_mod.AgentCell(
-            id="weaver-1",
-            name="Weaver",
-            group="g",
-            slug="weaver",
+        worker_a = self.state_mod.AgentCell(
+            id="worker-a",
+            name="Worker A",
+            group="loom",
+            slug="worker-a",
             cell_type="agent",
-            session_id="session-weaver",
+            session_id="session-worker-a",
+            window_id="window-a",
+            owner_engineer_id="eng-a",
+        )
+        engineer_b = self.state_mod.AgentCell(
+            id="eng-b",
+            name="Bob",
+            kind="engineer",
+            group="loom",
+            slug="bob",
+            cell_type="agent",
+            session_id="session-eng-b",
             window_id="window-a",
         )
-        second = self.state_mod.AgentCell(
-            id="agent-2",
-            name="Two",
-            group="g",
-            slug="two",
+        worker_b = self.state_mod.AgentCell(
+            id="worker-b",
+            name="Worker B",
+            group="loom",
+            slug="worker-b",
             cell_type="agent",
-            session_id="session-2",
+            session_id="session-worker-b",
+            window_id="window-a",
+            owner_engineer_id="eng-b",
+        )
+        user_worker = self.state_mod.AgentCell(
+            id="user-1",
+            name="User Worker",
+            group="loom",
+            slug="user-worker",
+            cell_type="agent",
+            session_id="session-user-1",
             window_id="window-a",
         )
         terminal = self.state_mod.AgentCell(
             id="term-1",
             name="Logs",
-            group="g",
-            slug="one:logs",
+            group="loom",
+            slug="worker-a:logs",
             cell_type="terminal",
             session_id="session-term",
             window_id="window-a",
-            parent_id="agent-1",
+            parent_id="worker-a",
         )
         state.agents = {
-            first.id: first,
-            weaver.id: weaver,
-            second.id: second,
+            engineer_a.id: engineer_a,
+            worker_a.id: worker_a,
+            engineer_b.id: engineer_b,
+            worker_b.id: worker_b,
+            user_worker.id: user_worker,
             terminal.id: terminal,
         }
 
@@ -237,11 +260,11 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             [cell.id for cell in ordered_agents],
-            ["weaver-1", "agent-1", "agent-2"],
+            ["eng-a", "worker-a", "eng-b", "worker-b", "user-1"],
         )
         self.assertEqual(
             [cell.id for cell in ordered_cells],
-            ["weaver-1", "agent-1", "term-1", "agent-2"],
+            ["eng-a", "worker-a", "term-1", "eng-b", "worker-b", "user-1"],
         )
 
     async def test_install_and_remove_preserve_displaced_bindings(self):
@@ -456,55 +479,104 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
-    async def test_navigation_rpcs_follow_weaver_first_order(self):
+    async def test_add_engineer_shortcut_dispatches_frontend_action(self):
         state = self.state_mod.MatrixState()
-        state.groups = {"g": ["agent-1", "weaver-1", "agent-2"]}
-        state.group_settings["g"] = self.state_mod.GroupSettings(
-            weaver_agent_id="weaver-1"
-        )
-        state._children = {"agent-1": ["term-1"], "weaver-1": [], "agent-2": []}
 
-        agent = self.state_mod.AgentCell(
-            id="agent-1",
-            name="Agent 1",
-            group="g",
-            slug="agent-1",
+        class Bridge:
+            async def focus_session(self, _session_id):
+                return None
+
+        sent = []
+
+        class FakeWs:
+            async def send_str(self, payload):
+                sent.append(json.loads(payload))
+
+        state._ws_clients = {FakeWs()}
+
+        await self.keybindings_mod.setup(object(), state, Bridge())
+
+        await self.stored["rpcs"]["loom_add_engineer"]()
+
+        defaults = self.keybindings_mod.get_default_bindings()
+        self.assertIn("add_engineer", defaults)
+        self.assertEqual(defaults["add_engineer"]["keycode"], "ANSI_E")
+        self.assertEqual(defaults["add_engineer"]["label"], "Add engineer")
+        self.assertEqual(
+            sent,
+            [{"type": "action", "action": "add_engineer"}],
+        )
+
+    async def test_navigation_rpcs_follow_engineer_hierarchy_order(self):
+        state = self.state_mod.MatrixState()
+        state.groups = {"loom": ["eng-a", "worker-a", "eng-b", "worker-b", "user-1"]}
+        state._children = {"eng-a": [], "worker-a": ["term-1"], "eng-b": [], "worker-b": [], "user-1": []}
+
+        engineer_a = self.state_mod.AgentCell(
+            id="eng-a",
+            name="Alice",
+            kind="engineer",
+            group="loom",
+            slug="alice",
             cell_type="agent",
-            session_id="session-1",
+            session_id="session-eng-a",
             window_id="window-a",
         )
-        weaver = self.state_mod.AgentCell(
-            id="weaver-1",
-            name="Weaver",
-            group="g",
-            slug="weaver",
+        worker_a = self.state_mod.AgentCell(
+            id="worker-a",
+            name="Worker A",
+            group="loom",
+            slug="worker-a",
             cell_type="agent",
-            session_id="session-weaver",
+            session_id="session-worker-a",
+            window_id="window-a",
+            owner_engineer_id="eng-a",
+        )
+        engineer_b = self.state_mod.AgentCell(
+            id="eng-b",
+            name="Bob",
+            kind="engineer",
+            group="loom",
+            slug="bob",
+            cell_type="agent",
+            session_id="session-eng-b",
             window_id="window-a",
         )
-        other = self.state_mod.AgentCell(
-            id="agent-2",
-            name="Agent 2",
-            group="g",
-            slug="agent-2",
+        worker_b = self.state_mod.AgentCell(
+            id="worker-b",
+            name="Worker B",
+            group="loom",
+            slug="worker-b",
             cell_type="agent",
-            session_id="session-2",
+            session_id="session-worker-b",
+            window_id="window-a",
+            owner_engineer_id="eng-b",
+        )
+        user_worker = self.state_mod.AgentCell(
+            id="user-1",
+            name="User Worker",
+            group="loom",
+            slug="user-worker",
+            cell_type="agent",
+            session_id="session-user-1",
             window_id="window-a",
         )
         terminal = self.state_mod.AgentCell(
             id="term-1",
             name="Logs",
-            group="g",
-            slug="agent-1:logs",
+            group="loom",
+            slug="worker-a:logs",
             cell_type="terminal",
             session_id="session-term",
             window_id="window-a",
-            parent_id="agent-1",
+            parent_id="worker-a",
         )
         state.agents = {
-            agent.id: agent,
-            weaver.id: weaver,
-            other.id: other,
+            engineer_a.id: engineer_a,
+            worker_a.id: worker_a,
+            engineer_b.id: engineer_b,
+            worker_b.id: worker_b,
+            user_worker.id: user_worker,
             terminal.id: terminal,
         }
         state.current_window_id = "window-a"
@@ -517,18 +589,18 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
 
         await self.keybindings_mod.setup(object(), state, Bridge())
 
-        state.active_session_id = agent.session_id
+        state.active_session_id = worker_a.session_id
         await self.stored["rpcs"]["loom_focus_prev"]()
-        self.assertEqual(focused.pop(), weaver.session_id)
+        self.assertEqual(focused.pop(), engineer_a.session_id)
 
-        state.active_session_id = agent.session_id
+        state.active_session_id = worker_a.session_id
         await self.stored["rpcs"]["loom_focus_next"]()
         self.assertEqual(focused.pop(), terminal.session_id)
 
         state.active_session_id = terminal.session_id
         await self.stored["rpcs"]["loom_prev_agent"]()
-        self.assertEqual(focused.pop(), weaver.session_id)
+        self.assertEqual(focused.pop(), engineer_a.session_id)
 
         state.active_session_id = terminal.session_id
         await self.stored["rpcs"]["loom_next_agent"]()
-        self.assertEqual(focused.pop(), other.session_id)
+        self.assertEqual(focused.pop(), engineer_b.session_id)
