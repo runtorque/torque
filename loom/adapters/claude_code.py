@@ -395,7 +395,8 @@ class ClaudeCodeAdapter(AgentAdapter):
         except Exception:
             pass  # Best-effort cleanup
 
-    def install_mcp_config(self, working_dir: str) -> bool:
+    def install_mcp_config(self, working_dir: str, *,
+                           mcp_entrypoint: str = "") -> bool:
         """Write Loom MCP server entry into .mcp.json.
 
         Merges with any existing .mcp.json so user's other MCP servers
@@ -410,6 +411,7 @@ class ClaudeCodeAdapter(AgentAdapter):
             "url": "http://127.0.0.1:${LOOM_PORT:-18932}/mcp",
             "headers": {"X-Loom-Cell-Id": "${LOOM_CELL_ID}"},
         }
+        del mcp_entrypoint
 
         try:
             existing = {}

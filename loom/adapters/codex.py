@@ -442,7 +442,8 @@ class CodexAdapter(AgentAdapter):
         except Exception:
             pass  # Best-effort cleanup
 
-    def install_mcp_config(self, working_dir: str) -> bool:
+    def install_mcp_config(self, working_dir: str, *,
+                           mcp_entrypoint: str = "") -> bool:
         """Write Loom MCP server entry into .codex/config.toml.
 
         Uses regex text manipulation for both reading and writing to
@@ -458,6 +459,7 @@ class CodexAdapter(AgentAdapter):
             f'url = "{_loom_mcp_url()}"\n'
             'env_http_headers = { "X-Loom-Cell-Id" = "LOOM_CELL_ID" }\n'
         )
+        del mcp_entrypoint
 
         try:
             config_dir.mkdir(parents=True, exist_ok=True)

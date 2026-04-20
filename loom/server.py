@@ -99,6 +99,8 @@ from .server_agent import (
     _build_self_dispatch_prompt,
     _new_agent_prompt_sequence,
     _startup_prompt_for_new_agent,
+    mcp_entrypoint_for_cell,
+    runtime_env_vars_for_cell,
 )
 from .server_dispatch import (
     _capture_auto_resume_targets,
