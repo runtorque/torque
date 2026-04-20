@@ -24,6 +24,12 @@ def _resolve_weaver_alias_caller(state, cell_id: str = "") -> tuple[str, str]:
         if (
             cell
             and getattr(cell, "cell_type", "") == "agent"
+            and str(getattr(cell, "kind", "") or "").strip() == "engineer"
+        ):
+            return "engineer", cell.id
+        if (
+            cell
+            and getattr(cell, "cell_type", "") == "agent"
             and str(getattr(cell, "kind", "") or "").strip() != "engineer"
             and state.get_group_settings(getattr(cell, "group", "")).weaver_agent_id
             == cell.id

@@ -173,6 +173,31 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls[0]["assigned_engineer_id"], alice.id)
         self.assertEqual(json.loads(text)["task_id"], "LOOM:1")
 
+    async def test_engineer_task_create_forces_caller_group(self):
+        state = self._make_state()
+        state.groups["other"] = []
+        alice = self._add_engineer(state, "eng-alice", "Alice")
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            return {"type": "board_task_added", "task_id": "LOOM:2"}
+
+        text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_task_create",
+            {
+                "title": "Cross-group attempt",
+                "group": "other",
+            },
+            fake_handle_command,
+            state,
+            caller_id=alice.id,
+        )
+
+        self.assertFalse(is_error, text)
+        self.assertEqual(calls[0]["group"], "loom")
+        self.assertEqual(calls[0]["assigned_engineer_id"], alice.id)
+
     async def test_engineer_task_edit_rejects_unassigned_task_in_other_group(self):
         state = self._make_state()
         state.groups["other"] = []
@@ -234,6 +259,30 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             {item["id"] for item in json.loads(text)["agents"]},
             {weaver.id, weaver_worker.id},
+        )
+
+    async def test_weaver_alias_uses_bound_engineer_session_scope(self):
+        state = self._make_state()
+        alice = self._add_engineer(state, "eng-alice", "Alice")
+        bob = self._add_engineer(state, "eng-bob", "Bob")
+        self._add_worker(state, "worker-a", "Alice Worker", alice.id)
+        bob_worker = self._add_worker(state, "worker-b", "Bob Worker", bob.id)
+
+        async def fake_handle_command(_payload):
+            self.fail("read tool should not call handle_command")
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_agents_list",
+            {},
+            fake_handle_command,
+            state,
+            cell_id=bob.id,
+        )
+
+        self.assertFalse(is_error, text)
+        self.assertEqual(
+            {item["id"] for item in json.loads(text)["agents"]},
+            {bob.id, bob_worker.id},
         )
 
     async def test_weaver_alias_uses_bound_legacy_weaver_session_group(self):
