@@ -329,6 +329,49 @@ class ServerModuleExtractionTests(unittest.TestCase):
             self.assertTrue((root / 'repo' / '.loom' / 'roles' / 'compat.yaml').is_file())
             self.assertFalse((root / 'repo' / '.loom' / 'agents' / 'compat.yaml').exists())
 
+            legacy_user_template = home / '.loom' / 'agents' / 'legacy.yaml'
+            legacy_user_template.write_text('name: legacy\ndescription: Legacy\n')
+            delete_template = asyncio.run(
+                self.server_mod._handle_role_template_command(
+                    {
+                        'cmd': 'delete_template',
+                        'group': 'g',
+                        'name': 'legacy',
+                        'scope': 'user',
+                    },
+                    role_mgr,
+                    resolve_base_dir,
+                )
+            )
+
+            self.assertEqual(delete_template['type'], 'templates')
+            self.assertEqual(delete_template['deleted'], 'legacy')
+            self.assertFalse(legacy_user_template.exists())
+
+            legacy_rename_path = home / '.loom' / 'agents' / 'rename-me.yaml'
+            legacy_rename_path.write_text('name: rename-me\ndescription: Legacy\n')
+            rename_template = asyncio.run(
+                self.server_mod._handle_role_template_command(
+                    {
+                        'cmd': 'save_template',
+                        'group': 'g',
+                        'name': 'renamed',
+                        'old_name': 'rename-me',
+                        'scope': 'user',
+                        'template': {
+                            'name': 'renamed',
+                            'description': 'Renamed compat save',
+                        },
+                    },
+                    role_mgr,
+                    resolve_base_dir,
+                )
+            )
+
+            self.assertEqual(rename_template['type'], 'templates')
+            self.assertFalse(legacy_rename_path.exists())
+            self.assertTrue((home / '.loom' / 'roles' / 'renamed.yaml').is_file())
+
             delete_role = asyncio.run(
                 self.server_mod._handle_role_template_command(
                     {

@@ -1055,9 +1055,9 @@ async def _handle_role_template_command(data: dict, role_mgr,
         if payload is None:
             payload = data.get("template", {})
         if old_name and old_name != name:
-            role_mgr.delete_role(old_name, base_dir=base_dir)
-            role_mgr.delete_role(old_name, scope="user",
-                                 base_dir=base_dir)
+            role_mgr.delete_template(old_name, base_dir=base_dir)
+            role_mgr.delete_template(old_name, scope="user",
+                                     base_dir=base_dir)
         role_mgr.save_role(
             name, payload, scope=scope, base_dir=base_dir)
         return {
@@ -1067,7 +1067,10 @@ async def _handle_role_template_command(data: dict, role_mgr,
             "saved": name,
         }
 
-    deleted = role_mgr.delete_role(
+    delete_fn = role_mgr.delete_role if cmd == "delete_role" else (
+        role_mgr.delete_template
+    )
+    deleted = delete_fn(
         name, scope=data.get("scope", ""), base_dir=base_dir)
     if not deleted:
         return {"type": "error", "message": f"{item_name} \"{name}\" not found"}

@@ -102,6 +102,30 @@ class RoleManagerTests(unittest.TestCase):
         self.assertEqual(bar["preamble"], "")
         self.assertEqual(bar["priorities"], [])
 
+    def test_project_legacy_overrides_user_role_for_same_name(self):
+        (self.project_templates / "foo.yaml").write_text(
+            "name: foo\ndescription: project legacy\n"
+        )
+        (self.user_roles / "foo.yaml").write_text(
+            "name: foo\ndescription: user role\n"
+        )
+
+        with self.assertNoLogs("loom", level="WARNING"):
+            loaded = self.mgr.load_role("foo", base_dir=str(self.project))
+            listed = self.mgr.list_roles(str(self.project))
+
+        self.assertEqual(loaded["description"], "project legacy")
+        matches = [item for item in listed if item["name"] == "foo"]
+        self.assertEqual(len(matches), 2)
+        project_entry = next(item for item in matches if not item["global"])
+        user_entry = next(item for item in matches if item["global"])
+        self.assertTrue(project_entry["legacy"])
+        self.assertEqual(project_entry["description"], "project legacy")
+        self.assertFalse(project_entry["shadowed"])
+        self.assertFalse(user_entry["legacy"])
+        self.assertEqual(user_entry["description"], "user role")
+        self.assertTrue(user_entry["shadowed"])
+
     def test_save_role_writes_to_roles_directory_even_for_legacy_origin(self):
         legacy_path = self.user_templates / "bar.yaml"
         legacy_path.write_text("name: bar\ndescription: Legacy\n")
@@ -120,6 +144,19 @@ class RoleManagerTests(unittest.TestCase):
         self.assertEqual(path, str(self.user_roles / "bar.yaml"))
         self.assertTrue((self.user_roles / "bar.yaml").is_file())
         self.assertEqual(legacy_path.read_text(), "name: bar\ndescription: Legacy\n")
+
+    def test_delete_template_removes_legacy_only_entry(self):
+        legacy_path = self.user_templates / "legacy.yaml"
+        legacy_path.write_text("name: legacy\ndescription: Legacy\n")
+
+        deleted = self.mgr.delete_template(
+            "legacy",
+            scope="user",
+            base_dir=str(self.project),
+        )
+
+        self.assertTrue(deleted)
+        self.assertFalse(legacy_path.exists())
 
     def test_render_preamble_formats_all_supported_shapes(self):
         render = self.mgr.render_preamble

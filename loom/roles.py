@@ -144,10 +144,10 @@ class RoleManager(TemplateManager):
 
         if project_role_dir:
             dirs.append((project_role_dir, False, False))
-        if os.path.isdir(global_role_dir):
-            dirs.append((global_role_dir, True, False))
         if project_legacy_dir:
             dirs.append((project_legacy_dir, False, True))
+        if os.path.isdir(global_role_dir):
+            dirs.append((global_role_dir, True, False))
         if os.path.isdir(global_legacy_dir):
             dirs.append((global_legacy_dir, True, True))
         return dirs
@@ -164,10 +164,24 @@ class RoleManager(TemplateManager):
         return entries
 
     @staticmethod
-    def _warning_slugs(entries: list[dict]) -> set[str]:
-        role_names = {entry["name"] for entry in entries if not entry["legacy"]}
-        legacy_names = {entry["name"] for entry in entries if entry["legacy"]}
-        return role_names & legacy_names
+    def _shadowed_legacy_keys(entries: list[dict]) -> set[tuple[str, bool]]:
+        role_keys = {
+            (entry["name"], entry["global"])
+            for entry in entries
+            if not entry["legacy"]
+        }
+        legacy_keys = {
+            (entry["name"], entry["global"])
+            for entry in entries
+            if entry["legacy"]
+        }
+        return role_keys & legacy_keys
+
+    @classmethod
+    def _warning_slugs(cls, entries: list[dict]) -> set[str]:
+        return {
+            name for name, _is_global in cls._shadowed_legacy_keys(entries)
+        }
 
     @staticmethod
     def _log_shadowed_legacy_templates(slugs: set[str]) -> None:
@@ -206,34 +220,31 @@ class RoleManager(TemplateManager):
         if not name:
             return None
         entries = self._collect_entries(base_dir, scope=scope)
-        shadowed_legacy = False
+        shadowed_legacy_keys = self._shadowed_legacy_keys(entries)
         for entry in entries:
             if entry["name"] != name:
                 continue
-            if not entry["legacy"]:
-                shadowed_legacy = shadowed_legacy or any(
-                    candidate["name"] == name and candidate["legacy"]
-                    for candidate in entries
-                )
-                with open(entry["path"]) as f:
-                    raw = f.read()
-                if shadowed_legacy:
-                    self._log_shadowed_legacy_templates({name})
-                return raw
+            if not entry["legacy"] and (
+                name, entry["global"]
+            ) in shadowed_legacy_keys:
+                self._log_shadowed_legacy_templates({name})
             with open(entry["path"]) as f:
                 return f.read()
         return None
 
     def list_roles(self, base_dir: str = "") -> list[dict]:
         entries = self._collect_entries(base_dir)
-        shadowed_legacy = self._warning_slugs(entries)
-        if shadowed_legacy:
-            self._log_shadowed_legacy_templates(shadowed_legacy)
+        shadowed_legacy_keys = self._shadowed_legacy_keys(entries)
+        warning_slugs = self._warning_slugs(entries)
+        if warning_slugs:
+            self._log_shadowed_legacy_templates(warning_slugs)
 
         results = []
         seen_names = set()
         for entry in entries:
-            if entry["legacy"] and entry["name"] in shadowed_legacy:
+            if entry["legacy"] and (
+                entry["name"], entry["global"]
+            ) in shadowed_legacy_keys:
                 continue
             meta = self._load_entry_meta(entry)
             shadowed = entry["global"] and entry["name"] in seen_names
@@ -332,7 +343,17 @@ class RoleManager(TemplateManager):
 
     def delete_template(self, name: str,
                         scope: str = "", base_dir: str = "") -> bool:
-        return self.delete_role(name, scope=scope, base_dir=base_dir)
+        for template_dir, _is_global, _is_legacy in self._source_dirs(
+            base_dir, scope
+        ):
+            if not template_dir:
+                continue
+            for suffix in (".yaml", ".yml"):
+                path = os.path.join(template_dir, name + suffix)
+                if os.path.isfile(path):
+                    os.remove(path)
+                    return True
+        return False
 
     @staticmethod
     def render_preamble(role: dict | None) -> str:
