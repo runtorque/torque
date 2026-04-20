@@ -338,6 +338,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             return f"prompt for {cell.id} via {launch_cfg['command']}"
 
         with tempfile.TemporaryDirectory() as temp_dir:
+            engineer.directory = temp_dir
             result = await self.server_mod._handle_relaunch_agent_command(
                 {"id": engineer.id},
                 state,
