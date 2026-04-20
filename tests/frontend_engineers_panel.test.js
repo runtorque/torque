@@ -55,7 +55,7 @@ function createHarness() {
     querySelector() { return null; },
   };
   sandbox.document.getElementById = function(id) {
-    return id === 'panel-weaver' ? panel : null;
+    return id === 'panel-agent' ? panel : null;
   };
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/render.js');

@@ -17,7 +17,7 @@ function baseSandbox() {
   const panel = {
     innerHTML: '',
     querySelector(selector) {
-      return selector === '.weaver-content' ? content : null;
+      return selector === '.agent-panel-content' ? content : null;
     },
   };
   const pendingHireBanner = { innerHTML: '', hidden: true };
@@ -37,7 +37,7 @@ function baseSandbox() {
     document: {
       activeElement: null,
       getElementById(id) {
-        if (id === 'panel-weaver') return panel;
+        if (id === 'panel-agent') return panel;
         if (id === 'pending-hire-banner') return pendingHireBanner;
         return null;
       },

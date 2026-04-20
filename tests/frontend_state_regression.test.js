@@ -245,7 +245,7 @@ const PANEL_ROOT_IDS = [
   'panel-templates',
   'panel-context',
   'panel-events',
-  'panel-weaver',
+  'panel-agent',
 ];
 
 function createSandbox(overrides = {}) {
@@ -589,7 +589,7 @@ function createWeaverWsHarness() {
   });
   document.register('main');
   document.register('bottom-panel');
-  document.register('panel-weaver');
+  document.register('panel-agent');
   document.register('conn-dot');
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/ws.js');
@@ -721,7 +721,7 @@ function createMainHarness(overrides = {}) {
     'panel-templates',
     'panel-context',
     'panel-events',
-    'panel-weaver',
+    'panel-agent',
     'add-name-input',
     'add-cmd-input',
     'add-dir-input',
@@ -6088,7 +6088,7 @@ test('ws invalidation skips rerendering the active context panel for off-group a
 
 test('renderWeaverPanel preserves focused reply draft across rerenders', () => {
   const { context, document } = createWeaverHarness();
-  const panel = document.register('panel-weaver');
+  const panel = document.register('panel-agent');
   const input = document.register('weaver-reply-input');
   input.value = 'Proceed with merge';
   input.selectionStart = 8;
@@ -6111,10 +6111,10 @@ test('renderWeaverPanel preserves focused reply draft across rerenders', () => {
 
 test('renderWeaverPanel preserves focused architect decision title editor across rerenders', () => {
   const { context, document } = createWeaverHarness();
-  const panel = document.register('panel-weaver');
+  const panel = document.register('panel-agent');
   const content = document.createElement('div');
-  content.classList.add('weaver-content');
-  panel.setQuerySelector('.weaver-content', content);
+  content.classList.add('agent-panel-content');
+  panel.setQuerySelector('.agent-panel-content', content);
 
   context.state.agents = {
     'arch-1': {
@@ -6171,10 +6171,10 @@ test('renderWeaverPanel preserves focused architect decision title editor across
 
 test('renderWeaverPanel preserves focused architect decision rationale editor across rerenders', () => {
   const { context, document } = createWeaverHarness();
-  const panel = document.register('panel-weaver');
+  const panel = document.register('panel-agent');
   const content = document.createElement('div');
-  content.classList.add('weaver-content');
-  panel.setQuerySelector('.weaver-content', content);
+  content.classList.add('agent-panel-content');
+  panel.setQuerySelector('.agent-panel-content', content);
 
   context.state.agents = {
     'arch-1': {
@@ -6231,7 +6231,7 @@ test('renderWeaverPanel preserves focused architect decision rationale editor ac
 
 test('renderWeaverPanel preserves the selected Events tab across rerenders', () => {
   const { context, document } = createWeaverHarness();
-  const panel = document.register('panel-weaver');
+  const panel = document.register('panel-agent');
   panel.querySelector = function() { return null; };
   context.state.weaver_buffer_stats = {
     alpha: {
@@ -6252,18 +6252,18 @@ test('renderWeaverPanel preserves the selected Events tab across rerenders', () 
   context.renderWeaverPanel();
   runInContext(context, `weaverSelectTab('events')`);
 
-  assert.match(panel.innerHTML, /id="weaver-tab-events" class="weaver-tab active"/);
+  assert.match(panel.innerHTML, /id="weaver-tab-events" class="agent-panel-tab active"/);
   assert.match(panel.innerHTML, /Queued for next digest/);
 
   context.renderWeaverPanel();
 
-  assert.match(panel.innerHTML, /id="weaver-tab-events" class="weaver-tab active"/);
+  assert.match(panel.innerHTML, /id="weaver-tab-events" class="agent-panel-tab active"/);
   assert.match(panel.innerHTML, /Already sent to Weaver/);
 });
 
 test('renderWeaverPanel preserves the selected Worklog tab across rerenders', () => {
   const { context, document } = createWeaverHarness();
-  const panel = document.register('panel-weaver');
+  const panel = document.register('panel-agent');
   panel.querySelector = function() { return null; };
   context.state.weaver_worklog = {
     alpha: [
@@ -6295,18 +6295,18 @@ test('renderWeaverPanel preserves the selected Worklog tab across rerenders', ()
   context.renderWeaverPanel();
   runInContext(context, `weaverSelectTab('worklog')`);
 
-  assert.match(panel.innerHTML, /id="weaver-tab-worklog" class="weaver-tab active"/);
+  assert.match(panel.innerHTML, /id="weaver-tab-worklog" class="agent-panel-tab active"/);
   assert.match(panel.innerHTML, /Dispatched tasks/);
 
   context.renderWeaverPanel();
 
-  assert.match(panel.innerHTML, /id="weaver-tab-worklog" class="weaver-tab active"/);
+  assert.match(panel.innerHTML, /id="weaver-tab-worklog" class="agent-panel-tab active"/);
   assert.match(panel.innerHTML, /Awaiting approval/);
 });
 
 test('renderWeaverPanel keeps the same Events anchor visible when new digest rows are inserted above', () => {
   const { context, document } = createWeaverHarness();
-  const panel = document.register('panel-weaver');
+  const panel = document.register('panel-agent');
   const oldContent = new FakeElement('weaver-content-old');
   const newContent = new FakeElement('weaver-content-new');
   let currentContent = oldContent;
@@ -6350,7 +6350,7 @@ test('renderWeaverPanel keeps the same Events anchor visible when new digest row
   };
 
   panel.querySelector = function(selector) {
-    if (selector === '.weaver-content') return currentContent;
+    if (selector === '.agent-panel-content') return currentContent;
     return null;
   };
   Object.defineProperty(panel, 'innerHTML', {
@@ -6533,7 +6533,7 @@ test('selected weaver cards keep selection chrome aligned with running and pause
 
 test('renderWeaverPanel shows branch review-point summary in Session Map view', () => {
   const { context, document } = createWeaverHarness();
-  const panel = document.register('panel-weaver');
+  const panel = document.register('panel-agent');
 
   context.state.agents = {
     'weaver-1': {
@@ -7048,7 +7048,7 @@ test('standalone panel title renames templates surface to library', () => {
 
 test('renderWeaverPanel shows a group-scoped empty state before a weaver exists', () => {
   const { context, document } = createWeaverHarness();
-  const panel = document.register('panel-weaver');
+  const panel = document.register('panel-agent');
   panel.querySelector = function() { return null; };
 
   runInContext(context, `
@@ -9235,7 +9235,7 @@ test('standalone startup restore keeps panel roots attached across the first dou
   });
 
   assert.deepEqual(attachedStandalonePanelIds(document), PANEL_ROOT_IDS);
-  assert.deepEqual(standaloneZoneBodyPanelIds(document, 'standalone-bottom-dock'), ['panel-board', 'panel-weaver']);
+  assert.deepEqual(standaloneZoneBodyPanelIds(document, 'standalone-bottom-dock'), ['panel-board', 'panel-agent']);
   assert.deepEqual(
     standaloneZoneBodyPanelIds(document, 'standalone-right-rail'),
     ['panel-actions', 'panel-templates', 'panel-context', 'panel-events']
@@ -9389,7 +9389,7 @@ test('standalone full-state rerender keeps panel roots attached', () => {
 
   assert.deepEqual(attachedStandalonePanelIds(document), PANEL_ROOT_IDS);
   assert.deepEqual(standaloneZoneBodyPanelIds(document, 'standalone-right-rail'), ['panel-actions', 'panel-context']);
-  assert.deepEqual(parkedStandalonePanelIds(document), ['panel-templates', 'panel-events', 'panel-weaver']);
+  assert.deepEqual(parkedStandalonePanelIds(document), ['panel-templates', 'panel-events', 'panel-agent']);
 });
 
 test('standalone layout ui_update loads and rerenders newly visible Actions', () => {
@@ -9473,7 +9473,7 @@ test('standalone layout ui_update keeps panel roots attached across rerenders', 
 
   assert.deepEqual(attachedStandalonePanelIds(document), PANEL_ROOT_IDS);
   assert.deepEqual(standaloneZoneBodyPanelIds(document, 'standalone-right-rail'), ['panel-actions', 'panel-context']);
-  assert.deepEqual(parkedStandalonePanelIds(document), ['panel-templates', 'panel-events', 'panel-weaver']);
+  assert.deepEqual(parkedStandalonePanelIds(document), ['panel-templates', 'panel-events', 'panel-agent']);
 });
 
 test('standalone bottom-dock drop moves a panel to the shell-owned dock and preserves roots across rerenders', () => {

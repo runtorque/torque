@@ -62,7 +62,7 @@ test('renderWeaverPanel shows Journal and Events tabs without settings tabs when
     querySelector() { return null; },
   };
   sandbox.document.getElementById = function(id) {
-    return id === 'panel-weaver' ? panel : null;
+    return id === 'panel-agent' ? panel : null;
   };
   const context = vm.createContext(sandbox);
   loadWeaver(context);
@@ -73,7 +73,7 @@ test('renderWeaverPanel shows Journal and Events tabs without settings tabs when
   assert.match(panel.innerHTML, />Journal</);
   assert.match(panel.innerHTML, />Events</);
   assert.match(panel.innerHTML, />Worklog</);
-  assert.match(panel.innerHTML, /weaver-tabs/);
+  assert.match(panel.innerHTML, /agent-panel-tabs/);
   assert.doesNotMatch(panel.innerHTML, />Settings</);
 });
 
@@ -99,7 +99,7 @@ test('weaver Events tab renders queued and sent digest sections', () => {
     querySelector() { return null; },
   };
   sandbox.document.getElementById = function(id) {
-    return id === 'panel-weaver' ? panel : null;
+    return id === 'panel-agent' ? panel : null;
   };
   const context = vm.createContext(sandbox);
   loadWeaver(context);
@@ -132,7 +132,7 @@ test('weaver Events countdown updates in place without rerendering the whole pan
   let renderCount = 0;
   const panel = {
     querySelector(selector) {
-      if (selector === '.weaver-events-countdown') return countdown;
+      if (selector === '.agent-panel-events-countdown') return countdown;
       return null;
     },
   };
@@ -147,7 +147,7 @@ test('weaver Events countdown updates in place without rerendering the whole pan
     },
   });
   sandbox.document.getElementById = function(id) {
-    return id === 'panel-weaver' ? panel : null;
+    return id === 'panel-agent' ? panel : null;
   };
   const context = vm.createContext(sandbox);
   loadWeaver(context);
@@ -291,9 +291,9 @@ test('weaver journal distinguishes blocking asks from non-blocking notes', () =>
 
   const html = vm.runInContext(`_weaverRenderJournal("alpha")`, context);
 
-  assert.match(html, /class="weaver-ask-banner"/);
+  assert.match(html, /class="agent-panel-ask-banner"/);
   assert.match(html, /Weaver is asking:/);
-  assert.match(html, /class="weaver-note-banner"/);
+  assert.match(html, /class="agent-panel-note-banner"/);
   assert.match(html, /Weaver asks \(non-blocking\):/);
   assert.match(html, /weaverDismissNote/);
 });
@@ -353,7 +353,7 @@ test('weaver journal keeps chronology separate and shows a Session Map button', 
   assert.match(html, /No journal entries yet/);
   assert.doesNotMatch(html, /Open Streams/);
   assert.doesNotMatch(html, /Awaiting validation/);
-  assert.doesNotMatch(html, /weaver-stream-section-label-product/);
+  assert.doesNotMatch(html, /agent-panel-stream-section-label-product/);
 });
 
 test('weaver session map renders deterministic stream and recovery sections', () => {
@@ -512,7 +512,7 @@ test('weaverSendNow uses the explicit flush command', () => {
 test('renderWeaverPanel uses the focused group in multi-project workspaces', () => {
   const sandbox = createSandbox();
   sandbox.document.getElementById = function(id) {
-    if (id !== 'panel-weaver') return null;
+    if (id !== 'panel-agent') return null;
     return {
       innerHTML: '',
       querySelector() { return null; },
@@ -533,7 +533,7 @@ test('renderWeaverPanel uses the focused group in multi-project workspaces', () 
     querySelector() { return null; },
   };
   sandbox.document.getElementById = function(id) {
-    return id === 'panel-weaver' ? panel : null;
+    return id === 'panel-agent' ? panel : null;
   };
   const context = vm.createContext(sandbox);
   loadWeaver(context);

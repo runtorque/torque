@@ -575,32 +575,32 @@ function weaverLinkDecisionEngineer(architectId, decisionId) {
 }
 
 function renderWeaverPanel() {
-  var el = document.getElementById('panel-weaver');
+  var el = document.getElementById('panel-agent');
   _weaverStopEventsCountdownTimer();
   if (!el) return;
   var panelStateOptions = {
-    scrollSelectors: ['.weaver-content'],
+    scrollSelectors: ['.agent-panel-content'],
     captureFocusKey(active) {
       if (typeof _captureMainFocusKey === 'function') {
         var key = _captureMainFocusKey(active);
         if (key) return key;
       }
       if (active && active.classList
-          && active.classList.contains('weaver-instructions')) {
-        return '.weaver-instructions';
+          && active.classList.contains('agent-panel-instructions')) {
+        return '.agent-panel-instructions';
       }
       return '';
     },
     capture: function(snapshot, root) {
       if (!snapshot || !root || typeof root.querySelector !== 'function') return;
       snapshot.anchor = _weaverCaptureScrollAnchor(
-        root.querySelector('.weaver-content')
+        root.querySelector('.agent-panel-content')
       );
     },
     restore: function(root, snapshot) {
       if (!root || !snapshot || typeof root.querySelector !== 'function') return;
       _weaverRestoreScrollAnchor(
-        root.querySelector('.weaver-content'),
+        root.querySelector('.agent-panel-content'),
         snapshot.anchor
       );
     },
@@ -615,27 +615,27 @@ function renderWeaverPanel() {
   var activeTab = _weaverActiveTab(group);
   var emptyMessage = _weaverPanelEmptyMessage(group, ws, weaver, bstats);
 
-  var html = '<div class="weaver-panel">';
+  var html = '<div class="agent-panel-panel">';
 
   // Header
-  html += '<div class="weaver-header">';
-  html += '<div class="weaver-header-copy">';
-  html += '<span class="weaver-title">Architects &amp; Engineers';
+  html += '<div class="agent-panel-header">';
+  html += '<div class="agent-panel-header-copy">';
+  html += '<span class="agent-panel-title">Architects &amp; Engineers';
   if (group) html += ' — ' + _esc(group);
   html += '</span>';
-  html += '<div class="weaver-subtitle">Architect roster, engineer hierarchy, orchestration journal, digest queue, worklog, and session map.</div>';
+  html += '<div class="agent-panel-subtitle">Architect roster, engineer hierarchy, orchestration journal, digest queue, worklog, and session map.</div>';
   html += '</div>';
-  html += '<div class="weaver-header-right">';
-  html += '<button type="button" class="weaver-add-engineer-btn" onclick="weaverOpenAddArchitect()">+ Add Architect</button>';
-  html += '<button type="button" class="weaver-add-engineer-btn" onclick="weaverOpenAddEngineer()">+ Add Engineer</button>';
+  html += '<div class="agent-panel-header-right">';
+  html += '<button type="button" class="agent-panel-add-engineer-btn" onclick="weaverOpenAddArchitect()">+ Add Architect</button>';
+  html += '<button type="button" class="agent-panel-add-engineer-btn" onclick="weaverOpenAddEngineer()">+ Add Engineer</button>';
   // Buffer stats + Pause/Resume toggle
   if (!emptyMessage && group) {
     if (bstats && bstats.buffered_events > 0) {
-      html += '<span class="weaver-buffer-stats">'
+      html += '<span class="agent-panel-buffer-stats">'
            + _esc(_weaverHeaderBufferStats(bstats, paused, weaver))
            + '</span>';
     }
-    html += '<button id="weaver-pause-btn" class="weaver-pause-btn' + (paused ? ' paused' : '') + '" '
+    html += '<button id="weaver-pause-btn" class="agent-panel-pause-btn' + (paused ? ' paused' : '') + '" '
          + 'onclick="weaverTogglePause()">'
          + (paused ? '&#x25B6;' : '&#x23F8;')
          + '</button>';
@@ -644,11 +644,11 @@ function renderWeaverPanel() {
   html += '</div>';
 
   if (!emptyMessage) html += _weaverRenderTabs(group, activeTab);
-  html += '<div class="weaver-content">';
+  html += '<div class="agent-panel-content">';
   html += _weaverRenderArchitectRoster(group);
   html += _weaverRenderEngineerRoster(group);
   if (emptyMessage) {
-    html += '<div class="weaver-empty">' + _esc(emptyMessage) + '</div>';
+    html += '<div class="agent-panel-empty">' + _esc(emptyMessage) + '</div>';
   } else if (activeTab === 'events') {
     html += _weaverRenderEvents(group, ws, weaver, bstats);
   } else if (activeTab === 'worklog') {
@@ -811,14 +811,14 @@ function _weaverMarkSessionMapStale(groups) {
 
 function _weaverRenderTabs(group, activeTab) {
   if (!group) return '';
-  var html = '<div class="weaver-tabs">';
-  html += '<button id="weaver-tab-journal" class="weaver-tab'
+  var html = '<div class="agent-panel-tabs">';
+  html += '<button id="weaver-tab-journal" class="agent-panel-tab'
     + (activeTab === 'journal' ? ' active' : '')
     + '" onclick="weaverSelectTab(\'journal\')">Journal</button>';
-  html += '<button id="weaver-tab-events" class="weaver-tab'
+  html += '<button id="weaver-tab-events" class="agent-panel-tab'
     + (activeTab === 'events' ? ' active' : '')
     + '" onclick="weaverSelectTab(\'events\')">Events</button>';
-  html += '<button id="weaver-tab-worklog" class="weaver-tab'
+  html += '<button id="weaver-tab-worklog" class="agent-panel-tab'
     + (activeTab === 'worklog' ? ' active' : '')
     + '" onclick="weaverSelectTab(\'worklog\')">Worklog</button>';
   html += '</div>';
@@ -827,7 +827,7 @@ function _weaverRenderTabs(group, activeTab) {
 
 function _weaverRenderEvents(group, ws, weaver, bstats) {
   if (!group) {
-    return '<div class="weaver-empty">No weaver configured for any group.</div>';
+    return '<div class="agent-panel-empty">No weaver configured for any group.</div>';
   }
 
   var queued = (bstats && bstats.queued_events) ? bstats.queued_events.slice() : [];
@@ -844,10 +844,10 @@ function _weaverRenderEvents(group, ws, weaver, bstats) {
     return (b.id || 0) - (a.id || 0);
   });
 
-  var html = '<div class="weaver-events-tab">';
-  html += '<div class="weaver-events-toolbar">';
-  html += '<div class="weaver-events-countdown">' + _esc(statusText) + '</div>';
-  html += '<button id="weaver-send-now-btn" class="weaver-send-now-btn"'
+  var html = '<div class="agent-panel-events-tab">';
+  html += '<div class="agent-panel-events-toolbar">';
+  html += '<div class="agent-panel-events-countdown">' + _esc(statusText) + '</div>';
+  html += '<button id="weaver-send-now-btn" class="agent-panel-send-now-btn"'
     + (sendDisabled ? ' disabled' : '')
     + ' onclick="weaverSendNow()">Send queued now</button>';
   html += '</div>';
@@ -868,17 +868,17 @@ function _weaverRenderEvents(group, ws, weaver, bstats) {
 }
 
 function _weaverRenderEventSection(title, events, mode, emptyText) {
-  var html = '<div class="weaver-event-section">';
-  html += '<div class="weaver-event-section-header">';
-  html += '<span class="weaver-event-section-title">' + _esc(title) + '</span>';
-  html += '<span class="weaver-event-section-count">' + events.length + '</span>';
+  var html = '<div class="agent-panel-event-section">';
+  html += '<div class="agent-panel-event-section-header">';
+  html += '<span class="agent-panel-event-section-title">' + _esc(title) + '</span>';
+  html += '<span class="agent-panel-event-section-count">' + events.length + '</span>';
   html += '</div>';
   if (!events.length) {
-    html += '<div class="weaver-event-empty">' + _esc(emptyText) + '</div>';
+    html += '<div class="agent-panel-event-empty">' + _esc(emptyText) + '</div>';
     html += '</div>';
     return html;
   }
-  html += '<div class="weaver-event-list">';
+  html += '<div class="agent-panel-event-list">';
   for (var i = 0; i < events.length; i++) {
     html += _weaverRenderEventItem(events[i], mode);
   }
@@ -906,15 +906,15 @@ function _weaverRenderEventItem(event, mode) {
     anchorKey += '-' + Math.floor(event.delivered_at);
   }
 
-  var html = '<div class="weaver-event-item weaver-event-item-' + _esc(mode) + '"'
+  var html = '<div class="agent-panel-event-item agent-panel-event-item-' + _esc(mode) + '"'
     + ' data-weaver-anchor="' + _esc(anchorKey) + '">';
-  html += '<div class="weaver-event-item-header">';
-  html += '<span class="weaver-event-kind">' + _esc(kind) + '</span>';
-  html += '<span class="weaver-event-meta">' + _esc(meta) + '</span>';
+  html += '<div class="agent-panel-event-item-header">';
+  html += '<span class="agent-panel-event-kind">' + _esc(kind) + '</span>';
+  html += '<span class="agent-panel-event-meta">' + _esc(meta) + '</span>';
   html += '</div>';
-  html += '<div class="weaver-event-message">' + _esc(summary) + '</div>';
+  html += '<div class="agent-panel-event-message">' + _esc(summary) + '</div>';
   if (event && event.task_id) {
-    html += '<div class="weaver-event-task">' + _esc(event.task_id) + '</div>';
+    html += '<div class="agent-panel-event-task">' + _esc(event.task_id) + '</div>';
   }
   html += '</div>';
   return html;
@@ -995,7 +995,7 @@ function _weaverStopEventsCountdownTimer() {
 
 function _weaverSyncEventsCountdown(panel, group, activeTab) {
   if (!panel || typeof panel.querySelector !== 'function') return;
-  var countdownEl = panel.querySelector('.weaver-events-countdown');
+  var countdownEl = panel.querySelector('.agent-panel-events-countdown');
   if (!countdownEl) return;
   var ws = _weaverGetSettings(group);
   var weaver = group ? _weaverGetAgent(group) : null;
@@ -1010,14 +1010,14 @@ function _weaverSyncEventsCountdown(panel, group, activeTab) {
     return;
   }
   _weaverEventsCountdownTimer = setInterval(function() {
-    var currentPanel = document.getElementById('panel-weaver');
+    var currentPanel = document.getElementById('panel-agent');
     if (!currentPanel) {
       _weaverStopEventsCountdownTimer();
       return;
     }
     var currentGroup = _weaverCurrentGroup();
     var currentTab = _weaverActiveTab(currentGroup);
-    var currentCountdown = currentPanel.querySelector('.weaver-events-countdown');
+    var currentCountdown = currentPanel.querySelector('.agent-panel-events-countdown');
     if (!currentCountdown || currentTab !== 'events') {
       _weaverStopEventsCountdownTimer();
       return;
@@ -1098,7 +1098,7 @@ function _weaverRestoreScrollAnchor(container, snapshot) {
 
 function _weaverRenderWorklog(group, ws) {
   if (!group) {
-    return '<div class="weaver-empty">No weaver configured for any group.</div>';
+    return '<div class="agent-panel-empty">No weaver configured for any group.</div>';
   }
 
   var entries = (state.weaver_worklog && state.weaver_worklog[group])
@@ -1115,24 +1115,24 @@ function _weaverRenderWorklog(group, ws) {
     return (b.id || 0) - (a.id || 0);
   });
 
-  var html = '<div class="weaver-worklog-tab">';
-  html += '<div class="weaver-worklog-header">';
-  html += '<span class="weaver-worklog-title">Dispatched tasks</span>';
-  html += '<span class="weaver-worklog-count">' + entries.length + '</span>';
+  var html = '<div class="agent-panel-worklog-tab">';
+  html += '<div class="agent-panel-worklog-header">';
+  html += '<span class="agent-panel-worklog-title">Dispatched tasks</span>';
+  html += '<span class="agent-panel-worklog-count">' + entries.length + '</span>';
   html += '</div>';
   if (ws && ws.restrict_to_created_agents) {
-    html += '<div class="weaver-worklog-note">Showing only tasks sent to Weaver-created agents.</div>';
+    html += '<div class="agent-panel-worklog-note">Showing only tasks sent to Weaver-created agents.</div>';
   } else {
-    html += '<div class="weaver-worklog-note">Recent tasks this Weaver dispatched in this group.</div>';
+    html += '<div class="agent-panel-worklog-note">Recent tasks this Weaver dispatched in this group.</div>';
   }
 
   if (!entries.length) {
-    html += '<div class="weaver-event-empty">No dispatched tasks yet.</div>';
+    html += '<div class="agent-panel-event-empty">No dispatched tasks yet.</div>';
     html += '</div>';
     return html;
   }
 
-  html += '<div class="weaver-worklog-list">';
+  html += '<div class="agent-panel-worklog-list">';
   for (var i = 0; i < entries.length; i++) {
     html += _weaverRenderWorklogItem(entries[i]);
   }
@@ -1153,22 +1153,22 @@ function _weaverRenderWorklogItem(entry) {
   var meta = 'dispatched ' + _weaverTimeAgo(entry && entry.started_at);
   var anchorKey = 'worklog-' + String(entry && entry.id ? entry.id : taskId || meta);
 
-  var html = '<div class="weaver-worklog-item" data-weaver-anchor="' + _esc(anchorKey) + '">';
-  html += '<div class="weaver-worklog-item-header">';
-  html += '<div class="weaver-worklog-task">';
-  html += '<div class="weaver-worklog-task-title">' + _esc(title) + '</div>';
+  var html = '<div class="agent-panel-worklog-item" data-weaver-anchor="' + _esc(anchorKey) + '">';
+  html += '<div class="agent-panel-worklog-item-header">';
+  html += '<div class="agent-panel-worklog-task">';
+  html += '<div class="agent-panel-worklog-task-title">' + _esc(title) + '</div>';
   if (taskId) {
-    html += '<div class="weaver-worklog-task-id">' + _esc(taskId) + '</div>';
+    html += '<div class="agent-panel-worklog-task-id">' + _esc(taskId) + '</div>';
   }
   html += '</div>';
-  html += '<div class="weaver-worklog-lane">' + _esc(lane || 'Unknown') + '</div>';
+  html += '<div class="agent-panel-worklog-lane">' + _esc(lane || 'Unknown') + '</div>';
   html += '</div>';
-  html += '<div class="weaver-worklog-meta-row">';
-  html += '<span class="weaver-worklog-agent">' + _esc(agentName) + '</span>';
-  html += '<span class="weaver-worklog-meta">' + _esc(meta) + '</span>';
+  html += '<div class="agent-panel-worklog-meta-row">';
+  html += '<span class="agent-panel-worklog-agent">' + _esc(agentName) + '</span>';
+  html += '<span class="agent-panel-worklog-meta">' + _esc(meta) + '</span>';
   html += '</div>';
   if (status) {
-    html += '<div class="weaver-worklog-status">' + _esc(status) + '</div>';
+    html += '<div class="agent-panel-worklog-status">' + _esc(status) + '</div>';
   }
   html += '</div>';
   return html;
@@ -1191,7 +1191,7 @@ function _weaverWorklogAgentLabel(entry, task) {
 
 function _weaverRenderJournal(group) {
   if (!group) {
-    return '<div class="weaver-empty">No weaver configured for any group.</div>';
+    return '<div class="agent-panel-empty">No weaver configured for any group.</div>';
   }
 
   var html = '';
@@ -1200,29 +1200,29 @@ function _weaverRenderJournal(group) {
   // Pending question banner
   var ws = _weaverGetSettings(group);
   if (ws && ws.pending_question) {
-    html += '<div class="weaver-ask-banner">';
-    html += '<div class="weaver-ask-label">Weaver is asking:</div>';
-    html += '<div class="weaver-ask-question">' + _esc(ws.pending_question) + '</div>';
-    html += '<textarea class="weaver-ask-reply" id="weaver-reply-input" '
+    html += '<div class="agent-panel-ask-banner">';
+    html += '<div class="agent-panel-ask-label">Weaver is asking:</div>';
+    html += '<div class="agent-panel-ask-question">' + _esc(ws.pending_question) + '</div>';
+    html += '<textarea class="agent-panel-ask-reply" id="weaver-reply-input" '
          + 'placeholder="Type your reply..." rows="2" '
          + 'oninput="_weaverReplyDraft=this.value">' + _esc(_weaverReplyDraft) + '</textarea>';
-    html += '<div class="weaver-ask-actions">';
-    html += '<button class="weaver-dismiss-btn" onclick="weaverDismissQuestion()">Dismiss</button>';
-    html += '<button class="weaver-reply-btn" onclick="weaverReply()">Send Reply</button>';
+    html += '<div class="agent-panel-ask-actions">';
+    html += '<button class="agent-panel-dismiss-btn" onclick="weaverDismissQuestion()">Dismiss</button>';
+    html += '<button class="agent-panel-reply-btn" onclick="weaverReply()">Send Reply</button>';
     html += '</div>';
     html += '</div>';
   }
   if (ws && ws.pending_note) {
     var noteKind = ws.pending_note_kind || 'note';
-    html += '<div class="weaver-note-banner">';
-    html += '<div class="weaver-note-label">'
+    html += '<div class="agent-panel-note-banner">';
+    html += '<div class="agent-panel-note-label">'
       + (noteKind === 'question'
         ? 'Weaver asks (non-blocking):'
         : 'Weaver note:')
       + '</div>';
-    html += '<div class="weaver-note-text">' + _esc(ws.pending_note) + '</div>';
-    html += '<div class="weaver-note-actions">';
-    html += '<button class="weaver-dismiss-btn" onclick="weaverDismissNote()">Dismiss</button>';
+    html += '<div class="agent-panel-note-text">' + _esc(ws.pending_note) + '</div>';
+    html += '<div class="agent-panel-note-actions">';
+    html += '<button class="agent-panel-dismiss-btn" onclick="weaverDismissNote()">Dismiss</button>';
     html += '</div>';
     html += '</div>';
   }
@@ -1238,28 +1238,28 @@ function _weaverRenderJournal(group) {
   if (entries.length) {
     html += _weaverRenderJournalEntries(entries, true);
   } else {
-    html += '<div class="weaver-empty">No journal entries yet.</div>';
+    html += '<div class="agent-panel-empty">No journal entries yet.</div>';
   }
   return html;
 }
 
 function _weaverRenderJournalToolbar(group, subview) {
   var groupJs = JSON.stringify(String(group || ''));
-  var html = '<div class="weaver-session-map-toolbar">';
-  html += '<div class="weaver-session-map-actions">';
+  var html = '<div class="agent-panel-session-map-toolbar">';
+  html += '<div class="agent-panel-session-map-actions">';
   if (subview === 'session_map') {
-    html += '<button class="weaver-session-map-btn" onclick=\'weaverCloseSessionMap('
+    html += '<button class="agent-panel-session-map-btn" onclick=\'weaverCloseSessionMap('
       + groupJs + ")\'>Back to Journal</button>";
-    html += '<button class="weaver-session-map-btn primary" onclick=\'weaverRefreshSessionMap('
+    html += '<button class="agent-panel-session-map-btn primary" onclick=\'weaverRefreshSessionMap('
       + groupJs + ")\'>Refresh</button>";
   } else {
-    html += '<button class="weaver-session-map-btn primary" onclick=\'weaverOpenSessionMap('
+    html += '<button class="agent-panel-session-map-btn primary" onclick=\'weaverOpenSessionMap('
       + groupJs + ")\'>Session Map</button>";
   }
   html += '</div>';
   var status = _weaverSessionMapStatus(group, subview);
   if (status) {
-    html += '<div class="weaver-session-map-status">' + _esc(status) + '</div>';
+    html += '<div class="agent-panel-session-map-status">' + _esc(status) + '</div>';
   }
   html += '</div>';
   return html;
@@ -1280,14 +1280,14 @@ function _weaverRenderSessionMap(group) {
   var sessionMap = _weaverSessionMapData(group);
   var meta = _weaverSessionMapMeta(group);
   if (!sessionMap) {
-    return '<div class="weaver-session-map-empty">'
+    return '<div class="agent-panel-session-map-empty">'
       + _esc(meta.loading
         ? 'Loading Session Map…'
         : 'Open Session Map to load the current deterministic orchestration snapshot.')
       + '</div>';
   }
 
-  var html = '<div class="weaver-session-map">';
+  var html = '<div class="agent-panel-session-map">';
   html += _weaverRenderSessionMapOverview(sessionMap.overview || {});
   html += _weaverRenderSessionMapHints(sessionMap.hints || {});
   html += _weaverRenderSessionMapStreams(sessionMap.streams || {});
@@ -1313,11 +1313,11 @@ function _weaverRenderSessionMapOverview(overview) {
     { label: 'Human gates', value: overview.human_gate_count || 0 },
     { label: 'Queued follow-up', value: overview.queued_follow_up_count || 0 },
   ];
-  var html = '<div class="weaver-session-map-overview">';
+  var html = '<div class="agent-panel-session-map-overview">';
   for (var i = 0; i < stats.length; i++) {
-    html += '<div class="weaver-session-map-stat">';
-    html += '<div class="weaver-session-map-stat-value">' + _esc(String(stats[i].value)) + '</div>';
-    html += '<div class="weaver-session-map-stat-label">' + _esc(stats[i].label) + '</div>';
+    html += '<div class="agent-panel-session-map-stat">';
+    html += '<div class="agent-panel-session-map-stat-value">' + _esc(String(stats[i].value)) + '</div>';
+    html += '<div class="agent-panel-session-map-stat-label">' + _esc(stats[i].label) + '</div>';
     html += '</div>';
   }
   html += '</div>';
@@ -1327,19 +1327,19 @@ function _weaverRenderSessionMapOverview(overview) {
 function _weaverRenderSessionMapHints(summary) {
   var items = _weaverSummaryItems(summary);
   if (!items.length) return '';
-  var html = '<div class="weaver-health-summary">';
-  html += '<div class="weaver-health-header">';
-  html += '<span class="weaver-health-title">Hints</span>';
-  html += '<span class="weaver-health-total">' + items.length + ' current hint'
+  var html = '<div class="agent-panel-health-summary">';
+  html += '<div class="agent-panel-health-header">';
+  html += '<span class="agent-panel-health-title">Hints</span>';
+  html += '<span class="agent-panel-health-total">' + items.length + ' current hint'
     + (items.length === 1 ? '' : 's') + '</span>';
   html += '</div>';
-  html += '<div class="weaver-health-list">';
+  html += '<div class="agent-panel-health-list">';
   for (var i = 0; i < items.length; i++) {
     var item = items[i];
-    html += '<div class="weaver-session-map-list-item">';
-    html += '<span class="weaver-health-pill weaver-health-pill-notice">'
+    html += '<div class="agent-panel-session-map-list-item">';
+    html += '<span class="agent-panel-health-pill agent-panel-health-pill-notice">'
       + _esc(_weaverHumanizeToken(item.kind || 'hint')) + '</span>';
-    html += '<span class="weaver-session-map-item-text">' + _esc(item.message || '') + '</span>';
+    html += '<span class="agent-panel-session-map-item-text">' + _esc(item.message || '') + '</span>';
     html += '</div>';
   }
   html += '</div>';
@@ -1350,13 +1350,13 @@ function _weaverRenderSessionMapHints(summary) {
 function _weaverRenderSessionMapStreams(summary) {
   var streams = _weaverSummaryItems(summary);
   if (!streams.length) return '';
-  var html = '<div class="weaver-streams-summary">';
-  html += '<div class="weaver-health-header">';
-  html += '<span class="weaver-health-title">Active streams</span>';
-  html += '<span class="weaver-health-total">' + streams.length + ' active stream'
+  var html = '<div class="agent-panel-streams-summary">';
+  html += '<div class="agent-panel-health-header">';
+  html += '<span class="agent-panel-health-title">Active streams</span>';
+  html += '<span class="agent-panel-health-total">' + streams.length + ' active stream'
     + (streams.length === 1 ? '' : 's') + '</span>';
   html += '</div>';
-  html += '<div class="weaver-stream-list">';
+  html += '<div class="agent-panel-stream-list">';
   for (var i = 0; i < streams.length; i++) {
     html += _weaverRenderOpenStreamCard(streams[i], i);
   }
@@ -1368,19 +1368,19 @@ function _weaverRenderSessionMapStreams(summary) {
 function _weaverRenderSessionMapAsks(title, summary, pillLabel) {
   var items = _weaverSummaryItems(summary);
   if (!items.length) return '';
-  var html = '<div class="weaver-health-summary">';
-  html += '<div class="weaver-health-header">';
-  html += '<span class="weaver-health-title">' + _esc(title) + '</span>';
-  html += '<span class="weaver-health-total">' + items.length + ' open</span>';
+  var html = '<div class="agent-panel-health-summary">';
+  html += '<div class="agent-panel-health-header">';
+  html += '<span class="agent-panel-health-title">' + _esc(title) + '</span>';
+  html += '<span class="agent-panel-health-total">' + items.length + ' open</span>';
   html += '</div>';
-  html += '<div class="weaver-health-list">';
+  html += '<div class="agent-panel-health-list">';
   for (var i = 0; i < items.length; i++) {
     var item = items[i];
-    html += '<div class="weaver-session-map-list-item">';
-    html += '<span class="weaver-health-pill weaver-health-pill-warning">' + _esc(pillLabel) + '</span>';
-    html += '<span class="weaver-session-map-item-text">' + _esc(item.title || '') + '</span>';
+    html += '<div class="agent-panel-session-map-list-item">';
+    html += '<span class="agent-panel-health-pill agent-panel-health-pill-warning">' + _esc(pillLabel) + '</span>';
+    html += '<span class="agent-panel-session-map-item-text">' + _esc(item.title || '') + '</span>';
     if (item.parent_task_id) {
-      html += '<span class="weaver-session-map-item-meta">via ' + _esc(item.parent_task_id) + '</span>';
+      html += '<span class="agent-panel-session-map-item-meta">via ' + _esc(item.parent_task_id) + '</span>';
     }
     html += '</div>';
   }
@@ -1392,24 +1392,24 @@ function _weaverRenderSessionMapAsks(title, summary, pillLabel) {
 function _weaverRenderSessionMapHumanGates(summary) {
   var items = _weaverSummaryItems(summary);
   if (!items.length) return '';
-  var html = '<div class="weaver-health-summary">';
-  html += '<div class="weaver-health-header">';
-  html += '<span class="weaver-health-title">Human gates</span>';
-  html += '<span class="weaver-health-total">' + items.length + ' waiting</span>';
+  var html = '<div class="agent-panel-health-summary">';
+  html += '<div class="agent-panel-health-header">';
+  html += '<span class="agent-panel-health-title">Human gates</span>';
+  html += '<span class="agent-panel-health-total">' + items.length + ' waiting</span>';
   html += '</div>';
-  html += '<div class="weaver-health-list">';
+  html += '<div class="agent-panel-health-list">';
   for (var i = 0; i < items.length; i++) {
     var item = items[i];
-    html += '<div class="weaver-session-map-list-item">';
-    html += '<span class="weaver-health-pill weaver-health-pill-warning">Validation gate</span>';
-    html += '<span class="weaver-session-map-item-text">'
+    html += '<div class="agent-panel-session-map-list-item">';
+    html += '<span class="agent-panel-health-pill agent-panel-health-pill-warning">Validation gate</span>';
+    html += '<span class="agent-panel-session-map-item-text">'
       + _esc(item.stream_title || item.branch || '') + '</span>';
     if (item.branch) {
-      html += '<span class="weaver-session-map-item-meta">' + _esc(item.branch.replace(/^loom\//, '')) + '</span>';
+      html += '<span class="agent-panel-session-map-item-meta">' + _esc(item.branch.replace(/^loom\//, '')) + '</span>';
     }
     html += '</div>';
     if (item.gate_reason) {
-      html += '<div class="weaver-session-map-item-subtext">' + _esc(item.gate_reason) + '</div>';
+      html += '<div class="agent-panel-session-map-item-subtext">' + _esc(item.gate_reason) + '</div>';
     }
   }
   html += '</div>';
@@ -1421,20 +1421,20 @@ function _weaverRenderSessionMapTaskHealth(summary) {
   var items = _weaverSummaryItems(summary);
   if (!items.length) return '';
 
-  var html = '<div class="weaver-health-summary">';
-  html += '<div class="weaver-health-header">';
-  html += '<span class="weaver-health-title">Task health</span>';
-  html += '<span class="weaver-health-total">' + items.length + ' unhealthy</span>';
+  var html = '<div class="agent-panel-health-summary">';
+  html += '<div class="agent-panel-health-header">';
+  html += '<span class="agent-panel-health-title">Task health</span>';
+  html += '<span class="agent-panel-health-total">' + items.length + ' unhealthy</span>';
   html += '</div>';
-  html += '<div class="weaver-health-list">';
+  html += '<div class="agent-panel-health-list">';
   for (var i = 0; i < items.length; i++) {
     var item = items[i];
-    html += '<div class="weaver-health-item">';
-    html += '<span class="weaver-health-item-state weaver-health-pill-' + _esc(item.health_state || 'blocked') + '">'
+    html += '<div class="agent-panel-health-item">';
+    html += '<span class="agent-panel-health-item-state agent-panel-health-pill-' + _esc(item.health_state || 'blocked') + '">'
       + _esc(_weaverHealthLabels[item.health_state] || item.health_state || 'Unhealthy') + '</span>';
-    html += '<span class="weaver-health-item-title">' + _esc(item.title || '') + '</span>';
+    html += '<span class="agent-panel-health-item-title">' + _esc(item.title || '') + '</span>';
     if (item.via) {
-      html += '<span class="weaver-health-item-via">via ' + _esc(item.via) + '</span>';
+      html += '<span class="agent-panel-health-item-via">via ' + _esc(item.via) + '</span>';
     }
     html += '</div>';
   }
@@ -1446,24 +1446,24 @@ function _weaverRenderSessionMapTaskHealth(summary) {
 function _weaverRenderSessionMapVerification(summary) {
   var items = _weaverSummaryItems(summary);
   if (!items.length) return '';
-  var html = '<div class="weaver-verification-summary">';
-  html += '<div class="weaver-health-header">';
-  html += '<span class="weaver-health-title">Verification</span>';
-  html += '<span class="weaver-health-total">' + items.length + ' open checkpoint'
+  var html = '<div class="agent-panel-verification-summary">';
+  html += '<div class="agent-panel-health-header">';
+  html += '<span class="agent-panel-health-title">Verification</span>';
+  html += '<span class="agent-panel-health-total">' + items.length + ' open checkpoint'
     + (items.length === 1 ? '' : 's') + '</span>';
   html += '</div>';
   for (var i = 0; i < items.length; i++) {
     var item = items[i];
-    html += '<div class="weaver-verification-item">';
-    html += '<span class="weaver-health-pill weaver-health-pill-' + _esc(item.verification_state || 'pending') + '">'
+    html += '<div class="agent-panel-verification-item">';
+    html += '<span class="agent-panel-health-pill agent-panel-health-pill-' + _esc(item.verification_state || 'pending') + '">'
       + _esc(_weaverVerificationLabels[item.verification_state] || item.verification_state || 'Verification') + '</span>';
-    html += '<span class="weaver-verification-item-title">' + _esc(item.title || '') + '</span>';
+    html += '<span class="agent-panel-verification-item-title">' + _esc(item.title || '') + '</span>';
     if (item.verification_mode) {
-      html += '<span class="weaver-verification-item-meta">' + _esc(item.verification_mode) + '</span>';
+      html += '<span class="agent-panel-verification-item-meta">' + _esc(item.verification_mode) + '</span>';
     }
     html += '</div>';
     if (item.detail) {
-      html += '<div class="weaver-verification-item-meta">' + _esc(item.detail) + '</div>';
+      html += '<div class="agent-panel-verification-item-meta">' + _esc(item.detail) + '</div>';
     }
   }
   html += '</div>';
@@ -1473,36 +1473,36 @@ function _weaverRenderSessionMapVerification(summary) {
 function _weaverRenderSessionMapBoundaries(summary) {
   var items = _weaverSummaryItems(summary);
   if (!items.length) return '';
-  var html = '<div class="weaver-health-summary">';
-  html += '<div class="weaver-health-header">';
-  html += '<span class="weaver-health-title">Branch review points</span>';
-  html += '<span class="weaver-health-total">' + items.length + ' branch'
+  var html = '<div class="agent-panel-health-summary">';
+  html += '<div class="agent-panel-health-header">';
+  html += '<span class="agent-panel-health-title">Branch review points</span>';
+  html += '<span class="agent-panel-health-total">' + items.length + ' branch'
     + (items.length === 1 ? '' : 'es') + '</span>';
   html += '</div>';
   for (var i = 0; i < items.length; i++) {
     var item = items[i];
     var pillState = item.partial_review_safe ? 'passed' : 'failed';
     var pillLabel = item.partial_review_safe ? 'Safe for partial review' : 'Branch advanced';
-    html += '<div class="weaver-verification-item">';
-    html += '<span class="weaver-health-pill weaver-health-pill-' + _esc(pillState) + '">'
+    html += '<div class="agent-panel-verification-item">';
+    html += '<span class="agent-panel-health-pill agent-panel-health-pill-' + _esc(pillState) + '">'
       + _esc(pillLabel) + '</span>';
-    html += '<span class="weaver-verification-item-title">'
+    html += '<span class="agent-panel-verification-item-title">'
       + _esc(item.latest_boundary_task || item.stream_title || '') + '</span>';
     if (item.branch) {
-      html += '<span class="weaver-verification-item-meta">' + _esc(item.branch.replace(/^loom\//, '')) + '</span>';
+      html += '<span class="agent-panel-verification-item-meta">' + _esc(item.branch.replace(/^loom\//, '')) + '</span>';
     }
     html += '</div>';
     if (item.foreground_task_title) {
-      html += '<div class="weaver-verification-item-meta">Current: '
+      html += '<div class="agent-panel-verification-item-meta">Current: '
         + _esc(item.foreground_task_title) + '</div>';
     }
     if (item.queued_followups && item.queued_followups.length) {
-      html += '<div class="weaver-verification-item-meta">Queued next: '
+      html += '<div class="agent-panel-verification-item-meta">Queued next: '
         + _esc(item.queued_followups.map(function(task) { return task.title; }).join(', '))
         + '</div>';
     }
     if (item.started_followups && item.started_followups.length) {
-      html += '<div class="weaver-verification-item-meta">Beyond boundary: '
+      html += '<div class="agent-panel-verification-item-meta">Beyond boundary: '
         + _esc(item.started_followups.map(function(task) { return task.title; }).join(', '))
         + '</div>';
     }
@@ -1514,23 +1514,23 @@ function _weaverRenderSessionMapBoundaries(summary) {
 function _weaverRenderSessionMapAgents(summary) {
   var items = _weaverSummaryItems(summary);
   if (!items.length) return '';
-  var html = '<div class="weaver-health-summary">';
-  html += '<div class="weaver-health-header">';
-  html += '<span class="weaver-health-title">Active agents</span>';
-  html += '<span class="weaver-health-total">' + items.length + ' active</span>';
+  var html = '<div class="agent-panel-health-summary">';
+  html += '<div class="agent-panel-health-header">';
+  html += '<span class="agent-panel-health-title">Active agents</span>';
+  html += '<span class="agent-panel-health-total">' + items.length + ' active</span>';
   html += '</div>';
-  html += '<div class="weaver-health-list">';
+  html += '<div class="agent-panel-health-list">';
   for (var i = 0; i < items.length; i++) {
     var item = items[i];
-    html += '<div class="weaver-session-map-list-item">';
-    html += '<span class="weaver-health-pill weaver-health-pill-notice">' + _esc(item.status || 'agent') + '</span>';
-    html += '<span class="weaver-session-map-item-text">' + _esc(item.name || item.slug || item.id || '') + '</span>';
+    html += '<div class="agent-panel-session-map-list-item">';
+    html += '<span class="agent-panel-health-pill agent-panel-health-pill-notice">' + _esc(item.status || 'agent') + '</span>';
+    html += '<span class="agent-panel-session-map-item-text">' + _esc(item.name || item.slug || item.id || '') + '</span>';
     if (item.current_task) {
-      html += '<span class="weaver-session-map-item-meta">' + _esc(item.current_task) + '</span>';
+      html += '<span class="agent-panel-session-map-item-meta">' + _esc(item.current_task) + '</span>';
     }
     html += '</div>';
     if (item.activity_detail) {
-      html += '<div class="weaver-session-map-item-subtext">' + _esc(item.activity_detail) + '</div>';
+      html += '<div class="agent-panel-session-map-item-subtext">' + _esc(item.activity_detail) + '</div>';
     }
   }
   html += '</div>';
@@ -1541,27 +1541,27 @@ function _weaverRenderSessionMapAgents(summary) {
 function _weaverRenderSessionMapQueuedFollowUp(summary) {
   var items = _weaverSummaryItems(summary);
   if (!items.length) return '';
-  var html = '<div class="weaver-health-summary">';
-  html += '<div class="weaver-health-header">';
-  html += '<span class="weaver-health-title">Queued follow-up</span>';
-  html += '<span class="weaver-health-total">' + items.length + ' queued item'
+  var html = '<div class="agent-panel-health-summary">';
+  html += '<div class="agent-panel-health-header">';
+  html += '<span class="agent-panel-health-title">Queued follow-up</span>';
+  html += '<span class="agent-panel-health-total">' + items.length + ' queued item'
     + (items.length === 1 ? '' : 's') + '</span>';
   html += '</div>';
-  html += '<div class="weaver-health-list">';
+  html += '<div class="agent-panel-health-list">';
   for (var i = 0; i < items.length; i++) {
     var item = items[i];
     var pill = item.source === 'dispatch_queue' ? 'Dispatch queue' : _weaverHumanizeToken(item.queue_state || 'Stream queue');
-    html += '<div class="weaver-session-map-list-item">';
-    html += '<span class="weaver-health-pill weaver-health-pill-notice">' + _esc(pill) + '</span>';
-    html += '<span class="weaver-session-map-item-text">' + _esc(item.task_title || item.task_id || '') + '</span>';
+    html += '<div class="agent-panel-session-map-list-item">';
+    html += '<span class="agent-panel-health-pill agent-panel-health-pill-notice">' + _esc(pill) + '</span>';
+    html += '<span class="agent-panel-session-map-item-text">' + _esc(item.task_title || item.task_id || '') + '</span>';
     if (item.branch) {
-      html += '<span class="weaver-session-map-item-meta">' + _esc(item.branch.replace(/^loom\//, '')) + '</span>';
+      html += '<span class="agent-panel-session-map-item-meta">' + _esc(item.branch.replace(/^loom\//, '')) + '</span>';
     } else if (item.target_agent_name) {
-      html += '<span class="weaver-session-map-item-meta">' + _esc(item.target_agent_name) + '</span>';
+      html += '<span class="agent-panel-session-map-item-meta">' + _esc(item.target_agent_name) + '</span>';
     }
     html += '</div>';
     if (item.gate_reason) {
-      html += '<div class="weaver-session-map-item-subtext">' + _esc(item.gate_reason) + '</div>';
+      html += '<div class="agent-panel-session-map-item-subtext">' + _esc(item.gate_reason) + '</div>';
     }
   }
   html += '</div>';
@@ -1572,10 +1572,10 @@ function _weaverRenderSessionMapQueuedFollowUp(summary) {
 function _weaverRenderSessionMapJournal(summary) {
   var items = _weaverSummaryItems(summary);
   if (!items.length) return '';
-  var html = '<div class="weaver-health-summary">';
-  html += '<div class="weaver-health-header">';
-  html += '<span class="weaver-health-title">Recent decisions, plans, and checkpoints</span>';
-  html += '<span class="weaver-health-total">' + items.length + ' item'
+  var html = '<div class="agent-panel-health-summary">';
+  html += '<div class="agent-panel-health-header">';
+  html += '<span class="agent-panel-health-title">Recent decisions, plans, and checkpoints</span>';
+  html += '<span class="agent-panel-health-total">' + items.length + ' item'
     + (items.length === 1 ? '' : 's') + '</span>';
   html += '</div>';
   html += _weaverRenderJournalEntries(items, false);
@@ -1587,21 +1587,21 @@ function _weaverRenderJournalEntries(entries, allowContextMenu) {
   var sorted = (entries || []).slice().sort(function(a, b) {
     return (b.id || 0) - (a.id || 0);
   });
-  var html = '<div class="weaver-journal">';
+  var html = '<div class="agent-panel-journal">';
   for (var i = 0; i < sorted.length; i++) {
     var e = sorted[i];
-    var typeClass = 'weaver-badge-' + (e.type || 'observation');
+    var typeClass = 'agent-panel-badge-' + (e.type || 'observation');
     var ago = _weaverTimeAgo(e.timestamp);
-    html += '<div class="weaver-entry"'
+    html += '<div class="agent-panel-entry"'
       + (allowContextMenu && e.id
         ? ' oncontextmenu="weaverEntryCtx(event,' + e.id + ')"'
         : '')
       + '>';
-    html += '<div class="weaver-entry-header">';
-    html += '<span class="weaver-badge ' + typeClass + '">' + _esc(e.type || '?') + '</span>';
-    html += '<span class="weaver-entry-time">' + _esc(ago) + '</span>';
+    html += '<div class="agent-panel-entry-header">';
+    html += '<span class="agent-panel-badge ' + typeClass + '">' + _esc(e.type || '?') + '</span>';
+    html += '<span class="agent-panel-entry-time">' + _esc(ago) + '</span>';
     html += '</div>';
-    html += '<div class="weaver-entry-text">' + _esc(e.entry || '') + '</div>';
+    html += '<div class="agent-panel-entry-text">' + _esc(e.entry || '') + '</div>';
     html += '</div>';
   }
   html += '</div>';
@@ -1619,20 +1619,20 @@ function _weaverRenderOpenStreams(group) {
   var summary = _weaverOpenStreamsSummary(group);
   if (!summary.show) return '';
 
-  var html = '<div class="weaver-streams-summary">';
-  html += '<div class="weaver-health-header">';
-  html += '<span class="weaver-health-title">Open Streams</span>';
-  html += '<span class="weaver-health-total">' + summary.streams.length + ' open stream'
+  var html = '<div class="agent-panel-streams-summary">';
+  html += '<div class="agent-panel-health-header">';
+  html += '<span class="agent-panel-health-title">Open Streams</span>';
+  html += '<span class="agent-panel-health-total">' + summary.streams.length + ' open stream'
     + (summary.streams.length === 1 ? '' : 's') + '</span>';
   html += '</div>';
 
   if (!summary.streams.length) {
-    html += '<div class="weaver-stream-empty">No open streams.</div>';
+    html += '<div class="agent-panel-stream-empty">No open streams.</div>';
     html += '</div>';
     return html;
   }
 
-  html += '<div class="weaver-stream-list">';
+  html += '<div class="agent-panel-stream-list">';
   for (var i = 0; i < summary.streams.length; i++) {
     html += _weaverRenderOpenStreamCard(summary.streams[i], i);
   }
@@ -1702,20 +1702,20 @@ function _weaverRenderOpenStreamCard(stream, index) {
   var visibilityItems = _weaverStreamVisibilityItems(stream);
   var key = _weaverStreamAnchorKey(stream, index, title, branch);
 
-  var html = '<div class="weaver-stream-card" data-weaver-anchor="' + _esc(key) + '">';
-  html += '<div class="weaver-stream-card-header">';
-  html += '<div class="weaver-stream-heading">';
-  html += '<div class="weaver-stream-title-row">';
-  html += '<span class="weaver-stream-title">' + _esc(title) + '</span>';
-  html += '<span class="weaver-stream-state weaver-stream-state-'
+  var html = '<div class="agent-panel-stream-card" data-weaver-anchor="' + _esc(key) + '">';
+  html += '<div class="agent-panel-stream-card-header">';
+  html += '<div class="agent-panel-stream-heading">';
+  html += '<div class="agent-panel-stream-title-row">';
+  html += '<span class="agent-panel-stream-title">' + _esc(title) + '</span>';
+  html += '<span class="agent-panel-stream-state agent-panel-stream-state-'
     + _esc(stateMeta.className) + '">' + _esc(stateMeta.label) + '</span>';
   html += '</div>';
   if (branch && branch !== title) {
-    html += '<div class="weaver-stream-branch">' + _esc(branch) + '</div>';
+    html += '<div class="agent-panel-stream-branch">' + _esc(branch) + '</div>';
   }
   html += '</div>';
   if (mergeMeta.label) {
-    html += '<span class="weaver-stream-merge weaver-stream-merge-' + _esc(mergeMeta.className)
+    html += '<span class="agent-panel-stream-merge agent-panel-stream-merge-' + _esc(mergeMeta.className)
       + '">' + _esc(mergeMeta.label) + '</span>';
   }
   html += '</div>';
@@ -1731,7 +1731,7 @@ function _weaverRenderOpenStreamCard(stream, index) {
     metaHtml += _weaverRenderStreamMetaRow('Next', nextAction);
   }
   if (metaHtml) {
-    html += '<div class="weaver-stream-meta-list">';
+    html += '<div class="agent-panel-stream-meta-list">';
     html += metaHtml;
     html += '</div>';
   }
@@ -1761,29 +1761,29 @@ function _weaverRenderOpenStreamCard(stream, index) {
 }
 
 function _weaverRenderStreamMetaRow(label, value) {
-  return '<div class="weaver-stream-meta-label">' + _esc(label) + '</div>'
-    + '<div class="weaver-stream-meta-value">' + _esc(value) + '</div>';
+  return '<div class="agent-panel-stream-meta-label">' + _esc(label) + '</div>'
+    + '<div class="agent-panel-stream-meta-value">' + _esc(value) + '</div>';
 }
 
 function _weaverRenderStreamTaskGroup(title, kind, tasks, summarizeOnly) {
   if (!tasks.length) return '';
   var summary = tasks.length + ' ' + kind + ' task' + (tasks.length === 1 ? '' : 's');
-  var html = '<div class="weaver-stream-task-group">';
-  html += '<div class="weaver-stream-task-group-header">';
-  html += '<span class="weaver-stream-section-label weaver-stream-section-label-' + _esc(kind)
+  var html = '<div class="agent-panel-stream-task-group">';
+  html += '<div class="agent-panel-stream-task-group-header">';
+  html += '<span class="agent-panel-stream-section-label agent-panel-stream-section-label-' + _esc(kind)
     + '">' + _esc(title) + '</span>';
-  html += '<span class="weaver-stream-summary-count">' + _esc(summary) + '</span>';
+  html += '<span class="agent-panel-stream-summary-count">' + _esc(summary) + '</span>';
   html += '</div>';
-  html += '<div class="weaver-stream-task-list">';
+  html += '<div class="agent-panel-stream-task-list">';
   var limit = summarizeOnly ? 2 : 3;
   for (var i = 0; i < tasks.length && i < limit; i++) {
     var item = tasks[i];
-    html += '<span class="weaver-stream-task-chip weaver-stream-task-chip-' + _esc(kind) + '">';
+    html += '<span class="agent-panel-stream-task-chip agent-panel-stream-task-chip-' + _esc(kind) + '">';
     html += _esc(item.title || item.id || '');
     html += '</span>';
   }
   if (tasks.length > limit) {
-    html += '<span class="weaver-stream-task-chip weaver-stream-task-chip-more">+'
+    html += '<span class="agent-panel-stream-task-chip agent-panel-stream-task-chip-more">+'
       + (tasks.length - limit) + ' more</span>';
   }
   html += '</div>';
@@ -1793,26 +1793,26 @@ function _weaverRenderStreamTaskGroup(title, kind, tasks, summarizeOnly) {
 
 function _weaverRenderStreamVisibilityGroup(items) {
   if (!items.length) return '';
-  var html = '<div class="weaver-stream-task-group">';
-  html += '<div class="weaver-stream-task-group-header">';
-  html += '<span class="weaver-stream-section-label weaver-stream-section-label-context">'
+  var html = '<div class="agent-panel-stream-task-group">';
+  html += '<div class="agent-panel-stream-task-group-header">';
+  html += '<span class="agent-panel-stream-section-label agent-panel-stream-section-label-context">'
     + 'Recent context</span>';
-  html += '<span class="weaver-stream-summary-count">' + items.length + ' item'
+  html += '<span class="agent-panel-stream-summary-count">' + items.length + ' item'
     + (items.length === 1 ? '' : 's') + '</span>';
   html += '</div>';
-  html += '<div class="weaver-stream-visibility-list">';
+  html += '<div class="agent-panel-stream-visibility-list">';
   for (var i = 0; i < items.length && i < 2; i++) {
     var item = items[i];
     var kind = _weaverVisibilityKindLabel(item);
-    html += '<div class="weaver-stream-visibility-item">';
+    html += '<div class="agent-panel-stream-visibility-item">';
     if (kind) {
-      html += '<span class="weaver-stream-visibility-kind">' + _esc(kind) + '</span>';
+      html += '<span class="agent-panel-stream-visibility-kind">' + _esc(kind) + '</span>';
     }
-    html += '<span class="weaver-stream-visibility-text">' + _esc(item.summary) + '</span>';
+    html += '<span class="agent-panel-stream-visibility-text">' + _esc(item.summary) + '</span>';
     html += '</div>';
   }
   if (items.length > 2) {
-    html += '<div class="weaver-stream-visibility-more">+' + (items.length - 2)
+    html += '<div class="agent-panel-stream-visibility-more">+' + (items.length - 2)
       + ' more context item' + (items.length - 2 === 1 ? '' : 's') + '</div>';
   }
   html += '</div>';
@@ -2065,30 +2065,30 @@ function _weaverRenderTaskHealth(group) {
   var summary = _weaverTaskHealthSummary(group);
   if (!summary.total) return '';
 
-  var html = '<div class="weaver-health-summary">';
-  html += '<div class="weaver-health-header">';
-  html += '<span class="weaver-health-title">Task health</span>';
-  html += '<span class="weaver-health-total">' + summary.total + ' unhealthy</span>';
+  var html = '<div class="agent-panel-health-summary">';
+  html += '<div class="agent-panel-health-header">';
+  html += '<span class="agent-panel-health-title">Task health</span>';
+  html += '<span class="agent-panel-health-total">' + summary.total + ' unhealthy</span>';
   html += '</div>';
-  html += '<div class="weaver-health-counts">';
+  html += '<div class="agent-panel-health-counts">';
   for (var i = 0; i < _weaverHealthOrder.length; i++) {
     var stateName = _weaverHealthOrder[i];
     var count = summary.counts[stateName] || 0;
     if (!count) continue;
-    html += '<span class="weaver-health-pill weaver-health-pill-' + _esc(stateName) + '">'
+    html += '<span class="agent-panel-health-pill agent-panel-health-pill-' + _esc(stateName) + '">'
       + count + ' ' + _esc(_weaverHealthLabels[stateName]) + '</span>';
   }
   html += '</div>';
   if (summary.items.length) {
-    html += '<div class="weaver-health-list">';
+    html += '<div class="agent-panel-health-list">';
     for (var j = 0; j < summary.items.length; j++) {
       var item = summary.items[j];
-      html += '<div class="weaver-health-item">';
-      html += '<span class="weaver-health-item-state weaver-health-pill-' + _esc(item.health_state) + '">'
+      html += '<div class="agent-panel-health-item">';
+      html += '<span class="agent-panel-health-item-state agent-panel-health-pill-' + _esc(item.health_state) + '">'
         + _esc(_weaverHealthLabels[item.health_state] || item.health_state) + '</span>';
-      html += '<span class="weaver-health-item-title">' + _esc(item.title) + '</span>';
+      html += '<span class="agent-panel-health-item-title">' + _esc(item.title) + '</span>';
       if (item.via) {
-        html += '<span class="weaver-health-item-via">via ' + _esc(item.via) + '</span>';
+        html += '<span class="agent-panel-health-item-via">via ' + _esc(item.via) + '</span>';
       }
       html += '</div>';
     }
@@ -2102,32 +2102,32 @@ function _weaverRenderVerificationSummary(group) {
   var summary = _weaverVerificationSummary(group);
   if (!summary.total) return '';
 
-  var html = '<div class="weaver-verification-summary">';
-  html += '<div class="weaver-health-header">';
-  html += '<span class="weaver-health-title">Verification</span>';
-  html += '<span class="weaver-health-total">' + summary.total + ' open checkpoint' + (summary.total === 1 ? '' : 's') + '</span>';
+  var html = '<div class="agent-panel-verification-summary">';
+  html += '<div class="agent-panel-health-header">';
+  html += '<span class="agent-panel-health-title">Verification</span>';
+  html += '<span class="agent-panel-health-total">' + summary.total + ' open checkpoint' + (summary.total === 1 ? '' : 's') + '</span>';
   html += '</div>';
-  html += '<div class="weaver-health-counts">';
+  html += '<div class="agent-panel-health-counts">';
   for (var i = 0; i < summary.order.length; i++) {
     var stateName = summary.order[i];
     var count = summary.counts[stateName] || 0;
     if (!count) continue;
-    html += '<span class="weaver-health-pill weaver-health-pill-' + _esc(stateName) + '">'
+    html += '<span class="agent-panel-health-pill agent-panel-health-pill-' + _esc(stateName) + '">'
       + count + ' ' + _esc(_weaverVerificationLabels[stateName] || stateName) + '</span>';
   }
   html += '</div>';
   for (var j = 0; j < summary.items.length; j++) {
     var item = summary.items[j];
-    html += '<div class="weaver-verification-item">';
-    html += '<span class="weaver-health-pill weaver-health-pill-' + _esc(item.verification_state) + '">'
+    html += '<div class="agent-panel-verification-item">';
+    html += '<span class="agent-panel-health-pill agent-panel-health-pill-' + _esc(item.verification_state) + '">'
       + _esc(_weaverVerificationLabels[item.verification_state] || item.verification_state) + '</span>';
-    html += '<span class="weaver-verification-item-title">' + _esc(item.title) + '</span>';
+    html += '<span class="agent-panel-verification-item-title">' + _esc(item.title) + '</span>';
     if (item.verification_mode) {
-      html += '<span class="weaver-verification-item-meta">' + _esc(item.verification_mode) + '</span>';
+      html += '<span class="agent-panel-verification-item-meta">' + _esc(item.verification_mode) + '</span>';
     }
     html += '</div>';
     if (item.detail) {
-      html += '<div class="weaver-verification-item-meta">' + _esc(item.detail) + '</div>';
+      html += '<div class="agent-panel-verification-item-meta">' + _esc(item.detail) + '</div>';
     }
   }
   html += '</div>';
@@ -2167,34 +2167,34 @@ function _weaverRenderBoundarySummary(group) {
   });
   if (!items.length) return '';
 
-  var html = '<div class="weaver-health-summary">';
-  html += '<div class="weaver-health-header">';
-  html += '<span class="weaver-health-title">Branch review points</span>';
-  html += '<span class="weaver-health-total">' + items.length + ' branch'
+  var html = '<div class="agent-panel-health-summary">';
+  html += '<div class="agent-panel-health-header">';
+  html += '<span class="agent-panel-health-title">Branch review points</span>';
+  html += '<span class="agent-panel-health-total">' + items.length + ' branch'
     + (items.length === 1 ? '' : 'es') + '</span>';
   html += '</div>';
   for (var i = 0; i < items.length; i++) {
     var item = items[i];
     var pillState = item.partial_review_safe ? 'passed' : 'failed';
     var pillLabel = item.partial_review_safe ? 'Safe for partial review' : 'Branch advanced';
-    html += '<div class="weaver-verification-item">';
-    html += '<span class="weaver-health-pill weaver-health-pill-' + _esc(pillState) + '">'
+    html += '<div class="agent-panel-verification-item">';
+    html += '<span class="agent-panel-health-pill agent-panel-health-pill-' + _esc(pillState) + '">'
       + _esc(pillLabel) + '</span>';
-    html += '<span class="weaver-verification-item-title">' + _esc(item.latest_boundary_task) + '</span>';
+    html += '<span class="agent-panel-verification-item-title">' + _esc(item.latest_boundary_task) + '</span>';
     if (item.branch) {
-      html += '<span class="weaver-verification-item-meta">' + _esc(item.branch.replace(/^loom\//, '')) + '</span>';
+      html += '<span class="agent-panel-verification-item-meta">' + _esc(item.branch.replace(/^loom\//, '')) + '</span>';
     }
     html += '</div>';
     if (item.current_task) {
-      html += '<div class="weaver-verification-item-meta">Current: ' + _esc(item.current_task) + '</div>';
+      html += '<div class="agent-panel-verification-item-meta">Current: ' + _esc(item.current_task) + '</div>';
     }
     if (item.queued_followers.length) {
-      html += '<div class="weaver-verification-item-meta">Queued next: '
+      html += '<div class="agent-panel-verification-item-meta">Queued next: '
         + _esc(item.queued_followers.map(function(task) { return task.task; }).join(', '))
         + '</div>';
     }
     if (item.started_followers.length) {
-      html += '<div class="weaver-verification-item-meta">Beyond boundary: '
+      html += '<div class="agent-panel-verification-item-meta">Beyond boundary: '
         + _esc(item.started_followers.map(function(task) { return task.task; }).join(', '))
         + '</div>';
     }
@@ -2331,10 +2331,10 @@ function weaverInstrInput(textarea) {
   _weaverCustomInstrDraft = textarea.value;
   // Show save button (re-render just the settings section would be heavy;
   // instead just toggle the button visibility)
-  var btn = textarea.parentElement.querySelector('.weaver-save-btn');
+  var btn = textarea.parentElement.querySelector('.agent-panel-save-btn');
   if (!btn) {
     var b = document.createElement('button');
-    b.className = 'weaver-save-btn';
+    b.className = 'agent-panel-save-btn';
     b.textContent = 'Save';
     b.onclick = weaverSaveInstructions;
     textarea.parentElement.appendChild(b);
