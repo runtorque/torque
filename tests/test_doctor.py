@@ -71,6 +71,17 @@ class LoomDoctorTests(unittest.TestCase):
             )
         )
 
+    def _add_legacy_kinds_columns(self):
+        self.db._conn.execute(
+            "ALTER TABLE agents ADD COLUMN template TEXT NOT NULL DEFAULT ''"
+        )
+        self.db._conn.execute(
+            "ALTER TABLE agents ADD COLUMN created_by_weaver_id TEXT NOT NULL DEFAULT ''"
+        )
+        self.db._conn.execute(
+            "ALTER TABLE board_tasks ADD COLUMN weaver_owner_id TEXT NOT NULL DEFAULT ''"
+        )
+
     def test_build_doctor_report_warns_when_no_engineer_exists(self):
         home = self._home_dir()
         self.db.save_board_task(
@@ -709,11 +720,10 @@ class LoomDoctorTests(unittest.TestCase):
                 assigned_engineer_id="weaver-1",
             )
         )
+        self._add_legacy_kinds_columns()
         self.db._conn.execute(
-            "ALTER TABLE board_tasks ADD COLUMN weaver_owner_id TEXT NOT NULL DEFAULT ''"
-        )
-        self.db._conn.execute(
-            "UPDATE agents SET kind='', role='', owner_engineer_id='other-engineer' "
+            "UPDATE agents SET template='researcher', created_by_weaver_id='weaver-1', "
+            "kind='', role='', owner_engineer_id='other-engineer' "
             "WHERE id='worker-1'"
         )
         self.db._conn.execute(

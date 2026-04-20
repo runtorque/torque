@@ -1827,7 +1827,15 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
     def backfill_agent_history(self):
         """Create history records for existing agents that lack them."""
         import time
-        if self._column_exists("agents", "role"):
+        if (
+            self._column_exists("agents", "role")
+            and self._column_exists("agents", "template")
+        ):
+            template_expr = (
+                "CASE WHEN TRIM(COALESCE(role, '')) != '' "
+                "THEN role ELSE template END"
+            )
+        elif self._column_exists("agents", "role"):
             template_expr = "role"
         elif self._column_exists("agents", "template"):
             template_expr = "template"

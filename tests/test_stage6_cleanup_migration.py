@@ -188,6 +188,59 @@ class Stage6CleanupMigrationTests(unittest.TestCase):
         self.assertEqual(stderr.getvalue().strip(), expected)
         self.assertIn(expected, "\n".join(cm.output))
 
+    def test_stage1_upgrade_preserves_agent_history_role_via_legacy_template(self):
+        path = self._path("stage1-history-upgrade.db")
+        seeded = LoomDB(path)
+        seeded.init()
+        seeded.save_agent(
+            AgentCell(
+                id="worker-1",
+                name="Worker",
+                group="g",
+                slug="worker",
+                template="researcher",
+                role="researcher",
+                kind="worker",
+                owner_engineer_id="weaver-1",
+            )
+        )
+        seeded.close()
+
+        conn = sqlite3.connect(str(path))
+        conn.execute(
+            "ALTER TABLE agents ADD COLUMN template TEXT NOT NULL DEFAULT ''"
+        )
+        conn.execute(
+            "ALTER TABLE agents ADD COLUMN created_by_weaver_id TEXT NOT NULL DEFAULT ''"
+        )
+        conn.execute(
+            "UPDATE agents SET template='researcher', created_by_weaver_id='weaver-1', "
+            "kind='', role='', owner_engineer_id='' WHERE id='worker-1'"
+        )
+        conn.execute(
+            "UPDATE meta SET value='1' WHERE key='schema_kinds_migration_version'"
+        )
+        conn.execute("DELETE FROM agent_history")
+        conn.commit()
+        conn.close()
+
+        upgraded = LoomDB(path)
+        self.addCleanup(upgraded.close)
+        upgraded.init()
+
+        self.assertEqual(
+            upgraded._conn.execute(
+                "SELECT kind, role FROM agents WHERE id='worker-1'"
+            ).fetchone(),
+            ("worker", "researcher"),
+        )
+        self.assertEqual(
+            upgraded._conn.execute(
+                "SELECT template FROM agent_history WHERE id='worker-1'"
+            ).fetchone(),
+            ("researcher",),
+        )
+
     def test_clean_v3_boot_skips_cleanup_and_emits_no_warnings(self):
         path = self._path("clean-v3.db")
         seeded = LoomDB(path)
