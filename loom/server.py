@@ -1961,6 +1961,7 @@ async def main(connection=None):
                                         target_window_id: str = "",
                                         persistent_prompt_text: str = "",
                                         created_by_weaver_id: str = "",
+                                        owner_engineer_id: str = "",
                                         restore_focus_to_prev_tab: bool = False):
         return await agent_launch.create_agent_with_config(
             group,
@@ -1971,6 +1972,7 @@ async def main(connection=None):
             target_window_id=target_window_id,
             persistent_prompt_text=persistent_prompt_text,
             created_by_weaver_id=created_by_weaver_id,
+            owner_engineer_id=owner_engineer_id,
             restore_focus_to_prev_tab=restore_focus_to_prev_tab,
         )
 
@@ -4040,6 +4042,7 @@ async def main(connection=None):
                     external_url=ext_link["external_url"],
                     depends_on=data.get("depends_on", []),
                     scheduled_at=data.get("scheduled_at", ""),
+                    assigned_engineer_id=data.get("assigned_engineer_id", ""),
                     verification_mode=data.get("verification_mode", ""),
                     verification_state=data.get("verification_state", ""),
                     verification_notes=data.get("verification_notes", ""),
@@ -4657,6 +4660,8 @@ async def main(connection=None):
                                 persistent_prompt_text=persistent_prompt_text,
                                 created_by_weaver_id=data.get(
                                     "_created_by_weaver_id", ""),
+                                owner_engineer_id=data.get(
+                                    "owner_engineer_id", ""),
                                 restore_focus_to_prev_tab=True,
                             )
                             if cell:

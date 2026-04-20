@@ -14,7 +14,8 @@ import logging
 
 from aiohttp import web
 
-from .mcp_weaver import WEAVER_TOOLS, _authorize_weaver_cell, _dispatch_weaver_tool
+from .mcp_engineer import ENGINEER_TOOLS, _dispatch_engineer_tool
+from .mcp_weaver import WEAVER_TOOLS, _dispatch_weaver_tool
 from .server_artifacts import serialize_task_for_mcp
 
 log = logging.getLogger("loom")
@@ -516,15 +517,27 @@ TOOLS = [
 _TOOL_MAP = {t["name"]: t for t in TOOLS}
 
 # Combined tool list (agent + weaver tools)
-ALL_TOOLS = TOOLS + WEAVER_TOOLS
+ALL_TOOLS = TOOLS + ENGINEER_TOOLS + WEAVER_TOOLS
 _ALL_TOOL_MAP = {t["name"]: t for t in ALL_TOOLS}
 
 
 def _visible_tools(state, cell_id: str):
     """Return the MCP tool list visible to the caller."""
     tools = list(TOOLS)
-    _, _, auth_error = _authorize_weaver_cell(state, cell_id)
-    if not auth_error:
+    cell = state.agents.get(str(cell_id or "").strip()) if cell_id else None
+    caller_kind = str(getattr(cell, "kind", "") or "").strip() if cell else ""
+    is_legacy_weaver = bool(
+        cell
+        and cell.cell_type == "agent"
+        and state.get_group_settings(getattr(cell, "group", "")).weaver_agent_id
+        == cell.id
+    )
+    if caller_kind == "engineer":
+        tools.extend(ENGINEER_TOOLS)
+        tools.extend(WEAVER_TOOLS)
+    elif is_legacy_weaver:
+        tools.extend(WEAVER_TOOLS)
+    elif not cell_id:
         tools.extend(WEAVER_TOOLS)
     return tools
 
@@ -762,11 +775,63 @@ def create_mcp_handler(handle_command, state):
                     _jsonrpc_error(req_id, -32602,
                                    f"Unknown tool: {tool_name}"))
 
-            # Weaver tools don't require X-Loom-Cell-Id but use it
+            caller_cell = state.agents.get(str(cell_id or "").strip()) if cell_id else None
+            caller_kind = str(
+                getattr(caller_cell, "kind", "") or ""
+            ).strip() if caller_cell else ""
+            is_legacy_weaver = bool(
+                caller_cell
+                and caller_cell.cell_type == "agent"
+                and state.get_group_settings(
+                    getattr(caller_cell, "group", "")
+                ).weaver_agent_id == caller_cell.id
+            )
+
             if tool_name.startswith("weaver_"):
+                if cell_id and caller_kind != "engineer" and not is_legacy_weaver:
+                    return web.json_response(
+                        _jsonrpc_ok(req_id, {
+                            "content": [{
+                                "type": "text",
+                                "text": (
+                                    "weaver tools are only available to engineer "
+                                    "sessions or external MCP clients"
+                                ),
+                            }],
+                            "isError": True,
+                        }))
                 text, is_error = await _dispatch_weaver_tool(
                     tool_name, arguments, handle_command, state,
                     cell_id=cell_id)
+            elif tool_name.startswith("engineer_"):
+                if not cell_id:
+                    return web.json_response(
+                        _jsonrpc_ok(req_id, {
+                            "content": [{
+                                "type": "text",
+                                "text": (
+                                    "X-Loom-Cell-Id header is required"
+                                    " — engineer tools only work inside a"
+                                    " Loom-managed engineer session"
+                                ),
+                            }],
+                            "isError": True,
+                        }))
+                if caller_kind != "engineer":
+                    return web.json_response(
+                        _jsonrpc_ok(req_id, {
+                            "content": [{
+                                "type": "text",
+                                "text": (
+                                    "engineer tools are only available inside a "
+                                    "Loom-managed engineer session"
+                                ),
+                            }],
+                            "isError": True,
+                        }))
+                text, is_error = await _dispatch_engineer_tool(
+                    tool_name, arguments, handle_command, state,
+                    caller_id=cell_id)
             else:
                 if not cell_id:
                     return web.json_response(
