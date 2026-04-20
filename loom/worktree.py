@@ -335,6 +335,39 @@ def _dedupe_worktree_name(base: str, index: int,
     return f"{trimmed}{suffix}"
 
 
+def _agent_branch_slug(agent) -> str:
+    """Return the agent slug segment used in default worktree branch names."""
+    slug = str(getattr(agent, "slug", "") or "").strip()
+    if slug:
+        return slug
+    return _slugify_worktree_name(getattr(agent, "name", ""), max_len=30) or "unnamed"
+
+
+def _branch_prefix_for_agent(agent, state) -> str:
+    """Return the creation-time worktree branch prefix for an agent.
+
+    Worker branches intentionally capture who owned the worker when the
+    worktree was created. If an engineer is later deleted and the worker
+    transfers back to the user, the existing branch name is grandfathered.
+    """
+    if str(getattr(agent, "kind", "") or "").strip() != "worker":
+        return "loom/"
+
+    owner_engineer_id = str(
+        getattr(agent, "owner_engineer_id", "") or ""
+    ).strip()
+    if not owner_engineer_id:
+        return "loom/user/"
+
+    owner = None
+    if state is not None:
+        owner = getattr(state, "agents", {}).get(owner_engineer_id)
+    owner_slug = _agent_branch_slug(owner) if owner else ""
+    if owner_slug:
+        return f"loom/{owner_slug}/"
+    return "loom/user/"
+
+
 def _resolve_worktree_base_path(repo_root: str, base_dir: str) -> str:
     """Return the absolute base directory under which worktrees are created."""
     repo_root = os.path.realpath(os.path.expanduser(repo_root))
@@ -767,13 +800,15 @@ class WorktreeManager:
             return False
 
     async def _resolve_worktree_target(self, cell, repo_root: str, base_dir: str,
-                                       worktree_name: str = "") -> tuple[str, str]:
+                                       worktree_name: str = "",
+                                       state=None) -> tuple[str, str]:
         """Choose the final worktree branch/path pair for this creation."""
+        branch_prefix = _branch_prefix_for_agent(cell, state)
         requested = _slugify_worktree_name(worktree_name)
         if not requested:
-            slug = _slugify_worktree_name(cell.name, max_len=30) or "unnamed"
+            slug = _agent_branch_slug(cell)
             short_id = cell.id[:7]
-            branch = f"loom/{slug}-{short_id}"
+            branch = f"{branch_prefix}{slug}-{short_id}"
             wt_path = os.path.join(
                 _resolve_worktree_base_path(repo_root, base_dir),
                 cell.id,
@@ -784,7 +819,7 @@ class WorktreeManager:
         candidate = requested
         suffix_index = 2
         while True:
-            branch = f"loom/{candidate}"
+            branch = f"{branch_prefix}{candidate}"
             wt_path = os.path.realpath(os.path.join(base_path, candidate))
             if os.path.commonpath([base_path, wt_path]) != base_path:
                 candidate = _dedupe_worktree_name(requested, suffix_index)
@@ -800,7 +835,8 @@ class WorktreeManager:
                      base_dir: str = ".loom/worktrees",
                      base_branch: str = "",
                      symlinks: list[str] | None = None,
-                     worktree_name: str = "") -> Optional[str]:
+                     worktree_name: str = "",
+                     state=None) -> Optional[str]:
         """Create a git worktree for the cell.
 
         Args:
@@ -812,6 +848,8 @@ class WorktreeManager:
                 root into worktree.
             worktree_name: Optional custom name for the worktree folder and
                 branch suffix.
+            state: MatrixState-like object used to resolve owner engineer
+                slugs for worker branch namespacing.
 
         Returns:
             Absolute path to the worktree, or None on failure.
@@ -822,6 +860,7 @@ class WorktreeManager:
                 repo_root,
                 base_dir,
                 worktree_name=worktree_name,
+                state=state,
             )
             os.makedirs(os.path.dirname(wt_path), exist_ok=True)
 

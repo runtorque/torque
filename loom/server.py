@@ -2219,6 +2219,7 @@ async def _handle_relaunch_agent_command(
                     base_dir=cell.worktree_base_dir or ".loom/worktrees",
                     base_branch=launch_cfg.get("worktree_base_branch", "") or "",
                     symlinks=launch_cfg.get("worktree_symlinks", []),
+                    state=state,
                 )
                 if wt_path:
                     cell.directory = wt_path
@@ -3976,7 +3977,9 @@ async def main(connection=None):
                                 or ".loom/worktrees",
                             base_branch=cell.worktree_base_branch
                                 or gs.worktree_base_branch or "",
-                            symlinks=gs.worktree_symlinks)
+                            symlinks=gs.worktree_symlinks,
+                            state=state,
+                        )
                         if wt_path:
                             cell.directory = wt_path
                             state._emit_agent(cell)

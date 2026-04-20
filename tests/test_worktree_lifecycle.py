@@ -52,6 +52,9 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         return SimpleNamespace(
             id=agent_id,
             name=name,
+            slug="",
+            kind="",
+            owner_engineer_id="",
             worktree_path="",
             worktree_branch="",
             worktree_repo_root="",
@@ -59,6 +62,13 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
             worktree_dirty=False,
             worktree_diff={},
             worktree_checkpoints=0,
+        )
+
+    def _make_state(self, *cells):
+        return SimpleNamespace(
+            agents={
+                cell.id: cell for cell in cells
+            }
         )
 
     def _worktree_gitdir(self, wt_path: str) -> Path:
@@ -208,6 +218,79 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(cell.worktree_branch.startswith("loom/worker-"))
 
+    async def test_worker_branch_is_namespaced_under_owner_engineer_slug(self):
+        engineer = self._make_cell(agent_id="eng12345", name="Alice")
+        engineer.kind = "engineer"
+        engineer.slug = "alice"
+        worker = self._make_cell(agent_id="face1234", name="Feature Worker")
+        worker.kind = "worker"
+        worker.slug = "feature-worker"
+        worker.owner_engineer_id = engineer.id
+
+        wt_path = await self.mgr.create(
+            worker,
+            str(self.repo_root),
+            base_branch="main",
+            state=self._make_state(engineer, worker),
+        )
+
+        self.assertIsNotNone(wt_path)
+        self.assertRegex(
+            worker.worktree_branch,
+            r"^loom/alice/feature-worker-[a-f0-9]+$",
+        )
+
+    async def test_worker_branch_uses_user_namespace_without_owner(self):
+        worker = self._make_cell(agent_id="cafe1234", name="Feature Worker")
+        worker.kind = "worker"
+        worker.slug = "feature-worker"
+
+        wt_path = await self.mgr.create(
+            worker,
+            str(self.repo_root),
+            base_branch="main",
+            state=self._make_state(worker),
+        )
+
+        self.assertIsNotNone(wt_path)
+        self.assertRegex(
+            worker.worktree_branch,
+            r"^loom/user/feature-worker-[a-f0-9]+$",
+        )
+
+    async def test_engineer_branch_keeps_flat_naming(self):
+        engineer = self._make_cell(agent_id="beef1234", name="Alice")
+        engineer.kind = "engineer"
+        engineer.slug = "alice"
+
+        wt_path = await self.mgr.create(
+            engineer,
+            str(self.repo_root),
+            base_branch="main",
+            state=self._make_state(engineer),
+        )
+
+        self.assertIsNotNone(wt_path)
+        self.assertRegex(engineer.worktree_branch, r"^loom/alice-[a-f0-9]+$")
+
+    async def test_architect_branch_keeps_flat_naming(self):
+        architect = self._make_cell(agent_id="fade1234", name="Productmind")
+        architect.kind = "architect"
+        architect.slug = "productmind"
+
+        wt_path = await self.mgr.create(
+            architect,
+            str(self.repo_root),
+            base_branch="main",
+            state=self._make_state(architect),
+        )
+
+        self.assertIsNotNone(wt_path)
+        self.assertRegex(
+            architect.worktree_branch,
+            r"^loom/productmind-[a-f0-9]+$",
+        )
+
     async def test_custom_worktree_name_is_sanitized_for_branch_and_path(self):
         cell = self._make_cell()
 
@@ -251,6 +334,56 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
             Path(second_path).resolve(),
             (self.repo_root / ".loom" / "worktrees" / "feature-api-v2-2").resolve(),
         )
+
+    async def test_legacy_flat_branch_still_diff_merges_and_removes(self):
+        cell = self._make_cell(agent_id="123abcd9", name="Legacy Worker")
+        cell.kind = "worker"
+        cell.slug = "legacy-worker"
+        cell.worktree_path = str(
+            self.repo_root / ".loom" / "worktrees" / "legacy-worker"
+        )
+        cell.worktree_branch = "loom/legacy-worker-123abcd"
+        cell.worktree_repo_root = str(self.repo_root)
+        cell.worktree_base_branch = "main"
+
+        proc = await asyncio.create_subprocess_exec(
+            "git",
+            "-C",
+            str(self.repo_root),
+            "worktree",
+            "add",
+            "-b",
+            cell.worktree_branch,
+            cell.worktree_path,
+            "main",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            self.fail(f"git worktree add failed: {stderr.decode().strip()}")
+
+        readme = Path(cell.worktree_path) / "README.md"
+        readme.write_text("line one\nlegacy branch change\n")
+        await self._git("add", "README.md", cwd=cell.worktree_path)
+        await self._git("commit", "-m", "Legacy branch update", cwd=cell.worktree_path)
+
+        summary = await self.mgr.diff_files_summary(cell)
+        self.assertEqual(summary["stats"]["files"], 1)
+        self.assertEqual(summary["files"][0]["path"], "README.md")
+
+        merged = await self.mgr.server_merge(cell, "Merge legacy branch")
+        self.assertTrue(merged["ok"], merged.get("error"))
+        self.assertEqual(
+            (self.repo_root / "README.md").read_text(),
+            "line one\nlegacy branch change\n",
+        )
+
+        old_path = Path(cell.worktree_path)
+        removed = await self.mgr.remove(cell)
+        self.assertTrue(removed)
+        self.assertFalse(old_path.exists())
+        self.assertEqual(cell.worktree_branch, "")
 
     async def test_checkpoint_history_and_rollback_cover_worktree_progress(self):
         cell = self._make_cell()

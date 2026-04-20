@@ -457,6 +457,7 @@ class AgentLaunchService:
                     base_branch=launch_cfg.get("worktree_base_branch", ""),
                     symlinks=launch_cfg.get("worktree_symlinks", []),
                     worktree_name=launch_cfg.get("worktree_name", ""),
+                    state=self.state,
                 )
                 if worktree_path:
                     cell.directory = worktree_path
