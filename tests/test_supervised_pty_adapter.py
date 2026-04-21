@@ -205,6 +205,47 @@ class SupervisedPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await adapter_b.shutdown()
 
+    async def test_adopt_supervisor_session_reinstalls_mcp_and_hooks(self):
+        """Parity with ITerm2Adapter.reconnect_orphans: when the daemon
+        restarts and adopts a live supervisor session for an awareness
+        agent, it must re-install hooks, MCP config, and skills in the
+        agent's working directory so files removed between restarts are
+        recreated.
+        """
+        state, adapter = await self._make_adapter()
+        try:
+            state.add_group("Loom")
+            cell = state.add_agent(
+                name="Awareness",
+                group="Loom",
+                terminal_backend="pty",
+                command="sleep 3",
+                directory=self.tmp.name,
+            )
+            cell.agent_type = "claude-code"
+            await adapter.create_session(cell)
+            # Simulate `.mcp.json` being removed between restarts.
+            mcp_file = Path(self.tmp.name) / ".mcp.json"
+            if mcp_file.exists():
+                mcp_file.unlink()
+            # Adopt the existing session into a fresh state as if the
+            # daemon was restarted and loaded the cell from SQLite.
+            info = {
+                "session_id": cell.session_id,
+                "cols": 120,
+                "rows": 32,
+                "bootstrap_dir": "",
+                "pid": 0,
+                "alive": True,
+            }
+            await adapter._adopt_supervisor_session(cell, info)
+            self.assertTrue(
+                mcp_file.exists(),
+                "adopted awareness agent should have .mcp.json re-installed",
+            )
+        finally:
+            await adapter.shutdown()
+
     async def test_reconnect_orphans_clears_cells_without_live_sessions(self):
         state, adapter = await self._make_adapter()
         try:

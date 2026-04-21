@@ -1627,7 +1627,7 @@ async def _relaunch_agent_after_worktree_removal(
     base_dir = cell.worktree_repo_root or cell.directory \
         or await resolve_base_dir(cell.group)
     use_weaver_launch = (
-        str(getattr(cell, "kind", "") or "").strip() == "engineer"
+        str(getattr(cell, "kind", "") or "").strip() in ("engineer", "architect")
         or bool(is_designated_weaver and is_designated_weaver(cell))
     )
     resolver = (
@@ -2251,7 +2251,7 @@ async def _handle_relaunch_agent_command(
     base_dir = cell.worktree_repo_root or cell.directory \
         or await resolve_base_dir(cell.group)
     use_weaver_launch = (
-        str(getattr(cell, "kind", "") or "").strip() == "engineer"
+        str(getattr(cell, "kind", "") or "").strip() in ("engineer", "architect")
         or is_designated_weaver(cell)
     )
     resolver = (
@@ -2269,13 +2269,19 @@ async def _handle_relaunch_agent_command(
     cell.idle_timeout = int(
         launch_cfg.get("idle_timeout", cell.idle_timeout) or 0)
     if cell.cell_type == "agent":
-        cell.command = launch_cfg.get("command", cell.command)
-        cell.profile = launch_cfg.get("profile", cell.profile)
-        cell.tab_color = launch_cfg.get("tab_color", cell.tab_color)
-        cell.icon = launch_cfg.get("icon", cell.icon)
-        cell.agent_type = launch_cfg.get("agent_type", cell.agent_type)
+        # Fall back to the cell's persisted values when the re-resolved
+        # launch_cfg has empty entries.  The group-level weaver_settings
+        # can't encode per-agent provider/command choices, so resolving
+        # without overrides often returns a generic default that would
+        # otherwise clobber an architect or engineer's actual config —
+        # including agent_type, which drives MCP/hook installation.
+        cell.command = launch_cfg.get("command") or cell.command
+        cell.profile = launch_cfg.get("profile") or cell.profile
+        cell.tab_color = launch_cfg.get("tab_color") or cell.tab_color
+        cell.icon = launch_cfg.get("icon") or cell.icon
+        cell.agent_type = launch_cfg.get("agent_type") or cell.agent_type
         if not cell.worktree_path:
-            cell.directory = launch_cfg.get("directory", cell.directory)
+            cell.directory = launch_cfg.get("directory") or cell.directory
     cell.worktree_base_dir = (
         launch_cfg.get("worktree_base_dir")
         or cell.worktree_base_dir
@@ -2353,6 +2359,145 @@ async def _handle_relaunch_agent_command(
         system_prompt=launch_cfg.get("system_prompt", ""),
         mcp_entrypoint=mcp_entrypoint_for_cell(cell),
     )
+    return None
+
+
+async def _handle_restart_agent_command(
+        data: dict,
+        state: MatrixState, *,
+        bridge,
+        worktree_mgr,
+        resolve_base_dir,
+        resolve_agent_launch_config,
+        resolve_weaver_launch_config,
+        apply_persistent_prompt,
+        build_cell_persistent_prompt,
+        persistent_prompt_filename,
+        is_designated_weaver,
+        send_agent_prompt) -> dict | None:
+    """Restart an agent from scratch using its original launch parameters.
+
+    Unlike ``relaunch`` (which resumes the prior provider session via
+    ``session_resume``), restart closes the current session, clears the
+    resumed-session state, and re-delivers the full startup + initial
+    prompt sequence, as if the agent had just been created.
+    """
+    cell = state.agents.get(data.get("id", ""))
+    if not cell:
+        return {"type": "error", "message": "Agent not found"}
+    if cell.cell_type != "agent":
+        return {"type": "error",
+                "message": "Only agents can be restarted"}
+
+    owner = _find_active_worktree_owner(state, cell)
+    if owner:
+        return {
+            "type": "error",
+            "message":
+                f"Cannot restart '{cell.name}' while "
+                f"'{owner.name}' is active on "
+                f"{owner.worktree_branch or owner.worktree_path}",
+        }
+
+    # Close any live session before opening a fresh one.
+    if cell.session_id:
+        try:
+            await bridge.close_session(cell.session_id)
+        except Exception:
+            log.exception("Failed to close session for '%s' during restart",
+                          cell.name)
+    cell.status = "stopped"
+    cell.session_id = None
+    # Start from scratch — drop any resumed provider session and any
+    # running task context so the new session gets a fresh run.
+    cell.agent_session_id = ""
+    cell.tasks_dispatched = 0
+    cell.current_task_id = ""
+    cell.mcp_messages = []
+
+    base_dir = cell.worktree_repo_root or cell.directory \
+        or await resolve_base_dir(cell.group)
+    kind = str(getattr(cell, "kind", "") or "").strip()
+    use_weaver_launch = (
+        kind in ("engineer", "architect")
+        or is_designated_weaver(cell)
+    )
+    resolver = (
+        resolve_weaver_launch_config if use_weaver_launch
+        else resolve_agent_launch_config
+    )
+    launch_cfg = resolver(
+        cell.group,
+        base_dir=base_dir,
+        explicit_template=cell.template,
+        overrides={},
+    )
+    cell.session_resume = bool(
+        launch_cfg.get("session_resume", cell.session_resume))
+    cell.idle_timeout = int(
+        launch_cfg.get("idle_timeout", cell.idle_timeout) or 0)
+    cell.command = launch_cfg.get("command") or cell.command
+    cell.profile = launch_cfg.get("profile") or cell.profile
+    cell.tab_color = launch_cfg.get("tab_color") or cell.tab_color
+    cell.icon = launch_cfg.get("icon") or cell.icon
+    cell.agent_type = launch_cfg.get("agent_type") or cell.agent_type
+    if not cell.worktree_path:
+        cell.directory = launch_cfg.get("directory") or cell.directory
+    cell.worktree_base_dir = (
+        launch_cfg.get("worktree_base_dir")
+        or cell.worktree_base_dir
+        or ".loom/worktrees")
+    state._emit_agent(cell)
+    state._db_save_agent(cell)
+
+    prev_directory = cell.directory
+    if cell.worktree_path:
+        if await worktree_mgr.validate(cell):
+            cell.directory = cell.worktree_path
+        else:
+            log.warning("Worktree invalid for '%s', clearing", cell.name)
+            cell.worktree_path = ""
+            cell.worktree_branch = ""
+            cell.worktree_repo_root = ""
+            cell.worktree_base_branch = ""
+            state._emit_agent(cell)
+            state._db_save_agent(cell)
+    if (cell.agent_type and prev_directory
+            and prev_directory != cell.directory):
+        get_adapter(cell.agent_type).uninstall_persistent_prompt(
+            os.path.expanduser(prev_directory),
+            persistent_prompt_filename(cell),
+        )
+
+    # Rebuild and re-apply the persistent prompt the same way creation does.
+    persistent_prompt_text = build_cell_persistent_prompt(cell, launch_cfg)
+    if kind == "architect":
+        persistent_prompt_text = _architect_persistent_prompt_text(
+            launch_cfg.get("system_prompt", ""))
+    apply_persistent_prompt(cell, launch_cfg, persistent_prompt_text)
+    state._emit_agent(cell)
+    state._db_save_agent(cell)
+
+    startup_prompt = _startup_prompt_for_new_agent(
+        agent_type=launch_cfg.get("agent_type", ""),
+        persistent_prompt_text=persistent_prompt_text,
+        is_weaver=use_weaver_launch,
+    )
+
+    await bridge.create_session(
+        cell,
+        env_vars=runtime_env_vars_for_cell(cell, launch_cfg.get("env_vars")),
+        env_file=launch_cfg.get("env_file", ""),
+        shell=launch_cfg.get("shell", ""),
+        system_prompt=launch_cfg.get("system_prompt", ""),
+        mcp_entrypoint=mcp_entrypoint_for_cell(cell),
+    )
+
+    if cell.session_id:
+        for prompt_text, send_kwargs in _new_agent_prompt_sequence(
+                launch_cfg,
+                startup_prompt=startup_prompt):
+            await send_agent_prompt(cell, prompt_text, **send_kwargs)
     return None
 
 
@@ -4048,6 +4193,22 @@ async def main(connection=None):
                     build_cell_persistent_prompt=_build_cell_persistent_prompt,
                     persistent_prompt_filename=_persistent_prompt_filename,
                     is_designated_weaver=_is_designated_weaver,
+                )
+
+            elif cmd == "restart_agent":
+                result = await _handle_restart_agent_command(
+                    data,
+                    state,
+                    bridge=bridge,
+                    worktree_mgr=worktree_mgr,
+                    resolve_base_dir=_resolve_base_dir,
+                    resolve_agent_launch_config=_resolve_agent_launch_config,
+                    resolve_weaver_launch_config=_resolve_weaver_launch_config,
+                    apply_persistent_prompt=_apply_persistent_prompt,
+                    build_cell_persistent_prompt=_build_cell_persistent_prompt,
+                    persistent_prompt_filename=_persistent_prompt_filename,
+                    is_designated_weaver=_is_designated_weaver,
+                    send_agent_prompt=_send_agent_prompt,
                 )
 
             elif cmd == "move_group":

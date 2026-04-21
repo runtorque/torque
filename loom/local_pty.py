@@ -980,6 +980,32 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
         self.state._emit_agent(cell)
         self.state._db_save_agent(cell)
 
+        # Re-install hooks, MCP config, and skills for awareness agents —
+        # parity with ITerm2Adapter.reconnect_orphans.  A daemon restart
+        # can happen across `uninstall_mcp_config` cleanups or a git
+        # checkout that removes the injected files, so an adopted session
+        # needs them re-written on the filesystem even though the PTY
+        # process itself is still alive.
+        if cell.agent_type and cell.directory:
+            adapter = get_adapter(cell.agent_type)
+            hook_dir = os.path.expanduser(cell.directory)
+            if hook_dir and hasattr(adapter, "install_hooks"):
+                if adapter.install_hooks(hook_dir):
+                    log.info("Re-installed hooks for '%s' in %s",
+                             cell.name, hook_dir)
+            if hook_dir and hasattr(adapter, "install_mcp_config"):
+                if adapter.install_mcp_config(
+                        hook_dir,
+                        mcp_entrypoint=mcp_entrypoint_for_cell(cell)):
+                    log.info("Re-installed MCP config for '%s' in %s",
+                             cell.name, hook_dir)
+            if hook_dir and hasattr(adapter, "install_skills"):
+                if adapter.install_skills(hook_dir):
+                    log.info("Re-installed skills for '%s' in %s",
+                             cell.name, hook_dir)
+            if hook_dir:
+                ensure_git_exclude(hook_dir)
+
     # -- session ops (delegated to supervisor) -----------------------------
 
     async def create_session(

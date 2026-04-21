@@ -485,3 +485,224 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             call["mcp_entrypoint"],
             self.server_agent_mod.ENGINEER_MCP_ENTRYPOINT,
         )
+
+    async def test_relaunch_stopped_architect_uses_weaver_launch_and_architect_mcp_entrypoint(self):
+        state = self._make_state()
+        architect = self._add_architect_cell(state, "arch-1", "Loomer")
+        architect.status = "stopped"
+        architect.agent_type = "codex"
+        bridge = _CapturingBridge()
+
+        async def fake_resolve_base_dir(group):
+            self.assertEqual(group, "loom")
+            return temp_dir
+
+        def fake_resolve_agent_launch_config(*args, **kwargs):
+            raise AssertionError(
+                "architect relaunch must use weaver launch config")
+
+        def fake_resolve_weaver_launch_config(group, *, base_dir="",
+                                              explicit_template="",
+                                              overrides=None):
+            self.assertEqual(group, "loom")
+            self.assertEqual(overrides, {})
+            # Weaver launch config sets worktree=False — architects
+            # must NOT spawn a worktree on relaunch.
+            cfg = self._launch_config(temp_dir)
+            cfg["worktree"] = False
+            return cfg
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            architect.directory = temp_dir
+            result = await self.server_mod._handle_relaunch_agent_command(
+                {"id": architect.id},
+                state,
+                bridge=bridge,
+                worktree_mgr=_FakeWorktreeManager(),
+                resolve_base_dir=fake_resolve_base_dir,
+                resolve_agent_launch_config=fake_resolve_agent_launch_config,
+                resolve_weaver_launch_config=fake_resolve_weaver_launch_config,
+                apply_persistent_prompt=lambda *a, **k: None,
+                build_cell_persistent_prompt=lambda *a, **k: "",
+                persistent_prompt_filename=lambda cell: f"{cell.id}.md",
+                is_designated_weaver=lambda cell: False,
+            )
+
+        self.assertIsNone(result)
+        self.assertEqual(architect.kind, "architect")
+        self.assertEqual(len(bridge.create_session_calls), 1)
+        call = bridge.create_session_calls[0]["kwargs"]
+        self.assertEqual(call["env_vars"]["LOOM_ARCHITECT_ID"], architect.id)
+        self.assertEqual(
+            call["mcp_entrypoint"],
+            self.server_agent_mod.ARCHITECT_MCP_ENTRYPOINT,
+        )
+        # Architect's persisted agent_type must survive re-resolution even
+        # when no per-agent overrides make it into launch_cfg.
+        self.assertEqual(architect.agent_type, "codex")
+
+    async def test_restart_agent_closes_session_and_resends_startup_sequence(self):
+        state = self._make_state()
+        engineer = self._add_engineer_cell(state, "eng-alice", "Alice")
+        engineer.status = "idle"
+        engineer.agent_type = "codex"
+        engineer.agent_session_id = "prev-session"
+        engineer.tasks_dispatched = 5
+        engineer.current_task_id = "LOOM:99"
+        engineer.session_id = "active-session"
+        closed = []
+        sent_prompts = []
+
+        class _Bridge(_CapturingBridge):
+            async def close_session(self, session_id):
+                closed.append(session_id)
+
+        bridge = _Bridge()
+
+        async def fake_resolve_base_dir(group):
+            del group
+            return temp_dir
+
+        def fake_resolve_weaver_launch_config(group, *, base_dir="",
+                                              explicit_template="",
+                                              overrides=None):
+            del group, base_dir, explicit_template, overrides
+            cfg = self._launch_config(temp_dir)
+            cfg["initial_prompt"] = "Engineer: get started on your queue."
+            return cfg
+
+        async def fake_send_agent_prompt(cell, prompt, **kwargs):
+            sent_prompts.append((cell.id, prompt, kwargs))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            engineer.directory = temp_dir
+            result = await self.server_mod._handle_restart_agent_command(
+                {"id": engineer.id},
+                state,
+                bridge=bridge,
+                worktree_mgr=_FakeWorktreeManager(),
+                resolve_base_dir=fake_resolve_base_dir,
+                resolve_agent_launch_config=lambda *a, **k: {},
+                resolve_weaver_launch_config=fake_resolve_weaver_launch_config,
+                apply_persistent_prompt=lambda *a, **k: None,
+                build_cell_persistent_prompt=lambda *a, **k: "persistent",
+                persistent_prompt_filename=lambda cell: f"{cell.id}.md",
+                is_designated_weaver=lambda cell: False,
+                send_agent_prompt=fake_send_agent_prompt,
+            )
+
+        self.assertIsNone(result)
+        self.assertEqual(closed, ["active-session"])
+        # Session-resume state must be cleared so the new session starts fresh.
+        self.assertEqual(engineer.agent_session_id, "")
+        self.assertEqual(engineer.tasks_dispatched, 0)
+        self.assertEqual(engineer.current_task_id, "")
+        # A fresh session was opened with the architect/engineer MCP entrypoint.
+        self.assertEqual(len(bridge.create_session_calls), 1)
+        call = bridge.create_session_calls[0]["kwargs"]
+        self.assertEqual(
+            call["mcp_entrypoint"],
+            self.server_agent_mod.ENGINEER_MCP_ENTRYPOINT,
+        )
+        # initial_prompt from launch_cfg is re-delivered.
+        prompts = [p for (_, p, _) in sent_prompts]
+        self.assertIn("Engineer: get started on your queue.", prompts)
+
+    async def test_restart_agent_rejects_terminals(self):
+        state = self._make_state()
+        state.add_group("loom")
+        terminal = state.add_terminal(
+            name="Term",
+            group="loom",
+            terminal_backend="iterm2",
+            profile="Default",
+            command="",
+            directory="/tmp",
+            tab_color="",
+        )
+
+        async def fake_resolve_base_dir(group):
+            del group
+            return "/tmp"
+
+        async def noop(*a, **k):
+            pass
+
+        result = await self.server_mod._handle_restart_agent_command(
+            {"id": terminal.id},
+            state,
+            bridge=_CapturingBridge(),
+            worktree_mgr=_FakeWorktreeManager(),
+            resolve_base_dir=fake_resolve_base_dir,
+            resolve_agent_launch_config=lambda *a, **k: {},
+            resolve_weaver_launch_config=lambda *a, **k: {},
+            apply_persistent_prompt=lambda *a, **k: None,
+            build_cell_persistent_prompt=lambda *a, **k: "",
+            persistent_prompt_filename=lambda cell: f"{cell.id}.md",
+            is_designated_weaver=lambda cell: False,
+            send_agent_prompt=noop,
+        )
+
+        self.assertEqual(result.get("type"), "error")
+
+    async def test_relaunch_preserves_cell_agent_type_when_launch_cfg_empty(self):
+        state = self._make_state()
+        engineer = self._add_engineer_cell(state, "eng-alice", "Alice")
+        engineer.status = "stopped"
+        engineer.agent_type = "codex"
+        engineer.command = "codex --custom"
+        bridge = _CapturingBridge()
+
+        async def fake_resolve_base_dir(group):
+            del group
+            return temp_dir
+
+        def fake_resolve_weaver_launch_config(group, *, base_dir="",
+                                              explicit_template="",
+                                              overrides=None):
+            del group, base_dir, explicit_template, overrides
+            # Simulate the bug trigger: group-level weaver settings can't
+            # describe this engineer's specific provider, so the resolver
+            # returns an empty agent_type/command.  These must NOT clobber
+            # the cell's persisted values.
+            return {
+                "profile": "Default",
+                "command": "",
+                "directory": temp_dir,
+                "tab_color": "",
+                "icon": "",
+                "env_vars": {},
+                "env_file": "",
+                "shell": "",
+                "system_prompt": "",
+                "initial_prompt": "",
+                "template": "",
+                "session_resume": True,
+                "idle_timeout": 0,
+                "worktree": False,
+                "terminals": [],
+                "agent_type": "",
+            }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            engineer.directory = temp_dir
+            await self.server_mod._handle_relaunch_agent_command(
+                {"id": engineer.id},
+                state,
+                bridge=bridge,
+                worktree_mgr=_FakeWorktreeManager(),
+                resolve_base_dir=fake_resolve_base_dir,
+                resolve_agent_launch_config=lambda *a, **k: {},
+                resolve_weaver_launch_config=fake_resolve_weaver_launch_config,
+                apply_persistent_prompt=lambda *a, **k: None,
+                build_cell_persistent_prompt=lambda *a, **k: "",
+                persistent_prompt_filename=lambda cell: f"{cell.id}.md",
+                is_designated_weaver=lambda cell: False,
+            )
+
+        self.assertEqual(engineer.agent_type, "codex")
+        self.assertEqual(engineer.command, "codex --custom")
+        # Directory should also be preserved, not wiped to the launch_cfg
+        # value when it's empty — but here launch_cfg provides temp_dir
+        # so the assertion is that the engineer's directory matches.
+        self.assertEqual(engineer.directory, temp_dir)

@@ -195,6 +195,16 @@ function relaunchAgent(id) {
   send({ cmd: 'relaunch_agent', id });
 }
 
+async function restartAgent(id) {
+  const cell = state.agents ? state.agents[id] : null;
+  if (!cell) return;
+  const label = cell.name || 'this agent';
+  const msg = `Restart '${label}' from scratch? The current session will be closed and a new one will launch with the original startup and initial prompts. Any in-progress conversation will be lost.`;
+  if (await showConfirm(msg)) {
+    send({ cmd: 'restart_agent', id });
+  }
+}
+
 async function clearAgentContext(id) {
   if (await showConfirm("Clear this agent's context? This resets the conversation and the agent will receive full instructions on its next task.")) {
     send({ cmd: 'clear_agent_context', id });
@@ -594,6 +604,12 @@ function onCellContextMenu(e, id) {
     items.push({
       label: isDesignatedWeaver ? 'Restart Weaver\u2026' : 'Relaunch',
       action: `relaunchAgent('${id}')`,
+    });
+  }
+  if (cell.cell_type === 'agent') {
+    items.push({
+      label: 'Restart from scratch\u2026',
+      action: `restartAgent('${id}')`,
     });
   }
   /* Worktree submenu */
