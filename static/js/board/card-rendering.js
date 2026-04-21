@@ -671,6 +671,9 @@ function _renderBoardCard(t, childrenOf, depth) {
   }
   cardHtml += '</div>';
   var meta = '';
+  if (typeof _taskCreatedByBadgeHtml === 'function') {
+    meta += _taskCreatedByBadgeHtml(t);
+  }
   var dispatchEligibility = _boardTaskDispatchEligibility(t);
   if (dispatchEligibility) {
     meta += '<span class="board-card-label ' + esc(dispatchEligibility.className)

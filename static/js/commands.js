@@ -195,6 +195,85 @@ function relaunchAgent(id) {
   send({ cmd: 'relaunch_agent', id });
 }
 
+function _activeSessionCell() {
+  if (!state || !state.active_session_id || !state.agents) return null;
+  for (var id in state.agents) {
+    var cell = state.agents[id];
+    if (cell && cell.session_id === state.active_session_id) return cell;
+  }
+  return null;
+}
+
+function _currentArchitectSessionCell() {
+  var cell = _activeSessionCell();
+  return cell && (cell.kind || '') === 'architect' ? cell : null;
+}
+
+function _isEngineerDismissedCell(cell) {
+  return !!(
+    cell
+    && (cell.kind || '') === 'engineer'
+    && Number(cell.dismissed_at || 0) > 0
+  );
+}
+
+function _canCurrentSessionManageEngineer(engineer) {
+  if (!engineer || (engineer.kind || '') !== 'engineer') return false;
+  var architect = _currentArchitectSessionCell();
+  if (!architect) return true;
+  return String(engineer.hired_by_architect_id || '').trim() === String(architect.id || '').trim();
+}
+
+function _engineerLifecyclePayload(cmd, engineer) {
+  var payload = {
+    cmd: cmd,
+    engineer_id: engineer.id,
+  };
+  var architect = _currentArchitectSessionCell();
+  if (architect) payload.architect_id = architect.id;
+  return payload;
+}
+
+function _engineerOwnedWorkerCount(engineerId) {
+  if (!state || !state.agents || !engineerId) return 0;
+  var count = 0;
+  for (var id in state.agents) {
+    var cell = state.agents[id];
+    if (!cell || cell.id === engineerId) continue;
+    if (cell.cell_type !== 'agent') continue;
+    var ownerId = String(
+      cell.owner_engineer_id
+      || cell.created_by_weaver_id
+      || ''
+    ).trim();
+    if (ownerId === String(engineerId)) count += 1;
+  }
+  return count;
+}
+
+async function dismissEngineer(id) {
+  const engineer = state.agents ? state.agents[id] : null;
+  if (!engineer || !_canCurrentSessionManageEngineer(engineer)) return;
+  if (_isEngineerDismissedCell(engineer)) return;
+  var workerCount = _engineerOwnedWorkerCount(engineer.id);
+  var msg = 'Dismiss "' + (engineer.name || engineer.id) + '"? This closes the engineer terminal';
+  if (workerCount > 0) {
+    msg += ' and ' + workerCount + ' owned worker terminal' + (workerCount === 1 ? '' : 's');
+  }
+  msg += '. You can rehire the engineer later from this menu.';
+  if (await showConfirm(msg, { label: 'Dismiss engineer', variant: 'btn-danger' })) {
+    var payload = _engineerLifecyclePayload('architect_engineer_dismiss', engineer);
+    payload.reason = 'Dismissed from UI';
+    send(payload);
+  }
+}
+
+function rehireEngineer(id) {
+  const engineer = state.agents ? state.agents[id] : null;
+  if (!engineer || !_canCurrentSessionManageEngineer(engineer)) return;
+  send(_engineerLifecyclePayload('architect_engineer_rehire', engineer));
+}
+
 async function restartAgent(id) {
   const cell = state.agents ? state.agents[id] : null;
   if (!cell) return;
@@ -595,22 +674,39 @@ function onCellContextMenu(e, id) {
   if (!cell) return;
   const gs = (state.group_settings || {})[cell.group] || {};
   const isDesignatedWeaver = gs.weaver_agent_id === id;
+  const isDismissedEngineer = _isEngineerDismissedCell(cell);
 
   const items = [
     { label: 'Edit\u2026', action: `openEditCell('${id}')` },
     { label: 'Focus', action: `focusAgent('${id}')` },
   ];
-  if (cell.status === 'stopped') {
+  if (cell.status === 'stopped' && !isDismissedEngineer) {
     items.push({
       label: isDesignatedWeaver ? 'Restart Weaver\u2026' : 'Relaunch',
       action: `relaunchAgent('${id}')`,
     });
   }
-  if (cell.cell_type === 'agent') {
+  if (cell.cell_type === 'agent' && !isDismissedEngineer) {
     items.push({
       label: 'Restart from scratch\u2026',
       action: `restartAgent('${id}')`,
     });
+  }
+  if (cell.cell_type === 'agent'
+      && (cell.kind || '') === 'engineer'
+      && _canCurrentSessionManageEngineer(cell)) {
+    if (isDismissedEngineer) {
+      items.push({
+        label: 'Rehire',
+        action: `rehireEngineer('${id}')`,
+      });
+    } else {
+      items.push({
+        label: 'Dismiss\u2026',
+        action: `dismissEngineer('${id}')`,
+        danger: true,
+      });
+    }
   }
   /* Worktree submenu */
   if (cell.cell_type === 'agent') {

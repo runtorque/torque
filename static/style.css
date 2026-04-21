@@ -614,9 +614,18 @@ body.runtime-embedded .terminal-empty {
   border-left: 3px solid rgba(88, 166, 255, 0.72);
   box-shadow: inset 3px 0 0 rgba(88, 166, 255, 0.14);
 }
+.cell.engineer.dismissed {
+  opacity: .5;
+  filter: grayscale(.35);
+  border-left-color: color-mix(in srgb, var(--text-dim) 72%, transparent);
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--text-dim) 14%, transparent);
+}
 .cell.engineer .cell-name {
   color: color-mix(in srgb, var(--accent) 78%, var(--text));
   font-weight: 600;
+}
+.cell.engineer.dismissed .cell-name {
+  color: var(--text-dim);
 }
 .cell.weaver {
   --weaver-chrome: transparent;
@@ -734,6 +743,12 @@ body.runtime-embedded .terminal-empty {
   width: 12px; height: 12px; top: 2px; right: 2px;
   font-size: 8px; font-weight: 800; line-height: 12px; text-align: center;
   animation: pulse 1.8s ease-in-out infinite;
+}
+.cell-status.dismissed {
+  width: 12px; height: 12px; top: 2px; right: 2px;
+  background: var(--text-dim);
+  color: var(--bg);
+  font-size: 10px; font-weight: 800; line-height: 12px; text-align: center;
 }
 /* Legacy status classes (used by terminal rows) */
 .cell-status.running       { background: var(--green); animation: pulse 1.8s ease-in-out infinite; }
@@ -877,6 +892,12 @@ body.runtime-embedded .terminal-empty {
   pointer-events: none;
 }
 .cell-relaunch:hover { color: var(--accent); }
+.cell-relaunch.cell-rehire {
+  color: var(--green);
+}
+.cell-relaunch.cell-rehire:hover {
+  color: color-mix(in srgb, var(--green) 78%, white);
+}
 .cell-icon { font-size: 18px; line-height: 1; margin-bottom: 2px; }
 .cell.cell-add {
   border: 1px dashed var(--border);
@@ -926,6 +947,21 @@ body.runtime-embedded .terminal-empty {
   color: #1f1300;
   background: color-mix(in srgb, var(--amber) 82%, white);
   border: 1px solid color-mix(in srgb, var(--amber) 58%, transparent);
+  border-radius: 999px;
+  padding: 0 4px;
+  line-height: 1.4;
+}
+.cell-dismissed-badge {
+  position: absolute;
+  bottom: 2px;
+  right: 3px;
+  font-size: 7px;
+  letter-spacing: .03em;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--text-dim) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text-dim) 24%, transparent);
   border-radius: 999px;
   padding: 0 4px;
   line-height: 1.4;
@@ -1629,6 +1665,45 @@ body.runtime-embedded #modal-group .modal-summary {
 .modal-tall { max-height: 85vh; display: flex; flex-direction: column; }
 #modal-task .modal {
   overflow: hidden;
+}
+.task-created-by-attribution {
+  margin: -4px 0 10px;
+}
+.task-created-by-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-cell);
+  color: var(--text-dim);
+  font-size: 10px;
+}
+.task-created-by-chip code {
+  color: currentColor;
+  font-size: 9px;
+  opacity: .75;
+}
+.task-created-by-copy {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.task-created-by-architect {
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 9%, var(--bg-cell));
+  border-color: color-mix(in srgb, var(--amber) 22%, var(--border));
+}
+.task-created-by-engineer {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg-cell));
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--border));
+}
+.task-created-by-system {
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--text-dim) 8%, var(--bg-cell));
 }
 .task-modal-body {
   flex: 1;
@@ -2911,6 +2986,39 @@ body.runtime-embedded #panel-board .board-wide-lane-body {
   font-size: 8px; color: var(--accent);
   background: color-mix(in srgb, var(--accent) 15%, transparent);
   border-radius: 3px; padding: 0 4px; line-height: 14px;
+}
+.board-card-created-by {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 140px;
+  vertical-align: top;
+}
+.board-card-created-by-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.board-card-created-by-icon {
+  font-size: 7px;
+  line-height: 1;
+  opacity: .85;
+}
+.board-card-created-by-user {
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--text-dim) 10%, transparent);
+}
+.board-card-created-by-system {
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--text-dim) 14%, transparent);
+}
+.board-card-created-by-architect {
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 15%, transparent);
+}
+.board-card-created-by-engineer {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
 }
 .board-card-template {
   color: var(--fg-dim); font-style: italic;

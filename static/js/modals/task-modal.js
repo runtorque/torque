@@ -145,6 +145,7 @@ function _taskOpenModal(config) {
   var verificationHumanEl = document.getElementById('task-verification-human-input');
   var verificationNotesEl = document.getElementById('task-verification-notes-input');
   var modal = document.getElementById('modal-task');
+  var attributionEl = document.getElementById('task-created-by-attribution');
 
   _taskEditId = config.editId || null;
   _taskDraftId = config.editId ? '' : ((draft && draft.draft_id) || config.draftId || _generateDraftId());
@@ -168,6 +169,15 @@ function _taskOpenModal(config) {
 
   document.getElementById('task-modal-title').textContent = config.title;
   document.getElementById('task-submit-btn').textContent = config.submitLabel;
+  if (attributionEl) {
+    if (config.createdByTask && typeof _taskCreatedByDetailHtml === 'function') {
+      attributionEl.innerHTML = _taskCreatedByDetailHtml(config.createdByTask);
+      attributionEl.classList.remove('hidden');
+    } else {
+      attributionEl.innerHTML = '';
+      attributionEl.classList.add('hidden');
+    }
+  }
 
   taskEl.value = draft && draft.task !== undefined ? draft.task : (config.task || '');
   descEl.value = draft && draft.description !== undefined ? draft.description : (config.description || '');
@@ -517,6 +527,7 @@ function openEditTask(taskId) {
     verificationState: t.verification_state || '',
     verificationNotes: t.verification_notes || '',
     verificationSummary: t.verification_summary || {},
+    createdByTask: t,
     selectTask: true,
   });
 }
