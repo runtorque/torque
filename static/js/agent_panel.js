@@ -6,6 +6,7 @@ var _agentPanelTabSpecByKind = {
     { key: 'decisions', label: 'Decisions' },
     { key: 'hired_engineers', label: 'Hired engineers' },
     { key: 'messages', label: 'Messages' },
+    { key: 'events', label: 'Events' },
   ],
   engineer: [
     { key: 'journal', label: 'Journal' },
@@ -377,7 +378,7 @@ function _renderEngineerJournal(agent) {
   return html;
 }
 
-function _renderEngineerEvents(agent) {
+function _renderAgentDigestEvents(agent) {
   var group = String((agent && agent.group) || '');
   var bstats = _agentPanelDigestBufferStats(agent);
   var sentEvents = _agentPanelDigestSentEvents(agent);
@@ -392,6 +393,14 @@ function _renderEngineerEvents(agent) {
     'agentPanelSendNow(\'' + _agentPanelEsc((agent && agent.id) || '') + '\')',
     'Already sent to ' + _agentPanelEsc((agent && (agent.name || agent.id)) || 'engineer')
   );
+}
+
+function _renderEngineerEvents(agent) {
+  return _renderAgentDigestEvents(agent);
+}
+
+function _renderArchitectEvents(agent) {
+  return _renderAgentDigestEvents(agent);
 }
 
 function _renderEngineerWorklog(agent) {
@@ -700,20 +709,25 @@ function _agentPanelArchitectMessages(agent) {
 function _renderArchitectPanel(agent) {
   var activeTab = _agentPanelActiveTab('architect');
   var body = '';
+  var headerRightHtml = '';
   if (activeTab === 'hired_engineers') {
     body = _agentPanelArchitectHiredEngineers(agent);
   } else if (activeTab === 'messages') {
     body = _agentPanelArchitectMessages(agent);
+  } else if (activeTab === 'events') {
+    headerRightHtml = _agentPanelDigestHeaderRight(agent);
+    body = _renderArchitectEvents(agent);
   } else {
     body = _agentPanelArchitectDecisionsHtml(agent);
   }
   return _agentPanelShell(
     'Architect: ' + ((agent && (agent.name || agent.id)) || 'Unknown')
       + ' · Group: ' + (((agent && agent.group) || '') || '—'),
-    'Decisions, hired engineers, and architect messages.',
+    'Decisions, hired engineers, architect messages, and digest queue.',
     'architect',
     activeTab,
-    body
+    body,
+    headerRightHtml
   );
 }
 
@@ -809,10 +823,11 @@ function renderAgentPanel() {
   if (typeof _restoreSurfaceState === 'function') {
     _restoreSurfaceState(el, panelState, panelStateOptions);
   }
+  var agentKind = agent ? _agentPanelKind(agent) : '';
   if (agent
-      && _agentPanelKind(agent) === 'engineer'
+      && (agentKind === 'engineer' || agentKind === 'architect')
       && typeof _weaverSyncEventsCountdown === 'function') {
-    _weaverSyncEventsCountdown(el, agent.group || '', _agentPanelActiveTab('engineer'));
+    _weaverSyncEventsCountdown(el, agent.group || '', _agentPanelActiveTab(agentKind));
   }
 }
 
@@ -1828,11 +1843,15 @@ function _weaverVisibleEventsSurfaceState(group, activeTab) {
       && typeof _agentPanelKind === 'function'
       && typeof _agentPanelActiveTab === 'function') {
     var focused = _resolveFocusedAgent();
-    if (focused && _agentPanelKind(focused) === 'engineer') {
+    if (focused && (
+        _agentPanelKind(focused) === 'engineer'
+        || _agentPanelKind(focused) === 'architect'
+    )) {
+      var focusedKind = _agentPanelKind(focused);
       return {
         agentId: String(focused.id || ''),
         group: String(focused.group || fallbackGroup || ''),
-        tab: String(_agentPanelActiveTab('engineer') || fallbackTab || 'journal'),
+        tab: String(_agentPanelActiveTab(focusedKind) || fallbackTab || 'journal'),
       };
     }
   }

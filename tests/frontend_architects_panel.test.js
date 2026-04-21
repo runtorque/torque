@@ -128,7 +128,7 @@ function worker(id, name, ownerEngineerId, createdAt) {
   };
 }
 
-test('focused architect panel shows decisions, hired engineers, and messages tabs', () => {
+test('focused architect panel shows decisions, hired engineers, messages, and events tabs', () => {
   const { context, panel, sandbox } = createArchitectHarness();
   sandbox.state.agents['arch-1'] = architect('arch-1', 'Productmind', 10);
   sandbox.focusedItemId = 'arch-1';
@@ -139,6 +139,7 @@ test('focused architect panel shows decisions, hired engineers, and messages tab
   assert.match(panel.innerHTML, /Decisions/);
   assert.match(panel.innerHTML, /Hired engineers/);
   assert.match(panel.innerHTML, /Messages/);
+  assert.match(panel.innerHTML, /Events/);
 });
 
 test('focused architect hired-engineers tab nests hired engineers and workers only', () => {

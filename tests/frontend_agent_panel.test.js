@@ -117,6 +117,7 @@ test('renderAgentPanel renders architect, engineer, worker, and terminal panels'
   assert.match(panel.innerHTML, /Decisions/);
   assert.match(panel.innerHTML, /Hired engineers/);
   assert.match(panel.innerHTML, /Messages/);
+  assert.match(panel.innerHTML, /Events/);
 
   setFocusedAgent(context, {
     id: 'eng-1',
@@ -423,6 +424,55 @@ test('focused engineer pause toggle sends per-agent digest pause and resume comm
   assert.deepEqual(JSON.parse(JSON.stringify(sendCalls)), [
     { cmd: 'digest_pause', agent_id: 'eng-1' },
     { cmd: 'digest_resume', agent_id: 'eng-1' },
+  ]);
+  assert.match(panel.innerHTML, /id="agent-panel-pause-btn" class="agent-panel-pause-btn paused"/);
+});
+
+test('focused architect Events tab renders digest data and pause control', () => {
+  const { context, panel, sendCalls } = createHarness();
+  setFocusedAgent(context, {
+    id: 'arch-1',
+    name: 'Planner',
+    kind: 'architect',
+    group: 'alpha',
+    cell_type: 'agent',
+  });
+  context.state.agent_digest_settings['arch-1'] = {
+    agent_id: 'arch-1',
+    paused: false,
+    architect_digest: true,
+  };
+  context.state.digest_buffer_stats['arch-1'] = {
+    agent_id: 'arch-1',
+    group: 'alpha',
+    buffered_events: 1,
+    next_push_at: Math.floor(Date.now() / 1000) + 300,
+    queued_events: [
+      { id: 11, kind: 'task_completed', message: 'Architect queued item', timestamp: 40 },
+    ],
+    manual_flush_requested: false,
+  };
+  context.state.digest_sent_events['arch-1'] = [
+    { id: 10, kind: 'task_completed', message: 'Architect delivered item', timestamp: 35, delivered_at: 38 },
+  ];
+  vm.runInContext(`_agentPanelLastSelectedTabByKind.architect = 'events';`, context);
+
+  context.renderAgentPanel();
+
+  assert.match(panel.innerHTML, /id="agent-panel-tab-events" class="agent-panel-tab active"/);
+  assert.match(panel.innerHTML, /id="agent-panel-pause-btn"/);
+  assert.match(panel.innerHTML, /Architect queued item/);
+  assert.match(panel.innerHTML, /Already sent to Planner/);
+  assert.match(panel.innerHTML, /Architect delivered item/);
+
+  vm.runInContext(`agentPanelTogglePauseForAgent('arch-1')`, context);
+  context.state.agent_digest_settings['arch-1'].paused = true;
+  context.renderAgentPanel();
+  vm.runInContext(`agentPanelTogglePauseForAgent('arch-1')`, context);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sendCalls)), [
+    { cmd: 'digest_pause', agent_id: 'arch-1' },
+    { cmd: 'digest_resume', agent_id: 'arch-1' },
   ]);
   assert.match(panel.innerHTML, /id="agent-panel-pause-btn" class="agent-panel-pause-btn paused"/);
 });

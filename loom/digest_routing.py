@@ -4,23 +4,39 @@ from __future__ import annotations
 
 from .state import AgentDigestSettings, WEAVER_MANDATORY_EVENTS
 
-ARCHITECT_COARSE_EVENT_KINDS = frozenset({
+ARCHITECT_COARSE_EVENTS = frozenset({
+    # Plan vocabulary.
+    "task_done",
+    "task_blocked",
+    "task_error",
+    "task_ask",
+    "task_derive",
+    # Current panel-event vocabulary.
     "task_completed",
     "agent_blocked",
     "agent_error",
     "ask_created",
     "task_derived",
+    # Cross-engineer lifecycle/pipeline signals.
     "pipeline_complete",
     "engineer_hired",
-    "pending_hire_created",
-    "pending_hire_approved",
-    "pending_hire_rejected",
-    "pending_hire_resolved",
+    "engineer_fired",
 })
+
+# Back-compat for earlier Phase 1 tests/imports.
+ARCHITECT_COARSE_EVENT_KINDS = ARCHITECT_COARSE_EVENTS
 
 
 def _cell_kind(cell) -> str:
     return str(getattr(cell, "kind", "") or "").strip()
+
+
+def _event_kind(event: dict) -> str:
+    return str((event or {}).get("kind", "") or "").strip()
+
+
+def _is_architect_coarse_event(event: dict) -> bool:
+    return _event_kind(event) in ARCHITECT_COARSE_EVENTS
 
 
 def _effective_owner_engineer_id(cell) -> str:
@@ -74,33 +90,36 @@ def _event_routing_source(state, event: dict):
 
 
 def candidate_digest_recipients(state, event: dict) -> list[str]:
-    """Return the unfiltered recipient chain for a panel event."""
+    """Return possible recipients before pause/enabled-events filters."""
     source = _event_routing_source(state, event)
     if not source:
         return []
 
     kind = _cell_kind(source)
     recipients: list[str] = []
+    architect_eligible = _is_architect_coarse_event(event)
 
     if kind == "worker":
         owner_id = _effective_owner_engineer_id(source)
         owner = state.agents.get(owner_id) if owner_id else None
         if owner and _cell_kind(owner) == "engineer":
             recipients.append(owner.id)
+            if architect_eligible:
+                architect_id = str(
+                    getattr(owner, "hired_by_architect_id", "") or ""
+                ).strip()
+                architect = state.agents.get(architect_id) if architect_id else None
+                if architect and _cell_kind(architect) == "architect":
+                    recipients.append(architect.id)
+    elif kind == "engineer":
+        recipients.append(source.id)
+        if architect_eligible:
             architect_id = str(
-                getattr(owner, "hired_by_architect_id", "") or ""
+                getattr(source, "hired_by_architect_id", "") or ""
             ).strip()
             architect = state.agents.get(architect_id) if architect_id else None
             if architect and _cell_kind(architect) == "architect":
                 recipients.append(architect.id)
-    elif kind == "engineer":
-        recipients.append(source.id)
-        architect_id = str(
-            getattr(source, "hired_by_architect_id", "") or ""
-        ).strip()
-        architect = state.agents.get(architect_id) if architect_id else None
-        if architect and _cell_kind(architect) == "architect":
-            recipients.append(architect.id)
     elif kind == "architect":
         return []
     elif str(getattr(source, "id", "") or "").strip():
@@ -119,9 +138,16 @@ def candidate_digest_recipients(state, event: dict) -> list[str]:
 
 def _default_digest_settings(state, recipient_id: str) -> AgentDigestSettings:
     cell = state.agents.get(str(recipient_id or "").strip())
+    is_architect = bool(cell and _cell_kind(cell) == "architect")
+    kwargs = {}
+    if is_architect:
+        kwargs["enabled_events"] = list(ARCHITECT_COARSE_EVENTS)
     return AgentDigestSettings(
         agent_id=str(recipient_id or "").strip(),
-        architect_digest=bool(cell and _cell_kind(cell) == "architect"),
+        push_interval=300 if is_architect else 60,
+        architect_digest=is_architect,
+        wake_on_digest=False,
+        **kwargs,
     )
 
 
@@ -151,7 +177,7 @@ def recipient_wants_digest_event(state, recipient_id: str, event: dict, *,
         if kind not in enabled:
             return False
     if _cell_kind(recipient) == "architect" and (
-            kind not in ARCHITECT_COARSE_EVENT_KINDS):
+            kind not in ARCHITECT_COARSE_EVENTS):
         return False
     return True
 

@@ -443,6 +443,135 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("…", digest)
         self.assertNotIn("support signs off", digest)
 
+    async def test_architect_digest_uses_inject_and_rolls_up_worker_events(self):
+        state, group, _weaver = self._make_state()
+        architect = self.state_mod.AgentCell(
+            id="arch-1",
+            name="Planner",
+            slug="planner",
+            group=group,
+            cell_type="agent",
+            session_id="session-arch",
+            status="running",
+            kind="architect",
+            persistent=True,
+        )
+        engineer = self.state_mod.AgentCell(
+            id="eng-1",
+            name="Engineer One",
+            slug="engineer-one",
+            group=group,
+            cell_type="agent",
+            kind="engineer",
+            hired_by_architect_id=architect.id,
+            persistent=True,
+        )
+        worker = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker Bee",
+            slug="worker-bee",
+            group=group,
+            cell_type="agent",
+            kind="worker",
+            owner_engineer_id=engineer.id,
+        )
+        state.agents[architect.id] = architect
+        state.agents[engineer.id] = engineer
+        state.agents[worker.id] = worker
+        state.groups[group].extend([architect.id, engineer.id, worker.id])
+        task = state.board_add_task(
+            "Ship architect digests",
+            group,
+            id="task-1",
+            agent_id=worker.id,
+            assigned_engineer_id=engineer.id,
+        )
+        self.assertIsNotNone(task)
+        state.update_agent_digest_settings(
+            architect.id,
+            push_interval=0,
+            max_interval=0,
+        )
+
+        injected = []
+
+        async def inject_message(target, text, **kwargs):
+            injected.append((target.id, text, kwargs))
+
+        buffer = self.weaver_mod.WeaverEventBuffer(
+            state,
+            FakeBridge(),
+            inject_message=inject_message,
+        )
+        buffer._loop = asyncio.get_running_loop()
+        buffer.on_panel_event({
+            "id": 10,
+            "group": group,
+            "cell_id": worker.id,
+            "agent_name": worker.name,
+            "kind": "task_completed",
+            "message": "Ready (task completed)",
+            "task_id": task.id,
+        })
+
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(len(injected), 1)
+        self.assertEqual(injected[0][0], architect.id)
+        digest = injected[0][1]
+        self.assertIn("## Architect digest", digest)
+        self.assertIn("### Engineer One", digest)
+        self.assertIn("1 worker event: done ×1", digest)
+        self.assertIn("Worker Bee: done task-1", digest)
+        self.assertIn("### Pipeline activity", digest)
+        self.assertIn("task-1 — Ship architect digests", digest)
+        self.assertEqual(injected[0][2]["action"], "digest")
+
+    def test_architect_digest_caps_lines_with_elision_footer(self):
+        state, group, _weaver = self._make_state()
+        architect = self.state_mod.AgentCell(
+            id="arch-1",
+            name="Planner",
+            slug="planner",
+            group=group,
+            cell_type="agent",
+            kind="architect",
+        )
+        state.agents[architect.id] = architect
+        events = []
+        for idx in range(30):
+            engineer = self.state_mod.AgentCell(
+                id=f"eng-{idx}",
+                name=f"Engineer {idx}",
+                slug=f"engineer-{idx}",
+                group=group,
+                cell_type="agent",
+                kind="engineer",
+                hired_by_architect_id=architect.id,
+            )
+            state.agents[engineer.id] = engineer
+            events.append({
+                "id": idx,
+                "group": group,
+                "cell_id": engineer.id,
+                "agent_name": engineer.name,
+                "kind": "task_derived",
+                "message": f"Review slice {idx}",
+            })
+
+        buffer = self.weaver_mod.WeaverEventBuffer(state, FakeBridge())
+        digest = buffer._format_digest(
+            group,
+            events,
+            buffer._board_summary(group),
+            architect,
+        )
+
+        lines = digest.splitlines()
+        self.assertLessEqual(len(lines), 40)
+        self.assertRegex(digest, r"… \d+ events? elided")
+        self.assertTrue(digest.endswith("---"))
+
     async def test_task_artifact_uploaded_digest_includes_ref_and_preview(self):
         state, group, weaver = self._make_state()
         state.weaver_settings[group] = self.state_mod.WeaverSettings(
