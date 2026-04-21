@@ -56,6 +56,7 @@ _HEALTH_SUMMARY_SILENT_AFTER_SECS = 5 * 60
 _HEALTH_SUMMARY_LIMIT = 120
 _ARCHITECT_BOARD_SUMMARY_TASK_LIMIT = 20
 _ARCHITECT_BOARD_SUMMARY_TITLE_LIMIT = 120
+_ARCHITECT_BOARD_SUMMARY_RESPONSE_LIMIT = 10_000
 
 # ---------------------------------------------------------------------------
 # Shared scoping helpers
@@ -135,6 +136,26 @@ def _architect_board_summary_task_item(task, *, created_by: str) -> dict:
         "health_state": getattr(task, "health_state", "healthy") or "healthy",
         "updated_at": getattr(task, "updated_at", "") or "",
     }
+
+
+def _compact_json(payload) -> str:
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
+def _architect_board_summary_json(summary: dict, task_items: list[dict]) -> str:
+    """Attach a bounded task excerpt and keep architect summaries under budget."""
+    count = len(task_items)
+    limit = min(count, _ARCHITECT_BOARD_SUMMARY_TASK_LIMIT)
+    while True:
+        summary["tasks"] = {
+            "count": count,
+            "items": task_items[:limit],
+            "truncated": count > limit,
+        }
+        text = _compact_json(summary)
+        if len(text) <= _ARCHITECT_BOARD_SUMMARY_RESPONSE_LIMIT or limit <= 0:
+            return text
+        limit -= 1
 
 
 def _is_engineer_like_cell(state, cell) -> bool:
@@ -1277,17 +1298,6 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 "truncated": len(boundary_items) > 10,
             },
         }
-        if include_created_by:
-            summary["tasks"] = {
-                "count": len(architect_task_items),
-                "items": architect_task_items[
-                    :_ARCHITECT_BOARD_SUMMARY_TASK_LIMIT
-                ],
-                "truncated": (
-                    len(architect_task_items)
-                    > _ARCHITECT_BOARD_SUMMARY_TASK_LIMIT
-                ),
-            }
         hints = compute_weaver_hints(
             summary_state,
             _weaver_group,
@@ -1298,7 +1308,12 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             "items": hints[:10],
             "truncated": len(hints) > 10,
         }
-        return json.dumps(summary, ensure_ascii=False, separators=(",", ":")), False
+        if include_created_by:
+            return _architect_board_summary_json(
+                summary,
+                architect_task_items,
+            ), False
+        return _compact_json(summary), False
 
     if tool_name == "session_map":
         return json.dumps(
