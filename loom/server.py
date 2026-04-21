@@ -634,6 +634,10 @@ def _format_mcp_message_prompt(message: str, *,
                                sender_name: str = "Weaver",
                                sender_kind: str = "weaver",
                                task_id: str = "") -> str:
+    # System-origin payloads (e.g. Loom digests) bring their own header
+    # and trailing separator; wrapping them would double-up the chrome.
+    if sender_kind == "system":
+        return "\n" + message + "\n"
     prompt = (
         "\n"
         f"## Message from {sender_name}\n"
@@ -641,7 +645,7 @@ def _format_mcp_message_prompt(message: str, *,
     )
     if task_id:
         prompt += f"Task: {task_id}\n"
-    if sender_kind != "system" and task_id:
+    if task_id:
         prompt += (
             f'Reply with: loom_reply(task="{task_id}", '
             'message="your response")\n'
