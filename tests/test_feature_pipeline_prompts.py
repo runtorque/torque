@@ -41,6 +41,8 @@ class FeaturePipelinePromptTests(unittest.TestCase):
         self.assertIn("loom_ask", sample_prompt)
         self.assertIn("loom_derive", project_prompt)
         self.assertIn("loom_done", project_prompt)
+        self.assertIn("## Closeout (mandatory)", project_prompt)
+        self.assertIn("Replying via `engineer_reply`", project_prompt)
 
         self.assertIsNotNone(rendered_prompt)
         self.assertIn("Verification summary", rendered_prompt)
@@ -50,3 +52,25 @@ class FeaturePipelinePromptTests(unittest.TestCase):
         self.assertIn("loom_derive", rendered_prompt)
         self.assertIn("loom_done", rendered_prompt)
         self.assertIn("deploy or live verification that still needs to happen", rendered_prompt)
+        self.assertIn("Your FINAL action MUST be `loom ai done`", rendered_prompt)
+        self.assertIn("Replying via `engineer_reply`", rendered_prompt)
+        self.assertTrue(rendered_prompt.rstrip().endswith("silence is read as a stall."))
+
+    def test_feature_implement_prompt_requires_review_derivation_when_requested(self):
+        project_prompt = (REPO_ROOT / ".loom" / "actions" / "feature" / "implement.yaml").read_text()
+        rendered_prompt = ActionManager().render_prompt(
+            "feature/implement",
+            {},
+            base_dir=str(REPO_ROOT),
+            loom_context={
+                "task": {
+                    "title": "Implement the auth refactor",
+                    "description": "Implementation must be derived to feature/review before closeout.",
+                }
+            },
+        )
+
+        reminder = 'MUST call `loom ai derive "<summary>" -a feature/review` before `loom ai done`'
+        self.assertIn(reminder, project_prompt)
+        self.assertIsNotNone(rendered_prompt)
+        self.assertIn(reminder, rendered_prompt)
