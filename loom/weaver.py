@@ -583,11 +583,13 @@ class WeaverEventBuffer:
 
     @staticmethod
     def _recipient_is_running(target) -> bool:
-        return bool(
-            target
-            and getattr(target, "session_id", "")
-            and getattr(target, "status", "") == "running"
-        )
+        # Engineer Claude processes exit between turns; the terminal session
+        # persists. Any state with a live session_id is deliverable via
+        # bridge.send_text / inject_mcp_message. Only "stopped" means the
+        # session itself is gone.
+        if not target or not getattr(target, "session_id", ""):
+            return False
+        return getattr(target, "status", "") != "stopped"
 
     def get_sent_events(self, recipient_or_group: str) -> list[dict]:
         agent_id = self._resolve_recipient_id(recipient_or_group)
