@@ -44,15 +44,14 @@ prompt: |
   - **Merge-risk summary** — rate the merge risk as low / medium / high and explain why
   - **Verdict** — end with `Ship`, `Ship with fixes`, or `Revert`
 
-  If there are blocking issues, call `loom_derive(description="Fix the issues found", action="feature/implement", context="...")` to send them back to the implementing agent. If there are no blocking issues, use `loom_done(message="brief review summary")` and keep any follow-up suggestions separate from the verdict.
+  If there are blocking issues, call `loom_derive(description="Fix the issues found", action="feature/implement", context="...")` to send them back to the implementing agent. Include the blocking issues, verification summary, merge-risk summary, and `Ship with fixes` or `Revert` verdict in the derive context. Do NOT call `loom_done` after deriving a fix task; the unresolved fix handoff is the valid blocking-review closeout path. If there are no blocking issues, use `loom_done(message="brief review summary")` and keep any follow-up suggestions separate from the `Ship` verdict.
 
   Do NOT fix issues yourself, deploy anything, or make changes. Only review and report.
 
   ## Closeout (mandatory)
 
-  Your FINAL action MUST be `loom ai done` with a verdict line stating one of:
-  - Ship — no blocking issues, ready to merge
-  - Ship with fixes — merge only after the listed fixes land
-  - Revert — blocking issues, implementation needs rework
+  Pick exactly one closeout path:
+  - Blocking issues found: your FINAL action MUST be `loom ai derive "Fix the issues found" -a feature/implement` (or `loom_derive(...)`) with the required review context. Do NOT call `loom ai done` after deriving the fix task.
+  - No blocking issues: your FINAL action MUST be `loom ai done` (or `loom_done(...)`) with a `Ship` verdict line stating there are no blocking issues and the work is ready to merge.
 
-  Replying via `engineer_reply` or posting an `agent_reply` is NOT a substitute. Do not exit without calling `loom ai done`. If tests are still running, call `loom ai progress "<status>"` periodically so the dispatching engineer knows you are alive — silence is read as a stall.
+  Replying via `engineer_reply` or posting an `agent_reply` is NOT a substitute for either closeout path. Do not exit without calling the appropriate closeout tool. If tests are still running, call `loom ai progress "<status>"` periodically so the dispatching engineer knows you are alive — silence is read as a stall.
