@@ -1169,6 +1169,8 @@ function renderAgentCell(a, options) {
   if (selected) cls.push('selected');
   if (a.id === focusedItemId) cls.push('focused');
   if (a.status === 'stopped') cls.push('stopped');
+  const _isArchitect = (a.kind || '') === 'architect';
+  const _isEngineer = (a.kind || '') === 'engineer';
   // Check if this agent is the weaver for its group
   const _gs = (state.group_settings || {})[a.group];
   const _isWeaver = _gs && _gs.weaver_agent_id === a.id;
@@ -1178,10 +1180,16 @@ function renderAgentCell(a, options) {
     ? state.weaver_settings[a.group] : null;
   const _weaverPaused = !!(_weaverWs && _weaverWs.paused);
   const _weaverAsking = _weaverWs && _weaverWs.pending_question;
+  const _isDigestRecipient = _isEngineer;
+  const _agentDigestSettings = _isDigestRecipient && state.agent_digest_settings
+    ? state.agent_digest_settings[String(a.id || '')] : null;
+  let _digestPaused = !!(_agentDigestSettings && _agentDigestSettings.paused);
+  if (!_agentDigestSettings && _isDigestRecipient && _isWeaver) {
+    _digestPaused = _weaverPaused;
+  }
   if (_weaverAsking) cls.push('weaver-asking');
-  if (_isWeaver) cls.push(_weaverPaused ? 'weaver-paused' : 'weaver-running');
-  const _isArchitect = (a.kind || '') === 'architect';
-  const _isEngineer = (a.kind || '') === 'engineer';
+  if (_isDigestRecipient) cls.push(_digestPaused ? 'weaver-paused' : 'weaver-running');
+  else if (_isWeaver) cls.push(_weaverPaused ? 'weaver-paused' : 'weaver-running');
   const visibleAgentById = options.visibleAgentById || null;
   const visibleEngineerIds = options.visibleEngineerIds || null;
   const ownerId = _workerOwnerEngineerId(a, visibleAgentById);
@@ -1231,7 +1239,10 @@ function renderAgentCell(a, options) {
   h += `</div>`;
   h += `<div class="cell-header-controls">`;
   h += `<button class="cell-close" draggable="false" onclick="event.stopPropagation();removeAgent('${a.id}')" title="Remove">\u2715</button>`;
-  if (_isWeaver) {
+  if (_isDigestRecipient) {
+    const digestAgentArg = encodeURIComponent(a.id || '');
+    h += `<button class="cell-weaver-toggle ${_digestPaused ? 'paused' : 'running'}" draggable="false" onclick="event.stopPropagation();toggleDigestPauseForAgent(decodeURIComponent('${digestAgentArg}'))" title="${_digestPaused ? 'Resume event delivery' : 'Pause event delivery'}">${_digestPaused ? '&#x25B6;' : '&#x23F8;'}</button>`;
+  } else if (_isWeaver) {
     const weaverGroupArg = encodeURIComponent(a.group || '');
     h += `<button class="cell-weaver-toggle ${_weaverPaused ? 'paused' : 'running'}" draggable="false" onclick="event.stopPropagation();weaverTogglePauseForGroup(decodeURIComponent('${weaverGroupArg}'))" title="${_weaverPaused ? 'Resume Weaver event delivery' : 'Pause Weaver event delivery'}">${_weaverPaused ? '&#x25B6;' : '&#x23F8;'}</button>`;
   }

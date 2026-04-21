@@ -1495,13 +1495,17 @@ function weaverTogglePauseForGroup(group) {
   send({ cmd: cmd, group: group });
 }
 
-function agentPanelTogglePauseForAgent(agentId) {
+function toggleDigestPauseForAgent(agentId) {
   agentId = String(agentId || '');
   if (!agentId) return;
   var agent = (state && state.agents && state.agents[agentId]) || { id: agentId };
   var settings = _agentPanelDigestSettings(agent);
   var cmd = (settings && settings.paused) ? 'digest_resume' : 'digest_pause';
   send({ cmd: cmd, agent_id: agentId });
+}
+
+function agentPanelTogglePauseForAgent(agentId) {
+  toggleDigestPauseForAgent(agentId);
 }
 
 function weaverSelectTab(tab, group) {
