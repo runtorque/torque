@@ -1,4 +1,5 @@
 import importlib
+import json
 import unittest
 
 try:
@@ -139,3 +140,42 @@ class MCPToolsSharedArchitectTests(unittest.TestCase):
         self.assertEqual(group, "loom")
         self.assertEqual(effective_kind, "architect")
         self.assertEqual(error_text, "")
+
+    def test_architect_board_summary_json_trims_tasks_to_response_budget(self):
+        summary = {
+            "group": "loom",
+            "streams": {
+                "count": 1,
+                "items": [{"summary": "stream-context " * 500}],
+                "truncated": False,
+            },
+        }
+        items = [
+            {
+                "id": f"task-{idx}",
+                "slug": f"task-{idx}",
+                "title": "Task " + ("x" * 110),
+                "lane": "Backlog",
+                "labels": [],
+                "status": "",
+                "assigned_engineer_id": "eng-1",
+                "created_by": "architect:arch-1",
+                "health_state": "healthy",
+                "updated_at": "2026-04-21T00:00:00+00:00",
+            }
+            for idx in range(self.shared_mod._ARCHITECT_BOARD_SUMMARY_TASK_LIMIT)
+        ]
+
+        text = self.shared_mod._architect_board_summary_json(summary, items)
+
+        self.assertLessEqual(
+            len(text),
+            self.shared_mod._ARCHITECT_BOARD_SUMMARY_RESPONSE_LIMIT,
+        )
+        payload = json.loads(text)
+        self.assertEqual(payload["tasks"]["count"], len(items))
+        self.assertTrue(payload["tasks"]["truncated"])
+        self.assertLess(
+            len(payload["tasks"]["items"]),
+            self.shared_mod._ARCHITECT_BOARD_SUMMARY_TASK_LIMIT,
+        )

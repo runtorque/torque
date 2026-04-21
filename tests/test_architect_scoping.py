@@ -267,9 +267,14 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         user_engineer = self._add_engineer("eng-user", "User Owned")
         own_task = self._add_task(
             "task-own",
-            "Architect-created task",
+            "Architect-created task\nsecond line must not leak",
             assigned_engineer_id=alice.id,
             created_by_architect_id=architect.id,
+            description="full description must stay out of board summary",
+            action_vars={"secret": "action-vars-must-not-leak"},
+            messages=[{"action": "progress", "message": "message must not leak"}],
+            health_details={"nested": "health-details-must-not-leak"},
+            verification_summary={"nested": "verification-summary-must-not-leak"},
         )
         peer_task = self._add_task(
             "task-peer",
@@ -313,6 +318,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         summary = json.loads(text)
         self.assertEqual(summary["tasks_total"], 5)
         self.assertEqual(summary["lanes"]["Backlog"], 5)
+        self.assertFalse(summary["tasks"]["truncated"])
         task_items = {
             item["id"]: item for item in summary["tasks"]["items"]
         }
@@ -339,6 +345,28 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
                 user_task.id: "user",
             },
         )
+        expected_task_item_keys = {
+            "id",
+            "slug",
+            "title",
+            "lane",
+            "labels",
+            "status",
+            "assigned_engineer_id",
+            "created_by",
+            "health_state",
+            "updated_at",
+        }
+        for item in task_items.values():
+            self.assertEqual(set(item), expected_task_item_keys)
+        self.assertEqual(task_items[own_task.id]["title"], "Architect-created task")
+        summary_text = json.dumps(summary)
+        self.assertNotIn("second line must not leak", summary_text)
+        self.assertNotIn("full description must stay out", summary_text)
+        self.assertNotIn("action-vars-must-not-leak", summary_text)
+        self.assertNotIn("message must not leak", summary_text)
+        self.assertNotIn("health-details-must-not-leak", summary_text)
+        self.assertNotIn("verification-summary-must-not-leak", summary_text)
 
         for task, expected in (
             (own_task, f"architect:{architect.id}"),
@@ -354,7 +382,87 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
                     architect.id,
                 )
                 self.assertFalse(show_error, show_text)
-                self.assertEqual(json.loads(show_text)["created_by"], expected)
+                shown = json.loads(show_text)
+                self.assertEqual(shown["created_by"], expected)
+                if task.id == own_task.id:
+                    self.assertIn("second line must not leak", shown["title"])
+                    self.assertIn(
+                        "full description must stay out",
+                        shown["description"],
+                    )
+                    self.assertEqual(
+                        shown["messages"][0]["message"],
+                        "message must not leak",
+                    )
+
+    async def test_architect_board_summary_bounds_large_task_excerpt(self):
+        architect = self._add_architect("arch-1", "Architect")
+        alice = self._add_engineer(
+            "eng-alice", "Alice", hired_by_architect_id=architect.id
+        )
+        expected_task_item_keys = {
+            "id",
+            "slug",
+            "title",
+            "lane",
+            "labels",
+            "status",
+            "assigned_engineer_id",
+            "created_by",
+            "health_state",
+            "updated_at",
+        }
+        for idx in range(205):
+            self._add_task(
+                f"task-{idx:03d}",
+                f"Task {idx:03d} first line " + ("x" * 180)
+                + "\nSECOND-LINE-SENTINEL",
+                assigned_engineer_id=alice.id,
+                created_by_architect_id=architect.id,
+                description="FULL-DESCRIPTION-SENTINEL " * 80,
+                action_vars={"payload": "ACTION-VARS-SENTINEL" * 20},
+                messages=[{
+                    "action": "progress",
+                    "message": "MESSAGE-SENTINEL" * 20,
+                }],
+                health_details={"nested": "HEALTH-DETAILS-SENTINEL" * 20},
+                verification_summary={
+                    "nested": "VERIFICATION-SUMMARY-SENTINEL" * 20,
+                },
+            )
+
+        text, is_error = await self._call(
+            "architect_board_summary",
+            {},
+            architect.id,
+        )
+
+        self.assertFalse(is_error, text)
+        self.assertLess(len(text), 10_000)
+        summary = json.loads(text)
+        self.assertEqual(summary["tasks_total"], 205)
+        self.assertEqual(summary["lanes"]["Backlog"], 205)
+        self.assertEqual(summary["tasks"]["count"], 205)
+        self.assertTrue(summary["tasks"]["truncated"])
+        task_items = summary["tasks"]["items"]
+        self.assertEqual(
+            len(task_items),
+            self.shared_mod._ARCHITECT_BOARD_SUMMARY_TASK_LIMIT,
+        )
+        for item in task_items:
+            self.assertEqual(set(item), expected_task_item_keys)
+            self.assertNotIn("\n", item["title"])
+            self.assertLessEqual(
+                len(item["title"]),
+                self.shared_mod._ARCHITECT_BOARD_SUMMARY_TITLE_LIMIT,
+            )
+            self.assertFalse(any(isinstance(value, dict) for value in item.values()))
+        self.assertNotIn("SECOND-LINE-SENTINEL", text)
+        self.assertNotIn("FULL-DESCRIPTION-SENTINEL", text)
+        self.assertNotIn("ACTION-VARS-SENTINEL", text)
+        self.assertNotIn("MESSAGE-SENTINEL", text)
+        self.assertNotIn("HEALTH-DETAILS-SENTINEL", text)
+        self.assertNotIn("VERIFICATION-SUMMARY-SENTINEL", text)
 
     async def test_architect_task_create_stamps_architect_fields_and_rejects_out_of_scope_engineer(self):
         architect = self._add_architect("arch-1", "Architect")
