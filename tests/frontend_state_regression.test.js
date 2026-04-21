@@ -6610,6 +6610,22 @@ test('weaver agent card toggle shares the close control reveal affordances and i
   assert.match(css, /\.cell-weaver-toggle:hover,\s*\.cell-weaver-toggle:focus-visible,\s*\.cell-weaver-toggle:active\s*\{[^}]*outline:\s*none;/);
 });
 
+test('agent role badges render in the bottom-right opposite the agent type label', () => {
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const typeRule = css.match(/\.cell-type\s*\{[^}]*\}/)[0];
+  const engineerRule = css.match(/\.cell-engineer-badge\s*\{[^}]*\}/)[0];
+  const architectRule = css.match(/\.cell-architect-badge\s*\{[^}]*\}/)[0];
+
+  assert.match(typeRule, /bottom:\s*2px;/);
+  assert.match(typeRule, /left:\s*3px;/);
+  assert.match(engineerRule, /bottom:\s*2px;/);
+  assert.match(engineerRule, /right:\s*3px;/);
+  assert.doesNotMatch(engineerRule, /left:\s*3px;/);
+  assert.match(architectRule, /bottom:\s*2px;/);
+  assert.match(architectRule, /right:\s*3px;/);
+  assert.doesNotMatch(architectRule, /left:\s*3px;/);
+});
+
 test('selected weaver cards keep selection chrome aligned with running and paused status colors', () => {
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
 
