@@ -209,6 +209,24 @@ def _decode_pending_hire_row(row, cols) -> dict:
     return pending_hire
 
 
+def _digest_event_json(event: dict) -> str:
+    """Encode a digest event without WeaverEventBuffer private metadata."""
+    payload = {
+        str(key): value
+        for key, value in dict(event or {}).items()
+        if not str(key).startswith("_digest_")
+    }
+    return json.dumps(payload, separators=(",", ":"))
+
+
+def _decode_digest_event_json(raw: str) -> dict:
+    try:
+        event = json.loads(raw or "{}")
+    except (json.JSONDecodeError, TypeError):
+        event = {}
+    return event if isinstance(event, dict) else {}
+
+
 
 
 class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
@@ -983,6 +1001,171 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         row = self._conn.execute(
             "SELECT MAX(id) FROM panel_events").fetchone()
         return row[0] if row and row[0] is not None else 0
+
+    # -- Digest delivery persistence ----------------------------------------
+
+    def save_digest_queued_event(
+        self,
+        recipient_id: str,
+        event: dict,
+        enqueued_at: float,
+    ) -> int:
+        """Persist one queued digest event and return its queue row ID."""
+        cur = self._conn.execute(
+            "INSERT INTO digest_queued_events "
+            "(recipient_id, event_json, enqueued_at) VALUES (?,?,?)",
+            (
+                str(recipient_id or ""),
+                _digest_event_json(event),
+                float(enqueued_at or 0),
+            ),
+        )
+        self._conn.commit()
+        return int(cur.lastrowid or 0)
+
+    def load_digest_queued_events(self) -> dict[str, list[dict]]:
+        """Load queued digest events grouped by recipient in delivery order."""
+        rows = self._conn.execute(
+            "SELECT id, recipient_id, event_json, enqueued_at "
+            "FROM digest_queued_events "
+            "ORDER BY recipient_id, id"
+        ).fetchall()
+        result: dict[str, list[dict]] = {}
+        for row_id, recipient_id, event_json, enqueued_at in rows:
+            recipient_id = str(recipient_id or "")
+            if not recipient_id:
+                continue
+            event = _decode_digest_event_json(event_json)
+            event["_digest_queue_id"] = int(row_id or 0)
+            event["_digest_enqueued_at"] = float(enqueued_at or 0)
+            result.setdefault(recipient_id, []).append(event)
+        return result
+
+    def load_digest_sent_events(
+        self,
+        *,
+        limit_per_recipient: int = 200,
+    ) -> dict[str, list[dict]]:
+        """Load recent sent digest events grouped by recipient.
+
+        Each recipient is capped in memory to the most recent
+        ``limit_per_recipient`` rows, returned oldest-first for UI display.
+        """
+        cap = max(0, int(limit_per_recipient or 0))
+        rows = self._conn.execute(
+            "SELECT recipient_id, event_json, enqueued_at, delivered_at "
+            "FROM digest_sent_events "
+            "ORDER BY recipient_id, delivered_at DESC, id DESC"
+        ).fetchall()
+        newest_first: dict[str, list[dict]] = {}
+        for recipient_id, event_json, enqueued_at, delivered_at in rows:
+            recipient_id = str(recipient_id or "")
+            if not recipient_id:
+                continue
+            bucket = newest_first.setdefault(recipient_id, [])
+            if cap and len(bucket) >= cap:
+                continue
+            event = _decode_digest_event_json(event_json)
+            event["delivered_at"] = float(
+                event.get("delivered_at") or delivered_at or 0
+            )
+            bucket.append(event)
+
+        result: dict[str, list[dict]] = {}
+        for recipient_id, events in newest_first.items():
+            result[recipient_id] = list(reversed(events))
+        return result
+
+    def complete_digest_delivery(
+        self,
+        recipient_id: str,
+        sent_events: list[tuple[dict, float, float]],
+        queue_ids: list[int],
+        *,
+        sent_cap: int = 200,
+    ):
+        """Move delivered events from the queued table to sent history.
+
+        ``sent_events`` contains ``(event, enqueued_at, delivered_at)`` tuples.
+        Queue deletion, sent inserts, and sent-history pruning are committed as
+        one transaction so a mid-flush crash cannot leave a partial move.
+        """
+        recipient_id = str(recipient_id or "")
+        if not recipient_id:
+            return
+        clean_queue_ids = []
+        for row_id in queue_ids or []:
+            try:
+                row_id = int(row_id or 0)
+            except (TypeError, ValueError):
+                row_id = 0
+            if row_id > 0:
+                clean_queue_ids.append(row_id)
+        sent_rows = [
+            (
+                recipient_id,
+                _digest_event_json(event),
+                float(enqueued_at or 0),
+                float(delivered_at or 0),
+            )
+            for event, enqueued_at, delivered_at in (sent_events or [])
+        ]
+
+        with self._conn:
+            if sent_rows:
+                self._conn.executemany(
+                    "INSERT INTO digest_sent_events "
+                    "(recipient_id, event_json, enqueued_at, delivered_at) "
+                    "VALUES (?,?,?,?)",
+                    sent_rows,
+                )
+            for i in range(0, len(clean_queue_ids), 500):
+                chunk = clean_queue_ids[i:i + 500]
+                placeholders = ",".join("?" for _ in chunk)
+                self._conn.execute(
+                    "DELETE FROM digest_queued_events "
+                    f"WHERE recipient_id=? AND id IN ({placeholders})",
+                    (recipient_id, *chunk),
+                )
+            self._prune_digest_sent_events_uncommitted(
+                recipient_id,
+                keep=sent_cap,
+            )
+
+    def prune_digest_sent_events(self, recipient_id: str, *, keep: int = 200):
+        """Keep only the newest sent digest events for one recipient."""
+        with self._conn:
+            self._prune_digest_sent_events_uncommitted(
+                str(recipient_id or ""),
+                keep=keep,
+            )
+
+    def _prune_digest_sent_events_uncommitted(
+        self,
+        recipient_id: str,
+        *,
+        keep: int,
+    ):
+        if not recipient_id:
+            return
+        keep = max(0, int(keep or 0))
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM digest_sent_events WHERE recipient_id=?",
+            (recipient_id,),
+        ).fetchone()
+        count = int((row[0] if row else 0) or 0)
+        excess = count - keep
+        if excess <= 0:
+            return
+        self._conn.execute(
+            "DELETE FROM digest_sent_events WHERE id IN ("
+            "SELECT id FROM digest_sent_events "
+            "WHERE recipient_id=? "
+            "ORDER BY delivered_at ASC, id ASC "
+            "LIMIT ?"
+            ")",
+            (recipient_id, excess),
+        )
 
     # -- Weaver settings & journal -------------------------------------------
 

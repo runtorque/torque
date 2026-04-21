@@ -301,6 +301,25 @@ CREATE TABLE IF NOT EXISTS agent_digest_settings (
     wake_on_digest     INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS digest_queued_events (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    recipient_id TEXT NOT NULL,
+    event_json   TEXT NOT NULL,
+    enqueued_at  REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_digest_queued_recipient
+    ON digest_queued_events (recipient_id, id);
+
+CREATE TABLE IF NOT EXISTS digest_sent_events (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    recipient_id TEXT NOT NULL,
+    event_json   TEXT NOT NULL,
+    enqueued_at  REAL NOT NULL,
+    delivered_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_digest_sent_recipient
+    ON digest_sent_events (recipient_id, delivered_at DESC);
+
 CREATE TABLE IF NOT EXISTS weaver_journal (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     group_name  TEXT NOT NULL,

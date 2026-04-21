@@ -29,6 +29,73 @@ class FakeBridge:
         await asyncio.sleep(0)
 
 
+class FakeDigestDB:
+    def __init__(self, *, queued=None, sent=None):
+        self.queued = {
+            recipient_id: [dict(evt) for evt in events]
+            for recipient_id, events in (queued or {}).items()
+        }
+        self.sent = {
+            recipient_id: [dict(evt) for evt in events]
+            for recipient_id, events in (sent or {}).items()
+        }
+        self.next_queue_id = 1
+        for events in self.queued.values():
+            for evt in events:
+                self.next_queue_id = max(
+                    self.next_queue_id,
+                    int(evt.get("_digest_queue_id") or 0) + 1,
+                )
+        self.completed = []
+        self.saved_settings = []
+
+    def save_agent_digest_settings(self, agent_id, settings):
+        self.saved_settings.append((agent_id, dict(settings)))
+
+    def save_digest_queued_event(self, recipient_id, event, enqueued_at):
+        row_id = self.next_queue_id
+        self.next_queue_id += 1
+        stored = dict(event)
+        stored["_digest_queue_id"] = row_id
+        stored["_digest_enqueued_at"] = enqueued_at
+        self.queued.setdefault(recipient_id, []).append(stored)
+        return row_id
+
+    def load_digest_queued_events(self):
+        return {
+            recipient_id: [dict(evt) for evt in events]
+            for recipient_id, events in self.queued.items()
+        }
+
+    def load_digest_sent_events(self, *, limit_per_recipient=200):
+        result = {}
+        for recipient_id, events in self.sent.items():
+            result[recipient_id] = [dict(evt) for evt in events[-limit_per_recipient:]]
+        return result
+
+    def complete_digest_delivery(
+        self,
+        recipient_id,
+        sent_events,
+        queue_ids,
+        *,
+        sent_cap=200,
+    ):
+        self.completed.append((recipient_id, list(queue_ids)))
+        remove_ids = {int(row_id) for row_id in queue_ids}
+        self.queued[recipient_id] = [
+            evt
+            for evt in self.queued.get(recipient_id, [])
+            if int(evt.get("_digest_queue_id") or 0) not in remove_ids
+        ]
+        for event, _enqueued_at, delivered_at in sent_events:
+            stored = dict(event)
+            stored["delivered_at"] = delivered_at
+            self.sent.setdefault(recipient_id, []).append(stored)
+        if len(self.sent.get(recipient_id, [])) > sent_cap:
+            self.sent[recipient_id] = self.sent[recipient_id][-sent_cap:]
+
+
 class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         _install_aiohttp_stub()
@@ -59,6 +126,112 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         )
         state.weaver_settings[group] = self.state_mod.WeaverSettings(group=group)
         return state, group, weaver
+
+    async def test_persisted_digest_state_reloads_on_buffer_construction(self):
+        state, _, weaver = self._make_state()
+        state.db = FakeDigestDB(
+            queued={
+                weaver.id: [
+                    {
+                        "kind": "task_completed",
+                        "message": "survived restart",
+                        "_digest_queue_id": 7,
+                        "_digest_enqueued_at": 50.0,
+                    }
+                ],
+            },
+            sent={
+                weaver.id: [
+                    {
+                        "kind": "task_completed",
+                        "message": f"sent {i}",
+                        "delivered_at": 1000.0 + i,
+                    }
+                    for i in range(205)
+                ],
+            },
+        )
+
+        buffer = self.weaver_mod.WeaverEventBuffer(state, FakeBridge())
+
+        stats = buffer.get_buffer_stats(weaver.id)
+        self.assertEqual(stats["buffered_events"], 1)
+        self.assertEqual(stats["queued_events"][0]["message"], "survived restart")
+        self.assertEqual(buffer._buffer_started[weaver.id], 50.0)
+        sent = buffer.get_sent_events(weaver.id)
+        self.assertEqual(len(sent), 200)
+        self.assertEqual(sent[0]["message"], "sent 5")
+        self.assertEqual(sent[-1]["message"], "sent 204")
+
+    async def test_manual_flush_moves_persisted_queue_rows_to_sent_history(self):
+        state, group, weaver = self._make_state()
+        db = FakeDigestDB()
+        state.db = db
+        bridge = FakeBridge()
+        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer._loop = asyncio.get_running_loop()
+
+        with mock.patch.object(self.weaver_mod.time, "time", return_value=100.0):
+            buffer.on_panel_event({
+                "group": group,
+                "kind": "task_completed",
+                "message": "persist then deliver",
+            })
+
+        self.assertEqual(len(db.queued[weaver.id]), 1)
+        queue_id = db.queued[weaver.id][0]["_digest_queue_id"]
+
+        with mock.patch.object(self.weaver_mod.time, "time", return_value=120.0):
+            ok, message = buffer.request_manual_flush(weaver.id)
+            self.assertTrue(ok)
+            self.assertEqual(message, "")
+            await asyncio.sleep(0.05)
+
+        self.assertEqual(bridge.sent and bridge.sent[0].count("persist then deliver"), 1)
+        self.assertEqual(db.queued[weaver.id], [])
+        self.assertEqual(db.completed, [(weaver.id, [queue_id])])
+        self.assertEqual(db.sent[weaver.id][0]["message"], "persist then deliver")
+        self.assertEqual(db.sent[weaver.id][0]["delivered_at"], 120.0)
+        buffer.stop()
+
+    async def test_persisted_paused_queue_flushes_after_resume(self):
+        state, _, weaver = self._make_state()
+        state.agent_digest_settings[weaver.id] = self.state_mod.AgentDigestSettings(
+            agent_id=weaver.id,
+            paused=True,
+        )
+        db = FakeDigestDB(
+            queued={
+                weaver.id: [
+                    {
+                        "kind": "task_completed",
+                        "message": "queued while paused",
+                        "_digest_queue_id": 42,
+                        "_digest_enqueued_at": 75.0,
+                    }
+                ],
+            },
+        )
+        state.db = db
+        bridge = FakeBridge()
+        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer._loop = asyncio.get_running_loop()
+
+        buffer._check_weaver_flush(weaver)
+        await asyncio.sleep(0.05)
+        self.assertEqual(bridge.sent, [])
+        self.assertEqual(buffer.get_buffer_stats(weaver.id)["buffered_events"], 1)
+
+        state.agent_digest_settings[weaver.id].paused = False
+        with mock.patch.object(self.weaver_mod.time, "time", return_value=180.0):
+            buffer.on_delivery_resumed(weaver.id)
+            await asyncio.sleep(0.05)
+
+        self.assertEqual(len(bridge.sent), 1)
+        self.assertIn("queued while paused", bridge.sent[0])
+        self.assertEqual(db.queued[weaver.id], [])
+        self.assertEqual(db.sent[weaver.id][0]["message"], "queued while paused")
+        buffer.stop()
 
     async def test_simultaneous_flush_triggers_only_one_digest(self):
         state, group, weaver = self._make_state()

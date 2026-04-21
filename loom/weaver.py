@@ -562,6 +562,42 @@ class WeaverEventBuffer:
         self._hint_delivery: dict[str, dict[str, float]] = {}  # group → fingerprint → last sent at
         self._timer_handle: asyncio.TimerHandle | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._load_persisted_digest_events()
+
+    def _load_persisted_digest_events(self):
+        """Restore queued/sent digest state persisted by a prior daemon."""
+        db = getattr(self._state, "db", None)
+        if not db:
+            return
+        try:
+            queued = db.load_digest_queued_events()
+            for recipient_id, events in queued.items():
+                if not self._digest_recipient(recipient_id) or not events:
+                    continue
+                self._buffers[recipient_id] = [dict(evt) for evt in events]
+                oldest = min(
+                    float(evt.get("_digest_enqueued_at") or 0)
+                    for evt in events
+                )
+                if oldest > 0:
+                    self._buffer_started[recipient_id] = oldest
+
+            sent = db.load_digest_sent_events(limit_per_recipient=200)
+            for recipient_id, events in sent.items():
+                if not self._digest_recipient(recipient_id) or not events:
+                    continue
+                self._sent_events[recipient_id] = [
+                    self._event_snapshot(evt) for evt in events[-200:]
+                ]
+            if queued or sent:
+                log.info(
+                    "Loaded persisted digest state: %d queued recipient(s), "
+                    "%d sent-history recipient(s)",
+                    len(queued),
+                    len(sent),
+                )
+        except Exception:
+            log.exception("Failed to load persisted digest events")
 
     def start(self):
         """Capture the event loop and start the periodic check timer."""
@@ -594,6 +630,89 @@ class WeaverEventBuffer:
         elif "delivered_at" in event:
             snapshot["delivered_at"] = event.get("delivered_at", 0)
         return snapshot
+
+    @classmethod
+    def _storage_event(cls, event: dict) -> dict:
+        """Return an event payload without buffer-only private metadata."""
+        return {
+            key: value
+            for key, value in dict(event or {}).items()
+            if not str(key).startswith("_digest_")
+        }
+
+    @staticmethod
+    def _event_enqueued_at(event: dict, *, fallback: float = 0) -> float:
+        try:
+            return float(event.get("_digest_enqueued_at") or fallback or 0)
+        except (TypeError, ValueError):
+            return float(fallback or 0)
+
+    @staticmethod
+    def _event_queue_id(event: dict) -> int:
+        try:
+            return int(event.get("_digest_queue_id") or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def _persist_queued_event(
+        self,
+        recipient_id: str,
+        event: dict,
+        enqueued_at: float,
+    ):
+        db = getattr(self._state, "db", None)
+        if not db:
+            return
+        try:
+            queue_id = db.save_digest_queued_event(
+                recipient_id,
+                self._storage_event(event),
+                enqueued_at,
+            )
+            if queue_id:
+                event["_digest_queue_id"] = queue_id
+            event["_digest_enqueued_at"] = enqueued_at
+        except Exception:
+            log.exception(
+                "Failed to persist queued digest event for '%s'",
+                recipient_id,
+            )
+
+    def _persist_delivered_events(
+        self,
+        recipient_id: str,
+        events: list[dict],
+        snapshots: list[dict],
+        delivered_at: float,
+    ):
+        db = getattr(self._state, "db", None)
+        if not db or not events:
+            return
+        queue_ids = [
+            row_id
+            for evt in events
+            if (row_id := self._event_queue_id(evt)) > 0
+        ]
+        sent_rows = [
+            (
+                self._storage_event(snapshot),
+                self._event_enqueued_at(original, fallback=delivered_at),
+                delivered_at,
+            )
+            for original, snapshot in zip(events, snapshots)
+        ]
+        try:
+            db.complete_digest_delivery(
+                recipient_id,
+                sent_rows,
+                queue_ids,
+                sent_cap=200,
+            )
+        except Exception:
+            log.exception(
+                "Failed to persist delivered digest events for '%s'",
+                recipient_id,
+            )
 
     def _resolve_recipient_id(self, recipient_or_group: str) -> str:
         recipient_or_group = str(recipient_or_group or "").strip()
@@ -803,9 +922,17 @@ class WeaverEventBuffer:
             if not target:
                 continue
             buf = self._buffers.setdefault(recipient_id, [])
+            enqueued_at = time.time()
             if not buf:
-                self._buffer_started[recipient_id] = time.time()
-            buf.append(dict(event))
+                self._buffer_started[recipient_id] = enqueued_at
+            queued_event = dict(event)
+            queued_event["_digest_enqueued_at"] = enqueued_at
+            buf.append(queued_event)
+            self._persist_queued_event(
+                recipient_id,
+                queued_event,
+                enqueued_at,
+            )
             self._emit_buffer_stats(recipient_id)
 
             settings = self._state.get_agent_digest_settings(recipient_id)
@@ -998,12 +1125,19 @@ class WeaverEventBuffer:
                          target.name, len(events))
                 if events:
                     sent = self._sent_events.setdefault(agent_id, [])
-                    sent.extend(
+                    delivered_snapshots = [
                         self._event_snapshot(evt, delivered_at=delivered_at)
                         for evt in events
-                    )
+                    ]
+                    sent.extend(delivered_snapshots)
                     if len(sent) > 200:
                         self._sent_events[agent_id] = sent[-200:]
+                    self._persist_delivered_events(
+                        agent_id,
+                        events,
+                        delivered_snapshots,
+                        delivered_at,
+                    )
                     self._emit_sent_events(agent_id)
                 if due_hints:
                     self._record_sent_hints(
