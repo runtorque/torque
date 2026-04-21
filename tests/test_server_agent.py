@@ -2,6 +2,11 @@ import importlib
 import types
 import unittest
 
+try:
+    from helpers import install_aiohttp_stub
+except ModuleNotFoundError:
+    from tests.helpers import install_aiohttp_stub
+
 
 class _FakeState:
     def __init__(self, *, agent_directory="", default_directory="",
@@ -104,6 +109,7 @@ class _FakeTemplateManager:
 
 class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        install_aiohttp_stub()
         self.server_agent_mod = importlib.import_module("loom.server_agent")
         self.server_agent_mod = importlib.reload(self.server_agent_mod)
         self.state_mod = importlib.import_module("loom.state")
@@ -349,6 +355,56 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNotNone(cell)
         self.assertEqual(cell.created_by_weaver_id, "weaver-1")
+
+    async def test_create_agent_with_config_launches_in_inherited_worktree(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("backend")
+        bridge = _CapturingBridge(current_path="/tmp/project")
+        service = self.server_agent_mod.AgentLaunchService(
+            state=state,
+            connection=None,
+            bridge=bridge,
+            worktree_mgr=None,
+            template_mgr=_FakeTemplateManager(),
+        )
+        source = self.state_mod.AgentCell(
+            id="impl-1",
+            name="Implementer",
+            group="backend",
+            cell_type="agent",
+            worktree_path="/repo/.loom/worktrees/impl",
+            worktree_branch="loom/impl",
+            worktree_repo_root="/repo",
+            worktree_base_branch="main",
+            worktree_changed_files=["README.md"],
+        )
+
+        cell = await service.create_agent_with_config(
+            "backend",
+            "Reviewer",
+            {
+                "profile": "Default",
+                "command": "codex",
+                "directory": "/repo",
+                "tab_color": "",
+                "env_vars": {},
+                "env_file": "",
+                "shell": "zsh",
+                "system_prompt": "",
+                "worktree": True,
+            },
+            inherited_worktree_from=source,
+        )
+
+        self.assertIsNotNone(cell)
+        self.assertEqual(cell.worktree_path, source.worktree_path)
+        self.assertEqual(cell.worktree_branch, source.worktree_branch)
+        self.assertEqual(cell.directory, source.worktree_path)
+        self.assertEqual(cell.worktree_changed_files, ["README.md"])
+        self.assertEqual(
+            bridge.create_session_calls[0]["cell"].directory,
+            source.worktree_path,
+        )
 
     def test_runtime_env_vars_for_engineer_adds_binding(self):
         cell = types.SimpleNamespace(
