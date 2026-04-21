@@ -44,6 +44,7 @@ log = logging.getLogger("loom")
 _KINDS_SCHEMA_MIGRATION_VERSION = 1
 _KINDS_BACKFILL_MIGRATION_VERSION = 2
 _KINDS_CLEANUP_MIGRATION_VERSION = 3
+_KINDS_WORKER_KIND_BACKFILL_MIGRATION_VERSION = 4
 _KINDS_SCHEMA_MIGRATION_VERSION_KEY = "schema_kinds_migration_version"
 _KINDS_SCHEMA_MIGRATION_MIGRATED_AT_KEY = "schema_kinds_migration_migrated_at"
 _KINDS_TASK_ASSIGNMENT_FIXUP_APPLIED_KEY = "schema_kinds_task_assignment_fixup_applied"
@@ -240,6 +241,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self._backfill_kinds_if_needed()
         self._fixup_kinds_task_assignments_if_needed()
         self._cleanup_kinds_legacy_columns_if_needed()
+        self._backfill_empty_worker_kinds_if_needed()
         self._migrate_agent_digest_settings_from_legacy_weaver_settings()
         self.migrate_task_ids_if_needed()
 
@@ -2892,6 +2894,49 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         except Exception:
             self._conn.rollback()
             raise
+
+
+    def _backfill_empty_worker_kinds_if_needed(self) -> None:
+        version = self._current_kinds_migration_version()
+        if version < _KINDS_CLEANUP_MIGRATION_VERSION:
+            return
+        if version >= _KINDS_WORKER_KIND_BACKFILL_MIGRATION_VERSION:
+            return
+
+        updated = 0
+        try:
+            self._conn.execute("BEGIN")
+            cursor = self._conn.execute(
+                "UPDATE agents SET kind='worker' "
+                "WHERE cell_type='agent' "
+                "AND TRIM(COALESCE(kind, '')) = '' "
+                "AND ("
+                "TRIM(COALESCE(owner_engineer_id, '')) != '' "
+                "OR COALESCE(persistent, 0) = 0"
+                ")"
+            )
+            updated = max(0, int(cursor.rowcount or 0))
+            migrated_at = datetime.now(timezone.utc).isoformat()
+            self._conn.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+                (
+                    _KINDS_SCHEMA_MIGRATION_VERSION_KEY,
+                    str(_KINDS_WORKER_KIND_BACKFILL_MIGRATION_VERSION),
+                ),
+            )
+            self._conn.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+                (_KINDS_SCHEMA_MIGRATION_MIGRATED_AT_KEY, migrated_at),
+            )
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
+
+        log.info(
+            "migration: empty worker kind backfill applied (updated=%d)",
+            updated,
+        )
 
     def _load_group_weaver_map(self) -> dict[str, str]:
         valid_agent_ids_by_group: dict[str, set[str]] = {}

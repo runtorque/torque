@@ -1688,7 +1688,7 @@ class LoomDBTests(unittest.TestCase):
         migrated_at = migrated._conn.execute(
             "SELECT value FROM meta WHERE key='schema_kinds_migration_migrated_at'"
         ).fetchone()[0]
-        self.assertEqual(version, "3")
+        self.assertEqual(version, "4")
         self.assertTrue(migrated_at)
 
         migrated.save_agent(
@@ -1758,6 +1758,106 @@ class LoomDBTests(unittest.TestCase):
         self.assertFalse(
             any("kinds backfill applied" in msg for msg in captured_messages),
             captured_messages,
+        )
+
+    def test_init_backfills_empty_worker_kind_rows_once(self):
+        path = Path(self.tmp.name) / "worker-kind-backfill.db"
+        seeded = LoomDB(path)
+        seeded.init()
+        seeded.save_agent(
+            AgentCell(
+                id="engineer-1",
+                name="Courier",
+                group="loom",
+                slug="courier",
+                kind="engineer",
+                persistent=True,
+            )
+        )
+        seeded.save_agent(
+            AgentCell(
+                id="owned-worker",
+                name="Owned Worker",
+                group="loom",
+                slug="owned-worker",
+                kind="",
+                owner_engineer_id="engineer-1",
+                persistent=False,
+            )
+        )
+        seeded.save_agent(
+            AgentCell(
+                id="user-worker",
+                name="User Worker",
+                group="loom",
+                slug="user-worker",
+                kind="",
+                persistent=False,
+            )
+        )
+        seeded.save_agent(
+            AgentCell(
+                id="persistent-empty",
+                name="Persistent Empty",
+                group="loom",
+                slug="persistent-empty",
+                kind="",
+                persistent=True,
+            )
+        )
+        seeded.close()
+
+        conn = sqlite3.connect(str(path))
+        conn.execute(
+            "UPDATE meta SET value='3' "
+            "WHERE key='schema_kinds_migration_version'"
+        )
+        conn.commit()
+        conn.close()
+
+        migrated = LoomDB(path)
+        self.addCleanup(migrated.close)
+        with self.assertLogs("loom", level="INFO") as cm:
+            migrated.init()
+
+        self.assertIn(
+            "migration: empty worker kind backfill applied (updated=2)",
+            "\n".join(cm.output),
+        )
+        rows = migrated._conn.execute(
+            "SELECT id, kind FROM agents ORDER BY id"
+        ).fetchall()
+        self.assertEqual(
+            rows,
+            [
+                ("engineer-1", "engineer"),
+                ("owned-worker", "worker"),
+                ("persistent-empty", ""),
+                ("user-worker", "worker"),
+            ],
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT value FROM meta WHERE key='schema_kinds_migration_version'"
+            ).fetchone()[0],
+            "4",
+        )
+
+        migrated.close()
+        rerun = LoomDB(path)
+        self.addCleanup(rerun.close)
+        rerun.init()
+        self.assertEqual(
+            rerun._conn.execute(
+                "SELECT id, kind FROM agents ORDER BY id"
+            ).fetchall(),
+            rows,
+        )
+        self.assertEqual(
+            rerun._conn.execute(
+                "SELECT value FROM meta WHERE key='schema_kinds_migration_version'"
+            ).fetchone()[0],
+            "4",
         )
 
     def test_init_backfills_kinds_with_root_weaver_candidate(self):
@@ -1842,7 +1942,7 @@ class LoomDBTests(unittest.TestCase):
         version = migrated._conn.execute(
             "SELECT value FROM meta WHERE key='schema_kinds_migration_version'"
         ).fetchone()[0]
-        self.assertEqual(version, "3")
+        self.assertEqual(version, "4")
 
         migrated.close()
 
@@ -1930,7 +2030,7 @@ class LoomDBTests(unittest.TestCase):
             migrated._conn.execute(
                 "SELECT value FROM meta WHERE key='schema_kinds_migration_version'"
             ).fetchone()[0],
-            "3",
+            "4",
         )
 
     def test_init_backfills_existing_agents_without_promoting_when_no_weaver_found(self):
@@ -1993,7 +2093,7 @@ class LoomDBTests(unittest.TestCase):
             migrated._conn.execute(
                 "SELECT value FROM meta WHERE key='schema_kinds_migration_version'"
             ).fetchone()[0],
-            "3",
+            "4",
         )
 
     def test_init_skips_ambiguous_weaver_backfill_without_override(self):
@@ -2128,7 +2228,7 @@ class LoomDBTests(unittest.TestCase):
             migrated._conn.execute(
                 "SELECT value FROM meta WHERE key='schema_kinds_migration_version'"
             ).fetchone()[0],
-            "3",
+            "4",
         )
 
     def test_init_uses_env_override_for_ambiguous_weaver_backfill(self):
@@ -2195,7 +2295,7 @@ class LoomDBTests(unittest.TestCase):
             migrated._conn.execute(
                 "SELECT value FROM meta WHERE key='schema_kinds_migration_version'"
             ).fetchone()[0],
-            "3",
+            "4",
         )
 
     def test_init_backfills_task_assignments_from_group_settings_weaver(self):
@@ -2285,7 +2385,7 @@ class LoomDBTests(unittest.TestCase):
             migrated._conn.execute(
                 "SELECT value FROM meta WHERE key='schema_kinds_migration_version'"
             ).fetchone()[0],
-            "3",
+            "4",
         )
 
     def test_init_ignores_stale_group_settings_weaver_with_heuristic_engineer(self):
@@ -2338,7 +2438,7 @@ class LoomDBTests(unittest.TestCase):
             migrated._conn.execute(
                 "SELECT value FROM meta WHERE key='schema_kinds_migration_version'"
             ).fetchone()[0],
-            "3",
+            "4",
         )
 
     def test_init_fixes_version2_unassigned_tasks_from_group_settings(self):

@@ -132,6 +132,53 @@ class LoomDoctorTests(unittest.TestCase):
         self.assertIn("[architects]", rendered)
         self.assertIn("[pending_hires]", rendered)
 
+    def test_build_doctor_report_warns_for_empty_kind_agent_with_task_history(self):
+        home = self._home_dir()
+        self._save_engineer(engineer_id="engineer-1", name="Courier")
+        self.db.save_agent(
+            AgentCell(
+                id="empty-worker",
+                name="Empty Worker",
+                group="loom",
+                slug="empty-worker",
+                cell_type="agent",
+                kind="",
+                tasks_dispatched=1,
+                persistent=False,
+            )
+        )
+        self.db.save_agent_history({
+            "id": "empty-worker",
+            "name": "Empty Worker",
+            "slug": "empty-worker",
+            "group": "loom",
+            "agent_type": "codex",
+            "template": "",
+            "created_at": time.time(),
+            "total_tasks": 1,
+            "status": "active",
+        })
+
+        with mock.patch.dict(os.environ, {"HOME": str(home)}):
+            report = build_doctor_report_for_db(self.db_path)
+            rendered = format_doctor_report(report)
+
+        self.assertEqual(
+            report["agents"]["empty_kind_with_task_history_count"],
+            1,
+        )
+        warning = next(
+            w for w in report["warnings"]
+            if w["name"] == "empty_kind_agents_with_task_history"
+        )
+        self.assertEqual(warning["details"]["count"], 1)
+        self.assertEqual(warning["details"]["agents"][0]["id"], "empty-worker")
+        self.assertIn(
+            "agent rows with kind='' have task history",
+            rendered,
+        )
+        self.assertIn("empty-worker", rendered)
+
     def test_build_doctor_report_passes_for_fully_assigned_engineer_db(self):
         home = self._home_dir()
         self.db_path.with_name("loom.db.pre-kinds.bak").write_bytes(b"backup")
@@ -184,7 +231,7 @@ class LoomDoctorTests(unittest.TestCase):
         self.assertEqual(report["failed_checks"], [])
         self.assertGreaterEqual(
             report["migration"]["schema_kinds_migration_version"],
-            3,
+            4,
         )
         self.assertTrue(report["migration"]["backup_exists"])
         self.assertEqual(report["agents"]["total"], 2)

@@ -141,7 +141,7 @@ class Stage6CleanupMigrationTests(unittest.TestCase):
             migrated._conn.execute(
                 "SELECT value FROM meta WHERE key='schema_kinds_migration_version'"
             ).fetchone()[0],
-            "3",
+            "4",
         )
         agent_columns = {
             row[1]
@@ -271,5 +271,5 @@ class Stage6CleanupMigrationTests(unittest.TestCase):
             rerun._conn.execute(
                 "SELECT value FROM meta WHERE key='schema_kinds_migration_version'"
             ).fetchone()[0],
-            "3",
+            "4",
         )
