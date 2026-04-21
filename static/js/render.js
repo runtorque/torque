@@ -114,6 +114,25 @@ function _workerOwnerEngineerId(agent, visibleById) {
   return ownerId;
 }
 
+function _agentDismissedAt(agent) {
+  if (!agent) return 0;
+  const value = Number(agent.dismissed_at || 0);
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function _isDismissedEngineer(agent) {
+  return !!(agent && (agent.kind || '') === 'engineer' && _agentDismissedAt(agent));
+}
+
+function _sortEngineersActiveFirst(engineers) {
+  return (Array.isArray(engineers) ? engineers : []).slice().sort(function(a, b) {
+    const aDismissed = _isDismissedEngineer(a) ? 1 : 0;
+    const bDismissed = _isDismissedEngineer(b) ? 1 : 0;
+    if (aDismissed !== bDismissed) return aDismissed - bDismissed;
+    return 0;
+  });
+}
+
 function _sortAgentsHierarchically(agents) {
   const visibleById = {};
   const architects = [];
@@ -157,20 +176,124 @@ function _sortAgentsHierarchically(agents) {
   const ordered = [];
   for (const architect of architects) {
     ordered.push(architect);
-    const hiredEngineers = engineersByArchitect[architect.id] || [];
+    const hiredEngineers = _sortEngineersActiveFirst(engineersByArchitect[architect.id] || []);
     for (const engineer of hiredEngineers) {
       ordered.push(engineer);
       const hiredWorkers = workersByEngineer[engineer.id] || [];
       for (const worker of hiredWorkers) ordered.push(worker);
     }
   }
-  for (const engineer of userEngineers) {
+  for (const engineer of _sortEngineersActiveFirst(userEngineers)) {
     ordered.push(engineer);
     const workers = workersByEngineer[engineer.id] || [];
     for (const worker of workers) ordered.push(worker);
   }
   for (const worker of orphans) ordered.push(worker);
   return ordered;
+}
+
+function _taskCreatedByValue(task) {
+  if (!task) return 'user';
+  const explicit = String(task.created_by || '').trim();
+  if (explicit) return explicit;
+  const architectId = String(task.created_by_architect_id || '').trim();
+  if (architectId) return 'architect:' + architectId;
+  const engineerId = String(task.created_by_engineer_id || '').trim();
+  if (engineerId) return 'engineer:' + engineerId;
+  if (String(task.parent_task_id || '').trim()) return 'system';
+  return 'user';
+}
+
+function _lookupAgentDisplayName(agentId) {
+  const id = String(agentId || '').trim();
+  if (!id || !state || !state.agents || !state.agents[id]) return '';
+  return state.agents[id].name || state.agents[id].slug || id;
+}
+
+function _taskCreatedByMeta(task) {
+  const raw = _taskCreatedByValue(task);
+  let kind = raw;
+  let id = '';
+  const colon = raw.indexOf(':');
+  if (colon >= 0) {
+    kind = raw.slice(0, colon);
+    id = raw.slice(colon + 1);
+  }
+  kind = String(kind || 'user').trim();
+  id = String(id || '').trim();
+  const agentName = id ? _lookupAgentDisplayName(id) : '';
+  const fallbackName = id || '';
+  const name = agentName || fallbackName;
+  if (kind === 'architect') {
+    return {
+      raw,
+      kind,
+      id,
+      name,
+      icon: '\u25B3',
+      shortLabel: name || 'Architect',
+      kindLabel: 'architect',
+      title: 'Created by architect' + (name ? ' ' + name : '') + (id ? ' (' + id + ')' : ''),
+    };
+  }
+  if (kind === 'engineer') {
+    return {
+      raw,
+      kind,
+      id,
+      name,
+      icon: '\u2692',
+      shortLabel: name || 'Engineer',
+      kindLabel: 'engineer',
+      title: 'Created by engineer' + (name ? ' ' + name : '') + (id ? ' (' + id + ')' : ''),
+    };
+  }
+  if (kind === 'system') {
+    return {
+      raw: 'system',
+      kind: 'system',
+      id: '',
+      name: '',
+      icon: '\u2699',
+      shortLabel: 'System',
+      kindLabel: 'system',
+      title: 'Created by system',
+    };
+  }
+  return {
+    raw: 'user',
+    kind: 'user',
+    id: '',
+    name: '',
+    icon: '\u25CF',
+    shortLabel: 'User',
+    kindLabel: 'user',
+    title: 'Created by user',
+  };
+}
+
+function _taskCreatedByBadgeHtml(task) {
+  const meta = _taskCreatedByMeta(task);
+  const cls = 'board-card-label board-card-created-by board-card-created-by-' + meta.kind;
+  return '<span class="' + esc(cls) + '"'
+    + ' data-created-by="' + esc(meta.raw) + '"'
+    + ' title="' + esc(meta.title) + '">'
+    + '<span class="board-card-created-by-icon">' + esc(meta.icon) + '</span>'
+    + '<span class="board-card-created-by-label">' + esc(meta.shortLabel) + '</span>'
+    + '</span>';
+}
+
+function _taskCreatedByDetailHtml(task) {
+  const meta = _taskCreatedByMeta(task);
+  let body = 'Created by ' + meta.kindLabel;
+  if (meta.name) body += ' ' + meta.name;
+  if (meta.id) body += ' (' + meta.id + ')';
+  return '<span class="task-created-by-chip task-created-by-' + esc(meta.kind) + '"'
+    + ' title="' + esc(meta.title) + '">'
+    + '<span class="task-created-by-icon">' + esc(meta.icon) + '</span>'
+    + '<span class="task-created-by-copy">' + esc(body) + '</span>'
+    + '<code>' + esc(meta.raw) + '</code>'
+    + '</span>';
 }
 
 function toggleMenu(chevron) {
@@ -1171,6 +1294,7 @@ function renderAgentCell(a, options) {
   if (a.status === 'stopped') cls.push('stopped');
   const _isArchitect = (a.kind || '') === 'architect';
   const _isEngineer = (a.kind || '') === 'engineer';
+  const _isDismissed = _isDismissedEngineer(a);
   // Check if this agent is the weaver for its group
   const _gs = (state.group_settings || {})[a.group];
   const _isWeaver = _gs && _gs.weaver_agent_id === a.id;
@@ -1211,12 +1335,14 @@ function renderAgentCell(a, options) {
   const _isArchitectOwnedWorker = !!(_isOwnedWorker && ownerArchitect);
   if (_isArchitect) cls.push('architect');
   if (_isEngineer) cls.push('engineer');
+  if (_isDismissed) cls.push('dismissed');
   if (_isArchitectOwnedEngineer) cls.push('architect-owned-engineer');
   if (_isArchitectOwnedWorker) cls.push('architect-owned-worker');
   else if (_isOwnedWorker) cls.push('engineer-owned-worker');
 
-  const statusCls = agentStatusClass(a);
+  const statusCls = _isDismissed ? 'dismissed' : agentStatusClass(a);
   const titleParts = [a.name, `(${a.status})`];
+  if (_isDismissed) titleParts.push('\u2014 dismissed');
   if (a.needs_attention && a.error_message) titleParts.push(`\u2014 ${a.error_message}`);
   else if (a.activity_detail) titleParts.push(`\u2014 ${a.activity_detail}`);
   const statusClasses = ['cell-status', statusCls];
@@ -1232,9 +1358,12 @@ function renderAgentCell(a, options) {
     statusAttrs.push(`title="${esc(a.error_message || 'Needs attention')}"`);
   }
 
-  let h = `<div class="${cls.join(' ')}" draggable="true" data-drag-id="${a.id}" data-drag-type="agent" data-drag-group="${esc(a.group)}" onclick="onAgentClick('${a.id}')" ondblclick="onAgentDblClick('${a.id}')" oncontextmenu="onCellContextMenu(event,'${a.id}')" onauxclick="if(event.button===1){event.preventDefault();removeAgent('${a.id}')}" title="${esc(titleParts.join(' '))}">`;
+  let h = `<div class="${cls.join(' ')}" draggable="true" data-drag-id="${a.id}" data-drag-type="agent" data-drag-group="${esc(a.group)}"`;
+  if (_isDismissed) h += ` data-dismissed-at="${esc(_agentDismissedAt(a))}"`;
+  h += ` onclick="onAgentClick('${a.id}')" ondblclick="onAgentDblClick('${a.id}')" oncontextmenu="onCellContextMenu(event,'${a.id}')" onauxclick="if(event.button===1){event.preventDefault();removeAgent('${a.id}')}" title="${esc(titleParts.join(' '))}">`;
   h += `<div class="${statusClasses.join(' ')}"${statusAttrs.length ? ' ' + statusAttrs.join(' ') : ''}>`;
-  if (statusCls === 'attention') h += '!';
+  if (_isDismissed) h += '\u2013';
+  else if (statusCls === 'attention') h += '!';
   else if (showDoneFlourish) h += `<span class="cell-status-flourish-label">${esc(doneFlourish.label)}</span>`;
   h += `</div>`;
   h += `<div class="cell-header-controls">`;
@@ -1252,7 +1381,8 @@ function renderAgentCell(a, options) {
   if (_isArchitect) {
     h += `<div class="cell-architect-badge">architect</div>`;
   } else if (_isEngineer) {
-    h += `<div class="cell-engineer-badge">engineer</div>`;
+    if (_isDismissed) h += `<div class="cell-dismissed-badge" title="Dismissed engineer">\u23F8 dismissed</div>`;
+    else h += `<div class="cell-engineer-badge">engineer</div>`;
   }
   if (_weaverAsking) {
     h += `<div class="cell-weaver-ask" title="${esc(_weaverWs.pending_question)}">? awaiting input</div>`;
@@ -1271,7 +1401,9 @@ function renderAgentCell(a, options) {
   if (childCount > 0) {
     h += `<div class="cell-term-count">${childCount}</div>`;
   }
-  if (a.status === 'stopped') {
+  if (_isDismissed) {
+    h += `<button class="cell-relaunch cell-rehire" onclick="event.stopPropagation();rehireEngineer('${a.id}')" title="Rehire engineer">\u21BB rehire</button>`;
+  } else if (a.status === 'stopped') {
     h += `<button class="cell-relaunch" onclick="event.stopPropagation();relaunchAgent('${a.id}')" title="Relaunch">\u21BB relaunch</button>`;
   }
   h += `</div>`;

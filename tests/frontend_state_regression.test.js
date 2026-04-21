@@ -2548,6 +2548,81 @@ test('_renderBoardCard shows the lane-entry timestamp badge in the card header',
   assert.match(html, /board-card-heading-meta/);
 });
 
+test('board cards render created_by attribution badges and update across rerenders', () => {
+  const { context, document } = createBoardHarness({ stubCards: false });
+  const panel = document.register('panel-board');
+  const cards = document.register('board-cards');
+  context.state.agents = {
+    'arch-1': {
+      id: 'arch-1',
+      name: 'Planner',
+      kind: 'architect',
+      group: 'alpha',
+    },
+    'eng-1': {
+      id: 'eng-1',
+      name: 'Builder',
+      kind: 'engineer',
+      group: 'alpha',
+    },
+  };
+  context.state.board_lanes = ['Backlog'];
+  context.state.board_tasks = {
+    userTask: {
+      id: 'userTask',
+      group: 'alpha',
+      task: 'User filed task',
+      lane: 'Backlog',
+      position: 4,
+      created_by: 'user',
+    },
+    architectTask: {
+      id: 'architectTask',
+      group: 'alpha',
+      task: 'Architect filed task',
+      lane: 'Backlog',
+      position: 3,
+      created_by: 'architect:arch-1',
+    },
+    engineerTask: {
+      id: 'engineerTask',
+      group: 'alpha',
+      task: 'Engineer filed task',
+      lane: 'Backlog',
+      position: 2,
+      created_by: 'engineer:eng-1',
+    },
+    systemTask: {
+      id: 'systemTask',
+      group: 'alpha',
+      task: 'System fork',
+      lane: 'Backlog',
+      position: 1,
+      created_by: 'system',
+    },
+  };
+
+  context.renderBoard();
+
+  assert.match(panel.innerHTML, /board-card-created-by-user/);
+  assert.match(panel.innerHTML, /data-created-by="user"/);
+  assert.match(panel.innerHTML, /board-card-created-by-architect/);
+  assert.match(panel.innerHTML, /data-created-by="architect:arch-1"/);
+  assert.match(panel.innerHTML, /Planner/);
+  assert.match(panel.innerHTML, /board-card-created-by-engineer/);
+  assert.match(panel.innerHTML, /data-created-by="engineer:eng-1"/);
+  assert.match(panel.innerHTML, /Builder/);
+  assert.match(panel.innerHTML, /board-card-created-by-system/);
+  assert.match(panel.innerHTML, /data-created-by="system"/);
+
+  cards.scrollTop = 72;
+  context.state.board_tasks.userTask.created_by = 'engineer:eng-1';
+  context.renderBoard();
+
+  assert.match(panel.innerHTML, /User filed task[\s\S]*data-created-by="engineer:eng-1"/);
+  assert.equal(cards.scrollTop, 72);
+});
+
 test('_boardTaskScheduleMeta distinguishes scheduled, due-soon, and overdue states', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);
@@ -5462,6 +5537,107 @@ test('agent clicks still focus immediately when focus-on-click is enabled', () =
   ]);
 });
 
+test('engineer context menu exposes authorized dismiss and rehire controls', async () => {
+  const { context, document } = createSelectionHarness();
+  const menu = document.register('ctx-menu');
+  context.showConfirm = function() { return Promise.resolve(true); };
+  context.state.active_session_id = 'sess-arch-a';
+  context.state.group_settings = { alpha: {} };
+  context.state.agents = {
+    'arch-a': {
+      id: 'arch-a',
+      name: 'Planner A',
+      kind: 'architect',
+      group: 'alpha',
+      cell_type: 'agent',
+      session_id: 'sess-arch-a',
+    },
+    'arch-b': {
+      id: 'arch-b',
+      name: 'Planner B',
+      kind: 'architect',
+      group: 'alpha',
+      cell_type: 'agent',
+      session_id: 'sess-arch-b',
+    },
+    'eng-a': {
+      id: 'eng-a',
+      name: 'Builder A',
+      kind: 'engineer',
+      group: 'alpha',
+      cell_type: 'agent',
+      hired_by_architect_id: 'arch-a',
+      status: 'running',
+    },
+    'eng-b': {
+      id: 'eng-b',
+      name: 'Builder B',
+      kind: 'engineer',
+      group: 'alpha',
+      cell_type: 'agent',
+      hired_by_architect_id: 'arch-b',
+      status: 'running',
+    },
+    'worker-a': {
+      id: 'worker-a',
+      name: 'Worker A',
+      kind: 'worker',
+      group: 'alpha',
+      cell_type: 'agent',
+      owner_engineer_id: 'eng-a',
+      status: 'running',
+    },
+  };
+
+  const evt = {
+    preventDefault() {},
+    stopPropagation() {},
+    clientX: 12,
+    clientY: 24,
+  };
+
+  context.onCellContextMenu(evt, 'eng-a');
+  assert.match(menu.innerHTML, /Dismiss/);
+  assert.doesNotMatch(menu.innerHTML, /Rehire/);
+
+  context.onCellContextMenu(evt, 'eng-b');
+  assert.doesNotMatch(menu.innerHTML, /Dismiss/);
+  assert.doesNotMatch(menu.innerHTML, /Rehire/);
+
+  context.state.agents['eng-a'].dismissed_at = 456;
+  context.state.agents['eng-a'].status = 'stopped';
+  context.onCellContextMenu(evt, 'eng-a');
+  assert.match(menu.innerHTML, /Rehire/);
+  assert.doesNotMatch(menu.innerHTML, /Dismiss/);
+  assert.doesNotMatch(menu.innerHTML, /Relaunch/);
+  assert.doesNotMatch(menu.innerHTML, /Restart from scratch/);
+
+  context.state.active_session_id = '';
+  context.onCellContextMenu(evt, 'eng-b');
+  assert.match(menu.innerHTML, /Dismiss/);
+
+  context.state.active_session_id = 'sess-arch-a';
+  context.state.agents['eng-a'].dismissed_at = 0;
+  context.state.agents['eng-a'].status = 'running';
+  await context.dismissEngineer('eng-a');
+  context.state.agents['eng-a'].dismissed_at = 456;
+  context.rehireEngineer('eng-a');
+
+  assert.deepEqual(JSON.parse(JSON.stringify(context.sendCalls.slice(-2))), [
+    {
+      cmd: 'architect_engineer_dismiss',
+      engineer_id: 'eng-a',
+      architect_id: 'arch-a',
+      reason: 'Dismissed from UI',
+    },
+    {
+      cmd: 'architect_engineer_rehire',
+      engineer_id: 'eng-a',
+      architect_id: 'arch-a',
+    },
+  ]);
+});
+
 test('embedded terminal selection clears stale agent selection for standalone terminals', () => {
   const { context } = createSelectionHarness();
   context.isEmbeddedTerminalMode = function() { return true; };
@@ -7418,10 +7594,12 @@ test('persisted dismissed attention stays hidden until a newer timestamp appears
 
 test('openEditTask populates modal state from the task and preserves editable versus system labels', () => {
   const { context, document } = createModalHarness();
+  loadScript(context, 'static/js/render.js');
   const futureIso = '2099-01-04T12:30:00.000Z';
 
   document.register('task-modal-title');
   document.register('task-submit-btn');
+  document.register('task-created-by-attribution');
   document.register('task-task-input');
   document.register('task-description-input');
   document.register('task-labels-input');
@@ -7448,6 +7626,9 @@ test('openEditTask populates modal state from the task and preserves editable ve
   const modal = document.register('modal-task');
 
   context.state.groups = { alpha: [], beta: [] };
+  context.state.agents = {
+    'arch-1': { id: 'arch-1', name: 'Planner', kind: 'architect', group: 'beta' },
+  };
   context.state.board_tasks = {
     dep: {
       id: 'dep',
@@ -7479,6 +7660,7 @@ test('openEditTask populates modal state from the task and preserves editable ve
         deploy_attempted: false,
         human_validation_pending: 'Confirm the modal in production',
       },
+      created_by: 'architect:arch-1',
     },
   };
 
@@ -7486,6 +7668,8 @@ test('openEditTask populates modal state from the task and preserves editable ve
 
   assert.equal(document.getElementById('task-modal-title').textContent, 'Edit Task');
   assert.equal(document.getElementById('task-submit-btn').textContent, 'Save');
+  assert.match(document.getElementById('task-created-by-attribution').innerHTML, /Created by architect Planner \(arch-1\)/);
+  assert.match(document.getElementById('task-created-by-attribution').innerHTML, /architect:arch-1/);
   assert.equal(document.getElementById('task-task-input').value, 'Fix flakey UI state');
   assert.equal(document.getElementById('task-description-input').value, 'Preserve modal data after rerenders');
   assert.equal(
@@ -8924,6 +9108,104 @@ test('main render orders architects above hired engineers, then user-owned engin
   assert.match(main.innerHTML, /cell-architect-badge/);
   assert.match(main.innerHTML, /architect-owned-engineer/);
   assert.match(main.innerHTML, /architect-owned-worker/);
+});
+
+test('main render sorts dismissed engineers last and preserves scroll across rehire transitions', () => {
+  const { context, document, sandbox } = createMainRenderHarness();
+  const main = document.getElementById('main');
+  let renderCount = 0;
+  Object.defineProperty(main, 'innerHTML', {
+    configurable: true,
+    get() {
+      return this._innerHTML || '';
+    },
+    set(value) {
+      this._innerHTML = value;
+      renderCount += 1;
+      this.scrollTop = 0;
+    },
+  });
+
+  sandbox.state.groups = {
+    loom: ['eng-dismissed', 'worker-dismissed', 'eng-active', 'worker-active'],
+  };
+  sandbox.state.group_settings = {
+    loom: { collapsed_default: false, weaver_agent_id: '' },
+  };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'eng-dismissed': {
+      id: 'eng-dismissed',
+      name: 'Paused Engineer',
+      kind: 'engineer',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'D',
+      status: 'stopped',
+      dismissed_at: 123,
+    },
+    'worker-dismissed': {
+      id: 'worker-dismissed',
+      name: 'Paused Worker',
+      owner_engineer_id: 'eng-dismissed',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'W',
+      status: 'stopped',
+    },
+    'eng-active': {
+      id: 'eng-active',
+      name: 'Active Engineer',
+      kind: 'engineer',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'A',
+      status: 'running',
+      session_id: 'sess-active',
+    },
+    'worker-active': {
+      id: 'worker-active',
+      name: 'Active Worker',
+      owner_engineer_id: 'eng-active',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'B',
+      status: 'running',
+      session_id: 'sess-worker-active',
+    },
+  };
+
+  runInContext(context, `render();`);
+
+  assert.deepEqual(jsonValue(context, `window._navAgents`), [
+    'eng-active',
+    'worker-active',
+    'eng-dismissed',
+    'worker-dismissed',
+  ]);
+  assert.match(main.innerHTML, /Active Engineer[\s\S]*Active Worker[\s\S]*Paused Engineer[\s\S]*Paused Worker/);
+  assert.match(main.innerHTML, /cell[^"]*engineer[^"]*dismissed/);
+  assert.match(main.innerHTML, /data-dismissed-at="123"/);
+  assert.match(main.innerHTML, /cell-dismissed-badge/);
+  assert.match(main.innerHTML, /rehireEngineer\('eng-dismissed'\)/);
+
+  main.scrollTop = 141;
+  sandbox.state.agents['eng-dismissed'].dismissed_at = 0;
+  sandbox.state.agents['eng-dismissed'].status = 'running';
+  sandbox.state.agents['eng-dismissed'].session_id = 'sess-dismissed-rehired';
+
+  runInContext(context, `render();`);
+
+  assert.equal(renderCount, 2);
+  assert.equal(main.scrollTop, 141);
+  assert.deepEqual(jsonValue(context, `window._navAgents`), [
+    'eng-dismissed',
+    'worker-dismissed',
+    'eng-active',
+    'worker-active',
+  ]);
+  assert.doesNotMatch(main.innerHTML, /cell-dismissed-badge/);
+  assert.doesNotMatch(main.innerHTML, /rehireEngineer\('eng-dismissed'\)/);
 });
 
 test('main render restores the main scroll position across rerenders', () => {
