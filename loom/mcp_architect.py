@@ -24,8 +24,8 @@ _ARCHITECT_TOOL_SPECS = [
     {
         "name": "architect_board_summary",
         "description": (
-            "Return a compact board overview scoped to this architect's own tasks "
-            "plus work assigned to engineers it hired."
+            "Return a compact board overview for this architect's group, "
+            "including task creator attribution."
         ),
         "inputSchema": {"type": "object", "properties": {}},
     },

@@ -180,6 +180,7 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(is_error, text)
         self.assertEqual(calls[0]["assigned_engineer_id"], alice.id)
+        self.assertEqual(calls[0]["created_by_engineer_id"], alice.id)
         self.assertEqual(json.loads(text)["task_id"], "LOOM:1")
 
     async def test_engineer_task_create_forces_caller_group(self):
@@ -206,6 +207,7 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(is_error, text)
         self.assertEqual(calls[0]["group"], "loom")
         self.assertEqual(calls[0]["assigned_engineer_id"], alice.id)
+        self.assertEqual(calls[0]["created_by_engineer_id"], alice.id)
 
     async def test_engineer_task_edit_rejects_unassigned_task_in_other_group(self):
         state = self._make_state()

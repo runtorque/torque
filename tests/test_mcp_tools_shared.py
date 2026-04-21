@@ -76,7 +76,7 @@ class MCPToolsSharedArchitectTests(unittest.TestCase):
 
         self.assertEqual(set(visible), {architect.id, hired.id})
 
-    def test_filter_tasks_for_architect_sees_created_tasks_and_hired_engineer_tasks(self):
+    def test_filter_tasks_for_architect_sees_all_group_tasks(self):
         state = self._make_state()
         architect = self._add_agent(state, "arch-1", "Architect", kind="architect")
         hired = self._add_agent(
@@ -103,10 +103,18 @@ class MCPToolsSharedArchitectTests(unittest.TestCase):
         )
         self._add_task(
             state,
-            "task-hidden",
-            "Hidden task",
+            "task-user",
+            "User task",
             assigned_engineer_id=user_engineer.id,
         )
+        state.groups["other"] = []
+        other_group = self.state_mod.BoardTask(
+            id="task-other-group",
+            task="Other group task",
+            group="other",
+            lane="Backlog",
+        )
+        state.board_tasks[other_group.id] = other_group
 
         visible = self.shared_mod._filter_tasks_for_caller(
             state,
@@ -114,7 +122,7 @@ class MCPToolsSharedArchitectTests(unittest.TestCase):
             architect.id,
         )
 
-        self.assertEqual(set(visible), {created.id, hired_task.id})
+        self.assertEqual(set(visible), {created.id, hired_task.id, "task-user"})
 
     def test_authorize_caller_accepts_architect(self):
         state = self._make_state()

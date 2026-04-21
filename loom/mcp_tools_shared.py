@@ -89,6 +89,26 @@ def _effective_assigned_engineer_id(task) -> str:
     return str(getattr(task, "assigned_engineer_id", "") or "").strip()
 
 
+def _task_created_by_classifier(task) -> str:
+    # Synthesized to avoid redundant storage; parent/pipeline refs are the derive/ask "system" heuristic.
+    architect_id = str(
+        getattr(task, "created_by_architect_id", "") or ""
+    ).strip()
+    if architect_id:
+        return f"architect:{architect_id}"
+    engineer_id = str(
+        getattr(task, "created_by_engineer_id", "") or ""
+    ).strip()
+    if engineer_id:
+        return f"engineer:{engineer_id}"
+    if (
+        str(getattr(task, "parent_task_id", "") or "").strip()
+        or str(getattr(task, "pipeline_root_id", "") or "").strip()
+    ):
+        return "system"
+    return "user"
+
+
 def _is_engineer_like_cell(state, cell) -> bool:
     if not cell or getattr(cell, "cell_type", "") != "agent":
         return False
@@ -382,20 +402,11 @@ def _filter_tasks_for_caller(state, caller_kind: str,
         caller_group = _caller_group(state, caller_id)
         if not caller_group:
             return {}
-        hired_engineer_ids = _architect_hired_engineer_ids(state, caller_id)
         filtered = {}
         for task in state.board_tasks.values():
             if str(getattr(task, "group", "") or "").strip() != caller_group:
                 continue
-            created_by_architect_id = str(
-                getattr(task, "created_by_architect_id", "") or ""
-            ).strip()
-            assigned_engineer_id = _effective_assigned_engineer_id(task)
-            if (
-                created_by_architect_id == caller_id
-                or assigned_engineer_id in hired_engineer_ids
-            ):
-                filtered[task.id] = task
+            filtered[task.id] = task
         return filtered
     if caller_kind != "engineer":
         return {}
@@ -483,7 +494,14 @@ def authorize_caller(state, *, caller_kind: str, caller_id: str):
 
 def build_scoped_state_view(state, *, caller_kind: str, caller_id: str,
                             caller_cell, caller_group: str):
-    visible_agents = _filter_agents_for_caller(state, caller_kind, caller_id)
+    if caller_kind == "architect":
+        visible_agents = {
+            cell_id: cell
+            for cell_id, cell in state.agents.items()
+            if str(getattr(cell, "group", "") or "").strip() == caller_group
+        }
+    else:
+        visible_agents = _filter_agents_for_caller(state, caller_kind, caller_id)
     visible_tasks = _filter_tasks_for_caller(state, caller_kind, caller_id)
     visible_agent_ids = {
         cell_id for cell_id, cell in visible_agents.items()
@@ -967,7 +985,28 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         unhealthy = []
         pending_asks = []
         verification_items = []
+        include_created_by = caller_kind == "architect"
+        architect_task_items = []
         for task in visible_tasks:
+            created_by = _task_created_by_classifier(task) if include_created_by else ""
+            if include_created_by:
+                architect_task_items.append({
+                    "id": task.id,
+                    "slug": task.slug,
+                    "title": task.task,
+                    "lane": task.lane,
+                    "status": task.status,
+                    "labels": task.labels or [],
+                    "action": task.action_name,
+                    "assigned_engineer_id": _effective_assigned_engineer_id(task),
+                    "created_by": created_by,
+                    "health_state": getattr(
+                        task, "health_state", "healthy"
+                    ) or "healthy",
+                    "verification_state": getattr(
+                        task, "verification_state", ""
+                    ) or "",
+                })
             if task.lane in lane_counts:
                 lane_counts[task.lane] += 1
             else:
@@ -983,18 +1022,21 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 health_counts[health_state] = 0
             health_counts[health_state] += 1
             if not board_task_is_closed(task) and health_state != "healthy":
-                unhealthy.append({
+                item = {
                     "id": task.id,
                     "title": task.task,
                     "health_state": health_state,
                     "health_since": getattr(task, "health_since", ""),
-                })
+                }
+                if include_created_by:
+                    item["created_by"] = created_by
+                unhealthy.append(item)
 
             verification_state = getattr(task, "verification_state", "") or ""
             if not board_task_is_closed(task) and verification_state in verification_counts:
                 verification_counts[verification_state] += 1
                 if verification_state in {"pending", "failed"}:
-                    verification_items.append({
+                    item = {
                         "id": task.id,
                         "title": task.task,
                         "verification_state": verification_state,
@@ -1004,14 +1046,20 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                         "verification_notes": getattr(
                             task, "verification_notes", ""
                         ) or "",
-                    })
+                    }
+                    if include_created_by:
+                        item["created_by"] = created_by
+                    verification_items.append(item)
 
             if "loom:human" in labels and not board_task_is_closed(task):
-                pending_asks.append({
+                item = {
                     "id": task.id,
                     "title": task.task,
                     "parent_task_id": task.parent_task_id,
-                })
+                }
+                if include_created_by:
+                    item["created_by"] = created_by
+                pending_asks.append(item)
 
         ordered_lanes = dict(lane_counts)
         for lane_name in sorted(extra_lanes):
@@ -1101,6 +1149,16 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 item.get("latest_boundary_recorded_at", ""),
             ),
         )
+        if include_created_by:
+            lane_order = {lane: idx for idx, lane in enumerate(state.board_lanes)}
+            architect_task_items.sort(
+                key=lambda item: (
+                    lane_order.get(item["lane"], len(lane_order)),
+                    getattr(state.board_tasks.get(item["id"]), "position", 0),
+                    item["title"].lower(),
+                    item["id"],
+                )
+            )
 
         summary = {
             "group": _weaver_group,
@@ -1148,6 +1206,12 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 "truncated": len(boundary_items) > 10,
             },
         }
+        if include_created_by:
+            summary["tasks"] = {
+                "count": len(architect_task_items),
+                "items": architect_task_items,
+                "truncated": False,
+            }
         hints = compute_weaver_hints(
             summary_state,
             _weaver_group,
@@ -1266,6 +1330,8 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 "health_since": getattr(t, "health_since", ""),
                 "parent_task_id": t.parent_task_id,
             }
+            if caller_kind == "architect":
+                item["created_by"] = _task_created_by_classifier(t)
             if agent_hidden:
                 item["agent_hidden"] = True
             lane_tasks.append(item)
@@ -1295,6 +1361,8 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         d.update(_task_health_payload_for_response(state, task))
         d["title"] = task.task
         d["action"] = task.action_name
+        if caller_kind == "architect":
+            d["created_by"] = _task_created_by_classifier(task)
         if task.agent_id and not _agent_visible_to_weaver(
                 state, _weaver_cell, task.agent_id):
             d["agent_id"] = ""
@@ -1337,6 +1405,8 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                     "depth": ct.pipeline_depth,
                     "agent": agent_slug,
                 }
+                if caller_kind == "architect":
+                    item["created_by"] = _task_created_by_classifier(ct)
                 if agent_hidden:
                     item["agent_hidden"] = True
                 d["pipeline_chain"].append(item)
@@ -1674,6 +1744,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             "verification_notes": args.get("verification_notes", ""),
             "verification_summary": args.get("verification_summary", {}),
             "assigned_engineer_id": str(caller_id or "").strip(),
+            "created_by_engineer_id": str(caller_id or "").strip(),
         }
         result = await handle_command(payload)
         if result and result.get("type") == "error":

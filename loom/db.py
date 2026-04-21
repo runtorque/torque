@@ -254,6 +254,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self._maybe_backup_pre_kinds_db()
         self._conn = sqlite3.connect(str(self.db_path))
         initialize_database(self._conn, self.backfill_agent_history)
+        self._ensure_board_task_engineer_provenance_column()
         self._refuse_unmigrated_legacy_rows_if_needed()
         self._migrate_kinds_schema_if_needed()
         self._backfill_kinds_if_needed()
@@ -262,6 +263,18 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self._backfill_empty_worker_kinds_if_needed()
         self._migrate_agent_digest_settings_from_legacy_weaver_settings()
         self.migrate_task_ids_if_needed()
+
+    def _ensure_board_task_engineer_provenance_column(self):
+        try:
+            self._conn.execute(
+                "SELECT created_by_engineer_id FROM board_tasks LIMIT 0"
+            )
+        except sqlite3.OperationalError:
+            self._conn.execute(
+                "ALTER TABLE board_tasks ADD COLUMN created_by_engineer_id "
+                "TEXT NOT NULL DEFAULT ''"
+            )
+            self._conn.commit()
 
     def close(self):
         if self._conn:
@@ -2674,6 +2687,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         for col, col_type, default in [
             ("assigned_engineer_id", "TEXT", "''"),
             ("created_by_architect_id", "TEXT", "''"),
+            ("created_by_engineer_id", "TEXT", "''"),
             ("suggested_action", "TEXT", "''"),
         ]:
             try:
