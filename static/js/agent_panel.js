@@ -1,6 +1,11 @@
 /* Agent panel — focused-agent router with per-kind renderers */
 
 var _agentPanelLastSelectedTabByKind = {};
+var _agentPanelCellEventsById = {};
+var _agentPanelCellEventsLoadingById = {};
+var _agentPanelCellEventsLastFetchById = {};
+var _agentPanelCellEventsLastFetchEventAtById = {};
+var _AGENT_PANEL_CELL_EVENTS_REFRESH_MS = 1500;
 var _agentPanelTabSpecByKind = {
   architect: [
     { key: 'decisions', label: 'Decisions' },
@@ -395,12 +400,130 @@ function _renderAgentDigestEvents(agent) {
   );
 }
 
+function _agentPanelUsesMergedCellEvents(agent) {
+  var kind = _agentPanelKind(agent);
+  return kind === 'architect' || kind === 'engineer';
+}
+
+function _agentPanelFallbackPanelEvents(agent) {
+  var agentId = String((agent && agent.id) || '');
+  if (!agentId || !state || !Array.isArray(state.panel_events)) return [];
+  return state.panel_events.filter(function(evt) {
+    return String((evt && evt.cell_id) || '') === agentId;
+  });
+}
+
+function _agentPanelRequestCellEvents(agent) {
+  if (!_agentPanelUsesMergedCellEvents(agent)) return;
+  if (typeof send !== 'function') return;
+  var agentId = String((agent && agent.id) || '');
+  if (!agentId) return;
+  if (_agentPanelCellEventsLoadingById[agentId]) return;
+  var now = Date.now();
+  var lastFetch = Number(_agentPanelCellEventsLastFetchById[agentId] || 0);
+  var eventAt = Number((agent && agent.last_event_at) || 0);
+  var lastFetchEventAt = Number(_agentPanelCellEventsLastFetchEventAtById[agentId] || 0);
+  if (lastFetch && eventAt === lastFetchEventAt
+      && now - lastFetch < _AGENT_PANEL_CELL_EVENTS_REFRESH_MS) return;
+  _agentPanelCellEventsLoadingById[agentId] = true;
+  _agentPanelCellEventsLastFetchById[agentId] = now;
+  _agentPanelCellEventsLastFetchEventAtById[agentId] = eventAt;
+  send({ cmd: 'get_cell_events', cell_id: agentId, limit: 200 });
+}
+
+function agentPanelReceiveCellEvents(data) {
+  var agentId = String((data && data.cell_id) || '');
+  if (!agentId) return;
+  _agentPanelCellEventsById[agentId] = Array.isArray(data.events)
+    ? data.events.slice()
+    : [];
+  _agentPanelCellEventsLoadingById[agentId] = false;
+  _agentPanelCellEventsLastFetchById[agentId] = Date.now();
+  var focused = _resolveFocusedAgent();
+  if (focused && String(focused.id || '') === agentId
+      && _agentPanelActiveTab(_agentPanelKind(focused)) === 'events') {
+    renderAgentPanel();
+  }
+}
+
+function _agentPanelCellEventsForAgent(agent) {
+  var agentId = String((agent && agent.id) || '');
+  var cached = _agentPanelCellEventsById[agentId];
+  if (Array.isArray(cached)) return cached.slice();
+  return _agentPanelFallbackPanelEvents(agent);
+}
+
+function _agentPanelRenderCellEventItem(evt, index) {
+  evt = evt || {};
+  var rawId = evt.id || ('idx-' + index);
+  var anchorKey = 'cell-event-' + String(rawId);
+  var kind = typeof _weaverEventKindLabel === 'function'
+    ? _weaverEventKindLabel(evt.kind)
+    : String(evt.kind || 'event').replace(/_/g, ' ');
+  var summary = evt.message || kind;
+  var source = String(evt.source || '');
+  var meta = _agentPanelTimeAgo(evt.timestamp);
+  if (source === 'event_log') meta += meta ? ' · live' : 'live';
+  else if (source === 'panel_events') meta += meta ? ' · persisted' : 'persisted';
+
+  var html = '<div class="agent-panel-event-item agent-panel-event-item-sent" data-agent-panel-anchor="'
+    + _agentPanelEsc(anchorKey) + '">';
+  html += '<div class="agent-panel-event-item-header">';
+  html += '<span class="agent-panel-event-kind">' + _agentPanelEsc(kind) + '</span>';
+  html += '<span class="agent-panel-event-meta">' + _agentPanelEsc(meta) + '</span>';
+  html += '</div>';
+  html += '<div class="agent-panel-event-message">' + _agentPanelEsc(summary) + '</div>';
+  if (evt.task_id) {
+    html += '<div class="agent-panel-event-task">' + _agentPanelEsc(evt.task_id) + '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function _renderPersistentCellEvents(agent) {
+  _agentPanelRequestCellEvents(agent);
+  var agentId = String((agent && agent.id) || '');
+  var events = _agentPanelCellEventsForAgent(agent);
+  events.sort(function(a, b) {
+    var tsDiff = Number((b && b.timestamp) || 0) - Number((a && a.timestamp) || 0);
+    if (tsDiff) return tsDiff;
+    return String((b && b.id) || '').localeCompare(String((a && a.id) || ''));
+  });
+  var loading = !!_agentPanelCellEventsLoadingById[agentId];
+
+  var html = '<div class="agent-panel-event-section">';
+  html += '<div class="agent-panel-event-section-header">';
+  html += '<span class="agent-panel-event-section-title">Cell events</span>';
+  html += '<span class="agent-panel-event-section-count">' + events.length + '</span>';
+  html += '</div>';
+  if (loading && !events.length) {
+    html += '<div class="agent-panel-event-empty">Loading cell events…</div>';
+    html += '</div>';
+    return html;
+  }
+  if (!events.length) {
+    html += '<div class="agent-panel-event-empty">No cell events yet.</div>';
+    html += '</div>';
+    return html;
+  }
+  if (loading) {
+    html += '<div class="agent-panel-worklog-note">Refreshing cell events…</div>';
+  }
+  html += '<div class="agent-panel-event-list">';
+  for (var i = 0; i < events.length; i++) {
+    html += _agentPanelRenderCellEventItem(events[i], i);
+  }
+  html += '</div>';
+  html += '</div>';
+  return html;
+}
+
 function _renderEngineerEvents(agent) {
-  return _renderAgentDigestEvents(agent);
+  return _renderPersistentCellEvents(agent) + _renderAgentDigestEvents(agent);
 }
 
 function _renderArchitectEvents(agent) {
-  return _renderAgentDigestEvents(agent);
+  return _renderPersistentCellEvents(agent) + _renderAgentDigestEvents(agent);
 }
 
 function _renderEngineerWorklog(agent) {

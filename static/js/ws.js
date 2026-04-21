@@ -166,6 +166,8 @@ function connect() {
       else if (typeof _showToast === 'function' && msg.message) _showToast(msg.message, 'error');
     } else if (msg.type === 'events_page') {
       if (typeof handleEventsPage === 'function') handleEventsPage(msg);
+    } else if (msg.type === 'cell_events') {
+      if (typeof agentPanelReceiveCellEvents === 'function') agentPanelReceiveCellEvents(msg);
     } else if (msg.type === 'agent_history_list') {
       if (typeof agentHistoryReceiveList === 'function') agentHistoryReceiveList(msg);
     } else if (msg.type === 'agent_history_detail') {

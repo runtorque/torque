@@ -39,7 +39,13 @@ from .state import (
     task_counts_as_done,
     task_is_closed,
 )
-from .events import EventLog, EventBus, PanelEventLog, health_check
+from .events import (
+    EventLog,
+    EventBus,
+    PanelEventLog,
+    get_cell_event_stream,
+    health_check,
+)
 from .adapters import get_adapter, get_providers
 from .notifications import NotificationManager
 from .worktree import WorktreeManager
@@ -3936,6 +3942,25 @@ async def main(connection=None):
             limit = min(int(data.get("limit", 50)), 200)
             events = panel_log.get_page(limit=limit, before_id=before_id)
             return {"type": "events_page", "events": events}
+
+        if cmd == "get_cell_events":
+            cell_id = str(data.get("cell_id", "") or "")
+            limit = min(int(data.get("limit", 200)), 200)
+            cell = state.agents.get(cell_id)
+            if not cell:
+                return {"type": "error", "message": "Cell not found"}
+            events = get_cell_event_stream(
+                cell,
+                event_log,
+                panel_log=panel_log,
+                db=db,
+                limit=limit,
+            )
+            return {
+                "type": "cell_events",
+                "cell_id": cell_id,
+                "events": events,
+            }
 
         # Agent history queries
         if cmd == "get_agent_history":

@@ -25,6 +25,125 @@ class EventBusTests(unittest.IsolatedAsyncioTestCase):
         state.board_lanes = ["Backlog", "To Do", "In Progress", "Done"]
         return state
 
+    def _make_cell(self, cell_id="agent-1", kind="worker"):
+        return self.state_mod.AgentCell(
+            id=cell_id,
+            name="Agent",
+            group="g",
+            cell_type="agent",
+            kind=kind,
+            current_task_id="LOOM:1",
+        )
+
+    def test_architect_cell_event_stream_survives_restart_via_panel_events(self):
+        cell = self._make_cell("arch-1", "architect")
+        event_log = self.events_mod.EventLog()
+
+        class FakeDB:
+            def load_panel_events(self, limit=50, before_id=0, cell_id=""):
+                self.args = (limit, before_id, cell_id)
+                return [
+                    {
+                        "id": 7,
+                        "timestamp": 10.0,
+                        "kind": "task_dispatched",
+                        "cell_id": cell_id,
+                        "agent_name": "Architect",
+                        "group": "g",
+                        "message": "Persisted dispatch",
+                        "task_id": "LOOM:7",
+                    }
+                ]
+
+        db = FakeDB()
+        events = self.events_mod.get_cell_event_stream(
+            cell, event_log, db=db, limit=20)
+
+        self.assertEqual(db.args, (20, 0, "arch-1"))
+        self.assertEqual([evt["message"] for evt in events],
+                         ["Persisted dispatch"])
+        self.assertEqual(events[0]["source"], "panel_events")
+
+    def test_worker_cell_event_stream_keeps_event_log_only_path(self):
+        cell = self._make_cell("worker-1", "worker")
+        event_log = self.events_mod.EventLog()
+        event_log.append(
+            self.base_mod.AgentEvent(
+                cell_id=cell.id,
+                timestamp=20.0,
+                event_type="tool_start",
+                data={"detail": "Running tests"},
+            )
+        )
+
+        class FailingDB:
+            def load_panel_events(self, **_kwargs):
+                raise AssertionError("workers must not load panel_events")
+
+        events = self.events_mod.get_cell_event_stream(
+            cell, event_log, db=FailingDB(), limit=20)
+
+        self.assertEqual([evt["kind"] for evt in events], ["tool_start"])
+        self.assertEqual([evt["message"] for evt in events], ["Running tests"])
+        self.assertEqual(events[0]["source"], "event_log")
+
+    def test_persistent_cell_event_stream_merges_sources_by_timestamp(self):
+        cell = self._make_cell("eng-1", "engineer")
+        event_log = self.events_mod.EventLog()
+        event_log.append(
+            self.base_mod.AgentEvent(
+                cell_id=cell.id,
+                timestamp=20.0,
+                event_type="tool_start",
+                data={"detail": "Live tool"},
+            )
+        )
+        event_log.append(
+            self.base_mod.AgentEvent(
+                cell_id=cell.id,
+                timestamp=40.0,
+                event_type="progress",
+                data={"detail": "Live progress"},
+            )
+        )
+
+        class FakeDB:
+            def load_panel_events(self, limit=50, before_id=0, cell_id=""):
+                return [
+                    {
+                        "id": 1,
+                        "timestamp": 10.0,
+                        "kind": "task_dispatched",
+                        "cell_id": cell_id,
+                        "agent_name": "Engineer",
+                        "group": "g",
+                        "message": "Persisted older",
+                        "task_id": "LOOM:1",
+                    },
+                    {
+                        "id": 2,
+                        "timestamp": 30.0,
+                        "kind": "task_completed",
+                        "cell_id": cell_id,
+                        "agent_name": "Engineer",
+                        "group": "g",
+                        "message": "Persisted middle",
+                        "task_id": "LOOM:2",
+                    },
+                ]
+
+        events = self.events_mod.get_cell_event_stream(
+            cell, event_log, db=FakeDB(), limit=20)
+
+        self.assertEqual(
+            [evt["message"] for evt in events],
+            ["Persisted older", "Live tool", "Persisted middle", "Live progress"],
+        )
+        self.assertEqual(
+            [evt["source"] for evt in events],
+            ["panel_events", "event_log", "panel_events", "event_log"],
+        )
+
     async def test_session_start_persists_session_id_and_calls_ready_callback(self):
         state = self._make_state()
         cell = self.state_mod.AgentCell(

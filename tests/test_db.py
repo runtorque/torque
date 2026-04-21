@@ -1060,6 +1060,11 @@ class LoomDBTests(unittest.TestCase):
             [evt["id"] for evt in self.db.load_panel_events(limit=2, before_id=4)],
             [2, 3],
         )
+        self.assertEqual(
+            [evt["id"] for evt in self.db.load_panel_events(limit=10,
+                                                            cell_id="agent-3")],
+            [3],
+        )
 
         self.db.trim_panel_events(2)
 
