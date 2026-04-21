@@ -1750,20 +1750,27 @@ def _agent_name_exists_for_kind(state: MatrixState, name: str, *,
     return False
 
 
-def _architect_persistent_prompt_text(action_system_prompt: str = "") -> str:
-    """Build a minimal persistent prompt for user-created architect agents."""
-    parts = []
-    if action_system_prompt:
-        parts.append(str(action_system_prompt).rstrip())
-    parts.append(build_loom_system_prompt().rstrip())
-    parts.append(
-        "You are an architect agent. Use the architect_* tool surface to keep "
-        "a decision log, route work to specific engineers, request hires for "
-        "user approval, and message the engineers you hire. Product-level "
-        "scope lives with the architect; do not silently delegate or reshape "
-        "scope without recording the decision."
-    )
-    return "\n\n".join(parts) + "\n"
+def _architect_persistent_prompt_text(group: str = "",
+                                      action_system_prompt: str = "",
+                                      state: MatrixState = None) -> str:
+    """Build the persistent prompt for user-created architect agents."""
+    from .architect import build_architect_system_prompt
+
+    group_settings = None
+    if state is not None and group:
+        try:
+            group_settings = state.get_group_settings(group)
+        except Exception:
+            group_settings = None
+
+    architect_body = build_architect_system_prompt(
+        group or "default",
+        architect_settings=None,
+        action_system_prompt=action_system_prompt,
+        group_settings=group_settings,
+    ).rstrip()
+
+    return build_loom_system_prompt().rstrip() + "\n\n" + architect_body + "\n"
 
 
 async def _handle_add_engineer_command(
@@ -1877,7 +1884,9 @@ async def _handle_add_architect_command(
     )
 
     persistent_prompt_text = _architect_persistent_prompt_text(
-        launch_cfg.get("system_prompt", ""),
+        group=group,
+        action_system_prompt=launch_cfg.get("system_prompt", ""),
+        state=state,
     )
     startup_prompt = _startup_prompt_for_new_agent(
         agent_type=launch_cfg.get("agent_type", ""),
@@ -3002,6 +3011,12 @@ async def main(connection=None):
             return build_engineer_system_prompt(
                 cell.group, ws, launch_cfg.get("system_prompt", ""),
                 group_settings=gs)
+        if cell.kind == "architect":
+            return _architect_persistent_prompt_text(
+                group=cell.group,
+                action_system_prompt=launch_cfg.get("system_prompt", ""),
+                state=state,
+            )
         return _build_dispatch_persistent_prompt(
             launch_cfg.get("system_prompt", ""))
 
