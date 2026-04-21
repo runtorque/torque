@@ -15,6 +15,7 @@ import json
 import time
 import uuid
 from dataclasses import asdict, replace
+from datetime import datetime, timezone
 
 from .config import log
 from .mcp_weaver_tools.shared import (
@@ -51,6 +52,8 @@ _STREAM_STATES = (
 )
 _DECISION_STATUSES = {"proposed", "accepted", "revised", "rejected"}
 _JOURNAL_ENTRY_TYPES = {"decision", "observation", "checkpoint", "plan"}
+_HEALTH_SUMMARY_SILENT_AFTER_SECS = 5 * 60
+_HEALTH_SUMMARY_LIMIT = 120
 
 # ---------------------------------------------------------------------------
 # Shared scoping helpers
@@ -581,6 +584,227 @@ def _stream_state_counts(streams: list[dict]) -> dict[str, int]:
     return counts
 
 
+def _parse_health_timestamp(value) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
+
+
+def _safe_int(value, default: int = 0) -> int:
+    try:
+        if value not in (None, ""):
+            return int(value)
+    except (TypeError, ValueError):
+        pass
+    return default
+
+
+def _format_health_duration(seconds: int | float | None) -> str:
+    total = max(0, int(seconds or 0))
+    if total < 60:
+        return f"{total} sec"
+    minutes = total // 60
+    if minutes < 60:
+        return f"{minutes} min"
+    hours = minutes // 60
+    rem_minutes = minutes % 60
+    if hours < 24:
+        if rem_minutes:
+            return f"{hours} hr {rem_minutes} min"
+        return f"{hours} hr"
+    days = hours // 24
+    rem_hours = hours % 24
+    if rem_hours:
+        return f"{days} day {rem_hours} hr"
+    return f"{days} day"
+
+
+def _format_health_clock(ts: float | None) -> str:
+    if ts is None:
+        return ""
+    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%H:%M UTC")
+
+
+def _clip_health_fragment(value: str, *, limit: int = 24) -> str:
+    text = " ".join(str(value or "").split())
+    if not text:
+        return ""
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 1)].rstrip() + "…"
+
+
+def _limit_health_summary(parts: list[str], fallback_parts: list[str]) -> str:
+    summary = "; ".join(part for part in parts if part).strip()
+    if summary and not summary.endswith("."):
+        summary += "."
+    if len(summary) <= _HEALTH_SUMMARY_LIMIT:
+        return summary
+    summary = "; ".join(part for part in fallback_parts if part).strip()
+    if summary and not summary.endswith("."):
+        summary += "."
+    if len(summary) <= _HEALTH_SUMMARY_LIMIT:
+        return summary
+    return summary[: max(0, _HEALTH_SUMMARY_LIMIT - 1)].rstrip() + "…"
+
+
+def _fresh_health_details(details, *, now_ts: float) -> tuple[dict, int | None,
+                                                             float | None]:
+    fresh = dict(details or {}) if isinstance(details, dict) else {}
+    last_activity_ts = _parse_health_timestamp(fresh.get("last_activity_at"))
+    silence_secs = None
+    if last_activity_ts is not None:
+        silence_secs = max(0, int(now_ts - last_activity_ts))
+        if "silence_secs" in fresh:
+            fresh["silence_secs"] = silence_secs
+    return fresh, silence_secs, last_activity_ts
+
+
+def _source_task_for_health(state, task, details: dict):
+    source_task_id = str((details or {}).get("source_task_id", "") or "").strip()
+    if source_task_id and source_task_id in state.board_tasks:
+        return state.board_tasks[source_task_id]
+    return task
+
+
+def _source_agent_for_health(state, task, details: dict):
+    source_task = _source_task_for_health(state, task, details)
+    agent_id = str(getattr(source_task, "agent_id", "") or "").strip()
+    if not agent_id:
+        agent_id = str(getattr(task, "agent_id", "") or "").strip()
+    if not agent_id:
+        return None
+    return state.agents.get(agent_id)
+
+
+def _health_summary(health_state: str, *, details: dict, agent=None,
+                    now_ts: float, silence_secs: int | None = None,
+                    last_activity_ts: float | None = None) -> str:
+    state_name = str(health_state or "healthy").strip() or "healthy"
+    if last_activity_ts is None:
+        last_activity_ts = _parse_health_timestamp(
+            (details or {}).get("last_activity_at")
+        )
+    if last_activity_ts is None and agent and getattr(agent, "last_event_at", 0):
+        last_activity_ts = float(getattr(agent, "last_event_at", 0) or 0)
+    if silence_secs is None and last_activity_ts is not None:
+        silence_secs = max(0, int(now_ts - last_activity_ts))
+
+    status = str(getattr(agent, "status", "") or "unknown").strip()
+    tokens_in = _safe_int(getattr(agent, "session_tokens_in", 0) if agent else 0)
+    tokens_out = _safe_int(getattr(agent, "session_tokens_out", 0) if agent else 0)
+    tokens_part = f"tokens={tokens_in}/{tokens_out}"
+    activity_detail = _clip_health_fragment(
+        getattr(agent, "activity_detail", "") if agent else ""
+    )
+    activity_part = f"activity={activity_detail}" if activity_detail else ""
+    clock = _format_health_clock(last_activity_ts)
+
+    should_signal_silence = (
+        silence_secs is not None
+        and (
+            silence_secs >= _HEALTH_SUMMARY_SILENT_AFTER_SECS
+            or state_name in {"idle-risk", "stalled", "stale-in-progress"}
+        )
+    )
+    if should_signal_silence:
+        duration = _format_health_duration(silence_secs)
+        parts = [
+            f"Silent {duration}",
+            f"status={status}",
+            activity_part,
+            tokens_part,
+            f"last {clock}" if clock else "",
+        ]
+        fallback = [
+            f"Silent {duration}",
+            f"status={status}",
+            tokens_part,
+            f"last {clock}" if clock else "",
+        ]
+        return _limit_health_summary(parts, fallback)
+
+    if state_name != "healthy":
+        label = state_name.replace("-", " ").title()
+        parts = [
+            label,
+            f"status={status}",
+            activity_part,
+            tokens_part,
+            f"last {clock}" if clock else "",
+        ]
+        fallback = [label, f"status={status}", tokens_part]
+        return _limit_health_summary(parts, fallback)
+
+    if last_activity_ts is not None and silence_secs is not None:
+        parts = [
+            "Healthy",
+            f"status={status}",
+            f"last activity {_format_health_duration(silence_secs)} ago",
+        ]
+    else:
+        parts = ["Healthy", f"status={status}"]
+    return _limit_health_summary(parts, parts)
+
+
+def _task_health_payload_for_response(state, task, *,
+                                      now_ts: float | None = None) -> dict:
+    """Return task health fields with freshness calculated at read time."""
+    if now_ts is None:
+        now_ts = time.time()
+    health_state = str(getattr(task, "health_state", "") or "healthy")
+    details, silence_secs, last_activity_ts = _fresh_health_details(
+        getattr(task, "health_details", {}) or {},
+        now_ts=now_ts,
+    )
+    agent = _source_agent_for_health(state, task, details)
+    return {
+        "health_state": health_state,
+        "health_details": details,
+        "health_summary": _health_summary(
+            health_state,
+            details=details,
+            agent=agent,
+            now_ts=now_ts,
+            silence_secs=silence_secs,
+            last_activity_ts=last_activity_ts,
+        ),
+    }
+
+
+def _agent_health_payload_for_response(state, cell, *, current_task=None,
+                                       now_ts: float | None = None) -> dict:
+    """Return top-level health fields for agent detail responses."""
+    if now_ts is None:
+        now_ts = time.time()
+    if current_task is not None:
+        return _task_health_payload_for_response(
+            state,
+            current_task,
+            now_ts=now_ts,
+        )
+    return {
+        "health_state": "healthy",
+        "health_summary": _health_summary(
+            "healthy",
+            details={},
+            agent=cell,
+            now_ts=now_ts,
+        ),
+    }
+
+
 def _weaver_streams(state, weaver_cell, group: str, *,
                     include_merged: bool = True,
                     include_orphaned: bool = False,
@@ -1068,6 +1292,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         if not task or task.group != _weaver_group:
             return "Task not found", True
         d = serialize_task_for_mcp(task, tasks_by_id=state.board_tasks)
+        d.update(_task_health_payload_for_response(state, task))
         d["title"] = task.task
         d["action"] = task.action_name
         if task.agent_id and not _agent_visible_to_weaver(
@@ -1224,6 +1449,16 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 "tokens_out": cell.session_tokens_out,
             },
         }
+        current_task = state.agent_current_task(agent_id)
+        if current_task and current_task.group != _weaver_group:
+            current_task = None
+        d.update(
+            _agent_health_payload_for_response(
+                state,
+                cell,
+                current_task=current_task,
+            )
+        )
 
         # Worktree state
         if cell.worktree_path:
@@ -1273,9 +1508,6 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 branch=cell.worktree_branch or "",
             )
             if overview:
-                current_task = state.agent_current_task(agent_id)
-                if current_task and current_task.group != _weaver_group:
-                    current_task = None
                 overview["current_task_id"] = (
                     current_task.id if current_task else ""
                 )
@@ -1328,7 +1560,6 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             d["tasks"] = tasks
 
         # Current task (may differ from tasks list if unlinked)
-        current_task = state.agent_current_task(agent_id)
         if current_task and current_task.group == _weaver_group:
             d["current_task_id"] = current_task.id
 
