@@ -273,6 +273,109 @@ class DigestRoutingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(recipients, [engineer.id])
 
+    def test_architect_does_not_receive_raw_progress_but_engineer_can(self):
+        state, group = self._make_state()
+        engineer = self._add_agent(
+            state,
+            agent_id="eng-1",
+            name="Engineer",
+            group=group,
+            kind="engineer",
+            hired_by_architect_id="arch-1",
+        )
+        architect = self._add_agent(
+            state,
+            agent_id="arch-1",
+            name="Architect",
+            group=group,
+            kind="architect",
+        )
+        worker = self._add_agent(
+            state,
+            agent_id="worker-1",
+            name="Worker",
+            group=group,
+            kind="worker",
+            owner_engineer_id=engineer.id,
+        )
+        state.update_agent_digest_settings(
+            engineer.id,
+            enabled_events=["agent_progress"],
+        )
+        state.update_agent_digest_settings(
+            architect.id,
+            enabled_events=["agent_progress"],
+        )
+
+        recipients = self.routing_mod.resolve_digest_recipients(
+            state,
+            {"cell_id": worker.id, "group": group, "kind": "agent_progress"},
+        )
+
+        self.assertEqual(recipients, [engineer.id])
+
+    def test_architect_does_not_receive_events_from_engineer_they_did_not_hire(self):
+        state, group = self._make_state()
+        architect = self._add_agent(
+            state,
+            agent_id="arch-1",
+            name="Architect",
+            group=group,
+            kind="architect",
+        )
+        other_architect = self._add_agent(
+            state,
+            agent_id="arch-2",
+            name="Other Architect",
+            group=group,
+            kind="architect",
+        )
+        engineer = self._add_agent(
+            state,
+            agent_id="eng-1",
+            name="Engineer",
+            group=group,
+            kind="engineer",
+            hired_by_architect_id=other_architect.id,
+        )
+        worker = self._add_agent(
+            state,
+            agent_id="worker-1",
+            name="Worker",
+            group=group,
+            kind="worker",
+            owner_engineer_id=engineer.id,
+        )
+        state.update_agent_digest_settings(engineer.id)
+        state.update_agent_digest_settings(architect.id)
+        state.update_agent_digest_settings(other_architect.id)
+
+        recipients = self.routing_mod.resolve_digest_recipients(
+            state,
+            {"cell_id": worker.id, "group": group, "kind": "task_completed"},
+        )
+
+        self.assertEqual(recipients, [engineer.id, other_architect.id])
+        self.assertNotIn(architect.id, recipients)
+
+    def test_user_architect_without_hired_engineers_receives_nothing(self):
+        state, group = self._make_state()
+        architect = self._add_agent(
+            state,
+            agent_id="arch-1",
+            name="Architect",
+            group=group,
+            kind="architect",
+        )
+        state.update_agent_digest_settings(architect.id)
+
+        recipients = self.routing_mod.resolve_digest_recipients(
+            state,
+            {"cell_id": architect.id, "group": group, "kind": "task_completed"},
+        )
+
+        self.assertEqual(recipients, [])
+
     def test_mandatory_events_bypass_enabled_events_filter(self):
         state, group = self._make_state()
         engineer = self._add_agent(
@@ -603,3 +706,50 @@ class DigestRoutingTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0)
 
         self.assertIn(engineer.id, state.agent_digest_settings)
+
+    async def test_worker_coarse_event_creates_default_architect_settings(self):
+        state, group = self._make_state()
+        architect = self._add_agent(
+            state,
+            agent_id="arch-1",
+            name="Architect",
+            group=group,
+            kind="architect",
+        )
+        engineer = self._add_agent(
+            state,
+            agent_id="eng-1",
+            name="Engineer",
+            group=group,
+            kind="engineer",
+            hired_by_architect_id=architect.id,
+        )
+        worker = self._add_agent(
+            state,
+            agent_id="worker-1",
+            name="Worker",
+            group=group,
+            kind="worker",
+            owner_engineer_id=engineer.id,
+        )
+        self.assertNotIn(architect.id, state.agent_digest_settings)
+
+        buffer = self.weaver_mod.WeaverEventBuffer(state, FakeBridge())
+        buffer._loop = asyncio.get_running_loop()
+        buffer.on_panel_event(
+            {
+                "id": 1,
+                "cell_id": worker.id,
+                "group": group,
+                "kind": "task_completed",
+                "message": "event A",
+            }
+        )
+        await asyncio.sleep(0)
+
+        settings = state.agent_digest_settings.get(architect.id)
+        self.assertIsNotNone(settings)
+        self.assertTrue(settings.architect_digest)
+        self.assertFalse(settings.paused)
+        self.assertEqual(settings.push_interval, 300)
+        self.assertFalse(settings.wake_on_digest)

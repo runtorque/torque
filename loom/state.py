@@ -90,6 +90,21 @@ _WEAVER_NOTIFICATION_PRESETS = {
         ],
     },
 }
+_ARCHITECT_DIGEST_DEFAULT_ENABLED_EVENTS = [
+    "task_done",
+    "task_blocked",
+    "task_error",
+    "task_ask",
+    "task_derive",
+    "task_completed",
+    "agent_blocked",
+    "agent_error",
+    "ask_created",
+    "task_derived",
+    "pipeline_complete",
+    "engineer_hired",
+    "engineer_fired",
+]
 _WEAVER_ESCALATION_STYLES = {
     "ask_early",
     "note_then_ask",
@@ -1781,17 +1796,41 @@ class MatrixState:
         """Return weaver settings for a group, creating defaults if needed."""
         return self.weaver_settings.get(group, WeaverSettings(group=group))
 
+    def _default_agent_digest_settings(
+        self,
+        agent_id: str,
+        cell=None,
+    ) -> AgentDigestSettings:
+        """Return kind-aware default digest settings for one recipient."""
+        agent_id = str(agent_id or "").strip()
+        if cell is None:
+            cell = self.agents.get(agent_id)
+        is_architect = bool(
+            cell and str(getattr(cell, "kind", "") or "").strip() == "architect"
+        )
+        kwargs = {}
+        if is_architect:
+            kwargs["enabled_events"] = list(
+                _ARCHITECT_DIGEST_DEFAULT_ENABLED_EVENTS
+            )
+        return AgentDigestSettings(
+            agent_id=agent_id,
+            push_interval=300 if is_architect else 60,
+            architect_digest=is_architect,
+            wake_on_digest=False,
+            **kwargs,
+        )
+
     def _legacy_agent_digest_settings(self, agent_id: str) -> AgentDigestSettings:
         agent_id = str(agent_id or "").strip()
         cell = self.agents.get(agent_id)
         if not cell:
             return AgentDigestSettings(agent_id=agent_id)
+        if str(getattr(cell, "kind", "") or "").strip() == "architect":
+            return self._default_agent_digest_settings(agent_id, cell)
         legacy_weaver = self.get_weaver_for_group(cell.group)
         if not legacy_weaver or legacy_weaver.id != agent_id:
-            return AgentDigestSettings(
-                agent_id=agent_id,
-                architect_digest=(cell.kind == "architect"),
-            )
+            return self._default_agent_digest_settings(agent_id, cell)
         ws = self.get_weaver_settings(cell.group)
         push_interval = getattr(ws, "push_interval", 60)
         if push_interval is None:

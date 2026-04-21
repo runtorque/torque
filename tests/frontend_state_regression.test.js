@@ -6307,6 +6307,53 @@ test('renderAgentPanel preserves the selected Events tab across rerenders', () =
   assert.match(panel.innerHTML, /Already sent to Engineer One/);
 });
 
+test('renderAgentPanel preserves the selected architect Events tab across rerenders', () => {
+  const { context, document } = createWeaverHarness();
+  const panel = document.register('panel-agent');
+  panel.querySelector = function() { return null; };
+  context.state.agents = {
+    'arch-1': {
+      id: 'arch-1',
+      name: 'Architect One',
+      group: 'alpha',
+      kind: 'architect',
+      cell_type: 'agent',
+    },
+  };
+  context.focusedItemId = 'arch-1';
+  context.state.agent_digest_settings = {
+    'arch-1': { agent_id: 'arch-1', paused: false, architect_digest: true },
+  };
+  context.state.digest_buffer_stats = {
+    'arch-1': {
+      agent_id: 'arch-1',
+      group: 'alpha',
+      buffered_events: 1,
+      next_push_in: 300,
+      queued_events: [
+        { id: 3, kind: 'task_completed', message: 'Queued architect event', timestamp: 10 },
+      ],
+      manual_flush_requested: false,
+    },
+  };
+  context.state.digest_sent_events = {
+    'arch-1': [
+      { id: 2, kind: 'task_completed', message: 'Sent architect event', timestamp: 5, delivered_at: 8 },
+    ],
+  };
+
+  context.renderAgentPanel();
+  runInContext(context, `agentPanelSelectTab('events')`);
+
+  assert.match(panel.innerHTML, /id="agent-panel-tab-events" class="agent-panel-tab active"/);
+  assert.match(panel.innerHTML, /Queued architect event/);
+
+  context.renderAgentPanel();
+
+  assert.match(panel.innerHTML, /id="agent-panel-tab-events" class="agent-panel-tab active"/);
+  assert.match(panel.innerHTML, /Already sent to Architect One/);
+});
+
 test('renderAgentPanel preserves the selected Worklog tab across rerenders', () => {
   const { context, document } = createWeaverHarness();
   const panel = document.register('panel-agent');

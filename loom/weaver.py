@@ -11,6 +11,7 @@ import re
 import time
 
 from .digest_routing import (
+    ARCHITECT_COARSE_EVENTS,
     candidate_digest_recipients,
     recipient_wants_digest_event,
     resolve_digest_recipients,
@@ -56,6 +57,37 @@ _ASK_DIGEST_MARKUP_PREFIX_RE = re.compile(
 _ASK_DIGEST_LABEL_RE = re.compile(
     r"^(?P<label>[A-Za-z][A-Za-z0-9 /;_-]{0,40}?):\s*(?P<value>.+)$"
 )
+
+_ARCHITECT_DIGEST_MAX_LINES = 40
+_ARCHITECT_EVENT_LABELS = {
+    "task_done": "done",
+    "task_completed": "done",
+    "task_blocked": "blocked",
+    "agent_blocked": "blocked",
+    "task_error": "error",
+    "agent_error": "error",
+    "task_ask": "ask",
+    "ask_created": "ask",
+    "task_derive": "derive",
+    "task_derived": "derive",
+    "pipeline_complete": "pipeline complete",
+    "engineer_hired": "engineer hired",
+    "engineer_fired": "engineer fired",
+    "agent_progress": "progress",
+}
+_ARCHITECT_PIPELINE_ACTIVITY_EVENTS = ARCHITECT_COARSE_EVENTS.intersection({
+    "task_done",
+    "task_completed",
+    "task_blocked",
+    "agent_blocked",
+    "task_error",
+    "agent_error",
+    "task_ask",
+    "ask_created",
+    "task_derive",
+    "task_derived",
+    "pipeline_complete",
+})
 
 # ---------------------------------------------------------------------------
 # Base system prompt (the weaver's "firmware")
@@ -1012,13 +1044,23 @@ class WeaverEventBuffer:
     def _format_digest(self, group: str, events: list[dict], board_summary: str,
                        weaver=None, hints: list[dict] | None = None) -> str:
         recipient_id = str(getattr(weaver, "id", "") or "").strip()
-        verbosity = normalize_weaver_digest_verbosity(
-            getattr(
-                self._state.get_agent_digest_settings(recipient_id)
-                if recipient_id else self._state.get_weaver_settings(group),
-                "digest_verbosity",
-                "balanced",
+        settings = (
+            self._state.get_agent_digest_settings(recipient_id)
+            if recipient_id else self._state.get_weaver_settings(group)
+        )
+        if (
+                str(getattr(weaver, "kind", "") or "").strip() == "architect"
+                or bool(getattr(settings, "architect_digest", False))
+        ):
+            return self._format_architect_digest(
+                group,
+                events,
+                board_summary,
+                weaver,
+                hints=hints,
             )
+        verbosity = normalize_weaver_digest_verbosity(
+            getattr(settings, "digest_verbosity", "balanced")
         )
         event_limit = 5 if verbosity == "compact" else None
         lines = [f"## Loom Digest ({len(events)} event"
@@ -1077,6 +1119,299 @@ class WeaverEventBuffer:
             if ctx_warn:
                 lines.append(ctx_warn)
 
+        lines.append("---")
+        return "\n".join(lines)
+
+    def _format_architect_digest(
+        self,
+        group: str,
+        events: list[dict],
+        board_summary: str,
+        architect=None,
+        hints: list[dict] | None = None,
+    ) -> str:
+        """Format an architect-facing digest with engineer-level rollups."""
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        items: list[tuple[str, int]] = [
+            (
+                f"## Architect digest — {timestamp} "
+                f"({len(events)} event{'s' if len(events) != 1 else ''})",
+                0,
+            ),
+            (f"Board: {board_summary}", 0),
+        ]
+
+        buckets = self._architect_digest_buckets(events)
+        if not events:
+            items.append(("No new architect-level events since last digest.", 0))
+        elif not buckets:
+            items.append(("No engineer-scoped activity in this window.", 0))
+
+        for bucket in buckets:
+            items.append(("", 0))
+            items.append((f"### {bucket['name']}", 0))
+            worker_events = bucket["worker_events"]
+            if worker_events:
+                counts = self._architect_event_counts(worker_events)
+                items.append((
+                    "- "
+                    f"{len(worker_events)} worker event"
+                    f"{'s' if len(worker_events) != 1 else ''}: "
+                    + ", ".join(
+                        f"{label} ×{count}" for label, count in counts
+                    ),
+                    len(worker_events),
+                ))
+                for evt in worker_events[:2]:
+                    items.append((
+                        "- " + self._format_architect_event_detail(evt),
+                        0,
+                    ))
+                if len(worker_events) > 2:
+                    items.append((
+                        f"- … {len(worker_events) - 2} worker detail"
+                        f"{'s' if len(worker_events) - 2 != 1 else ''} rolled up",
+                        0,
+                    ))
+
+            engineer_events = bucket["engineer_events"]
+            direct_limit = 4
+            for evt in engineer_events[:direct_limit]:
+                items.append((
+                    "- " + self._format_architect_event_detail(evt),
+                    1,
+                ))
+            hidden_direct = len(engineer_events) - direct_limit
+            if hidden_direct > 0:
+                items.append((
+                    f"- … {hidden_direct} engineer event"
+                    f"{'s' if hidden_direct != 1 else ''} rolled up",
+                    hidden_direct,
+                ))
+
+        items.extend(self._architect_pipeline_activity_items(events))
+
+        if hints:
+            hint_messages = [
+                self._truncate_digest_text(
+                    str((hint or {}).get("message", "") or ""),
+                    limit=120,
+                )
+                for hint in hints[:2]
+                if str((hint or {}).get("message", "") or "").strip()
+            ]
+            if hint_messages:
+                items.append(("", 0))
+                items.append(("Hints: " + " · ".join(hint_messages), 0))
+
+        if architect:
+            ctx_warn = self._context_warning(architect)
+            if ctx_warn:
+                items.append((ctx_warn, 0))
+
+        return self._finalize_architect_digest_lines(
+            items,
+            total_events=len(events),
+            max_lines=_ARCHITECT_DIGEST_MAX_LINES,
+        )
+
+    def _architect_digest_buckets(self, events: list[dict]) -> list[dict]:
+        buckets: dict[str, dict] = {}
+        for evt in events:
+            engineer = self._architect_digest_engineer(evt)
+            engineer_id = str(getattr(engineer, "id", "") or "").strip()
+            if not engineer_id:
+                engineer_id = "__unassigned__"
+            if engineer_id not in buckets:
+                buckets[engineer_id] = {
+                    "name": self._architect_engineer_label(engineer),
+                    "worker_events": [],
+                    "engineer_events": [],
+                }
+            source = self._state.agents.get(str(evt.get("cell_id", "") or ""))
+            if str(getattr(source, "kind", "") or "").strip() == "worker":
+                buckets[engineer_id]["worker_events"].append(evt)
+            else:
+                buckets[engineer_id]["engineer_events"].append(evt)
+        return list(buckets.values())
+
+    def _architect_digest_engineer(self, evt: dict):
+        cell_id = str(evt.get("cell_id", "") or "").strip()
+        source = self._state.agents.get(cell_id) if cell_id else None
+        source_kind = str(getattr(source, "kind", "") or "").strip()
+        if source_kind == "engineer":
+            return source
+        if source_kind == "worker":
+            owner_id = str(
+                getattr(source, "owner_engineer_id", "") or ""
+            ).strip() or str(
+                getattr(source, "created_by_weaver_id", "") or ""
+            ).strip()
+            owner = self._state.agents.get(owner_id) if owner_id else None
+            if str(getattr(owner, "kind", "") or "").strip() == "engineer":
+                return owner
+
+        task_id = str(evt.get("task_id", "") or "").strip()
+        task = self._state.board_tasks.get(task_id) if task_id else None
+        if not task:
+            return None
+        assigned_id = str(
+            getattr(task, "assigned_engineer_id", "") or ""
+        ).strip()
+        assigned = self._state.agents.get(assigned_id) if assigned_id else None
+        if str(getattr(assigned, "kind", "") or "").strip() == "engineer":
+            return assigned
+        for field_name in ("agent_id", "reply_agent_id"):
+            candidate_id = str(getattr(task, field_name, "") or "").strip()
+            candidate = self._state.agents.get(candidate_id) if candidate_id else None
+            candidate_kind = str(getattr(candidate, "kind", "") or "").strip()
+            if candidate_kind == "engineer":
+                return candidate
+            if candidate_kind == "worker":
+                owner_id = str(
+                    getattr(candidate, "owner_engineer_id", "") or ""
+                ).strip() or str(
+                    getattr(candidate, "created_by_weaver_id", "") or ""
+                ).strip()
+                owner = self._state.agents.get(owner_id) if owner_id else None
+                if str(getattr(owner, "kind", "") or "").strip() == "engineer":
+                    return owner
+        return None
+
+    def _architect_engineer_label(self, engineer) -> str:
+        if not engineer:
+            return "Unassigned engineer"
+        name = self._normalize_digest_text(
+            getattr(engineer, "name", "") or getattr(engineer, "slug", "")
+            or getattr(engineer, "id", "")
+        )
+        return self._truncate_digest_text(name or "Engineer", limit=80)
+
+    def _architect_event_counts(self, events: list[dict]) -> list[tuple[str, int]]:
+        counts: dict[str, int] = {}
+        for evt in events:
+            label = self._architect_event_label(evt.get("kind", ""))
+            counts[label] = counts.get(label, 0) + 1
+        return list(counts.items())
+
+    @staticmethod
+    def _architect_event_label(kind: str) -> str:
+        kind = str(kind or "").strip()
+        return _ARCHITECT_EVENT_LABELS.get(kind, kind.replace("_", " ") or "event")
+
+    def _format_architect_event_detail(self, evt: dict) -> str:
+        kind_label = self._architect_event_label(evt.get("kind", ""))
+        source = self._state.agents.get(str(evt.get("cell_id", "") or ""))
+        source_name = self._normalize_digest_text(
+            evt.get("agent_name", "")
+            or getattr(source, "name", "")
+            or getattr(source, "slug", "")
+            or getattr(source, "id", "")
+        )
+        if not source_name:
+            source_name = "Loom"
+        task_id = str(evt.get("task_id", "") or "").strip()
+        message = self._format_digest_event_message(evt, verbosity="balanced")
+
+        detail = f"{source_name}: {kind_label}"
+        if task_id:
+            detail += f" {task_id}"
+        if message:
+            detail += " — " + message
+        return self._truncate_digest_text(detail, limit=180)
+
+    def _architect_pipeline_activity_items(
+        self,
+        events: list[dict],
+    ) -> list[tuple[str, int]]:
+        items: list[tuple[str, int]] = [("", 0), ("### Pipeline activity", 0)]
+        pipelines: dict[str, dict] = {}
+        for evt in events:
+            kind = str(evt.get("kind", "") or "").strip()
+            if kind not in _ARCHITECT_PIPELINE_ACTIVITY_EVENTS:
+                continue
+            pipeline_key, pipeline_label = self._architect_pipeline_label(evt)
+            bucket = pipelines.setdefault(
+                pipeline_key,
+                {
+                    "label": pipeline_label,
+                    "count": 0,
+                    "counts": {},
+                },
+            )
+            bucket["count"] += 1
+            label = self._architect_event_label(kind)
+            bucket["counts"][label] = bucket["counts"].get(label, 0) + 1
+
+        if not pipelines:
+            items.append(("- None in this window.", 0))
+            return items
+
+        for bucket in list(pipelines.values())[:8]:
+            counts = ", ".join(
+                f"{label} ×{count}"
+                for label, count in bucket["counts"].items()
+            )
+            items.append((
+                "- "
+                + self._truncate_digest_text(
+                    f"{bucket['label']}: {bucket['count']} transition"
+                    f"{'s' if bucket['count'] != 1 else ''}"
+                    + (f" ({counts})" if counts else ""),
+                    limit=180,
+                ),
+                0,
+            ))
+        hidden = len(pipelines) - 8
+        if hidden > 0:
+            items.append((f"- … {hidden} more pipeline touched", 0))
+        return items
+
+    def _architect_pipeline_label(self, evt: dict) -> tuple[str, str]:
+        task_id = str(evt.get("task_id", "") or "").strip()
+        task = self._state.board_tasks.get(task_id) if task_id else None
+        root_id = str(getattr(task, "pipeline_root_id", "") or "").strip()
+        if not root_id and task:
+            root_id = str(getattr(task, "id", "") or "").strip()
+        root = self._state.board_tasks.get(root_id) if root_id else None
+        title = self._normalize_digest_text(
+            getattr(root, "task", "") or getattr(task, "task", "")
+            or evt.get("message", "") or task_id or evt.get("group", "")
+        )
+        label_id = root_id or task_id or str(evt.get("group", "") or "pipeline")
+        label = label_id
+        if title and title != label_id:
+            label += f" — {title}"
+        return label_id, self._truncate_digest_text(label, limit=120)
+
+    @staticmethod
+    def _finalize_architect_digest_lines(
+        items: list[tuple[str, int]],
+        *,
+        total_events: int,
+        max_lines: int,
+    ) -> str:
+        body_limit = max(max_lines - 1, 1)
+        selected: list[tuple[str, int]] = []
+        represented = 0
+        for line, count in items:
+            if len(selected) >= body_limit:
+                break
+            selected.append((line, count))
+            represented += max(0, int(count or 0))
+
+        omitted = max(0, int(total_events or 0) - represented)
+        if omitted > 0:
+            if len(selected) >= body_limit and selected:
+                _line, count = selected.pop()
+                represented -= max(0, int(count or 0))
+                omitted = max(0, int(total_events or 0) - represented)
+            selected.append((
+                f"… {omitted} event{'s' if omitted != 1 else ''} elided",
+                0,
+            ))
+
+        lines = [line for line, _count in selected]
         lines.append("---")
         return "\n".join(lines)
 
@@ -1369,11 +1704,16 @@ class WeaverEventBuffer:
         for recipient in self._state.agents.values():
             if recipient.cell_type != "agent":
                 continue
-            if str(getattr(recipient, "kind", "") or "").strip() not in {
-                    "engineer", "architect"}:
+            recipient_kind = str(getattr(recipient, "kind", "") or "").strip()
+            if recipient_kind not in {"engineer", "architect"}:
                 continue
             if recipient.status != "running" or not recipient.session_id:
                 continue
+            if (
+                    recipient_kind == "architect"
+                    and recipient.id not in self._state.agent_digest_settings
+            ):
+                self._state.ensure_agent_digest_settings(recipient.id)
 
             # Emit buffer stats for the UI
             stats = self.get_buffer_stats(recipient.id)
