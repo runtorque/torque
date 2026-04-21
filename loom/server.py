@@ -5483,6 +5483,7 @@ async def main(connection=None):
                                     "_created_by_weaver_id", ""),
                                 owner_engineer_id=data.get(
                                     "owner_engineer_id", ""),
+                                kind="worker",
                                 restore_focus_to_prev_tab=True,
                             )
                             if cell:

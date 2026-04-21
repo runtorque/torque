@@ -208,6 +208,8 @@ def _collect_agents_section(conn: sqlite3.Connection) -> dict:
             "terminal": 0,
             "architect": 0,
             "unmigrated": total,
+            "empty_kind_with_task_history": [],
+            "empty_kind_with_task_history_count": 0,
         }
 
     counts = {}
@@ -235,6 +237,9 @@ def _collect_agents_section(conn: sqlite3.Connection) -> dict:
             )
             or ""
         )
+    empty_kind_with_task_history = _collect_empty_kind_agents_with_task_history(
+        conn
+    )
     return {
         "total": total,
         "engineer": counts["engineer"],
@@ -243,7 +248,67 @@ def _collect_agents_section(conn: sqlite3.Connection) -> dict:
         "terminal": counts["terminal"],
         "architect": counts["architect"],
         "unmigrated": unmigrated,
+        "empty_kind_with_task_history": empty_kind_with_task_history,
+        "empty_kind_with_task_history_count": len(empty_kind_with_task_history),
     }
+
+
+def _collect_empty_kind_agents_with_task_history(conn: sqlite3.Connection) -> list[dict]:
+    if not _column_exists(conn, "agents", "kind"):
+        return []
+    tasks_dispatched_sql = (
+        "tasks_dispatched"
+        if _column_exists(conn, "agents", "tasks_dispatched")
+        else "0 AS tasks_dispatched"
+    )
+    try:
+        rows = conn.execute(
+            f"SELECT id, name, slug, group_name, {tasks_dispatched_sql} "
+            "FROM agents "
+            "WHERE cell_type='agent' AND TRIM(COALESCE(kind, '')) = '' "
+            "ORDER BY id"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+
+    history_totals: dict[str, int] = {}
+    if _table_exists(conn, "agent_history"):
+        try:
+            for agent_id, total_tasks in conn.execute(
+                "SELECT id, COALESCE(total_tasks, 0) FROM agent_history"
+            ).fetchall():
+                history_totals[str(agent_id or "")] = int(total_tasks or 0)
+        except sqlite3.OperationalError:
+            history_totals = {}
+
+    task_counts: dict[str, int] = {}
+    if _table_exists(conn, "agent_tasks"):
+        try:
+            for agent_id, count in conn.execute(
+                "SELECT agent_id, COUNT(*) FROM agent_tasks GROUP BY agent_id"
+            ).fetchall():
+                task_counts[str(agent_id or "")] = int(count or 0)
+        except sqlite3.OperationalError:
+            task_counts = {}
+
+    entries = []
+    for agent_id, name, slug, group_name, tasks_dispatched in rows:
+        agent_id = str(agent_id or "")
+        task_history = max(
+            int(tasks_dispatched or 0),
+            history_totals.get(agent_id, 0),
+            task_counts.get(agent_id, 0),
+        )
+        if task_history <= 0:
+            continue
+        entries.append({
+            "id": agent_id,
+            "name": str(name or ""),
+            "slug": str(slug or ""),
+            "group": str(group_name or ""),
+            "task_history": task_history,
+        })
+    return entries
 
 
 def _collect_engineers_section(conn: sqlite3.Connection) -> dict:
@@ -729,8 +794,8 @@ def _check_migration_version(report: dict) -> dict:
     actual = int(report["migration"]["schema_kinds_migration_version"] or 0)
     return {
         "name": "migration_version",
-        "status": "pass" if actual >= 3 else "fail",
-        "details": {"expected_min": 3, "actual": actual},
+        "status": "pass" if actual >= 4 else "fail",
+        "details": {"expected_min": 4, "actual": actual},
     }
 
 
@@ -922,6 +987,25 @@ def _warn_nonconforming_worker_worktree_branches(report: dict) -> dict | None:
     }
 
 
+def _warn_empty_kind_agents_with_task_history(report: dict) -> dict | None:
+    agents = report.get("agents", {}) or {}
+    entries = list(agents.get("empty_kind_with_task_history", []) or [])
+    if not entries:
+        return None
+    return {
+        "name": "empty_kind_agents_with_task_history",
+        "status": "warn",
+        "details": {
+            "count": len(entries),
+            "agents": entries,
+            "hint": (
+                "agent rows with kind='' and task history may be workers that "
+                "missed the worker kind stamp"
+            ),
+        },
+    }
+
+
 _DOCTOR_CHECKS = [
     _check_migration_version,
     _check_unmigrated_agents,
@@ -941,6 +1025,7 @@ _DOCTOR_WARNINGS = [
     _warn_stale_pending_hires,
     _warn_dangling_decision_architects,
     _warn_nonconforming_worker_worktree_branches,
+    _warn_empty_kind_agents_with_task_history,
 ]
 
 
@@ -1185,6 +1270,20 @@ def format_doctor_report(report: dict) -> str:
                 )
                 base = (
                     "  - worker worktree branches do not match stage-5 or legacy naming"
+                )
+                if summary:
+                    base += f": {summary}"
+                lines.append(base)
+            elif name == "empty_kind_agents_with_task_history":
+                entries = details.get("agents", []) or []
+                summary = ", ".join(
+                    str(entry.get("id", "") or "")
+                    for entry in entries
+                    if str(entry.get("id", "") or "").strip()
+                )
+                base = (
+                    "  - agent rows with kind='' have task history; "
+                    "run the worker-kind backfill migration"
                 )
                 if summary:
                     base += f": {summary}"

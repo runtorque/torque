@@ -99,6 +99,40 @@ class DigestRoutingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(recipients, [engineer.id, architect.id])
 
+    def test_candidate_worker_recipients_exclude_worker_self(self):
+        state, group = self._make_state()
+        architect = self._add_agent(
+            state,
+            agent_id="arch-1",
+            name="Architect",
+            group=group,
+            kind="architect",
+        )
+        engineer = self._add_agent(
+            state,
+            agent_id="eng-1",
+            name="Engineer",
+            group=group,
+            kind="engineer",
+            hired_by_architect_id=architect.id,
+        )
+        worker = self._add_agent(
+            state,
+            agent_id="worker-1",
+            name="Worker",
+            group=group,
+            kind="worker",
+            owner_engineer_id=engineer.id,
+        )
+
+        recipients = self.routing_mod.candidate_digest_recipients(
+            state,
+            {"cell_id": worker.id, "group": group, "kind": "task_completed"},
+        )
+
+        self.assertEqual(recipients, [engineer.id, architect.id])
+        self.assertNotIn(worker.id, recipients)
+
     def test_resolve_worker_without_owner_returns_no_recipients(self):
         state, group = self._make_state()
         worker = self._add_agent(
