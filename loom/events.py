@@ -10,6 +10,9 @@ from .config import log
 from .task_health import HEALTH_SEVERITY
 
 
+PERSISTENT_CELL_EVENT_KINDS = {"architect", "engineer"}
+
+
 class PanelEventLog:
     """Global ring buffer of high-level events for the Events panel.
 
@@ -86,14 +89,17 @@ class PanelEventLog:
             return list(self._events)
         return list(self._events)[-n:]
 
-    def get_page(self, limit: int = 50, before_id: int = 0) -> list[dict]:
+    def get_page(self, limit: int = 50, before_id: int = 0,
+                 cell_id: str = "") -> list[dict]:
         """Return a page of older events from DB (for scroll pagination)."""
         if self._db:
-            return self._db.load_panel_events(limit, before_id)
+            return self._db.load_panel_events(limit, before_id, cell_id=cell_id)
         # Fallback: paginate from in-memory buffer
         events = list(self._events)
         if before_id:
             events = [e for e in events if e["id"] < before_id]
+        if cell_id:
+            events = [e for e in events if e.get("cell_id", "") == cell_id]
         return events[-limit:]
 
 
@@ -121,6 +127,78 @@ class EventLog:
 
     def clear(self, cell_id: str):
         self._events.pop(cell_id, None)
+
+
+def _agent_event_message(event: AgentEvent) -> str:
+    data = event.data or {}
+    et = event.event_type
+    if et == "session_start":
+        return "Session started"
+    if et == "session_end":
+        return data.get("summary", "") or data.get("reason", "") or "Session ended"
+    if et == "tool_start":
+        return data.get("detail", "") or (
+            f"Using {data.get('tool')}" if data.get("tool") else "Tool started"
+        )
+    if et == "tool_end":
+        tool = data.get("tool", "")
+        suffix = "finished" if data.get("success", True) else "failed"
+        return f"{tool} {suffix}".strip() or f"Tool {suffix}"
+    if et == "activity_change":
+        return data.get("detail", "") or data.get("activity", "") or "Activity changed"
+    if et == "error":
+        return data.get("error", "") or "Error"
+    if et == "waiting":
+        return data.get("reason", "") or "Waiting for permission"
+    if et == "progress":
+        return data.get("detail", "") or "Progress update"
+    if et == "cost_update":
+        return "Token usage updated"
+    return et.replace("_", " ")
+
+
+def _serialize_agent_event(event: AgentEvent, cell, index: int) -> dict:
+    return {
+        "id": f"live:{event.timestamp:.6f}:{index}:{event.event_type}",
+        "timestamp": event.timestamp,
+        "kind": event.event_type,
+        "cell_id": event.cell_id,
+        "agent_name": getattr(cell, "name", ""),
+        "group": getattr(cell, "group", ""),
+        "message": _agent_event_message(event),
+        "task_id": getattr(cell, "current_task_id", ""),
+        "source": "event_log",
+    }
+
+
+def get_cell_event_stream(cell, event_log: EventLog,
+                          panel_log: PanelEventLog | None = None,
+                          db=None, limit: int = 200) -> list[dict]:
+    """Return per-cell events in timestamp order for the focused Events tab."""
+    cell_id = getattr(cell, "id", "")
+    live_events = [
+        _serialize_agent_event(event, cell, index)
+        for index, event in enumerate(event_log.get(cell_id))
+    ]
+    events = live_events
+    if getattr(cell, "kind", "") in PERSISTENT_CELL_EVENT_KINDS:
+        # Two-source layering: EventLog is live/low-level, panel_events is persisted/high-level for architect/engineer cells only.
+        if db is not None:
+            persisted_events = db.load_panel_events(limit=limit, cell_id=cell_id)
+        elif panel_log is not None:
+            persisted_events = panel_log.get_page(limit=limit, cell_id=cell_id)
+        else:
+            persisted_events = []
+        events = [dict(evt, source=evt.get("source", "panel_events"))
+                  for evt in persisted_events] + live_events
+    events.sort(key=lambda evt: (
+        float(evt.get("timestamp", 0) or 0),
+        str(evt.get("source", "")),
+        str(evt.get("id", "")),
+    ))
+    if limit and len(events) > limit:
+        events = events[-limit:]
+    return events
 
 
 class EventBus:

@@ -993,23 +993,27 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self._conn.commit()
 
     def load_panel_events(self, limit: int = 50,
-                          before_id: int = 0) -> list[dict]:
+                          before_id: int = 0,
+                          cell_id: str = "") -> list[dict]:
         """Load a page of panel events ordered by id DESC.
 
         Returns dicts with 'group' key (matching in-memory format).
         """
+        clauses = []
+        params = []
         if before_id:
-            rows = self._conn.execute(
-                "SELECT id, timestamp, kind, cell_id, agent_name, "
-                "group_name, message, task_id FROM panel_events "
-                "WHERE id < ? ORDER BY id DESC LIMIT ?",
-                (before_id, limit)).fetchall()
-        else:
-            rows = self._conn.execute(
-                "SELECT id, timestamp, kind, cell_id, agent_name, "
-                "group_name, message, task_id FROM panel_events "
-                "ORDER BY id DESC LIMIT ?",
-                (limit,)).fetchall()
+            clauses.append("id < ?")
+            params.append(before_id)
+        if cell_id:
+            clauses.append("cell_id = ?")
+            params.append(cell_id)
+        where = f"WHERE {' AND '.join(clauses)} " if clauses else ""
+        params.append(limit)
+        rows = self._conn.execute(
+            "SELECT id, timestamp, kind, cell_id, agent_name, "
+            "group_name, message, task_id FROM panel_events "
+            f"{where}ORDER BY id DESC LIMIT ?",
+            tuple(params)).fetchall()
         events = []
         for r in rows:
             events.append({

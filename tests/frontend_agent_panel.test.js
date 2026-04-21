@@ -272,6 +272,54 @@ test('worker panel filters per-cell events and task history to the focused worke
   assert.doesNotMatch(panel.innerHTML, /Ignore task/);
 });
 
+test('focused engineer events tab renders server-merged cell events', () => {
+  const { context, panel, sendCalls } = createHarness();
+  setFocusedAgent(context, {
+    id: 'eng-1',
+    name: 'Builder',
+    kind: 'engineer',
+    group: 'alpha',
+    cell_type: 'agent',
+  });
+  vm.runInContext(`_agentPanelLastSelectedTabByKind.engineer = 'events';`, context);
+
+  context.renderAgentPanel();
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sendCalls[0])), {
+    cmd: 'get_cell_events',
+    cell_id: 'eng-1',
+    limit: 200,
+  });
+  assert.match(panel.innerHTML, /Loading cell events/);
+
+  context.agentPanelReceiveCellEvents({
+    type: 'cell_events',
+    cell_id: 'eng-1',
+    events: [
+      {
+        id: 9,
+        cell_id: 'eng-1',
+        kind: 'task_dispatched',
+        message: 'Persisted dispatch survived restart',
+        timestamp: 20,
+        source: 'panel_events',
+      },
+      {
+        id: 'live:25',
+        cell_id: 'eng-1',
+        kind: 'tool_start',
+        message: 'Live tool call',
+        timestamp: 25,
+        source: 'event_log',
+      },
+    ],
+  });
+
+  assert.match(panel.innerHTML, /Cell events/);
+  assert.match(panel.innerHTML, /Persisted dispatch survived restart/);
+  assert.match(panel.innerHTML, /Live tool call/);
+});
+
 test('architect panel filters decisions, hired engineers, and messages to the focused architect', () => {
   const { context, panel } = createHarness();
   context.state.agents = {
@@ -421,7 +469,8 @@ test('focused engineer pause toggle sends per-agent digest pause and resume comm
   context.renderAgentPanel();
   vm.runInContext(`agentPanelTogglePauseForAgent('eng-1')`, context);
 
-  assert.deepEqual(JSON.parse(JSON.stringify(sendCalls)), [
+  const digestCalls = sendCalls.filter((call) => call.cmd && call.cmd.startsWith('digest_'));
+  assert.deepEqual(JSON.parse(JSON.stringify(digestCalls)), [
     { cmd: 'digest_pause', agent_id: 'eng-1' },
     { cmd: 'digest_resume', agent_id: 'eng-1' },
   ]);
@@ -470,7 +519,8 @@ test('focused architect Events tab renders digest data and pause control', () =>
   context.renderAgentPanel();
   vm.runInContext(`agentPanelTogglePauseForAgent('arch-1')`, context);
 
-  assert.deepEqual(JSON.parse(JSON.stringify(sendCalls)), [
+  const digestCalls = sendCalls.filter((call) => call.cmd && call.cmd.startsWith('digest_'));
+  assert.deepEqual(JSON.parse(JSON.stringify(digestCalls)), [
     { cmd: 'digest_pause', agent_id: 'arch-1' },
     { cmd: 'digest_resume', agent_id: 'arch-1' },
   ]);
