@@ -1164,6 +1164,149 @@ class ServerAutoCloseOnDoneTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(closed, [])
 
 
+class ServerReviewMergeCleanupTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        install_aiohttp_stub()
+        install_iterm2_stub()
+        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.reload(self.state_mod)
+        self.server_mod = importlib.import_module("loom.server")
+        self.server_mod = importlib.reload(self.server_mod)
+
+    def _make_state(self, *, verdict_message):
+        state = self.state_mod.MatrixState()
+        state.groups["g"] = []
+        impl = self.state_mod.AgentCell(
+            id="impl-1",
+            name="Implementer",
+            group="g",
+            cell_type="agent",
+            worktree_path="/repo/.loom/worktrees/impl",
+            worktree_branch="loom/impl",
+            worktree_repo_root="/repo",
+        )
+        reviewer = self.state_mod.AgentCell(
+            id="review-1",
+            name="Reviewer",
+            group="g",
+            cell_type="agent",
+            session_id="review-session",
+            worktree_path="/repo/.loom/worktrees/review",
+            worktree_branch="loom/review",
+            worktree_repo_root="/repo",
+        )
+        state.agents = {impl.id: impl, reviewer.id: reviewer}
+        root = state.board_add_task(
+            "Implement feature",
+            "g",
+            lane="Done",
+            id="task-root",
+            action_name="feature/implement",
+            agent_id=impl.id,
+        )
+        state.board_add_task(
+            "Review feature",
+            "g",
+            lane="Done",
+            id="task-review",
+            action_name="feature/review",
+            parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=1,
+            agent_id=reviewer.id,
+            messages=[
+                {
+                    "action": "done",
+                    "message": verdict_message,
+                    "agent_name": reviewer.name,
+                }
+            ],
+        )
+        return state, impl, reviewer
+
+    async def test_ship_review_cleanup_fires_after_parent_merge(self):
+        state, impl, reviewer = self._make_state(
+            verdict_message=(
+                "Verification summary: tests passed\n\n"
+                "## Verdict\n"
+                "**Ship** — no issues, ready to merge"
+            )
+        )
+        calls = []
+
+        async def cleanup(cell, *, close_agent, remove_worktree):
+            calls.append((cell.id, close_agent, remove_worktree))
+            return {
+                "agent_closed": True,
+                "worktree_removed": True,
+                "errors": [],
+            }
+
+        summary = await self.server_mod._cleanup_shipped_reviewers_for_merged_cell(
+            state,
+            impl,
+            cleanup,
+        )
+
+        self.assertEqual(calls, [(reviewer.id, True, True)])
+        self.assertEqual(summary["agents"], [reviewer.id])
+        self.assertEqual(summary["agent_closed"], 1)
+        self.assertEqual(summary["worktree_removed"], 1)
+
+    async def test_non_ship_review_cleanup_defers(self):
+        for verdict in (
+            "## Verdict\n**Ship with fixes** — address minor issues first",
+            "Verdict: Needs rework — core behavior is incorrect",
+        ):
+            with self.subTest(verdict=verdict):
+                state, impl, _reviewer = self._make_state(
+                    verdict_message=verdict,
+                )
+                calls = []
+
+                async def cleanup(cell, *, close_agent, remove_worktree):
+                    calls.append(cell.id)
+                    return {
+                        "agent_closed": True,
+                        "worktree_removed": True,
+                        "errors": [],
+                    }
+
+                summary = await self.server_mod._cleanup_shipped_reviewers_for_merged_cell(
+                    state,
+                    impl,
+                    cleanup,
+                )
+
+                self.assertEqual(calls, [])
+                self.assertEqual(summary["agents"], [])
+
+    async def test_review_cleanup_skips_implementer_agent(self):
+        state, impl, _reviewer = self._make_state(
+            verdict_message="Verdict: Ship",
+        )
+        review_task = state.board_tasks["task-review"]
+        review_task.agent_id = impl.id
+        calls = []
+
+        async def cleanup(cell, *, close_agent, remove_worktree):
+            calls.append(cell.id)
+            return {
+                "agent_closed": True,
+                "worktree_removed": True,
+                "errors": [],
+            }
+
+        summary = await self.server_mod._cleanup_shipped_reviewers_for_merged_cell(
+            state,
+            impl,
+            cleanup,
+        )
+
+        self.assertEqual(calls, [])
+        self.assertEqual(summary["agents"], [])
+
+
 class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub()

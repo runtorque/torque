@@ -24,6 +24,19 @@ ARCHITECT_MCP_ENTRYPOINT = "loom/mcp_architect.py"
 ENGINEER_MCP_ENTRYPOINT = "loom/mcp_engineer.py"
 
 
+def _copy_worktree_context(target, source) -> bool:
+    """Copy an existing worktree context from one cell to another."""
+    if not target or not source or not getattr(source, "worktree_path", ""):
+        return False
+    target.worktree_path = source.worktree_path
+    target.worktree_branch = source.worktree_branch
+    target.worktree_repo_root = source.worktree_repo_root
+    target.worktree_base_branch = source.worktree_base_branch
+    target.worktree_changed_files = list(source.worktree_changed_files or [])
+    target.directory = source.worktree_path
+    return True
+
+
 def _append_task_artifacts(prompt: str, attachments, artifacts,
                            upstream_artifacts=None) -> str:
     """Append legacy image references plus structured artifact references."""
@@ -405,6 +418,7 @@ class AgentLaunchService:
                                        kind: str = "",
                                        persistent: bool = False,
                                        hired_by_architect_id: str = "",
+                                       inherited_worktree_from=None,
                                        restore_focus_to_prev_tab: bool = False):
         """Create an agent cell, prepare its worktree, and open the session."""
         cell = self.state.add_agent(
@@ -443,11 +457,14 @@ class AgentLaunchService:
         ).strip()
         if launch_cfg.get("agent_type"):
             cell.agent_type = launch_cfg["agent_type"]
+        inherited_worktree = _copy_worktree_context(
+            cell, inherited_worktree_from
+        )
         self.state._emit_agent(cell)
         self.state._db_save_agent(cell)
         self.state.history_record_agent(cell)
 
-        if launch_cfg.get("worktree") and cell.directory:
+        if launch_cfg.get("worktree") and cell.directory and not inherited_worktree:
             repo_root = await self.worktree_mgr.get_repo_root(cell.directory)
             if repo_root:
                 worktree_path = await self.worktree_mgr.create(

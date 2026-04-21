@@ -104,6 +104,7 @@ from .server_agent import (
     AgentLaunchService,
     _append_task_artifacts,
     _build_self_dispatch_prompt,
+    _copy_worktree_context,
     _new_agent_prompt_sequence,
     _startup_prompt_for_new_agent,
     mcp_entrypoint_for_cell,
@@ -417,6 +418,135 @@ def _looks_like_review_task(task) -> bool:
         if part and part.strip()
     )
     return "review" in text or "re-review" in text
+
+
+def _is_feature_review_task(task) -> bool:
+    if not task:
+        return False
+    action_name = str(getattr(task, "action_name", "") or "").strip().lower()
+    return action_name == "feature/review"
+
+
+def _normalized_review_verdict_line(line: str) -> str:
+    text = str(line or "").strip()
+    while text[:1] in {"#", ">", "-", "*"}:
+        text = text[1:].strip()
+    for token in ("**", "__", "`"):
+        text = text.replace(token, "")
+    text = text.strip()
+    lower = text.lower()
+    if lower.startswith("verdict"):
+        rest = text[len("verdict"):].lstrip()
+        if rest[:1] in {":", "-", "—", "–"}:
+            text = rest[1:].strip()
+        else:
+            text = rest.strip()
+    return text.strip()
+
+
+def _review_verdict_from_message(message: str) -> str:
+    """Return ``ship`` or a non-ship verdict parsed from a review message."""
+    for line in reversed(str(message or "").splitlines()):
+        text = _normalized_review_verdict_line(line)
+        if not text:
+            continue
+        lower = text.lower().strip(" .")
+        if lower.startswith("ship with fixes"):
+            return "ship_with_fixes"
+        if lower.startswith(("needs rework", "needs changes", "blocker")):
+            return "needs_rework"
+        if lower == "ship" or lower == "ship it":
+            return "ship"
+        if lower.startswith("ship") and len(lower) > 4:
+            next_char = lower[4]
+            if next_char in {" ", ":", "-", "—", "–", ",", ";"}:
+                return "ship"
+    return ""
+
+
+def _review_task_has_ship_verdict(task) -> bool:
+    if not task:
+        return False
+    for entry in reversed(getattr(task, "messages", []) or []):
+        if str(entry.get("action", "") or "").lower() != "done":
+            continue
+        verdict = _review_verdict_from_message(entry.get("message", ""))
+        if verdict:
+            return verdict == "ship"
+    return False
+
+
+def _shipped_review_cleanup_candidates(state: MatrixState, merged_cell) -> list:
+    """Return reviewer agents whose Ship verdict should be cleaned post-merge."""
+    if not state or not merged_cell:
+        return []
+    root_ids = {
+        str(getattr(task, "pipeline_root_id", "") or task.id).strip()
+        for task in state.board_tasks.values()
+        if getattr(task, "agent_id", "") == getattr(merged_cell, "id", "")
+    }
+    root_ids.discard("")
+    if not root_ids:
+        return []
+
+    candidates = []
+    seen_agent_ids = set()
+    for root_id in sorted(root_ids):
+        for task in state.board_get_chain(root_id):
+            if not task_counts_as_done(task):
+                continue
+            if not _is_feature_review_task(task):
+                continue
+            if not _review_task_has_ship_verdict(task):
+                continue
+            agent_id = str(getattr(task, "agent_id", "") or "").strip()
+            if (
+                not agent_id
+                or agent_id == getattr(merged_cell, "id", "")
+                or agent_id in seen_agent_ids
+            ):
+                continue
+            if _agent_has_open_assigned_tasks(state, agent_id):
+                continue
+            if _agent_has_targeted_auto_dispatch_work(state, agent_id):
+                continue
+            if _agent_has_pending_weaver_followups(state, agent_id):
+                continue
+            cell = state.agents.get(agent_id)
+            if not cell or getattr(cell, "cell_type", "") != "agent":
+                continue
+            seen_agent_ids.add(agent_id)
+            candidates.append(cell)
+    return candidates
+
+
+async def _cleanup_shipped_reviewers_for_merged_cell(
+        state: MatrixState,
+        merged_cell,
+        cleanup_after_merge,
+) -> dict:
+    """Close/remove Ship reviewers after their parent branch has merged."""
+    summary = {
+        "close_agent": True,
+        "remove_worktree": True,
+        "agents": [],
+        "agent_closed": 0,
+        "worktree_removed": 0,
+        "errors": [],
+    }
+    for reviewer in _shipped_review_cleanup_candidates(state, merged_cell):
+        summary["agents"].append(reviewer.id)
+        cleanup = await cleanup_after_merge(
+            reviewer,
+            close_agent=True,
+            remove_worktree=True,
+        )
+        if cleanup.get("agent_closed"):
+            summary["agent_closed"] += 1
+        if cleanup.get("worktree_removed"):
+            summary["worktree_removed"] += 1
+        summary["errors"].extend(cleanup.get("errors", []) or [])
+    return summary
 
 
 def _is_generic_review_fix_task(task) -> bool:
@@ -3344,6 +3474,7 @@ async def main(connection=None):
                                         kind: str = "",
                                         persistent: bool = False,
                                         hired_by_architect_id: str = "",
+                                        inherited_worktree_from=None,
                                         restore_focus_to_prev_tab: bool = False):
         return await agent_launch.create_agent_with_config(
             group,
@@ -3358,6 +3489,7 @@ async def main(connection=None):
             kind=kind,
             persistent=persistent,
             hired_by_architect_id=hired_by_architect_id,
+            inherited_worktree_from=inherited_worktree_from,
             restore_focus_to_prev_tab=restore_focus_to_prev_tab,
         )
 
@@ -5328,6 +5460,13 @@ async def main(connection=None):
                                             preserve_diff_warning,
                                             "warning",
                                         )
+                                    reviewer_cleanup = (
+                                        await _cleanup_shipped_reviewers_for_merged_cell(
+                                            state,
+                                            cell,
+                                            _cleanup_after_merge,
+                                        )
+                                    )
                                     # Unlink completed/archive-closed tasks from this agent so
                                     # they don't re-appear in future merge
                                     # messages.  Tasks stay on the board as a
@@ -5425,6 +5564,15 @@ async def main(connection=None):
                                                     "Post-merge reset "
                                                     "failed for '%s'",
                                                     cell.name)
+                                    if reviewer_cleanup.get("agents"):
+                                        cleanup["reviewer_cleanup"] = (
+                                            reviewer_cleanup
+                                        )
+                                        cleanup["errors"].extend(
+                                            reviewer_cleanup.get(
+                                                "errors", []
+                                            )
+                                        )
                                     result = {
                                         "type": "worktree_merge",
                                         "id": aid, "ok": True,
@@ -6110,6 +6258,29 @@ async def main(connection=None):
                                 explicit_template=explicit_template,
                                 overrides=launch_overrides,
                             )
+                            inherited_worktree_source = None
+                            inherit_from = data.get(
+                                "inherit_worktree_from", "")
+                            if inherit_from:
+                                src = state.agents.get(inherit_from)
+                                if src and src.worktree_path:
+                                    inherited_worktree_source = src
+                            elif task.parent_task_id:
+                                # HITL dispatch: walk parent chain to find
+                                # the worktree before launching the session,
+                                # so derived reviewers do not briefly create
+                                # and run inside a throwaway branch.
+                                _ptid = task.parent_task_id
+                                while _ptid:
+                                    _pt = state.board_tasks.get(_ptid)
+                                    if not _pt:
+                                        break
+                                    if _pt.agent_id:
+                                        _pa = state.agents.get(_pt.agent_id)
+                                        if _pa and _pa.worktree_path:
+                                            inherited_worktree_source = _pa
+                                            break
+                                    _ptid = _pt.parent_task_id
                             persistent_prompt_text = ""
                             startup_prompt = ""
                             if launch_cfg.get("agent_type"):
@@ -6135,63 +6306,21 @@ async def main(connection=None):
                                 owner_engineer_id=data.get(
                                     "owner_engineer_id", ""),
                                 kind="worker",
+                                inherited_worktree_from=inherited_worktree_source,
                                 restore_focus_to_prev_tab=True,
                             )
                             if cell:
-                                # Worktree inheritance (pipeline)
-                                inherit_from = data.get(
-                                    "inherit_worktree_from", "")
-                                if inherit_from:
-                                    src = state.agents.get(inherit_from)
-                                    if src and src.worktree_path:
-                                        cell.worktree_path = \
-                                            src.worktree_path
-                                        cell.worktree_branch = \
-                                            src.worktree_branch
-                                        cell.worktree_repo_root = \
-                                            src.worktree_repo_root
-                                        cell.worktree_base_branch = \
-                                            src.worktree_base_branch
-                                        cell.worktree_changed_files = list(
-                                            src.worktree_changed_files
-                                            or [])
-                                        cell.directory = \
-                                            src.worktree_path
-                                        state._emit_agent(cell)
-                                        state._db_save_agent(cell)
-                                elif not cell.worktree_path \
-                                        and task.parent_task_id:
-                                    # HITL dispatch: walk parent
-                                    # chain to find worktree
-                                    _ptid = task.parent_task_id
-                                    while _ptid:
-                                        _pt = state.board_tasks.get(
-                                            _ptid)
-                                        if not _pt:
-                                            break
-                                        if _pt.agent_id:
-                                            _pa = state.agents.get(
-                                                _pt.agent_id)
-                                            if _pa and \
-                                                    _pa.worktree_path:
-                                                cell.worktree_path = \
-                                                    _pa.worktree_path
-                                                cell.worktree_branch =\
-                                                    _pa.worktree_branch
-                                                cell.worktree_repo_root = \
-                                                    _pa.worktree_repo_root
-                                                cell.worktree_base_branch = \
-                                                    _pa.worktree_base_branch
-                                                cell.worktree_changed_files = list(
-                                                    _pa.worktree_changed_files
-                                                    or [])
-                                                cell.directory = \
-                                                    _pa.worktree_path
-                                                state._emit_agent(cell)
-                                                state._db_save_agent(
-                                                    cell)
-                                                break
-                                        _ptid = _pt.parent_task_id
+                                # Worktree inheritance (pipeline) is applied
+                                # before session creation. Re-copy here in
+                                # case the source changed while the agent
+                                # session was launching.
+                                if inherited_worktree_source:
+                                    _copy_worktree_context(
+                                        cell,
+                                        inherited_worktree_source,
+                                    )
+                                    state._emit_agent(cell)
+                                    state._db_save_agent(cell)
 
                                 if launch_cfg.get("terminals"):
                                     await _create_child_terminals(
