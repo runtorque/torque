@@ -5044,6 +5044,7 @@ async def main(connection=None):
                     depends_on=data.get("depends_on", []),
                     scheduled_at=data.get("scheduled_at", ""),
                     assigned_engineer_id=data.get("assigned_engineer_id", ""),
+                    created_by_engineer_id=data.get("created_by_engineer_id", ""),
                     verification_mode=data.get("verification_mode", ""),
                     verification_state=data.get("verification_state", ""),
                     verification_notes=data.get("verification_notes", ""),

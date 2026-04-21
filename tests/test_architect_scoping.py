@@ -112,6 +112,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
                 description=payload.get("description", ""),
                 labels=payload.get("labels", []),
                 assigned_engineer_id=payload.get("assigned_engineer_id", ""),
+                created_by_engineer_id=payload.get("created_by_engineer_id", ""),
             )
             if not task:
                 return {"type": "error", "message": "task create failed"}
@@ -197,8 +198,8 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("worker-a", engineers)
         self.assertEqual(engineers[alice.id]["current_task_id"], visible_task.id)
         self.assertEqual(engineers[alice.id]["current_task"], visible_task.task)
-        self.assertEqual(engineers[user_engineer.id]["current_task_id"], "")
-        self.assertEqual(engineers[user_engineer.id]["current_task"], "")
+        self.assertEqual(engineers[user_engineer.id]["current_task_id"], hidden_task.id)
+        self.assertEqual(engineers[user_engineer.id]["current_task"], hidden_task.task)
 
     async def test_architect_task_show_refreshes_and_promotes_health(self):
         architect = self._add_architect("arch-1", "Architect")
@@ -245,6 +246,108 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Silent 15 min", data["health_summary"])
         self.assertIn("status=idle", data["health_summary"])
         self.assertLessEqual(len(data["health_summary"]), 120)
+        self.assertEqual(data["created_by"], f"architect:{architect.id}")
+
+    async def test_architect_board_summary_reads_full_group_with_created_by_attribution(self):
+        architect = self._add_architect("arch-1", "Architect")
+        other_architect = self._add_architect("arch-2", "Other Architect")
+        alice = self._add_engineer(
+            "eng-alice", "Alice", hired_by_architect_id=architect.id
+        )
+        bob = self._add_engineer(
+            "eng-bob", "Bob", hired_by_architect_id=other_architect.id
+        )
+        user_engineer = self._add_engineer("eng-user", "User Owned")
+        own_task = self._add_task(
+            "task-own",
+            "Architect-created task",
+            assigned_engineer_id=alice.id,
+            created_by_architect_id=architect.id,
+        )
+        peer_task = self._add_task(
+            "task-peer",
+            "Peer-created task",
+            assigned_engineer_id=bob.id,
+            created_by_architect_id=other_architect.id,
+        )
+        engineer_task = self._add_task(
+            "task-engineer",
+            "Engineer-created task",
+            assigned_engineer_id=alice.id,
+            created_by_engineer_id=alice.id,
+        )
+        system_task = self._add_task(
+            "task-system",
+            "Derived system task",
+            parent_task_id=own_task.id,
+            pipeline_depth=1,
+            pipeline_root_id=own_task.id,
+        )
+        user_task = self._add_task(
+            "task-user",
+            "Legacy user task",
+            assigned_engineer_id=user_engineer.id,
+        )
+        self.state.groups["other"] = []
+        self.state._db_save_groups()
+        self._add_task("task-other-group", "Other group task", group="other")
+
+        reloaded = self.state_mod.MatrixState(db=self.db)
+        reloaded.load()
+        self.state = reloaded
+
+        text, is_error = await self._call(
+            "architect_board_summary",
+            {},
+            architect.id,
+        )
+
+        self.assertFalse(is_error, text)
+        summary = json.loads(text)
+        self.assertEqual(summary["tasks_total"], 5)
+        self.assertEqual(summary["lanes"]["Backlog"], 5)
+        task_items = {
+            item["id"]: item for item in summary["tasks"]["items"]
+        }
+        self.assertEqual(
+            set(task_items),
+            {
+                own_task.id,
+                peer_task.id,
+                engineer_task.id,
+                system_task.id,
+                user_task.id,
+            },
+        )
+        self.assertEqual(
+            {
+                task_id: item["created_by"]
+                for task_id, item in task_items.items()
+            },
+            {
+                own_task.id: f"architect:{architect.id}",
+                peer_task.id: f"architect:{other_architect.id}",
+                engineer_task.id: f"engineer:{alice.id}",
+                system_task.id: "system",
+                user_task.id: "user",
+            },
+        )
+
+        for task, expected in (
+            (own_task, f"architect:{architect.id}"),
+            (peer_task, f"architect:{other_architect.id}"),
+            (engineer_task, f"engineer:{alice.id}"),
+            (system_task, "system"),
+            (user_task, "user"),
+        ):
+            with self.subTest(task=task.id):
+                show_text, show_error = await self._call(
+                    "architect_task_show",
+                    {"task": task.id},
+                    architect.id,
+                )
+                self.assertFalse(show_error, show_text)
+                self.assertEqual(json.loads(show_text)["created_by"], expected)
 
     async def test_architect_task_create_stamps_architect_fields_and_rejects_out_of_scope_engineer(self):
         architect = self._add_architect("arch-1", "Architect")

@@ -226,6 +226,7 @@ class BoardTask:
     agent_id: str = ""          # concrete agent working on this (optional)
     assigned_engineer_id: str = ""  # owning engineer responsible for the task
     created_by_architect_id: str = ""  # architect provenance
+    created_by_engineer_id: str = ""  # engineer provenance
     suggested_action: str = ""  # non-binding architect action hint
     reply_agent_id: str = ""    # worker expected to answer this follow-up
     labels: list[str] = field(default_factory=list)
