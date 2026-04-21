@@ -1205,6 +1205,81 @@ class LoomDBTests(unittest.TestCase):
         self.assertTrue(loaded["architect_digest"])
         self.assertTrue(loaded["wake_on_digest"])
 
+    def test_digest_queue_and_sent_events_roundtrip(self):
+        first = self.db.save_digest_queued_event(
+            "eng-1",
+            {
+                "id": 1,
+                "kind": "task_completed",
+                "message": "queued first",
+                "_digest_queue_id": 999,
+            },
+            10.0,
+        )
+        second = self.db.save_digest_queued_event(
+            "eng-1",
+            {
+                "id": 2,
+                "kind": "agent_reply",
+                "message": "queued second",
+            },
+            11.0,
+        )
+
+        queued = self.db.load_digest_queued_events()
+
+        self.assertEqual(
+            [evt["message"] for evt in queued["eng-1"]],
+            ["queued first", "queued second"],
+        )
+        self.assertEqual(queued["eng-1"][0]["_digest_queue_id"], first)
+        self.assertEqual(queued["eng-1"][1]["_digest_queue_id"], second)
+        self.assertEqual(queued["eng-1"][0]["_digest_enqueued_at"], 10.0)
+        self.assertNotEqual(queued["eng-1"][0]["_digest_queue_id"], 999)
+
+        self.db.complete_digest_delivery(
+            "eng-1",
+            [
+                (queued["eng-1"][0], 10.0, 20.0),
+                (queued["eng-1"][1], 11.0, 20.0),
+            ],
+            [first, second],
+        )
+
+        self.assertEqual(self.db.load_digest_queued_events(), {})
+        sent = self.db.load_digest_sent_events()["eng-1"]
+        self.assertEqual(
+            [evt["message"] for evt in sent],
+            ["queued first", "queued second"],
+        )
+        self.assertEqual([evt["delivered_at"] for evt in sent], [20.0, 20.0])
+
+    def test_digest_sent_events_are_capped_per_recipient(self):
+        self.db.complete_digest_delivery(
+            "eng-1",
+            [
+                (
+                    {"id": i, "kind": "task_completed", "message": f"sent {i}"},
+                    float(i),
+                    1000.0 + i,
+                )
+                for i in range(205)
+            ],
+            [],
+            sent_cap=200,
+        )
+
+        sent = self.db.load_digest_sent_events()["eng-1"]
+
+        self.assertEqual(len(sent), 200)
+        self.assertEqual(sent[0]["message"], "sent 5")
+        self.assertEqual(sent[-1]["message"], "sent 204")
+        row = self.db._conn.execute(
+            "SELECT COUNT(*) FROM digest_sent_events WHERE recipient_id=?",
+            ("eng-1",),
+        ).fetchone()
+        self.assertEqual(row[0], 200)
+
     def test_init_migrates_legacy_weaver_settings_to_agent_digest_settings(self):
         self.db.save_group("g", 0)
         self.db.save_group_settings(
