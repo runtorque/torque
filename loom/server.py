@@ -2373,6 +2373,22 @@ async def _handle_engineer_rehire_command(
     engineer.status = "stopped"
     state._emit_agent(engineer)
     state._db_save_agent(engineer)
+
+    async def _restore_dismissed_after_failed_rehire() -> None:
+        if engineer.session_id:
+            try:
+                await bridge.close_session(engineer.session_id)
+            except Exception:
+                log.exception(
+                    "Failed to close partial rehire session for '%s'",
+                    engineer.name,
+                )
+        engineer.dismissed_at = dismissed_at
+        engineer.status = "stopped"
+        engineer.session_id = None
+        state._emit_agent(engineer)
+        state._db_save_agent(engineer)
+
     try:
         relaunch_result = await _handle_relaunch_agent_command(
             {"id": engineer.id},
@@ -2389,23 +2405,14 @@ async def _handle_engineer_rehire_command(
         )
     except Exception as exc:
         log.exception("Failed to rehire engineer '%s'", engineer.name)
-        engineer.dismissed_at = dismissed_at
-        engineer.status = "stopped"
-        state._emit_agent(engineer)
-        state._db_save_agent(engineer)
+        await _restore_dismissed_after_failed_rehire()
         return {"type": "error", "message": f"Failed to rehire engineer: {exc}"}
 
     if relaunch_result and relaunch_result.get("type") == "error":
-        engineer.dismissed_at = dismissed_at
-        engineer.status = "stopped"
-        state._emit_agent(engineer)
-        state._db_save_agent(engineer)
+        await _restore_dismissed_after_failed_rehire()
         return relaunch_result
     if not engineer.session_id:
-        engineer.dismissed_at = dismissed_at
-        engineer.status = "stopped"
-        state._emit_agent(engineer)
-        state._db_save_agent(engineer)
+        await _restore_dismissed_after_failed_rehire()
         return {
             "type": "error",
             "message": "Failed to rehire engineer: no session was created",
