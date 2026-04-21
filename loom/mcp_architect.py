@@ -25,7 +25,8 @@ _ARCHITECT_TOOL_SPECS = [
         "name": "architect_board_summary",
         "description": (
             "Return a compact board overview for this architect's group, "
-            "including task creator attribution."
+            "including task creator attribution and a bounded lightweight "
+            "task summary excerpt."
         ),
         "inputSchema": {"type": "object", "properties": {}},
     },

@@ -54,6 +54,8 @@ _DECISION_STATUSES = {"proposed", "accepted", "revised", "rejected"}
 _JOURNAL_ENTRY_TYPES = {"decision", "observation", "checkpoint", "plan"}
 _HEALTH_SUMMARY_SILENT_AFTER_SECS = 5 * 60
 _HEALTH_SUMMARY_LIMIT = 120
+_ARCHITECT_BOARD_SUMMARY_TASK_LIMIT = 20
+_ARCHITECT_BOARD_SUMMARY_TITLE_LIMIT = 120
 
 # ---------------------------------------------------------------------------
 # Shared scoping helpers
@@ -107,6 +109,32 @@ def _task_created_by_classifier(task) -> str:
     ):
         return "system"
     return "user"
+
+
+def _summary_task_title(task) -> str:
+    """Return a bounded first-line title for compact board summaries."""
+    title = str(getattr(task, "task", "") or "").strip()
+    if not title:
+        return ""
+    first_line = title.splitlines()[0].strip()
+    if len(first_line) <= _ARCHITECT_BOARD_SUMMARY_TITLE_LIMIT:
+        return first_line
+    return first_line[:_ARCHITECT_BOARD_SUMMARY_TITLE_LIMIT - 1].rstrip() + "…"
+
+
+def _architect_board_summary_task_item(task, *, created_by: str) -> dict:
+    return {
+        "id": task.id,
+        "slug": task.slug,
+        "title": _summary_task_title(task),
+        "lane": task.lane,
+        "labels": task.labels or [],
+        "status": task.status,
+        "assigned_engineer_id": _effective_assigned_engineer_id(task),
+        "created_by": created_by,
+        "health_state": getattr(task, "health_state", "healthy") or "healthy",
+        "updated_at": getattr(task, "updated_at", "") or "",
+    }
 
 
 def _is_engineer_like_cell(state, cell) -> bool:
@@ -1044,23 +1072,12 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         for task in visible_tasks:
             created_by = _task_created_by_classifier(task) if include_created_by else ""
             if include_created_by:
-                architect_task_items.append({
-                    "id": task.id,
-                    "slug": task.slug,
-                    "title": task.task,
-                    "lane": task.lane,
-                    "status": task.status,
-                    "labels": task.labels or [],
-                    "action": task.action_name,
-                    "assigned_engineer_id": _effective_assigned_engineer_id(task),
-                    "created_by": created_by,
-                    "health_state": getattr(
-                        task, "health_state", "healthy"
-                    ) or "healthy",
-                    "verification_state": getattr(
-                        task, "verification_state", ""
-                    ) or "",
-                })
+                architect_task_items.append(
+                    _architect_board_summary_task_item(
+                        task,
+                        created_by=created_by,
+                    )
+                )
             if task.lane in lane_counts:
                 lane_counts[task.lane] += 1
             else:
@@ -1263,8 +1280,13 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         if include_created_by:
             summary["tasks"] = {
                 "count": len(architect_task_items),
-                "items": architect_task_items,
-                "truncated": False,
+                "items": architect_task_items[
+                    :_ARCHITECT_BOARD_SUMMARY_TASK_LIMIT
+                ],
+                "truncated": (
+                    len(architect_task_items)
+                    > _ARCHITECT_BOARD_SUMMARY_TASK_LIMIT
+                ),
             }
         hints = compute_weaver_hints(
             summary_state,
@@ -1276,7 +1298,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             "items": hints[:10],
             "truncated": len(hints) > 10,
         }
-        return json.dumps(summary), False
+        return json.dumps(summary, ensure_ascii=False, separators=(",", ":")), False
 
     if tool_name == "session_map":
         return json.dumps(
