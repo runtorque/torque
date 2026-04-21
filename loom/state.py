@@ -104,6 +104,8 @@ _ARCHITECT_DIGEST_DEFAULT_ENABLED_EVENTS = [
     "pipeline_complete",
     "engineer_hired",
     "engineer_fired",
+    "engineer_dismissed",
+    "engineer_rehired",
 ]
 _WEAVER_ESCALATION_STYLES = {
     "ask_early",
@@ -360,6 +362,7 @@ class AgentCell:
     role: str = ""  # worker-role slug mirrored from template during migration
     owner_engineer_id: str = ""  # owning engineer for worker/terminal agents
     hired_by_architect_id: str = ""  # architect provenance for hires
+    dismissed_at: int = 0  # unix timestamp when an engineer is paused/dismissed
     persistent: bool = False  # architect/engineer survive across sessions
     current_task_id: str = ""  # most recently dispatched task (ephemeral)
     session_resume: bool = True  # whether relaunch should resume the prior session

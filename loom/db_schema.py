@@ -39,7 +39,8 @@ CREATE TABLE IF NOT EXISTS agents (
     agent_session_id      TEXT NOT NULL DEFAULT '',
     session_resume        INTEGER NOT NULL DEFAULT 1,
     idle_timeout          INTEGER NOT NULL DEFAULT 0,
-    tasks_dispatched      INTEGER NOT NULL DEFAULT 0
+    tasks_dispatched      INTEGER NOT NULL DEFAULT 0,
+    dismissed_at          INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS groups (

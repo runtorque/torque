@@ -73,6 +73,8 @@ _ARCHITECT_EVENT_LABELS = {
     "pipeline_complete": "pipeline complete",
     "engineer_hired": "engineer hired",
     "engineer_fired": "engineer fired",
+    "engineer_dismissed": "engineer dismissed",
+    "engineer_rehired": "engineer rehired",
     "agent_progress": "progress",
 }
 _ARCHITECT_PIPELINE_ACTIVITY_EVENTS = ARCHITECT_COARSE_EVENTS.intersection({

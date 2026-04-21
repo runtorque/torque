@@ -43,6 +43,75 @@ class CliEngineerTests(unittest.TestCase):
         self.assertEqual(args.engineer_cmd, "list")
         self.assertTrue(args.json)
 
+    def test_parser_accepts_engineer_dismiss_and_rehire(self):
+        parser = self.cli.build_parser()
+        dismiss_args = parser.parse_args(
+            ["engineer", "dismiss", "alice", "--reason", "pause"]
+        )
+        self.assertEqual(dismiss_args.command, "engineer")
+        self.assertEqual(dismiss_args.engineer_cmd, "dismiss")
+        self.assertEqual(dismiss_args.identifier, "alice")
+        self.assertEqual(dismiss_args.reason, "pause")
+
+        rehire_args = parser.parse_args(["engineer", "rehire", "alice"])
+        self.assertEqual(rehire_args.command, "engineer")
+        self.assertEqual(rehire_args.engineer_cmd, "rehire")
+        self.assertEqual(rehire_args.identifier, "alice")
+
+    def test_cmd_engineer_dismiss_and_rehire_resolve_engineer_and_call_daemon(self):
+        state = {
+            "agents": {
+                "eng-alice": {
+                    "id": "eng-alice",
+                    "name": "Alice",
+                    "slug": "alice",
+                    "group": "loom",
+                    "kind": "engineer",
+                    "cell_type": "agent",
+                }
+            }
+        }
+        dismiss_args = SimpleNamespace(
+            port=18932,
+            identifier="alice",
+            reason="pause",
+        )
+        with mock.patch.object(self.cli, "get_state", return_value=state), \
+             mock.patch.object(
+                 self.cli,
+                 "api_call",
+                 return_value={"ok": True, "data": {"closed_sessions": 2}},
+             ) as api_call:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.cli.cmd_engineer_dismiss(dismiss_args)
+
+        api_call.assert_called_once_with(
+            "engineer_dismiss",
+            port=18932,
+            engineer_id="eng-alice",
+            reason="pause",
+        )
+        self.assertIn('Dismissed "Alice"', out.getvalue())
+
+        rehire_args = SimpleNamespace(port=18932, identifier="Alice")
+        with mock.patch.object(self.cli, "get_state", return_value=state), \
+             mock.patch.object(
+                 self.cli,
+                 "api_call",
+                 return_value={"ok": True, "data": {"replayed_messages": 1}},
+             ) as api_call:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.cli.cmd_engineer_rehire(rehire_args)
+
+        api_call.assert_called_once_with(
+            "engineer_rehire",
+            port=18932,
+            engineer_id="eng-alice",
+        )
+        self.assertIn('Rehired "Alice"', out.getvalue())
+
     def test_cmd_task_create_sets_assigned_engineer_id_from_slug(self):
         state = {
             "agents": {

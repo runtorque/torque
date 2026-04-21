@@ -123,6 +123,11 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
                 **{k: v for k, v in payload.items() if k not in {"cmd", "id"}},
             )
             return {"type": "ok"}
+        if payload["cmd"] == "inject_mcp_message":
+            agent = self.state.agents.get(payload.get("agent_id", ""))
+            if not agent or not getattr(agent, "session_id", ""):
+                return {"type": "ok", "delivered": False, "reason": "no_session"}
+            return {"type": "ok", "delivered": True}
         self.fail(f"Unexpected command: {payload}")
 
     async def _call(self, tool_name: str, args: dict, caller_id: str):
@@ -149,6 +154,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         alice = self._add_engineer(
             "eng-alice", "Alice", hired_by_architect_id=architect.id
         )
+        alice.dismissed_at = 42
         self._add_engineer("eng-bob", "Bob", hired_by_architect_id=other_architect.id)
         user_engineer = self._add_engineer("eng-user", "User Owned")
         self._add_worker("worker-a", "Alice Worker", alice.id)
@@ -198,6 +204,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("worker-a", engineers)
         self.assertEqual(engineers[alice.id]["current_task_id"], visible_task.id)
         self.assertEqual(engineers[alice.id]["current_task"], visible_task.task)
+        self.assertEqual(engineers[alice.id]["dismissed_at"], 42)
         self.assertEqual(engineers[user_engineer.id]["current_task_id"], hidden_task.id)
         self.assertEqual(engineers[user_engineer.id]["current_task"], hidden_task.task)
 
@@ -520,6 +527,46 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(architect_reassign_text, "engineer not found in scope")
         self.assertEqual(self.state.board_tasks[task.id].assigned_engineer_id, engineer.id)
 
+    async def test_architect_task_create_and_reassign_reject_dismissed_engineer(self):
+        architect = self._add_architect("arch-1", "Architect")
+        engineer = self._add_engineer(
+            "eng-hired", "Hired", hired_by_architect_id=architect.id
+        )
+        engineer.dismissed_at = 123
+        peer = self._add_engineer(
+            "eng-peer", "Peer", hired_by_architect_id=architect.id
+        )
+        task = self._add_task(
+            "task-own",
+            "Architect-owned task",
+            assigned_engineer_id=peer.id,
+            created_by_architect_id=architect.id,
+        )
+
+        create_text, create_error = await self._call(
+            "architect_task_create",
+            {
+                "title": "Dismissed target",
+                "group": "loom",
+                "assigned_engineer_id": engineer.id,
+            },
+            architect.id,
+        )
+        self.assertTrue(create_error)
+        create_payload = json.loads(create_text)
+        self.assertEqual(create_payload["reason"], "engineer_dismissed")
+        self.assertEqual(len(self.state.board_tasks), 1)
+
+        reassign_text, reassign_error = await self._call(
+            "architect_task_reassign",
+            {"task": task.id, "new_engineer_id": engineer.id},
+            architect.id,
+        )
+        self.assertTrue(reassign_error)
+        reassign_payload = json.loads(reassign_text)
+        self.assertEqual(reassign_payload["reason"], "engineer_dismissed")
+        self.assertEqual(self.state.board_tasks[task.id].assigned_engineer_id, peer.id)
+
     async def test_architect_and_engineer_messaging_respects_hiring_scope(self):
         architect = self._add_architect("arch-1", "Architect")
         other_architect = self._add_architect("arch-2", "Other Architect")
@@ -582,6 +629,28 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(engineer_denied_error)
         self.assertEqual(engineer_denied_text, "architect not found in scope")
+
+    async def test_architect_message_to_dismissed_engineer_buffers_for_rehire(self):
+        architect = self._add_architect("arch-1", "Architect")
+        hired = self._add_engineer(
+            "eng-hired", "Hired", hired_by_architect_id=architect.id
+        )
+        hired.dismissed_at = 123
+        hired.session_id = None
+
+        ok_text, ok_error = await self._call(
+            "architect_engineer_message",
+            {"engineer_id": hired.id, "message": "Read this when you return."},
+            architect.id,
+        )
+
+        self.assertFalse(ok_error, ok_text)
+        delivered = json.loads(ok_text)
+        self.assertTrue(delivered["message_id"])
+        self.assertEqual(hired.mcp_messages[0]["message"], "Read this when you return.")
+        self.assertFalse(hired.mcp_messages[0]["delivered"])
+        self.assertTrue(hired.mcp_messages[0]["buffered"])
+        self.assertEqual(hired.mcp_messages[0]["delivery_reason"], "no_session")
 
     async def test_architect_and_engineer_replies_follow_existing_threads(self):
         architect = self._add_architect("arch-1", "Architect")

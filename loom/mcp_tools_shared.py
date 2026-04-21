@@ -123,6 +123,22 @@ def _is_architect_cell(cell) -> bool:
     )
 
 
+def _agent_dismissed_at(cell) -> int:
+    try:
+        return int(getattr(cell, "dismissed_at", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _engineer_dismissed_error(engineer_id: str) -> str:
+    return json.dumps({
+        "type": "error",
+        "reason": "engineer_dismissed",
+        "message": f"engineer {engineer_id} is dismissed",
+        "engineer_id": str(engineer_id or "").strip(),
+    })
+
+
 def _caller_group(state, caller_id: str) -> str:
     caller = state.agents.get(str(caller_id or "").strip())
     return str(getattr(caller, "group", "") or "").strip() if caller else ""
@@ -269,6 +285,30 @@ def _append_cross_kind_message(cell, entry: dict) -> None:
         cell.mcp_messages[:] = cell.mcp_messages[:20]
 
 
+def mark_cross_kind_message_delivery(cell, message_id: str, *,
+                                     delivered: bool,
+                                     reason: str = "") -> bool:
+    """Update the recipient-side cross-kind inbox delivery marker."""
+    if not cell:
+        return False
+    message_id = str(message_id or "").strip()
+    if not message_id:
+        return False
+    updated = False
+    for entry in list(getattr(cell, "mcp_messages", []) or []):
+        if str((entry or {}).get("id", "") or "").strip() != message_id:
+            continue
+        entry["delivered"] = bool(delivered)
+        entry["buffered"] = not bool(delivered)
+        if reason:
+            entry["delivery_reason"] = str(reason or "").strip()
+        elif "delivery_reason" in entry:
+            entry.pop("delivery_reason", None)
+        updated = True
+        break
+    return updated
+
+
 def _load_message_entry(cell, message_id: str) -> tuple[dict | None, str]:
     message_id = str(message_id or "").strip()
     if not message_id:
@@ -338,7 +378,7 @@ async def _inject_mcp_message(handle_command, sender, recipient,
     if not recipient or not handle_command:
         return
     try:
-        await handle_command({
+        result = await handle_command({
             "cmd": "inject_mcp_message",
             "agent_id": getattr(recipient, "id", ""),
             "message": message,
@@ -346,7 +386,21 @@ async def _inject_mcp_message(handle_command, sender, recipient,
             "sender_kind": str(getattr(sender, "kind", "") or "").strip(),
             "message_id": str(delivered.get("id", "") or ""),
         })
+        was_delivered = bool(result and result.get("delivered"))
+        reason = str((result or {}).get("reason", "") or "")
+        mark_cross_kind_message_delivery(
+            recipient,
+            str(delivered.get("id", "") or ""),
+            delivered=was_delivered,
+            reason=reason,
+        )
     except Exception:
+        mark_cross_kind_message_delivery(
+            recipient,
+            str(delivered.get("id", "") or ""),
+            delivered=False,
+            reason="inject_failed",
+        )
         log.exception(
             "Failed to inject MCP message into agent %s",
             getattr(recipient, "id", ""),
@@ -1428,6 +1482,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 "name": cell.name,
                 "slug": cell.slug,
                 "status": cell.status,
+                "dismissed_at": _agent_dismissed_at(cell),
                 "group": cell.group,
                 "relation": relation,
                 "current_task_id": current_task.id if current_task else "",
@@ -1672,6 +1727,43 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             return result.get("message", "Unknown error"), True
         return json.dumps(result) if result else '{"type":"ok"}', False
 
+    if tool_name == "engineer_dismiss" and caller_kind == "architect":
+        engineer_ident = str(args.get("engineer_id", "") or "").strip()
+        if not engineer_ident:
+            return "engineer_id is required", True
+        engineer_id, engineer_error = _resolve_architect_hired_engineer(
+            real_state, caller_id, engineer_ident
+        )
+        if not engineer_id:
+            return engineer_error, True
+        result = await handle_command({
+            "cmd": "architect_engineer_dismiss",
+            "architect_id": str(caller_id or "").strip(),
+            "engineer_id": engineer_id,
+            "reason": str(args.get("reason", "") or "").strip(),
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps(result) if result else '{"type":"ok"}', False
+
+    if tool_name == "engineer_rehire" and caller_kind == "architect":
+        engineer_ident = str(args.get("engineer_id", "") or "").strip()
+        if not engineer_ident:
+            return "engineer_id is required", True
+        engineer_id, engineer_error = _resolve_architect_hired_engineer(
+            real_state, caller_id, engineer_ident
+        )
+        if not engineer_id:
+            return engineer_error, True
+        result = await handle_command({
+            "cmd": "architect_engineer_rehire",
+            "architect_id": str(caller_id or "").strip(),
+            "engineer_id": engineer_id,
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps(result) if result else '{"type":"ok"}', False
+
     if tool_name == "task_create":
         if caller_kind == "architect":
             title = str(args.get("title", "") or "").strip()
@@ -1692,6 +1784,9 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             )
             if not assigned_engineer_id:
                 return engineer_error, True
+            assigned_engineer = real_state.agents.get(assigned_engineer_id)
+            if _agent_dismissed_at(assigned_engineer):
+                return _engineer_dismissed_error(assigned_engineer_id), True
             action_vars = args.get("action_vars", {})
             if action_vars is None:
                 action_vars = {}
@@ -1770,6 +1865,9 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         )
         if not engineer_id:
             return engineer_error, True
+        engineer = real_state.agents.get(engineer_id)
+        if _agent_dismissed_at(engineer):
+            return _engineer_dismissed_error(engineer_id), True
         result = await handle_command({
             "cmd": "board_update_task",
             "id": tid,

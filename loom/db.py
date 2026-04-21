@@ -64,7 +64,7 @@ _AGENT_PERSISTED_COLS = [
     "agent_session_id", "session_resume", "idle_timeout",
     "tasks_dispatched",
     "kind", "role", "owner_engineer_id", "hired_by_architect_id",
-    "persistent",
+    "dismissed_at", "persistent",
 ]
 
 _AGENT_INSERT_SQL = """
@@ -130,6 +130,7 @@ def _serialize_agent_cell(cell):
         role,
         owner_engineer_id,
         d.get("hired_by_architect_id", ""),
+        int(d.get("dismissed_at", 0) or 0),
         int(d.get("persistent", 0) or 0),
     )
 
@@ -257,6 +258,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self._ensure_board_task_engineer_provenance_column()
         self._refuse_unmigrated_legacy_rows_if_needed()
         self._migrate_kinds_schema_if_needed()
+        self._ensure_agent_dismissed_at_column()
         self._backfill_kinds_if_needed()
         self._fixup_kinds_task_assignments_if_needed()
         self._cleanup_kinds_legacy_columns_if_needed()
@@ -273,6 +275,16 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             self._conn.execute(
                 "ALTER TABLE board_tasks ADD COLUMN created_by_engineer_id "
                 "TEXT NOT NULL DEFAULT ''"
+            )
+            self._conn.commit()
+
+    def _ensure_agent_dismissed_at_column(self):
+        try:
+            self._conn.execute("SELECT dismissed_at FROM agents LIMIT 0")
+        except sqlite3.OperationalError:
+            self._conn.execute(
+                "ALTER TABLE agents ADD COLUMN dismissed_at "
+                "INTEGER NOT NULL DEFAULT 0"
             )
             self._conn.commit()
 
@@ -2673,6 +2685,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             ("role", "TEXT", "''"),
             ("owner_engineer_id", "TEXT", "''"),
             ("hired_by_architect_id", "TEXT", "''"),
+            ("dismissed_at", "INTEGER", "0"),
             ("persistent", "INTEGER", "0"),
         ]:
             try:
