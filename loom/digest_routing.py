@@ -21,6 +21,8 @@ ARCHITECT_COARSE_EVENTS = frozenset({
     "pipeline_complete",
     "engineer_hired",
     "engineer_fired",
+    "engineer_dismissed",
+    "engineer_rehired",
 })
 
 # Back-compat for earlier Phase 1 tests/imports.

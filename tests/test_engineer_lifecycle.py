@@ -16,6 +16,8 @@ class _CapturingBridge:
             supports_embedded_terminal=False,
         )
         self.create_session_calls = []
+        self.closed_sessions = []
+        self.sent_text = []
 
     async def create_session(self, cell, **kwargs):
         cell.session_id = kwargs.get("session_id", "session-new")
@@ -23,6 +25,15 @@ class _CapturingBridge:
             "cell": cell,
             "kwargs": kwargs,
         })
+
+    async def close_session(self, session_id):
+        self.closed_sessions.append(session_id)
+
+    async def send_text(self, session_id, text):
+        self.sent_text.append((session_id, text))
+
+    def prime_input_ready(self, session_id):
+        del session_id
 
 
 class _FakeWorktreeManager:
@@ -104,6 +115,22 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         architect.persistent = True
         state._emit_agent(architect)
         return architect
+
+    def _add_worker_cell(self, state, engineer, name: str = "Worker"):
+        worker = state.add_agent(
+            name=name,
+            group="loom",
+            terminal_backend="iterm2",
+            profile="Default",
+            command="codex",
+            directory="/tmp/project",
+            tab_color="",
+        )
+        worker.kind = "worker"
+        worker.owner_engineer_id = engineer.id
+        worker.created_by_weaver_id = engineer.id
+        state._emit_agent(worker)
+        return worker
 
     async def test_add_engineer_creates_persistent_engineer_with_binding_and_engineer_mcp_entrypoint(self):
         state = self._make_state()
@@ -366,6 +393,189 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, {"transferred_agents": 0, "transferred_tasks": 0})
         self.assertNotIn(engineer.id, state.agents)
+
+    async def test_dismiss_engineer_closes_engineer_and_owned_workers_preserves_assignments(self):
+        state = self._make_state()
+        architect = self._add_architect_cell(state, "arch-1", "Productmind")
+        other_architect = self._add_architect_cell(state, "arch-2", "Other")
+        engineer = self._add_engineer_cell(state, "eng-alice", "Alice")
+        engineer.hired_by_architect_id = architect.id
+        engineer.session_id = "session-engineer"
+        worker = self._add_worker_cell(state, engineer)
+        worker.session_id = "session-worker"
+        other_engineer = self._add_engineer_cell(state, "eng-bob", "Bob")
+        other_worker = self._add_worker_cell(state, other_engineer, "Other Worker")
+        other_worker.session_id = "session-other-worker"
+        task = state.board_add_task(
+            "Keep assignment",
+            "loom",
+            id="task-keep-assignment",
+            assigned_engineer_id=engineer.id,
+        )
+        bridge = _CapturingBridge()
+        panel_events = []
+
+        denied = await self.server_mod._handle_engineer_dismiss_command(
+            {"engineer_id": engineer.id, "architect_id": other_architect.id},
+            state,
+            close_session=bridge.close_session,
+        )
+        self.assertEqual(denied["type"], "error")
+        self.assertEqual(engineer.dismissed_at, 0)
+
+        result = await self.server_mod._handle_engineer_dismiss_command(
+            {
+                "engineer_id": engineer.id,
+                "architect_id": architect.id,
+                "reason": "pause",
+            },
+            state,
+            close_session=bridge.close_session,
+            panel_event=lambda *args, **kwargs: panel_events.append(args),
+        )
+
+        self.assertEqual(result["type"], "ok")
+        self.assertGreater(engineer.dismissed_at, 0)
+        self.assertIn(engineer.id, state.agents)
+        self.assertIn(worker.id, state.agents)
+        self.assertEqual(state.board_tasks[task.id].assigned_engineer_id, engineer.id)
+        self.assertEqual(engineer.status, "stopped")
+        self.assertEqual(worker.status, "stopped")
+        self.assertEqual(other_worker.session_id, "session-other-worker")
+        self.assertEqual(
+            bridge.closed_sessions,
+            ["session-engineer", "session-worker"],
+        )
+        self.assertEqual(panel_events[0][0], "engineer_dismissed")
+
+        second = await self.server_mod._handle_engineer_dismiss_command(
+            {"engineer_id": engineer.id, "architect_id": architect.id},
+            state,
+            close_session=bridge.close_session,
+        )
+        self.assertTrue(second["already_dismissed"])
+        self.assertEqual(second["closed_sessions"], 0)
+
+    async def test_rehire_restores_engineer_replays_messages_and_does_not_reopen_workers(self):
+        state = self._make_state()
+        architect = self._add_architect_cell(state, "arch-1", "Productmind")
+        engineer = self._add_engineer_cell(state, "eng-alice", "Alice")
+        engineer.hired_by_architect_id = architect.id
+        engineer.status = "stopped"
+        engineer.dismissed_at = 123
+        engineer.agent_type = "codex"
+        engineer.mcp_messages.insert(0, {
+            "id": "msg-buffered",
+            "thread_id": "msg-buffered",
+            "action": "architect_message",
+            "message": "Resume with this context.",
+            "timestamp": 1.0,
+            "sender_id": architect.id,
+            "sender_kind": "architect",
+            "peer_id": architect.id,
+            "peer_kind": "architect",
+            "direction": "received",
+            "delivered": False,
+            "buffered": True,
+        })
+        worker = self._add_worker_cell(state, engineer)
+        worker.status = "stopped"
+        worker.session_id = None
+        bridge = _CapturingBridge()
+        panel_events = []
+
+        async def fake_resolve_base_dir(group):
+            self.assertEqual(group, "loom")
+            return temp_dir
+
+        def fake_resolve_weaver_launch_config(group, *, base_dir="",
+                                              explicit_template="",
+                                              overrides=None):
+            self.assertEqual(group, "loom")
+            self.assertEqual(overrides, {})
+            return self._launch_config(base_dir)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            engineer.directory = temp_dir
+            result = await self.server_mod._handle_engineer_rehire_command(
+                {"engineer_id": engineer.id, "architect_id": architect.id},
+                state,
+                bridge=bridge,
+                worktree_mgr=_FakeWorktreeManager(),
+                resolve_base_dir=fake_resolve_base_dir,
+                resolve_agent_launch_config=lambda *a, **k: {},
+                resolve_weaver_launch_config=fake_resolve_weaver_launch_config,
+                apply_persistent_prompt=lambda *a, **k: None,
+                build_cell_persistent_prompt=lambda *a, **k: "persistent",
+                persistent_prompt_filename=lambda cell: f"{cell.id}.md",
+                is_designated_weaver=lambda cell: False,
+                panel_event=lambda *args, **kwargs: panel_events.append(args),
+            )
+
+        self.assertEqual(result["type"], "ok")
+        self.assertEqual(engineer.dismissed_at, 0)
+        self.assertEqual(engineer.session_id, "session-new")
+        self.assertIsNone(worker.session_id)
+        self.assertEqual(len(bridge.create_session_calls), 1)
+        self.assertEqual(result["replayed_messages"], 1)
+        self.assertEqual(len(bridge.sent_text), 1)
+        self.assertIn("Resume with this context.", bridge.sent_text[0][1])
+        self.assertTrue(engineer.mcp_messages[0]["delivered"])
+        self.assertEqual(panel_events[0][0], "engineer_rehired")
+
+        second = await self.server_mod._handle_engineer_rehire_command(
+            {"engineer_id": engineer.id, "architect_id": architect.id},
+            state,
+            bridge=bridge,
+            worktree_mgr=_FakeWorktreeManager(),
+            resolve_base_dir=lambda group: temp_dir,
+            resolve_agent_launch_config=lambda *a, **k: {},
+            resolve_weaver_launch_config=lambda *a, **k: {},
+            apply_persistent_prompt=lambda *a, **k: None,
+            build_cell_persistent_prompt=lambda *a, **k: "",
+            persistent_prompt_filename=lambda cell: f"{cell.id}.md",
+            is_designated_weaver=lambda cell: False,
+        )
+        self.assertTrue(second["already_hired"])
+
+    async def test_rehire_boot_failure_keeps_dismissed_at_set(self):
+        state = self._make_state()
+        architect = self._add_architect_cell(state, "arch-1", "Productmind")
+        engineer = self._add_engineer_cell(state, "eng-alice", "Alice")
+        engineer.hired_by_architect_id = architect.id
+        engineer.status = "stopped"
+        engineer.dismissed_at = 456
+        engineer.agent_type = "codex"
+
+        class _FailingBridge(_CapturingBridge):
+            async def create_session(self, cell, **kwargs):
+                del cell, kwargs
+                raise RuntimeError("provider unavailable")
+
+        async def fake_resolve_base_dir(group):
+            del group
+            return temp_dir
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            engineer.directory = temp_dir
+            result = await self.server_mod._handle_engineer_rehire_command(
+                {"engineer_id": engineer.id, "architect_id": architect.id},
+                state,
+                bridge=_FailingBridge(),
+                worktree_mgr=_FakeWorktreeManager(),
+                resolve_base_dir=fake_resolve_base_dir,
+                resolve_agent_launch_config=lambda *a, **k: {},
+                resolve_weaver_launch_config=lambda *a, **k: self._launch_config(temp_dir),
+                apply_persistent_prompt=lambda *a, **k: None,
+                build_cell_persistent_prompt=lambda *a, **k: "persistent",
+                persistent_prompt_filename=lambda cell: f"{cell.id}.md",
+                is_designated_weaver=lambda cell: False,
+            )
+
+        self.assertEqual(result["type"], "error")
+        self.assertEqual(engineer.dismissed_at, 456)
+        self.assertEqual(engineer.status, "stopped")
+        self.assertIsNone(engineer.session_id)
 
     async def test_rename_engineer_updates_name_slug_and_preserves_kind(self):
         state = self._make_state()

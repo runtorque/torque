@@ -111,7 +111,8 @@ _ARCHITECT_TOOL_SPECS = [
     {
         "name": "architect_engineer_list",
         "description": (
-            "List engineers visible to this architect, marking each as hired or visible."
+            "List engineers visible to this architect, marking each as hired "
+            "or visible and including dismissed_at for paused engineers."
         ),
         "inputSchema": {"type": "object", "properties": {}},
     },
@@ -141,6 +142,44 @@ _ARCHITECT_TOOL_SPECS = [
                 },
             },
             "required": ["name"],
+        },
+    },
+    {
+        "name": "architect_engineer_dismiss",
+        "description": (
+            "Pause a hired engineer. The engineer and owned worker terminals "
+            "are closed, but history and task assignments are preserved."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "engineer_id": {
+                    "type": "string",
+                    "description": "Engineer id/slug/name.",
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "Optional reason for the dismissal.",
+                },
+            },
+            "required": ["engineer_id"],
+        },
+    },
+    {
+        "name": "architect_engineer_rehire",
+        "description": (
+            "Resume a previously dismissed hired engineer using the same "
+            "agent id, slug, history, and launch configuration."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "engineer_id": {
+                    "type": "string",
+                    "description": "Engineer id/slug/name.",
+                },
+            },
+            "required": ["engineer_id"],
         },
     },
     {

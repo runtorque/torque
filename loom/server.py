@@ -713,6 +713,84 @@ def _format_injected_mcp_message_prompt(
     )
 
 
+def _mark_cross_kind_message_delivery(cell, message_id: str, *,
+                                      delivered: bool,
+                                      reason: str = "") -> None:
+    message_id = str(message_id or "").strip()
+    if not cell or not message_id:
+        return
+    for entry in list(getattr(cell, "mcp_messages", []) or []):
+        if str((entry or {}).get("id", "") or "").strip() != message_id:
+            continue
+        entry["delivered"] = bool(delivered)
+        entry["buffered"] = not bool(delivered)
+        if reason:
+            entry["delivery_reason"] = str(reason or "").strip()
+        else:
+            entry.pop("delivery_reason", None)
+        return
+
+
+async def _replay_buffered_cross_kind_messages(
+        state: MatrixState,
+        bridge,
+        target) -> int:
+    """Replay architect/engineer inbox entries that buffered while dismissed."""
+    if not target or not getattr(target, "session_id", ""):
+        return 0
+    replayed = 0
+    entries = list(getattr(target, "mcp_messages", []) or [])
+    for entry in reversed(entries):
+        if str((entry or {}).get("direction", "") or "") != "received":
+            continue
+        if entry.get("delivered") is not False:
+            continue
+        message_id = str(entry.get("id", "") or "").strip()
+        message_text = str(entry.get("message", "") or "")
+        if not message_id or not message_text:
+            continue
+        sender_id = str(entry.get("sender_id", "") or "").strip()
+        sender = state.agents.get(sender_id)
+        sender_name = (
+            str(getattr(sender, "name", "") or "").strip()
+            or str(entry.get("sender_kind", "") or "").strip()
+            or "peer"
+        )
+        sender_kind = (
+            str(getattr(sender, "kind", "") or "").strip()
+            or str(entry.get("sender_kind", "") or "").strip()
+        )
+        formatted = _format_injected_mcp_message_prompt(
+            message=message_text,
+            sender_name=sender_name,
+            sender_kind=sender_kind,
+            recipient_kind=str(getattr(target, "kind", "") or ""),
+            message_id=message_id,
+        )
+        try:
+            if hasattr(bridge, "prime_input_ready"):
+                bridge.prime_input_ready(target.session_id)
+            await bridge.send_text(target.session_id, formatted)
+        except Exception:
+            log.exception(
+                "Failed to replay buffered MCP message %s to %s",
+                message_id,
+                target.id,
+            )
+            _mark_cross_kind_message_delivery(
+                target,
+                message_id,
+                delivered=False,
+                reason="replay_failed",
+            )
+            continue
+        _mark_cross_kind_message_delivery(target, message_id, delivered=True)
+        replayed += 1
+    if replayed:
+        state._emit_agent(target)
+    return replayed
+
+
 def _inherit_assigned_engineer_for_derived_task(parent_task,
                                                 derived_task=None) -> str:
     """Keep derived-task ownership bound to the parent's assigned engineer."""
@@ -1690,6 +1768,115 @@ def _resolve_engineer_cell(state: MatrixState, *, engineer_id: str = "",
     return None
 
 
+def _agent_dismissed_at(cell) -> int:
+    try:
+        return int(getattr(cell, "dismissed_at", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _engineer_dismissed_error(engineer_id: str) -> dict:
+    return {
+        "type": "error",
+        "reason": "engineer_dismissed",
+        "message": f"engineer {engineer_id} is dismissed",
+        "engineer_id": str(engineer_id or "").strip(),
+    }
+
+
+def _validate_engineer_lifecycle_authority(
+        state: MatrixState,
+        engineer,
+        *,
+        architect_id: str = "") -> dict | None:
+    """Return an error if an architect-scoped lifecycle command is unauthorized."""
+    architect_id = str(architect_id or "").strip()
+    if not architect_id:
+        return None
+    architect = _resolve_architect_cell(state, architect_id=architect_id)
+    if not architect:
+        return {"type": "error", "message": "Architect not found"}
+    hired_by = str(getattr(engineer, "hired_by_architect_id", "") or "").strip()
+    if hired_by != architect.id:
+        return {"type": "error", "message": "engineer not found in scope"}
+    return None
+
+
+def _effective_owner_engineer_id(cell) -> str:
+    owner_id = str(getattr(cell, "owner_engineer_id", "") or "").strip()
+    if owner_id:
+        return owner_id
+    return str(getattr(cell, "created_by_weaver_id", "") or "").strip()
+
+
+def _dismissal_close_cells(state: MatrixState, engineer) -> list:
+    """Return the engineer, owned workers, and child terminals to close."""
+    roots = []
+    seen: set[str] = set()
+
+    def add_root(cell) -> None:
+        if not cell or cell.id in seen:
+            return
+        seen.add(cell.id)
+        roots.append(cell)
+
+    add_root(engineer)
+    for cell in list(state.agents.values()):
+        if cell.cell_type != "agent":
+            continue
+        if str(getattr(cell, "kind", "") or "").strip() != "worker":
+            continue
+        if _effective_owner_engineer_id(cell) == engineer.id:
+            add_root(cell)
+
+    ordered = []
+    ordered_seen: set[str] = set()
+
+    def add_with_children(cell) -> None:
+        if not cell or cell.id in ordered_seen:
+            return
+        ordered_seen.add(cell.id)
+        ordered.append(cell)
+        for child_id in list(getattr(state, "_children", {}).get(cell.id, [])):
+            add_with_children(state.agents.get(child_id))
+
+    for root in roots:
+        add_with_children(root)
+    return ordered
+
+
+async def _close_cell_session_preserving_state(
+        state: MatrixState,
+        cell,
+        close_session,
+        *,
+        errors: list[str] | None = None) -> bool:
+    """Close a cell's terminal session while preserving its agent row/history."""
+    if not cell:
+        return False
+    had_session = bool(getattr(cell, "session_id", "") or "")
+    if had_session:
+        try:
+            await close_session(cell.session_id)
+        except Exception as exc:
+            if errors is not None:
+                errors.append(f"Failed to close session for '{cell.name}': {exc}")
+            log.exception("Failed to close session for '%s'", cell.name)
+    cell.status = "stopped"
+    cell.session_id = None
+    cell.current_process = ""
+    cell.current_path = ""
+    cell.current_branch = ""
+    cell.git_root = ""
+    cell.activity = ""
+    cell.activity_detail = ""
+    cell.error_message = ""
+    cell.needs_attention = False
+    state._emit_agent(cell)
+    state._db_save_agent(cell)
+    return had_session
+
+
 def _resolve_architect_cell(state: MatrixState, *, architect_id: str = "",
                             architect_slug: str = ""):
     """Resolve an architect agent by exact id or slug."""
@@ -2052,6 +2239,197 @@ def _handle_pending_hire_list_command(data: dict, state: MatrixState) -> dict:
             status_filter=status_filter,
             architect_id=architect_id,
         )
+    }
+
+
+async def _handle_engineer_dismiss_command(
+        data: dict,
+        state: MatrixState, *,
+        close_session,
+        panel_event=None) -> dict:
+    """Pause an engineer by closing sessions while preserving rows/history."""
+    engineer = _resolve_engineer_cell(
+        state,
+        engineer_id=data.get("engineer_id", "") or data.get("id", ""),
+        engineer_slug=data.get("slug", ""),
+    )
+    if not engineer:
+        return {"type": "error", "message": "Engineer not found"}
+    authority_error = _validate_engineer_lifecycle_authority(
+        state,
+        engineer,
+        architect_id=data.get("architect_id", ""),
+    )
+    if authority_error:
+        return authority_error
+
+    if _agent_dismissed_at(engineer):
+        return {
+            "type": "ok",
+            "engineer_id": engineer.id,
+            "dismissed_at": _agent_dismissed_at(engineer),
+            "already_dismissed": True,
+            "closed_sessions": 0,
+        }
+
+    dismissed_at = int(time.time())
+    engineer.dismissed_at = dismissed_at
+    state._emit_agent(engineer)
+    state._db_save_agent(engineer)
+
+    errors: list[str] = []
+    closed_sessions = 0
+    cells_to_close = _dismissal_close_cells(state, engineer)
+    # Dismiss is a hard pause: active tool calls may be interrupted and rely on normal session-resume recovery.
+    for cell in cells_to_close:
+        if await _close_cell_session_preserving_state(
+                state,
+                cell,
+                close_session,
+                errors=errors):
+            closed_sessions += 1
+
+    reason = str(data.get("reason", "") or "").strip()
+    if panel_event:
+        panel_event(
+            "engineer_dismissed",
+            engineer.id,
+            engineer.name,
+            engineer.group,
+            reason or "Engineer dismissed",
+        )
+    result = {
+        "type": "ok",
+        "engineer_id": engineer.id,
+        "dismissed_at": dismissed_at,
+        "closed_sessions": closed_sessions,
+        "closed_cells": [cell.id for cell in cells_to_close],
+    }
+    if errors:
+        result["close_errors"] = errors
+    return result
+
+
+async def _handle_engineer_rehire_command(
+        data: dict,
+        state: MatrixState, *,
+        bridge,
+        worktree_mgr,
+        resolve_base_dir,
+        resolve_agent_launch_config,
+        resolve_weaver_launch_config,
+        apply_persistent_prompt,
+        build_cell_persistent_prompt,
+        persistent_prompt_filename,
+        is_designated_weaver,
+        panel_event=None) -> dict:
+    """Resume a dismissed engineer with the same id/slug and launch config."""
+    engineer = _resolve_engineer_cell(
+        state,
+        engineer_id=data.get("engineer_id", "") or data.get("id", ""),
+        engineer_slug=data.get("slug", ""),
+    )
+    if not engineer:
+        return {"type": "error", "message": "Engineer not found"}
+    authority_error = _validate_engineer_lifecycle_authority(
+        state,
+        engineer,
+        architect_id=data.get("architect_id", ""),
+    )
+    if authority_error:
+        return authority_error
+
+    dismissed_at = _agent_dismissed_at(engineer)
+    if not dismissed_at:
+        return {
+            "type": "ok",
+            "engineer_id": engineer.id,
+            "dismissed_at": 0,
+            "already_hired": True,
+            "replayed_messages": 0,
+        }
+    if engineer.session_id:
+        engineer.dismissed_at = 0
+        state._emit_agent(engineer)
+        state._db_save_agent(engineer)
+        replayed = await _replay_buffered_cross_kind_messages(
+            state, bridge, engineer)
+        if panel_event:
+            panel_event(
+                "engineer_rehired",
+                engineer.id,
+                engineer.name,
+                engineer.group,
+                "Engineer rehired",
+            )
+        return {
+            "type": "ok",
+            "engineer_id": engineer.id,
+            "dismissed_at": 0,
+            "already_running": True,
+            "replayed_messages": replayed,
+        }
+
+    engineer.status = "stopped"
+    state._emit_agent(engineer)
+    state._db_save_agent(engineer)
+    try:
+        relaunch_result = await _handle_relaunch_agent_command(
+            {"id": engineer.id},
+            state,
+            bridge=bridge,
+            worktree_mgr=worktree_mgr,
+            resolve_base_dir=resolve_base_dir,
+            resolve_agent_launch_config=resolve_agent_launch_config,
+            resolve_weaver_launch_config=resolve_weaver_launch_config,
+            apply_persistent_prompt=apply_persistent_prompt,
+            build_cell_persistent_prompt=build_cell_persistent_prompt,
+            persistent_prompt_filename=persistent_prompt_filename,
+            is_designated_weaver=is_designated_weaver,
+        )
+    except Exception as exc:
+        log.exception("Failed to rehire engineer '%s'", engineer.name)
+        engineer.dismissed_at = dismissed_at
+        engineer.status = "stopped"
+        state._emit_agent(engineer)
+        state._db_save_agent(engineer)
+        return {"type": "error", "message": f"Failed to rehire engineer: {exc}"}
+
+    if relaunch_result and relaunch_result.get("type") == "error":
+        engineer.dismissed_at = dismissed_at
+        engineer.status = "stopped"
+        state._emit_agent(engineer)
+        state._db_save_agent(engineer)
+        return relaunch_result
+    if not engineer.session_id:
+        engineer.dismissed_at = dismissed_at
+        engineer.status = "stopped"
+        state._emit_agent(engineer)
+        state._db_save_agent(engineer)
+        return {
+            "type": "error",
+            "message": "Failed to rehire engineer: no session was created",
+        }
+
+    engineer.dismissed_at = 0
+    state._emit_agent(engineer)
+    state._db_save_agent(engineer)
+    replayed = await _replay_buffered_cross_kind_messages(
+        state, bridge, engineer)
+    if panel_event:
+        panel_event(
+            "engineer_rehired",
+            engineer.id,
+            engineer.name,
+            engineer.group,
+            "Engineer rehired",
+        )
+    return {
+        "type": "ok",
+        "engineer_id": engineer.id,
+        "dismissed_at": 0,
+        "session_id": engineer.session_id or "",
+        "replayed_messages": replayed,
     }
 
 
@@ -3959,6 +4337,30 @@ async def main(connection=None):
             elif cmd == "pending_hire_list":
                 result = _handle_pending_hire_list_command(data, state)
 
+            elif cmd in {"engineer_dismiss", "architect_engineer_dismiss"}:
+                result = await _handle_engineer_dismiss_command(
+                    data,
+                    state,
+                    close_session=bridge.close_session,
+                    panel_event=_panel_event,
+                )
+
+            elif cmd in {"engineer_rehire", "architect_engineer_rehire"}:
+                result = await _handle_engineer_rehire_command(
+                    data,
+                    state,
+                    bridge=bridge,
+                    worktree_mgr=worktree_mgr,
+                    resolve_base_dir=_resolve_base_dir,
+                    resolve_agent_launch_config=_resolve_agent_launch_config,
+                    resolve_weaver_launch_config=_resolve_weaver_launch_config,
+                    apply_persistent_prompt=_apply_persistent_prompt,
+                    build_cell_persistent_prompt=_build_cell_persistent_prompt,
+                    persistent_prompt_filename=_persistent_prompt_filename,
+                    is_designated_weaver=_is_designated_weaver,
+                    panel_event=_panel_event,
+                )
+
             elif cmd == "delete_engineer":
                 result = await _handle_delete_engineer_command(
                     data,
@@ -5550,9 +5952,45 @@ async def main(connection=None):
                         agent_id = data.get("agent_id", "")
                         handoff_from = data.get(
                             "handoff_worktree_from", "")
+                        dispatch_owner_id = str(
+                            data.get("owner_engineer_id", "")
+                            or data.get("_created_by_weaver_id", "")
+                            or ""
+                        ).strip()
+                        if agent_id:
+                            target_cell = state.agents.get(agent_id)
+                            if (
+                                target_cell
+                                and str(getattr(target_cell, "kind", "") or "").strip()
+                                == "engineer"
+                                and _agent_dismissed_at(target_cell)
+                            ):
+                                result = _engineer_dismissed_error(target_cell.id)
+                        elif dispatch_owner_id:
+                            owner_cell = state.agents.get(dispatch_owner_id)
+                            if (
+                                owner_cell
+                                and str(getattr(owner_cell, "kind", "") or "").strip()
+                                == "engineer"
+                                and _agent_dismissed_at(owner_cell)
+                            ):
+                                result = _engineer_dismissed_error(owner_cell.id)
+                        else:
+                            assigned_engineer_id = str(
+                                getattr(task, "assigned_engineer_id", "") or ""
+                            ).strip()
+                            assigned_engineer = (
+                                state.agents.get(assigned_engineer_id)
+                                if assigned_engineer_id else None
+                            )
+                            if _agent_dismissed_at(assigned_engineer):
+                                result = _engineer_dismissed_error(
+                                    assigned_engineer_id)
                         if agent_id and agent_id not in state.agents:
                             result = {"type": "error",
                                       "message": "Agent not found"}
+                        elif result:
+                            pass
                         elif agent_id:
                             # Dispatch to existing agent
                             cell = state.agents.get(agent_id)

@@ -444,6 +444,7 @@ def _engineers_with_counts(state_data):
                 "name": engineer.get("name", ""),
                 "slug": engineer.get("slug", ""),
                 "status": engineer.get("status", "") or "stopped",
+                "dismissed_at": int(engineer.get("dismissed_at", 0) or 0),
                 "worker_count": int(worker_counts.get(engineer["id"], 0) or 0),
                 "task_count": int(task_counts.get(engineer["id"], 0) or 0),
             }
@@ -466,6 +467,14 @@ def _resolve_engineer_id_by_slug(state_data, engineer_slug: str) -> str:
     """Resolve an engineer slug to its agent id, or return an empty string."""
     engineer = _resolve_engineer_by_slug(state_data, engineer_slug)
     return str(engineer.get("id", "") or "") if engineer else ""
+
+
+def _resolve_engineer_cell(state_data, identifier: str):
+    """Resolve an engineer by id/slug/name/prefix or exit with a clear error."""
+    cell = resolve_cell(state_data, identifier)
+    if str(cell.get("kind", "") or "").strip() != "engineer":
+        die(f"'{identifier}' is not an engineer")
+    return cell
 
 
 def _validate_engineer_assignment(state_data, engineer_slug: str, group: str) -> str:
@@ -2597,7 +2606,10 @@ def cmd_engineer_list(args):
     print(f"\n  {_bold('Engineers')} ({len(engineers)})")
     for engineer in engineers:
         eslug = _dim(engineer.get("slug", "") or engineer["id"][:6])
-        status = engineer.get("status", "") or "stopped"
+        dismissed_at = int(engineer.get("dismissed_at", 0) or 0)
+        status = "dismissed" if dismissed_at else (
+            engineer.get("status", "") or "stopped"
+        )
         print(
             "    "
             f"{eslug}  {engineer.get('name', '')}  "
@@ -2606,6 +2618,44 @@ def cmd_engineer_list(args):
             f"tasks={engineer.get('task_count', 0)}"
         )
     print()
+
+
+def cmd_engineer_dismiss(args):
+    """Dismiss/pause an engineer while preserving history."""
+    state_data = get_state(args.port)
+    engineer = _resolve_engineer_cell(state_data, args.identifier)
+    resp = api_call(
+        "engineer_dismiss",
+        port=args.port,
+        engineer_id=engineer["id"],
+        reason=args.reason or "",
+    )
+    data = check_ok(resp)
+    if data.get("already_dismissed"):
+        print(f"Engineer \"{engineer['name']}\" is already dismissed")
+    else:
+        print(
+            f"Dismissed \"{engineer['name']}\" "
+            f"(closed {data.get('closed_sessions', 0)} sessions)"
+        )
+
+
+def cmd_engineer_rehire(args):
+    """Rehire/resume a dismissed engineer."""
+    state_data = get_state(args.port)
+    engineer = _resolve_engineer_cell(state_data, args.identifier)
+    resp = api_call(
+        "engineer_rehire",
+        port=args.port,
+        engineer_id=engineer["id"],
+    )
+    data = check_ok(resp)
+    if data.get("already_hired"):
+        print(f"Engineer \"{engineer['name']}\" is already active")
+    else:
+        replayed = data.get("replayed_messages", 0)
+        suffix = f"; replayed {replayed} buffered messages" if replayed else ""
+        print(f"Rehired \"{engineer['name']}\"{suffix}")
 
 
 def cmd_task_verify(args):
@@ -4149,6 +4199,17 @@ def build_parser():
     p.add_argument("--json", action="store_true",
                    help="Output raw JSON")
     p.set_defaults(func=cmd_engineer_list)
+
+    p = eng_sub.add_parser("dismiss",
+                           help="Dismiss/pause an engineer")
+    p.add_argument("identifier", help="Engineer ID, slug, or name")
+    p.add_argument("--reason", help="Optional dismissal reason")
+    p.set_defaults(func=cmd_engineer_dismiss)
+
+    p = eng_sub.add_parser("rehire",
+                           help="Rehire/resume a dismissed engineer")
+    p.add_argument("identifier", help="Engineer ID, slug, or name")
+    p.set_defaults(func=cmd_engineer_rehire)
 
     hist = agt_sub.add_parser("history", aliases=["hist"],
                               help="Agent history (persistent)")
