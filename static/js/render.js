@@ -1180,7 +1180,7 @@ function renderAgentCell(a, options) {
     ? state.weaver_settings[a.group] : null;
   const _weaverPaused = !!(_weaverWs && _weaverWs.paused);
   const _weaverAsking = _weaverWs && _weaverWs.pending_question;
-  const _isDigestRecipient = _isEngineer;
+  const _isDigestRecipient = _isEngineer || _isArchitect;
   const _agentDigestSettings = _isDigestRecipient && state.agent_digest_settings
     ? state.agent_digest_settings[String(a.id || '')] : null;
   let _digestPaused = !!(_agentDigestSettings && _agentDigestSettings.paused);
