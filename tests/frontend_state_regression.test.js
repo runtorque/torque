@@ -6484,7 +6484,7 @@ test('renderAgentPanel keeps the same Events anchor visible when new digest rows
   assert.equal(newContent.scrollTop, 120);
 });
 
-test('renderAgentCell shows per-engineer digest pause controls with state-driven classes', () => {
+test('renderAgentCell shows per-engineer and architect digest pause controls with state-driven classes', () => {
   const { context } = createWeaverHarness();
   context.state.group_settings = {
     alpha: { weaver_agent_id: 'weaver-1' },
@@ -6496,9 +6496,11 @@ test('renderAgentCell shows per-engineer digest pause controls with state-driven
   context.state.agents = {
     'weaver-1': { id: 'weaver-1', name: 'Weaver', group: 'alpha', cell_type: 'agent' },
     'eng-1': { id: 'eng-1', name: 'Engineer', group: 'alpha', kind: 'engineer', cell_type: 'agent' },
+    'arch-1': { id: 'arch-1', name: 'Architect', group: 'alpha', kind: 'architect', cell_type: 'agent' },
   };
   context.state.agent_digest_settings = {
     'eng-1': { agent_id: 'eng-1', paused: false },
+    'arch-1': { agent_id: 'arch-1', paused: false, architect_digest: true },
   };
   runInContext(context, `focusedItemId = ''; selectedAgentId = 'weaver-1';`);
 
@@ -6527,6 +6529,15 @@ test('renderAgentCell shows per-engineer digest pause controls with state-driven
     cell_type: 'agent',
     status: 'running',
   });
+  const architectHtml = context.renderAgentCell({
+    id: 'arch-1',
+    name: 'Architect',
+    icon: '🏛️',
+    group: 'alpha',
+    kind: 'architect',
+    cell_type: 'agent',
+    status: 'running',
+  });
 
   assert.match(runningHtml, /class="cell selected weaver weaver-running"/);
   assert.match(runningHtml, /class="cell-header-controls">/);
@@ -6538,10 +6549,17 @@ test('renderAgentCell shows per-engineer digest pause controls with state-driven
   assert.match(engineerHtml, /toggleDigestPauseForAgent\(decodeURIComponent\('eng-1'\)\)/);
   assert.match(engineerHtml, /Pause event delivery/);
   assert.doesNotMatch(engineerHtml, /Pause Weaver event delivery/);
+  assert.match(architectHtml, /class="cell weaver-running architect"/);
+  assert.match(architectHtml, /class="cell-weaver-toggle running"/);
+  assert.match(architectHtml, /toggleDigestPauseForAgent\(decodeURIComponent\('arch-1'\)\)/);
+  assert.match(architectHtml, /Pause event delivery/);
+  assert.doesNotMatch(architectHtml, /Pause Weaver event delivery/);
 
   runInContext(context, `toggleDigestPauseForAgent('eng-1')`);
+  runInContext(context, `toggleDigestPauseForAgent('arch-1')`);
   assert.deepEqual(jsonValue(context, 'sendCalls'), [
     { cmd: 'digest_pause', agent_id: 'eng-1' },
+    { cmd: 'digest_pause', agent_id: 'arch-1' },
   ]);
 
   context.state.weaver_settings.alpha.paused = true;
@@ -6559,6 +6577,7 @@ test('renderAgentCell shows per-engineer digest pause controls with state-driven
   assert.match(pausedHtml, /Resume Weaver event delivery/);
 
   context.state.agent_digest_settings['eng-1'].paused = true;
+  context.state.agent_digest_settings['arch-1'].paused = true;
   const pausedEngineerHtml = context.renderAgentCell({
     id: 'eng-1',
     name: 'Engineer',
@@ -6568,9 +6587,21 @@ test('renderAgentCell shows per-engineer digest pause controls with state-driven
     cell_type: 'agent',
     status: 'running',
   });
+  const pausedArchitectHtml = context.renderAgentCell({
+    id: 'arch-1',
+    name: 'Architect',
+    icon: '🏛️',
+    group: 'alpha',
+    kind: 'architect',
+    cell_type: 'agent',
+    status: 'running',
+  });
   assert.match(pausedEngineerHtml, /class="cell weaver-paused engineer"/);
   assert.match(pausedEngineerHtml, /class="cell-weaver-toggle paused"/);
   assert.match(pausedEngineerHtml, /Resume event delivery/);
+  assert.match(pausedArchitectHtml, /class="cell weaver-paused architect"/);
+  assert.match(pausedArchitectHtml, /class="cell-weaver-toggle paused"/);
+  assert.match(pausedArchitectHtml, /Resume event delivery/);
 
   context.state.weaver_settings.alpha = {
     paused: false,
