@@ -395,7 +395,6 @@ function _deltaSurfaceInvalidations(ops) {
         break;
       case 'journal_append':
       case 'journal_delete':
-      case 'agent_digest_update':
       case 'digest_buffer_stats':
       case 'digest_sent_push':
       case 'weaver_buffer_stats':
@@ -406,6 +405,9 @@ function _deltaSurfaceInvalidations(ops) {
         _markSurface(flags, 'weaver');
         break;
       case 'weaver_settings_update':
+        _markSurface(flags, 'main', 'weaver');
+        break;
+      case 'agent_digest_update':
         _markSurface(flags, 'main', 'weaver');
         break;
       case 'decision_upsert':
