@@ -1,6 +1,7 @@
 import importlib
 import json
 import unittest
+from datetime import datetime, timezone
 from unittest import mock
 
 try:
@@ -65,6 +66,36 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         )
         state.board_tasks[task.id] = task
         return task
+
+    def _iso(self, ts):
+        return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+
+    def _attach_stale_health_fixture(self, state, *, base_ts=1_700_000_000):
+        engineer = self._add_engineer(state, "eng-alice", "Alice")
+        worker = self._add_worker(state, "worker-a", "Alice Worker", engineer.id)
+        worker.status = "idle"
+        worker.last_event_at = base_ts
+        worker.session_tokens_in = 0
+        worker.session_tokens_out = 0
+        task = self._add_task(
+            state,
+            "task-stale",
+            "Silent task",
+            assigned_engineer_id=engineer.id,
+        )
+        task.lane = "In Progress"
+        task.agent_id = worker.id
+        worker.current_task_id = task.id
+        task.health_state = "idle-risk"
+        task.health_details = {
+            "aggregate": False,
+            "source_task_id": task.id,
+            "last_activity_at": self._iso(base_ts),
+            "reasons": ["progress_silence_warning"],
+            "agent_last_event_at": self._iso(base_ts),
+            "silence_secs": 42,
+        }
+        return engineer, worker, task, base_ts
 
     async def test_engineer_agents_list_scopes_to_single_engineer(self):
         state = self._make_state()
@@ -242,6 +273,133 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         data = json.loads(text)
         self.assertEqual(data["tasks_total"], 1)
         self.assertEqual(data["lanes"]["Backlog"], 1)
+
+    async def test_engineer_task_show_refreshes_silence_secs_at_read_time(self):
+        state = self._make_state()
+        engineer, _worker, task, base_ts = self._attach_stale_health_fixture(state)
+
+        async def fake_handle_command(_payload):
+            self.fail("read tool should not call handle_command")
+
+        with mock.patch("loom.mcp_tools_shared.time.time", return_value=base_ts + 600):
+            text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+                "engineer_task_show",
+                {"task": task.id},
+                fake_handle_command,
+                state,
+                caller_id=engineer.id,
+            )
+
+        self.assertFalse(is_error, text)
+        data = json.loads(text)
+        self.assertEqual(data["health_details"]["silence_secs"], 600)
+        self.assertEqual(data["health_state"], "idle-risk")
+        self.assertIn("Silent 10 min", data["health_summary"])
+        self.assertIn("status=idle", data["health_summary"])
+        self.assertLessEqual(len(data["health_summary"]), 120)
+
+        with mock.patch("loom.mcp_tools_shared.time.time", return_value=base_ts + 900):
+            text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+                "engineer_task_show",
+                {"task": task.id},
+                fake_handle_command,
+                state,
+                caller_id=engineer.id,
+            )
+
+        self.assertFalse(is_error, text)
+        self.assertEqual(json.loads(text)["health_details"]["silence_secs"], 900)
+
+    async def test_engineer_agent_show_promotes_current_task_health(self):
+        state = self._make_state()
+        engineer, worker, _task, base_ts = self._attach_stale_health_fixture(state)
+
+        async def fake_handle_command(_payload):
+            self.fail("read tool should not call handle_command")
+
+        with mock.patch("loom.mcp_tools_shared.time.time", return_value=base_ts + 900):
+            text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+                "engineer_agent_show",
+                {"agent": worker.id},
+                fake_handle_command,
+                state,
+                caller_id=engineer.id,
+            )
+
+        self.assertFalse(is_error, text)
+        data = json.loads(text)
+        self.assertEqual(data["health_state"], "idle-risk")
+        self.assertEqual(data["health_details"]["silence_secs"], 900)
+        self.assertIn("Silent 15 min", data["health_summary"])
+        self.assertIn("status=idle", data["health_summary"])
+        self.assertLessEqual(len(data["health_summary"]), 120)
+
+    async def test_engineer_task_show_healthy_summary_is_not_alarming(self):
+        state = self._make_state()
+        engineer = self._add_engineer(state, "eng-alice", "Alice")
+        worker = self._add_worker(state, "worker-a", "Alice Worker", engineer.id)
+        base_ts = 1_700_000_000
+        worker.status = "running"
+        worker.last_event_at = base_ts
+        task = self._add_task(
+            state,
+            "task-healthy",
+            "Recent task",
+            assigned_engineer_id=engineer.id,
+        )
+        task.lane = "In Progress"
+        task.agent_id = worker.id
+        task.health_state = "healthy"
+        task.health_details = {
+            "aggregate": False,
+            "source_task_id": task.id,
+            "last_activity_at": self._iso(base_ts),
+            "reasons": ["recent_activity"],
+            "agent_last_event_at": self._iso(base_ts),
+            "silence_secs": 3,
+        }
+
+        async def fake_handle_command(_payload):
+            self.fail("read tool should not call handle_command")
+
+        with mock.patch("loom.mcp_tools_shared.time.time", return_value=base_ts + 60):
+            text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+                "engineer_task_show",
+                {"task": task.id},
+                fake_handle_command,
+                state,
+                caller_id=engineer.id,
+            )
+
+        self.assertFalse(is_error, text)
+        data = json.loads(text)
+        self.assertEqual(data["health_state"], "healthy")
+        self.assertEqual(data["health_details"]["silence_secs"], 60)
+        self.assertNotIn("Silent", data["health_summary"])
+
+    async def test_engineer_read_overviews_still_parse_with_health_payloads(self):
+        state = self._make_state()
+        engineer, _worker, _task, _base_ts = self._attach_stale_health_fixture(state)
+
+        async def fake_handle_command(_payload):
+            self.fail("read tool should not call handle_command")
+
+        for tool_name in (
+            "engineer_board_summary",
+            "engineer_session_map",
+            "engineer_streams_list",
+        ):
+            with self.subTest(tool_name=tool_name):
+                text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+                    tool_name,
+                    {},
+                    fake_handle_command,
+                    state,
+                    caller_id=engineer.id,
+                )
+
+                self.assertFalse(is_error, text)
+                json.loads(text)
 
     async def test_deleted_engineer_session_returns_structured_error(self):
         state = self._make_state()

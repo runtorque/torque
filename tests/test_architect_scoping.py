@@ -3,6 +3,7 @@ import json
 import stat
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -198,6 +199,52 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(engineers[alice.id]["current_task"], visible_task.task)
         self.assertEqual(engineers[user_engineer.id]["current_task_id"], "")
         self.assertEqual(engineers[user_engineer.id]["current_task"], "")
+
+    async def test_architect_task_show_refreshes_and_promotes_health(self):
+        architect = self._add_architect("arch-1", "Architect")
+        alice = self._add_engineer(
+            "eng-alice", "Alice", hired_by_architect_id=architect.id
+        )
+        base_ts = 1_700_000_000
+        alice.status = "idle"
+        alice.last_event_at = base_ts
+        task = self._add_task(
+            "task-visible",
+            "Architect-visible silent work",
+            lane="In Progress",
+            assigned_engineer_id=alice.id,
+            created_by_architect_id=architect.id,
+        )
+        task.agent_id = alice.id
+        alice.current_task_id = task.id
+        last_activity = datetime.fromtimestamp(
+            base_ts,
+            tz=timezone.utc,
+        ).isoformat()
+        task.health_state = "idle-risk"
+        task.health_details = {
+            "aggregate": False,
+            "source_task_id": task.id,
+            "last_activity_at": last_activity,
+            "reasons": ["progress_silence_warning"],
+            "agent_last_event_at": last_activity,
+            "silence_secs": 12,
+        }
+
+        with mock.patch("loom.mcp_tools_shared.time.time", return_value=base_ts + 900):
+            text, is_error = await self._call(
+                "architect_task_show",
+                {"task": task.id},
+                architect.id,
+            )
+
+        self.assertFalse(is_error, text)
+        data = json.loads(text)
+        self.assertEqual(data["health_state"], "idle-risk")
+        self.assertEqual(data["health_details"]["silence_secs"], 900)
+        self.assertIn("Silent 15 min", data["health_summary"])
+        self.assertIn("status=idle", data["health_summary"])
+        self.assertLessEqual(len(data["health_summary"]), 120)
 
     async def test_architect_task_create_stamps_architect_fields_and_rejects_out_of_scope_engineer(self):
         architect = self._add_architect("arch-1", "Architect")
