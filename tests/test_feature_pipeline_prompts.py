@@ -73,7 +73,11 @@ class FeaturePipelinePromptTests(unittest.TestCase):
 
         self.assertIsNotNone(rendered_prompt)
         closeout = rendered_prompt.split("## Closeout (mandatory)", 1)[1]
-        self.assertIn("Blocking issues found: your FINAL action MUST be `loom ai derive", closeout)
+        self.assertIn(
+            'Blocking issues found: your FINAL action MUST be `loom ai derive "Fix the issues found" -t feature/implement`',
+            closeout,
+        )
+        self.assertNotIn("-a feature/implement", rendered_prompt)
         self.assertIn("Do NOT call `loom ai done` after deriving the fix task", closeout)
         self.assertIn("unresolved fix handoff is the valid blocking-review closeout path", rendered_prompt)
         self.assertIn("No blocking issues: your FINAL action MUST be `loom ai done`", closeout)
@@ -93,7 +97,9 @@ class FeaturePipelinePromptTests(unittest.TestCase):
             },
         )
 
-        reminder = 'MUST call `loom ai derive "<summary>" -a feature/review` before `loom ai done`'
+        reminder = 'MUST call `loom ai derive "<summary>" -t feature/review` before `loom ai done`'
         self.assertIn(reminder, project_prompt)
+        self.assertNotIn("-a feature/review", project_prompt)
         self.assertIsNotNone(rendered_prompt)
         self.assertIn(reminder, rendered_prompt)
+        self.assertNotIn("-a feature/review", rendered_prompt)

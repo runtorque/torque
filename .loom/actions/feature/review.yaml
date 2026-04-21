@@ -51,7 +51,7 @@ prompt: |
   ## Closeout (mandatory)
 
   Pick exactly one closeout path:
-  - Blocking issues found: your FINAL action MUST be `loom ai derive "Fix the issues found" -a feature/implement` (or `loom_derive(...)`) with the required review context. Do NOT call `loom ai done` after deriving the fix task.
+  - Blocking issues found: your FINAL action MUST be `loom ai derive "Fix the issues found" -t feature/implement` (or `loom_derive(...)`) with the required review context. Do NOT call `loom ai done` after deriving the fix task.
   - No blocking issues: your FINAL action MUST be `loom ai done` (or `loom_done(...)`) with a `Ship` verdict line stating there are no blocking issues and the work is ready to merge.
 
   Replying via `engineer_reply` or posting an `agent_reply` is NOT a substitute for either closeout path. Do not exit without calling the appropriate closeout tool. If tests are still running, call `loom ai progress "<status>"` periodically so the dispatching engineer knows you are alive — silence is read as a stall.
