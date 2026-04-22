@@ -428,6 +428,46 @@ class MatrixStateCleanupTests(unittest.TestCase):
             "engineer-1",
         )
 
+    def test_load_backfills_architect_queue_empty_digest_default(self):
+        from loom.db import LoomDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = LoomDB(Path(tmp.name) / "loom.db")
+        db.init()
+        self.addCleanup(db.close)
+        db.save_groups({"g": ["arch-1"]}, {"g": "g"})
+        db.save_group_members("g", ["arch-1"])
+        db.save_agent(
+            self.state_mod.AgentCell(
+                id="arch-1",
+                name="Architect",
+                group="g",
+                cell_type="agent",
+                kind="architect",
+                persistent=True,
+            )
+        )
+        db.save_agent_digest_settings(
+            "arch-1",
+            {
+                "agent_id": "arch-1",
+                "enabled_events": ["task_completed"],
+                "architect_digest": True,
+            },
+        )
+
+        state = self.state_mod.MatrixState(db=db)
+        state.load()
+
+        settings = state.get_agent_digest_settings("arch-1")
+        self.assertEqual(
+            settings.enabled_events,
+            ["task_completed", "engineer_queue_empty"],
+        )
+        persisted = db.load_agent_digest_settings("arch-1")
+        self.assertIn("engineer_queue_empty", persisted["enabled_events"])
+
     def test_agent_visibility_to_weaver_respects_owned_agent_setting(self):
         state = self.state_mod.MatrixState()
         weaver = self.state_mod.AgentCell(

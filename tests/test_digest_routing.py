@@ -246,6 +246,49 @@ class DigestRoutingTests(unittest.IsolatedAsyncioTestCase):
             state.get_agent_digest_settings(architect.id).enabled_events,
         )
 
+    def test_engineer_queue_empty_routes_only_to_hiring_architect(self):
+        state, group = self._make_state()
+        engineer = self._add_agent(
+            state,
+            agent_id="eng-1",
+            name="Courier",
+            group=group,
+            kind="engineer",
+            hired_by_architect_id="arch-1",
+        )
+        architect = self._add_agent(
+            state,
+            agent_id="arch-1",
+            name="Architect",
+            group=group,
+            kind="architect",
+        )
+        state.update_agent_digest_settings(engineer.id)
+        state.update_agent_digest_settings(architect.id)
+
+        event = {
+            "cell_id": engineer.id,
+            "agent_name": engineer.name,
+            "group": group,
+            "kind": "engineer_queue_empty",
+        }
+
+        recipients = self.routing_mod.resolve_digest_recipients(state, event)
+
+        self.assertEqual(recipients, [architect.id])
+        self.assertIn(
+            "engineer_queue_empty",
+            self.routing_mod.ARCHITECT_COARSE_EVENTS,
+        )
+        self.assertIn(
+            "engineer_queue_empty",
+            state.get_agent_digest_settings(architect.id).enabled_events,
+        )
+        self.assertNotIn(
+            "engineer_queue_empty",
+            self.state_mod.WEAVER_MANDATORY_EVENTS,
+        )
+
     def test_candidate_worker_recipients_exclude_worker_self(self):
         state, group = self._make_state()
         architect = self._add_agent(

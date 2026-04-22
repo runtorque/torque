@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS agents (
     session_resume        INTEGER NOT NULL DEFAULT 1,
     idle_timeout          INTEGER NOT NULL DEFAULT 0,
     tasks_dispatched      INTEGER NOT NULL DEFAULT 0,
+    queue_empty_emitted   INTEGER NOT NULL DEFAULT 1,
     dismissed_at          INTEGER NOT NULL DEFAULT 0
 );
 
@@ -710,6 +711,7 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
     # Migrate: add tasks_dispatched column to agents
     for col, col_type, default in [
         ("tasks_dispatched", "INTEGER", "0"),
+        ("queue_empty_emitted", "INTEGER", "1"),
         ("worktree_base_dir", "TEXT", "'.loom/worktrees'"),
         ("worktree_auto_checkpoint", "INTEGER", "0"),
         ("checkpoint_on_progress", "INTEGER", "0"),

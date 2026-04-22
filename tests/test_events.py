@@ -499,6 +499,178 @@ class EventBusTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("No activity for 5 minutes", cell.error_message)
         self.assertEqual(alerts, [("agent-1", "No activity for 5 minutes")])
 
+    def test_engineer_queue_empty_emits_once_per_cycle_and_survives_restart(self):
+        state = self._make_state()
+        engineer = self.state_mod.AgentCell(
+            id="eng-1",
+            name="Courier",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+            status="running",
+            queue_empty_emitted=True,
+        )
+        engineer.mark_progress(1_000.0)
+        state.agents[engineer.id] = engineer
+        panel_log = self.events_mod.PanelEventLog()
+        state.panel_log = panel_log
+        bus = self.events_mod.EventBus(
+            state,
+            self.events_mod.EventLog(),
+            panel_log=panel_log,
+        )
+
+        active_task = state.board_add_task(
+            "Build feature",
+            "g",
+            lane="In Progress",
+            id="task-1",
+            assigned_engineer_id=engineer.id,
+        )
+        self.assertIsNotNone(active_task)
+        self.assertFalse(engineer.queue_empty_emitted)
+
+        # Active assigned work suppresses the empty event even after the idle
+        # clock is old enough.
+        changed = self.events_mod.check_engineer_queue_empty(
+            state,
+            bus,
+            now=1_240.0,
+        )
+        self.assertFalse(changed)
+        self.assertEqual(panel_log.get_recent(), [])
+
+        # Once the queue drains, both "idle" and "empty" must be observed for
+        # the debounce window before a single event fires.
+        state.board_move_task("task-1", "Done")
+        self.assertFalse(
+            self.events_mod.check_engineer_queue_empty(
+                state,
+                bus,
+                now=1_240.0,
+            )
+        )
+        self.assertTrue(
+            self.events_mod.check_engineer_queue_empty(
+                state,
+                bus,
+                now=1_360.0,
+            )
+        )
+        events = panel_log.get_recent()
+        self.assertEqual([evt["kind"] for evt in events],
+                         ["engineer_queue_empty"])
+        self.assertEqual(events[0]["cell_id"], engineer.id)
+        self.assertTrue(engineer.queue_empty_emitted)
+
+        self.assertFalse(
+            self.events_mod.check_engineer_queue_empty(
+                state,
+                bus,
+                now=1_520.0,
+            )
+        )
+        self.assertEqual(
+            [evt["kind"] for evt in panel_log.get_recent()],
+            ["engineer_queue_empty"],
+        )
+
+        # Simulate daemon restart after the empty event was persisted: the
+        # in-memory debounce map is gone, but the persisted gate prevents boot
+        # from re-firing.
+        restarted = self._make_state()
+        restarted_engineer = self.state_mod.AgentCell(
+            id=engineer.id,
+            name=engineer.name,
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+            status="running",
+            last_progress_at=engineer.last_progress_at,
+            queue_empty_emitted=True,
+        )
+        restarted.agents[restarted_engineer.id] = restarted_engineer
+        restarted_panel_log = self.events_mod.PanelEventLog()
+        restarted.panel_log = restarted_panel_log
+        restarted_bus = self.events_mod.EventBus(
+            restarted,
+            self.events_mod.EventLog(),
+            panel_log=restarted_panel_log,
+        )
+
+        self.assertFalse(
+            self.events_mod.check_engineer_queue_empty(
+                restarted,
+                restarted_bus,
+                now=2_000.0,
+            )
+        )
+        self.assertFalse(
+            self.events_mod.check_engineer_queue_empty(
+                restarted,
+                restarted_bus,
+                now=2_120.0,
+            )
+        )
+        self.assertEqual(restarted_panel_log.get_recent(), [])
+
+        second_task = restarted.board_add_task(
+            "Build second feature",
+            "g",
+            lane="To Do",
+            id="task-2",
+            assigned_engineer_id=restarted_engineer.id,
+        )
+        self.assertIsNotNone(second_task)
+        self.assertFalse(restarted_engineer.queue_empty_emitted)
+        restarted_engineer.mark_progress(2_000.0)
+        restarted.board_move_task("task-2", "Done")
+
+        self.assertFalse(
+            self.events_mod.check_engineer_queue_empty(
+                restarted,
+                restarted_bus,
+                now=2_120.0,
+            )
+        )
+        self.assertTrue(
+            self.events_mod.check_engineer_queue_empty(
+                restarted,
+                restarted_bus,
+                now=2_240.0,
+            )
+        )
+        self.assertEqual(
+            [evt["kind"] for evt in restarted_panel_log.get_recent()],
+            ["engineer_queue_empty"],
+        )
+
+    def test_engineer_queue_empty_gate_clears_when_owned_worker_spawns(self):
+        state = self._make_state()
+        engineer = self.state_mod.AgentCell(
+            id="eng-1",
+            name="Courier",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+            queue_empty_emitted=True,
+        )
+        worker = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            kind="worker",
+            owner_engineer_id=engineer.id,
+            status="running",
+        )
+        state.agents[engineer.id] = engineer
+        state.agents[worker.id] = worker
+
+        state._emit_agent(worker)
+
+        self.assertFalse(engineer.queue_empty_emitted)
+
     async def test_idle_activity_change_does_not_unlink_plain_backlog_child(self):
         state = self._make_state()
         parent = self.state_mod.BoardTask(
