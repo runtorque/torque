@@ -38,45 +38,6 @@ function loadScript(context, relPath) {
   vm.runInContext(source, context, { filename });
 }
 
-test('new dropdown renders Weaver entry only when a group has no weaver', () => {
-  const sandbox = createSandbox();
-  const context = vm.createContext(sandbox);
-  loadScript(context, 'static/js/render.js');
-
-  const htmlWithoutWeaver = vm.runInContext(`_renderWeaverMenuItem('alpha', {})`, context);
-  const htmlWithWeaver = vm.runInContext(`_renderWeaverMenuItem('alpha', { weaver_agent_id: 'weaver-1' })`, context);
-
-  assert.match(htmlWithoutWeaver, />Weaver<\/button>/);
-  assert.equal(htmlWithWeaver, '');
-});
-
-test('newWeaver opens the dedicated Weaver launch dialog', () => {
-  const sandbox = createSandbox();
-  const context = vm.createContext(sandbox);
-  loadScript(context, 'static/js/commands.js');
-
-  vm.runInContext(`newWeaver('alpha')`, context);
-
-  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.modalCalls)), [
-    {
-      group: 'alpha',
-      agentId: '',
-    },
-  ]);
-  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), []);
-});
-
-test('newWeaver is a no-op when the group already has a weaver', () => {
-  const sandbox = createSandbox();
-  sandbox.state.group_settings.alpha = { weaver_agent_id: 'weaver-1' };
-  const context = vm.createContext(sandbox);
-  loadScript(context, 'static/js/commands.js');
-
-  vm.runInContext(`newWeaver('alpha')`, context);
-
-  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), []);
-});
-
 test('relaunchAgent routes stopped designated weavers through the launch dialog', () => {
   const sandbox = createSandbox();
   sandbox.state.group_settings.alpha = { weaver_agent_id: 'weaver-1' };

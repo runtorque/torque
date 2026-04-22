@@ -363,7 +363,7 @@ test('group settings notification presets rewrite detailed controls before submi
   assert.equal(ensure('gs-weaver-notification-preset').value, 'quiet');
 });
 
-test('group settings points Weaver creation to the + New dropdown when absent', () => {
+test('group settings describes absent Weaver state without legacy creation copy', () => {
   const { sandbox, ensure } = createSandbox();
   const context = vm.createContext(sandbox);
   loadModals(context);
@@ -375,7 +375,7 @@ test('group settings points Weaver creation to the + New dropdown when absent', 
   })`, context);
 
   assert.equal(ensure('gs-weaver-agent-name').textContent, 'No weaver agent');
-  assert.match(ensure('gs-weaver-agent-meta').textContent, /\+ New dropdown/);
+  assert.equal(ensure('gs-weaver-agent-meta').textContent, 'No designated Weaver is configured for this group.');
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), []);
 });
 

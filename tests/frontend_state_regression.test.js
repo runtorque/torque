@@ -9672,18 +9672,24 @@ test('embedded runtime hides stale agent details when a standalone terminal is s
   assert.match(main.innerHTML, /Shell Root/);
 });
 
-test('agent create menu action stays standalone-only for the advanced modal path', () => {
-  const classic = createMainRenderHarness();
-  assert.deepEqual(jsonValue(classic.context, `_agentCreateMenuAction('alpha')`), {
-    label: 'Custom…',
-    action: "openAddAgent('alpha')",
-  });
+test('main agent grid omits the retired legacy creation dropdown', () => {
+  const { context, document, sandbox } = createMainRenderHarness();
+  const main = document.getElementById('main');
 
-  const embedded = createStandaloneRenderHarness();
-  assert.deepEqual(jsonValue(embedded.context, `_agentCreateMenuAction('alpha')`), {
-    label: 'Advanced…',
-    action: "openAddAgentAdvanced('alpha')",
-  });
+  sandbox.state.groups = { alpha: [] };
+  sandbox.state.group_settings = { alpha: { collapsed_default: false } };
+  sandbox.state.children = {};
+  sandbox.state.agents = {};
+
+  runInContext(context, `render();`);
+
+  assert.doesNotMatch(main.innerHTML, /cell cell-add/);
+  assert.doesNotMatch(main.innerHTML, /cell-add-drop/);
+  assert.doesNotMatch(main.innerHTML, /agent-grid-global-add-row/);
+  assert.doesNotMatch(main.innerHTML, /agent-add-menu/);
+  assert.match(main.innerHTML, /ghost-card ghost-card--worker[\s\S]*\+ New Worker/);
+  assert.match(main.innerHTML, /ghost-card ghost-card--engineer[\s\S]*\+ New Engineer/);
+  assert.match(main.innerHTML, /ghost-card ghost-card--architect[\s\S]*\+ New Architect/);
 });
 
 test('standalone sidebar formats repo and home paths compactly', () => {
@@ -9753,7 +9759,7 @@ test('standalone runtime metadata does not change embedded-runtime detection', (
 });
 
 
-test('architect section + New Engineer opens a scoped modal and submits architect hire context', () => {
+test('architect section + New Engineer ghost opens a scoped modal and submits architect hire context', () => {
   const { context, document, sandbox } = createMainRenderHarness();
   const modalDom = registerEngineerModalDom(document);
   loadModalScripts(context);
@@ -9779,13 +9785,18 @@ test('architect section + New Engineer opens a scoped modal and submits architec
 
   assert.match(main.innerHTML, /data-agent-section="architect:arch-a"/);
   assert.match(main.innerHTML, /agent-section-architect-column[\s\S]*Productmind/);
-  assert.match(main.innerHTML, /agent-section-body[\s\S]*class="agent-section-new-engineer-btn"/);
-  assert.match(main.innerHTML, /class="agent-section-new-engineer-btn"/);
+  assert.match(main.innerHTML, /agent-section-body[\s\S]*class="ghost-card ghost-card--engineer"/);
+  assert.match(main.innerHTML, /class="ghost-card ghost-card--engineer"/);
   assert.match(main.innerHTML, /data-hired-by-architect-id="arch-a"/);
   assert.match(main.innerHTML, /openAddEngineerForSection\(&quot;loom&quot;,&quot;arch-a&quot;\)/);
   assert.doesNotMatch(main.innerHTML, /architect-header-row|agent-section-header-row/);
 
-  runInContext(context, `openAddEngineerForSection('loom', 'arch-a');`);
+  const click = main.innerHTML.match(/onclick="([^"]*openAddEngineerForSection\(&quot;loom&quot;,&quot;arch-a&quot;\)[^"]*)"/);
+  assert.ok(click, 'new-engineer ghost should have a scoped click handler');
+  runInContext(context, `
+    var event = { stopPropagation() {} };
+    ${click[1].replace(/&quot;/g, '"')};
+  `);
   assert.equal(modalDom.modal.classList.contains('visible'), true);
   assert.equal(modalDom.summary.textContent, 'Create a persistent engineer session hired by Productmind in loom.');
   modalDom.nameInput.value = 'Casey';
@@ -9802,7 +9813,7 @@ test('architect section + New Engineer opens a scoped modal and submits architec
   }]);
 });
 
-test('user section + New Engineer submits a user-hired engineer without architect context', () => {
+test('user section + New Engineer ghost submits a user-hired engineer without architect context', () => {
   const { context, document, sandbox } = createMainRenderHarness();
   const modalDom = registerEngineerModalDom(document);
   loadModalScripts(context);
@@ -9817,8 +9828,8 @@ test('user section + New Engineer submits a user-hired engineer without architec
 
   assert.match(main.innerHTML, /data-agent-section="user"/);
   assert.match(main.innerHTML, /agent-section-architect-column[\s\S]*agent-section-user-card[\s\S]*User/);
-  assert.match(main.innerHTML, /agent-section-body[\s\S]*class="agent-section-new-engineer-btn"/);
-  assert.match(main.innerHTML, /class="agent-section-new-engineer-btn"/);
+  assert.match(main.innerHTML, /agent-section-body[\s\S]*class="ghost-card ghost-card--engineer"/);
+  assert.match(main.innerHTML, /class="ghost-card ghost-card--engineer"/);
   assert.match(main.innerHTML, /data-hired-by-architect-id=""/);
   assert.match(main.innerHTML, /openAddEngineerForSection\(&quot;loom&quot;,&quot;&quot;\)/);
   assert.doesNotMatch(main.innerHTML, /architect-header-row|agent-section-header-row/);
@@ -9838,7 +9849,7 @@ test('user section + New Engineer submits a user-hired engineer without architec
   assert.equal(Object.prototype.hasOwnProperty.call(sendCalls[0], 'hired_by_architect_id'), false);
 });
 
-test('bottom + New Architect button opens the group-scoped architect modal', () => {
+test('bottom + New Architect ghost opens the group-scoped architect modal', () => {
   const { context, document, sandbox } = createMainRenderHarness();
   const modalDom = registerArchitectModalDom(document);
   loadModalScripts(context);
@@ -9862,11 +9873,17 @@ test('bottom + New Architect button opens the group-scoped architect modal', () 
 
   runInContext(context, `render();`);
 
-  assert.match(main.innerHTML, /class="agent-grid-new-architect-btn"/);
+  assert.match(main.innerHTML, /class="ghost-card ghost-card--architect"/);
   assert.match(main.innerHTML, /openAddArchitectForGroup\(&quot;loom&quot;\)/);
-  assert.match(main.innerHTML, /Architect A[\s\S]*\+ New Architect[\s\S]*cell cell-add/);
+  assert.match(main.innerHTML, /Architect A[\s\S]*\+ New Architect/);
+  assert.doesNotMatch(main.innerHTML, /cell cell-add/);
 
-  runInContext(context, `openAddArchitectForGroup('loom');`);
+  const click = main.innerHTML.match(/onclick="([^"]*openAddArchitectForGroup\(&quot;loom&quot;\)[^"]*)"/);
+  assert.ok(click, 'new-architect ghost should have a click handler');
+  runInContext(context, `
+    var event = { stopPropagation() {} };
+    ${click[1].replace(/&quot;/g, '"')};
+  `);
   assert.equal(modalDom.modal.classList.contains('visible'), true);
   assert.equal(modalDom.summary.textContent, 'Create a persistent architect session for loom.');
   modalDom.nameInput.value = 'Second Architect';
@@ -9880,6 +9897,31 @@ test('bottom + New Architect button opens the group-scoped architect modal', () 
     group: 'loom',
     command: 'codex architect',
   }]);
+});
+
+test('hierarchical creation controls render shared quarter-height ghost-card classes and labels', () => {
+  const { context, document, sandbox } = createMainRenderHarness();
+  const main = document.getElementById('main');
+
+  sandbox.state.groups = { loom: [] };
+  sandbox.state.group_settings = { loom: { collapsed_default: false } };
+  sandbox.state.children = {};
+  sandbox.state.agents = {};
+
+  runInContext(context, `render();`);
+
+  assert.match(main.innerHTML, /class="ghost-card ghost-card--worker loose-workers-new-worker-btn"[\s\S]*\+ New Worker/);
+  assert.match(main.innerHTML, /class="ghost-card ghost-card--engineer"[\s\S]*\+ New Engineer/);
+  assert.match(main.innerHTML, /class="ghost-card ghost-card--architect"[\s\S]*\+ New Architect/);
+
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  assert.match(css, /--agent-grid-card-height:\s*64px;/);
+  assert.match(css, /--agent-ghost-card-height:\s*calc\(var\(--agent-grid-card-height\) \/ 4\);/);
+  assert.match(css, /\.ghost-card\s*\{[\s\S]*height:\s*var\(--agent-ghost-card-height\)/);
+  assert.match(css, /\.ghost-card--architect\s*\{[\s\S]*width:\s*var\(--agent-architect-column-width\)/);
+  assert.match(css, /\.ghost-card--engineer\s*\{[\s\S]*width:\s*var\(--agent-engineer-column-width\)/);
+  assert.match(css, /\.ghost-card--worker\s*\{[\s\S]*flex:\s*0 1 var\(--agent-grid-card-basis\)/);
+  assert.match(css, /body\.runtime-embedded \.agent-grid\s*\{[\s\S]*--agent-grid-card-height:\s*80px;/);
 });
 
 test('classic runtime keeps the shared left rail filtered to the current window', () => {
@@ -11118,6 +11160,111 @@ test('main hierarchy preserves loose-workers strip scroll and focus across webso
   assert.match(main.innerHTML, /Loose One[\s\S]*Loose Two[\s\S]*\+ New Worker/);
 });
 
+test('main hierarchy preserves focused ghost-card state across websocket delta rerenders', () => {
+  const cases = [
+    { label: 'worker ghost', focusKey: 'loose-new-worker:loom:user' },
+    { label: 'engineer ghost', focusKey: 'section-new-engineer:loom:architect:arch-a' },
+    { label: 'architect ghost', focusKey: 'agent-new-architect:loom' },
+  ];
+
+  for (const item of cases) {
+    const { sandbox, document } = createSandbox();
+    const main = document.register('main');
+    const context = vm.createContext(sandbox);
+    loadScript(context, 'static/js/ws.js');
+    loadScript(context, 'static/js/render.js');
+    runInContext(context, `
+      _cachedAgentTemplates = [];
+      selectedTerminalId = null;
+      getFilterByWindow = function() { return false; };
+      renderTerminalWorkspace = function() {};
+      updateEventsAttentionBadge = function() {};
+    `);
+
+    let currentGhost = null;
+    let renderCount = 0;
+    function installGhostSurface() {
+      currentGhost = new FakeElement(item.label);
+      currentGhost.dataset.focusKey = item.focusKey;
+      currentGhost.value = '';
+      currentGhost.selectionStart = 0;
+      currentGhost.selectionEnd = 0;
+      currentGhost.parentNode = main;
+      main.children = [currentGhost];
+      main.setQuerySelector('[data-focus-key="' + item.focusKey + '"]', currentGhost);
+    }
+
+    Object.defineProperty(main, 'innerHTML', {
+      configurable: true,
+      get() {
+        return this._innerHTML || '';
+      },
+      set(value) {
+        this._innerHTML = value;
+        renderCount += 1;
+        installGhostSurface();
+      },
+    });
+
+    runInContext(context, `
+      _handleFullState({
+        seq: 1,
+        groups: { loom: ['arch-a'] },
+        group_settings: { loom: { collapsed_default: false } },
+        agents: {
+          'arch-a': {
+            id: 'arch-a',
+            name: 'Architect A',
+            kind: 'architect',
+            group: 'loom',
+            cell_type: 'agent',
+            icon: 'A',
+            status: 'running',
+            created_at: 1
+          }
+        },
+        children: {},
+        board_lanes: [],
+        board_tasks: {},
+        panel_events: []
+      });
+    `);
+
+    currentGhost.value = item.label + ' draft';
+    currentGhost.selectionStart = 1;
+    currentGhost.selectionEnd = 5;
+    document.activeElement = currentGhost;
+
+    runInContext(context, `
+      _handleDelta({
+        seq: 2,
+        ops: [
+          {
+            op: 'agent_upsert',
+            id: 'eng-a',
+            name: 'Engineer A',
+            kind: 'engineer',
+            hired_by_architect_id: 'arch-a',
+            group: 'loom',
+            cell_type: 'agent',
+            icon: 'E',
+            status: 'running',
+            created_at: 2
+          },
+          { op: 'group_update', name: 'loom', agents: ['arch-a', 'eng-a'] }
+        ]
+      });
+    `);
+
+    assert.equal(renderCount, 2, item.label);
+    assert.equal(currentGhost.focused, true, item.label + ' focus should survive rerender');
+    assert.equal(currentGhost.value, item.label + ' draft');
+    assert.equal(currentGhost.selectionStart, 1);
+    assert.equal(currentGhost.selectionEnd, 5);
+    assert.match(main.innerHTML, new RegExp('data-focus-key="' + item.focusKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '"'));
+  }
+});
+
 test('main hierarchy ordering is stable when multiple agent deltas arrive in one websocket message', () => {
   const { sandbox, document } = createSandbox();
   document.register('main');
@@ -11643,8 +11790,12 @@ test('main grid keyboard navigation traverses logical rows across sections', () 
     { type: 'loose-workers-strip', items: ['loose-1', 'loose-2', 'grid-control:loose-new-worker:loom:user'] },
     { type: 'engineer-row', items: ['eng-user-a', 'worker-user-a1', 'worker-user-a2'] },
     { type: 'engineer-row', items: ['eng-user-b', 'worker-user-b1'] },
+    { type: 'section-creation-row', items: ['grid-control:section-new-engineer:loom:user'] },
     { type: 'engineer-row', items: ['arch-a', 'eng-a', 'worker-a1', 'worker-a2'] },
+    { type: 'section-creation-row', items: ['grid-control:section-new-engineer:loom:architect:arch-a'] },
     { type: 'engineer-row', items: ['arch-b', 'eng-b', 'worker-b1'] },
+    { type: 'section-creation-row', items: ['grid-control:section-new-engineer:loom:architect:arch-b'] },
+    { type: 'architect-creation-row', items: ['grid-control:agent-new-architect:loom'] },
   ]);
 
   runInContext(context, `moveFocusHorizontal(1);`);
@@ -11654,7 +11805,11 @@ test('main grid keyboard navigation traverses logical rows across sections', () 
   runInContext(context, `moveFocusDown();`);
   assert.equal(jsonValue(context, `focusedItemId`), 'worker-user-b1');
   runInContext(context, `moveFocusDown();`);
+  assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:section-new-engineer:loom:user');
+  runInContext(context, `moveFocusDown();`);
   assert.equal(jsonValue(context, `focusedItemId`), 'worker-a1');
+  runInContext(context, `moveFocusDown();`);
+  assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:section-new-engineer:loom:architect:arch-a');
   runInContext(context, `moveFocusDown();`);
   assert.equal(jsonValue(context, `focusedItemId`), 'worker-b1');
 
@@ -11842,6 +11997,63 @@ test('main grid Tab cycles through creation buttons in visual order', () => {
   assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:agent-new-architect:loom');
 });
 
+test('main grid Enter activates focused creation ghost cards with scoped context', () => {
+  const { context, document, sandbox } = createMainNavigationHarness();
+
+  sandbox.state.groups = { loom: ['arch-a'] };
+  sandbox.state.group_settings = { loom: { collapsed_default: false } };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'arch-a': {
+      id: 'arch-a',
+      name: 'Architect A',
+      kind: 'architect',
+      group: 'loom',
+      cell_type: 'agent',
+      status: 'running',
+      created_at: 1,
+    },
+  };
+
+  runInContext(context, `
+    var engineerGhostCalls = [];
+    var workerGhostCalls = [];
+    var architectGhostCalls = [];
+    openAddEngineerForSection = function(group, architectId) {
+      engineerGhostCalls.push({ group: group, architectId: architectId || '' });
+    };
+    openAddWorkerModal = function(group) {
+      workerGhostCalls.push({ group: group });
+    };
+    openAddArchitectForGroup = function(group) {
+      architectGhostCalls.push({ group: group });
+    };
+    render();
+  `);
+
+  function pressEnter(focusedId) {
+    runInContext(context, `focusedItemId = ${JSON.stringify(focusedId)}; render();`);
+    const event = {
+      key: 'Enter',
+      preventDefault() { this.defaultPrevented = true; },
+    };
+    document.listeners.keydown(event);
+    assert.equal(event.defaultPrevented, true);
+  }
+
+  pressEnter('grid-control:loose-new-worker:loom:user');
+  pressEnter('grid-control:section-new-engineer:loom:user');
+  pressEnter('grid-control:section-new-engineer:loom:architect:arch-a');
+  pressEnter('grid-control:agent-new-architect:loom');
+
+  assert.deepEqual(jsonValue(context, `workerGhostCalls`), [{ group: 'loom' }]);
+  assert.deepEqual(jsonValue(context, `engineerGhostCalls`), [
+    { group: 'loom', architectId: '' },
+    { group: 'loom', architectId: 'arch-a' },
+  ]);
+  assert.deepEqual(jsonValue(context, `architectGhostCalls`), [{ group: 'loom' }]);
+});
+
 test('main hierarchy always renders the synthetic User loose-workers strip when empty', () => {
   const { context, document, sandbox } = createMainRenderHarness();
   const main = document.getElementById('main');
@@ -11857,7 +12069,7 @@ test('main hierarchy always renders the synthetic User loose-workers strip when 
   assert.match(main.innerHTML, /agent-section-user-card[\s\S]*User/);
   const looseStrip = main.innerHTML.match(/<div class="loose-workers-strip"[\s\S]*?<\/div>/);
   assert.ok(looseStrip, 'empty user section should still include the loose-workers strip');
-  assert.match(looseStrip[0], /loose-workers-new-worker-btn/);
+  assert.match(looseStrip[0], /ghost-card ghost-card--worker loose-workers-new-worker-btn/);
   assert.match(looseStrip[0], /openAddWorkerModal\('loom'\)/);
   assert.doesNotMatch(looseStrip[0], /\bdisabled\b/);
   assert.doesNotMatch(looseStrip[0], /data-drag-id=/);

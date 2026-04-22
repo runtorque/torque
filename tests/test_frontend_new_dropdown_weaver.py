@@ -16,7 +16,7 @@ class FrontendNewDropdownWeaverTests(unittest.TestCase):
 
         if proc.returncode != 0:
             self.fail(
-                'frontend new dropdown weaver tests failed\n'
+                'frontend weaver relaunch tests failed\n'
                 f'stdout:\n{proc.stdout}\n'
                 f'stderr:\n{proc.stderr}'
             )
