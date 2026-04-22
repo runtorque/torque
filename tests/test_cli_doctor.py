@@ -29,6 +29,12 @@ class CliDoctorTests(unittest.TestCase):
         self.assertEqual(args.command, "doctor")
         self.assertTrue(args.json)
 
+    def test_parser_accepts_doctor_mcp_health_flag(self):
+        parser = self.cli.build_parser()
+        args = parser.parse_args(["doctor", "--mcp-health"])
+        self.assertEqual(args.command, "doctor")
+        self.assertTrue(args.mcp_health)
+
     def test_get_doctor_local_prefers_daemon_when_port_is_open(self):
         report = {"result": "pass", "source": "api"}
         with mock.patch.object(self.cli.socket, "create_connection", return_value=mock.MagicMock()), \
@@ -60,6 +66,28 @@ class CliDoctorTests(unittest.TestCase):
                 self.cli.cmd_doctor(SimpleNamespace(port=18932, json=True))
 
         self.assertEqual(json.loads(out.getvalue()), report)
+
+    def test_cmd_doctor_prints_mcp_health_only(self):
+        report = {
+            "result": "fail",
+            "mcp_health": {
+                "recent_window_seconds": 3600,
+                "pending_failed_writes": 1,
+                "totals": {"retry": 2, "drop": 1},
+                "surfaces": {"loom": {"events": {"retry": 2}, "tools": {}}},
+            },
+        }
+        with mock.patch.object(self.cli, "get_doctor_local", return_value=report):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.cli.cmd_doctor(
+                    SimpleNamespace(port=18932, json=False, mcp_health=True)
+                )
+
+        text = out.getvalue()
+        self.assertIn("Loom MCP health", text)
+        self.assertIn("pending_failed_writes: 1", text)
+        self.assertIn("retries=2", text)
 
     def test_cmd_doctor_exits_nonzero_on_fail(self):
         report = {"result": "fail", "checks": [], "failed_checks": ["migration_version"]}

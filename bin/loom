@@ -18,7 +18,19 @@ import time
 import urllib.error
 import urllib.request
 
-from loom.doctor import build_doctor_report_for_db, format_doctor_report
+from loom.doctor import (
+    build_doctor_report_for_db,
+    format_doctor_report,
+    format_mcp_health_report,
+)
+from loom.mcp_retry import (
+    DEFAULT_ATTEMPTS,
+    DEFAULT_BACKOFFS,
+    ensure_api_payload_idempotency,
+    is_api_write_command,
+    is_transient_exception,
+    is_transient_http_status,
+)
 
 DEFAULT_PORT = 18932
 DESKTOP_DEFAULT_PORT = 18933
@@ -562,29 +574,98 @@ def api_url(port):
     return f"http://127.0.0.1:{port}/api/cmd"
 
 
+def _queue_failed_api_write(payload, *, attempts, last_error):
+    key = str(payload.get("idempotency_key", "") or "").strip()
+    if not key or not is_api_write_command(payload.get("cmd", "")):
+        return False
+    try:
+        from loom.db import LoomDB
+        db = LoomDB(Path(LOOM_DB))
+        db.init()
+        try:
+            db.enqueue_failed_write(
+                idempotency_key=key,
+                endpoint="/api/cmd",
+                method="POST",
+                surface="api",
+                tool_name=str(payload.get("cmd", "") or ""),
+                caller_id=str(payload.get("cell_id", "") or ""),
+                payload=payload,
+                attempts=attempts,
+                last_error=last_error,
+            )
+            db.record_mcp_health_event(
+                surface="api",
+                tool_name=str(payload.get("cmd", "") or ""),
+                event="drop",
+                error=last_error,
+            )
+        finally:
+            db.close()
+        return True
+    except Exception:
+        return False
+
+
 def api_call(cmd, port=DEFAULT_PORT, **kwargs):
     """Send a command to the Loom daemon, return parsed response."""
-    payload = {"cmd": cmd, **kwargs}
-    data = json.dumps(payload).encode()
-    req = urllib.request.Request(
-        api_url(port),
-        data=data,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            return json.loads(resp.read())
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode(errors="replace")
+    payload, _key, _cmd_name = ensure_api_payload_idempotency({"cmd": cmd, **kwargs})
+    last_error = ""
+    for attempt in range(1, DEFAULT_ATTEMPTS + 1):
+        data = json.dumps(payload).encode()
+        req = urllib.request.Request(
+            api_url(port),
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
         try:
-            return json.loads(body)
-        except Exception:
-            die(f"HTTP {exc.code}: {body}")
-    except urllib.error.URLError as exc:
-        die(f"Cannot connect to Loom daemon on localhost:{port}\n"
-            f"  Is it running? Start with: make run (or Scripts menu → loom)\n"
-            f"  ({exc.reason})")
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return json.loads(resp.read())
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode(errors="replace")
+            if is_transient_http_status(exc.code) and attempt < DEFAULT_ATTEMPTS:
+                last_error = f"HTTP {exc.code}: {body}"
+                time.sleep(DEFAULT_BACKOFFS[min(attempt - 1, len(DEFAULT_BACKOFFS) - 1)])
+                continue
+            if is_transient_http_status(exc.code):
+                last_error = f"HTTP {exc.code}: {body}"
+                queued = _queue_failed_api_write(
+                    payload,
+                    attempts=attempt,
+                    last_error=last_error,
+                )
+                if queued:
+                    die(
+                        "Loom daemon returned repeated transient errors; "
+                        "write was queued durably for replay on next daemon boot.\n"
+                        f"  ({last_error})"
+                    )
+            try:
+                return json.loads(body)
+            except Exception:
+                die(f"HTTP {exc.code}: {body}")
+        except urllib.error.URLError as exc:
+            reason = exc.reason if isinstance(exc.reason, BaseException) else exc
+            if is_transient_exception(reason) and attempt < DEFAULT_ATTEMPTS:
+                last_error = str(exc.reason)
+                time.sleep(DEFAULT_BACKOFFS[min(attempt - 1, len(DEFAULT_BACKOFFS) - 1)])
+                continue
+            last_error = str(exc.reason)
+            queued = _queue_failed_api_write(
+                payload,
+                attempts=attempt,
+                last_error=last_error,
+            )
+            if queued:
+                die(
+                    "Cannot connect to Loom daemon; write was queued durably "
+                    "for replay on next daemon boot.\n"
+                    f"  ({exc.reason})"
+                )
+            die(f"Cannot connect to Loom daemon on localhost:{port}\n"
+                f"  Is it running? Start with: make run (or Scripts menu → loom)\n"
+                f"  ({exc.reason})")
 
 
 def die(msg):
@@ -2896,6 +2977,12 @@ def cmd_logs(args):
 
 def cmd_doctor(args):
     report = get_doctor_local(args.port)
+    if getattr(args, "mcp_health", False):
+        if args.json:
+            print(json.dumps(report.get("mcp_health", {}), indent=2))
+        else:
+            print(format_mcp_health_report(report))
+        return
     if args.json:
         print(json.dumps(report, indent=2))
     else:
@@ -4155,6 +4242,8 @@ def build_parser():
     p = sub.add_parser("doctor", help="Run Loom doctor checks")
     p.add_argument("--json", action="store_true",
                    help="Output raw JSON")
+    p.add_argument("--mcp-health", action="store_true",
+                   help="Show recent MCP retry/drop/dedupe/replay counts")
     p.set_defaults(func=cmd_doctor)
 
     # -- desktop ------------------------------------------------------------

@@ -103,7 +103,8 @@ from .external_tickets import (
     post_ticket_comment,
     push_ticket_status,
 )
-from .mcp import create_mcp_handler
+from .mcp import create_mcp_handler, dispatch_mcp_rpc_body
+from .mcp_retry import api_request_hash, is_api_write_command, replay_failed_writes
 from .identity import (
     agent_identity_anchor,
     agent_kind_for_identity,
@@ -9737,6 +9738,42 @@ async def main(connection=None):
             group=group, message=message, task_id=task_id)
         state._emit("event_append", **pe)
 
+    async def _replay_failed_write(write: dict):
+        endpoint = str(write.get("endpoint", "") or "")
+        payload = dict(write.get("payload", {}) or {})
+        if endpoint == "/mcp":
+            response, _status = await dispatch_mcp_rpc_body(
+                payload,
+                cell_id=str(write.get("caller_id", "") or ""),
+                handle_command=handle_command,
+                state=state,
+            )
+            if response.get("error"):
+                log.info(
+                    "Queued MCP write replay reached tool surface with error: %s",
+                    response.get("error"),
+                )
+            return response
+        if endpoint == "/api/cmd":
+            result = await handle_command(payload)
+            idempotency_key = str(payload.get("idempotency_key", "") or "").strip()
+            cmd = str(payload.get("cmd", "") or "")
+            if idempotency_key and is_api_write_command(cmd):
+                response_payload = {"ok": True, "data": result if result else {}}
+                db.save_mcp_idempotency(
+                    idempotency_key=idempotency_key,
+                    surface="api",
+                    tool_name=cmd,
+                    request_hash=api_request_hash(payload),
+                    response=response_payload,
+                )
+            return result
+        raise ValueError(f"Unsupported failed-write endpoint: {endpoint}")
+
+    replay_summary = await replay_failed_writes(db, _replay_failed_write)
+    if replay_summary.get("attempted"):
+        log.info("Failed-write replay summary: %s", replay_summary)
+
     # -- Scheduler ----------------------------------------------------------
 
     asyncio.create_task(
@@ -9863,6 +9900,37 @@ async def main(connection=None):
             return web.json_response(
                 {"ok": False, "error": "missing 'cmd'"}, status=400)
 
+        idempotency_key = str(data.get("idempotency_key", "") or "").strip()
+        request_hash = ""
+        if idempotency_key and is_api_write_command(cmd):
+            request_hash = api_request_hash(data)
+            existing = db.load_mcp_idempotency(idempotency_key)
+            if existing:
+                if (
+                    str(existing.get("request_hash", "") or "")
+                    and str(existing.get("request_hash", "") or "") != request_hash
+                ):
+                    return web.json_response(
+                        {
+                            "ok": False,
+                            "error": (
+                                "idempotency key was reused for a different "
+                                f"API command ({cmd})"
+                            ),
+                        },
+                        status=409,
+                    )
+                try:
+                    cached = json.loads(existing.get("response_json", "{}"))
+                except (json.JSONDecodeError, TypeError):
+                    cached = {}
+                db.record_mcp_health_event(
+                    surface="api",
+                    tool_name=str(cmd or ""),
+                    event="dedupe",
+                )
+                return web.json_response(cached)
+
         try:
             result = await handle_command(data)
         except Exception as exc:
@@ -9875,7 +9943,16 @@ async def main(connection=None):
                 {"ok": False, "error": result.get("message", "")})
 
         payload = result if result else await _state_payload()
-        return web.json_response({"ok": True, "data": payload})
+        response_payload = {"ok": True, "data": payload}
+        if idempotency_key and is_api_write_command(cmd):
+            db.save_mcp_idempotency(
+                idempotency_key=idempotency_key,
+                surface="api",
+                tool_name=str(cmd or ""),
+                request_hash=request_hash or api_request_hash(data),
+                response=response_payload,
+            )
+        return web.json_response(response_payload)
 
     # -- Attachment upload/serve endpoints -----------------------------------
 
