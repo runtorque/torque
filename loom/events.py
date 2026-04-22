@@ -184,16 +184,33 @@ class PanelEventLog:
 
     Unlike EventLog (per-cell, low-level), this stores aggregate events
     visible across the UI: task dispatched, completed, ask created, etc.
-    When a *db* is provided, events are persisted to SQLite and the
-    in-memory deque acts as a write-through cache for the most recent
-    ``_max_size`` entries.
+    The in-memory deque is still updated synchronously so recent-event
+    queries and WebSocket broadcasts see new events immediately.
+
+    When a *db* is provided, SQLite persistence is batched: appends/updates
+    are queued and flushed in one transaction after ``flush_interval`` seconds
+    or once ``flush_max_events`` inserts have accumulated.  Each batch commits
+    independently; a hard process crash can lose events that are still only in
+    memory (normally bounded by the small flush window/threshold), while
+    graceful daemon shutdown must call ``aclose()`` to flush pending events.
     """
 
-    def __init__(self, max_size: int = 500, db=None):
+    def __init__(self, max_size: int = 500, db=None,
+                 flush_max_events: int = 50,
+                 flush_interval: float = 0.1):
         self._max_size = max_size
         self._db = db
         self._events: deque[dict] = deque(maxlen=max_size)
         self.on_event = None  # callback(event_dict) — called on append/replace
+        self._flush_max_events = max(1, int(flush_max_events or 1))
+        self._flush_interval = max(0.0, float(flush_interval or 0.0))
+        self._pending_events: list[dict] = []
+        self._pending_event_ids: set[int] = set()
+        self._pending_updates: dict[int, dict] = {}
+        self._flush_handle: asyncio.TimerHandle | None = None
+        self._flush_task: asyncio.Task | None = None
+        self._last_flush_failed = False
+        self._closed = False
         # Seed id counter and hydrate deque from DB after restart
         if db:
             self._id_counter = db.get_panel_event_max_id()
@@ -217,11 +234,7 @@ class PanelEventLog:
         }
         self._events.append(evt)
         if self._db:
-            try:
-                self._db.save_panel_event(evt)
-                self._db.trim_panel_events(self._max_size)
-            except Exception:
-                log.exception("Failed to persist panel event %s", evt["id"])
+            self._queue_insert(evt)
         if self.on_event:
             try:
                 self.on_event(evt)
@@ -242,13 +255,182 @@ class PanelEventLog:
                     if k in evt:
                         evt[k] = v
                 if self._db:
-                    try:
-                        self._db.update_panel_event(evt)
-                    except Exception:
-                        log.exception("Failed to update panel event %s",
-                                      evt["id"])
+                    self._queue_update(evt)
                 return evt
         return self.append(kind=kind, cell_id=cell_id, **kwargs)
+
+    def _has_pending_db_work(self) -> bool:
+        return bool(self._pending_events or self._pending_updates)
+
+    def _queue_insert(self, evt: dict) -> None:
+        self._pending_events.append(evt)
+        self._pending_event_ids.add(int(evt["id"]))
+        delay = 0.0 if len(self._pending_events) >= self._flush_max_events \
+            else self._flush_interval
+        self._schedule_flush(delay)
+
+    def _queue_update(self, evt: dict) -> None:
+        evt_id = int(evt["id"])
+        if evt_id in self._pending_event_ids:
+            # The insert has not been flushed yet; it will persist the latest
+            # in-memory contents when the batch is copied for SQLite.
+            return
+        self._pending_updates[evt_id] = evt
+        self._schedule_flush(self._flush_interval)
+
+    def _schedule_flush(self, delay: float | None = None) -> None:
+        if not self._db or self._closed:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # Non-async contexts (mostly tests/tools) keep the old durability
+            # semantics instead of leaving unflushed work with no running loop.
+            self.flush_pending_sync()
+            return
+
+        delay = self._flush_interval if delay is None else max(0.0, delay)
+        if delay <= 0:
+            if self._flush_handle:
+                self._flush_handle.cancel()
+                self._flush_handle = None
+            loop.call_soon(self._ensure_flush_task)
+            return
+        if self._flush_handle is None:
+            self._flush_handle = loop.call_later(delay, self._ensure_flush_task)
+
+    def _ensure_flush_task(self) -> None:
+        self._flush_handle = None
+        if not self._db or self._closed:
+            return
+        if self._flush_task and not self._flush_task.done():
+            return
+        self._flush_task = asyncio.create_task(self._flush_pending_async())
+
+    def _pop_pending_batch(self) -> tuple[list[dict], list[dict]]:
+        events = list(self._pending_events)
+        event_ids = {int(evt["id"]) for evt in events}
+        updates = [
+            evt
+            for evt_id, evt in self._pending_updates.items()
+            if int(evt_id) not in event_ids
+        ]
+        self._pending_events.clear()
+        self._pending_event_ids.clear()
+        self._pending_updates.clear()
+        return events, updates
+
+    def _requeue_pending_batch(self, events: list[dict],
+                               updates: list[dict]) -> None:
+        if events:
+            self._pending_events = list(events) + self._pending_events
+            self._pending_event_ids.update(int(evt["id"]) for evt in events)
+        for evt in updates:
+            self._pending_updates[int(evt["id"])] = evt
+
+    def _persist_batch_sync(self, events: list[dict],
+                            updates: list[dict],
+                            *,
+                            separate_connection: bool) -> int:
+        if not self._db or (not events and not updates):
+            return 0
+        return self._db.save_panel_events_batch(
+            events,
+            updates=updates,
+            max_size=self._max_size,
+            separate_connection=separate_connection,
+        )
+
+    async def _flush_pending_async(self) -> None:
+        self._last_flush_failed = False
+        try:
+            while self._has_pending_db_work():
+                events, updates = self._pop_pending_batch()
+                if not events and not updates:
+                    break
+                event_rows = [dict(evt) for evt in events]
+                update_rows = [dict(evt) for evt in updates]
+                try:
+                    await asyncio.to_thread(
+                        self._persist_batch_sync,
+                        event_rows,
+                        update_rows,
+                        separate_connection=True,
+                    )
+                except Exception:
+                    self._last_flush_failed = True
+                    self._requeue_pending_batch(events, updates)
+                    log.exception(
+                        "Failed to persist %d panel events and %d updates",
+                        len(events), len(updates))
+                    break
+                if (self._pending_events
+                        and len(self._pending_events) >= self._flush_max_events):
+                    continue
+                break
+        finally:
+            self._flush_task = None
+            if self._has_pending_db_work() and not self._closed:
+                delay = 0.0 if (
+                    len(self._pending_events) >= self._flush_max_events
+                ) else self._flush_interval
+                self._schedule_flush(delay)
+
+    def flush_pending_sync(self) -> int:
+        """Synchronously flush pending panel-event DB work.
+
+        This is used only when no event loop is running.  The daemon's normal
+        path uses the async/off-loop flusher so appends stay in-memory-only.
+        """
+        if self._flush_handle:
+            self._flush_handle.cancel()
+            self._flush_handle = None
+        events, updates = self._pop_pending_batch()
+        try:
+            return self._persist_batch_sync(
+                events,
+                updates,
+                separate_connection=False,
+            )
+        except Exception:
+            self._requeue_pending_batch(events, updates)
+            log.exception(
+                "Failed to synchronously persist %d panel events and %d updates",
+                len(events), len(updates))
+            return 0
+
+    async def flush(self) -> None:
+        """Flush all queued SQLite work for tests and graceful shutdown."""
+        if self._flush_handle:
+            self._flush_handle.cancel()
+            self._flush_handle = None
+        while True:
+            task = self._flush_task
+            if task and not task.done():
+                await task
+                if self._last_flush_failed:
+                    return
+                continue
+            if not self._has_pending_db_work():
+                return
+            self._ensure_flush_task()
+            task = self._flush_task
+            if not task:
+                return
+            await task
+            if self._last_flush_failed:
+                return
+
+    async def aclose(self) -> None:
+        """Cancel timers and flush pending SQLite writes before shutdown."""
+        if self._flush_handle:
+            self._flush_handle.cancel()
+            self._flush_handle = None
+        await self.flush()
+        self._closed = True
+        if self._flush_handle:
+            self._flush_handle.cancel()
+            self._flush_handle = None
 
     def get_recent(self, n: int = 100) -> list[dict]:
         if n >= len(self._events):

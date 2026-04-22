@@ -1,5 +1,10 @@
 import asyncio
 import importlib
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
 import time
 import unittest
 
@@ -34,6 +39,219 @@ class EventBusTests(unittest.IsolatedAsyncioTestCase):
             kind=kind,
             current_task_id="LOOM:1",
         )
+
+    def _make_temp_db(self):
+        from loom.db import LoomDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = LoomDB(Path(tmp.name) / "loom.db")
+        db.init()
+        self.addCleanup(db.close)
+        return db
+
+    async def test_panel_event_log_batches_sqlite_flush(self):
+        db = self._make_temp_db()
+        panel_log = self.events_mod.PanelEventLog(
+            max_size=10,
+            db=db,
+            flush_max_events=3,
+            flush_interval=60.0,
+        )
+        try:
+            panel_log.append(
+                kind="task_dispatched",
+                cell_id="agent-1",
+                agent_name="Agent",
+                group="g",
+                message="one",
+            )
+            panel_log.append(
+                kind="task_completed",
+                cell_id="agent-2",
+                agent_name="Agent",
+                group="g",
+                message="two",
+            )
+
+            # Appends are in-memory-only until the batch threshold/window
+            # flushes them to SQLite.
+            self.assertEqual(db.load_panel_events(limit=10), [])
+
+            panel_log.append(
+                kind="task_derived",
+                cell_id="agent-3",
+                agent_name="Agent",
+                group="g",
+                message="three",
+            )
+            await asyncio.wait_for(panel_log.flush(), timeout=2.0)
+
+            persisted = db.load_panel_events(limit=10)
+            self.assertEqual(
+                [evt["message"] for evt in persisted],
+                ["one", "two", "three"],
+            )
+        finally:
+            await panel_log.aclose()
+
+    async def test_panel_event_log_timer_flush_persists_within_window(self):
+        db = self._make_temp_db()
+        panel_log = self.events_mod.PanelEventLog(
+            max_size=10,
+            db=db,
+            flush_max_events=50,
+            flush_interval=0.02,
+        )
+        try:
+            panel_log.append(
+                kind="task_dispatched",
+                cell_id="agent-1",
+                agent_name="Agent",
+                group="g",
+                message="timer",
+            )
+
+            deadline = time.monotonic() + 0.5
+            persisted = []
+            while time.monotonic() < deadline:
+                persisted = db.load_panel_events(limit=10)
+                if persisted:
+                    break
+                await asyncio.sleep(0.01)
+
+            self.assertEqual([evt["message"] for evt in persisted], ["timer"])
+        finally:
+            await panel_log.aclose()
+
+    async def test_panel_event_log_shutdown_flush_survives_restart(self):
+        db = self._make_temp_db()
+        panel_log = self.events_mod.PanelEventLog(
+            max_size=10,
+            db=db,
+            flush_max_events=50,
+            flush_interval=60.0,
+        )
+        panel_log.append(
+            kind="task_dispatched",
+            cell_id="agent-1",
+            agent_name="Agent",
+            group="g",
+            message="shutdown",
+        )
+        self.assertEqual(db.load_panel_events(limit=10), [])
+
+        await panel_log.aclose()
+
+        restarted_panel_log = self.events_mod.PanelEventLog(max_size=10, db=db)
+        try:
+            self.assertEqual(
+                [evt["message"] for evt in restarted_panel_log.get_recent()],
+                ["shutdown"],
+            )
+        finally:
+            await restarted_panel_log.aclose()
+
+    async def test_panel_event_log_batches_replace_last_updates(self):
+        db = self._make_temp_db()
+        panel_log = self.events_mod.PanelEventLog(
+            max_size=10,
+            db=db,
+            flush_max_events=50,
+            flush_interval=60.0,
+        )
+        try:
+            panel_log.append(
+                kind="agent_progress",
+                cell_id="agent-1",
+                agent_name="Agent",
+                group="g",
+                message="first",
+            )
+            panel_log.replace_last(
+                "agent_progress",
+                "agent-1",
+                agent_name="Agent",
+                group="g",
+                message="latest before insert",
+            )
+            await panel_log.flush()
+            self.assertEqual(
+                [evt["message"] for evt in db.load_panel_events(limit=10)],
+                ["latest before insert"],
+            )
+
+            panel_log.replace_last(
+                "agent_progress",
+                "agent-1",
+                agent_name="Agent",
+                group="g",
+                message="latest after insert",
+            )
+            self.assertEqual(
+                [evt["message"] for evt in db.load_panel_events(limit=10)],
+                ["latest before insert"],
+            )
+            await panel_log.flush()
+            self.assertEqual(
+                [evt["message"] for evt in db.load_panel_events(limit=10)],
+                ["latest after insert"],
+            )
+        finally:
+            await panel_log.aclose()
+
+    def test_panel_event_log_forced_crash_mid_batch_loses_pending_queue(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db_path = Path(tmp.name) / "loom.db"
+        repo_root = Path(__file__).resolve().parents[1]
+        code = f"""
+import asyncio
+import os
+from pathlib import Path
+
+from loom.db import LoomDB
+from loom.events import PanelEventLog
+
+async def main():
+    db = LoomDB(Path({str(db_path)!r}))
+    db.init()
+    panel_log = PanelEventLog(
+        max_size=10,
+        db=db,
+        flush_max_events=50,
+        flush_interval=60.0,
+    )
+    panel_log.append(
+        kind="task_dispatched",
+        cell_id="agent-1",
+        agent_name="Agent",
+        group="g",
+        message="crash-pending",
+    )
+    os._exit(0)
+
+asyncio.run(main())
+"""
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(repo_root)
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=repo_root,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        from loom.db import LoomDB
+
+        db = LoomDB(db_path)
+        db.init()
+        self.addCleanup(db.close)
+        self.assertEqual(db.load_panel_events(limit=10), [])
 
     def test_architect_cell_event_stream_survives_restart_via_panel_events(self):
         cell = self._make_cell("arch-1", "architect")

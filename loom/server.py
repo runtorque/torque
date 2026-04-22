@@ -10407,6 +10407,10 @@ async def main(connection=None):
                 pass
         state._ws_clients.clear()
         try:
+            await panel_log.aclose()
+        except Exception:
+            log.exception("Panel event log shutdown flush failed")
+        try:
             await bridge.shutdown()
         except Exception:
             log.exception("Terminal adapter shutdown failed")
@@ -10414,3 +10418,7 @@ async def main(connection=None):
             await runner.cleanup()
         except Exception:
             log.exception("HTTP runner cleanup failed")
+        try:
+            db.close()
+        except Exception:
+            log.exception("SQLite database close failed")

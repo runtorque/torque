@@ -1197,6 +1197,61 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
 
     # -- Panel events -------------------------------------------------------
 
+    @staticmethod
+    def _panel_event_insert_values(evt: dict) -> tuple:
+        return (
+            evt["id"], evt["timestamp"], evt["kind"],
+            evt.get("cell_id", ""), evt.get("agent_name", ""),
+            evt.get("group", ""), evt.get("message", ""),
+            evt.get("task_id", ""),
+        )
+
+    @staticmethod
+    def _panel_event_update_values(evt: dict) -> tuple:
+        return (
+            evt["timestamp"], evt["kind"], evt.get("cell_id", ""),
+            evt.get("agent_name", ""), evt.get("group", ""),
+            evt.get("message", ""), evt.get("task_id", ""),
+            evt["id"],
+        )
+
+    @staticmethod
+    def _save_panel_events_batch_on_conn(
+        conn: sqlite3.Connection,
+        events: list[dict],
+        updates: list[dict],
+        max_size: int | None,
+    ) -> int:
+        inserted = 0
+        updated = 0
+        try:
+            if events:
+                conn.executemany(
+                    "INSERT OR REPLACE INTO panel_events "
+                    "(id, timestamp, kind, cell_id, agent_name, group_name, "
+                    "message, task_id) VALUES (?,?,?,?,?,?,?,?)",
+                    [LoomDB._panel_event_insert_values(evt) for evt in events],
+                )
+                inserted = len(events)
+            if updates:
+                conn.executemany(
+                    "UPDATE panel_events SET timestamp=?, kind=?, cell_id=?, "
+                    "agent_name=?, group_name=?, message=?, task_id=? WHERE id=?",
+                    [LoomDB._panel_event_update_values(evt) for evt in updates],
+                )
+                updated = len(updates)
+            if max_size is not None:
+                conn.execute(
+                    "DELETE FROM panel_events WHERE id NOT IN "
+                    "(SELECT id FROM panel_events ORDER BY id DESC LIMIT ?)",
+                    (max(0, int(max_size)),),
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        return inserted + updated
+
     def save_panel_event(self, evt: dict) -> int:
         """Insert a panel event and return the assigned row ID."""
         with profiling.timer("sqlite_write_ms"), \
@@ -1205,12 +1260,38 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 "INSERT INTO panel_events "
                 "(id, timestamp, kind, cell_id, agent_name, group_name, "
                 "message, task_id) VALUES (?,?,?,?,?,?,?,?)",
-                (evt["id"], evt["timestamp"], evt["kind"],
-                 evt.get("cell_id", ""), evt.get("agent_name", ""),
-                 evt.get("group", ""), evt.get("message", ""),
-                 evt.get("task_id", "")))
+                self._panel_event_insert_values(evt))
             self._conn.commit()
         return evt["id"]
+
+    def save_panel_events_batch(
+        self,
+        events: list[dict],
+        updates: list[dict] | None = None,
+        max_size: int | None = None,
+        *,
+        separate_connection: bool = False,
+    ) -> int:
+        """Persist panel event inserts/updates in one transaction.
+
+        ``separate_connection`` is used by the async panel-event flush path so
+        SQLite I/O can run off the event loop without sharing the main
+        connection across threads.
+        """
+        events = list(events or [])
+        updates = list(updates or [])
+        if not events and not updates and max_size is None:
+            return 0
+        if separate_connection:
+            conn = sqlite3.connect(str(self.db_path))
+            try:
+                conn.execute("PRAGMA foreign_keys=ON")
+                return self._save_panel_events_batch_on_conn(
+                    conn, events, updates, max_size)
+            finally:
+                conn.close()
+        return self._save_panel_events_batch_on_conn(
+            self._conn, events, updates, max_size)
 
     def update_panel_event(self, evt: dict):
         """Update an existing panel event row."""
@@ -1219,10 +1300,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             self._conn.execute(
                 "UPDATE panel_events SET timestamp=?, kind=?, cell_id=?, "
                 "agent_name=?, group_name=?, message=?, task_id=? WHERE id=?",
-                (evt["timestamp"], evt["kind"], evt.get("cell_id", ""),
-                 evt.get("agent_name", ""), evt.get("group", ""),
-                 evt.get("message", ""), evt.get("task_id", ""),
-                 evt["id"]))
+                self._panel_event_update_values(evt))
             self._conn.commit()
 
     def trim_panel_events(self, max_size: int):
