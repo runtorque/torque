@@ -6,6 +6,12 @@ var _agentPanelCellEventsLoadingById = {};
 var _agentPanelCellEventsLastFetchById = {};
 var _agentPanelCellEventsLastFetchEventAtById = {};
 var _AGENT_PANEL_CELL_EVENTS_REFRESH_MS = 1500;
+var _AGENT_PANEL_EVENTS_PAGE_SIZE = 20;
+var _AGENT_PANEL_EVENTS_SCROLL_THRESHOLD = 80;
+var _agentPanelEventsPagerAgentId = '';
+var _agentPanelEventsVisibleLimit = _AGENT_PANEL_EVENTS_PAGE_SIZE;
+var _agentPanelEventsLastTotal = 0;
+var _agentPanelEventsPreRenderAtLiveTail = false;
 var _agentPanelTabSpecByKind = {
   architect: [
     { key: 'decisions', label: 'Decisions' },
@@ -290,6 +296,146 @@ function _agentPanelRestoreScrollAnchor(container, snapshot) {
   var containerRect = container.getBoundingClientRect();
   var targetRect = target.getBoundingClientRect();
   container.scrollTop += (targetRect.top - containerRect.top) - (snapshot.offset || 0);
+}
+
+function _agentPanelEventsAtLiveTail(container) {
+  // Agent-panel event lists are newest-first today, so the live tail is the
+  // top edge.  Keep this intentionally separate from older-event pagination
+  // (which loads near the bottom) so the current ordering semantics stay put.
+  if (!container || typeof container.scrollTop !== 'number') return false;
+  return container.scrollTop <= 4;
+}
+
+function _agentPanelEventsResetPager(agentId) {
+  _agentPanelEventsPagerAgentId = String(agentId || '');
+  _agentPanelEventsVisibleLimit = _AGENT_PANEL_EVENTS_PAGE_SIZE;
+  _agentPanelEventsLastTotal = 0;
+}
+
+function _agentPanelEventsEnsurePager(agent) {
+  var agentId = String((agent && agent.id) || '');
+  if (agentId !== _agentPanelEventsPagerAgentId) {
+    _agentPanelEventsResetPager(agentId);
+  }
+}
+
+function _agentPanelEventCompareDesc(a, b) {
+  a = a || {};
+  b = b || {};
+  var tsDiff = Number(b.timestamp || 0) - Number(a.timestamp || 0);
+  if (tsDiff) return tsDiff;
+  var aNum = Number(a.id);
+  var bNum = Number(b.id);
+  if (!Number.isNaN(aNum) && !Number.isNaN(bNum) && aNum !== bNum) {
+    return bNum - aNum;
+  }
+  return String(b.id || '').localeCompare(String(a.id || ''));
+}
+
+function _agentPanelEventPage(agent, events) {
+  _agentPanelEventsEnsurePager(agent);
+  events = Array.isArray(events) ? events : [];
+  var total = events.length;
+  var added = total - _agentPanelEventsLastTotal;
+  if (added > 0
+      && _agentPanelEventsLastTotal > 0
+      && !_agentPanelEventsPreRenderAtLiveTail) {
+    // A focused-agent event landed above the user's viewport. Grow the render
+    // window by the inserted rows so the previously visible older row stays in
+    // the DOM for the shared anchor-restore helper to lock onto.
+    _agentPanelEventsVisibleLimit += added;
+  }
+  _agentPanelEventsLastTotal = total;
+
+  if (_agentPanelEventsVisibleLimit < _AGENT_PANEL_EVENTS_PAGE_SIZE) {
+    _agentPanelEventsVisibleLimit = _AGENT_PANEL_EVENTS_PAGE_SIZE;
+  }
+
+  var visibleCount = Math.min(total, _agentPanelEventsVisibleLimit);
+  return {
+    events: events.slice(0, visibleCount),
+    total: total,
+    visibleCount: visibleCount,
+    hasMore: visibleCount < total,
+  };
+}
+
+function _agentPanelEventSectionCount(page) {
+  if (!page || !page.total) return '0';
+  if (page.hasMore) return page.visibleCount + ' / ' + page.total;
+  return String(page.total);
+}
+
+function _agentPanelRenderEventLoadMore(page) {
+  if (!page || !page.hasMore) return '';
+  var remaining = Math.max(0, page.total - page.visibleCount);
+  var nextCount = Math.min(_AGENT_PANEL_EVENTS_PAGE_SIZE, remaining);
+  return '<button type="button" class="agent-panel-event-load-more"'
+    + ' onclick="agentPanelLoadMoreEvents(event)">'
+    + 'Load ' + nextCount + ' older event' + (nextCount === 1 ? '' : 's')
+    + '</button>';
+}
+
+function _agentPanelSortedCellEvents(agent) {
+  var events = _agentPanelCellEventsForAgent(agent);
+  events.sort(_agentPanelEventCompareDesc);
+  return events;
+}
+
+function _agentPanelSortedWorkerEvents(agent) {
+  var agentId = String((agent && agent.id) || '');
+  var events = (state && state.panel_events ? state.panel_events.slice() : []).filter(function(evt) {
+    return String((evt && evt.cell_id) || '') === agentId;
+  });
+  events.sort(_agentPanelEventCompareDesc);
+  return events;
+}
+
+function _agentPanelEventTotalForAgent(agent) {
+  if (!agent) return 0;
+  if (_agentPanelUsesMergedCellEvents(agent)) {
+    return _agentPanelSortedCellEvents(agent).length;
+  }
+  if (_agentPanelKind(agent) === 'worker') {
+    return _agentPanelSortedWorkerEvents(agent).length;
+  }
+  return 0;
+}
+
+function _agentPanelEventsNearOlderTail(container) {
+  if (!container || typeof container.scrollTop !== 'number') return false;
+  var scrollHeight = Number(container.scrollHeight || 0);
+  var clientHeight = Number(container.clientHeight || 0);
+  return scrollHeight - container.scrollTop - clientHeight < _AGENT_PANEL_EVENTS_SCROLL_THRESHOLD;
+}
+
+function _agentPanelAttachEventsScroll(root, agent) {
+  if (!root || typeof root.querySelector !== 'function' || !agent) return;
+  if (_agentPanelActiveTab(_agentPanelKind(agent)) !== 'events') return;
+  var container = root.querySelector('.agent-panel-content');
+  if (!container || typeof container.addEventListener !== 'function') return;
+  container.addEventListener('scroll', agentPanelEventsOnScroll);
+}
+
+function agentPanelEventsOnScroll(evt) {
+  var container = (evt && (evt.currentTarget || evt.target)) || this;
+  if (!_agentPanelEventsNearOlderTail(container)) return;
+  agentPanelLoadMoreEvents();
+}
+
+function agentPanelLoadMoreEvents(evt) {
+  if (evt && typeof evt.preventDefault === 'function') evt.preventDefault();
+  if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
+  var agent = _resolveFocusedAgent();
+  if (!agent || _agentPanelActiveTab(_agentPanelKind(agent)) !== 'events') return;
+  _agentPanelEventsEnsurePager(agent);
+  var total = _agentPanelEventTotalForAgent(agent);
+  if (_agentPanelEventsVisibleLimit >= total) return;
+  _agentPanelEventsVisibleLimit = Math.min(
+    total,
+    _agentPanelEventsVisibleLimit + _AGENT_PANEL_EVENTS_PAGE_SIZE
+  );
+  renderAgentPanel();
 }
 
 function _agentPanelRenderTabs(kind, activeTab) {
@@ -608,18 +754,14 @@ function _agentPanelRenderCellEventItem(evt, index) {
 function _renderPersistentCellEvents(agent) {
   _agentPanelRequestCellEvents(agent);
   var agentId = String((agent && agent.id) || '');
-  var events = _agentPanelCellEventsForAgent(agent);
-  events.sort(function(a, b) {
-    var tsDiff = Number((b && b.timestamp) || 0) - Number((a && a.timestamp) || 0);
-    if (tsDiff) return tsDiff;
-    return String((b && b.id) || '').localeCompare(String((a && a.id) || ''));
-  });
+  var events = _agentPanelSortedCellEvents(agent);
+  var page = _agentPanelEventPage(agent, events);
   var loading = !!_agentPanelCellEventsLoadingById[agentId];
 
   var html = '<div class="agent-panel-event-section">';
   html += '<div class="agent-panel-event-section-header">';
   html += '<span class="agent-panel-event-section-title">Cell events</span>';
-  html += '<span class="agent-panel-event-section-count">' + events.length + '</span>';
+  html += '<span class="agent-panel-event-section-count">' + _agentPanelEventSectionCount(page) + '</span>';
   html += '</div>';
   if (loading && !events.length) {
     html += '<div class="agent-panel-event-empty">Loading cell events…</div>';
@@ -635,10 +777,11 @@ function _renderPersistentCellEvents(agent) {
     html += '<div class="agent-panel-worklog-note">Refreshing cell events…</div>';
   }
   html += '<div class="agent-panel-event-list">';
-  for (var i = 0; i < events.length; i++) {
-    html += _agentPanelRenderCellEventItem(events[i], i);
+  for (var i = 0; i < page.events.length; i++) {
+    html += _agentPanelRenderCellEventItem(page.events[i], i);
   }
   html += '</div>';
+  html += _agentPanelRenderEventLoadMore(page);
   html += '</div>';
   return html;
 }
@@ -682,20 +825,13 @@ function _renderEngineerPanel(agent) {
 }
 
 function _agentPanelWorkerEvents(agent) {
-  var agentId = String((agent && agent.id) || '');
-  var events = (state && state.panel_events ? state.panel_events.slice() : []).filter(function(evt) {
-    return String((evt && evt.cell_id) || '') === agentId;
-  });
-  events.sort(function(a, b) {
-    var tsDiff = Number((b && b.timestamp) || 0) - Number((a && a.timestamp) || 0);
-    if (tsDiff) return tsDiff;
-    return Number((b && b.id) || 0) - Number((a && a.id) || 0);
-  });
+  var events = _agentPanelSortedWorkerEvents(agent);
+  var page = _agentPanelEventPage(agent, events);
 
   var html = '<div class="agent-panel-event-section">';
   html += '<div class="agent-panel-event-section-header">';
   html += '<span class="agent-panel-event-section-title">Worker events</span>';
-  html += '<span class="agent-panel-event-section-count">' + events.length + '</span>';
+  html += '<span class="agent-panel-event-section-count">' + _agentPanelEventSectionCount(page) + '</span>';
   html += '</div>';
   if (!events.length) {
     html += '<div class="agent-panel-event-empty">No worker events yet.</div>';
@@ -703,8 +839,8 @@ function _agentPanelWorkerEvents(agent) {
     return html;
   }
   html += '<div class="agent-panel-event-list">';
-  for (var i = 0; i < events.length; i++) {
-    var evt = events[i] || {};
+  for (var i = 0; i < page.events.length; i++) {
+    var evt = page.events[i] || {};
     var anchorKey = 'worker-event-' + String(evt.id || i);
     var kind = typeof _weaverEventKindLabel === 'function'
       ? _weaverEventKindLabel(evt.kind)
@@ -723,6 +859,7 @@ function _agentPanelWorkerEvents(agent) {
     html += '</div>';
   }
   html += '</div>';
+  html += _agentPanelRenderEventLoadMore(page);
   html += '</div>';
   return html;
 }
@@ -1027,17 +1164,31 @@ function renderAgentPanel() {
   }
   var el = document.getElementById('panel-agent');
   if (!el) return;
+  var agent = _resolveFocusedAgent();
+  _agentPanelEventsEnsurePager(agent);
 
   var panelStateOptions = {
     scrollSelectors: ['.agent-panel-content', '.agent-panel-message-list'],
     capture: function(snapshot, root) {
       if (!snapshot || !root || typeof root.querySelector !== 'function') return;
+      if (agent && _agentPanelActiveTab(_agentPanelKind(agent)) === 'events') {
+        snapshot.agentPanelEventsAtLiveTail = _agentPanelEventsAtLiveTail(
+          _agentPanelScrollContainer(root)
+        );
+      }
       snapshot.anchor = _agentPanelCaptureScrollAnchor(
         _agentPanelScrollContainer(root)
       );
     },
     restore: function(root, snapshot) {
       if (!root || !snapshot || typeof root.querySelector !== 'function') return;
+      if (snapshot.agentPanelEventsAtLiveTail) {
+        var liveTailContainer = _agentPanelScrollContainer(root);
+        if (liveTailContainer && typeof liveTailContainer.scrollTop === 'number') {
+          liveTailContainer.scrollTop = 0;
+        }
+        return;
+      }
       _agentPanelRestoreScrollAnchor(
         _agentPanelScrollContainer(root),
         snapshot.anchor
@@ -1051,7 +1202,9 @@ function renderAgentPanel() {
   var panelState = typeof _captureSurfaceState === 'function'
     ? _captureSurfaceState(el, panelStateOptions)
     : null;
-  var agent = _resolveFocusedAgent();
+  _agentPanelEventsPreRenderAtLiveTail = !!(
+    panelState && panelState.agentPanelEventsAtLiveTail
+  );
   var html = '';
 
   if (!agent) {
@@ -1080,6 +1233,8 @@ function renderAgentPanel() {
   if (typeof _restoreSurfaceState === 'function') {
     _restoreSurfaceState(el, panelState, panelStateOptions);
   }
+  _agentPanelAttachEventsScroll(el, agent);
+  _agentPanelEventsPreRenderAtLiveTail = false;
   var agentKind = agent ? _agentPanelKind(agent) : '';
   if (agent
       && (agentKind === 'engineer' || agentKind === 'architect')

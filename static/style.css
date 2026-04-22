@@ -6304,6 +6304,20 @@ body.diff-view-open #ctx-menu {
   flex-direction: column;
   gap: 6px;
 }
+.agent-panel-event-load-more {
+  align-self: stretch;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  cursor: pointer;
+  font: 10px var(--font);
+  padding: 6px 8px;
+}
+.agent-panel-event-load-more:hover {
+  border-color: var(--text-dim);
+  color: var(--text);
+}
 .agent-panel-event-item {
   padding: 7px 8px;
   border: 1px solid var(--border);
