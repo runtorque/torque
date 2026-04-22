@@ -9851,7 +9851,42 @@ test('user section + New Engineer ghost submits a user-hired engineer without ar
   assert.equal(Object.prototype.hasOwnProperty.call(sendCalls[0], 'hired_by_architect_id'), false);
 });
 
-test('bottom + New Architect ghost opens the group-scoped architect modal', () => {
+test('user section renders + New Architect ghost in the architect column below User only', () => {
+  const { context, document, sandbox } = createMainRenderHarness();
+  const main = document.getElementById('main');
+
+  sandbox.state.groups = { loom: ['arch-a'] };
+  sandbox.state.group_settings = { loom: { collapsed_default: false } };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'arch-a': {
+      id: 'arch-a',
+      name: 'Architect A',
+      kind: 'architect',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'A',
+      status: 'running',
+      created_at: 1,
+    },
+  };
+
+  runInContext(context, `render();`);
+
+  assert.equal((main.innerHTML.match(/ghost-card ghost-card--architect/g) || []).length, 1);
+  assert.match(
+    main.innerHTML,
+    /data-agent-section="user"[\s\S]*agent-section-architect-column[\s\S]*agent-section-user-card[\s\S]*\+ New Architect[\s\S]*agent-section-body/
+  );
+  assert.match(
+    main.innerHTML,
+    /data-agent-section="user"[\s\S]*\+ New Architect[\s\S]*agent-section-divider[\s\S]*data-agent-section="architect:arch-a"/
+  );
+  assert.doesNotMatch(main.innerHTML, /agent-grid-new-architect-row/);
+  assert.doesNotMatch(main.innerHTML, /data-agent-section="architect:arch-a"[\s\S]*\+ New Architect/);
+});
+
+test('user-section + New Architect ghost opens the group-scoped architect modal', () => {
   const { context, document, sandbox } = createMainRenderHarness();
   const modalDom = registerArchitectModalDom(document);
   loadModalScripts(context);
@@ -9877,7 +9912,8 @@ test('bottom + New Architect ghost opens the group-scoped architect modal', () =
 
   assert.match(main.innerHTML, /class="ghost-card ghost-card--architect"/);
   assert.match(main.innerHTML, /openAddArchitectForGroup\(&quot;loom&quot;\)/);
-  assert.match(main.innerHTML, /Architect A[\s\S]*\+ New Architect/);
+  assert.match(main.innerHTML, /agent-section-user-card[\s\S]*\+ New Architect[\s\S]*Architect A/);
+  assert.doesNotMatch(main.innerHTML, /agent-grid-new-architect-row/);
   assert.doesNotMatch(main.innerHTML, /cell cell-add/);
 
   const click = main.innerHTML.match(/onclick="([^"]*openAddArchitectForGroup\(&quot;loom&quot;\)[^"]*)"/);
@@ -11789,6 +11825,7 @@ test('main grid keyboard navigation traverses logical rows across sections', () 
   runInContext(context, `focusedItemId = 'eng-user-a'; render();`);
 
   assert.deepEqual(jsonValue(context, `window._navGridRows.map(function(row) { return { type: row.rowType, items: row.items.map(function(item) { return item.id; }) }; })`), [
+    { type: 'architect-creation-row', items: ['grid-control:agent-new-architect:loom'] },
     { type: 'loose-workers-strip', items: ['loose-1', 'loose-2', 'grid-control:loose-new-worker:loom:user'] },
     { type: 'engineer-row', items: ['eng-user-a', 'worker-user-a1', 'worker-user-a2'] },
     { type: 'engineer-row', items: ['eng-user-b', 'worker-user-b1'] },
@@ -11797,7 +11834,6 @@ test('main grid keyboard navigation traverses logical rows across sections', () 
     { type: 'section-creation-row', items: ['grid-control:section-new-engineer:loom:architect:arch-a'] },
     { type: 'engineer-row', items: ['arch-b', 'eng-b', 'worker-b1'] },
     { type: 'section-creation-row', items: ['grid-control:section-new-engineer:loom:architect:arch-b'] },
-    { type: 'architect-creation-row', items: ['grid-control:agent-new-architect:loom'] },
   ]);
 
   runInContext(context, `moveFocusHorizontal(1);`);
@@ -11821,6 +11857,9 @@ test('main grid keyboard navigation traverses logical rows across sections', () 
   runInContext(context, `moveFocusHorizontal(1);`);
   assert.equal(jsonValue(context, `focusedItemId`), 'eng-a');
 
+  runInContext(context, `focusedItemId = 'loose-1'; render();`);
+  runInContext(context, `moveFocusUp();`);
+  assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:agent-new-architect:loom');
   runInContext(context, `focusedItemId = 'loose-1'; render();`);
   runInContext(context, `moveFocusHorizontal(1);`);
   assert.equal(jsonValue(context, `focusedItemId`), 'loose-2');
@@ -11851,7 +11890,7 @@ test('main grid keyboard navigation keeps wrapped worker rows in logical order',
 
   runInContext(context, `focusedItemId = 'eng-a'; render();`);
 
-  assert.deepEqual(jsonValue(context, `window._navGridRows[1].items.map(function(item) { return item.id; })`), [
+  assert.deepEqual(jsonValue(context, `window._navGridRows.find(function(row) { return row.rowKey === 'user:engineer:eng-a'; }).items.map(function(item) { return item.id; })`), [
     'eng-a',
     'worker-1',
     'worker-2',
@@ -11969,10 +12008,10 @@ test('main grid Tab cycles through creation buttons in visual order', () => {
   runInContext(context, `render();`);
 
   assert.deepEqual(jsonValue(context, `window._navCreationControls.map(function(item) { return item.controlType + ':' + item.sectionKey; })`), [
+    'agent-new-architect:user',
     'loose-new-worker:user',
     'section-new-engineer:user',
     'section-new-engineer:architect:arch-a',
-    'agent-new-architect:',
   ]);
 
   function pressTab(shiftKey = false) {
@@ -11986,6 +12025,8 @@ test('main grid Tab cycles through creation buttons in visual order', () => {
   }
 
   pressTab();
+  assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:agent-new-architect:loom');
+  pressTab();
   assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:loose-new-worker:loom:user');
   pressTab();
   assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:section-new-engineer:loom:user');
@@ -11993,10 +12034,8 @@ test('main grid Tab cycles through creation buttons in visual order', () => {
   assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:section-new-engineer:loom:architect:arch-a');
   pressTab();
   assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:agent-new-architect:loom');
-  pressTab();
-  assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:loose-new-worker:loom:user');
   pressTab(true);
-  assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:agent-new-architect:loom');
+  assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:section-new-engineer:loom:architect:arch-a');
 });
 
 test('main grid Enter activates focused creation ghost cards with scoped context', () => {
