@@ -106,6 +106,7 @@ _ARCHITECT_DIGEST_DEFAULT_ENABLED_EVENTS = [
     "engineer_fired",
     "engineer_dismissed",
     "engineer_rehired",
+    "workflow_breach",
 ]
 _WEAVER_ESCALATION_STYLES = {
     "ask_early",

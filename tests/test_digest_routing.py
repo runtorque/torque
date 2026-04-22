@@ -99,6 +99,41 @@ class DigestRoutingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(recipients, [engineer.id, architect.id])
 
+    def test_workflow_breach_is_architect_coarse_event_by_default(self):
+        state, group = self._make_state()
+        engineer = self._add_agent(
+            state,
+            agent_id="eng-1",
+            name="Engineer",
+            group=group,
+            kind="engineer",
+            hired_by_architect_id="arch-1",
+        )
+        architect = self._add_agent(
+            state,
+            agent_id="arch-1",
+            name="Architect",
+            group=group,
+            kind="architect",
+        )
+        state.update_agent_digest_settings(engineer.id)
+        state.update_agent_digest_settings(architect.id)
+
+        recipients = self.routing_mod.resolve_digest_recipients(
+            state,
+            {"cell_id": engineer.id, "group": group, "kind": "workflow_breach"},
+        )
+
+        self.assertEqual(recipients, [architect.id])
+        self.assertIn(
+            "workflow_breach",
+            self.routing_mod.ARCHITECT_COARSE_EVENTS,
+        )
+        self.assertIn(
+            "workflow_breach",
+            state.get_agent_digest_settings(architect.id).enabled_events,
+        )
+
     def test_candidate_worker_recipients_exclude_worker_self(self):
         state, group = self._make_state()
         architect = self._add_agent(

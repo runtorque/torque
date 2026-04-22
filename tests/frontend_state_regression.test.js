@@ -6483,6 +6483,43 @@ test('renderAgentPanel preserves the selected Events tab across rerenders', () =
   assert.match(panel.innerHTML, /Already sent to Engineer One/);
 });
 
+test('renderAgentPanel shows workflow breach events in engineer cell history', () => {
+  const { context, document } = createWeaverHarness();
+  const panel = document.register('panel-agent');
+  panel.querySelector = function() { return null; };
+  context.state.agents = {
+    'eng-1': {
+      id: 'eng-1',
+      name: 'Engineer One',
+      group: 'alpha',
+      kind: 'engineer',
+      cell_type: 'agent',
+    },
+  };
+  context.focusedItemId = 'eng-1';
+  context.state.agent_digest_settings = {
+    'eng-1': { agent_id: 'eng-1', paused: false },
+  };
+  context.state.panel_events = [
+    {
+      id: 42,
+      kind: 'workflow_breach',
+      cell_id: 'eng-1',
+      group: 'alpha',
+      message: 'escape_clause_skip: Review gate caught direct done (worker=worker-1)',
+      task_id: 'task-1',
+      timestamp: 10,
+    },
+  ];
+  runInContext(context, `_agentPanelLastSelectedTabByKind.engineer = 'events';`);
+
+  context.renderAgentPanel();
+
+  assert.match(panel.innerHTML, /workflow breach/);
+  assert.match(panel.innerHTML, /escape_clause_skip: Review gate caught direct done/);
+  assert.match(panel.innerHTML, /task-1/);
+});
+
 test('renderAgentPanel preserves the selected architect Events tab across rerenders', () => {
   const { context, document } = createWeaverHarness();
   const panel = document.register('panel-agent');

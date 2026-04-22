@@ -75,6 +75,7 @@ _ARCHITECT_EVENT_LABELS = {
     "engineer_fired": "engineer fired",
     "engineer_dismissed": "engineer dismissed",
     "engineer_rehired": "engineer rehired",
+    "workflow_breach": "workflow breach",
     "agent_progress": "progress",
 }
 _ARCHITECT_PIPELINE_ACTIVITY_EVENTS = ARCHITECT_COARSE_EVENTS.intersection({
@@ -1311,6 +1312,21 @@ class WeaverEventBuffer:
                     ))
 
             engineer_events = bucket["engineer_events"]
+            workflow_breaches = [
+                evt for evt in engineer_events
+                if str(evt.get("kind", "") or "").strip() == "workflow_breach"
+            ]
+            if workflow_breaches:
+                counts = self._architect_event_counts(workflow_breaches)
+                items.append((
+                    "- "
+                    f"{len(workflow_breaches)} workflow breach"
+                    f"{'es' if len(workflow_breaches) != 1 else ''}: "
+                    + ", ".join(
+                        f"{label} ×{count}" for label, count in counts
+                    ),
+                    len(workflow_breaches),
+                ))
             direct_limit = 4
             for evt in engineer_events[:direct_limit]:
                 items.append((
@@ -1426,7 +1442,7 @@ class WeaverEventBuffer:
     def _architect_event_counts(self, events: list[dict]) -> list[tuple[str, int]]:
         counts: dict[str, int] = {}
         for evt in events:
-            label = self._architect_event_label(evt.get("kind", ""))
+            label = self._architect_event_label_for_event(evt)
             counts[label] = counts.get(label, 0) + 1
         return list(counts.items())
 
@@ -1435,8 +1451,33 @@ class WeaverEventBuffer:
         kind = str(kind or "").strip()
         return _ARCHITECT_EVENT_LABELS.get(kind, kind.replace("_", " ") or "event")
 
+    @classmethod
+    def _workflow_breach_subkind(cls, evt: dict) -> str:
+        subkind = str((evt or {}).get("subkind", "") or "").strip()
+        if subkind:
+            return subkind
+        message = cls._normalize_digest_text((evt or {}).get("message", ""))
+        match = re.search(r"\bsubkind=([A-Za-z0-9_-]+)", message)
+        if match:
+            return match.group(1)
+        prefix = message.split(":", 1)[0].strip()
+        if re.fullmatch(r"[a-z][a-z0-9_]*", prefix):
+            return prefix
+        return ""
+
+    def _architect_event_label_for_event(self, evt: dict) -> str:
+        kind = str((evt or {}).get("kind", "") or "").strip()
+        label = self._architect_event_label(kind)
+        if kind == "workflow_breach":
+            subkind = self._workflow_breach_subkind(evt)
+            if subkind:
+                label = (
+                    f"{label}/{subkind.replace('_', ' ').replace('-', ' ')}"
+                )
+        return label
+
     def _format_architect_event_detail(self, evt: dict) -> str:
-        kind_label = self._architect_event_label(evt.get("kind", ""))
+        kind_label = self._architect_event_label_for_event(evt)
         source = self._state.agents.get(str(evt.get("cell_id", "") or ""))
         source_name = self._normalize_digest_text(
             evt.get("agent_name", "")
@@ -1476,7 +1517,7 @@ class WeaverEventBuffer:
                 },
             )
             bucket["count"] += 1
-            label = self._architect_event_label(kind)
+            label = self._architect_event_label_for_event(evt)
             bucket["counts"][label] = bucket["counts"].get(label, 0) + 1
 
         if not pipelines:
