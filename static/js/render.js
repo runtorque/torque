@@ -711,6 +711,28 @@ function _buildAgentGridNavigationModel(groupContexts) {
       for (const section of ctx.agentLayout.sections) {
         const sectionKey = _agentGridSectionKey(section);
         if (section.type === 'user') {
+          const architectControlId = _gridNavControlId('agent-new-architect', ctx.gname, '');
+          if (!ctx.atAgentCap) {
+            const architectControl = {
+              id: architectControlId,
+              type: 'control',
+              controlType: 'agent-new-architect',
+              group: ctx.gname,
+              sectionKey,
+              focusKey: _gridNavControlFocusKey('agent-new-architect', ctx.gname, sectionKey),
+            };
+            addRow({
+              group: ctx.gname,
+              sectionKey,
+              rowKey: sectionKey + ':agent-new-architect',
+              rowType: 'architect-creation-row',
+              items: [architectControl],
+            });
+            addCreationControl(Object.assign({}, architectControl, {
+              sort: model.itemMeta[architectControlId] ? model.itemMeta[architectControlId].sort : sortOrder++,
+            }));
+          }
+
           const workerItems = ((section && section.looseWorkers) || []).map(worker => ({
             id: worker.id,
             type: 'agent',
@@ -806,28 +828,6 @@ function _buildAgentGridNavigationModel(groupContexts) {
             sort: model.itemMeta[controlId] ? model.itemMeta[controlId].sort : sortOrder++,
           }));
         }
-      }
-
-      const architectControlId = _gridNavControlId('agent-new-architect', ctx.gname, '');
-      if (!ctx.atAgentCap) {
-        const architectControl = {
-          id: architectControlId,
-          type: 'control',
-          controlType: 'agent-new-architect',
-          group: ctx.gname,
-          sectionKey: '',
-          focusKey: _gridNavControlFocusKey('agent-new-architect', ctx.gname, ''),
-        };
-        addRow({
-          group: ctx.gname,
-          sectionKey: '',
-          rowKey: ctx.gname + ':agent-new-architect',
-          rowType: 'architect-creation-row',
-          items: [architectControl],
-        });
-        addCreationControl(Object.assign({}, architectControl, {
-          sort: model.itemMeta[architectControlId] ? model.itemMeta[architectControlId].sort : sortOrder++,
-        }));
       }
 
       for (let rowIndex = 0; rowIndex < model.gridRows.length; rowIndex++) {
@@ -986,13 +986,32 @@ function _renderLooseWorkersStrip(groupName, section, renderCell) {
   return html;
 }
 
-function _renderSectionArchitectColumn(groupName, section, renderCell) {
+function _renderNewArchitectGhostButton(gname, disabled) {
+  const groupArg = _jsStringAttr(gname);
+  const navId = _gridNavControlId('agent-new-architect', gname, '');
+  const focusKey = _gridNavControlFocusKey('agent-new-architect', gname, 'user');
+  return '<button type="button" class="ghost-card ghost-card--architect' + _gridNavFocusedClass(navId) + '"'
+    + ' data-action="new-architect"'
+    + ' data-nav-id="' + esc(navId) + '"'
+    + ' data-group="' + esc(gname) + '"'
+    + ' data-focus-key="' + esc(focusKey) + '"'
+    + (disabled ? ' disabled aria-disabled="true" title="Agent limit reached"' : ' title="Create a new architect in this group"')
+    + (disabled ? '' : ' onclick="event.stopPropagation();openAddArchitectForGroup(' + groupArg + ')"')
+    + '>+ New Architect</button>';
+}
+
+function _renderSectionArchitectColumn(groupName, section, renderCell, opts) {
+  opts = opts || {};
   const sectionKey = _agentGridSectionKey(section);
   let html = '<div class="agent-section-architect-column"'
     + ' data-agent-section-column="architect"'
     + ' data-section-key="' + esc(sectionKey) + '">';
-  if (section && section.architect) html += renderCell(section.architect);
-  else html += _renderUserSectionCard(groupName);
+  if (section && section.architect) {
+    html += renderCell(section.architect);
+  } else {
+    html += _renderUserSectionCard(groupName);
+    html += _renderNewArchitectGhostButton(groupName, !!opts.disabled);
+  }
   html += '</div>';
   return html;
 }
@@ -1007,24 +1026,6 @@ function _renderEngineerRow(row, renderCell) {
   const workers = row.workers || [];
   for (const worker of workers) html += renderCell(worker);
   html += '</div>';
-  html += '</div>';
-  return html;
-}
-
-function _renderAgentGridAddArchitectRow(gname, gsLocal, agents) {
-  const atCap = gsLocal.max_agents > 0 && agents.length >= gsLocal.max_agents;
-  const groupArg = _jsStringAttr(gname);
-  const navId = _gridNavControlId('agent-new-architect', gname, '');
-  const focusKey = _gridNavControlFocusKey('agent-new-architect', gname, '');
-  let html = '<div class="agent-grid-new-architect-row">';
-  html += '<button type="button" class="ghost-card ghost-card--architect' + _gridNavFocusedClass(navId) + '"'
-    + ' data-action="new-architect"'
-    + ' data-nav-id="' + esc(navId) + '"'
-    + ' data-group="' + esc(gname) + '"'
-    + ' data-focus-key="' + esc(focusKey) + '"'
-    + (atCap ? ' disabled aria-disabled="true" title="Agent limit reached"' : ' title="Create a new architect in this group"')
-    + (atCap ? '' : ' onclick="event.stopPropagation();openAddArchitectForGroup(' + groupArg + ')"')
-    + '>+ New Architect</button>';
   html += '</div>';
   return html;
 }
@@ -1108,7 +1109,6 @@ function render() {
     const agents = ctx.agents;
     const standaloneTerms = ctx.standaloneTerms;
     const wid = ctx.wid;
-    const gsLocal = ctx.gsLocal;
     const collapsed = ctx.collapsed;
 
     html += `<div class="group${collapsed ? ' collapsed' : ''}" data-group-name="${esc(gname)}">`;
@@ -1143,7 +1143,7 @@ function render() {
       ];
       html += '<section class="' + sectionClasses.join(' ') + '"'
         + ' data-agent-section="' + esc(sectionKey) + '">';
-      html += _renderSectionArchitectColumn(gname, section, renderCellForGrid);
+      html += _renderSectionArchitectColumn(gname, section, renderCellForGrid, { disabled: ctx.atAgentCap });
       html += '<div class="agent-section-body"'
         + ' data-agent-section-column="body"'
         + ' data-section-key="' + esc(sectionKey) + '">';
@@ -1155,7 +1155,6 @@ function render() {
       html += '</div>';
       html += '</section>';
     }
-    html += _renderAgentGridAddArchitectRow(gname, gsLocal, agents);
     html += `</div>`;
 
     /* Details + terminal drawer for selected agent (if in this group) */
