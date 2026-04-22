@@ -278,7 +278,7 @@ async function restartAgent(id) {
   const cell = state.agents ? state.agents[id] : null;
   if (!cell) return;
   const label = cell.name || 'this agent';
-  const msg = `Restart '${label}' from scratch? The current session will be closed and a new one will launch with the original startup and initial prompts. Any in-progress conversation will be lost.`;
+  const msg = `Restart '${label}'? The current session will be closed and a new one will launch with the original startup and initial prompts. Any in-progress conversation will be lost.`;
   if (await showConfirm(msg)) {
     send({ cmd: 'restart_agent', id });
   }
@@ -699,7 +699,7 @@ function onCellContextMenu(e, id) {
   }
   if (cell.cell_type === 'agent' && !isDismissedEngineer) {
     items.push({
-      label: 'Restart from scratch\u2026',
+      label: 'Restart\u2026',
       action: `restartAgent('${id}')`,
     });
   }

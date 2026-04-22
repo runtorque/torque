@@ -142,5 +142,6 @@ test('normal agent context menu keeps the existing relaunch action', () => {
   assert.equal(sandbox.contextMenuCalls.length, 1);
   const items = JSON.parse(JSON.stringify(sandbox.contextMenuCalls[0].items));
   assert.equal(items.some((item) => item.label === 'Relaunch'), true);
+  assert.equal(items.some((item) => item.label === 'Restart…'), true);
   assert.equal(items.some((item) => item.label === 'Restart Weaver…'), false);
 });
