@@ -376,6 +376,116 @@ class ServerModuleExtractionTests(unittest.TestCase):
         self.assertIn('/attachments/task-1/pytest.log', calls[0]['message'])
         self.assertIn('E assert 1 == 2', calls[0]['message'])
 
+    def test_workflow_breach_command_emits_assigned_engineer_panel_event(self):
+        state = self.state_mod.MatrixState()
+        state.groups['g'] = []
+        engineer = self.state_mod.AgentCell(
+            id='eng-1',
+            name='Engineer',
+            group='g',
+            cell_type='agent',
+            kind='engineer',
+        )
+        worker = self.state_mod.AgentCell(
+            id='worker-1',
+            name='Worker',
+            group='g',
+            cell_type='agent',
+            kind='worker',
+            owner_engineer_id=engineer.id,
+            worktree_branch='loom/worker-1',
+        )
+        state.agents[engineer.id] = engineer
+        state.agents[worker.id] = worker
+        state.groups['g'] = [engineer.id, worker.id]
+        task = state.board_add_task(
+            'Fix residue',
+            'g',
+            id='task-1',
+            agent_id=worker.id,
+            assigned_engineer_id=engineer.id,
+        )
+        events = []
+
+        def panel_event(kind, cell_id, agent_name, group, message, task_id=''):
+            events.append({
+                'kind': kind,
+                'cell_id': cell_id,
+                'agent_name': agent_name,
+                'group': group,
+                'message': message,
+                'task_id': task_id,
+            })
+
+        result = self.server_mod._handle_workflow_breach_command(
+            {
+                'subkind': 'manual',
+                'task_id': task.id,
+                'context': 'Operator caught reviewer residue',
+            },
+            state,
+            panel_event,
+        )
+
+        self.assertEqual(result['type'], 'workflow_breach')
+        self.assertEqual(result['event']['worker_id'], worker.id)
+        self.assertEqual(events[0]['kind'], 'workflow_breach')
+        self.assertEqual(events[0]['cell_id'], engineer.id)
+        self.assertIn('manual', events[0]['message'])
+        self.assertIn('Operator caught reviewer residue', events[0]['message'])
+        self.assertIn('branch=loom/worker-1', events[0]['message'])
+
+    def test_stale_base_workflow_breach_targets_worker_owner(self):
+        state = self.state_mod.MatrixState()
+        state.groups['g'] = []
+        engineer = self.state_mod.AgentCell(
+            id='eng-1',
+            name='Engineer',
+            group='g',
+            cell_type='agent',
+            kind='engineer',
+        )
+        worker = self.state_mod.AgentCell(
+            id='worker-1',
+            name='Worker',
+            group='g',
+            cell_type='agent',
+            kind='worker',
+            owner_engineer_id=engineer.id,
+            worktree_branch='loom/worker-1',
+        )
+        state.agents[engineer.id] = engineer
+        state.agents[worker.id] = worker
+        task = state.board_add_task(
+            'Merge branch',
+            'g',
+            id='task-1',
+            lane='In Progress',
+            agent_id=worker.id,
+        )
+        worker.current_task_id = task.id
+        events = []
+
+        def panel_event(kind, cell_id, agent_name, group, message, task_id=''):
+            events.append((kind, cell_id, agent_name, group, message, task_id))
+
+        event = self.server_mod._emit_stale_base_catch_workflow_breach(
+            state,
+            panel_event,
+            worker,
+            {
+                'stale': True,
+                'warning': '⚠ STALE BASE: branch forked from old main',
+            },
+        )
+
+        self.assertEqual(event['subkind'], 'stale_base_catch')
+        self.assertEqual(event['task_id'], task.id)
+        self.assertEqual(events[0][0], 'workflow_breach')
+        self.assertEqual(events[0][1], engineer.id)
+        self.assertIn('stale_base_catch', events[0][4])
+        self.assertIn('source=auto', events[0][4])
+
     def test_role_commands_and_template_compat_dispatch_through_helper(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

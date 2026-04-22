@@ -297,6 +297,54 @@ class CliExternalTicketTests(unittest.TestCase):
             },
         )
 
+    def test_workflow_breach_calls_manual_endpoint(self):
+        calls = []
+        self.cli.get_state_local = lambda _port: {
+            "board_tasks": {
+                "task-1": {"id": "task-1", "task": "Investigate residue"}
+            }
+        }
+        self.cli.resolve_task = lambda _state, _ident: {
+            "id": "task-1", "task": "Investigate residue"
+        }
+
+        def fake_api_call(cmd, port=0, **kwargs):
+            calls.append((cmd, kwargs))
+            return {
+                "ok": True,
+                "data": {
+                    "event": {
+                        "subkind": "manual",
+                        "task_id": "task-1",
+                    },
+                },
+            }
+
+        self.cli.api_call = fake_api_call
+        args = SimpleNamespace(
+            port=18932,
+            subkind="manual",
+            task="task-1",
+            context="Reviewer worktree residue caught by Courier",
+        )
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.cli.cmd_workflow_breach(args)
+
+        self.assertEqual(
+            calls[0],
+            (
+                "workflow_breach",
+                {
+                    "subkind": "manual",
+                    "task_id": "task-1",
+                    "context": "Reviewer worktree residue caught by Courier",
+                    "source": "operator",
+                },
+            ),
+        )
+        self.assertIn("Workflow breach recorded: manual (task-1)", out.getvalue())
+
     def test_memory_show_calls_memory_read_endpoint(self):
         calls = []
 

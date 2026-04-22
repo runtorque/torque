@@ -2707,6 +2707,23 @@ def cmd_task_verify(args):
     print(data.get("message", "Verification updated"))
 
 
+def cmd_workflow_breach(args):
+    """Report a workflow-discipline breach as a coarse event."""
+    st = get_state_local(args.port)
+    task = resolve_task(st, args.task)
+    payload = {
+        "subkind": args.subkind,
+        "task_id": task["id"],
+        "context": args.context,
+        "source": "operator",
+    }
+    resp = api_call("workflow_breach", port=args.port, **payload)
+    data = check_ok(resp)
+    event = data.get("event", {})
+    subkind = event.get("subkind", args.subkind)
+    print(f"Workflow breach recorded: {subkind} ({task['id']})")
+
+
 def cmd_task_move(args):
     """Move a task to a different lane."""
     st = get_state_local(args.port)
@@ -4214,6 +4231,18 @@ def build_parser():
                            help="Rehire/resume a dismissed engineer")
     p.add_argument("identifier", help="Engineer ID, slug, or name")
     p.set_defaults(func=cmd_engineer_rehire)
+
+    # -- workflow breach ----------------------------------------------------
+    p = sub.add_parser("workflow-breach",
+                       help="Report a workflow-discipline breach event")
+    p.add_argument("--subkind", required=True,
+                   choices=["escape_clause_skip", "stale_base_catch", "manual"],
+                   help="Breach subkind")
+    p.add_argument("--task", required=True,
+                   help="Task ID, slug, or title")
+    p.add_argument("--context", required=True,
+                   help="Human-readable breach context")
+    p.set_defaults(func=cmd_workflow_breach)
 
     hist = agt_sub.add_parser("history", aliases=["hist"],
                               help="Agent history (persistent)")

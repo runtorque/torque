@@ -101,6 +101,62 @@ class ReviewGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(checkpoints, ["checkpoint"])
         self.assertTrue(worktree_mgr.non_test_only)
 
+    async def test_gate_fire_emits_workflow_breach_for_owner_engineer(self):
+        state, cell, task = self._state_cell_task()
+        engineer = self.state_mod.AgentCell(
+            id="eng-1",
+            name="Engineer",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+        )
+        state.agents[engineer.id] = engineer
+        cell.kind = "worker"
+        cell.owner_engineer_id = engineer.id
+        cell.worktree_branch = "loom/worker-1"
+        task.assigned_engineer_id = engineer.id
+        action_mgr = FakeActionManager(
+            {"review_required_above_loc": 100},
+            [{"action": "feature/review"}],
+        )
+        worktree_mgr = FakeWorktreeManager(
+            {"files": 2, "insertions": 80, "deletions": 30},
+        )
+        panel_events = []
+
+        async def handle_command(_payload):
+            return {"type": "ok", "task_id": "task-review"}
+
+        def panel_event(kind, cell_id, agent_name, group, message, task_id=""):
+            panel_events.append({
+                "kind": kind,
+                "cell_id": cell_id,
+                "agent_name": agent_name,
+                "group": group,
+                "message": message,
+                "task_id": task_id,
+            })
+
+        result = await self.server_mod._maybe_apply_review_required_gate(
+            state,
+            action_mgr,
+            worktree_mgr,
+            handle_command,
+            panel_event,
+            cell=cell,
+            task=task,
+        )
+
+        self.assertEqual(result["type"], "error")
+        self.assertEqual(len(panel_events), 1)
+        event = panel_events[0]
+        self.assertEqual(event["kind"], "workflow_breach")
+        self.assertEqual(event["cell_id"], engineer.id)
+        self.assertEqual(event["task_id"], task.id)
+        self.assertIn("escape_clause_skip", event["message"])
+        self.assertIn("worker=worker-1", event["message"])
+        self.assertIn("branch=loom/worker-1", event["message"])
+
     async def test_gate_skips_below_threshold(self):
         state, cell, task = self._state_cell_task()
         action_mgr = FakeActionManager(

@@ -280,6 +280,223 @@ def _stale_base_merge_result(aid: str, stale_base: dict | None) -> dict:
     }
 
 
+_WORKFLOW_BREACH_SUBKINDS = frozenset({
+    "escape_clause_skip",
+    "stale_base_catch",
+    "manual",
+})
+_WORKFLOW_BREACH_SOURCES = frozenset({"auto", "operator"})
+
+
+def _workflow_breach_worker_for_task(state: MatrixState, task=None,
+                                     worker_id: str = ""):
+    """Resolve the worker implicated by a workflow-breach event, if any."""
+    wid = str(worker_id or "").strip()
+    if wid:
+        return state.agents.get(_resolve_agent_id(state, wid) or wid)
+    for field_name in ("agent_id", "reply_agent_id"):
+        cid = str(getattr(task, field_name, "") or "").strip()
+        if cid:
+            cell = state.agents.get(cid)
+            if cell:
+                return cell
+    return None
+
+
+def _workflow_breach_engineer_for(state: MatrixState, *,
+                                  task=None, worker=None):
+    """Resolve the engineer whose per-cell history should own the event."""
+    candidate_ids = [
+        str(getattr(task, "assigned_engineer_id", "") or "").strip(),
+        str(getattr(task, "created_by_engineer_id", "") or "").strip(),
+        str(getattr(worker, "owner_engineer_id", "") or "").strip(),
+        str(getattr(worker, "created_by_weaver_id", "") or "").strip(),
+    ]
+    if worker and str(getattr(worker, "kind", "") or "").strip() == "engineer":
+        candidate_ids.append(str(getattr(worker, "id", "") or "").strip())
+
+    for candidate_id in candidate_ids:
+        if not candidate_id:
+            continue
+        cell = state.agents.get(candidate_id)
+        if str(getattr(cell, "kind", "") or "").strip() == "engineer":
+            return cell
+    return None
+
+
+def _workflow_breach_active_task_for_worker(state: MatrixState, worker):
+    if not worker:
+        return None
+    current_id = str(getattr(worker, "current_task_id", "") or "").strip()
+    if current_id:
+        current = state.board_tasks.get(current_id)
+        try:
+            if state.task_occupies_execution_slot(
+                    current, agent_id=getattr(worker, "id", "")):
+                return current
+        except Exception:
+            if current and getattr(current, "agent_id", "") == getattr(worker, "id", ""):
+                return current
+    current = state.agent_current_task(getattr(worker, "id", ""))
+    if current:
+        return current
+    linked = [
+        t for t in state.board_tasks.values()
+        if getattr(t, "agent_id", "") == getattr(worker, "id", "")
+        and getattr(t, "lane", "") not in ("Done", "Backlog", ARCHIVED_LANE)
+    ]
+    if len(linked) == 1:
+        return linked[0]
+    return None
+
+
+def _format_workflow_breach_message(*, subkind: str, source: str,
+                                    task_id: str = "", worker_id: str = "",
+                                    branch: str = "",
+                                    context: str = "") -> str:
+    detail_parts = [f"source={source}"]
+    if worker_id:
+        detail_parts.append(f"worker={worker_id}")
+    if branch:
+        detail_parts.append(f"branch={branch}")
+    if task_id:
+        detail_parts.append(f"task={task_id}")
+    details = " ".join(detail_parts)
+    text = str(context or "").strip() or "Workflow-discipline breach reported."
+    if details:
+        return f"{subkind}: {text} ({details})"
+    return f"{subkind}: {text}"
+
+
+def _emit_workflow_breach_event(state: MatrixState, panel_event, *,
+                                subkind: str, source: str,
+                                task=None, worker=None,
+                                worker_id: str = "",
+                                branch: str = "",
+                                context: str = "") -> dict:
+    """Persist/surface a workflow_breach panel event and return its shape."""
+    subkind = str(subkind or "").strip() or "manual"
+    source = str(source or "").strip() or "auto"
+    if subkind not in _WORKFLOW_BREACH_SUBKINDS:
+        subkind = "manual"
+    if source not in _WORKFLOW_BREACH_SOURCES:
+        source = "auto"
+
+    if worker is None:
+        worker = _workflow_breach_worker_for_task(
+            state, task, worker_id=worker_id)
+    if not worker_id and worker:
+        worker_id = str(getattr(worker, "id", "") or "").strip()
+    if not branch and worker:
+        branch = str(getattr(worker, "worktree_branch", "") or "").strip()
+
+    engineer = _workflow_breach_engineer_for(
+        state, task=task, worker=worker)
+    target = engineer or worker
+    task_id = str(getattr(task, "id", "") or "").strip()
+    group = (
+        str(getattr(target, "group", "") or "").strip()
+        or str(getattr(worker, "group", "") or "").strip()
+        or str(getattr(task, "group", "") or "").strip()
+    )
+    agent_name = (
+        str(getattr(target, "name", "") or "").strip()
+        or str(getattr(target, "slug", "") or "").strip()
+        or str(getattr(target, "id", "") or "").strip()
+        or "loom"
+    )
+    cell_id = str(getattr(target, "id", "") or "").strip()
+    message = _format_workflow_breach_message(
+        subkind=subkind,
+        source=source,
+        task_id=task_id,
+        worker_id=worker_id,
+        branch=branch,
+        context=context,
+    )
+    event = {
+        "kind": "workflow_breach",
+        "subkind": subkind,
+        "task_id": task_id,
+        "worker_id": worker_id,
+        "branch": branch,
+        "context": str(context or "").strip(),
+        "source": source,
+        "message": message,
+        "cell_id": cell_id,
+        "agent_name": agent_name,
+        "group": group,
+    }
+    if panel_event:
+        panel_event(
+            "workflow_breach",
+            cell_id,
+            agent_name,
+            group,
+            message,
+            task_id=task_id,
+        )
+    return event
+
+
+def _handle_workflow_breach_command(data: dict, state: MatrixState,
+                                    panel_event) -> dict:
+    subkind = str(data.get("subkind", "") or "manual").strip()
+    if subkind not in _WORKFLOW_BREACH_SUBKINDS:
+        return {
+            "type": "error",
+            "message": (
+                "Unknown workflow breach subkind "
+                f"'{subkind}'. Expected one of: "
+                + ", ".join(sorted(_WORKFLOW_BREACH_SUBKINDS))
+            ),
+        }
+    task_id = _resolve_task_id(
+        state,
+        data.get("task_id", "") or data.get("task", "") or data.get("id", ""),
+    )
+    task = state.board_tasks.get(task_id)
+    if not task:
+        return {"type": "error", "message": "Task not found"}
+    context = str(data.get("context", "") or "").strip()
+    if not context:
+        return {"type": "error", "message": "Workflow breach context required"}
+    worker = _workflow_breach_worker_for_task(
+        state, task, worker_id=data.get("worker_id", ""))
+    event = _emit_workflow_breach_event(
+        state,
+        panel_event,
+        subkind=subkind,
+        source=str(data.get("source", "") or "operator"),
+        task=task,
+        worker=worker,
+        worker_id=data.get("worker_id", ""),
+        branch=data.get("branch", ""),
+        context=context,
+    )
+    return {"type": "workflow_breach", "event": event}
+
+
+def _emit_stale_base_catch_workflow_breach(state: MatrixState, panel_event,
+                                           cell, stale_base: dict | None):
+    warning = _stale_base_warning(stale_base)
+    if not warning:
+        return None
+    breach_task = _workflow_breach_active_task_for_worker(state, cell)
+    return _emit_workflow_breach_event(
+        state,
+        panel_event,
+        subkind="stale_base_catch",
+        source="auto",
+        task=breach_task,
+        worker=cell,
+        context=(
+            "Stale-base warning was followed by "
+            f"rebase: {warning}"
+        ),
+    )
+
+
 def _persist_preserved_merge_diff_warning_only(
     state: MatrixState,
     cell,
@@ -677,6 +894,15 @@ async def _maybe_apply_review_required_gate(
                 audit,
                 task_id=task.id,
             )
+            _emit_workflow_breach_event(
+                state,
+                panel_event,
+                subkind="escape_clause_skip",
+                source="auto",
+                task=task,
+                worker=cell,
+                context=audit,
+            )
         return None
 
     title = f"Review required — diff exceeded {threshold} LOC threshold"
@@ -713,6 +939,20 @@ async def _maybe_apply_review_required_gate(
         }
 
     review_task_id = (derive_result or {}).get("task_id", "")
+    breach_context = (
+        "Review gate auto-derived "
+        f"{review_task_id or _REVIEW_GATE_ACTION} after direct done attempt; "
+        f"diff {diff_size} non-test LOC exceeded threshold {threshold}."
+    )
+    _emit_workflow_breach_event(
+        state,
+        panel_event,
+        subkind="escape_clause_skip",
+        source="auto",
+        task=task,
+        worker=cell,
+        context=breach_context,
+    )
     review_task_label = review_task_id or "the review task"
     return {
         "type": "error",
@@ -5418,6 +5658,18 @@ async def main(connection=None):
                             "conflicts": [],
                         }
                     else:
+                        stale_base_before_rebase = {}
+                        stale_info = getattr(
+                            worktree_mgr, "stale_base_info", None)
+                        if callable(stale_info):
+                            try:
+                                stale_base_before_rebase = await stale_info(cell)
+                            except Exception:
+                                log.exception(
+                                    "stale-base preflight failed before rebase "
+                                    "for '%s'",
+                                    cell.name,
+                                )
                         check = await worktree_mgr.check_merge_conflicts(cell)
                         previous_head_sha = (
                             await worktree_mgr.current_head(cell) or ""
@@ -5455,6 +5707,16 @@ async def main(connection=None):
                             state._emit_agent(cell)
                             result = {"type": "worktree_rebase",
                                       "id": aid, "ok": True}
+                            breach_event = (
+                                _emit_stale_base_catch_workflow_breach(
+                                    state,
+                                    _panel_event,
+                                    cell,
+                                    stale_base_before_rebase,
+                                )
+                            )
+                            if breach_event:
+                                result["workflow_breach"] = breach_event
                         else:
                             result = {
                                 "type": "worktree_rebase",
@@ -6078,6 +6340,13 @@ async def main(connection=None):
                         targets=resume_targets,
                         group=task.group,
                     )
+
+            elif cmd == "workflow_breach":
+                result = _handle_workflow_breach_command(
+                    data,
+                    state,
+                    _panel_event,
+                )
 
             elif cmd == "external_import_task":
                 group = data.get("group", "")

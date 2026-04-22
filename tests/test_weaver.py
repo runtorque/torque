@@ -700,6 +700,72 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("task-1 — Ship architect digests", digest)
         self.assertEqual(injected[0][2]["action"], "digest")
 
+    def test_architect_digest_groups_workflow_breaches_by_subkind(self):
+        state, group, _weaver = self._make_state()
+        architect = self.state_mod.AgentCell(
+            id="arch-1",
+            name="Planner",
+            slug="planner",
+            group=group,
+            cell_type="agent",
+            session_id="session-arch",
+            status="running",
+            kind="architect",
+            persistent=True,
+        )
+        engineer = self.state_mod.AgentCell(
+            id="eng-1",
+            name="Engineer One",
+            slug="engineer-one",
+            group=group,
+            cell_type="agent",
+            kind="engineer",
+            hired_by_architect_id=architect.id,
+            persistent=True,
+        )
+        state.agents[architect.id] = architect
+        state.agents[engineer.id] = engineer
+        state.groups[group].extend([architect.id, engineer.id])
+        state.update_agent_digest_settings(
+            architect.id,
+            architect_digest=True,
+        )
+        buffer = self.weaver_mod.WeaverEventBuffer(state, FakeBridge())
+
+        digest = buffer._format_digest(
+            group,
+            [
+                {
+                    "id": 1,
+                    "group": group,
+                    "cell_id": engineer.id,
+                    "agent_name": engineer.name,
+                    "kind": "workflow_breach",
+                    "message": (
+                        "escape_clause_skip: Review gate caught direct done"
+                    ),
+                    "task_id": "task-1",
+                },
+                {
+                    "id": 2,
+                    "group": group,
+                    "cell_id": engineer.id,
+                    "agent_name": engineer.name,
+                    "kind": "workflow_breach",
+                    "subkind": "stale_base_catch",
+                    "message": "operator rebased after stale-base warning",
+                    "task_id": "task-2",
+                },
+            ],
+            "1 task active",
+            weaver=architect,
+        )
+
+        self.assertIn("workflow breach/escape clause skip ×1", digest)
+        self.assertIn("workflow breach/stale base catch ×1", digest)
+        self.assertIn("Engineer One: workflow breach/escape clause skip", digest)
+        self.assertIn("operator rebased after stale-base warning", digest)
+
     def test_architect_digest_caps_lines_with_elision_footer(self):
         state, group, _weaver = self._make_state()
         architect = self.state_mod.AgentCell(
