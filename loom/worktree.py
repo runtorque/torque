@@ -229,6 +229,43 @@ def _diff_status_from_name_status(code: str) -> str:
     }.get((code or "M")[:1], "modified")
 
 
+def _short_sha(sha: str) -> str:
+    return str(sha or "").strip()[:8]
+
+
+def format_stale_base_warning(info: dict | None, *,
+                              rebase_command: str = "") -> str:
+    """Return the loud operator warning for a branch forked behind base."""
+    info = info or {}
+    branch = str(info.get("branch", "") or "worktree branch").strip()
+    base = str(info.get("base_branch", "") or "base").strip()
+    fork = _short_sha(info.get("fork_point", ""))
+    base_head = _short_sha(info.get("base_head", ""))
+    fork_subject = str(
+        info.get("fork_point_subject", "") or "unknown subject"
+    ).strip()
+    base_subject = str(
+        info.get("base_head_subject", "") or "unknown subject"
+    ).strip()
+    commits = int(info.get("commits_on_base", 0) or 0)
+    files = int(info.get("files_changed_on_base", 0) or 0)
+    rebase_command = str(rebase_command or "").strip()
+    if not rebase_command:
+        agent_hint = str(info.get("agent_hint", "") or "").strip()
+        rebase_command = (
+            f"engineer_rebase {agent_hint}".strip()
+            if agent_hint else "engineer_rebase <worker>"
+        )
+    return (
+        f"⚠ STALE BASE: {branch} forks from {fork} ({fork_subject}).\n"
+        f"  {base} has advanced to {base_head} ({base_subject}).\n"
+        f"  {commits} commits + {files} files changed on {base} since fork.\n"
+        "  `engineer_diff summary` against this base WILL mis-classify\n"
+        "  other-branch changes as deletions.\n"
+        f"  Recommended: `{rebase_command}` then re-run diff before merge."
+    )
+
+
 def _parse_name_status_z(raw: bytes) -> list[dict]:
     """Parse ``git diff --name-status -z`` output."""
     records: list[dict] = []
@@ -700,6 +737,112 @@ class WorktreeManager:
         except Exception:
             log.debug("rev_parse failed for %s @ %s", directory, ref)
             return None
+
+    async def _git_stdout(self, directory: str, *args: str) -> tuple[int, str]:
+        """Run git in *directory* and return ``(returncode, stdout_text)``."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", directory, *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await proc.communicate()
+            return proc.returncode, stdout.decode().strip()
+        except Exception:
+            log.debug("git command failed for %s: %s", directory, " ".join(args))
+            return 1, ""
+
+    async def _commit_subject(self, repo_root: str, ref: str) -> str:
+        code, stdout = await self._git_stdout(
+            repo_root, "show", "-s", "--format=%s", ref
+        )
+        if code != 0:
+            return ""
+        return stdout.splitlines()[0].strip() if stdout else ""
+
+    async def stale_base_info(self, cell) -> dict:
+        """Return stale-base metadata for a worktree branch.
+
+        A branch is considered stale when its merge-base/fork-point with the
+        configured base branch is not the current base branch HEAD. This is a
+        cheap, explicit preflight for merge/review paths where trusting a diff
+        against an old base can hide or misclassify another stream's changes.
+        """
+        if not cell or not getattr(cell, "worktree_path", ""):
+            return {"stale": False, "error": "No worktree"}
+        base = str(getattr(cell, "worktree_base_branch", "") or "").strip()
+        branch = str(getattr(cell, "worktree_branch", "") or "").strip()
+        if not base or not branch:
+            return {"stale": False, "error": "No worktree or base branch"}
+        repo_root = str(getattr(cell, "worktree_repo_root", "") or "").strip()
+        if not repo_root:
+            repo_root = await self.get_repo_root(cell.worktree_path) or ""
+        if not repo_root:
+            return {"stale": False, "error": "Cannot find repo root"}
+
+        base_head = await self.rev_parse(repo_root, base) or ""
+        branch_head = await self.rev_parse(repo_root, branch) or ""
+        if not base_head or not branch_head:
+            return {
+                "stale": False,
+                "error": "Cannot resolve worktree branch or base branch",
+                "branch": branch,
+                "base_branch": base,
+            }
+
+        code, fork_point = await self._git_stdout(
+            repo_root, "merge-base", base, branch
+        )
+        if code != 0 or not fork_point:
+            return {
+                "stale": False,
+                "error": "Cannot determine branch fork point",
+                "branch": branch,
+                "base_branch": base,
+                "base_head": base_head,
+                "branch_head": branch_head,
+            }
+
+        stale = fork_point != base_head
+        info = {
+            "stale": stale,
+            "branch": branch,
+            "base_branch": base,
+            "fork_point": fork_point,
+            "base_head": base_head,
+            "branch_head": branch_head,
+            "fork_point_subject": await self._commit_subject(
+                repo_root, fork_point
+            ),
+            "base_head_subject": await self._commit_subject(repo_root, base_head),
+            "commits_on_base": 0,
+            "files_changed_on_base": 0,
+            "agent_hint": (
+                str(getattr(cell, "slug", "") or "").strip()
+                or str(getattr(cell, "id", "") or "").strip()
+                or str(getattr(cell, "name", "") or "").strip()
+            ),
+        }
+        if stale:
+            count_code, count_text = await self._git_stdout(
+                repo_root, "rev-list", "--count", f"{fork_point}..{base_head}"
+            )
+            if count_code == 0 and count_text:
+                try:
+                    info["commits_on_base"] = int(count_text.splitlines()[0])
+                except ValueError:
+                    info["commits_on_base"] = 0
+            files_code, files_text = await self._git_stdout(
+                repo_root, "diff", "--name-only", fork_point, base_head
+            )
+            if files_code == 0:
+                files = [
+                    line.strip() for line in files_text.splitlines()
+                    if line.strip()
+                ]
+                info["files_changed_on_base"] = len(files)
+            info["warning"] = format_stale_base_warning(info)
+        return info
 
     async def get_repo_root(self, directory: str) -> Optional[str]:
         """Find Loom's common repo root for a directory.

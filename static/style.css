@@ -5159,6 +5159,19 @@ body.diff-view-open #ctx-menu {
   color: var(--text-dim);
   margin-top: 2px;
 }
+.diff-stale-base-warning {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(210,153,34,.35);
+  background: rgba(210,153,34,.14);
+  color: var(--amber, #d29922);
+}
+.diff-stale-base-warning pre {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  line-height: 1.45;
+}
 .diff-file-section { border-bottom: 1px solid var(--border); }
 .diff-file-header {
   position: sticky; top: 0; z-index: 1;
@@ -5199,7 +5212,8 @@ body.diff-view-open #ctx-menu {
 .diff-merge-banner.loading { color: var(--text-dim); }
 .diff-merge-banner.clean { color: var(--green); background: rgba(26,58,42,.4); }
 .diff-merge-banner.conflict,
-.diff-merge-banner.dirty { color: var(--amber, #d29922); background: rgba(210,153,34,.12); }
+.diff-merge-banner.dirty,
+.diff-merge-banner.stale { color: var(--amber, #d29922); background: rgba(210,153,34,.12); }
 .diff-conflict-list {
   padding: 4px 12px 8px;
   font-size: 10px;

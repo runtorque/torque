@@ -2823,8 +2823,11 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             return "Agent has no worktree", True
 
         # First check for conflicts / merge boundary eligibility
-        result, error_text, blocked = await _run_worktree_merge_check(
-            handle_command, agent_id
+        force_stale_base = bool(args.get("force_stale_base"))
+        result, error_text, blocked = await _run_worktree_merge_check_with_options(
+            handle_command,
+            agent_id,
+            allow_stale_base=force_stale_base,
         )
         if blocked:
             return error_text, True
@@ -2854,6 +2857,8 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             payload["remove_worktree_on_merge"] = bool(
                 args.get("remove_worktree_on_merge")
             )
+        if force_stale_base:
+            payload["force_stale_base"] = True
         result = await handle_command(payload)
         if result and result.get("ok") is False:
             error = result.get("error", "Merge failed")
@@ -2909,6 +2914,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 handle_command,
                 agent_id,
                 allow_dirty=True,
+                allow_stale_base=True,
             )
         )
         if blocked:
@@ -3002,6 +3008,9 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
         if args.get("summary_only", False):
+            warning = str(result.get("stale_base_warning", "") or "").strip()
+            if warning:
+                return f"{warning}\n\n{json.dumps(result)}", False
             return json.dumps(result), False
         return result.get("diff", "No changes"), False
 

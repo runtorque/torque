@@ -263,6 +263,19 @@ function _renderBoundarySummary() {
   return html;
 }
 
+function _diffStaleBaseWarning() {
+  return (_diffMergeCheck && _diffMergeCheck.stale_base_warning)
+    || (_diffViewData && _diffViewData.stale_base_warning)
+    || '';
+}
+
+function _renderStaleBaseWarning() {
+  var warning = _diffStaleBaseWarning();
+  if (!warning) return '';
+  return '<section class="diff-stale-base-warning"><pre>'
+    + esc(warning) + '</pre></section>';
+}
+
 function _renderDiffLines(lines) {
   var html = '';
   for (var i = 0; i < lines.length; i++) {
@@ -357,6 +370,10 @@ function _renderMergeBanner() {
   if (_diffMergeCheck.dirty) {
     return '<div class="diff-merge-banner dirty">Uncommitted changes \u2014 checkpoint before merging</div>';
   }
+  if (_diffMergeCheck.stale_base_warning) {
+    return '<div class="diff-merge-banner stale">'
+      + esc(_diffMergeCheck.stale_base_warning) + '</div>';
+  }
   if (!_diffMergeCheck.clean) {
     var n = (_diffMergeCheck.conflicts || []).length;
     var label = n > 0
@@ -391,6 +408,8 @@ function _renderDiffFooter() {
 
   if (_diffMergeCheck && _diffMergeCheck.dirty) {
     html += '<button class="btn-green" onclick="_diffCheckpointAndRecheck()">Checkpoint</button>';
+  } else if (_diffMergeCheck && _diffMergeCheck.stale_base) {
+    html += '<button class="btn-rebase" onclick="_diffRebase()">Rebase onto Main</button>';
   } else if (_diffMergeCheck && !_diffMergeCheck.clean && !_diffMergeCheck.error) {
     html += '<button class="btn-rebase" onclick="_diffRebase()">Rebase onto Main</button>';
   }
@@ -468,6 +487,7 @@ function renderDiffView() {
   html += _renderDiffCollapseControls(files);
   html += '</div>';
   html += '<div class="diff-view-content">';
+  html += _renderStaleBaseWarning();
   html += _renderBoundarySummary();
   html += _renderDiffArtifacts();
   if (!files.length) {

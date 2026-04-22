@@ -150,6 +150,11 @@ async def _worktree_merge_diff_snapshot(cell, worktree_mgr) -> dict:
     if not cell or not cell.worktree_path:
         return {"error": "Agent has no worktree."}
     base_branch = cell.worktree_base_branch or "main"
+    stale_base = {}
+    try:
+        stale_base = await worktree_mgr.stale_base_info(cell)
+    except AttributeError:
+        stale_base = {}
     try:
         stats = await worktree_mgr.diff_summary(cell)
         proc = await asyncio.create_subprocess_exec(
@@ -178,6 +183,10 @@ async def _worktree_merge_diff_snapshot(cell, worktree_mgr) -> dict:
             "stats": stats,
             "files": files,
             "patch_text": patch_text,
+            **({
+                "stale_base": stale_base,
+                "stale_base_warning": stale_base.get("warning", ""),
+            } if stale_base.get("stale") else {}),
         }
     except Exception:
         log.exception("Failed to build merge diff snapshot for '%s'", cell.name)

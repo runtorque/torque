@@ -157,6 +157,174 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
             {bob.id, bob_worker.id},
         )
 
+    async def test_engineer_diff_summary_prefixes_stale_base_warning(self):
+        state = self._make_state()
+        alice = self._add_engineer(state, "eng-alice", "Alice")
+        worker = self._add_worker(state, "worker-a", "Alice Worker", alice.id)
+        worker.worktree_path = "/tmp/worker-a"
+        worker.worktree_branch = "loom/alice/worker-a"
+        worker.worktree_base_branch = "main"
+        warning = (
+            "⚠ STALE BASE: loom/alice/worker-a forks from 11111111 "
+            "(Old base)."
+        )
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            self.assertEqual(payload["cmd"], "worktree_diff")
+            return {
+                "type": "ok",
+                "stale_base_warning": warning,
+                "summary": {
+                    "agent_name": worker.name,
+                    "branch": worker.worktree_branch,
+                    "base_branch": "main",
+                    "stats": {"files": 1, "insertions": 2, "deletions": 0},
+                    "files": [],
+                },
+            }
+
+        text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_diff",
+            {"agent": worker.id, "summary_only": True},
+            fake_handle_command,
+            state,
+            caller_id=alice.id,
+        )
+
+        self.assertFalse(is_error, text)
+        self.assertTrue(text.startswith("⚠ STALE BASE"), text)
+        self.assertIn('"summary"', text)
+        self.assertEqual(calls[0]["summary_only"], True)
+
+    async def test_engineer_merge_refuses_stale_base_unless_forced(self):
+        state = self._make_state()
+        alice = self._add_engineer(state, "eng-alice", "Alice")
+        worker = self._add_worker(state, "worker-a", "Alice Worker", alice.id)
+        worker.worktree_path = "/tmp/worker-a"
+        worker.worktree_branch = "loom/alice/worker-a"
+        worker.worktree_base_branch = "main"
+        warning = (
+            "⚠ STALE BASE: loom/alice/worker-a forks from 11111111 "
+            "(Old base)."
+        )
+        calls = []
+
+        async def blocked_handle_command(payload):
+            calls.append(dict(payload))
+            self.assertEqual(payload["cmd"], "worktree_check_merge")
+            return {
+                "type": "worktree_check_merge",
+                "id": worker.id,
+                "clean": False,
+                "conflicts": [],
+                "error": warning,
+                "stale_base": {"stale": True},
+                "stale_base_warning": warning,
+            }
+
+        text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_merge",
+            {"agent": worker.id},
+            blocked_handle_command,
+            state,
+            caller_id=alice.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertIn("STALE BASE", text)
+        self.assertEqual([call["cmd"] for call in calls], ["worktree_check_merge"])
+
+        forced_calls = []
+
+        async def forced_handle_command(payload):
+            forced_calls.append(dict(payload))
+            if payload["cmd"] == "worktree_check_merge":
+                self.assertTrue(payload.get("allow_stale_base"))
+                return {
+                    "type": "worktree_check_merge",
+                    "id": worker.id,
+                    "clean": True,
+                    "conflicts": [],
+                    "stale_base": {"stale": True},
+                    "stale_base_warning": warning,
+                }
+            if payload["cmd"] == "worktree_merge":
+                self.assertTrue(payload.get("force_stale_base"))
+                return {
+                    "type": "worktree_merge",
+                    "id": worker.id,
+                    "ok": True,
+                    "sha": "abc123",
+                    "cleanup": {"errors": []},
+                }
+            self.fail(f"Unexpected command: {payload}")
+
+        forced_text, forced_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_merge",
+            {"agent": worker.id, "force_stale_base": True},
+            forced_handle_command,
+            state,
+            caller_id=alice.id,
+        )
+
+        self.assertFalse(forced_error, forced_text)
+        self.assertEqual(json.loads(forced_text)["sha"], "abc123")
+        self.assertEqual(
+            [call["cmd"] for call in forced_calls],
+            ["worktree_check_merge", "worktree_merge"],
+        )
+
+    async def test_engineer_rebase_allows_stale_base_precheck_to_clear_gate(self):
+        state = self._make_state()
+        alice = self._add_engineer(state, "eng-alice", "Alice")
+        worker = self._add_worker(state, "worker-a", "Alice Worker", alice.id)
+        worker.worktree_path = "/tmp/worker-a"
+        worker.worktree_branch = "loom/alice/worker-a"
+        worker.worktree_base_branch = "main"
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            if payload["cmd"] == "worktree_check_merge":
+                if len([c for c in calls if c["cmd"] == "worktree_check_merge"]) == 1:
+                    self.assertTrue(payload.get("allow_stale_base"))
+                    return {
+                        "type": "worktree_check_merge",
+                        "id": worker.id,
+                        "clean": True,
+                        "conflicts": [],
+                        "stale_base": {"stale": True},
+                        "stale_base_warning": "⚠ STALE BASE",
+                    }
+                return {
+                    "type": "worktree_check_merge",
+                    "id": worker.id,
+                    "clean": True,
+                    "conflicts": [],
+                    "default_message": "Merge after rebase",
+                }
+            if payload["cmd"] == "worktree_rebase":
+                return {"type": "worktree_rebase", "id": worker.id, "ok": True}
+            self.fail(f"Unexpected command: {payload}")
+
+        text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_rebase",
+            {"agent": worker.id},
+            fake_handle_command,
+            state,
+            caller_id=alice.id,
+        )
+
+        self.assertFalse(is_error, text)
+        payload = json.loads(text)
+        self.assertTrue(payload["merge_ready"])
+        self.assertEqual(
+            [call["cmd"] for call in calls],
+            ["worktree_check_merge", "worktree_rebase", "worktree_check_merge"],
+        )
+
     async def test_engineer_task_create_stamps_assigned_engineer(self):
         state = self._make_state()
         alice = self._add_engineer(state, "eng-alice", "Alice")

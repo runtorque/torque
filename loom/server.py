@@ -48,7 +48,7 @@ from .events import (
 )
 from .adapters import get_adapter, get_providers
 from .notifications import NotificationManager
-from .worktree import WorktreeManager
+from .worktree import WorktreeManager, format_stale_base_warning
 from .worktree_boundaries import (
     boundary_summary,
     branch_boundary_tasks,
@@ -231,6 +231,53 @@ def _untracked_overwrite_message(paths: list[str], *,
         f"Untracked files in {location} would be overwritten by {operation}: "
         f"{summary}. Move or remove them before retrying."
     )
+
+
+def _stale_base_warning(stale_base: dict | None) -> str:
+    stale_base = stale_base or {}
+    if not stale_base.get("stale"):
+        return ""
+    return str(stale_base.get("warning", "") or "").strip() \
+        or format_stale_base_warning(stale_base)
+
+
+def _attach_stale_base(result: dict, stale_base: dict | None) -> dict:
+    warning = _stale_base_warning(stale_base)
+    if warning:
+        result["stale_base"] = stale_base
+        result["stale_base_warning"] = warning
+    return result
+
+
+def _stale_base_check_merge_result(aid: str,
+                                   stale_base: dict | None) -> dict:
+    warning = _stale_base_warning(stale_base)
+    return {
+        "type": "worktree_check_merge",
+        "id": aid,
+        "clean": False,
+        "dirty": False,
+        "conflicts": [],
+        "error": warning,
+        "stale_base": stale_base,
+        "stale_base_warning": warning,
+    }
+
+
+def _stale_base_merge_result(aid: str, stale_base: dict | None) -> dict:
+    warning = _stale_base_warning(stale_base)
+    force_hint = (
+        "Pass force_stale_base=true only if you intentionally accept this "
+        "risk; otherwise rebase and re-run the diff first."
+    )
+    return {
+        "type": "worktree_merge",
+        "id": aid,
+        "ok": False,
+        "error": f"{warning}\n\n{force_hint}" if warning else force_hint,
+        "stale_base": stale_base,
+        "stale_base_warning": warning,
+    }
 
 
 def _persist_preserved_merge_diff_warning_only(
@@ -5289,6 +5336,15 @@ async def main(connection=None):
                             ),
                         }
                     else:
+                        stale_base = await worktree_mgr.stale_base_info(cell)
+                        if stale_base.get("stale") \
+                                and not data.get("allow_stale_base"):
+                            result = _stale_base_check_merge_result(
+                                aid, stale_base
+                            )
+                            result["boundary"] = boundary_state.get("latest")
+                            result["clean_boundary"] = boundary_state.get("clean")
+                            return result
                         check = await \
                             worktree_mgr.check_merge_conflicts(cell)
                         if check.get("clean"):
@@ -5315,6 +5371,7 @@ async def main(connection=None):
                         check["id"] = aid
                         check["boundary"] = boundary_state.get("latest")
                         check["clean_boundary"] = boundary_state.get("clean")
+                        _attach_stale_base(check, stale_base)
                         if check.get("clean"):
                             squash = cell.worktree_merge_squash
                             check["default_message"] = \
@@ -5431,6 +5488,7 @@ async def main(connection=None):
                     stat_only = data.get("stat_only", False)
                     summary_only = data.get("summary_only", False)
                     paths = data.get("paths", [])
+                    stale_base = await worktree_mgr.stale_base_info(cell)
                     if summary_only:
                         summary = await worktree_mgr.diff_files_summary(
                             cell,
@@ -5446,6 +5504,12 @@ async def main(connection=None):
                                 **summary,
                             },
                         }
+                        _attach_stale_base(result, stale_base)
+                        if stale_base.get("stale"):
+                            result["summary"]["stale_base"] = stale_base
+                            result["summary"]["stale_base_warning"] = (
+                                result.get("stale_base_warning", "")
+                            )
                     else:
                         diff_args = [
                             "git", "-C", cell.worktree_path,
@@ -5470,6 +5534,9 @@ async def main(connection=None):
                                       or "git diff failed"}
                         else:
                             diff_text = stdout.decode()
+                            warning = _stale_base_warning(stale_base)
+                            if warning:
+                                diff_text = f"{warning}\n\n{diff_text}"
                             # Truncate if too large (100K chars)
                             if len(diff_text) > 100_000:
                                 diff_text = (
@@ -5478,6 +5545,7 @@ async def main(connection=None):
                                 )
                             result = {"type": "ok",
                                       "diff": diff_text}
+                            _attach_stale_base(result, stale_base)
 
             elif cmd == "worktree_check_conflicts":
                 cell = state.agents.get(data.get("id", ""))
@@ -5570,6 +5638,13 @@ async def main(connection=None):
                             ),
                         }
                     else:
+                        stale_base = await worktree_mgr.stale_base_info(cell)
+                        if stale_base.get("stale") \
+                                and not data.get("force_stale_base"):
+                            result = _stale_base_merge_result(
+                                aid, stale_base
+                            )
+                            return result
                         precheck = await worktree_mgr.check_merge_conflicts(
                             cell
                         )
@@ -5582,6 +5657,7 @@ async def main(connection=None):
                                     "error", "Conflicts detected"
                                 ),
                             }
+                            _attach_stale_base(result, stale_base)
                         else:
                             overwrite_paths = (
                                 await worktree_mgr.merge_untracked_overwrite_paths(
@@ -5787,6 +5863,7 @@ async def main(connection=None):
                                         "sha": merge_result["sha"],
                                         "cleanup": cleanup,
                                     }
+                                    _attach_stale_base(result, stale_base)
                                 else:
                                     result = {
                                         "type": "worktree_merge",
@@ -5794,6 +5871,7 @@ async def main(connection=None):
                                         "error": merge_result.get(
                                             "error", "Merge failed"),
                                     }
+                                    _attach_stale_base(result, stale_base)
                 else:
                     result = {
                         "type": "worktree_merge", "id": aid,

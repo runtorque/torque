@@ -201,6 +201,59 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
             str(self.repo_root.resolve()),
         )
 
+    async def test_stale_base_info_detects_base_advance_and_rebase_clears(self):
+        cell = self._make_cell()
+        wt_path = await self.mgr.create(
+            cell,
+            str(self.repo_root),
+            base_branch="main",
+        )
+        self.assertIsNotNone(wt_path)
+
+        (Path(wt_path) / "worker.txt").write_text("worker change\n")
+        checkpoint = await self.mgr.checkpoint(cell, "Worker change")
+        self.assertTrue(checkpoint)
+
+        (self.repo_root / "base.txt").write_text("base change\n")
+        await self._git("add", "base.txt")
+        await self._git("commit", "-m", "Base branch advanced")
+
+        stale = await self.mgr.stale_base_info(cell)
+
+        self.assertTrue(stale["stale"])
+        self.assertEqual(stale["branch"], cell.worktree_branch)
+        self.assertEqual(stale["base_branch"], "main")
+        self.assertEqual(stale["commits_on_base"], 1)
+        self.assertEqual(stale["files_changed_on_base"], 1)
+        self.assertIn("⚠ STALE BASE", stale["warning"])
+        self.assertIn("Base branch advanced", stale["base_head_subject"])
+
+        self.assertTrue(await self.mgr.rebase_onto_base(cell))
+
+        refreshed = await self.mgr.stale_base_info(cell)
+        self.assertFalse(refreshed["stale"])
+        self.assertEqual(refreshed["fork_point"], refreshed["base_head"])
+
+    async def test_stale_base_info_current_base_branch_is_not_stale(self):
+        (self.repo_root / "base.txt").write_text("base change\n")
+        await self._git("add", "base.txt")
+        await self._git("commit", "-m", "Base branch already current")
+
+        cell = self._make_cell()
+        wt_path = await self.mgr.create(
+            cell,
+            str(self.repo_root),
+            base_branch="main",
+        )
+        self.assertIsNotNone(wt_path)
+        (Path(wt_path) / "worker.txt").write_text("worker change\n")
+        self.assertTrue(await self.mgr.checkpoint(cell, "Worker change"))
+
+        info = await self.mgr.stale_base_info(cell)
+
+        self.assertFalse(info["stale"])
+        self.assertEqual(info["fork_point"], info["base_head"])
+
     async def test_blank_custom_worktree_name_preserves_default_naming(self):
         cell = self._make_cell()
 
