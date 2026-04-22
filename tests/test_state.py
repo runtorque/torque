@@ -1002,6 +1002,243 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
         self.assertEqual(state.agent_current_task("agent-1").id, follow_up.id)
         self.assertTrue(state.agent_is_busy("agent-1"))
 
+    def test_done_child_cascades_single_level_parent_to_done(self):
+        state = self._make_state()
+        parent = state.board_add_task(
+            "Implement feature",
+            "g",
+            lane="In Progress",
+            id="task-parent",
+            status="On review",
+            health_state="stalled",
+            health_details={"reasons": ["no_progress_timeout"]},
+        )
+        child = state.board_add_task(
+            "Review feature",
+            "g",
+            lane="In Progress",
+            id="task-review",
+            parent_task_id=parent.id,
+            pipeline_root_id=parent.id,
+            pipeline_depth=1,
+        )
+
+        state._delta_ops.clear()
+        state.board_move_task(child.id, "Done")
+
+        self.assertEqual(state.board_tasks[child.id].lane, "Done")
+        self.assertEqual(state.board_tasks[parent.id].lane, "Done")
+        self.assertEqual(state.board_tasks[parent.id].status, "")
+        self.assertEqual(state.board_tasks[parent.id].health_state, "healthy")
+        upsert_ids = [
+            op.get("id") for op in state._delta_ops
+            if op.get("op") == "task_upsert"
+        ]
+        self.assertIn(child.id, upsert_ids)
+        self.assertIn(parent.id, upsert_ids)
+
+    def test_done_cascades_multi_pass_review_chain_after_ship_verdict(self):
+        state = self._make_state()
+        root = state.board_add_task(
+            "Implement cascading completion",
+            "g",
+            lane="In Progress",
+            id="LOOM:77",
+            status="On review",
+            health_state="idle-risk",
+            health_details={"reasons": ["progress_silence_warning"]},
+        )
+        review_one = state.board_add_task(
+            "Review pass 1",
+            "g",
+            lane="In Progress",
+            id="LOOM:77:1",
+            parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=1,
+            status="Fixing",
+            health_state="stalled",
+            health_details={"reasons": ["no_progress_timeout"]},
+        )
+        fix_one = state.board_add_task(
+            "Fix review pass 1",
+            "g",
+            lane="In Progress",
+            id="LOOM:77:2",
+            parent_task_id=review_one.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=2,
+        )
+        review_two = state.board_add_task(
+            "Review pass 2",
+            "g",
+            lane="In Progress",
+            id="LOOM:77:3",
+            parent_task_id=fix_one.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=3,
+        )
+        fix_two = state.board_add_task(
+            "Fix review pass 2",
+            "g",
+            lane="In Progress",
+            id="LOOM:77:4",
+            parent_task_id=review_two.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=4,
+        )
+        final_review = state.board_add_task(
+            "Final review pass",
+            "g",
+            lane="In Progress",
+            id="LOOM:77:5",
+            parent_task_id=fix_two.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=5,
+            messages=[{
+                "timestamp": 1.0,
+                "action": "done",
+                "message": "Verdict: Ship — no blocking issues",
+                "agent_name": "Reviewer",
+            }],
+        )
+
+        state._delta_ops.clear()
+        state.board_move_task(final_review.id, "Done")
+
+        chain = state.board_get_chain(root.id)
+        self.assertEqual(
+            [(task.id, task.lane) for task in chain],
+            [
+                ("LOOM:77", "Done"),
+                ("LOOM:77:1", "Done"),
+                ("LOOM:77:2", "Done"),
+                ("LOOM:77:3", "Done"),
+                ("LOOM:77:4", "Done"),
+                ("LOOM:77:5", "Done"),
+            ],
+        )
+        self.assertEqual(state.board_tasks[root.id].status, "")
+        self.assertEqual(state.board_tasks[review_one.id].status, "")
+        self.assertEqual(state.board_tasks[root.id].health_state, "healthy")
+        self.assertEqual(
+            state.board_tasks[review_one.id].health_state,
+            "healthy",
+        )
+        upsert_ids = [
+            op.get("id") for op in state._delta_ops
+            if op.get("op") == "task_upsert"
+        ]
+        for task in chain:
+            self.assertIn(task.id, upsert_ids)
+
+    def test_done_cascade_waits_for_open_sibling(self):
+        state = self._make_state()
+        parent = state.board_add_task(
+            "Implement feature",
+            "g",
+            lane="In Progress",
+            id="task-parent",
+        )
+        first_child = state.board_add_task(
+            "Review feature",
+            "g",
+            lane="In Progress",
+            id="task-review",
+            parent_task_id=parent.id,
+            pipeline_root_id=parent.id,
+            pipeline_depth=1,
+        )
+        second_child = state.board_add_task(
+            "Follow-up fix",
+            "g",
+            lane="To Do",
+            id="task-fix",
+            parent_task_id=parent.id,
+            pipeline_root_id=parent.id,
+            pipeline_depth=1,
+        )
+
+        state.board_move_task(first_child.id, "Done")
+
+        self.assertEqual(state.board_tasks[first_child.id].lane, "Done")
+        self.assertEqual(state.board_tasks[second_child.id].lane, "To Do")
+        self.assertEqual(state.board_tasks[parent.id].lane, "In Progress")
+
+    def test_done_cascade_ignores_weaver_follow_up_replies(self):
+        state = self._make_state()
+        parent = state.board_add_task(
+            "Implement feature",
+            "g",
+            lane="In Progress",
+            id="task-parent",
+            status="Reviewing",
+        )
+        follow_up = state.board_add_task(
+            "Weaver: Need status",
+            "g",
+            lane="Backlog",
+            id="task-reply",
+            parent_task_id=parent.id,
+            pipeline_root_id=parent.id,
+            pipeline_depth=1,
+            labels=["loom:derived", "loom:weaver-message"],
+        )
+
+        state.board_move_task(follow_up.id, "Done")
+
+        self.assertEqual(state.board_tasks[follow_up.id].lane, "Done")
+        self.assertEqual(state.board_tasks[parent.id].lane, "In Progress")
+        self.assertEqual(state.board_tasks[parent.id].status, "Reviewing")
+
+    def test_done_cascade_does_not_complete_weaver_follow_up_parent(self):
+        state = self._make_state()
+        parent = state.board_add_task(
+            "Weaver: Need status",
+            "g",
+            lane="In Progress",
+            id="task-reply",
+            labels=["loom:derived", "loom:weaver-message"],
+        )
+        child = state.board_add_task(
+            "Investigate reply",
+            "g",
+            lane="In Progress",
+            id="task-reply-child",
+            parent_task_id=parent.id,
+            pipeline_root_id=parent.id,
+            pipeline_depth=1,
+            labels=["loom:derived"],
+        )
+
+        state.board_move_task(child.id, "Done")
+
+        self.assertEqual(state.board_tasks[child.id].lane, "Done")
+        self.assertEqual(state.board_tasks[parent.id].lane, "In Progress")
+
+    def test_board_update_task_done_lane_uses_same_cascade(self):
+        state = self._make_state()
+        parent = state.board_add_task(
+            "Implement feature",
+            "g",
+            lane="In Progress",
+            id="task-parent",
+        )
+        child = state.board_add_task(
+            "Review feature",
+            "g",
+            lane="In Progress",
+            id="task-review",
+            parent_task_id=parent.id,
+            pipeline_root_id=parent.id,
+            pipeline_depth=1,
+        )
+
+        state.board_update_task(child.id, lane="Done")
+
+        self.assertEqual(state.board_tasks[child.id].lane, "Done")
+        self.assertEqual(state.board_tasks[parent.id].lane, "Done")
+
     def test_add_group_rejects_prefix_collisions(self):
         state = self.state_mod.MatrixState()
 

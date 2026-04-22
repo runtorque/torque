@@ -615,6 +615,13 @@ def task_counts_as_done(task: Optional[BoardTask]) -> bool:
     return board_task_counts_as_done(task)
 
 
+def task_suppresses_done_cascade(task: Optional[BoardTask]) -> bool:
+    if not task:
+        return False
+    labels = set(task.labels or [])
+    return bool(labels.intersection({"loom:human", "loom:weaver-message"}))
+
+
 def _normalize_verification_fields(fields: dict) -> None:
     if "verification_mode" in fields:
         mode = fields.get("verification_mode", "") or ""
@@ -3552,6 +3559,8 @@ class MatrixState:
                 )
         self._emit("task_upsert", **asdict(task))
         self._db_save_task(task)
+        if lane_changed and new_lane == "Done":
+            self.board_cascade_done(tid, recompute=False)
         self.recompute_task_health()
 
     def board_remove_task(self, tid: str):
@@ -3592,7 +3601,58 @@ class MatrixState:
             position=position,
             clear_attention=(lane == "Done"),
         )
+        if lane == "Done":
+            self.board_cascade_done(tid, recompute=False)
         self.recompute_task_health()
+
+    def board_cascade_done(self, tid: str, *,
+                           recompute: bool = True) -> list[str]:
+        """Complete ancestors whose entire descendant tree is done.
+
+        Derived tasks suspend their parents in an active lane while follow-up
+        work runs.  Once a descendant lands in Done and there are no open
+        descendants left under an ancestor, that ancestor should also count as
+        complete.  Keep this in the state layer so board moves, server-side
+        reports, and other mutation paths all share the same cascade behavior.
+        """
+        tid = self.resolve_task_alias(tid)
+        task = self.board_tasks.get(tid)
+        if not task or not task_counts_as_done(task):
+            return []
+        if task_suppresses_done_cascade(task):
+            return []
+        if "Done" not in self.board_lanes:
+            return []
+
+        changed: list[str] = []
+        pid = task.parent_task_id
+        while pid:
+            parent = self.board_tasks.get(pid)
+            if not parent:
+                break
+            next_pid = parent.parent_task_id
+            if task_suppresses_done_cascade(parent):
+                break
+            if board_task_is_closed(parent):
+                pid = next_pid
+                continue
+            if self.task_has_unresolved_descendants(parent.id):
+                break
+
+            parent.status = ""
+            self._board_apply_archive_state(
+                parent,
+                lane="Done",
+                archived_at="",
+                archived_from_lane="",
+                clear_attention=True,
+            )
+            changed.append(parent.id)
+            pid = next_pid
+
+        if changed and recompute:
+            self.recompute_task_health()
+        return changed
 
     def board_archive_task(self, tid: str, *,
                            position: Optional[int] = None):

@@ -1999,6 +1999,48 @@ test('renderBoard restores per-lane body scrollTop across re-renders in wide lay
   assert.equal(doneBody2.scrollTop, 0);
 });
 
+test('renderBoard rerender moves cascaded task from In Progress to Done lane', () => {
+  const { context, document } = createBoardHarness();
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+
+  document.body.classList.add('runtime-embedded');
+  panel.clientWidth = 1200;
+  runInContext(context, `
+    state.board_lanes = ['Backlog', 'In Progress', 'Done'];
+    state.board_tasks = {
+      'LOOM:77': {
+        id: 'LOOM:77',
+        task: 'Ship cascaded review chain',
+        group: 'alpha',
+        lane: 'In Progress',
+        position: 0
+      }
+    };
+    _boardSelectedLane = 'In Progress';
+    _renderBoardCard = function(t) {
+      return '<div class="board-card cascade-test-card">card-' + t.id + '-lane-' + t.lane + '</div>';
+    };
+  `);
+
+  context.renderBoard();
+
+  assert.match(panel.innerHTML, /card-LOOM:77-lane-In Progress/);
+  assert.doesNotMatch(panel.innerHTML, /card-LOOM:77-lane-Done/);
+
+  runInContext(context, `
+    state.board_tasks['LOOM:77'] = Object.assign(
+      {},
+      state.board_tasks['LOOM:77'],
+      { lane: 'Done' }
+    );
+  `);
+  context.renderBoard();
+
+  assert.doesNotMatch(panel.innerHTML, /card-LOOM:77-lane-In Progress/);
+  assert.match(panel.innerHTML, /card-LOOM:77-lane-Done/);
+});
+
 test('wide standalone lane columns keep their direct children from shrinking', () => {
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
 
