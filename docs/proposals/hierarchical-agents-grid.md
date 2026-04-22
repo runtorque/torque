@@ -162,6 +162,14 @@ Strip behavior:
 
 **v1 scoping decision:** only the User section carries a loose-workers strip. Architect sections cannot hold detached workers in v1 because architects cannot create workers directly — workers are engineer-owned. If a future feature allows architects to own detached workers, the strip primitive extends naturally to architect sections.
 
+**Kind contract for the strip:** the strip renders exactly **user-owned cells with `kind == worker` and null `owner_engineer_id`** — nothing else. In particular:
+
+- **Terminals never render in the strip.** Per the kinds model, terminals always carry a `parent_id` to some agent and render in that agent's drawer. A terminal without a parent is a data-integrity issue, not a strip resident — surface it via `loom doctor` rather than normalizing it into worker rendering.
+- **Engineers never render in the strip.** User-created engineers render as engineer rows in the User section with the leading-engineer-card + wrapping-workers layout. They are not "detached workers" even when they have no architect.
+- **The `+ New Worker` button always produces `kind == worker`.** There is no "quick-add with unspecified kind" path through the strip; the button's output kind is fixed.
+
+This contract closes the earlier ambiguity around whether "any detached agent regardless of kind" belonged in the strip. The strip is a worker-only surface; other kinds appearing in it would be a bug signal (upstream grouping logic leaked), not a rendering variant to accommodate.
+
 ---
 
 ## Data model
