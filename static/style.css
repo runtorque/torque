@@ -726,6 +726,40 @@ body.runtime-embedded .terminal-empty {
   font: 9px var(--font);
   opacity: .72;
 }
+.agent-section-new-engineer-btn,
+.agent-grid-new-architect-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  padding: 6px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 46%, var(--border));
+  border-radius: var(--radius);
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 11%, transparent);
+  font: 9px var(--font);
+  font-weight: 700;
+  letter-spacing: .01em;
+  transition: background .15s, border-color .15s, color .15s, opacity .15s;
+}
+.agent-section-new-engineer-btn:hover,
+.agent-grid-new-architect-btn:hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 66%, var(--border));
+}
+.agent-section-new-engineer-btn:disabled,
+.agent-grid-new-architect-btn:disabled {
+  cursor: default;
+  opacity: .55;
+  color: var(--text-dim);
+  background: transparent;
+  border-color: var(--border);
+}
+.agent-grid-new-architect-row {
+  display: flex;
+  justify-content: flex-start;
+  padding-top: 2px;
+}
 .loose-workers-placeholder-btn {
   min-height: 64px;
   cursor: default;

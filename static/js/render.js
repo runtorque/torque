@@ -603,6 +603,10 @@ function _agentGridSectionKey(section) {
   return 'architect:' + String((section.architect && section.architect.id) || '');
 }
 
+function _jsStringAttr(value) {
+  return esc(JSON.stringify(String(value || '')));
+}
+
 function _renderUserSectionCard(groupName) {
   return '<div class="agent-section-user-card"'
     + ' data-agent-section-card="user"'
@@ -613,15 +617,23 @@ function _renderUserSectionCard(groupName) {
     + '</div>';
 }
 
-function _renderSectionControlsSlot(groupName, section) {
+function _renderSectionControlsSlot(groupName, section, opts) {
+  opts = opts || {};
   const sectionKey = _agentGridSectionKey(section);
+  const architectId = section && section.architect ? String(section.architect.id || '') : '';
+  const groupArg = _jsStringAttr(groupName);
+  const architectArg = _jsStringAttr(architectId);
+  const disabled = !!opts.disabled;
   return '<div class="agent-section-controls-slot"'
     + ' data-section-controls-for="' + esc(sectionKey) + '">'
-    + '<span class="agent-section-placeholder-label">Controls</span>'
-    + '<span class="agent-section-placeholder-btn"'
-    + ' data-placeholder-action="new-engineer"'
+    + '<button type="button" class="agent-section-new-engineer-btn"'
+    + ' data-action="new-engineer"'
+    + ' data-group="' + esc(groupName) + '"'
+    + ' data-hired-by-architect-id="' + esc(architectId) + '"'
     + ' data-focus-key="section-new-engineer:' + esc(groupName) + ':' + esc(sectionKey) + '"'
-    + ' aria-disabled="true">+ New Engineer</span>'
+    + (disabled ? ' disabled aria-disabled="true" title="Agent limit reached"' : ' title="Create an engineer in this section"')
+    + (disabled ? '' : ' onclick="event.stopPropagation();openAddEngineerForSection(' + groupArg + ',' + architectArg + ')"')
+    + '>+ New Engineer</button>'
     + '</div>';
 }
 
@@ -640,14 +652,14 @@ function _renderLooseWorkersStrip(groupName, section, renderCell) {
   return html;
 }
 
-function _renderArchitectHeaderRow(groupName, section, renderCell) {
+function _renderArchitectHeaderRow(groupName, section, renderCell, opts) {
   const sectionKey = _agentGridSectionKey(section);
   let html = '<div class="agent-section-header-row architect-header-row"'
     + ' data-agent-row-shape="architect-header-row"'
     + ' data-section-key="' + esc(sectionKey) + '">';
   if (section && section.architect) html += renderCell(section.architect);
   else html += _renderUserSectionCard(groupName);
-  html += _renderSectionControlsSlot(groupName, section);
+  html += _renderSectionControlsSlot(groupName, section, opts);
   html += '</div>';
   return html;
 }
@@ -662,6 +674,21 @@ function _renderEngineerRow(row, renderCell) {
   const workers = row.workers || [];
   for (const worker of workers) html += renderCell(worker);
   html += '</div>';
+  html += '</div>';
+  return html;
+}
+
+function _renderAgentGridAddArchitectRow(gname, gsLocal, agents) {
+  const atCap = gsLocal.max_agents > 0 && agents.length >= gsLocal.max_agents;
+  const groupArg = _jsStringAttr(gname);
+  let html = '<div class="agent-grid-new-architect-row">';
+  html += '<button type="button" class="agent-grid-new-architect-btn"'
+    + ' data-action="new-architect"'
+    + ' data-group="' + esc(gname) + '"'
+    + ' data-focus-key="agent-new-architect:' + esc(gname) + '"'
+    + (atCap ? ' disabled aria-disabled="true" title="Agent limit reached"' : ' title="Create a new architect in this group"')
+    + (atCap ? '' : ' onclick="event.stopPropagation();openAddArchitectForGroup(' + groupArg + ')"')
+    + '>+ New Architect</button>';
   html += '</div>';
   return html;
 }
@@ -841,13 +868,15 @@ function render() {
       ];
       html += '<section class="' + sectionClasses.join(' ') + '"'
         + ' data-agent-section="' + esc(sectionKey) + '">';
-      html += _renderArchitectHeaderRow(gname, section, renderCellForGrid);
+      const atAgentCap = gsLocal.max_agents > 0 && agents.length >= gsLocal.max_agents;
+      html += _renderArchitectHeaderRow(gname, section, renderCellForGrid, { disabled: atAgentCap });
       if (section.type === 'user') {
         html += _renderLooseWorkersStrip(gname, section, renderCellForGrid);
       }
       for (const row of section.rows) html += _renderEngineerRow(row, renderCellForGrid);
       html += '</section>';
     }
+    html += _renderAgentGridAddArchitectRow(gname, gsLocal, agents);
     if (!collapsed) {
       for (const t of standaloneTerms) {
         navItems.push(t.id);

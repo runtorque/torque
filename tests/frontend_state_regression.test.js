@@ -1008,7 +1008,31 @@ function createModalHarness() {
     _renderTaskArtifactEditor = function() {};
     taskAutoResize = function() {};
   `);
-  return { context, document };
+  return { context, document, sandbox };
+}
+
+function registerEngineerModalDom(document) {
+  const modal = document.register('modal-engineer');
+  modal.classList.add('overlay');
+  const summary = document.register('modal-engineer-summary');
+  summary.classList.add('hidden');
+  const nameInput = document.register('engineer-name-input');
+  const commandInput = document.register('engineer-command-input');
+  document.setSelectorAll('.overlay', [modal]);
+  document.setSelectorAll('.hint-pop', []);
+  return { modal, summary, nameInput, commandInput };
+}
+
+function registerArchitectModalDom(document) {
+  const modal = document.register('modal-architect');
+  modal.classList.add('overlay');
+  const summary = document.register('modal-architect-summary');
+  summary.classList.add('hidden');
+  const nameInput = document.register('architect-name-input');
+  const commandInput = document.register('architect-command-input');
+  document.setSelectorAll('.overlay', [modal]);
+  document.setSelectorAll('.hint-pop', []);
+  return { modal, summary, nameInput, commandInput };
 }
 
 function createDiffHarness() {
@@ -9364,6 +9388,130 @@ test('standalone runtime metadata does not change embedded-runtime detection', (
   assert.equal(jsonValue(context, `_embeddedRuntimeEnabled()`), true);
 });
 
+
+test('architect header + New Engineer opens a scoped modal and submits architect hire context', () => {
+  const { context, document, sandbox } = createMainRenderHarness();
+  const modalDom = registerEngineerModalDom(document);
+  loadModalScripts(context);
+  const main = document.getElementById('main');
+
+  sandbox.state.groups = { loom: ['arch-a'] };
+  sandbox.state.group_settings = { loom: { collapsed_default: false } };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'arch-a': {
+      id: 'arch-a',
+      name: 'Productmind',
+      kind: 'architect',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'P',
+      status: 'running',
+      created_at: 1,
+    },
+  };
+
+  runInContext(context, `render();`);
+
+  assert.match(main.innerHTML, /data-agent-section="architect:arch-a"/);
+  assert.match(main.innerHTML, /class="agent-section-new-engineer-btn"/);
+  assert.match(main.innerHTML, /data-hired-by-architect-id="arch-a"/);
+  assert.match(main.innerHTML, /openAddEngineerForSection\(&quot;loom&quot;,&quot;arch-a&quot;\)/);
+
+  runInContext(context, `openAddEngineerForSection('loom', 'arch-a');`);
+  assert.equal(modalDom.modal.classList.contains('visible'), true);
+  assert.equal(modalDom.summary.textContent, 'Create a persistent engineer session hired by Productmind in loom.');
+  modalDom.nameInput.value = 'Casey';
+  modalDom.commandInput.value = 'codex --fast';
+
+  runInContext(context, `submitAddEngineer();`);
+
+  assert.deepEqual(jsonValue(context, `sendCalls`), [{
+    cmd: 'add_engineer',
+    name: 'Casey',
+    group: 'loom',
+    hired_by_architect_id: 'arch-a',
+    command: 'codex --fast',
+  }]);
+});
+
+test('user header + New Engineer submits a user-hired engineer without architect context', () => {
+  const { context, document, sandbox } = createMainRenderHarness();
+  const modalDom = registerEngineerModalDom(document);
+  loadModalScripts(context);
+  const main = document.getElementById('main');
+
+  sandbox.state.groups = { loom: [] };
+  sandbox.state.group_settings = { loom: { collapsed_default: false } };
+  sandbox.state.children = {};
+  sandbox.state.agents = {};
+
+  runInContext(context, `render();`);
+
+  assert.match(main.innerHTML, /data-agent-section="user"/);
+  assert.match(main.innerHTML, /class="agent-section-new-engineer-btn"/);
+  assert.match(main.innerHTML, /data-hired-by-architect-id=""/);
+  assert.match(main.innerHTML, /openAddEngineerForSection\(&quot;loom&quot;,&quot;&quot;\)/);
+
+  runInContext(context, `openAddEngineerForSection('loom', '');`);
+  assert.equal(modalDom.summary.textContent, 'Create a persistent user-hired engineer session in loom.');
+  modalDom.nameInput.value = 'User Engineer';
+
+  runInContext(context, `submitAddEngineer();`);
+
+  const sendCalls = jsonValue(context, `sendCalls`);
+  assert.deepEqual(sendCalls, [{
+    cmd: 'add_engineer',
+    name: 'User Engineer',
+    group: 'loom',
+  }]);
+  assert.equal(Object.prototype.hasOwnProperty.call(sendCalls[0], 'hired_by_architect_id'), false);
+});
+
+test('bottom + New Architect button opens the group-scoped architect modal', () => {
+  const { context, document, sandbox } = createMainRenderHarness();
+  const modalDom = registerArchitectModalDom(document);
+  loadModalScripts(context);
+  const main = document.getElementById('main');
+
+  sandbox.state.groups = { loom: ['arch-a'] };
+  sandbox.state.group_settings = { loom: { collapsed_default: false } };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'arch-a': {
+      id: 'arch-a',
+      name: 'Architect A',
+      kind: 'architect',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'A',
+      status: 'running',
+      created_at: 1,
+    },
+  };
+
+  runInContext(context, `render();`);
+
+  assert.match(main.innerHTML, /class="agent-grid-new-architect-btn"/);
+  assert.match(main.innerHTML, /openAddArchitectForGroup\(&quot;loom&quot;\)/);
+  assert.match(main.innerHTML, /Architect A[\s\S]*\+ New Architect[\s\S]*cell cell-add/);
+
+  runInContext(context, `openAddArchitectForGroup('loom');`);
+  assert.equal(modalDom.modal.classList.contains('visible'), true);
+  assert.equal(modalDom.summary.textContent, 'Create a persistent architect session for loom.');
+  modalDom.nameInput.value = 'Second Architect';
+  modalDom.commandInput.value = 'codex architect';
+
+  runInContext(context, `submitAddArchitect();`);
+
+  assert.deepEqual(jsonValue(context, `sendCalls`), [{
+    cmd: 'add_architect',
+    name: 'Second Architect',
+    group: 'loom',
+    command: 'codex architect',
+  }]);
+});
+
 test('classic runtime keeps the shared left rail filtered to the current window', () => {
   const { context, document, sandbox } = createMainRenderHarness();
   const main = document.getElementById('main');
@@ -10210,6 +10358,72 @@ test('main hierarchy row shapes preserve focused controls across rerenders', () 
     assert.equal(currentFocusTarget.selectionStart, 2);
     assert.equal(currentFocusTarget.selectionEnd, 6);
   }
+});
+
+
+test('add engineer modal draft survives agent grid rerender during websocket delta', () => {
+  const { sandbox, document } = createSandbox();
+  document.register('main');
+  const modalDom = registerEngineerModalDom(document);
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/ws.js');
+  loadScript(context, 'static/js/render.js');
+  loadModalScripts(context);
+  runInContext(context, `
+    renderTerminalWorkspace = function() {};
+    updateEventsAttentionBadge = function() {};
+    getFilterByWindow = function() { return false; };
+  `);
+
+  runInContext(context, `
+    _handleFullState({
+      seq: 1,
+      groups: { loom: ['arch-a'] },
+      group_settings: { loom: { collapsed_default: false } },
+      agents: {
+        'arch-a': {
+          id: 'arch-a',
+          name: 'Architect A',
+          kind: 'architect',
+          group: 'loom',
+          cell_type: 'agent',
+          icon: 'A',
+          status: 'running',
+          created_at: 1,
+        },
+      },
+      children: {},
+      board_lanes: [],
+      board_tasks: {},
+      panel_events: []
+    });
+    openAddEngineerForSection('loom', 'arch-a');
+  `);
+
+  modalDom.nameInput.value = 'Draft Engineer';
+  modalDom.nameInput.selectionStart = 6;
+  modalDom.nameInput.selectionEnd = 14;
+  modalDom.commandInput.value = 'codex --model gpt-5.4';
+  document.activeElement = modalDom.nameInput;
+
+  runInContext(context, `
+    _handleDelta({
+      seq: 2,
+      ops: [
+        { op: 'agent_upsert', id: 'eng-a', name: 'Engineer A', kind: 'engineer', hired_by_architect_id: 'arch-a', group: 'loom', cell_type: 'agent', icon: 'E', status: 'running', created_at: 2 },
+        { op: 'group_update', name: 'loom', agents: ['arch-a', 'eng-a'] }
+      ]
+    });
+  `);
+
+  assert.equal(modalDom.modal.classList.contains('visible'), true);
+  assert.equal(modalDom.nameInput.value, 'Draft Engineer');
+  assert.equal(modalDom.commandInput.value, 'codex --model gpt-5.4');
+  assert.equal(modalDom.nameInput.selectionStart, 6);
+  assert.equal(modalDom.nameInput.selectionEnd, 14);
+  assert.equal(document.activeElement, modalDom.nameInput);
+  assert.match(document.getElementById('main').innerHTML, /Architect A[\s\S]*Engineer A/);
+  assert.deepEqual(jsonValue(context, `sendCalls`), []);
 });
 
 test('main hierarchy ordering is stable when multiple agent deltas arrive in one websocket message', () => {
