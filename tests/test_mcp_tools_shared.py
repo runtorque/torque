@@ -1,6 +1,10 @@
 import importlib
 import json
+import subprocess
+import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
 
 try:
     from helpers import install_aiohttp_stub
@@ -179,3 +183,116 @@ class MCPToolsSharedArchitectTests(unittest.TestCase):
             len(payload["tasks"]["items"]),
             self.shared_mod._ARCHITECT_BOARD_SUMMARY_TASK_LIMIT,
         )
+
+    def test_architect_deploy_state_counts_commits_and_extracts_task_ids(self):
+        deploy_mod = importlib.import_module("loom.deploy_state")
+        deploy_mod = importlib.reload(deploy_mod)
+        state = self._make_state()
+        state.boot_timestamp = 100.0
+        state.boot_repo_root = "/repo"
+        state.boot_head_commit = "boot-sha"
+        state.boot_mainline_branch = "main"
+        calls = []
+
+        def fake_git(repo_root, *args):
+            calls.append((repo_root, args))
+            if args == ("rev-parse", "--abbrev-ref", "HEAD"):
+                return "main"
+            if args == ("rev-parse", "HEAD"):
+                return "current-sha"
+            if args == ("rev-list", "--count", "boot-sha..main"):
+                return "3"
+            if args == ("log", "--format=%B", "--reverse", "boot-sha..main"):
+                return (
+                    "Merge LOOM:101\n\n"
+                    "Ship deploy state for LOOM:102 and LOOM:101\n"
+                    "No task id here"
+                )
+            raise AssertionError(f"unexpected git call: {args}")
+
+        with mock.patch.object(deploy_mod, "_run_git", side_effect=fake_git):
+            payload = deploy_mod.architect_deploy_state_payload(
+                state,
+                "loom",
+                now=160.0,
+            )
+
+        self.assertEqual(payload["boot_timestamp"], 100.0)
+        self.assertEqual(payload["boot_head_commit"], "boot-sha")
+        self.assertEqual(payload["current_head_commit"], "current-sha")
+        self.assertEqual(payload["daemon_uptime_seconds"], 60)
+        self.assertEqual(payload["pending_deploy"]["count"], 3)
+        self.assertEqual(
+            payload["pending_deploy"]["loom_task_ids"],
+            ["LOOM:101", "LOOM:102"],
+        )
+        self.assertNotIn("error", payload)
+        self.assertEqual(calls[0], ("/repo", ("rev-parse", "--abbrev-ref", "HEAD")))
+
+    def test_architect_deploy_state_fails_gracefully_for_detached_head(self):
+        deploy_mod = importlib.import_module("loom.deploy_state")
+        deploy_mod = importlib.reload(deploy_mod)
+        state = self._make_state()
+        state.boot_timestamp = 100.0
+        state.boot_repo_root = "/repo"
+        state.boot_head_commit = "boot-sha"
+        state.boot_mainline_branch = "main"
+
+        def fake_git(_repo_root, *args):
+            if args == ("rev-parse", "--abbrev-ref", "HEAD"):
+                return "HEAD"
+            raise AssertionError(f"unexpected git call: {args}")
+
+        with mock.patch.object(deploy_mod, "_run_git", side_effect=fake_git):
+            payload = deploy_mod.architect_deploy_state_payload(
+                state,
+                "loom",
+                now=160.0,
+            )
+
+        self.assertEqual(payload["pending_deploy"]["count"], -1)
+        self.assertEqual(payload["pending_deploy"]["loom_task_ids"], [])
+        self.assertIn("detached HEAD", payload["error"])
+
+    def test_capture_deploy_boot_state_uses_installed_source_repo_metadata(self):
+        deploy_mod = importlib.import_module("loom.deploy_state")
+        deploy_mod = importlib.reload(deploy_mod)
+        state = self._make_state()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            script_dir = Path(tmp)
+            (script_dir / ".loom_source_repo_root").write_text(
+                "/repo\n",
+                encoding="utf-8",
+            )
+
+            def fake_git(repo_root, *args):
+                repo_root = str(repo_root)
+                if repo_root == str(script_dir):
+                    raise subprocess.CalledProcessError(
+                        128,
+                        ["git"],
+                        stderr="fatal: not a git repository",
+                    )
+                if repo_root == "/repo" and args == (
+                    "rev-parse",
+                    "--show-toplevel",
+                ):
+                    return "/repo"
+                if repo_root == "/repo" and args == ("rev-parse", "HEAD"):
+                    return "boot-sha"
+                if repo_root == "/repo" and args == (
+                    "rev-parse",
+                    "--abbrev-ref",
+                    "HEAD",
+                ):
+                    return "main"
+                raise AssertionError(f"unexpected git call: {repo_root} {args}")
+
+            with mock.patch.object(deploy_mod, "_run_git", side_effect=fake_git):
+                deploy_mod.capture_deploy_boot_state(state, script_dir)
+
+        self.assertEqual(state.boot_repo_root, "/repo")
+        self.assertEqual(state.boot_head_commit, "boot-sha")
+        self.assertEqual(state.boot_mainline_branch, "main")
+        self.assertEqual(state.boot_head_error, "")

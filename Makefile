@@ -69,6 +69,11 @@ install:
 		mkdir -p "$$(dirname "$$dest")"; \
 		cp "$$src" "$$dest"; \
 	done
+	@if repo_root=$$(git rev-parse --show-toplevel 2>/dev/null); then \
+		printf '%s\n' "$$repo_root" > "$(SCRIPT_DIR)/.loom_source_repo_root"; \
+	else \
+		rm -f "$(SCRIPT_DIR)/.loom_source_repo_root"; \
+	fi
 	@# -- Install dependencies --
 	@PYTHON="$(or $(PROJECT_PYTHON),$(shell ls "$(ITERM2_PROJECT)"/iterm2env/versions/3.*/bin/python3 \
 	    2>/dev/null | sort -V | tail -1))"; \
@@ -91,7 +96,7 @@ autolaunch: install
 
 ## uninstall: Remove installed files and autolaunch symlink
 uninstall:
-	rm -f "$(SCRIPT_DIR)/$(MAIN_SCRIPT)" "$(SCRIPT_DIR)/loom_desktop.py" "$(SCRIPT_DIR)/webview.html" "$(SCRIPT_DIR)/state.json" "$(SCRIPT_DIR)/loom.db"
+	rm -f "$(SCRIPT_DIR)/$(MAIN_SCRIPT)" "$(SCRIPT_DIR)/loom_desktop.py" "$(SCRIPT_DIR)/webview.html" "$(SCRIPT_DIR)/state.json" "$(SCRIPT_DIR)/loom.db" "$(SCRIPT_DIR)/.loom_source_repo_root"
 	rm -f "$(AUTOLAUNCH_DIR)/$(MAIN_SCRIPT)"
 	@echo "Uninstalled."
 
