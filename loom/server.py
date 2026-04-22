@@ -1966,6 +1966,57 @@ def _handle_doctor_command(db: LoomDB) -> dict:
     return build_doctor_report(db._conn, db.db_path)
 
 
+async def replay_api_failed_write_payload(
+    db: LoomDB,
+    payload: dict,
+    handle_command,
+):
+    """Replay one queued /api/cmd write with live API idempotency semantics."""
+    payload = dict(payload or {})
+    cmd = str(payload.get("cmd", "") or "")
+    idempotency_key = str(payload.get("idempotency_key", "") or "").strip()
+    request_hash = ""
+    if idempotency_key and is_api_write_command(cmd):
+        request_hash = api_request_hash(payload)
+        existing = db.load_mcp_idempotency(idempotency_key)
+        if existing:
+            existing_hash = str(existing.get("request_hash", "") or "")
+            if existing_hash and existing_hash != request_hash:
+                db.record_mcp_health_event(
+                    surface="api",
+                    tool_name=cmd,
+                    event="idempotency_conflict",
+                )
+                return {
+                    "ok": False,
+                    "error": (
+                        "idempotency key was reused for a different "
+                        f"API command ({cmd})"
+                    ),
+                }
+            try:
+                cached = json.loads(existing.get("response_json", "{}"))
+            except (json.JSONDecodeError, TypeError):
+                cached = {}
+            db.record_mcp_health_event(
+                surface="api",
+                tool_name=cmd,
+                event="dedupe",
+            )
+            return cached
+
+    result = await handle_command(payload)
+    if idempotency_key and is_api_write_command(cmd):
+        db.save_mcp_idempotency(
+            idempotency_key=idempotency_key,
+            surface="api",
+            tool_name=cmd,
+            request_hash=request_hash or api_request_hash(payload),
+            response={"ok": True, "data": result if result else {}},
+        )
+    return result
+
+
 async def _handle_role_template_command(data: dict, role_mgr,
                                         resolve_base_dir) -> dict | None:
     cmd = data.get("cmd", "")
@@ -9755,19 +9806,11 @@ async def main(connection=None):
                 )
             return response
         if endpoint == "/api/cmd":
-            result = await handle_command(payload)
-            idempotency_key = str(payload.get("idempotency_key", "") or "").strip()
-            cmd = str(payload.get("cmd", "") or "")
-            if idempotency_key and is_api_write_command(cmd):
-                response_payload = {"ok": True, "data": result if result else {}}
-                db.save_mcp_idempotency(
-                    idempotency_key=idempotency_key,
-                    surface="api",
-                    tool_name=cmd,
-                    request_hash=api_request_hash(payload),
-                    response=response_payload,
-                )
-            return result
+            return await replay_api_failed_write_payload(
+                db,
+                payload,
+                handle_command,
+            )
         raise ValueError(f"Unsupported failed-write endpoint: {endpoint}")
 
     replay_summary = await replay_failed_writes(db, _replay_failed_write)

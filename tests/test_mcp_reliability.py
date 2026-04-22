@@ -16,6 +16,7 @@ from loom.db import LoomDB
 from loom.doctor import build_doctor_report, format_mcp_health_report
 from loom.mcp_retry import (
     IDEMPOTENCY_ARG,
+    api_request_hash,
     replay_failed_writes,
     retry_async,
 )
@@ -193,6 +194,59 @@ class MCPFailedWriteReplayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.db.load_failed_writes(), [])
         health = self.db.load_mcp_health_summary(since=0)
         self.assertEqual(health["totals"].get("replay"), 1)
+
+    async def test_api_failed_write_replay_dedupes_existing_idempotency_row(self):
+        from loom.server import replay_api_failed_write_payload
+
+        payload = {
+            "cmd": "board_add_task",
+            "title": "Queued once",
+            "idempotency_key": "api-queued-idem",
+        }
+        cached_response = {
+            "ok": True,
+            "data": {"type": "board_task_added", "task_id": "LOOM:1"},
+        }
+        self.db.save_mcp_idempotency(
+            idempotency_key="api-queued-idem",
+            surface="api",
+            tool_name="board_add_task",
+            request_hash=api_request_hash(payload),
+            response=cached_response,
+        )
+        self.db.enqueue_failed_write(
+            idempotency_key="api-queued-idem",
+            endpoint="/api/cmd",
+            surface="api",
+            tool_name="board_add_task",
+            payload=payload,
+            attempts=4,
+            last_error="fake timeout after commit",
+        )
+        calls = []
+        results = []
+
+        async def handle_command(unexpected_payload):
+            calls.append(dict(unexpected_payload))
+            raise AssertionError("queued API replay should have been deduped")
+
+        async def sender(write):
+            result = await replay_api_failed_write_payload(
+                self.db,
+                write["payload"],
+                handle_command,
+            )
+            results.append(result)
+            return result
+
+        summary = await replay_failed_writes(self.db, sender)
+
+        self.assertEqual(summary, {"attempted": 1, "replayed": 1, "failed": 0})
+        self.assertEqual(results, [cached_response])
+        self.assertEqual(calls, [])
+        self.assertEqual(self.db.load_failed_writes(), [])
+        health = self.db.load_mcp_health_summary(since=0)
+        self.assertEqual(health["totals"].get("dedupe"), 1)
 
     def test_doctor_mcp_health_reports_recent_retry_drop_counts(self):
         self.db.record_mcp_health_event(
