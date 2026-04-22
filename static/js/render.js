@@ -528,7 +528,7 @@ function render() {
   const oldRects = doFlip ? _captureRects(main) : null;
   _captureAgentDetailDrafts();
   const mainState = _captureSurfaceState(main, {
-    scrollSelectors: [':root', '.mcp-log'],
+    scrollSelectors: [':root', '.mcp-log', '.detail-decisions-log'],
     captureFocusKey: _captureMainFocusKey,
   });
 
@@ -1526,25 +1526,13 @@ function renderAgentDetails(a) {
       h += `</div></div>`;
     }
     if (decisions.length) {
-      h += `<div class="detail-section"><div class="detail-section-head"><span class="detail-section-title">Decisions</span><span class="detail-section-count">${decisions.length}</span></div><div class="detail-section-list">`;
+      h += `<div class="detail-row detail-row-mcp detail-row-decisions"><span class="detail-label">Decisions</span>`;
+      h += `<div class="mcp-log detail-decisions-log" aria-label="${decisions.length} architect decision${decisions.length === 1 ? '' : 's'}">`;
       for (let i = 0; i < decisions.length; i++) {
         const decision = decisions[i] || {};
-        const linkedTaskIds = Array.isArray(decision.linked_task_ids) ? decision.linked_task_ids : [];
-        const linkedEngineerIds = Array.isArray(decision.linked_engineer_ids) ? decision.linked_engineer_ids : [];
-        h += `<div class="detail-section-card">`;
-        h += `<div class="detail-section-card-head"><span class="detail-section-primary" title="${esc(decision.title || '')}">${esc(decision.title || 'Decision')}</span><span class="detail-task-status">${esc(decision.status || 'proposed')}</span></div>`;
-        if (decision.rationale) {
-          h += `<div class="detail-section-card-body">${_detailMultilineHtml(decision.rationale)}</div>`;
-        }
-        if (linkedTaskIds.length || linkedEngineerIds.length) {
-          const linkParts = [];
-          if (linkedTaskIds.length) linkParts.push(`${linkedTaskIds.length} task${linkedTaskIds.length === 1 ? '' : 's'}`);
-          if (linkedEngineerIds.length) linkParts.push(`${linkedEngineerIds.length} engineer${linkedEngineerIds.length === 1 ? '' : 's'}`);
-          h += `<div class="detail-section-card-meta">Linked to ${esc(linkParts.join(' • '))}</div>`;
-        }
-        if (decision.updated_at || decision.created_at) {
-          h += `<div class="detail-section-card-meta">Updated ${esc(_relativeTime(decision.updated_at || decision.created_at))}</div>`;
-        }
+        const title = decision.title || 'Decision';
+        h += `<div class="mcp-entry" data-decision-id="${esc(decision.id || '')}">`;
+        h += `<span class="mcp-text" title="${esc(title)}">${esc(title)}</span>`;
         h += `</div>`;
       }
       h += `</div></div>`;
