@@ -1324,6 +1324,39 @@ var _glsKeybindings = {};     // current keybinding overrides being edited
 var _glsDefaults = {};        // default keybinding specs from server
 var _glsCapturing = null;     // action name currently capturing a keypress
 
+function _glsXtermScrollbackDefault() {
+  return (typeof XTERM_SCROLLBACK_DEFAULT === 'number')
+    ? XTERM_SCROLLBACK_DEFAULT : 2000;
+}
+
+function _glsXtermScrollbackMin() {
+  return (typeof XTERM_SCROLLBACK_MIN === 'number')
+    ? XTERM_SCROLLBACK_MIN : 100;
+}
+
+function _glsXtermScrollbackMax() {
+  return (typeof XTERM_SCROLLBACK_MAX === 'number')
+    ? XTERM_SCROLLBACK_MAX : 100000;
+}
+
+function _parseGlsXtermScrollback() {
+  var input = document.getElementById('gls-xterm-scrollback');
+  if (!input) return _glsXtermScrollbackDefault();
+  var min = _glsXtermScrollbackMin();
+  var max = _glsXtermScrollbackMax();
+  var value = Number(input.value);
+  if (!Number.isFinite(value) || Math.floor(value) !== value
+      || value < min || value > max) {
+    var message = 'Terminal scrollback must be an integer between '
+      + min + ' and ' + max + ' lines.';
+    if (typeof _showToast === 'function') _showToast(message, 'error');
+    else if (typeof alert === 'function') alert(message);
+    if (input && typeof input.focus === 'function') input.focus();
+    return null;
+  }
+  return Math.floor(value);
+}
+
 function switchGlsTab(name) {
   document.querySelectorAll('#modal-global-settings .gs-tab').forEach(t =>
     t.classList.toggle('active', t.dataset.tab === name));
@@ -1359,6 +1392,9 @@ function _showGlobalSettingsModal(data) {
     s.focus_on_click || false;
   document.getElementById('gls-max-event-log').value =
     s.max_event_log !== undefined ? s.max_event_log : 500;
+  document.getElementById('gls-xterm-scrollback').value =
+    s.xterm_scrollback !== undefined ? s.xterm_scrollback
+      : _glsXtermScrollbackDefault();
 
   // General > Board
   document.getElementById('gls-default-lanes').value =
@@ -1509,12 +1545,15 @@ function submitGlobalSettings() {
   var lanes = lanesText
     ? lanesText.split('\n').map(function(l) { return l.trim(); }).filter(Boolean)
     : [];
+  var xtermScrollback = _parseGlsXtermScrollback();
+  if (xtermScrollback === null) return;
 
   var settings = {
     default_command: document.getElementById('gls-default-cmd').value.trim(),
     filter_by_window: document.getElementById('gls-filter-window').checked,
     focus_new_tabs: document.getElementById('gls-focus-new-tabs').checked,
     focus_on_click: document.getElementById('gls-focus-on-click').checked,
+    xterm_scrollback: xtermScrollback,
     default_lanes: lanes,
     keybindings: _glsKeybindings,
     max_pipeline_depth: parseInt(document.getElementById('gls-max-pipeline-depth').value) || 0,
