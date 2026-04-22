@@ -3706,7 +3706,7 @@ test('renderAgentDetails adds clickable diff, checkpoint, and preserved-merge af
   assert.match(html, /<span class="detail-wt-tag detail-wt-merged">merged<\/span>/);
 });
 
-test('renderAgentDetails shows architect pending hires and decisions', () => {
+test('renderAgentDetails shows architect pending hires and compact decisions', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/render.js');
@@ -3770,10 +3770,12 @@ test('renderAgentDetails shows architect pending hires and decisions', () => {
   assert.doesNotMatch(html, /Hidden engineer/);
 
   assert.match(html, /Decisions/);
+  assert.match(html, /detail-decisions-log/);
   assert.match(html, /Define the API cut line/);
-  assert.match(html, /Ship the API before the CLI\.<br>Hold the dashboard until validation lands\./);
-  assert.match(html, /Linked to 1 task/);
-  assert.match(html, /2 engineers/);
+  assert.doesNotMatch(html, /Ship the API before the CLI/);
+  assert.doesNotMatch(html, /Linked to 1 task/);
+  assert.doesNotMatch(html, /2 engineers/);
+  assert.doesNotMatch(html, /approved/);
   assert.doesNotMatch(html, /Hidden decision/);
 });
 
