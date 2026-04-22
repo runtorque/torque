@@ -6014,7 +6014,7 @@ test('engineer context menu exposes authorized dismiss and rehire controls', asy
   assert.match(menu.innerHTML, /Rehire/);
   assert.doesNotMatch(menu.innerHTML, /Dismiss/);
   assert.doesNotMatch(menu.innerHTML, /Relaunch/);
-  assert.doesNotMatch(menu.innerHTML, /Restart from scratch/);
+  assert.doesNotMatch(menu.innerHTML, /Restart/);
 
   context.state.active_session_id = '';
   context.onCellContextMenu(evt, 'eng-b');
