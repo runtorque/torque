@@ -5445,6 +5445,188 @@ test('wide Done lane cache skips card rerender for offscreen task deltas', () =>
   assert.equal(doneCount.textContent, '80');
 });
 
+test('board lane cache rerenders visible dependency badges when a dependency is completed', () => {
+  const { context, document } = createBoardHarness({ stubCards: false });
+  const panel = document.register('panel-board');
+  const cards = document.register('board-cards');
+
+  context.state.board_lanes = ['Backlog', 'To Do', 'Done'];
+  context.state.board_tasks = {
+    blocked: {
+      id: 'blocked',
+      group: 'alpha',
+      task: 'Blocked backlog task',
+      lane: 'Backlog',
+      depends_on: ['dep'],
+      position: 2,
+    },
+    dep: {
+      id: 'dep',
+      group: 'alpha',
+      task: 'Dependency task',
+      lane: 'To Do',
+      position: 1,
+    },
+  };
+
+  runInContext(context, `
+    _boardSelectedLane = 'Backlog';
+    var originalRenderBoardCard = _renderBoardCard;
+    var cardRenderCalls = 0;
+    _renderBoardCard = function() {
+      cardRenderCalls++;
+      return originalRenderBoardCard.apply(this, arguments);
+    };
+  `);
+
+  context.renderBoard();
+
+  assert.match(panel.innerHTML, /Blocked by deps/);
+  assert.match(panel.innerHTML, /Blocked by 1/);
+
+  runInContext(context, `
+    cardRenderCalls = 0;
+    var previousDep = Object.assign({}, state.board_tasks.dep);
+    state.board_tasks.dep.lane = 'Done';
+    _boardQueueTaskDeltas([{
+      op: 'task_upsert',
+      id: 'dep',
+      previous: previousDep,
+      next: state.board_tasks.dep
+    }], { canPatch: true });
+  `);
+
+  context.renderBoard();
+
+  assert.equal(runInContext(context, 'cardRenderCalls'), 1);
+  assert.doesNotMatch(cards.innerHTML, /Blocked by deps/);
+  assert.doesNotMatch(cards.innerHTML, /Blocked by 1/);
+  assert.match(cards.innerHTML, /Deps 1/);
+});
+
+test('board lane cache rerenders Backlog summary when an offscreen dependency unblocks', () => {
+  const { context, document } = createBoardHarness({ stubCards: false });
+  const panel = document.register('panel-board');
+  const cards = document.register('board-cards');
+
+  context.state.board_lanes = ['Backlog', 'To Do', 'Done'];
+  context.state.board_tasks = {
+    visibleBlocked: {
+      id: 'visibleBlocked',
+      group: 'alpha',
+      task: 'Visible blocked task',
+      lane: 'Backlog',
+      labels: ['loom:blocked'],
+      position: 3,
+    },
+    offscreenBlocked: {
+      id: 'offscreenBlocked',
+      group: 'alpha',
+      task: 'Offscreen blocked task',
+      lane: 'Backlog',
+      depends_on: ['dep'],
+      position: 2,
+    },
+    dep: {
+      id: 'dep',
+      group: 'alpha',
+      task: 'Dependency task',
+      lane: 'To Do',
+      position: 1,
+    },
+  };
+
+  runInContext(context, `
+    _boardSelectedLane = 'Backlog';
+    _boardRenderLimit = 1;
+    var originalRenderBoardCard = _renderBoardCard;
+    var cardRenderCalls = 0;
+    _renderBoardCard = function() {
+      cardRenderCalls++;
+      return originalRenderBoardCard.apply(this, arguments);
+    };
+  `);
+
+  context.renderBoard();
+
+  assert.match(panel.innerHTML, /Everything in Backlog is blocked/);
+  assert.match(panel.innerHTML, /1 more card/);
+
+  runInContext(context, `
+    cardRenderCalls = 0;
+    var previousDep = Object.assign({}, state.board_tasks.dep);
+    state.board_tasks.dep.lane = 'Done';
+    _boardQueueTaskDeltas([{
+      op: 'task_upsert',
+      id: 'dep',
+      previous: previousDep,
+      next: state.board_tasks.dep
+    }], { canPatch: true });
+  `);
+
+  context.renderBoard();
+
+  assert.equal(runInContext(context, 'cardRenderCalls'), 1);
+  assert.doesNotMatch(cards.innerHTML, /Everything in Backlog is blocked/);
+  assert.match(cards.innerHTML, /1 more card/);
+});
+
+test('board lane cache rerenders blocking badges when a dependent completes', () => {
+  const { context, document } = createBoardHarness({ stubCards: false });
+  const panel = document.register('panel-board');
+  const cards = document.register('board-cards');
+
+  context.state.board_lanes = ['Backlog', 'To Do', 'Done'];
+  context.state.board_tasks = {
+    dep: {
+      id: 'dep',
+      group: 'alpha',
+      task: 'Dependency task',
+      lane: 'To Do',
+      position: 1,
+    },
+    blocked: {
+      id: 'blocked',
+      group: 'alpha',
+      task: 'Blocked backlog task',
+      lane: 'Backlog',
+      depends_on: ['dep'],
+      position: 2,
+    },
+  };
+
+  runInContext(context, `
+    _boardSelectedLane = 'To Do';
+    var originalRenderBoardCard = _renderBoardCard;
+    var cardRenderCalls = 0;
+    _renderBoardCard = function() {
+      cardRenderCalls++;
+      return originalRenderBoardCard.apply(this, arguments);
+    };
+  `);
+
+  context.renderBoard();
+
+  assert.match(panel.innerHTML, /Blocks 1/);
+
+  runInContext(context, `
+    cardRenderCalls = 0;
+    var previousBlocked = Object.assign({}, state.board_tasks.blocked);
+    state.board_tasks.blocked.lane = 'Done';
+    _boardQueueTaskDeltas([{
+      op: 'task_upsert',
+      id: 'blocked',
+      previous: previousBlocked,
+      next: state.board_tasks.blocked
+    }], { canPatch: true });
+  `);
+
+  context.renderBoard();
+
+  assert.equal(runInContext(context, 'cardRenderCalls'), 1);
+  assert.doesNotMatch(cards.innerHTML, /Blocks 1/);
+});
+
 test('boardArchiveSuggestedDone archives only stale completed tasks', () => {
   const { context } = createBoardHarness();
   context.state.board_tasks = {

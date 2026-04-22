@@ -746,12 +746,12 @@ function _boardResetRenderCaches() {
 }
 
 function _boardQueueTaskDeltas(changes, options) {
-  if (!changes || !changes.length) return;
   options = options || {};
+  if (options.canPatch === false) _boardQueuedTaskDeltasCanPatch = false;
+  if (!changes || !changes.length) return;
   for (var i = 0; i < changes.length; i++) {
     if (changes[i]) _boardQueuedTaskDeltas.push(changes[i]);
   }
-  if (options.canPatch === false) _boardQueuedTaskDeltasCanPatch = false;
 }
 
 function _boardConsumeQueuedTaskDeltas() {
@@ -786,6 +786,15 @@ function _boardAddDependentAffectedLanes(lanes, taskId) {
   }
 }
 
+function _boardAddDependencyAffectedLanes(lanes, task) {
+  if (!task || !Array.isArray(task.depends_on)) return;
+  var tasks = _boardTasks();
+  for (var i = 0; i < task.depends_on.length; i++) {
+    var dep = tasks[task.depends_on[i]];
+    if (dep) _boardAddAffectedLane(lanes, dep.lane);
+  }
+}
+
 function _boardAffectedLanesFromTaskDeltas(changes) {
   var lanes = {};
   var allVisible = false;
@@ -805,6 +814,8 @@ function _boardAffectedLanesFromTaskDeltas(changes) {
       var nextParent = _boardTasks()[next.parent_task_id];
       _boardAddAffectedLane(lanes, nextParent ? nextParent.lane : next.lane);
     }
+    _boardAddDependencyAffectedLanes(lanes, previous);
+    _boardAddDependencyAffectedLanes(lanes, next);
     _boardAddDependentAffectedLanes(lanes, taskId);
   }
   if (allVisible) return _boardVisibleLanes();
@@ -816,10 +827,12 @@ function _boardAffectedLanesFromTaskDeltas(changes) {
   });
 }
 
-function _boardTaskRenderSignature(task) {
+function _boardTaskRenderSignature(task, model) {
   if (!task) return '';
   return JSON.stringify({
     task: task,
+    dependencies: _boardTaskDependencySignature(task, model),
+    active_dependents: _boardTaskActiveDependentsSignature(task, model),
     focused: _boardFocusedTask === task.id,
     selected: !!_boardSelectedTasks[task.id],
     hovered: _boardHoveredTask === task.id,
@@ -830,7 +843,67 @@ function _boardTaskRenderSignature(task) {
   });
 }
 
-function _boardCollectRenderedLaneTasks(rootTasks, childrenOf, renderLimit) {
+function _boardDependencyRenderIndexes(model) {
+  if (model && model.dependencyRenderIndexes) return model.dependencyRenderIndexes;
+  var tasks = _boardTasks();
+  var activeDependentsByTask = {};
+  for (var id in tasks) {
+    var candidate = tasks[id];
+    if (!candidate || candidate.lane === 'Done' || !Array.isArray(candidate.depends_on)) continue;
+    for (var i = 0; i < candidate.depends_on.length; i++) {
+      var depId = candidate.depends_on[i];
+      if (!activeDependentsByTask[depId]) activeDependentsByTask[depId] = [];
+      activeDependentsByTask[depId].push({
+        id: candidate.id || id,
+        task: candidate.task || '',
+        lane: candidate.lane || '',
+        position: candidate.position || 0,
+      });
+    }
+  }
+  for (var depKey in activeDependentsByTask) {
+    activeDependentsByTask[depKey].sort(_boardCompareDependencySignatureRefs);
+  }
+  var indexes = { tasks: tasks, activeDependentsByTask: activeDependentsByTask };
+  if (model) model.dependencyRenderIndexes = indexes;
+  return indexes;
+}
+
+function _boardCompareDependencySignatureRefs(a, b) {
+  return String(a.lane || '').localeCompare(String(b.lane || ''))
+    || ((a.position || 0) - (b.position || 0))
+    || String(a.id || '').localeCompare(String(b.id || ''));
+}
+
+function _boardTaskDependencySignature(task, model) {
+  if (!task || !Array.isArray(task.depends_on) || !task.depends_on.length) return [];
+  var indexes = _boardDependencyRenderIndexes(model);
+  var tasks = indexes.tasks || {};
+  var refs = [];
+  for (var i = 0; i < task.depends_on.length; i++) {
+    var dep = tasks[task.depends_on[i]];
+    if (!dep) {
+      refs.push({ id: task.depends_on[i], missing: true });
+      continue;
+    }
+    refs.push({
+      id: dep.id || task.depends_on[i],
+      task: dep.task || '',
+      lane: dep.lane || '',
+      position: dep.position || 0,
+    });
+  }
+  refs.sort(_boardCompareDependencySignatureRefs);
+  return refs;
+}
+
+function _boardTaskActiveDependentsSignature(task, model) {
+  if (!task || !task.id || task.lane === 'Done') return [];
+  var indexes = _boardDependencyRenderIndexes(model);
+  return (indexes.activeDependentsByTask[task.id] || []).slice();
+}
+
+function _boardCollectRenderedLaneTasks(rootTasks, childrenOf, renderLimit, model) {
   var out = [];
   var remaining = Math.max(0, renderLimit || 0);
   function visit(task, depth) {
@@ -839,7 +912,7 @@ function _boardCollectRenderedLaneTasks(rootTasks, childrenOf, renderLimit) {
     out.push({
       id: task.id || '',
       depth: depth || 0,
-      signature: _boardTaskRenderSignature(task),
+      signature: _boardTaskRenderSignature(task, model),
     });
     var children = (childrenOf && childrenOf[task.id]) || [];
     if (!children.length || _boardCollapsedTasks[task.id]) return;
@@ -868,6 +941,8 @@ function _boardLanePoolSignature(lane, model) {
       task.scheduled_at || '',
       _boardTaskHealthState(task),
       (task.labels || []).join(','),
+      JSON.stringify(_boardTaskDependencySignature(task, model)),
+      JSON.stringify(_boardTaskActiveDependentsSignature(task, model)),
     ].join(':'));
   }
   parts.sort();
@@ -879,7 +954,7 @@ function _boardLaneRenderContextKey(lane, model, filtersActive, skipAddTask, wid
   var childrenOf = (model && model.childrenOf) || {};
   var renderLimit = _boardRenderLimitValue();
   var totalCards = _boardRenderableCardCountForRoots(rootTasks, childrenOf);
-  var rendered = _boardCollectRenderedLaneTasks(rootTasks, childrenOf, renderLimit);
+  var rendered = _boardCollectRenderedLaneTasks(rootTasks, childrenOf, renderLimit, model);
   var staleDoneIds = lane === 'Done' ? _boardStaleDoneTaskIds(model) : [];
   return JSON.stringify({
     lane: lane || '',
@@ -1048,13 +1123,21 @@ function _boardTryPatchTaskDeltas(panel, deltaBatch, lanes, filtersActive, wideL
   var childrenOf = model.childrenOf;
   var nextLaneEntryDelay = 0;
   if (wideLayout) {
+    var wideResultsByLane = {};
     for (var i = 0; i < requestedLanes.length; i++) {
       var wideResult = _boardPatchWideLaneBody(panel, requestedLanes[i], model, filtersActive);
       if (!wideResult) return false;
+      wideResultsByLane[requestedLanes[i]] = wideResult;
+    }
+    for (var wi = 0; wi < lanes.length; wi++) {
+      var refreshLane = lanes[wi];
+      var refreshEntry = wideResultsByLane[refreshLane]
+        || _boardLaneRenderCache[_boardLaneCacheKeyName(refreshLane, true)];
+      if (!refreshEntry) continue;
       var wideDelay = _boardVisibleLaneEntryRefreshDelay(
-        wideResult.rootTasks,
+        refreshEntry.rootTasks || [],
         childrenOf,
-        wideResult.renderLimit,
+        refreshEntry.renderLimit || _boardRenderLimitValue(),
       );
       if (wideDelay > 0 && (!nextLaneEntryDelay || wideDelay < nextLaneEntryDelay)) {
         nextLaneEntryDelay = wideDelay;
@@ -1245,6 +1328,8 @@ function _boardBindWideLaneBodyScroll(body) {
   if (!lane) return;
   var saved = _boardWideLaneScrollTops[lane];
   if (typeof saved === 'number') body.scrollTop = saved;
+  if (body._boardScrollBoundLane === lane) return;
+  body._boardScrollBoundLane = lane;
   body.addEventListener('scroll', function() {
     _boardWideLaneScrollTops[lane] = body.scrollTop;
     if (body.scrollTop + body.clientHeight >= body.scrollHeight - 100) {
