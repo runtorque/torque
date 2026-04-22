@@ -245,6 +245,117 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["type"], "error")
         self.assertEqual(len(state.agents), 1)
 
+    async def test_add_worker_creates_user_owned_detached_worker(self):
+        state = self._make_state()
+        bridge = _CapturingBridge()
+        service = self.server_agent_mod.AgentLaunchService(
+            state=state,
+            connection=None,
+            bridge=bridge,
+            worktree_mgr=None,
+            template_mgr=None,
+        )
+        sent_prompts = []
+
+        async def fake_resolve_base_dir(group):
+            self.assertEqual(group, "loom")
+            return temp_dir
+
+        def fake_resolve_agent_launch_config(group, *, base_dir="",
+                                             explicit_template="",
+                                             overrides=None):
+            self.assertEqual(group, "loom")
+            self.assertEqual(base_dir, temp_dir)
+            self.assertEqual(explicit_template, "worker/reviewer")
+            self.assertEqual(
+                overrides,
+                {
+                    "command": "codex --worker",
+                    "provider": "codex",
+                    "template": "worker/reviewer",
+                },
+            )
+            cfg = self._launch_config(temp_dir)
+            cfg["initial_prompt"] = "hello worker"
+            return cfg
+
+        async def fake_send_agent_prompt(cell, prompt, **kwargs):
+            sent_prompts.append({
+                "cell_id": cell.id,
+                "prompt": prompt,
+                "kwargs": kwargs,
+            })
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = await self.server_mod._handle_add_worker_command(
+                {
+                    "name": "Detached Worker",
+                    "group": "loom",
+                    "command": "codex --worker",
+                    "provider": "codex",
+                    "template": "worker/reviewer",
+                },
+                state,
+                resolve_base_dir=fake_resolve_base_dir,
+                resolve_agent_launch_config=fake_resolve_agent_launch_config,
+                create_agent_with_config=service.create_agent_with_config,
+                send_agent_prompt=fake_send_agent_prompt,
+            )
+
+        self.assertEqual(result["name"], "Detached Worker")
+        self.assertEqual(result["kind"], "worker")
+        worker = state.agents[result["id"]]
+        self.assertEqual(worker.kind, "worker")
+        self.assertFalse(worker.persistent)
+        self.assertEqual(worker.owner_engineer_id, "")
+        self.assertEqual(worker.created_by_weaver_id, "")
+        self.assertEqual(worker.hired_by_architect_id, "")
+        self.assertEqual(worker.template, "worker/reviewer")
+        self.assertEqual(len(bridge.create_session_calls), 1)
+        call = bridge.create_session_calls[0]["kwargs"]
+        self.assertEqual(call["env_vars"]["BASE"], "1")
+        self.assertNotIn("LOOM_ENGINEER_ID", call["env_vars"])
+        self.assertNotIn("LOOM_ARCHITECT_ID", call["env_vars"])
+        self.assertEqual(
+            call["mcp_entrypoint"],
+            self.server_agent_mod.DEFAULT_MCP_ENTRYPOINT,
+        )
+        self.assertEqual(len(sent_prompts), 1)
+        self.assertEqual(sent_prompts[0]["cell_id"], worker.id)
+        self.assertEqual(sent_prompts[0]["prompt"], "hello worker")
+
+    async def test_add_worker_rejects_user_supplied_owner(self):
+        state = self._make_state()
+
+        async def fake_resolve_base_dir(group):
+            raise AssertionError("should not resolve launch config")
+
+        def fake_resolve_agent_launch_config(*args, **kwargs):
+            raise AssertionError("should not resolve launch config")
+
+        async def fake_create_agent_with_config(*args, **kwargs):
+            raise AssertionError("should not create worker with user owner")
+
+        async def fake_send_agent_prompt(*args, **kwargs):
+            raise AssertionError("should not send prompts")
+
+        result = await self.server_mod._handle_add_worker_command(
+            {
+                "name": "Bad Worker",
+                "group": "loom",
+                "owner_engineer_id": "eng-alice",
+            },
+            state,
+            resolve_base_dir=fake_resolve_base_dir,
+            resolve_agent_launch_config=fake_resolve_agent_launch_config,
+            create_agent_with_config=fake_create_agent_with_config,
+            send_agent_prompt=fake_send_agent_prompt,
+        )
+
+        self.assertEqual(result["type"], "error")
+        self.assertIn("owner_engineer_id", result["message"])
+        self.assertEqual(len(state.agents), 0)
+
     async def test_add_architect_creates_persistent_architect_with_binding_and_architect_mcp_entrypoint(self):
         state = self._make_state()
         bridge = _CapturingBridge()

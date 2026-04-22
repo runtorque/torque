@@ -1035,6 +1035,60 @@ function registerArchitectModalDom(document) {
   return { modal, summary, nameInput, commandInput };
 }
 
+function registerAddCellModalElements(document) {
+  [
+    'modal-add',
+    'modal-add-title',
+    'modal-add-summary',
+    'add-submit-btn',
+    'add-name-input',
+    'add-group-select',
+    'add-template-row',
+    'add-template-select',
+    'add-advanced-details',
+    'add-advanced-summary',
+    'add-icon-row',
+    'add-icon-picker',
+    'add-provider-row',
+    'add-provider-select',
+    'add-cmd-row',
+    'add-cmd-input',
+    'add-model-row',
+    'add-model-input',
+    'add-reasoning-row',
+    'add-reasoning-effort',
+    'add-args-row',
+    'add-args-input',
+    'add-init-row',
+    'add-init-input',
+    'add-dir-select',
+    'add-dir-input',
+    'add-profile-select',
+    'add-shell-select',
+    'add-color-swatches',
+    'add-env-vars',
+    'add-wt-section',
+    'add-wt-enabled',
+    'add-wt-fields',
+    'add-wt-base-dir',
+    'add-wt-base-branch',
+    'add-wt-name',
+    'add-wt-auto-checkpoint',
+    'add-wt-checkpoint-on-progress',
+    'add-wt-squash',
+  ].forEach((id) => {
+    if (!document.getElementById(id)) document.register(id);
+  });
+  const modal = document.getElementById('modal-add');
+  modal.classList.add('overlay');
+  document.setSelectorAll('.overlay', [modal]);
+  document.getElementById('add-cmd-row').setQuerySelector(
+    'label',
+    document.register('add-cmd-row-label'),
+  );
+  return modal;
+}
+
 function createDiffHarness() {
   const { sandbox, document } = createSandbox();
   const context = vm.createContext(sandbox);
@@ -10360,7 +10414,6 @@ test('main hierarchy row shapes preserve focused controls across rerenders', () 
   }
 });
 
-
 test('add engineer modal draft survives agent grid rerender during websocket delta', () => {
   const { sandbox, document } = createSandbox();
   document.register('main');
@@ -10426,6 +10479,110 @@ test('add engineer modal draft survives agent grid rerender during websocket del
   assert.deepEqual(jsonValue(context, `sendCalls`), []);
 });
 
+test('main hierarchy preserves loose-workers strip scroll and focus across websocket delta rerenders', () => {
+  const { sandbox, document } = createSandbox();
+  const main = document.register('main');
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/ws.js');
+  loadScript(context, 'static/js/render.js');
+  runInContext(context, `
+    _cachedAgentTemplates = [];
+    selectedTerminalId = null;
+    getFilterByWindow = function() { return false; };
+    renderTerminalWorkspace = function() {};
+    updateEventsAttentionBadge = function() {};
+  `);
+
+  let currentStrip = null;
+  let currentButton = null;
+  let renderCount = 0;
+  function installLooseStripSurface() {
+    currentStrip = new FakeElement('');
+    currentButton = new FakeElement('');
+    currentButton.dataset.focusKey = 'loose-new-worker:loom:user';
+    currentButton.value = '';
+    currentButton.selectionStart = 0;
+    currentButton.selectionEnd = 0;
+    currentStrip.parentNode = main;
+    currentButton.parentNode = main;
+    main.children = [currentStrip, currentButton];
+    main.setQuerySelector('.loose-workers-strip', currentStrip);
+    main.setQuerySelector('[data-focus-key=\"loose-new-worker:loom:user\"]', currentButton);
+  }
+
+  Object.defineProperty(main, 'innerHTML', {
+    configurable: true,
+    get() {
+      return this._innerHTML || '';
+    },
+    set(value) {
+      this._innerHTML = value;
+      renderCount += 1;
+      installLooseStripSurface();
+    },
+  });
+
+  runInContext(context, `
+    _handleFullState({
+      seq: 1,
+      groups: { loom: ['loose-1'] },
+      group_settings: { loom: { collapsed_default: false } },
+      agents: {
+        'loose-1': {
+          id: 'loose-1',
+          name: 'Loose One',
+          kind: 'worker',
+          group: 'loom',
+          cell_type: 'agent',
+          icon: '1',
+          status: 'running',
+          created_at: 1
+        }
+      },
+      children: {},
+      board_lanes: [],
+      board_tasks: {},
+      panel_events: []
+    });
+  `);
+
+  currentStrip.scrollTop = 17;
+  currentStrip.scrollLeft = 43;
+  currentButton.value = 'draft';
+  currentButton.selectionStart = 1;
+  currentButton.selectionEnd = 4;
+  document.activeElement = currentButton;
+
+  runInContext(context, `
+    _handleDelta({
+      seq: 2,
+      ops: [
+        {
+          op: 'agent_upsert',
+          id: 'loose-2',
+          name: 'Loose Two',
+          kind: 'worker',
+          group: 'loom',
+          cell_type: 'agent',
+          icon: '2',
+          status: 'running',
+          created_at: 2
+        },
+        { op: 'group_update', name: 'loom', agents: ['loose-1', 'loose-2'] }
+      ]
+    });
+  `);
+
+  assert.equal(renderCount, 2);
+  assert.equal(currentStrip.scrollTop, 17);
+  assert.equal(currentStrip.scrollLeft, 43);
+  assert.equal(currentButton.focused, true);
+  assert.equal(currentButton.value, 'draft');
+  assert.equal(currentButton.selectionStart, 1);
+  assert.equal(currentButton.selectionEnd, 4);
+  assert.match(main.innerHTML, /Loose One[\s\S]*Loose Two[\s\S]*\+ New Worker/);
+});
+
 test('main hierarchy ordering is stable when multiple agent deltas arrive in one websocket message', () => {
   const { sandbox, document } = createSandbox();
   document.register('main');
@@ -10478,6 +10635,61 @@ test('main hierarchy ordering is stable when multiple agent deltas arrive in one
   assert.match(document.getElementById('main').innerHTML, /Loose[\s\S]*User Engineer[\s\S]*User Worker[\s\S]*Architect B[\s\S]*Engineer B[\s\S]*Architect A[\s\S]*Engineer A/);
 });
 
+test('main hierarchy loose-workers strip orders detached workers by creation time with new-worker button at the end', () => {
+  const { context, document, sandbox } = createMainRenderHarness();
+  const main = document.getElementById('main');
+
+  sandbox.state.groups = { loom: ['loose-b', 'loose-a', 'loose-c'] };
+  sandbox.state.group_settings = { loom: { collapsed_default: false } };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'loose-a': {
+      id: 'loose-a',
+      name: 'Worker A',
+      kind: 'worker',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'A',
+      status: 'running',
+      created_at: 10,
+    },
+    'loose-b': {
+      id: 'loose-b',
+      name: 'Worker B',
+      kind: 'worker',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'B',
+      status: 'running',
+      created_at: 30,
+    },
+    'loose-c': {
+      id: 'loose-c',
+      name: 'Worker C',
+      kind: 'worker',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'C',
+      status: 'running',
+      created_at: 20,
+    },
+  };
+
+  runInContext(context, `render();`);
+
+  assert.deepEqual(jsonValue(context, `window._navAgents`), [
+    'loose-a',
+    'loose-c',
+    'loose-b',
+  ]);
+  assert.match(main.innerHTML, /Worker A[\s\S]*Worker C[\s\S]*Worker B[\s\S]*\+ New Worker/);
+  assert.ok(
+    main.innerHTML.indexOf('data-drag-id="loose-b"') <
+      main.innerHTML.indexOf('+ New Worker'),
+    'new-worker button should render after the last detached worker card',
+  );
+});
+
 test('main hierarchy always renders the synthetic User loose-workers strip when empty', () => {
   const { context, document, sandbox } = createMainRenderHarness();
   const main = document.getElementById('main');
@@ -10493,8 +10705,105 @@ test('main hierarchy always renders the synthetic User loose-workers strip when 
   assert.match(main.innerHTML, /agent-section-user-card[\s\S]*User/);
   const looseStrip = main.innerHTML.match(/<div class="loose-workers-strip"[\s\S]*?<\/div>/);
   assert.ok(looseStrip, 'empty user section should still include the loose-workers strip');
-  assert.match(looseStrip[0], /loose-workers-placeholder-btn/);
+  assert.match(looseStrip[0], /loose-workers-new-worker-btn/);
+  assert.match(looseStrip[0], /openAddWorkerModal\('loom'\)/);
+  assert.doesNotMatch(looseStrip[0], /\bdisabled\b/);
   assert.doesNotMatch(looseStrip[0], /data-drag-id=/);
+});
+
+test('loose-workers + New Worker opens creation modal and submitted worker appears in the strip', () => {
+  const { sandbox, document } = createSandbox();
+  const main = document.register('main');
+  const modal = registerAddCellModalElements(document);
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/constants.js');
+  loadScript(context, 'static/js/render.js');
+  loadModalScripts(context);
+  runInContext(context, `
+    _cachedAgentTemplates = [];
+    _cachedProviders = [];
+    selectedTerminalId = null;
+    focusedItemId = null;
+    getFilterByWindow = function() { return false; };
+    renderTerminalWorkspace = function() {};
+    updateEventsAttentionBadge = function() {};
+  `);
+
+  sandbox.state.groups = { loom: [] };
+  sandbox.state.group_settings = { loom: { collapsed_default: false } };
+  sandbox.state.children = {};
+  sandbox.state.agents = {};
+
+  runInContext(context, `render();`);
+  const click = main.innerHTML.match(/onclick="([^"]*openAddWorkerModal\('loom'\)[^"]*)"/);
+  assert.ok(click, 'new-worker button should have a click handler');
+
+  runInContext(context, `
+    var event = { stopPropagation() {} };
+    ${click[1]};
+  `);
+  assert.deepEqual(jsonValue(context, 'sendCalls[0]'), {
+    cmd: 'get_config',
+    group: 'loom',
+  });
+
+  runInContext(context, `
+    _showAddModal('worker', 'loom', {
+      current_path: '/repo',
+      profiles: ['Default'],
+      current_profile: 'Default',
+      group_cells: [],
+      group_settings: {},
+      resolved_agent_defaults: { worktree: false }
+    });
+  `);
+
+  assert.equal(modal.classList.contains('visible'), true);
+  assert.equal(document.getElementById('modal-add-title').textContent, 'New Detached Worker');
+  assert.equal(document.getElementById('add-submit-btn').textContent, 'Create Worker');
+  assert.match(
+    document.getElementById('modal-add-summary').textContent,
+    /user-owned detached worker/,
+  );
+
+  document.getElementById('add-name-input').value = 'Detached Worker';
+  document.getElementById('add-dir-select').value = '';
+  document.getElementById('add-profile-select').value = 'Default';
+  document.getElementById('add-shell-select').value = '';
+  document.getElementById('add-env-vars').value = '';
+  document.getElementById('add-template-select').value = '';
+  document.getElementById('add-provider-select').value = '';
+  document.getElementById('add-cmd-input').value = '';
+  document.getElementById('add-model-input').value = '';
+  document.getElementById('add-reasoning-effort').value = '';
+  document.getElementById('add-wt-enabled').checked = false;
+
+  context.submitAdd();
+
+  assert.deepEqual(jsonValue(context, 'sendCalls[1]'), {
+    cmd: 'add_worker',
+    name: 'Detached Worker',
+    group: 'loom',
+    profile: 'Default',
+    worktree: false,
+  });
+
+  sandbox.state.agents['worker-new'] = {
+    id: 'worker-new',
+    name: 'Detached Worker',
+    kind: 'worker',
+    group: 'loom',
+    cell_type: 'agent',
+    icon: 'W',
+    status: 'running',
+    created_at: 1,
+  };
+  sandbox.state.groups.loom = ['worker-new'];
+
+  runInContext(context, `render();`);
+
+  assert.deepEqual(jsonValue(context, `window._navAgents`), ['worker-new']);
+  assert.match(main.innerHTML, /Detached Worker[\s\S]*\+ New Worker/);
 });
 
 test('main render restores the inline task description editor caret across rerenders', () => {
