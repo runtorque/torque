@@ -6348,6 +6348,158 @@ test('embedded terminal compose submits on Enter, allows Shift+Enter, and clears
   assert.equal(button.disabled, true);
 });
 
+test('terminal compose validates dropped attachments before upload', () => {
+  const { context } = createEmbeddedTerminalHarness();
+  context.__files = [
+    { type: 'image/png', name: 'ok.png', size: 1024 },
+    { type: 'application/pdf', name: 'notes.pdf', size: 1024 },
+    { type: 'image/jpeg', name: 'huge.jpg', size: 11 * 1024 * 1024 },
+  ];
+
+  const result = JSON.parse(runInContext(
+    context,
+    `JSON.stringify(terminalComposeValidateDroppedFiles(__files))`,
+  ));
+
+  assert.equal(result.accepted.length, 1);
+  assert.equal(result.accepted[0].name, 'ok.png');
+  assert.deepEqual(result.errors, [
+    'notes.pdf is not a supported image type.',
+    'huge.jpg is larger than 10 MB.',
+  ]);
+});
+
+test('terminal compose image drop uploads files and inserts returned paths at the cursor', async () => {
+  const uploads = [];
+  class FakeFormData {
+    constructor() {
+      this.entries = [];
+    }
+
+    append(name, value) {
+      this.entries.push([name, value]);
+    }
+  }
+
+  const { context, document } = createEmbeddedTerminalHarness({
+    FormData: FakeFormData,
+    fetch(url, options) {
+      uploads.push({ url, entries: options.body.entries });
+      return Promise.resolve({
+        json() {
+          return Promise.resolve({
+            ok: true,
+            data: [
+              { path: '/Users/aleksanderarruda/.loom/attachments/agent-1-first.png' },
+              { path: '/Users/aleksanderarruda/.loom/attachments/agent-1-second.jpg' },
+            ],
+          });
+        },
+      });
+    },
+  });
+
+  const form = new FakeElement('compose-form');
+  form.classList.add('terminal-compose');
+  const input = document.register('terminal-compose-input-agent-1');
+  input.classList.add('terminal-compose-input');
+  input.dataset.cellId = 'agent-1';
+  input.value = 'prefix- suffix';
+  input.selectionStart = 'prefix-'.length;
+  input.selectionEnd = 'prefix-'.length;
+  const error = new FakeElement('compose-error');
+  error.classList.add('terminal-compose-error');
+  const button = document.register('terminal-compose-submit-agent-1');
+  button.classList.add('terminal-compose-submit');
+  form.appendChild(input);
+  form.appendChild(error);
+  form.appendChild(button);
+  form.setQuerySelector('.terminal-compose-error', error);
+  form.setQuerySelector('.terminal-compose-submit', button);
+
+  const imageOne = { type: 'image/png', name: 'first.png', size: 1200 };
+  const imageTwo = { type: 'image/jpeg', name: 'second.jpg', size: 1400 };
+  const dropEvent = {
+    currentTarget: input,
+    dataTransfer: { types: ['Files'], files: [imageOne, imageTwo] },
+    preventDefaultCalled: false,
+    stopPropagationCalled: false,
+    preventDefault() { this.preventDefaultCalled = true; },
+    stopPropagation() { this.stopPropagationCalled = true; },
+  };
+
+  await context.terminalComposeDrop(dropEvent, 'agent-1');
+
+  assert.equal(dropEvent.preventDefaultCalled, true);
+  assert.equal(dropEvent.stopPropagationCalled, true);
+  assert.equal(uploads.length, 1);
+  assert.equal(uploads[0].url, '/api/attachment/upload');
+  assert.deepEqual(uploads[0].entries, [
+    ['agent_id', 'agent-1'],
+    ['file', imageOne],
+    ['file', imageTwo],
+  ]);
+  const inserted = '/Users/aleksanderarruda/.loom/attachments/agent-1-first.png'
+    + '\n/Users/aleksanderarruda/.loom/attachments/agent-1-second.jpg';
+  assert.equal(input.value, 'prefix-' + inserted + ' suffix');
+  assert.equal(input.selectionStart, 'prefix-'.length + inserted.length);
+  assert.equal(input.selectionEnd, input.selectionStart);
+  assert.equal(jsonValue(context, `_terminalComposeDrafts['agent-1']`), input.value);
+  assert.equal(error.textContent, '');
+  assert.equal(button.disabled, false);
+  assert.equal(input.focused, true);
+});
+
+test('terminal compose oversized image drop is rejected without upload or draft changes', async () => {
+  let fetchCalls = 0;
+  class FakeFormData {
+    append() {}
+  }
+  const { context, document } = createEmbeddedTerminalHarness({
+    FormData: FakeFormData,
+    fetch() {
+      fetchCalls += 1;
+      return Promise.resolve({ json: () => Promise.resolve({ ok: true, data: [] }) });
+    },
+  });
+
+  const form = new FakeElement('compose-form');
+  form.classList.add('terminal-compose');
+  const input = document.register('terminal-compose-input-agent-1');
+  input.classList.add('terminal-compose-input');
+  input.dataset.cellId = 'agent-1';
+  input.value = 'keep this draft';
+  input.selectionStart = input.value.length;
+  input.selectionEnd = input.value.length;
+  const error = new FakeElement('compose-error');
+  error.classList.add('terminal-compose-error');
+  form.appendChild(input);
+  form.appendChild(error);
+  form.setQuerySelector('.terminal-compose-error', error);
+  context.terminalComposeInput(input);
+
+  const dropEvent = {
+    currentTarget: input,
+    dataTransfer: {
+      types: ['Files'],
+      files: [{ type: 'image/png', name: 'too-big.png', size: 11 * 1024 * 1024 }],
+    },
+    preventDefaultCalled: false,
+    stopPropagationCalled: false,
+    preventDefault() { this.preventDefaultCalled = true; },
+    stopPropagation() { this.stopPropagationCalled = true; },
+  };
+
+  await context.terminalComposeDrop(dropEvent, 'agent-1');
+
+  assert.equal(dropEvent.preventDefaultCalled, true);
+  assert.equal(dropEvent.stopPropagationCalled, true);
+  assert.equal(fetchCalls, 0);
+  assert.equal(input.value, 'keep this draft');
+  assert.equal(jsonValue(context, `_terminalComposeDrafts['agent-1'] || ''`), 'keep this draft');
+  assert.equal(error.textContent, 'too-big.png is larger than 10 MB.');
+});
+
 test('embedded terminal ignores stale websocket output after a relaunch session swap', () => {
   const { context, sockets, terminals } = createEmbeddedTerminalHarness();
   const firstSurface = new FakeElement('surface-1');
