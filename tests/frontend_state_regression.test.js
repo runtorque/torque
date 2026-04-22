@@ -542,6 +542,10 @@ function jsonValue(context, expression) {
   return JSON.parse(runInContext(context, `JSON.stringify(${expression})`));
 }
 
+function boardCardDivCount(html) {
+  return (String(html).match(/<div class="board-card(?:\s|")/g) || []).length;
+}
+
 function attachStandalonePanelDom(document) {
   const get = (id) => document.elements.get(id) || null;
   const shell = get('standalone-sidebar-shell');
@@ -5068,6 +5072,141 @@ test('renderBoard surfaces a stale completed-task archive suggestion on the Done
 
   assert.match(panel.innerHTML, /Archive stale/);
   assert.match(panel.innerHTML, /inactive for 7\+ days/);
+});
+
+test('renderBoard Done lane limit counts expanded descendants as rendered cards', () => {
+  const { context, document } = createBoardHarness({ stubCards: false });
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+  document.register('board-lane-tabs');
+
+  context.state.board_lanes = ['Done'];
+  context.state.board_tasks = {
+    root: {
+      id: 'root',
+      group: 'alpha',
+      task: 'Root completed pipeline',
+      lane: 'Done',
+      position: 100,
+    },
+  };
+  for (let i = 1; i <= 60; i++) {
+    const id = `child-${String(i).padStart(2, '0')}`;
+    context.state.board_tasks[id] = {
+      id,
+      group: 'alpha',
+      task: `Completed child ${i}`,
+      lane: 'Done',
+      parent_task_id: 'root',
+      pipeline_depth: i,
+      created_at: `2026-04-01T00:${String(i).padStart(2, '0')}:00Z`,
+      position: 100 - i,
+    };
+  }
+
+  runInContext(context, `
+    _boardSelectedLane = 'Done';
+    _boardRenderLimit = 50;
+  `);
+
+  context.renderBoard();
+
+  assert.equal(boardCardDivCount(panel.innerHTML), 50);
+  assert.match(panel.innerHTML, /11 more cards/);
+  assert.doesNotMatch(panel.innerHTML, /child-50/);
+
+  context.boardLoadMore();
+
+  assert.equal(runInContext(context, '_boardRenderLimit'), 100);
+  assert.equal(boardCardDivCount(panel.innerHTML), 61);
+  assert.doesNotMatch(panel.innerHTML, /board-load-more/);
+});
+
+test('renderBoard counts collapsed pipeline roots as one virtualized card', () => {
+  const { context, document } = createBoardHarness({ stubCards: false });
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+  document.register('board-lane-tabs');
+
+  context.state.board_lanes = ['Done'];
+  context.state.board_tasks = {
+    rootA: { id: 'rootA', group: 'alpha', task: 'Collapsed root', lane: 'Done', position: 3 },
+    childA: {
+      id: 'childA',
+      group: 'alpha',
+      task: 'Hidden child',
+      lane: 'Done',
+      parent_task_id: 'rootA',
+      pipeline_depth: 1,
+      position: 2,
+    },
+    rootB: { id: 'rootB', group: 'alpha', task: 'Second root', lane: 'Done', position: 1 },
+    rootC: { id: 'rootC', group: 'alpha', task: 'Third root', lane: 'Done', position: 0 },
+  };
+
+  runInContext(context, `
+    _boardSelectedLane = 'Done';
+    _boardRenderLimit = 2;
+    _boardCollapsedTasks = { rootA: true };
+  `);
+
+  context.renderBoard();
+
+  assert.equal(boardCardDivCount(panel.innerHTML), 2);
+  assert.match(panel.innerHTML, /rootA/);
+  assert.match(panel.innerHTML, /rootB/);
+  assert.doesNotMatch(panel.innerHTML, /childA/);
+  assert.match(panel.innerHTML, /1 more card/);
+});
+
+test('renderBoard derives board task maps once per render', () => {
+  const { context, document } = createBoardHarness();
+  document.register('panel-board');
+  document.register('board-cards');
+  document.register('board-lane-tabs');
+
+  context.state.board_lanes = ['Backlog', 'Done'];
+  context.state.board_tasks = {
+    active: {
+      id: 'active',
+      group: 'alpha',
+      task: 'Active task',
+      labels: ['bug'],
+      action_name: 'feature/test',
+      agent_id: 'agent-1',
+      lane: 'Backlog',
+      position: 1,
+    },
+    done: {
+      id: 'done',
+      group: 'alpha',
+      task: 'Done task',
+      lane: 'Done',
+      updated_at: '2000-01-01T00:00:00Z',
+      position: 0,
+    },
+  };
+
+  runInContext(context, `
+    _boardSelectedLane = 'Done';
+    var scopedCallCount = 0;
+    var visibleCallCount = 0;
+    var originalScopedTasks = _boardScopedTasks;
+    var originalVisibleTasks = _boardVisibleTasks;
+    _boardScopedTasks = function(includeArchived) {
+      scopedCallCount++;
+      return originalScopedTasks(includeArchived);
+    };
+    _boardVisibleTasks = function() {
+      visibleCallCount++;
+      return originalVisibleTasks();
+    };
+  `);
+
+  context.renderBoard();
+
+  assert.equal(runInContext(context, 'scopedCallCount'), 1);
+  assert.equal(runInContext(context, 'visibleCallCount'), 0);
 });
 
 test('boardArchiveSuggestedDone archives only stale completed tasks', () => {

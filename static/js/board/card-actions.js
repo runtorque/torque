@@ -326,24 +326,41 @@ function _boardRevealTaskRootId(taskId, visibleTasks) {
   return rootId;
 }
 
-function _boardEnsureRenderLimitForTask(taskId) {
-  var visibleTasks = _boardVisibleTasks();
-  if (!visibleTasks[taskId]) return;
-  var rootId = _boardRevealTaskRootId(taskId, visibleTasks);
-  var laneTasks = _boardTasksInLane(_boardSelectedLane);
-  var rootIndex = -1;
-  var rootCount = 0;
-  for (var i = 0; i < laneTasks.length; i++) {
-    var task = laneTasks[i];
-    if (task.parent_task_id && visibleTasks[task.parent_task_id]) continue;
-    if (task.id === rootId) {
-      rootIndex = rootCount;
-      break;
+function _boardVisibleCardIndexForTask(rootTasks, childrenOf, taskId) {
+  var index = 0;
+  var found = -1;
+
+  function visit(task) {
+    if (!task || found >= 0) return;
+    if (task.id === taskId) {
+      found = index;
+      return;
     }
-    rootCount += 1;
+    index++;
+    var children = (childrenOf && childrenOf[task.id]) || [];
+    if (!children.length || _boardCollapsedTasks[task.id]) return;
+    for (var i = 0; i < children.length; i++) {
+      visit(children[i]);
+      if (found >= 0) return;
+    }
   }
-  if (rootIndex >= 0 && rootIndex >= _boardRenderLimit) {
-    _boardRenderLimit = Math.ceil((rootIndex + 1) / 50) * 50;
+
+  for (var i = 0; i < rootTasks.length; i++) {
+    visit(rootTasks[i]);
+    if (found >= 0) break;
+  }
+  return found;
+}
+
+function _boardEnsureRenderLimitForTask(taskId) {
+  var lane = _boardSelectedLane || _boardVisibleLanes()[0] || '';
+  var model = _boardBuildRenderModel([lane]);
+  if (!model.visibleTasks[taskId]) return;
+  _boardRevealTaskRootId(taskId, model.visibleTasks);
+  var rootTasks = _boardRootTasksForLane(lane, model.visibleTasks, model);
+  var cardIndex = _boardVisibleCardIndexForTask(rootTasks, model.childrenOf, taskId);
+  if (cardIndex >= 0 && cardIndex >= _boardRenderLimit) {
+    _boardRenderLimit = Math.ceil((cardIndex + 1) / 50) * 50;
   }
 }
 
