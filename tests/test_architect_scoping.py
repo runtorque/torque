@@ -762,7 +762,18 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         delivered = json.loads(ok_text)
         self.assertTrue(delivered["message_id"])
         self.assertEqual(hired.mcp_messages[0]["action"], "architect_message")
+        self.assertTrue(
+            hired.mcp_messages[0]["message"].startswith(
+                "You are Hired (engineer, id=eng-hired).\n\n"
+                "Need a scope decision."
+            ),
+            hired.mcp_messages[0]["message"],
+        )
         self.assertEqual(architect.mcp_messages[0]["action"], "architect_message")
+        self.assertEqual(
+            architect.mcp_messages[0]["message"],
+            "Need a scope decision.",
+        )
         self.assertTrue(hired.pending_weaver_message)
         self.assertEqual(
             [op["op"] for op in self.state._delta_ops[-2:]],
@@ -822,7 +833,11 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(ok_error, ok_text)
         delivered = json.loads(ok_text)
         self.assertTrue(delivered["message_id"])
-        self.assertEqual(hired.mcp_messages[0]["message"], "Read this when you return.")
+        self.assertEqual(
+            hired.mcp_messages[0]["message"],
+            "You are Hired (engineer, id=eng-hired).\n\n"
+            "Read this when you return.",
+        )
         self.assertFalse(hired.mcp_messages[0]["delivered"])
         self.assertTrue(hired.mcp_messages[0]["buffered"])
         self.assertEqual(hired.mcp_messages[0]["delivery_reason"], "no_session")

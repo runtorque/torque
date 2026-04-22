@@ -190,7 +190,7 @@ def _migrate_syntax(text):
 # Stub loom context for preview renders (no real agent/task).
 # Templates referencing loom.* get safe defaults instead of StrictUndefined errors.
 LOOM_CONTEXT_STUB = {
-    "agent":     {"name": "", "slug": "", "type": "", "group": "",
+    "agent":     {"id": "", "name": "", "slug": "", "type": "", "group": "",
                   "directory": "", "kind": "", "role": "",
                   "owner_engineer": ""},
     "context":   {"is_clean": True, "tasks_dispatched": 0, "previous_tasks": []},

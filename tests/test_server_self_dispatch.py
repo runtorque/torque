@@ -1842,6 +1842,39 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
+    async def test_new_agent_prompt_sequence_anchors_first_prompt_when_cell_known(self):
+        cell = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Panelsmith",
+            group="g",
+            cell_type="agent",
+            kind="worker",
+        )
+
+        prompts = self.server_mod._new_agent_prompt_sequence(
+            {"initial_prompt": "Template intro"},
+            startup_prompt="Persistent worker prompt",
+            final_prompt="Dispatch task body",
+            cell=cell,
+        )
+
+        self.assertEqual(
+            prompts[0],
+            (
+                "You are Panelsmith (worker, id=worker-1).\n\n"
+                "Persistent worker prompt",
+                {},
+            ),
+        )
+        self.assertEqual(
+            prompts[1][0],
+            "You are Panelsmith (worker, id=worker-1).\n\nTemplate intro",
+        )
+        self.assertEqual(
+            prompts[2][0],
+            "You are Panelsmith (worker, id=worker-1).\n\nDispatch task body",
+        )
+
     async def test_stream_auto_resume_dispatches_when_queue_head_becomes_ready(self):
         state = self._make_state()
         owner = self.state_mod.AgentCell(

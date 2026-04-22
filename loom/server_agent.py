@@ -19,6 +19,7 @@ from .artifacts import (
     upstream_artifact_prompt_block,
 )
 from .config import log
+from .identity import prepend_agent_identity_anchor
 
 DEFAULT_MCP_ENTRYPOINT = "loom/mcp.py"
 ARCHITECT_MCP_ENTRYPOINT = "loom/mcp_architect.py"
@@ -81,15 +82,19 @@ def _startup_prompt_for_new_agent(*, agent_type: str = "",
 
 def _new_agent_prompt_sequence(launch_cfg: dict, *,
                                startup_prompt: str = "",
-                               final_prompt: str = "") -> list[tuple[str, dict]]:
+                               final_prompt: str = "",
+                               cell=None) -> list[tuple[str, dict]]:
     """Return prompts to send to a brand-new agent in order."""
     prompts = []
     if startup_prompt:
+        startup_prompt = prepend_agent_identity_anchor(startup_prompt, cell)
         prompts.append((startup_prompt, {}))
     initial_prompt = launch_cfg.get("initial_prompt", "")
     if initial_prompt:
+        initial_prompt = prepend_agent_identity_anchor(initial_prompt, cell)
         prompts.append((initial_prompt, {}))
     if final_prompt:
+        final_prompt = prepend_agent_identity_anchor(final_prompt, cell)
         prompts.append((final_prompt, {"background": True}))
     return prompts
 

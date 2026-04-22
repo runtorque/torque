@@ -1139,6 +1139,49 @@ class LoomDBTests(unittest.TestCase):
             [entries[1]],
         )
 
+    def test_init_migrates_legacy_weaver_journal_author_column_before_index(self):
+        legacy_path = Path(self.tmp.name) / "legacy-journal.db"
+        conn = sqlite3.connect(str(legacy_path))
+        conn.execute("""
+            CREATE TABLE weaver_journal (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_name  TEXT NOT NULL,
+                timestamp   REAL NOT NULL,
+                entry_type  TEXT NOT NULL,
+                entry       TEXT NOT NULL
+            )
+        """)
+        conn.execute(
+            "INSERT INTO weaver_journal "
+            "(group_name, timestamp, entry_type, entry) "
+            "VALUES ('g', 10.0, 'plan', 'Legacy entry')"
+        )
+        conn.commit()
+        conn.close()
+
+        migrated = LoomDB(legacy_path)
+        self.addCleanup(migrated.close)
+
+        migrated.init()
+
+        cols = {
+            row[1]
+            for row in migrated._conn.execute(
+                "PRAGMA table_info(weaver_journal)"
+            ).fetchall()
+        }
+        self.assertIn("author_cell_id", cols)
+        self.assertIsNotNone(
+            migrated._conn.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='index' "
+                "AND name='idx_weaver_journal_group_author'"
+            ).fetchone()
+        )
+        entries = migrated.load_journal_entries("g", limit=10)
+        self.assertEqual(entries[0]["entry"], "Legacy entry")
+        self.assertEqual(entries[0]["author_cell_id"], "")
+
     def test_weaver_settings_load_backfills_heartbeat_from_legacy_rows(self):
         self.db._conn.execute(
             """

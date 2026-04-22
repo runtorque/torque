@@ -1491,33 +1491,42 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         return result
 
     def save_journal_entry(self, group_name: str, timestamp: float,
-                           entry_type: str, entry: str) -> int:
+                           entry_type: str, entry: str,
+                           author_cell_id: str = "") -> int:
         """Insert a weaver journal entry. Returns the new row ID."""
+        author_cell_id = str(author_cell_id or "").strip()
         c = self._conn.execute(
             "INSERT INTO weaver_journal "
-            "(group_name, timestamp, entry_type, entry) "
-            "VALUES (?,?,?,?)",
-            (group_name, timestamp, entry_type, entry))
+            "(group_name, timestamp, entry_type, entry, author_cell_id) "
+            "VALUES (?,?,?,?,?)",
+            (group_name, timestamp, entry_type, entry, author_cell_id))
         self._conn.commit()
         return c.lastrowid
 
     def load_journal_entries(self, group_name: str, limit: int = 20,
-                             entry_type: str = "") -> list[dict]:
+                             entry_type: str = "",
+                             author_cell_id: str = "") -> list[dict]:
         """Load recent journal entries for a group, newest first."""
+        filters = ["group_name=?"]
+        params = [group_name]
         if entry_type:
-            rows = self._conn.execute(
-                "SELECT id, group_name, timestamp, entry_type, entry "
-                "FROM weaver_journal WHERE group_name=? AND entry_type=? "
-                "ORDER BY id DESC LIMIT ?",
-                (group_name, entry_type, limit)).fetchall()
-        else:
-            rows = self._conn.execute(
-                "SELECT id, group_name, timestamp, entry_type, entry "
-                "FROM weaver_journal WHERE group_name=? "
-                "ORDER BY id DESC LIMIT ?",
-                (group_name, limit)).fetchall()
+            filters.append("entry_type=?")
+            params.append(entry_type)
+        author_cell_id = str(author_cell_id or "").strip()
+        if author_cell_id:
+            filters.append("author_cell_id=?")
+            params.append(author_cell_id)
+        params.append(limit)
+        rows = self._conn.execute(
+            "SELECT id, group_name, timestamp, entry_type, entry, "
+            "author_cell_id FROM weaver_journal WHERE "
+            + " AND ".join(filters)
+            + " ORDER BY id DESC LIMIT ?",
+            params,
+        ).fetchall()
         return [{"id": r[0], "group": r[1], "timestamp": r[2],
-                 "type": r[3], "entry": r[4]} for r in rows]
+                 "type": r[3], "entry": r[4],
+                 "author_cell_id": r[5]} for r in rows]
 
     def load_decision(self, decision_id: str) -> dict | None:
         """Load one persisted architect decision by id."""
