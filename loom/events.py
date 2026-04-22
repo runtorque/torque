@@ -601,13 +601,13 @@ class EventBus:
     def _fire_broadcast(self):
         """Timer callback — create a task for the async broadcast."""
         self._timers.pop("_global", None)
-        # Coalesce health recompute with the throttled broadcast: any event
-        # bursts in the last 1s share a single O(tasks) recompute pass, and
-        # the resulting task_upsert deltas piggyback on the same broadcast.
-        try:
-            self._state.recompute_task_health()
-        except Exception:
-            log.exception("recompute_task_health failed")
+        # Coalesce health recompute with the throttled broadcast, but do not
+        # scan the board if the last 1s of deltas cannot affect task health.
+        if self._state.has_pending_task_health_recompute():
+            try:
+                self._state.recompute_task_health()
+            except Exception:
+                log.exception("recompute_task_health failed")
         asyncio.create_task(self._do_broadcast())
 
     async def _do_broadcast(self):

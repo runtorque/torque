@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 import importlib
 import unittest
+from unittest import mock
 
 try:
     from helpers import install_aiohttp_stub
@@ -414,3 +415,70 @@ class MatrixStateTaskHealthTests(unittest.TestCase):
 
         self.assertEqual(state.board_tasks["task-1"].health_state, "stalled")
         self.assertNotEqual(state.board_tasks["task-1"].health_since, first_since)
+
+    def test_recompute_task_health_quiet_state_is_noop(self):
+        state = self.state_mod.MatrixState()
+        state.groups["g"] = []
+        state.board_add_task("Quiet", "g", id="task-1")
+
+        task_health_mod = importlib.import_module("loom.task_health")
+        with mock.patch.object(
+                task_health_mod,
+                "compute_task_health",
+                side_effect=AssertionError("full scan should be skipped")):
+            self.assertEqual(state.recompute_task_health(persist=False), [])
+
+    def test_incremental_recompute_single_task_op_skips_unrelated(self):
+        state = self.state_mod.MatrixState()
+        state.groups["g"] = []
+        parent = state.board_add_task("Parent", "g", id="parent")
+        child = state.board_add_task(
+            "Child",
+            "g",
+            id="child",
+            parent_task_id=parent.id,
+        )
+        state.board_add_task("Unrelated", "g", id="unrelated")
+
+        task_health_mod = importlib.import_module("loom.task_health")
+        original = task_health_mod._compute_local_health
+        calls = []
+
+        def wrapped(task, *args, **kwargs):
+            calls.append(task.id)
+            return original(task, *args, **kwargs)
+
+        with mock.patch.object(
+                task_health_mod,
+                "_compute_local_health",
+                side_effect=wrapped):
+            state.board_update_task(child.id, labels=["loom:blocked"])
+
+        self.assertCountEqual(calls, ["child", "parent"])
+        self.assertNotIn("unrelated", calls)
+
+    def test_incremental_recompute_cascade_updates_ancestors(self):
+        state = self.state_mod.MatrixState()
+        state.groups["g"] = []
+        parent = state.board_add_task("Parent", "g", id="parent")
+        child = state.board_add_task(
+            "Child",
+            "g",
+            id="child",
+            parent_task_id=parent.id,
+        )
+
+        state.board_update_task(child.id, labels=["loom:blocked"])
+
+        self.assertEqual(state.board_tasks["child"].health_state, "blocked")
+        self.assertEqual(state.board_tasks["parent"].health_state, "blocked")
+        self.assertTrue(state.board_tasks["parent"].health_details["aggregate"])
+        self.assertEqual(
+            state.board_tasks["parent"].health_details["source_task_id"],
+            "child",
+        )
+
+        state.board_update_task(child.id, labels=[])
+
+        self.assertEqual(state.board_tasks["child"].health_state, "healthy")
+        self.assertEqual(state.board_tasks["parent"].health_state, "healthy")
