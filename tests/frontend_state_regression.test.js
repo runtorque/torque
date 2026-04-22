@@ -9149,6 +9149,7 @@ test('architect messages and decisions use virtual windows for large histories',
       mcp_messages: [],
     },
   };
+  context.state.decisions = {};
   context.focusedItemId = 'arch-1';
   for (let i = 0; i < 1000; i++) {
     context.state.agents['arch-1'].mcp_messages.push({

@@ -446,8 +446,6 @@ function _agentPanelAttachVirtualScrolls(root) {
     var container = root.querySelector(meta.scrollSelector || '.agent-panel-content');
     if (!container || typeof container.addEventListener !== 'function') continue;
     if (typeof container.scrollTop === 'number') {
-      var rec = _agentPanelVirtualScrollByKey[meta.key] || {};
-      if (typeof rec.top === 'number') container.scrollTop = rec.top;
       _agentPanelRecordVirtualScroll(meta.key, container);
     }
     container.addEventListener('scroll', function(boundMeta) {
@@ -1072,7 +1070,16 @@ function _agentPanelWorkerTaskEntries(agent) {
   var agentId = String((agent && agent.id) || '');
   var tasks = [];
   if (!agentId || !state || !state.board_tasks) return tasks;
+  var boardTaskCount = 0;
+  for (var countTaskId in state.board_tasks) {
+    if (Object.prototype.hasOwnProperty.call(state.board_tasks, countTaskId)) {
+      boardTaskCount++;
+    }
+  }
   var cachedIds = _agentPanelWorkerTaskIdCacheByAgent[agentId];
+  if (cachedIds && cachedIds._boardTaskCount !== boardTaskCount) {
+    cachedIds = null;
+  }
   if (!cachedIds) {
     cachedIds = [];
     for (var taskId in state.board_tasks) {
@@ -1089,6 +1096,7 @@ function _agentPanelWorkerTaskEntries(agent) {
       if (aTs !== bTs) return bTs - aTs;
       return String((b && b.id) || bId || '').localeCompare(String((a && a.id) || aId || ''));
     });
+    cachedIds._boardTaskCount = boardTaskCount;
     _agentPanelWorkerTaskIdCacheByAgent[agentId] = cachedIds;
   }
   for (var i = 0; i < cachedIds.length; i++) {
