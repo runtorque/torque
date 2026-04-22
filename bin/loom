@@ -3217,6 +3217,10 @@ def cmd_ai_done(args):
         kwargs["message"] = args.message
     if args.post_external:
         kwargs["push_external"] = True
+    if getattr(args, "force_skip_review", False):
+        kwargs["force_skip_review"] = True
+        if getattr(args, "review_skip_reason", ""):
+            kwargs["review_skip_reason"] = args.review_skip_reason
     resp = api_call("ai_report", port=args.port, **kwargs)
     data = check_ok(resp)
     label = task.get("slug", task["id"][:6]) if task else ""
@@ -4572,6 +4576,10 @@ def build_parser():
     p.add_argument("-m", "--message", help="Completion summary")
     p.add_argument("--post-external", action="store_true",
                    help="Post the completion summary to the linked external issue")
+    p.add_argument("--force-skip-review", action="store_true",
+                   help="Bypass the action review gate and write an audit event")
+    p.add_argument("--review-skip-reason",
+                   help="Reason recorded when --force-skip-review is used")
     p.add_argument("task_ref", nargs="?",
                    help="Task slug/ID (auto-detected)")
     p.set_defaults(func=cmd_ai_done)

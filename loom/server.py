@@ -476,6 +476,214 @@ def _review_task_has_ship_verdict(task) -> bool:
     return False
 
 
+_REVIEW_GATE_ACTION = "feature/review"
+
+
+def _review_gate_threshold_from_action(act: dict | None) -> int | None:
+    """Return an action's review-required LOC threshold, if configured."""
+    if not isinstance(act, dict) or "review_required_above_loc" not in act:
+        return None
+    try:
+        threshold = int(act.get("review_required_above_loc"))
+    except (TypeError, ValueError):
+        return None
+    return threshold if threshold >= 0 else None
+
+
+def _has_review_gate_transition(transitions: list) -> bool:
+    """Return whether an action can transition to the review gate action."""
+    for transition in transitions or []:
+        if not isinstance(transition, dict):
+            continue
+        action_name = str(transition.get("action", "") or "").strip()
+        if action_name == _REVIEW_GATE_ACTION:
+            return True
+    return False
+
+
+def _chain_has_shipped_review(state: MatrixState, task) -> bool:
+    """Return whether this task chain already has a closed Ship review."""
+    if not state or not task:
+        return False
+    for chain_task in state.board_get_chain(task.id):
+        if not task_counts_as_done(chain_task):
+            continue
+        if not _is_feature_review_task(chain_task):
+            continue
+        if _review_task_has_ship_verdict(chain_task):
+            return True
+    return False
+
+
+def _review_gate_diff_size(summary: dict) -> int:
+    """Return insertions + deletions from a diff summary dict."""
+    try:
+        insertions = int((summary or {}).get("insertions", 0) or 0)
+    except (TypeError, ValueError):
+        insertions = 0
+    try:
+        deletions = int((summary or {}).get("deletions", 0) or 0)
+    except (TypeError, ValueError):
+        deletions = 0
+    return max(0, insertions) + max(0, deletions)
+
+
+def _review_gate_skip_audit_message(cell, task, *,
+                                    diff_size: int,
+                                    threshold: int,
+                                    reason: str) -> str:
+    worker_id = str(getattr(cell, "id", "") or "").strip()
+    worker_name = str(getattr(cell, "name", "") or "").strip()
+    task_id = str(getattr(task, "id", "") or "").strip()
+    reason = str(reason or "").strip() or "force-skip-review"
+    worker = worker_id
+    if worker_name:
+        worker = f"{worker_id} ({worker_name})" if worker_id else worker_name
+    return (
+        "Review gate skipped by worker "
+        f"{worker} for task {task_id}: diff size {diff_size} LOC, "
+        f"threshold {threshold}; reason: {reason}"
+    )
+
+
+async def _maybe_apply_review_required_gate(
+        state: MatrixState,
+        action_mgr: ActionManager,
+        worktree_mgr: WorktreeManager,
+        handle_command,
+        panel_event,
+        *,
+        cell,
+        task,
+        base_dir: str = "",
+        force_skip_review: bool = False,
+        skip_reason: str = "",
+        checkpoint_for_gate=None,
+        append_task_msg=None,
+        record_history_msg=None) -> dict | None:
+    """Enforce action-level review-required-above-LOC metadata.
+
+    Returns an error result when direct completion is refused, otherwise None
+    so the caller can proceed with the normal closeout path.
+    """
+    if not state or not cell or not task or not task.action_name:
+        return None
+
+    act = action_mgr.load_action(task.action_name, base_dir)
+    threshold = _review_gate_threshold_from_action(act)
+    if threshold is None:
+        return None
+
+    transitions = action_mgr.get_transitions(task.action_name, base_dir)
+    if not _has_review_gate_transition(transitions):
+        return None
+
+    if _chain_has_shipped_review(state, task):
+        return None
+
+    if checkpoint_for_gate:
+        await checkpoint_for_gate()
+
+    try:
+        diff_summary = await worktree_mgr.diff_summary(
+            cell,
+            non_test_only=True,
+        )
+    except TypeError:
+        # Test doubles or older integrations may not accept the keyword.
+        diff_summary = await worktree_mgr.diff_summary(cell)
+    diff_size = _review_gate_diff_size(diff_summary)
+    if diff_size <= threshold:
+        return None
+
+    if force_skip_review:
+        reason = str(skip_reason or "").strip() or "force-skip-review"
+        audit = _review_gate_skip_audit_message(
+            cell,
+            task,
+            diff_size=diff_size,
+            threshold=threshold,
+            reason=reason,
+        )
+        if append_task_msg:
+            append_task_msg(task, "review_gate_skipped", audit, cell.name)
+        elif task:
+            task.messages.append({
+                "timestamp": time.time(),
+                "action": "review_gate_skipped",
+                "message": audit,
+                "agent_name": getattr(cell, "name", ""),
+            })
+        if record_history_msg:
+            record_history_msg(
+                cell,
+                "review_gate_skipped",
+                audit,
+                task_override=task,
+            )
+        if panel_event:
+            panel_event(
+                "review_gate_skipped",
+                cell.id,
+                cell.name,
+                cell.group,
+                audit,
+                task_id=task.id,
+            )
+        return None
+
+    title = f"Review required — diff exceeded {threshold} LOC threshold"
+    context = (
+        f"Review required — diff exceeded {threshold} LOC threshold. "
+        "Please review and return Ship / Ship with fixes / Revert.\n\n"
+        "Gate details:\n"
+        f"- Worker: {cell.id} ({cell.name})\n"
+        f"- Task: {task.id}\n"
+        f"- Diff: {diff_size} non-test LOC "
+        f"({(diff_summary or {}).get('insertions', 0)} insertions + "
+        f"{(diff_summary or {}).get('deletions', 0)} deletions across "
+        f"{(diff_summary or {}).get('files', 0)} non-test files)\n"
+        f"- Threshold: {threshold}\n"
+    )
+    derive_result = await handle_command({
+        "cmd": "ai_report",
+        "cell_id": cell.id,
+        "action": "derive",
+        "task_id": task.id,
+        "action_name": _REVIEW_GATE_ACTION,
+        "message": title,
+        "description": context,
+    })
+    if derive_result and derive_result.get("type") == "error":
+        return {
+            "type": "error",
+            "message": (
+                "Cannot close directly — review gate required "
+                f"(diff: {diff_size} LOC, threshold: {threshold}), but "
+                "auto-deriving `feature/review` failed: "
+                f"{derive_result.get('message', 'unknown error')}"
+            ),
+        }
+
+    review_task_id = (derive_result or {}).get("task_id", "")
+    review_task_label = review_task_id or "the review task"
+    return {
+        "type": "error",
+        "message": (
+            "Cannot close directly — `feature/review` auto-derived at "
+            f"{review_task_label} per action gate (diff: {diff_size} LOC, "
+            f"threshold: {threshold}). Wait for reviewer's Ship verdict "
+            "before calling `loom ai done` again."
+        ),
+        "task_id": review_task_id,
+        "review_gate": {
+            "diff_size": diff_size,
+            "threshold": threshold,
+            "review_task_id": review_task_id,
+        },
+    }
+
+
 def _shipped_review_cleanup_candidates(state: MatrixState, merged_cell) -> list:
     """Return reviewer agents whose Ship verdict should be cleaned post-merge."""
     if not state or not merged_cell:
@@ -7380,125 +7588,184 @@ async def main(connection=None):
                                      "verify", "derive", "ask"}:
                         _promote_task_for_active_report(state, cell, task)
 
-                    if result and result.get("type") == "error":
-                        pass
-
-                    elif action == "done":
+                    if (
+                        not (result and result.get("type") == "error")
+                        and action == "done"
+                    ):
                         rejected = _reject_completion_with_open_descendants(
                             state, task, "done")
                         if rejected:
                             result = rejected
                         else:
-                            cell.activity = ""
-                            cell.activity_detail = ""
-                            cell.needs_attention = False
-                            cell.error_message = ""
-                            if message:
-                                cell.last_summary = message
-                            cell.current_task_id = ""
-                            _append_mcp(cell, "done", message or "Done")
-                            _append_task_msg(task, "done",
-                                             message or "Done", cell.name)
-                            _record_history_msg(
-                                cell, "done", message or "Done")
-                            if task:
-                                state.history_complete_task(
-                                    cell.id, task.id, "done")
-                            if task:
-                                await _record_task_boundary(
-                                    task, cell, message or "Done"
-                                )
-                            state._emit_agent(cell)
-                            # Auto-checkpoint on done. The session_end hook
-                            # callback (_on_agent_session_end, wired at
-                            # server.py:1541) already checkpoints, but it
-                            # only fires when Claude Code's
-                            # Stop/SessionEnd/idle_prompt hook reaches us —
-                            # racy and skipped when the agent calls
-                            # loom_done mid-turn. Running the same
-                            # checkpoint synchronously here ensures dirty
-                            # work lands on the branch before the MCP
-                            # reply returns, mirroring the pre-merge
-                            # checkpoint in worktree_merge.
-                            if (cell.worktree_path
+                            async def _checkpoint_for_review_gate():
+                                if not (
+                                    cell.worktree_path
                                     and cell.cell_type == "agent"
-                                    and cell.worktree_auto_checkpoint):
+                                    and cell.worktree_auto_checkpoint
+                                ):
+                                    return
                                 try:
-                                    cp_msg = _checkpoint_message(cell)
+                                    n = cell.worktree_checkpoints + 1
+                                    cp_msg = (
+                                        f"loom: checkpoint {n} — {cell.name}"
+                                    )
+                                    if message:
+                                        cp_msg = f"{cp_msg}\n\n{message}"
+                                    elif cell.last_summary:
+                                        cp_msg = (
+                                            f"{cp_msg}\n\n"
+                                            f"{cell.last_summary.strip()}"
+                                        )
                                     sha = await worktree_mgr.checkpoint(
-                                        cell, message=cp_msg)
+                                        cell,
+                                        message=cp_msg,
+                                    )
                                     if sha:
                                         state._db_save_agent(cell)
                                 except Exception:
                                     log.exception(
-                                        "done auto-checkpoint failed for"
+                                        "review gate checkpoint failed for"
                                         " '%s'", cell.name)
-                            if task and not task_counts_as_done(task):
-                                state.board_move_task(task.id, "Done")
-                            if task:
-                                task.status = ""
-                                _save_task(task)
-                                if data.get("push_external") \
-                                        and (task.provider or task.external_url):
-                                    try:
-                                        posted = post_ticket_comment(
-                                            task,
-                                            comment=build_completion_comment(
-                                                task.task, message),
-                                        )
-                                        _append_task_msg(
-                                            task, "external_comment",
-                                            posted, "loom")
-                                        _save_task(task)
-                                        result = {
-                                            "type": "external_comment_posted",
-                                            "task_id": task.id,
-                                            "message": posted,
-                                        }
-                                    except ExternalTicketError as exc:
-                                        _append_task_msg(
-                                            task, "external_error",
-                                            str(exc), "loom")
-                                        _save_task(task)
-                                        result = {
-                                            "type": "warning",
-                                            "message": str(exc),
-                                            "task_id": task.id,
-                                        }
-                                _cascade_done(task.id)
-                                # Notify dependents that are now unblocked
-                                for _dt in state.board_get_dependents(
-                                        task.id):
-                                    if not task_is_closed(_dt) \
-                                            and state.board_deps_met(_dt):
-                                        _panel_event(
-                                            "task_unblocked", "",
-                                            "", _dt.group,
-                                            f"Task '{_dt.task[:60]}'"
-                                            " is now unblocked",
-                                            task_id=_dt.id)
-                            _panel_event(
-                                "task_completed", cell.id,
-                                cell.name, cell.group,
-                                message or "Task completed")
-                            await _maybe_auto_resume_targets(
+
+                            base_dir = cell.worktree_repo_root \
+                                or cell.directory \
+                                or await _resolve_base_dir(
+                                    task.group if task else cell.group)
+                            gate_result = await _maybe_apply_review_required_gate(
                                 state,
+                                action_mgr,
+                                worktree_mgr,
                                 handle_command,
                                 _panel_event,
-                                targets=resume_targets,
-                                group=task.group if task else cell.group,
+                                cell=cell,
+                                task=task,
+                                base_dir=base_dir,
+                                force_skip_review=bool(
+                                    data.get("force_skip_review")),
+                                skip_reason=data.get(
+                                    "review_skip_reason", ""),
+                                checkpoint_for_gate=
+                                    _checkpoint_for_review_gate,
+                                append_task_msg=_append_task_msg,
+                                record_history_msg=_record_history_msg,
                             )
-                            await _drain_auto_dispatch_queue(
-                                task.group if task else cell.group
+                            if gate_result:
+                                result = gate_result
+
+                    if result and result.get("type") == "error":
+                        pass
+
+                    elif action == "done":
+                        cell.activity = ""
+                        cell.activity_detail = ""
+                        cell.needs_attention = False
+                        cell.error_message = ""
+                        if message:
+                            cell.last_summary = message
+                        cell.current_task_id = ""
+                        _append_mcp(cell, "done", message or "Done")
+                        _append_task_msg(task, "done",
+                                         message or "Done", cell.name)
+                        _record_history_msg(
+                            cell, "done", message or "Done")
+                        if task:
+                            state.history_complete_task(
+                                cell.id, task.id, "done")
+                        if task:
+                            await _record_task_boundary(
+                                task, cell, message or "Done"
                             )
-                            if task:
-                                await _maybe_auto_close_root_done_agents(
-                                    state,
-                                    task,
-                                    action_mgr=action_mgr,
-                                    resolve_base_dir=_resolve_base_dir,
-                                    close_agent=_close_agent_session_only,
-                                )
+                        state._emit_agent(cell)
+                        # Auto-checkpoint on done. The session_end hook
+                        # callback (_on_agent_session_end, wired at
+                        # server.py:1541) already checkpoints, but it
+                        # only fires when Claude Code's
+                        # Stop/SessionEnd/idle_prompt hook reaches us —
+                        # racy and skipped when the agent calls
+                        # loom_done mid-turn. Running the same
+                        # checkpoint synchronously here ensures dirty
+                        # work lands on the branch before the MCP
+                        # reply returns, mirroring the pre-merge
+                        # checkpoint in worktree_merge.
+                        if (cell.worktree_path
+                                and cell.cell_type == "agent"
+                                and cell.worktree_auto_checkpoint):
+                            try:
+                                cp_msg = _checkpoint_message(cell)
+                                sha = await worktree_mgr.checkpoint(
+                                    cell, message=cp_msg)
+                                if sha:
+                                    state._db_save_agent(cell)
+                            except Exception:
+                                log.exception(
+                                    "done auto-checkpoint failed for"
+                                    " '%s'", cell.name)
+                        if task and not task_counts_as_done(task):
+                            state.board_move_task(task.id, "Done")
+                        if task:
+                            task.status = ""
+                            _save_task(task)
+                            if data.get("push_external") \
+                                    and (task.provider or task.external_url):
+                                try:
+                                    posted = post_ticket_comment(
+                                        task,
+                                        comment=build_completion_comment(
+                                            task.task, message),
+                                    )
+                                    _append_task_msg(
+                                        task, "external_comment",
+                                        posted, "loom")
+                                    _save_task(task)
+                                    result = {
+                                        "type": "external_comment_posted",
+                                        "task_id": task.id,
+                                        "message": posted,
+                                    }
+                                except ExternalTicketError as exc:
+                                    _append_task_msg(
+                                        task, "external_error",
+                                        str(exc), "loom")
+                                    _save_task(task)
+                                    result = {
+                                        "type": "warning",
+                                        "message": str(exc),
+                                        "task_id": task.id,
+                                    }
+                            _cascade_done(task.id)
+                            # Notify dependents that are now unblocked
+                            for _dt in state.board_get_dependents(
+                                    task.id):
+                                if not task_is_closed(_dt) \
+                                        and state.board_deps_met(_dt):
+                                    _panel_event(
+                                        "task_unblocked", "",
+                                        "", _dt.group,
+                                        f"Task '{_dt.task[:60]}'"
+                                        " is now unblocked",
+                                        task_id=_dt.id)
+                        _panel_event(
+                            "task_completed", cell.id,
+                            cell.name, cell.group,
+                            message or "Task completed")
+                        await _maybe_auto_resume_targets(
+                            state,
+                            handle_command,
+                            _panel_event,
+                            targets=resume_targets,
+                            group=task.group if task else cell.group,
+                        )
+                        await _drain_auto_dispatch_queue(
+                            task.group if task else cell.group
+                        )
+                        if task:
+                            await _maybe_auto_close_root_done_agents(
+                                state,
+                                task,
+                                action_mgr=action_mgr,
+                                resolve_base_dir=_resolve_base_dir,
+                                close_agent=_close_agent_session_only,
+                            )
 
                     elif action == "blocked":
                         cell.needs_attention = True

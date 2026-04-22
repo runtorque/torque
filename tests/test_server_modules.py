@@ -79,6 +79,15 @@ class ServerModuleExtractionTests(unittest.TestCase):
 
         self.assertIn('disable_role_preamble: true', yaml_text)
 
+    def test_action_to_yaml_round_trips_review_required_above_loc(self):
+        yaml_text = self.server_actions._action_to_yaml('feature/implement', {
+            'description': 'Implement feature',
+            'review_required_above_loc': 100,
+            'prompt': '{{ TASK }}\n',
+        })
+
+        self.assertIn('review_required_above_loc: 100', yaml_text)
+
     def test_dispatch_queue_helper_respects_self_dispatch(self):
         active = self.state_mod.BoardTask(
             id='task-1',

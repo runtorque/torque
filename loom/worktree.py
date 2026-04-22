@@ -61,6 +61,22 @@ _BUILD_TEST_RE = re.compile(
     re.IGNORECASE,
 )
 _WORKTREE_NAME_MAX_LEN = 40
+_TEST_DIR_NAMES = {
+    "__snapshots__",
+    "__tests__",
+    "spec",
+    "specs",
+    "test",
+    "tests",
+}
+_TEST_FILE_RE = re.compile(
+    r"(^conftest\.py$|"
+    r"^test[_-].+\.[^/]+$|"
+    r".+[_-]tests?\.[^/]+$|"
+    r".+\.(test|spec)\.[^/]+$|"
+    r".+tests?\.(java|kt|kts|scala|cs)$)",
+    re.IGNORECASE,
+)
 
 
 def _normalize_repo_rel_path(path: str) -> str:
@@ -70,6 +86,55 @@ def _normalize_repo_rel_path(path: str) -> str:
     if normalized.startswith("./"):
         normalized = normalized[2:]
     return normalized
+
+
+def _is_test_path(path: str) -> bool:
+    """Return whether *path* looks like test-only coverage.
+
+    This intentionally catches common test directories plus language-idiomatic
+    test file suffixes. It is used for review-gate LOC accounting, not for
+    deciding whether tests should be ignored elsewhere in Loom.
+    """
+    normalized = _normalize_repo_rel_path(path)
+    if not normalized:
+        return False
+    parts = [part for part in normalized.split("/") if part]
+    if any(part.lower() in _TEST_DIR_NAMES for part in parts[:-1]):
+        return True
+    filename = parts[-1] if parts else normalized
+    return bool(_TEST_FILE_RE.match(filename))
+
+
+def _numstat_summary(text: str, *, non_test_only: bool = False) -> tuple[dict, list[str]]:
+    """Summarize ``git diff --numstat`` output.
+
+    Returns ``({"files", "insertions", "deletions"}, paths)``. Binary file
+    entries count as a changed file with zero textual insertions/deletions.
+    """
+    files = 0
+    insertions = 0
+    deletions = 0
+    paths: list[str] = []
+    for line in str(text or "").strip().splitlines():
+        parts = line.split("\t")
+        if len(parts) < 3:
+            continue
+        path = parts[2]
+        if non_test_only and _is_test_path(path):
+            continue
+        try:
+            ins = int(parts[0]) if parts[0] != "-" else 0
+            dels = int(parts[1]) if parts[1] != "-" else 0
+        except ValueError:
+            continue
+        insertions += ins
+        deletions += dels
+        files += 1
+        paths.append(path)
+    return (
+        {"files": files, "insertions": insertions, "deletions": deletions},
+        paths,
+    )
 
 
 def _find_untracked_overwrite_paths(untracked_paths: list[str],
@@ -612,27 +677,7 @@ class WorktreeManager:
             stdout, _ = await proc.communicate()
             if proc.returncode != 0:
                 return ({}, [])
-            files = 0
-            insertions = 0
-            deletions = 0
-            paths: list[str] = []
-            for line in stdout.decode().strip().splitlines():
-                parts = line.split("\t")
-                if len(parts) >= 3:
-                    try:
-                        ins = int(parts[0]) if parts[0] != "-" else 0
-                        dels = int(parts[1]) if parts[1] != "-" else 0
-                        insertions += ins
-                        deletions += dels
-                        files += 1
-                        paths.append(parts[2])
-                    except ValueError:
-                        continue
-            return (
-                {"files": files, "insertions": insertions,
-                 "deletions": deletions},
-                paths,
-            )
+            return _numstat_summary(stdout.decode())
         except Exception:
             log.debug("diff_numstat failed for '%s'", cell.name)
             return ({}, [])
@@ -1188,12 +1233,15 @@ class WorktreeManager:
         except Exception:
             return False
 
-    async def diff_summary(self, cell) -> dict:
+    async def diff_summary(self, cell, *, non_test_only: bool = False) -> dict:
         """Return diff stats for the worktree vs its base branch.
 
         Returns:
             {"files": int, "insertions": int, "deletions": int}
             Empty dict on failure.
+
+        If ``non_test_only`` is true, test directories and common test-file
+        suffixes are excluded from the totals.
         """
         if not cell.worktree_path or not cell.worktree_base_branch:
             return {}
@@ -1210,23 +1258,11 @@ class WorktreeManager:
             if proc.returncode != 0:
                 return {}
 
-            files = 0
-            insertions = 0
-            deletions = 0
-            for line in stdout.decode().strip().splitlines():
-                parts = line.split("\t")
-                if len(parts) >= 3:
-                    try:
-                        ins = int(parts[0]) if parts[0] != "-" else 0
-                        dels = int(parts[1]) if parts[1] != "-" else 0
-                        insertions += ins
-                        deletions += dels
-                        files += 1
-                    except ValueError:
-                        continue
-
-            return {"files": files, "insertions": insertions,
-                    "deletions": deletions}
+            summary, _paths = _numstat_summary(
+                stdout.decode(),
+                non_test_only=non_test_only,
+            )
+            return summary
         except Exception:
             log.debug("diff_summary failed for '%s'", cell.name)
             return {}

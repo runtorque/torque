@@ -8,6 +8,13 @@ agent:
 labels:
   - bugfix
 
+review_required_above_loc: 150
+
+transitions:
+  - action: feature/review
+    when: fix diff exceeded review gate threshold
+    status: "On Review"
+
 prompt: |
   You are diagnosing and fixing a bug. This is a quick, targeted fix — no review pipeline. Focus on understanding the root cause before writing any code.
 

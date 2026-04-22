@@ -523,6 +523,8 @@ class ActionManager:
             "terminals": act.get("terminals", []),
             "transitions": act.get("transitions", []),
             "max_depth": act.get("max_depth", None),
+            "review_required_above_loc": act.get(
+                "review_required_above_loc", None),
         }
 
     def get_auto_close_on_done(self, action_name: str,
@@ -532,6 +534,20 @@ class ActionManager:
         if not isinstance(act, dict):
             return False
         return bool(act.get("auto_close_on_done", False))
+
+    def get_review_required_above_loc(self, action_name: str,
+                                      base_dir: str = "") -> int | None:
+        """Return the review-gate threshold for an action, if configured."""
+        act = self.load_action(action_name, base_dir)
+        if not isinstance(act, dict):
+            return None
+        if "review_required_above_loc" not in act:
+            return None
+        try:
+            threshold = int(act.get("review_required_above_loc"))
+        except (TypeError, ValueError):
+            return None
+        return threshold if threshold >= 0 else None
 
     def get_transitions(self, action_name: str,
                          base_dir: str = "") -> list[dict]:

@@ -8,6 +8,8 @@ agent:
 labels:
   - feature
 
+review_required_above_loc: 100
+
 transitions:
   - action: feature/review
     when: implementation is complete and ready for review

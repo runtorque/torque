@@ -99,6 +99,35 @@ class CliExternalTicketTests(unittest.TestCase):
         self.assertEqual(calls[0][0], "ai_report")
         self.assertTrue(calls[0][1]["push_external"])
 
+    def test_ai_done_forwards_force_skip_review_audit_reason(self):
+        calls = []
+        self.cli._resolve_self_and_task = lambda _args: (
+            {"id": "agent-1"},
+            {"id": "task-1", "slug": "task-1"},
+        )
+
+        def fake_api_call(cmd, port=0, **kwargs):
+            calls.append((cmd, kwargs))
+            return {"ok": True, "data": {}}
+
+        self.cli.api_call = fake_api_call
+        args = SimpleNamespace(
+            port=18932,
+            message="Mechanical refactor",
+            post_external=False,
+            force_skip_review=True,
+            review_skip_reason="generated rename only",
+        )
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.cli.cmd_ai_done(args)
+
+        self.assertEqual(calls[0][0], "ai_report")
+        self.assertTrue(calls[0][1]["force_skip_review"])
+        self.assertEqual(
+            calls[0][1]["review_skip_reason"],
+            "generated rename only",
+        )
+
     def test_board_import_calls_external_import_endpoint(self):
         calls = []
         self.cli.get_state_local = lambda _port: {"groups": {"g": []}}
