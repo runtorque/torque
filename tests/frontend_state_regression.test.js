@@ -2404,7 +2404,7 @@ test('_renderBoardCard hides redundant group chips and only shows execution badg
   `);
 
   assert.equal((html.match(/board-card-group/g) || []).length, 0);
-  assert.equal((html.match(/board-card-status/g) || []).length, 1);
+  assert.equal((html.match(/board-card-label board-card-status/g) || []).length, 1);
   assert.equal((html.match(/board-card-health-stalled/g) || []).length, 1);
 });
 
