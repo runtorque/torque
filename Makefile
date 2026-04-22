@@ -82,10 +82,13 @@ install:
 		rm -f "$(SCRIPT_DIR)/.loom_source_repo_root"; \
 	fi
 	@# -- Install dependencies --
-	@PYTHON="$(or $(PROJECT_PYTHON),$(shell ls "$(ITERM2_PROJECT)"/iterm2env/versions/3.*/bin/python3 \
-	    2>/dev/null | sort -V | tail -1))"; \
+	@PYTHON="$(PROJECT_PYTHON)"; \
+	if [ -z "$$PYTHON" ]; then \
+		PYTHON=$$(ls "$(ITERM2_PROJECT)"/iterm2env/versions/3.*/bin/python3 \
+		    2>/dev/null | sort -V | tail -1); \
+	fi; \
 	if [ -n "$$PYTHON" ]; then \
-		"$$PYTHON" -m pip install -q aiohttp jinja2 pyyaml 2>/dev/null || true; \
+		"$$PYTHON" -m pip install -q aiohttp jinja2 pyyaml orjson 2>/dev/null || true; \
 	fi
 	@echo ""
 	@echo "Installed to $(SCRIPT_DIR)"
@@ -107,13 +110,13 @@ uninstall:
 	rm -f "$(AUTOLAUNCH_DIR)/$(MAIN_SCRIPT)"
 	@echo "Uninstalled."
 
-## deps: Install aiohttp into iTerm2's Python environment
+## deps: Install runtime dependencies into iTerm2's Python environment
 deps:
 	@if [ -z "$(ITERM2_PYTHON)" ]; then \
 		echo "Error: iTerm2 Python not found. Run make install first."; \
 		exit 1; \
 	fi
-	"$(ITERM2_PYTHON)" -m pip install aiohttp jinja2 pyyaml
+	"$(ITERM2_PYTHON)" -m pip install aiohttp jinja2 pyyaml orjson
 	@echo "Done. Using: $(ITERM2_PYTHON)"
 
 ## desktop-deps: Install optional native desktop-shell dependency
@@ -306,6 +309,9 @@ check:
 	@if [ -n "$(ITERM2_PYTHON)" ]; then \
 		echo "aiohttp:"; \
 		"$(ITERM2_PYTHON)" -c "import aiohttp; print('  installed:', aiohttp.__version__)" 2>/dev/null \
+			|| echo "  NOT installed (run: make deps)"; \
+		echo "orjson:"; \
+		"$(ITERM2_PYTHON)" -c "import orjson; print('  installed:', orjson.__version__)" 2>/dev/null \
 			|| echo "  NOT installed (run: make deps)"; \
 		echo "pywebview:"; \
 		"$(ITERM2_PYTHON)" -c "import webview; print('  installed:', getattr(webview, '__version__', 'unknown'))" 2>/dev/null \

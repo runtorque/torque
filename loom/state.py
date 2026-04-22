@@ -7,10 +7,16 @@ import re
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
+from datetime import date, datetime
 from pathlib import Path
 from typing import Optional
 
 from aiohttp import web
+
+try:
+    import orjson
+except ImportError:  # pragma: no cover - dependency is installed by Makefile.
+    orjson = None
 
 from .config import DATA_DIR, DEFAULT_COMMAND, log
 from . import profiling
@@ -139,6 +145,101 @@ _WEAVER_STREAM_DELTA_TRIGGER_OPS = {
 XTERM_SCROLLBACK_DEFAULT = 2000
 XTERM_SCROLLBACK_MIN = 100
 XTERM_SCROLLBACK_MAX = 100_000
+HOT_JSON_OFFLOAD_BYTES = 100 * 1024
+HOT_JSON_OFFLOAD_DELTA_OPS = 25
+
+
+def _hot_json_default(value):
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    raise TypeError
+
+
+def hot_json_dumps_bytes(payload) -> bytes:
+    """Serialize a hot-path WS/API payload to JSON bytes."""
+    if orjson is not None:
+        return orjson.dumps(
+            payload,
+            default=_hot_json_default,
+            option=(
+                orjson.OPT_NON_STR_KEYS
+                | orjson.OPT_PASSTHROUGH_DATETIME
+            ),
+        )
+    return json.dumps(payload, default=_hot_json_default).encode("utf-8")
+
+
+def hot_json_dumps(payload) -> str:
+    """Serialize a hot-path WS payload to a string."""
+    return hot_json_dumps_bytes(payload).decode("utf-8")
+
+
+def _approx_json_size(value, *, budget: int = HOT_JSON_OFFLOAD_BYTES) -> int:
+    """Return a cheap bounded size estimate for offload decisions."""
+    total = 0
+    stack = [(value, 0)]
+    seen_containers: set[int] = set()
+    while stack and total < budget:
+        item, depth = stack.pop()
+        if item is None or isinstance(item, bool):
+            total += 4
+        elif isinstance(item, (int, float)):
+            total += 16
+        elif isinstance(item, str):
+            total += len(item) + 2
+        elif isinstance(item, (bytes, bytearray)):
+            total += len(item)
+        elif isinstance(item, dict):
+            item_id = id(item)
+            if item_id in seen_containers:
+                continue
+            seen_containers.add(item_id)
+            total += len(item) * 4
+            for key, val in item.items():
+                stack.append((key, depth + 1))
+                stack.append((val, depth + 1))
+        elif isinstance(item, (list, tuple)):
+            item_id = id(item)
+            if item_id in seen_containers:
+                continue
+            seen_containers.add(item_id)
+            total += len(item) * 2
+            for val in item:
+                stack.append((val, depth + 1))
+        else:
+            total += len(str(item)) + 2
+    return total
+
+
+def hot_json_should_offload(payload) -> bool:
+    """Whether serializing ``payload`` should leave the event loop."""
+    if isinstance(payload, dict):
+        payload_type = payload.get("type")
+        if payload_type == "delta":
+            ops = payload.get("ops") or []
+            if len(ops) >= HOT_JSON_OFFLOAD_DELTA_OPS:
+                return True
+            return _approx_json_size(ops) >= HOT_JSON_OFFLOAD_BYTES
+    return _approx_json_size(payload) >= HOT_JSON_OFFLOAD_BYTES
+
+
+async def hot_json_dumps_bytes_async(
+    payload, *, offload: Optional[bool] = None
+) -> bytes:
+    """Serialize JSON bytes, moving large payloads off the event loop."""
+    if offload is None:
+        offload = hot_json_should_offload(payload)
+    if offload:
+        return await asyncio.to_thread(hot_json_dumps_bytes, payload)
+    return hot_json_dumps_bytes(payload)
+
+
+async def hot_json_dumps_async(payload, *, offload: Optional[bool] = None) -> str:
+    """Serialize JSON text, moving large payloads off the event loop."""
+    data = await hot_json_dumps_bytes_async(payload, offload=offload)
+    return data.decode("utf-8")
 
 
 def normalize_xterm_scrollback(value, *, strict: bool = False) -> int:
@@ -4375,12 +4476,17 @@ class MatrixState:
 
     def snapshot_msg(self) -> str:
         """Generate a full state snapshot message (for initial connect / resync)."""
-        msg = json.dumps({
+        msg = hot_json_dumps({
             "type": "state", "seq": self._seq, **self.to_dict()})
         if profiling.is_enabled():
             profiling.recorder().observe(
                 "snapshot_json_bytes", len(msg.encode("utf-8")))
         return msg
+
+    async def snapshot_msg_async(self) -> str:
+        """Generate a full state snapshot without serializing on the event loop."""
+        return await hot_json_dumps_async({
+            "type": "state", "seq": self._seq, **self.to_dict()})
 
     async def broadcast(self):
         """Send accumulated deltas to all WS clients.
@@ -4408,11 +4514,17 @@ class MatrixState:
                 return
             self._seq += 1
             op_count = len(self._delta_ops)
-            msg = json.dumps({
-                "type": "delta", "seq": self._seq,
-                "ops": self._delta_ops,
-            })
+            ops = self._delta_ops
             self._delta_ops = []
+            try:
+                msg = await hot_json_dumps_async({
+                    "type": "delta", "seq": self._seq,
+                    "ops": ops,
+                })
+            except Exception:
+                self._seq -= 1
+                self._delta_ops = ops + self._delta_ops
+                raise
             clients = list(self._ws_clients)
         if profiling.is_enabled():
             payload_bytes = len(msg.encode("utf-8"))
