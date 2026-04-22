@@ -357,12 +357,16 @@ function _contextVirtualRange(total) {
     viewport = listEl.clientHeight;
   }
   viewport = Math.max(120, viewport);
+  var rawScrollTop = Math.max(0, Number(_contextScrollTop || 0));
+  var maxScrollTop = Math.max(0, (total * _CONTEXT_LIST_ROW_HEIGHT) - viewport);
+  var scrollTop = Math.min(rawScrollTop, maxScrollTop);
+  if (scrollTop !== rawScrollTop) _contextScrollTop = scrollTop;
+  var visible = Math.ceil(viewport / _CONTEXT_LIST_ROW_HEIGHT) + (_CONTEXT_LIST_OVERSCAN * 2);
   var start = Math.max(
     0,
-    Math.floor(Math.max(0, Number(_contextScrollTop || 0)) / _CONTEXT_LIST_ROW_HEIGHT)
-      - _CONTEXT_LIST_OVERSCAN
+    Math.floor(scrollTop / _CONTEXT_LIST_ROW_HEIGHT) - _CONTEXT_LIST_OVERSCAN
   );
-  var visible = Math.ceil(viewport / _CONTEXT_LIST_ROW_HEIGHT) + (_CONTEXT_LIST_OVERSCAN * 2);
+  start = Math.min(start, Math.max(0, total - Math.max(1, visible)));
   var end = Math.min(total, start + Math.max(1, visible));
   return {
     start: start,

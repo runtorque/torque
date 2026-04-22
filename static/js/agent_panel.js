@@ -368,10 +368,18 @@ function _agentPanelVirtualRange(key, total, rowHeight, overscan) {
       virtualized: false,
     };
   }
-  var scrollTop = _agentPanelVirtualScrollTop(key);
   var viewport = _agentPanelVirtualViewportHeight(key);
-  var start = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan);
+  var rawScrollTop = _agentPanelVirtualScrollTop(key);
+  var maxScrollTop = Math.max(0, (total * rowHeight) - viewport);
+  var scrollTop = Math.min(rawScrollTop, maxScrollTop);
+  if (scrollTop !== rawScrollTop && key) {
+    var rec = _agentPanelVirtualScrollByKey[key] || {};
+    rec.top = scrollTop;
+    _agentPanelVirtualScrollByKey[key] = rec;
+  }
   var visible = Math.ceil(viewport / rowHeight) + (overscan * 2);
+  var start = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan);
+  start = Math.min(start, Math.max(0, total - Math.max(1, visible)));
   var end = Math.min(total, start + Math.max(1, visible));
   return {
     start: start,

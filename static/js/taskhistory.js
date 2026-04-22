@@ -18,6 +18,19 @@ function _thJsString(value) {
   return JSON.stringify(String(value == null ? '' : value));
 }
 
+function _thAttr(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function _thJsAttrString(value) {
+  return _thAttr(_thJsString(value));
+}
+
 function _thEstimatedRowHeight(task) {
   var height = _TASK_HISTORY_ROW_HEIGHT;
   if (task && _taskHistoryExpandedTask === task.task_id) {
@@ -346,7 +359,7 @@ function renderTaskHistory() {
       html += '<div class="th-task' + (expanded ? ' expanded' : '')
         + '" data-th-anchor="task-' + esc(t.task_id) + '">';
       html += '<div class="th-task-row" onclick="toggleTaskHistoryItem('
-        + _thJsString(t.task_id) + ')">';
+        + _thJsAttrString(t.task_id) + ')">';
       html += '<span class="th-expand">' + arrow + '</span>';
       html += _thOutcomeBadge(t.outcome);
       html += '<span class="th-task-title">' + esc(t.task_title) + '</span>';

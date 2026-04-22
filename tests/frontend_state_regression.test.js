@@ -551,6 +551,15 @@ function htmlClassCount(html, className) {
   return (String(html).match(new RegExp('class="' + escaped + '(?:\\\\s|")', 'g')) || []).length;
 }
 
+function decodeHtmlAttr(value) {
+  return String(value)
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+}
+
 function attachStandalonePanelDom(document) {
   const get = (id) => document.elements.get(id) || null;
   const shell = get('standalone-sidebar-shell');
@@ -6912,6 +6921,50 @@ test('context panel virtualizes oversized task-scoped memory lists', () => {
   assert.match(html, /Memory 300/);
 });
 
+test('context panel clamps stale virtual scroll after scoped list shrinks', () => {
+  const { context, document } = createContextHarness();
+  const panel = document.register('panel-context');
+  panel.clientWidth = 420;
+  const entries = [];
+  for (let i = 0; i < 100; i++) {
+    entries.push({
+      id: 'mem-' + i,
+      title: 'Shrunk memory ' + i,
+      content: 'Context entry ' + i,
+      entry_type: 'note',
+      pinned: false,
+      scope_kind: 'task',
+      scope_ref: 'task-1',
+      source_kind: 'manual',
+      source_id: 'note-' + i,
+      created_at: i,
+      updated_at: i,
+      links: [],
+    });
+  }
+
+  context.__entries = entries;
+  runInContext(context, `
+    state.board_tasks = {
+      'task-1': { id: 'task-1', task: 'Task scoped memory', group: 'alpha' }
+    };
+    _boardFocusedTask = 'task-1';
+    _contextFocus = 'task';
+    _contextEntries = __entries.slice();
+    _contextSelectedId = 'mem-0';
+    _contextLastQueryKey = JSON.stringify(_contextBuildListQuery());
+    _contextCompactDetailOpen = false;
+    _contextScrollTop = 70000;
+    renderContextPanel();
+  `);
+
+  const html = panel.innerHTML;
+  assert.equal(htmlClassCount(html, 'context-card') > 0, true);
+  assert.match(html, /Shrunk memory/);
+  assert.equal(jsonValue(context, `_contextVirtualRange(100).start <= _contextVirtualRange(100).end`), true);
+  assert.equal(jsonValue(context, `_contextScrollTop <= (100 * _CONTEXT_LIST_ROW_HEIGHT)`), true);
+});
+
 test('context panel opens a new linked manual note for the current task', () => {
   const { context, document } = createContextHarness();
   document.register('panel-context');
@@ -9124,6 +9177,56 @@ test('worker worklog virtualizes assigned task history and preserves scroll posi
   assert.equal(
     jsonValue(context, `_agentPanelVirtualScrollByKey[_agentPanelFocusedSurfaceKey(state.agents['worker-1'], 'worklog', 'worker-tasks')].top`),
     21000,
+  );
+});
+
+test('worker worklog clamps stale virtual scroll after task history shrinks', () => {
+  const { context, document } = createWeaverHarness();
+  const panel = document.register('panel-agent');
+  const content = document.createElement('div');
+  content.classList.add('agent-panel-content');
+  content.clientHeight = 280;
+  panel.setQuerySelector('.agent-panel-content', content);
+
+  context.state.agents = {
+    'worker-1': {
+      id: 'worker-1',
+      name: 'Worker One',
+      kind: 'worker',
+      group: 'alpha',
+      cell_type: 'agent',
+    },
+  };
+  context.focusedItemId = 'worker-1';
+  context.state.board_tasks = {};
+  for (let i = 0; i < 100; i++) {
+    context.state.board_tasks['task-' + i] = {
+      id: 'task-' + i,
+      task: 'Shrunk task ' + i,
+      group: 'alpha',
+      agent_id: 'worker-1',
+      lane: 'Done',
+      created_at: i,
+    };
+  }
+
+  runInContext(context, `
+    _agentPanelLastSelectedTabByKind.worker = 'worklog';
+    _agentPanelVirtualScrollByKey[
+      _agentPanelFocusedSurfaceKey(state.agents['worker-1'], 'worklog', 'worker-tasks')
+    ] = { top: 70000, viewportHeight: 280 };
+    renderAgentPanel();
+  `);
+
+  assert.match(panel.innerHTML, /Shrunk task/);
+  assert.equal(htmlClassCount(panel.innerHTML, 'agent-panel-worklog-item') > 0, true);
+  assert.equal(
+    jsonValue(context, `_agentPanelVirtualRange(_agentPanelFocusedSurfaceKey(state.agents['worker-1'], 'worklog', 'worker-tasks'), 100, _AGENT_PANEL_WORKLOG_ROW_HEIGHT).start <= _agentPanelVirtualRange(_agentPanelFocusedSurfaceKey(state.agents['worker-1'], 'worklog', 'worker-tasks'), 100, _AGENT_PANEL_WORKLOG_ROW_HEIGHT).end`),
+    true,
+  );
+  assert.equal(
+    jsonValue(context, `_agentPanelVirtualScrollByKey[_agentPanelFocusedSurfaceKey(state.agents['worker-1'], 'worklog', 'worker-tasks')].top <= (100 * _AGENT_PANEL_WORKLOG_ROW_HEIGHT)`),
+    true,
   );
 });
 
@@ -11769,6 +11872,40 @@ test('task history virtualizes large histories and lazily renders expanded messa
   assert.match(html, /Task 900/);
   assert.match(html, /Message for task 900/);
   assert.equal(jsonValue(context, `_taskHistoryExpandedTask`), 'task-900');
+});
+
+test('task history rendered row onclick expands visible tasks', () => {
+  const { context, document } = createTaskHistoryHarness();
+
+  context.showTaskHistory('agent-1');
+  context.taskHistoryReceiveDetail({
+    type: 'agent_history_detail',
+    record: { id: 'agent-1', name: 'History Agent' },
+    tasks: [{
+      task_id: 'task-1',
+      task_title: 'Clickable task',
+      outcome: 'done',
+      started_at: 100,
+    }],
+    messages: [{
+      task_id: 'task-1',
+      action: 'done',
+      message: 'Expanded from rendered click',
+      timestamp: 110,
+    }],
+  });
+
+  const html = document.getElementById('task-history-root').innerHTML;
+  const match = html.match(/<div class="th-task-row" onclick="([^"]*)"/);
+  assert.ok(match, 'expected rendered task row onclick');
+  const handler = decodeHtmlAttr(match[1]);
+
+  assert.equal(handler, 'toggleTaskHistoryItem("task-1")');
+  assert.doesNotThrow(() => runInContext(context, handler));
+  assert.match(
+    document.getElementById('task-history-root').innerHTML,
+    /Expanded from rendered click/,
+  );
 });
 
 test('task history keeps expanded item state across virtual window changes', () => {
