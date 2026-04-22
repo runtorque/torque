@@ -8155,26 +8155,8 @@ async def main(connection=None):
                         state._db_save_task(t)
 
                     def _cascade_done(task_id):
-                        """Walk up parent chain, completing ancestors
-                        whose descendant branches are all Done."""
-                        t = state.board_tasks.get(task_id)
-                        if not t or not t.parent_task_id:
-                            return
-                        pid = t.parent_task_id
-                        while pid:
-                            parent = state.board_tasks.get(pid)
-                            if not parent:
-                                break
-                            if task_is_closed(parent):
-                                pid = parent.parent_task_id
-                                continue
-                            if not state.task_has_unresolved_descendants(pid):
-                                parent.status = ""
-                                state.board_move_task(pid, "Done")
-                                _save_task(parent)
-                                pid = parent.parent_task_id
-                            else:
-                                break
+                        """Complete done task ancestors via state-layer logic."""
+                        state.board_cascade_done(task_id)
 
                     def _append_mcp(c, act, msg=""):
                         _append_mcp_message(c, act, msg)
