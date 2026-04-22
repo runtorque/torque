@@ -855,12 +855,18 @@ class MatrixState:
         # Board (Phase 5)
         self.board_lanes: list[str] = list(_DEFAULT_LANES)
         self.board_tasks: dict[str, BoardTask] = {}
-        # Secondary index: group → set of task ids. Maintained
-        # incrementally by `_index_task` / `_unindex_task` (called from
-        # the few places that mutate task identity or group). Lets
-        # hot-path consumers like compute_worktree_streams skip iterating
-        # the full task table when most tasks belong to other groups.
+        # Secondary task indexes. Maintained incrementally by
+        # `_index_task` / `_unindex_task`; hot-path consumers should not
+        # have to scan the full board when they already know the relevant
+        # group/parent/agent/dependency edge.
         self._tasks_by_group: dict[str, set[str]] = {}
+        self._tasks_by_parent: dict[str, set[str]] = {}
+        self._tasks_by_agent: dict[str, set[str]] = {}
+        self._task_dependents_by_dep: dict[str, set[str]] = {}
+        self._task_index_refs: dict[str, tuple[str, str, str, tuple[str, ...]]] = {}
+        self._task_health_dirty: set[str] = set()
+        self._task_health_force_full: bool = True
+        self._suppress_task_health_dirty: bool = False
         self.task_id_aliases: dict[str, str] = {}
         self.task_id_counters: dict[str, int] = {}
         self.pipeline_task_counters: dict[str, int] = {}
@@ -901,6 +907,8 @@ class MatrixState:
 
     def _emit(self, op: str, **kwargs):
         """Accumulate a delta operation for the next broadcast."""
+        old_task_refs = self._sync_task_indexes_from_delta(op, kwargs)
+        self._track_task_health_delta(op, kwargs, old_task_refs=old_task_refs)
         self._maybe_clear_engineer_queue_empty_from_delta(op, kwargs)
         self._delta_ops.append({"op": op, **kwargs})
 
@@ -989,47 +997,145 @@ class MatrixState:
 
     # -- Task indexes --------------------------------------------------------
 
-    def _index_task(self, task: "BoardTask") -> None:
-        """Add a task to the secondary indexes. Idempotent."""
+    def _task_index_values(self, task: "BoardTask"):
+        deps = tuple(
+            str(dep or "").strip()
+            for dep in (getattr(task, "depends_on", []) or [])
+            if str(dep or "").strip()
+        )
+        return (
+            str(getattr(task, "group", "") or ""),
+            str(getattr(task, "parent_task_id", "") or ""),
+            str(getattr(task, "agent_id", "") or ""),
+            deps,
+        )
+
+    @staticmethod
+    def _discard_indexed_id(index: dict[str, set[str]], key: str,
+                            tid: str) -> None:
+        if not key:
+            return
+        bucket = index.get(key)
+        if bucket is None:
+            return
+        bucket.discard(tid)
+        if not bucket:
+            index.pop(key, None)
+
+    def _remove_task_index_refs(self, tid: str, refs) -> None:
+        if not refs:
+            return
+        group, parent_id, agent_id, deps = refs
+        self._discard_indexed_id(self._tasks_by_group, group, tid)
+        self._discard_indexed_id(self._tasks_by_parent, parent_id, tid)
+        self._discard_indexed_id(self._tasks_by_agent, agent_id, tid)
+        for dep_id in deps or ():
+            self._discard_indexed_id(self._task_dependents_by_dep, dep_id, tid)
+
+    def _index_task(self, task: "BoardTask"):
+        """Add/update a task in the secondary indexes. Idempotent."""
+        if not task:
+            return None
+        tid = str(getattr(task, "id", "") or "")
+        if not tid:
+            return None
+        old_refs = self._task_index_refs.get(tid)
+        refs = self._task_index_values(task)
+        if old_refs == refs:
+            return old_refs
+        self._remove_task_index_refs(tid, old_refs)
+        group, parent_id, agent_id, deps = refs
         group = str(getattr(task, "group", "") or "")
-        bucket = self._tasks_by_group.setdefault(group, set())
-        bucket.add(task.id)
+        self._tasks_by_group.setdefault(group, set()).add(tid)
+        if parent_id:
+            self._tasks_by_parent.setdefault(parent_id, set()).add(tid)
+        if agent_id:
+            self._tasks_by_agent.setdefault(agent_id, set()).add(tid)
+        for dep_id in deps:
+            self._task_dependents_by_dep.setdefault(dep_id, set()).add(tid)
+        self._task_index_refs[tid] = refs
+        return old_refs
 
     def _unindex_task(self, task_or_id) -> None:
         """Remove a task from the secondary indexes. Idempotent."""
-        if isinstance(task_or_id, str):
-            tid = task_or_id
-            group = ""
-            for g, members in self._tasks_by_group.items():
-                if tid in members:
-                    group = g
-                    break
-        else:
-            tid = task_or_id.id
-            group = str(getattr(task_or_id, "group", "") or "")
-        bucket = self._tasks_by_group.get(group)
-        if bucket is not None:
-            bucket.discard(tid)
-            if not bucket:
-                self._tasks_by_group.pop(group, None)
+        tid = task_or_id if isinstance(task_or_id, str) else task_or_id.id
+        refs = self._task_index_refs.pop(tid, None)
+        self._remove_task_index_refs(tid, refs)
 
     def _reindex_task_group(self, task: "BoardTask",
                             old_group: str, new_group: str) -> None:
         """Move a task between group buckets when its group changes."""
-        if old_group == new_group:
-            return
-        old_bucket = self._tasks_by_group.get(old_group)
-        if old_bucket is not None:
-            old_bucket.discard(task.id)
-            if not old_bucket:
-                self._tasks_by_group.pop(old_group, None)
-        self._tasks_by_group.setdefault(new_group, set()).add(task.id)
+        self._index_task(task)
 
     def _rebuild_task_indexes(self) -> None:
         """Recompute all secondary indexes from scratch (used after bulk load)."""
         self._tasks_by_group = {}
+        self._tasks_by_parent = {}
+        self._tasks_by_agent = {}
+        self._task_dependents_by_dep = {}
+        self._task_index_refs = {}
         for task in self.board_tasks.values():
             self._index_task(task)
+
+    def _sync_task_indexes_from_delta(self, op: str, payload: dict):
+        if op != "task_upsert":
+            return None
+        tid = str((payload or {}).get("id", "") or "")
+        task = self.board_tasks.get(tid)
+        if not task:
+            return None
+        return self._index_task(task)
+
+    def _mark_task_health_dirty(self, *task_ids: str) -> None:
+        for task_id in task_ids:
+            tid = str(task_id or "").strip()
+            if tid:
+                self._task_health_dirty.add(tid)
+
+    def _track_task_health_delta(self, op: str, payload: dict,
+                                 *, old_task_refs=None) -> None:
+        """Remember the minimal task set affected by health-relevant ops."""
+        if self._suppress_task_health_dirty:
+            return
+        if op == "task_upsert":
+            tid = str((payload or {}).get("id", "") or "").strip()
+            if not tid:
+                return
+            self._mark_task_health_dirty(tid)
+            # A task mutation can unblock/block direct dependents.
+            self._mark_task_health_dirty(
+                *self._task_dependents_by_dep.get(tid, set())
+            )
+            # If the task moved between parents, both aggregate paths changed.
+            if old_task_refs:
+                old_parent = old_task_refs[1]
+                new_parent = str(
+                    getattr(self.board_tasks.get(tid), "parent_task_id", "")
+                    or ""
+                )
+                if old_parent and old_parent != new_parent:
+                    self._mark_task_health_dirty(old_parent)
+            return
+
+        if op == "task_remove":
+            tid = str((payload or {}).get("id", "") or "").strip()
+            if tid:
+                self._mark_task_health_dirty(tid)
+                self._mark_task_health_dirty(
+                    *self._task_dependents_by_dep.get(tid, set())
+                )
+            return
+
+        if op in {"agent_upsert", "agent_remove"}:
+            agent_id = str((payload or {}).get("id", "") or "").strip()
+            if agent_id:
+                self._mark_task_health_dirty(
+                    *self._tasks_by_agent.get(agent_id, set())
+                )
+
+    def has_pending_task_health_recompute(self) -> bool:
+        """Return whether a broadcast tick has health work to coalesce."""
+        return bool(self._task_health_force_full or self._task_health_dirty)
 
     def tasks_in_group(self, group: str) -> list["BoardTask"]:
         """Return the BoardTask objects belonging to ``group`` via the index.
@@ -3361,21 +3467,136 @@ class MatrixState:
         for i, t in enumerate(tasks):
             t.position = i
 
+    def _task_health_ancestors(self, task_id: str) -> list[str]:
+        ancestors = []
+        seen = {task_id}
+        task = self.board_tasks.get(task_id)
+        pid = getattr(task, "parent_task_id", "") if task else ""
+        while pid and pid not in seen:
+            seen.add(pid)
+            parent = self.board_tasks.get(pid)
+            if not parent:
+                break
+            ancestors.append(pid)
+            pid = parent.parent_task_id
+        return ancestors
+
+    def _task_health_depth(self, task_id: str) -> int:
+        depth = 0
+        seen = {task_id}
+        task = self.board_tasks.get(task_id)
+        pid = getattr(task, "parent_task_id", "") if task else ""
+        while pid and pid not in seen:
+            seen.add(pid)
+            parent = self.board_tasks.get(pid)
+            if not parent:
+                break
+            depth += 1
+            pid = parent.parent_task_id
+        return depth
+
+    def _task_health_context(self, task: BoardTask) -> dict[str, BoardTask]:
+        ids = {task.id}
+        ids.update(getattr(task, "depends_on", []) or [])
+        ids.update(self._tasks_by_parent.get(task.id, set()))
+        agent_id = str(getattr(task, "agent_id", "") or "")
+        if agent_id:
+            ids.update(self._tasks_by_agent.get(agent_id, set()))
+        return {
+            tid: task
+            for tid in ids
+            if (task := self.board_tasks.get(tid))
+            and task.lane != ARCHIVED_LANE
+        }
+
+    def _compute_incremental_task_health(self, task_ids: set[str],
+                                         now_ts: float | None):
+        from .task_health import (
+            ARCHIVED_LANE as HEALTH_ARCHIVED_LANE,
+            TaskHealthSnapshot,
+            _compute_local_health,
+            _roll_up_health,
+        )
+        if now_ts is None:
+            from datetime import datetime, timezone
+            now_ts = datetime.now(timezone.utc).timestamp()
+
+        target_ids: set[str] = set()
+        for tid in task_ids:
+            if tid not in self.board_tasks:
+                continue
+            target_ids.add(tid)
+            target_ids.update(self._task_health_ancestors(tid))
+
+        snapshots = {}
+        # Children before parents so aggregate rollups see fresh snapshots
+        # for the changed path and stored snapshots for untouched siblings.
+        ordered = sorted(
+            target_ids,
+            key=lambda tid: (self._task_health_depth(tid), tid),
+            reverse=True,
+        )
+        for tid in ordered:
+            task = self.board_tasks.get(tid)
+            if not task or task.lane == HEALTH_ARCHIVED_LANE:
+                continue
+            local = _compute_local_health(
+                task,
+                self._task_health_context(task),
+                self.agents,
+                now_ts,
+            )
+            child_snapshots = []
+            for child_id in self._tasks_by_parent.get(tid, set()):
+                child = self.board_tasks.get(child_id)
+                if not child or child.lane in {"Done", HEALTH_ARCHIVED_LANE}:
+                    continue
+                snapshot = snapshots.get(child_id)
+                if snapshot is None:
+                    snapshot = TaskHealthSnapshot(
+                        state=child.health_state or "healthy",
+                        details=dict(child.health_details or {}),
+                    )
+                child_snapshots.append(snapshot)
+            snapshots[tid] = _roll_up_health(
+                task,
+                local,
+                child_snapshots,
+                self.board_tasks,
+            )
+        return snapshots
+
     def recompute_task_health(self, now_ts: float | None = None,
                               *, emit: bool = True,
                               persist: bool = True) -> list[str]:
-        """Recompute advisory health for all tasks.
+        """Recompute advisory health for dirty tasks and their ancestors.
 
         Health is deterministic and derived from persisted task signals plus
-        live agent state. It never mutates task lanes or statuses.
+        live agent state. It never mutates task lanes or statuses. Routine
+        broadcast ticks use the dirty set and become a near-no-op when no
+        health-affecting deltas have been queued; explicit timestamped calls
+        still run a full scan for time-based idle/stalled transitions.
         """
         if not self.board_tasks:
+            self._task_health_dirty.clear()
+            self._task_health_force_full = False
+            return []
+
+        force_full = self._task_health_force_full or now_ts is not None
+        dirty_ids = set(self._task_health_dirty)
+        if not force_full and not dirty_ids:
             return []
 
         from .task_health import compute_task_health, now_iso
 
-        snapshots = compute_task_health(self.board_tasks, self.agents,
-                                        now_ts=now_ts)
+        if force_full:
+            snapshots = compute_task_health(self.board_tasks, self.agents,
+                                            now_ts=now_ts)
+        else:
+            snapshots = self._compute_incremental_task_health(
+                dirty_ids,
+                now_ts,
+            )
         changed = []
         changed_set = set()
         changed_task_ids = []
@@ -3406,6 +3627,8 @@ class MatrixState:
             changed_task_ids.append(task)
 
         if not changed:
+            self._task_health_dirty.clear()
+            self._task_health_force_full = False
             return []
 
         # If a task changes, re-emit and persist any open ancestors so root
@@ -3427,9 +3650,15 @@ class MatrixState:
             if not task:
                 continue
             if emit:
-                self._emit("task_upsert", **asdict(task))
+                self._suppress_task_health_dirty = True
+                try:
+                    self._emit("task_upsert", **asdict(task))
+                finally:
+                    self._suppress_task_health_dirty = False
             if persist and self.db:
                 self._db_save_task(task)
+        self._task_health_dirty.clear()
+        self._task_health_force_full = False
         return changed
 
     def _board_next_lane_position(self, lane: str, *, exclude_id: str = "") -> int:
@@ -3648,6 +3877,7 @@ class MatrixState:
         tid = self.resolve_task_alias(tid)
         task = self.board_tasks.pop(tid, None)
         if task:
+            self._mark_task_health_dirty(task.parent_task_id)
             self._unindex_task(task)
             self.auto_dispatch_queue_remove_task(tid)
             self._emit("task_remove", id=tid, group=task.group)
