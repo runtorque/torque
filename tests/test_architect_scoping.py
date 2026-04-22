@@ -325,7 +325,12 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             overview["architect_self_state"],
-            {"last_checkpoint_at": None, "last_decision_at": None},
+            {
+                "last_journal_entry_at": None,
+                "last_decision_at": None,
+                "journal_entry_count": 0,
+                "decision_count": 0,
+            },
         )
 
         engineer_ids = {item["id"] for item in overview["engineers"]}
@@ -1231,7 +1236,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(path.exists())
             self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
 
-    async def test_architect_workspace_overview_self_state_reads_latest_journal_entries(self):
+    async def test_architect_workspace_overview_self_state_reads_latest_history_counts(self):
         architect = self._add_architect("arch-1", "Architect")
         other_architect = self._add_architect("arch-2", "Other Architect")
         with mock.patch.object(self.state_mod, "DATA_DIR", Path(self.tmp.name)):
@@ -1249,6 +1254,31 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
                     )
                     self.assertFalse(write_error, write_text)
 
+            self.state.save_decision({
+                "id": "decision-old",
+                "architect_id": architect.id,
+                "title": "Old decision",
+                "rationale": "First recorded direction",
+                "created_at": 150,
+                "updated_at": 150,
+            })
+            self.state.save_decision({
+                "id": "decision-new",
+                "architect_id": architect.id,
+                "title": "New decision",
+                "rationale": "Latest recorded direction",
+                "created_at": 250,
+                "updated_at": 250,
+            })
+            self.state.save_decision({
+                "id": "decision-other",
+                "architect_id": other_architect.id,
+                "title": "Other decision",
+                "rationale": "Must not affect this architect",
+                "created_at": 500,
+                "updated_at": 500,
+            })
+
             text, is_error = await self._call(
                 "architect_workspace_overview",
                 {},
@@ -1257,7 +1287,12 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(is_error, text)
             self.assertEqual(
                 json.loads(text)["architect_self_state"],
-                {"last_checkpoint_at": 300.0, "last_decision_at": 200.0},
+                {
+                    "last_journal_entry_at": 400.0,
+                    "last_decision_at": 250.0,
+                    "journal_entry_count": 4,
+                    "decision_count": 2,
+                },
             )
 
             empty_text, empty_error = await self._call(
@@ -1268,7 +1303,29 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(empty_error, empty_text)
             self.assertEqual(
                 json.loads(empty_text)["architect_self_state"],
-                {"last_checkpoint_at": None, "last_decision_at": None},
+                {
+                    "last_journal_entry_at": None,
+                    "last_decision_at": 500.0,
+                    "journal_entry_count": 0,
+                    "decision_count": 1,
+                },
+            )
+
+            empty_architect = self._add_architect("arch-empty", "Empty Architect")
+            no_history_text, no_history_error = await self._call(
+                "architect_workspace_overview",
+                {},
+                empty_architect.id,
+            )
+            self.assertFalse(no_history_error, no_history_text)
+            self.assertEqual(
+                json.loads(no_history_text)["architect_self_state"],
+                {
+                    "last_journal_entry_at": None,
+                    "last_decision_at": None,
+                    "journal_entry_count": 0,
+                    "decision_count": 0,
+                },
             )
 
 

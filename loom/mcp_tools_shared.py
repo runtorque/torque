@@ -290,58 +290,72 @@ def _workspace_stream_matches_workers(state, stream: dict,
     return False
 
 
-def _architect_journal_latest_timestamp(state, architect_id: str, *,
-                                        entry_type: str,
-                                        group: str = "") -> float | None:
-    """Return latest architect journal timestamp for ``entry_type``.
-
-    Architect journals are currently stored in private JSONL files. Some
-    journal-capable callers also write through the shared journal table with
-    author provenance, so check both stores and return the newest matching
-    timestamp when present.
-    """
-    latest = 0.0
+def _architect_self_state(state, architect_id: str) -> dict:
+    """Return compact journal/decision recency counters for one architect."""
     architect_id = str(architect_id or "").strip()
+    empty = {
+        "last_journal_entry_at": None,
+        "last_decision_at": None,
+        "journal_entry_count": 0,
+        "decision_count": 0,
+    }
     if not architect_id:
-        return None
+        return empty
 
     try:
-        entries = state.architect_journal_read(architect_id, limit=1000)
+        journal_entries = state.architect_journal_read(
+            architect_id,
+            limit=1_000_000,
+        )
     except Exception:
         log.exception(
             "Failed to read architect journal self-state for %s",
             architect_id,
         )
-        entries = []
-    for entry in entries or []:
-        if str((entry or {}).get("type", "") or "").strip() != entry_type:
-            continue
-        latest = max(
-            latest,
-            _workspace_parse_timestamp((entry or {}).get("timestamp", 0) or 0),
+        journal_entries = []
+    journal_count = len(journal_entries or [])
+    last_journal_ts = None
+    if journal_count:
+        last_journal_ts = max(
+            (
+                _workspace_parse_timestamp((entry or {}).get("timestamp", 0) or 0)
+                for entry in journal_entries
+            ),
+            default=0.0,
         )
+        if last_journal_ts <= 0:
+            last_journal_ts = None
 
-    if group:
-        try:
-            table_entries = state.journal_read(
-                group,
-                limit=1,
-                entry_type=entry_type,
-                author_cell_id=architect_id,
-            )
-        except Exception:
-            log.exception(
-                "Failed to read shared journal self-state for %s",
-                architect_id,
-            )
-            table_entries = []
-        for entry in table_entries or []:
-            latest = max(
-                latest,
-                _workspace_parse_timestamp((entry or {}).get("timestamp", 0) or 0),
-            )
+    try:
+        decisions = state.load_decisions_for_architect(
+            architect_id,
+            include_archived=True,
+        )
+    except Exception:
+        log.exception(
+            "Failed to read architect decisions self-state for %s",
+            architect_id,
+        )
+        decisions = []
+    decision_count = len(decisions or [])
+    last_decision_ts = None
+    if decision_count:
+        last_decision_ts = max(
+            (
+                _workspace_parse_timestamp((decision or {}).get("created_at", 0) or 0)
+                for decision in decisions
+            ),
+            default=0.0,
+        )
+        if last_decision_ts <= 0:
+            last_decision_ts = None
 
-    return latest if latest > 0 else None
+    return {
+        "last_journal_entry_at": last_journal_ts,
+        "last_decision_at": last_decision_ts,
+        "journal_entry_count": journal_count,
+        "decision_count": decision_count,
+    }
 
 
 def _workspace_mark_top_truncated(payload: dict, key: str) -> None:
@@ -683,18 +697,7 @@ def _architect_workspace_overview_json(state, architect_id: str,
             "group": architect_group,
         },
         "architect_self_state": {
-            "last_checkpoint_at": _architect_journal_latest_timestamp(
-                state,
-                architect_id,
-                entry_type="checkpoint",
-                group=architect_group,
-            ),
-            "last_decision_at": _architect_journal_latest_timestamp(
-                state,
-                architect_id,
-                entry_type="decision",
-                group=architect_group,
-            ),
+            **_architect_self_state(state, architect_id),
         },
         "engineers": engineer_items,
         "my_tasks": my_task_items,
