@@ -192,8 +192,9 @@ CREATE TABLE IF NOT EXISTS ui_state (
 );
 
 CREATE TABLE IF NOT EXISTS global_settings (
-    key   TEXT PRIMARY KEY,
-    value TEXT NOT NULL
+    key               TEXT PRIMARY KEY,
+    value             TEXT NOT NULL,
+    xterm_scrollback  INTEGER NOT NULL DEFAULT 2000
 );
 
 CREATE TABLE IF NOT EXISTS panel_events (
@@ -553,6 +554,16 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
             "ALTER TABLE memory_entries ADD COLUMN expires_at REAL")
         conn.commit()
     rebuild_memory_retention_indexes(conn)
+    # Migrate: add xterm scrollback setting cache column. Global settings
+    # remain persisted as key/value rows; this column keeps the schema
+    # migration explicit for installations created before the setting existed.
+    try:
+        conn.execute("SELECT xterm_scrollback FROM global_settings LIMIT 0")
+    except sqlite3.OperationalError:
+        conn.execute(
+            "ALTER TABLE global_settings ADD COLUMN "
+            "xterm_scrollback INTEGER NOT NULL DEFAULT 2000")
+        conn.commit()
     # Migrate: add action_name and action_vars columns to board_tasks
     for col, default in [("action_name", "''"),
                          ("action_vars", "'{}'"),

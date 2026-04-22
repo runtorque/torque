@@ -396,11 +396,12 @@ function createEmbeddedTerminalHarness(overrides = {}) {
   delete sandboxOverrides.loadRenderHelpers;
 
   class FakeTerminal {
-    constructor() {
+    constructor(options = {}) {
       this.cols = 80;
       this.rows = 24;
       this.writes = [];
       this.resetCount = 0;
+      this.options = Object.assign({}, options);
       terminals.push(this);
     }
 
@@ -6417,6 +6418,97 @@ test('embedded terminal auto-focuses new sessions when standalone mode is active
   assert.equal(terminals[0].focusCount, 1);
 });
 
+test('embedded terminal initializes xterm scrollback from global settings', () => {
+  const { context, terminals } = createEmbeddedTerminalHarness();
+  const surface = new FakeElement('surface');
+  context.__surface = surface;
+
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    state.global_settings = { xterm_scrollback: 12345 };
+    _connectEmbeddedTerminal({ id: 'term-1', session_id: 'session-1' }, __surface);
+  `);
+
+  assert.equal(terminals[0].options.scrollback, 12345);
+});
+
+test('global scrollback setting edit updates existing and new embedded terminals', () => {
+  const { context, document, sandbox, terminals } = createEmbeddedTerminalHarness();
+  loadScript(context, 'static/js/modals.js');
+
+  [
+    'gls-default-cmd',
+    'gls-filter-window',
+    'gls-focus-new-tabs',
+    'gls-focus-on-click',
+    'gls-default-lanes',
+    'gls-max-pipeline-depth',
+    'gls-max-event-log',
+    'gls-xterm-scrollback',
+  ].forEach((id) => document.register(id));
+  document.getElementById('gls-default-cmd').value = '';
+  document.getElementById('gls-filter-window').checked = true;
+  document.getElementById('gls-focus-new-tabs').checked = true;
+  document.getElementById('gls-focus-on-click').checked = false;
+  document.getElementById('gls-default-lanes').value = 'Backlog\nDone';
+  document.getElementById('gls-max-pipeline-depth').value = '10';
+  document.getElementById('gls-max-event-log').value = '500';
+  document.getElementById('gls-xterm-scrollback').value = '9000';
+
+  const oldSurface = new FakeElement('old-surface');
+  context.__oldSurface = oldSurface;
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    state.global_settings = { xterm_scrollback: 2000 };
+    _connectEmbeddedTerminal({ id: 'term-1', session_id: 'session-1' }, __oldSurface);
+  `);
+  assert.equal(terminals[0].options.scrollback, 2000);
+
+  runInContext(context, `submitGlobalSettings();`);
+
+  assert.equal(sandbox.sendCalls.length, 1);
+  const saved = sandbox.sendCalls[0].settings;
+  assert.equal(saved.xterm_scrollback, 9000);
+
+  context.__savedSettings = saved;
+  const newSurface = new FakeElement('new-surface');
+  context.__newSurface = newSurface;
+  runInContext(context, `
+    state.global_settings = __savedSettings;
+    _applyEmbeddedTerminalScrollbackFromSettings();
+    _connectEmbeddedTerminal({ id: 'term-2', session_id: 'session-2' }, __newSurface);
+  `);
+
+  assert.equal(terminals[0].options.scrollback, 9000);
+  assert.equal(terminals[1].options.scrollback, 9000);
+});
+
+test('global settings modal rejects out-of-range xterm scrollback', () => {
+  const { context, document, sandbox } = createEmbeddedTerminalHarness();
+  loadScript(context, 'static/js/modals.js');
+
+  [
+    'gls-default-cmd',
+    'gls-filter-window',
+    'gls-focus-new-tabs',
+    'gls-focus-on-click',
+    'gls-default-lanes',
+    'gls-max-pipeline-depth',
+    'gls-max-event-log',
+    'gls-xterm-scrollback',
+  ].forEach((id) => document.register(id));
+  document.getElementById('gls-default-cmd').value = '';
+  document.getElementById('gls-default-lanes').value = '';
+  document.getElementById('gls-max-pipeline-depth').value = '10';
+  document.getElementById('gls-max-event-log').value = '500';
+  document.getElementById('gls-xterm-scrollback').value = '50';
+
+  runInContext(context, `submitGlobalSettings();`);
+
+  assert.equal(sandbox.sendCalls.length, 0);
+  assert.equal(document.getElementById('gls-xterm-scrollback').focused, true);
+});
+
 test('embedded terminal dragover accepts file drags before the browser exposes dropped files', () => {
   const { context, status } = createEmbeddedTerminalHarness();
   const surface = new FakeElement('surface');
@@ -6655,6 +6747,35 @@ test('ws invalidation rerenders the context panel for task updates', () => {
   });
 
   assert.equal(jsonValue(context, 'renderCalls.context'), 1);
+});
+
+test('ws global settings delta live-applies xterm scrollback hook', () => {
+  const { context } = createWsRenderHarness();
+  runInContext(context, `
+    var scrollbackApplyCalls = 0;
+    function _applyEmbeddedTerminalScrollbackFromSettings() {
+      scrollbackApplyCalls += 1;
+    }
+  `);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'global_settings_update',
+      default_command: '',
+      filter_by_window: true,
+      focus_new_tabs: true,
+      focus_on_click: false,
+      xterm_scrollback: 7777,
+      default_lanes: ['Backlog', 'Done'],
+      keybindings: {},
+      max_pipeline_depth: 10,
+      max_event_log: 500,
+    }],
+  });
+
+  assert.equal(jsonValue(context, 'state.global_settings.xterm_scrollback'), 7777);
+  assert.equal(jsonValue(context, 'scrollbackApplyCalls'), 1);
 });
 
 test('ws invalidation skips rerendering the active board for off-group task updates', () => {

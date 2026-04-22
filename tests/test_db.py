@@ -14,7 +14,7 @@ except ModuleNotFoundError:
 from loom.db import LoomDB
 
 install_aiohttp_stub()
-from loom.state import AgentCell, BoardTask, GroupSettings, Schedule
+from loom.state import AgentCell, BoardTask, GlobalSettings, GroupSettings, Schedule
 
 
 class LoomDBTests(unittest.TestCase):
@@ -24,6 +24,40 @@ class LoomDBTests(unittest.TestCase):
         self.db = LoomDB(Path(self.tmp.name) / "loom.db")
         self.db.init()
         self.addCleanup(self.db.close)
+
+    def test_global_settings_round_trips_xterm_scrollback(self):
+        self.db.save_global_settings(GlobalSettings(xterm_scrollback=4321))
+
+        snapshot = self.db.load_all()
+
+        self.assertEqual(snapshot["global_settings"]["xterm_scrollback"], 4321)
+        self.assertEqual(
+            self.db._conn.execute(
+                "SELECT xterm_scrollback FROM global_settings "
+                "WHERE key='xterm_scrollback'"
+            ).fetchone()[0],
+            4321,
+        )
+
+    def test_global_settings_schema_migrates_xterm_scrollback_column(self):
+        legacy_path = Path(self.tmp.name) / "legacy-global-settings.db"
+        conn = sqlite3.connect(str(legacy_path))
+        conn.execute(
+            "CREATE TABLE global_settings ("
+            "key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+        )
+        conn.commit()
+        conn.close()
+
+        migrated = LoomDB(legacy_path)
+        self.addCleanup(migrated.close)
+        migrated.init()
+
+        columns = {
+            row[1]
+            for row in migrated._conn.execute("PRAGMA table_info(global_settings)")
+        }
+        self.assertIn("xterm_scrollback", columns)
 
     def _seed_stage1a_db(
         self,

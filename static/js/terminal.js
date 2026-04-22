@@ -10,6 +10,31 @@ let _embeddedTerminalDropSurface = null;
 let _embeddedTerminalDropHandlers = null;
 let _embeddedTerminalDropDepth = 0;
 let _terminalComposeDrafts = Object.create(null);
+var XTERM_SCROLLBACK_DEFAULT = 2000;
+var XTERM_SCROLLBACK_MIN = 100;
+var XTERM_SCROLLBACK_MAX = 100000;
+
+function _xtermScrollbackFromSettings(settings) {
+  var raw = settings && settings.xterm_scrollback;
+  var value = Number(raw);
+  if (!Number.isFinite(value)) return XTERM_SCROLLBACK_DEFAULT;
+  value = Math.floor(value);
+  if (value < XTERM_SCROLLBACK_MIN || value > XTERM_SCROLLBACK_MAX) {
+    return XTERM_SCROLLBACK_DEFAULT;
+  }
+  return value;
+}
+
+function _currentXtermScrollback() {
+  return _xtermScrollbackFromSettings(
+    state && state.global_settings ? state.global_settings : null
+  );
+}
+
+function _applyEmbeddedTerminalScrollbackFromSettings() {
+  if (!_embeddedTerminal || !_embeddedTerminal.options) return;
+  _embeddedTerminal.options.scrollback = _currentXtermScrollback();
+}
 
 function isEmbeddedTerminalMode() {
   return !!(state && state.runtime && state.runtime.embedded_terminal);
@@ -617,7 +642,7 @@ function _connectEmbeddedTerminal(cell, surface) {
     fontSize: 13,
     lineHeight: 1.0,
     letterSpacing: 0,
-    scrollback: 5000,
+    scrollback: _currentXtermScrollback(),
     theme: {
       background: '#0d1117',
       foreground: '#e6edf3',
@@ -788,6 +813,8 @@ function renderTerminalWorkspace() {
   if (_embeddedTerminalSessionKey !== sessionKey || !dom.stage.querySelector('.terminal-surface')) {
     dom.stage.innerHTML = '<div class="terminal-surface"></div>';
     _connectEmbeddedTerminal(cell, dom.stage.querySelector('.terminal-surface'));
+  } else {
+    _applyEmbeddedTerminalScrollbackFromSettings();
   }
 
   _renderTerminalCompose(dom.compose, cell);

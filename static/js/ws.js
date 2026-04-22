@@ -269,6 +269,9 @@ function _handleFullState(msg) {
   if (!state.weaver_worklog) state.weaver_worklog = {};
   if (!state.weaver_streams) state.weaver_streams = {};
   if (!state.weaver_session_maps) state.weaver_session_maps = {};
+  if (typeof _applyEmbeddedTerminalScrollbackFromSettings === 'function') {
+    _applyEmbeddedTerminalScrollbackFromSettings();
+  }
   _triggerDoneFlourishesFromTaskSnapshot(prevTasks, state.board_tasks || {});
   if (typeof _pruneAgentDoneFlourishes === 'function') {
     _pruneAgentDoneFlourishes(state.agents || {});
@@ -664,6 +667,9 @@ function _applyDelta(ops) {
         const gs = Object.assign({}, op);
         delete gs.op;
         state.global_settings = gs;
+        if (typeof _applyEmbeddedTerminalScrollbackFromSettings === 'function') {
+          _applyEmbeddedTerminalScrollbackFromSettings();
+        }
         break;
       }
 

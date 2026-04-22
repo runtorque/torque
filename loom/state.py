@@ -133,6 +133,46 @@ _WEAVER_STREAM_DELTA_TRIGGER_OPS = {
     "task_remove",
     "task_upsert",
 }
+XTERM_SCROLLBACK_DEFAULT = 2000
+XTERM_SCROLLBACK_MIN = 100
+XTERM_SCROLLBACK_MAX = 100_000
+
+
+def normalize_xterm_scrollback(value, *, strict: bool = False) -> int:
+    """Return a valid xterm.js scrollback line limit.
+
+    Runtime updates use strict mode so invalid operator input is rejected
+    rather than silently changed. Non-strict mode is used while loading old
+    or hand-edited state so a bad persisted value cannot prevent startup.
+    """
+    raw = value
+    try:
+        if isinstance(raw, str):
+            stripped = raw.strip()
+            if not re.fullmatch(r"[+-]?\d+", stripped):
+                raise ValueError
+            value = int(stripped)
+        elif isinstance(raw, float):
+            if not raw.is_integer():
+                raise ValueError
+            value = int(raw)
+        else:
+            value = int(raw)
+    except (TypeError, ValueError):
+        if strict:
+            raise ValueError(
+                "xterm_scrollback must be an integer between "
+                f"{XTERM_SCROLLBACK_MIN} and {XTERM_SCROLLBACK_MAX}"
+            )
+        return XTERM_SCROLLBACK_DEFAULT
+    if value < XTERM_SCROLLBACK_MIN or value > XTERM_SCROLLBACK_MAX:
+        if strict:
+            raise ValueError(
+                "xterm_scrollback must be between "
+                f"{XTERM_SCROLLBACK_MIN} and {XTERM_SCROLLBACK_MAX}"
+            )
+        return XTERM_SCROLLBACK_DEFAULT
+    return value
 
 
 def normalize_weaver_autonomy_mode(value) -> str:
@@ -673,6 +713,7 @@ class GlobalSettings:
     filter_by_window: bool = True    # global default for window filtering
     focus_new_tabs: bool = True      # switch focus to newly created tabs
     focus_on_click: bool = False     # single click also focuses the iTerm2 tab
+    xterm_scrollback: int = XTERM_SCROLLBACK_DEFAULT  # embedded xterm.js history lines
     # General > Board
     default_lanes: list[str] = field(default_factory=lambda: list(_DEFAULT_LANES))
     # Keybindings — action name → {modifiers, keycode, character} overrides
@@ -681,6 +722,11 @@ class GlobalSettings:
     max_pipeline_depth: int = 10  # 0 = unlimited
     # Events
     max_event_log: int = 500  # max persisted panel events
+
+    def __post_init__(self):
+        self.xterm_scrollback = normalize_xterm_scrollback(
+            self.xterm_scrollback
+        )
 
 
 class MatrixState:
@@ -2410,9 +2456,14 @@ class MatrixState:
     def update_global_settings(self, **fields):
         """Update global settings fields."""
         valid = set(GlobalSettings.__dataclass_fields__)
+        updates = {}
         for key, value in fields.items():
             if key in valid:
-                setattr(self.global_settings, key, value)
+                if key == "xterm_scrollback":
+                    value = normalize_xterm_scrollback(value, strict=True)
+                updates[key] = value
+        for key, value in updates.items():
+            setattr(self.global_settings, key, value)
         self._emit("global_settings_update",
                     **asdict(self.global_settings))
         self._db_save_global_settings()

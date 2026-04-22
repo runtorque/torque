@@ -26,6 +26,16 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.state_mod = importlib.import_module("loom.state")
         self.state_mod = importlib.reload(self.state_mod)
 
+    def test_update_global_settings_validates_xterm_scrollback(self):
+        state = self.state_mod.MatrixState()
+        state.update_global_settings(xterm_scrollback=4096)
+        self.assertEqual(state.global_settings.xterm_scrollback, 4096)
+
+        with self.assertRaises(ValueError):
+            state.update_global_settings(xterm_scrollback=99)
+
+        self.assertEqual(state.global_settings.xterm_scrollback, 4096)
+
     def test_remove_agent_expires_orphaned_asks_and_clears_weaver_question(self):
         state = self.state_mod.MatrixState()
         agent = self.state_mod.AgentCell(
