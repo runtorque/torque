@@ -468,7 +468,9 @@ class AgentLaunchService:
         inherited_worktree = _copy_worktree_context(
             cell, inherited_worktree_from
         )
-        if cell.kind == "architect" and not loom_config.ARCHITECT_USES_WORKTREE:
+        if (cell.kind == "architect"
+                and not loom_config.ARCHITECT_USES_WORKTREE
+                and not inherited_worktree):
             launch_cfg["worktree"] = False
             if cell.directory and self.worktree_mgr:
                 repo_root = await self.worktree_mgr.get_repo_root(cell.directory)
