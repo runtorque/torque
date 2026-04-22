@@ -36,6 +36,7 @@ from dataclasses import asdict
 from .state import (
     ARCHIVED_LANE,
     BoardTask,
+    COMPACT_SNAPSHOT_PROTOCOL,
     MatrixState,
     hot_json_dumps_async,
     hot_json_dumps_bytes_async,
@@ -1809,6 +1810,39 @@ def _is_closing_ui_ws_error(exc: Exception) -> bool:
     return "closing transport" in text or "write eof" in text
 
 
+def _truthy_compact_value(value) -> bool:
+    text = str(value or "").strip().lower()
+    return text in {
+        "1",
+        "true",
+        "yes",
+        "compact",
+        COMPACT_SNAPSHOT_PROTOCOL,
+    }
+
+
+def _payload_wants_compact_snapshot(payload: dict | None) -> bool:
+    payload = payload or {}
+    return (
+        str(payload.get("protocol_version", "") or "").strip()
+        == COMPACT_SNAPSHOT_PROTOCOL
+        or str(payload.get("snapshot_protocol", "") or "").strip()
+        == COMPACT_SNAPSHOT_PROTOCOL
+        or _truthy_compact_value(payload.get("compact"))
+    )
+
+
+def _request_wants_compact_snapshot(request) -> bool:
+    query = getattr(request, "query", {}) or {}
+    return (
+        str(query.get("protocol_version", "") or "").strip()
+        == COMPACT_SNAPSHOT_PROTOCOL
+        or str(query.get("snapshot_protocol", "") or "").strip()
+        == COMPACT_SNAPSHOT_PROTOCOL
+        or _truthy_compact_value(query.get("compact"))
+    )
+
+
 async def _send_ui_ws_json(ws, payload: dict) -> bool:
     if not ws or getattr(ws, "closed", False):
         return False
@@ -3185,6 +3219,116 @@ def _handle_pending_hire_list_command(data: dict, state: MatrixState) -> dict:
     }
 
 
+def _handle_task_detail_command(data: dict, state: MatrixState) -> dict:
+    """Return one full BoardTask dict for compact snapshot lazy-loading."""
+    task_id = str(data.get("id", "") or data.get("task_id", "") or "").strip()
+    if not task_id:
+        return {"type": "error", "message": "task id required"}
+    task = state.get_task_detail(task_id)
+    if not task:
+        return {"type": "error", "message": "Task not found"}
+    return {
+        "type": "task_detail",
+        "id": task["id"],
+        "task": task,
+    }
+
+
+def _handle_decisions_snapshot_command(data: dict, state: MatrixState) -> dict:
+    """Return deferred architect decisions for compact snapshot clients."""
+    include_archived = bool(data.get("include_archived", False))
+    decisions = {
+        decision["id"]: decision
+        for decision in state.load_all_decisions(
+            include_archived=include_archived,
+        )
+    }
+    return {
+        "type": "decisions_snapshot",
+        "decisions": decisions,
+    }
+
+
+def _handle_pending_hires_snapshot_command(data: dict,
+                                           state: MatrixState) -> dict:
+    """Return deferred pending hires for compact snapshot clients."""
+    status_filter = str(
+        data.get("status_filter", data.get("status", "pending")) or ""
+    ).strip()
+    architect_id = str(data.get("architect_id", "") or "").strip()
+    pending_hires = {
+        pending_hire["id"]: pending_hire
+        for pending_hire in state.load_pending_hires(
+            status_filter=status_filter,
+            architect_id=architect_id,
+        )
+    }
+    return {
+        "type": "pending_hires_snapshot",
+        "pending_hires": pending_hires,
+    }
+
+
+def _handle_archived_tasks_command(data: dict, state: MatrixState) -> dict:
+    """Return archived tasks on demand, excluded from compact initial state."""
+    group = str(data.get("group", "") or "").strip()
+    return {
+        "type": "archived_tasks",
+        "group": group,
+        "board_tasks": state.get_archived_task_details(group=group),
+    }
+
+
+async def _handle_weaver_journal_snapshot_command(
+        data: dict,
+        state: MatrixState) -> dict:
+    """Return deferred per-group Weaver journal/worklog/stream snapshots."""
+    group = str(data.get("group", "") or "").strip()
+    if not group:
+        return {"type": "error", "message": "group required"}
+    try:
+        limit = int(data.get("limit", 50) or 50)
+    except (TypeError, ValueError):
+        limit = 50
+    limit = max(1, min(limit, 200))
+    try:
+        worklog_limit = int(data.get("worklog_limit", 200) or 200)
+    except (TypeError, ValueError):
+        worklog_limit = 200
+    worklog_limit = max(1, min(worklog_limit, 500))
+
+    streams = {
+        "count": 0,
+        "by_state": {},
+        "items": [],
+        "truncated": False,
+    }
+    if bool(data.get("include_streams", True)):
+        try:
+            from .worktree_streams import prefill_branch_exists_for_state
+            await prefill_branch_exists_for_state(state)
+            streams = state._weaver_stream_payload(group)
+        except Exception:
+            log.exception("Failed to load weaver streams for %s", group)
+
+    return {
+        "type": "weaver_journal_snapshot",
+        "group": group,
+        "weaver_journal": {
+            group: state.journal_read(group, limit=limit),
+        },
+        "weaver_worklog": {
+            group: [
+                dict(entry)
+                for entry in list(state.weaver_worklog.get(group, []))[:worklog_limit]
+            ],
+        },
+        "weaver_streams": {
+            group: streams,
+        },
+    }
+
+
 async def _handle_engineer_dismiss_command(
         data: dict,
         state: MatrixState, *,
@@ -4199,19 +4343,21 @@ async def main(connection=None):
             "default_command": state.get_default_command(),
         }
 
-    async def _state_payload() -> dict:
-        # Prefill the per-repo branch cache before state.to_dict() runs —
-        # otherwise the sync weaver-stream snapshot inside it would fork
-        # `git show-ref` per branch on the event loop, stalling the WS.
-        try:
-            from .worktree_streams import prefill_branch_exists_for_state
-            await prefill_branch_exists_for_state(state)
-        except Exception:
-            log.exception("Branch-exists prefill failed for state payload")
+    async def _state_payload(*, compact: bool = False) -> dict:
+        # Prefill the per-repo branch cache before legacy state.to_dict()
+        # runs — otherwise the sync weaver-stream snapshot inside it would
+        # fork `git show-ref` per branch on the event loop, stalling the WS.
+        if not compact:
+            try:
+                from .worktree_streams import prefill_branch_exists_for_state
+                await prefill_branch_exists_for_state(state)
+            except Exception:
+                log.exception("Branch-exists prefill failed for state payload")
+        state_payload = state.to_dict_compact() if compact else state.to_dict()
         return {
             "type": "state",
             "seq": state._seq,
-            **state.to_dict(),
+            **state_payload,
             **weaver_buffer.export_state(),
             "providers": get_providers(),
             "runtime": _runtime_payload(),
@@ -4922,6 +5068,21 @@ async def main(connection=None):
             limit = min(int(data.get("limit", 50)), 200)
             events = panel_log.get_page(limit=limit, before_id=before_id)
             return {"type": "events_page", "events": events}
+
+        if cmd == "task_detail":
+            return _handle_task_detail_command(data, state)
+
+        if cmd == "decisions_snapshot":
+            return _handle_decisions_snapshot_command(data, state)
+
+        if cmd == "pending_hires_snapshot":
+            return _handle_pending_hires_snapshot_command(data, state)
+
+        if cmd == "archived_tasks":
+            return _handle_archived_tasks_command(data, state)
+
+        if cmd == "weaver_journal_snapshot":
+            return await _handle_weaver_journal_snapshot_command(data, state)
 
         if cmd == "get_cell_events":
             cell_id = str(data.get("cell_id", "") or "")
@@ -9906,8 +10067,13 @@ async def main(connection=None):
     async def handle_ws(request):
         ws = web.WebSocketResponse()
         await ws.prepare(request)
+        compact_snapshot = _request_wants_compact_snapshot(request)
+
+        def ws_state_payload():
+            return _state_payload(compact=compact_snapshot)
+
         if not await _register_ready_ui_ws_client(
-                state, ws, _state_payload):
+                state, ws, ws_state_payload):
             return ws
         # Replay the current supervisor banner (if any) to the new client.
         banner = supervisor_banner_state.get("banner")
@@ -9921,12 +10087,27 @@ async def main(connection=None):
             async for msg in ws:
                 if msg.type == aiohttp.WSMsgType.TEXT:
                     try:
-                        result = await handle_command(
-                            json.loads(msg.data))
+                        data = json.loads(msg.data)
+                        if _payload_wants_compact_snapshot(data):
+                            compact_snapshot = True
+                        if data.get("type") == "connect":
+                            sent = await _register_ready_ui_ws_client(
+                                state, ws, ws_state_payload)
+                            if not sent:
+                                break
+                            continue
+                        if data.get("cmd") == "resync":
+                            sent = await _register_ready_ui_ws_client(
+                                state, ws, ws_state_payload)
+                            if not sent:
+                                break
+                            continue
+
+                        result = await handle_command(data)
                         if result:
                             if result.get("type") == "state":
                                 sent = await _register_ready_ui_ws_client(
-                                    state, ws, _state_payload)
+                                    state, ws, ws_state_payload)
                             else:
                                 sent = await _send_ui_ws_json(ws, result)
                             if not sent:

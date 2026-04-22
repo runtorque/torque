@@ -117,6 +117,159 @@ class ServerModuleExtractionTests(unittest.TestCase):
         finally:
             self.server_mod.STANDALONE = old
 
+    def test_compact_snapshot_opt_in_from_query_or_payload(self):
+        request = types.SimpleNamespace(query={'compact': '1'})
+        self.assertTrue(self.server_mod._request_wants_compact_snapshot(request))
+        request = types.SimpleNamespace(query={'protocol_version': 'compact-v1'})
+        self.assertTrue(self.server_mod._request_wants_compact_snapshot(request))
+        request = types.SimpleNamespace(query={'compact': '0'})
+        self.assertFalse(self.server_mod._request_wants_compact_snapshot(request))
+        self.assertTrue(self.server_mod._payload_wants_compact_snapshot({
+            'protocol_version': 'compact-v1',
+        }))
+        self.assertTrue(self.server_mod._payload_wants_compact_snapshot({
+            'compact': True,
+        }))
+
+    def test_task_detail_command_returns_full_task_shape(self):
+        state = self.state_mod.MatrixState()
+        state.groups['g'] = []
+        state.board_tasks['task-1'] = self.state_mod.BoardTask(
+            id='task-1',
+            task='Inspect detail',
+            group='g',
+            lane='To Do',
+            description='full detail',
+            messages=[{'message': 'progress'}],
+        )
+        state.task_id_aliases['legacy-1'] = 'task-1'
+
+        result = self.server_mod._handle_task_detail_command(
+            {'id': 'legacy-1'},
+            state,
+        )
+
+        self.assertEqual(result['type'], 'task_detail')
+        self.assertEqual(result['id'], 'task-1')
+        self.assertEqual(result['task']['description'], 'full detail')
+        self.assertEqual(result['task']['messages'], [{'message': 'progress'}])
+
+    def test_deferred_snapshot_commands_return_maps(self):
+        state = self.state_mod.MatrixState()
+
+        class FakeDB:
+            def load_all_decisions(self, *, include_archived=False):
+                self.include_archived = include_archived
+                return [
+                    {'id': 'decision-1', 'archived': False},
+                    {'id': 'decision-2', 'archived': True},
+                ]
+
+            def load_pending_hires(self, *, status_filter='', architect_id=''):
+                self.status_filter = status_filter
+                self.architect_id = architect_id
+                return [
+                    {'id': 'hire-1', 'status': status_filter or 'pending'},
+                ]
+
+        fake_db = FakeDB()
+        state.db = fake_db
+
+        decisions = self.server_mod._handle_decisions_snapshot_command(
+            {'include_archived': True},
+            state,
+        )
+        hires = self.server_mod._handle_pending_hires_snapshot_command(
+            {'status_filter': 'pending', 'architect_id': 'arch-1'},
+            state,
+        )
+
+        self.assertEqual(decisions['type'], 'decisions_snapshot')
+        self.assertEqual(set(decisions['decisions']), {'decision-1', 'decision-2'})
+        self.assertTrue(fake_db.include_archived)
+        self.assertEqual(hires['type'], 'pending_hires_snapshot')
+        self.assertEqual(set(hires['pending_hires']), {'hire-1'})
+        self.assertEqual(fake_db.status_filter, 'pending')
+        self.assertEqual(fake_db.architect_id, 'arch-1')
+
+    def test_archived_tasks_command_returns_full_archived_details(self):
+        state = self.state_mod.MatrixState()
+        state.groups['g'] = []
+        state.groups['other'] = []
+        state.board_tasks['live'] = self.state_mod.BoardTask(
+            id='live',
+            task='Live task',
+            group='g',
+            lane='To Do',
+        )
+        state.board_tasks['archived'] = self.state_mod.BoardTask(
+            id='archived',
+            task='Archived task',
+            group='g',
+            lane=self.state_mod.ARCHIVED_LANE,
+            archived_at='2026-04-22T00:00:00+00:00',
+            description='archived detail',
+            messages=[{'message': 'archived progress'}],
+        )
+        state.board_tasks['archived-other'] = self.state_mod.BoardTask(
+            id='archived-other',
+            task='Other archived task',
+            group='other',
+            lane=self.state_mod.ARCHIVED_LANE,
+            archived_at='2026-04-22T00:00:00+00:00',
+        )
+
+        result = self.server_mod._handle_archived_tasks_command(
+            {'group': 'g'},
+            state,
+        )
+
+        self.assertEqual(result['type'], 'archived_tasks')
+        self.assertEqual(set(result['board_tasks']), {'archived'})
+        self.assertEqual(
+            result['board_tasks']['archived']['messages'],
+            [{'message': 'archived progress'}],
+        )
+
+    def test_weaver_journal_snapshot_command_returns_group_payloads(self):
+        state = self.state_mod.MatrixState()
+        state.groups['g'] = []
+        state.weaver_worklog['g'] = [
+            {'id': 2, 'entry': 'new'},
+            {'id': 1, 'entry': 'old'},
+        ]
+        state.journal_read = lambda group, limit=20, **_kwargs: [
+            {'id': 1, 'group': group, 'entry': f'limit={limit}'},
+        ]
+
+        async def run():
+            return await self.server_mod._handle_weaver_journal_snapshot_command(
+                {
+                    'group': 'g',
+                    'limit': 7,
+                    'worklog_limit': 1,
+                    'include_streams': False,
+                },
+                state,
+            )
+
+        result = asyncio.run(run())
+
+        self.assertEqual(result['type'], 'weaver_journal_snapshot')
+        self.assertEqual(result['group'], 'g')
+        self.assertEqual(
+            result['weaver_journal'],
+            {'g': [{'id': 1, 'group': 'g', 'entry': 'limit=7'}]},
+        )
+        self.assertEqual(
+            result['weaver_worklog'],
+            {'g': [{'id': 2, 'entry': 'new'}]},
+        )
+        self.assertEqual(
+            result['weaver_streams']['g'],
+            {'count': 0, 'by_state': {}, 'items': [], 'truncated': False},
+        )
+
     def test_derive_helper_preserves_parent_assigned_engineer(self):
         parent = self.state_mod.BoardTask(
             id='task-parent',

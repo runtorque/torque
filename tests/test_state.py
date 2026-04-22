@@ -237,6 +237,132 @@ class MatrixStateCleanupTests(unittest.TestCase):
         if self.state_mod.orjson is not None:
             self.assertNotIn(": ", raw)
 
+    def test_compact_snapshot_uses_task_summaries_and_excludes_archived_tasks(self):
+        state = self.state_mod.MatrixState()
+        state.groups["g"] = []
+        state.board_tasks["task-1"] = self.state_mod.BoardTask(
+            id="task-1",
+            task="Heavy task",
+            slug="heavy-task",
+            group="g",
+            lane="In Progress",
+            position=3,
+            action_name="feature/implement",
+            labels=["performance"],
+            agent_id="agent-1",
+            assigned_engineer_id="eng-1",
+            parent_task_id="parent-1",
+            pipeline_depth=1,
+            status="On Review",
+            health_state="attention",
+            health_details={"reason": "large"},
+            verification_mode="deploy",
+            verification_state="pending",
+            lane_entered_at="2026-04-22T00:00:00+00:00",
+            description="long description",
+            context="legacy context",
+            criteria="legacy criteria",
+            instructions="legacy instructions",
+            messages=[{"message": "progress"}],
+            attachments=[{"filename": "image.png"}],
+            artifacts=[{"kind": "log"}],
+            verification_notes="needs smoke",
+            verification_summary={"tests_run": "targeted"},
+            worktree_boundary={"base": "main"},
+            action_vars={"name": "value"},
+        )
+        state.board_tasks["task-archived"] = self.state_mod.BoardTask(
+            id="task-archived",
+            task="Archived task",
+            group="g",
+            lane=self.state_mod.ARCHIVED_LANE,
+            archived_at="2026-04-22T00:00:00+00:00",
+            archived_from_lane="Done",
+        )
+
+        full = state.to_dict()
+        compact = state.to_dict_compact()
+        task = compact["board_tasks"]["task-1"]
+
+        self.assertIn("task-archived", full["board_tasks"])
+        self.assertIn("messages", full["board_tasks"]["task-1"])
+        self.assertIn("description", full["board_tasks"]["task-1"])
+        self.assertIn("health_details", full["board_tasks"]["task-1"])
+        self.assertIn("verification_summary", full["board_tasks"]["task-1"])
+        self.assertIn("worktree_boundary", full["board_tasks"]["task-1"])
+        self.assertIn("decisions", full)
+        self.assertIn("pending_hires", full)
+        self.assertEqual(
+            compact["snapshot_protocol"],
+            self.state_mod.COMPACT_SNAPSHOT_PROTOCOL,
+        )
+        self.assertEqual(
+            set(task),
+            set(self.state_mod.COMPACT_BOARD_TASK_FIELDS),
+        )
+        self.assertEqual(task["task"], "Heavy task")
+        self.assertEqual(task["labels"], ["performance"])
+        self.assertNotIn("messages", task)
+        self.assertNotIn("description", task)
+        self.assertNotIn("context", task)
+        self.assertNotIn("criteria", task)
+        self.assertNotIn("instructions", task)
+        self.assertNotIn("attachments", task)
+        self.assertNotIn("artifacts", task)
+        self.assertNotIn("health_details", task)
+        self.assertNotIn("verification_summary", task)
+        self.assertNotIn("worktree_boundary", task)
+        self.assertNotIn("verification_notes", task)
+        self.assertNotIn("action_vars", task)
+        self.assertNotIn("task-archived", compact["board_tasks"])
+        self.assertNotIn("decisions", compact)
+        self.assertNotIn("pending_hires", compact)
+        self.assertNotIn("weaver_journal", compact)
+        self.assertNotIn("weaver_worklog", compact)
+        self.assertNotIn("weaver_streams", compact)
+
+    def test_compact_snapshot_does_not_run_deferred_db_loaders(self):
+        state = self.state_mod.MatrixState()
+
+        class ExplodingDB:
+            def load_all_decisions(self, **_kwargs):
+                raise AssertionError("compact snapshot must defer decisions")
+
+            def load_pending_hires(self, **_kwargs):
+                raise AssertionError("compact snapshot must defer pending hires")
+
+        state.db = ExplodingDB()
+
+        compact = state.to_dict_compact()
+
+        self.assertEqual(compact["board_tasks"], {})
+        self.assertNotIn("decisions", compact)
+        self.assertNotIn("pending_hires", compact)
+
+    def test_task_detail_returns_full_shape_and_resolves_aliases(self):
+        state = self.state_mod.MatrixState()
+        state.groups["g"] = []
+        state.board_tasks["task-1"] = self.state_mod.BoardTask(
+            id="task-1",
+            task="Full task",
+            group="g",
+            lane="To Do",
+            description="full description",
+            messages=[{"action": "progress", "message": "hello"}],
+            artifacts=[{"kind": "diff"}],
+            worktree_boundary={"base": "main"},
+        )
+        state.task_id_aliases["legacy-1"] = "task-1"
+
+        detail = state.get_task_detail("legacy-1")
+
+        self.assertIsNotNone(detail)
+        self.assertEqual(detail["id"], "task-1")
+        self.assertEqual(detail["description"], "full description")
+        self.assertEqual(detail["messages"][0]["message"], "hello")
+        self.assertEqual(detail["artifacts"], [{"kind": "diff"}])
+        self.assertEqual(detail["worktree_boundary"], {"base": "main"})
+
     def test_hot_json_default_handles_guarded_types(self):
         raw = self.state_mod.hot_json_dumps({
             "path": Path("/tmp/loom"),
