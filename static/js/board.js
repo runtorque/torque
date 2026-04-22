@@ -77,6 +77,11 @@ var _boardEligibilityActionsByGroup = {};
 var _boardEligibilityTemplatesByGroup = {};
 var _boardEligibilityActionWaiting = false;
 var _boardEligibilityTemplateWaiting = false;
+var _boardQueuedTaskDeltas = [];
+var _boardQueuedTaskDeltasCanPatch = true;
+var _boardLastRenderShellKey = '';
+var _boardLastToolbarShapeKey = '';
+var _boardLaneRenderCache = {};
 var _boardHealthOrder = ['blocked', 'stale-in-progress', 'stalled', 'thrashing', 'idle-risk'];
 var _boardHealthLabels = {
   'blocked': 'Blocked',
@@ -151,6 +156,14 @@ function _boardDefaultAddTaskLane() {
   if (!lanes.length) return _boardSelectedLane || '';
   if (lanes.indexOf('Backlog') >= 0) return 'Backlog';
   return lanes[0];
+}
+
+function _boardNormalizeAddingTaskLane() {
+  if (!_boardAddingTask) return;
+  var addTaskLaneOptions = _boardAddTaskLaneOptions();
+  if (!_boardAddingTaskLane || addTaskLaneOptions.indexOf(_boardAddingTaskLane) === -1) {
+    _boardAddingTaskLane = _boardDefaultAddTaskLane();
+  }
 }
 
 function _boardTasks() {
@@ -645,11 +658,532 @@ function _boardAllHealthCounts(model) {
 }
 
 
+function _boardSortedCopy(values) {
+  return (values || []).slice().sort();
+}
+
+function _boardObjectKeysSorted(obj) {
+  var keys = [];
+  for (var key in (obj || {})) keys.push(key);
+  keys.sort();
+  return keys;
+}
+
+function _boardLaneSortSignature(lanes) {
+  var out = {};
+  for (var i = 0; i < (lanes || []).length; i++) {
+    out[lanes[i]] = _boardLaneSortMode(lanes[i]);
+  }
+  return out;
+}
+
+function _boardRenderShellKey(lanes, wideShell, wideLayout) {
+  return JSON.stringify({
+    group: _currentGroup() || '',
+    filter_by_group: !!_boardFilterByGroup,
+    lanes: (lanes || []).slice(),
+    selected_lane: _boardSelectedLane || '',
+    show_archived: !!_boardShowArchived,
+    show_schedules: !!_boardShowSchedules,
+    wide_shell: !!wideShell,
+    wide_layout: !!wideLayout,
+    search_query: _boardSearchQuery || '',
+    quick_view: _boardQuickView || '',
+    filter_labels: _boardSortedCopy(_boardFilterLabels),
+    filter_actions: _boardSortedCopy(_boardFilterActions),
+    filter_agents: _boardSortedCopy(_boardFilterAgents),
+    filter_health: _boardSortedCopy(_boardFilterHealth),
+    lane_sorts: _boardLaneSortSignature(lanes || []),
+    card_density: _boardCardDensityMode(),
+    saving_view: !!_boardSavingView,
+    saving_view_name: _boardSavingViewName || '',
+    adding_task: !!_boardAddingTask,
+    adding_lane: _boardAddingTaskLane || '',
+    act_list_open: _boardActList !== null,
+    view_menu_open: !!_boardViewMenuOpen,
+  });
+}
+
+function _boardToolbarShapeKey(model, filtersActive) {
+  var labelCounts = _boardAllLabelCounts(model);
+  var actionCounts = _boardAllActionCounts(model);
+  var agentCounts = _boardAllAgentCounts(model);
+  var healthCounts = _boardAllHealthCounts(model);
+  var archivedCount = _boardArchivedCount(model);
+  var savedViews = _boardCurrentGroupSavedViews();
+  var groupTaskCount = _boardGroupTaskCount(model);
+  var currentViewSavable = !_boardIsDefaultFilterState(_boardCurrentViewState());
+  return JSON.stringify({
+    has_labels: _boardObjectKeysSorted(labelCounts).length > 0,
+    has_actions: _boardObjectKeysSorted(actionCounts).length > 0,
+    has_agents: _boardObjectKeysSorted(agentCounts).length > 0,
+    has_health: _boardObjectKeysSorted(healthCounts).length > 0,
+    has_saved_views: savedViews.length > 0,
+    has_quick_views: groupTaskCount > 0 || _boardQuickView !== '',
+    current_view_savable: currentViewSavable,
+    show_saved_views_row: currentViewSavable || savedViews.length > 0 || _boardSavingView,
+    show_toolbar: groupTaskCount > 0
+      || _boardObjectKeysSorted(labelCounts).length > 0
+      || _boardObjectKeysSorted(actionCounts).length > 0
+      || _boardObjectKeysSorted(agentCounts).length > 0
+      || _boardObjectKeysSorted(healthCounts).length > 0
+      || _boardSearchQuery || _boardFilterLabels.length
+      || _boardFilterActions.length || _boardFilterAgents.length
+      || _boardFilterHealth.length
+      || savedViews.length > 0 || archivedCount > 0 || _boardShowArchived,
+    archived_present: archivedCount > 0,
+    filters_active: !!filtersActive,
+    schedules_present: _boardScheduleCount() > 0,
+  });
+}
+
+function _boardResetRenderCaches() {
+  _boardQueuedTaskDeltas = [];
+  _boardQueuedTaskDeltasCanPatch = true;
+  _boardLastRenderShellKey = '';
+  _boardLastToolbarShapeKey = '';
+  _boardLaneRenderCache = {};
+}
+
+function _boardQueueTaskDeltas(changes, options) {
+  options = options || {};
+  if (options.canPatch === false) _boardQueuedTaskDeltasCanPatch = false;
+  if (!changes || !changes.length) return;
+  for (var i = 0; i < changes.length; i++) {
+    if (changes[i]) _boardQueuedTaskDeltas.push(changes[i]);
+  }
+}
+
+function _boardConsumeQueuedTaskDeltas() {
+  if (!_boardQueuedTaskDeltas.length) {
+    var emptyOut = { changes: [], canPatch: _boardQueuedTaskDeltasCanPatch };
+    _boardQueuedTaskDeltasCanPatch = true;
+    return emptyOut;
+  }
+  var out = {
+    changes: _boardQueuedTaskDeltas.slice(),
+    canPatch: _boardQueuedTaskDeltasCanPatch,
+  };
+  _boardQueuedTaskDeltas = [];
+  _boardQueuedTaskDeltasCanPatch = true;
+  return out;
+}
+
+function _boardAddAffectedLane(lanes, lane) {
+  if (!lane) return;
+  lanes[lane] = true;
+}
+
+function _boardAddTaskAffectedLanes(lanes, task) {
+  if (!task) return;
+  var tasks = _boardTasks();
+  var cursor = task;
+  var seen = {};
+  while (cursor) {
+    var cursorId = cursor.id || cursor.parent_task_id || '';
+    if (cursorId) {
+      if (seen[cursorId]) break;
+      seen[cursorId] = true;
+    }
+    _boardAddAffectedLane(lanes, cursor.lane);
+    if (!cursor.parent_task_id) break;
+    cursor = tasks[cursor.parent_task_id];
+  }
+}
+
+function _boardAddDependentAffectedLanes(lanes, taskId) {
+  if (!taskId) return;
+  var tasks = _boardTasks();
+  for (var id in tasks) {
+    var task = tasks[id];
+    if (!task || !Array.isArray(task.depends_on)) continue;
+    if (task.depends_on.indexOf(taskId) >= 0) _boardAddTaskAffectedLanes(lanes, task);
+  }
+}
+
+function _boardAddDependencyAffectedLanes(lanes, task) {
+  if (!task || !Array.isArray(task.depends_on)) return;
+  var tasks = _boardTasks();
+  for (var i = 0; i < task.depends_on.length; i++) {
+    var dep = tasks[task.depends_on[i]];
+    if (dep) _boardAddTaskAffectedLanes(lanes, dep);
+  }
+}
+
+function _boardAffectedLanesFromTaskDeltas(changes) {
+  var lanes = {};
+  var allVisible = false;
+  if (_boardQuickView) allVisible = true;
+  for (var i = 0; i < (changes || []).length; i++) {
+    var change = changes[i] || {};
+    var previous = change.previous || null;
+    var next = change.next || null;
+    var taskId = change.id || (next && next.id) || (previous && previous.id) || '';
+    _boardAddTaskAffectedLanes(lanes, previous);
+    _boardAddTaskAffectedLanes(lanes, next);
+    _boardAddDependencyAffectedLanes(lanes, previous);
+    _boardAddDependencyAffectedLanes(lanes, next);
+    _boardAddDependentAffectedLanes(lanes, taskId);
+  }
+  if (allVisible) return _boardVisibleLanes();
+  var visible = {};
+  var visibleLanes = _boardVisibleLanes();
+  for (var vi = 0; vi < visibleLanes.length; vi++) visible[visibleLanes[vi]] = true;
+  return _boardObjectKeysSorted(lanes).filter(function(lane) {
+    return !!visible[lane];
+  });
+}
+
+function _boardTaskRenderSignature(task, model) {
+  if (!task) return '';
+  return JSON.stringify({
+    task: task,
+    dependencies: _boardTaskDependencySignature(task, model),
+    active_dependents: _boardTaskActiveDependentsSignature(task, model),
+    focused: _boardFocusedTask === task.id,
+    selected: !!_boardSelectedTasks[task.id],
+    hovered: _boardHoveredTask === task.id,
+    quick_task: _boardQuickEditTask === task.id ? _boardQuickEditKind : '',
+    quick_label_draft: _boardQuickEditTask === task.id ? _boardQuickLabelDraft : '',
+    quick_due_draft: _boardQuickEditTask === task.id ? _boardQuickDueDraft : '',
+    collapsed: !!_boardCollapsedTasks[task.id],
+  });
+}
+
+function _boardDependencyRenderIndexes(model) {
+  if (model && model.dependencyRenderIndexes) return model.dependencyRenderIndexes;
+  var tasks = _boardTasks();
+  var activeDependentsByTask = {};
+  for (var id in tasks) {
+    var candidate = tasks[id];
+    if (!candidate || candidate.lane === 'Done' || !Array.isArray(candidate.depends_on)) continue;
+    for (var i = 0; i < candidate.depends_on.length; i++) {
+      var depId = candidate.depends_on[i];
+      if (!activeDependentsByTask[depId]) activeDependentsByTask[depId] = [];
+      activeDependentsByTask[depId].push({
+        id: candidate.id || id,
+        task: candidate.task || '',
+        lane: candidate.lane || '',
+        position: candidate.position || 0,
+      });
+    }
+  }
+  for (var depKey in activeDependentsByTask) {
+    activeDependentsByTask[depKey].sort(_boardCompareDependencySignatureRefs);
+  }
+  var indexes = { tasks: tasks, activeDependentsByTask: activeDependentsByTask };
+  if (model) model.dependencyRenderIndexes = indexes;
+  return indexes;
+}
+
+function _boardCompareDependencySignatureRefs(a, b) {
+  return String(a.lane || '').localeCompare(String(b.lane || ''))
+    || ((a.position || 0) - (b.position || 0))
+    || String(a.id || '').localeCompare(String(b.id || ''));
+}
+
+function _boardTaskDependencySignature(task, model) {
+  if (!task || !Array.isArray(task.depends_on) || !task.depends_on.length) return [];
+  var indexes = _boardDependencyRenderIndexes(model);
+  var tasks = indexes.tasks || {};
+  var refs = [];
+  for (var i = 0; i < task.depends_on.length; i++) {
+    var dep = tasks[task.depends_on[i]];
+    if (!dep) {
+      refs.push({ id: task.depends_on[i], missing: true });
+      continue;
+    }
+    refs.push({
+      id: dep.id || task.depends_on[i],
+      task: dep.task || '',
+      lane: dep.lane || '',
+      position: dep.position || 0,
+    });
+  }
+  refs.sort(_boardCompareDependencySignatureRefs);
+  return refs;
+}
+
+function _boardTaskActiveDependentsSignature(task, model) {
+  if (!task || !task.id || task.lane === 'Done') return [];
+  var indexes = _boardDependencyRenderIndexes(model);
+  return (indexes.activeDependentsByTask[task.id] || []).slice();
+}
+
+function _boardCollectRenderedLaneTasks(rootTasks, childrenOf, renderLimit, model) {
+  var out = [];
+  var remaining = Math.max(0, renderLimit || 0);
+  function visit(task, depth) {
+    if (!task || remaining <= 0) return;
+    remaining--;
+    out.push({
+      id: task.id || '',
+      depth: depth || 0,
+      signature: _boardTaskRenderSignature(task, model),
+    });
+    var children = (childrenOf && childrenOf[task.id]) || [];
+    if (!children.length || _boardCollapsedTasks[task.id]) return;
+    for (var i = 0; i < children.length; i++) {
+      visit(children[i], (depth || 0) + 1);
+      if (remaining <= 0) break;
+    }
+  }
+  for (var i = 0; i < (rootTasks || []).length; i++) {
+    visit(rootTasks[i], 0);
+    if (remaining <= 0) break;
+  }
+  return out;
+}
+
+function _boardLanePoolSignature(lane, model) {
+  var pool = _boardLanePoolTasks(lane, model);
+  var parts = [];
+  for (var i = 0; i < pool.length; i++) {
+    var task = pool[i];
+    parts.push([
+      task.id || '',
+      task.lane || '',
+      task.group || '',
+      task.parent_task_id || '',
+      task.scheduled_at || '',
+      _boardTaskHealthState(task),
+      (task.labels || []).join(','),
+      JSON.stringify(_boardTaskDependencySignature(task, model)),
+      JSON.stringify(_boardTaskActiveDependentsSignature(task, model)),
+    ].join(':'));
+  }
+  parts.sort();
+  return parts.join('|');
+}
+
+function _boardLaneRenderContextKey(lane, model, filtersActive, skipAddTask, wideColumn) {
+  var rootTasks = _boardRootTasksForLane(lane, model ? model.visibleTasks : null, model);
+  var childrenOf = (model && model.childrenOf) || {};
+  var renderLimit = _boardRenderLimitValue();
+  var totalCards = _boardRenderableCardCountForRoots(rootTasks, childrenOf);
+  var rendered = _boardCollectRenderedLaneTasks(rootTasks, childrenOf, renderLimit, model);
+  var staleDoneIds = lane === 'Done' ? _boardStaleDoneTaskIds(model) : [];
+  return JSON.stringify({
+    lane: lane || '',
+    active: lane === _boardSelectedLane,
+    wide: !!wideColumn,
+    skip_add: !!skipAddTask,
+    filters_active: !!filtersActive,
+    render_limit: renderLimit,
+    lane_count: _boardLaneCount(lane, model),
+    root_count: rootTasks.length,
+    root_ids: rootTasks.map(function(task) { return task.id || ''; }),
+    total_cards: totalCards,
+    rendered: rendered,
+    pool: (rootTasks.length === 0 || lane === 'Backlog') ? _boardLanePoolSignature(lane, model) : '',
+    stale_done_ids: staleDoneIds,
+    adding_task: !!_boardAddingTask,
+    adding_lane: _boardAddingTaskLane || '',
+    adding_draft: _boardAddingTaskDraft || '',
+    adding_action: _boardAddingTaskAction || '',
+    adding_agent: _boardAddingTaskAgent || '',
+    act_list: _boardActList,
+  });
+}
+
+function _boardLaneCacheKeyName(lane, wideColumn) {
+  return (wideColumn ? 'wide:' : 'narrow:') + (lane || '');
+}
+
+function _boardRememberLaneRender(lane, model, filtersActive, skipAddTask, wideColumn, section) {
+  if (!lane || !section) return;
+  var cacheName = _boardLaneCacheKeyName(lane, wideColumn);
+  _boardLaneRenderCache[cacheName] = {
+    key: _boardLaneRenderContextKey(lane, model, filtersActive, skipAddTask, wideColumn),
+    html: section.html || '',
+    bodyHtml: section.bodyHtml || section.html || '',
+    laneCount: _boardLaneCount(lane, model),
+    renderedCards: section.renderedCards || 0,
+    totalCards: section.totalCards || 0,
+    rootTasks: section.rootTasks || [],
+    renderLimit: section.renderLimit || _boardRenderLimitValue(),
+  };
+}
+
+function _boardCachedLaneRender(lane, model, filtersActive, skipAddTask, wideColumn) {
+  var cacheName = _boardLaneCacheKeyName(lane, wideColumn);
+  var cached = _boardLaneRenderCache[cacheName];
+  if (!cached) return null;
+  var nextKey = _boardLaneRenderContextKey(lane, model, filtersActive, skipAddTask, wideColumn);
+  return cached.key === nextKey ? cached : null;
+}
+
+function _boardCssEscape(value) {
+  if (typeof CSS !== 'undefined' && CSS && typeof CSS.escape === 'function') {
+    return CSS.escape(String(value));
+  }
+  return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function _boardLaneAttrSelector(className, lane) {
+  return '.' + className + '[data-lane="' + _boardCssEscape(lane) + '"]';
+}
+
+function _boardFindWideLaneBody(panel, lane) {
+  if (!panel || typeof panel.querySelector !== 'function') return null;
+  return panel.querySelector(_boardLaneAttrSelector('board-wide-lane-body', lane));
+}
+
+function _boardPatchLaneCountDom(panel, lane, count) {
+  if (!panel || typeof panel.querySelector !== 'function') return;
+  var escaped = _boardCssEscape(lane);
+  var selectors = [
+    '.board-lane-tab[data-lane="' + escaped + '"] .lane-count',
+    '.board-wide-lane[data-lane="' + escaped + '"] .board-wide-lane-count',
+  ];
+  for (var i = 0; i < selectors.length; i++) {
+    var el = panel.querySelector(selectors[i]);
+    if (el) el.textContent = String(count);
+  }
+}
+
+function _boardPatchAllLaneCounts(panel, lanes, model) {
+  for (var i = 0; i < (lanes || []).length; i++) {
+    _boardPatchLaneCountDom(panel, lanes[i], _boardLaneCount(lanes[i], model));
+  }
+}
+
+function _boardPatchWideLaneBody(panel, lane, model, filtersActive) {
+  var cached = _boardCachedLaneRender(lane, model, filtersActive, true, true);
+  if (cached) {
+    _boardPatchLaneCountDom(panel, lane, cached.laneCount);
+    return {
+      patched: false,
+      rootTasks: cached.rootTasks || [],
+      renderLimit: cached.renderLimit || _boardRenderLimitValue(),
+    };
+  }
+  var body = _boardFindWideLaneBody(panel, lane);
+  if (!body) return null;
+  var section = _boardRenderWideLaneColumn(lane, model, filtersActive);
+  var savedScrollTop = typeof body.scrollTop === 'number' ? body.scrollTop : null;
+  body.innerHTML = section.bodyHtml || '';
+  if (typeof savedScrollTop === 'number') {
+    body.scrollTop = savedScrollTop;
+    _boardWideLaneScrollTops[lane] = savedScrollTop;
+  }
+  _boardBindWideLaneBodyScroll(body);
+  _boardPatchLaneCountDom(panel, lane, _boardLaneCount(lane, model));
+  _boardRememberLaneRender(lane, model, filtersActive, true, true, section);
+  return {
+    patched: true,
+    rootTasks: section.rootTasks || [],
+    renderLimit: section.renderLimit || _boardRenderLimitValue(),
+  };
+}
+
+function _boardPatchNarrowLaneBody(panel, lane, model, filtersActive) {
+  var cardsEl = document.getElementById('board-cards');
+  if (!cardsEl) return null;
+  var cached = _boardCachedLaneRender(lane, model, filtersActive, false, false);
+  if (cached) {
+    _boardPatchLaneCountDom(panel, lane, cached.laneCount);
+    return {
+      patched: false,
+      rootTasks: cached.rootTasks || [],
+      renderLimit: cached.renderLimit || _boardRenderLimitValue(),
+    };
+  }
+  var section = _boardRenderLaneSection(lane, model, filtersActive, false);
+  cardsEl.innerHTML = section.html || '';
+  cardsEl.scrollTop = _boardCardsScrollTop;
+  _boardPatchLaneCountDom(panel, lane, _boardLaneCount(lane, model));
+  _boardRememberLaneRender(lane, model, filtersActive, false, false, section);
+  return {
+    patched: true,
+    rootTasks: section.rootTasks || [],
+    renderLimit: section.renderLimit || _boardRenderLimitValue(),
+  };
+}
+
+function _boardCanTryTaskDeltaPatch(deltaBatch, shellKey) {
+  if (!deltaBatch || !deltaBatch.changes || !deltaBatch.changes.length) return false;
+  if (!deltaBatch.canPatch) return false;
+  if (!_boardLastRenderShellKey || _boardLastRenderShellKey !== shellKey) return false;
+  if (_boardShowSchedules || _boardViewMenuOpen || _boardFilterDropdownType) return false;
+  if (_boardSelectedCount && _boardSelectedCount() > 0) return false;
+  return true;
+}
+
+function _boardTryPatchTaskDeltas(panel, deltaBatch, lanes, filtersActive, wideLayout, shellKey, restoreState, quickEditRefocusTask, quickEditRefocusKind) {
+  if (!_boardCanTryTaskDeltaPatch(deltaBatch, shellKey)) return false;
+  var affectedLanes = _boardAffectedLanesFromTaskDeltas(deltaBatch.changes);
+  var visibleLaneSet = {};
+  for (var vi = 0; vi < lanes.length; vi++) visibleLaneSet[lanes[vi]] = true;
+  affectedLanes = affectedLanes.filter(function(lane) { return !!visibleLaneSet[lane]; });
+  var requestedLanes = wideLayout
+    ? affectedLanes.slice()
+    : (affectedLanes.indexOf(_boardSelectedLane) >= 0 ? [_boardSelectedLane] : []);
+  var model = _boardBuildRenderModel(requestedLanes);
+  var toolbarKey = _boardToolbarShapeKey(model, filtersActive);
+  if (_boardLastToolbarShapeKey && toolbarKey !== _boardLastToolbarShapeKey) return false;
+  if (filtersActive && _boardLaneCount(_boardSelectedLane, model) === 0) return false;
+
+  _boardEnsureDispatchEligibilityRefs(_currentGroup(), model);
+  _boardPatchAllLaneCounts(panel, lanes, model);
+
+  var childrenOf = model.childrenOf;
+  var nextLaneEntryDelay = 0;
+  if (wideLayout) {
+    var wideResultsByLane = {};
+    for (var i = 0; i < requestedLanes.length; i++) {
+      var wideResult = _boardPatchWideLaneBody(panel, requestedLanes[i], model, filtersActive);
+      if (!wideResult) return false;
+      wideResultsByLane[requestedLanes[i]] = wideResult;
+    }
+    for (var wi = 0; wi < lanes.length; wi++) {
+      var refreshLane = lanes[wi];
+      var refreshEntry = wideResultsByLane[refreshLane]
+        || _boardLaneRenderCache[_boardLaneCacheKeyName(refreshLane, true)];
+      if (!refreshEntry) continue;
+      var wideDelay = _boardVisibleLaneEntryRefreshDelay(
+        refreshEntry.rootTasks || [],
+        childrenOf,
+        refreshEntry.renderLimit || _boardRenderLimitValue(),
+      );
+      if (wideDelay > 0 && (!nextLaneEntryDelay || wideDelay < nextLaneEntryDelay)) {
+        nextLaneEntryDelay = wideDelay;
+      }
+    }
+  } else if (requestedLanes.length) {
+    var narrowResult = _boardPatchNarrowLaneBody(panel, requestedLanes[0], model, filtersActive);
+    if (!narrowResult) return false;
+    nextLaneEntryDelay = _boardVisibleLaneEntryRefreshDelay(
+      narrowResult.rootTasks,
+      childrenOf,
+      narrowResult.renderLimit,
+    );
+  }
+
+  _boardScheduleLaneEntryRefresh(nextLaneEntryDelay);
+  _boardLastToolbarShapeKey = toolbarKey;
+  if (restoreState) _restoreSurfaceState(panel, restoreState);
+  if (quickEditRefocusTask) {
+    _boardRefocusQuickEditInput(quickEditRefocusTask, quickEditRefocusKind);
+  }
+  if (_boardAddingTask) {
+    var addTaskInput = document.getElementById('board-add-task-input');
+    if (addTaskInput) boardAddTaskAutoResize(addTaskInput);
+  }
+  _boardAfterRenderLayout();
+  return true;
+}
+
 
 
 function _boardBuildRenderModel(lanes) {
   _boardSyncFiltersForCurrentGroup();
-  lanes = lanes || _boardVisibleLanes();
+  var visibleLanes = _boardVisibleLanes();
+  lanes = lanes || visibleLanes;
+  var requestedLaneSet = {};
+  for (var ri = 0; ri < lanes.length; ri++) requestedLaneSet[lanes[ri]] = true;
+  var visibleLaneSet = {};
+  for (var vi = 0; vi < visibleLanes.length; vi++) visibleLaneSet[visibleLanes[vi]] = true;
 
   var scopedWithArchived = _boardScopedTasks(true);
   var scopedWithoutArchived = _boardFilterArchivedTasks(scopedWithArchived);
@@ -676,20 +1210,31 @@ function _boardBuildRenderModel(lanes) {
     groupTaskCount: 0,
   };
 
+  for (var lci = 0; lci < visibleLanes.length; lci++) {
+    model.laneCounts[visibleLanes[lci]] = 0;
+  }
+
   for (var archivedId in scopedWithArchived) {
     if (_boardIsArchived(scopedWithArchived[archivedId])) model.archivedCount++;
   }
   for (var groupTaskId in scopedWithoutArchived) model.groupTaskCount++;
 
+  for (var visibleTaskId in visibleTasks) {
+    var visibleTask = visibleTasks[visibleTaskId];
+    if (!visibleLaneSet[visibleTask.lane]) continue;
+    if (visibleTask.parent_task_id && visibleTasks[visibleTask.parent_task_id]) continue;
+    model.laneCounts[visibleTask.lane] = (model.laneCounts[visibleTask.lane] || 0) + 1;
+  }
+
   for (var i = 0; i < lanes.length; i++) {
     var lane = lanes[i];
+    if (!requestedLaneSet[lane]) continue;
     var laneTasks = _boardTasksInLaneFromMap(lane, visibleTasks);
     var rootTasks = laneTasks.filter(function(task) {
       return !task.parent_task_id || !visibleTasks[task.parent_task_id];
     });
     model.laneTasks[lane] = laneTasks;
     model.rootTasksByLane[lane] = rootTasks;
-    model.laneCounts[lane] = rootTasks.length;
     model.lanePoolTasks[lane] = _boardLanePoolTasksFromAll(lane);
   }
 
@@ -790,6 +1335,8 @@ function _boardBindWideLaneBodyScroll(body) {
   if (!lane) return;
   var saved = _boardWideLaneScrollTops[lane];
   if (typeof saved === 'number') body.scrollTop = saved;
+  if (body._boardScrollBoundLane === lane) return;
+  body._boardScrollBoundLane = lane;
   body.addEventListener('scroll', function() {
     _boardWideLaneScrollTops[lane] = body.scrollTop;
     if (body.scrollTop + body.clientHeight >= body.scrollHeight - 100) {
@@ -1050,6 +1597,7 @@ function _boardRenderWideLaneColumn(lane, model, filtersActive) {
   var laneCount = _boardLaneCount(lane, model);
   var active = lane === _boardSelectedLane;
   var section = _boardRenderLaneSection(lane, model, filtersActive, true);
+  var bodyHtml = section.html;
   var html = '<section class="board-wide-lane' + (active ? ' active' : '') + '"'
     + ' data-lane="' + esc(lane) + '" data-board-lane-column="1">';
   html += '<div class="board-wide-lane-head">';
@@ -1067,9 +1615,11 @@ function _boardRenderWideLaneColumn(lane, model, filtersActive) {
     + ' ondragover="boardLaneTabDragOver(event)"'
     + ' ondragleave="boardLaneTabDragLeave(event)"'
     + ' ondrop="boardLaneTabDrop(event)">';
-  html += section.html;
+  html += bodyHtml;
   html += '</div>';
   html += '</section>';
+  section.bodyHtml = bodyHtml;
+  section.columnHtml = html;
   section.html = html;
   return section;
 }
@@ -1095,6 +1645,7 @@ function renderBoard() {
     };
   }
   _boardSetQuickEditRefocus('', '');
+  var queuedTaskDeltaBatch = _boardConsumeQueuedTaskDeltas();
   _boardSyncFiltersForCurrentGroup();
   _boardHydrateSavedViews();
   _boardHydrateLaneSorts();
@@ -1118,6 +1669,8 @@ function renderBoard() {
   var lanes = _boardVisibleLanes();
   if (!lanes.length) {
     panel.innerHTML = '<div class="board-empty">No lanes configured</div>';
+    _boardLastRenderShellKey = '';
+    _boardLastToolbarShapeKey = '';
     return;
   }
 
@@ -1136,6 +1689,20 @@ function renderBoard() {
   }
   var wideShell = _boardWideShellActive(panel);
   var wideLayout = _boardWideLayoutActive(panel);
+  _boardNormalizeAddingTaskLane();
+  var shellKey = _boardRenderShellKey(lanes, wideShell, wideLayout);
+  if (_boardTryPatchTaskDeltas(
+      panel,
+      queuedTaskDeltaBatch,
+      lanes,
+      filtersActive,
+      wideLayout,
+      shellKey,
+      restoreState,
+      quickEditRefocusTask,
+      quickEditRefocusKind)) {
+    return;
+  }
   var renderModel = _boardBuildRenderModel(lanes);
   _boardEnsureDispatchEligibilityRefs(_currentGroup(), renderModel);
 
@@ -1342,6 +1909,8 @@ function renderBoard() {
   if (_boardShowSchedules) {
     html += _renderSchedulesView();
     panel.innerHTML = html;
+    _boardLastRenderShellKey = shellKey;
+    _boardLastToolbarShapeKey = _boardToolbarShapeKey(renderModel, filtersActive);
     _boardRestoreRenderedState();
     _boardAfterRenderLayout();
     if (restoreState) _restoreSurfaceState(panel, restoreState);
@@ -1362,6 +1931,7 @@ function renderBoard() {
         renderModel,
         filtersActive,
       );
+      _boardRememberLaneRender(lanes[laneIdx], renderModel, filtersActive, true, true, wideSection);
       html += wideSection.html;
       var wideDelay = _boardVisibleLaneEntryRefreshDelay(
         wideSection.rootTasks,
@@ -1378,6 +1948,7 @@ function renderBoard() {
       renderModel,
       filtersActive,
     );
+    _boardRememberLaneRender(_boardSelectedLane, renderModel, filtersActive, false, false, laneSection);
     html += laneSection.html;
     nextLaneEntryDelay = _boardVisibleLaneEntryRefreshDelay(
       laneSection.rootTasks,
@@ -1393,6 +1964,8 @@ function renderBoard() {
   html += _renderBoardSelectionBar();
 
   panel.innerHTML = html;
+  _boardLastRenderShellKey = shellKey;
+  _boardLastToolbarShapeKey = _boardToolbarShapeKey(renderModel, filtersActive);
   _boardRestoreRenderedState();
 
   // Auto-focus inputs (only when user explicitly opened, not on re-renders)
