@@ -5504,6 +5504,73 @@ test('board lane cache rerenders visible dependency badges when a dependency is 
   assert.match(cards.innerHTML, /Deps 1/);
 });
 
+test('board lane cache rerenders nested dependent card in visible parent lane', () => {
+  const { context, document } = createBoardHarness({ stubCards: false });
+  const panel = document.register('panel-board');
+  const cards = document.register('board-cards');
+
+  context.state.board_lanes = ['Backlog', 'To Do', 'In Progress', 'Done'];
+  context.state.board_tasks = {
+    parent: {
+      id: 'parent',
+      group: 'alpha',
+      task: 'Visible parent task',
+      lane: 'In Progress',
+      position: 1,
+    },
+    child: {
+      id: 'child',
+      group: 'alpha',
+      task: 'Nested blocked task',
+      lane: 'Backlog',
+      parent_task_id: 'parent',
+      depends_on: ['dep'],
+      position: 2,
+    },
+    dep: {
+      id: 'dep',
+      group: 'alpha',
+      task: 'Dependency task',
+      lane: 'To Do',
+      position: 3,
+    },
+  };
+
+  runInContext(context, `
+    _boardSelectedLane = 'In Progress';
+    var originalRenderBoardCard = _renderBoardCard;
+    var cardRenderCalls = 0;
+    _renderBoardCard = function() {
+      cardRenderCalls++;
+      return originalRenderBoardCard.apply(this, arguments);
+    };
+  `);
+
+  context.renderBoard();
+
+  assert.match(panel.innerHTML, /Blocked by deps/);
+  assert.match(panel.innerHTML, /Blocked by 1/);
+
+  runInContext(context, `
+    cardRenderCalls = 0;
+    var previousDep = Object.assign({}, state.board_tasks.dep);
+    state.board_tasks.dep.lane = 'Done';
+    _boardQueueTaskDeltas([{
+      op: 'task_upsert',
+      id: 'dep',
+      previous: previousDep,
+      next: state.board_tasks.dep
+    }], { canPatch: true });
+  `);
+
+  context.renderBoard();
+
+  assert.equal(runInContext(context, 'cardRenderCalls'), 2);
+  assert.doesNotMatch(cards.innerHTML, /Blocked by deps/);
+  assert.doesNotMatch(cards.innerHTML, /Blocked by 1/);
+  assert.match(cards.innerHTML, /Deps 1/);
+});
+
 test('board lane cache rerenders Backlog summary when an offscreen dependency unblocks', () => {
   const { context, document } = createBoardHarness({ stubCards: false });
   const panel = document.register('panel-board');

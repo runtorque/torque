@@ -756,7 +756,9 @@ function _boardQueueTaskDeltas(changes, options) {
 
 function _boardConsumeQueuedTaskDeltas() {
   if (!_boardQueuedTaskDeltas.length) {
-    return { changes: [], canPatch: true };
+    var emptyOut = { changes: [], canPatch: _boardQueuedTaskDeltasCanPatch };
+    _boardQueuedTaskDeltasCanPatch = true;
+    return emptyOut;
   }
   var out = {
     changes: _boardQueuedTaskDeltas.slice(),
@@ -767,13 +769,18 @@ function _boardConsumeQueuedTaskDeltas() {
   return out;
 }
 
-function _boardTaskLaneFromDeltaTask(task) {
-  return task && task.lane ? task.lane : '';
-}
-
 function _boardAddAffectedLane(lanes, lane) {
   if (!lane) return;
   lanes[lane] = true;
+}
+
+function _boardAddTaskAffectedLanes(lanes, task) {
+  if (!task) return;
+  _boardAddAffectedLane(lanes, task.lane);
+  if (task.parent_task_id) {
+    var parent = _boardTasks()[task.parent_task_id];
+    _boardAddAffectedLane(lanes, parent ? parent.lane : task.lane);
+  }
 }
 
 function _boardAddDependentAffectedLanes(lanes, taskId) {
@@ -782,7 +789,7 @@ function _boardAddDependentAffectedLanes(lanes, taskId) {
   for (var id in tasks) {
     var task = tasks[id];
     if (!task || !Array.isArray(task.depends_on)) continue;
-    if (task.depends_on.indexOf(taskId) >= 0) _boardAddAffectedLane(lanes, task.lane);
+    if (task.depends_on.indexOf(taskId) >= 0) _boardAddTaskAffectedLanes(lanes, task);
   }
 }
 
@@ -791,7 +798,7 @@ function _boardAddDependencyAffectedLanes(lanes, task) {
   var tasks = _boardTasks();
   for (var i = 0; i < task.depends_on.length; i++) {
     var dep = tasks[task.depends_on[i]];
-    if (dep) _boardAddAffectedLane(lanes, dep.lane);
+    if (dep) _boardAddTaskAffectedLanes(lanes, dep);
   }
 }
 
@@ -804,16 +811,8 @@ function _boardAffectedLanesFromTaskDeltas(changes) {
     var previous = change.previous || null;
     var next = change.next || null;
     var taskId = change.id || (next && next.id) || (previous && previous.id) || '';
-    _boardAddAffectedLane(lanes, _boardTaskLaneFromDeltaTask(previous));
-    _boardAddAffectedLane(lanes, _boardTaskLaneFromDeltaTask(next));
-    if (previous && previous.parent_task_id) {
-      var prevParent = _boardTasks()[previous.parent_task_id];
-      _boardAddAffectedLane(lanes, prevParent ? prevParent.lane : previous.lane);
-    }
-    if (next && next.parent_task_id) {
-      var nextParent = _boardTasks()[next.parent_task_id];
-      _boardAddAffectedLane(lanes, nextParent ? nextParent.lane : next.lane);
-    }
+    _boardAddTaskAffectedLanes(lanes, previous);
+    _boardAddTaskAffectedLanes(lanes, next);
     _boardAddDependencyAffectedLanes(lanes, previous);
     _boardAddDependencyAffectedLanes(lanes, next);
     _boardAddDependentAffectedLanes(lanes, taskId);
