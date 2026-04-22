@@ -9276,6 +9276,182 @@ test('main render orders architects above hired engineers, then user-owned engin
   assert.match(main.innerHTML, /architect-owned-worker/);
 });
 
+test('main render hierarchy classes and indentation distinguish architect-owned workers from orphans', () => {
+  const { context, document, sandbox } = createMainRenderHarness();
+  const main = document.getElementById('main');
+
+  sandbox.state.groups = {
+    loom: ['arch-a', 'eng-hired', 'worker-hired', 'orphan'],
+  };
+  sandbox.state.group_settings = {
+    loom: { collapsed_default: false, weaver_agent_id: '' },
+  };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'arch-a': {
+      id: 'arch-a',
+      name: 'Architect A',
+      kind: 'architect',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'A',
+      status: 'running',
+    },
+    'eng-hired': {
+      id: 'eng-hired',
+      name: 'Alice',
+      kind: 'engineer',
+      hired_by_architect_id: 'arch-a',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'E',
+      status: 'running',
+    },
+    'worker-hired': {
+      id: 'worker-hired',
+      name: 'Worker A',
+      owner_engineer_id: 'eng-hired',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'W',
+      status: 'running',
+    },
+    orphan: {
+      id: 'orphan',
+      name: 'Orphan Worker',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'O',
+      status: 'running',
+    },
+  };
+
+  runInContext(context, `render();`);
+
+  const hiredWorker = main.innerHTML.match(/<div class="([^"]*)" draggable="true" data-drag-id="worker-hired"/);
+  const orphanWorker = main.innerHTML.match(/<div class="([^"]*)" draggable="true" data-drag-id="orphan"/);
+  assert.ok(hiredWorker, 'architect-owned worker cell should render');
+  assert.ok(orphanWorker, 'orphan worker cell should render');
+  assert.match(hiredWorker[1], /\barchitect-owned-worker\b/);
+  assert.doesNotMatch(orphanWorker[1], /\barchitect-owned-worker\b|\bengineer-owned-worker\b/);
+
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const architectEngineerRule = css.match(/\.cell\.architect-owned-engineer\s*\{[^}]*\}/)[0];
+  const engineerWorkerRule = css.match(/\.cell\.engineer-owned-worker\s*\{[^}]*\}/)[0];
+  const architectWorkerRule = css.match(/\.cell\.architect-owned-worker\s*\{[^}]*\}/)[0];
+  assert.match(architectEngineerRule, /padding-left:\s*28px;/);
+  assert.match(engineerWorkerRule, /padding-left:\s*28px;/);
+  assert.match(architectWorkerRule, /padding-left:\s*38px;/);
+  assert.match(css, /\.cell\.engineer-owned-worker::after,\s*\.cell\.architect-owned-engineer::after,\s*\.cell\.architect-owned-worker::after\s*\{[^}]*linear-gradient/);
+});
+
+test('main hierarchy rerender preserves surface state when worker relationship classes change', () => {
+  const { context, document, sandbox } = createMainRenderHarness();
+  const main = document.getElementById('main');
+  let renderCount = 0;
+
+  function installFocusedInput() {
+    const input = new FakeElement('hierarchy-filter');
+    input.value = '';
+    input.selectionStart = 0;
+    input.selectionEnd = 0;
+    input.parentNode = main;
+    main.children = [input];
+    document.register('hierarchy-filter', input);
+    return input;
+  }
+
+  Object.defineProperty(main, 'innerHTML', {
+    configurable: true,
+    get() {
+      return this._innerHTML || '';
+    },
+    set(value) {
+      this._innerHTML = value;
+      renderCount += 1;
+      this.scrollTop = 0;
+      installFocusedInput();
+    },
+  });
+
+  sandbox.state.groups = {
+    loom: ['arch-a', 'eng-hired', 'worker-hired'],
+  };
+  sandbox.state.group_settings = {
+    loom: { collapsed_default: false, weaver_agent_id: '' },
+  };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'arch-a': {
+      id: 'arch-a',
+      name: 'Architect A',
+      kind: 'architect',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'A',
+      status: 'running',
+    },
+    'eng-hired': {
+      id: 'eng-hired',
+      name: 'Alice',
+      kind: 'engineer',
+      hired_by_architect_id: 'arch-a',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'E',
+      status: 'running',
+    },
+    'worker-hired': {
+      id: 'worker-hired',
+      name: 'Worker A',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'W',
+      status: 'running',
+    },
+  };
+
+  let input = installFocusedInput();
+  input.value = 'planner';
+  input.selectionStart = 2;
+  input.selectionEnd = 5;
+  document.activeElement = input;
+  main.scrollTop = 73;
+
+  runInContext(context, `render();`);
+
+  input = document.getElementById('hierarchy-filter');
+  assert.equal(renderCount, 1);
+  assert.equal(main.scrollTop, 73);
+  assert.equal(input.value, 'planner');
+  assert.equal(input.selectionStart, 2);
+  assert.equal(input.selectionEnd, 5);
+  assert.equal(input.focused, true);
+  let workerMatch = main.innerHTML.match(/<div class="([^"]*)" draggable="true" data-drag-id="worker-hired"/);
+  assert.ok(workerMatch, 'worker cell should render before ownership changes');
+  assert.doesNotMatch(workerMatch[1], /\barchitect-owned-worker\b|\bengineer-owned-worker\b/);
+
+  document.activeElement = input;
+  input.value = 'planner';
+  input.selectionStart = 3;
+  input.selectionEnd = 7;
+  main.scrollTop = 91;
+  sandbox.state.agents['worker-hired'].owner_engineer_id = 'eng-hired';
+
+  runInContext(context, `render();`);
+
+  input = document.getElementById('hierarchy-filter');
+  assert.equal(renderCount, 2);
+  assert.equal(main.scrollTop, 91);
+  assert.equal(input.value, 'planner');
+  assert.equal(input.selectionStart, 3);
+  assert.equal(input.selectionEnd, 7);
+  assert.equal(input.focused, true);
+  workerMatch = main.innerHTML.match(/<div class="([^"]*)" draggable="true" data-drag-id="worker-hired"/);
+  assert.ok(workerMatch, 'worker cell should render after ownership changes');
+  assert.match(workerMatch[1], /\barchitect-owned-worker\b/);
+});
+
 test('main render sorts dismissed engineers last and preserves scroll across rehire transitions', () => {
   const { context, document, sandbox } = createMainRenderHarness();
   const main = document.getElementById('main');

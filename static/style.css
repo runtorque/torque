@@ -635,43 +635,50 @@ body.runtime-embedded .terminal-empty {
   margin-top: 2px;
 }
 .cell.engineer-owned-worker {
-  padding-left: 16px;
-}
-.cell.engineer-owned-worker::before {
-  content: "";
-  position: absolute;
-  left: 8px;
-  top: 12px;
-  bottom: 10px;
-  width: 1px;
-  background: color-mix(in srgb, var(--accent) 22%, transparent);
-  border-radius: 999px;
+  --cell-hierarchy-rule-color: color-mix(in srgb, var(--accent) 56%, transparent);
+  --cell-hierarchy-rule-left: 14px;
+  --cell-hierarchy-tick-width: 10px;
+  padding-left: 28px;
 }
 .cell.architect-owned-engineer {
-  padding-left: 16px;
-}
-.cell.architect-owned-engineer::before {
-  content: "";
-  position: absolute;
-  left: 8px;
-  top: 10px;
-  bottom: 8px;
-  width: 1px;
-  background: color-mix(in srgb, var(--amber) 28%, transparent);
-  border-radius: 999px;
+  --cell-hierarchy-rule-color: color-mix(in srgb, var(--amber) 58%, transparent);
+  --cell-hierarchy-rule-left: 14px;
+  --cell-hierarchy-tick-width: 10px;
+  padding-left: 28px;
 }
 .cell.architect-owned-worker {
-  padding-left: 24px;
+  --cell-hierarchy-rule-color: color-mix(in srgb, var(--amber) 62%, transparent);
+  --cell-hierarchy-rule-left: 20px;
+  --cell-hierarchy-tick-width: 12px;
+  padding-left: 38px;
 }
+.cell.engineer-owned-worker::before,
+.cell.architect-owned-engineer::before,
 .cell.architect-owned-worker::before {
   content: "";
   position: absolute;
-  left: 14px;
+  left: var(--cell-hierarchy-rule-left);
   top: 8px;
   bottom: 8px;
-  width: 1px;
-  background: color-mix(in srgb, var(--amber) 28%, transparent);
+  width: 2px;
+  background: var(--cell-hierarchy-rule-color);
   border-radius: 999px;
+  pointer-events: none;
+}
+.cell.engineer-owned-worker::after,
+.cell.architect-owned-engineer::after,
+.cell.architect-owned-worker::after {
+  content: "";
+  position: absolute;
+  left: var(--cell-hierarchy-rule-left);
+  top: 8px;
+  bottom: 8px;
+  width: var(--cell-hierarchy-tick-width);
+  background:
+    linear-gradient(var(--cell-hierarchy-rule-color), var(--cell-hierarchy-rule-color)) top left / var(--cell-hierarchy-tick-width) 2px no-repeat,
+    linear-gradient(var(--cell-hierarchy-rule-color), var(--cell-hierarchy-rule-color)) bottom left / var(--cell-hierarchy-tick-width) 2px no-repeat;
+  border-radius: 999px;
+  pointer-events: none;
 }
 .cell-name {
   font-size: 9px; text-align: center;
@@ -5775,24 +5782,71 @@ body.diff-view-open #ctx-menu {
   background: color-mix(in srgb, var(--bg-hover) 60%, transparent);
 }
 .architect-roster-level-1 {
-  margin-left: 12px;
+  --agent-panel-hierarchy-color: color-mix(in srgb, var(--amber) 58%, transparent);
+  --agent-panel-hierarchy-left: -12px;
+  --agent-panel-hierarchy-tick-width: 10px;
+  margin-left: 18px;
 }
 .architect-roster-level-2 {
-  margin-left: 24px;
+  --agent-panel-hierarchy-color: color-mix(in srgb, var(--amber) 62%, transparent);
+  --agent-panel-hierarchy-left: -16px;
+  --agent-panel-hierarchy-tick-width: 12px;
+  margin-left: 34px;
+}
+.engineer-roster-level-1 {
+  --agent-panel-hierarchy-color: color-mix(in srgb, var(--accent) 56%, transparent);
+  --agent-panel-hierarchy-left: -12px;
+  --agent-panel-hierarchy-tick-width: 10px;
+  margin-left: 18px;
+}
+.engineer-roster-level-2 {
+  --agent-panel-hierarchy-color: color-mix(in srgb, var(--accent) 56%, transparent);
+  --agent-panel-hierarchy-left: -16px;
+  --agent-panel-hierarchy-tick-width: 12px;
+  margin-left: 34px;
 }
 .architect-roster-level-1,
-.architect-roster-level-2 {
+.architect-roster-level-2,
+.engineer-roster-level-1,
+.engineer-roster-level-2 {
   position: relative;
 }
 .architect-roster-level-1::before,
-.architect-roster-level-2::before {
+.architect-roster-level-2::before,
+.engineer-roster-level-1::before,
+.engineer-roster-level-2::before {
   content: "";
   position: absolute;
-  left: -8px;
-  top: 8px;
-  bottom: 8px;
-  width: 1px;
-  background: color-mix(in srgb, var(--border) 80%, transparent);
+  left: var(--agent-panel-hierarchy-left);
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  background: var(--agent-panel-hierarchy-color);
+  border-radius: 999px;
+  pointer-events: none;
+}
+.architect-roster-level-1::after,
+.architect-roster-level-2::after,
+.engineer-roster-level-1::after,
+.engineer-roster-level-2::after {
+  content: "";
+  position: absolute;
+  left: var(--agent-panel-hierarchy-left);
+  top: 6px;
+  bottom: 6px;
+  width: var(--agent-panel-hierarchy-tick-width);
+  background:
+    linear-gradient(var(--agent-panel-hierarchy-color), var(--agent-panel-hierarchy-color)) top left / var(--agent-panel-hierarchy-tick-width) 2px no-repeat,
+    linear-gradient(var(--agent-panel-hierarchy-color), var(--agent-panel-hierarchy-color)) bottom left / var(--agent-panel-hierarchy-tick-width) 2px no-repeat;
+  pointer-events: none;
+}
+.engineer-row.architect-owned-engineer-row,
+.engineer-row.architect-owned-worker-row {
+  border-color: color-mix(in srgb, var(--amber) 32%, var(--border));
+}
+.engineer-row.user-owned-engineer-row,
+.engineer-row.engineer-owned-worker-row {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
 }
 .architect-roster-section-head {
   display: flex;
