@@ -229,6 +229,8 @@ function toggleHint(btn) {
 }
 
 let _confirmResolve = null;
+let _addEngineerGroup = '';
+let _addEngineerArchitectId = '';
 
 function closeModals() {
   var taskModal = document.getElementById('modal-task');
@@ -246,6 +248,9 @@ function closeModals() {
   document.querySelectorAll('.hint-pop').forEach(p => p.remove());
   if (_confirmResolve) { _confirmResolve(false); _confirmResolve = null; }
   if (typeof _glsCapturing !== 'undefined' && _glsCapturing) _cancelCapture();
+  _addEngineerGroup = '';
+  _addEngineerArchitectId = '';
+  _addArchitectGroup = '';
   _pendingHireRejectId = '';
   _architectDecisionModalArchitectId = '';
 }
@@ -322,14 +327,64 @@ function submitGroup() {
 }
 
 /* -- Add Engineer ----------------------------------------------------- */
-function openAddEngineerModal() {
+function _normalizeAddEngineerOptions(options, architectId) {
+  const ctx = { group: '', hired_by_architect_id: '' };
+  if (options && typeof options === 'object') {
+    ctx.group = String(options.group || '').trim();
+    ctx.hired_by_architect_id = String(
+      options.hired_by_architect_id
+      || options.hiredByArchitectId
+      || options.architect_id
+      || options.architectId
+      || ''
+    ).trim();
+  } else {
+    ctx.group = String(options || '').trim();
+    ctx.hired_by_architect_id = String(architectId || '').trim();
+  }
+  return ctx;
+}
+
+function _engineerModalArchitectName(architectId) {
+  const id = String(architectId || '').trim();
+  if (!id || !state || !state.agents || !state.agents[id]) return '';
+  const architect = state.agents[id];
+  return architect.name || architect.slug || id;
+}
+
+function _engineerModalSummary(group, architectId) {
+  const groupText = String(group || '').trim();
+  const architectName = _engineerModalArchitectName(architectId);
+  if (architectId) {
+    return 'Create a persistent engineer session hired by '
+      + (architectName || 'this architect')
+      + (groupText ? ' in ' + groupText : '')
+      + '.';
+  }
+  if (groupText) {
+    return 'Create a persistent user-hired engineer session in ' + groupText + '.';
+  }
+  return 'Create a persistent engineer session with its own MCP scope and launch command.';
+}
+
+function openAddEngineerForSection(group, architectId) {
+  openAddEngineerModal({
+    group: group,
+    hired_by_architect_id: architectId,
+  });
+}
+
+function openAddEngineerModal(options, architectId) {
   const modal = document.getElementById('modal-engineer');
   if (!modal) return;
+  const ctx = _normalizeAddEngineerOptions(options, architectId);
+  _addEngineerGroup = ctx.group;
+  _addEngineerArchitectId = ctx.hired_by_architect_id;
   const nameInput = document.getElementById('engineer-name-input');
   const commandInput = document.getElementById('engineer-command-input');
   const summary = document.getElementById('modal-engineer-summary');
   if (summary) {
-    summary.textContent = 'Create a persistent engineer session with its own MCP scope and launch command.';
+    summary.textContent = _engineerModalSummary(_addEngineerGroup, _addEngineerArchitectId);
     summary.classList.remove('hidden');
   }
   if (nameInput) nameInput.value = '';
@@ -346,6 +401,8 @@ function submitAddEngineer() {
   const command = commandInput ? commandInput.value.trim() : '';
   if (!name) return;
   const payload = { cmd: 'add_engineer', name };
+  if (_addEngineerGroup) payload.group = _addEngineerGroup;
+  if (_addEngineerArchitectId) payload.hired_by_architect_id = _addEngineerArchitectId;
   if (command) payload.command = command;
   send(payload);
   closeModals();
@@ -356,13 +413,25 @@ let _addArchitectGroup = '';
 let _pendingHireRejectId = '';
 let _architectDecisionModalArchitectId = '';
 
+function _normalizeAddArchitectOptions(options) {
+  if (options && typeof options === 'object') {
+    return { group: String(options.group || '').trim() };
+  }
+  return { group: String(options || '').trim() };
+}
+
+function openAddArchitectForGroup(group) {
+  openAddArchitectModal({ group: group });
+}
+
 function openAddArchitectModal(group) {
   const modal = document.getElementById('modal-architect');
   if (!modal) return;
   const nameInput = document.getElementById('architect-name-input');
   const commandInput = document.getElementById('architect-command-input');
   const summary = document.getElementById('modal-architect-summary');
-  _addArchitectGroup = String(group || '').trim();
+  const ctx = _normalizeAddArchitectOptions(group);
+  _addArchitectGroup = ctx.group;
   if (summary) {
     const summaryText = _addArchitectGroup
       ? 'Create a persistent architect session for ' + _addArchitectGroup + '.'
