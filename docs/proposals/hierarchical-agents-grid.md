@@ -75,7 +75,7 @@ A section is composed of:
 2. One or more **engineer rows** stacked vertically to the right of the architect column, inside the section. Each engineer row reads left-to-right as: `[ engineer card ] [ worker 1 ] [ worker 2 ] [ worker 3 ] ...` with workers wrapping within the same row when they overflow horizontally (flush-left with the first worker, NOT indented under the engineer card — the wrapping stays inside that engineer's row and does not visually bleed into the next row).
 3. A **`+ New Engineer` ghost card** at the bottom of the section's engineer-row stack (in the right column, aligned to the engineer-row left edge). Ghost card = dashed outline, same width as a real engineer card, 1/4 the height of a real engineer card, text label "+ New Engineer". Clicking it creates an engineer hired by this architect.
 4. In the User section only: a **loose-workers strip** rendered above the User section's engineer rows. Always rendered — if empty, it is a single-ghost-card row holding only the `+ New Worker` ghost card.
-5. A **`+ New Architect` ghost card** at the bottom of the architect column (below the last architect section), aligned to the architect column. Same dashed-outline ghost-card style: same width as a real architect card, 1/4 height, text label "+ New Architect".
+5. A **`+ New Architect` ghost card** inside the User section, positioned in the architect column directly below the User architect card (before the User-to-Architect-1 section divider). Same dashed-outline ghost-card style: same width as a real architect card, 1/4 height, text label "+ New Architect". Semantically it belongs to the User section because architects are user-created only (per the kinds invariants); visually this means the User section's left column is taller than just the User card, extending down to include the ghost.
 
 Section boundaries are horizontal dividers that span the full grid width.
 
@@ -121,11 +121,11 @@ Notation in the sketch: real cards are drawn with solid boxes (`[Name]` / `┌�
 │  │  User  │                      └╌╌╌╌╌╌╌╌╌╌┘                               │
 │  │ OWNER  │   ─────────────────────────────────                             │
 │  └────────┘   [Engineer 1] [worker] [worker]          ← engineer row 1      │
-│               ─────────────────────────────────                             │
-│               [Engineer 2] [worker]                    ← engineer row 2     │
-│               ─────────────────────────────────                             │
-│               ┌╌╌╌╌╌╌╌╌╌╌╌╌┐                          ← ghost card,         │
-│               │+ New Engineer│                           1/4 height          │
+│  ┌╌╌╌╌╌╌╌╌┐   ─────────────────────────────────                             │
+│  │+ New   │   [Engineer 2] [worker]                    ← engineer row 2     │
+│  │Architect│   ─────────────────────────────────                             │
+│  └╌╌╌╌╌╌╌╌┘   ┌╌╌╌╌╌╌╌╌╌╌╌╌┐                          ← engineer ghost     │
+│               │+ New Engineer│                                              │
 │               └╌╌╌╌╌╌╌╌╌╌╌╌┘                                                │
 │                                                                             │
 │ ─── architect section divider ─────────────────────────────────────────     │
@@ -151,14 +151,12 @@ Notation in the sketch: real cards are drawn with solid boxes (`[Name]` / `┌�
 │  └────────┘   │+ New Engineer│                                              │
 │               └╌╌╌╌╌╌╌╌╌╌╌╌┘                                                │
 │                                                                             │
-│ ─── architect section divider (between last architect + New Architect) ─    │
-│                                                                             │
-│  ┌╌╌╌╌╌╌╌╌╌╌╌╌┐                                ← architect column           │
-│  │+ New Architect│                                continues with ghost      │
-│  └╌╌╌╌╌╌╌╌╌╌╌╌┘                                                             │
+│                         (grid ends at last architect section, no orphan)    │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+Note the left column of the User section now extends vertically to accommodate both the User card AND the `+ New Architect` ghost below it. The right column still holds its own content (loose strip + engineer rows + `+ New Engineer` ghost). The two columns have independent vertical extents; the section's total height is `max(left_column_height, right_column_height)`.
 
 **Key non-shapes** (what this layout is NOT):
 
@@ -221,7 +219,7 @@ All three creation surfaces (`+ New Architect`, `+ New Engineer`, `+ New Worker`
 
 **Positioning:**
 
-- **`+ New Architect` ghost**: at the bottom of the architect column, below the last architect section's divider. Aligned to the architect column's fixed-width gutter on the left — physically continues the architect spine.
+- **`+ New Architect` ghost**: inside the User section, in the architect column, directly below the User architect card (before the User-to-Architect-1 divider). Aligned to the architect column's fixed-width gutter. Rationale: architects are user-created only per the kinds invariants; placing the ghost beneath the User card makes the "user creates architects" mental model spatially literal, and eliminates the orphan-at-bottom-of-grid look.
 - **`+ New Engineer` ghost**: at the bottom of each section's engineer-row stack, in the section's right column, aligned to the engineer-row left edge (directly under the first engineer card's position, NOT under the architect column). One per section.
 - **`+ New Worker` ghost**: in the User section's loose-workers strip, after any existing detached worker cards (right-most on the strip's first line; wraps to a new line only if the strip has many workers).
 
