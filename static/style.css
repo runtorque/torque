@@ -748,6 +748,12 @@ body.runtime-embedded .terminal-empty {
   background: color-mix(in srgb, var(--accent) 18%, transparent);
   border-color: color-mix(in srgb, var(--accent) 66%, var(--border));
 }
+.agent-section-new-engineer-btn.focused,
+.agent-grid-new-architect-btn.focused,
+.loose-workers-placeholder-btn.focused {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
 .agent-section-new-engineer-btn:disabled,
 .agent-grid-new-architect-btn:disabled {
   cursor: default;

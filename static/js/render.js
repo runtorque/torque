@@ -603,6 +603,355 @@ function _agentGridSectionKey(section) {
   return 'architect:' + String((section.architect && section.architect.id) || '');
 }
 
+function _gridNavControlId(controlType, groupName, sectionKey) {
+  let id = 'grid-control:' + String(controlType || '') + ':' + String(groupName || '');
+  if (sectionKey) id += ':' + String(sectionKey);
+  return id;
+}
+
+function _gridNavControlFocusKey(controlType, groupName, sectionKey) {
+  if (controlType === 'section-new-engineer') {
+    return 'section-new-engineer:' + String(groupName || '') + ':' + String(sectionKey || '');
+  }
+  if (controlType === 'loose-new-worker') {
+    return 'loose-new-worker:' + String(groupName || '') + ':' + String(sectionKey || '');
+  }
+  if (controlType === 'agent-new-architect') {
+    return 'agent-new-architect:' + String(groupName || '');
+  }
+  return '';
+}
+
+function _gridNavFocusedClass(navId) {
+  return (navId && typeof focusedItemId !== 'undefined' && focusedItemId === navId)
+    ? ' focused'
+    : '';
+}
+
+function _ensureGroupCollapsedInitialized(gname, gsLocal) {
+  if (!_collapsedInitialized.has(gname)) {
+    _collapsedInitialized.add(gname);
+    if (gsLocal && gsLocal.collapsed_default) collapsedGroups.add(gname);
+  }
+}
+
+function _visibleGroupCellsForGrid(gname, embeddedMode) {
+  const aids = state.groups[gname] || [];
+  const gsFilter = (state.group_settings || {})[gname] || {};
+  let wid = null;
+  if (!embeddedMode && gsFilter.filter_by_window && state.current_window_id) {
+    const hasActive = aids.some(id => {
+      const c = state.agents[id];
+      if (c && c.session_id) return true;
+      const kids = state.children[id] || [];
+      return kids.some(kid => {
+        const ct = state.agents[kid];
+        return ct && ct.session_id;
+      });
+    });
+    if (hasActive) wid = state.current_window_id;
+  } else if (!embeddedMode && getFilterByWindow()) {
+    wid = state.current_window_id;
+  }
+
+  const agents = [];
+  const standaloneTerms = [];
+  for (const id of aids) {
+    const c = state.agents[id];
+    if (!c) continue;
+    if (wid && c.window_id && c.window_id !== wid) continue;
+    if (c.cell_type === 'agent') {
+      agents.push(c);
+    } else if (c.cell_type === 'terminal' && (!c.parent_id || !state.agents[c.parent_id])) {
+      standaloneTerms.push(c);
+    }
+  }
+
+  return {
+    aids,
+    agents,
+    standaloneTerms,
+    wid,
+    hiddenByWindow: !!(wid && agents.length === 0 && standaloneTerms.length === 0 && aids.length > 0),
+  };
+}
+
+function _buildAgentGridNavigationModel(groupContexts) {
+  const model = {
+    navItems: [],
+    navAgents: [],
+    navByGroup: {},
+    navGroupOrder: [],
+    gridRows: [],
+    itemMeta: {},
+    creationControls: [],
+    focusableItems: [],
+  };
+
+  let sortOrder = 0;
+  const registeredRowIndexes = new Set();
+
+  const addMeta = function(item, row, colIndex, sortValue) {
+    if (!item || !item.id) return;
+    const meta = Object.assign({}, item, {
+      group: row ? row.group : item.group,
+      sectionKey: row ? row.sectionKey : item.sectionKey,
+      rowKey: row ? row.rowKey : item.rowKey,
+      rowType: row ? row.rowType : item.rowType,
+      rowIndex: row ? row.rowIndex : null,
+      colIndex: typeof colIndex === 'number' ? colIndex : null,
+      sort: typeof sortValue === 'number' ? sortValue : sortOrder,
+    });
+    model.itemMeta[item.id] = meta;
+    model.focusableItems.push(item.id);
+  };
+
+  const addCreationControl = function(control) {
+    if (!control || !control.id) return;
+    model.creationControls.push(control);
+    if (!model.itemMeta[control.id]) addMeta(control, null, null, control.sort);
+  };
+
+  const addRow = function(row) {
+    if (!row || !row.items || row.items.length === 0) return;
+    row.rowIndex = model.gridRows.length;
+    row.items = row.items.filter(item => item && item.id);
+    if (row.items.length === 0) return;
+    const rowSortBase = sortOrder++;
+    for (let i = 0; i < row.items.length; i++) {
+      addMeta(row.items[i], row, i, rowSortBase + (i / 100));
+    }
+    model.gridRows.push(row);
+  };
+
+  const addAgentNav = function(ctx, groupNav, agentId) {
+    const a = state.agents[agentId];
+    if (!a) return;
+    model.navItems.push(agentId);
+    model.navAgents.push(agentId);
+    groupNav.push(agentId);
+    if (a.id === selectedAgentId) {
+      const cIds = state.children[a.id] || [];
+      for (const cid of cIds) {
+        const ct = state.agents[cid];
+        if (ct && (!ctx.wid || !ct.window_id || ct.window_id === ctx.wid)) {
+          model.navItems.push(cid);
+          groupNav.push(cid);
+        }
+      }
+    }
+  };
+
+  for (const ctx of groupContexts) {
+    model.navGroupOrder.push(ctx.gname);
+    const groupNav = [];
+    if (!ctx.collapsed) {
+      for (const section of ctx.agentLayout.sections) {
+        const sectionKey = _agentGridSectionKey(section);
+        if (section.architect) {
+          const rowKey = sectionKey + ':header';
+          const headerRow = {
+            group: ctx.gname,
+            sectionKey,
+            rowKey,
+            rowType: 'architect-header-row',
+            architectId: section.architect.id,
+            items: [{
+              id: section.architect.id,
+              type: 'agent',
+              agentKind: 'architect',
+            }],
+          };
+          addRow(headerRow);
+          if (!ctx.atAgentCap) {
+            const controlId = _gridNavControlId('section-new-engineer', ctx.gname, sectionKey);
+            addCreationControl({
+              id: controlId,
+              type: 'control',
+              controlType: 'section-new-engineer',
+              group: ctx.gname,
+              sectionKey,
+              architectId: section.architect.id || '',
+              focusKey: _gridNavControlFocusKey('section-new-engineer', ctx.gname, sectionKey),
+              sort: model.itemMeta[section.architect.id].sort + 0.5,
+            });
+          }
+        } else if (section.type === 'user') {
+          if (!ctx.atAgentCap) {
+            const controlId = _gridNavControlId('section-new-engineer', ctx.gname, sectionKey);
+            addCreationControl({
+              id: controlId,
+              type: 'control',
+              controlType: 'section-new-engineer',
+              group: ctx.gname,
+              sectionKey,
+              architectId: '',
+              focusKey: _gridNavControlFocusKey('section-new-engineer', ctx.gname, sectionKey),
+              sort: sortOrder++,
+            });
+          }
+        }
+
+        if (section.type === 'user') {
+          const workerItems = ((section && section.looseWorkers) || []).map(worker => ({
+            id: worker.id,
+            type: 'agent',
+            agentKind: 'worker',
+          }));
+          const controlId = _gridNavControlId('loose-new-worker', ctx.gname, sectionKey);
+          const looseControl = {
+            id: controlId,
+            type: 'control',
+            controlType: 'loose-new-worker',
+            group: ctx.gname,
+            sectionKey,
+            focusKey: _gridNavControlFocusKey('loose-new-worker', ctx.gname, sectionKey),
+          };
+          addRow({
+            group: ctx.gname,
+            sectionKey,
+            rowKey: sectionKey + ':loose-workers',
+            rowType: 'loose-workers-strip',
+            items: workerItems.concat([looseControl]),
+          });
+          addCreationControl(Object.assign({}, looseControl, {
+            sort: model.itemMeta[controlId] ? model.itemMeta[controlId].sort : sortOrder++,
+          }));
+        }
+
+        for (const row of section.rows) {
+          const workerItems = (row.workers || []).map(worker => ({
+            id: worker.id,
+            type: 'agent',
+            agentKind: 'worker',
+          }));
+          addRow({
+            group: ctx.gname,
+            sectionKey,
+            rowKey: sectionKey + ':engineer:' + String(row.engineer.id || ''),
+            rowType: 'engineer-row',
+            engineerId: row.engineer.id,
+            items: [{
+              id: row.engineer.id,
+              type: 'agent',
+              agentKind: 'engineer',
+            }].concat(workerItems),
+          });
+        }
+      }
+
+      for (let rowIndex = 0; rowIndex < model.gridRows.length; rowIndex++) {
+        if (registeredRowIndexes.has(rowIndex)) continue;
+        const row = model.gridRows[rowIndex];
+        if (row.group !== ctx.gname) continue;
+        registeredRowIndexes.add(rowIndex);
+        for (const item of row.items) {
+          if (item.type === 'agent') addAgentNav(ctx, groupNav, item.id);
+        }
+      }
+
+      for (const t of ctx.standaloneTerms) {
+        model.navItems.push(t.id);
+        groupNav.push(t.id);
+      }
+
+      const architectControlId = _gridNavControlId('agent-new-architect', ctx.gname, '');
+      if (!ctx.atAgentCap) {
+        addCreationControl({
+          id: architectControlId,
+          type: 'control',
+          controlType: 'agent-new-architect',
+          group: ctx.gname,
+          sectionKey: '',
+          focusKey: _gridNavControlFocusKey('agent-new-architect', ctx.gname, ''),
+          sort: sortOrder++,
+        });
+      }
+    }
+    model.navByGroup[ctx.gname] = groupNav;
+  }
+
+  model.creationControls.sort(function(a, b) {
+    const av = typeof a.sort === 'number' ? a.sort : 0;
+    const bv = typeof b.sort === 'number' ? b.sort : 0;
+    if (av !== bv) return av - bv;
+    return String(a.id || '').localeCompare(String(b.id || ''));
+  });
+
+  return model;
+}
+
+function _navModelFirstAgentItemInRows(rows, predicate) {
+  rows = Array.isArray(rows) ? rows : [];
+  for (const row of rows) {
+    if (predicate && !predicate(row)) continue;
+    for (const item of row.items || []) {
+      if (item && item.type === 'agent') return item.id;
+    }
+  }
+  return '';
+}
+
+function _resolveFocusedItemForGridRender(currentFocusedId, navModel) {
+  if (!currentFocusedId || !navModel) return currentFocusedId || null;
+  if (navModel.itemMeta[currentFocusedId] || navModel.navItems.includes(currentFocusedId)) {
+    return currentFocusedId;
+  }
+
+  const previousMeta = window._navGridItemMeta
+    ? window._navGridItemMeta[currentFocusedId]
+    : null;
+  let fallback = '';
+
+  if (previousMeta) {
+    const sameRow = navModel.gridRows.find(row =>
+      row.group === previousMeta.group && row.rowKey === previousMeta.rowKey);
+    if (sameRow) {
+      const start = typeof previousMeta.colIndex === 'number' ? previousMeta.colIndex : 0;
+      for (let i = start; i < (sameRow.items || []).length; i++) {
+        const item = sameRow.items[i];
+        if (item && item.type === 'agent') {
+          fallback = item.id;
+          break;
+        }
+      }
+      if (!fallback && sameRow.rowType === 'engineer-row' && sameRow.engineerId) {
+        const engineerMeta = navModel.itemMeta[sameRow.engineerId];
+        if (engineerMeta) fallback = sameRow.engineerId;
+      }
+    }
+
+    if (!fallback) {
+      fallback = _navModelFirstAgentItemInRows(navModel.gridRows, row =>
+        row.group === previousMeta.group
+        && row.sectionKey === previousMeta.sectionKey
+        && row.rowType === 'engineer-row');
+    }
+
+    if (!fallback) {
+      fallback = _navModelFirstAgentItemInRows(navModel.gridRows, row =>
+        row.group === previousMeta.group
+        && row.sectionKey === 'user');
+    }
+  }
+
+  if (!fallback) {
+    fallback = _navModelFirstAgentItemInRows(navModel.gridRows);
+  }
+
+  if (!fallback && navModel.creationControls.length) {
+    fallback = navModel.creationControls[0].id;
+  }
+
+  if (fallback && typeof _navPreferredColumn !== 'undefined') {
+    const fallbackMeta = navModel.itemMeta[fallback];
+    if (fallbackMeta && typeof fallbackMeta.colIndex === 'number') {
+      _navPreferredColumn = fallbackMeta.colIndex;
+    }
+  }
+  return fallback || null;
+}
+
 function _jsStringAttr(value) {
   return esc(JSON.stringify(String(value || '')));
 }
@@ -624,13 +973,16 @@ function _renderSectionControlsSlot(groupName, section, opts) {
   const groupArg = _jsStringAttr(groupName);
   const architectArg = _jsStringAttr(architectId);
   const disabled = !!opts.disabled;
+  const navId = _gridNavControlId('section-new-engineer', groupName, sectionKey);
+  const focusKey = _gridNavControlFocusKey('section-new-engineer', groupName, sectionKey);
   return '<div class="agent-section-controls-slot"'
     + ' data-section-controls-for="' + esc(sectionKey) + '">'
-    + '<button type="button" class="agent-section-new-engineer-btn"'
+    + '<button type="button" class="agent-section-new-engineer-btn' + _gridNavFocusedClass(navId) + '"'
     + ' data-action="new-engineer"'
+    + ' data-nav-id="' + esc(navId) + '"'
     + ' data-group="' + esc(groupName) + '"'
     + ' data-hired-by-architect-id="' + esc(architectId) + '"'
-    + ' data-focus-key="section-new-engineer:' + esc(groupName) + ':' + esc(sectionKey) + '"'
+    + ' data-focus-key="' + esc(focusKey) + '"'
     + (disabled ? ' disabled aria-disabled="true" title="Agent limit reached"' : ' title="Create an engineer in this section"')
     + (disabled ? '' : ' onclick="event.stopPropagation();openAddEngineerForSection(' + groupArg + ',' + architectArg + ')"')
     + '>+ New Engineer</button>'
@@ -644,9 +996,12 @@ function _renderLooseWorkersStrip(groupName, section, renderCell) {
     + ' data-agent-row-shape="loose-workers-strip"'
     + ' data-section-key="' + esc(sectionKey) + '">';
   for (const worker of workers) html += renderCell(worker);
-  html += '<button type="button" class="loose-workers-new-worker-btn loose-workers-placeholder-btn"'
+  const navId = _gridNavControlId('loose-new-worker', groupName, sectionKey);
+  const focusKey = _gridNavControlFocusKey('loose-new-worker', groupName, sectionKey);
+  html += '<button type="button" class="loose-workers-new-worker-btn loose-workers-placeholder-btn' + _gridNavFocusedClass(navId) + '"'
     + ' data-action="new-worker"'
-    + ' data-focus-key="loose-new-worker:' + esc(groupName) + ':' + esc(sectionKey) + '"'
+    + ' data-nav-id="' + esc(navId) + '"'
+    + ' data-focus-key="' + esc(focusKey) + '"'
     + ' aria-label="Create detached worker"'
     + ' onclick="event.stopPropagation();openAddWorkerModal(\'' + esc(groupName) + '\')"'
     + ' title="Create a user-owned detached worker">+ New Worker</button>';
@@ -683,11 +1038,14 @@ function _renderEngineerRow(row, renderCell) {
 function _renderAgentGridAddArchitectRow(gname, gsLocal, agents) {
   const atCap = gsLocal.max_agents > 0 && agents.length >= gsLocal.max_agents;
   const groupArg = _jsStringAttr(gname);
+  const navId = _gridNavControlId('agent-new-architect', gname, '');
+  const focusKey = _gridNavControlFocusKey('agent-new-architect', gname, '');
   let html = '<div class="agent-grid-new-architect-row">';
-  html += '<button type="button" class="agent-grid-new-architect-btn"'
+  html += '<button type="button" class="agent-grid-new-architect-btn' + _gridNavFocusedClass(navId) + '"'
     + ' data-action="new-architect"'
+    + ' data-nav-id="' + esc(navId) + '"'
     + ' data-group="' + esc(gname) + '"'
-    + ' data-focus-key="agent-new-architect:' + esc(gname) + '"'
+    + ' data-focus-key="' + esc(focusKey) + '"'
     + (atCap ? ' disabled aria-disabled="true" title="Agent limit reached"' : ' title="Create a new architect in this group"')
     + (atCap ? '' : ' onclick="event.stopPropagation();openAddArchitectForGroup(' + groupArg + ')"')
     + '>+ New Architect</button>';
@@ -736,6 +1094,13 @@ function render() {
         No groups yet.<br>Create one to get started.
       </div>`;
     window._navItems = [];
+    window._navAgents = [];
+    window._navByGroup = {};
+    window._navGroupOrder = [];
+    window._navGridRows = [];
+    window._navGridItemMeta = {};
+    window._navCreationControls = [];
+    window._navFocusableItems = [];
     focusedItemId = null;
     if (typeof renderTerminalWorkspace === 'function') renderTerminalWorkspace();
     return;
@@ -762,66 +1127,41 @@ function render() {
     selectedTerminalId = null;
   }
 
-  const navItems = [];
-  const navAgents = [];  // agents only, for left/right navigation
-  const navByGroup = {};  // group name → [item IDs] for up/down within group
-  const navGroupOrder = [];  // visible group names in order
-
-  let html = '';
+  const groupContexts = [];
   for (const gname of groupNames) {
-    const aids = state.groups[gname] || [];
-
-    // Per-group window filtering based on filter_by_window setting
-    const gsFilter = (state.group_settings || {})[gname] || {};
-    let wid = null;
-    if (!embeddedMode && gsFilter.filter_by_window && state.current_window_id) {
-      // Check if any cell in this group has an active session
-      const hasActive = aids.some(id => {
-        const c = state.agents[id];
-        if (c && c.session_id) return true;
-        // Also check child terminals
-        const kids = state.children[id] || [];
-        return kids.some(kid => {
-          const ct = state.agents[kid];
-          return ct && ct.session_id;
-        });
-      });
-      // Only filter if there are active sessions; otherwise show everywhere
-      if (hasActive) wid = state.current_window_id;
-    } else if (!embeddedMode && getFilterByWindow()) {
-      wid = state.current_window_id;
-    }
-
-    // Only agent-type cells render in the main grid. Standalone/root
-    // terminals render in their own group drawer below; child terminals
-    // render under their parent agent's drawer. `state.groups[group]`
-    // from the server contains both agents and terminals, so we split
-    // them explicitly here.
-    const agents = [];
-    const standaloneTerms = [];
-    for (const id of aids) {
-      const c = state.agents[id];
-      if (!c) continue;
-      if (wid && c.window_id && c.window_id !== wid) continue;
-      if (c.cell_type === 'agent') {
-        agents.push(c);
-      } else if (c.cell_type === 'terminal' && (!c.parent_id || !state.agents[c.parent_id])) {
-        standaloneTerms.push(c);
-      }
-    }
+    const cells = _visibleGroupCellsForGrid(gname, embeddedMode);
     // Hide group only if it has cells but none in this window;
     // always show truly empty groups so the user can populate them.
-    if (wid && agents.length === 0 && standaloneTerms.length === 0 && aids.length > 0) continue;
-    navGroupOrder.push(gname);
-    const groupNav = [];
+    if (cells.hiddenByWindow) continue;
 
-    /* collapsed-default on first render of this group */
     const gsLocal = (state.group_settings || {})[gname] || {};
-    if (!_collapsedInitialized.has(gname)) {
-      _collapsedInitialized.add(gname);
-      if (gsLocal.collapsed_default) collapsedGroups.add(gname);
-    }
+    _ensureGroupCollapsedInitialized(gname, gsLocal);
     const collapsed = collapsedGroups.has(gname);
+    const agentLayout = _buildHierarchicalAgentSections(cells.agents);
+    groupContexts.push({
+      gname,
+      aids: cells.aids,
+      agents: cells.agents,
+      standaloneTerms: cells.standaloneTerms,
+      wid: cells.wid,
+      gsLocal,
+      collapsed,
+      agentLayout,
+      atAgentCap: gsLocal.max_agents > 0 && cells.agents.length >= gsLocal.max_agents,
+    });
+  }
+
+  const navModel = _buildAgentGridNavigationModel(groupContexts);
+  focusedItemId = _resolveFocusedItemForGridRender(focusedItemId, navModel);
+
+  let html = '';
+  for (const ctx of groupContexts) {
+    const gname = ctx.gname;
+    const agents = ctx.agents;
+    const standaloneTerms = ctx.standaloneTerms;
+    const wid = ctx.wid;
+    const gsLocal = ctx.gsLocal;
+    const collapsed = ctx.collapsed;
 
     html += `<div class="group${collapsed ? ' collapsed' : ''}" data-group-name="${esc(gname)}">`;
     html += `<div class="group-hdr" draggable="true" data-drag-id="${esc(gname)}" data-drag-type="group" oncontextmenu="onGroupContextMenu(event,'${esc(gname)}')">`;
@@ -836,31 +1176,11 @@ function render() {
     html += `<div class="group-body"><div class="group-body-inner">`;
 
     /* Agent grid (+ New cell is part of the grid) — hierarchical by kind/owner */
-    const agentLayout = _buildHierarchicalAgentSections(agents);
-    const sortedAgents = agentLayout.orderedAgents;
+    const agentLayout = ctx.agentLayout;
     const visibleAgentById = agentLayout.visibleAgentById;
     const visibleEngineerIds = agentLayout.visibleEngineerIds;
-    const pushAgentNav = function(a) {
-      if (!collapsed) {
-        navItems.push(a.id);
-        navAgents.push(a.id);
-        groupNav.push(a.id);
-        // Insert child terminals right after parent for keyboard nav
-        if (a.id === selectedAgentId) {
-          const cIds = state.children[a.id] || [];
-          for (const cid of cIds) {
-            const ct = state.agents[cid];
-            if (ct && (!wid || !ct.window_id || ct.window_id === wid)) {
-              navItems.push(cid);
-              groupNav.push(cid);
-            }
-          }
-        }
-      }
-    };
     html += `<div class="agent-grid agent-grid-hierarchical" data-drop-group="${esc(gname)}" data-drop-type="agent">`;
     const renderCellForGrid = function(a) {
-      pushAgentNav(a);
       return renderAgentCell(a, { visibleEngineerIds, visibleAgentById });
     };
     for (let sectionIndex = 0; sectionIndex < agentLayout.sections.length; sectionIndex++) {
@@ -875,8 +1195,7 @@ function render() {
       ];
       html += '<section class="' + sectionClasses.join(' ') + '"'
         + ' data-agent-section="' + esc(sectionKey) + '">';
-      const atAgentCap = gsLocal.max_agents > 0 && agents.length >= gsLocal.max_agents;
-      html += _renderArchitectHeaderRow(gname, section, renderCellForGrid, { disabled: atAgentCap });
+      html += _renderArchitectHeaderRow(gname, section, renderCellForGrid, { disabled: ctx.atAgentCap });
       if (section.type === 'user') {
         html += _renderLooseWorkersStrip(gname, section, renderCellForGrid);
       }
@@ -884,12 +1203,6 @@ function render() {
       html += '</section>';
     }
     html += _renderAgentGridAddArchitectRow(gname, gsLocal, agents);
-    if (!collapsed) {
-      for (const t of standaloneTerms) {
-        navItems.push(t.id);
-        groupNav.push(t.id);
-      }
-    }
     html += _renderAgentGridAddCell(gname, gsLocal, agents);
     html += `</div>`;
 
@@ -941,17 +1254,25 @@ function render() {
 
     html += `</div></div>`;
     html += `</div>`;
-    navByGroup[gname] = groupNav;
   }
 
   main.innerHTML = html;
 
-  // Update navigable items lists; clear focus if item was removed
-  window._navItems = navItems;
-  window._navAgents = navAgents;
-  window._navByGroup = navByGroup;
-  window._navGroupOrder = navGroupOrder;
-  if (focusedItemId && !navItems.includes(focusedItemId)) focusedItemId = null;
+  // Update navigable item lists after resolving focus so the rendered
+  // `.focused` marker and the keyboard model describe the same grid.
+  window._navItems = navModel.navItems;
+  window._navAgents = navModel.navAgents;
+  window._navByGroup = navModel.navByGroup;
+  window._navGroupOrder = navModel.navGroupOrder;
+  window._navGridRows = navModel.gridRows;
+  window._navGridItemMeta = navModel.itemMeta;
+  window._navCreationControls = navModel.creationControls;
+  window._navFocusableItems = navModel.focusableItems;
+  if (focusedItemId
+      && !navModel.navItems.includes(focusedItemId)
+      && !navModel.itemMeta[focusedItemId]) {
+    focusedItemId = null;
+  }
 
   if (oldRects) _applyFlip(main, oldRects);
   _restoreSurfaceState(main, mainState);
@@ -1557,7 +1878,7 @@ function renderAgentCell(a, options) {
     statusAttrs.push(`title="${esc(a.error_message || 'Needs attention')}"`);
   }
 
-  let h = `<div class="${cls.join(' ')}" draggable="true" data-drag-id="${a.id}" data-drag-type="agent" data-drag-group="${esc(a.group)}"`;
+  let h = `<div class="${cls.join(' ')}" draggable="true" data-drag-id="${a.id}" data-drag-type="agent" data-drag-group="${esc(a.group)}" data-nav-id="${esc(a.id)}"`;
   if (_isDismissed) h += ` data-dismissed-at="${esc(_agentDismissedAt(a))}"`;
   h += ` onclick="onAgentClick('${a.id}')" ondblclick="onAgentDblClick('${a.id}')" oncontextmenu="onCellContextMenu(event,'${a.id}')" onauxclick="if(event.button===1){event.preventDefault();removeAgent('${a.id}')}" title="${esc(titleParts.join(' '))}">`;
   h += `<div class="${statusClasses.join(' ')}"${statusAttrs.length ? ' ' + statusAttrs.join(' ') : ''}>`;
@@ -1837,7 +2158,7 @@ function renderTerminalRow(t) {
   const fullPath = t.current_path || t.directory || '';
   const pathDisplay = _formatDisplayPath(fullPath, t.git_root || t.worktree_repo_root || '');
 
-  let h = `<div class="${cls.join(' ')}" draggable="true" data-drag-id="${t.id}" data-drag-type="terminal" data-drag-group="${esc(t.group)}" onclick="focusAgent('${t.id}')" oncontextmenu="onCellContextMenu(event,'${t.id}')" onauxclick="if(event.button===1){event.preventDefault();removeAgent('${t.id}')}">`;
+  let h = `<div class="${cls.join(' ')}" draggable="true" data-drag-id="${t.id}" data-drag-type="terminal" data-drag-group="${esc(t.group)}" data-nav-id="${esc(t.id)}" onclick="focusAgent('${t.id}')" oncontextmenu="onCellContextMenu(event,'${t.id}')" onauxclick="if(event.button===1){event.preventDefault();removeAgent('${t.id}')}">`;
   h += `<div class="term-badge${darkCls}" style="background:${proc.color}">${proc.label}</div>`;
   h += `<div class="term-info">`;
   h += `  <div class="term-name">${esc(t.name)}</div>`;

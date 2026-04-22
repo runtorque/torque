@@ -458,7 +458,74 @@ function restoreStandaloneLayoutDefaults() {
 
 /* -- Keyboard navigation helpers ----------------------------------------- */
 
+var _navPreferredColumn = null;
+
+function _navMeta(id) {
+  if (!id) return null;
+  const meta = window._navGridItemMeta || {};
+  return meta[id] || null;
+}
+
+function _navRows() {
+  return window._navGridRows || [];
+}
+
+function _navCssValue(value) {
+  const raw = String(value || '');
+  if (typeof CSS !== 'undefined' && CSS && typeof CSS.escape === 'function') {
+    return CSS.escape(raw);
+  }
+  return raw.replace(/"/g, '\\"');
+}
+
+function _activeElementNavId() {
+  const active = document.activeElement;
+  if (!active || !active.dataset) return '';
+  return active.dataset.navId || '';
+}
+
+function _findFocusedNavElement(id) {
+  const meta = _navMeta(id);
+  const selectors = [];
+  if (id) selectors.push('[data-nav-id="' + _navCssValue(id) + '"]');
+  if (meta && meta.focusKey) {
+    selectors.push('[data-focus-key="' + _navCssValue(meta.focusKey) + '"]');
+  }
+  const main = document.getElementById('main');
+  for (let i = 0; i < selectors.length; i++) {
+    const selector = selectors[i];
+    let el = null;
+    if (main && typeof main.querySelector === 'function') el = main.querySelector(selector);
+    if (!el && typeof document.querySelector === 'function') el = document.querySelector(selector);
+    if (el) return el;
+  }
+  return document.querySelector('.focused');
+}
+
+function _scrollFocusedIntoView(id) {
+  const el = _findFocusedNavElement(id || focusedItemId);
+  if (el) el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+
+function _focusNavId(id, opts) {
+  if (!id) return;
+  opts = opts || {};
+  focusedItemId = id;
+  const meta = _navMeta(id);
+  if (!opts.preserveColumn) {
+    _navPreferredColumn = meta && typeof meta.colIndex === 'number'
+      ? meta.colIndex
+      : null;
+  }
+  render();
+  const el = _findFocusedNavElement(id);
+  if (opts.focusDom && el && typeof el.focus === 'function') el.focus();
+  if (el) el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+
 function _focusedGroup() {
+  const meta = _navMeta(focusedItemId);
+  if (meta && meta.group) return meta.group;
   if (!focusedItemId) return null;
   const cell = state.agents[focusedItemId];
   return cell ? cell.group : null;
@@ -472,7 +539,10 @@ function _firstGroup() {
 function _initFocus(delta) {
   // Start focus from active cell if possible, otherwise first/last in full list
   const items = window._navItems || [];
-  if (items.length === 0) return;
+  const focusable = (window._navFocusableItems && window._navFocusableItems.length)
+    ? window._navFocusableItems
+    : items;
+  if (focusable.length === 0) return;
   const activeIdx = items.findIndex(id => {
     const c = state.agents[id];
     return c && c.session_id === state.active_session_id;
@@ -480,21 +550,19 @@ function _initFocus(delta) {
   if (activeIdx >= 0) {
     focusedItemId = items[activeIdx];
   } else {
-    focusedItemId = delta > 0 ? items[0] : items[items.length - 1];
+    focusedItemId = delta > 0 ? focusable[0] : focusable[focusable.length - 1];
   }
+  const meta = _navMeta(focusedItemId);
+  _navPreferredColumn = meta && typeof meta.colIndex === 'number' ? meta.colIndex : null;
   render();
-  const el = document.querySelector('.focused');
-  if (el) el.scrollIntoView({ block: 'nearest' });
+  _scrollFocusedIntoView(focusedItemId);
 }
 
 function _moveInList(list, delta) {
   if (list.length === 0) return;
   const idx = list.indexOf(focusedItemId);
   const next = idx < 0 ? 0 : Math.max(0, Math.min(list.length - 1, idx + delta));
-  focusedItemId = list[next];
-  render();
-  const el = document.querySelector('.focused');
-  if (el) el.scrollIntoView({ block: 'nearest' });
+  _focusNavId(list[next]);
 }
 
 function _currentGroupItems() {
@@ -506,6 +574,19 @@ function _currentGroupItems() {
 
 function moveFocusHorizontal(delta) {
   if (focusedItemId == null) { _initFocus(delta); return; }
+
+  const meta = _navMeta(focusedItemId);
+  if (meta && typeof meta.rowIndex === 'number') {
+    const rows = _navRows();
+    const row = rows[meta.rowIndex];
+    if (!row || !row.items || row.items.length === 0) return;
+    const currentIdx = typeof meta.colIndex === 'number' ? meta.colIndex : 0;
+    const nextIdx = Math.max(0, Math.min(row.items.length - 1, currentIdx + delta));
+    const nextItem = row.items[nextIdx];
+    if (!nextItem || !nextItem.id) return;
+    _focusNavId(nextItem.id);
+    return;
+  }
 
   const cell = state.agents[focusedItemId];
   const onTerminal = cell && cell.cell_type === 'terminal';
@@ -557,17 +638,19 @@ function moveFocusHorizontal(delta) {
 function moveFocusDown() {
   if (focusedItemId == null) { _initFocus(1); return; }
 
-  const cell = state.agents[focusedItemId];
-  // If focused on an agent that isn't selected yet, open its drawer first
-  if (cell && cell.cell_type !== 'terminal' && selectedAgentId !== focusedItemId) {
-    if (typeof _updateSelectedAgentContext === 'function') {
-      _updateSelectedAgentContext(focusedItemId);
-    } else {
-      selectedAgentId = focusedItemId;
-    }
-    render();
-    const el = document.querySelector('.focused');
-    if (el) el.scrollIntoView({ block: 'nearest' });
+  const meta = _navMeta(focusedItemId);
+  if (meta && typeof meta.rowIndex === 'number') {
+    const rows = _navRows();
+    const targetRowIdx = Math.max(0, Math.min(rows.length - 1, meta.rowIndex + 1));
+    const targetRow = rows[targetRowIdx];
+    if (!targetRow || !targetRow.items || targetRow.items.length === 0) return;
+    const preferred = typeof _navPreferredColumn === 'number'
+      ? _navPreferredColumn
+      : (typeof meta.colIndex === 'number' ? meta.colIndex : 0);
+    _navPreferredColumn = preferred;
+    const targetCol = Math.max(0, Math.min(targetRow.items.length - 1, preferred));
+    const target = targetRow.items[targetCol];
+    if (target && target.id) _focusNavId(target.id, { preserveColumn: true });
     return;
   }
 
@@ -579,9 +662,61 @@ function moveFocusDown() {
 function moveFocusUp() {
   if (focusedItemId == null) { _initFocus(-1); return; }
 
+  const meta = _navMeta(focusedItemId);
+  if (meta && typeof meta.rowIndex === 'number') {
+    const rows = _navRows();
+    const targetRowIdx = Math.max(0, Math.min(rows.length - 1, meta.rowIndex - 1));
+    const targetRow = rows[targetRowIdx];
+    if (!targetRow || !targetRow.items || targetRow.items.length === 0) return;
+    const preferred = typeof _navPreferredColumn === 'number'
+      ? _navPreferredColumn
+      : (typeof meta.colIndex === 'number' ? meta.colIndex : 0);
+    _navPreferredColumn = preferred;
+    const targetCol = Math.max(0, Math.min(targetRow.items.length - 1, preferred));
+    const target = targetRow.items[targetCol];
+    if (target && target.id) _focusNavId(target.id, { preserveColumn: true });
+    return;
+  }
+
   // Move up within current group only
   const groupItems = _currentGroupItems();
   if (groupItems) _moveInList(groupItems, -1);
+}
+
+function moveFocusCreationControl(delta) {
+  const controls = window._navCreationControls || [];
+  if (controls.length === 0) return false;
+
+  const activeNavId = _activeElementNavId();
+  const currentId = activeNavId || focusedItemId;
+  let idx = controls.findIndex(item => item.id === currentId);
+  let target = null;
+
+  if (idx >= 0) {
+    idx = (idx + delta + controls.length) % controls.length;
+    target = controls[idx];
+  } else {
+    const meta = _navMeta(currentId);
+    if (meta && typeof meta.sort === 'number') {
+      if (delta > 0) {
+        target = controls.find(item => item.sort > meta.sort) || controls[0];
+      } else {
+        for (let i = controls.length - 1; i >= 0; i--) {
+          if (controls[i].sort < meta.sort) {
+            target = controls[i];
+            break;
+          }
+        }
+        if (!target) target = controls[controls.length - 1];
+      }
+    } else {
+      target = delta > 0 ? controls[0] : controls[controls.length - 1];
+    }
+  }
+
+  if (!target || !target.id) return false;
+  _focusNavId(target.id, { focusDom: true });
+  return true;
 }
 
 function switchGroup(delta) {
@@ -607,6 +742,20 @@ function switchGroup(delta) {
 
 function activateFocused() {
   if (!focusedItemId) return;
+  const meta = _navMeta(focusedItemId);
+  if (meta && meta.type === 'control') {
+    if (meta.controlType === 'section-new-engineer'
+        && typeof openAddEngineerForSection === 'function') {
+      openAddEngineerForSection(meta.group || '', meta.architectId || '');
+    } else if (meta.controlType === 'loose-new-worker'
+        && typeof openAddWorkerModal === 'function') {
+      openAddWorkerModal(meta.group || '');
+    } else if (meta.controlType === 'agent-new-architect'
+        && typeof openAddArchitectForGroup === 'function') {
+      openAddArchitectForGroup(meta.group || '');
+    }
+    return;
+  }
   const cell = state.agents[focusedItemId];
   if (!cell) return;
   if (cell.cell_type !== 'terminal') {
@@ -618,6 +767,8 @@ function activateFocused() {
 
 function removeFocused() {
   if (!focusedItemId) return;
+  const meta = _navMeta(focusedItemId);
+  if (meta && meta.type === 'control') return;
   removeAgent(focusedItemId);
 }
 
@@ -769,7 +920,7 @@ document.addEventListener('keydown', (e) => {
       break;
     case 'Tab':
       e.preventDefault();
-      switchGroup(e.shiftKey ? -1 : 1);
+      moveFocusCreationControl(e.shiftKey ? -1 : 1);
       break;
     case 'Escape':
       if (typeof _boardSelectedCount === 'function' && _boardSelectedCount() > 0) {
