@@ -1387,7 +1387,43 @@ class WeaverEventBuffer:
                 buckets[engineer_id]["engineer_events"].append(evt)
         return list(buckets.values())
 
+    def _architect_task_assigned_engineer(self, task):
+        seen_task_ids: set[str] = set()
+        current = task
+        while current:
+            current_id = str(getattr(current, "id", "") or "").strip()
+            if current_id:
+                if current_id in seen_task_ids:
+                    break
+                seen_task_ids.add(current_id)
+            assigned_id = str(
+                getattr(current, "assigned_engineer_id", "") or ""
+            ).strip()
+            if assigned_id:
+                assigned = self._state.agents.get(assigned_id)
+                if (
+                        str(getattr(assigned, "kind", "") or "").strip()
+                        == "engineer"
+                ):
+                    return assigned, True
+                return None, True
+            next_id = str(getattr(current, "parent_task_id", "") or "").strip()
+            root_id = str(getattr(current, "pipeline_root_id", "") or "").strip()
+            if not next_id and root_id and root_id != current_id:
+                next_id = root_id
+            current = self._state.board_tasks.get(next_id) if next_id else None
+        return None, False
+
     def _architect_digest_engineer(self, evt: dict):
+        task_id = str(evt.get("task_id", "") or "").strip()
+        task = self._state.board_tasks.get(task_id) if task_id else None
+        if task:
+            assigned, has_assignment = self._architect_task_assigned_engineer(
+                task
+            )
+            if has_assignment:
+                return assigned
+
         cell_id = str(evt.get("cell_id", "") or "").strip()
         source = self._state.agents.get(cell_id) if cell_id else None
         source_kind = str(getattr(source, "kind", "") or "").strip()
@@ -1403,16 +1439,8 @@ class WeaverEventBuffer:
             if str(getattr(owner, "kind", "") or "").strip() == "engineer":
                 return owner
 
-        task_id = str(evt.get("task_id", "") or "").strip()
-        task = self._state.board_tasks.get(task_id) if task_id else None
         if not task:
             return None
-        assigned_id = str(
-            getattr(task, "assigned_engineer_id", "") or ""
-        ).strip()
-        assigned = self._state.agents.get(assigned_id) if assigned_id else None
-        if str(getattr(assigned, "kind", "") or "").strip() == "engineer":
-            return assigned
         for field_name in ("agent_id", "reply_agent_id"):
             candidate_id = str(getattr(task, field_name, "") or "").strip()
             candidate = self._state.agents.get(candidate_id) if candidate_id else None

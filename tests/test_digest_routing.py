@@ -99,6 +99,118 @@ class DigestRoutingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(recipients, [engineer.id, architect.id])
 
+    def test_task_event_routes_to_assigned_engineer_before_worker_owner(self):
+        state, group = self._make_state()
+        architect = self._add_agent(
+            state,
+            agent_id="arch-1",
+            name="Architect",
+            group=group,
+            kind="architect",
+        )
+        assigned = self._add_agent(
+            state,
+            agent_id="eng-assigned",
+            name="Assigned Engineer",
+            group=group,
+            kind="engineer",
+            hired_by_architect_id=architect.id,
+        )
+        owner = self._add_agent(
+            state,
+            agent_id="eng-owner",
+            name="Worker Owner",
+            group=group,
+            kind="engineer",
+        )
+        worker = self._add_agent(
+            state,
+            agent_id="worker-1",
+            name="Worker",
+            group=group,
+            kind="worker",
+            owner_engineer_id=owner.id,
+        )
+        task = state.board_add_task(
+            "Architect-created task",
+            group,
+            id="task-1",
+            agent_id=worker.id,
+            assigned_engineer_id=assigned.id,
+        )
+        self.assertIsNotNone(task)
+        state.update_agent_digest_settings(assigned.id)
+        state.update_agent_digest_settings(owner.id)
+        state.update_agent_digest_settings(architect.id)
+
+        recipients = self.routing_mod.resolve_digest_recipients(
+            state,
+            {
+                "cell_id": worker.id,
+                "group": group,
+                "kind": "task_completed",
+                "task_id": task.id,
+            },
+        )
+
+        self.assertEqual(recipients, [assigned.id, architect.id])
+
+    def test_child_task_event_routes_via_parent_assigned_engineer(self):
+        state, group = self._make_state()
+        architect = self._add_agent(
+            state,
+            agent_id="arch-1",
+            name="Architect",
+            group=group,
+            kind="architect",
+        )
+        assigned = self._add_agent(
+            state,
+            agent_id="eng-assigned",
+            name="Assigned Engineer",
+            group=group,
+            kind="engineer",
+            hired_by_architect_id=architect.id,
+        )
+        worker = self._add_agent(
+            state,
+            agent_id="worker-1",
+            name="Worker",
+            group=group,
+            kind="worker",
+        )
+        parent = state.board_add_task(
+            "Architect-created task",
+            group,
+            id="task-1",
+            agent_id=worker.id,
+            assigned_engineer_id=assigned.id,
+        )
+        self.assertIsNotNone(parent)
+        ask_task = state.board_add_task(
+            "Need approval",
+            group,
+            id="task-1.1",
+            parent_task_id=parent.id,
+            pipeline_root_id=parent.id,
+            pipeline_depth=1,
+        )
+        self.assertIsNotNone(ask_task)
+        state.update_agent_digest_settings(assigned.id)
+        state.update_agent_digest_settings(architect.id)
+
+        recipients = self.routing_mod.resolve_digest_recipients(
+            state,
+            {
+                "cell_id": worker.id,
+                "group": group,
+                "kind": "ask_created",
+                "task_id": ask_task.id,
+            },
+        )
+
+        self.assertEqual(recipients, [assigned.id, architect.id])
+
     def test_workflow_breach_is_architect_coarse_event_by_default(self):
         state, group = self._make_state()
         engineer = self._add_agent(

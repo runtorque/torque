@@ -8367,7 +8367,8 @@ async def main(connection=None):
                         _panel_event(
                             "task_completed", cell.id,
                             cell.name, cell.group,
-                            message or "Task completed")
+                            message or "Task completed",
+                            task_id=task.id if task else "")
                         await _maybe_auto_resume_targets(
                             state,
                             handle_command,
@@ -8401,7 +8402,8 @@ async def main(connection=None):
                             _save_task(task)
                         _panel_event(
                             "agent_blocked", cell.id,
-                            cell.name, cell.group, message)
+                            cell.name, cell.group, message,
+                            task_id=task.id if task else "")
                         state.recompute_task_health()
 
                     elif action == "error":
@@ -8417,7 +8419,8 @@ async def main(connection=None):
                             _save_task(task)
                         _panel_event(
                             "agent_error", cell.id,
-                            cell.name, cell.group, message)
+                            cell.name, cell.group, message,
+                            task_id=task.id if task else "")
                         state.recompute_task_health()
 
                     elif action == "progress":
@@ -8540,7 +8543,8 @@ async def main(connection=None):
                             _panel_event(
                                 "task_completed", cell.id,
                                 cell.name, cell.group,
-                                "Ready (task completed)")
+                                "Ready (task completed)",
+                                task_id=task.id if task else "")
                             await _maybe_auto_resume_targets(
                                 state,
                                 handle_command,

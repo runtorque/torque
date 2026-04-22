@@ -29,6 +29,8 @@ ARCHITECT_COARSE_EVENTS = frozenset({
 # Back-compat for earlier Phase 1 tests/imports.
 ARCHITECT_COARSE_EVENT_KINDS = ARCHITECT_COARSE_EVENTS
 
+_NO_ROUTING_SOURCE = object()
+
 
 def _cell_kind(cell) -> str:
     return str(getattr(cell, "kind", "") or "").strip()
@@ -57,13 +59,27 @@ def _task_routing_source(state, event: dict):
     if not task:
         return None
 
-    assigned_engineer_id = str(
-        getattr(task, "assigned_engineer_id", "") or ""
-    ).strip()
-    if assigned_engineer_id:
-        engineer = state.agents.get(assigned_engineer_id)
-        if engineer:
-            return engineer
+    seen_task_ids: set[str] = set()
+    current = task
+    while current:
+        current_id = str(getattr(current, "id", "") or "").strip()
+        if current_id:
+            if current_id in seen_task_ids:
+                break
+            seen_task_ids.add(current_id)
+        assigned_engineer_id = str(
+            getattr(current, "assigned_engineer_id", "") or ""
+        ).strip()
+        if assigned_engineer_id:
+            engineer = state.agents.get(assigned_engineer_id)
+            if engineer:
+                return engineer
+            return _NO_ROUTING_SOURCE
+        next_id = str(getattr(current, "parent_task_id", "") or "").strip()
+        root_id = str(getattr(current, "pipeline_root_id", "") or "").strip()
+        if not next_id and root_id and root_id != current_id:
+            next_id = root_id
+        current = getattr(state, "board_tasks", {}).get(next_id) if next_id else None
 
     for field_name in ("agent_id", "reply_agent_id"):
         cell_id = str(getattr(task, field_name, "") or "").strip()
@@ -76,15 +92,17 @@ def _task_routing_source(state, event: dict):
 
 
 def _event_routing_source(state, event: dict):
+    source = _task_routing_source(state, event)
+    if source is _NO_ROUTING_SOURCE:
+        return None
+    if source:
+        return source
+
     cell_id = str(event.get("cell_id", "") or "").strip()
     if cell_id:
         source = state.agents.get(cell_id)
         if source:
             return source
-
-    source = _task_routing_source(state, event)
-    if source:
-        return source
 
     group = str(event.get("group", "") or "").strip()
     if not group:
