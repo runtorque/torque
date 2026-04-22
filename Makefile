@@ -19,8 +19,10 @@ PERF_MATRIX    ?= 10,20,30
 PERF_DURATION  ?= 15
 PERF_BASELINE  ?= tests/perf/baseline.json
 PERF_RUN_DIR   ?= tests/perf/runs
+PERF_VENV      ?= $(HOME)/.cache/loom/perf-harness-venv
+PERF_PYTHON    ?= $(PERF_VENV)/bin/python
 
-.PHONY: install uninstall run deps desktop-deps check stop deploy autolaunch cli standalone standalone-bg desktop desktop-attach open test perf-baseline perf-delta
+.PHONY: install uninstall run deps desktop-deps check stop deploy autolaunch cli standalone standalone-bg desktop desktop-attach open test perf-deps perf-baseline perf-delta
 
 ## install: Set up the iTerm2 script project and copy all files
 install:
@@ -323,10 +325,19 @@ check:
 test:
 	@python3 -m unittest discover -s tests -v
 
+## perf-deps: Prepare the cached Python environment used by perf harness targets
+perf-deps:
+	@if [ ! -x "$(PERF_PYTHON)" ]; then \
+		mkdir -p "$$(dirname "$(PERF_VENV)")"; \
+		python3 -m venv "$(PERF_VENV)"; \
+	fi
+	@"$(PERF_PYTHON)" -c "import aiohttp, jinja2, yaml" >/dev/null 2>&1 || \
+		"$(PERF_PYTHON)" -m pip install -q aiohttp jinja2 pyyaml
+
 ## perf-baseline: Capture N=10/20/30 standalone perf baseline evidence
-perf-baseline:
+perf-baseline: perf-deps
 	@mkdir -p "$$(dirname "$(PERF_BASELINE)")"
-	@python3 scripts/profile_harness.py \
+	@"$(PERF_PYTHON)" scripts/profile_harness.py \
 		--mode baseline \
 		--matrix "$(PERF_MATRIX)" \
 		--duration "$(PERF_DURATION)" \
@@ -334,10 +345,10 @@ perf-baseline:
 		--report "$(PERF_BASELINE:.json=.md)"
 
 ## perf-delta: Capture current perf evidence and diff against PERF_BASELINE
-perf-delta:
+perf-delta: perf-deps
 	@mkdir -p "$(PERF_RUN_DIR)"
 	@stamp=$$(date -u +%Y%m%dT%H%M%SZ); \
-	python3 scripts/profile_harness.py \
+	"$(PERF_PYTHON)" scripts/profile_harness.py \
 		--mode delta \
 		--matrix "$(PERF_MATRIX)" \
 		--duration "$(PERF_DURATION)" \
