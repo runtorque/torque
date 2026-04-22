@@ -6075,6 +6075,35 @@ body.diff-view-open #ctx-menu {
   flex-direction: column;
   gap: 8px;
 }
+.architect-decision-meta-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.architect-decision-meta-label {
+  flex: 0 0 96px;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+.architect-decision-meta-value {
+  min-width: 0;
+}
+.architect-decision-ref-list {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.architect-decision-ref {
+  font-family: var(--mono);
+  color: var(--text);
+  background: var(--bg-cell);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 6px;
+}
+.architect-decision-ref-empty {
+  color: var(--text-dim);
+}
 .architect-decision-link-row {
   display: flex;
   flex-wrap: wrap;
