@@ -71,11 +71,22 @@ The grid is a vertical stack of **architect sections**, separated by horizontal 
 
 A section is composed of:
 
-1. Optional **loose-workers strip** (User section only in v1): a single row of user-owned detached worker cards. Omitted when empty.
-2. An **architect header row** (full grid width): architect card on the left, controls inline to the right. For the User section, this header renders a synthetic "User" card.
-3. Zero or more **engineer rows** (full grid width): engineer card on the left, workers wrapping to the right, section-level `+ New Worker` affordance at the end of the last worker (though worker creation from the UI remains engineer-driven — see Creation semantics below).
-4. A **`+ New Engineer`** affordance inline in the architect header row (one per section).
-5. A `+ New Architect` button below the last architect section.
+1. A **fixed-width architect column** on the left: a single tall anchor card for the architect (or the synthetic "User" card in the User section). The card **row-spans** across all of this section's engineer rows — it is not repeated per engineer and it is not a header row sitting above the engineers.
+2. One or more **engineer rows** stacked vertically to the right of the architect column, inside the section. Each engineer row reads left-to-right as: `[ engineer card ] [ worker 1 ] [ worker 2 ] [ worker 3 ] ...` with workers wrapping within the same row when they overflow horizontally (flush-left with the first worker, NOT indented under the engineer card — the wrapping stays inside that engineer's row and does not visually bleed into the next row).
+3. A **`+ New Engineer`** button inside the section, positioned on a line below the last engineer row (inside the architect's section, still to the right of the architect column). It belongs to this architect — clicking it creates an engineer hired by that architect.
+4. In the User section only: a **loose-workers strip** rendered above the User section's engineer rows. Always rendered — if empty, it is a single-button row holding the `+ New Worker` button.
+5. A **`+ New Architect`** button below the last architect section, aligned to the architect column.
+
+Section boundaries are horizontal dividers that span the full grid width.
+
+### Column structure
+
+The grid has two logical columns:
+
+- **Left column (fixed width)**: holds architect cards. Every architect card — plus the synthetic User card — aligns to the same left edge and the same fixed width. This keeps the architect spine visually consistent no matter how many engineers each architect has.
+- **Right region (flex width)**: holds engineer rows for the current section. Engineer rows stack vertically. Within each engineer row, the engineer card is first, and workers flow right of it and wrap inside that row.
+
+The architect card itself has a **fixed height** — it does NOT grow to match the height of its section's engineer rows. When an architect has many engineers, the right column's engineer stack may be much taller than the architect card; the architect card stays at its natural compact height at the top-left of the section, and the space below the architect card (still inside the left column) stays empty. This matches the fixed-width constraint — both dimensions of the architect card are stable across sections, regardless of how many engineers or workers that architect owns.
 
 ### Row shape
 
@@ -83,15 +94,15 @@ Every engineer row reads left-to-right as:
 
 ```
 [ engineer card ] [ worker 1 ] [ worker 2 ] [ worker 3 ] ...
-                  [ worker 4 ] [ worker 5 ] (wrapped)
+                  [ worker 4 ] [ worker 5 ] (wrapped inside the same row)
 ```
 
-The engineer card is always the first card in the row and does not wrap. Worker cards wrap to the next line within the row, left-aligned flush with the first worker (not indented under the engineer card — the engineer card is a fixed anchor, not a parent column header). A subtle horizontal rule separates one engineer row from the next inside the same section.
+The engineer card is the fixed anchor on the left of that row. Worker cards wrap to the next line **within the same engineer row** — flush-left with the first worker, not under the engineer card, and never spilling into the next engineer's row. A subtle horizontal rule separates one engineer row from the next inside the same section.
 
 The loose-workers strip reads left-to-right as:
 
 ```
-[ worker ] [ worker ] [ worker ] ...
+[ worker ] [ worker ] [ worker ] ... [ + New Worker ]
 ```
 
 No leading agent card. The absence of a leading card is the visual signal that these workers have no engineer parent.
@@ -99,40 +110,56 @@ No leading agent card. The absence of a leading card is the visual signal that t
 ### Sketch
 
 ```
-┌───────────────────────────────────────────────────────────────┐
-│ User section                                                  │
-│                                                               │
-│   Loose-workers strip:                                        │
-│     [worker] [worker]                                         │
-│   ─────────────────────────────────────────                   │
-│   [User]  ( + New Engineer )                                  │
-│     [Engineer 1] [worker] [worker]                            │
-│     ─────────────────────────────                             │
-│     [Engineer 2] [worker]                                     │
-│                                                               │
-├─ ─ ─ architect section divider ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┤
-│                                                               │
-│ Architect 1 section                                           │
-│                                                               │
-│   [Architect 1]  ( + New Engineer )                           │
-│     [Engineer 1] [worker] [worker]                            │
-│     ─────────────────────────────                             │
-│     [Engineer 2] [worker] [worker] [worker] [worker]          │
-│                  [worker]  (wrapped to next line)             │
-│     ─────────────────────────────                             │
-│     [Engineer 3] [worker]                                     │
-│                                                               │
-├─ ─ ─ architect section divider ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┤
-│                                                               │
-│ Architect 2 section                                           │
-│                                                               │
-│   [Architect 2]  ( + New Engineer )                           │
-│     [Engineer 1] [worker] [worker]                            │
-│                                                               │
-├───────────────────────────────────────────────────────────────┤
-│   ( + New Architect )                                         │
-└───────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                                                                             │
+│ USER SECTION                                                                │
+│                                                                             │
+│  ┌────────┐   [worker] [worker] [ + New Worker ]        ← loose-workers     │
+│  │        │                                                strip            │
+│  │  User  │   ─────────────────────────────────                             │
+│  │ OWNER  │   [Engineer 1] [worker] [worker]            ← engineer row 1   │
+│  │        │   ─────────────────────────────                                 │
+│  │        │   [Engineer 2] [worker]                     ← engineer row 2   │
+│  │        │   ─────────────────────────────                                 │
+│  │        │   [ + New Engineer ]                                            │
+│  └────────┘                                                                 │
+│                                                                             │
+│ ─── architect section divider ─────────────────────────────────────────     │
+│                                                                             │
+│ ARCHITECT 1 SECTION                                                         │
+│                                                                             │
+│  ┌────────┐   [Engineer 1] [worker] [worker] [worker] [worker]              │
+│  │        │                [worker] [worker] (wrapped inside row 1)         │
+│  │Architect│   ─────────────────────────────                                │
+│  │  1     │   [Engineer 2] [worker]                                         │
+│  │        │   ─────────────────────────────                                 │
+│  │        │   [Engineer 3] [worker] [worker]                                │
+│  │        │   ─────────────────────────────                                 │
+│  └────────┘   [ + New Engineer ]                                            │
+│                                                                             │
+│ ─── architect section divider ─────────────────────────────────────────     │
+│                                                                             │
+│ ARCHITECT 2 SECTION                                                         │
+│                                                                             │
+│  ┌────────┐   [Engineer 1] [worker] [worker]                                │
+│  │Architect│   ─────────────────────────────                                │
+│  │  2     │   [ + New Engineer ]                                            │
+│  └────────┘                                                                 │
+│                                                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  [ + New Architect ]                                                        │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+**Key non-shapes** (what this layout is NOT):
+
+- NOT a horizontal header row with engineers stacked below. The architect is a left-column anchor, not a top-bar.
+- NOT a stacked column with architect card then engineer cards vertically beneath. Engineers live to the **right** of their architect, not below.
+- NOT a per-engineer repeated architect card. Each architect renders exactly once, anchoring its entire engineer stack on the left.
+- NOT a grid where workers wrap onto separate rows outside their engineer. Wrapped workers stay inside their engineer's row.
+- NOT an architect card that stretches vertically to fill its section. The architect card is fixed-height; the left column below it stays empty when the right column's engineer stack is taller.
 
 ---
 
@@ -154,13 +181,21 @@ The loose-workers strip is a horizontal row of worker cards appearing above the 
 
 Strip behavior:
 
-- Rendered only when the User section contains at least one detached worker. Omitted entirely when empty — no placeholder, no empty rail.
+- Always rendered in the User section, regardless of whether detached workers exist. When empty, the strip is a single-button row holding only the `+ New Worker` affordance.
 - Cards wrap to multiple lines within the strip if needed.
-- A `+ New Worker` button sits at the end of the strip (or as the strip's sole content when empty — in which case the strip is rendered as a single-button row).
+- A `+ New Worker` button sits at the end of the strip (or as the strip's sole content when empty).
 - Workers in the strip carry the full worker-card affordances (right-click context menu, focus, dispatch target, remove).
 - Visually distinguishable from engineer rows by the absence of a leading agent card. No special color needed.
 
 **v1 scoping decision:** only the User section carries a loose-workers strip. Architect sections cannot hold detached workers in v1 because architects cannot create workers directly — workers are engineer-owned. If a future feature allows architects to own detached workers, the strip primitive extends naturally to architect sections.
+
+**Kind contract for the strip:** the strip renders exactly **user-owned cells with `kind == worker` and null `owner_engineer_id`** — nothing else. In particular:
+
+- **Terminals never render in the strip.** Per the kinds model, terminals always carry a `parent_id` to some agent and render in that agent's drawer. A terminal without a parent is a data-integrity issue, not a strip resident — surface it via `loom doctor` rather than normalizing it into worker rendering.
+- **Engineers never render in the strip.** User-created engineers render as engineer rows in the User section with the leading-engineer-card + wrapping-workers layout. They are not "detached workers" even when they have no architect.
+- **The `+ New Worker` button always produces `kind == worker`.** There is no "quick-add with unspecified kind" path through the strip; the button's output kind is fixed.
+
+This contract closes the earlier ambiguity around whether "any detached agent regardless of kind" belonged in the strip. The strip is a worker-only surface; other kinds appearing in it would be a bug signal (upstream grouping logic leaked), not a rendering variant to accommodate.
 
 ---
 
@@ -258,11 +293,11 @@ The redesign is successful when:
 - **Layout flicker during rerenders.** The grid currently rerenders on each WebSocket delta. The new two-dimensional layout has more moving parts (sections, rows, strips). Must be covered by the existing rerender-guardrail pattern plus new regression tests for the new row shapes. Panelsmith's `feedback_ui_review_block_pattern` memory is the standing guidance here.
 - **Loose strip discoverability.** An operator who has never created a detached worker may not know the strip exists when empty (since it's hidden). Acceptable — when empty, there are no detached workers to find, and the `+ New Worker` button in the user section's controls still exists as the entry point.
 
-### Open questions
+### Resolved decisions
 
-- **Where does `+ New Worker` (detached) live when the loose strip is empty?** Option A: always render an empty strip with just the button. Option B: omit the strip but put the button in the User header row. Leaning toward A for consistency ("the strip is where detached workers live, including the button to make one") but B is cheaper visually. Panelsmith's call.
-- **Should dismissed engineers stay in their architect's section or sort to the bottom?** Today they greyed in-place. The answer should probably stay "in-place" for stability of row position, with the greyed state carrying the signal. Defer to Panelsmith unless operator feedback says otherwise.
-- **Section order: is User-first the right default, or should the operator's most-active architect float to the top?** Proposal lands on User-first for v1 (stable, predictable). Revisit if operators report wanting active-first ordering.
+- **Loose-workers strip is always rendered in the User section** (not hidden when empty). The `+ New Worker` button sits inside the strip; when there are no detached workers, the strip is a single-button row. This keeps the strip as a stable discoverable surface and makes "detached workers live here" a constant truth of the grid.
+- **Dismissed engineers stay in-place** inside their architect section, rendered greyed. Row position does not reshuffle on dismiss/rehire. The greyed state is the sole signal.
+- **Section order is User-first, then architects by creation timestamp ascending.** Stable across sessions; no activity-based reordering in v1.
 
 ---
 
