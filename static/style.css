@@ -630,6 +630,7 @@ body.runtime-embedded .terminal-empty {
 .loose-workers-strip {
   display: flex;
   flex-wrap: wrap;
+  justify-content: flex-start;
   align-items: stretch;
   align-content: flex-start;
   gap: 6px;
@@ -762,7 +763,14 @@ body.runtime-embedded .terminal-empty {
 }
 .loose-workers-placeholder-btn {
   min-height: 64px;
-  cursor: default;
+  cursor: pointer;
+}
+.loose-workers-new-worker-btn:hover,
+.loose-workers-new-worker-btn:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  outline: none;
 }
 .loose-workers-placeholder-btn:disabled {
   color: var(--text-dim);

@@ -644,10 +644,12 @@ function _renderLooseWorkersStrip(groupName, section, renderCell) {
     + ' data-agent-row-shape="loose-workers-strip"'
     + ' data-section-key="' + esc(sectionKey) + '">';
   for (const worker of workers) html += renderCell(worker);
-  html += '<button type="button" class="loose-workers-placeholder-btn" disabled'
-    + ' data-placeholder-action="new-worker"'
+  html += '<button type="button" class="loose-workers-new-worker-btn loose-workers-placeholder-btn"'
+    + ' data-action="new-worker"'
     + ' data-focus-key="loose-new-worker:' + esc(groupName) + ':' + esc(sectionKey) + '"'
-    + ' title="Detached worker creation lands in a later phase">+ New Worker</button>';
+    + ' aria-label="Create detached worker"'
+    + ' onclick="event.stopPropagation();openAddWorkerModal(\'' + esc(groupName) + '\')"'
+    + ' title="Create a user-owned detached worker">+ New Worker</button>';
   html += '</div>';
   return html;
 }
@@ -743,7 +745,12 @@ function render() {
   const oldRects = doFlip ? _captureRects(main) : null;
   _captureAgentDetailDrafts();
   const mainState = _captureSurfaceState(main, {
-    scrollSelectors: [':root', '.mcp-log', '.detail-decisions-log'],
+    scrollSelectors: [
+      ':root',
+      '.mcp-log',
+      '.detail-decisions-log',
+      '.loose-workers-strip',
+    ],
     captureFocusKey: _captureMainFocusKey,
   });
 

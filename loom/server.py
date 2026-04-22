@@ -2854,6 +2854,89 @@ async def _handle_add_architect_command(
     }
 
 
+async def _handle_add_worker_command(
+        data: dict,
+        state: MatrixState, *,
+        resolve_base_dir,
+        resolve_agent_launch_config,
+        create_agent_with_config,
+        send_agent_prompt) -> dict:
+    """Create and launch a user-owned detached worker agent."""
+    name = str(data.get("name", "") or "").strip()
+    if not name:
+        return {"type": "error", "message": "Worker name is required"}
+
+    supplied_owner = str(data.get("owner_engineer_id", "") or "").strip()
+    supplied_legacy_owner = str(
+        data.get("created_by_weaver_id", "")
+        or data.get("_created_by_weaver_id", "")
+        or ""
+    ).strip()
+    if supplied_owner or supplied_legacy_owner:
+        return {
+            "type": "error",
+            "message": (
+                "Detached worker creation does not accept "
+                "owner_engineer_id"
+            ),
+        }
+
+    group = str(data.get("group", "") or "").strip() or _resolve_engineer_group(state)
+    if group not in state.groups:
+        state.add_group(group)
+    base_dir = await resolve_base_dir(group)
+    explicit_template = str(data.get("template", "") or "").strip()
+    overrides = dict(data)
+    for key in (
+            "cmd",
+            "name",
+            "group",
+            "kind",
+            "owner_engineer_id",
+            "created_by_weaver_id",
+            "_created_by_weaver_id",
+            "hired_by_architect_id",
+    ):
+        overrides.pop(key, None)
+    launch_cfg = resolve_agent_launch_config(
+        group,
+        base_dir=base_dir,
+        explicit_template=explicit_template,
+        overrides=overrides,
+    )
+    startup_prompt = _startup_prompt_for_new_agent(
+        agent_type=launch_cfg.get("agent_type", ""),
+        persistent_prompt_text="",
+    )
+
+    cell = await create_agent_with_config(
+        group,
+        name,
+        launch_cfg,
+        explicit_template=explicit_template,
+        persistent_prompt_text="",
+        created_by_weaver_id="",
+        owner_engineer_id="",
+        kind="worker",
+        persistent=False,
+        hired_by_architect_id="",
+    )
+    if not cell:
+        return {"type": "error", "message": "Failed to create worker"}
+
+    if cell.session_id:
+        for prompt_text, send_kwargs in _new_agent_prompt_sequence(
+                launch_cfg,
+                startup_prompt=startup_prompt):
+            await send_agent_prompt(cell, prompt_text, **send_kwargs)
+    return {
+        "id": cell.id,
+        "slug": cell.slug,
+        "name": cell.name,
+        "kind": "worker",
+    }
+
+
 async def _handle_architect_engineer_hire_command(
         data: dict,
         state: MatrixState) -> dict:
@@ -5093,6 +5176,16 @@ async def main(connection=None):
                     state,
                     resolve_base_dir=_resolve_base_dir,
                     resolve_weaver_launch_config=_resolve_weaver_launch_config,
+                    create_agent_with_config=_create_agent_with_config,
+                    send_agent_prompt=_send_agent_prompt,
+                )
+
+            elif cmd == "add_worker":
+                result = await _handle_add_worker_command(
+                    data,
+                    state,
+                    resolve_base_dir=_resolve_base_dir,
+                    resolve_agent_launch_config=_resolve_agent_launch_config,
                     create_agent_with_config=_create_agent_with_config,
                     send_agent_prompt=_send_agent_prompt,
                 )

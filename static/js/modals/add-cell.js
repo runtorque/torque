@@ -11,7 +11,8 @@ function _standaloneCreateFlowEnabled() {
 }
 
 function _useCompactStandaloneAddFlow(mode) {
-  return _standaloneCreateFlowEnabled() && mode === 'agent';
+  return _standaloneCreateFlowEnabled()
+    && (mode === 'agent' || mode === 'worker');
 }
 
 function _setAddModalSummary(text) {
@@ -67,15 +68,19 @@ function _showAddModal(mode, group, config) {
   _addTemplateApplied = '';
   _pendingParentId = (_pendingModal && _pendingModal.parentId) || '';
   const compactStandalone = _useCompactStandaloneAddFlow(mode);
+  const isTerminal = mode === 'terminal';
+  const isWorker = mode === 'worker';
+  const isAgentLike = !isTerminal;
 
   const parent = _pendingParentId ? state.agents[_pendingParentId] : null;
   document.getElementById('modal-add-title').textContent =
     parent ? `New Terminal for ${parent.name}` :
+    isWorker ? 'New Detached Worker' :
     mode === 'agent' ? 'New Agent' : 'New Terminal';
   document.getElementById('add-submit-btn').textContent =
+    isWorker ? 'Create Worker' :
     mode === 'agent' ? 'Create Agent' : 'Create Terminal';
 
-  const isTerminal = mode === 'terminal';
   const cmdRow = document.getElementById('add-cmd-row');
   const modelRow = document.getElementById('add-model-row');
   const reasoningRow = document.getElementById('add-reasoning-row');
@@ -159,20 +164,26 @@ function _showAddModal(mode, group, config) {
   /* pre-fill from group settings */
   const gs = config.group_settings || {};
   const resolved = config.resolved_agent_defaults || {};
-  const isAgent = mode === 'agent';
-  const prefix = isAgent ? '' : gs.terminal_name_prefix;
+  const isAgent = isAgentLike;
+  const prefix = isAgentLike ? '' : gs.terminal_name_prefix;
   const nameInput = document.getElementById('add-name-input');
   if (isTerminal) {
     nameInput.value = prefix ? _nextName(prefix) : '';
   } else if (_pendingModal && _pendingModal.template) {
     nameInput.value = '';
   } else if (compactStandalone) {
-    nameInput.value = _nextName('Agent');
+    nameInput.value = _nextName(isWorker ? 'Worker' : 'Agent');
   } else {
     nameInput.value = '';
   }
-  nameInput.placeholder = isTerminal ? 'e.g. Shell' : 'e.g. Claude 1';
-  if (compactStandalone) {
+  nameInput.placeholder = isTerminal ? 'e.g. Shell'
+    : isWorker ? 'e.g. Reviewer'
+    : 'e.g. Claude 1';
+  if (isWorker) {
+    _setAddModalSummary(
+      'Creates a user-owned detached worker in this group. It will not be attached to an engineer.'
+    );
+  } else if (compactStandalone) {
     _setAddModalSummary('Uses this group’s defaults for CLI, shell, directory, environment, and worktree unless you expand Advanced.');
   } else if (isTerminal) {
     _setAddModalSummary('Terminal sessions inherit this group’s shell, directory, and profile defaults unless you override them here.');
@@ -257,7 +268,7 @@ function _showAddModal(mode, group, config) {
 }
 
 function _applyRenderedAddTemplate(config, templateName) {
-  if (!config || addCellMode !== 'agent') return;
+  if (!config || (addCellMode !== 'agent' && addCellMode !== 'worker')) return;
   _addTemplateApplied = templateName || '';
   document.getElementById('add-provider-select').value = config.provider || '';
   document.getElementById('add-cmd-input').value = config.command || '';
@@ -303,7 +314,7 @@ function _applyRenderedAddTemplate(config, templateName) {
 }
 
 function onAddTemplateChange() {
-  if (addCellMode !== 'agent') return;
+  if (addCellMode !== 'agent' && addCellMode !== 'worker') return;
   const sel = document.getElementById('add-template-select');
   const name = sel ? sel.value : '';
   if (!name) {
@@ -350,6 +361,9 @@ function openAddAgent(group, templateName) {
 function openAddAgentAdvanced(group, templateName) {
   _openAddModal('agent', group, '', templateName || '', { advanced: true });
 }
+function openAddWorkerModal(group, templateName) {
+  _openAddModal('worker', group, '', templateName || '', { advanced: false });
+}
 function openAddTerminal(group, parentId) { _openAddModal('terminal', group, parentId, '', { advanced: true }); }
 
 function submitAdd() {
@@ -369,7 +383,9 @@ function submitAdd() {
   const envVars = _textToEnv('add-env-vars');
 
   const msg = {
-    cmd: addCellMode === 'agent' ? 'add_agent' : 'add_terminal',
+    cmd: addCellMode === 'worker'
+      ? 'add_worker'
+      : addCellMode === 'agent' ? 'add_agent' : 'add_terminal',
     name, group, profile,
   };
   if (addCellMode === 'terminal' && _pendingParentId) msg.parent_id = _pendingParentId;
