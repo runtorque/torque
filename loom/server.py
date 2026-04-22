@@ -1421,15 +1421,18 @@ def _format_injected_mcp_message_prompt(
     recipient_kind: str,
     message_id: str,
     recipient_anchor: str = "",
+    ack_required: bool = False,
 ) -> str:
-    sender_label = sender_name or sender_kind or "peer"
-    if sender_kind and sender_name:
-        header = f"Message from {sender_name} ({sender_kind})"
+    sender_kind_key = str(sender_kind or "").strip()
+    recipient_kind_key = str(recipient_kind or "").strip()
+    sender_label = sender_name or sender_kind_key or "peer"
+    if sender_kind_key and sender_name:
+        header = f"Message from {sender_name} ({sender_kind_key})"
     else:
         header = f"Message from {sender_label}"
     reply_tool = (
-        f"mcp__loom__{recipient_kind}_reply"
-        if recipient_kind in {"architect", "engineer"}
+        f"mcp__loom__{recipient_kind_key}_reply"
+        if recipient_kind_key in {"architect", "engineer"}
         else "mcp__loom__loom_reply"
     )
     blocks = []
@@ -1442,10 +1445,14 @@ def _format_injected_mcp_message_prompt(
         body = body[len(anchor):].lstrip("\n")
     if body:
         blocks.append(body)
-    blocks.append(
-        f'Reply with: {reply_tool}(message_id="{message_id}", '
-        'message="your response")'
-    )
+    include_reply_hint = True
+    if sender_kind_key == "engineer" and recipient_kind_key == "architect":
+        include_reply_hint = bool(ack_required)
+    if include_reply_hint:
+        blocks.append(
+            f'Reply with: {reply_tool}(message_id="{message_id}", '
+            'message="your response")'
+        )
     prefix = "" if anchor else "\n"
     return prefix + "\n\n".join(blocks) + "\n---\n"
 
@@ -1510,6 +1517,7 @@ async def _replay_buffered_cross_kind_messages(
             recipient_kind=str(getattr(target, "kind", "") or ""),
             message_id=message_id,
             recipient_anchor=recipient_anchor,
+            ack_required=bool(entry.get("ack_required", False)),
         )
         try:
             if hasattr(bridge, "prime_input_ready"):
@@ -9383,6 +9391,7 @@ async def main(connection=None):
                         ),
                         message_id=str(data.get("message_id", "") or ""),
                         recipient_anchor=recipient_anchor,
+                        ack_required=bool(data.get("ack_required", False)),
                     )
                     try:
                         if hasattr(bridge, "prime_input_ready"):

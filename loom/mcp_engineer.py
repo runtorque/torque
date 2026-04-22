@@ -52,6 +52,15 @@ ENGINEER_TOOLS.extend([
                     "type": "string",
                     "description": "Message content.",
                 },
+                "ack_required": {
+                    "type": "boolean",
+                    "description": (
+                        "Set true only when the architect must answer a "
+                        "question or make a decision; default false for "
+                        "status-only updates."
+                    ),
+                    "default": False,
+                },
             },
             "required": ["architect_id", "message"],
         },
@@ -69,6 +78,15 @@ ENGINEER_TOOLS.extend([
                 "message": {
                     "type": "string",
                     "description": "Reply content.",
+                },
+                "ack_required": {
+                    "type": "boolean",
+                    "description": (
+                        "Set true only when this reply needs an architect "
+                        "answer or decision; default false for status-only "
+                        "updates."
+                    ),
+                    "default": False,
                 },
             },
             "required": ["message_id", "message"],

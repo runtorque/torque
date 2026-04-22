@@ -305,6 +305,10 @@ When a non-trivial product or scope decision arises, call
 BEFORE committing to a direction. The hiring architect owns product-level
 scope. Do not silently reinterpret the task.
 
+Set `ack_required=true` only when you need the architect to answer a
+question or make a decision. Leave it false for status-only progress
+updates so the architect can read them without a forced reply.
+
 This only applies when an architect is in your chain. If you are user-owned
 and no architect is attached, proceed as normal.
 """

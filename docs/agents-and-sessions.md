@@ -126,6 +126,16 @@ See [Actions & Templates](actions.md) for how task prompts are rendered from act
 
 Loom installs adapter-specific files into the agent's working directory so it can observe activity and expose Loom tools inside the provider.
 
+### Architect-engineer message acknowledgements
+
+Engineer-to-architect messages carry an optional `ack_required` boolean.
+It defaults to `false`: routine progress and status-only updates should not
+force the architect to reply. Engineers should set `ack_required: true` only
+when they are explicitly asking the architect a question or requesting a
+product/scope decision. When `ack_required` is false or omitted, Loom still
+delivers the message to the architect session, but suppresses the reply
+boilerplate; when true, Loom includes the normal `architect_reply(...)` hint.
+
 ### Common runtime behavior
 
 - Loom exports `LOOM_CELL_ID` into every session.

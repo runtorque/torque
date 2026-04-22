@@ -143,6 +143,44 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         state._emit_agent(worker)
         return worker
 
+    def test_injected_engineer_to_architect_prompt_respects_ack_required(self):
+        status_prompt = self.server_mod._format_injected_mcp_message_prompt(
+            message="Status: going quiet.",
+            sender_name="Alice",
+            sender_kind="engineer",
+            recipient_kind="architect",
+            message_id="msg-status",
+        )
+        self.assertIn("## Message from Alice (engineer)", status_prompt)
+        self.assertIn("Status: going quiet.", status_prompt)
+        self.assertNotIn("Reply with:", status_prompt)
+        self.assertNotIn("mcp__loom__architect_reply", status_prompt)
+
+        question_prompt = self.server_mod._format_injected_mcp_message_prompt(
+            message="Should I cut scope?",
+            sender_name="Alice",
+            sender_kind="engineer",
+            recipient_kind="architect",
+            message_id="msg-question",
+            ack_required=True,
+        )
+        self.assertIn(
+            'Reply with: mcp__loom__architect_reply(message_id="msg-question"',
+            question_prompt,
+        )
+
+        engineer_prompt = self.server_mod._format_injected_mcp_message_prompt(
+            message="Please confirm.",
+            sender_name="Productmind",
+            sender_kind="architect",
+            recipient_kind="engineer",
+            message_id="msg-architect",
+        )
+        self.assertIn(
+            'Reply with: mcp__loom__engineer_reply(message_id="msg-architect"',
+            engineer_prompt,
+        )
+
     async def test_add_engineer_creates_persistent_engineer_with_binding_and_engineer_mcp_entrypoint(self):
         state = self._make_state()
         bridge = _CapturingBridge()
