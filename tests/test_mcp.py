@@ -403,6 +403,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("weaver_board_summary", tool_names)
         self.assertNotIn("engineer_board_summary", tool_names)
         self.assertNotIn("architect_board_summary", tool_names)
+        self.assertNotIn("architect_workspace_overview", tool_names)
 
         listed_worker = await handler(
             FakeRequest(
@@ -417,6 +418,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("weaver_board_summary", worker_tool_names)
         self.assertNotIn("engineer_board_summary", worker_tool_names)
         self.assertNotIn("architect_board_summary", worker_tool_names)
+        self.assertNotIn("architect_workspace_overview", worker_tool_names)
 
         listed_architect = await handler(
             FakeRequest(
@@ -427,6 +429,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         architect_tool_names = [
             tool["name"] for tool in listed_architect.payload["result"]["tools"]
         ]
+        self.assertIn("architect_workspace_overview", architect_tool_names)
         self.assertIn("architect_board_summary", architect_tool_names)
         self.assertIn("architect_decision_create", architect_tool_names)
         self.assertIn("architect_engineer_hire", architect_tool_names)
@@ -448,6 +451,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("engineer_message_architect", engineer_tool_names)
         self.assertIn("engineer_reply", engineer_tool_names)
         self.assertNotIn("weaver_board_summary", engineer_tool_names)
+        self.assertNotIn("architect_workspace_overview", engineer_tool_names)
 
         listed_weaver = await handler(
             FakeRequest(

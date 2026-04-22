@@ -210,6 +210,195 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(engineers[user_engineer.id]["current_task_id"], hidden_task.id)
         self.assertEqual(engineers[user_engineer.id]["current_task"], hidden_task.task)
 
+    async def test_architect_workspace_overview_shape_and_scoping(self):
+        architect = self._add_architect("arch-1", "Loomer")
+        other_architect = self._add_architect("arch-2", "Other Architect")
+        panelsmith = self._add_engineer(
+            "eng-panelsmith", "Panelsmith", hired_by_architect_id=architect.id
+        )
+        courier = self._add_engineer(
+            "eng-courier", "Courier", hired_by_architect_id=architect.id
+        )
+        other_hired = self._add_engineer(
+            "eng-other", "Other", hired_by_architect_id=other_architect.id
+        )
+        user_visible = self._add_engineer("eng-user", "User Visible")
+        panelsmith.activity_detail = "Reviewing the workspace overview"
+        panelsmith.last_event_at = 111.0
+        self.state.update_agent_digest_settings(panelsmith.id, paused=True)
+
+        panel_worker = self._add_worker("worker-panel", "Panel Worker", panelsmith.id)
+        panel_worker.status = "running"
+        panel_worker.activity_detail = "Editing mcp_tools_shared.py"
+        panel_worker.worktree_repo_root = "/repo"
+        panel_worker.git_root = "/repo"
+        panel_worker.worktree_branch = "loom/panelsmith"
+        panel_worker.worktree_path = "/repo/.loom/worktrees/panel"
+        panel_worker.last_event_at = 222.0
+        courier_worker = self._add_worker("worker-courier", "Courier Worker", courier.id)
+        courier_worker.status = "idle"
+        courier_worker.worktree_repo_root = "/repo"
+        courier_worker.git_root = "/repo"
+        courier_worker.worktree_branch = "loom/courier"
+        courier_worker.worktree_path = "/repo/.loom/worktrees/courier"
+        hidden_worker = self._add_worker("worker-hidden", "Hidden Worker", other_hired.id)
+        hidden_worker.worktree_branch = "loom/hidden"
+
+        panel_task = self._add_task(
+            "LOOM:1",
+            "Implement compact workspace overview with a title that should be clipped "
+            "before it becomes too verbose for the architect context window",
+            lane="In Progress",
+            assigned_engineer_id=panelsmith.id,
+            created_by_architect_id=architect.id,
+        )
+        panel_task.agent_id = panel_worker.id
+        panel_task.created_at = "2026-04-22T10:00:00+00:00"
+        panel_task.updated_at = "2026-04-22T10:30:00+00:00"
+        panel_task.lane_entered_at = "2026-04-22T10:15:00+00:00"
+        panel_worker.current_task_id = panel_task.id
+        courier_task = self._add_task(
+            "LOOM:2",
+            "Review workspace overview response shape",
+            lane="To Do",
+            assigned_engineer_id=courier.id,
+            created_by_architect_id=architect.id,
+        )
+        courier_task.created_at = "2026-04-22T11:00:00+00:00"
+        self._add_task(
+            "LOOM:3",
+            "Archived own task must stay out",
+            lane="Archived",
+            assigned_engineer_id=courier.id,
+            created_by_architect_id=architect.id,
+        )
+        self._add_task(
+            "LOOM:4",
+            "Other architect task must stay out of my_tasks",
+            lane="To Do",
+            assigned_engineer_id=other_hired.id,
+            created_by_architect_id=other_architect.id,
+        )
+
+        self.state.save_pending_hire({
+            "id": "hire-own",
+            "architect_id": architect.id,
+            "requested_name": "Extra Engineer",
+            "status": "pending",
+        })
+        self.state.save_pending_hire({
+            "id": "hire-other",
+            "architect_id": other_architect.id,
+            "requested_name": "Hidden Engineer",
+            "status": "pending",
+        })
+        message_text, message_error = await self._call_engineer(
+            "engineer_message_architect",
+            {"architect_id": architect.id, "message": "Panels are ready for review."},
+            panelsmith.id,
+        )
+        self.assertFalse(message_error, message_text)
+
+        text, is_error = await self._call(
+            "architect_workspace_overview",
+            {},
+            architect.id,
+        )
+
+        self.assertFalse(is_error, text)
+        self.assertLess(len(text), 4096)
+        overview = json.loads(text)
+        self.assertEqual(
+            set(overview),
+            {
+                "architect",
+                "architect_self_state",
+                "engineers",
+                "my_tasks",
+                "pending_hires",
+                "unread_messages",
+            },
+        )
+        self.assertEqual(
+            overview["architect"],
+            {"id": architect.id, "name": "Loomer", "group": "loom"},
+        )
+        self.assertEqual(
+            overview["architect_self_state"],
+            {
+                "last_journal_entry_at": None,
+                "last_decision_at": None,
+                "journal_entry_count": 0,
+                "decision_count": 0,
+            },
+        )
+
+        engineer_ids = {item["id"] for item in overview["engineers"]}
+        self.assertEqual(engineer_ids, {panelsmith.id, courier.id, user_visible.id})
+        self.assertNotIn(other_hired.id, engineer_ids)
+        self.assertNotIn(hidden_worker.id, json.dumps(overview))
+
+        panelsmith_item = next(
+            item for item in overview["engineers"] if item["id"] == panelsmith.id
+        )
+        self.assertTrue(panelsmith_item["digest_paused"])
+        self.assertEqual(panelsmith_item["last_progress_at"], 111.0)
+        self.assertEqual(
+            panelsmith_item["queue"]["in_progress"],
+            [{
+                "task_id": panel_task.id,
+                "title": (
+                    "Implement compact workspace overview with a title that should "
+                    "be clipped before…"
+                ),
+                "since": "2026-04-22T10:15:00+00:00",
+            }],
+        )
+        self.assertEqual(panelsmith_item["workers"][0]["id"], panel_worker.id)
+        self.assertEqual(
+            panelsmith_item["workers"][0]["current_task_id"],
+            panel_task.id,
+        )
+        self.assertEqual(
+            panelsmith_item["recent_streams"][0]["branch"],
+            "loom/panelsmith",
+        )
+
+        courier_item = next(
+            item for item in overview["engineers"] if item["id"] == courier.id
+        )
+        self.assertEqual(
+            courier_item["queue"]["to_do"],
+            [{"task_id": courier_task.id, "title": courier_task.task}],
+        )
+        self.assertEqual(courier_item["workers"][0]["id"], courier_worker.id)
+
+        self.assertEqual(
+            {task["task_id"] for task in overview["my_tasks"]},
+            {panel_task.id, courier_task.id},
+        )
+        self.assertEqual(
+            overview["my_tasks"][0]["assigned_engineer_name"],
+            "Courier",
+        )
+        self.assertEqual(
+            overview["pending_hires"],
+            [{
+                "hire_id": "hire-own",
+                "requested_name": "Extra Engineer",
+                "status": "pending",
+            }],
+        )
+        self.assertEqual(overview["unread_messages"][0]["peer_id"], panelsmith.id)
+        self.assertEqual(
+            overview["unread_messages"][0]["peer_name"],
+            "Panelsmith",
+        )
+        self.assertEqual(
+            overview["unread_messages"][0]["snippet"],
+            "Panels are ready for review.",
+        )
+
     async def test_task_reads_resolve_literal_alias_to_hash_task(self):
         architect = self._add_architect("arch-1", "Architect")
         engineer = self._add_engineer("eng-1", "Engineer")
@@ -1046,6 +1235,98 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             path = self.state._architect_journal_path(architect.id)
             self.assertTrue(path.exists())
             self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+
+    async def test_architect_workspace_overview_self_state_reads_latest_history_counts(self):
+        architect = self._add_architect("arch-1", "Architect")
+        other_architect = self._add_architect("arch-2", "Other Architect")
+        with mock.patch.object(self.state_mod, "DATA_DIR", Path(self.tmp.name)):
+            with mock.patch("time.time", side_effect=[100.0, 200.0, 300.0, 400.0]):
+                for entry_type, entry in (
+                    ("checkpoint", "Old checkpoint"),
+                    ("decision", "Use the compact rollup"),
+                    ("checkpoint", "New checkpoint"),
+                    ("observation", "Not part of self-state"),
+                ):
+                    write_text, write_error = await self._call(
+                        "architect_journal",
+                        {"type": entry_type, "entry": entry},
+                        architect.id,
+                    )
+                    self.assertFalse(write_error, write_text)
+
+            self.state.save_decision({
+                "id": "decision-old",
+                "architect_id": architect.id,
+                "title": "Old decision",
+                "rationale": "First recorded direction",
+                "created_at": 150,
+                "updated_at": 150,
+            })
+            self.state.save_decision({
+                "id": "decision-new",
+                "architect_id": architect.id,
+                "title": "New decision",
+                "rationale": "Latest recorded direction",
+                "created_at": 250,
+                "updated_at": 250,
+            })
+            self.state.save_decision({
+                "id": "decision-other",
+                "architect_id": other_architect.id,
+                "title": "Other decision",
+                "rationale": "Must not affect this architect",
+                "created_at": 500,
+                "updated_at": 500,
+            })
+
+            text, is_error = await self._call(
+                "architect_workspace_overview",
+                {},
+                architect.id,
+            )
+            self.assertFalse(is_error, text)
+            self.assertEqual(
+                json.loads(text)["architect_self_state"],
+                {
+                    "last_journal_entry_at": 400.0,
+                    "last_decision_at": 250.0,
+                    "journal_entry_count": 4,
+                    "decision_count": 2,
+                },
+            )
+
+            empty_text, empty_error = await self._call(
+                "architect_workspace_overview",
+                {},
+                other_architect.id,
+            )
+            self.assertFalse(empty_error, empty_text)
+            self.assertEqual(
+                json.loads(empty_text)["architect_self_state"],
+                {
+                    "last_journal_entry_at": None,
+                    "last_decision_at": 500.0,
+                    "journal_entry_count": 0,
+                    "decision_count": 1,
+                },
+            )
+
+            empty_architect = self._add_architect("arch-empty", "Empty Architect")
+            no_history_text, no_history_error = await self._call(
+                "architect_workspace_overview",
+                {},
+                empty_architect.id,
+            )
+            self.assertFalse(no_history_error, no_history_text)
+            self.assertEqual(
+                json.loads(no_history_text)["architect_self_state"],
+                {
+                    "last_journal_entry_at": None,
+                    "last_decision_at": None,
+                    "journal_entry_count": 0,
+                    "decision_count": 0,
+                },
+            )
 
 
 class ArchitectBindingValidationTests(unittest.TestCase):
