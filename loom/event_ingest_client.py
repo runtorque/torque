@@ -54,6 +54,7 @@ class EventIngestClient:
         self._writer: Optional[asyncio.StreamWriter] = None
         self._reader_task: Optional[asyncio.Task] = None
         self._request_lock = asyncio.Lock()
+        self._connect_lock = asyncio.Lock()
         self._pending: Optional[asyncio.Future] = None
         self._closed = False
         self._ready = asyncio.Event()
@@ -62,37 +63,15 @@ class EventIngestClient:
             Callable[[dict], Optional[Awaitable[None]]]
         ] = None
         self._last_daemon_pid: Optional[int] = None
+        self._connection_generation = 0
 
     async def connect(self) -> dict:
         """Open the socket, verify protocol version, return pong payload."""
         self._closed = False
-        if self.data_dir is not None:
-            self.socket_path = await asyncio.to_thread(
-                self._ensure_running_func,
-                self.data_dir,
-            )
-        reader, writer = await asyncio.wait_for(
-            asyncio.open_unix_connection(str(self.socket_path)),
-            timeout=self._connect_timeout,
-        )
-        self._reader = reader
-        self._writer = writer
-        self._ready.set()
-        self._reader_task = asyncio.create_task(self._read_loop())
-        try:
-            pong = await self._probe_ping()
-            if pong.get("type") != "pong":
-                raise EventIngestProtocolError(f"expected pong, got {pong!r}")
-            if pong.get("version") != PROTOCOL_VERSION:
-                raise EventIngestProtocolError(
-                    f"version mismatch: client={PROTOCOL_VERSION} "
-                    f"daemon={pong.get('version')!r}"
-                )
-        except Exception:
-            await self._close_transport()
-            raise
-        self._last_daemon_pid = pong.get("pid")
-        return pong
+        async with self._request_lock:
+            pong = await self._connect_once()
+            self._last_daemon_pid = pong.get("pid")
+            return pong
 
     async def aclose(self) -> None:
         self._closed = True
@@ -107,7 +86,7 @@ class EventIngestClient:
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._reader_task
         self._reader_task = None
-        await self._close_transport()
+        await self._close_transport(cancel_reader=True)
         if self._pending and not self._pending.done():
             self._pending.set_exception(EventIngestUnavailable("client closed"))
         self._pending = None
@@ -163,6 +142,47 @@ class EventIngestClient:
                 if self._pending is fut:
                     self._pending = None
 
+    async def _connect_once(self) -> dict:
+        """Open one verified connection while request_lock is held.
+
+        ``_pending`` is a single shared response future, so connect-time ping
+        must be serialized with normal request/response calls.  Both
+        foreground calls and the background reconnect loop route through
+        ``_request_lock`` before entering here.
+        """
+        async with self._connect_lock:
+            if self.data_dir is not None:
+                self.socket_path = await asyncio.to_thread(
+                    self._ensure_running_func,
+                    self.data_dir,
+                )
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_unix_connection(str(self.socket_path)),
+                timeout=self._connect_timeout,
+            )
+            await self._close_transport(cancel_reader=True)
+            self._connection_generation += 1
+            generation = self._connection_generation
+            self._reader = reader
+            self._writer = writer
+            self._ready.set()
+            self._reader_task = asyncio.create_task(
+                self._read_loop(reader, generation))
+            try:
+                pong = await self._probe_ping()
+                if pong.get("type") != "pong":
+                    raise EventIngestProtocolError(
+                        f"expected pong, got {pong!r}")
+                if pong.get("version") != PROTOCOL_VERSION:
+                    raise EventIngestProtocolError(
+                        f"version mismatch: client={PROTOCOL_VERSION} "
+                        f"daemon={pong.get('version')!r}"
+                    )
+            except Exception:
+                await self._close_transport(cancel_reader=True)
+                raise
+            return pong
+
     async def _probe_ping(self) -> dict:
         """Send the connect-time ping without re-entering request_lock."""
         loop = asyncio.get_running_loop()
@@ -190,7 +210,7 @@ class EventIngestClient:
     async def _ensure_ready(self, *, connect_if_needed: bool = True) -> None:
         if self._writer is None or self._reader is None:
             if connect_if_needed:
-                await self.connect()
+                await self._connect_once()
             else:
                 raise EventIngestUnavailable("not connected")
         if not self._ready.is_set():
@@ -199,13 +219,17 @@ class EventIngestClient:
             except asyncio.TimeoutError as exc:
                 raise EventIngestUnavailable("event-ingest daemon not ready") from exc
 
-    async def _read_loop(self) -> None:
+    async def _read_loop(
+        self,
+        reader: asyncio.StreamReader,
+        generation: int,
+    ) -> None:
         try:
             while True:
-                if self._reader is None:
+                if generation != self._connection_generation:
                     break
                 try:
-                    msg = await read_frame(self._reader)
+                    msg = await read_frame(reader)
                 except (ConnectionResetError, BrokenPipeError, OSError):
                     break
                 except ValueError:
@@ -219,7 +243,8 @@ class EventIngestClient:
         except Exception:
             log.exception("Event-ingest client read loop failed")
         finally:
-            self._handle_disconnect()
+            if generation == self._connection_generation:
+                self._handle_disconnect(generation=generation)
 
     async def _dispatch_frame(self, msg: dict) -> None:
         mtype = msg.get("type")
@@ -232,7 +257,9 @@ class EventIngestClient:
             return
         log.warning("Unknown frame type from event-ingest daemon: %s", mtype)
 
-    def _handle_disconnect(self) -> None:
+    def _handle_disconnect(self, *, generation: int | None = None) -> None:
+        if generation is not None and generation != self._connection_generation:
+            return
         self._ready.clear()
         if self._pending and not self._pending.done():
             self._pending.set_exception(EventIngestUnavailable("connection lost"))
@@ -242,6 +269,8 @@ class EventIngestClient:
                 self._writer.close()
         self._reader = None
         self._writer = None
+        if generation is None or generation == self._connection_generation:
+            self._reader_task = None
         if self._closed:
             return
         if self._reconnect_task and not self._reconnect_task.done():
@@ -251,6 +280,12 @@ class EventIngestClient:
     async def _reconnect_loop(self) -> None:
         while not self._closed:
             await asyncio.sleep(self._reconnect_delay)
+            if (
+                self._ready.is_set()
+                and self._reader is not None
+                and self._writer is not None
+            ):
+                return
             try:
                 await self._reconnect_now()
             except Exception as exc:
@@ -259,18 +294,11 @@ class EventIngestClient:
             return
 
     async def _reconnect_now(self) -> dict:
-        current = asyncio.current_task()
-        if (
-            self._reconnect_task
-            and self._reconnect_task is not current
-            and not self._reconnect_task.done()
-        ):
-            self._reconnect_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await self._reconnect_task
-        prev_pid = self._last_daemon_pid
-        pong = await self.connect()
-        new_pid = pong.get("pid")
+        async with self._request_lock:
+            prev_pid = self._last_daemon_pid
+            pong = await self._connect_once()
+            new_pid = pong.get("pid")
+            self._last_daemon_pid = new_pid
         if self.on_reconnect:
             await _maybe_await(self.on_reconnect({
                 "previous_pid": prev_pid,
@@ -280,14 +308,26 @@ class EventIngestClient:
             }))
         return pong
 
-    async def _close_transport(self) -> None:
+    async def _close_transport(self, *, cancel_reader: bool = False) -> None:
         self._ready.clear()
+        self._connection_generation += 1
+        reader_task = self._reader_task
+        self._reader_task = None
         if self._writer:
             with contextlib.suppress(Exception):
                 self._writer.close()
                 await self._writer.wait_closed()
         self._reader = None
         self._writer = None
+        if (
+            cancel_reader
+            and reader_task
+            and reader_task is not asyncio.current_task()
+            and not reader_task.done()
+        ):
+            reader_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await reader_task
 
 
 async def _maybe_await(result) -> None:

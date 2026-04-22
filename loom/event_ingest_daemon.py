@@ -293,6 +293,27 @@ def _cleanup_stale(paths: dict) -> None:
         paths["pid"].unlink()
 
 
+def _terminate_pid(pid: int, *, timeout: float = 1.0) -> None:
+    """Best-effort terminate for a stale sidecar pid."""
+    if not _pid_alive(pid):
+        return
+    with contextlib.suppress(ProcessLookupError):
+        os.kill(pid, signal.SIGTERM)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not _pid_alive(pid):
+            return
+        with contextlib.suppress(ChildProcessError, OSError):
+            os.waitpid(pid, os.WNOHANG)
+        time.sleep(0.05)
+    if _pid_alive(pid):
+        log.warning("Event-ingest pid=%s did not exit after SIGTERM; killing", pid)
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.kill(pid, signal.SIGKILL)
+        with contextlib.suppress(ChildProcessError, OSError):
+            os.waitpid(pid, os.WNOHANG)
+
+
 def spawn_detached(data_dir: Path, *, max_rows: int | None = None) -> int:
     """Launch a detached ingest process. Returns the child PID."""
     data_dir = Path(data_dir)
@@ -352,10 +373,7 @@ def ensure_running(
             "Existing event-ingest pid=%s does not respond — terminating",
             old_pid,
         )
-        with contextlib.suppress(ProcessLookupError):
-            os.kill(old_pid, signal.SIGTERM)
-        with contextlib.suppress(ChildProcessError, OSError):
-            os.waitpid(old_pid, os.WNOHANG)
+        _terminate_pid(old_pid)
     _cleanup_stale(paths)
 
     child_pid = spawn_detached(data_dir, max_rows=max_rows)
@@ -381,6 +399,8 @@ async def _serve(data_dir: Path, *, max_rows: int = DEFAULT_MAX_ROWS) -> None:
     paths = _paths(data_dir)
     store = EventIngestStore(paths["db"], max_rows=max_rows).init()
     daemon = EventIngestDaemon(store)
+    stop_event = asyncio.Event()
+    shutdown_task: asyncio.Task | None = None
 
     async def handler(reader, writer):
         await daemon.handle_client(reader, writer)
@@ -393,7 +413,11 @@ async def _serve(data_dir: Path, *, max_rows: int = DEFAULT_MAX_ROWS) -> None:
     os.chmod(paths["pid"], 0o600)
 
     def _signal_shutdown(*_args):
-        asyncio.create_task(_graceful(server, daemon, paths))
+        nonlocal shutdown_task
+        if shutdown_task and not shutdown_task.done():
+            return
+        shutdown_task = asyncio.create_task(
+            _graceful(server, daemon, paths, stop_event))
 
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
@@ -402,20 +426,29 @@ async def _serve(data_dir: Path, *, max_rows: int = DEFAULT_MAX_ROWS) -> None:
 
     log.info("Event-ingest daemon listening on %s (pid=%s)", paths["socket"], os.getpid())
     async with server:
-        try:
-            await server.serve_forever()
-        except asyncio.CancelledError:
-            pass
+        await server.start_serving()
+        await stop_event.wait()
+    if shutdown_task:
+        with contextlib.suppress(asyncio.CancelledError):
+            await shutdown_task
 
 
-async def _graceful(server, daemon: EventIngestDaemon, paths: dict) -> None:
+async def _graceful(
+    server,
+    daemon: EventIngestDaemon,
+    paths: dict,
+    stop_event: asyncio.Event,
+) -> None:
     log.info("Event-ingest daemon shutting down")
     server.close()
+    with contextlib.suppress(Exception):
+        await server.wait_closed()
     await daemon.shutdown()
     with contextlib.suppress(FileNotFoundError):
         paths["socket"].unlink()
     with contextlib.suppress(FileNotFoundError):
         paths["pid"].unlink()
+    stop_event.set()
 
 
 def _configure_logging(log_path: Optional[Path]) -> None:

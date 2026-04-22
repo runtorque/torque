@@ -3877,9 +3877,8 @@ async def main(connection=None):
         event_bus,
         state,
     )
-    event_ingest_drainer.start()
-    log.info("Event bus, durable event-ingest drainer, health monitor, "
-             "and notifications started")
+    log.info("Event bus, event-ingest client, health monitor, "
+             "and notifications initialized")
 
     supervisor_banner: dict | None = None
     if STANDALONE:
@@ -4184,6 +4183,8 @@ async def main(connection=None):
     event_bus.on_session_end = _on_agent_session_end
     # Also checkpoint when the terminal session is actually closed (tab closed)
     bridge.on_session_terminated = _on_agent_session_end
+    event_ingest_drainer.start()
+    log.info("Durable event-ingest drainer started after EventBus callbacks")
 
     def _runtime_payload() -> dict:
         return {

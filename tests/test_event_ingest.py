@@ -3,10 +3,14 @@
 import asyncio
 import contextlib
 import os
+import signal
 import tempfile
+import time
 import unittest
+import warnings
 from pathlib import Path
 
+from loom import event_ingest_daemon
 from loom.event_ingest_db import EventIngestStore
 from loom.event_ingest_daemon import (
     EventIngestDaemon,
@@ -19,6 +23,7 @@ from loom.events import (
     EventBus,
     EventIngestDrainer,
     EventLog,
+    PanelEventLog,
     build_event_ingest_envelope,
 )
 try:
@@ -167,6 +172,40 @@ class EventIngestProtocolTests(unittest.IsolatedAsyncioTestCase):
             await writer.wait_closed()
 
 
+class EventIngestLifecycleTests(unittest.TestCase):
+    def test_detached_daemon_sigterm_exits_and_unlinks_runtime_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = Path(tmp)
+            pid_path = data_dir / event_ingest_daemon.DEFAULT_PID_FILE_NAME
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", ResourceWarning)
+                sock_path = event_ingest_daemon.ensure_running(
+                    data_dir,
+                    timeout=5.0,
+                    max_rows=10,
+                )
+            pid = int(pid_path.read_text(encoding="utf-8").strip())
+            try:
+                os.kill(pid, signal.SIGTERM)
+                deadline = time.monotonic() + 5.0
+                while time.monotonic() < deadline:
+                    with contextlib.suppress(ChildProcessError, OSError):
+                        os.waitpid(pid, os.WNOHANG)
+                    if not event_ingest_daemon._pid_alive(pid):
+                        break
+                    time.sleep(0.05)
+                self.assertFalse(
+                    event_ingest_daemon._pid_alive(pid),
+                    "event-ingest daemon stayed alive after SIGTERM",
+                )
+                self.assertFalse(sock_path.exists())
+                self.assertFalse(pid_path.exists())
+            finally:
+                if event_ingest_daemon._pid_alive(pid):
+                    with contextlib.suppress(ProcessLookupError, PermissionError):
+                        os.kill(pid, signal.SIGKILL)
+
+
 class EventIngestClientAndDrainerTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.h = _Harness()
@@ -200,6 +239,42 @@ class EventIngestClientAndDrainerTests(unittest.IsolatedAsyncioTestCase):
 
             status = await client.status()
             self.assertEqual(status.get("total_rows"), 1)
+        finally:
+            await client.aclose()
+
+    async def test_immediate_append_during_pending_background_reconnect(self):
+        original_append = self.h.store.append
+
+        def slow_append(*args, **kwargs):
+            time.sleep(0.25)
+            return original_append(*args, **kwargs)
+
+        self.h.store.append = slow_append
+        client = EventIngestClient(self.h.socket_path, reconnect_delay=0.05)
+        await client.connect()
+        try:
+            assert client._writer is not None
+            client._writer.close()
+            await client._writer.wait_closed()
+
+            deadline = asyncio.get_running_loop().time() + 1.0
+            while (
+                asyncio.get_running_loop().time() < deadline
+                and (
+                    client._reconnect_task is None
+                    or client._reconnect_task.done()
+                )
+            ):
+                await asyncio.sleep(0.01)
+            self.assertIsNotNone(client._reconnect_task)
+            self.assertFalse(client._reconnect_task.done())
+
+            appended = await asyncio.wait_for(
+                client.append({"slow": True}, idempotency_key="slow-after-drop"),
+                timeout=2.0,
+            )
+            self.assertEqual(appended.get("type"), "ok")
+            self.assertEqual((await client.status()).get("total_rows"), 1)
         finally:
             await client.aclose()
 
@@ -258,6 +333,53 @@ class EventIngestClientAndDrainerTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await restarted_client.status()).get("pending_rows"), 0)
         finally:
             await restarted_client.aclose()
+
+    async def test_restart_backlog_session_end_invokes_callbacks_and_hooks(self):
+        state, cell = self._state_with_cell()
+        cell.status = "running"
+        panel_seen: list[dict] = []
+        panel_log = PanelEventLog()
+        panel_log.on_event = lambda evt: panel_seen.append(evt)
+
+        client = EventIngestClient(self.h.socket_path, reconnect_delay=0.05)
+        await client.connect()
+        try:
+            await client.append(
+                build_event_ingest_envelope(
+                    {
+                        "hook_event_name": "Stop",
+                        "last_assistant_message": "finished from backlog",
+                    },
+                    headers={"X-Loom-Cell-Id": cell.id},
+                ),
+                idempotency_key="startup-session-end",
+            )
+
+            bus = EventBus(state, EventLog(), panel_log=panel_log)
+            bus.start()
+            session_end_seen: list[str] = []
+            weaver_seen: list[str] = []
+
+            async def on_session_end(ended_cell):
+                session_end_seen.append(ended_cell.id)
+
+            class FakeWeaverBuffer:
+                def on_agent_activity_change(self, changed_cell):
+                    weaver_seen.append(changed_cell.id)
+
+            bus.on_session_end = on_session_end
+            bus._weaver_buffer = FakeWeaverBuffer()
+
+            drainer = EventIngestDrainer(client, bus, state, batch_size=10)
+            processed = await drainer.drain_once()
+            self.assertEqual(processed, 1)
+            self.assertEqual(session_end_seen, [cell.id])
+            self.assertEqual(weaver_seen, [cell.id])
+            self.assertEqual([evt["kind"] for evt in panel_seen], ["agent_finished"])
+            self.assertEqual(cell.status, "idle")
+            self.assertEqual(cell.last_summary, "finished from backlog")
+        finally:
+            await client.aclose()
 
     async def test_reconnect_callback_reports_fresh_and_append_recovers(self):
         client = EventIngestClient(self.h.socket_path, reconnect_delay=0.05)
