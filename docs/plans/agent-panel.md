@@ -2,7 +2,7 @@
 
 ## Motivation
 
-The right-hand panel today is called "Architects & Engineers" and is rendered by `renderWeaverPanel()` in `static/js/weaver.js:577`. It was built when there was exactly **one Weaver per group**, so it is scoped to the group and mixes two concerns:
+The right-hand panel used to be called "Architects & Engineers" and was rendered by `renderWeaverPanel()` in `static/js/weaver.js:577`. It was built when there was exactly **one Weaver per group**, so it was scoped to the group and mixed two concerns:
 
 1. **Roster surface** — lists every architect and engineer in the group, with inline "+ Add Architect" and "+ Add Engineer" buttons (see `static/js/weaver.js:629-630`) plus the architect decision-log controls.
 2. **Weaver detail view** — Journal, Events, and Worklog tabs, all keyed by group (`state.weaver_worklog[group]`, `state.weaver_sent_events[group]`, `state.weaver_journal[group]`, `state.weaver_buffer_stats[group]`).
@@ -51,7 +51,7 @@ For an engineer, Events keeps its current meaning: the digest queue (queued + se
 - `agentPanelSelectTab(tab)` — tab switch; persists last-selected tab per agent-kind combo in a module-local dict.
 - Internal: `_renderArchitectPanel(agent)`, `_renderEngineerPanel(agent)`, `_renderWorkerPanel(agent)`, `_renderTerminalPanel(agent)`, `_resolveFocusedAgent()`.
 
-**DOM root rename.** `#panel-weaver` → `#panel-agent`. Update `static/js/panel_manager.js` and any CSS selectors. CSS class prefix `weaver-*` → `agent-panel-*` (mechanical rename — keep the same visual treatment for this pass).
+**DOM root.** The panel uses `#panel-agent`. `static/js/panel_manager.js` and CSS selectors target the neutral `agent-panel-*` prefix.
 
 **Split-button menu changes (`static/js/render.js`).** Inside `+ New` for each group:
 
@@ -90,7 +90,7 @@ For an architect, the Decisions section reads from the architect-specific decisi
 1. Move `+ Add Architect` / `+ Add Engineer` into the `+ New` split-button menu. Retire the "Weaver" menu entry and `newWeaver` code path.
 2. Replace `renderWeaverPanel` with `renderAgentPanel`, binding to `focusedItemId`.
 3. Implement the four kind renderers (architect / engineer / worker / terminal) reusing the existing tab body renderers where possible.
-4. Delete `static/js/weaver.js`. Rename `#panel-weaver` → `#panel-agent`. Update CSS class prefixes.
+4. Delete `static/js/weaver.js`. Keep the neutral `#panel-agent` root and `agent-panel-*` CSS prefixes.
 5. Verify rerender guardrails: scroll anchor, focus, inline drafts survive WebSocket deltas on each kind.
 
 **Phase 2 (follow-up, out of scope here).**

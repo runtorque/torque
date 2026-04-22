@@ -67,7 +67,7 @@ tail -f "$LOG"
 
 ## Add the architect
 
-1. Open the **Architects** panel.
+1. Open the **Agent** panel.
 2. Click **+ Add Architect**.
 3. Enter `productmind` as the name.
 4. Keep the default boot command unless you need a local override.

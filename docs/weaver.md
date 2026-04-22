@@ -29,7 +29,7 @@ After that engineer exists, open **Group Settings** for that group and switch to
 
 The designated engineer still uses Loom's persistent Weaver launch/settings flow because Loom needs to boot it with a dedicated system prompt. You cannot retroactively convert an arbitrary existing agent into that orchestration endpoint.
 
-### Engineers panel
+### Agent panel
 
 The panel's **Journal** tab keeps chronology separate from synthesis:
 
@@ -42,7 +42,7 @@ The panel header also shows:
 - time until the next digest push
 - a pause/resume toggle for event delivery
 
-In standalone mode, the **Board** remains the default lower workspace. Open **Engineers** when you need orchestration detail, journal context, or the deterministic session map.
+In standalone mode, the **Board** remains the default lower workspace. Open **Agent** when you need orchestration detail, journal context, or the deterministic session map.
 
 When event delivery is paused, Loom keeps buffering matching events for that engineer instead of dropping them. Resuming delivery flushes the buffered events in order, so pausing is safe even during busy boards.
 

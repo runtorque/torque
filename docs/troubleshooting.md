@@ -213,13 +213,13 @@ This usually means the UI is connected to an old daemon instance or the daemon l
 
 ### Symptoms
 
-- The Weaver panel stops sending digests.
+- The Agent panel stops sending digests.
 - The designated engineer is paused and never resumes.
 - The human replied, but the orchestration flow still looks stuck.
 
 ### Recovery
 
-1. Open the Engineers panel and check whether event delivery is paused.
+1. Open the Agent panel and check whether event delivery is paused.
 2. If the designated engineer asked a human question, make sure the reply was actually sent back to the waiting task.
 3. Resume orchestration after the reply if the flow expects that step.
 4. Relaunch the designated engineer if the session itself stopped.

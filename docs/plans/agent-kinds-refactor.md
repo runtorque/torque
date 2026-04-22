@@ -80,7 +80,7 @@ One SQLite migration in `db.py`:
 
 Data backfill on first load:
 
-- Existing Weaver(s) → `kind='engineer'`, `persistent=1`, `owner_engineer_id=''`, name becomes `"Weaver"` (preserving provenance; user can rename from the Engineers panel).
+- Existing Weaver(s) → `kind='engineer'`, `persistent=1`, `owner_engineer_id=''`, name becomes `"Weaver"` (preserving provenance; user can rename from the Agent panel).
 - Existing non-Weaver agents → `kind='worker'`, `role=template`, `owner_engineer_id=created_by_weaver_id`.
 - Existing tasks → `assigned_engineer_id=weaver_owner_id`.
 - Copy `template` → `role`.
@@ -149,14 +149,14 @@ The UI stays "see everything" but the order changes:
   4. Orphan workers (no engineer) last
 - Visual treatment: indentation + a faint connector line. Each kind gets a distinct icon/badge.
 - Group header becomes optional — hierarchy replaces it as the primary organizing principle. (Groups still exist for color/settings, but they're no longer the top-level axis.)
-- Panel rename: "Weaver" panel → "Engineers" panel. New "Architects" panel parallel to it. Roles editor replaces Templates editor.
+- Panel rename: the old "Weaver" / "Architects" surfaces converge into the Agent panel. Roles editor replaces Templates editor.
 - Architect detail UI also carries the live decision log and pending-hire review surfaces. Those views update from `decision_*` and `pending_hire_*` WebSocket deltas instead of a separate polling loop.
 
 ## 5. Hire / fire / relaunch semantics
 
 - **Hire (architect → engineer)**: architect calls `architect_engineer_hire`. This queues a pending hire visible to the user with approve/reject. The tool returns immediately with `status='pending'`; the architect must poll for resolution. On approve, a new engineer row is created (`persistent=1`) with `hired_by_architect_id=architect.id`. On reject, the architect gets a tool error and logs the rejection in its journal. Every hire requires explicit user approval in v1 — no pre-approved/trusted-architect mode. We'll revisit after observing usage.
 - **Relaunch engineer**: existing agent relaunch flow; works because `persistent=1` keeps the row alive after session end.
-- **Delete engineer**: hard delete only via the Engineers panel with user confirmation. On delete: all agents with `owner_engineer_id == deleted.id` get `owner_engineer_id=''` (transfer to user); all tasks with `assigned_engineer_id == deleted.id` get `assigned_engineer_id=''`. Worktrees stay (cleanup is separate). Deleting the last engineer is still allowed; `weaver_*` aliases then fail with a clear "create an engineer" error until one exists again.
+- **Delete engineer**: hard delete only via the Agent panel with user confirmation. On delete: all agents with `owner_engineer_id == deleted.id` get `owner_engineer_id=''` (transfer to user); all tasks with `assigned_engineer_id == deleted.id` get `assigned_engineer_id=''`. Worktrees stay (cleanup is separate). Deleting the last engineer is still allowed; `weaver_*` aliases then fail with a clear "create an engineer" error until one exists again.
 - **Delete architect**: same pattern — its engineers transfer to user (they keep running). Its decision log is archived (kept readable but marked `archived=1`), not deleted, so the audit trail survives.
 
 ## 6. Branch namespacing
@@ -232,14 +232,14 @@ Six stages, each independently shippable with a concrete acceptance criterion.
 
 **Deliverable**: the user can create multiple named engineers; each sees only its own agents and tasks; existing `weaver_*` clients still work via an alias.
 
-- **Engineer launch infra**: new "Add Engineer" action in the Engineers panel. Prompts for name + provider/command (default: the same Claude Code command the default engineer uses today). Spawns a persistent agent with `kind='engineer'`, unique `LOOM_ENGINEER_ID` env var, and the engineer MCP config pointing at `mcp_engineer.py`.
+- **Engineer launch infra**: new "Add Engineer" action in the Agent panel. Prompts for name + provider/command (default: the same Claude Code command the default engineer uses today). Spawns a persistent agent with `kind='engineer'`, unique `LOOM_ENGINEER_ID` env var, and the engineer MCP config pointing at `mcp_engineer.py`.
 - **MCP session binding**: engineer MCP server runs through a local stdio entrypoint (`mcp_engineer.py`), reads `LOOM_ENGINEER_ID` on startup, rejects tool calls if the env var is missing or the referenced engineer has been deleted, and scopes every read/write by that id.
 - Split the tool implementation: the existing single-surface module splits into a shared core (ownership-filtered CRUD) and per-kind entrypoints. `weaver_*` names stay as aliases routed to a deterministic "default engineer" — the one named `"Weaver"` if present, else the first engineer by creation order. When the alias is called from a bound legacy Weaver or engineer session, it stays bound to that session instead of jumping to the global default. If zero engineers exist, the alias returns a clear error telling the user to create one.
 - Enforce ownership scoping on all `engineer_*` reads and writes. Writes that create agents or tasks auto-stamp `owner_engineer_id` / `assigned_engineer_id` to the caller, and engineer task access is group-scoped.
 - CLI: `loom task create` from a terminal remains unassigned by default (`assigned_engineer_id=''`). Add `--engineer <slug>` for explicit assignment, extend `loom task edit` with the same reassignment flag, and add offline-capable `loom engineer list`.
 - Keybindings: `Cmd+Option+A` continues to add a worker (default); new `Cmd+Option+E` adds an engineer. Document in settings.
 - UI:
-  - Rename "Weaver" panel → "Engineers" panel, list all engineers with status/rename/delete controls.
+  - Rename the old "Weaver" surface to the Agent panel, listing engineers with status/rename/delete controls.
   - Agent list re-sorted hierarchically: user-owned content → engineers (creation order) → each engineer's workers indented underneath.
   - Hierarchical sort composes with group filter: when a group filter is active, sort stays hierarchical within the filtered set.
   - Relaunch button on engineer cells (uses existing relaunch path, `persistent=1` row survives).
@@ -251,15 +251,15 @@ Six stages, each independently shippable with a concrete acceptance criterion.
 
 **Deliverable**: the user can spawn an Architect that creates tasks, assigns them to engineers, writes typed decisions, and can request hiring new engineers via a user-approved flow.
 
-- **Architect launch infra**: new "Add Architect" action in the Architects panel. Same shape as engineer launch but with the architect MCP config (`mcp_architect.py`) and architect boot prompt. Persistent=1.
+- **Architect launch infra**: new "Add Architect" action in the Agent panel. Same shape as engineer launch but with the architect MCP config (`mcp_architect.py`) and architect boot prompt. Persistent=1.
 - **Architect MCP surface** (`architect_*`): task create/reassign (scoped to tasks it created), engineer list/message/reply/hire, decision CRUD, journal, board summary (scoped to tasks it created + engineers it hired). No dispatch, no worker messaging.
 - **Engineer ↔ architect messaging** (both surfaces): `architect_engineer_message`, `architect_reply`, `engineer_message_architect`, `engineer_reply`. Messages surface on both agents' cells.
 - **Engineer boot prompt update**: explicit instruction to escalate non-trivial product/scope decisions to the architect via `engineer_message_architect`.
-- **Pending hire queue**: new `pending_hires` table (`id`, `architect_id`, `requested_name`, `requested_command`, `requested_provider`, `status ∈ {pending,approved,rejected}`, `created_at`). User sees pending hires in the Architects panel with approve/reject buttons. On approve → engineer created with `hired_by_architect_id` set; on reject → architect receives a tool-call error with the user's reason (if any) and journals it.
+- **Pending hire queue**: new `pending_hires` table (`id`, `architect_id`, `requested_name`, `requested_command`, `requested_provider`, `status ∈ {pending,approved,rejected}`, `created_at`). User sees pending hires in the Agent panel with approve/reject buttons. On approve → engineer created with `hired_by_architect_id` set; on reject → architect receives a tool-call error with the user's reason (if any) and journals it.
 - **Reassignment rule**: an architect can only reassign tasks it created. Tasks created by users or by other architects are read-only from this architect's surface. (Documented; can relax later.)
 - **Decision delta ops**: add `decision_upsert` / `decision_remove` to the WS delta protocol (`static/js/ws.js`) so the UI stays live.
 - UI:
-  - Architects panel (parallel to Engineers).
+  - Agent panel.
   - Decision log viewer: list grouped by status, with filter by architect, click-through to linked tasks/engineers.
   - Hire approval banner/modal.
   - Sort: architects → engineers under each architect → workers under each engineer.
@@ -303,7 +303,7 @@ Six stages, each independently shippable with a concrete acceptance criterion.
 - **Architect task-reassign authority**: allowing any architect to reassign any task creates unclear ownership. → V1: architect can only reassign tasks it created. Revisit if workflow demands broader reassignment.
 ~~**Version skip during cleanup** (stage 6): users upgrading directly from pre-stage-1 to post-stage-6 would lose data. → Upgrade guard refuses to boot with a clear "install intermediate version first" error.~~
 - **Worktree orphans on engineer delete**: when an engineer is deleted and its workers transfer to the user, worktree branches still exist under the old `loom/<engineer-slug>/...` prefix. → Keep the branches as-is (don't rename — breaks git refs); document that branch names reflect creation-time ownership, not current.
-- **Pending-hire table growth**: approved/rejected hires pile up. → Auto-archive entries older than 30 days; expose a "clear history" action in the Architects panel.
+- **Pending-hire table growth**: approved/rejected hires pile up. → Auto-archive entries older than 30 days; expose a "clear history" action in the Agent panel.
 
 ## 11. Testing plan per stage
 

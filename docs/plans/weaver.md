@@ -1,7 +1,7 @@
 # Implementation Plan: Weaver (Phase 5)
 
 **Roadmap phase**: 5 — Semi-Autonomous Orchestration
-**Status**: Implemented (core: data model, event buffer, MCP tools, CLI, weaver panel, human interaction)
+**Status**: Implemented (core: data model, event buffer, MCP tools, CLI, Agent panel, human interaction)
 **Goal**: A dedicated semi-autonomous orchestrator agent per group that manages tasks, dispatches agents, reacts to events, consults with the human at key decision points, and maintains a persistent decision journal. The weaver is a first-class concept in Loom — a special agent unique to each group with its own UI panel, event subscription system, human interaction flow, and context management strategy.
 
 ---
@@ -30,8 +30,8 @@ The weaver is NOT fully autonomous — it's a semi-independent orchestrator that
 4. **Mandatory + optional events** — Some events always appear in digests (task completed, agent error, agent reply). Others are configurable (agent started, progress updates). A max interval (default 5 minutes) ensures the weaver gets periodic heartbeats even when nothing critical happened.
 5. **Journal as persistent brain** — The weaver writes structured journal entries (decisions, observations, checkpoints, plans). On context cleanup, the journal + current board state is enough to resume orchestration. The journal is per-group and stored in SQLite.
 6. **Pausable by the user** — A pause/resume button in the UI suspends event pushes so the human can interact with the weaver directly without competing with automated digests.
-7. **Human-in-the-loop** — The weaver is semi-autonomous: it uses `weaver_ask` to post questions to the human, which auto-pauses event delivery and shows the question in the Engineers panel. The human can reply via the panel (Loom sends the answer to the terminal) or type directly into the designated engineer's Claude Code terminal. When the weaver becomes active again, the pending question auto-clears.
-8. **Weaver creation via UI** — The legacy `weaver_*` entrypoint is created through the Engineers panel settings flow rather than by designating an arbitrary existing agent. This ensures the `--append-system-prompt-file` flag is set on boot.
+7. **Human-in-the-loop** — The weaver is semi-autonomous: it uses `weaver_ask` to post questions to the human, which auto-pauses event delivery and shows the question in the Agent panel. The human can reply via the panel (Loom sends the answer to the terminal) or type directly into the designated engineer's Claude Code terminal. When the weaver becomes active again, the pending question auto-clears.
+8. **Weaver creation via UI** — The legacy `weaver_*` entrypoint is created through the Agent panel settings flow rather than by designating an arbitrary existing agent. This ensures the `--append-system-prompt-file` flag is set on boot.
 
 ---
 
@@ -131,12 +131,12 @@ Weaver needs human guidance
   │     ├── WeaverSettings.pending_question = "Which tasks..."
   │     ├── WeaverSettings.paused = True (events auto-pause)
   │     ├── Journal: "Asked human: Which tasks..."
-  │     ├── Weaver panel shows amber banner with question + reply textarea
+  │     ├── Agent panel shows amber banner with question + reply textarea
   │     │
   │     └── Tool response to weaver:
   │           "Events paused. Call weaver_resume after the human responds."
   │
-  ├── Path A: Human replies via Weaver panel
+  ├── Path A: Human replies via Agent panel
   │     │
   │     ├── Types answer in textarea, clicks "Send Reply"
   │     ├── weaver_reply command:
@@ -216,7 +216,7 @@ class WeaverSettings:
     )
 ```
 
-**`custom_instructions`**: Free-text instructions injected into the weaver's system prompt via `--append-system-prompt`. The user writes these in the Engineers panel settings tab. They are concatenated with the weaver's base system prompt (from the action's `system_prompt` field or a built-in default) and passed as a single `--append-system-prompt` flag on boot.
+**`custom_instructions`**: Free-text instructions injected into the weaver's system prompt via `--append-system-prompt`. The user writes these in the Agent panel settings tab. They are concatenated with the weaver's base system prompt (from the action's `system_prompt` field or a built-in default) and passed as a single `--append-system-prompt` flag on boot.
 
 **System prompt structure** (assembled by Loom, passed via `--append-system-prompt`):
 
@@ -714,7 +714,7 @@ Reply with: loom_reply("your response")
 
 ##### `weaver_ask` (new)
 
-Ask the human a question. Posts the question to the Engineers panel and auto-pauses event delivery. The human can reply via the panel (Loom sends the answer to the terminal) or type directly into the designated engineer's Claude Code terminal.
+Ask the human a question. Posts the question to the Agent panel and auto-pauses event delivery. The human can reply via the panel (Loom sends the answer to the terminal) or type directly into the designated engineer's Claude Code terminal.
 
 ```json
 {
@@ -730,7 +730,7 @@ Ask the human a question. Posts the question to the Engineers panel and auto-pau
 
 **Tool response:**
 ```
-Question posted to the Engineers panel. Event pushes have been paused.
+Question posted to the Agent panel. Event pushes have been paused.
 The human will see your question and reply via the panel or directly
 in this terminal.
 
@@ -741,7 +741,7 @@ After the human responds, call weaver_resume to unpause event delivery.
 1. Sets `WeaverSettings.pending_question` to the question text
 2. Sets `WeaverSettings.paused = True` (auto-pause events)
 3. Logs to journal: "Asked human: {question}"
-4. Weaver panel shows amber banner with the question + reply textarea
+4. Agent panel shows amber banner with the question + reply textarea
 5. The weaver goes idle and waits
 
 **Human reply paths:**
@@ -972,7 +972,7 @@ All weaver configuration in one place. Sections separated by subtle dividers.
 
 #### Pause/Resume button
 
-- Shown in the Engineers panel settings section
+- Shown in the Agent panel settings section
 - Also shown as a small toggle icon on the weaver's agent cell in the Agents panel
 - When paused: event buffer still accumulates, but no digests are sent
 - When resumed: if events are buffered, they flush on next idle check
@@ -1046,7 +1046,7 @@ Append an entry to the weaver's journal.
 **Behavior:**
 1. Validate entry_type is one of: decision, observation, checkpoint, plan
 2. Insert into `weaver_journal` table
-3. Emit delta: `journal_append` (new delta op type for the Engineers panel)
+3. Emit delta: `journal_append` (new delta op type for the Agent panel)
 4. Return `{"type": "ok", "id": entry_id}`
 
 #### `weaver_journal_read`
@@ -1210,9 +1210,9 @@ When the weaver agent is removed, clear `GroupSettings.weaver_agent_id`. The jou
 - Add `weaver_events`, `weaver_notifications`, `weaver_journal`, `weaver_journal_read`, `weaver_agent_message` tools
 - Add `weaver_ask` tool: delegates to `weaver_ask` command, returns instructional response telling weaver to call `weaver_resume` after human responds
 
-### Step 6: UI — Weaver panel (`static/js/weaver.js`, `static/style.css`) ✅
+### Step 6: UI — Agent panel (`static/js/agent_panel.js`, `static/style.css`) ✅
 
-- New file: `static/js/weaver.js` — loaded between `events.js` and `main.js`
+- New file: `static/js/agent_panel.js` — loaded between `events.js` and `main.js`
 - Tabbed layout: `Journal` | `Settings` tabs
 - Panel header: group name (follows `_currentGroup()` — the currently selected group), pause/resume toggle
 - **Journal tab** (default):
@@ -1233,7 +1233,7 @@ When the weaver agent is removed, clear `GroupSettings.weaver_agent_id`. The jou
 
 ### Step 8: UI — Pause/resume controls ✅
 
-- Pause/Resume button in Weaver panel header (always visible across tabs)
+- Pause/Resume button in Agent panel header (always visible across tabs)
 - Updates `WeaverSettings.paused` via WS command
 - Visual feedback: button text toggles between "Pause" and "Resume", styled differently when paused
 
@@ -1293,10 +1293,10 @@ When the weaver agent is removed, clear `GroupSettings.weaver_agent_id`. The jou
 | `loom/mcp.py` | `loom_reply` tool definition + action mapping |
 | `loom/mcp_weaver.py` | Remove 3 tools, enrich `task_show` with chain, add 6 tools (`events`, `notifications`, `journal`, `journal_read`, `agent_message`, `ask`) |
 | `bin/loom` | `loom ai reply` subcommand, `loom weaver journal` subcommand |
-| `static/js/weaver.js` | **New file.** Tabbed panel (Journal/Settings), pending question banner with reply box, journal feed, settings with create button + custom instructions + notifications, `weaverCreate()` / `weaverReply()` / `weaverTogglePause()` |
-| `static/js/render.js` | Weaver panel re-render on delta |
+| `static/js/agent_panel.js` | **New file.** Tabbed panel (Journal/Settings), pending question banner with reply box, journal feed, settings with create button + custom instructions + notifications, `weaverCreate()` / `weaverReply()` / `weaverTogglePause()` |
+| `static/js/render.js` | Agent panel re-render on delta |
 | `static/js/ws.js` | `journal_append` + `weaver_settings_update` delta op handlers |
-| `static/js/main.js` | `panel-weaver` in panel IDs, render hooks |
-| `static/style.css` | Weaver panel styles: header, tabs, journal entries with type badges, ask banner (amber), reply textarea/button, settings sections, create button, event checkboxes |
-| `webview.html` | `panel-weaver` div, taskbar button (⚖ Weaver), `weaver.js` script tag |
+| `static/js/main.js` | `panel-agent` in panel IDs, render hooks |
+| `static/style.css` | Agent panel styles: header, tabs, journal entries with type badges, ask banner (amber), reply textarea/button, settings sections, create button, event checkboxes |
+| `webview.html` | `panel-agent` div, taskbar button (⚖ Agent), `agent_panel.js` script tag |
 | `Makefile` | Add `loom/mcp_weaver.py` and `loom/weaver.py` to install target |

@@ -895,7 +895,7 @@ WEAVER_TOOLS = [
         "name": "weaver_ask",
         "description": (
             "Ask the human a question. The question is displayed in "
-            "the Engineers panel and event pushes are automatically "
+            "the Agent panel and event pushes are automatically "
             "paused until the human replies. Use this only when the "
             "next orchestration step depends on a blocking human "
             "decision — prioritization, design decisions, approval, "
