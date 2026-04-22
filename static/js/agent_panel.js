@@ -31,6 +31,19 @@ function _agentPanelEsc(value) {
   return String(value == null ? '' : value);
 }
 
+function _agentPanelAttr(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function _agentPanelEventAttr(value) {
+  return _agentPanelAttr(value);
+}
+
 function _agentPanelKind(agent) {
   if (!agent) return '';
   if ((agent.cell_type || '') === 'terminal') return 'terminal';
@@ -1118,7 +1131,10 @@ function _weaverDecisionUiState(decisionId, decision) {
     };
   }
   var entry = _weaverArchitectDecisionUi[key];
-  var current = decision || (state && state.decisions ? state.decisions[key] : null) || {};
+  var current = decision
+    || (state && state.decisions ? state.decisions[key] : null)
+    || (state && state.architect_decisions ? state.architect_decisions[key] : null)
+    || {};
   if (!entry.editing) {
     entry.draft.title = String(current.title || '');
     entry.draft.rationale = String(current.rationale || '');
@@ -1128,7 +1144,8 @@ function _weaverDecisionUiState(decisionId, decision) {
 }
 
 function _weaverMultilineHtml(text) {
-  return formatCode(text || '').replace(/\n/g, '<br>');
+  var formatter = (typeof formatCode === 'function') ? formatCode : _agentPanelEsc;
+  return formatter(text || '').replace(/\n/g, '<br>');
 }
 
 function _weaverDecisionGroups(decisions) {
@@ -1174,6 +1191,59 @@ function getArchitectDecisionEngineerOptions(architectId) {
     if (engineer.slug) label += ' (' + engineer.slug + ')';
     return { value: engineer.id, label: label };
   });
+}
+
+function _weaverDecisionSupersededByIds(architectId, decisionId) {
+  var architectKey = String(architectId || '').trim();
+  var decisionKey = String(decisionId || '').trim();
+  var ids = [];
+  var seen = {};
+  if (!architectKey || !decisionKey || !state) return ids;
+  var stores = [];
+  if (state.decisions) stores.push(state.decisions);
+  if (state.architect_decisions && state.architect_decisions !== state.decisions) {
+    stores.push(state.architect_decisions);
+  }
+  for (var storeIndex = 0; storeIndex < stores.length; storeIndex++) {
+    var store = stores[storeIndex];
+    var values = Array.isArray(store) ? store : Object.keys(store).map(function(key) {
+      return store[key];
+    });
+    for (var valueIndex = 0; valueIndex < values.length; valueIndex++) {
+      var candidate = values[valueIndex] || {};
+      var candidateId = String(candidate.id || '').trim();
+      if (!candidateId || seen[candidateId]) continue;
+      if (String(candidate.architect_id || '').trim() !== architectKey) continue;
+      if (String(candidate.supersedes || '').trim() !== decisionKey) continue;
+      seen[candidateId] = true;
+      ids.push(candidateId);
+    }
+  }
+  ids.sort();
+  return ids;
+}
+
+function _weaverDecisionRefsHtml(ids, emptyText) {
+  var values = Array.isArray(ids) ? ids.filter(function(id) {
+    return String(id || '').trim();
+  }) : [];
+  if (!values.length) {
+    return '<span class="architect-decision-ref-empty">'
+      + _agentPanelEsc(emptyText || 'None') + '</span>';
+  }
+  var html = '<span class="architect-decision-ref-list">';
+  for (var i = 0; i < values.length; i++) {
+    html += '<span class="architect-decision-ref">' + _agentPanelEsc(values[i]) + '</span>';
+  }
+  html += '</span>';
+  return html;
+}
+
+function _weaverDecisionMetaRowHtml(label, valueHtml) {
+  return '<div class="detail-section-card-meta architect-decision-meta-row">'
+    + '<span class="architect-decision-meta-label">' + _agentPanelEsc(label) + '</span>'
+    + '<span class="architect-decision-meta-value">' + (valueHtml || '') + '</span>'
+    + '</div>';
 }
 
 function _agentPanelLegacyRenderWorkerRows(workers, levelClass) {
@@ -1223,20 +1293,27 @@ function _agentPanelLegacyRenderDecisionRow(architectId, decision) {
   var statusFocusKey = _weaverDecisionFocusKey(decision.id, 'status');
   var linkedTaskIds = Array.isArray(decision.linked_task_ids) ? decision.linked_task_ids : [];
   var linkedEngineerIds = Array.isArray(decision.linked_engineer_ids) ? decision.linked_engineer_ids : [];
+  var supersedesId = String(decision.supersedes || '').trim();
+  var supersededByIds = _weaverDecisionSupersededByIds(architectId, decision.id);
   var taskOptions = getArchitectDecisionTaskOptions(architectId);
   var engineerOptions = getArchitectDecisionEngineerOptions(architectId);
   var html = '<div class="detail-section-card architect-decision-card">';
   html += '<div class="detail-section-card-head">';
-  html += '<button type="button" class="architect-decision-toggle" onclick="weaverToggleDecision(' + decisionIdJs + ')">';
+  html += '<button type="button" class="architect-decision-toggle" onclick="'
+    + _agentPanelEventAttr('weaverToggleDecision(' + decisionIdJs + ')') + '">';
   html += '<span class="detail-section-primary" title="' + _esc(decision.title || '') + '">' + _esc(decision.title || 'Decision') + '</span>';
   html += '<span class="detail-task-status">' + _esc(decision.status || 'proposed') + '</span>';
   html += '<span class="detail-expand-caret">' + (ui.expanded ? '\u25BE' : '\u25B8') + '</span>';
   html += '</button>';
   html += '<div class="detail-section-card-actions">';
   if (!ui.editing) {
-    html += '<button type="button" class="detail-inline-editor-btn" onclick="event.stopPropagation();weaverStartDecisionEdit(' + decisionIdJs + ')">Edit</button>';
+    html += '<button type="button" class="detail-inline-editor-btn" onclick="'
+      + _agentPanelEventAttr('event.stopPropagation();weaverStartDecisionEdit(' + decisionIdJs + ')')
+      + '">Edit</button>';
   }
-  html += '<button type="button" class="detail-inline-editor-btn" onclick="event.stopPropagation();weaverArchiveDecision(' + architectIdJs + ',' + decisionIdJs + ')">Archive</button>';
+  html += '<button type="button" class="detail-inline-editor-btn" onclick="'
+    + _agentPanelEventAttr('event.stopPropagation();weaverArchiveDecision(' + architectIdJs + ',' + decisionIdJs + ')')
+    + '">Archive</button>';
   html += '</div></div>';
   if (ui.expanded || ui.editing) {
     html += '<div class="architect-decision-body">';
@@ -1244,15 +1321,15 @@ function _agentPanelLegacyRenderDecisionRow(architectId, decision) {
       html += '<input class="detail-inline-description-input architect-decision-input"'
         + ' data-focus-key="' + _esc(titleFocusKey) + '"'
         + ' value="' + _esc(ui.draft.title || '') + '"'
-        + ' oninput="weaverDecisionDraftInput(' + decisionIdJs + ',\'title\',this.value)"'
+        + ' oninput="' + _agentPanelEventAttr('weaverDecisionDraftInput(' + decisionIdJs + ',\'title\',this.value)') + '"'
         + ' placeholder="Decision title">';
       html += '<textarea class="detail-inline-description-input architect-decision-textarea" rows="4"'
         + ' data-focus-key="' + _esc(rationaleFocusKey) + '"'
-        + ' oninput="weaverDecisionDraftInput(' + decisionIdJs + ',\'rationale\',this.value)"'
+        + ' oninput="' + _agentPanelEventAttr('weaverDecisionDraftInput(' + decisionIdJs + ',\'rationale\',this.value)') + '"'
         + ' placeholder="Decision rationale...">' + _esc(ui.draft.rationale || '') + '</textarea>';
       html += '<select class="architect-decision-status-select"'
         + ' data-focus-key="' + _esc(statusFocusKey) + '"'
-        + ' onchange="weaverDecisionDraftInput(' + decisionIdJs + ',\'status\',this.value)">';
+        + ' onchange="' + _agentPanelEventAttr('weaverDecisionDraftInput(' + decisionIdJs + ',\'status\',this.value)') + '">';
       for (var statusIndex = 0; statusIndex < _WEAVER_DECISION_STATUSES.length; statusIndex++) {
         var statusOption = _WEAVER_DECISION_STATUSES[statusIndex];
         var selected = ui.draft.status === statusOption ? ' selected' : '';
@@ -1260,20 +1337,34 @@ function _agentPanelLegacyRenderDecisionRow(architectId, decision) {
       }
       html += '</select>';
       html += '<div class="detail-inline-editor-actions">';
-      html += '<button type="button" class="detail-inline-editor-btn detail-inline-editor-btn-primary" onclick="weaverSaveDecisionEdit(' + architectIdJs + ',' + decisionIdJs + ')">Save</button>';
-      html += '<button type="button" class="detail-inline-editor-btn" onclick="weaverCancelDecisionEdit(' + decisionIdJs + ')">Cancel</button>';
+      html += '<button type="button" class="detail-inline-editor-btn detail-inline-editor-btn-primary" onclick="'
+        + _agentPanelEventAttr('weaverSaveDecisionEdit(' + architectIdJs + ',' + decisionIdJs + ')')
+        + '">Save</button>';
+      html += '<button type="button" class="detail-inline-editor-btn" onclick="'
+        + _agentPanelEventAttr('weaverCancelDecisionEdit(' + decisionIdJs + ')')
+        + '">Cancel</button>';
       html += '</div>';
     } else {
       if (decision.rationale) {
         html += '<div class="detail-section-card-body">' + _weaverMultilineHtml(decision.rationale) + '</div>';
       }
-      html += '<div class="detail-section-card-meta">';
-      html += 'Linked ' + linkedTaskIds.length + ' task' + (linkedTaskIds.length === 1 ? '' : 's')
-        + ' • ' + linkedEngineerIds.length + ' engineer' + (linkedEngineerIds.length === 1 ? '' : 's');
-      if (decision.archived) html += ' • archived';
-      html += '</div>';
+      html += _weaverDecisionMetaRowHtml(
+        'Status',
+        '<span class="detail-task-status">' + _agentPanelEsc(decision.status || 'proposed') + '</span>'
+          + (decision.archived ? ' <span class="architect-decision-ref-empty">archived</span>' : '')
+      );
+      html += _weaverDecisionMetaRowHtml('Linked tasks', _weaverDecisionRefsHtml(linkedTaskIds, 'None'));
+      html += _weaverDecisionMetaRowHtml('Linked engineers', _weaverDecisionRefsHtml(linkedEngineerIds, 'None'));
+      if (supersedesId) {
+        html += _weaverDecisionMetaRowHtml('Supersedes', _weaverDecisionRefsHtml([supersedesId], 'None'));
+      }
+      if (supersededByIds.length) {
+        html += _weaverDecisionMetaRowHtml('Superseded by', _weaverDecisionRefsHtml(supersededByIds, 'None'));
+      }
       html += '<div class="architect-decision-link-row">';
-      html += '<select class="architect-decision-link-select" onchange="weaverDecisionLinkSelect(' + decisionIdJs + ',\'task\',this.value)">';
+      html += '<select class="architect-decision-link-select" onchange="'
+        + _agentPanelEventAttr('weaverDecisionLinkSelect(' + decisionIdJs + ',\'task\',this.value)')
+        + '">';
       html += '<option value="">Link task…</option>';
       for (var taskIndex = 0; taskIndex < taskOptions.length; taskIndex++) {
         var taskOption = taskOptions[taskIndex];
@@ -1281,8 +1372,12 @@ function _agentPanelLegacyRenderDecisionRow(architectId, decision) {
         html += '<option value="' + _esc(taskOption.value) + '"' + taskSelected + '>' + _esc(taskOption.label) + '</option>';
       }
       html += '</select>';
-      html += '<button type="button" class="detail-inline-editor-btn" onclick="weaverLinkDecisionTask(' + architectIdJs + ',' + decisionIdJs + ')">Link task</button>';
-      html += '<select class="architect-decision-link-select" onchange="weaverDecisionLinkSelect(' + decisionIdJs + ',\'engineer\',this.value)">';
+      html += '<button type="button" class="detail-inline-editor-btn" onclick="'
+        + _agentPanelEventAttr('weaverLinkDecisionTask(' + architectIdJs + ',' + decisionIdJs + ')')
+        + '">Link task</button>';
+      html += '<select class="architect-decision-link-select" onchange="'
+        + _agentPanelEventAttr('weaverDecisionLinkSelect(' + decisionIdJs + ',\'engineer\',this.value)')
+        + '">';
       html += '<option value="">Link engineer…</option>';
       for (var engineerIndex = 0; engineerIndex < engineerOptions.length; engineerIndex++) {
         var engineerOption = engineerOptions[engineerIndex];
@@ -1290,7 +1385,9 @@ function _agentPanelLegacyRenderDecisionRow(architectId, decision) {
         html += '<option value="' + _esc(engineerOption.value) + '"' + engineerSelected + '>' + _esc(engineerOption.label) + '</option>';
       }
       html += '</select>';
-      html += '<button type="button" class="detail-inline-editor-btn" onclick="weaverLinkDecisionEngineer(' + architectIdJs + ',' + decisionIdJs + ')">Link engineer</button>';
+      html += '<button type="button" class="detail-inline-editor-btn" onclick="'
+        + _agentPanelEventAttr('weaverLinkDecisionEngineer(' + architectIdJs + ',' + decisionIdJs + ')')
+        + '">Link engineer</button>';
       html += '</div>';
     }
     html += '</div>';
@@ -1351,7 +1448,9 @@ function _agentPanelLegacyRenderArchitectRoster(group) {
       } else {
         html += '<div class="engineers-roster-empty architect-roster-empty">No hired engineers yet.</div>';
       }
-      html += '<div class="architect-roster-section-head"><span class="architect-roster-section-title">Decision log</span><span class="architect-roster-section-actions"><span class="architect-roster-section-count">' + decisions.length + '</span><button type="button" class="engineer-row-btn" onclick="event.stopPropagation();openArchitectDecisionModal(' + architectIdJs + ')">+ New decision</button></span></div>';
+      html += '<div class="architect-roster-section-head"><span class="architect-roster-section-title">Decision log</span><span class="architect-roster-section-actions"><span class="architect-roster-section-count">' + decisions.length + '</span><button type="button" class="engineer-row-btn" onclick="'
+        + _agentPanelEventAttr('event.stopPropagation();openArchitectDecisionModal(' + architectIdJs + ')')
+        + '">+ New decision</button></span></div>';
       var hasDecisionRows = false;
       for (var statusIndex = 0; statusIndex < _WEAVER_DECISION_STATUSES.length; statusIndex++) {
         var statusName = _WEAVER_DECISION_STATUSES[statusIndex];

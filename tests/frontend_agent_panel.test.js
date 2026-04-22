@@ -505,6 +505,98 @@ test('focused architect decision interactions rerender the agent panel instead o
   assert.equal(vm.runInContext(`_weaverDecisionUiState('d1').expanded`, context), true);
 });
 
+test('focused architect decision rows render parseable click handlers and expanded details', () => {
+  const { context, panel } = createHarness();
+  setFocusedAgent(context, {
+    id: 'arch-1',
+    name: 'Planner',
+    kind: 'architect',
+    group: 'alpha',
+    cell_type: 'agent',
+  });
+  context.state.decisions = {
+    d1: {
+      id: 'd1',
+      architect_id: 'arch-1',
+      title: 'Keep the focused agent surface stable',
+      rationale: 'Show the operator why this direction was chosen.',
+      status: 'accepted',
+      linked_task_ids: ['LOOM:101'],
+      linked_engineer_ids: ['eng-1'],
+      supersedes: 'd0',
+      updated_at: 40,
+    },
+    d2: {
+      id: 'd2',
+      architect_id: 'arch-1',
+      title: 'Follow-up decision',
+      status: 'revised',
+      supersedes: 'd1',
+      updated_at: 41,
+    },
+  };
+
+  context.renderAgentPanel();
+
+  assert.match(panel.innerHTML, /onclick="weaverToggleDecision\(&quot;d1&quot;\)"/);
+  assert.match(panel.innerHTML, /onclick="event\.stopPropagation\(\);weaverStartDecisionEdit\(&quot;d1&quot;\)"/);
+  assert.doesNotMatch(panel.innerHTML, /onclick="weaverToggleDecision\("/);
+  assert.doesNotMatch(panel.innerHTML, /weaverStartDecisionEdit\("/);
+
+  context.weaverToggleDecision('d1');
+
+  assert.match(panel.innerHTML, /Show the operator why this direction was chosen\./);
+  assert.match(panel.innerHTML, /Status/);
+  assert.match(panel.innerHTML, /accepted/);
+  assert.match(panel.innerHTML, /Linked tasks/);
+  assert.match(panel.innerHTML, /LOOM:101/);
+  assert.match(panel.innerHTML, /Linked engineers/);
+  assert.match(panel.innerHTML, /eng-1/);
+  assert.match(panel.innerHTML, /Supersedes/);
+  assert.match(panel.innerHTML, /d0/);
+  assert.match(panel.innerHTML, /Superseded by/);
+  assert.match(panel.innerHTML, /d2/);
+});
+
+test('focused architect decision edit sends the existing update command', () => {
+  const { context, sendCalls } = createHarness();
+  setFocusedAgent(context, {
+    id: 'arch-1',
+    name: 'Planner',
+    kind: 'architect',
+    group: 'alpha',
+    cell_type: 'agent',
+  });
+  context.state.decisions = {
+    d1: {
+      id: 'd1',
+      architect_id: 'arch-1',
+      title: 'Initial title',
+      rationale: 'Initial rationale',
+      status: 'proposed',
+      updated_at: 40,
+    },
+  };
+
+  context.renderAgentPanel();
+  context.weaverStartDecisionEdit('d1');
+  context.weaverDecisionDraftInput('d1', 'title', 'Updated title');
+  context.weaverDecisionDraftInput('d1', 'rationale', 'Updated rationale');
+  context.weaverDecisionDraftInput('d1', 'status', 'accepted');
+  context.weaverSaveDecisionEdit('arch-1', 'd1');
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sendCalls)), [
+    {
+      cmd: 'architect_decision_update',
+      architect_id: 'arch-1',
+      id: 'd1',
+      title: 'Updated title',
+      rationale: 'Updated rationale',
+      status: 'accepted',
+    },
+  ]);
+});
+
 test('focused engineer events tab starts the live countdown timer', () => {
   const { context, panel, intervalCalls } = createHarness();
   const countdownEl = { textContent: '' };

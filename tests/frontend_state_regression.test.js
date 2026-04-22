@@ -6723,6 +6723,189 @@ test('renderAgentPanel preserves focused architect decision rationale editor acr
   );
 });
 
+test('renderAgentPanel preserves expanded architect decision state and scroll across decision WS deltas', () => {
+  const { context, document } = createWeaverWsHarness();
+  const panel = document.getElementById('panel-agent');
+  const content = document.createElement('div');
+  content.classList.add('agent-panel-content');
+  panel.setQuerySelector('.agent-panel-content', content);
+
+  runInContext(context, `
+    state.groups = { alpha: ['arch-1'] };
+    state.agents = {
+      'arch-1': {
+        id: 'arch-1',
+        name: 'Productmind',
+        slug: 'productmind',
+        kind: 'architect',
+        group: 'alpha',
+        cell_type: 'agent',
+        status: 'running',
+        created_at: 10,
+      },
+      'eng-1': {
+        id: 'eng-1',
+        name: 'Engineer One',
+        kind: 'engineer',
+        group: 'alpha',
+        hired_by_architect_id: 'arch-1',
+        cell_type: 'agent',
+        created_at: 11,
+      },
+    };
+    state.board_tasks = {
+      'LOOM:200': { id: 'LOOM:200', task: 'Implement decision UI', group: 'alpha', lane: 'In Progress' },
+    };
+    state.decisions = {
+      'decision-1': {
+        id: 'decision-1',
+        architect_id: 'arch-1',
+        title: 'Initial title',
+        rationale: 'Initial rationale',
+        status: 'proposed',
+        updated_at: 20,
+      },
+    };
+    focusedItemId = 'arch-1';
+    _expectedSeq = 1;
+    renderAgentPanel();
+    weaverToggleDecision('decision-1');
+  `);
+  content.scrollTop = 144;
+
+  context._handleDelta({
+    seq: 1,
+    ops: [
+      {
+        op: 'decision_upsert',
+        id: 'decision-1',
+        architect_id: 'arch-1',
+        title: 'Define scope first',
+        rationale: 'Updated rationale from server',
+        status: 'accepted',
+        linked_task_ids: ['LOOM:200'],
+        linked_engineer_ids: ['eng-1'],
+        supersedes: 'decision-0',
+        updated_at: 30,
+      },
+      {
+        op: 'decision_upsert',
+        id: 'decision-2',
+        architect_id: 'arch-1',
+        title: 'Revision',
+        rationale: 'Supersedes the first decision',
+        status: 'revised',
+        supersedes: 'decision-1',
+        updated_at: 31,
+      },
+    ],
+  });
+
+  assert.equal(content.scrollTop, 144);
+  assert.equal(jsonValue(context, `_weaverArchitectDecisionUi['decision-1'].expanded`), true);
+  assert.match(panel.innerHTML, /Updated rationale from server/);
+  assert.match(panel.innerHTML, /Linked tasks/);
+  assert.match(panel.innerHTML, /LOOM:200/);
+  assert.match(panel.innerHTML, /Linked engineers/);
+  assert.match(panel.innerHTML, /eng-1/);
+  assert.match(panel.innerHTML, /Supersedes/);
+  assert.match(panel.innerHTML, /decision-0/);
+  assert.match(panel.innerHTML, /Superseded by/);
+  assert.match(panel.innerHTML, /decision-2/);
+});
+
+test('renderAgentPanel preserves focused architect decision edit draft across decision WS deltas', () => {
+  const { context, document, sandbox } = createWeaverWsHarness();
+  const panel = document.getElementById('panel-agent');
+  const content = document.createElement('div');
+  content.classList.add('agent-panel-content');
+  panel.setQuerySelector('.agent-panel-content', content);
+
+  runInContext(context, `
+    state.groups = { alpha: ['arch-1'] };
+    state.agents = {
+      'arch-1': {
+        id: 'arch-1',
+        name: 'Productmind',
+        slug: 'productmind',
+        kind: 'architect',
+        group: 'alpha',
+        cell_type: 'agent',
+        status: 'running',
+        created_at: 10,
+      },
+    };
+    state.decisions = {
+      'decision-1': {
+        id: 'decision-1',
+        architect_id: 'arch-1',
+        title: 'Initial title',
+        rationale: 'Initial rationale',
+        status: 'proposed',
+        updated_at: 20,
+      },
+    };
+    focusedItemId = 'arch-1';
+    _expectedSeq = 1;
+    renderAgentPanel();
+    weaverStartDecisionEdit('decision-1');
+    weaverDecisionDraftInput('decision-1', 'title', 'Draft title');
+    weaverDecisionDraftInput('decision-1', 'rationale', 'Draft rationale');
+    weaverDecisionDraftInput('decision-1', 'status', 'accepted');
+  `);
+  content.scrollTop = 96;
+
+  const oldInput = document.createElement('input');
+  oldInput.dataset.focusKey = 'weaver-decision-title:decision-1';
+  oldInput.value = 'Draft title';
+  oldInput.selectionStart = 2;
+  oldInput.selectionEnd = 7;
+  panel.appendChild(oldInput);
+  document.activeElement = oldInput;
+
+  const restoredInput = document.createElement('input');
+  restoredInput.dataset.focusKey = 'weaver-decision-title:decision-1';
+  panel.setQuerySelector('[data-focus-key="weaver-decision-title:decision-1"]', restoredInput);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [
+      {
+        op: 'decision_upsert',
+        id: 'decision-1',
+        architect_id: 'arch-1',
+        title: 'Server title',
+        rationale: 'Server rationale',
+        status: 'rejected',
+        updated_at: 30,
+      },
+    ],
+  });
+
+  assert.equal(content.scrollTop, 96);
+  assert.equal(restoredInput.focused, true);
+  assert.equal(restoredInput.value, 'Draft title');
+  assert.equal(restoredInput.selectionStart, 2);
+  assert.equal(restoredInput.selectionEnd, 7);
+  assert.equal(jsonValue(context, `_weaverArchitectDecisionUi['decision-1'].editing`), true);
+  assert.equal(jsonValue(context, `_weaverArchitectDecisionUi['decision-1'].draft.title`), 'Draft title');
+  assert.equal(jsonValue(context, `_weaverArchitectDecisionUi['decision-1'].draft.rationale`), 'Draft rationale');
+  assert.equal(jsonValue(context, `_weaverArchitectDecisionUi['decision-1'].draft.status`), 'accepted');
+
+  runInContext(context, `weaverSaveDecisionEdit('arch-1', 'decision-1')`);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
+    {
+      cmd: 'architect_decision_update',
+      architect_id: 'arch-1',
+      id: 'decision-1',
+      title: 'Draft title',
+      rationale: 'Draft rationale',
+      status: 'accepted',
+    },
+  ]);
+});
+
 test('renderAgentPanel preserves the selected Events tab across rerenders', () => {
   const { context, document } = createWeaverHarness();
   const panel = document.register('panel-agent');
