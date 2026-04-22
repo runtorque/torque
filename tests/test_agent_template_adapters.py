@@ -1,4 +1,6 @@
+import fcntl
 import json
+import multiprocessing
 import os
 import tempfile
 import unittest
@@ -10,6 +12,15 @@ from loom.adapters import detect_by_command, get_default_command_for_provider, g
 from loom.adapters.claude_code import ClaudeCodeAdapter
 from loom.adapters.codex import CodexAdapter
 from loom.adapters.generic import GenericAdapter
+
+
+def _claude_mcp_config_worker(args):
+    working_dir, operation = args
+    adapter = ClaudeCodeAdapter()
+    if operation == "install":
+        return adapter.install_mcp_config(working_dir)
+    adapter.uninstall_mcp_config(working_dir)
+    return True
 
 
 class AgentTemplateAdapterTests(unittest.TestCase):
@@ -147,7 +158,17 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                 )
             )
 
-            self.assertTrue(adapter.install_mcp_config(tmp))
+            with mock.patch(
+                "loom.adapters.claude_code.os.rename", wraps=os.rename
+            ) as rename, mock.patch(
+                "loom.adapters.claude_code.fcntl.flock", wraps=fcntl.flock
+            ) as flock:
+                self.assertTrue(adapter.install_mcp_config(tmp))
+                self.assertEqual(Path(rename.call_args.args[1]), mcp_file)
+                self.assertEqual(Path(rename.call_args.args[0]).parent, Path(tmp))
+                self.assertIn(
+                    fcntl.LOCK_EX, [call.args[1] for call in flock.call_args_list]
+                )
 
             installed = json.loads(mcp_file.read_text())
             self.assertIn("github", installed["mcpServers"])
@@ -157,7 +178,12 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                 "${LOOM_CELL_ID}",
             )
 
-            adapter.uninstall_mcp_config(tmp)
+            with mock.patch(
+                "loom.adapters.claude_code.os.rename", wraps=os.rename
+            ) as rename:
+                adapter.uninstall_mcp_config(tmp)
+                self.assertEqual(Path(rename.call_args.args[1]), mcp_file)
+                self.assertEqual(Path(rename.call_args.args[0]).parent, Path(tmp))
 
             cleaned = json.loads(mcp_file.read_text())
             self.assertEqual(
@@ -168,6 +194,43 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                     }
                 },
             )
+
+    def test_claude_mcp_config_concurrent_operations_preserve_user_servers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mcp_file = Path(tmp) / ".mcp.json"
+            user_servers = {
+                "github": {"type": "http", "url": "https://example.test/mcp"},
+                "linear": {"type": "http", "url": "https://linear.example/mcp"},
+            }
+            mcp_file.write_text(json.dumps({"mcpServers": user_servers}))
+
+            ctx = multiprocessing.get_context("fork")
+            with ctx.Pool(5) as pool:
+                results = pool.map(
+                    _claude_mcp_config_worker, [(tmp, "install")] * 5
+                )
+
+            self.assertEqual(results, [True] * 5)
+            installed = json.loads(mcp_file.read_text())
+            servers = installed["mcpServers"]
+            self.assertEqual(servers["github"], user_servers["github"])
+            self.assertEqual(servers["linear"], user_servers["linear"])
+            self.assertEqual(list(servers).count("loom"), 1)
+            self.assertEqual(servers["loom"]["type"], "http")
+
+            with ctx.Pool(10) as pool:
+                results = pool.map(
+                    _claude_mcp_config_worker,
+                    [(tmp, operation) for operation in ["install", "uninstall"] * 5],
+                )
+
+            self.assertEqual(results, [True] * 10)
+            final = json.loads(mcp_file.read_text())
+            servers = final["mcpServers"]
+            self.assertEqual(servers["github"], user_servers["github"])
+            self.assertEqual(servers["linear"], user_servers["linear"])
+            if "loom" in servers:
+                self.assertIn(servers["loom"]["type"], {"http", "stdio"})
 
     def test_claude_engineer_mcp_config_uses_local_stdio_entrypoint(self):
         with tempfile.TemporaryDirectory() as tmp:

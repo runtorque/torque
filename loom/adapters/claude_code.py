@@ -1,9 +1,12 @@
 """Claude Code adapter — full integration via HTTP hooks."""
 
+import fcntl
 import json
 import os
 import re
+import tempfile
 import time
+from contextlib import contextmanager
 from pathlib import Path
 import shlex
 from textwrap import dedent
@@ -85,6 +88,35 @@ def _render_skill_md(skill: dict) -> str:
     lines.append("")
     lines.append(skill["body"])
     return "\n".join(lines)
+
+
+@contextmanager
+def _locked_mcp_json(mcp_file: Path):
+    """Hold the per-worktree .mcp.json advisory lock."""
+    lock_file = mcp_file.with_name(f"{mcp_file.name}.lock")
+    with lock_file.open("a") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+def _atomic_write_mcp_json(mcp_file: Path, data: dict):
+    """Atomically replace .mcp.json using a temp file in the same directory."""
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{mcp_file.name}.", suffix=".tmp", dir=str(mcp_file.parent)
+    )
+    try:
+        with os.fdopen(fd, "w") as tmp:
+            tmp.write(json.dumps(data, indent=2) + "\n")
+        os.rename(tmp_name, mcp_file)
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
 
 
 # Tool name → human-readable activity detail
@@ -418,15 +450,16 @@ class ClaudeCodeAdapter(AgentAdapter):
             }
 
         try:
-            existing = {}
-            if mcp_file.exists():
-                text = mcp_file.read_text().strip()
-                if text:
-                    existing = json.loads(text)
+            with _locked_mcp_json(mcp_file):
+                existing = {}
+                if mcp_file.exists():
+                    text = mcp_file.read_text().strip()
+                    if text:
+                        existing = json.loads(text)
 
-            servers = existing.setdefault("mcpServers", {})
-            servers["loom"] = loom_entry
-            mcp_file.write_text(json.dumps(existing, indent=2) + "\n")
+                servers = existing.setdefault("mcpServers", {})
+                servers["loom"] = loom_entry
+                _atomic_write_mcp_json(mcp_file, existing)
             return True
         except Exception:
             return False
@@ -437,24 +470,26 @@ class ClaudeCodeAdapter(AgentAdapter):
         If the file only contained the Loom entry, deletes it entirely.
         """
         mcp_file = Path(working_dir) / ".mcp.json"
-        if not mcp_file.exists():
-            return
 
         try:
-            text = mcp_file.read_text().strip()
-            if not text:
-                mcp_file.unlink(missing_ok=True)
-                return
+            with _locked_mcp_json(mcp_file):
+                if not mcp_file.exists():
+                    return
 
-            existing = json.loads(text)
-            servers = existing.get("mcpServers", {})
-            servers.pop("loom", None)
+                text = mcp_file.read_text().strip()
+                if not text:
+                    mcp_file.unlink(missing_ok=True)
+                    return
 
-            if not servers:
-                mcp_file.unlink(missing_ok=True)
-            else:
-                existing["mcpServers"] = servers
-                mcp_file.write_text(json.dumps(existing, indent=2) + "\n")
+                existing = json.loads(text)
+                servers = existing.get("mcpServers", {})
+                servers.pop("loom", None)
+
+                if not servers:
+                    mcp_file.unlink(missing_ok=True)
+                else:
+                    existing["mcpServers"] = servers
+                    _atomic_write_mcp_json(mcp_file, existing)
         except Exception:
             pass  # Best-effort cleanup
 
