@@ -5209,6 +5209,242 @@ test('renderBoard derives board task maps once per render', () => {
   assert.equal(runInContext(context, 'visibleCallCount'), 0);
 });
 
+test('board task delta in an inactive narrow lane patches counts without rerendering cards', () => {
+  const { context, document } = createBoardHarness({ stubCards: false });
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+  const doneCount = new FakeElement();
+  panel.setQuerySelector('.board-lane-tab[data-lane="Done"] .lane-count', doneCount);
+
+  context.state.board_lanes = ['Backlog', 'Done'];
+  context.state.board_tasks = {
+    backlog: {
+      id: 'backlog',
+      group: 'alpha',
+      task: 'Backlog task',
+      lane: 'Backlog',
+      position: 2,
+    },
+  };
+  const addInput = document.register('board-add-task-input');
+  addInput.value = 'Keep this inline draft';
+
+  runInContext(context, `
+    _boardSelectedLane = 'Backlog';
+    _boardAddingTask = true;
+    var cardRenderCalls = 0;
+    _renderBoardCard = function(t, childrenOf, depth, renderState) {
+      if (renderState) {
+        if (renderState.remaining <= 0) {
+          renderState.limitHit = true;
+          return '';
+        }
+        renderState.remaining--;
+        renderState.rendered++;
+      }
+      cardRenderCalls++;
+      return '<div class="board-card" data-task-id="' + t.id + '">' + t.task + '</div>';
+    };
+  `);
+
+  context.renderBoard();
+  const shellHtml = panel.innerHTML;
+  assert.equal(runInContext(context, 'cardRenderCalls'), 1);
+
+  const searchInput = document.register('board-search-input');
+  searchInput.value = 'operator query';
+  searchInput.selectionStart = 3;
+  searchInput.selectionEnd = 8;
+  panel.appendChild(searchInput);
+  document.activeElement = searchInput;
+
+  runInContext(context, `
+    state.board_tasks.done = {
+      id: 'done',
+      group: 'alpha',
+      task: 'Done task',
+      lane: 'Done',
+      position: 1
+    };
+    _boardQueueTaskDeltas([{
+      op: 'task_upsert',
+      id: 'done',
+      previous: null,
+      next: state.board_tasks.done
+    }], { canPatch: true });
+  `);
+
+  context.renderBoard();
+
+  assert.equal(panel.innerHTML, shellHtml);
+  assert.equal(runInContext(context, 'cardRenderCalls'), 1);
+  assert.equal(doneCount.textContent, '1');
+  assert.equal(runInContext(context, '_boardAddingTaskDraft'), 'Keep this inline draft');
+  assert.equal(searchInput.focused, true);
+  assert.equal(searchInput.value, 'operator query');
+  assert.equal(searchInput.selectionStart, 3);
+  assert.equal(searchInput.selectionEnd, 8);
+});
+
+test('wide board task delta patches only the affected lane body and preserves lane scroll', () => {
+  const { context, document } = createBoardHarness({ stubCards: false });
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+  document.body.classList.add('runtime-embedded');
+  panel.clientWidth = 1200;
+
+  context.state.board_lanes = ['Backlog', 'Done'];
+  context.state.board_tasks = {
+    backlog: {
+      id: 'backlog',
+      group: 'alpha',
+      task: 'Backlog task',
+      lane: 'Backlog',
+      position: 2,
+    },
+    done: {
+      id: 'done',
+      group: 'alpha',
+      task: 'Done task',
+      lane: 'Done',
+      position: 1,
+    },
+  };
+
+  runInContext(context, `
+    _boardSelectedLane = 'Backlog';
+    var cardRenderCalls = 0;
+    _renderBoardCard = function(t, childrenOf, depth, renderState) {
+      if (renderState) {
+        if (renderState.remaining <= 0) {
+          renderState.limitHit = true;
+          return '';
+        }
+        renderState.remaining--;
+        renderState.rendered++;
+      }
+      cardRenderCalls++;
+      return '<div class="board-card" data-task-id="' + t.id + '">' + t.task + '</div>';
+    };
+  `);
+
+  context.renderBoard();
+  const shellHtml = panel.innerHTML;
+  assert.equal(runInContext(context, 'cardRenderCalls'), 2);
+
+  const doneBody = new FakeElement();
+  doneBody.dataset = { lane: 'Done' };
+  doneBody.scrollTop = 130;
+  doneBody.scrollHeight = 900;
+  doneBody.clientHeight = 240;
+  const doneCount = new FakeElement();
+  panel.setQuerySelector('.board-wide-lane-body[data-lane="Done"]', doneBody);
+  panel.setQuerySelector('.board-wide-lane[data-lane="Done"] .board-wide-lane-count', doneCount);
+
+  runInContext(context, `
+    cardRenderCalls = 0;
+    var previousDone = Object.assign({}, state.board_tasks.done);
+    state.board_tasks.done.task = 'Done task updated';
+    _boardQuickEditTask = 'done';
+    _boardQuickEditKind = 'labels';
+    _boardQuickLabelDraft = 'ops';
+    _boardSetQuickEditRefocus('done', 'labels');
+    _boardQueueTaskDeltas([{
+      op: 'task_upsert',
+      id: 'done',
+      previous: previousDone,
+      next: state.board_tasks.done
+    }], { canPatch: true });
+  `);
+  const quickInput = document.register('board-quick-label-input-done');
+
+  context.renderBoard();
+
+  assert.equal(panel.innerHTML, shellHtml);
+  assert.equal(runInContext(context, 'cardRenderCalls'), 1);
+  assert.match(doneBody.innerHTML, /Done task updated/);
+  assert.equal(doneBody.scrollTop, 130);
+  assert.equal(doneCount.textContent, '1');
+  assert.equal(quickInput.focused, true);
+  assert.equal(quickInput.value, 'ops');
+  assert.equal(quickInput.selectionStart, 3);
+  assert.equal(quickInput.selectionEnd, 3);
+});
+
+test('wide Done lane cache skips card rerender for offscreen task deltas', () => {
+  const { context, document } = createBoardHarness({ stubCards: false });
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+  document.body.classList.add('runtime-embedded');
+  panel.clientWidth = 1200;
+
+  context.state.board_lanes = ['Backlog', 'Done'];
+  context.state.board_tasks = {
+    backlog: {
+      id: 'backlog',
+      group: 'alpha',
+      task: 'Backlog task',
+      lane: 'Backlog',
+      position: 2000,
+    },
+  };
+  for (let i = 0; i < 80; i++) {
+    const id = `done-${String(i).padStart(2, '0')}`;
+    context.state.board_tasks[id] = {
+      id,
+      group: 'alpha',
+      task: `Done task ${i}`,
+      lane: 'Done',
+      position: 1000 - i,
+    };
+  }
+
+  runInContext(context, `
+    _boardSelectedLane = 'Backlog';
+    _boardRenderLimit = 50;
+    var cardRenderCalls = 0;
+    _renderBoardCard = function(t, childrenOf, depth, renderState) {
+      if (renderState) {
+        if (renderState.remaining <= 0) {
+          renderState.limitHit = true;
+          return '';
+        }
+        renderState.remaining--;
+        renderState.rendered++;
+      }
+      cardRenderCalls++;
+      return '<div class="board-card" data-task-id="' + t.id + '">' + t.task + '</div>';
+    };
+  `);
+
+  context.renderBoard();
+  assert.equal(runInContext(context, 'cardRenderCalls'), 51);
+
+  const doneBody = new FakeElement();
+  doneBody.dataset = { lane: 'Done' };
+  const doneCount = new FakeElement();
+  panel.setQuerySelector('.board-wide-lane-body[data-lane="Done"]', doneBody);
+  panel.setQuerySelector('.board-wide-lane[data-lane="Done"] .board-wide-lane-count', doneCount);
+
+  runInContext(context, `
+    cardRenderCalls = 0;
+    var previousDone = Object.assign({}, state.board_tasks['done-70']);
+    state.board_tasks['done-70'].status = 'reported';
+    _boardQueueTaskDeltas([{
+      op: 'task_upsert',
+      id: 'done-70',
+      previous: previousDone,
+      next: state.board_tasks['done-70']
+    }], { canPatch: true });
+  `);
+
+  context.renderBoard();
+
+  assert.equal(runInContext(context, 'cardRenderCalls'), 0);
+  assert.equal(doneBody.innerHTML, '');
+  assert.equal(doneCount.textContent, '80');
+});
+
 test('boardArchiveSuggestedDone archives only stale completed tasks', () => {
   const { context } = createBoardHarness();
   context.state.board_tasks = {
@@ -7537,6 +7773,60 @@ test('task completion deltas trigger the done flourish only for live lane transi
   assert.deepEqual(jsonValue(context, 'doneFlourishCalls'), [
     { agentId: 'agent-1', label: 'Done' },
   ]);
+});
+
+test('ws task deltas pass previous and next task snapshots to the board patch queue', () => {
+  const { context, sandbox } = createWsRenderHarness();
+  sandbox._activePanelApp = 'board';
+  runInContext(context, `
+    boardDeltaQueueCalls = [];
+    _boardQueueTaskDeltas = function(changes, options) {
+      boardDeltaQueueCalls.push({ changes: changes, options: options });
+    };
+    state.board_tasks = {
+      'task-1': {
+        id: 'task-1',
+        task: 'Ship polish',
+        group: 'alpha',
+        lane: 'In Progress',
+        position: 2
+      }
+    };
+  `);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'task_upsert',
+      id: 'task-1',
+      task: 'Ship polish',
+      group: 'alpha',
+      lane: 'Done',
+      position: 1,
+    }],
+  });
+
+  assert.deepEqual(jsonValue(context, 'boardDeltaQueueCalls'), [{
+    changes: [{
+      op: 'task_upsert',
+      id: 'task-1',
+      previous: {
+        id: 'task-1',
+        task: 'Ship polish',
+        group: 'alpha',
+        lane: 'In Progress',
+        position: 2,
+      },
+      next: {
+        id: 'task-1',
+        task: 'Ship polish',
+        group: 'alpha',
+        lane: 'Done',
+        position: 1,
+      },
+    }],
+    options: { canPatch: true },
+  }]);
 });
 
 test('ws invalidation skips rerendering the active context panel for off-group agent removals', () => {

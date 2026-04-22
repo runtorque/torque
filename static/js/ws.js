@@ -260,6 +260,7 @@ function _handleFullState(msg) {
   if (typeof _boardLaneSortsByGroup !== 'undefined') _boardLaneSortsByGroup = null;
   if (typeof _boardCardDensityByGroup !== 'undefined') _boardCardDensityByGroup = null;
   if (typeof _boardFilterStateGroup !== 'undefined') _boardFilterStateGroup = '';
+  if (typeof _boardResetRenderCaches === 'function') _boardResetRenderCaches();
   if (msg.providers) _cachedProviders = msg.providers;
   if (!state.panel_events) state.panel_events = [];
   if (!state.agent_digest_settings) state.agent_digest_settings = {};
@@ -322,6 +323,12 @@ function _handleDelta(msg) {
   }
   _expectedSeq = msg.seq + 1;
   _applyDelta(msg.ops);
+  if (invalidations.board && typeof _boardQueueTaskDeltas === 'function') {
+    _boardQueueTaskDeltas(
+      _collectBoardTaskDeltaChanges(msg.ops, opGroupHints),
+      { canPatch: _deltaOpsAreOnlyTaskDeltas(msg.ops) },
+    );
+  }
   const sessionMapGroups = _collectSessionMapInvalidationGroups(msg.ops, opGroupHints);
   if (sessionMapGroups.length && typeof _weaverMarkSessionMapStale === 'function') {
     _weaverMarkSessionMapStale(sessionMapGroups);
@@ -490,15 +497,52 @@ function _captureDeltaGroupHints(ops) {
   for (let i = 0; i < ops.length; i++) {
     const op = ops[i] || {};
     let group = '';
+    let task = null;
     if (op.op === 'agent_remove' && state && state.agents && state.agents[op.id]) {
       group = state.agents[op.id].group || '';
-    } else if (op.op === 'task_remove'
+    } else if ((op.op === 'task_remove' || op.op === 'task_upsert')
         && state && state.board_tasks && state.board_tasks[op.id]) {
       group = state.board_tasks[op.id].group || '';
+      task = _cloneBoardDeltaTask(state.board_tasks[op.id]);
     }
-    hints.push({ group: group });
+    hints.push({ group: group, task: task });
   }
   return hints;
+}
+
+function _cloneBoardDeltaTask(task) {
+  if (!task) return null;
+  return Object.assign({}, task);
+}
+
+function _deltaOpsAreOnlyTaskDeltas(ops) {
+  if (!ops || !ops.length) return false;
+  for (let i = 0; i < ops.length; i++) {
+    const opName = (ops[i] && ops[i].op) || '';
+    if (opName !== 'task_upsert' && opName !== 'task_remove') return false;
+  }
+  return true;
+}
+
+function _collectBoardTaskDeltaChanges(ops, hints) {
+  const changes = [];
+  for (let i = 0; i < (ops || []).length; i++) {
+    const op = ops[i] || {};
+    if (op.op !== 'task_upsert' && op.op !== 'task_remove') continue;
+    const id = op.id || '';
+    const hint = hints && hints[i] ? hints[i] : {};
+    const previous = hint.task || null;
+    const next = (op.op === 'task_remove' || !state || !state.board_tasks)
+      ? null
+      : _cloneBoardDeltaTask(state.board_tasks[id]);
+    changes.push({
+      op: op.op,
+      id: id,
+      previous: previous,
+      next: next,
+    });
+  }
+  return changes;
 }
 
 function _opTouchesGroup(op, group, hint) {

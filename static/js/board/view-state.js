@@ -256,6 +256,7 @@ function _boardCurrentViewKey() {
     filter_labels: _boardFilterLabels.slice().sort(),
     filter_actions: _boardFilterActions.slice().sort(),
     filter_agents: _boardFilterAgents.slice().sort(),
+    filter_health: _boardFilterHealth.slice().sort(),
   });
 }
 
