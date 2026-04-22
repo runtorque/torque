@@ -308,6 +308,12 @@ function quickAddAgent(group) {
   send({ cmd: 'add_agent', name: _nextName('Agent'), group });
 }
 
+function newWeaver(group) {
+  const gs = (state.group_settings || {})[group] || {};
+  if (gs.weaver_agent_id) return;
+  if (typeof openWeaverLaunchDialog === 'function') openWeaverLaunchDialog(group, '');
+}
+
 function newAgentFromTemplate(group, templateName) {
   const gs = (state.group_settings || {})[group] || {};
   if (typeof isEmbeddedTerminalMode === 'function' && isEmbeddedTerminalMode()) {

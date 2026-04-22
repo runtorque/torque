@@ -242,14 +242,14 @@ test('agent panel roster marks architect-owned and user-owned hierarchy rows dis
 
   context.agentPanelSelectTab('hired_engineers');
 
-  assert.match(panel.innerHTML, /architect-roster-level-1 architect-owned-engineer-row/);
-  assert.match(panel.innerHTML, /architect-roster-level-2 architect-owned-worker-row/);
+  assert.match(panel.innerHTML, /architect-roster-level-1 architect-section-engineer-row/);
+  assert.match(panel.innerHTML, /architect-roster-level-2 architect-section-worker-row/);
 
   const userRosterHtml = vm.runInContext(`_agentPanelLegacyRenderEngineerRoster('alpha')`, context);
   assert.match(userRosterHtml, /engineer-row-virtual-parent/);
-  assert.match(userRosterHtml, /engineer-roster-level-1 user-owned-engineer-row/);
-  assert.match(userRosterHtml, /engineer-roster-level-2 engineer-owned-worker-row/);
-  assert.doesNotMatch(userRosterHtml, /architect-owned-engineer-row|architect-owned-worker-row/);
+  assert.match(userRosterHtml, /engineer-roster-level-1 user-section-engineer-row/);
+  assert.match(userRosterHtml, /engineer-roster-level-2 user-section-worker-row/);
+  assert.doesNotMatch(userRosterHtml, /architect-section-engineer-row|architect-section-worker-row/);
 });
 
 test('agentPanelSelectTab remembers the last selected tab per kind', () => {
