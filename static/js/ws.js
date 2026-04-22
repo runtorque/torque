@@ -558,21 +558,19 @@ function _applyDelta(ops) {
         if (state.agent_digest_settings) delete state.agent_digest_settings[op.id];
         if (state.digest_buffer_stats) delete state.digest_buffer_stats[op.id];
         if (state.digest_sent_events) delete state.digest_sent_events[op.id];
-        // Selection globals (`selectedAgentId` / `selectedTerminalId` /
-        // `focusedItemId`) are browser-local — the server doesn't know
-        // about them. When the agent they reference gets removed
-        // (cascade, `loom ai ready`, group delete, etc.), clear the
-        // stale id here so the detail panel + terminal drawer don't
-        // keep rendering the ghost cell.
+        // Selection/focus globals are browser-local — the server doesn't know
+        // about them. Selections can be cleared immediately; focusedItemId is
+        // left intact until render() can use previous grid-row metadata to pick
+        // the next logical focus target.
         if (typeof selectedAgentId !== 'undefined' && selectedAgentId === op.id) {
           selectedAgentId = null;
         }
         if (typeof selectedTerminalId !== 'undefined' && selectedTerminalId === op.id) {
           selectedTerminalId = null;
         }
-        if (typeof focusedItemId !== 'undefined' && focusedItemId === op.id) {
-          focusedItemId = null;
-        }
+        // Keep focusedItemId until render() rebuilds the grid navigation model.
+        // The renderer has the previous row metadata and can fall forward to the
+        // next logical cell instead of dropping keyboard focus on every remove.
         if (typeof _clearAgentDoneFlourish === 'function') {
           _clearAgentDoneFlourish(op.id);
         }

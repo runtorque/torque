@@ -890,6 +890,50 @@ function createMainRenderHarness() {
   return { context, document, sandbox };
 }
 
+function createMainNavigationHarness() {
+  const { sandbox, document } = createSandbox({
+    connect() {},
+    setupDrag() {},
+    window: {
+      innerHeight: 900,
+      addEventListener() {},
+      open() {},
+    },
+  });
+  document.register('main');
+  [
+    'add-name-input',
+    'add-cmd-input',
+    'add-dir-input',
+    'add-args-input',
+    'add-init-input',
+    'engineer-name-input',
+    'engineer-command-input',
+    'gs-directory',
+    'gs-agent-directory',
+    'gs-terminal-prefix',
+    'gs-terminal-boot-cmd',
+    'gs-terminal-cmd-args',
+    'gs-terminal-init-script',
+    'gs-terminal-directory',
+    'gs-weaver-boot-cmd',
+    'gs-weaver-custom-instructions',
+  ].forEach((id) => document.register(id));
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/constants.js');
+  loadScript(context, 'static/js/render.js');
+  runInContext(context, `
+    var _cachedAgentTemplates = [];
+    var focusedItemId = null;
+    var selectedTerminalId = null;
+    getFilterByWindow = function() { return false; };
+    renderTerminalWorkspace = function() {};
+    updateEventsAttentionBadge = function() {};
+  `);
+  loadScript(context, 'static/js/main.js');
+  return { context, document, sandbox };
+}
+
 function createPanelHarness() {
   const { sandbox, document } = createSandbox({
     window: {
@@ -10791,6 +10835,247 @@ test('main hierarchy loose-workers strip orders detached workers by creation tim
       main.innerHTML.indexOf('+ New Worker'),
     'new-worker button should render after the last detached worker card',
   );
+});
+
+test('main grid keyboard navigation traverses logical rows across sections', () => {
+  const { context, sandbox } = createMainNavigationHarness();
+
+  sandbox.state.groups = {
+    loom: [
+      'loose-1',
+      'loose-2',
+      'eng-user-a',
+      'worker-user-a1',
+      'worker-user-a2',
+      'eng-user-b',
+      'worker-user-b1',
+      'arch-a',
+      'eng-a',
+      'worker-a1',
+      'worker-a2',
+      'arch-b',
+      'eng-b',
+      'worker-b1',
+    ],
+  };
+  sandbox.state.group_settings = { loom: { collapsed_default: false } };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'loose-1': { id: 'loose-1', name: 'Loose 1', kind: 'worker', group: 'loom', cell_type: 'agent', status: 'running', created_at: 1 },
+    'loose-2': { id: 'loose-2', name: 'Loose 2', kind: 'worker', group: 'loom', cell_type: 'agent', status: 'running', created_at: 2 },
+    'eng-user-a': { id: 'eng-user-a', name: 'User A', kind: 'engineer', group: 'loom', cell_type: 'agent', status: 'running', created_at: 10 },
+    'worker-user-a1': { id: 'worker-user-a1', name: 'A1', kind: 'worker', owner_engineer_id: 'eng-user-a', group: 'loom', cell_type: 'agent', status: 'running', created_at: 11 },
+    'worker-user-a2': { id: 'worker-user-a2', name: 'A2', kind: 'worker', owner_engineer_id: 'eng-user-a', group: 'loom', cell_type: 'agent', status: 'running', created_at: 12 },
+    'eng-user-b': { id: 'eng-user-b', name: 'User B', kind: 'engineer', group: 'loom', cell_type: 'agent', status: 'running', created_at: 20 },
+    'worker-user-b1': { id: 'worker-user-b1', name: 'B1', kind: 'worker', owner_engineer_id: 'eng-user-b', group: 'loom', cell_type: 'agent', status: 'running', created_at: 21 },
+    'arch-a': { id: 'arch-a', name: 'Architect A', kind: 'architect', group: 'loom', cell_type: 'agent', status: 'running', created_at: 30 },
+    'eng-a': { id: 'eng-a', name: 'Eng A', kind: 'engineer', hired_by_architect_id: 'arch-a', group: 'loom', cell_type: 'agent', status: 'running', created_at: 31 },
+    'worker-a1': { id: 'worker-a1', name: 'WA1', kind: 'worker', owner_engineer_id: 'eng-a', group: 'loom', cell_type: 'agent', status: 'running', created_at: 32 },
+    'worker-a2': { id: 'worker-a2', name: 'WA2', kind: 'worker', owner_engineer_id: 'eng-a', group: 'loom', cell_type: 'agent', status: 'running', created_at: 33 },
+    'arch-b': { id: 'arch-b', name: 'Architect B', kind: 'architect', group: 'loom', cell_type: 'agent', status: 'running', created_at: 40 },
+    'eng-b': { id: 'eng-b', name: 'Eng B', kind: 'engineer', hired_by_architect_id: 'arch-b', group: 'loom', cell_type: 'agent', status: 'running', created_at: 41 },
+    'worker-b1': { id: 'worker-b1', name: 'WB1', kind: 'worker', owner_engineer_id: 'eng-b', group: 'loom', cell_type: 'agent', status: 'running', created_at: 42 },
+  };
+
+  runInContext(context, `focusedItemId = 'eng-user-a'; render();`);
+
+  assert.deepEqual(jsonValue(context, `window._navGridRows.map(function(row) { return { type: row.rowType, items: row.items.map(function(item) { return item.id; }) }; })`), [
+    { type: 'loose-workers-strip', items: ['loose-1', 'loose-2', 'grid-control:loose-new-worker:loom:user'] },
+    { type: 'engineer-row', items: ['eng-user-a', 'worker-user-a1', 'worker-user-a2'] },
+    { type: 'engineer-row', items: ['eng-user-b', 'worker-user-b1'] },
+    { type: 'architect-header-row', items: ['arch-a'] },
+    { type: 'engineer-row', items: ['eng-a', 'worker-a1', 'worker-a2'] },
+    { type: 'architect-header-row', items: ['arch-b'] },
+    { type: 'engineer-row', items: ['eng-b', 'worker-b1'] },
+  ]);
+
+  runInContext(context, `moveFocusHorizontal(1);`);
+  assert.equal(jsonValue(context, `focusedItemId`), 'worker-user-a1');
+  runInContext(context, `moveFocusHorizontal(1);`);
+  assert.equal(jsonValue(context, `focusedItemId`), 'worker-user-a2');
+  runInContext(context, `moveFocusDown();`);
+  assert.equal(jsonValue(context, `focusedItemId`), 'worker-user-b1');
+  runInContext(context, `moveFocusDown();`);
+  assert.equal(jsonValue(context, `focusedItemId`), 'arch-a');
+  runInContext(context, `moveFocusDown();`);
+  assert.equal(jsonValue(context, `focusedItemId`), 'worker-a2');
+
+  runInContext(context, `focusedItemId = 'loose-1'; render();`);
+  runInContext(context, `moveFocusHorizontal(1);`);
+  assert.equal(jsonValue(context, `focusedItemId`), 'loose-2');
+  runInContext(context, `moveFocusHorizontal(1);`);
+  assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:loose-new-worker:loom:user');
+  runInContext(context, `moveFocusHorizontal(-1);`);
+  assert.equal(jsonValue(context, `focusedItemId`), 'loose-2');
+});
+
+test('main grid keyboard navigation keeps wrapped worker rows in logical order', () => {
+  const { context, document, sandbox } = createMainNavigationHarness();
+  const focusedMarker = new FakeElement('focused-marker');
+  document.setSelector('.focused', focusedMarker);
+
+  sandbox.state.groups = {
+    loom: ['eng-a', 'worker-1', 'worker-2', 'worker-3', 'worker-4', 'worker-5'],
+  };
+  sandbox.state.group_settings = { loom: { collapsed_default: false } };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'eng-a': { id: 'eng-a', name: 'Engineer', kind: 'engineer', group: 'loom', cell_type: 'agent', status: 'running', created_at: 1 },
+    'worker-1': { id: 'worker-1', name: 'Worker 1', kind: 'worker', owner_engineer_id: 'eng-a', group: 'loom', cell_type: 'agent', status: 'running', created_at: 2 },
+    'worker-2': { id: 'worker-2', name: 'Worker 2', kind: 'worker', owner_engineer_id: 'eng-a', group: 'loom', cell_type: 'agent', status: 'running', created_at: 3 },
+    'worker-3': { id: 'worker-3', name: 'Worker 3', kind: 'worker', owner_engineer_id: 'eng-a', group: 'loom', cell_type: 'agent', status: 'running', created_at: 4 },
+    'worker-4': { id: 'worker-4', name: 'Worker 4', kind: 'worker', owner_engineer_id: 'eng-a', group: 'loom', cell_type: 'agent', status: 'running', created_at: 5 },
+    'worker-5': { id: 'worker-5', name: 'Worker 5', kind: 'worker', owner_engineer_id: 'eng-a', group: 'loom', cell_type: 'agent', status: 'running', created_at: 6 },
+  };
+
+  runInContext(context, `focusedItemId = 'eng-a'; render();`);
+
+  assert.deepEqual(jsonValue(context, `window._navGridRows[1].items.map(function(item) { return item.id; })`), [
+    'eng-a',
+    'worker-1',
+    'worker-2',
+    'worker-3',
+    'worker-4',
+    'worker-5',
+  ]);
+
+  for (const expected of ['worker-1', 'worker-2', 'worker-3', 'worker-4', 'worker-5']) {
+    runInContext(context, `moveFocusHorizontal(1);`);
+    assert.equal(jsonValue(context, `focusedItemId`), expected);
+  }
+  assert.deepEqual(JSON.parse(JSON.stringify(focusedMarker.scrollIntoViewOptions)), {
+    block: 'nearest',
+    inline: 'nearest',
+  });
+});
+
+test('main grid focus falls forward across websocket delta removals', () => {
+  const { sandbox, document } = createSandbox();
+  document.register('main');
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/constants.js');
+  loadScript(context, 'static/js/ws.js');
+  loadScript(context, 'static/js/render.js');
+  runInContext(context, `
+    _cachedAgentTemplates = [];
+    selectedTerminalId = null;
+    getFilterByWindow = function() { return false; };
+    renderTerminalWorkspace = function() {};
+    updateEventsAttentionBadge = function() {};
+  `);
+
+  runInContext(context, `
+    _handleFullState({
+      seq: 1,
+      groups: { loom: ['loose-1', 'eng-a', 'worker-a1', 'worker-a2', 'eng-b'] },
+      group_settings: { loom: { collapsed_default: false } },
+      agents: {
+        'loose-1': { id: 'loose-1', name: 'Loose', kind: 'worker', group: 'loom', cell_type: 'agent', status: 'running', created_at: 1 },
+        'eng-a': { id: 'eng-a', name: 'Engineer A', kind: 'engineer', group: 'loom', cell_type: 'agent', status: 'running', created_at: 10 },
+        'worker-a1': { id: 'worker-a1', name: 'Worker A1', kind: 'worker', owner_engineer_id: 'eng-a', group: 'loom', cell_type: 'agent', status: 'running', created_at: 11 },
+        'worker-a2': { id: 'worker-a2', name: 'Worker A2', kind: 'worker', owner_engineer_id: 'eng-a', group: 'loom', cell_type: 'agent', status: 'running', created_at: 12 },
+        'eng-b': { id: 'eng-b', name: 'Engineer B', kind: 'engineer', group: 'loom', cell_type: 'agent', status: 'running', created_at: 20 }
+      },
+      children: {},
+      board_lanes: [],
+      board_tasks: {},
+      panel_events: []
+    });
+    focusedItemId = 'worker-a1';
+    render();
+    _handleDelta({
+      seq: 2,
+      ops: [
+        { op: 'agent_remove', id: 'worker-a1' },
+        { op: 'group_update', name: 'loom', agents: ['loose-1', 'eng-a', 'worker-a2', 'eng-b'] }
+      ]
+    });
+  `);
+  assert.equal(jsonValue(context, `focusedItemId`), 'worker-a2');
+
+  runInContext(context, `
+    _handleDelta({
+      seq: 3,
+      ops: [
+        { op: 'agent_remove', id: 'worker-a2' },
+        { op: 'group_update', name: 'loom', agents: ['loose-1', 'eng-a', 'eng-b'] }
+      ]
+    });
+  `);
+  assert.equal(jsonValue(context, `focusedItemId`), 'eng-a');
+
+  runInContext(context, `
+    _handleDelta({
+      seq: 4,
+      ops: [
+        { op: 'agent_remove', id: 'eng-a' },
+        { op: 'group_update', name: 'loom', agents: ['loose-1', 'eng-b'] }
+      ]
+    });
+  `);
+  assert.equal(jsonValue(context, `focusedItemId`), 'eng-b');
+
+  runInContext(context, `
+    _handleDelta({
+      seq: 5,
+      ops: [
+        { op: 'agent_remove', id: 'eng-b' },
+        { op: 'group_update', name: 'loom', agents: ['loose-1'] }
+      ]
+    });
+  `);
+  assert.equal(jsonValue(context, `focusedItemId`), 'loose-1');
+});
+
+test('main grid Tab cycles through creation buttons in visual order', () => {
+  const { context, document, sandbox } = createMainNavigationHarness();
+
+  sandbox.state.groups = { loom: ['arch-a'] };
+  sandbox.state.group_settings = { loom: { collapsed_default: false } };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'arch-a': {
+      id: 'arch-a',
+      name: 'Architect A',
+      kind: 'architect',
+      group: 'loom',
+      cell_type: 'agent',
+      status: 'running',
+      created_at: 1,
+    },
+  };
+
+  runInContext(context, `render();`);
+
+  assert.deepEqual(jsonValue(context, `window._navCreationControls.map(function(item) { return item.controlType + ':' + item.sectionKey; })`), [
+    'section-new-engineer:user',
+    'loose-new-worker:user',
+    'section-new-engineer:architect:arch-a',
+    'agent-new-architect:',
+  ]);
+
+  function pressTab(shiftKey = false) {
+    const event = {
+      key: 'Tab',
+      shiftKey,
+      preventDefault() { this.defaultPrevented = true; },
+    };
+    document.listeners.keydown(event);
+    assert.equal(event.defaultPrevented, true);
+  }
+
+  pressTab();
+  assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:section-new-engineer:loom:user');
+  pressTab();
+  assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:loose-new-worker:loom:user');
+  pressTab();
+  assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:section-new-engineer:loom:architect:arch-a');
+  pressTab();
+  assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:agent-new-architect:loom');
+  pressTab();
+  assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:section-new-engineer:loom:user');
+  pressTab(true);
+  assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:agent-new-architect:loom');
 });
 
 test('main hierarchy always renders the synthetic User loose-workers strip when empty', () => {
