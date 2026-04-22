@@ -10,12 +10,21 @@ var _tplEditorNew = false;     // true when creating a new template
 var _tplEditorScope = 'project'; // 'project' or 'user'
 var _tplPanelView = 'editor';  // 'editor' or 'pipelines'
 var _tplPipelinesData = null;  // cached pipeline discovery result
+var _tplEditorLoadedGroup = null;
+var _tplEditorLoadingGroup = null;
 
 /* ---- Load & render ------------------------------------------------- */
 
 function tplEditorLoad() {
   var group = _currentGroup();
+  _tplEditorLoadingGroup = group || '';
   send({ cmd: 'list_actions', group: group });
+}
+
+function tplEditorEnsureLoaded() {
+  var group = _currentGroup() || '';
+  if (_tplEditorLoadedGroup === group || _tplEditorLoadingGroup === group) return;
+  tplEditorLoad();
 }
 
 function _tplKey(t) {
@@ -29,6 +38,8 @@ function _tplSelectedName() {
 }
 
 function tplEditorReceiveList(msg) {
+  _tplEditorLoadingGroup = null;
+  _tplEditorLoadedGroup = (msg && msg.group != null) ? (msg.group || '') : (_currentGroup() || '');
   _tplEditorList = msg.actions || [];
 
   // If we just saved, select it with the right scope key

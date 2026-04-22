@@ -28,10 +28,15 @@ function _panelAppVisible(appName) {
 }
 
 function _loadPanelApp(appName) {
-  if (appName === 'actions' && typeof tplEditorLoad === 'function') tplEditorLoad();
+  if (appName === 'actions') {
+    if (typeof tplEditorEnsureLoaded === 'function') tplEditorEnsureLoaded();
+    else if (typeof tplEditorLoad === 'function') tplEditorLoad();
+  }
   if (appName === 'templates') {
     if (typeof _agentsPanelView !== 'undefined' && _agentsPanelView === 'history') {
       if (typeof agentHistoryLoad === 'function') agentHistoryLoad();
+    } else if (typeof agentTemplateEnsureLoaded === 'function') {
+      agentTemplateEnsureLoaded();
     } else if (typeof agentTemplateEditorLoad === 'function') {
       agentTemplateEditorLoad();
     }
@@ -98,7 +103,7 @@ function _normalizePanelHeight(height) {
 function togglePanel(appName) {
   if (typeof _standaloneTogglePanel === 'function'
       && _standalonePanelsEnabled()) {
-    var handled = _standaloneTogglePanel(appName);
+    var handled = _standaloneTogglePanel(appName, { skipOpenHooks: true });
     if (handled) {
       if (_panelAppVisible(appName)) _loadPanelApp(appName);
       if (typeof renderActivePanel === 'function') renderActivePanel();
