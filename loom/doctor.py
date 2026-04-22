@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import sqlite3
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -16,6 +17,7 @@ _KINDS_MIGRATION_MIGRATED_AT_KEY = "schema_kinds_migration_migrated_at"
 _KINDS_BACKUP_NAME = "loom.db.pre-kinds.bak"
 _SEVEN_DAYS_SECONDS = 7 * 24 * 60 * 60
 _ONE_DAY_SECONDS = 24 * 60 * 60
+_MCP_HEALTH_WINDOW_SECONDS = 60 * 60
 # WorktreeManager currently derives the default branch suffix from ``cell.id[:7]``.
 # Accept 6+ hex tails so the doctor stays tolerant of older/manual fixtures while
 # still rejecting very short manual tails like ``-bad``.
@@ -666,6 +668,52 @@ def _collect_task_aliases_section(conn: sqlite3.Connection) -> dict:
     return section
 
 
+def _collect_mcp_health_section(conn: sqlite3.Connection) -> dict:
+    window = _MCP_HEALTH_WINDOW_SECONDS
+    since = time.time() - window
+    section = {
+        "recent_window_seconds": window,
+        "since": since,
+        "totals": {},
+        "surfaces": {},
+        "pending_failed_writes": 0,
+    }
+    if not _table_exists(conn, "mcp_health_events"):
+        return section
+    try:
+        rows = conn.execute(
+            "SELECT surface, tool_name, event, COUNT(*) "
+            "FROM mcp_health_events WHERE timestamp >= ? "
+            "GROUP BY surface, tool_name, event "
+            "ORDER BY surface, tool_name, event",
+            (since,),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+    for surface, tool_name, event, count in rows:
+        surface = str(surface or "mcp")
+        tool_name = str(tool_name or "")
+        event = str(event or "")
+        count = int(count or 0)
+        section["totals"][event] = section["totals"].get(event, 0) + count
+        surface_entry = section["surfaces"].setdefault(
+            surface,
+            {"events": {}, "tools": {}},
+        )
+        surface_entry["events"][event] = (
+            surface_entry["events"].get(event, 0) + count
+        )
+        if tool_name:
+            tool_entry = surface_entry["tools"].setdefault(tool_name, {})
+            tool_entry[event] = tool_entry.get(event, 0) + count
+    if _table_exists(conn, "failed_writes"):
+        section["pending_failed_writes"] = int(
+            _fetch_scalar(conn, "SELECT COUNT(*) FROM failed_writes", default=0)
+            or 0
+        )
+    return section
+
+
 def _classify_worker_worktree_branch(branch: str) -> str:
     branch = str(branch or "").strip()
     if not branch:
@@ -1135,6 +1183,7 @@ def build_doctor_report(conn: sqlite3.Connection, db_path: Path | str) -> dict:
         "agents": agents,
         "tasks": tasks,
         "task_aliases": _collect_task_aliases_section(conn),
+        "mcp_health": _collect_mcp_health_section(conn),
         "drift": _collect_drift_section(conn),
         "roles": _collect_roles_section(),
         "stage_6_cleanup": _collect_stage_6_cleanup_section(
@@ -1178,6 +1227,47 @@ def build_doctor_report_for_db(db_path: Path | str) -> dict:
         conn.close()
 
 
+def format_mcp_health_report(report: dict) -> str:
+    mcp_health = report.get("mcp_health", report) or {}
+    totals = mcp_health.get("totals", {}) or {}
+    surfaces = mcp_health.get("surfaces", {}) or {}
+    lines = [
+        "Loom MCP health",
+        "",
+        "recent_window_seconds: "
+        f"{int(mcp_health.get('recent_window_seconds', 0) or 0)}",
+        "pending_failed_writes: "
+        f"{int(mcp_health.get('pending_failed_writes', 0) or 0)}",
+        "totals: "
+        f"retries={int(totals.get('retry', 0) or 0)} "
+        f"drops={int(totals.get('drop', 0) or 0)} "
+        f"dedupes={int(totals.get('dedupe', 0) or 0)} "
+        f"replays={int(totals.get('replay', 0) or 0)}",
+        "",
+        "surfaces:",
+    ]
+    if not surfaces:
+        lines.append("  (no recent MCP reliability events)")
+    for surface in sorted(surfaces):
+        entry = surfaces.get(surface, {}) or {}
+        events = entry.get("events", {}) or {}
+        lines.append(
+            f"  - {surface}: "
+            f"retries={int(events.get('retry', 0) or 0)} "
+            f"drops={int(events.get('drop', 0) or 0)} "
+            f"dedupes={int(events.get('dedupe', 0) or 0)} "
+            f"replays={int(events.get('replay', 0) or 0)}"
+        )
+        for tool_name in sorted((entry.get("tools", {}) or {})):
+            tool_events = entry["tools"].get(tool_name, {}) or {}
+            parts = [
+                f"{name}={int(tool_events.get(name, 0) or 0)}"
+                for name in sorted(tool_events)
+            ]
+            lines.append(f"      {tool_name}: " + ", ".join(parts))
+    return "\n".join(lines)
+
+
 def format_doctor_report(report: dict) -> str:
     migration = report.get("migration", {})
     agents = report.get("agents", {})
@@ -1187,6 +1277,7 @@ def format_doctor_report(report: dict) -> str:
     worktrees = report.get("worktrees", {}) or {}
     tasks = report.get("tasks", {})
     task_aliases = report.get("task_aliases", {}) or {}
+    mcp_health = report.get("mcp_health", {}) or {}
     drift = report.get("drift", {})
     roles = report.get("roles", {}) or {}
     stage_6_cleanup = report.get("stage_6_cleanup", {}) or {}
@@ -1281,6 +1372,20 @@ def format_doctor_report(report: dict) -> str:
         f"{int(task_aliases.get('missing_canonical_count', 0) or 0)}",
         "  strategy:                      "
         f"{task_aliases.get('strategy', 'alias_precedence_archived_literals_hidden')}",
+        "",
+        "[mcp_health]",
+        "  recent_window_seconds:         "
+        f"{int(mcp_health.get('recent_window_seconds', 0) or 0)}",
+        "  pending_failed_writes:         "
+        f"{int(mcp_health.get('pending_failed_writes', 0) or 0)}",
+        "  retries:                       "
+        f"{int((mcp_health.get('totals', {}) or {}).get('retry', 0) or 0)}",
+        "  drops:                         "
+        f"{int((mcp_health.get('totals', {}) or {}).get('drop', 0) or 0)}",
+        "  dedupes:                       "
+        f"{int((mcp_health.get('totals', {}) or {}).get('dedupe', 0) or 0)}",
+        "  replays:                       "
+        f"{int((mcp_health.get('totals', {}) or {}).get('replay', 0) or 0)}",
         "",
         "[drift]",
         "  agents.template ↔ role:                 "

@@ -476,6 +476,46 @@ CREATE INDEX IF NOT EXISTS idx_pending_hires_status
     ON pending_hires(status);
 CREATE INDEX IF NOT EXISTS idx_pending_hires_architect
     ON pending_hires(architect_id);
+
+CREATE TABLE IF NOT EXISTS mcp_idempotency (
+    idempotency_key TEXT PRIMARY KEY,
+    surface         TEXT NOT NULL DEFAULT '',
+    tool_name       TEXT NOT NULL DEFAULT '',
+    request_hash    TEXT NOT NULL DEFAULT '',
+    response_json   TEXT NOT NULL DEFAULT '{}',
+    created_at      REAL NOT NULL,
+    updated_at      REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mcp_idempotency_tool
+    ON mcp_idempotency(surface, tool_name, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS failed_writes (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    idempotency_key TEXT NOT NULL UNIQUE,
+    endpoint        TEXT NOT NULL DEFAULT '',
+    method          TEXT NOT NULL DEFAULT 'POST',
+    surface         TEXT NOT NULL DEFAULT '',
+    tool_name       TEXT NOT NULL DEFAULT '',
+    caller_id       TEXT NOT NULL DEFAULT '',
+    payload_json    TEXT NOT NULL DEFAULT '{}',
+    created_at      REAL NOT NULL,
+    updated_at      REAL NOT NULL,
+    attempts        INTEGER NOT NULL DEFAULT 0,
+    last_error      TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_failed_writes_created
+    ON failed_writes(created_at);
+
+CREATE TABLE IF NOT EXISTS mcp_health_events (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp  REAL NOT NULL,
+    surface    TEXT NOT NULL DEFAULT '',
+    tool_name  TEXT NOT NULL DEFAULT '',
+    event      TEXT NOT NULL DEFAULT '',
+    error      TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_mcp_health_events_recent
+    ON mcp_health_events(timestamp DESC, surface, tool_name, event);
 """
 
 def initialize_database(conn: sqlite3.Connection, backfill_agent_history):

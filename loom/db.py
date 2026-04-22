@@ -16,6 +16,7 @@ import re
 import shutil
 import sqlite3
 import sys
+import time
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -309,6 +310,218 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         if self._conn:
             self._conn.close()
             self._conn = None
+
+    # -- MCP reliability ----------------------------------------------------
+
+    def load_mcp_idempotency(self, idempotency_key: str) -> dict | None:
+        """Load a stored MCP idempotency response by key."""
+        key = str(idempotency_key or "").strip()
+        if not key:
+            return None
+        row = self._conn.execute(
+            "SELECT idempotency_key, surface, tool_name, request_hash, "
+            "response_json, created_at, updated_at "
+            "FROM mcp_idempotency WHERE idempotency_key=?",
+            (key,),
+        ).fetchone()
+        if not row:
+            return None
+        return {
+            "idempotency_key": row[0],
+            "surface": row[1],
+            "tool_name": row[2],
+            "request_hash": row[3],
+            "response_json": row[4],
+            "created_at": row[5],
+            "updated_at": row[6],
+        }
+
+    def save_mcp_idempotency(
+        self,
+        *,
+        idempotency_key: str,
+        surface: str,
+        tool_name: str,
+        request_hash: str,
+        response: dict,
+    ) -> None:
+        """Persist one idempotent MCP write response."""
+        key = str(idempotency_key or "").strip()
+        if not key:
+            return
+        now = time.time()
+        existing = self.load_mcp_idempotency(key)
+        created_at = float((existing or {}).get("created_at", 0) or now)
+        self._conn.execute(
+            "INSERT OR REPLACE INTO mcp_idempotency "
+            "(idempotency_key, surface, tool_name, request_hash, "
+            "response_json, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (
+                key,
+                str(surface or ""),
+                str(tool_name or ""),
+                str(request_hash or ""),
+                json.dumps(response or {}, separators=(",", ":")),
+                created_at,
+                now,
+            ),
+        )
+        self._conn.commit()
+
+    def enqueue_failed_write(
+        self,
+        *,
+        idempotency_key: str,
+        endpoint: str,
+        method: str = "POST",
+        surface: str = "",
+        tool_name: str = "",
+        caller_id: str = "",
+        payload: dict | None = None,
+        attempts: int = 0,
+        last_error: str = "",
+    ) -> None:
+        """Persist or update a failed idempotent write for boot-time replay."""
+        key = str(idempotency_key or "").strip()
+        if not key:
+            raise ValueError("idempotency_key is required")
+        now = time.time()
+        row = self._conn.execute(
+            "SELECT created_at FROM failed_writes WHERE idempotency_key=?",
+            (key,),
+        ).fetchone()
+        created_at = float(row[0]) if row else now
+        self._conn.execute(
+            "INSERT OR REPLACE INTO failed_writes "
+            "(idempotency_key, endpoint, method, surface, tool_name, "
+            "caller_id, payload_json, created_at, updated_at, attempts, last_error) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                key,
+                str(endpoint or ""),
+                str(method or "POST"),
+                str(surface or ""),
+                str(tool_name or ""),
+                str(caller_id or ""),
+                json.dumps(payload or {}, separators=(",", ":")),
+                created_at,
+                now,
+                int(attempts or 0),
+                str(last_error or ""),
+            ),
+        )
+        self._conn.commit()
+
+    def load_failed_writes(self, *, limit: int = 100) -> list[dict]:
+        """Load queued failed writes oldest-first."""
+        rows = self._conn.execute(
+            "SELECT id, idempotency_key, endpoint, method, surface, tool_name, "
+            "caller_id, payload_json, created_at, updated_at, attempts, last_error "
+            "FROM failed_writes ORDER BY created_at ASC, id ASC LIMIT ?",
+            (max(1, int(limit or 100)),),
+        ).fetchall()
+        writes = []
+        for row in rows:
+            try:
+                payload = json.loads(row[7] or "{}")
+            except (json.JSONDecodeError, TypeError):
+                payload = {}
+            writes.append({
+                "id": row[0],
+                "idempotency_key": row[1],
+                "endpoint": row[2],
+                "method": row[3],
+                "surface": row[4],
+                "tool_name": row[5],
+                "caller_id": row[6],
+                "payload": payload if isinstance(payload, dict) else {},
+                "created_at": row[8],
+                "updated_at": row[9],
+                "attempts": row[10],
+                "last_error": row[11],
+            })
+        return writes
+
+    def delete_failed_write(self, failed_write_id) -> None:
+        self._conn.execute(
+            "DELETE FROM failed_writes WHERE id=?",
+            (int(failed_write_id or 0),),
+        )
+        self._conn.commit()
+
+    def mark_failed_write_attempt(self, failed_write_id, last_error: str) -> None:
+        self._conn.execute(
+            "UPDATE failed_writes SET attempts=attempts+1, updated_at=?, "
+            "last_error=? WHERE id=?",
+            (time.time(), str(last_error or ""), int(failed_write_id or 0)),
+        )
+        self._conn.commit()
+
+    def record_mcp_health_event(
+        self,
+        *,
+        surface: str,
+        tool_name: str = "",
+        event: str,
+        error: str = "",
+    ) -> None:
+        self._conn.execute(
+            "INSERT INTO mcp_health_events "
+            "(timestamp, surface, tool_name, event, error) VALUES (?,?,?,?,?)",
+            (
+                time.time(),
+                str(surface or ""),
+                str(tool_name or ""),
+                str(event or ""),
+                str(error or "")[:500],
+            ),
+        )
+        self._conn.commit()
+
+    def load_mcp_health_summary(self, *, since: float = 0) -> dict:
+        """Return counts of recent MCP retry/drop/dedupe/replay events."""
+        try:
+            since_value = float(since or 0)
+        except (TypeError, ValueError):
+            since_value = 0.0
+        rows = self._conn.execute(
+            "SELECT surface, tool_name, event, COUNT(*) "
+            "FROM mcp_health_events WHERE timestamp >= ? "
+            "GROUP BY surface, tool_name, event "
+            "ORDER BY surface, tool_name, event",
+            (since_value,),
+        ).fetchall()
+        totals: dict[str, int] = {}
+        surfaces: dict[str, dict] = {}
+        for surface, tool_name, event, count in rows:
+            surface = str(surface or "mcp")
+            tool_name = str(tool_name or "")
+            event = str(event or "")
+            count = int(count or 0)
+            totals[event] = totals.get(event, 0) + count
+            surface_entry = surfaces.setdefault(
+                surface,
+                {"events": {}, "tools": {}},
+            )
+            surface_entry["events"][event] = (
+                surface_entry["events"].get(event, 0) + count
+            )
+            if tool_name:
+                tool_entry = surface_entry["tools"].setdefault(tool_name, {})
+                tool_entry[event] = tool_entry.get(event, 0) + count
+        pending_failed_writes = int(
+            self._conn.execute(
+                "SELECT COUNT(*) FROM failed_writes"
+            ).fetchone()[0]
+            or 0
+        )
+        return {
+            "since": since_value,
+            "totals": totals,
+            "surfaces": surfaces,
+            "pending_failed_writes": pending_failed_writes,
+        }
 
     def _legacy_weaver_rows_exist(self) -> bool:
         row = self._conn.execute(
