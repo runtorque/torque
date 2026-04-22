@@ -11624,6 +11624,97 @@ test('main render restores scroll when a section rerenders with a new engineer r
   assert.match(main.innerHTML, /Architect A[\s\S]*Alice[\s\S]*Bob/);
 });
 
+test('main render indexes board task lookups for subtitles and branch boundary details', () => {
+  const { context, document, sandbox } = createMainRenderHarness();
+  const main = document.getElementById('main');
+
+  sandbox.state.groups = { alpha: [] };
+  sandbox.state.group_settings = { alpha: { collapsed_default: false } };
+  sandbox.state.children = {};
+  sandbox.state.agents = {};
+  sandbox.state.board_tasks = {};
+
+  for (let i = 0; i < 10; i++) {
+    const id = 'agent-' + i;
+    sandbox.state.groups.alpha.push(id);
+    sandbox.state.agents[id] = {
+      id,
+      name: 'Worker ' + i,
+      group: 'alpha',
+      cell_type: 'agent',
+      kind: 'worker',
+      icon: String(i),
+      status: 'running',
+      created_at: i,
+      worktree_repo_root: i === 0 ? '/repo' : '',
+      worktree_branch: i === 0 ? 'loom/feature' : '',
+    };
+    sandbox.state.board_tasks['task-agent-' + i] = {
+      id: 'task-agent-' + i,
+      group: 'alpha',
+      task: i === 0 ? 'Ship the indexed subtitle' : 'Worker task ' + i,
+      lane: i === 0 ? 'In Progress' : 'Backlog',
+      agent_id: id,
+      created_at: '2026-04-22T00:00:' + String(i).padStart(2, '0') + 'Z',
+    };
+  }
+  for (let i = 0; i < 1000; i++) {
+    sandbox.state.board_tasks['filler-' + i] = {
+      id: 'filler-' + i,
+      group: 'alpha',
+      task: 'Filler task ' + i,
+      lane: 'Backlog',
+      agent_id: '',
+      created_at: '2026-04-21T00:00:00Z',
+    };
+  }
+  sandbox.state.board_tasks.boundary = {
+    id: 'boundary',
+    group: 'alpha',
+    task: 'Clean review point',
+    lane: 'Done',
+    agent_id: '',
+    worktree_boundary: {
+      status: 'open',
+      repo_root: '/repo',
+      branch: 'loom/feature',
+      recorded_at: '2026-04-22T12:00:00Z',
+    },
+  };
+  sandbox.state.board_tasks.follow = {
+    id: 'follow',
+    group: 'alpha',
+    task: 'Queued follow-up',
+    lane: 'Backlog',
+    agent_id: '',
+    resume_after_boundary_task_id: 'boundary',
+    created_at: '2026-04-22T12:10:00Z',
+  };
+
+  const boardTaskValueCalls = runInContext(context, `
+    (function() {
+      var originalValues = Object.values;
+      var calls = 0;
+      Object.values = function(obj) {
+        if (obj === state.board_tasks) calls += 1;
+        return originalValues.call(Object, obj);
+      };
+      try {
+        selectedAgentId = 'agent-0';
+        render();
+      } finally {
+        Object.values = originalValues;
+      }
+      return calls;
+    })()
+  `);
+
+  assert.equal(boardTaskValueCalls, 1);
+  assert.match(main.innerHTML, /Ship the indexed subtitle/);
+  assert.match(main.innerHTML, /Clean review point/);
+  assert.match(main.innerHTML, /Queued follow-up/);
+});
+
 test('main hierarchy row shapes preserve focused controls across rerenders', () => {
   const cases = [
     { label: 'architect column', focusKey: 'agent-close:arch-1' },
@@ -11908,6 +11999,107 @@ test('main hierarchy preserves loose-workers strip scroll and focus across webso
   assert.equal(currentButton.selectionStart, 1);
   assert.equal(currentButton.selectionEnd, 4);
   assert.match(main.innerHTML, /Loose One[\s\S]*Loose Two[\s\S]*\+ New Worker/);
+});
+
+test('task delta updates visible agent subtitle while preserving main-grid focus', () => {
+  const { sandbox, document } = createSandbox();
+  const main = document.register('main');
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/ws.js');
+  loadScript(context, 'static/js/render.js');
+  runInContext(context, `
+    _cachedAgentTemplates = [];
+    selectedTerminalId = null;
+    getFilterByWindow = function() { return false; };
+    renderTerminalWorkspace = function() {};
+    updateEventsAttentionBadge = function() {};
+  `);
+
+  let currentButton = null;
+  let renderCount = 0;
+  function installFocusedControl() {
+    currentButton = new FakeElement('');
+    currentButton.dataset.focusKey = 'agent-close:agent-1';
+    currentButton.value = '';
+    currentButton.selectionStart = 0;
+    currentButton.selectionEnd = 0;
+    currentButton.parentNode = main;
+    main.children = [currentButton];
+    main.setQuerySelector('[data-focus-key="agent-close:agent-1"]', currentButton);
+  }
+
+  Object.defineProperty(main, 'innerHTML', {
+    configurable: true,
+    get() {
+      return this._innerHTML || '';
+    },
+    set(value) {
+      this._innerHTML = value;
+      renderCount += 1;
+      installFocusedControl();
+    },
+  });
+
+  runInContext(context, `
+    _handleFullState({
+      seq: 1,
+      groups: { alpha: ['agent-1'] },
+      group_settings: { alpha: { collapsed_default: false } },
+      agents: {
+        'agent-1': {
+          id: 'agent-1',
+          name: 'Worker',
+          group: 'alpha',
+          cell_type: 'agent',
+          kind: 'worker',
+          icon: 'W',
+          status: 'running',
+          created_at: 1
+        }
+      },
+      children: {},
+      board_lanes: [],
+      board_tasks: {
+        'task-1': {
+          id: 'task-1',
+          group: 'alpha',
+          task: 'Original subtitle',
+          lane: 'In Progress',
+          agent_id: 'agent-1'
+        }
+      },
+      panel_events: []
+    });
+  `);
+
+  currentButton.value = 'close draft';
+  currentButton.selectionStart = 2;
+  currentButton.selectionEnd = 7;
+  document.activeElement = currentButton;
+
+  runInContext(context, `
+    _handleDelta({
+      seq: 2,
+      ops: [
+        {
+          op: 'task_upsert',
+          id: 'task-1',
+          group: 'alpha',
+          task: 'Updated subtitle from task delta',
+          lane: 'In Progress',
+          agent_id: 'agent-1'
+        }
+      ]
+    });
+  `);
+
+  assert.equal(renderCount, 2);
+  assert.match(main.innerHTML, /Updated subtitle from task delta/);
+  assert.doesNotMatch(main.innerHTML, /Original subtitle/);
+  assert.equal(currentButton.focused, true);
+  assert.equal(currentButton.value, 'close draft');
+  assert.equal(currentButton.selectionStart, 2);
+  assert.equal(currentButton.selectionEnd, 7);
 });
 
 test('main hierarchy preserves focused ghost-card state across websocket delta rerenders', () => {

@@ -235,6 +235,7 @@ function _handleFullState(msg) {
   _resyncPending = false;
   _awaitingFullState = false;
   state = msg;
+  if (typeof _invalidateTaskLookupIndex === 'function') _invalidateTaskLookupIndex();
   _applyRuntimeMode();
   if (typeof _standalonePanelSetLayoutFromState === 'function'
       && typeof _standalonePanelsEnabled === 'function'
@@ -652,11 +653,13 @@ function _applyDelta(ops) {
           state.board_tasks[id] = Object.assign({}, op);
         }
         delete state.board_tasks[id].op;
+        if (typeof _invalidateTaskLookupIndex === 'function') _invalidateTaskLookupIndex();
         _maybeTriggerAgentDoneFlourish(previousTask, state.board_tasks[id]);
         break;
       }
       case 'task_remove':
         if (state.board_tasks) delete state.board_tasks[op.id];
+        if (typeof _invalidateTaskLookupIndex === 'function') _invalidateTaskLookupIndex();
         break;
 
       case 'lanes_update':
