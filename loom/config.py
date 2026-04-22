@@ -84,11 +84,18 @@ STATE_FILE: Path = DATA_DIR / "state.json"
 DB_FILE: Path = DATA_DIR / "loom.db"
 LOG_FILE: Path = DATA_DIR / "loom.log"
 ATTACHMENTS_DIR: Path = _resolve_attachments_dir(SCRIPT_DIR, DATA_DIR)
+EVENT_INGEST_SOCKET_FILE: Path = DATA_DIR / "event_ingest.sock"
+EVENT_INGEST_PID_FILE: Path = DATA_DIR / "event_ingest.pid"
+EVENT_INGEST_DB_FILE: Path = DATA_DIR / "event_ingest.db"
+EVENT_INGEST_LOG_FILE: Path = DATA_DIR / "event_ingest.log"
+EVENT_INGEST_MAX_ROWS: int = int(
+    os.environ.get("LOOM_EVENT_INGEST_MAX_ROWS", "50000"))
 
 
 def init_paths(script_dir: Path):
     """Called once from the entry point to anchor code and data paths."""
     global SCRIPT_DIR, DATA_DIR, STATE_FILE, DB_FILE, WEBVIEW_FILE, LOG_FILE, ATTACHMENTS_DIR
+    global EVENT_INGEST_SOCKET_FILE, EVENT_INGEST_PID_FILE, EVENT_INGEST_DB_FILE, EVENT_INGEST_LOG_FILE
     SCRIPT_DIR = script_dir
     DATA_DIR = resolve_data_dir(script_dir)
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -97,6 +104,10 @@ def init_paths(script_dir: Path):
     WEBVIEW_FILE = script_dir / "webview.html"
     LOG_FILE = DATA_DIR / "loom.log"
     ATTACHMENTS_DIR = _resolve_attachments_dir(script_dir, DATA_DIR)
+    EVENT_INGEST_SOCKET_FILE = DATA_DIR / "event_ingest.sock"
+    EVENT_INGEST_PID_FILE = DATA_DIR / "event_ingest.pid"
+    EVENT_INGEST_DB_FILE = DATA_DIR / "event_ingest.db"
+    EVENT_INGEST_LOG_FILE = DATA_DIR / "event_ingest.log"
     _setup_logging()
     log.info("Logging initialized at %s", LOG_FILE)
     log.info("Runtime data directory: %s", DATA_DIR)

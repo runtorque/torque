@@ -47,12 +47,13 @@ from .state import (
 from .events import (
     EventLog,
     EventBus,
+    EventIngestDrainer,
     PanelEventLog,
+    build_event_ingest_envelope,
     get_cell_event_stream,
     health_check,
 )
 from .adapters import get_adapter, get_providers
-from .adapters.base import AgentEvent, EVENT_TYPES
 from .notifications import NotificationManager
 from .worktree import WorktreeManager, format_stale_base_warning
 from .worktree_boundaries import (
@@ -3859,7 +3860,25 @@ async def main(connection=None):
     event_bus = EventBus(state, event_log, notifier, panel_log=panel_log)
     event_bus.start()
     asyncio.create_task(health_check(state, event_log, event_bus, notifier))
-    log.info("Event bus, health monitor, and notifications started")
+    from .event_ingest_client import EventIngestClient
+
+    event_ingest_client = EventIngestClient(data_dir=DATA_DIR)
+    try:
+        await event_ingest_client.connect()
+        log.info("Event ingest daemon connected at %s",
+                 event_ingest_client.socket_path)
+    except Exception:
+        # Keep startup alive; endpoint appends and the drainer both retry via
+        # ensure_running on demand. If append still cannot persist an event,
+        # /events returns 503 instead of pretending the event is safe.
+        log.exception("Event ingest daemon unavailable at startup")
+    event_ingest_drainer = EventIngestDrainer(
+        event_ingest_client,
+        event_bus,
+        state,
+    )
+    log.info("Event bus, event-ingest client, health monitor, "
+             "and notifications initialized")
 
     supervisor_banner: dict | None = None
     if STANDALONE:
@@ -4164,6 +4183,8 @@ async def main(connection=None):
     event_bus.on_session_end = _on_agent_session_end
     # Also checkpoint when the terminal session is actually closed (tab closed)
     bridge.on_session_terminated = _on_agent_session_end
+    event_ingest_drainer.start()
+    log.info("Durable event-ingest drainer started after EventBus callbacks")
 
     def _runtime_payload() -> dict:
         return {
@@ -9771,34 +9792,6 @@ async def main(connection=None):
 
     # -- Events endpoint (agent hooks) ----------------------------------------
 
-    def _parse_profile_synthetic_event(raw: dict, cell) -> AgentEvent | None:
-        """Parse harness-only events without requiring a provider hook shape."""
-        if not profiling.is_enabled():
-            return None
-        if raw.get("source") != "loom-profile-harness":
-            return None
-        event_type = str(raw.get("event_type", "")).strip()
-        if event_type not in EVENT_TYPES:
-            return None
-        data = dict(raw.get("data") or {})
-        for key in (
-                "activity", "detail", "summary", "task", "tool", "reason",
-                "error", "session_id", "model", "input_tokens",
-                "output_tokens"):
-            if key in raw and key not in data:
-                data[key] = raw[key]
-        data.setdefault("event_id", raw.get("event_id", ""))
-        try:
-            timestamp = float(raw.get("timestamp") or time.time())
-        except (TypeError, ValueError):
-            timestamp = time.time()
-        return AgentEvent(
-            cell_id=cell.id,
-            timestamp=timestamp,
-            event_type=event_type,
-            data=data,
-        )
-
     async def handle_events(request):
         """Receive events from agent hooks (Claude Code HTTP hooks, etc.)."""
         request_started = time.perf_counter()
@@ -9811,44 +9804,47 @@ async def main(connection=None):
                 "event_endpoint_ms", time.perf_counter() - request_started)
             return web.json_response({}, status=400)
 
-        # Correlate: X-Loom-Cell-Id header (primary) → cwd match (fallback)
-        cell_id = request.headers.get("X-Loom-Cell-Id", "")
-        cell = state.agents.get(cell_id) if cell_id else None
+        headers = {
+            "X-Loom-Cell-Id": request.headers.get("X-Loom-Cell-Id", ""),
+        }
+        envelope = build_event_ingest_envelope(raw, headers=headers)
+        idempotency_key = None
+        explicit_event_id = raw.get("event_id")
+        if not explicit_event_id and isinstance(raw.get("data"), dict):
+            explicit_event_id = raw["data"].get("event_id")
+        if explicit_event_id:
+            idempotency_key = (
+                f"events:{headers['X-Loom-Cell-Id']}:{explicit_event_id}"
+            )
 
-        if not cell:
-            # Fallback: match by cwd
-            cwd = raw.get("cwd", "")
-            if cwd:
-                for c in state.agents.values():
-                    if c.session_id and c.directory and \
-                            os.path.realpath(c.directory) == os.path.realpath(cwd):
-                        cell = c
-                        break
-
-        if not cell:
-            log.debug("Event from unknown cell (id=%s, cwd=%s), discarding",
-                      cell_id, raw.get("cwd", ""))
-            profiling.recorder().incr("events_dropped_unknown_cell")
+        try:
+            response = await event_ingest_client.append(
+                envelope,
+                idempotency_key=idempotency_key,
+            )
+        except Exception as exc:
+            log.exception("Failed to durably enqueue agent event")
+            profiling.recorder().incr("events_dropped_ingest_unavailable")
             profiling.recorder().observe_ms(
                 "event_endpoint_ms", time.perf_counter() - request_started)
-            return web.json_response({})
-
-        # Parse through the profile harness fast path or provider adapter.
-        event = _parse_profile_synthetic_event(raw, cell)
-        if event is None:
-            adapter = get_adapter(cell.agent_type)
-            event = adapter.parse_event(raw, cell)
-        if event:
-            profiling.recorder().incr("events_accepted")
-            with profiling.timer("event_bus_emit_ms"):
-                await event_bus.emit(event)
-        else:
-            profiling.recorder().incr("events_dropped_unparsed")
+            return web.json_response(
+                {"ok": False, "error": str(exc) or "event ingest unavailable"},
+                status=503,
+            )
+        if response.get("type") == "error":
+            profiling.recorder().incr("events_dropped_ingest_error")
+            profiling.recorder().observe_ms(
+                "event_endpoint_ms", time.perf_counter() - request_started)
+            return web.json_response(
+                {"ok": False, "error": response.get("message", "ingest error")},
+                status=500,
+            )
+        profiling.recorder().incr("events_enqueued")
 
         profiling.recorder().observe_ms(
             "event_endpoint_ms", time.perf_counter() - request_started)
 
-        # Always return 200 with empty JSON — never block the agent
+        # Return 200 only after the ingest daemon has committed the event.
         return web.json_response({})
 
     # -- Panel event helper -------------------------------------------------
@@ -10422,6 +10418,14 @@ async def main(connection=None):
             await panel_log.aclose()
         except Exception:
             log.exception("Panel event log shutdown flush failed")
+        try:
+            await event_ingest_drainer.stop()
+        except Exception:
+            log.exception("Event ingest drainer shutdown failed")
+        try:
+            await event_ingest_client.aclose()
+        except Exception:
+            log.exception("Event ingest client shutdown failed")
         try:
             await bridge.shutdown()
         except Exception:

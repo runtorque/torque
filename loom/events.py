@@ -6,9 +6,11 @@ from datetime import datetime
 from collections import deque
 from dataclasses import asdict
 
-from .adapters.base import AgentEvent
+from .adapters import get_adapter
+from .adapters.base import AgentEvent, EVENT_TYPES
 from .config import log
 from .task_health import HEALTH_SEVERITY
+from . import profiling
 
 
 PERSISTENT_CELL_EVENT_KINDS = {"architect", "engineer"}
@@ -836,6 +838,183 @@ class EventBus:
     def cleanup_cell(self, cell_id: str):
         """Clean up when a cell is removed."""
         self._log.clear(cell_id)
+
+
+# -- Durable event-ingest drainer -----------------------------------------
+
+
+def build_event_ingest_envelope(
+    raw: dict,
+    *,
+    headers: dict | None = None,
+    received_at: float | None = None,
+) -> dict:
+    """Build the durable envelope stored by the event-ingest sidecar."""
+    return {
+        "schema": 1,
+        "received_at": float(time.time() if received_at is None else received_at),
+        "headers": dict(headers or {}),
+        "raw": dict(raw or {}),
+    }
+
+
+def _parse_profile_synthetic_event(raw: dict, cell) -> AgentEvent | None:
+    """Parse harness-only events without requiring a provider hook shape."""
+    if not profiling.is_enabled():
+        return None
+    if raw.get("source") != "loom-profile-harness":
+        return None
+    event_type = str(raw.get("event_type", "")).strip()
+    if event_type not in EVENT_TYPES:
+        return None
+    data = dict(raw.get("data") or {})
+    for key in (
+            "activity", "detail", "summary", "task", "tool", "reason",
+            "error", "session_id", "model", "input_tokens",
+            "output_tokens"):
+        if key in raw and key not in data:
+            data[key] = raw[key]
+    data.setdefault("event_id", raw.get("event_id", ""))
+    try:
+        timestamp = float(raw.get("timestamp") or time.time())
+    except (TypeError, ValueError):
+        timestamp = time.time()
+    return AgentEvent(
+        cell_id=cell.id,
+        timestamp=timestamp,
+        event_type=event_type,
+        data=data,
+    )
+
+
+def agent_event_from_ingest_envelope(state, envelope: dict) -> AgentEvent | None:
+    """Resolve a durable ingest envelope into an ``AgentEvent``.
+
+    This intentionally mirrors the old ``/events`` request path: header
+    cell-id match first, cwd fallback second, then provider adapter parsing.
+    Unknown or unparsed events return ``None`` and are still safe for the
+    drainer to ack because they would have been discarded before Phase 2.
+    """
+    raw = dict((envelope or {}).get("raw") or {})
+    headers = dict((envelope or {}).get("headers") or {})
+
+    cell_id = headers.get("X-Loom-Cell-Id", "")
+    cell = state.agents.get(cell_id) if cell_id else None
+
+    if not cell:
+        cwd = raw.get("cwd", "")
+        if cwd:
+            import os
+            for candidate in state.agents.values():
+                if candidate.session_id and candidate.directory and \
+                        os.path.realpath(candidate.directory) == os.path.realpath(cwd):
+                    cell = candidate
+                    break
+
+    if not cell:
+        log.debug("Event from unknown cell (id=%s, cwd=%s), discarding",
+                  cell_id, raw.get("cwd", ""))
+        profiling.recorder().incr("events_dropped_unknown_cell")
+        return None
+
+    event = _parse_profile_synthetic_event(raw, cell)
+    if event is None:
+        adapter = get_adapter(cell.agent_type)
+        event = adapter.parse_event(raw, cell)
+    if event:
+        profiling.recorder().incr("events_accepted")
+        return event
+
+    profiling.recorder().incr("events_dropped_unparsed")
+    return None
+
+
+class EventIngestDrainer:
+    """Drain durable event-ingest rows into ``EventBus.emit`` asynchronously."""
+
+    def __init__(
+        self,
+        client,
+        event_bus: EventBus,
+        state,
+        *,
+        batch_size: int = 100,
+        idle_interval: float = 0.05,
+        error_interval: float = 1.0,
+    ):
+        self.client = client
+        self.event_bus = event_bus
+        self.state = state
+        self.batch_size = max(1, int(batch_size or 100))
+        self.idle_interval = max(0.01, float(idle_interval or 0.05))
+        self.error_interval = max(0.05, float(error_interval or 1.0))
+        self.cursor = 0
+        self._task: asyncio.Task | None = None
+        self._closed = False
+
+    def start(self) -> asyncio.Task:
+        if self._task is None or self._task.done():
+            self._closed = False
+            self._task = asyncio.create_task(self.run_forever())
+        return self._task
+
+    async def stop(self) -> None:
+        self._closed = True
+        if self._task and not self._task.done():
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+        self._task = None
+
+    async def run_forever(self) -> None:
+        while not self._closed:
+            try:
+                processed = await self.drain_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("Event-ingest drainer iteration failed")
+                await asyncio.sleep(self.error_interval)
+                continue
+            if processed < self.batch_size:
+                await asyncio.sleep(self.idle_interval)
+
+    async def drain_once(self) -> int:
+        response = await self.client.drain(
+            since=self.cursor,
+            limit=self.batch_size,
+        )
+        if response.get("type") == "error":
+            raise RuntimeError(response.get("message") or response.get("code"))
+
+        ack_cursor = int(response.get("ack_cursor") or 0)
+        if ack_cursor > self.cursor:
+            self.cursor = ack_cursor
+
+        rows = list(response.get("events") or [])
+        if not rows:
+            return 0
+
+        processed = 0
+        last_cursor = self.cursor
+        for row in rows:
+            cursor = int(row.get("cursor") or 0)
+            envelope = dict(row.get("event") or {})
+            event = agent_event_from_ingest_envelope(self.state, envelope)
+            if event is not None:
+                with profiling.timer("event_bus_emit_ms"):
+                    await self.event_bus.emit(event)
+            last_cursor = max(last_cursor, cursor)
+            processed += 1
+
+        if last_cursor > self.cursor:
+            ack = await self.client.ack(up_to=last_cursor)
+            if ack.get("type") == "error":
+                raise RuntimeError(ack.get("message") or ack.get("code"))
+            self.cursor = max(self.cursor, int(ack.get("ack_cursor") or last_cursor))
+        return processed
 
 
 async def health_check(state, event_log: EventLog, event_bus: EventBus,
