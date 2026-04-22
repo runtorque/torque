@@ -14,6 +14,23 @@ var _eventsDismissedIds = new Set();
 var _eventsSearchDebounce = null;
 var _eventsSearchHadFocus = false;
 var _eventsResolveDrafts = {};
+var _eventsRenderedShellSignature = '';
+var _eventsVirtualRows = [];
+var _eventsVirtualTops = [];
+var _eventsVirtualHeight = 0;
+var _eventsLogRenderState = {
+  visibleKeys: '',
+  visibleHtml: '',
+  topHeight: -1,
+  bottomHeight: -1,
+};
+var _eventsMeasuredHeights = {};
+var _eventsDefaultEntryHeight = 24;
+var _eventsDefaultExpandedEntryHeight = 72;
+var _eventsDefaultDateHeight = 22;
+var _eventsDefaultEmptyHeight = 52;
+var _eventsDefaultLoadingHeight = 30;
+var _eventsVirtualOverscanPx = 240;
 
 function _eventsDismissedMap() {
   if (!state.events_dismissed_attention
@@ -259,6 +276,382 @@ function _eventsAskAgent(task) {
 
 /* ---- Render --------------------------------------------------------- */
 
+function _eventsAttentionSignature(items) {
+  var parts = [];
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i] || {};
+    parts.push([
+      item.type || '',
+      item.id || '',
+      item.timestamp || 0,
+      item.agent_name || '',
+      item.message || '',
+      item.description || '',
+      item.parent_task_title || '',
+      item.parent_task_description || '',
+    ].join('\u0001'));
+  }
+  return parts.join('\u0002');
+}
+
+function _eventsBuildShellHtml(grp, attention) {
+  var html = '';
+  var scopeLabel = grp
+    ? 'Attention inbox and recent activity for ' + grp
+    : 'Attention inbox and recent activity across Loom';
+
+  html += '<div class="events-header">';
+  html += '<div class="events-header-copy">';
+  html += '<div class="events-header-title">Events</div>';
+  html += '<div class="events-header-subtitle">' + esc(scopeLabel) + '</div>';
+  html += '</div>';
+  html += '<div class="events-header-actions">';
+  html += '<select class="events-kind-filter" onchange="eventsSetKindFilter(this.value)">';
+  html += '<option value="all"' + (_eventsKindFilter === 'all' ? ' selected' : '') + '>All</option>';
+  html += '<option value="errors"' + (_eventsKindFilter === 'errors' ? ' selected' : '') + '>Errors</option>';
+  html += '<option value="tasks"' + (_eventsKindFilter === 'tasks' ? ' selected' : '') + '>Tasks</option>';
+  html += '<option value="lifecycle"' + (_eventsKindFilter === 'lifecycle' ? ' selected' : '') + '>Lifecycle</option>';
+  html += '</select>';
+  html += '</div>';
+  html += '</div>';
+  html += '<div class="events-search-row">';
+  html += '<input class="events-search-input" type="text" placeholder="Search events\u2026"'
+    + ' value="' + esc(_eventsSearchQuery) + '"'
+    + ' oninput="eventsOnSearchInput(this.value)">';
+  html += '</div>';
+
+  var attCount = attention.length;
+  html += '<div class="events-attention">';
+  html += '<div class="events-attention-heading">Attention inbox'
+    + (attCount > 0 ? ' <span class="events-attention-count">' + attCount + '</span>' : '')
+    + '</div>';
+  if (attention.length === 0) {
+    html += '<div class="events-attention-empty">No items need attention in this view.</div>';
+  } else {
+    for (var i = 0; i < attention.length; i++) {
+      html += _renderAttentionCard(attention[i]);
+    }
+  }
+  html += '</div>';
+
+  html += '<div class="events-log" data-events-virtual-log="1"></div>';
+  return html;
+}
+
+function _eventsBuildShellSignature(grp, attention) {
+  return [
+    grp || '',
+    _eventsKindFilter || 'all',
+    _eventsSearchQuery || '',
+    _eventsAttentionSignature(attention),
+  ].join('\u0003');
+}
+
+function _eventsSyncShellControls(panel) {
+  if (!panel || typeof panel.querySelector !== 'function') return;
+  var filter = panel.querySelector('.events-kind-filter');
+  if (filter && 'value' in filter && filter.value !== _eventsKindFilter) {
+    filter.value = _eventsKindFilter;
+  }
+  var search = panel.querySelector('.events-search-input');
+  if (search && 'value' in search && search.value !== _eventsSearchQuery
+      && document.activeElement !== search) {
+    search.value = _eventsSearchQuery;
+  }
+}
+
+function _eventsRememberResolveDrafts(panel) {
+  if (!panel || typeof panel.querySelectorAll !== 'function') return;
+  panel.querySelectorAll('.events-resolve-textarea').forEach(function(ta) {
+    var taskId = ta.id.replace('events-resolve-', '');
+    _eventsResolveDrafts[taskId] = ta.value;
+  });
+}
+
+function _eventsVirtualEventKey(evt, idx) {
+  return 'event:' + _eventsEntryKey(evt, idx);
+}
+
+function _eventsVirtualDateKey(label, timestamp) {
+  var d = new Date((timestamp || 0) * 1000);
+  var day = [d.getFullYear(), d.getMonth(), d.getDate()].join('-');
+  return 'date:' + label + ':' + day;
+}
+
+function _eventsEstimateEventHeight(evt, idx) {
+  var entryKey = _eventsEntryKey(evt, idx);
+  var virtualKey = 'event:' + entryKey;
+  var measured = _eventsMeasuredHeights[virtualKey];
+  if (measured && measured > 0) return measured;
+  var expanded = _eventsExpandedEntries[entryKey]
+    && (evt.kind === 'agent_error' || evt.kind === 'agent_blocked');
+  if (!expanded) return _eventsDefaultEntryHeight;
+  var message = evt && evt.message ? String(evt.message) : '';
+  var extraLines = Math.min(8, Math.ceil(message.length / 120));
+  return _eventsDefaultExpandedEntryHeight + Math.max(0, extraLines - 1) * 16;
+}
+
+function _eventsRowHeight(row) {
+  if (!row) return 0;
+  var measured = _eventsMeasuredHeights[row.key];
+  if (measured && measured > 0) return measured;
+  if (row.type === 'date') return _eventsDefaultDateHeight;
+  if (row.type === 'event') return _eventsEstimateEventHeight(row.event, row.idx);
+  if (row.type === 'loading') return _eventsDefaultLoadingHeight;
+  if (row.type === 'empty') return _eventsDefaultEmptyHeight;
+  return _eventsDefaultEntryHeight;
+}
+
+function _eventsBuildVirtualRows() {
+  var rows = [];
+  var grp = _eventsCurrentGroup();
+  var events = (state && state.panel_events) || [];
+  var count = 0;
+  var lastDateLabel = '';
+  for (var j = events.length - 1; j >= 0; j--) {
+    var evt = events[j];
+    if (grp && evt.group !== grp) continue;
+    if (!_eventsMatchesFilters(evt)) continue;
+    var dateLabel = _eventsDateLabel(evt.timestamp);
+    if (dateLabel !== lastDateLabel) {
+      var dateKey = _eventsVirtualDateKey(dateLabel, evt.timestamp);
+      rows.push({
+        type: 'date',
+        key: dateKey,
+        label: dateLabel,
+        height: _eventsMeasuredHeights[dateKey] || _eventsDefaultDateHeight,
+      });
+      lastDateLabel = dateLabel;
+    }
+    var eventKey = _eventsVirtualEventKey(evt, j);
+    rows.push({
+      type: 'event',
+      key: eventKey,
+      event: evt,
+      idx: j,
+      height: _eventsEstimateEventHeight(evt, j),
+    });
+    count++;
+  }
+  if (count === 0) {
+    rows.push({ type: 'empty', key: 'empty', height: _eventsDefaultEmptyHeight });
+  }
+  if (_eventsLoading) {
+    rows.push({ type: 'loading', key: 'loading', height: _eventsDefaultLoadingHeight });
+  }
+  return rows;
+}
+
+function _eventsBuildVirtualMetrics(rows) {
+  var tops = [];
+  var total = 0;
+  for (var i = 0; i < rows.length; i++) {
+    rows[i].height = _eventsRowHeight(rows[i]);
+    tops.push(total);
+    total += rows[i].height;
+  }
+  return { tops: tops, total: total };
+}
+
+function _eventsFindRowIndexAt(rows, tops, scrollTop) {
+  if (!rows.length) return 0;
+  var target = Math.max(0, Number(scrollTop || 0));
+  var lo = 0;
+  var hi = rows.length - 1;
+  var result = rows.length - 1;
+  while (lo <= hi) {
+    var mid = Math.floor((lo + hi) / 2);
+    if (tops[mid] + rows[mid].height > target) {
+      result = mid;
+      hi = mid - 1;
+    } else {
+      lo = mid + 1;
+    }
+  }
+  return result;
+}
+
+function _eventsVirtualRange(rows, tops, scrollTop, viewportHeight) {
+  if (!rows.length) return { start: 0, end: 0 };
+  var viewport = Math.max(1, Number(viewportHeight || 0) || 320);
+  var startTop = Math.max(0, Number(scrollTop || 0) - _eventsVirtualOverscanPx);
+  var endTop = Number(scrollTop || 0) + viewport + _eventsVirtualOverscanPx;
+  var start = _eventsFindRowIndexAt(rows, tops, startTop);
+  var end = start;
+  while (end < rows.length && tops[end] < endTop) end++;
+  if (end <= start) end = Math.min(rows.length, start + 1);
+  return { start: start, end: end };
+}
+
+function _eventsFindVirtualKeyIndex(rows, key) {
+  if (!key) return -1;
+  for (var i = 0; i < rows.length; i++) {
+    if (rows[i].key === key) return i;
+  }
+  return -1;
+}
+
+function _eventsFindAnchorRowIndex(rows, tops, scrollTop) {
+  if (!rows.length) return 0;
+  var idx = _eventsFindRowIndexAt(rows, tops, scrollTop);
+  while (idx < rows.length && rows[idx] && rows[idx].type !== 'event') idx++;
+  if (idx < rows.length) return idx;
+  return _eventsFindRowIndexAt(rows, tops, scrollTop);
+}
+
+function _eventsCaptureVirtualLogAnchor(logEl) {
+  if (!logEl) return null;
+  var top = typeof logEl.scrollTop === 'number' ? logEl.scrollTop : _eventsScrollTop;
+  var snapshot = {
+    key: '',
+    offset: 0,
+    top: typeof top === 'number' ? top : 0,
+    pinned: !top || top <= 2,
+    domAnchor: null,
+  };
+  if (_eventsVirtualRows.length && _eventsVirtualTops.length) {
+    var idx = _eventsFindAnchorRowIndex(_eventsVirtualRows, _eventsVirtualTops, snapshot.top);
+    var row = _eventsVirtualRows[idx];
+    if (row) {
+      snapshot.key = row.key;
+      snapshot.offset = snapshot.top - (_eventsVirtualTops[idx] || 0);
+    }
+  } else {
+    // Migration/first-render fallback for an existing non-virtualized DOM. Normal
+    // live appends use the row index/offset snapshot above and avoid DOM scans.
+    snapshot.domAnchor = _eventsCaptureScrollAnchor(logEl, '.events-entry', 'eventId');
+  }
+  return snapshot;
+}
+
+function _eventsScrollTopForAnchor(anchor, rows, tops) {
+  if (!anchor) return _eventsScrollTop || 0;
+  if (anchor.pinned) return 0;
+  if (anchor.key) {
+    var idx = _eventsFindVirtualKeyIndex(rows, anchor.key);
+    if (idx >= 0) return Math.max(0, (tops[idx] || 0) + (anchor.offset || 0));
+  }
+  return Math.max(0, typeof anchor.top === 'number' ? anchor.top : (_eventsScrollTop || 0));
+}
+
+function _eventsRenderVirtualRow(row) {
+  if (!row) return '';
+  if (row.type === 'date') {
+    return '<div class="events-date-separator" data-events-virtual-key="' + esc(row.key) + '">'
+      + esc(row.label) + '</div>';
+  }
+  if (row.type === 'event') {
+    return _renderEventEntry(row.event, row.idx, row.key);
+  }
+  if (row.type === 'loading') {
+    return '<div class="events-loading" data-events-virtual-key="loading">Loading\u2026</div>';
+  }
+  return '<div class="events-log-empty" data-events-virtual-key="empty">No recent events in this view yet.</div>';
+}
+
+function _eventsSpacerHtml(className, height) {
+  return '<div class="events-virtual-spacer ' + className + '" aria-hidden="true"'
+    + ' style="height:' + Math.max(0, Math.round(height || 0)) + 'px"></div>';
+}
+
+function _eventsSetSpacerHeight(el, height) {
+  if (!el || !el.style) return;
+  el.style.height = Math.max(0, Math.round(height || 0)) + 'px';
+}
+
+function _eventsPatchVirtualLog(logEl, fullHtml, visibleHtml, visibleKeys, topHeight, bottomHeight) {
+  if (!logEl || typeof logEl.querySelector !== 'function') {
+    if (logEl) logEl.innerHTML = fullHtml;
+    return false;
+  }
+  var topSpacer = logEl.querySelector('.events-virtual-top');
+  var windowEl = logEl.querySelector('.events-virtual-window');
+  var bottomSpacer = logEl.querySelector('.events-virtual-bottom');
+  if (!topSpacer || !windowEl || !bottomSpacer) {
+    if (logEl.innerHTML !== fullHtml) logEl.innerHTML = fullHtml;
+    return false;
+  }
+
+  _eventsSetSpacerHeight(topSpacer, topHeight);
+  _eventsSetSpacerHeight(bottomSpacer, bottomHeight);
+  if (_eventsLogRenderState.visibleHtml !== visibleHtml
+      || _eventsLogRenderState.visibleKeys !== visibleKeys) {
+    windowEl.innerHTML = visibleHtml;
+  }
+  return true;
+}
+
+function _eventsMeasureVisibleRows(logEl) {
+  if (!logEl || typeof logEl.querySelectorAll !== 'function') return;
+  var nodes = logEl.querySelectorAll('[data-events-virtual-key]') || [];
+  for (var i = 0; i < nodes.length; i++) {
+    var node = nodes[i];
+    var key = _eventsAnchorDataValue(node, 'eventsVirtualKey');
+    var height = typeof node.offsetHeight === 'number' ? node.offsetHeight : 0;
+    if (key && height > 0) _eventsMeasuredHeights[key] = height;
+  }
+}
+
+function _eventsUpdateOldestId() {
+  var events = (state && state.panel_events) || [];
+  if (events.length > 0) _eventsOldestId = events[0].id;
+}
+
+function _eventsRenderLog(options) {
+  options = options || {};
+  var panel = options.panel || document.getElementById('panel-events');
+  if (!panel) return;
+  var logEl = options.logEl || (typeof panel.querySelector === 'function'
+    ? panel.querySelector('.events-log') : null);
+  if (!logEl) return;
+
+  var anchor = options.preserveScrollTop
+    ? { top: typeof logEl.scrollTop === 'number' ? logEl.scrollTop : _eventsScrollTop, pinned: false }
+    : (options.anchor || _eventsCaptureVirtualLogAnchor(logEl));
+
+  var rows = _eventsBuildVirtualRows();
+  var metrics = _eventsBuildVirtualMetrics(rows);
+  _eventsVirtualRows = rows;
+  _eventsVirtualTops = metrics.tops;
+  _eventsVirtualHeight = metrics.total;
+  _eventsUpdateOldestId();
+
+  var nextTop = Math.max(0, _eventsScrollTopForAnchor(anchor, rows, metrics.tops));
+  _eventsScrollTop = nextTop;
+
+  var viewport = typeof logEl.clientHeight === 'number' && logEl.clientHeight > 0
+    ? logEl.clientHeight : 320;
+  var range = _eventsVirtualRange(rows, metrics.tops, _eventsScrollTop, viewport);
+  var topHeight = range.start < metrics.tops.length ? metrics.tops[range.start] : metrics.total;
+  var bottomStart = range.end < metrics.tops.length ? metrics.tops[range.end] : metrics.total;
+  var bottomHeight = Math.max(0, metrics.total - bottomStart);
+  var visibleHtml = '';
+  var visibleKeys = [];
+  for (var i = range.start; i < range.end; i++) {
+    visibleHtml += _eventsRenderVirtualRow(rows[i]);
+    visibleKeys.push(rows[i].key);
+  }
+  var keysSignature = visibleKeys.join('|');
+  var fullHtml = _eventsSpacerHtml('events-virtual-top', topHeight)
+    + '<div class="events-virtual-window">' + visibleHtml + '</div>'
+    + _eventsSpacerHtml('events-virtual-bottom', bottomHeight);
+
+  _eventsPatchVirtualLog(logEl, fullHtml, visibleHtml, keysSignature, topHeight, bottomHeight);
+  _eventsLogRenderState.visibleKeys = keysSignature;
+  _eventsLogRenderState.visibleHtml = visibleHtml;
+  _eventsLogRenderState.topHeight = topHeight;
+  _eventsLogRenderState.bottomHeight = bottomHeight;
+  _eventsMeasureVisibleRows(logEl);
+
+  if (anchor && anchor.domAnchor && anchor.domAnchor.id) {
+    _eventsRestoreScrollAnchor(logEl, '.events-entry', 'eventId', anchor.domAnchor);
+    if (typeof logEl.scrollTop === 'number') _eventsScrollTop = logEl.scrollTop;
+  } else if (typeof logEl.scrollTop === 'number') {
+    logEl.scrollTop = nextTop;
+    _eventsScrollTop = logEl.scrollTop;
+  }
+}
+
 function renderEvents() {
   var panel = document.getElementById('panel-events');
   if (!panel) return;
@@ -284,11 +677,6 @@ function renderEvents() {
         '.events-attention-card',
         'itemId',
       );
-      snapshot.logAnchor = _eventsCaptureScrollAnchor(
-        root.querySelector('.events-log'),
-        '.events-entry',
-        'eventId',
-      );
     },
     restore: function(root, snapshot) {
       if (!snapshot || !root || typeof root.querySelector !== 'function') return;
@@ -298,117 +686,45 @@ function renderEvents() {
         'itemId',
         snapshot.attentionAnchor,
       );
-      _eventsRestoreScrollAnchor(
-        root.querySelector('.events-log'),
-        '.events-entry',
-        'eventId',
-        snapshot.logAnchor,
-      );
     },
   };
   var panelState = _captureSurfaceState(panel, panelStateOptions);
   var shouldRestoreSearchFocus = _eventsSearchHadFocus
     && !(panelState && panelState.focus);
 
-  // Preserve scroll position and inline ask drafts before DOM rebuild
-  var logEl = panel.querySelector('.events-log');
-  if (logEl) _eventsScrollTop = logEl.scrollTop;
-  panel.querySelectorAll('.events-resolve-textarea').forEach(function(ta) {
-    var taskId = ta.id.replace('events-resolve-', '');
-    _eventsResolveDrafts[taskId] = ta.value;
-  });
+  var logEl = panel.querySelector ? panel.querySelector('.events-log') : null;
+  if (logEl && typeof logEl.scrollTop === 'number') _eventsScrollTop = logEl.scrollTop;
+  var logAnchor = _eventsCaptureVirtualLogAnchor(logEl);
+  _eventsRememberResolveDrafts(panel);
 
-  var html = '';
-
-  // Header
   var grp = _eventsCurrentGroup();
-  var scopeLabel = grp
-    ? 'Attention inbox and recent activity for ' + grp
-    : 'Attention inbox and recent activity across Loom';
-  html += '<div class="events-header">';
-  html += '<div class="events-header-copy">';
-  html += '<div class="events-header-title">Events</div>';
-  html += '<div class="events-header-subtitle">' + esc(scopeLabel) + '</div>';
-  html += '</div>';
-  html += '<div class="events-header-actions">';
-  html += '<select class="events-kind-filter" onchange="eventsSetKindFilter(this.value)">';
-  html += '<option value="all"' + (_eventsKindFilter === 'all' ? ' selected' : '') + '>All</option>';
-  html += '<option value="errors"' + (_eventsKindFilter === 'errors' ? ' selected' : '') + '>Errors</option>';
-  html += '<option value="tasks"' + (_eventsKindFilter === 'tasks' ? ' selected' : '') + '>Tasks</option>';
-  html += '<option value="lifecycle"' + (_eventsKindFilter === 'lifecycle' ? ' selected' : '') + '>Lifecycle</option>';
-  html += '</select>';
-  html += '</div>';
-  html += '</div>';
-  html += '<div class="events-search-row">';
-  html += '<input class="events-search-input" type="text" placeholder="Search events\u2026"'
-    + ' value="' + esc(_eventsSearchQuery) + '"'
-    + ' oninput="eventsOnSearchInput(this.value)">';
-  html += '</div>';
-
-  // Attention section
   var allAttention = _eventsGetAttentionItems();
   var attention = [];
   for (var ai = 0; ai < allAttention.length; ai++) {
     if (!_eventsIsDismissed(allAttention[ai])) attention.push(allAttention[ai]);
   }
-  var attCount = attention.length;
-  html += '<div class="events-attention">';
-  html += '<div class="events-attention-heading">Attention inbox'
-    + (attCount > 0 ? ' <span class="events-attention-count">' + attCount + '</span>' : '')
-    + '</div>';
-  if (attention.length === 0) {
-    html += '<div class="events-attention-empty">No items need attention in this view.</div>';
+  var shellSignature = _eventsBuildShellSignature(grp, attention);
+  var needsShellRender = _eventsRenderedShellSignature !== shellSignature || !logEl;
+
+  if (needsShellRender) {
+    panel.innerHTML = _eventsBuildShellHtml(grp, attention);
+    _eventsRenderedShellSignature = shellSignature;
+    _eventsLogRenderState = { visibleKeys: '', visibleHtml: '', topHeight: -1, bottomHeight: -1 };
+
+    panel.querySelectorAll('.events-resolve-textarea').forEach(function(ta) {
+      ta.style.height = 'auto';
+      ta.style.height = ta.scrollHeight + 'px';
+    });
+    _restoreSurfaceState(panel, panelState, panelStateOptions);
   } else {
-    for (var i = 0; i < attention.length; i++) {
-      html += _renderAttentionCard(attention[i]);
-    }
-  }
-  html += '</div>';
-
-  // Log section
-  html += '<div class="events-log">';
-  var events = (state && state.panel_events) || [];
-  var count = 0;
-  var lastDateLabel = '';
-  for (var j = events.length - 1; j >= 0 && count < 200; j--) {
-    var evt = events[j];
-    if (grp && evt.group !== grp) continue;
-    if (!_eventsMatchesFilters(evt)) continue;
-    var dateLabel = _eventsDateLabel(evt.timestamp);
-    if (dateLabel !== lastDateLabel) {
-      html += '<div class="events-date-separator">' + dateLabel + '</div>';
-      lastDateLabel = dateLabel;
-    }
-    html += _renderEventEntry(evt, j);
-    count++;
-  }
-  if (count === 0) {
-    html += '<div class="events-log-empty">No recent events in this view yet.</div>';
-  }
-  if (_eventsLoading) {
-    html += '<div class="events-loading">Loading\u2026</div>';
-  }
-  html += '</div>';
-
-  panel.innerHTML = html;
-
-  // Track oldest ID for pagination
-  if (events.length > 0) {
-    _eventsOldestId = events[0].id;
+    _eventsSyncShellControls(panel);
   }
 
-  // Auto-resize textareas
-  panel.querySelectorAll('.events-resolve-textarea').forEach(function(ta) {
-    ta.style.height = 'auto';
-    ta.style.height = ta.scrollHeight + 'px';
-  });
-  _restoreSurfaceState(panel, panelState, panelStateOptions);
-
-  logEl = panel.querySelector('.events-log');
+  logEl = panel.querySelector ? panel.querySelector('.events-log') : null;
   if (logEl) {
-    _eventsScrollTop = logEl.scrollTop;
     logEl.addEventListener('scroll', _eventsOnScroll);
   }
+  _eventsRenderLog({ panel: panel, logEl: logEl, anchor: logAnchor });
 
   if (shouldRestoreSearchFocus) {
     var searchInput = panel.querySelector('.events-search-input');
@@ -478,8 +794,9 @@ function _renderAttentionCard(item) {
 
 /* ---- Log entry rendering -------------------------------------------- */
 
-function _renderEventEntry(evt, idx) {
+function _renderEventEntry(evt, idx, virtualKey) {
   var entryKey = _eventsEntryKey(evt, idx);
+  var rowKey = virtualKey || ('event:' + entryKey);
   var entryKeyJs = esc(entryKey).replace(/'/g, "\\'");
   var kindClass = _eventsKindClass(evt.kind);
   var isExpanded = _eventsExpandedEntries[entryKey];
@@ -487,6 +804,7 @@ function _renderEventEntry(evt, idx) {
   var isError = (evt.kind === 'agent_error' || evt.kind === 'agent_blocked');
   var html = '<div class="events-entry ' + kindClass + expanded + '"'
     + ' data-event-id="' + esc(entryKey) + '"'
+    + ' data-events-virtual-key="' + esc(rowKey) + '"'
     + ' onclick="eventsToggleEntry(\'' + entryKeyJs + '\')">';
   html += '<span class="events-entry-time">' + _eventsFormatTime(evt.timestamp) + '</span>';
   html += '<span class="events-entry-icon">' + _eventsKindIcon(evt.kind) + '</span>';
@@ -599,6 +917,7 @@ function updateEventsAttentionBadge() {
 function _eventsOnScroll() {
   var el = this;
   _eventsScrollTop = el.scrollTop;
+  _eventsRenderLog({ logEl: el, preserveScrollTop: true });
   // The log renders newest first (top) — "load more" triggers near the bottom
   if (_eventsLoading || !_eventsHasMore) return;
   if (el.scrollHeight - el.scrollTop - el.clientHeight < 80) {
@@ -609,7 +928,10 @@ function _eventsOnScroll() {
 function _eventsLoadMore() {
   if (_eventsLoading || !_eventsHasMore || !_eventsOldestId) return;
   _eventsLoading = true;
-  renderEvents();
+  var panel = document.getElementById('panel-events');
+  var logEl = panel && panel.querySelector ? panel.querySelector('.events-log') : null;
+  if (logEl) _eventsRenderLog({ panel: panel, logEl: logEl, preserveScrollTop: true });
+  else renderEvents();
   send({ cmd: 'get_events', before_id: _eventsOldestId, limit: 50 });
 }
 

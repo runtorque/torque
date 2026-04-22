@@ -5898,6 +5898,258 @@ test('events entries preserve expansion state by event id across rerenders', () 
   assert.match(html, /eventsToggleEntry\('7'\)/);
 });
 
+test('events log virtualizes large histories to the visible window', () => {
+  const { context, document } = createEventsHarness({ stubRenderers: false });
+  const panel = document.register('panel-events');
+  const log = new FakeElement('events-log');
+  log.clientHeight = 96;
+  log.scrollTop = 0;
+  const search = new FakeElement();
+  search.classList.add('events-search-input');
+  panel.setQuerySelector('.events-log', log);
+  panel.setQuerySelector('.events-attention', null);
+  panel.setQuerySelector('.events-search-input', search);
+  panel.setQuerySelectorAll('.events-resolve-textarea', []);
+
+  context.state.panel_events = [];
+  for (let i = 1; i <= 500; i++) {
+    context.state.panel_events.push({
+      id: i,
+      kind: 'agent_progress',
+      message: `event ${i}`,
+      group: 'alpha',
+      timestamp: i,
+    });
+  }
+  runInContext(context, `
+    _eventsVirtualOverscanPx = 0;
+    _eventsDefaultDateHeight = 0;
+    _eventsDefaultEntryHeight = 24;
+    _eventsRenderedEntryCount = 0;
+    var _originalRenderEventEntryForVirtualTest = _renderEventEntry;
+    _renderEventEntry = function(evt, idx, virtualKey) {
+      _eventsRenderedEntryCount++;
+      return _originalRenderEventEntryForVirtualTest(evt, idx, virtualKey);
+    };
+  `);
+
+  context.renderEvents();
+
+  assert.equal(runInContext(context, '_eventsVirtualRows.length > 500'), true);
+  assert.equal(runInContext(context, '_eventsRenderedEntryCount < 20'), true);
+  assert.match(log.innerHTML, /event 500/);
+  assert.doesNotMatch(log.innerHTML, /event 1</);
+});
+
+test('events live appends preserve the virtual scroll anchor without replacing stable DOM', () => {
+  const { context, document } = createEventsHarness({ stubRenderers: false });
+  const panel = document.register('panel-events');
+  const log = new FakeElement('events-log');
+  log.clientHeight = 96;
+  log.scrollTop = 240;
+  const search = new FakeElement();
+  search.classList.add('events-search-input');
+  panel.setQuerySelector('.events-log', log);
+  panel.setQuerySelector('.events-attention', null);
+  panel.setQuerySelector('.events-search-input', search);
+  panel.setQuerySelectorAll('.events-resolve-textarea', []);
+
+  let panelReplaceCount = 0;
+  Object.defineProperty(panel, 'innerHTML', {
+    configurable: true,
+    get() { return this._innerHTML || ''; },
+    set(value) {
+      panelReplaceCount++;
+      this._innerHTML = value;
+      this.children = [];
+    },
+  });
+
+  context.state.panel_events = [];
+  for (let i = 1; i <= 80; i++) {
+    context.state.panel_events.push({
+      id: i,
+      kind: 'agent_progress',
+      message: `event ${i}`,
+      group: 'alpha',
+      timestamp: i,
+    });
+  }
+  runInContext(context, `
+    _eventsVirtualOverscanPx = 0;
+    _eventsDefaultDateHeight = 0;
+    _eventsDefaultEntryHeight = 24;
+  `);
+
+  context.renderEvents();
+  const initialPanelReplaceCount = panelReplaceCount;
+  const anchoredKey = runInContext(context, `_eventsVirtualRows[_eventsFindRowIndexAt(_eventsVirtualRows, _eventsVirtualTops, 240)].key`);
+  const initialVisibleKeys = runInContext(context, `_eventsLogRenderState.visibleKeys`);
+
+  const topSpacer = new FakeElement('events-virtual-top');
+  const windowEl = new FakeElement('events-virtual-window');
+  const bottomSpacer = new FakeElement('events-virtual-bottom');
+  let windowReplaceCount = 0;
+  Object.defineProperty(windowEl, 'innerHTML', {
+    configurable: true,
+    get() { return this._innerHTML || ''; },
+    set(value) {
+      windowReplaceCount++;
+      this._innerHTML = value;
+    },
+  });
+  log.setQuerySelector('.events-virtual-top', topSpacer);
+  log.setQuerySelector('.events-virtual-window', windowEl);
+  log.setQuerySelector('.events-virtual-bottom', bottomSpacer);
+
+  context.state.panel_events.push({
+    id: 81,
+    kind: 'agent_progress',
+    message: 'new offscreen event',
+    group: 'alpha',
+    timestamp: 81,
+  });
+  context.renderEvents();
+
+  assert.equal(panelReplaceCount, initialPanelReplaceCount, 'event append should not rebuild the Events shell');
+  assert.equal(windowReplaceCount, 0, 'offscreen append should not replace the unchanged virtual window');
+  assert.equal(runInContext(context, `_eventsLogRenderState.visibleKeys`), initialVisibleKeys);
+  assert.equal(
+    runInContext(context, `_eventsVirtualRows[_eventsFindRowIndexAt(_eventsVirtualRows, _eventsVirtualTops, _eventsScrollTop)].key`),
+    anchoredKey,
+  );
+  assert.equal(log.scrollTop, 264);
+  assert.equal(topSpacer.style.height, '264px');
+});
+
+test('events live appends keep search focus and resolve drafts while patching only the log', () => {
+  const { context, document } = createEventsHarness({ stubRenderers: false });
+  const panel = document.register('panel-events');
+  const log = new FakeElement('events-log');
+  const attention = new FakeElement('events-attention');
+  const search = new FakeElement();
+  search.classList.add('events-search-input');
+  search.value = 'stuck';
+  const textarea = new FakeElement('events-resolve-ask-1');
+  textarea.value = 'Please continue';
+  panel.appendChild(search);
+  panel.setQuerySelector('.events-log', log);
+  panel.setQuerySelector('.events-attention', attention);
+  panel.setQuerySelector('.events-search-input', search);
+  panel.setQuerySelectorAll('.events-resolve-textarea', [textarea]);
+  document.activeElement = search;
+  context.state.board_tasks = {
+    parent: {
+      id: 'parent',
+      group: 'alpha',
+      task: 'Root task',
+      agent_id: 'agent-1',
+    },
+    'ask-1': {
+      id: 'ask-1',
+      group: 'alpha',
+      task: 'Need answer',
+      labels: ['loom:human'],
+      parent_task_id: 'parent',
+      lane: 'Backlog',
+      created_at: '2026-04-10T10:00:00Z',
+    },
+  };
+  context.state.agents = {
+    'agent-1': {
+      id: 'agent-1',
+      name: 'worker',
+      slug: 'worker',
+      group: 'alpha',
+      cell_type: 'agent',
+    },
+  };
+  context.state.panel_events = [
+    { id: 1, kind: 'agent_progress', message: 'stuck waiting', group: 'alpha', timestamp: 1 },
+  ];
+
+  let panelReplaceCount = 0;
+  Object.defineProperty(panel, 'innerHTML', {
+    configurable: true,
+    get() { return this._innerHTML || ''; },
+    set(value) {
+      panelReplaceCount++;
+      this._innerHTML = value;
+      this.children = [];
+    },
+  });
+  runInContext(context, `_eventsSearchQuery = '';`);
+
+  context.renderEvents();
+  const initialPanelReplaceCount = panelReplaceCount;
+  textarea.value = 'Draft survives append';
+  context.state.panel_events.push({
+    id: 2,
+    kind: 'agent_progress',
+    message: 'stuck still waiting',
+    group: 'alpha',
+    timestamp: 2,
+  });
+
+  context.renderEvents();
+
+  assert.equal(panelReplaceCount, initialPanelReplaceCount);
+  assert.equal(document.activeElement, search);
+  assert.equal(search.value, 'stuck');
+  assert.deepEqual(jsonValue(context, '_eventsResolveDrafts'), {
+    'ask-1': 'Draft survives append',
+  });
+});
+
+test('events pagination requests and merges older pages with the virtual log model', () => {
+  const { context, document } = createEventsHarness({ stubRenderers: false });
+  const panel = document.register('panel-events');
+  const log = new FakeElement('events-log');
+  log.clientHeight = 100;
+  log.scrollHeight = 1000;
+  log.scrollTop = 930;
+  const search = new FakeElement();
+  search.classList.add('events-search-input');
+  panel.setQuerySelector('.events-log', log);
+  panel.setQuerySelector('.events-attention', null);
+  panel.setQuerySelector('.events-search-input', search);
+  panel.setQuerySelectorAll('.events-resolve-textarea', []);
+
+  context.state.panel_events = [];
+  for (let i = 51; i <= 100; i++) {
+    context.state.panel_events.push({
+      id: i,
+      kind: 'agent_progress',
+      message: `event ${i}`,
+      group: 'alpha',
+      timestamp: i,
+    });
+  }
+  context.renderEvents();
+
+  context._eventsOnScroll.call(log);
+
+  assert.deepEqual(jsonValue(context, 'sendCalls'), [
+    { cmd: 'get_events', before_id: 51, limit: 50 },
+  ]);
+
+  const older = [];
+  for (let i = 1; i <= 50; i++) {
+    older.push({
+      id: i,
+      kind: 'agent_progress',
+      message: `event ${i}`,
+      group: 'alpha',
+      timestamp: i,
+    });
+  }
+  context.handleEventsPage({ events: older });
+
+  assert.equal(context.state.panel_events[0].id, 1);
+  assert.equal(context.state.panel_events[99].id, 100);
+  assert.equal(runInContext(context, `_eventsFindVirtualKeyIndex(_eventsVirtualRows, 'event:1') >= 0`), true);
+});
+
 test('context panel requests scoped memory and renders provenance details', () => {
   const { context, document } = createContextHarness();
   const panel = document.register('panel-context');
