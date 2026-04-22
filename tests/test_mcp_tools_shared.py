@@ -1,6 +1,7 @@
 import importlib
 import json
 import unittest
+from unittest import mock
 
 try:
     from helpers import install_aiohttp_stub
@@ -179,3 +180,73 @@ class MCPToolsSharedArchitectTests(unittest.TestCase):
             len(payload["tasks"]["items"]),
             self.shared_mod._ARCHITECT_BOARD_SUMMARY_TASK_LIMIT,
         )
+
+    def test_architect_deploy_state_counts_commits_and_extracts_task_ids(self):
+        deploy_mod = importlib.import_module("loom.deploy_state")
+        deploy_mod = importlib.reload(deploy_mod)
+        state = self._make_state()
+        state.boot_timestamp = 100.0
+        state.boot_repo_root = "/repo"
+        state.boot_head_commit = "boot-sha"
+        state.boot_mainline_branch = "main"
+        calls = []
+
+        def fake_git(repo_root, *args):
+            calls.append((repo_root, args))
+            if args == ("rev-parse", "--abbrev-ref", "HEAD"):
+                return "main"
+            if args == ("rev-parse", "HEAD"):
+                return "current-sha"
+            if args == ("rev-list", "--count", "boot-sha..main"):
+                return "3"
+            if args == ("log", "--format=%B", "--reverse", "boot-sha..main"):
+                return (
+                    "Merge LOOM:101\n\n"
+                    "Ship deploy state for LOOM:102 and LOOM:101\n"
+                    "No task id here"
+                )
+            raise AssertionError(f"unexpected git call: {args}")
+
+        with mock.patch.object(deploy_mod, "_run_git", side_effect=fake_git):
+            payload = deploy_mod.architect_deploy_state_payload(
+                state,
+                "loom",
+                now=160.0,
+            )
+
+        self.assertEqual(payload["boot_timestamp"], 100.0)
+        self.assertEqual(payload["boot_head_commit"], "boot-sha")
+        self.assertEqual(payload["current_head_commit"], "current-sha")
+        self.assertEqual(payload["daemon_uptime_seconds"], 60)
+        self.assertEqual(payload["pending_deploy"]["count"], 3)
+        self.assertEqual(
+            payload["pending_deploy"]["loom_task_ids"],
+            ["LOOM:101", "LOOM:102"],
+        )
+        self.assertNotIn("error", payload)
+        self.assertEqual(calls[0], ("/repo", ("rev-parse", "--abbrev-ref", "HEAD")))
+
+    def test_architect_deploy_state_fails_gracefully_for_detached_head(self):
+        deploy_mod = importlib.import_module("loom.deploy_state")
+        deploy_mod = importlib.reload(deploy_mod)
+        state = self._make_state()
+        state.boot_timestamp = 100.0
+        state.boot_repo_root = "/repo"
+        state.boot_head_commit = "boot-sha"
+        state.boot_mainline_branch = "main"
+
+        def fake_git(_repo_root, *args):
+            if args == ("rev-parse", "--abbrev-ref", "HEAD"):
+                return "HEAD"
+            raise AssertionError(f"unexpected git call: {args}")
+
+        with mock.patch.object(deploy_mod, "_run_git", side_effect=fake_git):
+            payload = deploy_mod.architect_deploy_state_payload(
+                state,
+                "loom",
+                now=160.0,
+            )
+
+        self.assertEqual(payload["pending_deploy"]["count"], -1)
+        self.assertEqual(payload["pending_deploy"]["loom_task_ids"], [])
+        self.assertIn("detached HEAD", payload["error"])

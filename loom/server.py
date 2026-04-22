@@ -29,6 +29,7 @@ from .config import (
     log,
 )
 from .db import LoomDB
+from .deploy_state import capture_deploy_boot_state
 from .doctor import build_doctor_report
 from dataclasses import asdict
 from .state import (
@@ -3771,6 +3772,7 @@ async def main(connection=None):
     log.info("SQLite database opened at %s", DB_FILE)
     state = MatrixState(db=db)
     state.load()
+    capture_deploy_boot_state(state, loom_config.SCRIPT_DIR)
     log.info("State loaded: %d agents, %d groups",
              len(state.agents), len(state.groups))
 

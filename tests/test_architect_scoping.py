@@ -470,6 +470,44 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["events"][0]["id"], "25")
         self.assertEqual(payload["events"][-1]["id"], "6")
 
+    async def test_architect_deploy_state_tool_returns_boot_and_pending_counts(self):
+        architect = self._add_architect("arch-1", "Architect")
+        self.state.boot_timestamp = 100.0
+        self.state.boot_repo_root = "/repo"
+        self.state.boot_head_commit = "boot-sha"
+        self.state.boot_mainline_branch = "main"
+
+        def fake_git(_repo_root, *args):
+            if args == ("rev-parse", "--abbrev-ref", "HEAD"):
+                return "main"
+            if args == ("rev-parse", "HEAD"):
+                return "current-sha"
+            if args == ("rev-list", "--count", "boot-sha..main"):
+                return "2"
+            if args == ("log", "--format=%B", "--reverse", "boot-sha..main"):
+                return "Merge LOOM:118\nMerge LOOM:119"
+            raise AssertionError(f"unexpected git call: {args}")
+
+        with mock.patch("loom.deploy_state._run_git", side_effect=fake_git), \
+                mock.patch("loom.deploy_state.time.time", return_value=160.0):
+            text, is_error = await self._call(
+                "architect_deploy_state",
+                {},
+                architect.id,
+            )
+
+        self.assertFalse(is_error, text)
+        payload = json.loads(text)
+        self.assertEqual(payload["boot_timestamp"], 100.0)
+        self.assertEqual(payload["boot_head_commit"], "boot-sha")
+        self.assertEqual(payload["current_head_commit"], "current-sha")
+        self.assertEqual(payload["daemon_uptime_seconds"], 60)
+        self.assertEqual(payload["pending_deploy"]["count"], 2)
+        self.assertEqual(
+            payload["pending_deploy"]["loom_task_ids"],
+            ["LOOM:118", "LOOM:119"],
+        )
+
     async def test_architect_workspace_overview_shape_and_scoping(self):
         architect = self._add_architect("arch-1", "Loomer")
         other_architect = self._add_architect("arch-2", "Other Architect")

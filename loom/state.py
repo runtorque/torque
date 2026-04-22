@@ -827,6 +827,11 @@ class MatrixState:
 
     def __init__(self, db: Optional[LoomDB] = None):
         self.db: Optional[LoomDB] = db
+        self.boot_timestamp: float = time.time()
+        self.boot_repo_root: str = ""
+        self.boot_head_commit: str = ""
+        self.boot_mainline_branch: str = ""
+        self.boot_head_error: str = ""
         self.agents: dict[str, AgentCell] = {}
         self.groups: dict[str, list[str]] = {}
         self.group_slugs: dict[str, str] = {}  # group_name → slug

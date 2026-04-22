@@ -18,6 +18,7 @@ from dataclasses import asdict, replace
 from datetime import datetime, timezone
 
 from .config import log
+from .deploy_state import architect_deploy_state_payload
 from .digest_routing import resolve_digest_recipients
 from .mcp_weaver_tools.shared import (
     active_worker_ids as _active_worker_ids,
@@ -1920,6 +1921,11 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             _weaver_group,
             args,
         )
+
+    if tool_name == "deploy_state" and caller_kind == "architect":
+        return _compact_json(
+            architect_deploy_state_payload(real_state, _weaver_group)
+        ), False
 
     if tool_name == "board_summary":
         summary_streams = _weaver_streams(

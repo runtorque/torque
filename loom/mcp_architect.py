@@ -69,6 +69,14 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
+        "name": "architect_deploy_state",
+        "description": (
+            "Return read-only daemon boot git state and pending mainline "
+            "commit count since boot for deploy observability."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
         "name": "architect_task_show",
         "description": (
             "Show full details for one task the architect can see."
