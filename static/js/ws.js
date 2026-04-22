@@ -621,6 +621,33 @@ function _taskDeltaChangedFields(previous, next, op) {
   return fields;
 }
 
+function _taskHasBranchBoundaryMainRelevance(task) {
+  if (!task) return false;
+  const boundary = task.worktree_boundary && typeof task.worktree_boundary === 'object'
+    ? task.worktree_boundary
+    : null;
+  if (boundary && boundary.repo_root && boundary.branch) return true;
+  return !!task.resume_after_boundary_task_id;
+}
+
+function _taskDeltaInvalidatesBoundaryMain(previous, next, changed) {
+  if (!_taskHasBranchBoundaryMainRelevance(previous)
+      && !_taskHasBranchBoundaryMainRelevance(next)) {
+    return false;
+  }
+  if (!previous || !next) return true;
+  return _deltaHasChangedField(changed, [
+    'task',
+    'lane',
+    'status',
+    'created_at',
+    'updated_at',
+    'lane_entered_at',
+    'worktree_boundary',
+    'resume_after_boundary_task_id',
+  ]);
+}
+
 function _taskDeltaInvalidatesMain(previous, next, op) {
   if (!_standaloneDeltaOptimizationsEnabled()) return true;
   if (!previous && !next) return false;
@@ -645,6 +672,7 @@ function _taskDeltaInvalidatesMain(previous, next, op) {
       'attachments',
     ]);
   }
+  if (_taskDeltaInvalidatesBoundaryMain(previous, next, changed)) return true;
   return _deltaHasChangedField(changed, [
     'worktree_boundary',
     'resume_after_boundary_task_id',

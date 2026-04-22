@@ -8454,6 +8454,124 @@ test('standalone ask task and attention agent deltas narrow events invalidation'
   assert.equal(sandbox.renderCalls.events, 2);
 });
 
+test('standalone no-agent boundary task title deltas invalidate the main grid', () => {
+  const { context, sandbox, flushRaf } = createStandaloneDeltaBatchHarness([]);
+  runInContext(context, `
+    state.agents = {
+      'agent-1': {
+        id: 'agent-1',
+        group: 'alpha',
+        cell_type: 'agent',
+        kind: 'worker',
+        worktree_repo_root: '/repo',
+        git_root: '/repo',
+        worktree_branch: 'feature/review'
+      }
+    };
+    state.board_tasks = {
+      'boundary-1': {
+        id: 'boundary-1',
+        group: 'alpha',
+        task: 'Original review point',
+        lane: 'Done',
+        updated_at: '2026-04-22T10:00:00+00:00',
+        worktree_boundary: {
+          status: 'open',
+          repo_root: '/repo',
+          branch: 'feature/review',
+          recorded_at: '2026-04-22T10:00:00+00:00'
+        }
+      }
+    };
+  `);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'task_upsert',
+      id: 'boundary-1',
+      group: 'alpha',
+      task: 'Updated review point',
+      lane: 'Done',
+      updated_at: '2026-04-22T10:05:00+00:00',
+    }],
+  });
+  flushRaf();
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 1,
+    board: 0,
+    actions: 0,
+    context: 0,
+    events: 0,
+    weaver: 0,
+    templates: 0,
+  });
+});
+
+test('standalone no-agent boundary follower lane deltas invalidate the main grid', () => {
+  const { context, sandbox, flushRaf } = createStandaloneDeltaBatchHarness([]);
+  runInContext(context, `
+    state.agents = {
+      'agent-1': {
+        id: 'agent-1',
+        group: 'alpha',
+        cell_type: 'agent',
+        kind: 'worker',
+        worktree_repo_root: '/repo',
+        git_root: '/repo',
+        worktree_branch: 'feature/review'
+      }
+    };
+    state.board_tasks = {
+      'boundary-1': {
+        id: 'boundary-1',
+        group: 'alpha',
+        task: 'Review point',
+        lane: 'Done',
+        updated_at: '2026-04-22T10:00:00+00:00',
+        worktree_boundary: {
+          status: 'open',
+          repo_root: '/repo',
+          branch: 'feature/review',
+          recorded_at: '2026-04-22T10:00:00+00:00'
+        }
+      },
+      'follower-1': {
+        id: 'follower-1',
+        group: 'alpha',
+        task: 'Queued follow-up',
+        lane: 'Backlog',
+        resume_after_boundary_task_id: 'boundary-1',
+        updated_at: '2026-04-22T10:01:00+00:00'
+      }
+    };
+  `);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'task_upsert',
+      id: 'follower-1',
+      group: 'alpha',
+      task: 'Started follow-up',
+      lane: 'In Progress',
+      updated_at: '2026-04-22T10:06:00+00:00',
+    }],
+  });
+  flushRaf();
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 1,
+    board: 0,
+    actions: 0,
+    context: 0,
+    events: 0,
+    weaver: 0,
+    templates: 0,
+  });
+});
+
 test('standalone sequence gap cancels pending batched renders and requests one resync', () => {
   const { context, sandbox, rafCallbacks, flushRaf } = createStandaloneDeltaBatchHarness(['board']);
   runInContext(context, `
