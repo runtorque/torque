@@ -24,6 +24,7 @@ from typing import Optional
 
 from loom import __version__
 from loom.config import ATTACHMENTS_DIR
+from loom import profiling
 from loom.db_board import (
     BoardPersistenceMixin,
     decode_auto_dispatch_queue_rows,
@@ -659,13 +660,17 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
 
     def save_agent(self, cell):
         """Upsert a single agent/terminal cell (persisted fields only)."""
-        self._insert_agent_row(self._conn, cell)
-        self._conn.commit()
+        with profiling.timer("sqlite_write_ms"), \
+                profiling.timer("sqlite_write_save_agent_ms"):
+            self._insert_agent_row(self._conn, cell)
+            self._conn.commit()
 
     def save_board_task(self, task):
         """Upsert a board task."""
-        self._insert_board_task_row(self._conn, task)
-        self._conn.commit()
+        with profiling.timer("sqlite_write_ms"), \
+                profiling.timer("sqlite_write_save_board_task_ms"):
+            self._insert_board_task_row(self._conn, task)
+            self._conn.commit()
 
     def delete_agent(self, agent_id: str):
         self._conn.execute("DELETE FROM agents WHERE id=?", (agent_id,))
@@ -1194,35 +1199,41 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
 
     def save_panel_event(self, evt: dict) -> int:
         """Insert a panel event and return the assigned row ID."""
-        self._conn.execute(
-            "INSERT INTO panel_events "
-            "(id, timestamp, kind, cell_id, agent_name, group_name, "
-            "message, task_id) VALUES (?,?,?,?,?,?,?,?)",
-            (evt["id"], evt["timestamp"], evt["kind"],
-             evt.get("cell_id", ""), evt.get("agent_name", ""),
-             evt.get("group", ""), evt.get("message", ""),
-             evt.get("task_id", "")))
-        self._conn.commit()
+        with profiling.timer("sqlite_write_ms"), \
+                profiling.timer("sqlite_write_save_panel_event_ms"):
+            self._conn.execute(
+                "INSERT INTO panel_events "
+                "(id, timestamp, kind, cell_id, agent_name, group_name, "
+                "message, task_id) VALUES (?,?,?,?,?,?,?,?)",
+                (evt["id"], evt["timestamp"], evt["kind"],
+                 evt.get("cell_id", ""), evt.get("agent_name", ""),
+                 evt.get("group", ""), evt.get("message", ""),
+                 evt.get("task_id", "")))
+            self._conn.commit()
         return evt["id"]
 
     def update_panel_event(self, evt: dict):
         """Update an existing panel event row."""
-        self._conn.execute(
-            "UPDATE panel_events SET timestamp=?, kind=?, cell_id=?, "
-            "agent_name=?, group_name=?, message=?, task_id=? WHERE id=?",
-            (evt["timestamp"], evt["kind"], evt.get("cell_id", ""),
-             evt.get("agent_name", ""), evt.get("group", ""),
-             evt.get("message", ""), evt.get("task_id", ""),
-             evt["id"]))
-        self._conn.commit()
+        with profiling.timer("sqlite_write_ms"), \
+                profiling.timer("sqlite_write_update_panel_event_ms"):
+            self._conn.execute(
+                "UPDATE panel_events SET timestamp=?, kind=?, cell_id=?, "
+                "agent_name=?, group_name=?, message=?, task_id=? WHERE id=?",
+                (evt["timestamp"], evt["kind"], evt.get("cell_id", ""),
+                 evt.get("agent_name", ""), evt.get("group", ""),
+                 evt.get("message", ""), evt.get("task_id", ""),
+                 evt["id"]))
+            self._conn.commit()
 
     def trim_panel_events(self, max_size: int):
         """Delete oldest events beyond *max_size*."""
-        self._conn.execute(
-            "DELETE FROM panel_events WHERE id NOT IN "
-            "(SELECT id FROM panel_events ORDER BY id DESC LIMIT ?)",
-            (max_size,))
-        self._conn.commit()
+        with profiling.timer("sqlite_write_ms"), \
+                profiling.timer("sqlite_write_trim_panel_events_ms"):
+            self._conn.execute(
+                "DELETE FROM panel_events WHERE id NOT IN "
+                "(SELECT id FROM panel_events ORDER BY id DESC LIMIT ?)",
+                (max_size,))
+            self._conn.commit()
 
     def load_panel_events(self, limit: int = 50,
                           before_id: int = 0,

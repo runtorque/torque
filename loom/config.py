@@ -30,6 +30,27 @@ def _truthy_env(name: str) -> bool:
     return os.environ.get(name, "").lower() in ("1", "true", "yes")
 
 
+def _profile_enabled_env() -> bool:
+    """Return whether profile-only instrumentation/endpoints are enabled.
+
+    ``LOOM_PROFILE`` already names the runtime data profile for normal Loom
+    launches, so only boolean-looking values opt into instrumentation through
+    that compatibility flag.  Harness launches should prefer
+    ``LOOM_PERF_PROFILE=1`` or ``LOOM_PROFILE_ENABLED=1``.
+    """
+    if any(_truthy_env(name) for name in (
+            "LOOM_PROFILE_ENABLED",
+            "LOOM_PERF_PROFILE",
+            "LOOM_PERF_HARNESS",
+    )):
+        return True
+    return os.environ.get("LOOM_PROFILE", "").lower() in ("1", "true", "yes")
+
+
+PROFILE_ENABLED: bool = _profile_enabled_env()
+PROFILE_SKIP_PTY: bool = _truthy_env("LOOM_PROFILE_SKIP_PTY")
+
+
 def _slugify_profile(name: str) -> str:
     text = re.sub(r"[^A-Za-z0-9._-]+", "-", (name or "").strip().lower())
     text = text.strip(".-_")

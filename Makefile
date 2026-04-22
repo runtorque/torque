@@ -15,7 +15,12 @@ GLOBAL_PYTHON  := $(shell ls $(HOME)/.config/iterm2/AppSupport/iterm2env*/versio
                     2>/dev/null | sort -V | tail -1)
 ITERM2_PYTHON  := $(or $(PROJECT_PYTHON),$(GLOBAL_PYTHON))
 
-.PHONY: install uninstall run deps desktop-deps check stop deploy autolaunch cli standalone standalone-bg desktop desktop-attach open test
+PERF_MATRIX    ?= 10,20,30
+PERF_DURATION  ?= 15
+PERF_BASELINE  ?= tests/perf/baseline.json
+PERF_RUN_DIR   ?= tests/perf/runs
+
+.PHONY: install uninstall run deps desktop-deps check stop deploy autolaunch cli standalone standalone-bg desktop desktop-attach open test perf-baseline perf-delta
 
 ## install: Set up the iTerm2 script project and copy all files
 install:
@@ -317,3 +322,25 @@ check:
 ## test: Run the automated regression suite
 test:
 	@python3 -m unittest discover -s tests -v
+
+## perf-baseline: Capture N=10/20/30 standalone perf baseline evidence
+perf-baseline:
+	@mkdir -p "$$(dirname "$(PERF_BASELINE)")"
+	@python3 scripts/profile_harness.py \
+		--mode baseline \
+		--matrix "$(PERF_MATRIX)" \
+		--duration "$(PERF_DURATION)" \
+		--output "$(PERF_BASELINE)" \
+		--report "$(PERF_BASELINE:.json=.md)"
+
+## perf-delta: Capture current perf evidence and diff against PERF_BASELINE
+perf-delta:
+	@mkdir -p "$(PERF_RUN_DIR)"
+	@stamp=$$(date -u +%Y%m%dT%H%M%SZ); \
+	python3 scripts/profile_harness.py \
+		--mode delta \
+		--matrix "$(PERF_MATRIX)" \
+		--duration "$(PERF_DURATION)" \
+		--baseline "$(PERF_BASELINE)" \
+		--output "$(PERF_RUN_DIR)/delta-$$stamp.json" \
+		--report "$(PERF_RUN_DIR)/delta-$$stamp.md"

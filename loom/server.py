@@ -18,6 +18,7 @@ from typing import Optional
 import aiohttp
 from aiohttp import web
 from . import config as loom_config
+from . import profiling
 from .config import (
     WS_PORT,
     DB_FILE,
@@ -49,6 +50,7 @@ from .events import (
     health_check,
 )
 from .adapters import get_adapter, get_providers
+from .adapters.base import AgentEvent, EVENT_TYPES
 from .notifications import NotificationManager
 from .worktree import WorktreeManager, format_stale_base_warning
 from .worktree_boundaries import (
@@ -1818,17 +1820,26 @@ async def _send_ui_ws_json(ws, payload: dict) -> bool:
 
 async def _register_ready_ui_ws_client(state: MatrixState, ws,
                                        payload_factory) -> bool:
+    connect_started = time.perf_counter()
     async with state._ws_clients_lock:
         state._ws_clients.discard(ws)
     while True:
         payload = payload_factory()
         if asyncio.iscoroutine(payload):
             payload = await payload
+        if profiling.is_enabled() and payload.get("type") == "state":
+            payload_bytes = len(json.dumps(payload).encode("utf-8"))
+            profiling.recorder().observe("snapshot_json_bytes", payload_bytes)
         if not await _send_ui_ws_json(ws, payload):
             return False
         async with state._ws_clients_lock:
             if state._seq == int(payload.get("seq", 0) or 0):
                 state._ws_clients.add(ws)
+                profiling.recorder().incr("ws_connects")
+                profiling.recorder().observe_ms(
+                    "ws_connect_latency_ms",
+                    time.perf_counter() - connect_started,
+                )
                 return True
 
 
@@ -3819,6 +3830,7 @@ async def _handle_restart_agent_command(
 
 async def main(connection=None):
     log.info("Loom starting (port=%d)", WS_PORT)
+    profiling.configure_asyncio(asyncio.get_running_loop())
     db = LoomDB(DB_FILE)
     db.init()
     log.info("SQLite database opened at %s", DB_FILE)
@@ -3842,27 +3854,32 @@ async def main(connection=None):
     supervisor_banner: dict | None = None
     if STANDALONE:
         from .local_pty import LocalPtyAdapter, SupervisedPtyAdapter
-        from . import pty_supervisor
 
-        bridge = None
-        try:
-            sock_path = pty_supervisor.ensure_running(DATA_DIR)
-            bridge = SupervisedPtyAdapter(state, sock_path)
-            log.info(
-                "Standalone mode — using PTY supervisor at %s", sock_path)
-        except Exception as exc:
-            log.exception(
-                "PTY supervisor unavailable — falling back to in-memory "
-                "(terminals will not survive daemon restart)")
-            supervisor_banner = {
-                "kind": "supervisor_unavailable",
-                "message": (
-                    "PTY supervisor unavailable — terminals will not "
-                    "survive a Loom restart. See loom.log for details."
-                ),
-                "detail": str(exc),
-            }
+        if loom_config.PROFILE_SKIP_PTY:
             bridge = LocalPtyAdapter(state)
+            log.info("Profile mode — PTY supervisor skipped")
+        else:
+            from . import pty_supervisor
+
+            bridge = None
+            try:
+                sock_path = pty_supervisor.ensure_running(DATA_DIR)
+                bridge = SupervisedPtyAdapter(state, sock_path)
+                log.info(
+                    "Standalone mode — using PTY supervisor at %s", sock_path)
+            except Exception as exc:
+                log.exception(
+                    "PTY supervisor unavailable — falling back to in-memory "
+                    "(terminals will not survive daemon restart)")
+                supervisor_banner = {
+                    "kind": "supervisor_unavailable",
+                    "message": (
+                        "PTY supervisor unavailable — terminals will not "
+                        "survive a Loom restart. See loom.log for details."
+                    ),
+                    "detail": str(exc),
+                }
+                bridge = LocalPtyAdapter(state)
     else:
         from .bridge import ITerm2Adapter
 
@@ -9744,11 +9761,44 @@ async def main(connection=None):
 
     # -- Events endpoint (agent hooks) ----------------------------------------
 
+    def _parse_profile_synthetic_event(raw: dict, cell) -> AgentEvent | None:
+        """Parse harness-only events without requiring a provider hook shape."""
+        if not profiling.is_enabled():
+            return None
+        if raw.get("source") != "loom-profile-harness":
+            return None
+        event_type = str(raw.get("event_type", "")).strip()
+        if event_type not in EVENT_TYPES:
+            return None
+        data = dict(raw.get("data") or {})
+        for key in (
+                "activity", "detail", "summary", "task", "tool", "reason",
+                "error", "session_id", "model", "input_tokens",
+                "output_tokens"):
+            if key in raw and key not in data:
+                data[key] = raw[key]
+        data.setdefault("event_id", raw.get("event_id", ""))
+        try:
+            timestamp = float(raw.get("timestamp") or time.time())
+        except (TypeError, ValueError):
+            timestamp = time.time()
+        return AgentEvent(
+            cell_id=cell.id,
+            timestamp=timestamp,
+            event_type=event_type,
+            data=data,
+        )
+
     async def handle_events(request):
         """Receive events from agent hooks (Claude Code HTTP hooks, etc.)."""
+        request_started = time.perf_counter()
+        profiling.recorder().incr("events_endpoint_received")
         try:
             raw = await request.json()
         except Exception:
+            profiling.recorder().incr("events_dropped_invalid_json")
+            profiling.recorder().observe_ms(
+                "event_endpoint_ms", time.perf_counter() - request_started)
             return web.json_response({}, status=400)
 
         # Correlate: X-Loom-Cell-Id header (primary) → cwd match (fallback)
@@ -9768,13 +9818,25 @@ async def main(connection=None):
         if not cell:
             log.debug("Event from unknown cell (id=%s, cwd=%s), discarding",
                       cell_id, raw.get("cwd", ""))
+            profiling.recorder().incr("events_dropped_unknown_cell")
+            profiling.recorder().observe_ms(
+                "event_endpoint_ms", time.perf_counter() - request_started)
             return web.json_response({})
 
-        # Parse through the adapter
-        adapter = get_adapter(cell.agent_type)
-        event = adapter.parse_event(raw, cell)
+        # Parse through the profile harness fast path or provider adapter.
+        event = _parse_profile_synthetic_event(raw, cell)
+        if event is None:
+            adapter = get_adapter(cell.agent_type)
+            event = adapter.parse_event(raw, cell)
         if event:
-            await event_bus.emit(event)
+            profiling.recorder().incr("events_accepted")
+            with profiling.timer("event_bus_emit_ms"):
+                await event_bus.emit(event)
+        else:
+            profiling.recorder().incr("events_dropped_unparsed")
+
+        profiling.recorder().observe_ms(
+            "event_endpoint_ms", time.perf_counter() - request_started)
 
         # Always return 200 with empty JSON — never block the agent
         return web.json_response({})
@@ -9997,6 +10059,120 @@ async def main(connection=None):
             )
         return web.json_response(response_payload)
 
+    # -- Profile harness endpoints -----------------------------------------
+
+    def _remove_profile_synthetic_agents(group: str, prefix: str) -> int:
+        removed = 0
+        members = list(state.groups.get(group, []))
+        for aid in members:
+            cell = state.agents.get(aid)
+            if not cell:
+                continue
+            if (
+                    cell.command != "loom-profile-harness"
+                    and not cell.name.startswith(prefix)
+            ):
+                continue
+            for child_id in list(state._children.get(aid, [])):
+                child = state.agents.pop(child_id, None)
+                if child:
+                    state._emit("agent_remove", id=child_id,
+                                group=child.group,
+                                cell_type=child.cell_type)
+                    state._db_delete_agent(child_id)
+            state._children.pop(aid, None)
+            state.agents.pop(aid, None)
+            if aid in state.groups.get(group, []):
+                state.groups[group].remove(aid)
+            state._emit("agent_remove", id=aid,
+                        group=group,
+                        cell_type=cell.cell_type)
+            state._db_delete_agent(aid)
+            removed += 1
+        if removed:
+            state._emit_group(group)
+            state._db_save_groups()
+        return removed
+
+    async def handle_profile_get(request):
+        if not profiling.is_enabled():
+            raise web.HTTPNotFound()
+        profiling.recorder().set_gauge("agent_count", len(state.agents))
+        profiling.recorder().set_gauge("group_count", len(state.groups))
+        profiling.recorder().set_gauge("board_task_count", len(state.board_tasks))
+        data = profiling.recorder().snapshot()
+        limit = int(request.query.get("cprofile_limit", "30") or 30)
+        data["cprofile_top"] = profiling.cprofile_top(limit=limit)
+        return web.json_response({"ok": True, "data": data})
+
+    async def handle_profile_reset(request):
+        if not profiling.is_enabled():
+            raise web.HTTPNotFound()
+        profiling.reset()
+        return web.json_response({"ok": True})
+
+    async def handle_profile_synthetic_agents(request):
+        """Create N in-memory/persisted fake cells for the perf harness.
+
+        This deliberately bypasses terminal/session creation.  It is only
+        registered when profiling is enabled and is intended for ephemeral
+        standalone harness data directories.
+        """
+        if not profiling.is_enabled():
+            raise web.HTTPNotFound()
+        try:
+            data = await request.json()
+        except Exception:
+            return web.json_response(
+                {"ok": False, "error": "invalid JSON"}, status=400)
+        group = str(data.get("group", "perf-harness") or "perf-harness")
+        prefix = str(data.get("prefix", "perf-agent") or "perf-agent")
+        count = max(0, int(data.get("count", 10) or 0))
+        reset_existing = bool(data.get("reset", True))
+        removed = 0
+        if reset_existing:
+            removed = _remove_profile_synthetic_agents(group, prefix)
+        if group not in state.groups:
+            state.add_group(group)
+
+        directory = str(data.get("directory", "") or DATA_DIR)
+        agent_type = str(data.get("agent_type", "claude-code")
+                         or "claude-code")
+        ids: list[str] = []
+        for index in range(count):
+            name = f"{prefix}-{index + 1:02d}"
+            cell = state.add_agent(
+                name=name,
+                group=group,
+                profile="Synthetic",
+                command="loom-profile-harness",
+                directory=directory,
+            )
+            if not cell:
+                continue
+            cell.terminal_backend = "synthetic"
+            cell.session_id = f"synthetic-{uuid.uuid4().hex[:12]}"
+            cell.agent_session_id = f"profile-{uuid.uuid4().hex[:12]}"
+            cell.agent_type = agent_type
+            cell.status = "running"
+            cell.current_process = "synthetic-agent"
+            cell.current_path = directory
+            cell.kind = "worker"
+            state._emit_agent(cell)
+            state._db_save_agent(cell)
+            ids.append(cell.id)
+
+        await state.broadcast()
+        profiling.recorder().set_gauge("synthetic_agent_count", len(ids))
+        return web.json_response({
+            "ok": True,
+            "data": {
+                "group": group,
+                "agent_ids": ids,
+                "removed": removed,
+            },
+        })
+
     # -- Attachment upload/serve endpoints -----------------------------------
 
     async def handle_upload(request):
@@ -10165,6 +10341,13 @@ async def main(connection=None):
     app_server.router.add_get("/ws/terminal/{cell_id}", handle_terminal_ws)
     app_server.router.add_post("/events", handle_events)
     app_server.router.add_post("/api/cmd", handle_api_cmd)
+    if profiling.is_enabled():
+        app_server.router.add_get("/api/profile", handle_profile_get)
+        app_server.router.add_post("/api/profile/reset", handle_profile_reset)
+        app_server.router.add_post(
+            "/api/profile/synthetic_agents",
+            handle_profile_synthetic_agents,
+        )
     app_server.router.add_post("/mcp", create_mcp_handler(handle_command, state))
     app_server.router.add_post("/api/upload", handle_upload)
     app_server.router.add_post("/api/upload/cleanup", handle_upload_cleanup)
