@@ -627,43 +627,6 @@ body.runtime-embedded .terminal-empty {
 .cell.engineer.dismissed .cell-name {
   color: var(--text-dim);
 }
-.cell.weaver {
-  --weaver-chrome: transparent;
-  --weaver-edge-shadow: none;
-  --weaver-active-glow: none;
-  border-left: 3px solid transparent;
-  border-left-color: var(--weaver-chrome);
-  box-shadow: var(--weaver-edge-shadow);
-}
-.cell.weaver.weaver-running {
-  --weaver-chrome: var(--green);
-  --weaver-edge-shadow: inset 3px 0 0 rgba(63, 185, 80, 0.16);
-  --weaver-active-glow: 0 0 10px rgba(63, 185, 80, 0.2);
-}
-.cell.weaver.weaver-paused {
-  --weaver-chrome: var(--amber);
-  --weaver-edge-shadow: inset 3px 0 0 rgba(210, 153, 34, 0.18);
-  --weaver-active-glow: 0 0 10px rgba(210, 153, 34, 0.22);
-}
-.cell.weaver.selected {
-  border-color: var(--weaver-chrome);
-}
-.cell.weaver.focused {
-  outline-color: var(--weaver-chrome);
-}
-.cell.weaver.selected.active {
-  box-shadow: var(--weaver-active-glow), var(--weaver-edge-shadow);
-}
-.cell.weaver-asking {
-  --weaver-chrome: var(--amber);
-  --weaver-edge-shadow: inset 3px 0 0 rgba(210, 153, 34, 0.18);
-  --weaver-active-glow: 0 0 10px rgba(210, 153, 34, 0.22);
-  animation: weaver-pulse 2s ease-in-out infinite;
-}
-@keyframes weaver-pulse {
-  0%, 100% { box-shadow: var(--weaver-edge-shadow); }
-  50% { box-shadow: var(--weaver-edge-shadow), 0 0 8px rgba(210, 153, 34, 0.3); }
-}
 .cell-weaver-ask {
   font-size: 8px;
   color: var(--amber);

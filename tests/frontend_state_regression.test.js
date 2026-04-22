@@ -6688,6 +6688,15 @@ test('renderAgentCell shows per-engineer and architect digest pause controls wit
     cell_type: 'agent',
     status: 'running',
   });
+  const engineerNamedWeaverHtml = context.renderAgentCell({
+    id: 'eng-weaver',
+    name: 'Weaver',
+    icon: '🛠️',
+    group: 'alpha',
+    kind: 'engineer',
+    cell_type: 'agent',
+    status: 'running',
+  });
   const workerHtml = context.renderAgentCell({
     id: 'agent-1',
     name: 'Worker',
@@ -6715,17 +6724,22 @@ test('renderAgentCell shows per-engineer and architect digest pause controls wit
     status: 'running',
   });
 
-  assert.match(runningHtml, /class="cell selected weaver weaver-running"/);
+  assert.match(runningHtml, /^<div class="cell selected"/);
+  assert.doesNotMatch(runningHtml, /^<div class="[^"]*\bweaver(?:\b|-)/);
   assert.match(runningHtml, /class="cell-header-controls">/);
   assert.match(runningHtml, /class="cell-weaver-toggle running"/);
   assert.match(runningHtml, /Pause Weaver event delivery/);
+  assert.match(engineerNamedWeaverHtml, /^<div class="cell engineer"/);
+  assert.doesNotMatch(engineerNamedWeaverHtml, /^<div class="[^"]*\bweaver(?:\b|-)/);
   assert.doesNotMatch(workerHtml, /cell-weaver-toggle/);
-  assert.match(engineerHtml, /class="cell weaver-running engineer"/);
+  assert.match(engineerHtml, /^<div class="cell engineer"/);
+  assert.doesNotMatch(engineerHtml, /^<div class="[^"]*\bweaver(?:\b|-)/);
   assert.match(engineerHtml, /class="cell-weaver-toggle running"/);
   assert.match(engineerHtml, /toggleDigestPauseForAgent\(decodeURIComponent\('eng-1'\)\)/);
   assert.match(engineerHtml, /Pause event delivery/);
   assert.doesNotMatch(engineerHtml, /Pause Weaver event delivery/);
-  assert.match(architectHtml, /class="cell weaver-running architect"/);
+  assert.match(architectHtml, /^<div class="cell architect"/);
+  assert.doesNotMatch(architectHtml, /^<div class="[^"]*\bweaver(?:\b|-)/);
   assert.match(architectHtml, /class="cell-weaver-toggle running"/);
   assert.match(architectHtml, /toggleDigestPauseForAgent\(decodeURIComponent\('arch-1'\)\)/);
   assert.match(architectHtml, /Pause event delivery/);
@@ -6748,7 +6762,8 @@ test('renderAgentCell shows per-engineer and architect digest pause controls wit
     status: 'running',
   });
 
-  assert.match(pausedHtml, /class="cell selected weaver weaver-paused"/);
+  assert.match(pausedHtml, /^<div class="cell selected"/);
+  assert.doesNotMatch(pausedHtml, /^<div class="[^"]*\bweaver(?:\b|-)/);
   assert.match(pausedHtml, /class="cell-weaver-toggle paused"/);
   assert.match(pausedHtml, /Resume Weaver event delivery/);
 
@@ -6772,10 +6787,12 @@ test('renderAgentCell shows per-engineer and architect digest pause controls wit
     cell_type: 'agent',
     status: 'running',
   });
-  assert.match(pausedEngineerHtml, /class="cell weaver-paused engineer"/);
+  assert.match(pausedEngineerHtml, /^<div class="cell engineer"/);
+  assert.doesNotMatch(pausedEngineerHtml, /^<div class="[^"]*\bweaver(?:\b|-)/);
   assert.match(pausedEngineerHtml, /class="cell-weaver-toggle paused"/);
   assert.match(pausedEngineerHtml, /Resume event delivery/);
-  assert.match(pausedArchitectHtml, /class="cell weaver-paused architect"/);
+  assert.match(pausedArchitectHtml, /^<div class="cell architect"/);
+  assert.doesNotMatch(pausedArchitectHtml, /^<div class="[^"]*\bweaver(?:\b|-)/);
   assert.match(pausedArchitectHtml, /class="cell-weaver-toggle paused"/);
   assert.match(pausedArchitectHtml, /Resume event delivery/);
 
@@ -6792,7 +6809,8 @@ test('renderAgentCell shows per-engineer and architect digest pause controls wit
     status: 'running',
   });
 
-  assert.match(askingHtml, /class="cell selected weaver weaver-asking weaver-running"/);
+  assert.match(askingHtml, /^<div class="cell selected"/);
+  assert.doesNotMatch(askingHtml, /^<div class="[^"]*\bweaver(?:\b|-)/);
   assert.match(askingHtml, /\? awaiting input/);
 });
 
@@ -6880,17 +6898,15 @@ test('agent role badges render in the bottom-right opposite the agent type label
   assert.doesNotMatch(architectRule, /left:\s*3px;/);
 });
 
-test('selected weaver cards keep selection chrome aligned with running and paused status colors', () => {
+test('agent cards do not define legacy weaver edge chrome', () => {
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
 
-  assert.match(css, /\.cell\.weaver\s*\{[^}]*--weaver-chrome:\s*transparent;[^}]*--weaver-edge-shadow:\s*none;[^}]*border-left-color:\s*var\(--weaver-chrome\);[^}]*box-shadow:\s*var\(--weaver-edge-shadow\);/);
-  assert.match(css, /\.cell\.weaver\.weaver-running\s*\{[^}]*--weaver-chrome:\s*var\(--green\);/);
-  assert.match(css, /\.cell\.weaver\.weaver-paused\s*\{[^}]*--weaver-chrome:\s*var\(--amber\);/);
-  assert.match(css, /\.cell\.weaver\.selected\s*\{[^}]*border-color:\s*var\(--weaver-chrome\);/);
-  assert.match(css, /\.cell\.weaver\.focused\s*\{[^}]*outline-color:\s*var\(--weaver-chrome\);/);
-  assert.match(css, /\.cell\.weaver\.selected\.active\s*\{[^}]*box-shadow:\s*var\(--weaver-active-glow\),\s*var\(--weaver-edge-shadow\);/);
-  assert.match(css, /\.cell\.weaver-asking\s*\{[^}]*--weaver-chrome:\s*var\(--amber\);[^}]*animation:\s*weaver-pulse 2s ease-in-out infinite;/);
-  assert.match(css, /@keyframes weaver-pulse\s*\{\s*0%,\s*100%\s*\{\s*box-shadow:\s*var\(--weaver-edge-shadow\);[^}]*\}\s*50%\s*\{\s*box-shadow:\s*var\(--weaver-edge-shadow\),\s*0 0 8px rgba\(210, 153, 34, 0\.3\);/);
+  assert.match(css, /\.cell\.engineer\s*\{[^}]*border-left:\s*3px solid rgba\(88, 166, 255, 0\.72\);/);
+  assert.doesNotMatch(css, /\.cell\.weaver(?:[\s.#:{]|$)/);
+  assert.doesNotMatch(css, /\.cell\.weaver-asking(?:[\s.#:{]|$)/);
+  assert.doesNotMatch(css, /--weaver-(?:chrome|edge-shadow|active-glow)/);
+  assert.doesNotMatch(css, /weaver-pulse/);
+  assert.match(css, /\.cell-weaver-ask\s*\{/);
 });
 
 test('renderAgentPanel shows branch review-point summary in Session Map view', () => {

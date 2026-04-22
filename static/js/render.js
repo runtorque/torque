@@ -1298,7 +1298,6 @@ function renderAgentCell(a, options) {
   // Check if this agent is the weaver for its group
   const _gs = (state.group_settings || {})[a.group];
   const _isWeaver = _gs && _gs.weaver_agent_id === a.id;
-  if (_isWeaver) cls.push('weaver');
   // Check if weaver is awaiting human input
   const _weaverWs = _isWeaver && state.weaver_settings
     ? state.weaver_settings[a.group] : null;
@@ -1311,9 +1310,6 @@ function renderAgentCell(a, options) {
   if (!_agentDigestSettings && _isDigestRecipient && _isWeaver) {
     _digestPaused = _weaverPaused;
   }
-  if (_weaverAsking) cls.push('weaver-asking');
-  if (_isDigestRecipient) cls.push(_digestPaused ? 'weaver-paused' : 'weaver-running');
-  else if (_isWeaver) cls.push(_weaverPaused ? 'weaver-paused' : 'weaver-running');
   const visibleAgentById = options.visibleAgentById || null;
   const visibleEngineerIds = options.visibleEngineerIds || null;
   const ownerId = _workerOwnerEngineerId(a, visibleAgentById);
