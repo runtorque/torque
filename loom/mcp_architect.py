@@ -22,6 +22,16 @@ _ENV_VAR = "LOOM_ARCHITECT_ID"
 
 _ARCHITECT_TOOL_SPECS = [
     {
+        "name": "architect_workspace_overview",
+        "description": (
+            "Return a compact, architect-scoped rollup of visible engineers, "
+            "their current task queues/workers/worktree streams, this "
+            "architect's open tasks, pending hires, unread messages, and "
+            "minimal journal self-state."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
         "name": "architect_board_summary",
         "description": (
             "Return a compact board overview for this architect's group, "

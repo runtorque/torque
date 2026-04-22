@@ -58,6 +58,15 @@ _HEALTH_SUMMARY_LIMIT = 120
 _ARCHITECT_BOARD_SUMMARY_TASK_LIMIT = 20
 _ARCHITECT_BOARD_SUMMARY_TITLE_LIMIT = 120
 _ARCHITECT_BOARD_SUMMARY_RESPONSE_LIMIT = 10_000
+_ARCHITECT_WORKSPACE_ENGINEER_LIMIT = 10
+_ARCHITECT_WORKSPACE_QUEUE_LIMIT = 5
+_ARCHITECT_WORKSPACE_WORKER_LIMIT = 5
+_ARCHITECT_WORKSPACE_STREAM_LIMIT = 3
+_ARCHITECT_WORKSPACE_MY_TASK_LIMIT = 10
+_ARCHITECT_WORKSPACE_PENDING_HIRE_LIMIT = 5
+_ARCHITECT_WORKSPACE_MESSAGE_LIMIT = 5
+_ARCHITECT_WORKSPACE_TITLE_LIMIT = 80
+_ARCHITECT_WORKSPACE_SNIPPET_LIMIT = 160
 
 # ---------------------------------------------------------------------------
 # Shared scoping helpers
@@ -157,6 +166,488 @@ def _architect_board_summary_json(summary: dict, task_items: list[dict]) -> str:
         if len(text) <= _ARCHITECT_BOARD_SUMMARY_RESPONSE_LIMIT or limit <= 0:
             return text
         limit -= 1
+
+
+def _workspace_clip_text(value, *, limit: int) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= limit:
+        return text
+    return text[:max(0, limit - 1)].rstrip() + "…"
+
+
+def _workspace_parse_timestamp(value) -> float:
+    if isinstance(value, (int, float)):
+        return float(value or 0)
+    text = str(value or "").strip()
+    if not text:
+        return 0.0
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except (TypeError, ValueError):
+        try:
+            return float(text)
+        except (TypeError, ValueError):
+            return 0.0
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
+
+
+def _workspace_limit(items: list, limit: int) -> tuple[list, bool]:
+    if len(items) <= limit:
+        return items, False
+    return items[:limit], True
+
+
+def _workspace_task_title(task) -> str:
+    return _workspace_clip_text(
+        getattr(task, "task", "") or "",
+        limit=_ARCHITECT_WORKSPACE_TITLE_LIMIT,
+    )
+
+
+def _workspace_task_ref(task) -> dict:
+    return {
+        "task_id": getattr(task, "id", "") or "",
+        "title": _workspace_task_title(task),
+    }
+
+
+def _workspace_task_newest_key(task) -> tuple[float, str]:
+    ts = (
+        _workspace_parse_timestamp(getattr(task, "created_at", "") or "")
+        or _workspace_parse_timestamp(getattr(task, "updated_at", "") or "")
+    )
+    return (-ts, str(getattr(task, "id", "") or ""))
+
+
+def _workspace_agent_last_progress_at(cell) -> float | None:
+    for attr in ("last_progress_at", "last_activity_at", "last_event_at"):
+        ts = _workspace_parse_timestamp(getattr(cell, attr, 0) or 0)
+        if ts > 0:
+            return ts
+    return None
+
+
+def _workspace_agent_activity(cell) -> str:
+    return _workspace_clip_text(
+        getattr(cell, "activity_detail", "") or getattr(cell, "activity", "") or "",
+        limit=_ARCHITECT_WORKSPACE_SNIPPET_LIMIT,
+    )
+
+
+def _workspace_stream_sort_key(stream: dict) -> tuple[float, str, str]:
+    return (
+        -_workspace_parse_timestamp(stream.get("last_activity_at", "") or ""),
+        str(stream.get("branch", "") or ""),
+        str(stream.get("stream_id", "") or ""),
+    )
+
+
+def _workspace_stream_matches_workers(state, stream: dict,
+                                      workers: list[object]) -> bool:
+    worker_ids = {
+        str(getattr(worker, "id", "") or "").strip()
+        for worker in workers
+        if str(getattr(worker, "id", "") or "").strip()
+    }
+    if not worker_ids:
+        return False
+    if str(stream.get("agent_id", "") or "").strip() in worker_ids:
+        return True
+
+    stream_repo_root = str(stream.get("repo_root", "") or "").strip()
+    stream_branch = str(stream.get("branch", "") or "").strip()
+    for worker in workers:
+        worker_branch = str(
+            getattr(worker, "worktree_branch", "")
+            or getattr(worker, "current_branch", "")
+            or ""
+        ).strip()
+        worker_repo_root = str(
+            getattr(worker, "worktree_repo_root", "")
+            or getattr(worker, "git_root", "")
+            or ""
+        ).strip()
+        if (
+            worker_branch
+            and worker_branch == stream_branch
+            and (not worker_repo_root or worker_repo_root == stream_repo_root)
+        ):
+            return True
+
+    for task_id in member_task_ids_for_stream(stream):
+        task = state.board_tasks.get(task_id)
+        if not task:
+            continue
+        if str(getattr(task, "agent_id", "") or "").strip() in worker_ids:
+            return True
+        if str(getattr(task, "reply_agent_id", "") or "").strip() in worker_ids:
+            return True
+    return False
+
+
+def _architect_journal_latest_timestamp(state, architect_id: str, *,
+                                        entry_type: str,
+                                        group: str = "") -> float | None:
+    """Return latest architect journal timestamp for ``entry_type``.
+
+    Architect journals are currently stored in private JSONL files. Some
+    journal-capable callers also write through the shared journal table with
+    author provenance, so check both stores and return the newest matching
+    timestamp when present.
+    """
+    latest = 0.0
+    architect_id = str(architect_id or "").strip()
+    if not architect_id:
+        return None
+
+    try:
+        entries = state.architect_journal_read(architect_id, limit=1000)
+    except Exception:
+        log.exception(
+            "Failed to read architect journal self-state for %s",
+            architect_id,
+        )
+        entries = []
+    for entry in entries or []:
+        if str((entry or {}).get("type", "") or "").strip() != entry_type:
+            continue
+        latest = max(
+            latest,
+            _workspace_parse_timestamp((entry or {}).get("timestamp", 0) or 0),
+        )
+
+    if group:
+        try:
+            table_entries = state.journal_read(
+                group,
+                limit=1,
+                entry_type=entry_type,
+                author_cell_id=architect_id,
+            )
+        except Exception:
+            log.exception(
+                "Failed to read shared journal self-state for %s",
+                architect_id,
+            )
+            table_entries = []
+        for entry in table_entries or []:
+            latest = max(
+                latest,
+                _workspace_parse_timestamp((entry or {}).get("timestamp", 0) or 0),
+            )
+
+    return latest if latest > 0 else None
+
+
+def _architect_workspace_overview_json(state, architect_id: str,
+                                       architect_cell, architect_group: str) -> str:
+    architect_id = str(architect_id or "").strip()
+    architect_group = str(architect_group or "").strip()
+    streams = compute_worktree_streams(
+        state,
+        group=architect_group,
+        visibility_limit=3,
+        include_orphaned=True,
+    )
+
+    tasks = [
+        task for task in state.board_tasks.values()
+        if str(getattr(task, "group", "") or "").strip() == architect_group
+        and str(getattr(task, "lane", "") or "") != ARCHIVED_LANE
+    ]
+    tasks_by_assigned: dict[str, list] = {}
+    for task in tasks:
+        assigned_id = _effective_assigned_engineer_id(task)
+        if not assigned_id:
+            continue
+        tasks_by_assigned.setdefault(assigned_id, []).append(task)
+
+    workers_by_engineer: dict[str, list] = {}
+    for cell in state.agents.values():
+        if getattr(cell, "cell_type", "") != "agent":
+            continue
+        if str(getattr(cell, "kind", "") or "").strip() != "worker":
+            continue
+        owner_id = str(getattr(cell, "owner_engineer_id", "") or "").strip()
+        if not owner_id:
+            owner_id = _effective_owner_engineer_id(cell)
+        if owner_id:
+            workers_by_engineer.setdefault(owner_id, []).append(cell)
+
+    engineers = []
+    visible_engineers = list(_architect_visible_engineers(
+        state,
+        architect_id,
+    ).values())
+    visible_engineers.sort(
+        key=lambda item: (
+            0 if item[1] == "hired" else 1,
+            (getattr(item[0], "slug", "") or getattr(item[0], "name", "")
+             or getattr(item[0], "id", "")).lower(),
+            getattr(item[0], "id", ""),
+        )
+    )
+    for engineer_cell, _relation in visible_engineers:
+        engineer_tasks = list(tasks_by_assigned.get(engineer_cell.id, []))
+        to_do_tasks = [
+            task for task in engineer_tasks
+            if str(getattr(task, "lane", "") or "") in {"Backlog", "To Do"}
+        ]
+        to_do_tasks.sort(
+            key=lambda task: (
+                0 if getattr(task, "lane", "") == "To Do" else 1,
+                getattr(task, "position", 0),
+                getattr(task, "id", ""),
+            )
+        )
+        in_progress_tasks = [
+            task for task in engineer_tasks
+            if str(getattr(task, "lane", "") or "") == "In Progress"
+        ]
+        in_progress_tasks.sort(
+            key=lambda task: (
+                _workspace_parse_timestamp(
+                    getattr(task, "lane_entered_at", "") or ""
+                ),
+                getattr(task, "position", 0),
+                getattr(task, "id", ""),
+            )
+        )
+
+        to_do_items, to_do_truncated = _workspace_limit(
+            [_workspace_task_ref(task) for task in to_do_tasks],
+            _ARCHITECT_WORKSPACE_QUEUE_LIMIT,
+        )
+        in_progress_items, in_progress_truncated = _workspace_limit(
+            [
+                {
+                    **_workspace_task_ref(task),
+                    "since": (
+                        getattr(task, "lane_entered_at", "")
+                        or getattr(task, "updated_at", "")
+                        or getattr(task, "created_at", "")
+                        or ""
+                    ),
+                }
+                for task in in_progress_tasks
+            ],
+            _ARCHITECT_WORKSPACE_QUEUE_LIMIT,
+        )
+
+        engineer_workers = list(workers_by_engineer.get(engineer_cell.id, []))
+        engineer_workers.sort(
+            key=lambda cell: (
+                0 if getattr(cell, "status", "") == "running" else 1,
+                (getattr(cell, "slug", "") or getattr(cell, "name", "")
+                 or getattr(cell, "id", "")).lower(),
+                getattr(cell, "id", ""),
+            )
+        )
+        worker_items, workers_truncated = _workspace_limit(
+            [
+                {
+                    "id": worker.id,
+                    "name": worker.name,
+                    "status": worker.status,
+                    "activity": _workspace_agent_activity(worker),
+                    "current_task_id": (
+                        real_task.id
+                        if (real_task := state.agent_current_task(worker.id))
+                        else str(getattr(worker, "current_task_id", "") or "")
+                    ),
+                    "branch": (
+                        getattr(worker, "worktree_branch", "")
+                        or getattr(worker, "current_branch", "")
+                        or ""
+                    ),
+                    "worktree_path": getattr(worker, "worktree_path", "") or "",
+                }
+                for worker in engineer_workers
+            ],
+            _ARCHITECT_WORKSPACE_WORKER_LIMIT,
+        )
+
+        engineer_streams = [
+            stream for stream in streams
+            if _workspace_stream_matches_workers(state, stream, engineer_workers)
+        ]
+        engineer_streams.sort(key=_workspace_stream_sort_key)
+        stream_items, streams_truncated = _workspace_limit(
+            [
+                {
+                    "branch": stream.get("branch", "") or "",
+                    "state": stream.get("state", "") or "",
+                    "merge_state": stream.get("merge_state", "") or "",
+                    "latest_boundary_task_id": (
+                        stream.get("latest_boundary_task_id", "") or ""
+                    ),
+                }
+                for stream in engineer_streams
+            ],
+            _ARCHITECT_WORKSPACE_STREAM_LIMIT,
+        )
+
+        queue = {
+            "to_do": to_do_items,
+            "in_progress": in_progress_items,
+        }
+        queue_truncated = {}
+        if to_do_truncated:
+            queue_truncated["to_do"] = True
+        if in_progress_truncated:
+            queue_truncated["in_progress"] = True
+        if queue_truncated:
+            queue["truncated"] = queue_truncated
+
+        engineer_item = {
+            "id": engineer_cell.id,
+            "name": engineer_cell.name,
+            "slug": engineer_cell.slug,
+            "status": engineer_cell.status,
+            "activity": _workspace_agent_activity(engineer_cell),
+            "last_progress_at": _workspace_agent_last_progress_at(engineer_cell),
+            "digest_paused": bool(
+                getattr(
+                    state.get_agent_digest_settings(engineer_cell.id),
+                    "paused",
+                    False,
+                )
+            ),
+            "queue": queue,
+            "workers": worker_items,
+            "recent_streams": stream_items,
+        }
+        item_truncated = {}
+        if workers_truncated:
+            item_truncated["workers"] = True
+        if streams_truncated:
+            item_truncated["recent_streams"] = True
+        if item_truncated:
+            engineer_item["truncated"] = item_truncated
+        engineers.append(engineer_item)
+
+    my_tasks = [
+        task for task in tasks
+        if str(getattr(task, "created_by_architect_id", "") or "").strip()
+        == architect_id
+    ]
+    my_tasks.sort(key=_workspace_task_newest_key)
+    my_task_items, my_tasks_truncated = _workspace_limit(
+        [
+            {
+                **_workspace_task_ref(task),
+                "lane": getattr(task, "lane", "") or "",
+                "assigned_engineer_id": _effective_assigned_engineer_id(task),
+                "assigned_engineer_name": (
+                    getattr(
+                        state.agents.get(_effective_assigned_engineer_id(task)),
+                        "name",
+                        "",
+                    )
+                    or ""
+                ),
+            }
+            for task in my_tasks
+        ],
+        _ARCHITECT_WORKSPACE_MY_TASK_LIMIT,
+    )
+
+    pending_hires = state.load_pending_hires(
+        status_filter="pending",
+        architect_id=architect_id,
+    )
+    pending_hire_items, pending_hires_truncated = _workspace_limit(
+        [
+            {
+                "hire_id": hire.get("id", "") or "",
+                "requested_name": hire.get("requested_name", "") or "",
+                "status": hire.get("status", "") or "",
+            }
+            for hire in pending_hires
+        ],
+        _ARCHITECT_WORKSPACE_PENDING_HIRE_LIMIT,
+    )
+
+    architect_messages = []
+    for message in list(getattr(architect_cell, "mcp_messages", []) or []):
+        if str((message or {}).get("direction", "") or "").strip() != "received":
+            continue
+        architect_messages.append(dict(message or {}))
+    architect_messages.sort(
+        key=lambda message: -_workspace_parse_timestamp(
+            message.get("timestamp", "") or 0
+        )
+    )
+    unread_items, unread_truncated = _workspace_limit(
+        [
+            {
+                "message_id": message.get("id", "") or "",
+                "peer_id": message.get("peer_id", "") or "",
+                "peer_kind": message.get("peer_kind", "") or "",
+                "peer_name": (
+                    getattr(
+                        state.agents.get(str(message.get("peer_id", "") or "")),
+                        "name",
+                        "",
+                    )
+                    or ""
+                ),
+                "timestamp": message.get("timestamp", 0) or 0,
+                "snippet": _workspace_clip_text(
+                    message.get("message", "") or "",
+                    limit=_ARCHITECT_WORKSPACE_SNIPPET_LIMIT,
+                ),
+            }
+            for message in architect_messages
+        ],
+        _ARCHITECT_WORKSPACE_MESSAGE_LIMIT,
+    )
+
+    engineer_items, engineers_truncated = _workspace_limit(
+        engineers,
+        _ARCHITECT_WORKSPACE_ENGINEER_LIMIT,
+    )
+    payload = {
+        "architect": {
+            "id": architect_id,
+            "name": getattr(architect_cell, "name", "") or "",
+            "group": architect_group,
+        },
+        "architect_self_state": {
+            "last_checkpoint_at": _architect_journal_latest_timestamp(
+                state,
+                architect_id,
+                entry_type="checkpoint",
+                group=architect_group,
+            ),
+            "last_decision_at": _architect_journal_latest_timestamp(
+                state,
+                architect_id,
+                entry_type="decision",
+                group=architect_group,
+            ),
+        },
+        "engineers": engineer_items,
+        "my_tasks": my_task_items,
+        "pending_hires": pending_hire_items,
+        "unread_messages": unread_items,
+    }
+    truncated = {}
+    if engineers_truncated:
+        truncated["engineers"] = True
+    if my_tasks_truncated:
+        truncated["my_tasks"] = True
+    if pending_hires_truncated:
+        truncated["pending_hires"] = True
+    if unread_truncated:
+        truncated["unread_messages"] = True
+    if truncated:
+        payload["truncated"] = truncated
+    return _compact_json(payload)
 
 
 def _is_engineer_like_cell(state, cell) -> bool:
@@ -1097,6 +1588,14 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
     tool_name = normalize_tool_name(name, tool_prefix)
 
     # -- Read tools ---------------------------------------------------------
+
+    if tool_name == "workspace_overview" and caller_kind == "architect":
+        return _architect_workspace_overview_json(
+            real_state,
+            caller_id,
+            _weaver_cell,
+            _weaver_group,
+        ), False
 
     if tool_name == "board_summary":
         summary_streams = _weaver_streams(
