@@ -71,11 +71,22 @@ The grid is a vertical stack of **architect sections**, separated by horizontal 
 
 A section is composed of:
 
-1. Optional **loose-workers strip** (User section only in v1): a single row of user-owned detached worker cards. Omitted when empty.
-2. An **architect header row** (full grid width): architect card on the left, controls inline to the right. For the User section, this header renders a synthetic "User" card.
-3. Zero or more **engineer rows** (full grid width): engineer card on the left, workers wrapping to the right, section-level `+ New Worker` affordance at the end of the last worker (though worker creation from the UI remains engineer-driven — see Creation semantics below).
-4. A **`+ New Engineer`** affordance inline in the architect header row (one per section).
-5. A `+ New Architect` button below the last architect section.
+1. A **fixed-width architect column** on the left: a single tall anchor card for the architect (or the synthetic "User" card in the User section). The card **row-spans** across all of this section's engineer rows — it is not repeated per engineer and it is not a header row sitting above the engineers.
+2. One or more **engineer rows** stacked vertically to the right of the architect column, inside the section. Each engineer row reads left-to-right as: `[ engineer card ] [ worker 1 ] [ worker 2 ] [ worker 3 ] ...` with workers wrapping within the same row when they overflow horizontally (flush-left with the first worker, NOT indented under the engineer card — the wrapping stays inside that engineer's row and does not visually bleed into the next row).
+3. A **`+ New Engineer`** button inside the section, positioned on a line below the last engineer row (inside the architect's section, still to the right of the architect column). It belongs to this architect — clicking it creates an engineer hired by that architect.
+4. In the User section only: a **loose-workers strip** rendered above the User section's engineer rows. Always rendered — if empty, it is a single-button row holding the `+ New Worker` button.
+5. A **`+ New Architect`** button below the last architect section, aligned to the architect column.
+
+Section boundaries are horizontal dividers that span the full grid width.
+
+### Column structure
+
+The grid has two logical columns:
+
+- **Left column (fixed width)**: holds architect cards. Every architect card — plus the synthetic User card — aligns to the same left edge and the same fixed width. This keeps the architect spine visually consistent no matter how many engineers each architect has.
+- **Right region (flex width)**: holds engineer rows for the current section. Engineer rows stack vertically. Within each engineer row, the engineer card is first, and workers flow right of it and wrap inside that row.
+
+The architect card itself has a **fixed height** — it does NOT grow to match the height of its section's engineer rows. When an architect has many engineers, the right column's engineer stack may be much taller than the architect card; the architect card stays at its natural compact height at the top-left of the section, and the space below the architect card (still inside the left column) stays empty. This matches the fixed-width constraint — both dimensions of the architect card are stable across sections, regardless of how many engineers or workers that architect owns.
 
 ### Row shape
 
@@ -83,15 +94,15 @@ Every engineer row reads left-to-right as:
 
 ```
 [ engineer card ] [ worker 1 ] [ worker 2 ] [ worker 3 ] ...
-                  [ worker 4 ] [ worker 5 ] (wrapped)
+                  [ worker 4 ] [ worker 5 ] (wrapped inside the same row)
 ```
 
-The engineer card is always the first card in the row and does not wrap. Worker cards wrap to the next line within the row, left-aligned flush with the first worker (not indented under the engineer card — the engineer card is a fixed anchor, not a parent column header). A subtle horizontal rule separates one engineer row from the next inside the same section.
+The engineer card is the fixed anchor on the left of that row. Worker cards wrap to the next line **within the same engineer row** — flush-left with the first worker, not under the engineer card, and never spilling into the next engineer's row. A subtle horizontal rule separates one engineer row from the next inside the same section.
 
 The loose-workers strip reads left-to-right as:
 
 ```
-[ worker ] [ worker ] [ worker ] ...
+[ worker ] [ worker ] [ worker ] ... [ + New Worker ]
 ```
 
 No leading agent card. The absence of a leading card is the visual signal that these workers have no engineer parent.
@@ -99,40 +110,56 @@ No leading agent card. The absence of a leading card is the visual signal that t
 ### Sketch
 
 ```
-┌───────────────────────────────────────────────────────────────┐
-│ User section                                                  │
-│                                                               │
-│   Loose-workers strip:                                        │
-│     [worker] [worker]                                         │
-│   ─────────────────────────────────────────                   │
-│   [User]  ( + New Engineer )                                  │
-│     [Engineer 1] [worker] [worker]                            │
-│     ─────────────────────────────                             │
-│     [Engineer 2] [worker]                                     │
-│                                                               │
-├─ ─ ─ architect section divider ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┤
-│                                                               │
-│ Architect 1 section                                           │
-│                                                               │
-│   [Architect 1]  ( + New Engineer )                           │
-│     [Engineer 1] [worker] [worker]                            │
-│     ─────────────────────────────                             │
-│     [Engineer 2] [worker] [worker] [worker] [worker]          │
-│                  [worker]  (wrapped to next line)             │
-│     ─────────────────────────────                             │
-│     [Engineer 3] [worker]                                     │
-│                                                               │
-├─ ─ ─ architect section divider ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┤
-│                                                               │
-│ Architect 2 section                                           │
-│                                                               │
-│   [Architect 2]  ( + New Engineer )                           │
-│     [Engineer 1] [worker] [worker]                            │
-│                                                               │
-├───────────────────────────────────────────────────────────────┤
-│   ( + New Architect )                                         │
-└───────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                                                                             │
+│ USER SECTION                                                                │
+│                                                                             │
+│  ┌────────┐   [worker] [worker] [ + New Worker ]        ← loose-workers     │
+│  │        │                                                strip            │
+│  │  User  │   ─────────────────────────────────                             │
+│  │ OWNER  │   [Engineer 1] [worker] [worker]            ← engineer row 1   │
+│  │        │   ─────────────────────────────                                 │
+│  │        │   [Engineer 2] [worker]                     ← engineer row 2   │
+│  │        │   ─────────────────────────────                                 │
+│  │        │   [ + New Engineer ]                                            │
+│  └────────┘                                                                 │
+│                                                                             │
+│ ─── architect section divider ─────────────────────────────────────────     │
+│                                                                             │
+│ ARCHITECT 1 SECTION                                                         │
+│                                                                             │
+│  ┌────────┐   [Engineer 1] [worker] [worker] [worker] [worker]              │
+│  │        │                [worker] [worker] (wrapped inside row 1)         │
+│  │Architect│   ─────────────────────────────                                │
+│  │  1     │   [Engineer 2] [worker]                                         │
+│  │        │   ─────────────────────────────                                 │
+│  │        │   [Engineer 3] [worker] [worker]                                │
+│  │        │   ─────────────────────────────                                 │
+│  └────────┘   [ + New Engineer ]                                            │
+│                                                                             │
+│ ─── architect section divider ─────────────────────────────────────────     │
+│                                                                             │
+│ ARCHITECT 2 SECTION                                                         │
+│                                                                             │
+│  ┌────────┐   [Engineer 1] [worker] [worker]                                │
+│  │Architect│   ─────────────────────────────                                │
+│  │  2     │   [ + New Engineer ]                                            │
+│  └────────┘                                                                 │
+│                                                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  [ + New Architect ]                                                        │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+**Key non-shapes** (what this layout is NOT):
+
+- NOT a horizontal header row with engineers stacked below. The architect is a left-column anchor, not a top-bar.
+- NOT a stacked column with architect card then engineer cards vertically beneath. Engineers live to the **right** of their architect, not below.
+- NOT a per-engineer repeated architect card. Each architect renders exactly once, anchoring its entire engineer stack on the left.
+- NOT a grid where workers wrap onto separate rows outside their engineer. Wrapped workers stay inside their engineer's row.
+- NOT an architect card that stretches vertically to fill its section. The architect card is fixed-height; the left column below it stays empty when the right column's engineer stack is taller.
 
 ---
 
