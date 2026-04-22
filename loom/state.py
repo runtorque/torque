@@ -864,7 +864,9 @@ class MatrixState:
         self._tasks_by_parent: dict[str, set[str]] = {}
         self._tasks_by_agent: dict[str, set[str]] = {}
         self._task_dependents_by_dep: dict[str, set[str]] = {}
-        self._task_index_refs: dict[str, tuple[str, str, str, tuple[str, ...]]] = {}
+        self._task_index_refs: dict[
+            str, tuple[str, str, str, str, tuple[str, ...]]
+        ] = {}
         self._task_health_dirty: set[str] = set()
         self._task_health_force_full: bool = True
         self._suppress_task_health_dirty: bool = False
@@ -1008,8 +1010,23 @@ class MatrixState:
             str(getattr(task, "group", "") or ""),
             str(getattr(task, "parent_task_id", "") or ""),
             str(getattr(task, "agent_id", "") or ""),
+            str(getattr(task, "lane", "") or ""),
             deps,
         )
+
+    @staticmethod
+    def _task_index_ref_parts(refs):
+        if not refs:
+            return "", "", "", "", ()
+        if len(refs) == 4:
+            group, parent_id, agent_id, deps = refs
+            return group, parent_id, agent_id, "", deps
+        group, parent_id, agent_id, lane, deps = refs
+        return group, parent_id, agent_id, lane, deps
+
+    @staticmethod
+    def _task_lane_counts_as_agent_open(lane: str) -> bool:
+        return str(lane or "") not in {"Done", "Backlog", ARCHIVED_LANE}
 
     @staticmethod
     def _discard_indexed_id(index: dict[str, set[str]], key: str,
@@ -1026,7 +1043,7 @@ class MatrixState:
     def _remove_task_index_refs(self, tid: str, refs) -> None:
         if not refs:
             return
-        group, parent_id, agent_id, deps = refs
+        group, parent_id, agent_id, _lane, deps = self._task_index_ref_parts(refs)
         self._discard_indexed_id(self._tasks_by_group, group, tid)
         self._discard_indexed_id(self._tasks_by_parent, parent_id, tid)
         self._discard_indexed_id(self._tasks_by_agent, agent_id, tid)
@@ -1045,7 +1062,7 @@ class MatrixState:
         if old_refs == refs:
             return old_refs
         self._remove_task_index_refs(tid, old_refs)
-        group, parent_id, agent_id, deps = refs
+        group, parent_id, agent_id, _lane, deps = self._task_index_ref_parts(refs)
         group = str(getattr(task, "group", "") or "")
         self._tasks_by_group.setdefault(group, set()).add(tid)
         if parent_id:
@@ -1108,14 +1125,37 @@ class MatrixState:
                 *self._task_dependents_by_dep.get(tid, set())
             )
             # If the task moved between parents, both aggregate paths changed.
+            new_task = self.board_tasks.get(tid)
+            new_parent = str(getattr(new_task, "parent_task_id", "") or "")
+            new_agent = str(getattr(new_task, "agent_id", "") or "")
+            new_lane = str(getattr(new_task, "lane", "") or "")
             if old_task_refs:
-                old_parent = old_task_refs[1]
-                new_parent = str(
-                    getattr(self.board_tasks.get(tid), "parent_task_id", "")
-                    or ""
+                _old_group, old_parent, old_agent, old_lane, _deps = (
+                    self._task_index_ref_parts(old_task_refs)
                 )
                 if old_parent and old_parent != new_parent:
                     self._mark_task_health_dirty(old_parent)
+            else:
+                old_agent = ""
+                old_lane = ""
+
+            old_open = (
+                bool(old_agent)
+                and self._task_lane_counts_as_agent_open(old_lane)
+            )
+            new_open = (
+                bool(new_agent)
+                and self._task_lane_counts_as_agent_open(new_lane)
+            )
+            if old_agent != new_agent or old_open != new_open:
+                if old_open:
+                    self._mark_task_health_dirty(
+                        *self._tasks_by_agent.get(old_agent, set())
+                    )
+                if new_open:
+                    self._mark_task_health_dirty(
+                        *self._tasks_by_agent.get(new_agent, set())
+                    )
             return
 
         if op == "task_remove":
@@ -3781,7 +3821,6 @@ class MatrixState:
                 "created_at", "updated_at", "lane_entered_at")},
         )
         self.board_tasks[tid] = bt
-        self._index_task(bt)
         if alias_id and alias_id != tid:
             self.task_id_aliases[alias_id] = tid
             self._db_save_task_id_alias(alias_id)
@@ -3851,14 +3890,11 @@ class MatrixState:
                     tid, lane=new_lane, position=archive_position
                 )
             return
-        old_group = task.group
         for key, value in fields.items():
             if key in valid:
                 setattr(task, key, value)
         if "task" in fields:
             task.slug = self._unique_task_slug(task.task, exclude_id=tid)
-        if "group" in fields and task.group != old_group:
-            self._reindex_task_group(task, old_group, task.group)
         from datetime import datetime, timezone
         now_iso = datetime.now(timezone.utc).isoformat()
         task.updated_at = now_iso
@@ -3879,6 +3915,13 @@ class MatrixState:
         task = self.board_tasks.pop(tid, None)
         if task:
             self._mark_task_health_dirty(task.parent_task_id)
+            if (
+                    task.agent_id
+                    and self._task_lane_counts_as_agent_open(task.lane)
+            ):
+                self._mark_task_health_dirty(
+                    *self._tasks_by_agent.get(task.agent_id, set())
+                )
             self._unindex_task(task)
             self.auto_dispatch_queue_remove_task(tid)
             self._emit("task_remove", id=tid, group=task.group)

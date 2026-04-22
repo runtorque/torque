@@ -482,3 +482,179 @@ class MatrixStateTaskHealthTests(unittest.TestCase):
 
         self.assertEqual(state.board_tasks["child"].health_state, "healthy")
         self.assertEqual(state.board_tasks["parent"].health_state, "healthy")
+
+    def test_same_agent_open_task_add_invalidates_existing_task(self):
+        state = self.state_mod.MatrixState()
+        state.groups["g"] = []
+        state.agents["agent-1"] = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            status="running",
+            worktree_path="/repo/.loom/worktrees/agent-1",
+            worktree_checkpoints=1,
+            worktree_dirty=False,
+        )
+        state.board_add_task(
+            "Current",
+            "g",
+            lane="In Progress",
+            id="task-1",
+            agent_id="agent-1",
+        )
+
+        state.board_add_task(
+            "Queued follow-up",
+            "g",
+            lane="To Do",
+            id="task-2",
+            agent_id="agent-1",
+        )
+
+        task_health_mod = importlib.import_module("loom.task_health")
+        full = task_health_mod.compute_task_health(
+            state.board_tasks,
+            state.agents,
+        )["task-1"].state
+        self.assertEqual(state.board_tasks["task-1"].health_state, "healthy")
+        self.assertEqual(state.board_tasks["task-1"].health_state, full)
+        self.assertFalse(state.has_pending_task_health_recompute())
+
+    def test_same_agent_open_task_done_invalidates_existing_task(self):
+        state = self.state_mod.MatrixState()
+        state.groups["g"] = []
+        state.agents["agent-1"] = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            status="running",
+            worktree_path="/repo/.loom/worktrees/agent-1",
+            worktree_checkpoints=1,
+            worktree_dirty=False,
+        )
+        state.board_add_task(
+            "Current",
+            "g",
+            lane="In Progress",
+            id="task-1",
+            agent_id="agent-1",
+        )
+        state.board_add_task(
+            "Queued follow-up",
+            "g",
+            lane="To Do",
+            id="task-2",
+            agent_id="agent-1",
+        )
+        self.assertEqual(state.board_tasks["task-1"].health_state, "healthy")
+
+        state.board_update_task("task-2", lane="Done")
+
+        task_health_mod = importlib.import_module("loom.task_health")
+        full = task_health_mod.compute_task_health(
+            state.board_tasks,
+            state.agents,
+        )["task-1"].state
+        self.assertEqual(
+            state.board_tasks["task-1"].health_state,
+            "stale-in-progress",
+        )
+        self.assertEqual(state.board_tasks["task-1"].health_state, full)
+        self.assertFalse(state.has_pending_task_health_recompute())
+
+    def test_agent_status_change_invalidates_assigned_task(self):
+        state = self.state_mod.MatrixState()
+        state.groups["g"] = []
+        agent = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            status="running",
+            worktree_path="/repo/.loom/worktrees/agent-1",
+            worktree_checkpoints=1,
+            worktree_dirty=False,
+        )
+        state.agents[agent.id] = agent
+        state.board_add_task(
+            "Current",
+            "g",
+            lane="In Progress",
+            id="task-1",
+            agent_id=agent.id,
+        )
+        self.assertEqual(
+            state.board_tasks["task-1"].health_state,
+            "stale-in-progress",
+        )
+
+        agent.status = "stopped"
+        state._emit_agent(agent)
+        state.recompute_task_health()
+
+        self.assertEqual(state.board_tasks["task-1"].health_state, "healthy")
+        self.assertFalse(state.has_pending_task_health_recompute())
+
+    def test_task_done_cascade_refreshes_ancestor_health_incrementally(self):
+        state = self.state_mod.MatrixState()
+        state.groups["g"] = []
+        parent = state.board_add_task(
+            "Parent",
+            "g",
+            id="parent",
+            lane="In Progress",
+        )
+        child = state.board_add_task(
+            "Child",
+            "g",
+            id="child",
+            lane="To Do",
+            parent_task_id=parent.id,
+            labels=["loom:blocked"],
+        )
+        self.assertEqual(state.board_tasks["parent"].health_state, "blocked")
+
+        state.board_update_task(child.id, lane="Done")
+
+        self.assertEqual(state.board_tasks["child"].health_state, "healthy")
+        self.assertEqual(state.board_tasks["parent"].lane, "Done")
+        self.assertEqual(state.board_tasks["parent"].health_state, "healthy")
+        self.assertFalse(state.has_pending_task_health_recompute())
+
+    def test_task_delete_cleans_secondary_indexes(self):
+        state = self.state_mod.MatrixState()
+        state.groups["g"] = []
+        state.board_add_task("Dependency", "g", id="dep")
+        state.board_add_task("Parent", "g", id="parent")
+        child = state.board_add_task(
+            "Child",
+            "g",
+            id="child",
+            parent_task_id="parent",
+            agent_id="agent-1",
+            depends_on=["dep"],
+        )
+        self.assertIn(child.id, state._tasks_by_group["g"])
+        self.assertIn(child.id, state._tasks_by_parent["parent"])
+        self.assertIn(child.id, state._tasks_by_agent["agent-1"])
+        self.assertIn(child.id, state._task_dependents_by_dep["dep"])
+        self.assertIn(child.id, state._task_index_refs)
+
+        state.board_remove_task(child.id)
+
+        self.assertNotIn(child.id, state._tasks_by_group.get("g", set()))
+        self.assertNotIn(
+            child.id,
+            state._tasks_by_parent.get("parent", set()),
+        )
+        self.assertNotIn(
+            child.id,
+            state._tasks_by_agent.get("agent-1", set()),
+        )
+        self.assertNotIn(
+            child.id,
+            state._task_dependents_by_dep.get("dep", set()),
+        )
+        self.assertNotIn(child.id, state._task_index_refs)
