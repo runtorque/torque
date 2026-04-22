@@ -41,6 +41,34 @@ _ARCHITECT_TOOL_SPECS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "architect_events_recent",
+        "description": (
+            "Return recent architect-scoped coarse panel events with task, "
+            "engineer, worker-owner, creator, and digest-recipient attribution."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum events to return (default 20, max 100).",
+                },
+                "kind_filter": {
+                    "type": "string",
+                    "description": "Optional panel event kind filter.",
+                },
+                "since": {
+                    "type": "number",
+                    "description": "Optional unix timestamp lower bound.",
+                },
+                "engineer_id": {
+                    "type": "string",
+                    "description": "Optional engineer id involvement filter.",
+                },
+            },
+        },
+    },
+    {
         "name": "architect_task_show",
         "description": (
             "Show full details for one task the architect can see."

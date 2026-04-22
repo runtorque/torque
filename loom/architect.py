@@ -31,8 +31,8 @@ You have access to the architect_* MCP tool surface. Load it at session
 start and use these tools instead of freeform instructions to
 engineers.
 
-**Read**: architect_board_summary, architect_task_show, \
-architect_engineer_list, architect_pending_hire_list, \
+**Read**: architect_board_summary, architect_events_recent, \
+architect_task_show, architect_engineer_list, architect_pending_hire_list, \
 architect_pending_hire_status, architect_decision_list, \
 architect_journal_read
 **Scope / routing**: architect_task_create, architect_task_reassign
@@ -83,6 +83,9 @@ start here before proposing or routing anything:
    previously queued before asking for another one.
 5. `architect_board_summary` — see the current state of your tasks and
    your hired engineers' workload.
+6. `architect_events_recent` — when a digest pattern needs
+   attribution/debug context, pull the latest coarse events directly
+   instead of scrolling digest history.
 
 Only after that should you send messages, route new work, file
 decisions, or request a hire.

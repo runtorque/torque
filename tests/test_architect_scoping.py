@@ -104,6 +104,21 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(task)
         return task
 
+    def _save_panel_event(self, event_id: int, kind: str, *,
+                          cell_id: str = "", agent_name: str = "",
+                          group: str = "loom", message: str = "",
+                          task_id: str = "", timestamp: float | None = None):
+        self.db.save_panel_event({
+            "id": event_id,
+            "timestamp": float(timestamp if timestamp is not None else event_id),
+            "kind": kind,
+            "cell_id": cell_id,
+            "agent_name": agent_name,
+            "group": group,
+            "message": message,
+            "task_id": task_id,
+        })
+
     async def _handle_command(self, payload):
         self.handle_calls.append(dict(payload))
         if payload["cmd"] == "board_add_task":
@@ -209,6 +224,251 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(engineers[alice.id]["dismissed_at"], 42)
         self.assertEqual(engineers[user_engineer.id]["current_task_id"], hidden_task.id)
         self.assertEqual(engineers[user_engineer.id]["current_task"], hidden_task.task)
+
+    async def test_architect_events_recent_scopes_to_group_hires_and_created_tasks(self):
+        architect = self._add_architect("arch-1", "Architect")
+        other_architect = self._add_architect("arch-2", "Other Architect")
+        alice = self._add_engineer(
+            "eng-alice", "Alice", hired_by_architect_id=architect.id
+        )
+        bob = self._add_engineer(
+            "eng-bob", "Bob", hired_by_architect_id=other_architect.id
+        )
+        user_engineer = self._add_engineer("eng-user", "User Owned")
+        alice_worker = self._add_worker("worker-alice", "Alice Worker", alice.id)
+        bob_worker = self._add_worker("worker-bob", "Bob Worker", bob.id)
+        user_worker = self._add_worker("worker-user", "User Worker", user_engineer.id)
+
+        alice_task = self._add_task(
+            "LOOM:201",
+            "Alice task",
+            assigned_engineer_id=alice.id,
+            created_by_architect_id=architect.id,
+        )
+        other_task = self._add_task(
+            "LOOM:202",
+            "Other architect task",
+            assigned_engineer_id=bob.id,
+            created_by_architect_id=other_architect.id,
+        )
+        architect_created_other_worker_task = self._add_task(
+            "LOOM:203",
+            "Architect-originated task",
+            assigned_engineer_id=bob.id,
+            created_by_architect_id=architect.id,
+        )
+        user_task = self._add_task(
+            "LOOM:204",
+            "User-visible engineer task",
+            assigned_engineer_id=user_engineer.id,
+        )
+
+        self._save_panel_event(
+            1, "task_completed", cell_id=alice_worker.id,
+            agent_name=alice_worker.name, task_id=alice_task.id,
+            message="visible via hired worker",
+        )
+        self._save_panel_event(
+            2, "task_completed", cell_id=bob_worker.id,
+            agent_name=bob_worker.name, task_id=other_task.id,
+            message="hidden other architect",
+        )
+        self._save_panel_event(
+            3, "task_completed", cell_id=bob_worker.id,
+            agent_name=bob_worker.name,
+            task_id=architect_created_other_worker_task.id,
+            message="visible via creator",
+        )
+        self._save_panel_event(
+            4, "task_completed", cell_id=user_worker.id,
+            agent_name=user_worker.name, task_id=user_task.id,
+            message="hidden user-visible engineer",
+        )
+        self._save_panel_event(
+            5, "agent_error", cell_id=architect.id,
+            agent_name=architect.name, message="visible own event",
+        )
+        self._save_panel_event(
+            6, "task_completed", cell_id=alice_worker.id,
+            agent_name=alice_worker.name, group="other",
+            task_id=alice_task.id, message="hidden other group",
+        )
+
+        text, is_error = await self._call(
+            "architect_events_recent",
+            {"limit": 10},
+            architect.id,
+        )
+
+        self.assertFalse(is_error, text)
+        payload = json.loads(text)
+        self.assertFalse(payload["truncated"])
+        self.assertEqual(
+            [event["id"] for event in payload["events"]],
+            ["5", "3", "1"],
+        )
+        events = {event["id"]: event for event in payload["events"]}
+        self.assertEqual(events["1"]["assigned_engineer_id"], alice.id)
+        self.assertEqual(events["1"]["owner_engineer_id"], alice.id)
+        self.assertEqual(events["1"]["agent_kind"], "worker")
+        self.assertEqual(
+            events["3"]["created_by_architect_id"],
+            architect.id,
+        )
+        self.assertEqual(events["3"]["owner_engineer_id"], bob.id)
+        self.assertEqual(events["5"]["agent_kind"], "architect")
+        self.assertNotIn("2", events)
+        self.assertNotIn("4", events)
+        self.assertNotIn("6", events)
+
+    async def test_architect_events_recent_filters_kind_since_and_engineer(self):
+        architect = self._add_architect("arch-1", "Architect")
+        alice = self._add_engineer(
+            "eng-alice", "Alice", hired_by_architect_id=architect.id
+        )
+        courier = self._add_engineer(
+            "eng-courier", "Courier", hired_by_architect_id=architect.id
+        )
+        alice_worker = self._add_worker("worker-alice", "Alice Worker", alice.id)
+        courier_worker = self._add_worker("worker-courier", "Courier Worker", courier.id)
+        alice_task = self._add_task(
+            "LOOM:211",
+            "Alice task",
+            assigned_engineer_id=alice.id,
+            created_by_architect_id=architect.id,
+        )
+        courier_task = self._add_task(
+            "LOOM:212",
+            "Courier task",
+            assigned_engineer_id=courier.id,
+            created_by_architect_id=architect.id,
+        )
+
+        self._save_panel_event(
+            1, "agent_error", cell_id=alice_worker.id,
+            agent_name=alice_worker.name, task_id=alice_task.id,
+            message="old error", timestamp=10,
+        )
+        self._save_panel_event(
+            2, "task_completed", cell_id=alice_worker.id,
+            agent_name=alice_worker.name, task_id=alice_task.id,
+            message="wrong kind", timestamp=20,
+        )
+        self._save_panel_event(
+            3, "agent_error", cell_id=courier_worker.id,
+            agent_name=courier_worker.name, task_id=courier_task.id,
+            message="wrong engineer", timestamp=30,
+        )
+        self._save_panel_event(
+            4, "agent_error", cell_id=alice_worker.id,
+            agent_name=alice_worker.name, task_id=alice_task.id,
+            message="matching event", timestamp=40,
+        )
+
+        text, is_error = await self._call(
+            "architect_events_recent",
+            {
+                "kind_filter": "agent_error",
+                "since": 25,
+                "engineer_id": alice.id,
+            },
+            architect.id,
+        )
+
+        self.assertFalse(is_error, text)
+        payload = json.loads(text)
+        self.assertEqual([event["id"] for event in payload["events"]], ["4"])
+        self.assertEqual(payload["events"][0]["message"], "matching event")
+
+    async def test_architect_events_recent_shows_loom108_attribution_and_recipients(self):
+        architect = self._add_architect("arch-1", "Architect")
+        assigned = self._add_engineer(
+            "eng-assigned", "Assigned Engineer",
+            hired_by_architect_id=architect.id,
+        )
+        owner = self._add_engineer("eng-owner", "Worker Owner")
+        worker = self._add_worker("worker-1", "Worker Bee", owner.id)
+        task = self._add_task(
+            "LOOM:108",
+            "Architect-created attribution bug",
+            assigned_engineer_id=assigned.id,
+            created_by_architect_id=architect.id,
+            agent_id=worker.id,
+        )
+        self.state.update_agent_digest_settings(assigned.id, enabled_events=["task_done"])
+        self.state.update_agent_digest_settings(architect.id)
+        self.state.update_agent_digest_settings(owner.id)
+
+        self._save_panel_event(
+            1,
+            "task_done",
+            cell_id=worker.id,
+            agent_name=worker.name,
+            task_id=task.id,
+            message="Implemented fix with a very long body " + ("x " * 200),
+        )
+
+        text, is_error = await self._call(
+            "architect_events_recent",
+            {},
+            architect.id,
+        )
+
+        self.assertFalse(is_error, text)
+        self.assertLess(len(text), 10_000)
+        payload = json.loads(text)
+        self.assertEqual(len(payload["events"]), 1)
+        event = payload["events"][0]
+        self.assertEqual(event["id"], "1")
+        self.assertEqual(event["kind"], "task_done")
+        self.assertEqual(event["cell_id"], worker.id)
+        self.assertEqual(event["agent_name"], worker.name)
+        self.assertEqual(event["agent_kind"], "worker")
+        self.assertEqual(event["task_id"], task.id)
+        self.assertEqual(event["assigned_engineer_id"], assigned.id)
+        self.assertEqual(event["created_by_architect_id"], architect.id)
+        self.assertEqual(event["owner_engineer_id"], owner.id)
+        self.assertEqual(event["digest_recipients"], [assigned.id, architect.id])
+        self.assertLessEqual(
+            len(event["message"]),
+            self.shared_mod._ARCHITECT_EVENTS_RECENT_MESSAGE_LIMIT,
+        )
+
+    async def test_architect_events_recent_default_response_stays_bounded(self):
+        architect = self._add_architect("arch-1", "Architect")
+        engineer = self._add_engineer(
+            "eng-1", "Engineer", hired_by_architect_id=architect.id
+        )
+        worker = self._add_worker("worker-1", "Worker", engineer.id)
+        task = self._add_task(
+            "LOOM:220",
+            "Bounded response task",
+            assigned_engineer_id=engineer.id,
+            created_by_architect_id=architect.id,
+        )
+        for idx in range(25):
+            self._save_panel_event(
+                idx + 1,
+                "task_completed",
+                cell_id=worker.id,
+                agent_name=worker.name,
+                task_id=task.id,
+                message="long summary " + ("x" * 1000),
+            )
+
+        text, is_error = await self._call(
+            "architect_events_recent",
+            {},
+            architect.id,
+        )
+
+        self.assertFalse(is_error, text)
+        self.assertLess(len(text), 10_000)
+        payload = json.loads(text)
+        self.assertTrue(payload["truncated"])
+        self.assertEqual(len(payload["events"]), 20)
+        self.assertEqual(payload["events"][0]["id"], "25")
+        self.assertEqual(payload["events"][-1]["id"], "6")
 
     async def test_architect_workspace_overview_shape_and_scoping(self):
         architect = self._add_architect("arch-1", "Loomer")

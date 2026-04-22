@@ -18,6 +18,7 @@ from dataclasses import asdict, replace
 from datetime import datetime, timezone
 
 from .config import log
+from .digest_routing import resolve_digest_recipients
 from .mcp_weaver_tools.shared import (
     active_worker_ids as _active_worker_ids,
     blocked_dependency_titles as _blocked_dependency_titles,
@@ -68,6 +69,11 @@ _ARCHITECT_WORKSPACE_MESSAGE_LIMIT = 5
 _ARCHITECT_WORKSPACE_TITLE_LIMIT = 80
 _ARCHITECT_WORKSPACE_SNIPPET_LIMIT = 160
 _ARCHITECT_WORKSPACE_RESPONSE_LIMIT = 4_096
+_ARCHITECT_EVENTS_RECENT_DEFAULT_LIMIT = 20
+_ARCHITECT_EVENTS_RECENT_MAX_LIMIT = 100
+_ARCHITECT_EVENTS_RECENT_LOAD_LIMIT = 500
+_ARCHITECT_EVENTS_RECENT_MESSAGE_LIMIT = 120
+_ARCHITECT_EVENTS_RECENT_RESPONSE_LIMIT = 10_000
 
 # ---------------------------------------------------------------------------
 # Shared scoping helpers
@@ -816,6 +822,245 @@ def _resolve_architect_hired_engineer(state, caller_id: str,
     if engineer_id not in _architect_hired_engineer_ids(state, caller_id):
         return None, "engineer not found in scope"
     return engineer_id, ""
+
+
+def _event_task_chain(state, event: dict) -> list:
+    task_id = str((event or {}).get("task_id", "") or "").strip()
+    task = getattr(state, "board_tasks", {}).get(task_id)
+    chain = []
+    seen: set[str] = set()
+    while task:
+        current_id = str(getattr(task, "id", "") or "").strip()
+        if current_id:
+            if current_id in seen:
+                break
+            seen.add(current_id)
+        chain.append(task)
+        next_id = str(getattr(task, "parent_task_id", "") or "").strip()
+        root_id = str(getattr(task, "pipeline_root_id", "") or "").strip()
+        if not next_id and root_id and root_id != current_id:
+            next_id = root_id
+        task = getattr(state, "board_tasks", {}).get(next_id) if next_id else None
+    return chain
+
+
+def _event_agent_kind(cell) -> str:
+    kind = str(getattr(cell, "kind", "") or "").strip() if cell else ""
+    if kind:
+        return kind
+    if cell and str(getattr(cell, "cell_type", "") or "").strip() == "terminal":
+        return "terminal"
+    return ""
+
+
+def _event_attribution(state, event: dict) -> dict:
+    cell_id = str((event or {}).get("cell_id", "") or "").strip()
+    cell = getattr(state, "agents", {}).get(cell_id)
+    task_chain = _event_task_chain(state, event)
+    task = task_chain[0] if task_chain else None
+
+    assigned_engineer_id = ""
+    created_by_architect_id = ""
+    created_by_engineer_id = ""
+    task_agent_ids: list[str] = []
+    for chain_task in task_chain:
+        if not assigned_engineer_id:
+            assigned_engineer_id = _effective_assigned_engineer_id(chain_task)
+        if not created_by_architect_id:
+            created_by_architect_id = str(
+                getattr(chain_task, "created_by_architect_id", "") or ""
+            ).strip()
+        if not created_by_engineer_id:
+            created_by_engineer_id = str(
+                getattr(chain_task, "created_by_engineer_id", "") or ""
+            ).strip()
+        for field_name in ("agent_id", "reply_agent_id"):
+            task_agent_id = str(getattr(chain_task, field_name, "") or "").strip()
+            if task_agent_id:
+                task_agent_ids.append(task_agent_id)
+
+    owner_engineer_id = ""
+    if cell:
+        owner_engineer_id = _effective_owner_engineer_id(cell)
+    if not owner_engineer_id:
+        for task_agent_id in task_agent_ids:
+            task_agent = getattr(state, "agents", {}).get(task_agent_id)
+            owner_engineer_id = _effective_owner_engineer_id(task_agent)
+            if owner_engineer_id:
+                break
+
+    agent_name = str((event or {}).get("agent_name", "") or "")
+    if not agent_name and cell:
+        agent_name = str(getattr(cell, "name", "") or "")
+
+    return {
+        "cell": cell,
+        "task": task,
+        "task_chain": task_chain,
+        "task_agent_ids": task_agent_ids,
+        "cell_id": cell_id,
+        "agent_name": agent_name,
+        "agent_kind": _event_agent_kind(cell),
+        "assigned_engineer_id": assigned_engineer_id,
+        "created_by_architect_id": created_by_architect_id,
+        "created_by_engineer_id": created_by_engineer_id,
+        "owner_engineer_id": owner_engineer_id,
+    }
+
+
+def _event_involves_engineer(state, event: dict, engineer_id: str,
+                             attribution: dict | None = None) -> bool:
+    engineer_id = str(engineer_id or "").strip()
+    if not engineer_id:
+        return False
+    attribution = attribution or _event_attribution(state, event)
+    if engineer_id in {
+        str(attribution.get("assigned_engineer_id", "") or "").strip(),
+        str(attribution.get("owner_engineer_id", "") or "").strip(),
+        str(attribution.get("created_by_engineer_id", "") or "").strip(),
+        str(attribution.get("cell_id", "") or "").strip(),
+    }:
+        return True
+    if engineer_id in {
+        str(agent_id or "").strip()
+        for agent_id in attribution.get("task_agent_ids", []) or []
+    }:
+        return True
+    for agent_id in attribution.get("task_agent_ids", []) or []:
+        task_agent = getattr(state, "agents", {}).get(str(agent_id or "").strip())
+        if _effective_owner_engineer_id(task_agent) == engineer_id:
+            return True
+    return False
+
+
+def _architect_event_visible(state, caller_id: str, caller_group: str,
+                             event: dict, attribution: dict) -> bool:
+    if str((event or {}).get("group", "") or "").strip() != caller_group:
+        return False
+    caller_id = str(caller_id or "").strip()
+    if str(attribution.get("cell_id", "") or "").strip() == caller_id:
+        return True
+    if str(attribution.get("created_by_architect_id", "") or "").strip() == caller_id:
+        return True
+    hired_engineers = _architect_hired_engineer_ids(state, caller_id)
+    if str(attribution.get("assigned_engineer_id", "") or "").strip() in hired_engineers:
+        return True
+    if str(attribution.get("owner_engineer_id", "") or "").strip() in hired_engineers:
+        return True
+    cell = attribution.get("cell")
+    if (
+        _is_engineer_like_cell(state, cell)
+        and str(getattr(cell, "id", "") or "").strip() in hired_engineers
+    ):
+        return True
+    return any(
+        _event_involves_engineer(state, event, engineer_id, attribution)
+        for engineer_id in hired_engineers
+    )
+
+
+def _clip_event_message(value: str) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= _ARCHITECT_EVENTS_RECENT_MESSAGE_LIMIT:
+        return text
+    return text[:_ARCHITECT_EVENTS_RECENT_MESSAGE_LIMIT - 1].rstrip() + "…"
+
+
+def _normalize_architect_events_limit(value) -> tuple[int, str]:
+    if value in (None, ""):
+        return _ARCHITECT_EVENTS_RECENT_DEFAULT_LIMIT, ""
+    try:
+        limit = int(value)
+    except (TypeError, ValueError):
+        return 0, "limit must be an integer"
+    if limit < 1:
+        return 0, "limit must be at least 1"
+    return min(limit, _ARCHITECT_EVENTS_RECENT_MAX_LIMIT), ""
+
+
+def _normalize_since(value) -> tuple[float, str]:
+    if value in (None, ""):
+        return 0.0, ""
+    try:
+        since = float(value)
+    except (TypeError, ValueError):
+        return 0.0, "since must be a number"
+    return since, ""
+
+
+def _load_recent_panel_events(state) -> list[dict]:
+    db = getattr(state, "db", None)
+    if db and hasattr(db, "load_panel_events"):
+        return list(reversed(db.load_panel_events(
+            limit=_ARCHITECT_EVENTS_RECENT_LOAD_LIMIT
+        )))
+    panel_log = getattr(state, "panel_log", None)
+    if panel_log and hasattr(panel_log, "get_recent"):
+        return list(reversed(panel_log.get_recent(
+            _ARCHITECT_EVENTS_RECENT_LOAD_LIMIT
+        )))
+    return []
+
+
+def _architect_events_recent_json(state, architect_id: str, architect_group: str,
+                                  args: dict) -> tuple[str, bool]:
+    limit, limit_error = _normalize_architect_events_limit(args.get("limit"))
+    if limit_error:
+        return limit_error, True
+    since, since_error = _normalize_since(args.get("since"))
+    if since_error:
+        return since_error, True
+    kind_filter = str(args.get("kind_filter", "") or "").strip()
+    engineer_filter = str(args.get("engineer_id", "") or "").strip()
+
+    events = []
+    for event in _load_recent_panel_events(state):
+        if kind_filter and str(event.get("kind", "") or "").strip() != kind_filter:
+            continue
+        timestamp = float(event.get("timestamp", 0) or 0)
+        if since and timestamp < since:
+            continue
+        attribution = _event_attribution(state, event)
+        if not _architect_event_visible(
+            state,
+            architect_id,
+            architect_group,
+            event,
+            attribution,
+        ):
+            continue
+        if engineer_filter and not _event_involves_engineer(
+            state, event, engineer_filter, attribution
+        ):
+            continue
+        events.append({
+            "id": str(event.get("id", "") or ""),
+            "kind": str(event.get("kind", "") or ""),
+            "timestamp": timestamp,
+            "cell_id": attribution["cell_id"],
+            "agent_name": attribution["agent_name"],
+            "agent_kind": attribution["agent_kind"],
+            "group": str(event.get("group", "") or ""),
+            "task_id": str(event.get("task_id", "") or ""),
+            "assigned_engineer_id": attribution["assigned_engineer_id"],
+            "created_by_architect_id": attribution["created_by_architect_id"],
+            "owner_engineer_id": attribution["owner_engineer_id"],
+            "message": _clip_event_message(event.get("message", "") or ""),
+            "digest_recipients": resolve_digest_recipients(state, event),
+        })
+
+    truncated = len(events) > limit
+    payload_events = events[:limit]
+    while True:
+        payload = {"events": payload_events, "truncated": truncated}
+        text = _compact_json(payload)
+        if (
+            len(text) <= _ARCHITECT_EVENTS_RECENT_RESPONSE_LIMIT
+            or not payload_events
+        ):
+            return text, False
+        payload_events = payload_events[:-1]
+        truncated = True
 
 
 def _normalize_decision_links(state, caller_id: str, *,
@@ -1667,6 +1912,14 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             _weaver_cell,
             _weaver_group,
         ), False
+
+    if tool_name == "events_recent" and caller_kind == "architect":
+        return _architect_events_recent_json(
+            real_state,
+            caller_id,
+            _weaver_group,
+            args,
+        )
 
     if tool_name == "board_summary":
         summary_streams = _weaver_streams(
