@@ -8,6 +8,11 @@ from pathlib import Path
 WS_PORT = int(os.environ.get("LOOM_PORT", 18932))
 DEFAULT_COMMAND = os.environ.get("LOOM_DEFAULT_CMD", "claude")
 
+# Seed knob for the future architect settings surface.  Architects are
+# planning/scoping sessions, so new architects run from the main checkout by
+# default instead of receiving a per-agent git worktree.
+ARCHITECT_USES_WORKTREE: bool = False
+
 # Standalone mode: daemon runs outside iTerm2's script environment,
 # no toolbelt webview registration.  Dual mode (toolbelt + browser)
 # works without this flag — just open http://127.0.0.1:<port>/.

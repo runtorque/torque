@@ -7,6 +7,7 @@ import os
 import shlex
 from typing import Any
 
+from . import config as loom_config
 from .adapters import (
     detect_by_command,
     get_adapter,
@@ -467,6 +468,15 @@ class AgentLaunchService:
         inherited_worktree = _copy_worktree_context(
             cell, inherited_worktree_from
         )
+        if (cell.kind == "architect"
+                and not loom_config.ARCHITECT_USES_WORKTREE
+                and not inherited_worktree):
+            launch_cfg["worktree"] = False
+            if cell.directory and self.worktree_mgr:
+                repo_root = await self.worktree_mgr.get_repo_root(cell.directory)
+                if repo_root:
+                    cell.directory = repo_root
+                    launch_cfg["directory"] = repo_root
         self.state._emit_agent(cell)
         self.state._db_save_agent(cell)
         self.state.history_record_agent(cell)

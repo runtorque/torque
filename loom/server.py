@@ -17,6 +17,7 @@ from typing import Optional
 
 import aiohttp
 from aiohttp import web
+from . import config as loom_config
 from .config import (
     WS_PORT,
     DB_FILE,
@@ -2806,6 +2807,13 @@ async def _handle_add_architect_command(
         explicit_template="",
         overrides=overrides,
     )
+    if loom_config.ARCHITECT_USES_WORKTREE:
+        launch_cfg["worktree"] = bool(
+            launch_cfg.get("worktree")
+            or state.get_group_settings(group).git_worktree
+        )
+    else:
+        launch_cfg["worktree"] = False
 
     persistent_prompt_text = _architect_persistent_prompt_text(
         group=group,

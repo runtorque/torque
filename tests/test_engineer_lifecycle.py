@@ -37,15 +37,26 @@ class _CapturingBridge:
 
 
 class _FakeWorktreeManager:
+    def __init__(self, repo_root="", worktree_path=""):
+        self.repo_root = repo_root
+        self.worktree_path = worktree_path
+        self.create_calls = 0
+
     async def validate(self, cell):
         del cell
         return True
 
     async def get_repo_root(self, directory):
-        return directory
+        return self.repo_root or directory
 
     async def create(self, cell, repo_root, **kwargs):
-        del cell, repo_root, kwargs
+        del kwargs
+        self.create_calls += 1
+        if self.worktree_path:
+            cell.worktree_path = self.worktree_path
+            cell.worktree_branch = f"loom/{cell.slug}-abc123"
+            cell.worktree_repo_root = repo_root
+            return self.worktree_path
         return ""
 
 
@@ -295,6 +306,60 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.server_agent_mod.ARCHITECT_MCP_ENTRYPOINT,
         )
         self.assertEqual(len(sent_prompts), 1)
+
+    async def test_add_architect_worktree_default_and_knob(self):
+        async def spawn(*, knob=False, launch_worktree=False, group_worktree=False):
+            state = self._make_state()
+            if group_worktree:
+                state.update_group_settings("loom", git_worktree=True)
+            repo_root = "/repo"
+            subdir = "/repo/packages/app"
+            worktree_path = "/repo/.loom/worktrees/architect"
+            worktree_mgr = _FakeWorktreeManager(repo_root, worktree_path)
+            service = self.server_agent_mod.AgentLaunchService(
+                state=state,
+                connection=None,
+                bridge=_CapturingBridge(),
+                worktree_mgr=worktree_mgr,
+                template_mgr=None,
+            )
+
+            async def fake_resolve_base_dir(group):
+                del group
+                return repo_root
+
+            async def fake_send_agent_prompt(*args, **kwargs):
+                del args, kwargs
+
+            def fake_resolve_weaver_launch_config(*args, **kwargs):
+                del args, kwargs
+                cfg = self._launch_config(subdir)
+                cfg["worktree"] = launch_worktree
+                return cfg
+
+            try:
+                self.server_mod.loom_config.ARCHITECT_USES_WORKTREE = knob
+                result = await self.server_mod._handle_add_architect_command(
+                    {"name": "Productmind", "group": "loom"},
+                    state,
+                    resolve_base_dir=fake_resolve_base_dir,
+                    resolve_weaver_launch_config=fake_resolve_weaver_launch_config,
+                    create_agent_with_config=service.create_agent_with_config,
+                    send_agent_prompt=fake_send_agent_prompt,
+                )
+                return state.agents[result["id"]], worktree_mgr
+            finally:
+                self.server_mod.loom_config.ARCHITECT_USES_WORKTREE = False
+
+        architect, worktree_mgr = await spawn(launch_worktree=True)
+        self.assertEqual(architect.directory, worktree_mgr.repo_root)
+        self.assertEqual(architect.worktree_path, "")
+        self.assertEqual(worktree_mgr.create_calls, 0)
+
+        architect, worktree_mgr = await spawn(knob=True, group_worktree=True)
+        self.assertEqual(architect.directory, worktree_mgr.worktree_path)
+        self.assertEqual(architect.worktree_path, worktree_mgr.worktree_path)
+        self.assertEqual(worktree_mgr.create_calls, 1)
 
     async def test_delete_architect_transfers_hired_engineers_and_archives_decisions(self):
         state = self._make_state()

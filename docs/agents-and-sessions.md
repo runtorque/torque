@@ -240,6 +240,8 @@ Worktrees are part of the agent session model, not a separate feature bolted on 
 
 This is why relaunching a worktree-backed agent usually drops you back into the same isolated branch automatically.
 
+Architect sessions are the exception: new architects run from the repository's main checkout by default and do not create a per-agent worktree, because architects are intended to shape scope rather than edit code. Existing architect cells that already have worktrees continue to use them; the forward-looking code knob `loom.config.ARCHITECT_USES_WORKTREE` can be set to `True` to restore per-architect worktree creation for new architect sessions.
+
 ### Worktree inheritance
 
 Pipelines can inherit worktrees so the next agent sees the same branch and files. This is how an implement agent can hand a review or fix task to another agent without copying changes manually.
