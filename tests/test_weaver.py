@@ -127,6 +127,51 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         state.weaver_settings[group] = self.state_mod.WeaverSettings(group=group)
         return state, group, weaver
 
+    def _add_architect_digest_team(self, state, group, *,
+                                   worker_owner_id="eng-assigned"):
+        architect = self.state_mod.AgentCell(
+            id="arch-1",
+            name="Planner",
+            slug="planner",
+            group=group,
+            cell_type="agent",
+            kind="architect",
+            persistent=True,
+        )
+        assigned = self.state_mod.AgentCell(
+            id="eng-assigned",
+            name="Assigned Engineer",
+            slug="assigned-engineer",
+            group=group,
+            cell_type="agent",
+            kind="engineer",
+            hired_by_architect_id=architect.id,
+            persistent=True,
+        )
+        other = self.state_mod.AgentCell(
+            id="eng-other",
+            name="Other Engineer",
+            slug="other-engineer",
+            group=group,
+            cell_type="agent",
+            kind="engineer",
+            hired_by_architect_id=architect.id,
+            persistent=True,
+        )
+        worker = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker Bee",
+            slug="worker-bee",
+            group=group,
+            cell_type="agent",
+            kind="worker",
+            owner_engineer_id=worker_owner_id,
+        )
+        for cell in (architect, assigned, other, worker):
+            state.agents[cell.id] = cell
+            state.groups[group].append(cell.id)
+        return architect, assigned, other, worker
+
     async def test_persisted_digest_state_reloads_on_buffer_construction(self):
         state, _, weaver = self._make_state()
         state.db = FakeDigestDB(
@@ -699,6 +744,254 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("### Pipeline activity", digest)
         self.assertIn("task-1 — Ship architect digests", digest)
         self.assertEqual(injected[0][2]["action"], "digest")
+
+    def test_architect_digest_task_done_uses_assigned_engineer_without_owner(self):
+        state, group, _weaver = self._make_state()
+        _architect, assigned, _other, worker = self._add_architect_digest_team(
+            state,
+            group,
+            worker_owner_id="",
+        )
+        task = state.board_add_task(
+            "Architect-created task",
+            group,
+            id="task-1",
+            agent_id=worker.id,
+            assigned_engineer_id=assigned.id,
+        )
+        self.assertIsNotNone(task)
+        buffer = self.weaver_mod.WeaverEventBuffer(state, FakeBridge())
+
+        engineer = buffer._architect_digest_engineer({
+            "group": group,
+            "cell_id": worker.id,
+            "agent_name": worker.name,
+            "kind": "task_done",
+            "message": "Done",
+            "task_id": task.id,
+        })
+
+        self.assertEqual(getattr(engineer, "id", ""), assigned.id)
+
+    def test_architect_digest_task_done_prefers_assignment_over_worker_owner(self):
+        state, group, _weaver = self._make_state()
+        _architect, assigned, other, worker = self._add_architect_digest_team(
+            state,
+            group,
+            worker_owner_id="eng-other",
+        )
+        task = state.board_add_task(
+            "Architect-created task",
+            group,
+            id="task-1",
+            agent_id=worker.id,
+            assigned_engineer_id=assigned.id,
+        )
+        self.assertIsNotNone(task)
+        buffer = self.weaver_mod.WeaverEventBuffer(state, FakeBridge())
+
+        engineer = buffer._architect_digest_engineer({
+            "group": group,
+            "cell_id": worker.id,
+            "agent_name": worker.name,
+            "kind": "task_done",
+            "message": "Done",
+            "task_id": task.id,
+        })
+
+        self.assertEqual(getattr(engineer, "id", ""), assigned.id)
+        self.assertNotEqual(getattr(engineer, "id", ""), other.id)
+
+    def test_architect_digest_task_scoped_events_prefer_assignment(self):
+        state, group, _weaver = self._make_state()
+        _architect, assigned, _other, worker = self._add_architect_digest_team(
+            state,
+            group,
+            worker_owner_id="eng-other",
+        )
+        task = state.board_add_task(
+            "Architect-created task",
+            group,
+            id="task-1",
+            agent_id=worker.id,
+            assigned_engineer_id=assigned.id,
+        )
+        self.assertIsNotNone(task)
+        buffer = self.weaver_mod.WeaverEventBuffer(state, FakeBridge())
+
+        for kind in (
+            "task_blocked",
+            "agent_blocked",
+            "agent_error",
+            "ask_created",
+            "pipeline_complete",
+        ):
+            with self.subTest(kind=kind):
+                engineer = buffer._architect_digest_engineer({
+                    "group": group,
+                    "cell_id": worker.id,
+                    "agent_name": worker.name,
+                    "kind": kind,
+                    "message": kind,
+                    "task_id": task.id,
+                })
+
+                self.assertEqual(getattr(engineer, "id", ""), assigned.id)
+
+    def test_architect_digest_task_done_without_assignment_or_owner_is_unassigned(self):
+        state, group, _weaver = self._make_state()
+        architect, _assigned, _other, worker = self._add_architect_digest_team(
+            state,
+            group,
+            worker_owner_id="",
+        )
+        task = state.board_add_task(
+            "Unowned task",
+            group,
+            id="task-1",
+            agent_id=worker.id,
+        )
+        self.assertIsNotNone(task)
+        buffer = self.weaver_mod.WeaverEventBuffer(state, FakeBridge())
+
+        digest = buffer._format_digest(
+            group,
+            [{
+                "group": group,
+                "cell_id": worker.id,
+                "agent_name": worker.name,
+                "kind": "task_done",
+                "message": "Done",
+                "task_id": task.id,
+            }],
+            "1 task active",
+            weaver=architect,
+        )
+
+        self.assertIn("### Unassigned engineer", digest)
+        self.assertIn("Worker Bee: done task-1", digest)
+
+    def test_architect_digest_task_done_and_derive_resolve_same_assignment(self):
+        state, group, _weaver = self._make_state()
+        _architect, assigned, _other, worker = self._add_architect_digest_team(
+            state,
+            group,
+            worker_owner_id="eng-other",
+        )
+        task = state.board_add_task(
+            "Architect-created task",
+            group,
+            id="task-1",
+            agent_id=worker.id,
+            assigned_engineer_id=assigned.id,
+        )
+        self.assertIsNotNone(task)
+        buffer = self.weaver_mod.WeaverEventBuffer(state, FakeBridge())
+        done_engineer = buffer._architect_digest_engineer({
+            "group": group,
+            "cell_id": worker.id,
+            "agent_name": worker.name,
+            "kind": "task_done",
+            "message": "Done",
+            "task_id": task.id,
+        })
+        derive_engineer = buffer._architect_digest_engineer({
+            "group": group,
+            "cell_id": worker.id,
+            "agent_name": worker.name,
+            "kind": "task_derived",
+            "message": "Follow-up",
+            "task_id": task.id,
+        })
+
+        self.assertEqual(getattr(done_engineer, "id", ""), assigned.id)
+        self.assertEqual(getattr(derive_engineer, "id", ""), assigned.id)
+
+    def test_architect_digest_ask_created_uses_parent_task_assignment(self):
+        state, group, _weaver = self._make_state()
+        _architect, assigned, _other, worker = self._add_architect_digest_team(
+            state,
+            group,
+            worker_owner_id="",
+        )
+        parent = state.board_add_task(
+            "Architect-created task",
+            group,
+            id="task-1",
+            agent_id=worker.id,
+            assigned_engineer_id=assigned.id,
+        )
+        self.assertIsNotNone(parent)
+        ask_task = state.board_add_task(
+            "Need approval",
+            group,
+            id="task-1.1",
+            parent_task_id=parent.id,
+            pipeline_root_id=parent.id,
+            pipeline_depth=1,
+        )
+        self.assertIsNotNone(ask_task)
+        buffer = self.weaver_mod.WeaverEventBuffer(state, FakeBridge())
+
+        engineer = buffer._architect_digest_engineer({
+            "group": group,
+            "cell_id": worker.id,
+            "agent_name": worker.name,
+            "kind": "ask_created",
+            "message": "Need approval",
+            "task_id": ask_task.id,
+        })
+
+        self.assertEqual(getattr(engineer, "id", ""), assigned.id)
+
+    async def test_architect_digest_fanout_task_completed_uses_task_assignment(self):
+        state, group, _weaver = self._make_state()
+        architect, assigned, _other, worker = self._add_architect_digest_team(
+            state,
+            group,
+            worker_owner_id="",
+        )
+        architect.session_id = "session-arch"
+        architect.status = "running"
+        task = state.board_add_task(
+            "Architect-created task",
+            group,
+            id="task-1",
+            agent_id=worker.id,
+            assigned_engineer_id=assigned.id,
+        )
+        self.assertIsNotNone(task)
+        state.update_agent_digest_settings(
+            architect.id,
+            push_interval=0,
+            max_interval=0,
+        )
+        injected = []
+
+        async def inject_message(target, text, **kwargs):
+            injected.append((target.id, text, kwargs))
+
+        buffer = self.weaver_mod.WeaverEventBuffer(
+            state,
+            FakeBridge(),
+            inject_message=inject_message,
+        )
+        buffer._loop = asyncio.get_running_loop()
+        buffer.on_panel_event({
+            "group": group,
+            "cell_id": worker.id,
+            "agent_name": worker.name,
+            "kind": "task_completed",
+            "message": "Done",
+            "task_id": task.id,
+        })
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(len(injected), 1)
+        digest = injected[0][1]
+        self.assertIn("### Assigned Engineer", digest)
+        self.assertNotIn("### Unassigned engineer", digest)
+        self.assertIn("Worker Bee: done task-1", digest)
 
     def test_architect_digest_groups_workflow_breaches_by_subkind(self):
         state, group, _weaver = self._make_state()
