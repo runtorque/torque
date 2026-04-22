@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import time
@@ -9,6 +10,7 @@ from pathlib import Path
 
 _GIT_TIMEOUT_SECONDS = 5
 _LOOM_TASK_ID_RE = re.compile(r"\bLOOM:\d+\b")
+_SOURCE_REPO_ROOT_FILE = ".loom_source_repo_root"
 
 
 def _run_git(repo_root: str | Path, *args: str) -> str:
@@ -40,6 +42,44 @@ def _dedupe_loom_task_ids(text: str) -> list[str]:
     return ids
 
 
+def _read_source_repo_root_metadata(script_dir: str | Path) -> str:
+    try:
+        raw = (Path(script_dir) / _SOURCE_REPO_ROOT_FILE).read_text(
+            encoding="utf-8"
+        )
+    except OSError:
+        return ""
+    lines = raw.splitlines()
+    return lines[0].strip() if lines else ""
+
+
+def _deploy_repo_candidates(state, repo_hint: str | Path) -> list[str]:
+    candidates = [
+        os.environ.get("LOOM_DEPLOY_REPO_ROOT", "").strip(),
+        _read_source_repo_root_metadata(repo_hint),
+        str(repo_hint or "").strip(),
+    ]
+    for cell in getattr(state, "agents", {}).values():
+        candidates.extend([
+            getattr(cell, "worktree_repo_root", ""),
+            getattr(cell, "git_root", ""),
+            getattr(cell, "directory", ""),
+        ])
+
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for candidate in candidates:
+        text = str(candidate or "").strip()
+        if not text:
+            continue
+        key = os.path.expanduser(text)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(key)
+    return deduped
+
+
 def capture_deploy_boot_state(state, repo_hint: str | Path) -> None:
     """Record daemon boot git state in memory without raising on failure."""
     if not getattr(state, "boot_timestamp", 0):
@@ -49,20 +89,27 @@ def capture_deploy_boot_state(state, repo_hint: str | Path) -> None:
     state.boot_mainline_branch = ""
     state.boot_head_error = ""
 
-    try:
-        repo_root = _run_git(repo_hint, "rev-parse", "--show-toplevel")
-        head = _run_git(repo_root, "rev-parse", "HEAD")
-        branch = _run_git(repo_root, "rev-parse", "--abbrev-ref", "HEAD")
-    except Exception as exc:
-        state.boot_head_error = f"failed to capture boot git state: {_error_text(exc)}"
+    errors: list[str] = []
+    for candidate in _deploy_repo_candidates(state, repo_hint):
+        try:
+            repo_root = _run_git(candidate, "rev-parse", "--show-toplevel")
+            head = _run_git(repo_root, "rev-parse", "HEAD")
+            branch = _run_git(repo_root, "rev-parse", "--abbrev-ref", "HEAD")
+        except Exception as exc:
+            errors.append(f"{candidate}: {_error_text(exc)}")
+            continue
+
+        state.boot_repo_root = repo_root
+        state.boot_head_commit = head
+        if branch == "HEAD":
+            state.boot_head_error = "repository is in detached HEAD state"
+            return
+        state.boot_mainline_branch = branch
         return
 
-    state.boot_repo_root = repo_root
-    state.boot_head_commit = head
-    if branch == "HEAD":
-        state.boot_head_error = "repository is in detached HEAD state"
-        return
-    state.boot_mainline_branch = branch
+    detail = "; ".join(errors[:3])
+    suffix = f": {detail}" if detail else ""
+    state.boot_head_error = f"failed to capture boot git state{suffix}"
 
 
 def _group_mainline_branch(state, group: str, current_branch: str) -> str:
