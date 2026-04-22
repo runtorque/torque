@@ -461,8 +461,11 @@ body.runtime-embedded #standalone-float-layer {
   gap: 6px;
   min-width: 0;
 }
-.terminal-compose-input {
+.terminal-compose-input-wrap {
   flex: 1;
+  min-width: 0;
+}
+.terminal-compose-input {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
@@ -477,6 +480,7 @@ body.runtime-embedded #standalone-float-layer {
   color: var(--text);
   font: 12px/1.35 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   outline: none;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
 }
 .terminal-compose-input::placeholder {
   color: color-mix(in srgb, var(--text-dim) 78%, transparent);
@@ -484,6 +488,22 @@ body.runtime-embedded #standalone-float-layer {
 .terminal-compose-input:focus {
   border-color: color-mix(in srgb, var(--accent) 54%, var(--border) 46%);
   box-shadow: 0 0 0 1px rgba(88,166,255,.14);
+}
+.terminal-compose-input.terminal-compose-drop-target,
+.terminal-compose.terminal-compose-drop-target .terminal-compose-input {
+  border-color: var(--accent);
+  background: rgba(88,166,255,.08);
+  box-shadow: 0 0 0 1px rgba(88,166,255,.18);
+}
+.terminal-compose-error {
+  display: none;
+  margin-top: 4px;
+  color: var(--red);
+  font-size: 10px;
+  line-height: 1.25;
+}
+.terminal-compose-error:not(:empty) {
+  display: block;
 }
 .terminal-compose-submit {
   flex: 0 0 auto;
