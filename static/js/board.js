@@ -776,10 +776,18 @@ function _boardAddAffectedLane(lanes, lane) {
 
 function _boardAddTaskAffectedLanes(lanes, task) {
   if (!task) return;
-  _boardAddAffectedLane(lanes, task.lane);
-  if (task.parent_task_id) {
-    var parent = _boardTasks()[task.parent_task_id];
-    _boardAddAffectedLane(lanes, parent ? parent.lane : task.lane);
+  var tasks = _boardTasks();
+  var cursor = task;
+  var seen = {};
+  while (cursor) {
+    var cursorId = cursor.id || cursor.parent_task_id || '';
+    if (cursorId) {
+      if (seen[cursorId]) break;
+      seen[cursorId] = true;
+    }
+    _boardAddAffectedLane(lanes, cursor.lane);
+    if (!cursor.parent_task_id) break;
+    cursor = tasks[cursor.parent_task_id];
   }
 }
 

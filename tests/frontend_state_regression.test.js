@@ -5504,35 +5504,51 @@ test('board lane cache rerenders visible dependency badges when a dependency is 
   assert.match(cards.innerHTML, /Deps 1/);
 });
 
-test('board lane cache rerenders nested dependent card in visible parent lane', () => {
+test('board lane cache rerenders deeply nested dependent card in visible root lane', () => {
   const { context, document } = createBoardHarness({ stubCards: false });
   const panel = document.register('panel-board');
   const cards = document.register('board-cards');
 
   context.state.board_lanes = ['Backlog', 'To Do', 'In Progress', 'Done'];
   context.state.board_tasks = {
-    parent: {
-      id: 'parent',
+    root: {
+      id: 'root',
       group: 'alpha',
-      task: 'Visible parent task',
+      task: 'Visible root task',
       lane: 'In Progress',
       position: 1,
     },
-    child: {
-      id: 'child',
+    middle: {
+      id: 'middle',
       group: 'alpha',
-      task: 'Nested blocked task',
+      task: 'Middle task',
       lane: 'Backlog',
-      parent_task_id: 'parent',
-      depends_on: ['dep'],
+      parent_task_id: 'root',
       position: 2,
+    },
+    lower: {
+      id: 'lower',
+      group: 'alpha',
+      task: 'Lower task',
+      lane: 'Backlog',
+      parent_task_id: 'middle',
+      position: 3,
+    },
+    leaf: {
+      id: 'leaf',
+      group: 'alpha',
+      task: 'Deeply nested blocked task',
+      lane: 'Backlog',
+      parent_task_id: 'lower',
+      depends_on: ['dep'],
+      position: 4,
     },
     dep: {
       id: 'dep',
       group: 'alpha',
       task: 'Dependency task',
       lane: 'To Do',
-      position: 3,
+      position: 5,
     },
   };
 
@@ -5565,10 +5581,66 @@ test('board lane cache rerenders nested dependent card in visible parent lane', 
 
   context.renderBoard();
 
-  assert.equal(runInContext(context, 'cardRenderCalls'), 2);
+  assert.equal(runInContext(context, 'cardRenderCalls'), 4);
   assert.doesNotMatch(cards.innerHTML, /Blocked by deps/);
   assert.doesNotMatch(cards.innerHTML, /Blocked by 1/);
   assert.match(cards.innerHTML, /Deps 1/);
+});
+
+test('board dependency affected lanes tolerate cyclic parent chains', () => {
+  const { context } = createBoardHarness({ stubCards: false });
+
+  context.state.board_lanes = ['Backlog', 'To Do', 'In Progress', 'Review', 'Done'];
+  context.state.board_tasks = {
+    cycleA: {
+      id: 'cycleA',
+      group: 'alpha',
+      task: 'Cycle A',
+      lane: 'Backlog',
+      parent_task_id: 'cycleB',
+      depends_on: ['dep'],
+      position: 1,
+    },
+    cycleB: {
+      id: 'cycleB',
+      group: 'alpha',
+      task: 'Cycle B',
+      lane: 'In Progress',
+      parent_task_id: 'cycleA',
+      position: 2,
+    },
+    selfRef: {
+      id: 'selfRef',
+      group: 'alpha',
+      task: 'Self reference',
+      lane: 'Review',
+      parent_task_id: 'selfRef',
+      position: 3,
+    },
+    dep: {
+      id: 'dep',
+      group: 'alpha',
+      task: 'Dependency task',
+      lane: 'To Do',
+      position: 4,
+    },
+  };
+
+  const lanes = runInContext(context, `
+    var previousDep = Object.assign({}, state.board_tasks.dep);
+    var nextDep = Object.assign({}, state.board_tasks.dep, { lane: 'Done' });
+    JSON.stringify(_boardAffectedLanesFromTaskDeltas([
+      { op: 'task_upsert', id: 'dep', previous: previousDep, next: nextDep },
+      {
+        op: 'task_upsert',
+        id: 'selfRef',
+        previous: Object.assign({}, state.board_tasks.selfRef),
+        next: Object.assign({}, state.board_tasks.selfRef, { task: 'Self reference updated' })
+      }
+    ]));
+  `);
+
+  assert.deepEqual(JSON.parse(lanes), ['Backlog', 'Done', 'In Progress', 'Review', 'To Do']);
 });
 
 test('board lane cache rerenders Backlog summary when an offscreen dependency unblocks', () => {
