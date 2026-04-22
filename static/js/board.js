@@ -195,13 +195,23 @@ function _boardPanelVisible() {
   return !panel.classList.contains('collapsed');
 }
 
-function _boardGroupTaskCount() {
-  return Object.keys(_boardScopedTasks(false)).length;
-}
-
 function _boardIsArchived(task) {
   return !!(task && (task.lane === _boardArchivedLane
     || (task.labels && task.labels.indexOf(_boardArchiveLabel) >= 0)));
+}
+
+function _boardCopyTaskMap(tasks) {
+  var out = {};
+  for (var id in (tasks || {})) out[id] = tasks[id];
+  return out;
+}
+
+function _boardFilterArchivedTasks(tasks) {
+  var filtered = {};
+  for (var taskId in (tasks || {})) {
+    if (!_boardIsArchived(tasks[taskId])) filtered[taskId] = tasks[taskId];
+  }
+  return filtered;
 }
 
 function _boardScopedTasks(includeArchived) {
@@ -220,14 +230,11 @@ function _boardScopedTasks(includeArchived) {
     for (var id in all) out[id] = all[id];
   }
   if (includeArchived) return out;
-  var filtered = {};
-  for (var taskId in out) {
-    if (!_boardIsArchived(out[taskId])) filtered[taskId] = out[taskId];
-  }
-  return filtered;
+  return _boardFilterArchivedTasks(out);
 }
 
-function _boardArchivedCount() {
+function _boardArchivedCount(model) {
+  if (model && typeof model.archivedCount === 'number') return model.archivedCount;
   var tasks = _boardScopedTasks(true);
   var count = 0;
   for (var id in tasks) {
@@ -291,7 +298,11 @@ function _boardSelectedArchiveIds(archived) {
 /** Return visible tasks, optionally filtered to the current group. */
 function _boardVisibleTasks() {
   _boardSyncFiltersForCurrentGroup();
-  var out = _boardScopedTasks(_boardShowArchived);
+  return _boardVisibleTasksFromScoped(_boardScopedTasks(_boardShowArchived));
+}
+
+function _boardVisibleTasksFromScoped(scopedTasks) {
+  var out = _boardCopyTaskMap(scopedTasks);
   if (_boardQuickView) {
     var ranked = [];
     for (var rid in out) ranked.push(out[rid]);
@@ -387,17 +398,24 @@ function _boardVisibleTasks() {
   return out;
 }
 
-function _boardTasksInLane(lane) {
-  var tasks = _boardVisibleTasks();
+function _boardTasksInLaneFromMap(lane, tasks) {
   var arr = [];
-  for (var id in tasks) {
+  for (var id in (tasks || {})) {
     if (tasks[id].lane === lane) arr.push(tasks[id]);
   }
   arr.sort(function(a, b) { return _boardCompareLaneTasks(a, b, lane); });
   return arr;
 }
 
-function _boardLaneCount(lane) {
+function _boardTasksInLane(lane, model) {
+  if (model && model.laneTasks) {
+    return model.laneTasks[lane] || [];
+  }
+  return _boardTasksInLaneFromMap(lane, _boardVisibleTasks());
+}
+
+function _boardLaneCount(lane, model) {
+  if (model && model.laneCounts) return model.laneCounts[lane] || 0;
   var tasks = _boardVisibleTasks();
   var n = 0;
   for (var id in tasks) {
@@ -420,7 +438,7 @@ function _boardHasActiveFilters() {
 }
 
 
-function _boardLanePoolTasks(lane) {
+function _boardLanePoolTasksFromAll(lane) {
   var all = _boardTasks();
   var pool = [];
   var group = _boardFilterByGroup ? _currentGroup() : '';
@@ -431,6 +449,11 @@ function _boardLanePoolTasks(lane) {
     pool.push(task);
   }
   return pool;
+}
+
+function _boardLanePoolTasks(lane, model) {
+  if (model && model.lanePoolTasks) return model.lanePoolTasks[lane] || [];
+  return _boardLanePoolTasksFromAll(lane);
 }
 
 
@@ -544,11 +567,9 @@ function _boardBacklogDispatchNote(rootTasks, lane) {
   };
 }
 
-/** Collect all labels with counts (before search/label/action filters). */
-function _boardAllLabelCounts() {
-  var pool = _boardScopedTasks(_boardShowArchived);
+function _boardLabelCountsFromTasks(pool) {
   var counts = {};
-  for (var id in pool) {
+  for (var id in (pool || {})) {
     var t = pool[id];
     if (t.labels) {
       for (var i = 0; i < t.labels.length; i++) {
@@ -559,11 +580,9 @@ function _boardAllLabelCounts() {
   return counts;
 }
 
-/** Collect all action names with counts from tasks. */
-function _boardAllActionCounts() {
-  var pool = _boardScopedTasks(_boardShowArchived);
+function _boardActionCountsFromTasks(pool) {
   var counts = {};
-  for (var id in pool) {
+  for (var id in (pool || {})) {
     var t = pool[id];
     if (t.action_name) {
       counts[t.action_name] = (counts[t.action_name] || 0) + 1;
@@ -572,11 +591,9 @@ function _boardAllActionCounts() {
   return counts;
 }
 
-/** Collect all agent IDs with counts from tasks. */
-function _boardAllAgentCounts() {
-  var pool = _boardScopedTasks(_boardShowArchived);
+function _boardAgentCountsFromTasks(pool) {
   var counts = {};
-  for (var id in pool) {
+  for (var id in (pool || {})) {
     var t = pool[id];
     if (t.agent_id) {
       counts[t.agent_id] = (counts[t.agent_id] || 0) + 1;
@@ -585,21 +602,12 @@ function _boardAllAgentCounts() {
   return counts;
 }
 
-/** Collect all unhealthy task health states with counts from tasks. */
-function _boardAllHealthCounts() {
-  var all = _boardTasks();
-  var pool = {};
-  if (_boardFilterByGroup) {
-    var grp = _currentGroup();
-    if (grp) {
-      for (var id in all) { if (all[id].group === grp) pool[id] = all[id]; }
-    } else { pool = all; }
-  } else { pool = all; }
+function _boardHealthCountsFromTasks(pool) {
   var counts = {};
   for (var hi = 0; hi < _boardHealthOrder.length; hi++) {
     counts[_boardHealthOrder[hi]] = 0;
   }
-  for (var id in pool) {
+  for (var id in (pool || {})) {
     var stateName = _boardTaskHealthState(pool[id]);
     if (stateName !== 'healthy') {
       counts[stateName] = (counts[stateName] || 0) + 1;
@@ -612,8 +620,86 @@ function _boardAllHealthCounts() {
   return counts;
 }
 
+/** Collect all labels with counts (before search/label/action filters). */
+function _boardAllLabelCounts(model) {
+  if (model && model.labelCounts) return model.labelCounts;
+  return _boardLabelCountsFromTasks(_boardScopedTasks(_boardShowArchived));
+}
+
+/** Collect all action names with counts from tasks. */
+function _boardAllActionCounts(model) {
+  if (model && model.actionCounts) return model.actionCounts;
+  return _boardActionCountsFromTasks(_boardScopedTasks(_boardShowArchived));
+}
+
+/** Collect all agent IDs with counts from tasks. */
+function _boardAllAgentCounts(model) {
+  if (model && model.agentCounts) return model.agentCounts;
+  return _boardAgentCountsFromTasks(_boardScopedTasks(_boardShowArchived));
+}
+
+/** Collect all unhealthy task health states with counts from tasks. */
+function _boardAllHealthCounts(model) {
+  if (model && model.healthCounts) return model.healthCounts;
+  return _boardHealthCountsFromTasks(_boardScopedTasks(true));
+}
 
 
+
+
+function _boardBuildRenderModel(lanes) {
+  _boardSyncFiltersForCurrentGroup();
+  lanes = lanes || _boardVisibleLanes();
+
+  var scopedWithArchived = _boardScopedTasks(true);
+  var scopedWithoutArchived = _boardFilterArchivedTasks(scopedWithArchived);
+  var scopedTasks = _boardShowArchived
+    ? _boardCopyTaskMap(scopedWithArchived)
+    : scopedWithoutArchived;
+  var visibleTasks = _boardVisibleTasksFromScoped(scopedTasks);
+  var childrenOf = _boardChildrenOfVisibleTasks(visibleTasks);
+  var model = {
+    scopedTasks: scopedTasks,
+    scopedWithArchived: scopedWithArchived,
+    scopedWithoutArchived: scopedWithoutArchived,
+    visibleTasks: visibleTasks,
+    childrenOf: childrenOf,
+    laneTasks: {},
+    rootTasksByLane: {},
+    laneCounts: {},
+    lanePoolTasks: {},
+    labelCounts: _boardLabelCountsFromTasks(scopedTasks),
+    actionCounts: _boardActionCountsFromTasks(scopedTasks),
+    agentCounts: _boardAgentCountsFromTasks(scopedTasks),
+    healthCounts: _boardHealthCountsFromTasks(scopedWithArchived),
+    archivedCount: 0,
+    groupTaskCount: 0,
+  };
+
+  for (var archivedId in scopedWithArchived) {
+    if (_boardIsArchived(scopedWithArchived[archivedId])) model.archivedCount++;
+  }
+  for (var groupTaskId in scopedWithoutArchived) model.groupTaskCount++;
+
+  for (var i = 0; i < lanes.length; i++) {
+    var lane = lanes[i];
+    var laneTasks = _boardTasksInLaneFromMap(lane, visibleTasks);
+    var rootTasks = laneTasks.filter(function(task) {
+      return !task.parent_task_id || !visibleTasks[task.parent_task_id];
+    });
+    model.laneTasks[lane] = laneTasks;
+    model.rootTasksByLane[lane] = rootTasks;
+    model.laneCounts[lane] = rootTasks.length;
+    model.lanePoolTasks[lane] = _boardLanePoolTasksFromAll(lane);
+  }
+
+  return model;
+}
+
+function _boardGroupTaskCount(model) {
+  if (model && typeof model.groupTaskCount === 'number') return model.groupTaskCount;
+  return Object.keys(_boardScopedTasks(false)).length;
+}
 
 function showTaskMessages(taskId) {
   var t = state.board_tasks[taskId];
@@ -761,7 +847,9 @@ function _boardChildrenOfVisibleTasks(allTasks) {
   return childrenOf;
 }
 
-function _boardRootTasksForLane(lane, allTasks) {
+function _boardRootTasksForLane(lane, allTasks, model) {
+  if (model && model.rootTasksByLane) return model.rootTasksByLane[lane] || [];
+  allTasks = allTasks || _boardVisibleTasks();
   return _boardTasksInLane(lane).filter(function(task) {
     return !task.parent_task_id || !allTasks[task.parent_task_id];
   });
@@ -862,10 +950,56 @@ function _boardRenderWideAddTaskSection() {
   return html;
 }
 
-function _boardRenderLaneSection(lane, allTasks, childrenOf, filtersActive, skipAddTask) {
+function _boardRenderLaneCards(rootTasks, childrenOf, renderLimit) {
+  var renderState = {
+    remaining: Math.max(0, renderLimit || 0),
+    rendered: 0,
+    limitHit: false,
+  };
   var html = '';
-  var rootTasks = _boardRootTasksForLane(lane, allTasks);
-  var renderCap = Math.min(rootTasks.length, _boardRenderLimit);
+  for (var j = 0; j < rootTasks.length; j++) {
+    if (renderState.remaining <= 0) {
+      renderState.limitHit = true;
+      break;
+    }
+    html += _renderBoardCard(rootTasks[j], childrenOf, 0, renderState);
+  }
+  return {
+    html: html,
+    renderedCards: renderState.rendered,
+    limitHit: renderState.limitHit,
+  };
+}
+
+function _boardRenderableCardCount(task, childrenOf, depth) {
+  if (!task) return 0;
+  var count = 1;
+  var children = (childrenOf && childrenOf[task.id]) || [];
+  if (!children.length || _boardCollapsedTasks[task.id]) return count;
+  for (var i = 0; i < children.length; i++) {
+    count += _boardRenderableCardCount(children[i], childrenOf, (depth || 0) + 1);
+  }
+  return count;
+}
+
+function _boardRenderableCardCountForRoots(rootTasks, childrenOf) {
+  var count = 0;
+  for (var i = 0; i < rootTasks.length; i++) {
+    count += _boardRenderableCardCount(rootTasks[i], childrenOf, 0);
+  }
+  return count;
+}
+
+function _boardRenderLimitValue() {
+  return Math.max(0, _boardRenderLimit || 50);
+}
+
+function _boardRenderLaneSection(lane, model, filtersActive, skipAddTask) {
+  var html = '';
+  var childrenOf = (model && model.childrenOf) || {};
+  var rootTasks = _boardRootTasksForLane(lane, model ? model.visibleTasks : null, model);
+  var totalCards = _boardRenderableCardCountForRoots(rootTasks, childrenOf);
+  var renderLimit = _boardRenderLimitValue();
 
   if (!skipAddTask) {
     html += _boardRenderAddTaskSection(lane);
@@ -874,7 +1008,7 @@ function _boardRenderLaneSection(lane, allTasks, childrenOf, filtersActive, skip
     html += _boardRenderActionListSection();
   }
 
-  var archiveSuggestion = _renderBoardArchiveSuggestion(lane);
+  var archiveSuggestion = _renderBoardArchiveSuggestion(lane, model);
   if (archiveSuggestion) html += archiveSuggestion;
 
   var backlogDispatchNote = _boardBacklogDispatchNote(rootTasks, lane);
@@ -886,7 +1020,7 @@ function _boardRenderLaneSection(lane, allTasks, childrenOf, filtersActive, skip
     html += _renderBoardMessageState(
       _boardEmptyStateForLane(
         lane,
-        _boardLanePoolTasks(lane),
+        _boardLanePoolTasks(lane, model),
         rootTasks,
         filtersActive,
       ),
@@ -894,27 +1028,28 @@ function _boardRenderLaneSection(lane, allTasks, childrenOf, filtersActive, skip
     );
   }
 
-  for (var j = 0; j < renderCap; j++) {
-    html += _renderBoardCard(rootTasks[j], childrenOf, 0);
-  }
-  if (rootTasks.length > renderCap) {
-    var remaining = rootTasks.length - renderCap;
+  var rendered = _boardRenderLaneCards(rootTasks, childrenOf, renderLimit);
+  html += rendered.html;
+  if (totalCards > rendered.renderedCards) {
+    var remaining = totalCards - rendered.renderedCards;
     html += '<div class="board-load-more" onclick="boardLoadMore()">'
-      + remaining + ' more task' + (remaining === 1 ? '' : 's') + ' — click or scroll to load</div>';
+      + remaining + ' more card' + (remaining === 1 ? '' : 's') + ' — click or scroll to load</div>';
   }
 
   return {
     html: html,
     rootTasks: rootTasks,
-    renderCap: renderCap,
+    renderLimit: renderLimit,
+    renderedCards: rendered.renderedCards,
+    totalCards: totalCards,
   };
 }
 
-function _boardRenderWideLaneColumn(lane, allTasks, childrenOf, filtersActive) {
+function _boardRenderWideLaneColumn(lane, model, filtersActive) {
   var escLane = esc(lane).replace(/'/g, "\\'");
-  var laneCount = _boardLaneCount(lane);
+  var laneCount = _boardLaneCount(lane, model);
   var active = lane === _boardSelectedLane;
-  var section = _boardRenderLaneSection(lane, allTasks, childrenOf, filtersActive, true);
+  var section = _boardRenderLaneSection(lane, model, filtersActive, true);
   var html = '<section class="board-wide-lane' + (active ? ' active' : '') + '"'
     + ' data-lane="' + esc(lane) + '" data-board-lane-column="1">';
   html += '<div class="board-wide-lane-head">';
@@ -964,7 +1099,6 @@ function renderBoard() {
   _boardHydrateSavedViews();
   _boardHydrateLaneSorts();
   _boardHydrateCardDensity();
-  _boardEnsureDispatchEligibilityRefs(_currentGroup());
 
   // Preserve scroll + draft before DOM rebuild
   var _cardsEl = document.getElementById('board-cards');
@@ -1002,23 +1136,25 @@ function renderBoard() {
   }
   var wideShell = _boardWideShellActive(panel);
   var wideLayout = _boardWideLayoutActive(panel);
+  var renderModel = _boardBuildRenderModel(lanes);
+  _boardEnsureDispatchEligibilityRefs(_currentGroup(), renderModel);
 
   // Search & filter toolbar
-  var labelCounts = _boardAllLabelCounts();
-  var actionCounts = _boardAllActionCounts();
-  var agentCounts = _boardAllAgentCounts();
-  var healthCounts = _boardAllHealthCounts();
-  var archivedCount = _boardArchivedCount();
+  var labelCounts = _boardAllLabelCounts(renderModel);
+  var actionCounts = _boardAllActionCounts(renderModel);
+  var agentCounts = _boardAllAgentCounts(renderModel);
+  var healthCounts = _boardAllHealthCounts(renderModel);
+  var archivedCount = _boardArchivedCount(renderModel);
   var hasLabels = Object.keys(labelCounts).length > 0;
   var hasActions = Object.keys(actionCounts).length > 0;
   var hasAgents = Object.keys(agentCounts).length > 0;
   var hasHealth = Object.keys(healthCounts).length > 0;
   var savedViews = _boardCurrentGroupSavedViews();
   var hasSavedViews = savedViews.length > 0;
-  var hasQuickViews = _boardGroupTaskCount() > 0 || _boardQuickView !== '';
+  var hasQuickViews = _boardGroupTaskCount(renderModel) > 0 || _boardQuickView !== '';
   var currentViewSavable = !_boardIsDefaultFilterState(_boardCurrentViewState());
   var schedCount = _boardScheduleCount();
-  var showToolbar = _boardGroupTaskCount() > 0
+  var showToolbar = _boardGroupTaskCount(renderModel) > 0
     || hasLabels || hasActions || hasAgents || hasHealth
     || _boardSearchQuery || _boardFilterLabels.length
     || _boardFilterActions.length || _boardFilterAgents.length
@@ -1162,10 +1298,10 @@ function renderBoard() {
   if (filtersActive) {
     if (!_boardPreFilterLane) _boardPreFilterLane = _boardSelectedLane;
     // Check if current lane has matches; if not, jump to first that does
-    var curCount = _boardLaneCount(_boardSelectedLane);
+    var curCount = _boardLaneCount(_boardSelectedLane, renderModel);
     if (curCount === 0) {
       for (var fi = 0; fi < lanes.length; fi++) {
-        if (_boardLaneCount(lanes[fi]) > 0) {
+        if (_boardLaneCount(lanes[fi], renderModel) > 0) {
           _boardSelectedLane = lanes[fi];
           break;
         }
@@ -1184,7 +1320,7 @@ function renderBoard() {
     html += '<div class="board-lane-tabs" id="board-lane-tabs">';
     for (var i = 0; i < lanes.length; i++) {
       var l = lanes[i];
-      var cnt = _boardLaneCount(l);
+      var cnt = _boardLaneCount(l, renderModel);
       var cls = (!_boardShowSchedules && l === _boardSelectedLane) ? ' active' : '';
       if (filtersActive && cnt === 0) cls += ' dimmed';
       var escLane = esc(l).replace(/'/g, "\\'");
@@ -1212,8 +1348,7 @@ function renderBoard() {
     return;
   }
 
-  var allTasks = _boardVisibleTasks();
-  var childrenOf = _boardChildrenOfVisibleTasks(allTasks);
+  var childrenOf = renderModel.childrenOf;
   var nextLaneEntryDelay = 0;
   if (wideLayout) {
     html += _boardRenderWideAddTaskSection();
@@ -1224,15 +1359,14 @@ function renderBoard() {
     for (var laneIdx = 0; laneIdx < lanes.length; laneIdx++) {
       var wideSection = _boardRenderWideLaneColumn(
         lanes[laneIdx],
-        allTasks,
-        childrenOf,
+        renderModel,
         filtersActive,
       );
       html += wideSection.html;
       var wideDelay = _boardVisibleLaneEntryRefreshDelay(
         wideSection.rootTasks,
         childrenOf,
-        wideSection.renderCap,
+        wideSection.renderLimit,
       );
       if (wideDelay > 0 && (!nextLaneEntryDelay || wideDelay < nextLaneEntryDelay)) {
         nextLaneEntryDelay = wideDelay;
@@ -1241,15 +1375,14 @@ function renderBoard() {
   } else {
     var laneSection = _boardRenderLaneSection(
       _boardSelectedLane,
-      allTasks,
-      childrenOf,
+      renderModel,
       filtersActive,
     );
     html += laneSection.html;
     nextLaneEntryDelay = _boardVisibleLaneEntryRefreshDelay(
       laneSection.rootTasks,
       childrenOf,
-      laneSection.renderCap,
+      laneSection.renderLimit,
     );
   }
   _boardScheduleLaneEntryRefresh(nextLaneEntryDelay);
@@ -1297,16 +1430,19 @@ function renderBoard() {
 /* ---- Virtual scroll ------------------------------------------------- */
 
 function boardLoadMore() {
-  var allTasks = _boardVisibleTasks();
-  var rootCount = 0;
   var lanes = _boardWideLayoutActive(document.getElementById('panel-board'))
     ? _boardVisibleLanes()
     : [_boardSelectedLane || _boardVisibleLanes()[0] || ''];
+  var model = _boardBuildRenderModel(lanes);
+  var cardCount = 0;
   for (var i = 0; i < lanes.length; i++) {
-    var laneRootCount = _boardRootTasksForLane(lanes[i], allTasks).length;
-    if (laneRootCount > rootCount) rootCount = laneRootCount;
+    var laneCards = _boardRenderableCardCountForRoots(
+      _boardRootTasksForLane(lanes[i], model.visibleTasks, model),
+      model.childrenOf
+    );
+    if (laneCards > cardCount) cardCount = laneCards;
   }
-  if (_boardRenderLimit >= rootCount) return;
+  if (_boardRenderLimit >= cardCount) return;
   _boardRenderLimit += 50;
   _boardSyncActiveViewState();
   renderBoard();

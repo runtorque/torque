@@ -122,22 +122,26 @@ function _boardScheduleLaneEntryRefresh(delayMs) {
   }, Math.max(1000, delayMs));
 }
 
-function _boardVisibleLaneEntryRefreshDelay(rootTasks, childrenOf, renderCap) {
+function _boardVisibleLaneEntryRefreshDelay(rootTasks, childrenOf, renderLimit) {
   var nextDelay = 0;
+  var remaining = Math.max(0, renderLimit || 0);
 
   function visit(task, depth) {
+    if (!task || remaining <= 0) return;
+    remaining--;
     var delay = _boardLaneEntryNextRefreshDelay(task);
     if (delay > 0 && (!nextDelay || delay < nextDelay)) nextDelay = delay;
     var children = childrenOf[task.id] || [];
-    if (!children.length) return;
-    if (depth === 0 && _boardCollapsedTasks[task.id]) return;
+    if (!children.length || _boardCollapsedTasks[task.id]) return;
     for (var i = 0; i < children.length; i++) {
       visit(children[i], depth + 1);
+      if (remaining <= 0) break;
     }
   }
 
-  for (var i = 0; i < renderCap; i++) {
+  for (var i = 0; i < rootTasks.length; i++) {
     visit(rootTasks[i], 0);
+    if (remaining <= 0) break;
   }
   return nextDelay;
 }
@@ -148,8 +152,10 @@ function _boardCardIndentLevel(depth) {
   return Math.min(level, 3);
 }
 
-function _boardStaleDoneTaskIds() {
-  var tasks = _boardScopedTasks(false);
+function _boardStaleDoneTaskIds(model) {
+  var tasks = model && model.scopedWithoutArchived
+    ? model.scopedWithoutArchived
+    : _boardScopedTasks(false);
   var cutoff = Date.now() - (_boardArchiveStaleDays * 24 * 60 * 60 * 1000);
   var ids = [];
   for (var id in tasks) {
@@ -200,9 +206,11 @@ function _boardHandleEligibilityTemplateList(msg) {
   renderBoard();
 }
 
-function _boardEnsureDispatchEligibilityRefs(group) {
+function _boardEnsureDispatchEligibilityRefs(group, model) {
   if (!group || typeof send !== 'function') return;
-  var tasks = _boardScopedTasks(_boardShowArchived);
+  var tasks = model && model.scopedTasks
+    ? model.scopedTasks
+    : _boardScopedTasks(_boardShowArchived);
   var needsActions = false;
   var needsTemplates = false;
   for (var id in tasks) {
@@ -610,9 +618,9 @@ function _renderBoardQuickEdit(t) {
   return html;
 }
 
-function _renderBoardArchiveSuggestion(lane) {
+function _renderBoardArchiveSuggestion(lane, model) {
   if (_boardShowArchived || (lane || _boardSelectedLane) !== 'Done') return '';
-  var staleIds = _boardStaleDoneTaskIds();
+  var staleIds = _boardStaleDoneTaskIds(model);
   if (!staleIds.length) return '';
   return '<div class="board-archive-suggestion">'
     + '<span class="board-archive-suggestion-copy">'
@@ -624,7 +632,15 @@ function _renderBoardArchiveSuggestion(lane) {
 
 /* ---- Card rendering ------------------------------------------------- */
 
-function _renderBoardCard(t, childrenOf, depth) {
+function _renderBoardCard(t, childrenOf, depth, renderState) {
+  if (renderState) {
+    if (renderState.remaining <= 0) {
+      renderState.limitHit = true;
+      return '';
+    }
+    renderState.remaining--;
+    renderState.rendered++;
+  }
   var isSubordinate = depth > 0;
   var indentLevel = _boardCardIndentLevel(depth);
   var hasChildren = childrenOf[t.id] && childrenOf[t.id].length > 0;
@@ -841,7 +857,11 @@ function _renderBoardCard(t, childrenOf, depth) {
   if (hasChildren && !isCollapsed) {
     var children = childrenOf[t.id];
     for (var ci = 0; ci < children.length; ci++) {
-      cardHtml += _renderBoardCard(children[ci], childrenOf, depth + 1);
+      if (renderState && renderState.remaining <= 0) {
+        renderState.limitHit = true;
+        break;
+      }
+      cardHtml += _renderBoardCard(children[ci], childrenOf, depth + 1, renderState);
     }
   }
   return cardHtml;
