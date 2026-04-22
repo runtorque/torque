@@ -509,6 +509,13 @@ function _standaloneMovePanelToZone(app, zoneName, opts) {
   _standalonePanelSetLayout(layout);
 }
 
+function _standaloneRunPanelOpenHooks(app, opts) {
+  opts = opts || {};
+  if (opts.skipOpenHooks) return;
+  if (typeof _loadPanelApp === 'function') _loadPanelApp(app);
+  if (typeof renderActivePanel === 'function') renderActivePanel();
+}
+
 function _standaloneSelectPanel(app, opts) {
   if (!_standalonePanelsEnabled()) return false;
   opts = opts || {};
@@ -516,6 +523,7 @@ function _standaloneSelectPanel(app, opts) {
   var placement = _standalonePanelPlacement(app);
   if (!placement) {
     _standaloneMovePanelToZone(app, _standalonePanelDefaults[app] || 'bottom');
+    _standaloneRunPanelOpenHooks(app, opts);
     return true;
   }
   if (placement === 'float') {
@@ -528,6 +536,7 @@ function _standaloneSelectPanel(app, opts) {
       layout.floats[app].z = maxZ + 1;
     }
     _standalonePanelSetLayout(layout, opts);
+    _standaloneRunPanelOpenHooks(app, opts);
     return true;
   }
   var zone = layout[placement];
@@ -536,6 +545,7 @@ function _standaloneSelectPanel(app, opts) {
   zone.active = app;
   layout.last_active = app;
   _standalonePanelSetLayout(layout, opts);
+  _standaloneRunPanelOpenHooks(app, opts);
   return true;
 }
 
@@ -550,14 +560,15 @@ function _standaloneToggleZone(zoneName) {
   }
 }
 
-function _standaloneTogglePanel(app) {
+function _standaloneTogglePanel(app, opts) {
   if (!_standalonePanelsEnabled()) return false;
+  opts = opts || {};
   var placement = _standalonePanelPlacement(app);
   if (!placement) {
-    return _standaloneSelectPanel(app);
+    return _standaloneSelectPanel(app, opts);
   }
   if (placement === 'float') {
-    return _standaloneSelectPanel(app);
+    return _standaloneSelectPanel(app, opts);
   }
   var layout = _standaloneClone(_standalonePanelCurrentLayout());
   var zone = layout[placement];
@@ -569,7 +580,7 @@ function _standaloneTogglePanel(app) {
     }
     return true;
   }
-  return _standaloneSelectPanel(app);
+  return _standaloneSelectPanel(app, opts);
 }
 
 function _standalonePanelActiveApp() {

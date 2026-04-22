@@ -11,6 +11,8 @@ var _agentTplData = null;
 var _agentTplDirty = false;
 var _agentTplNew = false;
 var _agentTplScope = 'project';
+var _agentTplLoadedGroup = null;
+var _agentTplLoadingGroup = null;
 
 function _agentTplKey(t) {
   return (t.global ? 'user:' : 'project:') + t.name;
@@ -22,11 +24,21 @@ function _agentTplSelectedName() {
 }
 
 function agentTemplateEditorLoad() {
-  send({ cmd: 'get_config', group: _currentGroup() });
-  send({ cmd: 'list_roles', group: _currentGroup() });
+  var group = _currentGroup();
+  _agentTplLoadingGroup = group || '';
+  send({ cmd: 'get_config', group: group });
+  send({ cmd: 'list_roles', group: group });
+}
+
+function agentTemplateEnsureLoaded() {
+  var group = _currentGroup() || '';
+  if (_agentTplLoadedGroup === group || _agentTplLoadingGroup === group) return;
+  agentTemplateEditorLoad();
 }
 
 function agentTemplateReceiveList(msg) {
+  _agentTplLoadingGroup = null;
+  _agentTplLoadedGroup = (msg && msg.group != null) ? (msg.group || '') : (_currentGroup() || '');
   _agentTplList = msg.roles || msg.templates || [];
   if (msg.saved) {
     var match = _agentTplList.find(function(t) { return t.name === msg.saved; });
@@ -60,6 +72,7 @@ function agentsPanelSwitchView(view) {
   if (view === 'history') {
     agentHistoryLoad();
   } else {
+    agentTemplateEnsureLoaded();
     renderAgentTemplatesPanel();
   }
 }

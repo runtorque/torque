@@ -1311,6 +1311,37 @@ test('actions editor save payload preserves auto_close_on_done', () => {
   assert.deepEqual(jsonValue(context, 'sendCalls[0].action.transitions'), []);
 });
 
+test('actions panel ensure-loaded fetches once per group until refresh', () => {
+  const { sandbox } = createSandbox({
+    _cachedAgentTemplates: [],
+  });
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/actions.js');
+
+  context.tplEditorEnsureLoaded();
+  context.tplEditorEnsureLoaded();
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
+    { cmd: 'list_actions', group: 'alpha' },
+  ]);
+
+  context.tplEditorReceiveList({
+    type: 'actions',
+    group: 'alpha',
+    actions: [{ name: 'feature/review' }],
+  });
+  context.tplEditorEnsureLoaded();
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
+    { cmd: 'list_actions', group: 'alpha' },
+  ]);
+
+  context.tplEditorLoad();
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
+    { cmd: 'list_actions', group: 'alpha' },
+    { cmd: 'list_actions', group: 'alpha' },
+  ]);
+});
+
 test('board lane counts ignore subordinate tasks in the same lane', () => {
   const { context } = createBoardHarness();
   context.state.board_tasks = {
@@ -7553,6 +7584,20 @@ test('opening agents panel requests history when history is the active view', ()
   ]);
 });
 
+test('switching Library from History to Roles requests roles once', () => {
+  const { context, sandbox } = createTemplatesHarness();
+
+  context.renderAgentTemplatesPanel();
+  context.agentsPanelSwitchView('templates');
+  context.agentsPanelSwitchView('templates');
+
+  assert.equal(jsonValue(context, '_agentsPanelView'), 'templates');
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
+    { cmd: 'get_config', group: 'alpha' },
+    { cmd: 'list_roles', group: 'alpha' },
+  ]);
+});
+
 test('event deltas rerender only the active events panel', () => {
   const { context, sandbox } = createWsRenderHarness();
   sandbox._activePanelApp = 'board';
@@ -10321,6 +10366,40 @@ test('opening Actions in standalone loads the actions editor', () => {
   `);
 
   context.togglePanel('actions');
+
+  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.active`), 'actions');
+  assert.equal(jsonValue(context, `_standalonePanelSurfaceVisible('actions')`), true);
+  assert.equal(sandbox.tplEditorLoadCalls, 1);
+  assert.equal(sandbox.renderActivePanelCalls, 1);
+});
+
+test('selecting an existing standalone Actions tab loads and renders the actions editor', () => {
+  const { context, document, sandbox } = createMainHarness({
+    tplEditorLoad() {
+      sandbox.tplEditorLoadCalls = (sandbox.tplEditorLoadCalls || 0) + 1;
+    },
+    renderActivePanel() {
+      sandbox.renderActivePanelCalls = (sandbox.renderActivePanelCalls || 0) + 1;
+    },
+  });
+  document.body.classList.add('runtime-embedded');
+  context.isEmbeddedTerminalMode = function() { return true; };
+
+  runInContext(context, `
+    state = {
+      runtime: { embedded_terminal: true },
+      standalone_panel_layout: {
+        version: 1,
+        bottom: { open: true, size: 280, tabs: ['board'], active: 'board' },
+        right: { open: true, size: 320, tabs: ['actions', 'context'], active: 'context' },
+        floats: {},
+        last_active: 'context',
+      },
+    };
+    _restoreStandalonePanelState();
+  `);
+
+  runInContext(context, `_standaloneSelectPanel('actions')`);
 
   assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.active`), 'actions');
   assert.equal(jsonValue(context, `_standalonePanelSurfaceVisible('actions')`), true);
