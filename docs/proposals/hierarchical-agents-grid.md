@@ -154,9 +154,9 @@ The loose-workers strip is a horizontal row of worker cards appearing above the 
 
 Strip behavior:
 
-- Rendered only when the User section contains at least one detached worker. Omitted entirely when empty — no placeholder, no empty rail.
+- Always rendered in the User section, regardless of whether detached workers exist. When empty, the strip is a single-button row holding only the `+ New Worker` affordance.
 - Cards wrap to multiple lines within the strip if needed.
-- A `+ New Worker` button sits at the end of the strip (or as the strip's sole content when empty — in which case the strip is rendered as a single-button row).
+- A `+ New Worker` button sits at the end of the strip (or as the strip's sole content when empty).
 - Workers in the strip carry the full worker-card affordances (right-click context menu, focus, dispatch target, remove).
 - Visually distinguishable from engineer rows by the absence of a leading agent card. No special color needed.
 
@@ -258,11 +258,11 @@ The redesign is successful when:
 - **Layout flicker during rerenders.** The grid currently rerenders on each WebSocket delta. The new two-dimensional layout has more moving parts (sections, rows, strips). Must be covered by the existing rerender-guardrail pattern plus new regression tests for the new row shapes. Panelsmith's `feedback_ui_review_block_pattern` memory is the standing guidance here.
 - **Loose strip discoverability.** An operator who has never created a detached worker may not know the strip exists when empty (since it's hidden). Acceptable — when empty, there are no detached workers to find, and the `+ New Worker` button in the user section's controls still exists as the entry point.
 
-### Open questions
+### Resolved decisions
 
-- **Where does `+ New Worker` (detached) live when the loose strip is empty?** Option A: always render an empty strip with just the button. Option B: omit the strip but put the button in the User header row. Leaning toward A for consistency ("the strip is where detached workers live, including the button to make one") but B is cheaper visually. Panelsmith's call.
-- **Should dismissed engineers stay in their architect's section or sort to the bottom?** Today they greyed in-place. The answer should probably stay "in-place" for stability of row position, with the greyed state carrying the signal. Defer to Panelsmith unless operator feedback says otherwise.
-- **Section order: is User-first the right default, or should the operator's most-active architect float to the top?** Proposal lands on User-first for v1 (stable, predictable). Revisit if operators report wanting active-first ordering.
+- **Loose-workers strip is always rendered in the User section** (not hidden when empty). The `+ New Worker` button sits inside the strip; when there are no detached workers, the strip is a single-button row. This keeps the strip as a stable discoverable surface and makes "detached workers live here" a constant truth of the grid.
+- **Dismissed engineers stay in-place** inside their architect section, rendered greyed. Row position does not reshuffle on dismiss/rehire. The greyed state is the sole signal.
+- **Section order is User-first, then architects by creation timestamp ascending.** Stable across sessions; no activity-based reordering in v1.
 
 ---
 
