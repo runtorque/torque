@@ -71,11 +71,11 @@ The grid is a vertical stack of **architect sections**, separated by horizontal 
 
 A section is composed of:
 
-1. A **fixed-width architect column** on the left: a single tall anchor card for the architect (or the synthetic "User" card in the User section). The card **row-spans** across all of this section's engineer rows — it is not repeated per engineer and it is not a header row sitting above the engineers.
+1. A **fixed-width architect column** on the left: a single fixed-width + fixed-height anchor card for the architect (or the synthetic "User" card in the User section). The card **row-spans** across all of this section's engineer rows — it is not repeated per engineer and it is not a header row sitting above the engineers.
 2. One or more **engineer rows** stacked vertically to the right of the architect column, inside the section. Each engineer row reads left-to-right as: `[ engineer card ] [ worker 1 ] [ worker 2 ] [ worker 3 ] ...` with workers wrapping within the same row when they overflow horizontally (flush-left with the first worker, NOT indented under the engineer card — the wrapping stays inside that engineer's row and does not visually bleed into the next row).
-3. A **`+ New Engineer`** button inside the section, positioned on a line below the last engineer row (inside the architect's section, still to the right of the architect column). It belongs to this architect — clicking it creates an engineer hired by that architect.
-4. In the User section only: a **loose-workers strip** rendered above the User section's engineer rows. Always rendered — if empty, it is a single-button row holding the `+ New Worker` button.
-5. A **`+ New Architect`** button below the last architect section, aligned to the architect column.
+3. A **`+ New Engineer` ghost card** at the bottom of the section's engineer-row stack (in the right column, aligned to the engineer-row left edge). Ghost card = dashed outline, same width as a real engineer card, 1/4 the height of a real engineer card, text label "+ New Engineer". Clicking it creates an engineer hired by this architect.
+4. In the User section only: a **loose-workers strip** rendered above the User section's engineer rows. Always rendered — if empty, it is a single-ghost-card row holding only the `+ New Worker` ghost card.
+5. A **`+ New Architect` ghost card** at the bottom of the architect column (below the last architect section), aligned to the architect column. Same dashed-outline ghost-card style: same width as a real architect card, 1/4 height, text label "+ New Architect".
 
 Section boundaries are horizontal dividers that span the full grid width.
 
@@ -109,20 +109,24 @@ No leading agent card. The absence of a leading card is the visual signal that t
 
 ### Sketch
 
+Notation in the sketch: real cards are drawn with solid boxes (`[Name]` / `┌─┐ │ └─┘`), ghost cards with a compact dashed style (`┌╌╌╌╌┐ │+New X│ └╌╌╌╌┘`). Ghost cards are 1/4 the height of their real-card counterparts.
+
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                                                                             │
 │ USER SECTION                                                                │
 │                                                                             │
-│  ┌────────┐   [worker] [worker] [ + New Worker ]        ← loose-workers     │
-│  │        │                                                strip            │
-│  │  User  │   ─────────────────────────────────                             │
-│  │ OWNER  │   [Engineer 1] [worker] [worker]            ← engineer row 1   │
-│  │        │   ─────────────────────────────                                 │
-│  │        │   [Engineer 2] [worker]                     ← engineer row 2   │
-│  │        │   ─────────────────────────────                                 │
-│  │        │   [ + New Engineer ]                                            │
-│  └────────┘                                                                 │
+│  ┌────────┐   [worker] [worker] ┌╌╌╌╌╌╌╌╌╌╌┐          ← loose-workers       │
+│  │        │                      │+ New Worker│           strip             │
+│  │  User  │                      └╌╌╌╌╌╌╌╌╌╌┘                               │
+│  │ OWNER  │   ─────────────────────────────────                             │
+│  └────────┘   [Engineer 1] [worker] [worker]          ← engineer row 1      │
+│               ─────────────────────────────────                             │
+│               [Engineer 2] [worker]                    ← engineer row 2     │
+│               ─────────────────────────────────                             │
+│               ┌╌╌╌╌╌╌╌╌╌╌╌╌┐                          ← ghost card,         │
+│               │+ New Engineer│                           1/4 height          │
+│               └╌╌╌╌╌╌╌╌╌╌╌╌┘                                                │
 │                                                                             │
 │ ─── architect section divider ─────────────────────────────────────────     │
 │                                                                             │
@@ -133,9 +137,9 @@ No leading agent card. The absence of a leading card is the visual signal that t
 │  │Architect│   ─────────────────────────────                                │
 │  │  1     │   [Engineer 2] [worker]                                         │
 │  │        │   ─────────────────────────────                                 │
-│  │        │   [Engineer 3] [worker] [worker]                                │
-│  │        │   ─────────────────────────────                                 │
-│  └────────┘   [ + New Engineer ]                                            │
+│  └────────┘   ┌╌╌╌╌╌╌╌╌╌╌╌╌┐                                                │
+│               │+ New Engineer│                                              │
+│               └╌╌╌╌╌╌╌╌╌╌╌╌┘                                                │
 │                                                                             │
 │ ─── architect section divider ─────────────────────────────────────────     │
 │                                                                             │
@@ -143,12 +147,15 @@ No leading agent card. The absence of a leading card is the visual signal that t
 │                                                                             │
 │  ┌────────┐   [Engineer 1] [worker] [worker]                                │
 │  │Architect│   ─────────────────────────────                                │
-│  │  2     │   [ + New Engineer ]                                            │
-│  └────────┘                                                                 │
+│  │  2     │   ┌╌╌╌╌╌╌╌╌╌╌╌╌┐                                                │
+│  └────────┘   │+ New Engineer│                                              │
+│               └╌╌╌╌╌╌╌╌╌╌╌╌┘                                                │
 │                                                                             │
-├─────────────────────────────────────────────────────────────────────────────┤
+│ ─── architect section divider (between last architect + New Architect) ─    │
 │                                                                             │
-│  [ + New Architect ]                                                        │
+│  ┌╌╌╌╌╌╌╌╌╌╌╌╌┐                                ← architect column           │
+│  │+ New Architect│                                continues with ghost      │
+│  └╌╌╌╌╌╌╌╌╌╌╌╌┘                                                             │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -167,11 +174,12 @@ No leading agent card. The absence of a leading card is the visual signal that t
 
 The grid's creation affordances align with the ownership rules:
 
-- **`+ New Architect`** (bottom of grid): creates a new architect at group scope. Opens the existing architect-creation modal.
-- **`+ New Engineer`** (inline in an architect header row): creates an engineer hired by that specific architect, or for the User section, a user-created engineer. The architect context is implicit from the section the button sits in — no more disambiguation modal step.
-- **Worker creation remains engineer-driven**: an engineer creates workers attached to itself via `loom ai derive` or engineer MCP surfaces. The grid does not expose a direct `+ New Worker` button on engineer rows in v1. Rationale: per the kinds-refactor invariants, workers are engineer-dispatched; surfacing a grid button would invite the wrong mental model ("users create workers for engineers"). We may revisit this in a follow-up if engineers want a manual worker-spawn affordance.
-- **Detached worker creation**: a dedicated `+ New Worker` button lives in the User section, anchored to the loose-workers strip. This is the only path through which a user creates a worker directly; it always produces a detached (no-engineer) worker. Users cannot create a worker under an engineer they did not hire, and cannot create a worker under an engineer at all — the engineer owns that surface.
+- **`+ New Architect`** (ghost card at the bottom of the architect column): creates a new architect at group scope. Opens the existing architect-creation modal.
+- **`+ New Engineer`** (ghost card at the bottom of each section's engineer-row stack): creates an engineer hired by that specific architect, or for the User section, a user-created engineer. The architect context is implicit from the section the ghost card sits in — no more disambiguation modal step.
+- **Worker creation remains engineer-driven**: an engineer creates workers attached to itself via `loom ai derive` or engineer MCP surfaces. The grid does not expose a direct `+ New Worker` ghost on engineer rows in v1. Rationale: per the kinds-refactor invariants, workers are engineer-dispatched; surfacing a grid ghost would invite the wrong mental model ("users create workers for engineers"). We may revisit this in a follow-up if engineers want a manual worker-spawn affordance.
+- **Detached worker creation**: a dedicated `+ New Worker` ghost card lives in the User section's loose-workers strip. This is the only path through which a user creates a worker directly; it always produces a detached (no-engineer) worker. Users cannot create a worker under an engineer they did not hire, and cannot create a worker under an engineer at all — the engineer owns that surface.
 - **Terminal creation**: unchanged from today. Terminals attach to any agent kind (architect, engineer, worker) and render in that agent's drawer. A terminal is never a first-class grid cell in this proposal.
+- **Legacy `+ New` kind-picker dropdown**: retired. It was the only creation surface before the per-section ghost cards existed. With architect/engineer/worker all having explicit ghost-card creation surfaces tied to their spatial context, the kind-picker is redundant and should be removed from the grid entirely.
 
 ---
 
@@ -196,6 +204,38 @@ Strip behavior:
 - **The `+ New Worker` button always produces `kind == worker`.** There is no "quick-add with unspecified kind" path through the strip; the button's output kind is fixed.
 
 This contract closes the earlier ambiguity around whether "any detached agent regardless of kind" belonged in the strip. The strip is a worker-only surface; other kinds appearing in it would be a bug signal (upstream grouping logic leaked), not a rendering variant to accommodate.
+
+---
+
+## Ghost-card creation affordances
+
+All three creation surfaces (`+ New Architect`, `+ New Engineer`, `+ New Worker`) render as **ghost cards** — dashed-outline placeholder cards that occupy the same spatial slot as the agent kind they create. This replaces the prior solid-button affordances and the legacy `+ New` kind-picker dropdown.
+
+**Visual style (applies to all three ghost cards):**
+
+- **Outline**: dashed border, no filled background. Distinguishes ghost slots from real agent cards at a glance.
+- **Width**: exactly the same as a real card of the kind it creates. `+ New Architect` matches an architect card's width (fixed); `+ New Engineer` matches an engineer card's width; `+ New Worker` matches a worker card's width.
+- **Height**: **1/4 the height** of a real card of the kind it creates. Low visual weight so real cards remain the focal point; still large enough to read the text label and click comfortably.
+- **Label**: text label inside the dashed outline: `+ New Architect` / `+ New Engineer` / `+ New Worker`. No icon-only variant.
+- **Hover/focus**: standard button-like affordance (highlight on hover, focus ring on keyboard focus).
+
+**Positioning:**
+
+- **`+ New Architect` ghost**: at the bottom of the architect column, below the last architect section's divider. Aligned to the architect column's fixed-width gutter on the left — physically continues the architect spine.
+- **`+ New Engineer` ghost**: at the bottom of each section's engineer-row stack, in the section's right column, aligned to the engineer-row left edge (directly under the first engineer card's position, NOT under the architect column). One per section.
+- **`+ New Worker` ghost**: in the User section's loose-workers strip, after any existing detached worker cards (right-most on the strip's first line; wraps to a new line only if the strip has many workers).
+
+**Behavior:**
+
+- Clicking a ghost card opens the existing creation modal for that kind, with the architect/section context pre-filled implicitly (no disambiguation step).
+- Ghost cards are always rendered, even when the section is empty. The `+ New Engineer` ghost shows in a section with zero engineers as a cue to fill the slot.
+- Ghost cards are NOT drop targets for drag-and-drop in v1 — the interaction is click-only. Drag-to-reparent is the future drag-to-detach proposal.
+
+**Why ghost cards over solid buttons:**
+
+- **Spatial ownership is unambiguous**: a ghost card in the architect column clearly creates an architect; one in an engineer-row stack clearly creates an engineer for that architect. Solid buttons stacked at the bottom of the grid created the ambiguity ("is this for the last section or global?") that LOOM:110's first iteration had.
+- **Consistent visual language**: all three creation surfaces share one grammar (dashed card = "empty slot you can fill"). The loose-workers strip already used this pattern; extending it to engineer/architect creation unifies the grid.
+- **Reduced visual weight**: dashed outlines read as "empty slot," not "attention-demanding action." Real agent cards remain the focal point of the grid.
 
 ---
 
