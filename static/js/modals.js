@@ -900,7 +900,7 @@ function _renderGsWeaverSummary(group, weaver, ws) {
     metaEl.textContent = parts.length ? parts.join(' • ') : 'Weaver agent configured for this group.';
   } else {
     nameEl.textContent = 'No weaver agent';
-    metaEl.textContent = 'Create a Weaver from the group’s + New dropdown, then configure it here.';
+    metaEl.textContent = 'No designated Weaver is configured for this group.';
   }
 }
 

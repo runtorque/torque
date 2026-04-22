@@ -69,44 +69,6 @@ function _embeddedRuntimeEnabled() {
   return !!(state && state.runtime && state.runtime.embedded_terminal);
 }
 
-function renderSplitBtn(quickAction, customAction) {
-  return `<div class="split-btn">`
-    + `<button class="split-main" onclick="${quickAction}">+ New</button>`
-    + `<button class="split-drop" onclick="event.stopPropagation();toggleMenu(this)">\u25BE</button>`
-    + `<div class="split-menu">`
-    + `  <button onclick="closeMenus();${customAction}">Custom\u2026</button>`
-    + `</div></div>`;
-}
-
-function _agentCreateMenuAction(group) {
-  if (_embeddedRuntimeEnabled()) {
-    return {
-      label: 'Advanced…',
-      action: `openAddAgentAdvanced('${esc(group)}')`,
-    };
-  }
-  return {
-    label: 'Custom…',
-    action: `openAddAgent('${esc(group)}')`,
-  };
-}
-
-function _renderAgentTemplateMenuItems(group) {
-  const templates = (_cachedAgentTemplates || []).filter(t => !t.shadowed);
-  let html = '';
-  for (const t of templates) {
-    const label = t.display_name || t.name;
-    html += `<button onclick="event.stopPropagation();closeMenus();newAgentFromTemplate('${esc(group)}','${esc(t.name)}')">${esc(label)}</button>`;
-  }
-  return html;
-}
-
-function _renderWeaverMenuItem(group, groupSettings) {
-  const gs = groupSettings || {};
-  if (gs.weaver_agent_id) return '';
-  return `<button onclick="event.stopPropagation();closeMenus();newWeaver('${esc(group)}')">Weaver</button>`;
-}
-
 function _workerOwnerEngineerId(agent, visibleById) {
   if (!agent) return '';
   const ownerId = String(
@@ -823,7 +785,7 @@ function _buildAgentGridNavigationModel(groupContexts) {
 
         if (!ctx.atAgentCap) {
           const controlId = _gridNavControlId('section-new-engineer', ctx.gname, sectionKey);
-          addCreationControl({
+          const control = {
             id: controlId,
             type: 'control',
             controlType: 'section-new-engineer',
@@ -831,9 +793,41 @@ function _buildAgentGridNavigationModel(groupContexts) {
             sectionKey,
             architectId: section.architect ? (section.architect.id || '') : '',
             focusKey: _gridNavControlFocusKey('section-new-engineer', ctx.gname, sectionKey),
-            sort: sortOrder++,
+          };
+          addRow({
+            group: ctx.gname,
+            sectionKey,
+            rowKey: sectionKey + ':section-new-engineer',
+            rowType: 'section-creation-row',
+            architectId: control.architectId,
+            items: [control],
           });
+          addCreationControl(Object.assign({}, control, {
+            sort: model.itemMeta[controlId] ? model.itemMeta[controlId].sort : sortOrder++,
+          }));
         }
+      }
+
+      const architectControlId = _gridNavControlId('agent-new-architect', ctx.gname, '');
+      if (!ctx.atAgentCap) {
+        const architectControl = {
+          id: architectControlId,
+          type: 'control',
+          controlType: 'agent-new-architect',
+          group: ctx.gname,
+          sectionKey: '',
+          focusKey: _gridNavControlFocusKey('agent-new-architect', ctx.gname, ''),
+        };
+        addRow({
+          group: ctx.gname,
+          sectionKey: '',
+          rowKey: ctx.gname + ':agent-new-architect',
+          rowType: 'architect-creation-row',
+          items: [architectControl],
+        });
+        addCreationControl(Object.assign({}, architectControl, {
+          sort: model.itemMeta[architectControlId] ? model.itemMeta[architectControlId].sort : sortOrder++,
+        }));
       }
 
       for (let rowIndex = 0; rowIndex < model.gridRows.length; rowIndex++) {
@@ -849,19 +843,6 @@ function _buildAgentGridNavigationModel(groupContexts) {
       for (const t of ctx.standaloneTerms) {
         model.navItems.push(t.id);
         groupNav.push(t.id);
-      }
-
-      const architectControlId = _gridNavControlId('agent-new-architect', ctx.gname, '');
-      if (!ctx.atAgentCap) {
-        addCreationControl({
-          id: architectControlId,
-          type: 'control',
-          controlType: 'agent-new-architect',
-          group: ctx.gname,
-          sectionKey: '',
-          focusKey: _gridNavControlFocusKey('agent-new-architect', ctx.gname, ''),
-          sort: sortOrder++,
-        });
       }
     }
     model.navByGroup[ctx.gname] = groupNav;
@@ -973,7 +954,7 @@ function _renderSectionControlsSlot(groupName, section, opts) {
   const focusKey = _gridNavControlFocusKey('section-new-engineer', groupName, sectionKey);
   return '<div class="agent-section-controls-slot"'
     + ' data-section-controls-for="' + esc(sectionKey) + '">'
-    + '<button type="button" class="agent-section-new-engineer-btn' + _gridNavFocusedClass(navId) + '"'
+    + '<button type="button" class="ghost-card ghost-card--engineer' + _gridNavFocusedClass(navId) + '"'
     + ' data-action="new-engineer"'
     + ' data-nav-id="' + esc(navId) + '"'
     + ' data-group="' + esc(groupName) + '"'
@@ -994,7 +975,7 @@ function _renderLooseWorkersStrip(groupName, section, renderCell) {
   for (const worker of workers) html += renderCell(worker);
   const navId = _gridNavControlId('loose-new-worker', groupName, sectionKey);
   const focusKey = _gridNavControlFocusKey('loose-new-worker', groupName, sectionKey);
-  html += '<button type="button" class="loose-workers-new-worker-btn loose-workers-placeholder-btn' + _gridNavFocusedClass(navId) + '"'
+  html += '<button type="button" class="ghost-card ghost-card--worker loose-workers-new-worker-btn' + _gridNavFocusedClass(navId) + '"'
     + ' data-action="new-worker"'
     + ' data-nav-id="' + esc(navId) + '"'
     + ' data-focus-key="' + esc(focusKey) + '"'
@@ -1036,7 +1017,7 @@ function _renderAgentGridAddArchitectRow(gname, gsLocal, agents) {
   const navId = _gridNavControlId('agent-new-architect', gname, '');
   const focusKey = _gridNavControlFocusKey('agent-new-architect', gname, '');
   let html = '<div class="agent-grid-new-architect-row">';
-  html += '<button type="button" class="agent-grid-new-architect-btn' + _gridNavFocusedClass(navId) + '"'
+  html += '<button type="button" class="ghost-card ghost-card--architect' + _gridNavFocusedClass(navId) + '"'
     + ' data-action="new-architect"'
     + ' data-nav-id="' + esc(navId) + '"'
     + ' data-group="' + esc(gname) + '"'
@@ -1044,34 +1025,6 @@ function _renderAgentGridAddArchitectRow(gname, gsLocal, agents) {
     + (atCap ? ' disabled aria-disabled="true" title="Agent limit reached"' : ' title="Create a new architect in this group"')
     + (atCap ? '' : ' onclick="event.stopPropagation();openAddArchitectForGroup(' + groupArg + ')"')
     + '>+ New Architect</button>';
-  html += '</div>';
-  return html;
-}
-
-function _renderAgentGridAddCell(gname, gsLocal, agents) {
-  const atCap = gsLocal.max_agents > 0 && agents.length >= gsLocal.max_agents;
-  let html = '<div class="agent-grid-global-add-row">';
-  if (atCap) {
-    html += `<div class="cell cell-add disabled">`;
-    html += `  <div class="cell-add-icon">\u2013</div>`;
-    html += `  <div class="cell-name">Full</div>`;
-    html += `</div>`;
-  } else {
-    const createMenu = _agentCreateMenuAction(gname);
-    html += `<div class="cell cell-add" onclick="quickAddAgent('${esc(gname)}')">`;
-    html += `  <div class="cell-add-icon">+</div>`;
-    html += `  <div class="cell-name">New</div>`;
-    html += `  <button class="cell-add-drop" data-focus-key="agent-add-menu:${esc(gname)}" onclick="event.stopPropagation();toggleMenu(this)">\u25BE</button>`;
-    html += `  <div class="split-menu">`;
-    html += `<button onclick="event.stopPropagation();closeMenus();openAddArchitectModal('${esc(gname)}')">Architect</button>`;
-    html += `<button onclick="event.stopPropagation();closeMenus();openAddEngineerModal()">Engineer</button>`;
-    html += _renderWeaverMenuItem(gname, gsLocal);
-    html += `<div class="split-sep"></div>`;
-    html += _renderAgentTemplateMenuItems(gname);
-    html += `<button onclick="event.stopPropagation();closeMenus();${createMenu.action}">${createMenu.label}</button>`;
-    html += `</div>`;
-    html += `</div>`;
-  }
   html += '</div>';
   return html;
 }
@@ -1170,7 +1123,7 @@ function render() {
 
     html += `<div class="group-body"><div class="group-body-inner">`;
 
-    /* Agent grid (+ New cell is part of the grid) — hierarchical by kind/owner */
+    /* Agent grid — hierarchical by kind/owner */
     const agentLayout = ctx.agentLayout;
     const visibleAgentById = agentLayout.visibleAgentById;
     const visibleEngineerIds = agentLayout.visibleEngineerIds;
@@ -1203,7 +1156,6 @@ function render() {
       html += '</section>';
     }
     html += _renderAgentGridAddArchitectRow(gname, gsLocal, agents);
-    html += _renderAgentGridAddCell(gname, gsLocal, agents);
     html += `</div>`;
 
     /* Details + terminal drawer for selected agent (if in this group) */

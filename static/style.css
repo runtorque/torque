@@ -594,6 +594,8 @@ body.runtime-embedded .terminal-empty {
   --agent-grid-card-basis: 86px;
   --agent-grid-card-min: 72px;
   --agent-grid-card-max: 112px;
+  --agent-grid-card-height: 64px;
+  --agent-ghost-card-height: calc(var(--agent-grid-card-height) / 4);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -671,8 +673,7 @@ body.runtime-embedded .terminal-empty {
 }
 .engineer-row-workers > .cell,
 .loose-workers-strip > .cell,
-.loose-workers-placeholder-btn,
-.agent-grid-global-add-row > .cell {
+.ghost-card--worker {
   flex: 0 1 var(--agent-grid-card-basis);
   min-width: var(--agent-grid-card-min);
   max-width: var(--agent-grid-card-max);
@@ -729,48 +730,50 @@ body.runtime-embedded .terminal-empty {
   padding: 0 0 2px;
   box-sizing: border-box;
 }
-.loose-workers-placeholder-btn {
+.ghost-card {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 30px;
-  padding: 6px 9px;
+  height: var(--agent-ghost-card-height);
+  min-height: var(--agent-ghost-card-height);
+  padding: 0 8px;
+  box-sizing: border-box;
   border: 1px dashed color-mix(in srgb, var(--border) 80%, transparent);
   border-radius: var(--radius);
   color: var(--text-dim);
   background: transparent;
   font: 9px var(--font);
-  opacity: .72;
-}
-.agent-section-new-engineer-btn,
-.agent-grid-new-architect-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 30px;
-  padding: 6px 10px;
-  border: 1px solid color-mix(in srgb, var(--accent) 46%, var(--border));
-  border-radius: var(--radius);
-  color: var(--text);
-  background: color-mix(in srgb, var(--accent) 11%, transparent);
-  font: 9px var(--font);
   font-weight: 700;
+  line-height: 1;
   letter-spacing: .01em;
+  opacity: .72;
   transition: background .15s, border-color .15s, color .15s, opacity .15s;
+  cursor: pointer;
+  white-space: nowrap;
 }
-.agent-section-new-engineer-btn:hover,
-.agent-grid-new-architect-btn:hover {
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 66%, var(--border));
+.ghost-card--architect,
+.ghost-card--engineer {
+  flex: 0 0 auto;
 }
-.agent-section-new-engineer-btn.focused,
-.agent-grid-new-architect-btn.focused,
-.loose-workers-placeholder-btn.focused {
+.ghost-card--architect {
+  width: var(--agent-architect-column-width);
+}
+.ghost-card--engineer {
+  width: var(--agent-engineer-column-width);
+}
+.ghost-card:hover,
+.ghost-card:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  opacity: 1;
+  outline: none;
+}
+.ghost-card.focused {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
 }
-.agent-section-new-engineer-btn:disabled,
-.agent-grid-new-architect-btn:disabled {
+.ghost-card:disabled {
   cursor: default;
   opacity: .55;
   color: var(--text-dim);
@@ -782,52 +785,14 @@ body.runtime-embedded .terminal-empty {
   justify-content: flex-start;
   padding-top: 2px;
 }
-.loose-workers-placeholder-btn {
-  min-height: 64px;
-  cursor: pointer;
-}
-.loose-workers-new-worker-btn:hover,
-.loose-workers-new-worker-btn:focus-visible {
-  border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
-  color: var(--text);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-  outline: none;
-}
-.loose-workers-placeholder-btn:disabled {
-  color: var(--text-dim);
-}
-.agent-grid-global-add-row {
-  display: flex;
-  justify-content: flex-start;
-  padding-top: 2px;
-}
 
 /* ------------------------------------------------------------------ */
-/* Split button (+ New ▾)                                              */
+/* Menu popovers                                                       */
 /* ------------------------------------------------------------------ */
 .section-btns {
   display: flex; gap: 4px;
   padding: 4px 8px 6px;
 }
-.split-btn {
-  position: relative; display: inline-flex;
-  border: 1px solid var(--border); border-radius: var(--radius);
-}
-.split-main {
-  padding: 3px 8px;
-  font-size: 9px; color: var(--text-dim);
-  border-right: 1px solid var(--border);
-  border-radius: var(--radius) 0 0 var(--radius);
-  transition: background .15s, color .15s;
-}
-.split-main:hover { background: var(--bg-hover); color: var(--text); }
-.split-drop {
-  padding: 3px 5px;
-  font-size: 8px; color: var(--text-dim);
-  border-radius: 0 var(--radius) var(--radius) 0;
-  transition: background .15s, color .15s;
-}
-.split-drop:hover { background: var(--bg-hover); color: var(--text); }
 .split-menu {
   display: none; position: fixed;
   z-index: 50;
@@ -1088,21 +1053,6 @@ body.runtime-embedded .terminal-empty {
   color: color-mix(in srgb, var(--green) 78%, white);
 }
 .cell-icon { font-size: 18px; line-height: 1; margin-bottom: 2px; }
-.cell.cell-add {
-  border: 1px dashed var(--border);
-  background: transparent;
-  opacity: .6;
-}
-.cell.cell-add:hover { opacity: 1; background: var(--bg-cell); }
-.cell-add-icon { font-size: 18px; line-height: 1; margin-bottom: 2px; color: var(--text-dim); }
-.cell-add-drop {
-  position: absolute; top: 2px; right: 2px;
-  font-size: 10px; color: var(--text-dim);
-  width: 18px; height: 18px;
-  display: flex; align-items: center; justify-content: center;
-  border-radius: 3px;
-}
-.cell-add-drop:hover { background: var(--bg-hover); color: var(--text); }
 /* Agent type label — bottom-left, opposite role badges */
 .cell-type {
   position: absolute; bottom: 2px; left: 3px;
@@ -1686,18 +1636,17 @@ body.runtime-embedded .agent-grid {
   --agent-engineer-column-width: 132px;
   --agent-grid-card-basis: 112px;
   --agent-grid-card-max: 140px;
+  --agent-grid-card-height: 80px;
   gap: 8px;
   padding: 9px 11px;
 }
 body.runtime-embedded .engineer-row-workers > .cell,
 body.runtime-embedded .loose-workers-strip > .cell,
-body.runtime-embedded .loose-workers-placeholder-btn,
-body.runtime-embedded .agent-grid-global-add-row > .cell {
+body.runtime-embedded .ghost-card--worker {
   flex-basis: var(--agent-grid-card-basis);
   max-width: var(--agent-grid-card-max);
 }
 body.runtime-embedded .agent-section-user-card,
-body.runtime-embedded .loose-workers-placeholder-btn,
 body.runtime-embedded .engineer-row-workers {
   min-height: 80px;
 }
@@ -2111,9 +2060,6 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 
 #modal-confirm { z-index: 200; }
 #confirm-message { font-size: 12px; line-height: 1.5; }
-
-/* Max agents cap — disabled add cell */
-.cell.cell-add.disabled { opacity: .3; cursor: not-allowed; pointer-events: none; }
 
 /* ------------------------------------------------------------------ */
 /* Worktree History modal                                              */
