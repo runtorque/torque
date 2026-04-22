@@ -1294,6 +1294,7 @@ function renderAgentCell(a, options) {
   if (a.status === 'stopped') cls.push('stopped');
   const _isArchitect = (a.kind || '') === 'architect';
   const _isEngineer = (a.kind || '') === 'engineer';
+  const _isWorker = (a.kind || '') === 'worker';
   const _isDismissed = _isDismissedEngineer(a);
   // Check if this agent is the weaver for its group
   const _gs = (state.group_settings || {})[a.group];
@@ -1379,6 +1380,8 @@ function renderAgentCell(a, options) {
   } else if (_isEngineer) {
     if (_isDismissed) h += `<div class="cell-dismissed-badge" title="Dismissed engineer">\u23F8 dismissed</div>`;
     else h += `<div class="cell-engineer-badge">engineer</div>`;
+  } else if (_isWorker) {
+    h += `<div class="cell-worker-badge">worker</div>`;
   }
   if (_weaverAsking) {
     h += `<div class="cell-weaver-ask" title="${esc(_weaverWs.pending_question)}">? awaiting input</div>`;

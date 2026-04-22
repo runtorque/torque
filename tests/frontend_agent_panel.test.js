@@ -157,6 +157,43 @@ test('renderAgentPanel renders architect, engineer, worker, and terminal panels'
   assert.match(panel.innerHTML, /pytest/);
 });
 
+test('architect roster renders worker kind badges with worker-specific class', () => {
+  const { context, panel } = createHarness();
+  context._esc = function(value) { return String(value); };
+  context.state.agents = {
+    'arch-1': {
+      id: 'arch-1',
+      name: 'Planner',
+      kind: 'architect',
+      group: 'alpha',
+      cell_type: 'agent',
+    },
+    'eng-1': {
+      id: 'eng-1',
+      name: 'Builder',
+      kind: 'engineer',
+      group: 'alpha',
+      hired_by_architect_id: 'arch-1',
+      cell_type: 'agent',
+    },
+    'worker-1': {
+      id: 'worker-1',
+      name: 'Worker Bee',
+      kind: 'worker',
+      group: 'alpha',
+      owner_engineer_id: 'eng-1',
+      cell_type: 'agent',
+    },
+  };
+  context.state.groups.alpha = ['arch-1', 'eng-1', 'worker-1'];
+  context.focusedItemId = 'arch-1';
+
+  context.agentPanelSelectTab('hired_engineers');
+
+  assert.match(panel.innerHTML, /class="engineer-row-kind engineer-row-kind-engineer">engineer<\/span>/);
+  assert.match(panel.innerHTML, /class="engineer-row-kind engineer-row-kind-worker">worker<\/span>/);
+});
+
 test('agentPanelSelectTab remembers the last selected tab per kind', () => {
   const { context, panel } = createHarness();
   setFocusedAgent(context, {

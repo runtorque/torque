@@ -6702,6 +6702,7 @@ test('renderAgentCell shows per-engineer and architect digest pause controls wit
     name: 'Worker',
     icon: '🤖',
     group: 'alpha',
+    kind: 'worker',
     cell_type: 'agent',
     status: 'running',
   });
@@ -6732,14 +6733,18 @@ test('renderAgentCell shows per-engineer and architect digest pause controls wit
   assert.match(engineerNamedWeaverHtml, /^<div class="cell engineer"/);
   assert.doesNotMatch(engineerNamedWeaverHtml, /^<div class="[^"]*\bweaver(?:\b|-)/);
   assert.doesNotMatch(workerHtml, /cell-weaver-toggle/);
+  assert.match(workerHtml, /class="cell-worker-badge">worker<\/div>/);
+  assert.doesNotMatch(workerHtml, /cell-engineer-badge|cell-architect-badge/);
   assert.match(engineerHtml, /^<div class="cell engineer"/);
   assert.doesNotMatch(engineerHtml, /^<div class="[^"]*\bweaver(?:\b|-)/);
+  assert.match(engineerHtml, /class="cell-engineer-badge">engineer<\/div>/);
   assert.match(engineerHtml, /class="cell-weaver-toggle running"/);
   assert.match(engineerHtml, /toggleDigestPauseForAgent\(decodeURIComponent\('eng-1'\)\)/);
   assert.match(engineerHtml, /Pause event delivery/);
   assert.doesNotMatch(engineerHtml, /Pause Weaver event delivery/);
   assert.match(architectHtml, /^<div class="cell architect"/);
   assert.doesNotMatch(architectHtml, /^<div class="[^"]*\bweaver(?:\b|-)/);
+  assert.match(architectHtml, /class="cell-architect-badge">architect<\/div>/);
   assert.match(architectHtml, /class="cell-weaver-toggle running"/);
   assert.match(architectHtml, /toggleDigestPauseForAgent\(decodeURIComponent\('arch-1'\)\)/);
   assert.match(architectHtml, /Pause event delivery/);
@@ -6887,6 +6892,7 @@ test('agent role badges render in the bottom-right opposite the agent type label
   const typeRule = css.match(/\.cell-type\s*\{[^}]*\}/)[0];
   const engineerRule = css.match(/\.cell-engineer-badge\s*\{[^}]*\}/)[0];
   const architectRule = css.match(/\.cell-architect-badge\s*\{[^}]*\}/)[0];
+  const workerRule = css.match(/\.cell-worker-badge\s*\{[^}]*\}/)[0];
 
   assert.match(typeRule, /bottom:\s*2px;/);
   assert.match(typeRule, /left:\s*3px;/);
@@ -6896,6 +6902,10 @@ test('agent role badges render in the bottom-right opposite the agent type label
   assert.match(architectRule, /bottom:\s*2px;/);
   assert.match(architectRule, /right:\s*3px;/);
   assert.doesNotMatch(architectRule, /left:\s*3px;/);
+  assert.match(workerRule, /bottom:\s*2px;/);
+  assert.match(workerRule, /right:\s*3px;/);
+  assert.doesNotMatch(workerRule, /left:\s*3px;/);
+  assert.match(workerRule, /color:\s*var\(--green\);/);
 });
 
 test('agent cards do not define legacy weaver edge chrome', () => {

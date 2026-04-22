@@ -914,6 +914,21 @@ body.runtime-embedded .terminal-empty {
   padding: 0 4px;
   line-height: 1.4;
 }
+.cell-worker-badge {
+  position: absolute;
+  bottom: 2px;
+  right: 3px;
+  font-size: 7px;
+  letter-spacing: .03em;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--green);
+  background: rgba(63, 185, 80, 0.12);
+  border: 1px solid rgba(63, 185, 80, 0.24);
+  border-radius: 999px;
+  padding: 0 4px;
+  line-height: 1.4;
+}
 .cell-dismissed-badge {
   position: absolute;
   bottom: 2px;
@@ -5869,6 +5884,11 @@ body.diff-view-open #ctx-menu {
   border: 1px solid rgba(88, 166, 255, 0.24);
   border-radius: 999px;
   padding: 1px 5px;
+}
+.engineer-row-kind-worker {
+  color: var(--green);
+  background: rgba(63, 185, 80, 0.12);
+  border-color: rgba(63, 185, 80, 0.24);
 }
 .engineer-row-slug {
   font-size: 9px;
