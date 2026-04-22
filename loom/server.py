@@ -67,6 +67,10 @@ from .artifacts import (
     normalize_artifacts,
     task_artifacts,
 )
+from .attachment_uploads import (
+    AttachmentUploadError,
+    save_message_attachment_stream,
+)
 from .server_artifacts import (
     describe_task_artifact_for_digest,
     finalize_task_attachments,
@@ -1421,15 +1425,18 @@ def _format_injected_mcp_message_prompt(
     recipient_kind: str,
     message_id: str,
     recipient_anchor: str = "",
+    ack_required: bool = False,
 ) -> str:
-    sender_label = sender_name or sender_kind or "peer"
-    if sender_kind and sender_name:
-        header = f"Message from {sender_name} ({sender_kind})"
+    sender_kind_key = str(sender_kind or "").strip()
+    recipient_kind_key = str(recipient_kind or "").strip()
+    sender_label = sender_name or sender_kind_key or "peer"
+    if sender_kind_key and sender_name:
+        header = f"Message from {sender_name} ({sender_kind_key})"
     else:
         header = f"Message from {sender_label}"
     reply_tool = (
-        f"mcp__loom__{recipient_kind}_reply"
-        if recipient_kind in {"architect", "engineer"}
+        f"mcp__loom__{recipient_kind_key}_reply"
+        if recipient_kind_key in {"architect", "engineer"}
         else "mcp__loom__loom_reply"
     )
     blocks = []
@@ -1442,10 +1449,14 @@ def _format_injected_mcp_message_prompt(
         body = body[len(anchor):].lstrip("\n")
     if body:
         blocks.append(body)
-    blocks.append(
-        f'Reply with: {reply_tool}(message_id="{message_id}", '
-        'message="your response")'
-    )
+    include_reply_hint = True
+    if sender_kind_key == "engineer" and recipient_kind_key == "architect":
+        include_reply_hint = bool(ack_required)
+    if include_reply_hint:
+        blocks.append(
+            f'Reply with: {reply_tool}(message_id="{message_id}", '
+            'message="your response")'
+        )
     prefix = "" if anchor else "\n"
     return prefix + "\n\n".join(blocks) + "\n---\n"
 
@@ -1510,6 +1521,7 @@ async def _replay_buffered_cross_kind_messages(
             recipient_kind=str(getattr(target, "kind", "") or ""),
             message_id=message_id,
             recipient_anchor=recipient_anchor,
+            ack_required=bool(entry.get("ack_required", False)),
         )
         try:
             if hasattr(bridge, "prime_input_ready"):
@@ -9383,6 +9395,7 @@ async def main(connection=None):
                         ),
                         message_id=str(data.get("message_id", "") or ""),
                         recipient_anchor=recipient_anchor,
+                        ack_required=bool(data.get("ack_required", False)),
                     )
                     try:
                         if hasattr(bridge, "prime_input_ready"):
@@ -9941,6 +9954,68 @@ async def main(connection=None):
                 shutil.rmtree(att_dir, ignore_errors=True)
         return web.json_response({"ok": True})
 
+    async def handle_attachment_upload(request):
+        """POST /api/attachment/upload — image drops for agent message compose."""
+        try:
+            reader = await request.multipart()
+        except Exception:
+            return web.json_response(
+                {"ok": False, "error": "invalid multipart upload"}, status=400)
+
+        agent_id = ""
+        saved = []
+        try:
+            while True:
+                part = await reader.next()
+                if part is None:
+                    break
+                if part.name == "agent_id":
+                    agent_id = (await part.text()).strip()
+                elif part.name == "file":
+                    if not agent_id:
+                        raise AttachmentUploadError(
+                            "agent_id must come before file parts", status=400)
+                    mime = part.headers.get(
+                        aiohttp.hdrs.CONTENT_TYPE,
+                        "application/octet-stream")
+                    entry = await save_message_attachment_stream(
+                        agent_id=agent_id,
+                        filename=part.filename or "screenshot",
+                        mime_type=mime,
+                        stream=part,
+                        attachments_dir=ATTACHMENTS_DIR,
+                    )
+                    saved.append(entry)
+        except AttachmentUploadError as exc:
+            # Keep multi-file drops all-or-nothing from the endpoint's
+            # perspective.  A later invalid/oversized part should not leave
+            # earlier files from the same compose drop behind.
+            for entry in saved:
+                try:
+                    Path(entry.get("path", "")).unlink()
+                except Exception:
+                    pass
+            return web.json_response(
+                {"ok": False, "error": str(exc)}, status=exc.status)
+        except Exception as exc:
+            for entry in saved:
+                try:
+                    Path(entry.get("path", "")).unlink()
+                except Exception:
+                    pass
+            log.exception("Attachment upload failed")
+            return web.json_response(
+                {"ok": False, "error": str(exc) or "attachment upload failed"},
+                status=500)
+
+        if not agent_id:
+            return web.json_response(
+                {"ok": False, "error": "missing agent_id"}, status=400)
+        if not saved:
+            return web.json_response(
+                {"ok": False, "error": "missing file"}, status=400)
+        return web.json_response({"ok": True, "data": saved})
+
     async def handle_serve_attachment(request):
         """GET /attachments/{task_id}/{filename} — serve attachment file."""
         task_id = request.match_info["task_id"]
@@ -9978,6 +10053,7 @@ async def main(connection=None):
     app_server.router.add_post("/mcp", create_mcp_handler(handle_command, state))
     app_server.router.add_post("/api/upload", handle_upload)
     app_server.router.add_post("/api/upload/cleanup", handle_upload_cleanup)
+    app_server.router.add_post("/api/attachment/upload", handle_attachment_upload)
     app_server.router.add_get(
         "/attachments/{task_id}/{filename}", handle_serve_attachment)
     from .config import SCRIPT_DIR

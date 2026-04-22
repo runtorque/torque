@@ -10,6 +10,16 @@ let _embeddedTerminalDropSurface = null;
 let _embeddedTerminalDropHandlers = null;
 let _embeddedTerminalDropDepth = 0;
 let _terminalComposeDrafts = Object.create(null);
+let _terminalComposeErrors = Object.create(null);
+
+var TERMINAL_COMPOSE_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
+var TERMINAL_COMPOSE_ATTACHMENT_MIME_TYPES = {
+  'image/png': true,
+  'image/jpeg': true,
+  'image/webp': true,
+  'image/gif': true,
+};
+
 var XTERM_SCROLLBACK_DEFAULT = 2000;
 var XTERM_SCROLLBACK_MIN = 100;
 var XTERM_SCROLLBACK_MAX = 100000;
@@ -300,6 +310,128 @@ function _terminalComposeSetButtonState(input) {
   if (button) button.disabled = !String(input.value || '').trim();
 }
 
+function _terminalComposeErrorElement(input) {
+  const container = _terminalComposeContainerFor(input);
+  return container && container.querySelector
+    ? container.querySelector('.terminal-compose-error')
+    : null;
+}
+
+function _terminalComposeSetError(input, message) {
+  if (!input) return;
+  const cellId = input.dataset ? (input.dataset.cellId || '') : '';
+  const text = String(message || '');
+  if (cellId) _terminalComposeErrors[cellId] = text;
+  const el = _terminalComposeErrorElement(input);
+  if (el) el.textContent = text;
+}
+
+function _terminalComposeSetDropTarget(input, active) {
+  if (!input || !input.classList) return;
+  input.classList.toggle('terminal-compose-drop-target', !!active);
+  const container = _terminalComposeContainerFor(input);
+  if (container && container.classList) {
+    container.classList.toggle('terminal-compose-drop-target', !!active);
+  }
+}
+
+function _terminalComposeDroppedFiles(dataTransfer) {
+  if (!dataTransfer || !dataTransfer.files || !dataTransfer.files.length) return [];
+  return Array.prototype.slice.call(dataTransfer.files);
+}
+
+function _terminalComposeHasDraggedFiles(dataTransfer) {
+  if (!dataTransfer) return false;
+  if (dataTransfer.types && typeof dataTransfer.types.length === 'number') {
+    if (Array.prototype.indexOf.call(dataTransfer.types, 'Files') !== -1) return true;
+  }
+  if (dataTransfer.items && typeof dataTransfer.items.length === 'number') {
+    for (var i = 0; i < dataTransfer.items.length; i++) {
+      var item = dataTransfer.items[i];
+      if (item && item.kind === 'file') return true;
+    }
+  }
+  return _terminalComposeDroppedFiles(dataTransfer).length > 0;
+}
+
+function _terminalComposeNormalizeMime(type) {
+  return String(type || '').split(';')[0].trim().toLowerCase();
+}
+
+function _terminalComposeFormatBytes(bytes) {
+  var mb = Math.floor(bytes / (1024 * 1024));
+  return (mb || 1) + ' MB';
+}
+
+function _terminalComposeFileLabel(file) {
+  return file && file.name ? String(file.name) : 'Dropped file';
+}
+
+function terminalComposeValidateDroppedFiles(files) {
+  var accepted = [];
+  var errors = [];
+  var list = Array.prototype.slice.call(files || []);
+  for (var i = 0; i < list.length; i++) {
+    var file = list[i];
+    var mime = _terminalComposeNormalizeMime(file && file.type);
+    var name = _terminalComposeFileLabel(file);
+    if (!TERMINAL_COMPOSE_ATTACHMENT_MIME_TYPES[mime]) {
+      errors.push(name + ' is not a supported image type.');
+      continue;
+    }
+    if (file && typeof file.size === 'number'
+        && file.size > TERMINAL_COMPOSE_ATTACHMENT_MAX_BYTES) {
+      errors.push(name + ' is larger than '
+        + _terminalComposeFormatBytes(TERMINAL_COMPOSE_ATTACHMENT_MAX_BYTES) + '.');
+      continue;
+    }
+    accepted.push(file);
+  }
+  return { accepted: accepted, errors: errors };
+}
+
+function _terminalComposeInsertPaths(input, paths) {
+  if (!input || !paths || !paths.length) return;
+  var insertText = paths.map(function(path) { return String(path || ''); })
+    .filter(Boolean)
+    .join('\n');
+  if (!insertText) return;
+  var value = String(input.value || '');
+  var start = typeof input.selectionStart === 'number' ? input.selectionStart : value.length;
+  var end = typeof input.selectionEnd === 'number' ? input.selectionEnd : start;
+  start = Math.max(0, Math.min(value.length, start));
+  end = Math.max(start, Math.min(value.length, end));
+  input.value = value.slice(0, start) + insertText + value.slice(end);
+  var cursor = start + insertText.length;
+  if (typeof input.setSelectionRange === 'function') {
+    input.setSelectionRange(cursor, cursor);
+  } else {
+    input.selectionStart = cursor;
+    input.selectionEnd = cursor;
+  }
+  terminalComposeInput(input);
+  if (typeof input.focus === 'function') input.focus();
+}
+
+async function _terminalComposeUploadAttachments(cellId, files) {
+  var fd = new FormData();
+  fd.append('agent_id', String(cellId || ''));
+  for (var i = 0; i < files.length; i++) {
+    fd.append('file', files[i]);
+  }
+  var r = await fetch('/api/attachment/upload', { method: 'POST', body: fd });
+  var res = r && typeof r.json === 'function' ? await r.json() : null;
+  if (!res || !res.ok) {
+    throw new Error((res && res.error) || 'Attachment upload failed.');
+  }
+  if (!Array.isArray(res.data)) {
+    throw new Error('Attachment upload failed.');
+  }
+  return res.data
+    .map(function(entry) { return entry && entry.path ? entry.path : ''; })
+    .filter(Boolean);
+}
+
 function _terminalComposePersistFromDom(root) {
   const input = _terminalComposeTextarea(root);
   if (!input || !input.dataset || !input.dataset.cellId) return;
@@ -345,14 +477,24 @@ function _renderTerminalCompose(root, cell) {
   const draft = Object.prototype.hasOwnProperty.call(_terminalComposeDrafts, cellId)
     ? _terminalComposeDrafts[cellId]
     : '';
+  const error = Object.prototype.hasOwnProperty.call(_terminalComposeErrors, cellId)
+    ? _terminalComposeErrors[cellId]
+    : '';
   const disabled = !String(draft || '').trim();
   root.innerHTML = ''
     + '<form class="terminal-compose" data-cell-id="' + esc(cellId) + '" onsubmit="return terminalComposeSubmit(event, \'' + esc(cellId) + '\')">'
+    + '  <div class="terminal-compose-input-wrap">'
     + '  <textarea id="' + esc(inputId) + '" class="terminal-compose-input" rows="1"'
     + ' data-cell-id="' + esc(cellId) + '"'
     + ' placeholder="Send a message to ' + esc(cell.name || 'terminal') + '\u2026"'
     + ' oninput="terminalComposeInput(this)"'
-    + ' onkeydown="terminalComposeKeydown(event, \'' + esc(cellId) + '\')">' + esc(draft) + '</textarea>'
+    + ' onkeydown="terminalComposeKeydown(event, \'' + esc(cellId) + '\')"'
+    + ' ondragenter="terminalComposeDragenter(event, \'' + esc(cellId) + '\')"'
+    + ' ondragover="terminalComposeDragover(event, \'' + esc(cellId) + '\')"'
+    + ' ondragleave="terminalComposeDragleave(event, \'' + esc(cellId) + '\')"'
+    + ' ondrop="terminalComposeDrop(event, \'' + esc(cellId) + '\')">' + esc(draft) + '</textarea>'
+    + '  <div class="terminal-compose-error" aria-live="polite">' + esc(error) + '</div>'
+    + '  </div>'
     + '  <button id="' + esc(buttonId) + '" class="terminal-compose-submit" type="submit"'
     + (disabled ? ' disabled' : '')
     + ' title="Send message">Send</button>'
@@ -369,6 +511,7 @@ function terminalComposeInput(el) {
   if (!el) return;
   const cellId = el.dataset ? (el.dataset.cellId || '') : '';
   if (cellId) _terminalComposeDrafts[cellId] = String(el.value || '');
+  if (cellId && _terminalComposeErrors[cellId]) _terminalComposeSetError(el, '');
   _terminalComposeAutoResize(el);
   _terminalComposeSetButtonState(el);
 }
@@ -418,6 +561,72 @@ function terminalComposeKeydown(evt, cellId) {
     if (typeof evt.stopPropagation === 'function') evt.stopPropagation();
     terminalComposeSubmit(evt, cellId);
   }
+}
+
+function terminalComposeDragenter(evt, cellId) {
+  if (!evt || !_terminalComposeHasDraggedFiles(evt.dataTransfer)) return;
+  if (typeof evt.preventDefault === 'function') evt.preventDefault();
+  const input = evt.currentTarget || (
+    document.getElementById ? document.getElementById(_terminalComposeInputId(cellId)) : null
+  );
+  _terminalComposeSetDropTarget(input, true);
+}
+
+function terminalComposeDragover(evt, cellId) {
+  if (!evt || !_terminalComposeHasDraggedFiles(evt.dataTransfer)) return;
+  if (typeof evt.preventDefault === 'function') evt.preventDefault();
+  if (evt.dataTransfer) evt.dataTransfer.dropEffect = 'copy';
+  const input = evt.currentTarget || (
+    document.getElementById ? document.getElementById(_terminalComposeInputId(cellId)) : null
+  );
+  _terminalComposeSetDropTarget(input, true);
+}
+
+function terminalComposeDragleave(evt, cellId) {
+  if (!evt || !_terminalComposeHasDraggedFiles(evt.dataTransfer)) return;
+  const input = evt.currentTarget || (
+    document.getElementById ? document.getElementById(_terminalComposeInputId(cellId)) : null
+  );
+  _terminalComposeSetDropTarget(input, false);
+}
+
+async function terminalComposeDrop(evt, cellId) {
+  if (!evt || !_terminalComposeHasDraggedFiles(evt.dataTransfer)) return false;
+  if (typeof evt.preventDefault === 'function') evt.preventDefault();
+  if (typeof evt.stopPropagation === 'function') evt.stopPropagation();
+  const id = String(cellId || '');
+  const input = evt.currentTarget || (
+    document.getElementById ? document.getElementById(_terminalComposeInputId(id)) : null
+  );
+  _terminalComposeSetDropTarget(input, false);
+
+  var files = _terminalComposeDroppedFiles(evt.dataTransfer);
+  if (!files.length) {
+    _terminalComposeSetError(input, 'Drop an image file to attach it.');
+    return false;
+  }
+  var validation = terminalComposeValidateDroppedFiles(files);
+  if (validation.errors.length) {
+    _terminalComposeSetError(input, validation.errors[0]);
+    return false;
+  }
+  if (!validation.accepted.length) {
+    _terminalComposeSetError(input, 'Drop an image file to attach it.');
+    return false;
+  }
+
+  try {
+    _terminalComposeSetError(input, '');
+    var paths = await _terminalComposeUploadAttachments(id, validation.accepted);
+    if (!paths.length) {
+      _terminalComposeSetError(input, 'Attachment upload failed.');
+      return false;
+    }
+    _terminalComposeInsertPaths(input, paths);
+  } catch (e) {
+    _terminalComposeSetError(input, (e && e.message) || 'Attachment upload failed.');
+  }
+  return false;
 }
 
 function _disposeEmbeddedTerminal() {

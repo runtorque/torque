@@ -38,6 +38,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.state.board_lanes = ["Backlog", "To Do", "In Progress", "Done", "Archived"]
         self.state.groups["loom"] = []
         self.state._db_save_groups()
+        self.handle_calls = []
 
     def _add_architect(self, agent_id: str, name: str):
         cell = self.state_mod.AgentCell(
@@ -104,6 +105,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         return task
 
     async def _handle_command(self, payload):
+        self.handle_calls.append(dict(payload))
         if payload["cmd"] == "board_add_task":
             task = self.state.board_add_task(
                 payload.get("task", ""),
@@ -815,6 +817,49 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(engineer_denied_error)
         self.assertEqual(engineer_denied_text, "architect not found in scope")
+
+    async def test_engineer_message_architect_ack_required_defaults_false_and_propagates(self):
+        architect = self._add_architect("arch-1", "Architect")
+        architect.session_id = "session-architect"
+        hired = self._add_engineer(
+            "eng-hired", "Hired", hired_by_architect_id=architect.id
+        )
+
+        status_text, status_error = await self._call_engineer(
+            "engineer_message_architect",
+            {"architect_id": architect.id, "message": "Status: going quiet."},
+            hired.id,
+        )
+
+        self.assertFalse(status_error, status_text)
+        self.assertFalse(architect.mcp_messages[0]["ack_required"])
+        self.assertFalse(hired.mcp_messages[0]["ack_required"])
+        injects = [
+            call for call in self.handle_calls
+            if call.get("cmd") == "inject_mcp_message"
+        ]
+        self.assertEqual(len(injects), 1)
+        self.assertFalse(injects[-1]["ack_required"])
+
+        question_text, question_error = await self._call_engineer(
+            "engineer_message_architect",
+            {
+                "architect_id": architect.id,
+                "message": "Should I cut scope?",
+                "ack_required": True,
+            },
+            hired.id,
+        )
+
+        self.assertFalse(question_error, question_text)
+        self.assertTrue(architect.mcp_messages[0]["ack_required"])
+        self.assertTrue(hired.mcp_messages[0]["ack_required"])
+        injects = [
+            call for call in self.handle_calls
+            if call.get("cmd") == "inject_mcp_message"
+        ]
+        self.assertEqual(len(injects), 2)
+        self.assertTrue(injects[-1]["ack_required"])
 
     async def test_architect_message_to_dismissed_engineer_buffers_for_rehire(self):
         architect = self._add_architect("arch-1", "Architect")
