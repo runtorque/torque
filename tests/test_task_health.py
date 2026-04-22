@@ -81,6 +81,76 @@ class TaskHealthTests(unittest.TestCase):
         self.assertEqual(idle_snapshots["task-1"].state, "idle-risk")
         self.assertEqual(stalled_snapshots["task-1"].state, "stalled")
 
+    def test_heartbeats_do_not_mask_progress_silence(self):
+        base = 50_000
+        task = self.state_mod.BoardTask(
+            id="task-1",
+            task="Review stall",
+            group="g",
+            lane="In Progress",
+            agent_id="agent-1",
+            updated_at=_iso(base),
+        )
+        agents = {
+            "agent-1": self.state_mod.AgentCell(
+                id="agent-1",
+                name="Worker",
+                group="g",
+                cell_type="agent",
+                last_progress_at=base,
+                last_heartbeat_at=base + (10 * 60),
+            )
+        }
+
+        snapshots = self.task_health_mod.compute_task_health(
+            {"task-1": task},
+            agents,
+            now_ts=base + (11 * 60),
+        )
+
+        self.assertEqual(snapshots["task-1"].state, "idle-risk")
+        self.assertEqual(
+            snapshots["task-1"].details["reasons"],
+            ["progress_silence_warning"],
+        )
+        self.assertEqual(snapshots["task-1"].details["silence_secs"], 11 * 60)
+
+    def test_token_zero_after_dispatch_is_caught_by_existing_silence_rule(self):
+        base = 60_000
+        task = self.state_mod.BoardTask(
+            id="task-1",
+            task="Worker never starts",
+            group="g",
+            lane="In Progress",
+            agent_id="agent-1",
+            updated_at=_iso(base),
+        )
+        agents = {
+            "agent-1": self.state_mod.AgentCell(
+                id="agent-1",
+                name="Worker",
+                group="g",
+                cell_type="agent",
+                status="running",
+                last_progress_at=base,
+                last_heartbeat_at=base + 30,
+                session_tokens_in=0,
+                session_tokens_out=0,
+            )
+        }
+
+        snapshots = self.task_health_mod.compute_task_health(
+            {"task-1": task},
+            agents,
+            now_ts=base + (11 * 60),
+        )
+
+        self.assertEqual(snapshots["task-1"].state, "idle-risk")
+        self.assertEqual(
+            snapshots["task-1"].details["reasons"],
+            ["progress_silence_warning"],
+        )
+
     def test_thrashing_detects_recent_message_churn_without_completion(self):
         base = 20_000
         messages = []

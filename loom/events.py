@@ -11,6 +11,15 @@ from .task_health import HEALTH_SEVERITY
 
 
 PERSISTENT_CELL_EVENT_KINDS = {"architect", "engineer"}
+PROGRESS_EVENT_TYPES = {
+    "tool_start",
+    "tool_end",
+    "message",
+    "error",
+    "waiting",
+    "progress",
+    "cost_update",
+}
 
 
 class PanelEventLog:
@@ -235,8 +244,20 @@ class EventBus:
 
         prev_activity = cell.activity
         prev_status = cell.status
+        prev_clocks = (
+            cell.last_progress_at,
+            cell.last_heartbeat_at,
+            cell.last_activity_at,
+            cell.last_event_at,
+        )
         self._apply(event, cell)
-        if cell.status != prev_status:
+        clocks_changed = prev_clocks != (
+            cell.last_progress_at,
+            cell.last_heartbeat_at,
+            cell.last_activity_at,
+            cell.last_event_at,
+        )
+        if cell.status != prev_status or clocks_changed:
             self._state._db_save_agent(cell)
         self._log.append(event)
         log.info("Event: cell='%s' type=%s activity='%s' detail='%s'",
@@ -261,10 +282,12 @@ class EventBus:
 
     def _apply(self, event: AgentEvent, cell):
         """Update AgentCell fields based on event type."""
-        cell.last_event_at = event.timestamp
-
         et = event.event_type
         d = event.data
+        if et in PROGRESS_EVENT_TYPES:
+            cell.mark_progress(event.timestamp)
+        else:
+            cell.mark_heartbeat(event.timestamp)
 
         if et == "session_start":
             cell.activity = ""
@@ -465,7 +488,12 @@ async def health_check(state, event_log: EventLog, event_bus: EventBus,
         for cell in state.cells_with_awareness():
             if cell.status != "running":
                 continue
-            if cell.last_event_at == 0.0:
+            last_progress_at = float(
+                getattr(cell, "last_progress_at", 0.0)
+                or getattr(cell, "last_event_at", 0.0)
+                or 0.0
+            )
+            if last_progress_at == 0.0:
                 continue  # never received an event
 
             # Fallback: unlink idle agent from post-derive parent task
@@ -485,7 +513,7 @@ async def health_check(state, event_log: EventLog, event_bus: EventBus,
             if timeout_min <= 0:
                 continue  # idle timeout disabled for this group
 
-            silence = now - cell.last_event_at
+            silence = now - last_progress_at
             timeout_sec = timeout_min * 60
 
             # No events for timeout while running and not waiting

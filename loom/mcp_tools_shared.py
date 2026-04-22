@@ -1397,7 +1397,9 @@ def _limit_health_summary(parts: list[str], fallback_parts: list[str]) -> str:
 def _fresh_health_details(details, *, now_ts: float) -> tuple[dict, int | None,
                                                              float | None]:
     fresh = dict(details or {}) if isinstance(details, dict) else {}
-    last_activity_ts = _parse_health_timestamp(fresh.get("last_activity_at"))
+    last_activity_ts = _parse_health_timestamp(
+        fresh.get("last_progress_at") or fresh.get("last_activity_at")
+    )
     silence_secs = None
     if last_activity_ts is not None:
         silence_secs = max(0, int(now_ts - last_activity_ts))
@@ -1429,10 +1431,16 @@ def _health_summary(health_state: str, *, details: dict, agent=None,
     state_name = str(health_state or "healthy").strip() or "healthy"
     if last_activity_ts is None:
         last_activity_ts = _parse_health_timestamp(
-            (details or {}).get("last_activity_at")
+            (details or {}).get("last_progress_at")
+            or (details or {}).get("last_activity_at")
         )
-    if last_activity_ts is None and agent and getattr(agent, "last_event_at", 0):
-        last_activity_ts = float(getattr(agent, "last_event_at", 0) or 0)
+    if last_activity_ts is None and agent:
+        progress_at = (
+            getattr(agent, "last_progress_at", 0)
+            or getattr(agent, "last_event_at", 0)
+        )
+        if progress_at:
+            last_activity_ts = float(progress_at)
     if silence_secs is None and last_activity_ts is not None:
         silence_secs = max(0, int(now_ts - last_activity_ts))
 

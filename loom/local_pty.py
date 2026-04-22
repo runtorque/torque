@@ -105,6 +105,7 @@ class LocalPtyAdapter:
             cell.activity_detail = ""
             cell.error_message = ""
             cell.needs_attention = False
+            self.state.mark_agent_heartbeat(cell, emit=False)
             self.state._emit_agent(cell)
             self.state._db_save_agent(cell)
         self.state.active_session_id = None
@@ -257,6 +258,7 @@ class LocalPtyAdapter:
         self._input_ready_events.pop(cell.id, None)
 
         await self._resolve_git_info(cell)
+        self.state.mark_agent_heartbeat(cell, emit=False)
         self.state._emit_agent(cell)
         self.state._db_save_agent(cell)
 
@@ -633,6 +635,7 @@ class LocalPtyAdapter:
     async def _update_cell_path(self, cell: AgentCell, path: str) -> None:
         cell.current_path = path
         await self._resolve_git_info(cell)
+        self.state.mark_agent_heartbeat(cell, emit=False)
         self.state._emit_agent(cell)
         await self.state.broadcast()
 
@@ -681,6 +684,7 @@ class LocalPtyAdapter:
         cell.activity_detail = ""
         cell.error_message = ""
         cell.needs_attention = False
+        self.state.mark_agent_heartbeat(cell, emit=False)
         self.state._emit_agent(cell)
         self.state._db_save_agent(cell)
         if self.state.active_session_id == session_id:
@@ -929,6 +933,7 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
             cell.activity_detail = ""
             cell.error_message = ""
             cell.needs_attention = False
+            self.state.mark_agent_heartbeat(cell, emit=False)
             self.state._emit_agent(cell)
             self.state._db_save_agent(cell)
 
@@ -977,6 +982,7 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
             cell.status = "idle"
         else:
             cell.status = "running" if cell.command else "idle"
+        self.state.mark_agent_heartbeat(cell, emit=False)
         self.state._emit_agent(cell)
         self.state._db_save_agent(cell)
 

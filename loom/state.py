@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import re
+import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -251,6 +252,13 @@ def merge_cleanup_flags(mode: str) -> tuple[bool, bool]:
     return (False, False)
 
 
+def _safe_float(value, default: float = 0.0) -> float:
+    try:
+        return float(value or 0.0)
+    except (TypeError, ValueError):
+        return default
+
+
 @dataclass
 class BoardTask:
     id: str
@@ -389,7 +397,15 @@ class AgentCell:
     agent_session_id: str = ""  # agent's own session ID (e.g. Claude Code session)
     activity: str = ""  # "", "thinking", "tool_call", "writing", "waiting"
     activity_detail: str = ""  # e.g. "Editing server.py", "Running tests"
-    last_event_at: float = 0.0  # timestamp of last event received
+    # Activity clocks:
+    # - last_progress_at is a real work signal and drives task health.
+    # - last_heartbeat_at is passive liveness from monitors/session pings.
+    # - last_activity_at/last_event_at are compatibility aliases for the
+    #   mixed "anything happened" clock.
+    last_progress_at: float = 0.0
+    last_heartbeat_at: float = 0.0
+    last_activity_at: float = 0.0
+    last_event_at: float = 0.0  # legacy mixed timestamp of last event received
     last_event_text: str = ""  # last meaningful event description
     session_tokens_in: int = 0  # cumulative input tokens this session
     session_tokens_out: int = 0  # cumulative output tokens this session
@@ -423,12 +439,81 @@ class AgentCell:
     # Weaver message tracking (ephemeral)
     pending_weaver_message: bool = False  # agent has unread message from weaver
 
+    def __post_init__(self):
+        """Normalize legacy activity clocks loaded from older snapshots."""
+        legacy = max(
+            _safe_float(self.last_activity_at),
+            _safe_float(self.last_event_at),
+        )
+        if not self.last_progress_at and legacy:
+            self.last_progress_at = legacy
+        if not self.last_heartbeat_at and legacy:
+            self.last_heartbeat_at = legacy
+        self._sync_activity_alias()
+
+    def _sync_activity_alias(self) -> bool:
+        """Keep compatibility clocks equal to max(progress, heartbeat)."""
+        mixed = max(
+            _safe_float(self.last_progress_at),
+            _safe_float(self.last_heartbeat_at),
+        )
+        changed = (
+            _safe_float(self.last_activity_at) != mixed
+            or _safe_float(self.last_event_at) != mixed
+        )
+        self.last_activity_at = mixed
+        self.last_event_at = mixed
+        return changed
+
+    def mark_progress(self, timestamp: float | None = None, *,
+                      heartbeat: bool = True) -> bool:
+        """Record a real work signal. Progress also counts as liveness."""
+        ts = _safe_float(timestamp if timestamp is not None else time.time())
+        if ts <= 0:
+            return False
+        before = (
+            _safe_float(self.last_progress_at),
+            _safe_float(self.last_heartbeat_at),
+            _safe_float(self.last_activity_at),
+            _safe_float(self.last_event_at),
+        )
+        self.last_progress_at = max(_safe_float(self.last_progress_at), ts)
+        if heartbeat:
+            self.last_heartbeat_at = max(_safe_float(self.last_heartbeat_at), ts)
+        self._sync_activity_alias()
+        after = (
+            _safe_float(self.last_progress_at),
+            _safe_float(self.last_heartbeat_at),
+            _safe_float(self.last_activity_at),
+            _safe_float(self.last_event_at),
+        )
+        return after != before
+
+    def mark_heartbeat(self, timestamp: float | None = None) -> bool:
+        """Record a passive liveness signal without advancing progress."""
+        ts = _safe_float(timestamp if timestamp is not None else time.time())
+        if ts <= 0:
+            return False
+        before = (
+            _safe_float(self.last_heartbeat_at),
+            _safe_float(self.last_activity_at),
+            _safe_float(self.last_event_at),
+        )
+        self.last_heartbeat_at = max(_safe_float(self.last_heartbeat_at), ts)
+        self._sync_activity_alias()
+        after = (
+            _safe_float(self.last_heartbeat_at),
+            _safe_float(self.last_activity_at),
+            _safe_float(self.last_event_at),
+        )
+        return after != before
+
 
 # Fields that are ephemeral (not meaningful across restarts)
 _EPHEMERAL_FIELDS = ("current_process", "current_path",
                      "current_branch", "git_root",
                      "activity", "activity_detail",
-                     "last_event_at", "last_event_text",
+                     "last_event_text",
                      "session_tokens_in", "session_tokens_out",
                      "error_message", "needs_attention", "last_summary",
                      "current_task_id",
@@ -1139,6 +1224,38 @@ class MatrixState:
             except Exception:
                 log.exception("Failed to delete agent %s", agent_id)
 
+    def mark_agent_progress(self, cell_or_id, timestamp: float | None = None,
+                            *, emit: bool = True,
+                            persist: bool = True) -> bool:
+        """Mark a cell's real-progress clock without touching callers' state."""
+        cell = self.agents.get(cell_or_id) if isinstance(cell_or_id, str) \
+            else cell_or_id
+        if not cell:
+            return False
+        changed = cell.mark_progress(timestamp)
+        if changed:
+            if emit:
+                self._emit_agent(cell)
+            if persist:
+                self._db_save_agent(cell)
+        return changed
+
+    def mark_agent_heartbeat(self, cell_or_id, timestamp: float | None = None,
+                             *, emit: bool = True,
+                             persist: bool = False) -> bool:
+        """Mark a cell's passive heartbeat clock without advancing progress."""
+        cell = self.agents.get(cell_or_id) if isinstance(cell_or_id, str) \
+            else cell_or_id
+        if not cell:
+            return False
+        changed = cell.mark_heartbeat(timestamp)
+        if changed:
+            if emit:
+                self._emit_agent(cell)
+            if persist:
+                self._db_save_agent(cell)
+        return changed
+
     def _db_save_groups(self):
         """Persist all groups and their memberships."""
         if self.db:
@@ -1430,9 +1547,12 @@ class MatrixState:
         """Record a task dispatch in history."""
         import time
         ts = time.time()
+        if cell.mark_progress(ts):
+            self._emit_agent(cell)
         weaver_group = str(weaver_group or "").strip()
         weaver_id = str(weaver_id or "").strip()
         try:
+            self._db_save_agent(cell)
             if self.db:
                 self.db.save_agent_task({
                     "agent_id": cell.id,
@@ -1475,14 +1595,20 @@ class MatrixState:
     def history_record_message(self, cell_id: str, action: str,
                                message: str, task_id: str = ""):
         """Record an agent message (loom ai report) in history."""
+        import time
+        ts = time.time()
+        cell = self.agents.get(cell_id)
+        if cell:
+            if cell.mark_progress(ts):
+                self._emit_agent(cell)
+            self._db_save_agent(cell)
         if not self.db:
             return
-        import time
         try:
             self.db.save_agent_message({
                 "agent_id": cell_id,
                 "task_id": task_id,
-                "timestamp": time.time(),
+                "timestamp": ts,
                 "action": action,
                 "message": message,
             })

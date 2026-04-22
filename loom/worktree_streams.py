@@ -1164,7 +1164,11 @@ def _select_owner_agent(state, *, stream_tasks: list[Any], repo_root: str,
             0 if current_id in stream_task_ids else 1,
             0 if getattr(cell, "status", "") == "running" else 1,
             0 if state.agent_is_busy(cell.id) and current_mutable else 1,
-            -float(getattr(cell, "last_event_at", 0.0) or 0.0),
+            -float(
+                getattr(cell, "last_activity_at", 0.0)
+                or getattr(cell, "last_event_at", 0.0)
+                or 0.0
+            ),
             str(getattr(cell, "name", "") or "").lower(),
             cell.id,
         )
@@ -1706,7 +1710,14 @@ def _latest_activity_iso(tasks: list[Any], agents: list[Any]) -> str:
     for task in tasks:
         latest = max(latest, _task_activity_ts(task))
     for cell in agents:
-        latest = max(latest, float(getattr(cell, "last_event_at", 0.0) or 0.0))
+        latest = max(
+            latest,
+            float(
+                getattr(cell, "last_activity_at", 0.0)
+                or getattr(cell, "last_event_at", 0.0)
+                or 0.0
+            ),
+        )
     return _timestamp_to_iso(latest)
 
 

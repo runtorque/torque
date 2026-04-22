@@ -318,6 +318,60 @@ class EventBusTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cell.activity_detail, "Reading logs")
         self.assertEqual(state.board_tasks[task.id].labels, ["keep"])
 
+    async def test_activity_change_heartbeat_does_not_advance_progress_clock(self):
+        state = self._make_state()
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            last_progress_at=100.0,
+            last_heartbeat_at=100.0,
+        )
+        state.agents[cell.id] = cell
+
+        bus = self.events_mod.EventBus(state, self.events_mod.EventLog())
+
+        await bus.emit(
+            self.base_mod.AgentEvent(
+                cell_id=cell.id,
+                timestamp=200.0,
+                event_type="activity_change",
+                data={"activity": "thinking", "detail": "Still alive"},
+            )
+        )
+
+        self.assertEqual(cell.last_progress_at, 100.0)
+        self.assertEqual(cell.last_heartbeat_at, 200.0)
+        self.assertEqual(cell.last_activity_at, 200.0)
+
+    async def test_progress_event_advances_progress_and_heartbeat_clocks(self):
+        state = self._make_state()
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            last_progress_at=100.0,
+            last_heartbeat_at=150.0,
+        )
+        state.agents[cell.id] = cell
+
+        bus = self.events_mod.EventBus(state, self.events_mod.EventLog())
+
+        await bus.emit(
+            self.base_mod.AgentEvent(
+                cell_id=cell.id,
+                timestamp=200.0,
+                event_type="progress",
+                data={"detail": "Tests are running"},
+            )
+        )
+
+        self.assertEqual(cell.last_progress_at, 200.0)
+        self.assertEqual(cell.last_heartbeat_at, 200.0)
+        self.assertEqual(cell.last_activity_at, 200.0)
+
     async def test_health_check_flags_stuck_agent_and_unlinks_post_derive_task(self):
         state = self._make_state()
         parent = self.state_mod.BoardTask(

@@ -562,6 +562,7 @@ class AgentLaunchService:
                 else:
                     await self.bridge.send_text(target_session_id, payload)
                 cell.status = "running"
+                self.state.mark_agent_progress(cell, emit=False, persist=persist)
                 self.state._emit_agent(cell)
                 if persist:
                     self.state._db_save_agent(cell)

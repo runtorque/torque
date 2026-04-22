@@ -1401,3 +1401,44 @@ class MatrixStateWeaverStreamTests(unittest.IsolatedAsyncioTestCase):
             stream_ops[0]["streams"]["items"][0]["branch"],
             "loom/worker",
         )
+
+
+class AgentCellActivityClockTests(unittest.TestCase):
+    def setUp(self):
+        _install_aiohttp_stub()
+        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.reload(self.state_mod)
+
+    def test_heartbeat_updates_only_heartbeat_and_activity_alias(self):
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            last_progress_at=100.0,
+            last_heartbeat_at=100.0,
+        )
+
+        changed = cell.mark_heartbeat(200.0)
+
+        self.assertTrue(changed)
+        self.assertEqual(cell.last_progress_at, 100.0)
+        self.assertEqual(cell.last_heartbeat_at, 200.0)
+        self.assertEqual(cell.last_activity_at, 200.0)
+        self.assertEqual(cell.last_event_at, 200.0)
+
+    def test_progress_updates_progress_heartbeat_and_activity_alias(self):
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            last_progress_at=100.0,
+            last_heartbeat_at=150.0,
+        )
+
+        changed = cell.mark_progress(200.0)
+
+        self.assertTrue(changed)
+        self.assertEqual(cell.last_progress_at, 200.0)
+        self.assertEqual(cell.last_heartbeat_at, 200.0)
+        self.assertEqual(cell.last_activity_at, 200.0)
+        self.assertEqual(cell.last_event_at, 200.0)
