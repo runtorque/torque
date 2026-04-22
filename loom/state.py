@@ -1646,7 +1646,7 @@ class MatrixState:
         """Persist a single agent to SQLite."""
         if self.db:
             try:
-                self.db.save_agent(cell)
+                self.db.save_agent_deferred(cell)
             except Exception:
                 log.exception("Failed to save agent %s", cell.id)
 
@@ -1693,16 +1693,22 @@ class MatrixState:
         """Persist all groups and their memberships."""
         if self.db:
             try:
-                self.db.save_groups(self.groups, self.group_slugs)
-                for gname, members in self.groups.items():
-                    self.db.save_group_members(gname, members)
+                self.db.save_groups_and_members_deferred(
+                    self.groups,
+                    self.group_slugs,
+                )
             except Exception:
                 log.exception("Failed to save groups")
 
     def _db_save_group_settings(self, name: str):
         if self.db and name in self.group_settings:
             try:
-                self.db.save_group_settings(name, self.group_settings[name])
+                self.db.defer_write(
+                    "group_settings",
+                    "save_group_settings",
+                    name,
+                    self.group_settings[name],
+                )
             except Exception:
                 log.exception("Failed to save group settings for %s", name)
 
@@ -1716,7 +1722,7 @@ class MatrixState:
     def _db_save_task(self, task: BoardTask):
         if self.db:
             try:
-                self.db.save_board_task(task)
+                self.db.save_board_task_deferred(task)
             except Exception:
                 log.exception("Failed to save task %s", task.id)
 
@@ -1730,7 +1736,9 @@ class MatrixState:
     def _db_save_task_id_counter(self, group_prefix: str):
         if self.db:
             try:
-                self.db.save_task_id_counter(
+                self.db.defer_write(
+                    "task_id_counters",
+                    "save_task_id_counter",
                     group_prefix,
                     self.task_id_counters.get(group_prefix, 1),
                 )
@@ -1740,7 +1748,9 @@ class MatrixState:
     def _db_save_pipeline_task_counter(self, root_task_id: str):
         if self.db:
             try:
-                self.db.save_pipeline_task_counter(
+                self.db.defer_write(
+                    "pipeline_task_counters",
+                    "save_pipeline_task_counter",
                     root_task_id,
                     self.pipeline_task_counters.get(root_task_id, 1),
                 )
@@ -1755,14 +1765,19 @@ class MatrixState:
                     task = self.board_tasks.get(self.resolve_task_alias(task_id))
                     if task:
                         self._db_save_task(task)
-                    self.db.save_task_id_alias(legacy_id, task_id)
+                    self.db.defer_write(
+                        "task_id_aliases",
+                        "save_task_id_alias",
+                        legacy_id,
+                        task_id,
+                    )
             except Exception:
                 log.exception("Failed to save task ID alias %s", legacy_id)
 
     def _db_save_schedule(self, sched: Schedule):
         if self.db:
             try:
-                self.db.save_schedule(sched)
+                self.db.defer_write("schedules", "save_schedule", sched)
             except Exception:
                 log.exception("Failed to save schedule %s", sched.id)
 
@@ -1776,28 +1791,38 @@ class MatrixState:
     def _db_save_lanes(self):
         if self.db:
             try:
-                self.db.save_board_lanes(self.board_lanes)
+                self.db.defer_write(
+                    "board_lanes",
+                    "save_board_lanes",
+                    self.board_lanes,
+                )
             except Exception:
                 log.exception("Failed to save board lanes")
 
     def _db_save_ui(self, key: str, value):
         if self.db:
             try:
-                self.db.save_ui_state(key, value)
+                self.db.defer_write("ui_state", "save_ui_state", key, value)
             except Exception:
                 log.exception("Failed to save UI state %s", key)
 
     def _db_save_global_settings(self):
         if self.db:
             try:
-                self.db.save_global_settings(self.global_settings)
+                self.db.defer_write(
+                    "global_settings",
+                    "save_global_settings",
+                    self.global_settings,
+                )
             except Exception:
                 log.exception("Failed to save global settings")
 
     def _db_save_auto_dispatch_queue(self, group: str):
         if self.db:
             try:
-                self.db.save_auto_dispatch_queue(
+                self.db.defer_write(
+                    "auto_dispatch_queue",
+                    "save_auto_dispatch_queue",
                     group,
                     self.auto_dispatch_queues.get(group, []),
                 )
@@ -1812,6 +1837,11 @@ class MatrixState:
             except Exception:
                 log.exception("Failed to delete auto-dispatch queue for %s",
                               group)
+
+    async def flush_db_writes(self) -> None:
+        """Wait for queued async SQLite writes to finish."""
+        if self.db:
+            await self.db.flush_async_writes()
 
     def auto_dispatch_queue_find(self, task_id: str):
         for group, entries in self.auto_dispatch_queues.items():
@@ -2821,6 +2851,20 @@ class MatrixState:
                 )
         return None
 
+    async def save_decision_async(self, row_dict: dict) -> dict | None:
+        """Persist one architect decision off the event loop."""
+        if self.db:
+            try:
+                saved = await self.db.save_decision_async(row_dict)
+                self._emit_decision(saved)
+                return saved
+            except Exception:
+                log.exception(
+                    "Failed to save decision %s",
+                    str((row_dict or {}).get("id", "") or ""),
+                )
+        return None
+
     def load_decisions_for_architect(self, architect_id: str, *,
                                      include_archived: bool = False) -> list[dict]:
         """Load persisted decisions for one architect."""
@@ -2882,6 +2926,20 @@ class MatrixState:
         if self.db:
             try:
                 saved = self.db.save_pending_hire(row_dict)
+                self._emit_pending_hire(saved)
+                return saved
+            except Exception:
+                log.exception(
+                    "Failed to save pending hire %s",
+                    str((row_dict or {}).get("id", "") or ""),
+                )
+        return None
+
+    async def save_pending_hire_async(self, row_dict: dict) -> dict | None:
+        """Persist one pending-hire row off the event loop."""
+        if self.db:
+            try:
+                saved = await self.db.save_pending_hire_async(row_dict)
                 self._emit_pending_hire(saved)
                 return saved
             except Exception:

@@ -1,4 +1,6 @@
+import asyncio
 import tempfile
+import time
 import unittest
 import logging
 from pathlib import Path
@@ -14,7 +16,14 @@ except ModuleNotFoundError:
 from loom.db import LoomDB
 
 install_aiohttp_stub()
-from loom.state import AgentCell, BoardTask, GlobalSettings, GroupSettings, Schedule
+from loom.state import (
+    AgentCell,
+    BoardTask,
+    GlobalSettings,
+    GroupSettings,
+    MatrixState,
+    Schedule,
+)
 
 
 class LoomDBTests(unittest.TestCase):
@@ -2798,3 +2807,131 @@ class LoomDBTests(unittest.TestCase):
             ).fetchone()[0],
             "1",
         )
+
+class LoomDBAsyncWriteTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db = LoomDB(Path(self.tmp.name) / "loom.db")
+        self.db.init()
+        self.db.enable_async_writes(True)
+
+    async def asyncTearDown(self):
+        await self.db.close_async_writes()
+        self.db.close()
+        self.tmp.cleanup()
+
+    async def test_deferred_agent_saves_preserve_fifo_final_state(self):
+        cell = AgentCell(id="agent-1", name="Agent", group="g")
+
+        for index in range(100):
+            cell.status = f"state-{index}"
+            cell.last_progress_at = float(index)
+            self.db.save_agent_deferred(cell)
+
+        await asyncio.wait_for(self.db.flush_async_writes(), timeout=5.0)
+
+        loaded = self.db.load_all()["agents"]["agent-1"]
+        self.assertEqual(loaded["status"], "state-99")
+        self.assertEqual(loaded["last_progress_at"], 99.0)
+
+    async def test_deferred_agent_save_returns_before_sync_write_runs(self):
+        cell = AgentCell(id="agent-1", name="Agent", group="g")
+        original_save_agent = LoomDB.save_agent
+
+        def slow_save_agent(db_self, saved_cell):
+            time.sleep(0.15)
+            return original_save_agent(db_self, saved_cell)
+
+        with mock.patch.object(LoomDB, "save_agent", slow_save_agent):
+            started = time.monotonic()
+            self.db.save_agent_deferred(cell)
+            elapsed = time.monotonic() - started
+            self.assertLess(elapsed, 0.05)
+
+            await asyncio.wait_for(self.db.flush_async_writes(), timeout=5.0)
+
+        self.assertIn("agent-1", self.db.load_all()["agents"])
+
+    async def test_async_wrappers_return_saved_rows_after_queue_drain(self):
+        task = BoardTask(id="LOOM:1", task="Ship it", group="g")
+        await self.db.save_board_task_async(task)
+        task.lane = "Done"
+        await self.db.save_board_task_async(task)
+        self.assertEqual(
+            self.db.load_all()["board_tasks"]["LOOM:1"]["lane"],
+            "Done",
+        )
+
+        decision = await self.db.save_decision_async({
+            "id": "decision-1",
+            "architect_id": "architect-1",
+            "title": "Choose path",
+            "rationale": "Fastest safe option",
+            "status": "proposed",
+        })
+        self.assertEqual(decision["id"], "decision-1")
+        updated = await self.db.save_decision_async({
+            "id": "decision-1",
+            "status": "accepted",
+        })
+        self.assertEqual(updated["status"], "accepted")
+
+        pending_hire = await self.db.save_pending_hire_async({
+            "id": "hire-1",
+            "architect_id": "architect-1",
+            "requested_name": "Engineer",
+            "status": "pending",
+        })
+        self.assertEqual(pending_hire["status"], "pending")
+        resolved = await self.db.save_pending_hire_async({
+            "id": "hire-1",
+            "status": "approved",
+            "created_engineer_id": "engineer-1",
+        })
+        self.assertEqual(resolved["status"], "approved")
+        self.assertEqual(resolved["created_engineer_id"], "engineer-1")
+
+        self.db.defer_write(
+            "group_settings",
+            "save_group_settings",
+            "g",
+            GroupSettings(notifications=True),
+        )
+        self.db.defer_write(
+            "global_settings",
+            "save_global_settings",
+            GlobalSettings(xterm_scrollback=4321),
+        )
+        await asyncio.wait_for(self.db.flush_async_writes(), timeout=5.0)
+        loaded = self.db.load_all()
+        self.assertTrue(loaded["group_settings"]["g"]["notifications"])
+        self.assertEqual(loaded["global_settings"]["xterm_scrollback"], 4321)
+
+    async def test_state_delta_broadcast_uses_memory_before_deferred_save_flush(self):
+        class DummyWebSocket:
+            def __init__(self):
+                self.messages = []
+
+            async def send_str(self, message):
+                self.messages.append(message)
+
+        state = MatrixState(db=self.db)
+        cell = AgentCell(id="agent-1", name="Agent", group="g")
+        state.agents[cell.id] = cell
+        state.groups["g"] = [cell.id]
+        ws = DummyWebSocket()
+        state._ws_clients.add(ws)
+
+        cell.status = "running"
+        state._emit_agent(cell)
+        state._db_save_agent(cell)
+        await state.broadcast()
+
+        payload = json.loads(ws.messages[-1])
+        self.assertEqual(payload["type"], "delta")
+        self.assertEqual(payload["ops"][0]["op"], "agent_upsert")
+        self.assertEqual(payload["ops"][0]["status"], "running")
+
+        await asyncio.wait_for(self.db.flush_async_writes(), timeout=5.0)
+        loaded = self.db.load_all()["agents"]["agent-1"]
+        self.assertEqual(loaded["status"], "running")
