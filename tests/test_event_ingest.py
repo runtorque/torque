@@ -21,6 +21,13 @@ from loom.events import (
     EventLog,
     build_event_ingest_envelope,
 )
+try:
+    from helpers import install_aiohttp_stub
+except ModuleNotFoundError:
+    from tests.helpers import install_aiohttp_stub
+
+install_aiohttp_stub()
+
 from loom.state import AgentCell, MatrixState
 
 
