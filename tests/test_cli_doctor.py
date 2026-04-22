@@ -213,7 +213,7 @@ class CliDoctorTests(unittest.TestCase):
                     "details": {
                         "count": 0,
                         "hint": (
-                            "no engineer exists; create one from the Engineers panel "
+                            "no engineer exists; create one from the Agent panel "
                             "before using engineer MCP tools"
                         ),
                     },
@@ -233,7 +233,7 @@ class CliDoctorTests(unittest.TestCase):
         text = out.getvalue()
         self.assertIn("Result: PASS (with warnings)", text)
         self.assertIn(
-            "no engineer exists; create one from the Engineers panel before using engineer MCP tools",
+            "no engineer exists; create one from the Agent panel before using engineer MCP tools",
             text,
         )
 

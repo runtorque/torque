@@ -970,7 +970,7 @@ function renderAgentPanel() {
 
 
 /* ---- Legacy weaver support moved into agent_panel.js (stage 5) ---- */
-/* Weaver panel — journal + events + worklog */
+/* Agent panel — journal + events + worklog */
 
 var _weaverReplyDraft = '';
 var _weaverActiveTabByGroup = {};
@@ -1604,7 +1604,7 @@ function renderLegacyGroupPanel() {
   // Header
   html += '<div class="agent-panel-header">';
   html += '<div class="agent-panel-header-copy">';
-  html += '<span class="agent-panel-title">Architects &amp; Engineers';
+  html += '<span class="agent-panel-title">Agent';
   if (group) html += ' — ' + _esc(group);
   html += '</span>';
   html += '<div class="agent-panel-subtitle">Architect roster, engineer hierarchy, orchestration journal, digest queue, worklog, and session map.</div>';

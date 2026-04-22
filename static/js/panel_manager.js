@@ -7,7 +7,7 @@ var _standalonePanelTitles = {
   templates: 'Library',
   context: 'Context',
   events: 'Events',
-  weaver: 'Architects',
+  weaver: 'Agent',
 };
 var _standalonePanelDefaults = {
   board: 'bottom',

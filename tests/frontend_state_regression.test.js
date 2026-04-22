@@ -7800,9 +7800,16 @@ test('task modal and add-agent labels rename template UI to role UI', () => {
   assert.match(html, /<label>Role[\s\S]*Optional role used when this task creates a new agent during dispatch\./);
 });
 
-test('standalone panel title renames templates surface to library', () => {
+test('standalone panel titles use current operator-facing names', () => {
   const { context } = createPanelHarness();
   assert.equal(jsonValue(context, `_standalonePanelTitle('templates')`), 'Library');
+  assert.equal(jsonValue(context, `_standalonePanelTitle('weaver')`), 'Agent');
+});
+
+test('taskbar labels the selected-agent panel as Agent', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  assert.match(html, /<button class="taskbar-app" data-app="weaver" onclick="togglePanel\('weaver'\)">&#x2696; Agent<\/button>/);
+  assert.doesNotMatch(html, /&#x2696; Architects<\/button>/);
 });
 
 test('renderAgentPanel shows the focused-agent empty state when nothing is focused', () => {

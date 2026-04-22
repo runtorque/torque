@@ -79,7 +79,7 @@ iTerm2 → Scripts → loom
 
 ### 2.1 Add the architect in the UI
 
-1. Open the **Architects** panel.
+1. Open the **Agent** panel.
 2. Click **+ Add Architect**.
 3. Enter `productmind` as the name.
 4. Keep the default launch settings unless you intentionally need an override.
@@ -129,7 +129,7 @@ echo "$DECISION_ID"
 test -n "$DECISION_ID"
 ```
 
-Expected: the decision appears in the Architects UI with `status='proposed'`.
+Expected: the decision appears in the Agent panel with `status='proposed'`.
 
 ### 2.4 Request a hire for `alice`
 

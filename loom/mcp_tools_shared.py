@@ -2747,7 +2747,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
         return (
-            "Question posted to the Engineers panel. Event pushes have "
+            "Question posted to the Agent panel. Event pushes have "
             "been paused. The human will see your question and reply "
             "via the panel or directly in this terminal.\n\n"
             f"After the human responds, call "
@@ -2772,7 +2772,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
         return (
-            "Note posted to the Engineers panel without pausing event "
+            "Note posted to the Agent panel without pausing event "
             "delivery. It will remain visible until dismissed."
         ), False
 

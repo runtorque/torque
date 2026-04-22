@@ -145,7 +145,7 @@ class LoomDoctorTests(unittest.TestCase):
                     "details": {
                         "count": 0,
                         "hint": (
-                            "no engineer exists; create one from the Engineers panel "
+                            "no engineer exists; create one from the Agent panel "
                             "before using engineer MCP tools"
                         ),
                     },
@@ -161,7 +161,7 @@ class LoomDoctorTests(unittest.TestCase):
         self.assertFalse(report["stage_6_cleanup"]["weaver_tool_aliases_present"])
         self.assertIn("Result: PASS (with warnings)", rendered)
         self.assertIn(
-            "no engineer exists; create one from the Engineers panel before using engineer MCP tools",
+            "no engineer exists; create one from the Agent panel before using engineer MCP tools",
             rendered,
         )
         self.assertIn("roles_dir:                      ~/.loom/roles (0 files)", rendered)
@@ -632,7 +632,7 @@ class LoomDoctorTests(unittest.TestCase):
                     "details": {
                         "count": 0,
                         "hint": (
-                            "no engineer exists; create one from the Engineers panel "
+                            "no engineer exists; create one from the Agent panel "
                             "before using engineer MCP tools"
                         ),
                     },
@@ -866,7 +866,7 @@ class LoomDoctorTests(unittest.TestCase):
                     "details": {
                         "count": 0,
                         "hint": (
-                            "no engineer exists; create one from the Engineers panel "
+                            "no engineer exists; create one from the Agent panel "
                             "before using engineer MCP tools"
                         ),
                     },
@@ -879,7 +879,7 @@ class LoomDoctorTests(unittest.TestCase):
             rendered,
         )
         self.assertIn(
-            "no engineer exists; create one from the Engineers panel before using engineer MCP tools",
+            "no engineer exists; create one from the Agent panel before using engineer MCP tools",
             rendered,
         )
 

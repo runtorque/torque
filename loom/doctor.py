@@ -955,7 +955,7 @@ def _warn_no_engineers(report: dict) -> dict | None:
         "details": {
             "count": 0,
             "hint": (
-                "no engineer exists; create one from the Engineers panel "
+                "no engineer exists; create one from the Agent panel "
                 "before using engineer MCP tools"
             ),
         },
@@ -1346,7 +1346,7 @@ def format_doctor_report(report: dict) -> str:
                 lines.append(line)
             elif name == "no_engineers":
                 lines.append(
-                    "  - no engineer exists; create one from the Engineers panel "
+                    "  - no engineer exists; create one from the Agent panel "
                     "before using engineer MCP tools"
                 )
             elif name == "engineer_binding_env_mismatch":

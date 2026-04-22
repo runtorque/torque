@@ -134,8 +134,8 @@ A **task** is a unit of work tracked on the board.
 
 Examples:
 
-- Add Events tab to the Engineers panel
-- Add Worklog tab to the Engineers panel
+- Add Events tab to the Agent panel
+- Add Worklog tab to the Agent panel
 - Keep Weaver Events next-dispatch timing accurate without full-panel rerender
 - Review self-dispatch prompt submission fix
 - Resolve merge conflicts for Weaver ownership branch

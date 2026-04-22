@@ -63,7 +63,7 @@ Expected:
 
 ## Add a second engineer
 
-1. Open the **Engineers** panel.
+1. Open the **Agent** panel.
 2. Click **+ Add Engineer**.
 3. Enter `alice` as the name.
 4. Keep the default boot command unless you need a local override.
@@ -71,7 +71,7 @@ Expected:
 
 Expected:
 
-- `alice` appears in the Engineers panel immediately
+- `alice` appears in the Agent panel immediately
 - `alice` also appears in the main agent list
 - `loom engineer list` now shows both `Weaver` and `alice`
 
@@ -125,13 +125,13 @@ Expected:
 
 ## Delete Alice and verify orphan transfer
 
-1. In the **Engineers** panel, click **Delete** for `alice`.
+1. In the **Agent** panel, click **Delete** for `alice`.
 2. Confirm the modal text includes the worker/task transfer counts.
 3. Confirm the deletion.
 
 Expected:
 
-- Alice disappears from the Engineers panel
+- Alice disappears from the Agent panel
 - Alice disappears from the main agent list
 - Alice's former worker(s) move to the user-owned section at the bottom
 - Alice's former task(s) become unassigned instead of disappearing

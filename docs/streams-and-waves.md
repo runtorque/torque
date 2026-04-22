@@ -67,8 +67,8 @@ A **product task** is a user-visible or operator-visible deliverable.
 
 Examples:
 
-- Add Events tab to the Engineers panel
-- Add Worklog tab to the Engineers panel
+- Add Events tab to the Agent panel
+- Add Worklog tab to the Agent panel
 - Keep Weaver Events countdown accurate
 - Add inline task description editing
 
@@ -540,9 +540,9 @@ So validation is now **visible and structurally real**, but not yet fully operat
 
 ---
 
-## Open Streams in the Engineers UI
+## Open Streams in the Agent UI
 
-The Weaver panel now includes an **Open Streams** summary.
+The Agent panel now includes an **Open Streams** summary.
 
 It is meant to answer, at a glance:
 
@@ -646,7 +646,7 @@ Action: Loom auto-dispatches LOOM:334 if policy allows
 - computed stream synthesis
 - product/workflow/visibility classification
 - stream exposure through Weaver MCP and board summary surfaces
-- Open Streams UI in the Engineers panel
+- Open Streams UI in the Agent panel
 - validation represented as a stream gate
 
 ### Phase 2
@@ -694,7 +694,7 @@ Validation is now first-class as a **state/gate**, but not yet as a fully operat
 
 ## Practical guidance for operators
 
-When reading the Engineers panel:
+When reading the Agent panel:
 
 ### Think in this order
 
