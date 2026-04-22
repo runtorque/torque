@@ -350,7 +350,18 @@ async function removeGroup(group) {
   if (await showConfirm(msg)) send({ cmd: 'remove_group', group });
 }
 
-/* Drag and drop */
+/* Drag and drop
+ *
+ * Supported legacy behavior on the hierarchical grid DOM:
+ * - group headers reorder groups via move_group.
+ * - agent cards reorder within the current group/bucket via move_agent; the
+ *   section/row wrappers do not mutate owner_engineer_id or
+ *   hired_by_architect_id, so drag-to-reparent across architect/engineer
+ *   boundaries is intentionally deferred.
+ * - terminal rows move between a parent drawer and standalone group terminals:
+ *   drawer -> standalone uses move_agent to detach, drawer/agent drops use
+ *   reparent_terminal, and same-parent drawer ordering uses reorder_child.
+ */
 let _dragId = null;
 let _dragType = null;
 
