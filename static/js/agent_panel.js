@@ -731,8 +731,8 @@ function _agentPanelArchitectHiredEngineers(agent) {
     html += _agentPanelLegacyRenderEngineerTreeRows(
       group,
       engineers,
-      'architect-roster-level-1 architect-owned-engineer-row',
-      'architect-roster-level-2 architect-owned-worker-row'
+      'architect-roster-level-1 architect-section-engineer-row',
+      'architect-roster-level-2 architect-section-worker-row'
     );
   } else {
     for (var i = 0; i < engineers.length; i++) {
@@ -1345,8 +1345,8 @@ function _agentPanelLegacyRenderArchitectRoster(group) {
         html += _agentPanelLegacyRenderEngineerTreeRows(
           group,
           hiredEngineers,
-          'architect-roster-level-1 architect-owned-engineer-row',
-          'architect-roster-level-2 architect-owned-worker-row'
+          'architect-roster-level-1 architect-section-engineer-row',
+          'architect-roster-level-2 architect-section-worker-row'
         );
       } else {
         html += '<div class="engineers-roster-empty architect-roster-empty">No hired engineers yet.</div>';
@@ -1394,8 +1394,8 @@ function _agentPanelLegacyRenderEngineerRoster(group) {
   html += _agentPanelLegacyRenderEngineerTreeRows(
     group,
     engineers,
-    'engineer-roster-level-1 user-owned-engineer-row',
-    'engineer-roster-level-2 engineer-owned-worker-row'
+    'engineer-roster-level-1 user-section-engineer-row',
+    'engineer-roster-level-2 user-section-worker-row'
   );
   html += '</div>';
   html += '</section>';

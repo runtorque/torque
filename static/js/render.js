@@ -101,6 +101,12 @@ function _renderAgentTemplateMenuItems(group) {
   return html;
 }
 
+function _renderWeaverMenuItem(group, groupSettings) {
+  const gs = groupSettings || {};
+  if (gs.weaver_agent_id) return '';
+  return `<button onclick="event.stopPropagation();closeMenus();newWeaver('${esc(group)}')">Weaver</button>`;
+}
+
 function _workerOwnerEngineerId(agent, visibleById) {
   if (!agent) return '';
   const ownerId = String(
@@ -114,6 +120,51 @@ function _workerOwnerEngineerId(agent, visibleById) {
   return ownerId;
 }
 
+function _agentRawOwnerEngineerId(agent) {
+  if (!agent) return '';
+  return String(
+    agent.owner_engineer_id
+    || agent.created_by_weaver_id
+    || ''
+  ).trim();
+}
+
+function _agentCreationSortValue(agent, fallbackIndex) {
+  if (!agent) return fallbackIndex;
+  const raw = agent.created_at || agent.created || agent.started_at || '';
+  if (raw !== '' && raw != null) {
+    if (typeof raw === 'number') {
+      if (Number.isFinite(raw)) return raw;
+    } else {
+      const numeric = Number(raw);
+      if (Number.isFinite(numeric) && String(raw).trim() !== '') return numeric;
+      const parsed = Date.parse(String(raw));
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return fallbackIndex;
+}
+
+function _sortAgentsByCreation(agents, indexById) {
+  return (Array.isArray(agents) ? agents : []).slice().sort(function(a, b) {
+    const aIndex = indexById && Object.prototype.hasOwnProperty.call(indexById, a.id)
+      ? indexById[a.id] : 0;
+    const bIndex = indexById && Object.prototype.hasOwnProperty.call(indexById, b.id)
+      ? indexById[b.id] : 0;
+    const av = _agentCreationSortValue(a, aIndex);
+    const bv = _agentCreationSortValue(b, bIndex);
+    if (av !== bv) return av - bv;
+    if (aIndex !== bIndex) return aIndex - bIndex;
+    return String(a.id || '').localeCompare(String(b.id || ''));
+  });
+}
+
+function _isWorkerLikeAgent(agent) {
+  if (!agent || agent.cell_type !== 'agent') return false;
+  const kind = String(agent.kind || '').trim();
+  return kind === 'worker' || (!kind && kind !== 'architect' && kind !== 'engineer');
+}
+
 function _agentDismissedAt(agent) {
   if (!agent) return 0;
   const value = Number(agent.dismissed_at || 0);
@@ -124,27 +175,21 @@ function _isDismissedEngineer(agent) {
   return !!(agent && (agent.kind || '') === 'engineer' && _agentDismissedAt(agent));
 }
 
-function _sortEngineersActiveFirst(engineers) {
-  return (Array.isArray(engineers) ? engineers : []).slice().sort(function(a, b) {
-    const aDismissed = _isDismissedEngineer(a) ? 1 : 0;
-    const bDismissed = _isDismissedEngineer(b) ? 1 : 0;
-    if (aDismissed !== bDismissed) return aDismissed - bDismissed;
-    return 0;
-  });
-}
-
-function _sortAgentsHierarchically(agents) {
+function _buildHierarchicalAgentSections(agents) {
   const visibleById = {};
   const architects = [];
   const userEngineers = [];
-  const orphans = [];
   const engineersByArchitect = {};
   const workersByEngineer = {};
+  const looseWorkers = [];
   const list = Array.isArray(agents) ? agents.slice() : [];
+  const indexById = {};
 
-  for (const agent of list) {
+  for (let i = 0; i < list.length; i++) {
+    const agent = list[i];
     if (!agent) continue;
     visibleById[agent.id] = agent;
+    indexById[agent.id] = i;
   }
 
   for (const agent of list) {
@@ -165,31 +210,77 @@ function _sortAgentsHierarchically(agents) {
       continue;
     }
     const ownerId = _workerOwnerEngineerId(agent, visibleById);
-    if (ownerId) {
+    if (_isWorkerLikeAgent(agent) && ownerId) {
       if (!workersByEngineer[ownerId]) workersByEngineer[ownerId] = [];
       workersByEngineer[ownerId].push(agent);
       continue;
     }
-    orphans.push(agent);
+    if (_isWorkerLikeAgent(agent) && !_agentRawOwnerEngineerId(agent)) {
+      looseWorkers.push(agent);
+      continue;
+    }
+    if (_isWorkerLikeAgent(agent)) looseWorkers.push(agent);
+  }
+
+  const visibleEngineerIds = {};
+  for (const engineer of userEngineers) visibleEngineerIds[engineer.id] = true;
+  for (const architectId in engineersByArchitect) {
+    for (const engineer of engineersByArchitect[architectId]) visibleEngineerIds[engineer.id] = true;
+  }
+
+  function engineerRows(engineers) {
+    const rows = [];
+    const sortedEngineers = _sortAgentsByCreation(engineers, indexById);
+    for (const engineer of sortedEngineers) {
+      rows.push({
+        engineer,
+        workers: _sortAgentsByCreation(workersByEngineer[engineer.id] || [], indexById),
+      });
+    }
+    return rows;
+  }
+
+  const sections = [{
+    key: 'user',
+    type: 'user',
+    architect: null,
+    looseWorkers: _sortAgentsByCreation(looseWorkers, indexById),
+    rows: engineerRows(userEngineers),
+  }];
+
+  const sortedArchitects = _sortAgentsByCreation(architects, indexById);
+  for (const architect of sortedArchitects) {
+    sections.push({
+      key: 'architect:' + String(architect.id || ''),
+      type: 'architect',
+      architect,
+      looseWorkers: [],
+      rows: engineerRows(engineersByArchitect[architect.id] || []),
+    });
   }
 
   const ordered = [];
-  for (const architect of architects) {
-    ordered.push(architect);
-    const hiredEngineers = _sortEngineersActiveFirst(engineersByArchitect[architect.id] || []);
-    for (const engineer of hiredEngineers) {
-      ordered.push(engineer);
-      const hiredWorkers = workersByEngineer[engineer.id] || [];
-      for (const worker of hiredWorkers) ordered.push(worker);
+  for (const section of sections) {
+    if (section.architect) ordered.push(section.architect);
+    if (section.type === 'user') {
+      for (const worker of section.looseWorkers) ordered.push(worker);
+    }
+    for (const row of section.rows) {
+      ordered.push(row.engineer);
+      for (const worker of row.workers) ordered.push(worker);
     }
   }
-  for (const engineer of _sortEngineersActiveFirst(userEngineers)) {
-    ordered.push(engineer);
-    const workers = workersByEngineer[engineer.id] || [];
-    for (const worker of workers) ordered.push(worker);
-  }
-  for (const worker of orphans) ordered.push(worker);
-  return ordered;
+
+  return {
+    sections,
+    orderedAgents: ordered,
+    visibleAgentById: visibleById,
+    visibleEngineerIds,
+  };
+}
+
+function _sortAgentsHierarchically(agents) {
+  return _buildHierarchicalAgentSections(agents).orderedAgents;
 }
 
 function _taskCreatedByValue(task) {
@@ -506,6 +597,103 @@ function _applyFlip(main, oldRects) {
   }
 }
 
+function _agentGridSectionKey(section) {
+  if (!section) return '';
+  if (section.type === 'user') return 'user';
+  return 'architect:' + String((section.architect && section.architect.id) || '');
+}
+
+function _renderUserSectionCard(groupName) {
+  return '<div class="agent-section-user-card"'
+    + ' data-agent-section-card="user"'
+    + ' title="User-owned engineers and detached workers">'
+    + '<div class="agent-section-user-icon">\u25CF</div>'
+    + '<div class="agent-section-user-name">User</div>'
+    + '<div class="agent-section-user-badge">owner</div>'
+    + '</div>';
+}
+
+function _renderSectionControlsSlot(groupName, section) {
+  const sectionKey = _agentGridSectionKey(section);
+  return '<div class="agent-section-controls-slot"'
+    + ' data-section-controls-for="' + esc(sectionKey) + '">'
+    + '<span class="agent-section-placeholder-label">Controls</span>'
+    + '<span class="agent-section-placeholder-btn"'
+    + ' data-placeholder-action="new-engineer"'
+    + ' data-focus-key="section-new-engineer:' + esc(groupName) + ':' + esc(sectionKey) + '"'
+    + ' aria-disabled="true">+ New Engineer</span>'
+    + '</div>';
+}
+
+function _renderLooseWorkersStrip(groupName, section, renderCell) {
+  const sectionKey = _agentGridSectionKey(section);
+  const workers = (section && section.looseWorkers) || [];
+  let html = '<div class="loose-workers-strip"'
+    + ' data-agent-row-shape="loose-workers-strip"'
+    + ' data-section-key="' + esc(sectionKey) + '">';
+  for (const worker of workers) html += renderCell(worker);
+  html += '<button type="button" class="loose-workers-placeholder-btn" disabled'
+    + ' data-placeholder-action="new-worker"'
+    + ' data-focus-key="loose-new-worker:' + esc(groupName) + ':' + esc(sectionKey) + '"'
+    + ' title="Detached worker creation lands in a later phase">+ New Worker</button>';
+  html += '</div>';
+  return html;
+}
+
+function _renderArchitectHeaderRow(groupName, section, renderCell) {
+  const sectionKey = _agentGridSectionKey(section);
+  let html = '<div class="agent-section-header-row architect-header-row"'
+    + ' data-agent-row-shape="architect-header-row"'
+    + ' data-section-key="' + esc(sectionKey) + '">';
+  if (section && section.architect) html += renderCell(section.architect);
+  else html += _renderUserSectionCard(groupName);
+  html += _renderSectionControlsSlot(groupName, section);
+  html += '</div>';
+  return html;
+}
+
+function _renderEngineerRow(row, renderCell) {
+  if (!row || !row.engineer) return '';
+  let html = '<div class="engineer-row agent-grid-engineer-row"'
+    + ' data-agent-row-shape="engineer-row"'
+    + ' data-engineer-id="' + esc(row.engineer.id || '') + '">';
+  html += '<div class="engineer-row-anchor">' + renderCell(row.engineer) + '</div>';
+  html += '<div class="engineer-row-workers">';
+  const workers = row.workers || [];
+  for (const worker of workers) html += renderCell(worker);
+  html += '</div>';
+  html += '</div>';
+  return html;
+}
+
+function _renderAgentGridAddCell(gname, gsLocal, agents) {
+  const atCap = gsLocal.max_agents > 0 && agents.length >= gsLocal.max_agents;
+  let html = '<div class="agent-grid-global-add-row">';
+  if (atCap) {
+    html += `<div class="cell cell-add disabled">`;
+    html += `  <div class="cell-add-icon">\u2013</div>`;
+    html += `  <div class="cell-name">Full</div>`;
+    html += `</div>`;
+  } else {
+    const createMenu = _agentCreateMenuAction(gname);
+    html += `<div class="cell cell-add" onclick="quickAddAgent('${esc(gname)}')">`;
+    html += `  <div class="cell-add-icon">+</div>`;
+    html += `  <div class="cell-name">New</div>`;
+    html += `  <button class="cell-add-drop" data-focus-key="agent-add-menu:${esc(gname)}" onclick="event.stopPropagation();toggleMenu(this)">\u25BE</button>`;
+    html += `  <div class="split-menu">`;
+    html += `<button onclick="event.stopPropagation();closeMenus();openAddArchitectModal('${esc(gname)}')">Architect</button>`;
+    html += `<button onclick="event.stopPropagation();closeMenus();openAddEngineerModal()">Engineer</button>`;
+    html += _renderWeaverMenuItem(gname, gsLocal);
+    html += `<div class="split-sep"></div>`;
+    html += _renderAgentTemplateMenuItems(gname);
+    html += `<button onclick="event.stopPropagation();closeMenus();${createMenu.action}">${createMenu.label}</button>`;
+    html += `</div>`;
+    html += `</div>`;
+  }
+  html += '</div>';
+  return html;
+}
+
 function render() {
   const main = document.getElementById('main');
   const groupNames = Object.keys(state.groups);
@@ -614,15 +802,11 @@ function render() {
     html += `<div class="group-body"><div class="group-body-inner">`;
 
     /* Agent grid (+ New cell is part of the grid) — hierarchical by kind/owner */
-    const sortedAgents = _sortAgentsHierarchically(agents);
-    const visibleAgentById = {};
-    const visibleEngineerIds = {};
-    for (const agent of sortedAgents) {
-      visibleAgentById[agent.id] = agent;
-      if ((agent.kind || '') === 'engineer') visibleEngineerIds[agent.id] = true;
-    }
-    html += `<div class="agent-grid" data-drop-group="${esc(gname)}" data-drop-type="agent">`;
-    for (const a of sortedAgents) {
+    const agentLayout = _buildHierarchicalAgentSections(agents);
+    const sortedAgents = agentLayout.orderedAgents;
+    const visibleAgentById = agentLayout.visibleAgentById;
+    const visibleEngineerIds = agentLayout.visibleEngineerIds;
+    const pushAgentNav = function(a) {
       if (!collapsed) {
         navItems.push(a.id);
         navAgents.push(a.id);
@@ -639,7 +823,30 @@ function render() {
           }
         }
       }
-      html += renderAgentCell(a, { visibleEngineerIds, visibleAgentById });
+    };
+    html += `<div class="agent-grid agent-grid-hierarchical" data-drop-group="${esc(gname)}" data-drop-type="agent">`;
+    const renderCellForGrid = function(a) {
+      pushAgentNav(a);
+      return renderAgentCell(a, { visibleEngineerIds, visibleAgentById });
+    };
+    for (let sectionIndex = 0; sectionIndex < agentLayout.sections.length; sectionIndex++) {
+      const section = agentLayout.sections[sectionIndex];
+      if (sectionIndex > 0) {
+        html += '<div class="agent-section-divider" role="separator"></div>';
+      }
+      const sectionKey = _agentGridSectionKey(section);
+      const sectionClasses = [
+        'agent-section',
+        section.type === 'user' ? 'agent-section-user' : 'agent-section-architect',
+      ];
+      html += '<section class="' + sectionClasses.join(' ') + '"'
+        + ' data-agent-section="' + esc(sectionKey) + '">';
+      html += _renderArchitectHeaderRow(gname, section, renderCellForGrid);
+      if (section.type === 'user') {
+        html += _renderLooseWorkersStrip(gname, section, renderCellForGrid);
+      }
+      for (const row of section.rows) html += _renderEngineerRow(row, renderCellForGrid);
+      html += '</section>';
     }
     if (!collapsed) {
       for (const t of standaloneTerms) {
@@ -647,27 +854,7 @@ function render() {
         groupNav.push(t.id);
       }
     }
-    const atCap = gsLocal.max_agents > 0 && agents.length >= gsLocal.max_agents;
-    if (atCap) {
-      html += `<div class="cell cell-add disabled">`;
-      html += `  <div class="cell-add-icon">\u2013</div>`;
-      html += `  <div class="cell-name">Full</div>`;
-      html += `</div>`;
-    } else {
-      const createMenu = _agentCreateMenuAction(gname);
-      html += `<div class="cell cell-add" onclick="quickAddAgent('${esc(gname)}')">`;
-      html += `  <div class="cell-add-icon">+</div>`;
-      html += `  <div class="cell-name">New</div>`;
-      html += `  <button class="cell-add-drop" onclick="event.stopPropagation();toggleMenu(this)">\u25BE</button>`;
-      html += `  <div class="split-menu">`;
-      html += `<button onclick="event.stopPropagation();closeMenus();openAddArchitectModal('${esc(gname)}')">Architect</button>`;
-      html += `<button onclick="event.stopPropagation();closeMenus();openAddEngineerModal()">Engineer</button>`;
-      html += `<div class="split-sep"></div>`;
-      html += _renderAgentTemplateMenuItems(gname);
-      html += `<button onclick="event.stopPropagation();closeMenus();${createMenu.action}">${createMenu.label}</button>`;
-      html += `</div>`;
-      html += `</div>`;
-    }
+    html += _renderAgentGridAddCell(gname, gsLocal, agents);
     html += `</div>`;
 
     /* Details + terminal drawer for selected agent (if in this group) */
@@ -1311,31 +1498,10 @@ function renderAgentCell(a, options) {
   if (!_agentDigestSettings && _isDigestRecipient && _isWeaver) {
     _digestPaused = _weaverPaused;
   }
-  const visibleAgentById = options.visibleAgentById || null;
-  const visibleEngineerIds = options.visibleEngineerIds || null;
-  const ownerId = _workerOwnerEngineerId(a, visibleAgentById);
-  const ownerEngineer = ownerId && visibleAgentById ? visibleAgentById[ownerId] : null;
-  const ownerArchitectId = ownerEngineer ? String(ownerEngineer.hired_by_architect_id || '').trim() : '';
-  const ownerArchitect = ownerArchitectId && visibleAgentById ? visibleAgentById[ownerArchitectId] : null;
-  const _isArchitectOwnedEngineer = !!(
-    _isEngineer
-    && visibleAgentById
-    && a.hired_by_architect_id
-    && visibleAgentById[String(a.hired_by_architect_id || '').trim()]
-    && (visibleAgentById[String(a.hired_by_architect_id || '').trim()].kind || '') === 'architect'
-  );
-  const _isOwnedWorker = !!(
-    !_isEngineer
-    && ownerId
-    && (!visibleEngineerIds || visibleEngineerIds[ownerId])
-  );
-  const _isArchitectOwnedWorker = !!(_isOwnedWorker && ownerArchitect);
   if (_isArchitect) cls.push('architect');
   if (_isEngineer) cls.push('engineer');
+  if (_isWorker) cls.push('worker');
   if (_isDismissed) cls.push('dismissed');
-  if (_isArchitectOwnedEngineer) cls.push('architect-owned-engineer');
-  if (_isArchitectOwnedWorker) cls.push('architect-owned-worker');
-  else if (_isOwnedWorker) cls.push('engineer-owned-worker');
 
   const statusCls = _isDismissed ? 'dismissed' : agentStatusClass(a);
   const titleParts = [a.name, `(${a.status})`];
@@ -1364,13 +1530,13 @@ function renderAgentCell(a, options) {
   else if (showDoneFlourish) h += `<span class="cell-status-flourish-label">${esc(doneFlourish.label)}</span>`;
   h += `</div>`;
   h += `<div class="cell-header-controls">`;
-  h += `<button class="cell-close" draggable="false" onclick="event.stopPropagation();removeAgent('${a.id}')" title="Remove">\u2715</button>`;
+  h += `<button class="cell-close" draggable="false" data-focus-key="agent-close:${esc(a.id)}" onclick="event.stopPropagation();removeAgent('${a.id}')" title="Remove">\u2715</button>`;
   if (_isDigestRecipient) {
     const digestAgentArg = encodeURIComponent(a.id || '');
-    h += `<button class="cell-weaver-toggle ${_digestPaused ? 'paused' : 'running'}" draggable="false" onclick="event.stopPropagation();toggleDigestPauseForAgent(decodeURIComponent('${digestAgentArg}'))" title="${_digestPaused ? 'Resume event delivery' : 'Pause event delivery'}">${_digestPaused ? '&#x25B6;' : '&#x23F8;'}</button>`;
+    h += `<button class="cell-weaver-toggle ${_digestPaused ? 'paused' : 'running'}" draggable="false" data-focus-key="agent-digest-toggle:${esc(a.id)}" onclick="event.stopPropagation();toggleDigestPauseForAgent(decodeURIComponent('${digestAgentArg}'))" title="${_digestPaused ? 'Resume event delivery' : 'Pause event delivery'}">${_digestPaused ? '&#x25B6;' : '&#x23F8;'}</button>`;
   } else if (_isWeaver) {
     const weaverGroupArg = encodeURIComponent(a.group || '');
-    h += `<button class="cell-weaver-toggle ${_weaverPaused ? 'paused' : 'running'}" draggable="false" onclick="event.stopPropagation();weaverTogglePauseForGroup(decodeURIComponent('${weaverGroupArg}'))" title="${_weaverPaused ? 'Resume Weaver event delivery' : 'Pause Weaver event delivery'}">${_weaverPaused ? '&#x25B6;' : '&#x23F8;'}</button>`;
+    h += `<button class="cell-weaver-toggle ${_weaverPaused ? 'paused' : 'running'}" draggable="false" data-focus-key="agent-weaver-toggle:${esc(a.id)}" onclick="event.stopPropagation();weaverTogglePauseForGroup(decodeURIComponent('${weaverGroupArg}'))" title="${_weaverPaused ? 'Resume Weaver event delivery' : 'Pause Weaver event delivery'}">${_weaverPaused ? '&#x25B6;' : '&#x23F8;'}</button>`;
   }
   h += `</div>`;
   h += `<div class="cell-icon">${a.icon || agentIcon(a.name)}</div>`;

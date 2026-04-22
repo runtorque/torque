@@ -9231,7 +9231,7 @@ test('classic runtime keeps the shared left rail filtered to the current window'
   assert.deepEqual(jsonValue(context, `window._navAgents`), ['agent-a']);
 });
 
-test('main render uses engineer hierarchy in the visible and navigable agent order', () => {
+test('main render groups user loose workers before engineer rows and exposes row primitives', () => {
   const { context, document, sandbox } = createMainRenderHarness();
   const main = document.getElementById('main');
 
@@ -9257,6 +9257,7 @@ test('main render uses engineer hierarchy in the visible and navigable agent ord
     'worker-a': {
       id: 'worker-a',
       name: 'Worker A',
+      kind: 'worker',
       owner_engineer_id: 'eng-a',
       group: 'loom',
       cell_type: 'agent',
@@ -9279,6 +9280,7 @@ test('main render uses engineer hierarchy in the visible and navigable agent ord
     'worker-b': {
       id: 'worker-b',
       name: 'Worker B',
+      kind: 'worker',
       owner_engineer_id: 'eng-b',
       group: 'loom',
       cell_type: 'agent',
@@ -9290,6 +9292,7 @@ test('main render uses engineer hierarchy in the visible and navigable agent ord
     'agent-user': {
       id: 'agent-user',
       name: 'User Worker',
+      kind: 'worker',
       group: 'loom',
       cell_type: 'agent',
       icon: 'U',
@@ -9302,18 +9305,24 @@ test('main render uses engineer hierarchy in the visible and navigable agent ord
   runInContext(context, `render();`);
 
   assert.deepEqual(jsonValue(context, `window._navAgents`), [
+    'agent-user',
     'eng-a',
     'worker-a',
     'eng-b',
     'worker-b',
-    'agent-user',
   ]);
-  assert.match(main.innerHTML, /Alice[\s\S]*Worker A[\s\S]*Bob[\s\S]*Worker B[\s\S]*User Worker/);
+  assert.match(main.innerHTML, /User Worker[\s\S]*Alice[\s\S]*Worker A[\s\S]*Bob[\s\S]*Worker B/);
+  assert.match(main.innerHTML, /architect-header-row/);
+  assert.match(main.innerHTML, /loose-workers-strip/);
+  assert.match(main.innerHTML, /engineer-row/);
   assert.match(main.innerHTML, /cell-engineer-badge/);
-  assert.match(main.innerHTML, /engineer-owned-worker/);
+  assert.doesNotMatch(
+    main.innerHTML,
+    new RegExp('engineer-' + 'owned-worker|architect-' + 'owned-engineer|architect-' + 'owned-worker'),
+  );
 });
 
-test('main render preserves manual state.groups ordering within engineer hierarchy buckets', () => {
+test('main render falls back to state.groups ordering within hierarchy buckets without creation timestamps', () => {
   const { context, document, sandbox } = createMainRenderHarness();
   const main = document.getElementById('main');
 
@@ -9348,6 +9357,7 @@ test('main render preserves manual state.groups ordering within engineer hierarc
     'worker-a-1': {
       id: 'worker-a-1',
       name: 'Worker A1',
+      kind: 'worker',
       owner_engineer_id: 'eng-a',
       group: 'loom',
       cell_type: 'agent',
@@ -9358,6 +9368,7 @@ test('main render preserves manual state.groups ordering within engineer hierarc
     'worker-a-2': {
       id: 'worker-a-2',
       name: 'Worker A2',
+      kind: 'worker',
       owner_engineer_id: 'eng-a',
       group: 'loom',
       cell_type: 'agent',
@@ -9368,6 +9379,7 @@ test('main render preserves manual state.groups ordering within engineer hierarc
     'worker-b-1': {
       id: 'worker-b-1',
       name: 'Worker B1',
+      kind: 'worker',
       owner_engineer_id: 'eng-b',
       group: 'loom',
       cell_type: 'agent',
@@ -9378,6 +9390,7 @@ test('main render preserves manual state.groups ordering within engineer hierarc
     'worker-b-2': {
       id: 'worker-b-2',
       name: 'Worker B2',
+      kind: 'worker',
       owner_engineer_id: 'eng-b',
       group: 'loom',
       cell_type: 'agent',
@@ -9388,6 +9401,7 @@ test('main render preserves manual state.groups ordering within engineer hierarc
     'agent-user': {
       id: 'agent-user',
       name: 'User Worker',
+      kind: 'worker',
       group: 'loom',
       cell_type: 'agent',
       icon: 'U',
@@ -9399,23 +9413,23 @@ test('main render preserves manual state.groups ordering within engineer hierarc
   runInContext(context, `render();`);
 
   assert.deepEqual(jsonValue(context, `window._navAgents`), [
+    'agent-user',
     'eng-b',
     'worker-b-2',
     'worker-b-1',
     'eng-a',
     'worker-a-2',
     'worker-a-1',
-    'agent-user',
   ]);
-  assert.match(main.innerHTML, /Bob[\s\S]*Worker B2[\s\S]*Worker B1[\s\S]*Alice[\s\S]*Worker A2[\s\S]*Worker A1[\s\S]*User Worker/);
+  assert.match(main.innerHTML, /User Worker[\s\S]*Bob[\s\S]*Worker B2[\s\S]*Worker B1[\s\S]*Alice[\s\S]*Worker A2[\s\S]*Worker A1/);
 });
 
-test('main render orders architects above hired engineers, then user-owned engineers and orphan workers', () => {
+test('main render orders sections user-first then architect creation order', () => {
   const { context, document, sandbox } = createMainRenderHarness();
   const main = document.getElementById('main');
 
   sandbox.state.groups = {
-    loom: ['worker-user', 'eng-user', 'worker-hired', 'arch-a', 'eng-hired', 'orphan', 'arch-b'],
+    loom: ['worker-hired-a', 'arch-a', 'eng-hired-a', 'arch-b', 'eng-hired-b', 'worker-user', 'eng-user', 'worker-user-owned'],
   };
   sandbox.state.group_settings = {
     loom: { collapsed_default: false, weaver_agent_id: '' },
@@ -9431,6 +9445,7 @@ test('main render orders architects above hired engineers, then user-owned engin
       icon: 'A',
       status: 'running',
       session_id: 'sess-arch-a',
+      created_at: 30,
     },
     'arch-b': {
       id: 'arch-b',
@@ -9441,27 +9456,43 @@ test('main render orders architects above hired engineers, then user-owned engin
       icon: 'B',
       status: 'running',
       session_id: 'sess-arch-b',
+      created_at: 20,
     },
-    'eng-hired': {
-      id: 'eng-hired',
-      name: 'Alice',
+    'eng-hired-a': {
+      id: 'eng-hired-a',
+      name: 'Alice A',
       kind: 'engineer',
       hired_by_architect_id: 'arch-a',
       group: 'loom',
       cell_type: 'agent',
       icon: 'E',
       status: 'running',
-      session_id: 'sess-eng-hired',
+      session_id: 'sess-eng-hired-a',
+      created_at: 31,
     },
-    'worker-hired': {
-      id: 'worker-hired',
+    'worker-hired-a': {
+      id: 'worker-hired-a',
       name: 'Worker A',
-      owner_engineer_id: 'eng-hired',
+      kind: 'worker',
+      owner_engineer_id: 'eng-hired-a',
       group: 'loom',
       cell_type: 'agent',
       icon: 'W',
       status: 'running',
-      session_id: 'sess-worker-hired',
+      session_id: 'sess-worker-hired-a',
+      created_at: 32,
+    },
+    'eng-hired-b': {
+      id: 'eng-hired-b',
+      name: 'Alice B',
+      kind: 'engineer',
+      hired_by_architect_id: 'arch-b',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'F',
+      status: 'running',
+      session_id: 'sess-eng-hired-b',
+      created_at: 21,
     },
     'eng-user': {
       id: 'eng-user',
@@ -9472,46 +9503,51 @@ test('main render orders architects above hired engineers, then user-owned engin
       icon: 'U',
       status: 'running',
       session_id: 'sess-eng-user',
+      created_at: 10,
     },
-    'worker-user': {
-      id: 'worker-user',
+    'worker-user-owned': {
+      id: 'worker-user-owned',
       name: 'Worker B',
+      kind: 'worker',
       owner_engineer_id: 'eng-user',
       group: 'loom',
       cell_type: 'agent',
       icon: 'V',
       status: 'running',
       session_id: 'sess-worker-user',
+      created_at: 11,
     },
-    'orphan': {
-      id: 'orphan',
-      name: 'Orphan Worker',
+    'worker-user': {
+      id: 'worker-user',
+      name: 'Loose Worker',
+      kind: 'worker',
       group: 'loom',
       cell_type: 'agent',
       icon: 'O',
       status: 'running',
-      session_id: 'sess-orphan',
+      session_id: 'sess-loose',
+      created_at: 5,
     },
   };
 
   runInContext(context, `render();`);
 
   assert.deepEqual(jsonValue(context, `window._navAgents`), [
-    'arch-a',
-    'eng-hired',
-    'worker-hired',
-    'arch-b',
-    'eng-user',
     'worker-user',
-    'orphan',
+    'eng-user',
+    'worker-user-owned',
+    'arch-b',
+    'eng-hired-b',
+    'arch-a',
+    'eng-hired-a',
+    'worker-hired-a',
   ]);
-  assert.match(main.innerHTML, /Architect A[\s\S]*Alice[\s\S]*Worker A[\s\S]*Architect B[\s\S]*Bob[\s\S]*Worker B[\s\S]*Orphan Worker/);
+  assert.match(main.innerHTML, /Loose Worker[\s\S]*Bob[\s\S]*Worker B[\s\S]*Architect B[\s\S]*Alice B[\s\S]*Architect A[\s\S]*Alice A[\s\S]*Worker A/);
   assert.match(main.innerHTML, /cell-architect-badge/);
-  assert.match(main.innerHTML, /architect-owned-engineer/);
-  assert.match(main.innerHTML, /architect-owned-worker/);
+  assert.match(main.innerHTML, /agent-section-divider/);
 });
 
-test('main render hierarchy classes and indentation distinguish architect-owned workers from orphans', () => {
+test('main render uses containment primitives and retires cell hierarchy indentation classes', () => {
   const { context, document, sandbox } = createMainRenderHarness();
   const main = document.getElementById('main');
 
@@ -9545,6 +9581,7 @@ test('main render hierarchy classes and indentation distinguish architect-owned 
     'worker-hired': {
       id: 'worker-hired',
       name: 'Worker A',
+      kind: 'worker',
       owner_engineer_id: 'eng-hired',
       group: 'loom',
       cell_type: 'agent',
@@ -9554,6 +9591,7 @@ test('main render hierarchy classes and indentation distinguish architect-owned 
     orphan: {
       id: 'orphan',
       name: 'Orphan Worker',
+      kind: 'worker',
       group: 'loom',
       cell_type: 'agent',
       icon: 'O',
@@ -9567,20 +9605,28 @@ test('main render hierarchy classes and indentation distinguish architect-owned 
   const orphanWorker = main.innerHTML.match(/<div class="([^"]*)" draggable="true" data-drag-id="orphan"/);
   assert.ok(hiredWorker, 'architect-owned worker cell should render');
   assert.ok(orphanWorker, 'orphan worker cell should render');
-  assert.match(hiredWorker[1], /\barchitect-owned-worker\b/);
-  assert.doesNotMatch(orphanWorker[1], /\barchitect-owned-worker\b|\bengineer-owned-worker\b/);
+  assert.match(hiredWorker[1], /\bworker\b/);
+  assert.match(orphanWorker[1], /\bworker\b/);
+  assert.doesNotMatch(
+    hiredWorker[1],
+    new RegExp('\\barchitect-' + 'owned-worker\\b|\\bengineer-' + 'owned-worker\\b'),
+  );
+  assert.doesNotMatch(
+    orphanWorker[1],
+    new RegExp('\\barchitect-' + 'owned-worker\\b|\\bengineer-' + 'owned-worker\\b'),
+  );
+  assert.match(main.innerHTML, /architect-header-row/);
+  assert.match(main.innerHTML, /loose-workers-strip/);
+  assert.match(main.innerHTML, /engineer-row/);
 
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
-  const architectEngineerRule = css.match(/\.cell\.architect-owned-engineer\s*\{[^}]*\}/)[0];
-  const engineerWorkerRule = css.match(/\.cell\.engineer-owned-worker\s*\{[^}]*\}/)[0];
-  const architectWorkerRule = css.match(/\.cell\.architect-owned-worker\s*\{[^}]*\}/)[0];
-  assert.match(architectEngineerRule, /padding-left:\s*28px;/);
-  assert.match(engineerWorkerRule, /padding-left:\s*28px;/);
-  assert.match(architectWorkerRule, /padding-left:\s*38px;/);
-  assert.match(css, /\.cell\.engineer-owned-worker::after,\s*\.cell\.architect-owned-engineer::after,\s*\.cell\.architect-owned-worker::after\s*\{[^}]*linear-gradient/);
+  assert.doesNotMatch(
+    css,
+    new RegExp('\\.cell\\.architect-' + 'owned-engineer|\\.cell\\.architect-' + 'owned-worker|\\.cell\\.engineer-' + 'owned-worker'),
+  );
 });
 
-test('main hierarchy rerender preserves surface state when worker relationship classes change', () => {
+test('main hierarchy rerender preserves surface state when a worker moves from loose strip to engineer row', () => {
   const { context, document, sandbox } = createMainRenderHarness();
   const main = document.getElementById('main');
   let renderCount = 0;
@@ -9639,6 +9685,7 @@ test('main hierarchy rerender preserves surface state when worker relationship c
     'worker-hired': {
       id: 'worker-hired',
       name: 'Worker A',
+      kind: 'worker',
       group: 'loom',
       cell_type: 'agent',
       icon: 'W',
@@ -9664,7 +9711,11 @@ test('main hierarchy rerender preserves surface state when worker relationship c
   assert.equal(input.focused, true);
   let workerMatch = main.innerHTML.match(/<div class="([^"]*)" draggable="true" data-drag-id="worker-hired"/);
   assert.ok(workerMatch, 'worker cell should render before ownership changes');
-  assert.doesNotMatch(workerMatch[1], /\barchitect-owned-worker\b|\bengineer-owned-worker\b/);
+  assert.doesNotMatch(
+    workerMatch[1],
+    new RegExp('\\barchitect-' + 'owned-worker\\b|\\bengineer-' + 'owned-worker\\b'),
+  );
+  assert.match(main.innerHTML, /loose-workers-strip[\s\S]*Worker A[\s\S]*Alice/);
 
   document.activeElement = input;
   input.value = 'planner';
@@ -9684,10 +9735,14 @@ test('main hierarchy rerender preserves surface state when worker relationship c
   assert.equal(input.focused, true);
   workerMatch = main.innerHTML.match(/<div class="([^"]*)" draggable="true" data-drag-id="worker-hired"/);
   assert.ok(workerMatch, 'worker cell should render after ownership changes');
-  assert.match(workerMatch[1], /\barchitect-owned-worker\b/);
+  assert.doesNotMatch(
+    workerMatch[1],
+    new RegExp('\\barchitect-' + 'owned-worker\\b|\\bengineer-' + 'owned-worker\\b'),
+  );
+  assert.match(main.innerHTML, /Alice[\s\S]*Worker A/);
 });
 
-test('main render sorts dismissed engineers last and preserves scroll across rehire transitions', () => {
+test('main render keeps dismissed engineers in-place and preserves scroll across rehire transitions', () => {
   const { context, document, sandbox } = createMainRenderHarness();
   const main = document.getElementById('main');
   let renderCount = 0;
@@ -9724,6 +9779,7 @@ test('main render sorts dismissed engineers last and preserves scroll across reh
     'worker-dismissed': {
       id: 'worker-dismissed',
       name: 'Paused Worker',
+      kind: 'worker',
       owner_engineer_id: 'eng-dismissed',
       group: 'loom',
       cell_type: 'agent',
@@ -9743,6 +9799,7 @@ test('main render sorts dismissed engineers last and preserves scroll across reh
     'worker-active': {
       id: 'worker-active',
       name: 'Active Worker',
+      kind: 'worker',
       owner_engineer_id: 'eng-active',
       group: 'loom',
       cell_type: 'agent',
@@ -9755,12 +9812,12 @@ test('main render sorts dismissed engineers last and preserves scroll across reh
   runInContext(context, `render();`);
 
   assert.deepEqual(jsonValue(context, `window._navAgents`), [
-    'eng-active',
-    'worker-active',
     'eng-dismissed',
     'worker-dismissed',
+    'eng-active',
+    'worker-active',
   ]);
-  assert.match(main.innerHTML, /Active Engineer[\s\S]*Active Worker[\s\S]*Paused Engineer[\s\S]*Paused Worker/);
+  assert.match(main.innerHTML, /Paused Engineer[\s\S]*Paused Worker[\s\S]*Active Engineer[\s\S]*Active Worker/);
   assert.match(main.innerHTML, /cell[^"]*engineer[^"]*dismissed/);
   assert.match(main.innerHTML, /data-dismissed-at="123"/);
   assert.match(main.innerHTML, /cell-dismissed-badge/);
@@ -9785,7 +9842,7 @@ test('main render sorts dismissed engineers last and preserves scroll across reh
   assert.doesNotMatch(main.innerHTML, /rehireEngineer\('eng-dismissed'\)/);
 });
 
-test('main render restores the main scroll position across rerenders', () => {
+test('main render restores scroll when a section rerenders with a new engineer row', () => {
   const { context, document, sandbox } = createMainRenderHarness();
   const main = document.getElementById('main');
   let renderCount = 0;
@@ -9801,14 +9858,26 @@ test('main render restores the main scroll position across rerenders', () => {
     },
   });
 
-  sandbox.state.groups = { loom: ['eng-a'] };
+  sandbox.state.groups = { loom: ['arch-a', 'eng-a'] };
   sandbox.state.group_settings = { loom: { collapsed_default: false } };
   sandbox.state.children = {};
   sandbox.state.agents = {
+    'arch-a': {
+      id: 'arch-a',
+      name: 'Architect A',
+      kind: 'architect',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'R',
+      status: 'running',
+      session_id: 'sess-arch-a',
+      created_at: 5,
+    },
     'eng-a': {
       id: 'eng-a',
       name: 'Alice',
       kind: 'engineer',
+      hired_by_architect_id: 'arch-a',
       group: 'loom',
       cell_type: 'agent',
       icon: 'A',
@@ -9821,23 +9890,214 @@ test('main render restores the main scroll position across rerenders', () => {
   runInContext(context, `render();`);
   main.scrollTop = 135;
 
-  sandbox.state.agents['worker-a'] = {
-    id: 'worker-a',
-    name: 'Worker A',
-    owner_engineer_id: 'eng-a',
+  sandbox.state.agents['eng-b'] = {
+    id: 'eng-b',
+    name: 'Bob',
+    kind: 'engineer',
+    hired_by_architect_id: 'arch-a',
     group: 'loom',
     cell_type: 'agent',
-    icon: '1',
+    icon: 'B',
     status: 'running',
-    session_id: 'sess-worker-a',
+    session_id: 'sess-eng-b',
     created_at: 11,
   };
-  sandbox.state.groups.loom = ['eng-a', 'worker-a'];
+  sandbox.state.groups.loom = ['arch-a', 'eng-a', 'eng-b'];
 
   runInContext(context, `render();`);
 
   assert.equal(renderCount, 2);
   assert.equal(main.scrollTop, 135);
+  assert.deepEqual(jsonValue(context, `window._navAgents`), ['arch-a', 'eng-a', 'eng-b']);
+  assert.match(main.innerHTML, /Architect A[\s\S]*Alice[\s\S]*Bob/);
+});
+
+test('main hierarchy row shapes preserve focused controls across rerenders', () => {
+  const cases = [
+    { label: 'architect header row', focusKey: 'agent-close:arch-1' },
+    { label: 'engineer row', focusKey: 'agent-close:eng-1' },
+    { label: 'loose-workers strip', focusKey: 'agent-close:loose-1' },
+  ];
+
+  for (const item of cases) {
+    const { context, document, sandbox } = createMainRenderHarness();
+    const main = document.getElementById('main');
+    let currentFocusTarget = null;
+    let renderCount = 0;
+
+    function installFocusTarget() {
+      const target = new FakeElement('focused-grid-control');
+      target.dataset.focusKey = item.focusKey;
+      target.value = '';
+      target.selectionStart = 0;
+      target.selectionEnd = 0;
+      target.parentNode = main;
+      main.children = [target];
+      main.setQuerySelector('[data-focus-key="' + item.focusKey + '"]', target);
+      document.register('focused-grid-control', target);
+      currentFocusTarget = target;
+      return target;
+    }
+
+    Object.defineProperty(main, 'innerHTML', {
+      configurable: true,
+      get() {
+        return this._innerHTML || '';
+      },
+      set(value) {
+        this._innerHTML = value;
+        renderCount += 1;
+        installFocusTarget();
+      },
+    });
+
+    sandbox.state.groups = { loom: ['arch-1', 'eng-1', 'loose-1'] };
+    sandbox.state.group_settings = { loom: { collapsed_default: false } };
+    sandbox.state.children = {};
+    sandbox.state.agents = {
+      'arch-1': {
+        id: 'arch-1',
+        name: 'Architect',
+        kind: 'architect',
+        group: 'loom',
+        cell_type: 'agent',
+        icon: 'A',
+        status: 'running',
+        created_at: 1,
+      },
+      'eng-1': {
+        id: 'eng-1',
+        name: 'Engineer',
+        kind: 'engineer',
+        hired_by_architect_id: 'arch-1',
+        group: 'loom',
+        cell_type: 'agent',
+        icon: 'E',
+        status: 'running',
+        created_at: 2,
+      },
+      'loose-1': {
+        id: 'loose-1',
+        name: 'Loose Worker',
+        kind: 'worker',
+        group: 'loom',
+        cell_type: 'agent',
+        icon: 'W',
+        status: 'running',
+        created_at: 3,
+      },
+    };
+
+    let target = installFocusTarget();
+    target.value = item.label;
+    target.selectionStart = 1;
+    target.selectionEnd = 4;
+    document.activeElement = target;
+
+    runInContext(context, `render();`);
+
+    assert.match(main.innerHTML, new RegExp('data-focus-key="' + item.focusKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '"'));
+    assert.equal(currentFocusTarget.focused, true, item.label + ' focus should be restored on initial render');
+    assert.equal(currentFocusTarget.value, item.label);
+    assert.equal(currentFocusTarget.selectionStart, 1);
+    assert.equal(currentFocusTarget.selectionEnd, 4);
+
+    document.activeElement = currentFocusTarget;
+    currentFocusTarget.value = item.label + ' draft';
+    currentFocusTarget.selectionStart = 2;
+    currentFocusTarget.selectionEnd = 6;
+    sandbox.state.agents['eng-2'] = {
+      id: 'eng-2',
+      name: 'Engineer 2',
+      kind: 'engineer',
+      hired_by_architect_id: 'arch-1',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: '2',
+      status: 'running',
+      created_at: 4,
+    };
+    sandbox.state.groups.loom = ['arch-1', 'eng-1', 'loose-1', 'eng-2'];
+
+    runInContext(context, `render();`);
+
+    assert.equal(renderCount, 2);
+    assert.equal(currentFocusTarget.focused, true, item.label + ' focus should survive rerender');
+    assert.equal(currentFocusTarget.value, item.label + ' draft');
+    assert.equal(currentFocusTarget.selectionStart, 2);
+    assert.equal(currentFocusTarget.selectionEnd, 6);
+  }
+});
+
+test('main hierarchy ordering is stable when multiple agent deltas arrive in one websocket message', () => {
+  const { sandbox, document } = createSandbox();
+  document.register('main');
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/ws.js');
+  loadScript(context, 'static/js/render.js');
+  runInContext(context, `
+    _cachedAgentTemplates = [];
+    selectedTerminalId = null;
+    getFilterByWindow = function() { return false; };
+    renderTerminalWorkspace = function() {};
+    updateEventsAttentionBadge = function() {};
+  `);
+
+  runInContext(context, `
+    _handleFullState({
+      seq: 1,
+      groups: { loom: [] },
+      group_settings: { loom: { collapsed_default: false } },
+      agents: {},
+      children: {},
+      board_lanes: [],
+      board_tasks: {},
+      panel_events: []
+    });
+    _handleDelta({
+      seq: 2,
+      ops: [
+        { op: 'agent_upsert', id: 'arch-a', name: 'Architect A', kind: 'architect', group: 'loom', cell_type: 'agent', icon: 'A', status: 'running', created_at: 30 },
+        { op: 'agent_upsert', id: 'eng-user', name: 'User Engineer', kind: 'engineer', group: 'loom', cell_type: 'agent', icon: 'U', status: 'running', created_at: 2 },
+        { op: 'agent_upsert', id: 'arch-b', name: 'Architect B', kind: 'architect', group: 'loom', cell_type: 'agent', icon: 'B', status: 'running', created_at: 20 },
+        { op: 'agent_upsert', id: 'worker-user', name: 'User Worker', kind: 'worker', owner_engineer_id: 'eng-user', group: 'loom', cell_type: 'agent', icon: 'w', status: 'running', created_at: 3 },
+        { op: 'agent_upsert', id: 'eng-a', name: 'Engineer A', kind: 'engineer', hired_by_architect_id: 'arch-a', group: 'loom', cell_type: 'agent', icon: 'E', status: 'running', created_at: 31 },
+        { op: 'agent_upsert', id: 'eng-b', name: 'Engineer B', kind: 'engineer', hired_by_architect_id: 'arch-b', group: 'loom', cell_type: 'agent', icon: 'F', status: 'running', created_at: 21 },
+        { op: 'agent_upsert', id: 'loose', name: 'Loose', kind: 'worker', group: 'loom', cell_type: 'agent', icon: 'L', status: 'running', created_at: 1 },
+        { op: 'group_update', name: 'loom', agents: ['eng-a', 'arch-a', 'worker-user', 'arch-b', 'loose', 'eng-b', 'eng-user'] }
+      ]
+    });
+  `);
+
+  assert.deepEqual(jsonValue(context, `window._navAgents`), [
+    'loose',
+    'eng-user',
+    'worker-user',
+    'arch-b',
+    'eng-b',
+    'arch-a',
+    'eng-a',
+  ]);
+  assert.match(document.getElementById('main').innerHTML, /Loose[\s\S]*User Engineer[\s\S]*User Worker[\s\S]*Architect B[\s\S]*Engineer B[\s\S]*Architect A[\s\S]*Engineer A/);
+});
+
+test('main hierarchy always renders the synthetic User loose-workers strip when empty', () => {
+  const { context, document, sandbox } = createMainRenderHarness();
+  const main = document.getElementById('main');
+
+  sandbox.state.groups = { loom: [] };
+  sandbox.state.group_settings = { loom: { collapsed_default: false } };
+  sandbox.state.children = {};
+  sandbox.state.agents = {};
+
+  runInContext(context, `render();`);
+
+  assert.match(main.innerHTML, /agent-section agent-section-user/);
+  assert.match(main.innerHTML, /agent-section-user-card[\s\S]*User/);
+  const looseStrip = main.innerHTML.match(/<div class="loose-workers-strip"[\s\S]*?<\/div>/);
+  assert.ok(looseStrip, 'empty user section should still include the loose-workers strip');
+  assert.match(looseStrip[0], /loose-workers-placeholder-btn/);
+  assert.doesNotMatch(looseStrip[0], /data-drag-id=/);
 });
 
 test('main render restores the inline task description editor caret across rerenders', () => {
