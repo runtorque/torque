@@ -748,50 +748,6 @@ function _buildAgentGridNavigationModel(groupContexts) {
     if (!ctx.collapsed) {
       for (const section of ctx.agentLayout.sections) {
         const sectionKey = _agentGridSectionKey(section);
-        if (section.architect) {
-          const rowKey = sectionKey + ':header';
-          const headerRow = {
-            group: ctx.gname,
-            sectionKey,
-            rowKey,
-            rowType: 'architect-header-row',
-            architectId: section.architect.id,
-            items: [{
-              id: section.architect.id,
-              type: 'agent',
-              agentKind: 'architect',
-            }],
-          };
-          addRow(headerRow);
-          if (!ctx.atAgentCap) {
-            const controlId = _gridNavControlId('section-new-engineer', ctx.gname, sectionKey);
-            addCreationControl({
-              id: controlId,
-              type: 'control',
-              controlType: 'section-new-engineer',
-              group: ctx.gname,
-              sectionKey,
-              architectId: section.architect.id || '',
-              focusKey: _gridNavControlFocusKey('section-new-engineer', ctx.gname, sectionKey),
-              sort: model.itemMeta[section.architect.id].sort + 0.5,
-            });
-          }
-        } else if (section.type === 'user') {
-          if (!ctx.atAgentCap) {
-            const controlId = _gridNavControlId('section-new-engineer', ctx.gname, sectionKey);
-            addCreationControl({
-              id: controlId,
-              type: 'control',
-              controlType: 'section-new-engineer',
-              group: ctx.gname,
-              sectionKey,
-              architectId: '',
-              focusKey: _gridNavControlFocusKey('section-new-engineer', ctx.gname, sectionKey),
-              sort: sortOrder++,
-            });
-          }
-        }
-
         if (section.type === 'user') {
           const workerItems = ((section && section.looseWorkers) || []).map(worker => ({
             id: worker.id,
@@ -819,23 +775,63 @@ function _buildAgentGridNavigationModel(groupContexts) {
           }));
         }
 
-        for (const row of section.rows) {
+        for (let sectionRowIndex = 0; sectionRowIndex < section.rows.length; sectionRowIndex++) {
+          const row = section.rows[sectionRowIndex];
           const workerItems = (row.workers || []).map(worker => ({
             id: worker.id,
             type: 'agent',
             agentKind: 'worker',
           }));
+          const rowItems = [];
+          if (section.architect && sectionRowIndex === 0) {
+            rowItems.push({
+              id: section.architect.id,
+              type: 'agent',
+              agentKind: 'architect',
+            });
+          }
+          rowItems.push({
+            id: row.engineer.id,
+            type: 'agent',
+            agentKind: 'engineer',
+          });
           addRow({
             group: ctx.gname,
             sectionKey,
             rowKey: sectionKey + ':engineer:' + String(row.engineer.id || ''),
             rowType: 'engineer-row',
+            architectId: section.architect ? section.architect.id : '',
             engineerId: row.engineer.id,
+            items: rowItems.concat(workerItems),
+          });
+        }
+
+        if (section.architect && section.rows.length === 0) {
+          addRow({
+            group: ctx.gname,
+            sectionKey,
+            rowKey: sectionKey + ':architect-anchor',
+            rowType: 'architect-anchor-row',
+            architectId: section.architect.id,
             items: [{
-              id: row.engineer.id,
+              id: section.architect.id,
               type: 'agent',
-              agentKind: 'engineer',
-            }].concat(workerItems),
+              agentKind: 'architect',
+            }],
+          });
+        }
+
+        if (!ctx.atAgentCap) {
+          const controlId = _gridNavControlId('section-new-engineer', ctx.gname, sectionKey);
+          addCreationControl({
+            id: controlId,
+            type: 'control',
+            controlType: 'section-new-engineer',
+            group: ctx.gname,
+            sectionKey,
+            architectId: section.architect ? (section.architect.id || '') : '',
+            focusKey: _gridNavControlFocusKey('section-new-engineer', ctx.gname, sectionKey),
+            sort: sortOrder++,
           });
         }
       }
@@ -1009,14 +1005,13 @@ function _renderLooseWorkersStrip(groupName, section, renderCell) {
   return html;
 }
 
-function _renderArchitectHeaderRow(groupName, section, renderCell, opts) {
+function _renderSectionArchitectColumn(groupName, section, renderCell) {
   const sectionKey = _agentGridSectionKey(section);
-  let html = '<div class="agent-section-header-row architect-header-row"'
-    + ' data-agent-row-shape="architect-header-row"'
+  let html = '<div class="agent-section-architect-column"'
+    + ' data-agent-section-column="architect"'
     + ' data-section-key="' + esc(sectionKey) + '">';
   if (section && section.architect) html += renderCell(section.architect);
   else html += _renderUserSectionCard(groupName);
-  html += _renderSectionControlsSlot(groupName, section, opts);
   html += '</div>';
   return html;
 }
@@ -1195,11 +1190,16 @@ function render() {
       ];
       html += '<section class="' + sectionClasses.join(' ') + '"'
         + ' data-agent-section="' + esc(sectionKey) + '">';
-      html += _renderArchitectHeaderRow(gname, section, renderCellForGrid, { disabled: ctx.atAgentCap });
+      html += _renderSectionArchitectColumn(gname, section, renderCellForGrid);
+      html += '<div class="agent-section-body"'
+        + ' data-agent-section-column="body"'
+        + ' data-section-key="' + esc(sectionKey) + '">';
       if (section.type === 'user') {
         html += _renderLooseWorkersStrip(gname, section, renderCellForGrid);
       }
       for (const row of section.rows) html += _renderEngineerRow(row, renderCellForGrid);
+      html += _renderSectionControlsSlot(gname, section, { disabled: ctx.atAgentCap });
+      html += '</div>';
       html += '</section>';
     }
     html += _renderAgentGridAddArchitectRow(gname, gsLocal, agents);

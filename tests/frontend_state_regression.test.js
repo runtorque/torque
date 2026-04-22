@@ -9753,7 +9753,7 @@ test('standalone runtime metadata does not change embedded-runtime detection', (
 });
 
 
-test('architect header + New Engineer opens a scoped modal and submits architect hire context', () => {
+test('architect section + New Engineer opens a scoped modal and submits architect hire context', () => {
   const { context, document, sandbox } = createMainRenderHarness();
   const modalDom = registerEngineerModalDom(document);
   loadModalScripts(context);
@@ -9778,9 +9778,12 @@ test('architect header + New Engineer opens a scoped modal and submits architect
   runInContext(context, `render();`);
 
   assert.match(main.innerHTML, /data-agent-section="architect:arch-a"/);
+  assert.match(main.innerHTML, /agent-section-architect-column[\s\S]*Productmind/);
+  assert.match(main.innerHTML, /agent-section-body[\s\S]*class="agent-section-new-engineer-btn"/);
   assert.match(main.innerHTML, /class="agent-section-new-engineer-btn"/);
   assert.match(main.innerHTML, /data-hired-by-architect-id="arch-a"/);
   assert.match(main.innerHTML, /openAddEngineerForSection\(&quot;loom&quot;,&quot;arch-a&quot;\)/);
+  assert.doesNotMatch(main.innerHTML, /architect-header-row|agent-section-header-row/);
 
   runInContext(context, `openAddEngineerForSection('loom', 'arch-a');`);
   assert.equal(modalDom.modal.classList.contains('visible'), true);
@@ -9799,7 +9802,7 @@ test('architect header + New Engineer opens a scoped modal and submits architect
   }]);
 });
 
-test('user header + New Engineer submits a user-hired engineer without architect context', () => {
+test('user section + New Engineer submits a user-hired engineer without architect context', () => {
   const { context, document, sandbox } = createMainRenderHarness();
   const modalDom = registerEngineerModalDom(document);
   loadModalScripts(context);
@@ -9813,9 +9816,12 @@ test('user header + New Engineer submits a user-hired engineer without architect
   runInContext(context, `render();`);
 
   assert.match(main.innerHTML, /data-agent-section="user"/);
+  assert.match(main.innerHTML, /agent-section-architect-column[\s\S]*agent-section-user-card[\s\S]*User/);
+  assert.match(main.innerHTML, /agent-section-body[\s\S]*class="agent-section-new-engineer-btn"/);
   assert.match(main.innerHTML, /class="agent-section-new-engineer-btn"/);
   assert.match(main.innerHTML, /data-hired-by-architect-id=""/);
   assert.match(main.innerHTML, /openAddEngineerForSection\(&quot;loom&quot;,&quot;&quot;\)/);
+  assert.doesNotMatch(main.innerHTML, /architect-header-row|agent-section-header-row/);
 
   runInContext(context, `openAddEngineerForSection('loom', '');`);
   assert.equal(modalDom.summary.textContent, 'Create a persistent user-hired engineer session in loom.');
@@ -10007,7 +10013,9 @@ test('main render groups user loose workers before engineer rows and exposes row
     'worker-b',
   ]);
   assert.match(main.innerHTML, /User Worker[\s\S]*Alice[\s\S]*Worker A[\s\S]*Bob[\s\S]*Worker B/);
-  assert.match(main.innerHTML, /architect-header-row/);
+  assert.match(main.innerHTML, /agent-section-architect-column/);
+  assert.match(main.innerHTML, /agent-section-body/);
+  assert.doesNotMatch(main.innerHTML, /architect-header-row|agent-section-header-row/);
   assert.match(main.innerHTML, /loose-workers-strip/);
   assert.match(main.innerHTML, /engineer-row/);
   assert.match(main.innerHTML, /cell-engineer-badge/);
@@ -10310,7 +10318,9 @@ test('main render uses containment primitives and retires cell hierarchy indenta
     orphanWorker[1],
     new RegExp('\\barchitect-' + 'owned-worker\\b|\\bengineer-' + 'owned-worker\\b'),
   );
-  assert.match(main.innerHTML, /architect-header-row/);
+  assert.match(main.innerHTML, /agent-section-architect-column/);
+  assert.match(main.innerHTML, /agent-section-body/);
+  assert.doesNotMatch(main.innerHTML, /architect-header-row|agent-section-header-row/);
   assert.match(main.innerHTML, /loose-workers-strip/);
   assert.match(main.innerHTML, /engineer-row/);
 
@@ -10319,6 +10329,221 @@ test('main render uses containment primitives and retires cell hierarchy indenta
     css,
     new RegExp('\\.cell\\.architect-' + 'owned-engineer|\\.cell\\.architect-' + 'owned-worker|\\.cell\\.engineer-' + 'owned-worker'),
   );
+  assert.doesNotMatch(css, /agent-section-header-row|architect-header-row/);
+});
+
+test('main render anchors each architect once in a fixed left column with engineer rows on the right', () => {
+  const { context, document, sandbox } = createMainRenderHarness();
+  const main = document.getElementById('main');
+
+  sandbox.state.groups = {
+    loom: ['arch-a', 'eng-a1', 'worker-a1', 'eng-a2', 'worker-a2', 'eng-a3'],
+  };
+  sandbox.state.group_settings = {
+    loom: { collapsed_default: false, weaver_agent_id: '' },
+  };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'arch-a': {
+      id: 'arch-a',
+      name: 'Productmind',
+      kind: 'architect',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'P',
+      status: 'running',
+      created_at: 1,
+    },
+    'eng-a1': {
+      id: 'eng-a1',
+      name: 'Engineer One',
+      kind: 'engineer',
+      hired_by_architect_id: 'arch-a',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: '1',
+      status: 'running',
+      created_at: 2,
+    },
+    'worker-a1': {
+      id: 'worker-a1',
+      name: 'Worker One',
+      kind: 'worker',
+      owner_engineer_id: 'eng-a1',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'W',
+      status: 'running',
+      created_at: 3,
+    },
+    'eng-a2': {
+      id: 'eng-a2',
+      name: 'Engineer Two',
+      kind: 'engineer',
+      hired_by_architect_id: 'arch-a',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: '2',
+      status: 'running',
+      created_at: 4,
+    },
+    'worker-a2': {
+      id: 'worker-a2',
+      name: 'Worker Two',
+      kind: 'worker',
+      owner_engineer_id: 'eng-a2',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'V',
+      status: 'running',
+      created_at: 5,
+    },
+    'eng-a3': {
+      id: 'eng-a3',
+      name: 'Engineer Three',
+      kind: 'engineer',
+      hired_by_architect_id: 'arch-a',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: '3',
+      status: 'running',
+      created_at: 6,
+    },
+  };
+
+  runInContext(context, `render();`);
+
+  const start = main.innerHTML.indexOf('data-agent-section="architect:arch-a"');
+  const end = main.innerHTML.indexOf('</section>', start);
+  const sectionHtml = main.innerHTML.slice(start, end);
+  assert.ok(start >= 0 && end > start, 'architect section should render');
+  assert.equal((sectionHtml.match(/data-drag-id="arch-a"/g) || []).length, 1);
+  assert.equal((sectionHtml.match(/class="engineer-row agent-grid-engineer-row"/g) || []).length, 3);
+  assert.ok(sectionHtml.indexOf('agent-section-architect-column') < sectionHtml.indexOf('agent-section-body'));
+  assert.ok(sectionHtml.indexOf('Productmind') < sectionHtml.indexOf('Engineer One'));
+  assert.match(sectionHtml, /agent-section-body[\s\S]*Engineer One[\s\S]*Engineer Two[\s\S]*Engineer Three[\s\S]*\+ New Engineer/);
+  assert.doesNotMatch(sectionHtml, /architect-header-row|agent-section-header-row/);
+});
+
+test('main render keeps the User loose-workers strip inside the right column above engineer rows', () => {
+  const { context, document, sandbox } = createMainRenderHarness();
+  const main = document.getElementById('main');
+
+  sandbox.state.groups = { loom: ['loose-a', 'eng-user', 'worker-user'] };
+  sandbox.state.group_settings = { loom: { collapsed_default: false, weaver_agent_id: '' } };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'loose-a': {
+      id: 'loose-a',
+      name: 'Loose A',
+      kind: 'worker',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'L',
+      status: 'running',
+      created_at: 1,
+    },
+    'eng-user': {
+      id: 'eng-user',
+      name: 'User Engineer',
+      kind: 'engineer',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'E',
+      status: 'running',
+      created_at: 2,
+    },
+    'worker-user': {
+      id: 'worker-user',
+      name: 'User Worker',
+      kind: 'worker',
+      owner_engineer_id: 'eng-user',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'W',
+      status: 'running',
+      created_at: 3,
+    },
+  };
+
+  runInContext(context, `render();`);
+
+  const start = main.innerHTML.indexOf('data-agent-section="user"');
+  const end = main.innerHTML.indexOf('</section>', start);
+  const sectionHtml = main.innerHTML.slice(start, end);
+  const bodyStart = sectionHtml.indexOf('agent-section-body');
+  assert.ok(bodyStart >= 0, 'user section body should render');
+  assert.ok(sectionHtml.indexOf('agent-section-user-card') < bodyStart);
+  assert.ok(sectionHtml.indexOf('loose-workers-strip') > bodyStart);
+  assert.ok(sectionHtml.indexOf('loose-workers-strip') < sectionHtml.indexOf('data-engineer-id="eng-user"'));
+  assert.match(sectionHtml, /loose-workers-strip[\s\S]*Loose A[\s\S]*\+ New Worker/);
+  assert.match(sectionHtml, /data-engineer-id="eng-user"[\s\S]*User Engineer[\s\S]*User Worker/);
+});
+
+test('main render keeps wrapped workers inside their engineer row and fixes architect column width via CSS', () => {
+  const { context, document, sandbox } = createMainRenderHarness();
+  const main = document.getElementById('main');
+
+  const ids = ['eng-a'];
+  const agents = {
+    'eng-a': {
+      id: 'eng-a',
+      name: 'Engineer A',
+      kind: 'engineer',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'E',
+      status: 'running',
+      created_at: 1,
+    },
+    'eng-b': {
+      id: 'eng-b',
+      name: 'Engineer B',
+      kind: 'engineer',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'B',
+      status: 'running',
+      created_at: 20,
+    },
+  };
+  for (let i = 1; i <= 7; i++) {
+    const id = 'worker-' + i;
+    ids.push(id);
+    agents[id] = {
+      id,
+      name: 'Worker ' + i,
+      kind: 'worker',
+      owner_engineer_id: 'eng-a',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: String(i),
+      status: 'running',
+      created_at: i + 1,
+    };
+  }
+  ids.push('eng-b');
+
+  sandbox.state.groups = { loom: ids };
+  sandbox.state.group_settings = { loom: { collapsed_default: false, weaver_agent_id: '' } };
+  sandbox.state.children = {};
+  sandbox.state.agents = agents;
+
+  runInContext(context, `render();`);
+
+  const firstRowStart = main.innerHTML.indexOf('data-engineer-id="eng-a"');
+  const secondRowStart = main.innerHTML.indexOf('data-engineer-id="eng-b"');
+  const firstRowHtml = main.innerHTML.slice(firstRowStart, secondRowStart);
+  assert.ok(firstRowStart >= 0 && secondRowStart > firstRowStart, 'two engineer rows should render');
+  assert.match(firstRowHtml, /engineer-row-workers/);
+  for (let i = 1; i <= 7; i++) assert.match(firstRowHtml, new RegExp('Worker ' + i));
+  assert.doesNotMatch(firstRowHtml, /Engineer B/);
+
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  assert.match(css, /--agent-architect-column-width:\s*96px/);
+  assert.match(css, /\.agent-section\s*\{[^}]*grid-template-columns:\s*var\(--agent-architect-column-width\)\s+minmax\(0,\s*1fr\)/s);
+  assert.match(css, /\.agent-grid \.engineer-row\s*\{[^}]*display:\s*flex/s);
+  assert.match(css, /\.engineer-row-workers,\s*\.loose-workers-strip\s*\{[^}]*flex-wrap:\s*wrap/s);
 });
 
 test('main hierarchy rerender preserves surface state when a worker moves from loose strip to engineer row', () => {
@@ -10609,7 +10834,7 @@ test('main render restores scroll when a section rerenders with a new engineer r
 
 test('main hierarchy row shapes preserve focused controls across rerenders', () => {
   const cases = [
-    { label: 'architect header row', focusKey: 'agent-close:arch-1' },
+    { label: 'architect column', focusKey: 'agent-close:arch-1' },
     { label: 'engineer row', focusKey: 'agent-close:eng-1' },
     { label: 'loose-workers strip', focusKey: 'agent-close:loose-1' },
   ];
@@ -11418,10 +11643,8 @@ test('main grid keyboard navigation traverses logical rows across sections', () 
     { type: 'loose-workers-strip', items: ['loose-1', 'loose-2', 'grid-control:loose-new-worker:loom:user'] },
     { type: 'engineer-row', items: ['eng-user-a', 'worker-user-a1', 'worker-user-a2'] },
     { type: 'engineer-row', items: ['eng-user-b', 'worker-user-b1'] },
-    { type: 'architect-header-row', items: ['arch-a'] },
-    { type: 'engineer-row', items: ['eng-a', 'worker-a1', 'worker-a2'] },
-    { type: 'architect-header-row', items: ['arch-b'] },
-    { type: 'engineer-row', items: ['eng-b', 'worker-b1'] },
+    { type: 'engineer-row', items: ['arch-a', 'eng-a', 'worker-a1', 'worker-a2'] },
+    { type: 'engineer-row', items: ['arch-b', 'eng-b', 'worker-b1'] },
   ]);
 
   runInContext(context, `moveFocusHorizontal(1);`);
@@ -11431,9 +11654,15 @@ test('main grid keyboard navigation traverses logical rows across sections', () 
   runInContext(context, `moveFocusDown();`);
   assert.equal(jsonValue(context, `focusedItemId`), 'worker-user-b1');
   runInContext(context, `moveFocusDown();`);
-  assert.equal(jsonValue(context, `focusedItemId`), 'arch-a');
+  assert.equal(jsonValue(context, `focusedItemId`), 'worker-a1');
   runInContext(context, `moveFocusDown();`);
-  assert.equal(jsonValue(context, `focusedItemId`), 'worker-a2');
+  assert.equal(jsonValue(context, `focusedItemId`), 'worker-b1');
+
+  runInContext(context, `focusedItemId = 'eng-a'; render();`);
+  runInContext(context, `moveFocusHorizontal(-1);`);
+  assert.equal(jsonValue(context, `focusedItemId`), 'arch-a');
+  runInContext(context, `moveFocusHorizontal(1);`);
+  assert.equal(jsonValue(context, `focusedItemId`), 'eng-a');
 
   runInContext(context, `focusedItemId = 'loose-1'; render();`);
   runInContext(context, `moveFocusHorizontal(1);`);
@@ -11583,8 +11812,8 @@ test('main grid Tab cycles through creation buttons in visual order', () => {
   runInContext(context, `render();`);
 
   assert.deepEqual(jsonValue(context, `window._navCreationControls.map(function(item) { return item.controlType + ':' + item.sectionKey; })`), [
-    'section-new-engineer:user',
     'loose-new-worker:user',
+    'section-new-engineer:user',
     'section-new-engineer:architect:arch-a',
     'agent-new-architect:',
   ]);
@@ -11600,15 +11829,15 @@ test('main grid Tab cycles through creation buttons in visual order', () => {
   }
 
   pressTab();
-  assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:section-new-engineer:loom:user');
-  pressTab();
   assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:loose-new-worker:loom:user');
+  pressTab();
+  assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:section-new-engineer:loom:user');
   pressTab();
   assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:section-new-engineer:loom:architect:arch-a');
   pressTab();
   assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:agent-new-architect:loom');
   pressTab();
-  assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:section-new-engineer:loom:user');
+  assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:loose-new-worker:loom:user');
   pressTab(true);
   assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:agent-new-architect:loom');
 });
