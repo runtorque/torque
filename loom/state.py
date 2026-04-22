@@ -180,6 +180,7 @@ def _approx_json_size(value, *, budget: int = HOT_JSON_OFFLOAD_BYTES) -> int:
     """Return a cheap bounded size estimate for offload decisions."""
     total = 0
     stack = [(value, 0)]
+    seen_containers: set[int] = set()
     while stack and total < budget:
         item, depth = stack.pop()
         if item is None or isinstance(item, bool):
@@ -191,16 +192,20 @@ def _approx_json_size(value, *, budget: int = HOT_JSON_OFFLOAD_BYTES) -> int:
         elif isinstance(item, (bytes, bytearray)):
             total += len(item)
         elif isinstance(item, dict):
-            total += len(item) * 4
-            if depth >= 4:
+            item_id = id(item)
+            if item_id in seen_containers:
                 continue
+            seen_containers.add(item_id)
+            total += len(item) * 4
             for key, val in item.items():
                 stack.append((key, depth + 1))
                 stack.append((val, depth + 1))
         elif isinstance(item, (list, tuple)):
-            total += len(item) * 2
-            if depth >= 4:
+            item_id = id(item)
+            if item_id in seen_containers:
                 continue
+            seen_containers.add(item_id)
+            total += len(item) * 2
             for val in item:
                 stack.append((val, depth + 1))
         else:

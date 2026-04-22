@@ -27,6 +27,24 @@ class HotJsonSerializationTests(unittest.IsolatedAsyncioTestCase):
         self.state_mod = importlib.import_module("loom.state")
         self.state_mod = importlib.reload(self.state_mod)
 
+    def _state_payload_with_task_message(self, message: str) -> dict:
+        state = self.state_mod.MatrixState()
+        state.groups["g"] = []
+        task = self.state_mod.BoardTask(
+            id="task-1",
+            task="Nested message payload",
+            group="g",
+            lane="Backlog",
+            messages=[{
+                "timestamp": 1,
+                "action": "progress",
+                "message": message,
+                "agent_name": "worker",
+            }],
+        )
+        state.board_tasks[task.id] = task
+        return {"type": "state", "seq": state._seq, **state.to_dict()}
+
     def test_hot_json_should_offload_uses_size_threshold_for_state_payloads(self):
         small_delta = {
             "type": "delta",
@@ -58,6 +76,27 @@ class HotJsonSerializationTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.state_mod.hot_json_should_offload(large_state))
         self.assertFalse(
             self.state_mod.hot_json_should_offload(small_wrapped_state)
+        )
+
+    def test_hot_json_should_offload_realistic_nested_state_payloads(self):
+        small_state = self._state_payload_with_task_message("small")
+        large_state = self._state_payload_with_task_message(
+            "x" * (self.state_mod.HOT_JSON_OFFLOAD_BYTES * 2)
+        )
+        wrapped_large_state = {"ok": True, "data": large_state}
+
+        self.assertLess(
+            len(self.state_mod.hot_json_dumps_bytes(small_state)),
+            self.state_mod.HOT_JSON_OFFLOAD_BYTES,
+        )
+        self.assertFalse(self.state_mod.hot_json_should_offload(small_state))
+        self.assertGreaterEqual(
+            len(self.state_mod.hot_json_dumps_bytes(large_state)),
+            self.state_mod.HOT_JSON_OFFLOAD_BYTES,
+        )
+        self.assertTrue(self.state_mod.hot_json_should_offload(large_state))
+        self.assertTrue(
+            self.state_mod.hot_json_should_offload(wrapped_large_state)
         )
 
     async def test_hot_json_dumps_async_inlines_small_and_offloads_large_payloads(self):
@@ -101,6 +140,40 @@ class HotJsonSerializationTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(len(calls), 1)
             self.assertIs(calls[0][0], self.state_mod.hot_json_dumps_bytes)
+        finally:
+            self.state_mod.asyncio.to_thread = original_to_thread
+
+    async def test_hot_json_dumps_async_offloads_large_nested_state_payloads(self):
+        calls = []
+        original_to_thread = self.state_mod.asyncio.to_thread
+
+        async def recording_to_thread(func, /, *args, **kwargs):
+            calls.append((func, args, kwargs))
+            return func(*args, **kwargs)
+
+        self.state_mod.asyncio.to_thread = recording_to_thread
+        try:
+            large_state = self._state_payload_with_task_message(
+                "x" * (self.state_mod.HOT_JSON_OFFLOAD_BYTES * 2)
+            )
+            wrapped_large_state = {"ok": True, "data": large_state}
+
+            self.assertEqual(
+                json.loads(await self.state_mod.hot_json_dumps_async(large_state)),
+                large_state,
+            )
+            self.assertEqual(len(calls), 1)
+
+            self.assertEqual(
+                json.loads(
+                    await self.state_mod.hot_json_dumps_async(wrapped_large_state)
+                ),
+                wrapped_large_state,
+            )
+            self.assertEqual(len(calls), 2)
+            self.assertTrue(
+                all(call[0] is self.state_mod.hot_json_dumps_bytes for call in calls)
+            )
         finally:
             self.state_mod.asyncio.to_thread = original_to_thread
 
