@@ -67,6 +67,7 @@ _ARCHITECT_WORKSPACE_PENDING_HIRE_LIMIT = 5
 _ARCHITECT_WORKSPACE_MESSAGE_LIMIT = 5
 _ARCHITECT_WORKSPACE_TITLE_LIMIT = 80
 _ARCHITECT_WORKSPACE_SNIPPET_LIMIT = 160
+_ARCHITECT_WORKSPACE_RESPONSE_LIMIT = 4_096
 
 # ---------------------------------------------------------------------------
 # Shared scoping helpers
@@ -341,6 +342,70 @@ def _architect_journal_latest_timestamp(state, architect_id: str, *,
             )
 
     return latest if latest > 0 else None
+
+
+def _workspace_mark_top_truncated(payload: dict, key: str) -> None:
+    payload.setdefault("truncated", {})[key] = True
+
+
+def _workspace_mark_engineer_truncated(engineer: dict, key: str) -> None:
+    engineer.setdefault("truncated", {})[key] = True
+
+
+def _workspace_mark_queue_truncated(engineer: dict, key: str) -> None:
+    engineer.setdefault("queue", {}).setdefault("truncated", {})[key] = True
+
+
+def _workspace_trim_list(values: list, limit: int) -> bool:
+    if len(values) <= limit:
+        return False
+    del values[limit:]
+    return True
+
+
+def _workspace_json_with_budget(payload: dict) -> str:
+    """Return compact JSON, progressively trimming excerpts to fit budget."""
+    text = _compact_json(payload)
+    if len(text) <= _ARCHITECT_WORKSPACE_RESPONSE_LIMIT:
+        return text
+
+    def _trim_top_list(key: str, limit: int) -> None:
+        if _workspace_trim_list(payload.get(key, []), limit):
+            _workspace_mark_top_truncated(payload, key)
+
+    def _trim_engineer_list(key: str, limit: int) -> None:
+        for engineer in payload.get("engineers", []) or []:
+            if _workspace_trim_list(engineer.get(key, []), limit):
+                _workspace_mark_engineer_truncated(engineer, key)
+
+    def _trim_queue_list(key: str, limit: int) -> None:
+        for engineer in payload.get("engineers", []) or []:
+            queue = engineer.get("queue", {}) or {}
+            if _workspace_trim_list(queue.get(key, []), limit):
+                _workspace_mark_queue_truncated(engineer, key)
+
+    trim_steps = (
+        (_trim_top_list, "my_tasks", 5),
+        (_trim_queue_list, "to_do", 3),
+        (_trim_queue_list, "in_progress", 3),
+        (_trim_engineer_list, "workers", 3),
+        (_trim_engineer_list, "recent_streams", 2),
+        (_trim_top_list, "my_tasks", 3),
+        (_trim_queue_list, "to_do", 2),
+        (_trim_queue_list, "in_progress", 2),
+        (_trim_engineer_list, "workers", 2),
+        (_trim_engineer_list, "recent_streams", 1),
+        (_trim_top_list, "my_tasks", 1),
+        (_trim_queue_list, "to_do", 1),
+        (_trim_queue_list, "in_progress", 1),
+        (_trim_engineer_list, "workers", 1),
+    )
+    for trim_func, key, limit in trim_steps:
+        trim_func(key, limit)
+        text = _compact_json(payload)
+        if len(text) <= _ARCHITECT_WORKSPACE_RESPONSE_LIMIT:
+            return text
+    return text
 
 
 def _architect_workspace_overview_json(state, architect_id: str,
@@ -647,7 +712,7 @@ def _architect_workspace_overview_json(state, architect_id: str,
         truncated["unread_messages"] = True
     if truncated:
         payload["truncated"] = truncated
-    return _compact_json(payload)
+    return _workspace_json_with_budget(payload)
 
 
 def _is_engineer_like_cell(state, cell) -> bool:

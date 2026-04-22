@@ -344,7 +344,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
                 "task_id": panel_task.id,
                 "title": (
                     "Implement compact workspace overview with a title that should "
-                    "be clipped…"
+                    "be clipped before…"
                 ),
                 "since": "2026-04-22T10:15:00+00:00",
             }],
