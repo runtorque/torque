@@ -194,6 +194,64 @@ test('architect roster renders worker kind badges with worker-specific class', (
   assert.match(panel.innerHTML, /class="engineer-row-kind engineer-row-kind-worker">worker<\/span>/);
 });
 
+test('agent panel roster marks architect-owned and user-owned hierarchy rows distinctly', () => {
+  const { context, panel } = createHarness();
+  context._esc = function(value) { return String(value); };
+  context.state.agents = {
+    'arch-1': {
+      id: 'arch-1',
+      name: 'Planner',
+      kind: 'architect',
+      group: 'alpha',
+      cell_type: 'agent',
+    },
+    'eng-arch': {
+      id: 'eng-arch',
+      name: 'Architect Engineer',
+      kind: 'engineer',
+      group: 'alpha',
+      hired_by_architect_id: 'arch-1',
+      cell_type: 'agent',
+    },
+    'worker-arch': {
+      id: 'worker-arch',
+      name: 'Architect Worker',
+      kind: 'worker',
+      group: 'alpha',
+      owner_engineer_id: 'eng-arch',
+      cell_type: 'agent',
+    },
+    'eng-user': {
+      id: 'eng-user',
+      name: 'User Engineer',
+      kind: 'engineer',
+      group: 'alpha',
+      cell_type: 'agent',
+    },
+    'worker-user': {
+      id: 'worker-user',
+      name: 'User Worker',
+      kind: 'worker',
+      group: 'alpha',
+      owner_engineer_id: 'eng-user',
+      cell_type: 'agent',
+    },
+  };
+  context.state.groups.alpha = ['arch-1', 'eng-arch', 'worker-arch', 'eng-user', 'worker-user'];
+  context.focusedItemId = 'arch-1';
+
+  context.agentPanelSelectTab('hired_engineers');
+
+  assert.match(panel.innerHTML, /architect-roster-level-1 architect-owned-engineer-row/);
+  assert.match(panel.innerHTML, /architect-roster-level-2 architect-owned-worker-row/);
+
+  const userRosterHtml = vm.runInContext(`_agentPanelLegacyRenderEngineerRoster('alpha')`, context);
+  assert.match(userRosterHtml, /engineer-row-virtual-parent/);
+  assert.match(userRosterHtml, /engineer-roster-level-1 user-owned-engineer-row/);
+  assert.match(userRosterHtml, /engineer-roster-level-2 engineer-owned-worker-row/);
+  assert.doesNotMatch(userRosterHtml, /architect-owned-engineer-row|architect-owned-worker-row/);
+});
+
 test('agentPanelSelectTab remembers the last selected tab per kind', () => {
   const { context, panel } = createHarness();
   setFocusedAgent(context, {

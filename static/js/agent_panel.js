@@ -728,7 +728,12 @@ function _agentPanelArchitectHiredEngineers(agent) {
   }
   html += '<div class="engineers-roster-list">';
   if (typeof _agentPanelLegacyRenderEngineerTreeRows === 'function') {
-    html += _agentPanelLegacyRenderEngineerTreeRows(group, engineers, 'architect-roster-level-1', 'architect-roster-level-2');
+    html += _agentPanelLegacyRenderEngineerTreeRows(
+      group,
+      engineers,
+      'architect-roster-level-1 architect-owned-engineer-row',
+      'architect-roster-level-2 architect-owned-worker-row'
+    );
   } else {
     for (var i = 0; i < engineers.length; i++) {
       var engineer = engineers[i];
@@ -1337,7 +1342,12 @@ function _agentPanelLegacyRenderArchitectRoster(group) {
       html += '<div class="architect-row-body">';
       html += '<div class="architect-roster-section-head"><span class="architect-roster-section-title">Hired engineers</span><span class="architect-roster-section-count">' + hiredEngineers.length + '</span></div>';
       if (hiredEngineers.length) {
-        html += _agentPanelLegacyRenderEngineerTreeRows(group, hiredEngineers, 'architect-roster-level-1', 'architect-roster-level-2');
+        html += _agentPanelLegacyRenderEngineerTreeRows(
+          group,
+          hiredEngineers,
+          'architect-roster-level-1 architect-owned-engineer-row',
+          'architect-roster-level-2 architect-owned-worker-row'
+        );
       } else {
         html += '<div class="engineers-roster-empty architect-roster-empty">No hired engineers yet.</div>';
       }
@@ -1381,7 +1391,12 @@ function _agentPanelLegacyRenderEngineerRoster(group) {
   }
   html += '<div class="engineers-roster-list">';
   html += '<div class="engineer-row engineer-row-virtual-parent"><div class="engineer-row-main"><span class="engineer-row-name">User</span><span class="engineer-row-kind">owner</span></div></div>';
-  html += _agentPanelLegacyRenderEngineerTreeRows(group, engineers, 'architect-roster-level-1', 'architect-roster-level-2');
+  html += _agentPanelLegacyRenderEngineerTreeRows(
+    group,
+    engineers,
+    'engineer-roster-level-1 user-owned-engineer-row',
+    'engineer-roster-level-2 engineer-owned-worker-row'
+  );
   html += '</div>';
   html += '</section>';
   return html;
