@@ -82,6 +82,44 @@ class LoomDoctorTests(unittest.TestCase):
             "ALTER TABLE board_tasks ADD COLUMN weaver_owner_id TEXT NOT NULL DEFAULT ''"
         )
 
+    def test_build_doctor_report_flags_alias_missing_canonical_collision(self):
+        home = self._home_dir()
+        self._save_engineer()
+        self.db.save_board_task(
+            BoardTask(
+                id="LOOM:51",
+                task="Archived header task",
+                slug="archived-header-task",
+                group="loom",
+                lane="Archived",
+                archived_at="2026-04-07T00:00:00+00:00",
+                assigned_engineer_id="weaver-1",
+            )
+        )
+        self.db.save_task_id_alias("LOOM:51", "bcf3a475")
+
+        with mock.patch.dict(os.environ, {"HOME": str(home)}):
+            report = build_doctor_report_for_db(self.db_path)
+            rendered = format_doctor_report(report)
+
+        aliases = report["task_aliases"]
+        self.assertEqual(aliases["total"], 1)
+        self.assertEqual(aliases["literal_collision_count"], 1)
+        self.assertEqual(aliases["archived_literal_collision_count"], 1)
+        self.assertEqual(aliases["missing_canonical_count"], 1)
+        self.assertEqual(
+            aliases["missing_canonical"][0]["legacy_id"],
+            "LOOM:51",
+        )
+        self.assertEqual(
+            aliases["strategy"],
+            "alias_precedence_archived_literals_hidden",
+        )
+        warning_names = [warning["name"] for warning in report["warnings"]]
+        self.assertIn("task_aliases_missing_canonical", warning_names)
+        self.assertIn("missing_canonical:             1", rendered)
+        self.assertIn("LOOM:51->bcf3a475", rendered)
+
     def test_build_doctor_report_warns_when_no_engineer_exists(self):
         home = self._home_dir()
         self.db.save_board_task(

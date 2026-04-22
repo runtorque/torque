@@ -628,6 +628,139 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
         state.groups["g"] = []
         return state
 
+    def test_resolve_board_task_id_prefers_alias_over_archived_literal(self):
+        state = self._make_state()
+        archived = self.state_mod.BoardTask(
+            id="LOOM:51",
+            task="Archived task",
+            group="g",
+            lane="Archived",
+            archived_at="2026-04-07T00:00:00+00:00",
+        )
+        live = self.state_mod.BoardTask(
+            id="bcf3a475",
+            task="Live task",
+            group="g",
+            lane="Backlog",
+        )
+        state.board_tasks[archived.id] = archived
+        state.board_tasks[live.id] = live
+        state.task_id_aliases[archived.id] = live.id
+
+        self.assertEqual(state.resolve_task_alias("LOOM:51"), live.id)
+        self.assertEqual(state.resolve_board_task_id("LOOM:51"), live.id)
+        self.assertEqual(state.resolve_board_task_id("LOOM:5"), live.id)
+
+    def test_board_add_task_archived_literal_collision_creates_persisted_alias(self):
+        from loom.db import LoomDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = LoomDB(Path(tmp.name) / "loom.db")
+        db.init()
+        self.addCleanup(db.close)
+
+        state = self.state_mod.MatrixState(db=db)
+        state.groups["Loom"] = []
+        state._db_save_groups()
+        state.task_id_counters["LOOM"] = 51
+        archived = self.state_mod.BoardTask(
+            id="LOOM:51",
+            task="Archived original",
+            group="Loom",
+            lane="Archived",
+            archived_at="2026-04-07T00:00:00+00:00",
+        )
+        state.board_tasks[archived.id] = archived
+        state._db_save_task(archived)
+
+        task = state.board_add_task("New live task", "Loom")
+
+        self.assertIsNotNone(task)
+        self.assertNotEqual(task.id, "LOOM:51")
+        self.assertEqual(len(task.id), 8)
+        self.assertEqual(state.task_id_aliases["LOOM:51"], task.id)
+        self.assertTrue(db.board_task_exists(task.id))
+        self.assertTrue(db.board_task_exists("LOOM:51"))
+        self.assertEqual(state.resolve_board_task_id("LOOM:51"), task.id)
+
+    def test_board_update_task_alias_persists_missing_canonical_and_full_delta(self):
+        from loom.db import LoomDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = LoomDB(Path(tmp.name) / "loom.db")
+        db.init()
+        self.addCleanup(db.close)
+        db.save_groups({"g": []}, {"g": "g"})
+
+        state = self.state_mod.MatrixState(db=db)
+        state.groups["g"] = []
+        archived = self.state_mod.BoardTask(
+            id="LOOM:51",
+            task="Highlight Events panel header",
+            group="g",
+            lane="Archived",
+            archived_at="2026-04-07T00:00:00+00:00",
+        )
+        live = self.state_mod.BoardTask(
+            id="bcf3a475",
+            task="Keep track of which agent moved a task",
+            group="g",
+            lane="Backlog",
+        )
+        db.save_board_task(archived)
+        db.save_task_id_alias("LOOM:51", live.id)
+        state.board_tasks[archived.id] = archived
+        state.board_tasks[live.id] = live
+        state.task_id_aliases["LOOM:51"] = live.id
+
+        state.board_update_task(
+            "LOOM:51",
+            description="Architect-written description",
+            action_name="feature/implement",
+            assigned_engineer_id="eng-1",
+        )
+
+        updated = state.board_tasks[live.id]
+        self.assertEqual(updated.description, "Architect-written description")
+        self.assertEqual(updated.action_name, "feature/implement")
+        self.assertEqual(updated.assigned_engineer_id, "eng-1")
+        self.assertEqual(state.board_tasks["LOOM:51"].task, archived.task)
+        self.assertTrue(db.board_task_exists(live.id))
+        row = db._conn.execute(
+            "SELECT description, action_name, assigned_engineer_id "
+            "FROM board_tasks WHERE id=?",
+            (live.id,),
+        ).fetchone()
+        self.assertEqual(
+            row,
+            ("Architect-written description", "feature/implement", "eng-1"),
+        )
+        archived_row = db._conn.execute(
+            "SELECT task, description FROM board_tasks WHERE id='LOOM:51'"
+        ).fetchone()
+        self.assertEqual(archived_row, (archived.task, ""))
+        task_ops = [
+            op for op in state._delta_ops
+            if op.get("op") == "task_upsert" and op.get("id") == live.id
+        ]
+        self.assertTrue(task_ops)
+        full_delta = task_ops[0]
+        self.assertEqual(full_delta["description"], "Architect-written description")
+        self.assertEqual(full_delta["action_name"], "feature/implement")
+        self.assertEqual(full_delta["assigned_engineer_id"], "eng-1")
+        self.assertIn("created_at", full_delta)
+        self.assertIn("health_details", full_delta)
+
+        reloaded = self.state_mod.MatrixState(db=db)
+        reloaded.load()
+        self.assertEqual(reloaded.resolve_board_task_id("LOOM:51"), live.id)
+        self.assertEqual(
+            reloaded.board_tasks[live.id].description,
+            "Architect-written description",
+        )
+
     def test_board_add_task_allocates_group_scoped_root_ids(self):
         state = self.state_mod.MatrixState()
         state.groups["Loom Team"] = []

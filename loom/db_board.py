@@ -242,6 +242,13 @@ class BoardPersistenceMixin:
         self._conn.execute("DELETE FROM board_tasks WHERE id=?", (task_id,))
         self._conn.commit()
 
+    def board_task_exists(self, task_id: str) -> bool:
+        row = self._conn.execute(
+            "SELECT 1 FROM board_tasks WHERE id=? LIMIT 1",
+            (str(task_id or ""),),
+        ).fetchone()
+        return bool(row)
+
     def save_board_lanes(self, lanes: list):
         """Replace all lanes with new ordered list."""
         replace_board_lanes(self._conn, lanes)

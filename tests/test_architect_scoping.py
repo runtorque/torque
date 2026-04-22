@@ -208,6 +208,73 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(engineers[user_engineer.id]["current_task_id"], hidden_task.id)
         self.assertEqual(engineers[user_engineer.id]["current_task"], hidden_task.task)
 
+    async def test_task_reads_resolve_literal_alias_to_hash_task(self):
+        architect = self._add_architect("arch-1", "Architect")
+        engineer = self._add_engineer("eng-1", "Engineer")
+        archived = self.state_mod.BoardTask(
+            id="LOOM:51",
+            task="Archived header task",
+            group="loom",
+            lane="Archived",
+            archived_at="2026-04-07T00:00:00+00:00",
+        )
+        live = self.state_mod.BoardTask(
+            id="bcf3a475",
+            task="Keep track of which agent moved a task",
+            description="Live canonical description",
+            group="loom",
+            lane="Backlog",
+            action_name="feature/implement",
+            assigned_engineer_id=engineer.id,
+            created_by_architect_id=architect.id,
+        )
+        self.db.save_board_task(archived)
+        self.db.save_task_id_alias("LOOM:51", live.id)
+        self.state.board_tasks[archived.id] = archived
+        self.state.board_tasks[live.id] = live
+        self.state.task_id_aliases["LOOM:51"] = live.id
+
+        text, is_error = await self._call(
+            "architect_task_show",
+            {"task": "LOOM:51"},
+            architect.id,
+        )
+
+        self.assertFalse(is_error, text)
+        data = json.loads(text)
+        self.assertEqual(data["id"], live.id)
+        self.assertEqual(data["title"], live.task)
+        self.assertEqual(data["description"], "Live canonical description")
+        self.assertEqual(data["action"], "feature/implement")
+        self.assertTrue(self.db.board_task_exists(live.id))
+
+        text, is_error = await self._call_engineer(
+            "engineer_task_show",
+            {"task": "LOOM:51"},
+            engineer.id,
+        )
+        self.assertFalse(is_error, text)
+        self.assertEqual(json.loads(text)["id"], live.id)
+
+        summary_text, is_error = await self._call(
+            "architect_board_summary",
+            {},
+            architect.id,
+        )
+        self.assertFalse(is_error, summary_text)
+        summary = json.loads(summary_text)
+        self.assertEqual(summary["tasks_total"], 1)
+        self.assertEqual(summary["tasks"]["items"][0]["id"], live.id)
+
+        list_text, is_error = await self._call_engineer(
+            "engineer_board_list",
+            {},
+            engineer.id,
+        )
+        self.assertFalse(is_error, list_text)
+        lanes = json.loads(list_text)["lanes"]
+        self.assertEqual(lanes["Backlog"][0]["id"], live.id)
+
     async def test_architect_task_show_refreshes_and_promotes_health(self):
         architect = self._add_architect("arch-1", "Architect")
         alice = self._add_engineer(
