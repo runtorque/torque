@@ -169,6 +169,8 @@ class LoomDBTests(unittest.TestCase):
             worktree_merge_squash=False,
             agent_type="codex",
             agent_session_id="agent-session",
+            last_progress_at=111.0,
+            last_heartbeat_at=222.0,
             session_resume=False,
             idle_timeout=9,
             tasks_dispatched=3,
@@ -303,6 +305,9 @@ class LoomDBTests(unittest.TestCase):
             loaded["agents"]["agent-1"]["created_by_weaver_id"],
             "weaver-1",
         )
+        self.assertEqual(loaded["agents"]["agent-1"]["last_progress_at"], 111.0)
+        self.assertEqual(loaded["agents"]["agent-1"]["last_heartbeat_at"], 222.0)
+        self.assertEqual(loaded["agents"]["agent-1"]["last_activity_at"], 222.0)
         self.assertEqual(loaded["agents"]["agent-1"]["kind"], "worker")
         self.assertEqual(loaded["agents"]["agent-1"]["role"], "researcher")
         self.assertEqual(
@@ -424,6 +429,52 @@ class LoomDBTests(unittest.TestCase):
             loaded["auto_dispatch_queues"]["g"][0]["weaver_owner_id"],
             "weaver-1",
         )
+
+    def test_agent_activity_timestamp_migration_is_idempotent(self):
+        cell = AgentCell(
+            id="agent-activity",
+            name="Worker",
+            group="g",
+            slug="worker",
+        )
+        self.db.save_agent(cell)
+        self.db._conn.execute(
+            "UPDATE agents SET last_activity_at=123, "
+            "last_progress_at=0, last_heartbeat_at=0 WHERE id=?",
+            (cell.id,),
+        )
+        self.db._conn.execute(
+            "DELETE FROM meta WHERE key=?",
+            ("schema_agent_activity_timestamps_version",),
+        )
+        self.db._conn.commit()
+
+        self.db._migrate_agent_activity_timestamps_if_needed()
+        first = self.db._conn.execute(
+            "SELECT last_progress_at, last_heartbeat_at, last_activity_at "
+            "FROM agents WHERE id=?",
+            (cell.id,),
+        ).fetchone()
+        first_meta = self.db._conn.execute(
+            "SELECT value FROM meta WHERE key=?",
+            ("schema_agent_activity_timestamps_version",),
+        ).fetchone()
+
+        self.db._migrate_agent_activity_timestamps_if_needed()
+        second = self.db._conn.execute(
+            "SELECT last_progress_at, last_heartbeat_at, last_activity_at "
+            "FROM agents WHERE id=?",
+            (cell.id,),
+        ).fetchone()
+        second_meta = self.db._conn.execute(
+            "SELECT value FROM meta WHERE key=?",
+            ("schema_agent_activity_timestamps_version",),
+        ).fetchone()
+
+        self.assertEqual(first, (123.0, 123.0, 123.0))
+        self.assertEqual(second, first)
+        self.assertEqual(first_meta, ("1",))
+        self.assertEqual(second_meta, first_meta)
 
     def test_save_agent_and_board_task_update_preserve_kinds_fields(self):
         cell = AgentCell(

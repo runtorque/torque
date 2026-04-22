@@ -1859,6 +1859,7 @@ async def _handle_send_user_message_command(data, state: MatrixState,
     if not cell or not getattr(cell, "session_id", ""):
         return False
     cell.status = "running"
+    state.mark_agent_progress(cell, emit=False)
     state._emit_agent(cell)
     await bridge.send_text(cell.session_id, text)
     return True
@@ -4322,6 +4323,7 @@ async def main(connection=None):
         state.board_update_task(task.id, agent_id=cell.id, lane=lane)
         state.auto_dispatch_queue_remove_task(task.id)
         cell.current_task_id = task.id
+        state.mark_agent_progress(cell, emit=False)
 
     def _iso_to_unix(ts: str) -> float | None:
         if not ts:
@@ -5486,6 +5488,7 @@ async def main(connection=None):
                 cell = state.agents.get(data["id"])
                 if cell and cell.session_id:
                     cell.status = "running"
+                    state.mark_agent_progress(cell, emit=False)
                     state._emit_agent(cell)
                 await _queue_cell_prompt_send(
                     cell,
@@ -5501,6 +5504,7 @@ async def main(connection=None):
                     cell = state.agents.get(aid)
                     if cell and cell.session_id:
                         cell.status = "running"
+                        state.mark_agent_progress(cell, emit=False)
                         state._emit_agent(cell)
                     await _queue_cell_prompt_send(
                         cell,
@@ -5512,6 +5516,7 @@ async def main(connection=None):
                         child = state.agents.get(child_id)
                         if child and child.session_id:
                             child.status = "running"
+                            state.mark_agent_progress(child, emit=False)
                             state._emit_agent(child)
                         await _queue_cell_prompt_send(
                             child,
@@ -8200,6 +8205,12 @@ async def main(connection=None):
                             _panel_event,
                             group=group_name,
                         )
+
+                    if action in {
+                        "progress", "done", "blocked", "error",
+                        "ask", "derive", "ready", "verify",
+                    }:
+                        state.mark_agent_progress(cell)
 
                     if result and result.get("type") == "error":
                         pass  # auto-resolve failed; skip action

@@ -167,6 +167,7 @@ class ITerm2BridgeCore:
 
                 # Resolve git info for all cell types
                 await self._resolve_git_info(cell)
+                self.state.mark_agent_heartbeat(cell, emit=False)
 
                 # Re-install hooks and MCP config for awareness agents
                 # (in case files were lost or working dir changed)
@@ -511,6 +512,7 @@ class ITerm2BridgeCore:
 
         # Resolve git info for all cell types
         await self._resolve_git_info(cell)
+        self.state.mark_agent_heartbeat(cell, emit=False)
 
         self.state._emit_agent(cell)
         self.state._db_save_agent(cell)
@@ -939,6 +941,7 @@ class ITerm2BridgeCore:
                                 log.info("Auto-detected agent type '%s' "
                                          "for '%s' (process: %s)",
                                          adapter.name, cell.name, val)
+                        self.state.mark_agent_heartbeat(cell, emit=False)
                         self.state._emit_agent(cell)
                         # Only persist if agent_type changed (persistent field)
                         if val and cell.agent_type:
@@ -962,6 +965,7 @@ class ITerm2BridgeCore:
                         log.debug("Path changed for '%s': %s",
                                   cell.name, val)
                         await self._resolve_git_info(cell)
+                        self.state.mark_agent_heartbeat(cell, emit=False)
                         self.state._emit_agent(cell)
                         # Ephemeral fields only — no DB write needed
                         await self.state.broadcast()
@@ -1022,6 +1026,7 @@ class ITerm2BridgeCore:
                             cell.activity_detail = ""
                             cell.error_message = ""
                             cell.needs_attention = False
+                            self.state.mark_agent_heartbeat(cell, emit=False)
                             self.state._emit_agent(cell)
                             self.state._db_save_agent(cell)
                             for tasks in (self._prompt_tasks,

@@ -158,8 +158,14 @@ def _compute_local_health(task: Any, tasks_by_id: dict[str, Any],
         "last_activity_at": _iso_or_empty(last_activity_ts),
         "reasons": reasons[:],
     }
-    if agent and getattr(agent, "last_event_at", 0):
-        details["agent_last_event_at"] = _iso_or_empty(agent.last_event_at)
+    if agent and getattr(agent, "last_progress_at", 0):
+        details["agent_last_progress_at"] = _iso_or_empty(agent.last_progress_at)
+        # Backwards-compatible name; health now keys this to progress only.
+        details["agent_last_event_at"] = _iso_or_empty(agent.last_progress_at)
+    if agent and getattr(agent, "last_heartbeat_at", 0):
+        details["agent_last_heartbeat_at"] = _iso_or_empty(
+            agent.last_heartbeat_at
+        )
 
     if reasons:
         return TaskHealthSnapshot(state=HEALTH_BLOCKED, details=details)
@@ -280,8 +286,8 @@ def _task_last_activity_ts(task: Any, agent: Any | None) -> float | None:
         ts = msg.get("timestamp")
         if isinstance(ts, (int, float)):
             timestamps.append(float(ts))
-    if agent and getattr(agent, "last_event_at", 0):
-        timestamps.append(float(agent.last_event_at))
+    if agent and getattr(agent, "last_progress_at", 0):
+        timestamps.append(float(agent.last_progress_at))
     timestamps = [ts for ts in timestamps if ts]
     return max(timestamps) if timestamps else None
 

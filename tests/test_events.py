@@ -318,6 +318,122 @@ class EventBusTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cell.activity_detail, "Reading logs")
         self.assertEqual(state.board_tasks[task.id].labels, ["keep"])
 
+    async def test_activity_change_heartbeat_does_not_advance_progress_clock(self):
+        state = self._make_state()
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            last_progress_at=100.0,
+            last_heartbeat_at=100.0,
+        )
+        state.agents[cell.id] = cell
+
+        bus = self.events_mod.EventBus(state, self.events_mod.EventLog())
+
+        await bus.emit(
+            self.base_mod.AgentEvent(
+                cell_id=cell.id,
+                timestamp=200.0,
+                event_type="activity_change",
+                data={"activity": "thinking", "detail": "Still alive"},
+            )
+        )
+
+        self.assertEqual(cell.last_progress_at, 100.0)
+        self.assertEqual(cell.last_heartbeat_at, 200.0)
+        self.assertEqual(cell.last_activity_at, 200.0)
+
+    async def test_progress_event_advances_progress_and_heartbeat_clocks(self):
+        state = self._make_state()
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            last_progress_at=100.0,
+            last_heartbeat_at=150.0,
+        )
+        state.agents[cell.id] = cell
+
+        bus = self.events_mod.EventBus(state, self.events_mod.EventLog())
+
+        await bus.emit(
+            self.base_mod.AgentEvent(
+                cell_id=cell.id,
+                timestamp=200.0,
+                event_type="progress",
+                data={"detail": "Tests are running"},
+            )
+        )
+
+        self.assertEqual(cell.last_progress_at, 200.0)
+        self.assertEqual(cell.last_heartbeat_at, 200.0)
+        self.assertEqual(cell.last_activity_at, 200.0)
+
+    async def test_health_check_does_not_treat_heartbeat_alias_as_progress(self):
+        state = self._make_state()
+        base = time.time() - 301
+        task = self.state_mod.BoardTask(
+            id="task-1",
+            task="Never emitted progress",
+            group="g",
+            lane="In Progress",
+            agent_id="agent-1",
+            created_at=self.task_health_iso(base),
+            updated_at=self.task_health_iso(base),
+        )
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            agent_type="codex",
+            status="running",
+            current_task_id=task.id,
+            idle_timeout=5,
+            last_progress_at=0,
+            last_heartbeat_at=time.time() - 1,
+        )
+        state.agents[cell.id] = cell
+        state.board_tasks[task.id] = task
+
+        alerts = []
+
+        class Notifier:
+            def on_health_alert(self, cell_id, message):
+                alerts.append((cell_id, message))
+
+        sleep_calls = {"count": 0}
+        orig_sleep = self.events_mod.asyncio.sleep
+
+        async def fake_sleep(_delay):
+            sleep_calls["count"] += 1
+            if sleep_calls["count"] > 1:
+                raise asyncio.CancelledError()
+
+        self.events_mod.asyncio.sleep = fake_sleep
+        try:
+            with self.assertRaises(asyncio.CancelledError):
+                await self.events_mod.health_check(
+                    state,
+                    self.events_mod.EventLog(),
+                    self.events_mod.EventBus(state, self.events_mod.EventLog()),
+                    notifier=Notifier(),
+                )
+        finally:
+            self.events_mod.asyncio.sleep = orig_sleep
+
+        self.assertTrue(cell.needs_attention)
+        self.assertIn("No activity for 5 minutes", cell.error_message)
+        self.assertEqual(alerts, [("agent-1", "No activity for 5 minutes")])
+
+    @staticmethod
+    def task_health_iso(ts):
+        from datetime import datetime, timezone
+        return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+
     async def test_health_check_flags_stuck_agent_and_unlinks_post_derive_task(self):
         state = self._make_state()
         parent = self.state_mod.BoardTask(

@@ -52,6 +52,10 @@ _KINDS_SCHEMA_BACKUP_NAME = "loom.db.pre-kinds.bak"
 _KINDS_WEAVER_OVERRIDE_ENV = "LOOM_MIGRATE_WEAVER_ID"
 _KINDS_WEAVER_GROUP = "loom"
 _KINDS_WEAVER_NAME = "Weaver"
+_AGENT_ACTIVITY_TS_MIGRATION_VERSION = 1
+_AGENT_ACTIVITY_TS_MIGRATION_VERSION_KEY = (
+    "schema_agent_activity_timestamps_version"
+)
 
 _AGENT_PERSISTED_COLS = [
     "id", "name", "slug", "group_name", "cell_type", "terminal_backend",
@@ -61,7 +65,9 @@ _AGENT_PERSISTED_COLS = [
     "worktree_repo_root", "worktree_base_dir", "worktree_base_branch",
     "worktree_auto_checkpoint", "checkpoint_on_progress",
     "worktree_merge_squash", "agent_type",
-    "agent_session_id", "session_resume", "idle_timeout",
+    "agent_session_id",
+    "last_progress_at", "last_heartbeat_at", "last_activity_at",
+    "session_resume", "idle_timeout",
     "tasks_dispatched",
     "kind", "role", "owner_engineer_id", "hired_by_architect_id",
     "dismissed_at", "persistent",
@@ -123,6 +129,13 @@ def _serialize_agent_cell(cell):
         int(d.get("worktree_merge_squash", True)),
         d.get("agent_type", ""),
         d.get("agent_session_id", ""),
+        float(d.get("last_progress_at", 0) or 0),
+        float(d.get("last_heartbeat_at", 0) or 0),
+        max(
+            float(d.get("last_activity_at", 0) or 0),
+            float(d.get("last_progress_at", 0) or 0),
+            float(d.get("last_heartbeat_at", 0) or 0),
+        ),
         int(d.get("session_resume", True)),
         d.get("idle_timeout", 0),
         d.get("tasks_dispatched", 0),
@@ -256,6 +269,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self._conn = sqlite3.connect(str(self.db_path))
         initialize_database(self._conn, self.backfill_agent_history)
         self._ensure_board_task_engineer_provenance_column()
+        self._migrate_agent_activity_timestamps_if_needed()
         self._refuse_unmigrated_legacy_rows_if_needed()
         self._migrate_kinds_schema_if_needed()
         self._ensure_agent_dismissed_at_column()
@@ -2449,6 +2463,13 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 d.get("worktree_merge_squash", 1))
             d["persistent"] = bool(d.get("persistent", 0))
             d["session_resume"] = bool(d.get("session_resume", 1))
+            d["last_progress_at"] = float(d.get("last_progress_at", 0) or 0)
+            d["last_heartbeat_at"] = float(d.get("last_heartbeat_at", 0) or 0)
+            d["last_activity_at"] = max(
+                float(d.get("last_activity_at", 0) or 0),
+                d["last_progress_at"],
+                d["last_heartbeat_at"],
+            )
             agents[d["id"]] = d
 
         # Groups (ordered)
@@ -2662,6 +2683,74 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             return int(raw or 0)
         except (TypeError, ValueError):
             return 0
+
+    def _current_agent_activity_ts_migration_version(self) -> int:
+        raw = self._read_meta_value(_AGENT_ACTIVITY_TS_MIGRATION_VERSION_KEY)
+        try:
+            return int(raw or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def _ensure_agent_activity_timestamp_columns(self) -> None:
+        for col in (
+            "last_progress_at",
+            "last_heartbeat_at",
+            "last_activity_at",
+        ):
+            try:
+                self._conn.execute(f"SELECT {col} FROM agents LIMIT 0")
+            except sqlite3.OperationalError:
+                self._conn.execute(
+                    f"ALTER TABLE agents ADD COLUMN {col} "
+                    "REAL NOT NULL DEFAULT 0"
+                )
+                self._conn.commit()
+
+    def _migrate_agent_activity_timestamps_if_needed(self) -> None:
+        """Backfill split progress/heartbeat clocks from legacy activity."""
+        self._ensure_agent_activity_timestamp_columns()
+        if (
+            self._current_agent_activity_ts_migration_version()
+            >= _AGENT_ACTIVITY_TS_MIGRATION_VERSION
+        ):
+            return
+
+        try:
+            self._conn.execute("BEGIN")
+            # Existing rows only had one mixed activity clock. Preserve that
+            # value by seeding both new clocks once, then keep the compatibility
+            # alias equal to max(progress, heartbeat).
+            self._conn.execute(
+                "UPDATE agents "
+                "SET last_progress_at = CASE "
+                "WHEN COALESCE(last_progress_at, 0) = 0 "
+                "THEN COALESCE(last_activity_at, 0) ELSE last_progress_at END, "
+                "last_heartbeat_at = CASE "
+                "WHEN COALESCE(last_heartbeat_at, 0) = 0 "
+                "THEN COALESCE(last_activity_at, 0) ELSE last_heartbeat_at END"
+            )
+            self._conn.execute(
+                "UPDATE agents SET last_activity_at = "
+                "MAX(COALESCE(last_activity_at, 0), "
+                "COALESCE(last_progress_at, 0), "
+                "COALESCE(last_heartbeat_at, 0))"
+            )
+            self._conn.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+                (
+                    _AGENT_ACTIVITY_TS_MIGRATION_VERSION_KEY,
+                    str(_AGENT_ACTIVITY_TS_MIGRATION_VERSION),
+                ),
+            )
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
+
+        log.info(
+            "migration: agent activity timestamps split applied (version=%d)",
+            _AGENT_ACTIVITY_TS_MIGRATION_VERSION,
+        )
 
     def _maybe_backup_pre_kinds_db(self):
         if not self.db_path.exists():
