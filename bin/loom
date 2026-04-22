@@ -717,19 +717,36 @@ def resolve_task(state_data, identifier):
     tasks = state_data.get("board_tasks", {})
     aliases = state_data.get("task_id_aliases", {})
 
+    # Exact legacy alias match.  Aliases take precedence over literal archived
+    # rows with the same ID, so stale/missing alias targets fail instead of
+    # silently reading the archived row.
+    alias_target = aliases.get(identifier, "")
+    if alias_target:
+        if alias_target in tasks:
+            return tasks[alias_target]
+        die(f"Task alias target not found: {identifier} -> {alias_target}")
+
     # Exact ID match
     if identifier in tasks:
         return tasks[identifier]
 
-    # Exact legacy alias match
-    alias_target = aliases.get(identifier, "")
-    if alias_target and alias_target in tasks:
-        return tasks[alias_target]
-
     ident_lower = identifier.lower()
 
-    # ID prefix match
-    prefix_matches = [t for tid, t in tasks.items() if tid.startswith(identifier)]
+    # ID/alias prefix match
+    prefix_ids = []
+    seen_ids = set()
+    for legacy_id, target_id in sorted(aliases.items()):
+        if legacy_id.startswith(identifier) and target_id in tasks and target_id not in seen_ids:
+            prefix_ids.append(target_id)
+            seen_ids.add(target_id)
+    hidden_literal_ids = set(aliases)
+    for tid in sorted(tasks):
+        if tid in hidden_literal_ids:
+            continue
+        if tid.startswith(identifier) and tid not in seen_ids:
+            prefix_ids.append(tid)
+            seen_ids.add(tid)
+    prefix_matches = [tasks[tid] for tid in prefix_ids]
     if len(prefix_matches) == 1:
         return prefix_matches[0]
     if len(prefix_matches) > 1:
@@ -3801,15 +3818,29 @@ def _resolve_dep_ids(state_data, depends_on_str):
         token = token.strip()
         if not token:
             continue
+        alias_target = aliases.get(token, "")
+        if alias_target:
+            if alias_target in tasks:
+                ids.append(alias_target)
+                continue
+            die(f"Dependency task alias target not found: {token} -> {alias_target}")
         # Exact ID
         if token in tasks:
             ids.append(token)
             continue
-        alias_target = aliases.get(token, "")
-        if alias_target and alias_target in tasks:
-            ids.append(alias_target)
-            continue
-        prefix_matches = [tid for tid in tasks if tid.startswith(token)]
+        prefix_matches = []
+        seen_ids = set()
+        for legacy_id, target_id in sorted(aliases.items()):
+            if legacy_id.startswith(token) and target_id in tasks and target_id not in seen_ids:
+                prefix_matches.append(target_id)
+                seen_ids.add(target_id)
+        hidden_literal_ids = set(aliases)
+        for tid in sorted(tasks):
+            if tid in hidden_literal_ids:
+                continue
+            if tid.startswith(token) and tid not in seen_ids:
+                prefix_matches.append(tid)
+                seen_ids.add(tid)
         if len(prefix_matches) == 1:
             ids.append(prefix_matches[0])
             continue

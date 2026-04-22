@@ -1029,6 +1029,10 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
     if auth_error:
         return auth_error, auth_structured
 
+    persist_missing = getattr(state, "persist_missing_aliased_tasks", None)
+    if callable(persist_missing):
+        persist_missing()
+
     view_state = build_scoped_state_view(
         state, caller_kind=caller_kind, caller_id=caller_id,
         caller_cell=_weaver_cell, caller_group=_weaver_group,

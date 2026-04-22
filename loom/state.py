@@ -1156,6 +1156,9 @@ class MatrixState:
             try:
                 task_id = self.task_id_aliases.get(legacy_id, "")
                 if task_id:
+                    task = self.board_tasks.get(self.resolve_task_alias(task_id))
+                    if task:
+                        self._db_save_task(task)
                     self.db.save_task_id_alias(legacy_id, task_id)
             except Exception:
                 log.exception("Failed to save task ID alias %s", legacy_id)
@@ -2465,8 +2468,148 @@ class MatrixState:
         return ""
 
     def resolve_task_alias(self, task_id: str) -> str:
+        """Return the canonical task ID for ``task_id``.
+
+        Legacy aliases are the compatibility boundary for historical IDs.
+        Aliases intentionally take precedence over an exact in-memory task row
+        with the same ID: archived literal rows may still exist in SQLite, but
+        normal reads and writes should target the live canonical task that the
+        alias names.  Follow short alias chains defensively and stop on cycles.
+        """
         value = str(task_id or "").strip()
-        return self.task_id_aliases.get(value, value)
+        seen = set()
+        while value and value in self.task_id_aliases and value not in seen:
+            seen.add(value)
+            next_value = str(self.task_id_aliases.get(value, "") or "").strip()
+            if not next_value or next_value == value:
+                break
+            value = next_value
+        return value
+
+    def resolve_board_task_id(self, identifier: str, *,
+                              allow_prefix: bool = True) -> str:
+        """Resolve a board task ID/alias/prefix to a live canonical ID.
+
+        The alias map is authoritative.  If an identifier is an alias whose
+        target is missing from in-memory state, return an empty string instead
+        of falling back to a literal archived row with the same ID.
+        """
+        ident = str(identifier or "").strip()
+        if not ident:
+            return ""
+
+        aliased = self.resolve_task_alias(ident)
+        if aliased != ident:
+            return aliased if aliased in self.board_tasks else ""
+
+        if ident in self.board_tasks:
+            return ident
+
+        if not allow_prefix:
+            return ""
+
+        matches: list[str] = []
+        seen: set[str] = set()
+
+        # Prefixes can match legacy aliases as well as canonical IDs.  When a
+        # literal ID is also an alias key, hide the archived literal row and
+        # expose only the alias target.
+        for legacy_id in sorted(self.task_id_aliases):
+            if not legacy_id.startswith(ident):
+                continue
+            target_id = self.resolve_task_alias(legacy_id)
+            if target_id in self.board_tasks and target_id not in seen:
+                matches.append(target_id)
+                seen.add(target_id)
+
+        hidden_literal_ids = set(self.task_id_aliases)
+        for task_id in sorted(self.board_tasks):
+            if task_id in hidden_literal_ids:
+                continue
+            if task_id.startswith(ident) and task_id not in seen:
+                matches.append(task_id)
+                seen.add(task_id)
+
+        if len(matches) == 1:
+            return matches[0]
+        return ""
+
+    def _db_board_task_exists(self, task_id: str) -> bool:
+        if not self.db:
+            return False
+        tid = str(task_id or "").strip()
+        if not tid:
+            return False
+        try:
+            exists = getattr(self.db, "board_task_exists", None)
+            if callable(exists):
+                return bool(exists(tid))
+            conn = getattr(self.db, "_conn", None)
+            if conn is None:
+                return False
+            row = conn.execute(
+                "SELECT 1 FROM board_tasks WHERE id=? LIMIT 1",
+                (tid,),
+            ).fetchone()
+            return bool(row)
+        except Exception:
+            log.exception("Failed to check persisted task %s", tid)
+            return False
+
+    def ensure_board_task_persisted(self, task_id: str) -> bool:
+        """Persist an in-memory task if its canonical row is absent in DB."""
+        tid = self.resolve_task_alias(task_id)
+        task = self.board_tasks.get(tid)
+        if not task or not self.db:
+            return False
+        if self._db_board_task_exists(tid):
+            return False
+        self._db_save_task(task)
+        return True
+
+    def persist_missing_aliased_tasks(self) -> list[str]:
+        """Persist aliased canonical tasks that only exist in memory."""
+        persisted: list[str] = []
+        for legacy_id in sorted(self.task_id_aliases):
+            task_id = self.resolve_task_alias(legacy_id)
+            if task_id and task_id in self.board_tasks:
+                if self.ensure_board_task_persisted(task_id):
+                    persisted.append(task_id)
+        return persisted
+
+    def _new_ephemeral_task_id(self) -> str:
+        while True:
+            tid = uuid.uuid4().hex[:8]
+            if tid in self.board_tasks:
+                continue
+            if tid in self.task_id_aliases:
+                continue
+            if tid in set(self.task_id_aliases.values()):
+                continue
+            return tid
+
+    def _alias_or_use_task_id(self, candidate_id: str) -> tuple[str, str] | None:
+        """Return ``(task_id, alias_id)`` for a requested/candidate ID.
+
+        If the candidate collides with an archived literal row, keep the
+        archived row intact and create a hash-primary-key task addressed by the
+        literal ID alias.  Non-archived collisions are rejected so callers do
+        not accidentally hide a live task.
+        """
+        candidate = str(candidate_id or "").strip()
+        if not candidate:
+            return None
+        existing = self.board_tasks.get(candidate)
+        if existing:
+            if board_task_is_archived(existing):
+                return self._new_ephemeral_task_id(), candidate
+            return None
+        if candidate in self.task_id_aliases:
+            target = self.resolve_task_alias(candidate)
+            if target not in self.board_tasks:
+                return self._new_ephemeral_task_id(), candidate
+            return None
+        return candidate, ""
 
     def _allocate_root_task_id(self, group_name: str) -> str:
         prefix = self.normalized_group_prefix(group_name)
@@ -3058,16 +3201,29 @@ class MatrixState:
             kwargs["parent_task_id"] = parent_task_id
         if pipeline_root_id:
             kwargs["pipeline_root_id"] = pipeline_root_id
+        alias_id = ""
         if explicit_id:
-            tid = explicit_id
+            resolved = self._alias_or_use_task_id(explicit_id)
+            if not resolved:
+                return None
+            tid, alias_id = resolved
         elif parent_task_id or pipeline_root_id:
             root_id = pipeline_root_id or parent_task_id
             try:
-                tid = self._allocate_derived_task_id(group, root_id)
+                candidate_id = self._allocate_derived_task_id(group, root_id)
+                resolved = self._alias_or_use_task_id(candidate_id)
+                if not resolved:
+                    return None
+                tid, alias_id = resolved
             except ValueError:
-                tid = uuid.uuid4().hex[:8]
+                tid = self._new_ephemeral_task_id()
         else:
-            tid = self._allocate_root_task_id(group)
+            while True:
+                candidate_id = self._allocate_root_task_id(group)
+                resolved = self._alias_or_use_task_id(candidate_id)
+                if resolved:
+                    tid, alias_id = resolved
+                    break
         task_slug = self._unique_task_slug(task)
         # Validate depends_on: strip non-existent IDs
         if "depends_on" in kwargs:
@@ -3104,9 +3260,9 @@ class MatrixState:
         )
         self.board_tasks[tid] = bt
         self._index_task(bt)
-        if explicit_id and explicit_id != tid:
-            self.task_id_aliases[explicit_id] = tid
-            self._db_save_task_id_alias(explicit_id)
+        if alias_id and alias_id != tid:
+            self.task_id_aliases[alias_id] = tid
+            self._db_save_task_id_alias(alias_id)
         if is_canonical_task_id(tid):
             parsed = parse_task_id(tid)
             if parsed:
@@ -3131,9 +3287,11 @@ class MatrixState:
         return bt
 
     def board_update_task(self, tid: str, **fields):
+        tid = self.resolve_task_alias(tid)
         task = self.board_tasks.get(tid)
         if not task:
             return
+        self.ensure_board_task_persisted(tid)
         # Validate depends_on: strip self-refs, missing IDs, cycles
         if "depends_on" in fields:
             deps = fields["depends_on"]
@@ -3193,6 +3351,7 @@ class MatrixState:
         self.recompute_task_health()
 
     def board_remove_task(self, tid: str):
+        tid = self.resolve_task_alias(tid)
         task = self.board_tasks.pop(tid, None)
         if task:
             self._unindex_task(task)
@@ -3210,6 +3369,7 @@ class MatrixState:
 
     def board_move_task(self, tid: str, lane: str,
                         position: Optional[int] = None):
+        tid = self.resolve_task_alias(tid)
         task = self.board_tasks.get(tid)
         if not task or lane not in self.board_lanes:
             return
@@ -3232,6 +3392,7 @@ class MatrixState:
 
     def board_archive_task(self, tid: str, *,
                            position: Optional[int] = None):
+        tid = self.resolve_task_alias(tid)
         task = self.board_tasks.get(tid)
         if not task or ARCHIVED_LANE not in self.board_lanes:
             return
@@ -3255,6 +3416,7 @@ class MatrixState:
     def board_unarchive_task(self, tid: str, *,
                              lane: str = "",
                              position: Optional[int] = None):
+        tid = self.resolve_task_alias(tid)
         task = self.board_tasks.get(tid)
         if not task or task.lane != ARCHIVED_LANE:
             return
@@ -3272,6 +3434,7 @@ class MatrixState:
         self.recompute_task_health()
 
     def board_reorder_task(self, tid: str, position: int):
+        tid = self.resolve_task_alias(tid)
         task = self.board_tasks.get(tid)
         if not task:
             return
@@ -3348,6 +3511,7 @@ class MatrixState:
 
     def board_get_children(self, task_id: str) -> list[BoardTask]:
         """Return direct children of a task (derived tasks)."""
+        task_id = self.resolve_task_alias(task_id)
         return [t for t in self.board_tasks.values()
                 if t.parent_task_id == task_id]
 
@@ -3378,11 +3542,13 @@ class MatrixState:
 
     def board_get_dependents(self, task_id: str) -> list[BoardTask]:
         """Tasks that have task_id in their depends_on."""
+        task_id = self.resolve_task_alias(task_id)
         return [t for t in self.board_tasks.values()
                 if task_id in t.depends_on]
 
     def board_get_chain(self, task_id: str) -> list[BoardTask]:
         """Return all tasks in the same pipeline chain, ordered by depth."""
+        task_id = self.resolve_task_alias(task_id)
         task = self.board_tasks.get(task_id)
         if not task:
             return []
@@ -3394,6 +3560,7 @@ class MatrixState:
 
     def task_open_descendants(self, task_id: str) -> list[BoardTask]:
         """Return all unresolved descendants for ``task_id``."""
+        task_id = self.resolve_task_alias(task_id)
         if not task_id:
             return []
         descendants = []

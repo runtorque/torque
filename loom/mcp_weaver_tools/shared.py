@@ -12,14 +12,27 @@ from ..worktree_boundaries import (
 
 
 def resolve_task(state, identifier: str) -> str | None:
-    """Resolve a task by ID, legacy alias, or ID prefix."""
+    """Resolve a task by ID, legacy alias, or ID prefix.
+
+    The alias map is authoritative: if an archived literal row shares an ID
+    with a legacy alias, callers should see the alias target, not the archive.
+    """
     if not identifier:
         return None
+    resolver = getattr(state, "resolve_board_task_id", None)
+    if callable(resolver):
+        resolved = resolver(identifier)
+        if resolved:
+            ensure = getattr(state, "ensure_board_task_persisted", None)
+            if callable(ensure):
+                ensure(resolved)
+            return resolved
+        return None
+    aliased = state.resolve_task_alias(identifier)
+    if aliased != identifier:
+        return aliased if aliased in state.board_tasks else None
     if identifier in state.board_tasks:
         return identifier
-    aliased = state.resolve_task_alias(identifier)
-    if aliased in state.board_tasks:
-        return aliased
     matches = [task.id for task in state.board_tasks.values()
                if task.id.startswith(identifier)]
     if len(matches) == 1:

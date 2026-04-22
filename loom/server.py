@@ -140,15 +140,23 @@ def _should_install_keybindings() -> bool:
 
 
 def _resolve_task_id(state, identifier: str) -> str:
-    """Resolve a task by exact canonical ID, legacy alias, or ID prefix."""
+    """Resolve a task by canonical ID, legacy alias, or ID prefix.
+
+    Legacy aliases take precedence over literal rows so archived rows whose IDs
+    were later reused as aliases do not absorb writes meant for the live task.
+    """
     ident = str(identifier or "").strip()
     if not ident:
         return ""
+    resolver = getattr(state, "resolve_board_task_id", None)
+    if callable(resolver):
+        resolved = resolver(ident)
+        return resolved or ("" if ident in getattr(state, "task_id_aliases", {}) else ident)
+    aliased = state.resolve_task_alias(ident)
+    if aliased != ident:
+        return aliased if aliased in state.board_tasks else ""
     if ident in state.board_tasks:
         return ident
-    aliased = state.resolve_task_alias(ident)
-    if aliased in state.board_tasks:
-        return aliased
     prefix_matches = [
         task.id for task in state.board_tasks.values()
         if task.id.startswith(ident)

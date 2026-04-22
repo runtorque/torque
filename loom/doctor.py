@@ -595,6 +595,77 @@ def _collect_tasks_section(conn: sqlite3.Connection, *, engineer_count: int) -> 
     }
 
 
+def _collect_task_aliases_section(conn: sqlite3.Connection) -> dict:
+    section = {
+        "total": 0,
+        "missing_canonical_count": 0,
+        "literal_collision_count": 0,
+        "archived_literal_collision_count": 0,
+        "missing_canonical": [],
+        "literal_collisions": [],
+        "strategy": "alias_precedence_archived_literals_hidden",
+    }
+    if not _table_exists(conn, "task_id_aliases"):
+        return section
+
+    try:
+        alias_rows = conn.execute(
+            "SELECT legacy_id, task_id FROM task_id_aliases ORDER BY legacy_id"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return section
+    section["total"] = len(alias_rows)
+    if not alias_rows or not _table_exists(conn, "board_tasks"):
+        return section
+
+    task_rows = {}
+    try:
+        for row in conn.execute(
+            "SELECT id, task, lane, archived_at FROM board_tasks"
+        ).fetchall():
+            task_rows[str(row[0] or "")] = {
+                "id": str(row[0] or ""),
+                "title": str(row[1] or ""),
+                "lane": str(row[2] or ""),
+                "archived_at": str(row[3] or ""),
+            }
+    except sqlite3.OperationalError:
+        return section
+
+    for legacy_id, task_id in alias_rows:
+        legacy = str(legacy_id or "").strip()
+        canonical = str(task_id or "").strip()
+        if not legacy or not canonical:
+            continue
+        legacy_row = task_rows.get(legacy)
+        canonical_row = task_rows.get(canonical)
+        if legacy_row and legacy != canonical:
+            entry = {
+                "legacy_id": legacy,
+                "task_id": canonical,
+                "legacy_title": legacy_row.get("title", ""),
+                "legacy_lane": legacy_row.get("lane", ""),
+                "legacy_archived_at": legacy_row.get("archived_at", ""),
+                "canonical_exists": bool(canonical_row),
+            }
+            section["literal_collisions"].append(entry)
+            if legacy_row.get("lane") == "Archived" or legacy_row.get("archived_at"):
+                section["archived_literal_collision_count"] += 1
+        if not canonical_row:
+            section["missing_canonical"].append({
+                "legacy_id": legacy,
+                "task_id": canonical,
+                "legacy_row_exists": bool(legacy_row),
+                "legacy_title": (legacy_row or {}).get("title", ""),
+                "legacy_lane": (legacy_row or {}).get("lane", ""),
+                "legacy_archived_at": (legacy_row or {}).get("archived_at", ""),
+            })
+
+    section["literal_collision_count"] = len(section["literal_collisions"])
+    section["missing_canonical_count"] = len(section["missing_canonical"])
+    return section
+
+
 def _classify_worker_worktree_branch(branch: str) -> str:
     branch = str(branch or "").strip()
     if not branch:
@@ -855,6 +926,24 @@ def _warn_unassigned_tasks_when_engineer_present(report: dict) -> dict | None:
     }
 
 
+def _warn_task_aliases_missing_canonical(report: dict) -> dict | None:
+    aliases = report.get("task_aliases", {}) or {}
+    count = int(aliases.get("missing_canonical_count", 0) or 0)
+    if count <= 0:
+        return None
+    return {
+        "name": "task_aliases_missing_canonical",
+        "status": "warn",
+        "details": {
+            "count": count,
+            "aliases": list(aliases.get("missing_canonical", []) or []),
+            "strategy": aliases.get(
+                "strategy", "alias_precedence_archived_literals_hidden"
+            ),
+        },
+    }
+
+
 def _warn_no_engineers(report: dict) -> dict | None:
     engineers = report.get("engineers", {}) or {}
     total = int(engineers.get("total", 0) or 0)
@@ -1019,6 +1108,7 @@ _DOCTOR_CHECKS = [
 
 _DOCTOR_WARNINGS = [
     _warn_unassigned_tasks_when_engineer_present,
+    _warn_task_aliases_missing_canonical,
     _warn_ignored_legacy_template_files,
     _warn_no_engineers,
     _warn_engineer_binding_env_mismatch,
@@ -1044,6 +1134,7 @@ def build_doctor_report(conn: sqlite3.Connection, db_path: Path | str) -> dict:
         "migration": _collect_migration_section(conn, db_path),
         "agents": agents,
         "tasks": tasks,
+        "task_aliases": _collect_task_aliases_section(conn),
         "drift": _collect_drift_section(conn),
         "roles": _collect_roles_section(),
         "stage_6_cleanup": _collect_stage_6_cleanup_section(
@@ -1095,6 +1186,7 @@ def format_doctor_report(report: dict) -> str:
     pending_hires = report.get("pending_hires", {}) or {}
     worktrees = report.get("worktrees", {}) or {}
     tasks = report.get("tasks", {})
+    task_aliases = report.get("task_aliases", {}) or {}
     drift = report.get("drift", {})
     roles = report.get("roles", {}) or {}
     stage_6_cleanup = report.get("stage_6_cleanup", {}) or {}
@@ -1179,6 +1271,17 @@ def format_doctor_report(report: dict) -> str:
         "  unassigned_when_engineer_present: "
         f"{int(tasks.get('unassigned_when_engineer_present', 0) or 0)}",
         "",
+        "[task_aliases]",
+        f"  total:                         {int(task_aliases.get('total', 0) or 0)}",
+        "  literal_collisions:            "
+        f"{int(task_aliases.get('literal_collision_count', 0) or 0)}",
+        "  archived_literal_collisions:   "
+        f"{int(task_aliases.get('archived_literal_collision_count', 0) or 0)}",
+        "  missing_canonical:             "
+        f"{int(task_aliases.get('missing_canonical_count', 0) or 0)}",
+        "  strategy:                      "
+        f"{task_aliases.get('strategy', 'alias_precedence_archived_literals_hidden')}",
+        "",
         "[drift]",
         "  agents.template ↔ role:                 "
         f"{int(drift.get('agents_template_role', 0) or 0)}",
@@ -1219,6 +1322,19 @@ def format_doctor_report(report: dict) -> str:
                     "  - engineer present but unassigned tasks remain: "
                     f"{details.get('count', 0)}"
                 )
+            elif name == "task_aliases_missing_canonical":
+                aliases = details.get("aliases", []) or []
+                summary = ", ".join(
+                    f"{entry.get('legacy_id')}->{entry.get('task_id')}"
+                    for entry in aliases[:7]
+                )
+                line = (
+                    "  - task aliases point at missing canonical rows; "
+                    "persist/review before restart"
+                )
+                if summary:
+                    line += f": {summary}"
+                lines.append(line)
             elif name == "legacy_template_files_ignored":
                 files = ", ".join(details.get("files", []) or [])
                 line = (

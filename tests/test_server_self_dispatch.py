@@ -194,6 +194,34 @@ class ServerSelfDispatchTests(unittest.TestCase):
             task.id,
         )
 
+    def test_resolve_task_id_prefers_alias_over_archived_literal_collision(self):
+        state = self.state_mod.MatrixState()
+        archived = self.state_mod.BoardTask(
+            id="LOOM:51",
+            task="Archived task",
+            group="g",
+            lane="Archived",
+            archived_at="2026-04-07T00:00:00+00:00",
+        )
+        live = self.state_mod.BoardTask(
+            id="bcf3a475",
+            task="Live task",
+            group="g",
+            lane="Backlog",
+        )
+        state.board_tasks[archived.id] = archived
+        state.board_tasks[live.id] = live
+        state.task_id_aliases[archived.id] = live.id
+
+        self.assertEqual(
+            self.server_mod._resolve_task_id(state, "LOOM:51"),
+            live.id,
+        )
+        self.assertEqual(
+            self.server_mod._resolve_task_id(state, "LOOM:5"),
+            live.id,
+        )
+
     def test_resolve_agent_id_accepts_slug_name_and_prefix(self):
         state = self.state_mod.MatrixState()
         agent = self._make_agent("agent-1234abcd")
