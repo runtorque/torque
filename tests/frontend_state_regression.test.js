@@ -764,6 +764,56 @@ function createWsRenderHarness() {
   return { context, document, sandbox };
 }
 
+function createStandaloneDeltaBatchHarness(visibleSurfaces = ['board']) {
+  const rafCallbacks = [];
+  const canceledFrames = new Set();
+  const { sandbox, document } = createSandbox({
+    requestAnimationFrame(fn) {
+      const id = rafCallbacks.length + 1;
+      rafCallbacks.push({ id, fn });
+      return id;
+    },
+    cancelAnimationFrame(id) {
+      canceledFrames.add(id);
+    },
+  });
+  sandbox.__visibleSurfaces = visibleSurfaces.slice();
+  sandbox._activePanelApp = '';
+  sandbox.renderCalls = {
+    main: 0,
+    board: 0,
+    actions: 0,
+    context: 0,
+    events: 0,
+    weaver: 0,
+    templates: 0,
+  };
+  document.register('main');
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/ws.js');
+  loadScript(context, 'static/js/render.js');
+  runInContext(context, `
+    _standalonePanelsEnabled = function() { return true; };
+    _visiblePanelSurfaces = function() { return __visibleSurfaces.slice(); };
+    render = function() { renderCalls.main++; };
+    renderBoard = function() { renderCalls.board++; };
+    renderTemplatesPanel = function() { renderCalls.actions++; };
+    renderContextPanel = function() { renderCalls.context++; };
+    renderEvents = function() { renderCalls.events++; };
+    renderAgentPanel = function() { renderCalls.weaver++; };
+    renderAgentTemplatesPanel = function() { renderCalls.templates++; };
+    updateEventsAttentionBadge = function() {};
+    _expectedSeq = 1;
+  `);
+  function flushRaf() {
+    while (rafCallbacks.length) {
+      const item = rafCallbacks.shift();
+      if (!canceledFrames.has(item.id)) item.fn();
+    }
+  }
+  return { context, document, sandbox, rafCallbacks, canceledFrames, flushRaf };
+}
+
 function createTemplatesHarness() {
   const { sandbox, document } = createSandbox({
     _cachedProviders: [],
@@ -8150,6 +8200,418 @@ test('ws task deltas pass previous and next task snapshots to the board patch qu
   }]);
 });
 
+test('standalone task delta renders are batched to one frame with immediate state updates', () => {
+  const { context, sandbox, rafCallbacks, flushRaf } = createStandaloneDeltaBatchHarness(['board', 'context']);
+  runInContext(context, `
+    state.board_tasks = {
+      'task-1': {
+        id: 'task-1',
+        task: 'Initial title',
+        group: 'alpha',
+        lane: 'In Progress',
+        position: 1
+      }
+    };
+    _boardFocusedTask = 'task-1';
+    _contextFocus = 'task';
+    _contextCurrentTask = function() { return state.board_tasks[_boardFocusedTask] || null; };
+  `);
+
+  for (let i = 1; i <= 50; i++) {
+    context._handleDelta({
+      seq: i,
+      ops: [{
+        op: 'task_upsert',
+        id: 'task-1',
+        task: 'Updated title ' + i,
+        group: 'alpha',
+        lane: 'In Progress',
+        position: i,
+      }],
+    });
+  }
+
+  assert.equal(jsonValue(context, `state.board_tasks["task-1"].task`), 'Updated title 50');
+  assert.equal(rafCallbacks.length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 0,
+    board: 0,
+    actions: 0,
+    context: 0,
+    events: 0,
+    weaver: 0,
+    templates: 0,
+  });
+
+  flushRaf();
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 0,
+    board: 1,
+    actions: 0,
+    context: 1,
+    events: 0,
+    weaver: 0,
+    templates: 0,
+  });
+});
+
+test('standalone event_append deltas batch events rendering and keep log state immediate', () => {
+  const { context, sandbox, rafCallbacks, flushRaf } = createStandaloneDeltaBatchHarness(['events']);
+
+  for (let i = 1; i <= 12; i++) {
+    context._handleDelta({
+      seq: i,
+      ops: [{
+        op: 'event_append',
+        id: 'evt-' + i,
+        group: 'alpha',
+        kind: 'agent_progress',
+        message: 'Progress ' + i,
+        timestamp: i,
+      }],
+    });
+  }
+
+  assert.equal(jsonValue(context, 'state.panel_events.length'), 12);
+  assert.equal(rafCallbacks.length, 1);
+  flushRaf();
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 0,
+    board: 0,
+    actions: 0,
+    context: 0,
+    events: 1,
+    weaver: 0,
+    templates: 0,
+  });
+});
+
+test('standalone agent_upsert deltas batch current-group weaver rendering', () => {
+  const { context, sandbox, rafCallbacks, flushRaf } = createStandaloneDeltaBatchHarness(['weaver']);
+
+  for (let i = 1; i <= 20; i++) {
+    context._handleDelta({
+      seq: i,
+      ops: [{
+        op: 'agent_upsert',
+        id: 'agent-1',
+        group: 'alpha',
+        name: 'Worker ' + i,
+        cell_type: 'agent',
+        kind: 'worker',
+        status: 'running',
+      }],
+    });
+  }
+
+  assert.equal(jsonValue(context, `state.agents["agent-1"].name`), 'Worker 20');
+  assert.equal(rafCallbacks.length, 1);
+  flushRaf();
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 1,
+    board: 0,
+    actions: 0,
+    context: 0,
+    events: 0,
+    weaver: 1,
+    templates: 0,
+  });
+});
+
+test('standalone task invalidation is scoped by group and active context selection', () => {
+  const { context, sandbox, flushRaf } = createStandaloneDeltaBatchHarness(['board', 'context', 'events', 'weaver']);
+  runInContext(context, `
+    state.board_tasks = {
+      'task-1': { id: 'task-1', task: 'Selected', group: 'alpha', lane: 'In Progress', position: 1 },
+      'task-2': { id: 'task-2', task: 'Unselected', group: 'alpha', lane: 'In Progress', position: 2 }
+    };
+    _boardFocusedTask = 'task-1';
+    _contextFocus = 'task';
+    _contextCurrentTask = function() { return state.board_tasks[_boardFocusedTask] || null; };
+  `);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'task_upsert',
+      id: 'task-beta',
+      task: 'Off group',
+      group: 'beta',
+      lane: 'In Progress',
+      position: 1,
+    }],
+  });
+  flushRaf();
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 0,
+    board: 0,
+    actions: 0,
+    context: 0,
+    events: 0,
+    weaver: 0,
+    templates: 0,
+  });
+
+  context._handleDelta({
+    seq: 2,
+    ops: [{
+      op: 'task_upsert',
+      id: 'task-2',
+      task: 'Unselected changed',
+      group: 'alpha',
+      lane: 'In Progress',
+      position: 2,
+    }],
+  });
+  flushRaf();
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 0,
+    board: 1,
+    actions: 0,
+    context: 0,
+    events: 0,
+    weaver: 0,
+    templates: 0,
+  });
+
+  context._handleDelta({
+    seq: 3,
+    ops: [{
+      op: 'task_upsert',
+      id: 'task-1',
+      task: 'Selected changed',
+      group: 'alpha',
+      lane: 'In Progress',
+      position: 1,
+    }],
+  });
+  flushRaf();
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 0,
+    board: 2,
+    actions: 0,
+    context: 1,
+    events: 0,
+    weaver: 0,
+    templates: 0,
+  });
+});
+
+test('standalone ask task and attention agent deltas narrow events invalidation', () => {
+  const { context, sandbox, flushRaf } = createStandaloneDeltaBatchHarness(['events']);
+  runInContext(context, `
+    state.board_tasks = {
+      'parent-1': { id: 'parent-1', task: 'Parent', group: 'alpha', lane: 'In Progress', agent_id: 'agent-1' },
+      'ask-1': { id: 'ask-1', task: 'Question', group: 'alpha', lane: 'In Progress', parent_task_id: 'parent-1', labels: ['loom:human'] }
+    };
+    state.agents = {
+      'agent-1': { id: 'agent-1', name: 'Worker', group: 'alpha', cell_type: 'agent', needs_attention: false }
+    };
+  `);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'task_upsert',
+      id: 'normal-1',
+      task: 'Normal update',
+      group: 'alpha',
+      lane: 'In Progress',
+    }],
+  });
+  flushRaf();
+  assert.equal(sandbox.renderCalls.events, 0);
+
+  context._handleDelta({
+    seq: 2,
+    ops: [{
+      op: 'task_upsert',
+      id: 'ask-1',
+      task: 'Updated question',
+      group: 'alpha',
+      lane: 'In Progress',
+      parent_task_id: 'parent-1',
+      labels: ['loom:human'],
+    }],
+  });
+  flushRaf();
+  assert.equal(sandbox.renderCalls.events, 1);
+
+  context._handleDelta({
+    seq: 3,
+    ops: [{
+      op: 'agent_upsert',
+      id: 'agent-1',
+      name: 'Renamed Worker',
+      group: 'alpha',
+      cell_type: 'agent',
+      needs_attention: true,
+      error_message: 'Blocked',
+    }],
+  });
+  flushRaf();
+  assert.equal(sandbox.renderCalls.events, 2);
+});
+
+test('standalone no-agent boundary task title deltas invalidate the main grid', () => {
+  const { context, sandbox, flushRaf } = createStandaloneDeltaBatchHarness([]);
+  runInContext(context, `
+    state.agents = {
+      'agent-1': {
+        id: 'agent-1',
+        group: 'alpha',
+        cell_type: 'agent',
+        kind: 'worker',
+        worktree_repo_root: '/repo',
+        git_root: '/repo',
+        worktree_branch: 'feature/review'
+      }
+    };
+    state.board_tasks = {
+      'boundary-1': {
+        id: 'boundary-1',
+        group: 'alpha',
+        task: 'Original review point',
+        lane: 'Done',
+        updated_at: '2026-04-22T10:00:00+00:00',
+        worktree_boundary: {
+          status: 'open',
+          repo_root: '/repo',
+          branch: 'feature/review',
+          recorded_at: '2026-04-22T10:00:00+00:00'
+        }
+      }
+    };
+  `);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'task_upsert',
+      id: 'boundary-1',
+      group: 'alpha',
+      task: 'Updated review point',
+      lane: 'Done',
+      updated_at: '2026-04-22T10:05:00+00:00',
+    }],
+  });
+  flushRaf();
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 1,
+    board: 0,
+    actions: 0,
+    context: 0,
+    events: 0,
+    weaver: 0,
+    templates: 0,
+  });
+});
+
+test('standalone no-agent boundary follower lane deltas invalidate the main grid', () => {
+  const { context, sandbox, flushRaf } = createStandaloneDeltaBatchHarness([]);
+  runInContext(context, `
+    state.agents = {
+      'agent-1': {
+        id: 'agent-1',
+        group: 'alpha',
+        cell_type: 'agent',
+        kind: 'worker',
+        worktree_repo_root: '/repo',
+        git_root: '/repo',
+        worktree_branch: 'feature/review'
+      }
+    };
+    state.board_tasks = {
+      'boundary-1': {
+        id: 'boundary-1',
+        group: 'alpha',
+        task: 'Review point',
+        lane: 'Done',
+        updated_at: '2026-04-22T10:00:00+00:00',
+        worktree_boundary: {
+          status: 'open',
+          repo_root: '/repo',
+          branch: 'feature/review',
+          recorded_at: '2026-04-22T10:00:00+00:00'
+        }
+      },
+      'follower-1': {
+        id: 'follower-1',
+        group: 'alpha',
+        task: 'Queued follow-up',
+        lane: 'Backlog',
+        resume_after_boundary_task_id: 'boundary-1',
+        updated_at: '2026-04-22T10:01:00+00:00'
+      }
+    };
+  `);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'task_upsert',
+      id: 'follower-1',
+      group: 'alpha',
+      task: 'Started follow-up',
+      lane: 'In Progress',
+      updated_at: '2026-04-22T10:06:00+00:00',
+    }],
+  });
+  flushRaf();
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 1,
+    board: 0,
+    actions: 0,
+    context: 0,
+    events: 0,
+    weaver: 0,
+    templates: 0,
+  });
+});
+
+test('standalone sequence gap cancels pending batched renders and requests one resync', () => {
+  const { context, sandbox, rafCallbacks, flushRaf } = createStandaloneDeltaBatchHarness(['board']);
+  runInContext(context, `
+    WebSocket = { OPEN: 1 };
+    ws = {
+      readyState: 1,
+      send(payload) { sendCalls.push(JSON.parse(payload)); }
+    };
+  `);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'task_upsert',
+      id: 'task-1',
+      task: 'Queued render',
+      group: 'alpha',
+      lane: 'In Progress',
+    }],
+  });
+  assert.equal(rafCallbacks.length, 1);
+
+  context._handleDelta({ seq: 3, ops: [] });
+  context._handleDelta({ seq: 4, ops: [] });
+  flushRaf();
+
+  assert.deepEqual(jsonValue(context, 'sendCalls'), [{ cmd: 'resync' }]);
+  assert.equal(jsonValue(context, '_resyncPending'), true);
+  assert.equal(jsonValue(context, '_awaitingFullState'), true);
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 0,
+    board: 0,
+    actions: 0,
+    context: 0,
+    events: 0,
+    weaver: 0,
+    templates: 0,
+  });
+});
+
 test('ws invalidation skips rerendering the active context panel for off-group agent removals', () => {
   const { context, sandbox } = createWsRenderHarness();
   sandbox._activePanelApp = 'context';
@@ -14469,7 +14931,7 @@ test('standalone startup restore keeps panel roots attached across the first dou
   );
 });
 
-test('standalone task deltas rerender every visible docked surface', () => {
+test('standalone task deltas rerender only affected visible docked surfaces', () => {
   const { context, sandbox } = createWsRenderHarness();
 
   runInContext(context, `
@@ -14493,10 +14955,10 @@ test('standalone task deltas rerender every visible docked surface', () => {
   });
 
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
-    main: 1,
+    main: 0,
     board: 1,
     actions: 0,
-    context: 1,
+    context: 0,
     events: 0,
     weaver: 0,
     templates: 0,

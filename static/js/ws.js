@@ -17,6 +17,8 @@ var _firstStateReceived = false;
 var _expectedSeq = 0;
 var _resyncPending = false;
 var _awaitingFullState = false;
+var _pendingDeltaSurfaceInvalidations = null;
+var _pendingDeltaSurfaceRenderFrame = 0;
 
 function connect() {
   _firstStateReceived = false;
@@ -222,6 +224,7 @@ function _triggerDoneFlourishesFromTaskSnapshot(previousTasks, nextTasks) {
 /* -- Full state (initial connect + resync) -------------------------------- */
 
 function _handleFullState(msg) {
+  _cancelPendingDeltaSurfaceRender();
   const prevActive = state.active_session_id;
   const prevTasks = state.board_tasks || {};
   const prevStandaloneVisibleApps = (typeof _standaloneVisiblePanelApps === 'function'
@@ -309,11 +312,9 @@ function _handleFullState(msg) {
 
 function _handleDelta(msg) {
   if (_awaitingFullState) return;
-  const prevGroup = (typeof _currentGroup === 'function') ? _currentGroup() : '';
-  const invalidations = _deltaSurfaceInvalidations(msg.ops);
-  const opGroupHints = _captureDeltaGroupHints(msg.ops);
   if (msg.seq !== _expectedSeq) {
     // Sequence gap — request full resync
+    _cancelPendingDeltaSurfaceRender();
     if (!_resyncPending) {
       _resyncPending = true;
       _awaitingFullState = true;
@@ -321,6 +322,9 @@ function _handleDelta(msg) {
     }
     return;
   }
+  const prevGroup = (typeof _currentGroup === 'function') ? _currentGroup() : '';
+  const opGroupHints = _captureDeltaGroupHints(msg.ops);
+  const invalidations = _deltaSurfaceInvalidations(msg.ops, opGroupHints);
   _expectedSeq = msg.seq + 1;
   _applyDelta(msg.ops);
   if (invalidations.board && typeof _boardQueueTaskDeltas === 'function') {
@@ -351,12 +355,75 @@ function _handleDelta(msg) {
     });
   }
   if (!dragInProgress) {
-    if (typeof renderInvalidatedSurfaces === 'function') {
-      renderInvalidatedSurfaces(invalidations);
-    } else {
-      render();
-    }
+    _queueDeltaSurfaceRender(invalidations);
   }
+}
+
+function _standaloneDeltaOptimizationsEnabled() {
+  return !!(
+    typeof _standalonePanelsEnabled === 'function'
+    && _standalonePanelsEnabled()
+  );
+}
+
+function _surfaceInvalidationsAny(flags) {
+  if (!flags) return false;
+  for (const key in flags) {
+    if (key && flags[key]) return true;
+  }
+  return false;
+}
+
+function _mergeSurfaceInvalidations(target, source) {
+  const out = target || _blankSurfaceInvalidations();
+  for (const key in (source || {})) {
+    if (source[key]) out[key] = true;
+    else if (!Object.prototype.hasOwnProperty.call(out, key)) out[key] = false;
+  }
+  return out;
+}
+
+function _renderDeltaSurfaceInvalidations(flags) {
+  if (!_surfaceInvalidationsAny(flags)) return;
+  if (typeof renderInvalidatedSurfaces === 'function') {
+    renderInvalidatedSurfaces(flags);
+  } else {
+    render();
+  }
+}
+
+function _cancelPendingDeltaSurfaceRender() {
+  if (_pendingDeltaSurfaceRenderFrame
+      && typeof cancelAnimationFrame === 'function') {
+    cancelAnimationFrame(_pendingDeltaSurfaceRenderFrame);
+  }
+  _pendingDeltaSurfaceRenderFrame = 0;
+  _pendingDeltaSurfaceInvalidations = null;
+}
+
+function _flushDeltaSurfaceRenderBatch() {
+  if (!_pendingDeltaSurfaceInvalidations) return;
+  const flags = _pendingDeltaSurfaceInvalidations;
+  _pendingDeltaSurfaceInvalidations = null;
+  _pendingDeltaSurfaceRenderFrame = 0;
+  if (!dragInProgress) _renderDeltaSurfaceInvalidations(flags);
+}
+
+function _queueDeltaSurfaceRender(flags) {
+  if (!_surfaceInvalidationsAny(flags)) return;
+  if (!_standaloneDeltaOptimizationsEnabled()
+      || typeof requestAnimationFrame !== 'function') {
+    _renderDeltaSurfaceInvalidations(flags);
+    return;
+  }
+  _pendingDeltaSurfaceInvalidations = _mergeSurfaceInvalidations(
+    _pendingDeltaSurfaceInvalidations,
+    flags
+  );
+  if (_pendingDeltaSurfaceRenderFrame) return;
+  _pendingDeltaSurfaceRenderFrame = requestAnimationFrame(function() {
+    _flushDeltaSurfaceRenderBatch();
+  });
 }
 
 function _blankSurfaceInvalidations() {
@@ -376,14 +443,15 @@ function _markSurface(flags) {
   }
 }
 
-function _deltaSurfaceInvalidations(ops) {
+function _deltaSurfaceInvalidations(ops, hints) {
   const flags = _blankSurfaceInvalidations();
   for (let i = 0; i < ops.length; i++) {
     const op = ops[i];
+    const hint = hints && hints[i] ? hints[i] : {};
     switch (op.op) {
       case 'agent_upsert':
       case 'agent_remove':
-        _markSurface(flags, 'main', 'context', 'events', 'weaver');
+        _applyAgentSurfaceInvalidation(flags, op, hint);
         break;
       case 'group_update':
       case 'group_remove':
@@ -396,7 +464,7 @@ function _deltaSurfaceInvalidations(ops) {
         break;
       case 'task_upsert':
       case 'task_remove':
-        _markSurface(flags, 'main', 'board', 'context', 'events', 'weaver');
+        _applyTaskSurfaceInvalidation(flags, op, hint);
         break;
       case 'lanes_update':
       case 'schedule_upsert':
@@ -435,6 +503,482 @@ function _deltaSurfaceInvalidations(ops) {
     }
   }
   return flags;
+}
+
+function _taskNextFromDelta(op, previous) {
+  if (!op || op.op === 'task_remove') return null;
+  const next = Object.assign({}, previous || {}, op || {});
+  delete next.op;
+  return next;
+}
+
+function _agentNextFromDelta(op, previous) {
+  if (!op || op.op === 'agent_remove') return null;
+  const next = Object.assign({}, previous || {}, op || {});
+  delete next.op;
+  return next;
+}
+
+function _stableDeltaValue(value) {
+  if (value === undefined) return '__loom_undefined__';
+  if (value === null) return null;
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value);
+    } catch (_err) {
+      return String(value);
+    }
+  }
+  return value;
+}
+
+function _deltaValuesEqual(a, b) {
+  return _stableDeltaValue(a) === _stableDeltaValue(b);
+}
+
+function _deltaObjectFieldsChanged(previous, next, candidateFields) {
+  const changed = {};
+  const fields = candidateFields || [];
+  for (let i = 0; i < fields.length; i++) {
+    const field = fields[i];
+    const a = previous ? previous[field] : undefined;
+    const b = next ? next[field] : undefined;
+    if (!_deltaValuesEqual(a, b)) changed[field] = true;
+  }
+  return changed;
+}
+
+function _deltaHasChangedField(changed, fields) {
+  for (let i = 0; i < fields.length; i++) {
+    if (changed[fields[i]]) return true;
+  }
+  return false;
+}
+
+function _taskTouchesGroup(previous, next, group) {
+  if (!group) return true;
+  const prevGroup = previous ? (previous.group || '') : '';
+  const nextGroup = next ? (next.group || '') : '';
+  return prevGroup === group || nextGroup === group;
+}
+
+function _agentTouchesGroup(previous, next, group) {
+  if (!group) return true;
+  const prevGroup = previous ? (previous.group || '') : '';
+  const nextGroup = next ? (next.group || '') : '';
+  return prevGroup === group || nextGroup === group;
+}
+
+function _boardCurrentGroupFilterEnabled() {
+  return typeof _boardFilterByGroup === 'undefined' || !!_boardFilterByGroup;
+}
+
+function _eventsCurrentGroupFilterEnabled() {
+  return typeof _eventsFilterByGroup === 'undefined' || !!_eventsFilterByGroup;
+}
+
+function _currentSurfaceGroup() {
+  return (typeof _currentGroup === 'function') ? (_currentGroup() || '') : '';
+}
+
+function _taskHasHumanAskLabel(task) {
+  return !!(
+    task
+    && Array.isArray(task.labels)
+    && task.labels.indexOf('loom:human') >= 0
+  );
+}
+
+function _taskIsOpenAsk(task) {
+  return !!(task && _taskHasHumanAskLabel(task) && (task.lane || '') !== 'Done');
+}
+
+function _taskIsAskParent(taskId, group) {
+  if (!taskId || !state || !state.board_tasks) return false;
+  const tasks = state.board_tasks || {};
+  for (const id in tasks) {
+    const task = tasks[id];
+    if (!task || task.parent_task_id !== taskId) continue;
+    if (!_taskIsOpenAsk(task)) continue;
+    if (group && task.group !== group) continue;
+    return true;
+  }
+  return false;
+}
+
+function _taskDeltaChangedFields(previous, next, op) {
+  const fields = {};
+  const keys = {};
+  for (const key in (previous || {})) keys[key] = true;
+  for (const key in (next || {})) keys[key] = true;
+  for (const key in (op || {})) keys[key] = true;
+  delete keys.op;
+  for (const key in keys) {
+    const a = previous ? previous[key] : undefined;
+    const b = next ? next[key] : undefined;
+    if (!_deltaValuesEqual(a, b)) fields[key] = true;
+  }
+  return fields;
+}
+
+function _taskHasBranchBoundaryMainRelevance(task) {
+  if (!task) return false;
+  const boundary = task.worktree_boundary && typeof task.worktree_boundary === 'object'
+    ? task.worktree_boundary
+    : null;
+  if (boundary && boundary.repo_root && boundary.branch) return true;
+  return !!task.resume_after_boundary_task_id;
+}
+
+function _taskDeltaInvalidatesBoundaryMain(previous, next, changed) {
+  if (!_taskHasBranchBoundaryMainRelevance(previous)
+      && !_taskHasBranchBoundaryMainRelevance(next)) {
+    return false;
+  }
+  if (!previous || !next) return true;
+  return _deltaHasChangedField(changed, [
+    'task',
+    'lane',
+    'status',
+    'created_at',
+    'updated_at',
+    'lane_entered_at',
+    'worktree_boundary',
+    'resume_after_boundary_task_id',
+  ]);
+}
+
+function _taskDeltaInvalidatesMain(previous, next, op) {
+  if (!_standaloneDeltaOptimizationsEnabled()) return true;
+  if (!previous && !next) return false;
+  const changed = _taskDeltaChangedFields(previous, next, op);
+  const prevAgent = previous ? String(previous.agent_id || '') : '';
+  const nextAgent = next ? String(next.agent_id || '') : '';
+  if (prevAgent || nextAgent) {
+    if (prevAgent !== nextAgent) return true;
+    return _deltaHasChangedField(changed, [
+      'task',
+      'lane',
+      'status',
+      'action_name',
+      'description',
+      'messages',
+      'created_at',
+      'updated_at',
+      'started_at',
+      'worktree_boundary',
+      'resume_after_boundary_task_id',
+      'artifacts',
+      'attachments',
+    ]);
+  }
+  if (_taskDeltaInvalidatesBoundaryMain(previous, next, changed)) return true;
+  return _deltaHasChangedField(changed, [
+    'worktree_boundary',
+    'resume_after_boundary_task_id',
+  ]);
+}
+
+function _taskDeltaInvalidatesBoard(previous, next, op) {
+  if (!_standaloneDeltaOptimizationsEnabled()) return true;
+  const group = _boardCurrentGroupFilterEnabled() ? _currentSurfaceGroup() : '';
+  if (!_taskTouchesGroup(previous, next, group)) return false;
+  if (!previous || !next) return true;
+  const changed = _taskDeltaChangedFields(previous, next, op);
+  const alwaysFields = [
+    'id',
+    'group',
+    'lane',
+    'position',
+    'parent_task_id',
+    'pipeline_depth',
+    'depends_on',
+    'task',
+    'labels',
+    'action_name',
+    'agent_template',
+    'agent_id',
+    'status',
+    'health_state',
+    'health_details',
+    'health_since',
+    'verification_mode',
+    'verification_state',
+    'verification_notes',
+    'verification_summary',
+    'attachments',
+    'artifacts',
+    'provider',
+    'external_id',
+    'external_url',
+    'messages',
+    'created_by',
+    'created_by_architect_id',
+    'created_by_engineer_id',
+    'created_at',
+    'updated_at',
+    'lane_entered_at',
+    'scheduled_at',
+    'worktree_boundary',
+    'resume_after_boundary_task_id',
+  ];
+  if (_deltaHasChangedField(changed, alwaysFields)) return true;
+  const searchActive = !!(typeof _boardSearchQuery !== 'undefined' && _boardSearchQuery);
+  if (searchActive && _deltaHasChangedField(changed, [
+    'description',
+    'assigned_engineer_id',
+  ])) return true;
+  return false;
+}
+
+function _contextFocusedTaskBeforeDelta() {
+  if (typeof _contextCurrentTask === 'function') {
+    const task = _contextCurrentTask();
+    return task ? String(task.id || '') : '';
+  }
+  if (typeof _boardFocusedTask !== 'undefined' && _boardFocusedTask) {
+    return String(_boardFocusedTask || '');
+  }
+  return '';
+}
+
+function _contextFocusedAgentBeforeDelta() {
+  if (typeof _contextCurrentAgent === 'function') {
+    const agent = _contextCurrentAgent();
+    return agent ? String(agent.id || '') : '';
+  }
+  if (typeof selectedAgentId !== 'undefined' && selectedAgentId) {
+    return String(selectedAgentId || '');
+  }
+  if (typeof focusedItemId !== 'undefined' && focusedItemId
+      && state && state.agents && state.agents[focusedItemId]) {
+    return String(focusedItemId || '');
+  }
+  return '';
+}
+
+function _taskPipelineRef(task) {
+  return task ? String(task.pipeline_root_id || task.id || '') : '';
+}
+
+function _taskDeltaMayChangeContextCurrentTask(previous, next, focusedAgentId) {
+  if (!focusedAgentId) return false;
+  const prevAgent = previous ? String(previous.agent_id || '') : '';
+  const nextAgent = next ? String(next.agent_id || '') : '';
+  if (prevAgent === focusedAgentId || nextAgent === focusedAgentId) return true;
+  return false;
+}
+
+function _taskDeltaInvalidatesContext(previous, next, op) {
+  if (!_standaloneDeltaOptimizationsEnabled()) return true;
+  const focus = (typeof _contextFocus !== 'undefined') ? String(_contextFocus || 'group') : 'group';
+  const focusedTaskId = _contextFocusedTaskBeforeDelta();
+  const focusedAgentId = _contextFocusedAgentBeforeDelta();
+  const taskId = String((op && op.id) || (next && next.id) || (previous && previous.id) || '');
+  const changed = _taskDeltaChangedFields(previous, next, op);
+  if (focus === 'task') {
+    if (taskId && taskId === focusedTaskId) return true;
+    return _taskDeltaMayChangeContextCurrentTask(previous, next, focusedAgentId);
+  }
+  if (focus === 'pipeline') {
+    const current = focusedTaskId && state && state.board_tasks
+      ? _taskPipelineRef(state.board_tasks[focusedTaskId])
+      : '';
+    if (!current && _taskDeltaMayChangeContextCurrentTask(previous, next, focusedAgentId)) return true;
+    if (current && (_taskPipelineRef(previous) === current || _taskPipelineRef(next) === current)) return true;
+    return _deltaHasChangedField(changed, ['pipeline_root_id'])
+      && _taskDeltaMayChangeContextCurrentTask(previous, next, focusedAgentId);
+  }
+  if (focus === 'agent') {
+    return _taskDeltaMayChangeContextCurrentTask(previous, next, focusedAgentId);
+  }
+  if (taskId && taskId === focusedTaskId) {
+    return _deltaHasChangedField(changed, ['task', 'agent_id', 'lane', 'pipeline_root_id']);
+  }
+  return false;
+}
+
+function _taskDeltaInvalidatesEvents(previous, next, op) {
+  if (!_standaloneDeltaOptimizationsEnabled()) return true;
+  const group = _eventsCurrentGroupFilterEnabled() ? _currentSurfaceGroup() : '';
+  if (!_taskTouchesGroup(previous, next, group)) return false;
+  const wasAsk = _taskIsOpenAsk(previous);
+  const isAsk = _taskIsOpenAsk(next);
+  if (wasAsk || isAsk) {
+    const changed = _taskDeltaChangedFields(previous, next, op);
+    return !previous || !next || _deltaHasChangedField(changed, [
+      'group',
+      'labels',
+      'lane',
+      'task',
+      'description',
+      'created_at',
+      'parent_task_id',
+    ]);
+  }
+  const taskId = String((op && op.id) || (previous && previous.id) || (next && next.id) || '');
+  if (_taskIsAskParent(taskId, group)) {
+    const changed = _taskDeltaChangedFields(previous, next, op);
+    return !previous || !next || _deltaHasChangedField(changed, [
+      'task',
+      'description',
+      'agent_id',
+      'group',
+    ]);
+  }
+  return false;
+}
+
+function _focusedWeaverAgent() {
+  if (typeof _resolveFocusedAgent === 'function') return _resolveFocusedAgent();
+  if (typeof focusedItemId !== 'undefined'
+      && focusedItemId
+      && state
+      && state.agents
+      && state.agents[focusedItemId]) {
+    return state.agents[focusedItemId];
+  }
+  return null;
+}
+
+function _focusedWeaverAgentKind(agent) {
+  if (typeof _agentPanelKind === 'function') return _agentPanelKind(agent);
+  return String((agent && agent.kind) || 'worker');
+}
+
+function _focusedWeaverActiveTab(kind) {
+  if (typeof _agentPanelActiveTab === 'function') return _agentPanelActiveTab(kind);
+  return '';
+}
+
+function _taskDeltaInvalidatesWeaver(previous, next, op) {
+  if (!_standaloneDeltaOptimizationsEnabled()) return true;
+  const group = _currentSurfaceGroup();
+  if (!_taskTouchesGroup(previous, next, group)) return false;
+  const focused = _focusedWeaverAgent();
+  if (!focused) return false;
+  const kind = _focusedWeaverAgentKind(focused);
+  const tab = _focusedWeaverActiveTab(kind);
+  if (kind === 'worker') {
+    if (tab && tab !== 'worklog') return false;
+    const focusedId = String(focused.id || '');
+    return !!(
+      focusedId
+      && ((previous && String(previous.agent_id || '') === focusedId)
+        || (next && String(next.agent_id || '') === focusedId))
+    );
+  }
+  if (kind === 'engineer') {
+    if (tab && tab !== 'worklog') return false;
+    const focusedId = String(focused.id || '');
+    return !!(
+      focusedId
+      && ((previous && String(previous.assigned_engineer_id || '') === focusedId)
+        || (next && String(next.assigned_engineer_id || '') === focusedId))
+    );
+  }
+  return false;
+}
+
+function _applyTaskSurfaceInvalidation(flags, op, hint) {
+  if (!_standaloneDeltaOptimizationsEnabled()) {
+    _markSurface(flags, 'main', 'board', 'context', 'events', 'weaver');
+    return;
+  }
+  const previous = hint && hint.task ? hint.task : null;
+  const next = _taskNextFromDelta(op, previous);
+  if (_taskDeltaInvalidatesMain(previous, next, op)) _markSurface(flags, 'main');
+  if (_taskDeltaInvalidatesBoard(previous, next, op)) _markSurface(flags, 'board');
+  if (_taskDeltaInvalidatesContext(previous, next, op)) _markSurface(flags, 'context');
+  if (_taskDeltaInvalidatesEvents(previous, next, op)) _markSurface(flags, 'events');
+  if (_taskDeltaInvalidatesWeaver(previous, next, op)) _markSurface(flags, 'weaver');
+}
+
+function _agentHasAttention(agent) {
+  return !!(agent && agent.needs_attention && agent.cell_type !== 'terminal');
+}
+
+function _agentIsAskParentAgent(agentId, group) {
+  if (!agentId || !state || !state.board_tasks) return false;
+  const tasks = state.board_tasks || {};
+  for (const id in tasks) {
+    const ask = tasks[id];
+    if (!_taskIsOpenAsk(ask)) continue;
+    if (group && ask.group !== group) continue;
+    const parentId = ask.parent_task_id || '';
+    const parent = parentId ? tasks[parentId] : null;
+    if (parent && String(parent.agent_id || '') === String(agentId || '')) return true;
+  }
+  return false;
+}
+
+function _agentDeltaInvalidatesContext(previous, next, op) {
+  if (!_standaloneDeltaOptimizationsEnabled()) return true;
+  const focusedAgentId = _contextFocusedAgentBeforeDelta();
+  const agentId = String((op && op.id) || (previous && previous.id) || (next && next.id) || '');
+  if (!agentId || agentId !== focusedAgentId) return false;
+  return true;
+}
+
+function _agentDeltaInvalidatesEvents(previous, next, op) {
+  if (!_standaloneDeltaOptimizationsEnabled()) return true;
+  const group = _eventsCurrentGroupFilterEnabled() ? _currentSurfaceGroup() : '';
+  if (!_agentTouchesGroup(previous, next, group)) return false;
+  const wasAttention = _agentHasAttention(previous);
+  const isAttention = _agentHasAttention(next);
+  if (wasAttention || isAttention) {
+    const changed = _deltaObjectFieldsChanged(previous, next, [
+      'group',
+      'name',
+      'needs_attention',
+      'error_message',
+      'activity_detail',
+      'last_event_at',
+      'cell_type',
+    ]);
+    return !previous || !next || _deltaHasChangedField(changed, [
+      'group',
+      'name',
+      'needs_attention',
+      'error_message',
+      'activity_detail',
+      'last_event_at',
+      'cell_type',
+    ]);
+  }
+  const agentId = String((op && op.id) || (previous && previous.id) || (next && next.id) || '');
+  if (_agentIsAskParentAgent(agentId, group)) {
+    const changed = _deltaObjectFieldsChanged(previous, next, [
+      'group',
+      'name',
+      'slug',
+    ]);
+    return !previous || !next || _deltaHasChangedField(changed, ['group', 'name', 'slug']);
+  }
+  return false;
+}
+
+function _agentDeltaInvalidatesWeaver(previous, next, op) {
+  if (!_standaloneDeltaOptimizationsEnabled()) return true;
+  const group = _currentSurfaceGroup();
+  if (!_agentTouchesGroup(previous, next, group)) return false;
+  const focused = _focusedWeaverAgent();
+  const agentId = String((op && op.id) || (previous && previous.id) || (next && next.id) || '');
+  if (focused && agentId && String(focused.id || '') === agentId) return true;
+  return true;
+}
+
+function _applyAgentSurfaceInvalidation(flags, op, hint) {
+  if (!_standaloneDeltaOptimizationsEnabled()) {
+    _markSurface(flags, 'main', 'context', 'events', 'weaver');
+    return;
+  }
+  const previous = hint && hint.agent ? hint.agent : null;
+  const next = _agentNextFromDelta(op, previous);
+  _markSurface(flags, 'main');
+  if (_agentDeltaInvalidatesContext(previous, next, op)) _markSurface(flags, 'context');
+  if (_agentDeltaInvalidatesEvents(previous, next, op)) _markSurface(flags, 'events');
+  if (_agentDeltaInvalidatesWeaver(previous, next, op)) _markSurface(flags, 'weaver');
 }
 
 function _applyUiSurfaceInvalidation(flags, key) {
@@ -498,14 +1042,19 @@ function _captureDeltaGroupHints(ops) {
     const op = ops[i] || {};
     let group = '';
     let task = null;
+    let agent = null;
     if (op.op === 'agent_remove' && state && state.agents && state.agents[op.id]) {
       group = state.agents[op.id].group || '';
+      agent = _cloneBoardDeltaTask(state.agents[op.id]);
+    } else if (op.op === 'agent_upsert' && state && state.agents && state.agents[op.id]) {
+      group = state.agents[op.id].group || '';
+      agent = _cloneBoardDeltaTask(state.agents[op.id]);
     } else if ((op.op === 'task_remove' || op.op === 'task_upsert')
         && state && state.board_tasks && state.board_tasks[op.id]) {
       group = state.board_tasks[op.id].group || '';
       task = _cloneBoardDeltaTask(state.board_tasks[op.id]);
     }
-    hints.push({ group: group, task: task });
+    hints.push({ group: group, task: task, agent: agent });
   }
   return hints;
 }
@@ -552,7 +1101,7 @@ function _opTouchesGroup(op, group, hint) {
     case 'agent_upsert':
     case 'task_upsert':
     case 'event_append':
-      return (op.group || hintedGroup || '') === group;
+      return (op.group || '') === group || (!!hintedGroup && hintedGroup === group);
     case 'agent_remove':
     case 'task_remove':
       return hintedGroup ? hintedGroup === group : true;
