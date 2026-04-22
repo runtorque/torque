@@ -147,6 +147,26 @@ XTERM_SCROLLBACK_MIN = 100
 XTERM_SCROLLBACK_MAX = 100_000
 HOT_JSON_OFFLOAD_BYTES = 100 * 1024
 HOT_JSON_OFFLOAD_DELTA_OPS = 25
+COMPACT_SNAPSHOT_PROTOCOL = "compact-v1"
+COMPACT_BOARD_TASK_FIELDS = (
+    "id",
+    "task",
+    "slug",
+    "group",
+    "lane",
+    "position",
+    "action_name",
+    "labels",
+    "agent_id",
+    "assigned_engineer_id",
+    "parent_task_id",
+    "pipeline_depth",
+    "status",
+    "health_state",
+    "verification_state",
+    "verification_mode",
+    "lane_entered_at",
+)
 
 
 def _hot_json_default(value):
@@ -709,6 +729,17 @@ def board_task_counts_as_done(task: Optional[BoardTask]) -> bool:
     if task.lane == "Done":
         return True
     return task.lane == ARCHIVED_LANE and task.archived_from_lane == "Done"
+
+
+def board_task_compact(task: BoardTask) -> dict:
+    """Return the compact board-card summary used by compact snapshots."""
+    summary = {}
+    for field_name in COMPACT_BOARD_TASK_FIELDS:
+        value = getattr(task, field_name)
+        if isinstance(value, list):
+            value = list(value)
+        summary[field_name] = value
+    return summary
 
 
 def task_is_closed(task: Optional[BoardTask]) -> bool:
@@ -1533,6 +1564,80 @@ class MatrixState:
             "weaver_streams": self._weaver_streams_snapshot(),
             "decisions": decisions,
             "pending_hires": pending_hires,
+        }
+
+    def get_task_detail(self, task_id: str) -> dict | None:
+        """Return the full BoardTask dict for a lazily-loaded task detail."""
+        tid = self.resolve_board_task_id(task_id)
+        if not tid:
+            return None
+        task = self.board_tasks.get(tid)
+        if not task:
+            return None
+        return asdict(task)
+
+    def get_archived_task_details(self, *, group: str = "") -> dict[str, dict]:
+        """Return full archived task details, optionally scoped to a group."""
+        group = str(group or "").strip()
+        return {
+            tid: asdict(task)
+            for tid, task in self.board_tasks.items()
+            if board_task_is_archived(task)
+            and (not group or str(task.group or "") == group)
+        }
+
+    def to_dict_compact(self) -> dict:
+        """Return an opt-in compact snapshot for new lazy-loading clients.
+
+        This intentionally does not call ``to_dict()``: the legacy snapshot
+        performs synchronous decision/pending-hire/journal/weaver-stream reads
+        and expands full BoardTask rows. Compact clients fetch those heavier
+        slices with explicit lazy-load commands after the socket is ready.
+        """
+        return {
+            "snapshot_protocol": COMPACT_SNAPSHOT_PROTOCOL,
+            "agents": {aid: asdict(a) for aid, a in self.agents.items()},
+            "groups": self.groups,
+            "group_slugs": dict(self.group_slugs),
+            "group_settings": {
+                n: asdict(gs) for n, gs in self.group_settings.items()
+            },
+            "global_settings": asdict(self.global_settings),
+            "children": self._children,
+            "active_session_id": self.active_session_id,
+            "current_window_id": self.current_window_id,
+            "board_lanes": self.board_lanes,
+            "board_tasks": {
+                tid: board_task_compact(t)
+                for tid, t in self.board_tasks.items()
+                if not board_task_is_archived(t)
+            },
+            "task_id_aliases": dict(self.task_id_aliases),
+            "task_id_counters": dict(self.task_id_counters),
+            "pipeline_task_counters": dict(self.pipeline_task_counters),
+            "schedules": {
+                sid: asdict(s) for sid, s in self.schedules.items()
+            },
+            "auto_dispatch_queues": {
+                group: [asdict(entry) for entry in entries]
+                for group, entries in self.auto_dispatch_queues.items()
+            },
+            "panel_active": self.panel_active,
+            "board_panel_height": self.board_panel_height,
+            "standalone_panel_layout": self.standalone_panel_layout,
+            "events_dismissed_attention": self.events_dismissed_attention,
+            "board_filters_by_group": self.board_filters_by_group,
+            "board_saved_views_by_group": self.board_saved_views_by_group,
+            "board_lane_sorts_by_group": self.board_lane_sorts_by_group,
+            "board_card_density_by_group": self.board_card_density_by_group,
+            "panel_events": self.panel_log.get_recent(50) if self.panel_log else [],
+            "weaver_settings": {
+                n: asdict(ws) for n, ws in self.weaver_settings.items()
+            },
+            "agent_digest_settings": {
+                agent_id: asdict(settings)
+                for agent_id, settings in self.agent_digest_settings.items()
+            },
         }
 
     # -- Targeted persistence helpers ----------------------------------------
