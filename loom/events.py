@@ -541,14 +541,45 @@ class EventBus:
             cell.session_tokens_in += d.get("input_tokens", 0)
             cell.session_tokens_out += d.get("output_tokens", 0)
 
+        elif et == "heartbeat":
+            detail = d.get("detail", "")
+            if detail:
+                cell.last_event_text = detail
+
+        elif et == "derive":
+            cell.activity = "thinking"
+            cell.activity_detail = ""
+            cell.error_message = ""
+            cell.needs_attention = False
+            cell.last_event_text = (
+                d.get("summary", "") or d.get("task", "") or "Derived follow-up task"
+            )
+
+        elif et == "done":
+            cell.activity = ""
+            cell.activity_detail = ""
+            cell.error_message = ""
+            cell.needs_attention = False
+            if cell.status != "stopped":
+                cell.status = "idle"
+            summary = d.get("summary", "") or d.get("detail", "")
+            if summary:
+                cell.last_summary = summary
+                cell.last_event_text = summary
+            else:
+                cell.last_event_text = "Task done"
+
         # Emit panel event for key types
         if self._panel_log and et in (
-                "session_start", "session_end", "error", "waiting"):
+                "session_start", "session_end", "error", "waiting",
+                "derive", "done"):
             kind_map = {
                 "session_start": "agent_started",
                 "session_end": "agent_finished",
                 "error": "agent_error",
                 "waiting": "agent_waiting",
+                "derive": "task_derived",
+                "done": "task_done",
             }
             msg = ""
             if et == "error":
@@ -557,6 +588,10 @@ class EventBus:
                 msg = d.get("summary", "") or "Session ended"
             elif et == "waiting":
                 msg = d.get("reason", "") or "Waiting for permission"
+            elif et == "derive":
+                msg = d.get("summary", "") or d.get("task", "") or "Derived task"
+            elif et == "done":
+                msg = d.get("summary", "") or d.get("detail", "") or "Done"
             pe = self._panel_log.append(
                 kind=kind_map[et],
                 cell_id=cell.id,

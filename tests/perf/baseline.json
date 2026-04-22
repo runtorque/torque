@@ -1,0 +1,1687 @@
+{
+  "comparison": {},
+  "config": {
+    "duration_sec": 1.0,
+    "event_rate_per_agent_sec": 1.0,
+    "group": "perf-harness",
+    "matrix": [
+      10,
+      20,
+      30
+    ],
+    "py_spy_enabled": true,
+    "regression_threshold_pct": 20.0,
+    "startup_timeout_sec": 20.0
+  },
+  "generated_at": "2026-04-22T22:32:42.082076+00:00",
+  "kind": "loom-perf-profile",
+  "mode": "baseline",
+  "repo": {
+    "branch": "loom/courier/perf-harness-n10-n20-n30-ac43a0c",
+    "head": "74470daae4a72b148f5f5ee0364ebe47b55c13e1",
+    "root": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9",
+    "status_short": ""
+  },
+  "runs": [
+    {
+      "acceptance": {
+        "event_endpoint_latency_ms": {
+          "count": 26,
+          "max": 1.246292000359972,
+          "mean": 0.6489118844771068,
+          "min": 0.40666699987923494,
+          "p50": 0.5748749999838765,
+          "p95": 0.9976562496376573,
+          "p99": 1.1856565001835406
+        },
+        "event_loop_blocking_ms": {
+          "count": 53,
+          "max": 2.4143750006260234,
+          "mean": 1.9094591130199678,
+          "min": 0.38416700044763274,
+          "p50": 2.3343749990090146,
+          "p95": 2.402349999465514,
+          "p99": 2.413400000295951
+        },
+        "event_loss_count": 0,
+        "snapshot_json_size_bytes": {
+          "count": 1,
+          "max": 19511.0,
+          "mean": 19511.0,
+          "min": 19511.0,
+          "p50": 19511.0,
+          "p95": 19511.0,
+          "p99": 19511.0
+        },
+        "sqlite_write_latency_ms": {
+          "count": 76,
+          "max": 0.39037500027916394,
+          "mean": 0.13096489467563133,
+          "min": 0.030082999728620052,
+          "p50": 0.1194999999825086,
+          "p95": 0.28778175055776956,
+          "p99": 0.32596874962109723
+        },
+        "ws_broadcast_latency_ms": {
+          "count": 3,
+          "max": 7.521749999796157,
+          "mean": 2.7787083333047726,
+          "min": 0.3992080000898568,
+          "p50": 0.41516700002830476,
+          "p95": 6.811091699819371,
+          "p99": 7.3796183398008
+        },
+        "ws_connect_latency_ms": {
+          "count": 1,
+          "max": 0.8467500001643202,
+          "mean": 0.8467500001643202,
+          "min": 0.8467500001643202,
+          "p50": 0.8467500001643202,
+          "p95": 0.8467500001643202,
+          "p99": 0.8467500001643202
+        },
+        "ws_payload_size_bytes": {
+          "count": 3,
+          "max": 32926.0,
+          "mean": 17242.666666666668,
+          "min": 161.0,
+          "p50": 18641.0,
+          "p95": 31497.5,
+          "p99": 32640.3
+        }
+      },
+      "client": {
+        "event_post_latency_ms": {
+          "count": 26,
+          "max": 17.97791699937079,
+          "mean": 7.376605807691633,
+          "min": 1.1463330001788563,
+          "p50": 6.552916499913408,
+          "p95": 16.773750000083965,
+          "p99": 17.743718999554403
+        },
+        "first_ws_seq": 2,
+        "http_errors": 0,
+        "last_ws_seq": 5,
+        "post_exceptions": 0,
+        "sent_events": 26,
+        "ws_connect_latency_ms": {
+          "count": 1,
+          "max": 1.5016249999462161,
+          "mean": 1.5016249999462161,
+          "min": 1.5016249999462161,
+          "p50": 1.5016249999462161,
+          "p95": 1.5016249999462161,
+          "p99": 1.5016249999462161
+        },
+        "ws_deltas": 3,
+        "ws_message_bytes": {
+          "count": 4,
+          "max": 32926.0,
+          "mean": 17809.75,
+          "min": 161.0,
+          "p50": 19076.0,
+          "p95": 30913.749999999993,
+          "p99": 32523.549999999996
+        },
+        "ws_messages": 4,
+        "ws_snapshots": 1
+      },
+      "daemon": {
+        "data_dir": "/var/folders/c9/18cc_c7d0f532zt5drvlszg40000gn/T/loom-perf-n10-v_hplecf",
+        "pid": 50382,
+        "port": 53852,
+        "stderr": "/var/folders/c9/18cc_c7d0f532zt5drvlszg40000gn/T/loom-perf-n10-v_hplecf/daemon.stderr.log",
+        "stdout": "/var/folders/c9/18cc_c7d0f532zt5drvlszg40000gn/T/loom-perf-n10-v_hplecf/daemon.stdout.log"
+      },
+      "duration_sec": 1.0,
+      "elapsed_sec": 3.2139295830002084,
+      "event_mix": {
+        "activity_change": 0.14,
+        "cost_update": 0.03,
+        "derive": 0.06,
+        "done": 0.05,
+        "heartbeat": 0.26,
+        "progress": 0.24,
+        "session_end": 0.015,
+        "session_start": 0.015,
+        "tool_end": 0.08,
+        "tool_start": 0.08,
+        "waiting": 0.03
+      },
+      "event_rate_per_agent_sec": 1.0,
+      "hot_path": {
+        "event_endpoint_p95_ms": 0.9976562496376573,
+        "event_loop_lag_p95_ms": 2.402349999465514,
+        "event_loss_count": 0.0,
+        "snapshot_max_bytes": 19511.0,
+        "sqlite_write_p95_ms": 0.28778175055776956,
+        "ws_broadcast_p95_ms": 6.811091699819371,
+        "ws_payload_p95_bytes": 31497.5
+      },
+      "n": 10,
+      "py_spy": {
+        "available": false,
+        "format": "speedscope",
+        "output": "tests/perf/artifacts/pyspy-n10.speedscope.json",
+        "status": "missing"
+      },
+      "server": {
+        "counters": {
+          "events_accepted": 26,
+          "events_endpoint_received": 26,
+          "ws_connects": 1
+        },
+        "cprofile_top": [
+          {
+            "calls": 148,
+            "cumulative_sec": 2.778670791,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/base_events.py:1966(_run_once)",
+            "per_call_cumulative_sec": 0.018774802641891894,
+            "per_call_total_sec": 8.971621621621622e-06,
+            "primitive_calls": 148,
+            "total_sec": 0.0013278
+          },
+          {
+            "calls": 148,
+            "cumulative_sec": 2.718661206,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/selectors.py:540(select)",
+            "per_call_cumulative_sec": 0.018369332472972975,
+            "per_call_total_sec": 2.4863783783783787e-06,
+            "primitive_calls": 148,
+            "total_sec": 0.000367984
+          },
+          {
+            "calls": 159,
+            "cumulative_sec": 2.7182549650000003,
+            "function": "~:0(<method 'control' of 'select.kqueue' objects>)",
+            "per_call_cumulative_sec": 0.01709594317610063,
+            "per_call_total_sec": 0.01709594317610063,
+            "primitive_calls": 159,
+            "total_sec": 2.7182549650000003
+          },
+          {
+            "calls": 233,
+            "cumulative_sec": 0.057886412000000005,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/events.py:92(_run)",
+            "per_call_cumulative_sec": 0.00024843953648068674,
+            "per_call_total_sec": 1.0664763948497854e-06,
+            "primitive_calls": 233,
+            "total_sec": 0.000248489
+          },
+          {
+            "calls": 233,
+            "cumulative_sec": 0.057634798,
+            "function": "~:0(<method 'run' of '_contextvars.Context' objects>)",
+            "per_call_cumulative_sec": 0.00024735964806866953,
+            "per_call_total_sec": 1.215519313304721e-06,
+            "primitive_calls": 233,
+            "total_sec": 0.00028321600000000003
+          },
+          {
+            "calls": 39,
+            "cumulative_sec": 0.027450000000000002,
+            "function": "/private/tmp/loom-perf-venv/lib/python3.14/site-packages/aiohttp/web_protocol.py:550(start)",
+            "per_call_cumulative_sec": 0.0007038461538461539,
+            "per_call_total_sec": 1.2149153846153846e-05,
+            "primitive_calls": 39,
+            "total_sec": 0.000473817
+          },
+          {
+            "calls": 379,
+            "cumulative_sec": 0.023799701000000003,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/traceback.py:437(extract)",
+            "per_call_cumulative_sec": 6.279604485488127e-05,
+            "per_call_total_sec": 8.043905013192613e-07,
+            "primitive_calls": 379,
+            "total_sec": 0.000304864
+          },
+          {
+            "calls": 379,
+            "cumulative_sec": 0.023494837,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/traceback.py:459(_extract_from_extended_frame_gen)",
+            "per_call_cumulative_sec": 6.199165435356201e-05,
+            "per_call_total_sec": 1.6599160949868076e-05,
+            "primitive_calls": 379,
+            "total_sec": 0.006291082000000001
+          },
+          {
+            "calls": 29,
+            "cumulative_sec": 0.021559835000000003,
+            "function": "/private/tmp/loom-perf-venv/lib/python3.14/site-packages/aiohttp/web_protocol.py:507(_handle_request)",
+            "per_call_cumulative_sec": 0.0007434425862068967,
+            "per_call_total_sec": 6.495724137931034e-06,
+            "primitive_calls": 29,
+            "total_sec": 0.000188376
+          },
+          {
+            "calls": 29,
+            "cumulative_sec": 0.019724499,
+            "function": "/private/tmp/loom-perf-venv/lib/python3.14/site-packages/aiohttp/web_app.py:527(_handle)",
+            "per_call_cumulative_sec": 0.0006801551379310344,
+            "per_call_total_sec": 8.631758620689656e-06,
+            "primitive_calls": 29,
+            "total_sec": 0.000250321
+          },
+          {
+            "calls": 26,
+            "cumulative_sec": 0.017354752,
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/server.py:9740(handle_events)",
+            "per_call_cumulative_sec": 0.0006674904615384616,
+            "per_call_total_sec": 1.3298076923076924e-05,
+            "primitive_calls": 26,
+            "total_sec": 0.00034575000000000003
+          },
+          {
+            "calls": 26,
+            "cumulative_sec": 0.014883332,
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/events.py:394(emit)",
+            "per_call_cumulative_sec": 0.0005724358461538461,
+            "per_call_total_sec": 7.6875e-06,
+            "primitive_calls": 26,
+            "total_sec": 0.00019987500000000002
+          },
+          {
+            "calls": 221,
+            "cumulative_sec": 0.012722373,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/events.py:41(__init__)",
+            "per_call_cumulative_sec": 5.756729864253394e-05,
+            "per_call_total_sec": 1.3566515837104073e-06,
+            "primitive_calls": 221,
+            "total_sec": 0.00029982
+          },
+          {
+            "calls": 53,
+            "cumulative_sec": 0.012408163000000002,
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/profiling.py:290(_loop_lag_probe)",
+            "per_call_cumulative_sec": 0.00023411628301886795,
+            "per_call_total_sec": 8.131264150943397e-06,
+            "primitive_calls": 53,
+            "total_sec": 0.00043095700000000004
+          },
+          {
+            "calls": 158,
+            "cumulative_sec": 0.012368169,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/traceback.py:251(extract_stack)",
+            "per_call_cumulative_sec": 7.827955063291139e-05,
+            "per_call_total_sec": 1.279208860759494e-06,
+            "primitive_calls": 158,
+            "total_sec": 0.00020211500000000003
+          },
+          {
+            "calls": 221,
+            "cumulative_sec": 0.012297759,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/format_helpers.py:70(extract_stack)",
+            "per_call_cumulative_sec": 5.564596832579186e-05,
+            "per_call_total_sec": 1.8957556561085975e-06,
+            "primitive_calls": 221,
+            "total_sec": 0.00041896200000000005
+          },
+          {
+            "calls": 147,
+            "cumulative_sec": 0.011720795,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/base_events.py:817(call_soon)",
+            "per_call_cumulative_sec": 7.97332993197279e-05,
+            "per_call_total_sec": 1.5622585034013606e-06,
+            "primitive_calls": 147,
+            "total_sec": 0.000229652
+          },
+          {
+            "calls": 106,
+            "cumulative_sec": 0.011328373000000001,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/tasks.py:687(sleep)",
+            "per_call_cumulative_sec": 0.00010687144339622642,
+            "per_call_total_sec": 2.181990566037736e-06,
+            "primitive_calls": 106,
+            "total_sec": 0.000231291
+          },
+          {
+            "calls": 147,
+            "cumulative_sec": 0.009455504,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/base_events.py:846(_call_soon)",
+            "per_call_cumulative_sec": 6.432315646258504e-05,
+            "per_call_total_sec": 1.58365306122449e-06,
+            "primitive_calls": 147,
+            "total_sec": 0.00023279700000000003
+          },
+          {
+            "calls": 94,
+            "cumulative_sec": 0.009211416,
+            "function": "~:0(<method 'set_result' of '_asyncio.Future' objects>)",
+            "per_call_cumulative_sec": 9.799378723404256e-05,
+            "per_call_total_sec": 1.7738936170212767e-06,
+            "primitive_calls": 94,
+            "total_sec": 0.000166746
+          },
+          {
+            "calls": 101,
+            "cumulative_sec": 0.008522411,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/base_events.py:457(create_future)",
+            "per_call_cumulative_sec": 8.438030693069308e-05,
+            "per_call_total_sec": 1.6257227722772277e-06,
+            "primitive_calls": 101,
+            "total_sec": 0.000164198
+          },
+          {
+            "calls": 26,
+            "cumulative_sec": 0.007890081,
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/events.py:440(_apply)",
+            "per_call_cumulative_sec": 0.00030346465384615385,
+            "per_call_total_sec": 5.837730769230769e-06,
+            "primitive_calls": 26,
+            "total_sec": 0.000151781
+          },
+          {
+            "calls": 36,
+            "cumulative_sec": 0.007418210000000001,
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/state.py:1293(_db_save_agent)",
+            "per_call_cumulative_sec": 0.0002060613888888889,
+            "per_call_total_sec": 5.475277777777779e-07,
+            "primitive_calls": 36,
+            "total_sec": 1.9711e-05
+          },
+          {
+            "calls": 36,
+            "cumulative_sec": 0.007398499,
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/db.py:448(save_agent)",
+            "per_call_cumulative_sec": 0.00020551386111111112,
+            "per_call_total_sec": 2.748777777777778e-06,
+            "primitive_calls": 36,
+            "total_sec": 9.8956e-05
+          },
+          {
+            "calls": 63,
+            "cumulative_sec": 0.007269337000000001,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/futures.py:319(_set_result_unless_cancelled)",
+            "per_call_cumulative_sec": 0.0001153863015873016,
+            "per_call_total_sec": 9.947301587301588e-07,
+            "primitive_calls": 63,
+            "total_sec": 6.2668e-05
+          },
+          {
+            "calls": 1916,
+            "cumulative_sec": 0.006873102000000001,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/linecache.py:74(checkcache)",
+            "per_call_cumulative_sec": 3.5872139874739045e-06,
+            "per_call_total_sec": 6.988105427974949e-07,
+            "primitive_calls": 1916,
+            "total_sec": 0.001338921
+          },
+          {
+            "calls": 76,
+            "cumulative_sec": 0.005587039,
+            "function": "~:0(<method 'commit' of 'sqlite3.Connection' objects>)",
+            "per_call_cumulative_sec": 7.351367105263158e-05,
+            "per_call_total_sec": 7.351367105263158e-05,
+            "primitive_calls": 76,
+            "total_sec": 0.005587039
+          },
+          {
+            "calls": 1853,
+            "cumulative_sec": 0.005260239000000001,
+            "function": "~:0(<built-in method posix.stat>)",
+            "per_call_cumulative_sec": 2.838769023205613e-06,
+            "per_call_total_sec": 2.838769023205613e-06,
+            "primitive_calls": 1853,
+            "total_sec": 0.005260239000000001
+          },
+          {
+            "calls": 1843,
+            "cumulative_sec": 0.00497545,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/traceback.py:373(line)",
+            "per_call_cumulative_sec": 2.699647314161693e-06,
+            "per_call_total_sec": 4.960884427563754e-07,
+            "primitive_calls": 1843,
+            "total_sec": 0.000914291
+          },
+          {
+            "calls": 64,
+            "cumulative_sec": 0.004052875,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/base_events.py:799(call_at)",
+            "per_call_cumulative_sec": 6.3326171875e-05,
+            "per_call_total_sec": 2.197765625e-06,
+            "primitive_calls": 64,
+            "total_sec": 0.000140657
+          }
+        ],
+        "enabled": true,
+        "gauges": {
+          "agent_count": 10,
+          "board_task_count": 0,
+          "group_count": 1
+        },
+        "recent_events": [],
+        "samples": {
+          "event_bus_emit_ms": {
+            "count": 26,
+            "max": 1.1383330001990544,
+            "mean": 0.577243577131762,
+            "min": 0.3514160007398459,
+            "p50": 0.4798960003427055,
+            "p95": 0.9155627501513663,
+            "p99": 1.0838540001714136
+          },
+          "event_endpoint_ms": {
+            "count": 26,
+            "max": 1.246292000359972,
+            "mean": 0.6489118844771068,
+            "min": 0.40666699987923494,
+            "p50": 0.5748749999838765,
+            "p95": 0.9976562496376573,
+            "p99": 1.1856565001835406
+          },
+          "event_loop_lag_ms": {
+            "count": 53,
+            "max": 2.4143750006260234,
+            "mean": 1.9094591130199678,
+            "min": 0.38416700044763274,
+            "p50": 2.3343749990090146,
+            "p95": 2.402349999465514,
+            "p99": 2.413400000295951
+          },
+          "snapshot_json_bytes": {
+            "count": 1,
+            "max": 19511.0,
+            "mean": 19511.0,
+            "min": 19511.0,
+            "p50": 19511.0,
+            "p95": 19511.0,
+            "p99": 19511.0
+          },
+          "sqlite_write_ms": {
+            "count": 76,
+            "max": 0.39037500027916394,
+            "mean": 0.13096489467563133,
+            "min": 0.030082999728620052,
+            "p50": 0.1194999999825086,
+            "p95": 0.28778175055776956,
+            "p99": 0.32596874962109723
+          },
+          "sqlite_write_save_agent_ms": {
+            "count": 36,
+            "max": 0.376083999981347,
+            "mean": 0.1802570833559811,
+            "min": 0.09970800056180451,
+            "p50": 0.16697900036888313,
+            "p95": 0.2788125002552988,
+            "p99": 0.34315459997742426
+          },
+          "sqlite_write_save_panel_event_ms": {
+            "count": 20,
+            "max": 0.17395900067640468,
+            "mean": 0.0926751000861259,
+            "min": 0.05275000057736179,
+            "p50": 0.08927099952416029,
+            "p95": 0.1553941000111081,
+            "p99": 0.17024602054334534
+          },
+          "sqlite_write_trim_panel_events_ms": {
+            "count": 20,
+            "max": 0.05512500047188951,
+            "mean": 0.030510499982483452,
+            "min": 0.019708000763785094,
+            "p50": 0.02637550005601952,
+            "p95": 0.04839615035052703,
+            "p99": 0.053779230447617
+          },
+          "ws_broadcast_ms": {
+            "count": 3,
+            "max": 7.521749999796157,
+            "mean": 2.7787083333047726,
+            "min": 0.3992080000898568,
+            "p50": 0.41516700002830476,
+            "p95": 6.811091699819371,
+            "p99": 7.3796183398008
+          },
+          "ws_clients_per_broadcast": {
+            "count": 3,
+            "max": 1.0,
+            "mean": 1.0,
+            "min": 1.0,
+            "p50": 1.0,
+            "p95": 1.0,
+            "p99": 1.0
+          },
+          "ws_connect_latency_ms": {
+            "count": 1,
+            "max": 0.8467500001643202,
+            "mean": 0.8467500001643202,
+            "min": 0.8467500001643202,
+            "p50": 0.8467500001643202,
+            "p95": 0.8467500001643202,
+            "p99": 0.8467500001643202
+          },
+          "ws_delta_ops_count": {
+            "count": 3,
+            "max": 28.0,
+            "mean": 16.0,
+            "min": 1.0,
+            "p50": 19.0,
+            "p95": 27.099999999999998,
+            "p99": 27.819999999999997
+          },
+          "ws_delta_payload_bytes": {
+            "count": 3,
+            "max": 32926.0,
+            "mean": 17242.666666666668,
+            "min": 161.0,
+            "p50": 18641.0,
+            "p95": 31497.5,
+            "p99": 32640.3
+          }
+        },
+        "slow_callbacks": [],
+        "started_at": "2026-04-22T22:32:32.831253+00:00",
+        "uptime_sec": 2.778914213180542
+      },
+      "started_at": "2026-04-22T22:32:32.403453+00:00"
+    },
+    {
+      "acceptance": {
+        "event_endpoint_latency_ms": {
+          "count": 51,
+          "max": 1.0709999996834085,
+          "mean": 0.556120156783008,
+          "min": 0.285125000118569,
+          "p50": 0.5148750005901093,
+          "p95": 0.7514789999731875,
+          "p99": 0.9767084998202336
+        },
+        "event_loop_blocking_ms": {
+          "count": 53,
+          "max": 6.326249999801803,
+          "mean": 2.036031452642522,
+          "min": 0.34537499959697016,
+          "p50": 2.3461660002794815,
+          "p95": 2.4368750004214235,
+          "p99": 4.327521319937647
+        },
+        "event_loss_count": 0,
+        "snapshot_json_size_bytes": {
+          "count": 1,
+          "max": 37091.0,
+          "mean": 37091.0,
+          "min": 37091.0,
+          "p50": 37091.0,
+          "p95": 37091.0,
+          "p99": 37091.0
+        },
+        "sqlite_write_latency_ms": {
+          "count": 155,
+          "max": 0.2720419997785939,
+          "mean": 0.10554541935444801,
+          "min": 0.02725000013015233,
+          "p50": 0.10795799971674569,
+          "p95": 0.23357939971901925,
+          "p99": 0.26172932017288986
+        },
+        "ws_broadcast_latency_ms": {
+          "count": 3,
+          "max": 14.808375000029628,
+          "mean": 5.224889000298087,
+          "min": 0.4146250003032037,
+          "p50": 0.4516670005614287,
+          "p95": 13.372704200082806,
+          "p99": 14.521240840040264
+        },
+        "ws_connect_latency_ms": {
+          "count": 1,
+          "max": 1.3276249992486555,
+          "mean": 1.3276249992486555,
+          "min": 1.3276249992486555,
+          "p50": 1.3276249992486555,
+          "p95": 1.3276249992486555,
+          "p99": 1.3276249992486555
+        },
+        "ws_payload_size_bytes": {
+          "count": 3,
+          "max": 62546.0,
+          "mean": 33970.0,
+          "min": 161.0,
+          "p50": 39203.0,
+          "p95": 60211.7,
+          "p99": 62079.14
+        }
+      },
+      "client": {
+        "event_post_latency_ms": {
+          "count": 51,
+          "max": 31.745249999403313,
+          "mean": 12.800882274467428,
+          "min": 1.1215419999643927,
+          "p50": 11.75941600013175,
+          "p95": 29.533812500176282,
+          "p99": 31.32929149978736
+        },
+        "first_ws_seq": 2,
+        "http_errors": 0,
+        "last_ws_seq": 5,
+        "post_exceptions": 0,
+        "sent_events": 51,
+        "ws_connect_latency_ms": {
+          "count": 1,
+          "max": 1.5074580005602911,
+          "mean": 1.5074580005602911,
+          "min": 1.5074580005602911,
+          "p50": 1.5074580005602911,
+          "p95": 1.5074580005602911,
+          "p99": 1.5074580005602911
+        },
+        "ws_deltas": 3,
+        "ws_message_bytes": {
+          "count": 4,
+          "max": 62546.0,
+          "mean": 34750.25,
+          "min": 161.0,
+          "p50": 38147.0,
+          "p95": 59044.54999999999,
+          "p99": 61845.71
+        },
+        "ws_messages": 4,
+        "ws_snapshots": 1
+      },
+      "daemon": {
+        "data_dir": "/var/folders/c9/18cc_c7d0f532zt5drvlszg40000gn/T/loom-perf-n20-faqqzwrg",
+        "pid": 50472,
+        "port": 53875,
+        "stderr": "/var/folders/c9/18cc_c7d0f532zt5drvlszg40000gn/T/loom-perf-n20-faqqzwrg/daemon.stderr.log",
+        "stdout": "/var/folders/c9/18cc_c7d0f532zt5drvlszg40000gn/T/loom-perf-n20-faqqzwrg/daemon.stdout.log"
+      },
+      "duration_sec": 1.0,
+      "elapsed_sec": 3.2217617500000415,
+      "event_mix": {
+        "activity_change": 0.14,
+        "cost_update": 0.03,
+        "derive": 0.06,
+        "done": 0.05,
+        "heartbeat": 0.26,
+        "progress": 0.24,
+        "session_end": 0.015,
+        "session_start": 0.015,
+        "tool_end": 0.08,
+        "tool_start": 0.08,
+        "waiting": 0.03
+      },
+      "event_rate_per_agent_sec": 1.0,
+      "hot_path": {
+        "event_endpoint_p95_ms": 0.7514789999731875,
+        "event_loop_lag_p95_ms": 2.4368750004214235,
+        "event_loss_count": 0.0,
+        "snapshot_max_bytes": 37091.0,
+        "sqlite_write_p95_ms": 0.23357939971901925,
+        "ws_broadcast_p95_ms": 13.372704200082806,
+        "ws_payload_p95_bytes": 60211.7
+      },
+      "n": 20,
+      "py_spy": {
+        "available": false,
+        "format": "speedscope",
+        "output": "tests/perf/artifacts/pyspy-n20.speedscope.json",
+        "status": "missing"
+      },
+      "server": {
+        "counters": {
+          "events_accepted": 51,
+          "events_endpoint_received": 51,
+          "ws_connects": 1
+        },
+        "cprofile_top": [
+          {
+            "calls": 154,
+            "cumulative_sec": 2.7798668650000002,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/base_events.py:1966(_run_once)",
+            "per_call_cumulative_sec": 0.01805108353896104,
+            "per_call_total_sec": 9.43896103896104e-06,
+            "primitive_calls": 154,
+            "total_sec": 0.0014536
+          },
+          {
+            "calls": 154,
+            "cumulative_sec": 2.693141703,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/selectors.py:540(select)",
+            "per_call_cumulative_sec": 0.017487933136363636,
+            "per_call_total_sec": 2.5516558441558443e-06,
+            "primitive_calls": 154,
+            "total_sec": 0.000392955
+          },
+          {
+            "calls": 175,
+            "cumulative_sec": 2.692709996,
+            "function": "~:0(<method 'control' of 'select.kqueue' objects>)",
+            "per_call_cumulative_sec": 0.015386914262857144,
+            "per_call_total_sec": 0.015386914262857144,
+            "primitive_calls": 175,
+            "total_sec": 2.692709996
+          },
+          {
+            "calls": 333,
+            "cumulative_sec": 0.08435967300000001,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/events.py:92(_run)",
+            "per_call_cumulative_sec": 0.0002533323513513514,
+            "per_call_total_sec": 8.400060060060062e-07,
+            "primitive_calls": 333,
+            "total_sec": 0.00027972200000000004
+          },
+          {
+            "calls": 333,
+            "cumulative_sec": 0.084076909,
+            "function": "~:0(<method 'run' of '_contextvars.Context' objects>)",
+            "per_call_cumulative_sec": 0.0002524832102102102,
+            "per_call_total_sec": 1.003957957957958e-06,
+            "primitive_calls": 333,
+            "total_sec": 0.000334318
+          },
+          {
+            "calls": 74,
+            "cumulative_sec": 0.046522996000000004,
+            "function": "/private/tmp/loom-perf-venv/lib/python3.14/site-packages/aiohttp/web_protocol.py:550(start)",
+            "per_call_cumulative_sec": 0.0006286891351351352,
+            "per_call_total_sec": 1.0036905405405406e-05,
+            "primitive_calls": 74,
+            "total_sec": 0.0007427310000000001
+          },
+          {
+            "calls": 54,
+            "cumulative_sec": 0.035695086,
+            "function": "/private/tmp/loom-perf-venv/lib/python3.14/site-packages/aiohttp/web_protocol.py:507(_handle_request)",
+            "per_call_cumulative_sec": 0.0006610201111111111,
+            "per_call_total_sec": 5.646629629629629e-06,
+            "primitive_calls": 54,
+            "total_sec": 0.000304918
+          },
+          {
+            "calls": 564,
+            "cumulative_sec": 0.033061995000000004,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/traceback.py:437(extract)",
+            "per_call_cumulative_sec": 5.86205585106383e-05,
+            "per_call_total_sec": 7.044804964539007e-07,
+            "primitive_calls": 564,
+            "total_sec": 0.000397327
+          },
+          {
+            "calls": 564,
+            "cumulative_sec": 0.032664668,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/traceback.py:459(_extract_from_extended_frame_gen)",
+            "per_call_cumulative_sec": 5.79160780141844e-05,
+            "per_call_total_sec": 1.5534656028368795e-05,
+            "primitive_calls": 564,
+            "total_sec": 0.008761546
+          },
+          {
+            "calls": 54,
+            "cumulative_sec": 0.032578833,
+            "function": "/private/tmp/loom-perf-venv/lib/python3.14/site-packages/aiohttp/web_app.py:527(_handle)",
+            "per_call_cumulative_sec": 0.0006033117222222223,
+            "per_call_total_sec": 8.134185185185185e-06,
+            "primitive_calls": 54,
+            "total_sec": 0.000439246
+          },
+          {
+            "calls": 51,
+            "cumulative_sec": 0.029180622000000003,
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/server.py:9740(handle_events)",
+            "per_call_cumulative_sec": 0.0005721690588235295,
+            "per_call_total_sec": 1.136480392156863e-05,
+            "primitive_calls": 51,
+            "total_sec": 0.0005796050000000001
+          },
+          {
+            "calls": 51,
+            "cumulative_sec": 0.024913085,
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/events.py:394(emit)",
+            "per_call_cumulative_sec": 0.0004884918627450981,
+            "per_call_total_sec": 6.304803921568628e-06,
+            "primitive_calls": 51,
+            "total_sec": 0.000321545
+          },
+          {
+            "calls": 248,
+            "cumulative_sec": 0.018366879000000003,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/traceback.py:251(extract_stack)",
+            "per_call_cumulative_sec": 7.405999596774194e-05,
+            "per_call_total_sec": 1.1325483870967744e-06,
+            "primitive_calls": 248,
+            "total_sec": 0.00028087200000000004
+          },
+          {
+            "calls": 316,
+            "cumulative_sec": 0.016330659,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/events.py:41(__init__)",
+            "per_call_cumulative_sec": 5.167930063291139e-05,
+            "per_call_total_sec": 1.2004113924050634e-06,
+            "primitive_calls": 316,
+            "total_sec": 0.00037933000000000004
+          },
+          {
+            "calls": 316,
+            "cumulative_sec": 0.015802849,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/format_helpers.py:70(extract_stack)",
+            "per_call_cumulative_sec": 5.000901582278481e-05,
+            "per_call_total_sec": 1.5638164556962025e-06,
+            "primitive_calls": 316,
+            "total_sec": 0.000494166
+          },
+          {
+            "calls": 222,
+            "cumulative_sec": 0.015408000000000002,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/base_events.py:817(call_soon)",
+            "per_call_cumulative_sec": 6.940540540540542e-05,
+            "per_call_total_sec": 1.3400450450450451e-06,
+            "primitive_calls": 222,
+            "total_sec": 0.00029749
+          },
+          {
+            "calls": 51,
+            "cumulative_sec": 0.013352206,
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/events.py:440(_apply)",
+            "per_call_cumulative_sec": 0.00026180796078431373,
+            "per_call_total_sec": 4.658509803921569e-06,
+            "primitive_calls": 51,
+            "total_sec": 0.00023758400000000002
+          },
+          {
+            "calls": 222,
+            "cumulative_sec": 0.012408336,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/base_events.py:846(_call_soon)",
+            "per_call_cumulative_sec": 5.589340540540541e-05,
+            "per_call_total_sec": 1.3474954954954955e-06,
+            "primitive_calls": 222,
+            "total_sec": 0.000299144
+          },
+          {
+            "calls": 53,
+            "cumulative_sec": 0.012356292000000001,
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/profiling.py:290(_loop_lag_probe)",
+            "per_call_cumulative_sec": 0.0002331375849056604,
+            "per_call_total_sec": 7.837396226415095e-06,
+            "primitive_calls": 53,
+            "total_sec": 0.000415382
+          },
+          {
+            "calls": 71,
+            "cumulative_sec": 0.011766382,
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/state.py:1293(_db_save_agent)",
+            "per_call_cumulative_sec": 0.00016572369014084508,
+            "per_call_total_sec": 4.0377464788732397e-07,
+            "primitive_calls": 71,
+            "total_sec": 2.8668e-05
+          },
+          {
+            "calls": 71,
+            "cumulative_sec": 0.011737714000000002,
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/db.py:448(save_agent)",
+            "per_call_cumulative_sec": 0.00016531991549295776,
+            "per_call_total_sec": 2.271830985915493e-06,
+            "primitive_calls": 71,
+            "total_sec": 0.00016130000000000002
+          },
+          {
+            "calls": 146,
+            "cumulative_sec": 0.011694831000000001,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/base_events.py:457(create_future)",
+            "per_call_cumulative_sec": 8.010158219178083e-05,
+            "per_call_total_sec": 1.3381643835616439e-06,
+            "primitive_calls": 146,
+            "total_sec": 0.000195372
+          },
+          {
+            "calls": 106,
+            "cumulative_sec": 0.011294041000000001,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/tasks.py:687(sleep)",
+            "per_call_cumulative_sec": 0.00010654755660377359,
+            "per_call_total_sec": 2.237415094339623e-06,
+            "primitive_calls": 106,
+            "total_sec": 0.00023716600000000003
+          },
+          {
+            "calls": 129,
+            "cumulative_sec": 0.011019372000000001,
+            "function": "~:0(<method 'set_result' of '_asyncio.Future' objects>)",
+            "per_call_cumulative_sec": 8.542148837209303e-05,
+            "per_call_total_sec": 1.4938604651162793e-06,
+            "primitive_calls": 129,
+            "total_sec": 0.000192708
+          },
+          {
+            "calls": 2801,
+            "cumulative_sec": 0.008936026,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/linecache.py:74(checkcache)",
+            "per_call_cumulative_sec": 3.190298464833988e-06,
+            "per_call_total_sec": 6.695312388432702e-07,
+            "primitive_calls": 2801,
+            "total_sec": 0.001875357
+          },
+          {
+            "calls": 155,
+            "cumulative_sec": 0.008396458,
+            "function": "~:0(<method 'commit' of 'sqlite3.Connection' objects>)",
+            "per_call_cumulative_sec": 5.417069677419355e-05,
+            "per_call_total_sec": 5.417069677419355e-05,
+            "primitive_calls": 155,
+            "total_sec": 0.008396458
+          },
+          {
+            "calls": 73,
+            "cumulative_sec": 0.007656419,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/futures.py:319(_set_result_unless_cancelled)",
+            "per_call_cumulative_sec": 0.00010488245205479452,
+            "per_call_total_sec": 1.1473561643835618e-06,
+            "primitive_calls": 73,
+            "total_sec": 8.3757e-05
+          },
+          {
+            "calls": 2718,
+            "cumulative_sec": 0.007146437,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/traceback.py:373(line)",
+            "per_call_cumulative_sec": 2.6292998528329657e-06,
+            "per_call_total_sec": 4.854882266372333e-07,
+            "primitive_calls": 2718,
+            "total_sec": 0.001319557
+          },
+          {
+            "calls": 42,
+            "cumulative_sec": 0.006806122,
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/events.py:205(append)",
+            "per_call_cumulative_sec": 0.00016205052380952381,
+            "per_call_total_sec": 2.089166666666667e-06,
+            "primitive_calls": 42,
+            "total_sec": 8.774500000000001e-05
+          },
+          {
+            "calls": 2728,
+            "cumulative_sec": 0.006652497,
+            "function": "~:0(<built-in method posix.stat>)",
+            "per_call_cumulative_sec": 2.4385986070381232e-06,
+            "per_call_total_sec": 2.4385986070381232e-06,
+            "primitive_calls": 2728,
+            "total_sec": 0.006652497
+          }
+        ],
+        "enabled": true,
+        "gauges": {
+          "agent_count": 20,
+          "board_task_count": 0,
+          "group_count": 1
+        },
+        "recent_events": [],
+        "samples": {
+          "event_bus_emit_ms": {
+            "count": 51,
+            "max": 0.9656249994804966,
+            "mean": 0.4928669019386243,
+            "min": 0.23104200045054313,
+            "p50": 0.4510000007940107,
+            "p95": 0.691437499881431,
+            "p99": 0.8825209997667116
+          },
+          "event_endpoint_ms": {
+            "count": 51,
+            "max": 1.0709999996834085,
+            "mean": 0.556120156783008,
+            "min": 0.285125000118569,
+            "p50": 0.5148750005901093,
+            "p95": 0.7514789999731875,
+            "p99": 0.9767084998202336
+          },
+          "event_loop_lag_ms": {
+            "count": 53,
+            "max": 6.326249999801803,
+            "mean": 2.036031452642522,
+            "min": 0.34537499959697016,
+            "p50": 2.3461660002794815,
+            "p95": 2.4368750004214235,
+            "p99": 4.327521319937647
+          },
+          "snapshot_json_bytes": {
+            "count": 1,
+            "max": 37091.0,
+            "mean": 37091.0,
+            "min": 37091.0,
+            "p50": 37091.0,
+            "p95": 37091.0,
+            "p99": 37091.0
+          },
+          "sqlite_write_ms": {
+            "count": 155,
+            "max": 0.2720419997785939,
+            "mean": 0.10554541935444801,
+            "min": 0.02725000013015233,
+            "p50": 0.10795799971674569,
+            "p95": 0.23357939971901925,
+            "p99": 0.26172932017288986
+          },
+          "sqlite_write_save_agent_ms": {
+            "count": 71,
+            "max": 0.2515420001145685,
+            "mean": 0.1425241690528092,
+            "min": 0.09612500070943497,
+            "p50": 0.1327499994658865,
+            "p95": 0.23447900002793176,
+            "p99": 0.25046260007002275
+          },
+          "sqlite_write_save_panel_event_ms": {
+            "count": 42,
+            "max": 0.13587499961431604,
+            "mean": 0.07890976186380223,
+            "min": 0.04387500030134106,
+            "p50": 0.08625000009487849,
+            "p95": 0.12014794983770113,
+            "p99": 0.1308352799605927
+          },
+          "sqlite_write_trim_panel_events_ms": {
+            "count": 42,
+            "max": 0.053499999921768904,
+            "mean": 0.025981095145003304,
+            "min": 0.017458000002079643,
+            "p50": 0.021999999717081664,
+            "p95": 0.05032499984736204,
+            "p99": 0.0523212498956127
+          },
+          "ws_broadcast_ms": {
+            "count": 3,
+            "max": 14.808375000029628,
+            "mean": 5.224889000298087,
+            "min": 0.4146250003032037,
+            "p50": 0.4516670005614287,
+            "p95": 13.372704200082806,
+            "p99": 14.521240840040264
+          },
+          "ws_clients_per_broadcast": {
+            "count": 3,
+            "max": 1.0,
+            "mean": 1.0,
+            "min": 1.0,
+            "p50": 1.0,
+            "p95": 1.0,
+            "p99": 1.0
+          },
+          "ws_connect_latency_ms": {
+            "count": 1,
+            "max": 1.3276249992486555,
+            "mean": 1.3276249992486555,
+            "min": 1.3276249992486555,
+            "p50": 1.3276249992486555,
+            "p95": 1.3276249992486555,
+            "p99": 1.3276249992486555
+          },
+          "ws_delta_ops_count": {
+            "count": 3,
+            "max": 55.0,
+            "mean": 31.666666666666668,
+            "min": 1.0,
+            "p50": 39.0,
+            "p95": 53.4,
+            "p99": 54.68
+          },
+          "ws_delta_payload_bytes": {
+            "count": 3,
+            "max": 62546.0,
+            "mean": 33970.0,
+            "min": 161.0,
+            "p50": 39203.0,
+            "p95": 60211.7,
+            "p99": 62079.14
+          }
+        },
+        "slow_callbacks": [],
+        "started_at": "2026-04-22T22:32:36.054849+00:00",
+        "uptime_sec": 2.7801029682159424
+      },
+      "started_at": "2026-04-22T22:32:35.619843+00:00"
+    },
+    {
+      "acceptance": {
+        "event_endpoint_latency_ms": {
+          "count": 83,
+          "max": 1.103708000300685,
+          "mean": 0.5656566627075368,
+          "min": 0.2932919996965211,
+          "p50": 0.5307080000420683,
+          "p95": 0.8461708002869268,
+          "p99": 1.0366729999805095
+        },
+        "event_loop_blocking_ms": {
+          "count": 53,
+          "max": 22.640750000391563,
+          "mean": 2.4961643205831523,
+          "min": 0.6513329990411876,
+          "p50": 2.349708000110695,
+          "p95": 2.4192999999286258,
+          "p99": 12.131181840195431
+        },
+        "event_loss_count": 0,
+        "snapshot_json_size_bytes": {
+          "count": 1,
+          "max": 54671.0,
+          "mean": 54671.0,
+          "min": 54671.0,
+          "p50": 54671.0,
+          "p95": 54671.0,
+          "p99": 54671.0
+        },
+        "sqlite_write_latency_ms": {
+          "count": 242,
+          "max": 0.5664580003212905,
+          "mean": 0.1127355455108887,
+          "min": 0.027583000701270066,
+          "p50": 0.1114999995479593,
+          "p95": 0.24120179937199282,
+          "p99": 0.2819989700765291
+        },
+        "ws_broadcast_latency_ms": {
+          "count": 2,
+          "max": 0.5182080003578449,
+          "mean": 0.4676245002883661,
+          "min": 0.41704100021888735,
+          "p50": 0.4676245002883661,
+          "p95": 0.513149650350897,
+          "p99": 0.5171963303564553
+        },
+        "ws_connect_latency_ms": {
+          "count": 1,
+          "max": 1.8295829995622626,
+          "mean": 1.8295829995622626,
+          "min": 1.8295829995622626,
+          "p50": 1.8295829995622626,
+          "p95": 1.8295829995622626,
+          "p99": 1.8295829995622626
+        },
+        "ws_payload_size_bytes": {
+          "count": 2,
+          "max": 164368.0,
+          "mean": 82264.5,
+          "min": 161.0,
+          "p50": 82264.5,
+          "p95": 156157.65,
+          "p99": 162725.93
+        }
+      },
+      "client": {
+        "event_post_latency_ms": {
+          "count": 83,
+          "max": 47.42716700002347,
+          "mean": 17.27197942170048,
+          "min": 1.050792000569345,
+          "p50": 14.39833299991733,
+          "p95": 43.829087499671,
+          "p99": 46.740929499646874
+        },
+        "first_ws_seq": 2,
+        "http_errors": 0,
+        "last_ws_seq": 4,
+        "post_exceptions": 0,
+        "sent_events": 83,
+        "ws_connect_latency_ms": {
+          "count": 1,
+          "max": 1.4456669996434357,
+          "mean": 1.4456669996434357,
+          "min": 1.4456669996434357,
+          "p50": 1.4456669996434357,
+          "p95": 1.4456669996434357,
+          "p99": 1.4456669996434357
+        },
+        "ws_deltas": 2,
+        "ws_message_bytes": {
+          "count": 3,
+          "max": 164368.0,
+          "mean": 73066.66666666667,
+          "min": 161.0,
+          "p50": 54671.0,
+          "p95": 153398.3,
+          "p99": 162174.06
+        },
+        "ws_messages": 3,
+        "ws_snapshots": 1
+      },
+      "daemon": {
+        "data_dir": "/var/folders/c9/18cc_c7d0f532zt5drvlszg40000gn/T/loom-perf-n30-hj0nzzdl",
+        "pid": 50490,
+        "port": 53908,
+        "stderr": "/var/folders/c9/18cc_c7d0f532zt5drvlszg40000gn/T/loom-perf-n30-hj0nzzdl/daemon.stderr.log",
+        "stdout": "/var/folders/c9/18cc_c7d0f532zt5drvlszg40000gn/T/loom-perf-n30-hj0nzzdl/daemon.stdout.log"
+      },
+      "duration_sec": 1.0,
+      "elapsed_sec": 3.237864165999781,
+      "event_mix": {
+        "activity_change": 0.14,
+        "cost_update": 0.03,
+        "derive": 0.06,
+        "done": 0.05,
+        "heartbeat": 0.26,
+        "progress": 0.24,
+        "session_end": 0.015,
+        "session_start": 0.015,
+        "tool_end": 0.08,
+        "tool_start": 0.08,
+        "waiting": 0.03
+      },
+      "event_rate_per_agent_sec": 1.0,
+      "hot_path": {
+        "event_endpoint_p95_ms": 0.8461708002869268,
+        "event_loop_lag_p95_ms": 2.4192999999286258,
+        "event_loss_count": 0.0,
+        "snapshot_max_bytes": 54671.0,
+        "sqlite_write_p95_ms": 0.24120179937199282,
+        "ws_broadcast_p95_ms": 0.513149650350897,
+        "ws_payload_p95_bytes": 156157.65
+      },
+      "n": 30,
+      "py_spy": {
+        "available": false,
+        "format": "speedscope",
+        "output": "tests/perf/artifacts/pyspy-n30.speedscope.json",
+        "status": "missing"
+      },
+      "server": {
+        "counters": {
+          "events_accepted": 83,
+          "events_endpoint_received": 83,
+          "ws_connects": 1
+        },
+        "cprofile_top": [
+          {
+            "calls": 177,
+            "cumulative_sec": 2.7901056730000002,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/base_events.py:1966(_run_once)",
+            "per_call_cumulative_sec": 0.01576330888700565,
+            "per_call_total_sec": 9.551525423728815e-06,
+            "primitive_calls": 177,
+            "total_sec": 0.00169062
+          },
+          {
+            "calls": 177,
+            "cumulative_sec": 2.666262825,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/selectors.py:540(select)",
+            "per_call_cumulative_sec": 0.015063631779661017,
+            "per_call_total_sec": 2.834734463276836e-06,
+            "primitive_calls": 177,
+            "total_sec": 0.000501748
+          },
+          {
+            "calls": 208,
+            "cumulative_sec": 2.665719373,
+            "function": "~:0(<method 'control' of 'select.kqueue' objects>)",
+            "per_call_cumulative_sec": 0.01281595852403846,
+            "per_call_total_sec": 0.01281595852403846,
+            "primitive_calls": 208,
+            "total_sec": 2.665719373
+          },
+          {
+            "calls": 444,
+            "cumulative_sec": 0.12111996300000001,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/events.py:92(_run)",
+            "per_call_cumulative_sec": 0.0002727927094594595,
+            "per_call_total_sec": 7.287905405405405e-07,
+            "primitive_calls": 444,
+            "total_sec": 0.000323583
+          },
+          {
+            "calls": 444,
+            "cumulative_sec": 0.12079383900000001,
+            "function": "~:0(<method 'run' of '_contextvars.Context' objects>)",
+            "per_call_cumulative_sec": 0.000272058195945946,
+            "per_call_total_sec": 8.129504504504505e-07,
+            "primitive_calls": 444,
+            "total_sec": 0.00036095
+          },
+          {
+            "calls": 116,
+            "cumulative_sec": 0.075722042,
+            "function": "/private/tmp/loom-perf-venv/lib/python3.14/site-packages/aiohttp/web_protocol.py:550(start)",
+            "per_call_cumulative_sec": 0.0006527762241379311,
+            "per_call_total_sec": 1.050596551724138e-05,
+            "primitive_calls": 116,
+            "total_sec": 0.0012186920000000002
+          },
+          {
+            "calls": 86,
+            "cumulative_sec": 0.05818262800000001,
+            "function": "/private/tmp/loom-perf-venv/lib/python3.14/site-packages/aiohttp/web_protocol.py:507(_handle_request)",
+            "per_call_cumulative_sec": 0.0006765421860465117,
+            "per_call_total_sec": 5.859953488372094e-06,
+            "primitive_calls": 86,
+            "total_sec": 0.0005039560000000001
+          },
+          {
+            "calls": 86,
+            "cumulative_sec": 0.052995459,
+            "function": "/private/tmp/loom-perf-venv/lib/python3.14/site-packages/aiohttp/web_app.py:527(_handle)",
+            "per_call_cumulative_sec": 0.0006162262674418605,
+            "per_call_total_sec": 8.043023255813954e-06,
+            "primitive_calls": 86,
+            "total_sec": 0.0006917000000000001
+          },
+          {
+            "calls": 83,
+            "cumulative_sec": 0.048315165,
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/server.py:9740(handle_events)",
+            "per_call_cumulative_sec": 0.000582110421686747,
+            "per_call_total_sec": 1.1737662650602409e-05,
+            "primitive_calls": 83,
+            "total_sec": 0.000974226
+          },
+          {
+            "calls": 765,
+            "cumulative_sec": 0.043936152000000006,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/traceback.py:437(extract)",
+            "per_call_cumulative_sec": 5.743287843137256e-05,
+            "per_call_total_sec": 6.461934640522875e-07,
+            "primitive_calls": 765,
+            "total_sec": 0.000494338
+          },
+          {
+            "calls": 765,
+            "cumulative_sec": 0.043441814,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/traceback.py:459(_extract_from_extended_frame_gen)",
+            "per_call_cumulative_sec": 5.6786684967320265e-05,
+            "per_call_total_sec": 1.5156707189542485e-05,
+            "primitive_calls": 765,
+            "total_sec": 0.011594881000000001
+          },
+          {
+            "calls": 83,
+            "cumulative_sec": 0.041210538000000005,
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/events.py:394(emit)",
+            "per_call_cumulative_sec": 0.0004965125060240965,
+            "per_call_total_sec": 6.1389759036144576e-06,
+            "primitive_calls": 83,
+            "total_sec": 0.000509535
+          },
+          {
+            "calls": 350,
+            "cumulative_sec": 0.025395554,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/traceback.py:251(extract_stack)",
+            "per_call_cumulative_sec": 7.255872571428572e-05,
+            "per_call_total_sec": 1.1202685714285715e-06,
+            "primitive_calls": 350,
+            "total_sec": 0.000392094
+          },
+          {
+            "calls": 83,
+            "cumulative_sec": 0.020967583,
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/events.py:440(_apply)",
+            "per_call_cumulative_sec": 0.00025262148192771087,
+            "per_call_total_sec": 4.600566265060241e-06,
+            "primitive_calls": 83,
+            "total_sec": 0.00038184700000000005
+          },
+          {
+            "calls": 415,
+            "cumulative_sec": 0.020640329000000002,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/events.py:41(__init__)",
+            "per_call_cumulative_sec": 4.973573253012049e-05,
+            "per_call_total_sec": 1.142722891566265e-06,
+            "primitive_calls": 415,
+            "total_sec": 0.00047423
+          },
+          {
+            "calls": 114,
+            "cumulative_sec": 0.02012933,
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/state.py:1293(_db_save_agent)",
+            "per_call_cumulative_sec": 0.0001765730701754386,
+            "per_call_total_sec": 4.356052631578947e-07,
+            "primitive_calls": 114,
+            "total_sec": 4.9659e-05
+          },
+          {
+            "calls": 114,
+            "cumulative_sec": 0.020079671,
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/db.py:448(save_agent)",
+            "per_call_cumulative_sec": 0.0001761374649122807,
+            "per_call_total_sec": 2.3635877192982455e-06,
+            "primitive_calls": 114,
+            "total_sec": 0.000269449
+          },
+          {
+            "calls": 415,
+            "cumulative_sec": 0.019984553000000002,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/format_helpers.py:70(extract_stack)",
+            "per_call_cumulative_sec": 4.8155549397590365e-05,
+            "per_call_total_sec": 1.4508843373493975e-06,
+            "primitive_calls": 415,
+            "total_sec": 0.000602117
+          },
+          {
+            "calls": 301,
+            "cumulative_sec": 0.019447081,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/base_events.py:817(call_soon)",
+            "per_call_cumulative_sec": 6.460824252491695e-05,
+            "per_call_total_sec": 1.2620697674418605e-06,
+            "primitive_calls": 301,
+            "total_sec": 0.000379883
+          },
+          {
+            "calls": 301,
+            "cumulative_sec": 0.01569788,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/base_events.py:846(_call_soon)",
+            "per_call_cumulative_sec": 5.215242524916944e-05,
+            "per_call_total_sec": 1.1270498338870432e-06,
+            "primitive_calls": 301,
+            "total_sec": 0.000339242
+          },
+          {
+            "calls": 198,
+            "cumulative_sec": 0.015506958000000001,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/base_events.py:457(create_future)",
+            "per_call_cumulative_sec": 7.83179696969697e-05,
+            "per_call_total_sec": 1.2047020202020203e-06,
+            "primitive_calls": 198,
+            "total_sec": 0.00023853100000000002
+          },
+          {
+            "calls": 242,
+            "cumulative_sec": 0.014532052,
+            "function": "~:0(<method 'commit' of 'sqlite3.Connection' objects>)",
+            "per_call_cumulative_sec": 6.004980165289256e-05,
+            "per_call_total_sec": 6.004980165289256e-05,
+            "primitive_calls": 242,
+            "total_sec": 0.014532052
+          },
+          {
+            "calls": 170,
+            "cumulative_sec": 0.013490422,
+            "function": "~:0(<method 'set_result' of '_asyncio.Future' objects>)",
+            "per_call_cumulative_sec": 7.935542352941177e-05,
+            "per_call_total_sec": 1.2735588235294117e-06,
+            "primitive_calls": 170,
+            "total_sec": 0.000216505
+          },
+          {
+            "calls": 53,
+            "cumulative_sec": 0.012438082000000001,
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/profiling.py:290(_loop_lag_probe)",
+            "per_call_cumulative_sec": 0.0002346807924528302,
+            "per_call_total_sec": 8.034622641509435e-06,
+            "primitive_calls": 53,
+            "total_sec": 0.000425835
+          },
+          {
+            "calls": 3766,
+            "cumulative_sec": 0.011607606000000001,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/linecache.py:74(checkcache)",
+            "per_call_cumulative_sec": 3.08221083377589e-06,
+            "per_call_total_sec": 6.503539564524695e-07,
+            "primitive_calls": 3766,
+            "total_sec": 0.0024492330000000003
+          },
+          {
+            "calls": 106,
+            "cumulative_sec": 0.011396211000000002,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/tasks.py:687(sleep)",
+            "per_call_cumulative_sec": 0.0001075114245283019,
+            "per_call_total_sec": 2.130547169811321e-06,
+            "primitive_calls": 106,
+            "total_sec": 0.00022583800000000002
+          },
+          {
+            "calls": 64,
+            "cumulative_sec": 0.010574461,
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/events.py:205(append)",
+            "per_call_cumulative_sec": 0.000165225953125,
+            "per_call_total_sec": 2.0344531250000003e-06,
+            "primitive_calls": 64,
+            "total_sec": 0.00013020500000000002
+          },
+          {
+            "calls": 3701,
+            "cumulative_sec": 0.009736998,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/traceback.py:373(line)",
+            "per_call_cumulative_sec": 2.630910024317752e-06,
+            "per_call_total_sec": 4.806644150229669e-07,
+            "primitive_calls": 3701,
+            "total_sec": 0.0017789390000000002
+          },
+          {
+            "calls": 3683,
+            "cumulative_sec": 0.008634579,
+            "function": "~:0(<built-in method posix.stat>)",
+            "per_call_cumulative_sec": 2.344441759435243e-06,
+            "per_call_total_sec": 2.344441759435243e-06,
+            "primitive_calls": 3683,
+            "total_sec": 0.008634579
+          },
+          {
+            "calls": 228,
+            "cumulative_sec": 0.008513751,
+            "function": "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/dataclasses.py:1475(asdict)",
+            "per_call_cumulative_sec": 3.734101315789474e-05,
+            "per_call_total_sec": 4.996929824561404e-07,
+            "primitive_calls": 228,
+            "total_sec": 0.00011393
+          }
+        ],
+        "enabled": true,
+        "gauges": {
+          "agent_count": 30,
+          "board_task_count": 0,
+          "group_count": 1
+        },
+        "recent_events": [],
+        "samples": {
+          "event_bus_emit_ms": {
+            "count": 83,
+            "max": 0.9939579995261738,
+            "mean": 0.500959879517098,
+            "min": 0.23729100030323025,
+            "p50": 0.45508399944083067,
+            "p95": 0.7922335999865021,
+            "p99": 0.9172199400200036
+          },
+          "event_endpoint_ms": {
+            "count": 83,
+            "max": 1.103708000300685,
+            "mean": 0.5656566627075368,
+            "min": 0.2932919996965211,
+            "p50": 0.5307080000420683,
+            "p95": 0.8461708002869268,
+            "p99": 1.0366729999805095
+          },
+          "event_loop_lag_ms": {
+            "count": 53,
+            "max": 22.640750000391563,
+            "mean": 2.4961643205831523,
+            "min": 0.6513329990411876,
+            "p50": 2.349708000110695,
+            "p95": 2.4192999999286258,
+            "p99": 12.131181840195431
+          },
+          "snapshot_json_bytes": {
+            "count": 1,
+            "max": 54671.0,
+            "mean": 54671.0,
+            "min": 54671.0,
+            "p50": 54671.0,
+            "p95": 54671.0,
+            "p99": 54671.0
+          },
+          "sqlite_write_ms": {
+            "count": 242,
+            "max": 0.5664580003212905,
+            "mean": 0.1127355455108887,
+            "min": 0.027583000701270066,
+            "p50": 0.1114999995479593,
+            "p95": 0.24120179937199282,
+            "p99": 0.2819989700765291
+          },
+          "sqlite_write_save_agent_ms": {
+            "count": 114,
+            "max": 0.5544159994315123,
+            "mean": 0.15249565787375455,
+            "min": 0.09279200003220467,
+            "p50": 0.13772949932899792,
+            "p95": 0.24441874993499368,
+            "p99": 0.26935620940093946
+          },
+          "sqlite_write_save_panel_event_ms": {
+            "count": 64,
+            "max": 0.16033300016715657,
+            "mean": 0.08248181252668019,
+            "min": 0.039000000469968654,
+            "p50": 0.08643750015835394,
+            "p95": 0.13343565055947687,
+            "p99": 0.15668467007344586
+          },
+          "sqlite_write_trim_panel_events_ms": {
+            "count": 64,
+            "max": 0.06062500051484676,
+            "mean": 0.02643103123034507,
+            "min": 0.017875000594358426,
+            "p50": 0.022291500044957502,
+            "p95": 0.05108125014885443,
+            "p99": 0.05842000034135707
+          },
+          "ws_broadcast_ms": {
+            "count": 2,
+            "max": 0.5182080003578449,
+            "mean": 0.4676245002883661,
+            "min": 0.41704100021888735,
+            "p50": 0.4676245002883661,
+            "p95": 0.513149650350897,
+            "p99": 0.5171963303564553
+          },
+          "ws_clients_per_broadcast": {
+            "count": 2,
+            "max": 1.0,
+            "mean": 1.0,
+            "min": 1.0,
+            "p50": 1.0,
+            "p95": 1.0,
+            "p99": 1.0
+          },
+          "ws_connect_latency_ms": {
+            "count": 1,
+            "max": 1.8295829995622626,
+            "mean": 1.8295829995622626,
+            "min": 1.8295829995622626,
+            "p50": 1.8295829995622626,
+            "p95": 1.8295829995622626,
+            "p99": 1.8295829995622626
+          },
+          "ws_delta_ops_count": {
+            "count": 2,
+            "max": 147.0,
+            "mean": 74.0,
+            "min": 1.0,
+            "p50": 74.0,
+            "p95": 139.70000000000002,
+            "p99": 145.54
+          },
+          "ws_delta_payload_bytes": {
+            "count": 2,
+            "max": 164368.0,
+            "mean": 82264.5,
+            "min": 161.0,
+            "p50": 82264.5,
+            "p95": 156157.65,
+            "p99": 162725.93
+          }
+        },
+        "slow_callbacks": [],
+        "started_at": "2026-04-22T22:32:39.287068+00:00",
+        "uptime_sec": 2.790357828140259
+      },
+      "started_at": "2026-04-22T22:32:38.844121+00:00"
+    }
+  ],
+  "schema_version": 1
+}

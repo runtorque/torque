@@ -14,6 +14,12 @@ EVENT_TYPES = frozenset({
     "waiting",
     "progress",
     "cost_update",
+    # Synthetic/profile-harness-only signals.  Real provider adapters may
+    # ignore these; EventBus accepts them so the perf harness can model Loom
+    # closeout patterns without spawning real agent TUIs.
+    "heartbeat",
+    "derive",
+    "done",
 })
 
 

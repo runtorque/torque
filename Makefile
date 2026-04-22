@@ -15,7 +15,14 @@ GLOBAL_PYTHON  := $(shell ls $(HOME)/.config/iterm2/AppSupport/iterm2env*/versio
                     2>/dev/null | sort -V | tail -1)
 ITERM2_PYTHON  := $(or $(PROJECT_PYTHON),$(GLOBAL_PYTHON))
 
-.PHONY: install uninstall run deps desktop-deps check stop deploy autolaunch cli standalone standalone-bg desktop desktop-attach open test
+PERF_MATRIX    ?= 10,20,30
+PERF_DURATION  ?= 15
+PERF_BASELINE  ?= tests/perf/baseline.json
+PERF_RUN_DIR   ?= tests/perf/runs
+PERF_VENV      ?= $(HOME)/.cache/loom/perf-harness-venv
+PERF_PYTHON    ?= $(PERF_VENV)/bin/python
+
+.PHONY: install uninstall run deps desktop-deps check stop deploy autolaunch cli standalone standalone-bg desktop desktop-attach open test perf-deps perf-baseline perf-delta
 
 ## install: Set up the iTerm2 script project and copy all files
 install:
@@ -317,3 +324,34 @@ check:
 ## test: Run the automated regression suite
 test:
 	@python3 -m unittest discover -s tests -v
+
+## perf-deps: Prepare the cached Python environment used by perf harness targets
+perf-deps:
+	@if [ ! -x "$(PERF_PYTHON)" ]; then \
+		mkdir -p "$$(dirname "$(PERF_VENV)")"; \
+		python3 -m venv "$(PERF_VENV)"; \
+	fi
+	@"$(PERF_PYTHON)" -c "import aiohttp, jinja2, yaml" >/dev/null 2>&1 || \
+		"$(PERF_PYTHON)" -m pip install -q aiohttp jinja2 pyyaml
+
+## perf-baseline: Capture N=10/20/30 standalone perf baseline evidence
+perf-baseline: perf-deps
+	@mkdir -p "$$(dirname "$(PERF_BASELINE)")"
+	@"$(PERF_PYTHON)" scripts/profile_harness.py \
+		--mode baseline \
+		--matrix "$(PERF_MATRIX)" \
+		--duration "$(PERF_DURATION)" \
+		--output "$(PERF_BASELINE)" \
+		--report "$(PERF_BASELINE:.json=.md)"
+
+## perf-delta: Capture current perf evidence and diff against PERF_BASELINE
+perf-delta: perf-deps
+	@mkdir -p "$(PERF_RUN_DIR)"
+	@stamp=$$(date -u +%Y%m%dT%H%M%SZ); \
+	"$(PERF_PYTHON)" scripts/profile_harness.py \
+		--mode delta \
+		--matrix "$(PERF_MATRIX)" \
+		--duration "$(PERF_DURATION)" \
+		--baseline "$(PERF_BASELINE)" \
+		--output "$(PERF_RUN_DIR)/delta-$$stamp.json" \
+		--report "$(PERF_RUN_DIR)/delta-$$stamp.md"

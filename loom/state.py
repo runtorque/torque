@@ -13,6 +13,7 @@ from typing import Optional
 from aiohttp import web
 
 from .config import DATA_DIR, DEFAULT_COMMAND, log
+from . import profiling
 from .artifacts import normalize_artifacts, normalize_attachments
 from .db import LoomDB
 from .task_ids import (
@@ -4331,8 +4332,12 @@ class MatrixState:
 
     def snapshot_msg(self) -> str:
         """Generate a full state snapshot message (for initial connect / resync)."""
-        return json.dumps({
+        msg = json.dumps({
             "type": "state", "seq": self._seq, **self.to_dict()})
+        if profiling.is_enabled():
+            profiling.recorder().observe(
+                "snapshot_json_bytes", len(msg.encode("utf-8")))
+        return msg
 
     async def broadcast(self):
         """Send accumulated deltas to all WS clients.
@@ -4359,19 +4364,26 @@ class MatrixState:
             if not self._delta_ops:
                 return
             self._seq += 1
+            op_count = len(self._delta_ops)
             msg = json.dumps({
                 "type": "delta", "seq": self._seq,
                 "ops": self._delta_ops,
             })
             self._delta_ops = []
             clients = list(self._ws_clients)
+        if profiling.is_enabled():
+            payload_bytes = len(msg.encode("utf-8"))
+            profiling.recorder().observe("ws_delta_payload_bytes", payload_bytes)
+            profiling.recorder().observe("ws_delta_ops_count", op_count)
+            profiling.recorder().observe("ws_clients_per_broadcast", len(clients))
         # Send to every client concurrently so a slow/stuck client
         # doesn't stall delivery to the others (the lock above already
         # guarantees ordering — only one broadcast is in flight at a time).
-        results = await asyncio.gather(
-            *(ws.send_str(msg) for ws in clients),
-            return_exceptions=True,
-        )
+        with profiling.timer("ws_broadcast_ms"):
+            results = await asyncio.gather(
+                *(ws.send_str(msg) for ws in clients),
+                return_exceptions=True,
+            )
         dead: set[web.WebSocketResponse] = {
             ws for ws, result in zip(clients, results)
             if isinstance(result, BaseException)
