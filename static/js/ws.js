@@ -396,7 +396,7 @@ function _deltaSurfaceInvalidations(ops) {
         _markSurface(flags, 'board');
         break;
       case 'event_append':
-        _markSurface(flags, 'events');
+        _markSurface(flags, 'events', 'weaver');
         break;
       case 'journal_append':
       case 'journal_delete':

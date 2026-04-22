@@ -7767,6 +7767,264 @@ test('renderAgentPanel keeps the same Events anchor visible when new digest rows
   assert.equal(newContent.scrollTop, 120);
 });
 
+test('renderAgentPanel paginates worker Events and resets the page when focus changes', () => {
+  const { context, document } = createWeaverHarness();
+  const panel = document.register('panel-agent');
+  context.state.agents = {
+    'worker-1': {
+      id: 'worker-1',
+      name: 'Worker One',
+      group: 'alpha',
+      kind: 'worker',
+      cell_type: 'agent',
+    },
+    'worker-2': {
+      id: 'worker-2',
+      name: 'Worker Two',
+      group: 'alpha',
+      kind: 'worker',
+      cell_type: 'agent',
+    },
+  };
+  context.state.panel_events = [];
+  for (let i = 1; i <= 25; i++) {
+    context.state.panel_events.push({
+      id: i,
+      cell_id: 'worker-1',
+      kind: 'agent_progress',
+      message: `worker-1 event ${i}`,
+      timestamp: i,
+    });
+  }
+  for (let i = 1; i <= 22; i++) {
+    context.state.panel_events.push({
+      id: 100 + i,
+      cell_id: 'worker-2',
+      kind: 'agent_progress',
+      message: `worker-2 event ${i}`,
+      timestamp: i,
+    });
+  }
+  context.focusedItemId = 'worker-1';
+  runInContext(context, `_agentPanelLastSelectedTabByKind.worker = 'events';`);
+
+  context.renderAgentPanel();
+
+  assert.equal((panel.innerHTML.match(/agent-panel-event-message/g) || []).length, 20);
+  assert.match(panel.innerHTML, /worker-1 event 25/);
+  assert.match(panel.innerHTML, /Load 5 older events/);
+  assert.doesNotMatch(panel.innerHTML, /worker-1 event 5</);
+
+  context.agentPanelEventsOnScroll({
+    currentTarget: { scrollTop: 125, scrollHeight: 320, clientHeight: 240 },
+  });
+
+  assert.equal((panel.innerHTML.match(/agent-panel-event-message/g) || []).length, 25);
+  assert.match(panel.innerHTML, /worker-1 event 1/);
+
+  context.focusedItemId = 'worker-2';
+  context.renderAgentPanel();
+
+  assert.equal((panel.innerHTML.match(/agent-panel-event-message/g) || []).length, 20);
+  assert.match(panel.innerHTML, /worker-2 event 22/);
+  assert.match(panel.innerHTML, /Load 2 older events/);
+  assert.doesNotMatch(panel.innerHTML, /worker-2 event 1</);
+});
+
+test('renderAgentPanel preserves Events scroll anchor when a focused-agent event delta inserts above', () => {
+  const { context, document } = createWeaverWsHarness();
+  const panel = document.getElementById('panel-agent');
+  const oldContent = new FakeElement('events-content-old');
+  const newContent = new FakeElement('events-content-new');
+  let currentContent = oldContent;
+
+  function makeAnchor(key, top, bottom) {
+    const el = new FakeElement();
+    el.setAttribute('data-agent-panel-anchor', key);
+    el.getBoundingClientRect = function() {
+      return { top, bottom, left: 0, right: 220, width: 220, height: bottom - top };
+    };
+    return el;
+  }
+
+  const agents = {
+    'worker-1': {
+      id: 'worker-1',
+      name: 'Worker One',
+      group: 'alpha',
+      kind: 'worker',
+      cell_type: 'agent',
+    },
+  };
+  const events = [];
+  for (let i = 1; i <= 25; i++) {
+    events.push({
+      id: i,
+      cell_id: 'worker-1',
+      kind: 'agent_progress',
+      message: `event ${i}`,
+      group: 'alpha',
+      timestamp: i,
+    });
+  }
+  runInContext(context, `
+    state.agents = ${JSON.stringify(agents)};
+    state.panel_events = ${JSON.stringify(events)};
+    focusedItemId = 'worker-1';
+    _agentPanelLastSelectedTabByKind.worker = 'events';
+  `);
+  context.renderAgentPanel();
+  context.agentPanelLoadMoreEvents();
+
+  oldContent.scrollTop = 120;
+  oldContent.getBoundingClientRect = function() {
+    return { top: 0, bottom: 120, left: 0, right: 220, width: 220, height: 120 };
+  };
+  oldContent.querySelectorAll = function(selector) {
+    if (selector === '[data-agent-panel-anchor]') {
+      return [
+        makeAnchor('worker-event-24', 20, 40),
+        makeAnchor('worker-event-23', 60, 80),
+      ];
+    }
+    return [];
+  };
+
+  newContent.scrollTop = 0;
+  newContent.getBoundingClientRect = function() {
+    return { top: 0, bottom: 120, left: 0, right: 220, width: 220, height: 120 };
+  };
+  newContent.querySelectorAll = function(selector) {
+    if (selector === '[data-agent-panel-anchor]') {
+      return [
+        makeAnchor('worker-event-26', 10, 30),
+        makeAnchor('worker-event-25', 40, 60),
+        makeAnchor('worker-event-24', 50, 70),
+        makeAnchor('worker-event-23', 90, 110),
+      ];
+    }
+    return [];
+  };
+
+  panel.querySelector = function(selector) {
+    if (selector === '.agent-panel-content') return currentContent;
+    return null;
+  };
+  Object.defineProperty(panel, 'innerHTML', {
+    configurable: true,
+    get() {
+      return this._innerHTML || '';
+    },
+    set(value) {
+      this._innerHTML = value;
+      currentContent = newContent;
+    },
+  });
+
+  runInContext(context, `_expectedSeq = 1;`);
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'event_append',
+      id: 26,
+      cell_id: 'worker-1',
+      kind: 'agent_progress',
+      message: 'event 26',
+      group: 'alpha',
+      timestamp: 26,
+    }],
+  });
+
+  assert.equal(newContent.scrollTop, 150);
+  assert.equal((panel.innerHTML.match(/agent-panel-event-message/g) || []).length, 26);
+  assert.match(panel.innerHTML, /event 26/);
+  assert.match(panel.innerHTML, /event 1/);
+});
+
+test('renderAgentPanel keeps the current newest-first Events live tail pinned on event deltas', () => {
+  const { context, document } = createWeaverWsHarness();
+  const panel = document.getElementById('panel-agent');
+  const oldContent = new FakeElement('events-live-old');
+  const newContent = new FakeElement('events-live-new');
+  let currentContent = oldContent;
+
+  const agents = {
+    'worker-1': {
+      id: 'worker-1',
+      name: 'Worker One',
+      group: 'alpha',
+      kind: 'worker',
+      cell_type: 'agent',
+    },
+  };
+  const events = [];
+  for (let i = 1; i <= 25; i++) {
+    events.push({
+      id: i,
+      cell_id: 'worker-1',
+      kind: 'agent_progress',
+      message: `event ${i}`,
+      group: 'alpha',
+      timestamp: i,
+    });
+  }
+  runInContext(context, `
+    state.agents = ${JSON.stringify(agents)};
+    state.panel_events = ${JSON.stringify(events)};
+    focusedItemId = 'worker-1';
+    _agentPanelLastSelectedTabByKind.worker = 'events';
+  `);
+  context.renderAgentPanel();
+
+  oldContent.scrollTop = 0;
+  oldContent.getBoundingClientRect = function() {
+    return { top: 0, bottom: 120, left: 0, right: 220, width: 220, height: 120 };
+  };
+  oldContent.querySelectorAll = function() {
+    return [];
+  };
+  newContent.scrollTop = 88;
+  newContent.getBoundingClientRect = function() {
+    return { top: 0, bottom: 120, left: 0, right: 220, width: 220, height: 120 };
+  };
+  newContent.querySelectorAll = function() {
+    return [];
+  };
+  panel.querySelector = function(selector) {
+    if (selector === '.agent-panel-content') return currentContent;
+    return null;
+  };
+  Object.defineProperty(panel, 'innerHTML', {
+    configurable: true,
+    get() {
+      return this._innerHTML || '';
+    },
+    set(value) {
+      this._innerHTML = value;
+      currentContent = newContent;
+    },
+  });
+
+  runInContext(context, `_expectedSeq = 1;`);
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'event_append',
+      id: 26,
+      cell_id: 'worker-1',
+      kind: 'agent_progress',
+      message: 'event 26',
+      group: 'alpha',
+      timestamp: 26,
+    }],
+  });
+
+  assert.equal(newContent.scrollTop, 0);
+  assert.equal((panel.innerHTML.match(/agent-panel-event-message/g) || []).length, 20);
+  assert.match(panel.innerHTML, /event 26/);
+  assert.doesNotMatch(panel.innerHTML, /event 1</);
+});
+
 test('renderAgentPanel keeps the same Messages anchor visible when new message cards are inserted above', () => {
   const { context, document } = createWeaverHarness();
   const panel = document.register('panel-agent');
