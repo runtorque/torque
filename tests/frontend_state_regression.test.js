@@ -9623,9 +9623,11 @@ test('embedded runtime reuses the shared group, cell, and terminal UI', () => {
   assert.match(main.innerHTML, /Shell Root/);
   assert.match(main.innerHTML, /class="cell[^"]*selected/);
   assert.match(main.innerHTML, /class="term-row/);
-  assert.match(main.innerHTML, /openAddEngineerModal\(\)/);
-  assert.match(main.innerHTML, /quickAddAgent\('alpha'\)/);
-  assert.match(main.innerHTML, /openAddAgentAdvanced\('alpha'\)/);
+  assert.match(main.innerHTML, /ghost-card ghost-card--worker[\s\S]*openAddWorkerModal\('alpha'\)/);
+  assert.match(main.innerHTML, /ghost-card ghost-card--engineer[\s\S]*openAddEngineerForSection\(&quot;alpha&quot;,&quot;&quot;\)/);
+  assert.match(main.innerHTML, /ghost-card ghost-card--architect[\s\S]*openAddArchitectForGroup\(&quot;alpha&quot;\)/);
+  assert.doesNotMatch(main.innerHTML, /quickAddAgent\('alpha'\)/);
+  assert.doesNotMatch(main.innerHTML, /openAddAgentAdvanced\('alpha'\)/);
   assert.match(main.innerHTML, /quickAddTerminal\('alpha','agent-1'\)/);
   assert.match(main.innerHTML, /openAddTerminal\('alpha','agent-1'\)/);
   assert.equal(sandbox.renderTerminalWorkspaceCalls, 1);
@@ -11184,7 +11186,7 @@ test('main hierarchy preserves focused ghost-card state across websocket delta r
     let currentGhost = null;
     let renderCount = 0;
     function installGhostSurface() {
-      currentGhost = new FakeElement(item.label);
+      currentGhost = new FakeElement('');
       currentGhost.dataset.focusKey = item.focusKey;
       currentGhost.value = '';
       currentGhost.selectionStart = 0;
