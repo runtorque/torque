@@ -369,10 +369,27 @@ def _load_message_entry(cell, message_id: str) -> tuple[dict | None, str]:
     return None, "Message not found"
 
 
+def _optional_bool_arg(args: dict, key: str, default: bool = False
+                       ) -> tuple[bool, str]:
+    if key not in args or args.get(key) is None:
+        return bool(default), ""
+    value = args.get(key)
+    if isinstance(value, bool):
+        return value, ""
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "1", "yes", "on"}:
+            return True, ""
+        if lowered in {"false", "0", "no", "off", ""}:
+            return False, ""
+    return bool(default), f"{key} must be a boolean"
+
+
 def _deliver_architect_engineer_message(state, sender, recipient, *,
                                         action: str, message: str,
                                         reply_to_id: str = "",
-                                        thread_id: str = "") -> dict:
+                                        thread_id: str = "",
+                                        ack_required: bool = False) -> dict:
     message_text = str(message or "").strip()
     if not message_text:
         raise ValueError("message is required")
@@ -390,6 +407,11 @@ def _deliver_architect_engineer_message(state, sender, recipient, *,
         "sender_id": sender.id,
         "sender_kind": str(getattr(sender, "kind", "") or "").strip(),
     }
+    if (
+        str(getattr(sender, "kind", "") or "").strip() == "engineer"
+        and str(getattr(recipient, "kind", "") or "").strip() == "architect"
+    ):
+        shared["ack_required"] = bool(ack_required)
     sender_entry = dict(shared)
     sender_entry.update({
         "peer_id": recipient.id,
@@ -436,14 +458,17 @@ async def _inject_mcp_message(handle_command, sender, recipient,
     if not recipient or not handle_command:
         return
     try:
-        result = await handle_command({
+        payload = {
             "cmd": "inject_mcp_message",
             "agent_id": getattr(recipient, "id", ""),
             "message": message,
             "sender_name": str(getattr(sender, "name", "") or "").strip(),
             "sender_kind": str(getattr(sender, "kind", "") or "").strip(),
             "message_id": str(delivered.get("id", "") or ""),
-        })
+        }
+        if "ack_required" in delivered:
+            payload["ack_required"] = bool(delivered.get("ack_required", False))
+        result = await handle_command(payload)
         was_delivered = bool(result and result.get("delivered"))
         reason = str((result or {}).get("reason", "") or "")
         mark_cross_kind_message_delivery(
@@ -2691,12 +2716,16 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         message = str(args.get("message", "") or "").strip()
         if not message:
             return "message is required", True
+        ack_required, ack_error = _optional_bool_arg(args, "ack_required")
+        if ack_error:
+            return ack_error, True
         delivered = _deliver_architect_engineer_message(
             real_state,
             engineer,
             architect,
             action="engineer_message_architect",
             message=message,
+            ack_required=ack_required,
         )
         await _inject_mcp_message(
             handle_command, engineer, architect, delivered, message
@@ -2736,6 +2765,11 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         message = str(args.get("message", "") or "").strip()
         if not message:
             return "message is required", True
+        ack_required = False
+        if caller_kind == "engineer":
+            ack_required, ack_error = _optional_bool_arg(args, "ack_required")
+            if ack_error:
+                return ack_error, True
         delivered = _deliver_architect_engineer_message(
             real_state,
             caller,
@@ -2744,6 +2778,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             message=message,
             reply_to_id=str(entry.get("id", "") or "").strip(),
             thread_id=str(entry.get("thread_id", "") or "").strip(),
+            ack_required=ack_required,
         )
         await _inject_mcp_message(
             handle_command, caller, peer, delivered, message
