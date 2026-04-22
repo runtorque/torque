@@ -107,6 +107,16 @@ def _engineer_queue_idle_ready(engineer, now: float) -> bool:
     return now - last_progress_at >= ENGINEER_QUEUE_EMPTY_DEBOUNCE_SECS
 
 
+def _engineer_queue_empty_fire_ready(engineer, *, now: float,
+                                     observed_empty_at: float) -> bool:
+    """Return whether idle+empty have remained stable for the debounce."""
+    if not _engineer_queue_idle_ready(engineer, now):
+        return False
+    last_progress_at = float(getattr(engineer, "last_progress_at", 0.0) or 0.0)
+    stable_since = max(float(observed_empty_at or 0.0), last_progress_at)
+    return now - stable_since >= ENGINEER_QUEUE_EMPTY_DEBOUNCE_SECS
+
+
 def check_engineer_queue_empty(state, event_bus: "EventBus",
                                now: float | None = None) -> bool:
     """Emit one engineer_queue_empty event per work→empty transition."""
@@ -133,12 +143,18 @@ def check_engineer_queue_empty(state, event_bus: "EventBus",
                 changed = True
             continue
 
-        if not _engineer_queue_idle_ready(engineer, now):
+        activity = str(getattr(engineer, "activity", "") or "").strip()
+        last_progress_at = float(getattr(engineer, "last_progress_at", 0.0) or 0.0)
+        if activity not in {"", "waiting"} or last_progress_at <= 0:
             empty_since.pop(engineer_id, None)
             continue
 
         observed_at = empty_since.setdefault(engineer_id, now)
-        if now - observed_at < ENGINEER_QUEUE_EMPTY_DEBOUNCE_SECS:
+        if not _engineer_queue_empty_fire_ready(
+                engineer,
+                now=now,
+                observed_empty_at=observed_at,
+        ):
             continue
         if bool(getattr(engineer, "queue_empty_emitted", True)):
             continue

@@ -645,6 +645,53 @@ class EventBusTests(unittest.IsolatedAsyncioTestCase):
             ["engineer_queue_empty"],
         )
 
+    def test_engineer_queue_empty_debounce_counts_from_drain_transition(self):
+        state = self._make_state()
+        engineer = self.state_mod.AgentCell(
+            id="eng-1",
+            name="Courier",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+            status="running",
+            queue_empty_emitted=False,
+        )
+        engineer.mark_progress(1_000.0)
+        state.agents[engineer.id] = engineer
+        panel_log = self.events_mod.PanelEventLog()
+        state.panel_log = panel_log
+        bus = self.events_mod.EventBus(
+            state,
+            self.events_mod.EventLog(),
+            panel_log=panel_log,
+        )
+
+        self.assertFalse(
+            self.events_mod.check_engineer_queue_empty(
+                state,
+                bus,
+                now=1_000.0,
+            )
+        )
+        self.assertFalse(
+            self.events_mod.check_engineer_queue_empty(
+                state,
+                bus,
+                now=1_119.0,
+            )
+        )
+        self.assertTrue(
+            self.events_mod.check_engineer_queue_empty(
+                state,
+                bus,
+                now=1_120.0,
+            )
+        )
+        self.assertEqual(
+            [evt["kind"] for evt in panel_log.get_recent()],
+            ["engineer_queue_empty"],
+        )
+
     def test_engineer_queue_empty_gate_clears_when_owned_worker_spawns(self):
         state = self._make_state()
         engineer = self.state_mod.AgentCell(
