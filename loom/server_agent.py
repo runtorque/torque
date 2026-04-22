@@ -25,7 +25,14 @@ ENGINEER_MCP_ENTRYPOINT = "loom/mcp_engineer.py"
 
 
 def _copy_worktree_context(target, source) -> bool:
-    """Copy an existing worktree context from one cell to another."""
+    """Copy an existing worktree context from one cell to another.
+
+    Derived reviewers intentionally inherit the implementer's exact worktree
+    path/branch instead of receiving a throwaway branch. The parent
+    implementer is considered suspended by the task-handoff graph while the
+    review is active; server-side checkpoint guards keep Loom-originated
+    writes from that parent out of the shared branch until review finishes.
+    """
     if not target or not source or not getattr(source, "worktree_path", ""):
         return False
     target.worktree_path = source.worktree_path

@@ -1091,8 +1091,10 @@ WEAVER_TOOLS = [
             "its base branch. Can return a structured summary, "
             "diffstat, or full diff output, optionally limited to "
             "specific files. Useful for reviewing changes before "
-            "merge or PR. When owned-agent restriction is enabled, only "
-            "agents created by this Weaver can be targeted."
+            "merge or PR. Reviewer workers may share the implementer's "
+            "worktree, so targeting a reviewer reports that shared branch. "
+            "When owned-agent restriction is enabled, only agents created "
+            "by this Weaver can be targeted."
         ),
         "inputSchema": {
             "type": "object",
@@ -1155,8 +1157,10 @@ WEAVER_TOOLS = [
             "Create a checkpoint commit on an agent's worktree. "
             "Commits all current changes with an auto-generated "
             "message. Useful for saving progress before risky "
-            "operations. When owned-agent restriction is enabled, only "
-            "agents created by this Weaver can be targeted."
+            "operations. When targeting a reviewer that shares an "
+            "implementer's worktree, this snapshots the shared branch. "
+            "When owned-agent restriction is enabled, only agents "
+            "created by this Weaver can be targeted."
         ),
         "inputSchema": {
             "type": "object",

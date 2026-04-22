@@ -574,6 +574,53 @@ class ServerSelfDispatchTests(unittest.TestCase):
             )
         )
 
+    def test_active_review_blocks_parent_checkpoint_writes_only(self):
+        state = self.state_mod.MatrixState()
+        owner = self._make_agent("impl-1", current_task_id="")
+        reviewer = self._make_agent("review-1", current_task_id="task-review")
+        state.agents = {owner.id: owner, reviewer.id: reviewer}
+        parent = self.state_mod.BoardTask(
+            id="task-impl",
+            task="Implementation",
+            group="g",
+            lane="In Progress",
+            agent_id=owner.id,
+            action_name="feature/implement",
+        )
+        review = self.state_mod.BoardTask(
+            id="task-review",
+            task="Review implementation",
+            group="g",
+            lane="In Progress",
+            parent_task_id=parent.id,
+            pipeline_root_id=parent.id,
+            pipeline_depth=1,
+            agent_id=reviewer.id,
+            action_name="feature/review",
+        )
+        state.board_tasks = {parent.id: parent, review.id: review}
+
+        block_reason = self.server_mod._shared_review_checkpoint_block_reason(
+            state,
+            owner,
+        )
+
+        self.assertIn("feature/review task task-review", block_reason)
+        self.assertIs(
+            self.server_mod._active_shared_worktree_review_for_cell(
+                state,
+                owner,
+            ),
+            review,
+        )
+        self.assertEqual(
+            self.server_mod._shared_review_checkpoint_block_reason(
+                state,
+                reviewer,
+            ),
+            "",
+        )
+
     def test_suspended_parent_does_not_claim_shared_worktree_ownership(self):
         state = self.state_mod.MatrixState()
         parent = self.state_mod.BoardTask(
@@ -1224,6 +1271,41 @@ class ServerReviewMergeCleanupTests(unittest.IsolatedAsyncioTestCase):
         )
         return state, impl, reviewer
 
+    def test_review_verdict_parser_pins_drift_cases(self):
+        cases = [
+            ("Ship", "ship"),
+            ("ship", "ship"),
+            ("SHIP", "ship"),
+            ("ship with fixes", "ship_with_fixes"),
+            ("SHIP WITH FIXES", "ship_with_fixes"),
+            ("- Ship", "ship"),
+            ("## Verdict: Ship", "ship"),
+            ("## Ship verdict: Ship", "ship"),
+            (
+                "Review notes\n\nVerdict: Needs changes",
+                "needs_rework",
+            ),
+            (
+                "Review notes\n\nAfter review I believe this should Ship",
+                "",
+            ),
+            (
+                "Approved, looks good to me",
+                "",
+            ),
+            (
+                "LGTM",
+                "",
+            ),
+        ]
+
+        for message, expected in cases:
+            with self.subTest(message=message):
+                self.assertEqual(
+                    self.server_mod._review_verdict_from_message(message),
+                    expected,
+                )
+
     async def test_ship_review_cleanup_fires_after_parent_merge(self):
         state, impl, reviewer = self._make_state(
             verdict_message=(
@@ -1257,6 +1339,7 @@ class ServerReviewMergeCleanupTests(unittest.IsolatedAsyncioTestCase):
         for verdict in (
             "## Verdict\n**Ship with fixes** — address minor issues first",
             "Verdict: Needs rework — core behavior is incorrect",
+            "Approved, looks good to me",
         ):
             with self.subTest(verdict=verdict):
                 state, impl, _reviewer = self._make_state(
