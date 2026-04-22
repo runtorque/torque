@@ -738,6 +738,13 @@ def _active_shared_worktree_review_for_cell(state: MatrixState, cell):
         reviewer_id = str(getattr(task, "agent_id", "") or "").strip()
         if not reviewer_id or reviewer_id == cell_id:
             continue
+        # When a review derives blocker fixes back to the implementer, the
+        # review task remains open/status=Fixing but no longer owns the
+        # foreground mutable branch; the descendant fix task does.
+        if not state.task_occupies_execution_slot(
+                task,
+                agent_id=reviewer_id):
+            continue
         reviewer = state.agents.get(reviewer_id)
         if not _cells_share_worktree_context(cell, reviewer):
             continue

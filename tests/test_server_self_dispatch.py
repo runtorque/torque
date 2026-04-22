@@ -621,6 +621,64 @@ class ServerSelfDispatchTests(unittest.TestCase):
             "",
         )
 
+    def test_review_fix_handoff_allows_parent_checkpoint_writes(self):
+        state = self.state_mod.MatrixState()
+        owner = self._make_agent("impl-1", current_task_id="task-fix")
+        reviewer = self._make_agent("review-1", current_task_id="task-review")
+        state.agents = {owner.id: owner, reviewer.id: reviewer}
+        parent = self.state_mod.BoardTask(
+            id="task-impl",
+            task="Implementation",
+            group="g",
+            lane="Done",
+            agent_id=owner.id,
+            action_name="feature/implement",
+        )
+        review = self.state_mod.BoardTask(
+            id="task-review",
+            task="Review implementation",
+            group="g",
+            lane="In Progress",
+            status="Fixing",
+            parent_task_id=parent.id,
+            pipeline_root_id=parent.id,
+            pipeline_depth=1,
+            agent_id=reviewer.id,
+            action_name="feature/review",
+        )
+        fix = self.state_mod.BoardTask(
+            id="task-fix",
+            task="Fix review blockers",
+            group="g",
+            lane="In Progress",
+            parent_task_id=review.id,
+            pipeline_root_id=parent.id,
+            pipeline_depth=2,
+            agent_id=owner.id,
+            action_name="feature/implement",
+        )
+        state.board_tasks = {
+            parent.id: parent,
+            review.id: review,
+            fix.id: fix,
+        }
+
+        self.assertTrue(state.agent_is_busy(owner.id))
+        self.assertFalse(state.agent_is_busy(reviewer.id))
+        self.assertIsNone(
+            self.server_mod._active_shared_worktree_review_for_cell(
+                state,
+                owner,
+            )
+        )
+        self.assertEqual(
+            self.server_mod._shared_review_checkpoint_block_reason(
+                state,
+                owner,
+            ),
+            "",
+        )
+
     def test_suspended_parent_does_not_claim_shared_worktree_ownership(self):
         state = self.state_mod.MatrixState()
         parent = self.state_mod.BoardTask(
