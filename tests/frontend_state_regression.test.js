@@ -120,12 +120,24 @@ class FakeElement {
 
   setAttribute(name, value) {
     this.attributes[name] = String(value);
+    if (name.startsWith('data-')) {
+      const key = name.slice(5).replace(/-([a-z])/g, (_, ch) => ch.toUpperCase());
+      this.dataset[key] = String(value);
+    }
   }
 
   getAttribute(name) {
+    if (name.startsWith('data-')) {
+      const key = name.slice(5).replace(/-([a-z])/g, (_, ch) => ch.toUpperCase());
+      if (Object.prototype.hasOwnProperty.call(this.dataset, key)) return this.dataset[key];
+    }
     return Object.prototype.hasOwnProperty.call(this.attributes, name)
       ? this.attributes[name]
       : null;
+  }
+
+  hasAttribute(name) {
+    return this.getAttribute(name) !== null;
   }
 
   focus() {
@@ -146,12 +158,43 @@ class FakeElement {
 
   contains(target) {
     if (target === this) return true;
-    return this.children.includes(target);
+    return this.children.some((child) => child === target || (child && child.contains && child.contains(target)));
   }
 
   closest(selector) {
-    if (!selector || selector.charAt(0) !== '.') return null;
-    return this.classList.contains(selector.slice(1)) ? this : null;
+    for (let node = this; node; node = node.parentNode) {
+      if (node._matchesSimpleSelector && node._matchesSimpleSelector(selector)) return node;
+    }
+    return null;
+  }
+
+  _matchesSimpleSelector(selector) {
+    if (!selector) return false;
+    const classMatch = selector.match(/^\.([A-Za-z0-9_-]+)(.*)$/);
+    if (classMatch) {
+      if (!this.classList.contains(classMatch[1])) return false;
+      const rest = classMatch[2] || '';
+      if (!rest) return true;
+      const attrMatch = rest.match(/^\[([^\]=]+)(?:=["']?([^"'\]]+)["']?)?\]$/);
+      if (!attrMatch) return false;
+      const value = this.getAttribute(attrMatch[1]);
+      if (value === null) return false;
+      return typeof attrMatch[2] === 'undefined' || String(value) === attrMatch[2];
+    }
+    const attrMatch = selector.match(/^\[([^\]=]+)(?:=["']?([^"'\]]+)["']?)?\]$/);
+    if (attrMatch) {
+      const value = this.getAttribute(attrMatch[1]);
+      if (value === null) return false;
+      return typeof attrMatch[2] === 'undefined' || String(value) === attrMatch[2];
+    }
+    return false;
+  }
+
+  get nextElementSibling() {
+    if (!this.parentNode || !Array.isArray(this.parentNode.children)) return null;
+    const index = this.parentNode.children.indexOf(this);
+    if (index < 0) return null;
+    return this.parentNode.children[index + 1] || null;
   }
 
   getBoundingClientRect() {
@@ -888,6 +931,126 @@ function createMainRenderHarness() {
     getFilterByWindow = function() { return false; };
   `);
   return { context, document, sandbox };
+}
+
+function createMainGridDragHarness() {
+  const { sandbox, document } = createSandbox({
+    renderTerminalWorkspace() {},
+    updateEventsAttentionBadge() {},
+    renderAgentPanel() {},
+  });
+  document.register('main');
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/constants.js');
+  loadScript(context, 'static/js/render.js');
+  loadScript(context, 'static/js/commands.js');
+  runInContext(context, `
+    var _cachedAgentTemplates = [];
+    var focusedItemId = null;
+    var selectedTerminalId = null;
+    var dragInProgress = false;
+    getFilterByWindow = function() { return false; };
+  `);
+  return { context, document, sandbox };
+}
+
+function createDragDomElement({
+  dragId = '',
+  dragType = '',
+  dragGroup = '',
+  dropType = '',
+  dropGroup = '',
+  dropParent = '',
+  groupName = '',
+  classNames = [],
+  rect = {},
+  parent = null,
+} = {}) {
+  const element = new FakeElement(dragId || groupName || '');
+  classNames.forEach((name) => element.classList.add(name));
+  if (dragId) element.dataset.dragId = dragId;
+  if (dragType) element.dataset.dragType = dragType;
+  if (dragGroup) element.dataset.dragGroup = dragGroup;
+  if (dropType) element.dataset.dropType = dropType;
+  if (dropGroup) element.dataset.dropGroup = dropGroup;
+  if (dropParent) element.dataset.dropParent = dropParent;
+  if (groupName) element.dataset.groupName = groupName;
+  const bounds = Object.assign({
+    top: 20,
+    bottom: 80,
+    left: 20,
+    right: 140,
+    width: 120,
+    height: 60,
+  }, rect);
+  element.getBoundingClientRect = () => bounds;
+  if (parent) parent.appendChild(element);
+  return element;
+}
+
+function fireGridDrag(main, dragElement, dropTarget, options = {}) {
+  const transfer = {
+    effectAllowed: '',
+    dropEffect: '',
+    data: {},
+    setData(type, value) {
+      this.data[type] = value;
+    },
+  };
+  main.listeners.dragstart({ target: dragElement, dataTransfer: transfer });
+  const dropEvent = {
+    target: dropTarget,
+    dataTransfer: transfer,
+    clientX: typeof options.clientX === 'number' ? options.clientX : 0,
+    clientY: typeof options.clientY === 'number' ? options.clientY : 0,
+    preventDefault() {
+      this.defaultPrevented = true;
+    },
+  };
+  main.listeners.drop(dropEvent);
+  return { transfer, dropEvent };
+}
+
+function applyMoveAgentForDragState(state, id, targetGroup, before = '') {
+  const cell = state.agents[id];
+  if (!cell || !state.groups[targetGroup]) return;
+  if (cell.parent_id && state.children[cell.parent_id]) {
+    state.children[cell.parent_id] = state.children[cell.parent_id].filter((childId) => childId !== id);
+    cell.parent_id = '';
+  }
+  if (state.groups[cell.group]) {
+    state.groups[cell.group] = state.groups[cell.group].filter((agentId) => agentId !== id);
+  }
+  const target = state.groups[targetGroup];
+  const index = before ? target.indexOf(before) : -1;
+  if (index >= 0) target.splice(index, 0, id);
+  else target.push(id);
+  cell.group = targetGroup;
+}
+
+function applyReparentTerminalForDragState(state, id, parentId = '') {
+  const cell = state.agents[id];
+  if (!cell || cell.cell_type !== 'terminal') return;
+  const oldParent = cell.parent_id || '';
+  if (oldParent && state.children[oldParent]) {
+    state.children[oldParent] = state.children[oldParent].filter((childId) => childId !== id);
+  }
+  if (!oldParent && state.groups[cell.group]) {
+    state.groups[cell.group] = state.groups[cell.group].filter((agentId) => agentId !== id);
+  }
+  if (parentId) {
+    const parent = state.agents[parentId];
+    if (!parent) return;
+    cell.parent_id = parentId;
+    cell.group = parent.group;
+    if (!state.children[parentId]) state.children[parentId] = [];
+    state.children[parentId].push(id);
+  } else {
+    cell.parent_id = '';
+    if (state.groups[cell.group] && !state.groups[cell.group].includes(id)) {
+      state.groups[cell.group].push(id);
+    }
+  }
 }
 
 function createMainNavigationHarness() {
@@ -10835,6 +10998,378 @@ test('main hierarchy loose-workers strip orders detached workers by creation tim
       main.innerHTML.indexOf('+ New Worker'),
     'new-worker button should render after the last detached worker card',
   );
+});
+
+test('main grid drag reorders agents within a hierarchical row without changing row ownership', () => {
+  const { context, document, sandbox } = createMainGridDragHarness();
+  const main = document.getElementById('main');
+
+  sandbox.state.groups = { loom: ['eng-1', 'worker-1', 'worker-2'] };
+  sandbox.state.group_settings = { loom: { collapsed_default: false } };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'eng-1': {
+      id: 'eng-1',
+      name: 'Engineer',
+      kind: 'engineer',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'E',
+      status: 'running',
+    },
+    'worker-1': {
+      id: 'worker-1',
+      name: 'Worker 1',
+      kind: 'worker',
+      owner_engineer_id: 'eng-1',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: '1',
+      status: 'running',
+    },
+    'worker-2': {
+      id: 'worker-2',
+      name: 'Worker 2',
+      kind: 'worker',
+      owner_engineer_id: 'eng-1',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: '2',
+      status: 'running',
+    },
+  };
+
+  runInContext(context, `render(); setupDrag();`);
+  assert.deepEqual(
+    jsonValue(context, `window._navGridRows.find(function(row) { return row.rowKey === 'user:engineer:eng-1'; }).items.map(function(item) { return item.id; })`),
+    ['eng-1', 'worker-1', 'worker-2'],
+  );
+
+  const row = createDragDomElement({
+    classNames: ['engineer-row', 'agent-grid-engineer-row'],
+    parent: main,
+  });
+  const worker1 = createDragDomElement({
+    dragId: 'worker-1',
+    dragType: 'agent',
+    dragGroup: 'loom',
+    rect: { left: 180, right: 300, width: 120 },
+    parent: row,
+  });
+  const worker2 = createDragDomElement({
+    dragId: 'worker-2',
+    dragType: 'agent',
+    dragGroup: 'loom',
+    rect: { left: 320, right: 440, width: 120 },
+    parent: row,
+  });
+
+  const { dropEvent } = fireGridDrag(main, worker2, worker1, { clientX: 190, clientY: 40 });
+
+  assert.equal(dropEvent.defaultPrevented, true);
+  assert.deepEqual(jsonValue(context, `sendCalls[0]`), {
+    cmd: 'move_agent',
+    id: 'worker-2',
+    target_group: 'loom',
+    before: 'worker-1',
+  });
+
+  applyMoveAgentForDragState(sandbox.state, 'worker-2', 'loom', 'worker-1');
+  runInContext(context, `render();`);
+
+  assert.deepEqual(
+    jsonValue(context, `window._navGridRows.find(function(row) { return row.rowKey === 'user:engineer:eng-1'; }).items.map(function(item) { return item.id; })`),
+    ['eng-1', 'worker-2', 'worker-1'],
+  );
+  assert.deepEqual(jsonValue(context, `({
+    worker2Section: window._navGridItemMeta['worker-2'].sectionKey,
+    worker2Row: window._navGridItemMeta['worker-2'].rowKey,
+    worker2Owner: state.agents['worker-2'].owner_engineer_id
+  })`), {
+    worker2Section: 'user',
+    worker2Row: 'user:engineer:eng-1',
+    worker2Owner: 'eng-1',
+  });
+});
+
+test('terminal drag moves between an agent drawer and standalone while preserving session and worktree fields', () => {
+  const { context, document, sandbox } = createMainGridDragHarness();
+  const main = document.getElementById('main');
+
+  sandbox.state.groups = { loom: ['agent-1', 'term-standalone'] };
+  sandbox.state.group_settings = { loom: { collapsed_default: false } };
+  sandbox.state.children = { 'agent-1': ['term-child'] };
+  sandbox.state.agents = {
+    'agent-1': {
+      id: 'agent-1',
+      name: 'Agent',
+      kind: 'worker',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'A',
+      status: 'running',
+      session_id: 'agent-session',
+    },
+    'term-child': {
+      id: 'term-child',
+      name: 'Child Terminal',
+      kind: 'terminal',
+      group: 'loom',
+      cell_type: 'terminal',
+      parent_id: 'agent-1',
+      status: 'running',
+      session_id: 'child-session',
+      current_process: 'zsh',
+      worktree_path: '/repo/.loom/worktrees/term-child',
+      worktree_branch: 'loom/term-child',
+      current_path: '/repo',
+    },
+    'term-standalone': {
+      id: 'term-standalone',
+      name: 'Standalone Terminal',
+      kind: 'terminal',
+      group: 'loom',
+      cell_type: 'terminal',
+      status: 'running',
+      session_id: 'standalone-session',
+      current_process: 'zsh',
+    },
+  };
+
+  runInContext(context, `selectedAgentId = 'agent-1'; selectedTerminalId = 'agent-1'; render(); setupDrag();`);
+
+  const childTerminal = createDragDomElement({
+    dragId: 'term-child',
+    dragType: 'terminal',
+    dragGroup: 'loom',
+    parent: main,
+  });
+  const standaloneList = createDragDomElement({
+    dropType: 'terminal',
+    dropGroup: 'loom',
+    classNames: ['term-list'],
+    parent: main,
+  });
+
+  fireGridDrag(main, childTerminal, standaloneList, { clientX: 40, clientY: 40 });
+
+  assert.deepEqual(jsonValue(context, `sendCalls[0]`), {
+    cmd: 'move_agent',
+    id: 'term-child',
+    target_group: 'loom',
+    before: '',
+  });
+
+  applyMoveAgentForDragState(sandbox.state, 'term-child', 'loom', '');
+  runInContext(context, `render();`);
+
+  assert.deepEqual(jsonValue(context, `({
+    parent: state.agents['term-child'].parent_id,
+    group: state.agents['term-child'].group,
+    groups: state.groups.loom,
+    children: state.children['agent-1'],
+    session: state.agents['term-child'].session_id,
+    worktreePath: state.agents['term-child'].worktree_path,
+    worktreeBranch: state.agents['term-child'].worktree_branch
+  })`), {
+    parent: '',
+    group: 'loom',
+    groups: ['agent-1', 'term-standalone', 'term-child'],
+    children: [],
+    session: 'child-session',
+    worktreePath: '/repo/.loom/worktrees/term-child',
+    worktreeBranch: 'loom/term-child',
+  });
+
+  const detachedTerminal = createDragDomElement({
+    dragId: 'term-child',
+    dragType: 'terminal',
+    dragGroup: 'loom',
+    parent: main,
+  });
+  const parentDrawerList = createDragDomElement({
+    dropType: 'terminal',
+    dropGroup: 'loom',
+    dropParent: 'agent-1',
+    classNames: ['term-list'],
+    parent: main,
+  });
+
+  fireGridDrag(main, detachedTerminal, parentDrawerList, { clientX: 40, clientY: 40 });
+
+  assert.deepEqual(jsonValue(context, `sendCalls[1]`), {
+    cmd: 'reparent_terminal',
+    id: 'term-child',
+    parent_id: 'agent-1',
+  });
+
+  applyReparentTerminalForDragState(sandbox.state, 'term-child', 'agent-1');
+  runInContext(context, `render();`);
+
+  assert.deepEqual(jsonValue(context, `({
+    parent: state.agents['term-child'].parent_id,
+    group: state.agents['term-child'].group,
+    groups: state.groups.loom,
+    children: state.children['agent-1'],
+    navItems: window._navItems,
+    session: state.agents['term-child'].session_id,
+    worktreePath: state.agents['term-child'].worktree_path,
+    worktreeBranch: state.agents['term-child'].worktree_branch
+  })`), {
+    parent: 'agent-1',
+    group: 'loom',
+    groups: ['agent-1', 'term-standalone'],
+    children: ['term-child'],
+    navItems: ['agent-1', 'term-child', 'term-standalone'],
+    session: 'child-session',
+    worktreePath: '/repo/.loom/worktrees/term-child',
+    worktreeBranch: 'loom/term-child',
+  });
+});
+
+test('agent drag across an architect section boundary preserves ownership instead of reparenting', () => {
+  const { context, document, sandbox } = createMainGridDragHarness();
+  const main = document.getElementById('main');
+
+  sandbox.state.groups = { loom: ['eng-user', 'worker-user', 'arch-a', 'eng-a'] };
+  sandbox.state.group_settings = { loom: { collapsed_default: false } };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'eng-user': {
+      id: 'eng-user',
+      name: 'User Engineer',
+      kind: 'engineer',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'U',
+      status: 'running',
+    },
+    'worker-user': {
+      id: 'worker-user',
+      name: 'User Worker',
+      kind: 'worker',
+      owner_engineer_id: 'eng-user',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'W',
+      status: 'running',
+    },
+    'arch-a': {
+      id: 'arch-a',
+      name: 'Architect A',
+      kind: 'architect',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'A',
+      status: 'running',
+    },
+    'eng-a': {
+      id: 'eng-a',
+      name: 'Architect Engineer',
+      kind: 'engineer',
+      hired_by_architect_id: 'arch-a',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'E',
+      status: 'running',
+    },
+  };
+
+  runInContext(context, `render(); setupDrag();`);
+
+  const userSection = createDragDomElement({
+    classNames: ['agent-section', 'agent-section-user'],
+    parent: main,
+  });
+  userSection.dataset.agentSection = 'user';
+  const architectSection = createDragDomElement({
+    classNames: ['agent-section', 'agent-section-architect'],
+    parent: main,
+  });
+  architectSection.dataset.agentSection = 'architect:arch-a';
+  const workerUser = createDragDomElement({
+    dragId: 'worker-user',
+    dragType: 'agent',
+    dragGroup: 'loom',
+    rect: { left: 180, right: 300, width: 120 },
+    parent: userSection,
+  });
+  const architectEngineer = createDragDomElement({
+    dragId: 'eng-a',
+    dragType: 'agent',
+    dragGroup: 'loom',
+    rect: { left: 180, right: 300, width: 120 },
+    parent: architectSection,
+  });
+
+  fireGridDrag(main, workerUser, architectEngineer, { clientX: 190, clientY: 40 });
+
+  assert.deepEqual(jsonValue(context, `sendCalls[0]`), {
+    cmd: 'move_agent',
+    id: 'worker-user',
+    target_group: 'loom',
+    before: 'eng-a',
+  });
+  assert.equal(jsonValue(context, `sendCalls.length`), 1);
+
+  applyMoveAgentForDragState(sandbox.state, 'worker-user', 'loom', 'eng-a');
+  runInContext(context, `render();`);
+
+  assert.deepEqual(jsonValue(context, `({
+    workerSection: window._navGridItemMeta['worker-user'].sectionKey,
+    workerRow: window._navGridItemMeta['worker-user'].rowKey,
+    workerOwner: state.agents['worker-user'].owner_engineer_id,
+    engineerArchitect: state.agents['eng-a'].hired_by_architect_id,
+    navAgents: window._navAgents
+  })`), {
+    workerSection: 'user',
+    workerRow: 'user:engineer:eng-user',
+    workerOwner: 'eng-user',
+    engineerArchitect: 'arch-a',
+    navAgents: ['eng-user', 'worker-user', 'arch-a', 'eng-a'],
+  });
+});
+
+test('group header drag still maps hierarchical grid group reordering to move_group', () => {
+  const { context, document, sandbox } = createMainGridDragHarness();
+  const main = document.getElementById('main');
+
+  sandbox.state.groups = { alpha: [], beta: [] };
+  sandbox.state.group_settings = {
+    alpha: { collapsed_default: false },
+    beta: { collapsed_default: false },
+  };
+  sandbox.state.children = {};
+  sandbox.state.agents = {};
+
+  runInContext(context, `render(); setupDrag();`);
+
+  const alphaGroup = createDragDomElement({
+    groupName: 'alpha',
+    classNames: ['group'],
+    rect: { top: 10, bottom: 110, height: 100 },
+    parent: main,
+  });
+  const betaGroup = createDragDomElement({
+    groupName: 'beta',
+    classNames: ['group'],
+    rect: { top: 130, bottom: 230, height: 100 },
+    parent: main,
+  });
+  const betaHeader = createDragDomElement({
+    dragId: 'beta',
+    dragType: 'group',
+    classNames: ['group-hdr'],
+    parent: betaGroup,
+  });
+
+  fireGridDrag(main, betaHeader, alphaGroup, { clientX: 20, clientY: 20 });
+
+  assert.deepEqual(jsonValue(context, `sendCalls[0]`), {
+    cmd: 'move_group',
+    group: 'beta',
+    before: 'alpha',
+  });
 });
 
 test('main grid keyboard navigation traverses logical rows across sections', () => {
