@@ -112,6 +112,103 @@ function _agentPanelTimeAgo(ts) {
   return Math.floor(diff / 86400) + 'd ago';
 }
 
+function _agentPanelTimestamp(ts) {
+  ts = Number(ts || 0);
+  if (!ts) return '';
+  var relative = _agentPanelTimeAgo(ts);
+  var exact = '';
+  try {
+    exact = new Date(ts * 1000).toISOString()
+      .replace('T', ' ')
+      .replace(/\.\d{3}Z$/, ' UTC');
+  } catch (err) {
+    exact = '';
+  }
+  if (relative && exact) return relative + ' · ' + exact;
+  return relative || exact;
+}
+
+function _agentPanelMessageKey(message, index) {
+  message = message || {};
+  var id = String(message.id || '').trim();
+  if (id) return 'message-' + id;
+  var threadId = String(message.thread_id || '').trim();
+  var action = String(message.action || '').trim();
+  var ts = Number(message.timestamp || 0);
+  if (threadId && ts) return 'message-' + threadId + '-' + ts + '-' + action;
+  if (ts) return 'message-' + ts + '-' + action;
+  return 'message-' + index + '-' + action;
+}
+
+function _agentPanelMessageKindLabel(kind) {
+  kind = String(kind || '').trim().toLowerCase();
+  if (!kind) return 'User';
+  if (kind === 'architect') return 'Architect';
+  if (kind === 'engineer') return 'Engineer';
+  if (kind === 'worker') return 'Worker';
+  if (kind === 'user' || kind === 'human') return 'User';
+  if (kind === 'weaver' || kind === 'system' || kind === 'loom') return 'User';
+  return kind.charAt(0).toUpperCase() + kind.slice(1).replace(/_/g, ' ');
+}
+
+function _agentPanelAgentForId(agentId) {
+  agentId = String(agentId || '').trim();
+  if (!agentId || !state || !state.agents) return null;
+  return state.agents[agentId] || null;
+}
+
+function _agentPanelMessageDirection(agent, message) {
+  message = message || {};
+  var raw = String(message.direction || '').trim().toLowerCase();
+  if (raw === 'sent' || raw === 'out' || raw === 'outgoing') return 'out';
+  if (raw === 'received' || raw === 'in' || raw === 'incoming') return 'in';
+
+  var agentId = String((agent && agent.id) || '');
+  var senderId = String(message.sender_id || '').trim();
+  if (senderId && agentId) return senderId === agentId ? 'out' : 'in';
+
+  var action = String(message.action || '').trim();
+  var kind = _agentPanelKind(agent);
+  if (action === 'architect_message' || action === 'architect_reply') {
+    return kind === 'architect' ? 'out' : 'in';
+  }
+  if (action === 'engineer_message_architect' || action === 'engineer_reply') {
+    return kind === 'engineer' ? 'out' : 'in';
+  }
+  if (action === 'weaver_message' || action === 'system') return 'in';
+  return 'out';
+}
+
+function _agentPanelMessageSenderKind(agent, message, direction) {
+  message = message || {};
+  var explicitKind = String(message.sender_kind || '').trim();
+  if (explicitKind) return explicitKind;
+
+  var sender = _agentPanelAgentForId(message.sender_id);
+  if (sender && sender.kind) return sender.kind;
+
+  if (direction === 'out') {
+    return _agentPanelKind(agent) || 'user';
+  }
+  if (direction === 'in') {
+    if (message.peer_kind) return String(message.peer_kind || '').trim();
+    var peer = _agentPanelAgentForId(message.peer_id);
+    if (peer && peer.kind) return peer.kind;
+  }
+
+  var action = String(message.action || '').trim();
+  if (action.indexOf('architect_') === 0) return 'architect';
+  if (action.indexOf('engineer_') === 0) return 'engineer';
+  if (action === 'weaver_message' || action === 'system') return 'user';
+  return _agentPanelKind(agent) || 'user';
+}
+
+function _agentPanelMessageActionLabel(action) {
+  action = String(action || '').trim();
+  if (!action) return 'message';
+  return action.replace(/_/g, ' ');
+}
+
 function _agentPanelAnchorItems(container) {
   if (!container || typeof container.querySelectorAll !== 'function') return [];
   var results = [];
@@ -143,6 +240,12 @@ function _agentPanelAnchorKey(item) {
     if (key) return String(key);
   }
   return '';
+}
+
+function _agentPanelScrollContainer(root) {
+  if (!root || typeof root.querySelector !== 'function') return null;
+  return root.querySelector('.agent-panel-message-list')
+    || root.querySelector('.agent-panel-content');
 }
 
 function _agentPanelCaptureScrollAnchor(container) {
@@ -816,39 +919,43 @@ function _agentPanelArchitectDecisionsHtml(agent) {
 }
 
 function _agentPanelArchitectMessages(agent) {
-  var messages = Array.isArray(agent && agent.mcp_messages) ? agent.mcp_messages.slice(0, 20) : [];
-  var icons = {
-    progress: '\u25CF',
-    done: '\u2714',
-    ready: '\u2714',
-    blocked: '\u26D4',
-    error: '\u2716',
-    derive: '\u2934',
-    ask: '\u2753',
-    name: '\u270E',
-    architect_reply: '\u21A9',
-  };
-  var html = '<div class="agent-panel-worklog-tab">';
-  html += '<div class="agent-panel-worklog-header">';
-  html += '<span class="agent-panel-worklog-title">Messages</span>';
-  html += '<span class="agent-panel-worklog-count">' + messages.length + '</span>';
+  var messages = Array.isArray(agent && agent.mcp_messages) ? agent.mcp_messages.slice() : [];
+  var html = '<div class="agent-panel-messages-tab">';
+  html += '<div class="agent-panel-message-header">';
+  html += '<div class="agent-panel-message-heading">';
+  html += '<span class="agent-panel-message-title">Messages</span>';
+  html += '<span class="agent-panel-message-count">' + messages.length + '</span>';
   html += '</div>';
-  html += '<div class="agent-panel-worklog-note">Reply composer lands in a later task.</div>';
+  html += '<div class="agent-panel-message-note">Reply composer lands in a later task.</div>';
+  html += '</div>';
   if (!messages.length) {
     html += '<div class="agent-panel-event-empty">No messages yet.</div>';
     html += '</div>';
     return html;
   }
-  html += '<div class="mcp-log">';
+  html += '<div class="agent-panel-message-list">';
   for (var i = 0; i < messages.length; i++) {
     var message = messages[i] || {};
     var action = String(message.action || 'progress');
-    html += '<div class="mcp-entry-wrap">';
-    html += '<div class="mcp-entry mcp-' + _agentPanelEsc(action) + '">';
-    html += '<span class="mcp-icon">' + (icons[action] || '\u25CF') + '</span>';
-    html += '<span class="mcp-text">' + _agentPanelEsc(message.message || action) + '</span>';
-    html += '<span class="mcp-time">' + _agentPanelEsc(_agentPanelTimeAgo(message.timestamp)) + '</span>';
+    var direction = _agentPanelMessageDirection(agent, message);
+    var senderKind = _agentPanelMessageSenderKind(agent, message, direction);
+    var body = String(message.message || action || '');
+    var anchorKey = _agentPanelMessageKey(message, i);
+    html += '<div class="agent-panel-message-card agent-panel-message-' + _agentPanelAttr(direction)
+      + '" data-agent-panel-anchor="' + _agentPanelAttr(anchorKey) + '">';
+    html += '<div class="agent-panel-message-card-header">';
+    html += '<div class="agent-panel-message-meta">';
+    html += '<span class="agent-panel-message-sender">'
+      + _agentPanelEsc(_agentPanelMessageKindLabel(senderKind)) + '</span>';
+    html += '<span class="agent-panel-message-direction">'
+      + _agentPanelEsc(direction === 'in' ? 'In' : 'Out') + '</span>';
+    html += '<span class="agent-panel-message-action">'
+      + _agentPanelEsc(_agentPanelMessageActionLabel(action)) + '</span>';
     html += '</div>';
+    html += '<span class="agent-panel-message-time">'
+      + _agentPanelEsc(_agentPanelTimestamp(message.timestamp)) + '</span>';
+    html += '</div>';
+    html += '<div class="agent-panel-message-body">' + _agentPanelEsc(body) + '</div>';
     html += '</div>';
   }
   html += '</div>';
@@ -922,17 +1029,17 @@ function renderAgentPanel() {
   if (!el) return;
 
   var panelStateOptions = {
-    scrollSelectors: ['.agent-panel-content'],
+    scrollSelectors: ['.agent-panel-content', '.agent-panel-message-list'],
     capture: function(snapshot, root) {
       if (!snapshot || !root || typeof root.querySelector !== 'function') return;
       snapshot.anchor = _agentPanelCaptureScrollAnchor(
-        root.querySelector('.agent-panel-content')
+        _agentPanelScrollContainer(root)
       );
     },
     restore: function(root, snapshot) {
       if (!root || !snapshot || typeof root.querySelector !== 'function') return;
       _agentPanelRestoreScrollAnchor(
-        root.querySelector('.agent-panel-content'),
+        _agentPanelScrollContainer(root),
         snapshot.anchor
       );
     },

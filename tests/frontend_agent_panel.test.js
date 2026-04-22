@@ -99,7 +99,10 @@ test('renderAgentPanel shows an empty state when no grid item is focused', () =>
   assert.match(panel.innerHTML, /Select an agent from the grid to see its context\./);
   assert.equal(captureCalls.length, 1);
   assert.equal(restoreCalls.length, 1);
-  assert.deepEqual(JSON.parse(JSON.stringify(captureCalls[0].opts.scrollSelectors)), ['.agent-panel-content']);
+  assert.deepEqual(JSON.parse(JSON.stringify(captureCalls[0].opts.scrollSelectors)), [
+    '.agent-panel-content',
+    '.agent-panel-message-list',
+  ]);
 });
 
 test('renderAgentPanel renders architect, engineer, worker, and terminal panels', () => {
@@ -472,6 +475,54 @@ test('architect panel filters decisions, hired engineers, and messages to the fo
   context.agentPanelSelectTab('messages');
   assert.match(panel.innerHTML, /Need a follow-up worker/);
   assert.match(panel.innerHTML, /Reply composer lands in a later task\./);
+});
+
+test('architect Messages tab renders full-height message cards instead of the compact MCP preview', () => {
+  const { context, panel } = createHarness();
+  const longBody = 'Line one with enough detail to be useful to the operator.\n'
+    + 'Line two remains visible instead of being collapsed into a preview snippet.';
+  context.state.agents = {
+    'arch-1': {
+      id: 'arch-1',
+      name: 'Planner',
+      kind: 'architect',
+      group: 'alpha',
+      cell_type: 'agent',
+      mcp_messages: [
+        {
+          id: 'msg-in',
+          action: 'engineer_message_architect',
+          message: longBody,
+          timestamp: 1712345678,
+          sender_kind: 'engineer',
+          direction: 'received',
+        },
+        {
+          id: 'msg-out',
+          action: 'architect_reply',
+          message: 'Thanks, keep going with the full plan.',
+          timestamp: 1712345688,
+          sender_kind: 'architect',
+          direction: 'sent',
+        },
+      ],
+    },
+  };
+  context.focusedItemId = 'arch-1';
+
+  context.agentPanelSelectTab('messages');
+
+  assert.match(panel.innerHTML, /agent-panel-messages-tab/);
+  assert.match(panel.innerHTML, /agent-panel-message-list/);
+  assert.match(panel.innerHTML, /agent-panel-message-card/);
+  assert.match(panel.innerHTML, /Engineer/);
+  assert.match(panel.innerHTML, /In/);
+  assert.match(panel.innerHTML, /Architect/);
+  assert.match(panel.innerHTML, /Out/);
+  assert.match(panel.innerHTML, /2024-04-05 19:34:38 UTC/);
+  assert.ok(panel.innerHTML.includes(longBody));
+  assert.doesNotMatch(panel.innerHTML, /class="mcp-log"/);
+  assert.doesNotMatch(panel.innerHTML, /class="mcp-text"/);
 });
 
 test('focused architect decision interactions rerender the agent panel instead of the legacy weaver surface', () => {

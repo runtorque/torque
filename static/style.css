@@ -5939,6 +5939,12 @@ body.diff-view-open #ctx-menu {
   overflow-y: auto;
   padding: 8px;
 }
+.agent-panel-panel[data-agent-panel-tab="messages"] .agent-panel-content {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
 .engineers-roster {
   display: flex;
   flex-direction: column;
@@ -6436,6 +6442,114 @@ body.diff-view-open #ctx-menu {
 .agent-panel-worklog-status {
   margin-top: 6px;
   line-height: 1.45;
+}
+
+.agent-panel-messages-tab {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+}
+.agent-panel-message-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-cell);
+  flex-shrink: 0;
+}
+.agent-panel-message-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.agent-panel-message-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.agent-panel-message-count,
+.agent-panel-message-note {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+.agent-panel-message-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px;
+  scrollbar-width: thin;
+}
+.agent-panel-message-card {
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-left: 2px solid color-mix(in srgb, var(--text-dim) 45%, var(--border));
+  border-radius: var(--radius);
+  background: var(--bg-cell);
+  flex-shrink: 0;
+}
+.agent-panel-message-in {
+  border-left-color: color-mix(in srgb, var(--amber) 58%, var(--border));
+}
+.agent-panel-message-out {
+  border-left-color: color-mix(in srgb, var(--accent) 58%, var(--border));
+}
+.agent-panel-message-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.agent-panel-message-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+.agent-panel-message-sender,
+.agent-panel-message-direction,
+.agent-panel-message-action {
+  font-size: 9px;
+  line-height: 1.4;
+}
+.agent-panel-message-sender {
+  font-weight: 700;
+  color: var(--text);
+}
+.agent-panel-message-direction {
+  color: var(--accent);
+  background: rgba(88,166,255,.1);
+  border: 1px solid rgba(88,166,255,.18);
+  border-radius: 999px;
+  padding: 0 5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.agent-panel-message-action,
+.agent-panel-message-time {
+  color: var(--text-dim);
+}
+.agent-panel-message-time {
+  font-size: 9px;
+  flex-shrink: 0;
+  text-align: right;
+}
+.agent-panel-message-body {
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 /* Journal entries */
