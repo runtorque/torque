@@ -5,6 +5,13 @@ agent:
   name_prefix: fix
   tab_color: "#f85149"
 
+review_required_above_loc: 150
+
+transitions:
+  - action: feature/review
+    when: fix diff exceeded review gate threshold
+    status: "On Review"
+
 prompt: |
   {% if loom.context.is_clean %}
   You are diagnosing and fixing a bug. This is a quick, targeted fix — no review pipeline. Focus on understanding the root cause before writing any code.
