@@ -1438,13 +1438,16 @@ def _format_injected_mcp_message_prompt(
         blocks.append(anchor)
     blocks.append(f"## {header}")
     body = str(message or "").strip("\n")
+    if anchor and (body == anchor or body.startswith(anchor + "\n")):
+        body = body[len(anchor):].lstrip("\n")
     if body:
         blocks.append(body)
     blocks.append(
         f'Reply with: {reply_tool}(message_id="{message_id}", '
         'message="your response")'
     )
-    return "\n" + "\n\n".join(blocks) + "\n---\n"
+    prefix = "" if anchor else "\n"
+    return prefix + "\n\n".join(blocks) + "\n---\n"
 
 
 def _mark_cross_kind_message_delivery(cell, message_id: str, *,
@@ -1494,12 +1497,19 @@ async def _replay_buffered_cross_kind_messages(
             str(getattr(sender, "kind", "") or "").strip()
             or str(entry.get("sender_kind", "") or "").strip()
         )
+        recipient_anchor = ""
+        if (
+            str(getattr(target, "kind", "") or "").strip() == "engineer"
+            and sender_kind == "architect"
+        ):
+            recipient_anchor = agent_identity_anchor(target)
         formatted = _format_injected_mcp_message_prompt(
             message=message_text,
             sender_name=sender_name,
             sender_kind=sender_kind,
             recipient_kind=str(getattr(target, "kind", "") or ""),
             message_id=message_id,
+            recipient_anchor=recipient_anchor,
         )
         try:
             if hasattr(bridge, "prime_input_ready"):

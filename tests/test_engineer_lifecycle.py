@@ -640,11 +640,12 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         engineer.status = "stopped"
         engineer.dismissed_at = 123
         engineer.agent_type = "codex"
+        identity_anchor = f"You are Alice (engineer, id={engineer.id})."
         engineer.mcp_messages.insert(0, {
             "id": "msg-buffered",
             "thread_id": "msg-buffered",
             "action": "architect_message",
-            "message": "Resume with this context.",
+            "message": identity_anchor + "\n\nResume with this context.",
             "timestamp": 1.0,
             "sender_id": architect.id,
             "sender_kind": "architect",
@@ -695,7 +696,11 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(bridge.create_session_calls), 1)
         self.assertEqual(result["replayed_messages"], 1)
         self.assertEqual(len(bridge.sent_text), 1)
-        self.assertIn("Resume with this context.", bridge.sent_text[0][1])
+        replayed_prompt = bridge.sent_text[0][1]
+        self.assertTrue(replayed_prompt.startswith(identity_anchor))
+        self.assertIn("## Message from Productmind (architect)", replayed_prompt)
+        self.assertIn("Resume with this context.", replayed_prompt)
+        self.assertEqual(replayed_prompt.count(identity_anchor), 1)
         self.assertTrue(engineer.mcp_messages[0]["delivered"])
         self.assertEqual(panel_events[0][0], "engineer_rehired")
 

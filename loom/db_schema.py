@@ -331,8 +331,6 @@ CREATE TABLE IF NOT EXISTS weaver_journal (
 );
 CREATE INDEX IF NOT EXISTS idx_weaver_journal_group
     ON weaver_journal(group_name, id DESC);
-CREATE INDEX IF NOT EXISTS idx_weaver_journal_group_author
-    ON weaver_journal(group_name, author_cell_id, id DESC);
 
 CREATE TABLE IF NOT EXISTS playbook_candidates (
     id                     TEXT PRIMARY KEY,
