@@ -39,6 +39,15 @@ function _agentPanelKind(agent) {
   return 'worker';
 }
 
+function _agentPanelKindBadge(kind) {
+  var label = String(kind || '').trim();
+  var cls = 'engineer-row-kind';
+  if (label === 'architect' || label === 'engineer' || label === 'worker') {
+    cls += ' engineer-row-kind-' + label;
+  }
+  return '<span class="' + cls + '">' + _agentPanelEsc(label) + '</span>';
+}
+
 function _resolveFocusedAgent() {
   if (typeof focusedItemId === 'undefined' || !focusedItemId) return null;
   if (!state || !state.agents) return null;
@@ -726,7 +735,7 @@ function _agentPanelArchitectHiredEngineers(agent) {
       html += '<div class="engineer-row architect-roster-level-1">';
       html += '<div class="engineer-row-main">';
       html += '<span class="engineer-row-name">' + _agentPanelEsc(engineer.name || engineer.id || '') + '</span>';
-      html += '<span class="engineer-row-kind">engineer</span>';
+      html += _agentPanelKindBadge('engineer');
       html += '</div></div>';
     }
   }
@@ -1170,7 +1179,7 @@ function _agentPanelLegacyRenderWorkerRows(workers, levelClass) {
     html += '<div class="engineer-row ' + levelClass + '">';
     html += '<div class="engineer-row-main">';
     html += '<span class="engineer-row-name">' + _esc(worker.name || worker.id || '') + '</span>';
-    html += '<span class="engineer-row-kind">worker</span>';
+    html += _agentPanelKindBadge('worker');
     if (worker.slug) html += '<span class="engineer-row-slug">' + _esc(worker.slug) + '</span>';
     html += '</div>';
     html += '<div class="engineer-row-meta">';
@@ -1189,7 +1198,7 @@ function _agentPanelLegacyRenderEngineerTreeRows(group, engineers, levelClass, w
     html += '<div class="engineer-row ' + levelClass + '">';
     html += '<div class="engineer-row-main">';
     html += '<span class="engineer-row-name">' + _esc(engineer.name || engineer.id || '') + '</span>';
-    html += '<span class="engineer-row-kind">engineer</span>';
+    html += _agentPanelKindBadge('engineer');
     if (engineer.slug) html += '<span class="engineer-row-slug">' + _esc(engineer.slug) + '</span>';
     html += '</div>';
     html += '<div class="engineer-row-meta">';
@@ -1308,7 +1317,7 @@ function _agentPanelLegacyRenderArchitectRoster(group) {
     html += '<div class="engineer-row architect-parent-row">';
     html += '<div class="engineer-row-main">';
     html += '<span class="engineer-row-name">' + _esc(architect.name || architect.id || '') + '</span>';
-    html += '<span class="engineer-row-kind">architect</span>';
+    html += _agentPanelKindBadge('architect');
     if (architect.slug) {
       html += '<span class="engineer-row-slug">' + _esc(architect.slug) + '</span>';
     }

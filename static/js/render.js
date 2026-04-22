@@ -1294,11 +1294,11 @@ function renderAgentCell(a, options) {
   if (a.status === 'stopped') cls.push('stopped');
   const _isArchitect = (a.kind || '') === 'architect';
   const _isEngineer = (a.kind || '') === 'engineer';
+  const _isWorker = (a.kind || '') === 'worker';
   const _isDismissed = _isDismissedEngineer(a);
   // Check if this agent is the weaver for its group
   const _gs = (state.group_settings || {})[a.group];
   const _isWeaver = _gs && _gs.weaver_agent_id === a.id;
-  if (_isWeaver) cls.push('weaver');
   // Check if weaver is awaiting human input
   const _weaverWs = _isWeaver && state.weaver_settings
     ? state.weaver_settings[a.group] : null;
@@ -1311,9 +1311,6 @@ function renderAgentCell(a, options) {
   if (!_agentDigestSettings && _isDigestRecipient && _isWeaver) {
     _digestPaused = _weaverPaused;
   }
-  if (_weaverAsking) cls.push('weaver-asking');
-  if (_isDigestRecipient) cls.push(_digestPaused ? 'weaver-paused' : 'weaver-running');
-  else if (_isWeaver) cls.push(_weaverPaused ? 'weaver-paused' : 'weaver-running');
   const visibleAgentById = options.visibleAgentById || null;
   const visibleEngineerIds = options.visibleEngineerIds || null;
   const ownerId = _workerOwnerEngineerId(a, visibleAgentById);
@@ -1383,6 +1380,8 @@ function renderAgentCell(a, options) {
   } else if (_isEngineer) {
     if (_isDismissed) h += `<div class="cell-dismissed-badge" title="Dismissed engineer">\u23F8 dismissed</div>`;
     else h += `<div class="cell-engineer-badge">engineer</div>`;
+  } else if (_isWorker) {
+    h += `<div class="cell-worker-badge">worker</div>`;
   }
   if (_weaverAsking) {
     h += `<div class="cell-weaver-ask" title="${esc(_weaverWs.pending_question)}">? awaiting input</div>`;

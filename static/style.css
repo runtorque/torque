@@ -627,43 +627,6 @@ body.runtime-embedded .terminal-empty {
 .cell.engineer.dismissed .cell-name {
   color: var(--text-dim);
 }
-.cell.weaver {
-  --weaver-chrome: transparent;
-  --weaver-edge-shadow: none;
-  --weaver-active-glow: none;
-  border-left: 3px solid transparent;
-  border-left-color: var(--weaver-chrome);
-  box-shadow: var(--weaver-edge-shadow);
-}
-.cell.weaver.weaver-running {
-  --weaver-chrome: var(--green);
-  --weaver-edge-shadow: inset 3px 0 0 rgba(63, 185, 80, 0.16);
-  --weaver-active-glow: 0 0 10px rgba(63, 185, 80, 0.2);
-}
-.cell.weaver.weaver-paused {
-  --weaver-chrome: var(--amber);
-  --weaver-edge-shadow: inset 3px 0 0 rgba(210, 153, 34, 0.18);
-  --weaver-active-glow: 0 0 10px rgba(210, 153, 34, 0.22);
-}
-.cell.weaver.selected {
-  border-color: var(--weaver-chrome);
-}
-.cell.weaver.focused {
-  outline-color: var(--weaver-chrome);
-}
-.cell.weaver.selected.active {
-  box-shadow: var(--weaver-active-glow), var(--weaver-edge-shadow);
-}
-.cell.weaver-asking {
-  --weaver-chrome: var(--amber);
-  --weaver-edge-shadow: inset 3px 0 0 rgba(210, 153, 34, 0.18);
-  --weaver-active-glow: 0 0 10px rgba(210, 153, 34, 0.22);
-  animation: weaver-pulse 2s ease-in-out infinite;
-}
-@keyframes weaver-pulse {
-  0%, 100% { box-shadow: var(--weaver-edge-shadow); }
-  50% { box-shadow: var(--weaver-edge-shadow), 0 0 8px rgba(210, 153, 34, 0.3); }
-}
 .cell-weaver-ask {
   font-size: 8px;
   color: var(--amber);
@@ -947,6 +910,21 @@ body.runtime-embedded .terminal-empty {
   color: #1f1300;
   background: color-mix(in srgb, var(--amber) 82%, white);
   border: 1px solid color-mix(in srgb, var(--amber) 58%, transparent);
+  border-radius: 999px;
+  padding: 0 4px;
+  line-height: 1.4;
+}
+.cell-worker-badge {
+  position: absolute;
+  bottom: 2px;
+  right: 3px;
+  font-size: 7px;
+  letter-spacing: .03em;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--green);
+  background: rgba(63, 185, 80, 0.12);
+  border: 1px solid rgba(63, 185, 80, 0.24);
   border-radius: 999px;
   padding: 0 4px;
   line-height: 1.4;
@@ -5934,6 +5912,11 @@ body.diff-view-open #ctx-menu {
   border: 1px solid rgba(88, 166, 255, 0.24);
   border-radius: 999px;
   padding: 1px 5px;
+}
+.engineer-row-kind-worker {
+  color: var(--green);
+  background: rgba(63, 185, 80, 0.12);
+  border-color: rgba(63, 185, 80, 0.24);
 }
 .engineer-row-slug {
   font-size: 9px;
