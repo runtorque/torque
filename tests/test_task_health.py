@@ -115,6 +115,40 @@ class TaskHealthTests(unittest.TestCase):
         )
         self.assertEqual(snapshots["task-1"].details["silence_secs"], 11 * 60)
 
+    def test_zero_progress_heartbeat_only_agent_uses_task_clock_for_health(self):
+        base = 70_000
+        task = self.state_mod.BoardTask(
+            id="task-1",
+            task="Never emitted progress",
+            group="g",
+            lane="In Progress",
+            agent_id="agent-1",
+            updated_at=_iso(base),
+        )
+        agents = {
+            "agent-1": self.state_mod.AgentCell(
+                id="agent-1",
+                name="Worker",
+                group="g",
+                cell_type="agent",
+                last_progress_at=0,
+                last_heartbeat_at=base + (10 * 60),
+            )
+        }
+
+        snapshots = self.task_health_mod.compute_task_health(
+            {"task-1": task},
+            agents,
+            now_ts=base + (11 * 60),
+        )
+
+        self.assertEqual(snapshots["task-1"].state, "idle-risk")
+        self.assertEqual(
+            snapshots["task-1"].details["reasons"],
+            ["progress_silence_warning"],
+        )
+        self.assertEqual(snapshots["task-1"].details["silence_secs"], 11 * 60)
+
     def test_token_zero_after_dispatch_is_caught_by_existing_silence_rule(self):
         base = 60_000
         task = self.state_mod.BoardTask(

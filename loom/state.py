@@ -440,15 +440,23 @@ class AgentCell:
     pending_weaver_message: bool = False  # agent has unread message from weaver
 
     def __post_init__(self):
-        """Normalize legacy activity clocks loaded from older snapshots."""
+        """Normalize legacy activity clocks loaded from older snapshots.
+
+        Only infer progress from legacy mixed clocks when neither split clock
+        exists. Once ``last_heartbeat_at`` is present, a zero
+        ``last_progress_at`` is meaningful and must stay zero across reloads.
+        """
+        progress = _safe_float(self.last_progress_at)
+        heartbeat = _safe_float(self.last_heartbeat_at)
         legacy = max(
             _safe_float(self.last_activity_at),
             _safe_float(self.last_event_at),
         )
-        if not self.last_progress_at and legacy:
+        if not progress and not heartbeat and legacy:
             self.last_progress_at = legacy
-        if not self.last_heartbeat_at and legacy:
             self.last_heartbeat_at = legacy
+        elif progress and not heartbeat:
+            self.last_heartbeat_at = progress
         self._sync_activity_alias()
 
     def _sync_activity_alias(self) -> bool:

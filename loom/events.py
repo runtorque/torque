@@ -2,6 +2,7 @@
 
 import asyncio
 import time
+from datetime import datetime
 from collections import deque
 from dataclasses import asdict
 
@@ -20,6 +21,39 @@ PROGRESS_EVENT_TYPES = {
     "progress",
     "cost_update",
 }
+
+
+def _parse_iso_ts(value: str) -> float:
+    if not value:
+        return 0.0
+    try:
+        return datetime.fromisoformat(str(value)).timestamp()
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _task_progress_anchor_ts(task) -> float:
+    if not task:
+        return 0.0
+    timestamps = [
+        _parse_iso_ts(getattr(task, "updated_at", "") or ""),
+        _parse_iso_ts(getattr(task, "created_at", "") or ""),
+    ]
+    for msg in getattr(task, "messages", []) or []:
+        ts = msg.get("timestamp") if isinstance(msg, dict) else None
+        if isinstance(ts, (int, float)):
+            timestamps.append(float(ts))
+    timestamps = [ts for ts in timestamps if ts]
+    return max(timestamps) if timestamps else 0.0
+
+
+def _agent_progress_ts(state, cell) -> float:
+    progress_at = float(getattr(cell, "last_progress_at", 0.0) or 0.0)
+    if progress_at:
+        return progress_at
+    task_id = str(getattr(cell, "current_task_id", "") or "").strip()
+    task = state.board_tasks.get(task_id) if task_id else None
+    return _task_progress_anchor_ts(task)
 
 
 class PanelEventLog:
@@ -488,13 +522,9 @@ async def health_check(state, event_log: EventLog, event_bus: EventBus,
         for cell in state.cells_with_awareness():
             if cell.status != "running":
                 continue
-            last_progress_at = float(
-                getattr(cell, "last_progress_at", 0.0)
-                or getattr(cell, "last_event_at", 0.0)
-                or 0.0
-            )
+            last_progress_at = _agent_progress_ts(state, cell)
             if last_progress_at == 0.0:
-                continue  # never received an event
+                continue  # no progress signal or task anchor yet
 
             # Fallback: unlink idle agent from post-derive parent task
             # (catches cases where the activity_change event was missed)

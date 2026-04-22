@@ -1442,3 +1442,48 @@ class AgentCellActivityClockTests(unittest.TestCase):
         self.assertEqual(cell.last_heartbeat_at, 200.0)
         self.assertEqual(cell.last_activity_at, 200.0)
         self.assertEqual(cell.last_event_at, 200.0)
+
+    def test_heartbeat_only_split_clock_survives_construction_and_reload(self):
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            last_progress_at=0.0,
+            last_heartbeat_at=200.0,
+            last_activity_at=200.0,
+        )
+
+        self.assertEqual(cell.last_progress_at, 0.0)
+        self.assertEqual(cell.last_heartbeat_at, 200.0)
+        self.assertEqual(cell.last_activity_at, 200.0)
+
+        from loom.db import LoomDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = LoomDB(Path(tmp.name) / "loom.db")
+        db.init()
+        self.addCleanup(db.close)
+        db.save_groups({"g": [cell.id]}, {"g": "g"})
+        db.save_group_members("g", [cell.id])
+        db.save_agent(cell)
+
+        state = self.state_mod.MatrixState(db=db)
+        state.load()
+
+        loaded = state.agents[cell.id]
+        self.assertEqual(loaded.last_progress_at, 0.0)
+        self.assertEqual(loaded.last_heartbeat_at, 200.0)
+        self.assertEqual(loaded.last_activity_at, 200.0)
+
+    def test_legacy_mixed_clock_still_backfills_split_fields(self):
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            last_event_at=123.0,
+        )
+
+        self.assertEqual(cell.last_progress_at, 123.0)
+        self.assertEqual(cell.last_heartbeat_at, 123.0)
+        self.assertEqual(cell.last_activity_at, 123.0)

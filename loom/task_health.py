@@ -286,13 +286,8 @@ def _task_last_activity_ts(task: Any, agent: Any | None) -> float | None:
         ts = msg.get("timestamp")
         if isinstance(ts, (int, float)):
             timestamps.append(float(ts))
-    if agent:
-        progress_at = (
-            getattr(agent, "last_progress_at", 0)
-            or getattr(agent, "last_event_at", 0)
-        )
-        if progress_at:
-            timestamps.append(float(progress_at))
+    if agent and getattr(agent, "last_progress_at", 0):
+        timestamps.append(float(agent.last_progress_at))
     timestamps = [ts for ts in timestamps if ts]
     return max(timestamps) if timestamps else None
 

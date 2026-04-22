@@ -1434,13 +1434,8 @@ def _health_summary(health_state: str, *, details: dict, agent=None,
             (details or {}).get("last_progress_at")
             or (details or {}).get("last_activity_at")
         )
-    if last_activity_ts is None and agent:
-        progress_at = (
-            getattr(agent, "last_progress_at", 0)
-            or getattr(agent, "last_event_at", 0)
-        )
-        if progress_at:
-            last_activity_ts = float(progress_at)
+    if last_activity_ts is None and agent and getattr(agent, "last_progress_at", 0):
+        last_activity_ts = float(getattr(agent, "last_progress_at", 0) or 0)
     if silence_secs is None and last_activity_ts is not None:
         silence_secs = max(0, int(now_ts - last_activity_ts))
 
