@@ -614,6 +614,9 @@ body.runtime-embedded .terminal-empty {
   width: 100%;
 }
 .agent-section-architect-column {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
   width: var(--agent-architect-column-width);
   min-width: 0;
 }
@@ -780,12 +783,6 @@ body.runtime-embedded .terminal-empty {
   background: transparent;
   border-color: var(--border);
 }
-.agent-grid-new-architect-row {
-  display: flex;
-  justify-content: flex-start;
-  padding-top: 2px;
-}
-
 /* ------------------------------------------------------------------ */
 /* Menu popovers                                                       */
 /* ------------------------------------------------------------------ */

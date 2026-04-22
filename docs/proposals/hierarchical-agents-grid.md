@@ -172,7 +172,7 @@ Note the left column of the User section now extends vertically to accommodate b
 
 The grid's creation affordances align with the ownership rules:
 
-- **`+ New Architect`** (ghost card at the bottom of the architect column): creates a new architect at group scope. Opens the existing architect-creation modal.
+- **`+ New Architect`** (ghost card inside the User section's architect column, directly below the User card): creates a new architect at group scope. Opens the existing architect-creation modal.
 - **`+ New Engineer`** (ghost card at the bottom of each section's engineer-row stack): creates an engineer hired by that specific architect, or for the User section, a user-created engineer. The architect context is implicit from the section the ghost card sits in — no more disambiguation modal step.
 - **Worker creation remains engineer-driven**: an engineer creates workers attached to itself via `loom ai derive` or engineer MCP surfaces. The grid does not expose a direct `+ New Worker` ghost on engineer rows in v1. Rationale: per the kinds-refactor invariants, workers are engineer-dispatched; surfacing a grid ghost would invite the wrong mental model ("users create workers for engineers"). We may revisit this in a follow-up if engineers want a manual worker-spawn affordance.
 - **Detached worker creation**: a dedicated `+ New Worker` ghost card lives in the User section's loose-workers strip. This is the only path through which a user creates a worker directly; it always produces a detached (no-engineer) worker. Users cannot create a worker under an engineer they did not hire, and cannot create a worker under an engineer at all — the engineer owns that surface.
