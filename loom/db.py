@@ -69,6 +69,7 @@ _AGENT_PERSISTED_COLS = [
     "last_progress_at", "last_heartbeat_at", "last_activity_at",
     "session_resume", "idle_timeout",
     "tasks_dispatched",
+    "queue_empty_emitted",
     "kind", "role", "owner_engineer_id", "hired_by_architect_id",
     "dismissed_at", "persistent",
 ]
@@ -139,6 +140,7 @@ def _serialize_agent_cell(cell):
         int(d.get("session_resume", True)),
         d.get("idle_timeout", 0),
         d.get("tasks_dispatched", 0),
+        int(d.get("queue_empty_emitted", True)),
         d.get("kind", ""),
         role,
         owner_engineer_id,
@@ -269,6 +271,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self._conn = sqlite3.connect(str(self.db_path))
         initialize_database(self._conn, self.backfill_agent_history)
         self._ensure_board_task_engineer_provenance_column()
+        self._ensure_agent_queue_empty_emitted_column()
         self._migrate_agent_activity_timestamps_if_needed()
         self._refuse_unmigrated_legacy_rows_if_needed()
         self._migrate_kinds_schema_if_needed()
@@ -2463,6 +2466,9 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 d.get("worktree_merge_squash", 1))
             d["persistent"] = bool(d.get("persistent", 0))
             d["session_resume"] = bool(d.get("session_resume", 1))
+            d["queue_empty_emitted"] = bool(
+                d.get("queue_empty_emitted", 1)
+            )
             d["last_progress_at"] = float(d.get("last_progress_at", 0) or 0)
             d["last_heartbeat_at"] = float(d.get("last_heartbeat_at", 0) or 0)
             d["last_activity_at"] = max(
@@ -2705,6 +2711,16 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                     "REAL NOT NULL DEFAULT 0"
                 )
                 self._conn.commit()
+
+    def _ensure_agent_queue_empty_emitted_column(self) -> None:
+        try:
+            self._conn.execute("SELECT queue_empty_emitted FROM agents LIMIT 0")
+        except sqlite3.OperationalError:
+            self._conn.execute(
+                "ALTER TABLE agents ADD COLUMN queue_empty_emitted "
+                "INTEGER NOT NULL DEFAULT 1"
+            )
+            self._conn.commit()
 
     def _migrate_agent_activity_timestamps_if_needed(self) -> None:
         """Backfill split progress/heartbeat clocks from legacy activity."""

@@ -21,6 +21,8 @@ PROGRESS_EVENT_TYPES = {
     "progress",
     "cost_update",
 }
+ENGINEER_QUEUE_EMPTY_DEBOUNCE_SECS = 120
+ENGINEER_QUEUE_ACTIVE_TASK_LANES = {"To Do", "In Progress"}
 
 
 def _parse_iso_ts(value: str) -> float:
@@ -54,6 +56,127 @@ def _agent_progress_ts(state, cell) -> float:
     task_id = str(getattr(cell, "current_task_id", "") or "").strip()
     task = state.board_tasks.get(task_id) if task_id else None
     return _task_progress_anchor_ts(task)
+
+
+def _cell_kind(cell) -> str:
+    return str(getattr(cell, "kind", "") or "").strip()
+
+
+def _effective_owner_engineer_id(cell) -> str:
+    owner_id = str(getattr(cell, "owner_engineer_id", "") or "").strip()
+    if owner_id:
+        return owner_id
+    return str(getattr(cell, "created_by_weaver_id", "") or "").strip()
+
+
+def engineer_has_queue_work(state, engineer) -> bool:
+    """Return whether an engineer still owns active tasks or live workers."""
+    engineer_id = str(getattr(engineer, "id", "") or "").strip()
+    if not engineer_id:
+        return False
+
+    for task in getattr(state, "board_tasks", {}).values():
+        assigned_id = str(
+            getattr(task, "assigned_engineer_id", "") or ""
+        ).strip()
+        lane = str(getattr(task, "lane", "") or "").strip()
+        if (
+                assigned_id == engineer_id
+                and lane in ENGINEER_QUEUE_ACTIVE_TASK_LANES
+        ):
+            return True
+
+    for cell in getattr(state, "agents", {}).values():
+        if _cell_kind(cell) != "worker":
+            continue
+        if str(getattr(cell, "status", "") or "").strip() == "stopped":
+            continue
+        if _effective_owner_engineer_id(cell) == engineer_id:
+            return True
+
+    return False
+
+
+def _engineer_queue_idle_ready(engineer, now: float) -> bool:
+    activity = str(getattr(engineer, "activity", "") or "").strip()
+    if activity not in {"", "waiting"}:
+        return False
+    last_progress_at = float(getattr(engineer, "last_progress_at", 0.0) or 0.0)
+    if last_progress_at <= 0:
+        return False
+    return now - last_progress_at >= ENGINEER_QUEUE_EMPTY_DEBOUNCE_SECS
+
+
+def _engineer_queue_empty_fire_ready(engineer, *, now: float,
+                                     observed_empty_at: float) -> bool:
+    """Return whether idle+empty have remained stable for the debounce."""
+    if not _engineer_queue_idle_ready(engineer, now):
+        return False
+    last_progress_at = float(getattr(engineer, "last_progress_at", 0.0) or 0.0)
+    stable_since = max(float(observed_empty_at or 0.0), last_progress_at)
+    return now - stable_since >= ENGINEER_QUEUE_EMPTY_DEBOUNCE_SECS
+
+
+def check_engineer_queue_empty(state, event_bus: "EventBus",
+                               now: float | None = None) -> bool:
+    """Emit one engineer_queue_empty event per work→empty transition."""
+    now = time.time() if now is None else float(now)
+    empty_since = getattr(state, "_engineer_queue_empty_since", None)
+    if empty_since is None:
+        empty_since = {}
+        setattr(state, "_engineer_queue_empty_since", empty_since)
+
+    changed = False
+    for engineer in list(getattr(state, "agents", {}).values()):
+        if _cell_kind(engineer) != "engineer":
+            continue
+        engineer_id = str(getattr(engineer, "id", "") or "").strip()
+        if not engineer_id:
+            continue
+
+        if engineer_has_queue_work(state, engineer):
+            empty_since.pop(engineer_id, None)
+            if bool(getattr(engineer, "queue_empty_emitted", True)):
+                engineer.queue_empty_emitted = False
+                state._db_save_agent(engineer)
+                state._emit_agent(engineer)
+                changed = True
+            continue
+
+        activity = str(getattr(engineer, "activity", "") or "").strip()
+        last_progress_at = float(getattr(engineer, "last_progress_at", 0.0) or 0.0)
+        if activity not in {"", "waiting"} or last_progress_at <= 0:
+            empty_since.pop(engineer_id, None)
+            continue
+
+        observed_at = empty_since.setdefault(engineer_id, now)
+        if not _engineer_queue_empty_fire_ready(
+                engineer,
+                now=now,
+                observed_empty_at=observed_at,
+        ):
+            continue
+        if bool(getattr(engineer, "queue_empty_emitted", True)):
+            continue
+
+        panel_log = getattr(state, "panel_log", None) or getattr(
+            event_bus, "_panel_log", None)
+        if not panel_log:
+            continue
+        pe = panel_log.append(
+            kind="engineer_queue_empty",
+            cell_id=engineer.id,
+            agent_name=engineer.name,
+            group=engineer.group,
+            message="",
+        )
+        state._emit("event_append", **pe)
+        engineer.queue_empty_emitted = True
+        state._db_save_agent(engineer)
+        state._emit_agent(engineer)
+        changed = True
+
+    return changed
 
 
 class PanelEventLog:
@@ -582,6 +705,9 @@ async def health_check(state, event_log: EventLog, event_bus: EventBus,
                 old_task_health,
                 notifier,
             )
+
+        if check_engineer_queue_empty(state, event_bus, now=now):
+            changed = True
 
         if changed:
             await state.broadcast()

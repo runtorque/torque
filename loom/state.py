@@ -108,6 +108,7 @@ _ARCHITECT_DIGEST_DEFAULT_ENABLED_EVENTS = [
     "engineer_dismissed",
     "engineer_rehired",
     "workflow_breach",
+    "engineer_queue_empty",
 ]
 _WEAVER_ESCALATION_STYLES = {
     "ask_early",
@@ -421,6 +422,7 @@ class AgentCell:
     hired_by_architect_id: str = ""  # architect provenance for hires
     dismissed_at: int = 0  # unix timestamp when an engineer is paused/dismissed
     persistent: bool = False  # architect/engineer survive across sessions
+    queue_empty_emitted: bool = True  # suppress duplicate engineer queue-empty events
     current_task_id: str = ""  # most recently dispatched task (ephemeral)
     session_resume: bool = True  # whether relaunch should resume the prior session
     idle_timeout: int = 0  # per-agent idle timeout in minutes (0=disable)
@@ -885,6 +887,7 @@ class MatrixState:
         # weaver streams when an agent_upsert only changes ephemeral
         # fields (activity, path, last_event_at, etc.).
         self._agent_weaver_fingerprints: dict[str, tuple] = {}
+        self._engineer_queue_empty_since: dict[str, float] = {}
         # Deferred weaver-stream recompute. `broadcast()` queues affected
         # groups into `_weaver_recompute_pending` and spawns a single
         # worker task that prefills branch-existence, computes each
@@ -898,11 +901,68 @@ class MatrixState:
 
     def _emit(self, op: str, **kwargs):
         """Accumulate a delta operation for the next broadcast."""
+        self._maybe_clear_engineer_queue_empty_from_delta(op, kwargs)
         self._delta_ops.append({"op": op, **kwargs})
 
     def _emit_agent(self, cell: AgentCell):
         """Emit an agent_upsert delta with the full agent dict."""
         self._emit("agent_upsert", **asdict(cell))
+
+    def _clear_engineer_queue_empty_emitted(self, engineer_id: str) -> bool:
+        """Clear the one-shot queue-empty gate when an engineer picks up work."""
+        engineer_id = str(engineer_id or "").strip()
+        if not engineer_id:
+            return False
+        engineer = self.agents.get(engineer_id)
+        if (
+                not engineer
+                or str(getattr(engineer, "kind", "") or "").strip() != "engineer"
+                or not bool(getattr(engineer, "queue_empty_emitted", True))
+        ):
+            return False
+        engineer.queue_empty_emitted = False
+        self._engineer_queue_empty_since.pop(engineer.id, None)
+        self._db_save_agent(engineer)
+        return True
+
+    def _maybe_clear_engineer_queue_empty_from_delta(
+        self,
+        op: str,
+        payload: dict,
+    ) -> None:
+        """Observe central task/worker upserts and reopen queue-empty cycles."""
+        if op == "task_upsert":
+            lane = str((payload or {}).get("lane", "") or "").strip()
+            if lane not in {"To Do", "In Progress"}:
+                return
+            self._clear_engineer_queue_empty_emitted(
+                str((payload or {}).get("assigned_engineer_id", "") or "")
+            )
+            return
+
+        if op != "agent_upsert":
+            return
+        kind = str((payload or {}).get("kind", "") or "").strip()
+        status = str((payload or {}).get("status", "") or "").strip()
+        if kind != "worker" or status == "stopped":
+            return
+        owner_id = str((payload or {}).get("owner_engineer_id", "") or "").strip()
+        if not owner_id:
+            owner_id = str(
+                (payload or {}).get("created_by_weaver_id", "") or ""
+            ).strip()
+        self._clear_engineer_queue_empty_emitted(owner_id)
+
+    def _clear_engineer_queue_empty_for_active_tasks(self) -> None:
+        """Reopen queue-empty cycles for active assigned tasks loaded from DB."""
+        active_engineer_ids = {
+            str(getattr(task, "assigned_engineer_id", "") or "").strip()
+            for task in self.board_tasks.values()
+            if str(getattr(task, "lane", "") or "").strip()
+            in {"To Do", "In Progress"}
+        }
+        for engineer_id in active_engineer_ids:
+            self._clear_engineer_queue_empty_emitted(engineer_id)
 
     def _emit_group(self, name: str):
         """Emit a group_update delta with the current member list."""
@@ -1785,6 +1845,7 @@ class MatrixState:
                 if root_id
             }
             self._rebuild_task_indexes()
+            self._clear_engineer_queue_empty_for_active_tasks()
             self.cleanup_stale_boundary_successors(emit=False)
             for aid, cell in self.agents.items():
                 cell.pending_weaver_message = bool(
@@ -1930,6 +1991,7 @@ class MatrixState:
                     self.agent_digest_settings[agent_id] = (
                         AgentDigestSettings(**filtered)
                     )
+                self._backfill_architect_digest_defaults()
                 for gname in self.groups:
                     entries = self.db.load_weaver_task_log(
                         gname,
@@ -2064,6 +2126,25 @@ class MatrixState:
         if settings is not None:
             return settings
         return self._legacy_agent_digest_settings(agent_id)
+
+    def _backfill_architect_digest_defaults(self) -> None:
+        """Add new architect-default digest events to existing settings rows."""
+        changed = []
+        for agent_id, settings in self.agent_digest_settings.items():
+            cell = self.agents.get(agent_id)
+            if str(getattr(cell, "kind", "") or "").strip() != "architect":
+                continue
+            enabled = list(getattr(settings, "enabled_events", []) or [])
+            if "engineer_queue_empty" in enabled:
+                continue
+            enabled.append("engineer_queue_empty")
+            settings.enabled_events = enabled
+            if not bool(getattr(settings, "architect_digest", False)):
+                settings.architect_digest = True
+            changed.append((agent_id, settings))
+        if self.db:
+            for agent_id, settings in changed:
+                self.db.save_agent_digest_settings(agent_id, asdict(settings))
 
     def update_agent_digest_settings(self, agent_id: str, **fields):
         """Update digest settings for one engineer/architect recipient."""

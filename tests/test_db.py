@@ -180,6 +180,7 @@ class LoomDBTests(unittest.TestCase):
             owner_engineer_id="weaver-1",
             hired_by_architect_id="architect-1",
             persistent=True,
+            queue_empty_emitted=False,
         )
         self.db.save_agent(cell)
         self.db.save_groups({"g": [cell.id]}, {"g": "g"})
@@ -319,6 +320,7 @@ class LoomDBTests(unittest.TestCase):
             "architect-1",
         )
         self.assertTrue(loaded["agents"]["agent-1"]["persistent"])
+        self.assertFalse(loaded["agents"]["agent-1"]["queue_empty_emitted"])
         self.assertEqual(
             loaded["group_settings"]["g"]["default_terminal_backend"],
             "pty",

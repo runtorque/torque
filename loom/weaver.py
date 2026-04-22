@@ -76,6 +76,7 @@ _ARCHITECT_EVENT_LABELS = {
     "engineer_dismissed": "engineer dismissed",
     "engineer_rehired": "engineer rehired",
     "workflow_breach": "workflow breach",
+    "engineer_queue_empty": "queue empty",
     "agent_progress": "progress",
 }
 _ARCHITECT_PIPELINE_ACTIVITY_EVENTS = ARCHITECT_COARSE_EVENTS.intersection({
