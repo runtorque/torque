@@ -68,6 +68,8 @@ Loom also adds its own injected runtime files to the repo's git exclude list so 
 - `.codex/config.toml`
 - `.codex/hooks.json`
 
+For engineer and worker worktrees, Loom also writes `.claude/settings.local.json` with `autoMemoryEnabled: false`. This opts those Claude Code sessions out of opportunistic auto-memory so one engineer's memory index cannot bleed into another agent's identity context; Loom's journal-scoping rules are the complementary fix for shared Loom-authored narrative context.
+
 For Codex, Loom may also clean up old Loom-managed sections in `.codex/AGENTS.md` left behind by earlier versions, but the current integration uses `.codex/config.toml` plus prompt files under `.loom/`.
 
 !!! note
