@@ -1057,6 +1057,7 @@ function render() {
 
   const doFlip = Date.now() < _flipUntil;
   const oldRects = doFlip ? _captureRects(main) : null;
+  _refreshTaskLookupIndexForRender();
   _captureAgentDetailDrafts();
   const mainState = _captureSurfaceState(main, {
     scrollSelectors: [
@@ -1254,17 +1255,123 @@ function agentStatusClass(a) {
   return 'idle';
 }
 
-function _getAgentTask(agentId) {
-  if (!state.board_tasks) return null;
-  let openTask = null;
-  let doneTask = null;
-  for (const t of Object.values(state.board_tasks)) {
-    if (t.agent_id !== agentId) continue;
-    if (t.lane === 'In Progress') return t;
-    if (t.lane !== 'Done' && !openTask) openTask = t;
-    if (!doneTask) doneTask = t;
+var _taskLookupIndex = null;
+var _taskLookupIndexSource = null;
+
+function _invalidateTaskLookupIndex() {
+  _taskLookupIndex = null;
+  _taskLookupIndexSource = null;
+}
+
+function _taskLookupSortFollowers(a, b) {
+  return String(a.created_at || a.updated_at || a.id || '')
+    .localeCompare(String(b.created_at || b.updated_at || b.id || ''));
+}
+
+function _taskLookupPreferredAgentTask(entry) {
+  if (!entry) return null;
+  return entry.in_progress || entry.open || entry.done || null;
+}
+
+function _buildTaskLookupIndex(tasks) {
+  const taskMap = tasks || {};
+  const taskValues = Object.values(taskMap);
+  const agentTaskEntries = {};
+  const agentTaskById = {};
+  const latestBoundaryByKey = {};
+  const followersByBoundaryId = {};
+
+  for (let i = 0; i < taskValues.length; i++) {
+    const task = taskValues[i];
+    if (!task) continue;
+
+    const agentId = String(task.agent_id || '');
+    if (agentId) {
+      let entry = agentTaskEntries[agentId];
+      if (!entry) {
+        entry = { in_progress: null, open: null, done: null };
+        agentTaskEntries[agentId] = entry;
+      }
+      if (task.lane === 'In Progress' && !entry.in_progress) entry.in_progress = task;
+      if (task.lane !== 'Done' && !entry.open) entry.open = task;
+      if (!entry.done) entry.done = task;
+    }
+
+    const boundaryKey = _taskBoundaryBranchKey(task);
+    if (boundaryKey && (_taskBoundaryMeta(task).status || '') === 'open') {
+      const latest = latestBoundaryByKey[boundaryKey];
+      if (!latest || _taskBoundarySortValue(task) > _taskBoundarySortValue(latest)) {
+        latestBoundaryByKey[boundaryKey] = task;
+      }
+    }
+
+    const resumeAfter = String(task.resume_after_boundary_task_id || '');
+    if (resumeAfter) {
+      if (!followersByBoundaryId[resumeAfter]) {
+        followersByBoundaryId[resumeAfter] = { queued: [], started: [] };
+      }
+      if (task.lane === 'Backlog' || task.lane === 'To Do') {
+        followersByBoundaryId[resumeAfter].queued.push(task);
+      } else {
+        followersByBoundaryId[resumeAfter].started.push(task);
+      }
+    }
   }
-  return openTask || doneTask || null;
+
+  for (const agentId in agentTaskEntries) {
+    const task = _taskLookupPreferredAgentTask(agentTaskEntries[agentId]);
+    if (task) agentTaskById[agentId] = task;
+  }
+
+  const branchBoundaryByKey = {};
+  for (const branchKey in latestBoundaryByKey) {
+    const latest = latestBoundaryByKey[branchKey];
+    const boundary = _taskBoundaryMeta(latest);
+    const followers = followersByBoundaryId[latest.id] || { queued: [], started: [] };
+    const queued = followers.queued.slice().sort(_taskLookupSortFollowers);
+    const started = followers.started.slice().sort(_taskLookupSortFollowers);
+    branchBoundaryByKey[branchKey] = {
+      repo_root: boundary.repo_root || '',
+      branch: boundary.branch || '',
+      latest_boundary_task: latest,
+      queued_followers: queued,
+      started_followers: started,
+      branch_advanced: started.length > 0,
+      partial_review_safe: started.length === 0,
+    };
+  }
+
+  return {
+    source: taskMap,
+    agentTaskById,
+    branchBoundaryByKey,
+    tasks: taskValues,
+  };
+}
+
+function _currentTaskLookupIndex() {
+  if (!state || !state.board_tasks) return null;
+  if (!_taskLookupIndex || _taskLookupIndexSource !== state.board_tasks) {
+    _taskLookupIndex = _buildTaskLookupIndex(state.board_tasks);
+    _taskLookupIndexSource = state.board_tasks;
+  }
+  return _taskLookupIndex;
+}
+
+function _refreshTaskLookupIndexForRender() {
+  if (!state || !state.board_tasks) {
+    _invalidateTaskLookupIndex();
+    return null;
+  }
+  _taskLookupIndex = _buildTaskLookupIndex(state.board_tasks);
+  _taskLookupIndexSource = state.board_tasks;
+  return _taskLookupIndex;
+}
+
+function _getAgentTask(agentId) {
+  const index = _currentTaskLookupIndex();
+  if (!index) return null;
+  return index.agentTaskById[String(agentId || '')] || null;
 }
 
 function _taskBoundaryMeta(task) {
@@ -1290,36 +1397,19 @@ function _taskBoundarySortValue(task) {
 function _branchBoundaryOverviewForContext(repoRoot, branch) {
   if (!repoRoot || !branch || !state || !state.board_tasks) return null;
   const branchKey = repoRoot + '::' + branch;
-  let latest = null;
-  for (const task of Object.values(state.board_tasks)) {
-    if (_taskBoundaryBranchKey(task) !== branchKey) continue;
-    if ((_taskBoundaryMeta(task).status || '') !== 'open') continue;
-    if (!latest || _taskBoundarySortValue(task) > _taskBoundarySortValue(latest)) {
-      latest = task;
-    }
-  }
-  if (!latest) return null;
-  const queued = [];
-  const started = [];
-  for (const task of Object.values(state.board_tasks)) {
-    if ((task.resume_after_boundary_task_id || '') !== latest.id) continue;
-    if (task.lane === 'Backlog' || task.lane === 'To Do') queued.push(task);
-    else started.push(task);
-  }
-  const sortFollowers = function(a, b) {
-    return String(a.created_at || a.updated_at || a.id || '')
-      .localeCompare(String(b.created_at || b.updated_at || b.id || ''));
-  };
-  queued.sort(sortFollowers);
-  started.sort(sortFollowers);
+  const index = _currentTaskLookupIndex();
+  const overview = index && index.branchBoundaryByKey
+    ? index.branchBoundaryByKey[branchKey]
+    : null;
+  if (!overview) return null;
   return {
-    repo_root: repoRoot,
-    branch: branch,
-    latest_boundary_task: latest,
-    queued_followers: queued,
-    started_followers: started,
-    branch_advanced: started.length > 0,
-    partial_review_safe: started.length === 0,
+    repo_root: overview.repo_root,
+    branch: overview.branch,
+    latest_boundary_task: overview.latest_boundary_task,
+    queued_followers: overview.queued_followers.slice(),
+    started_followers: overview.started_followers.slice(),
+    branch_advanced: overview.branch_advanced,
+    partial_review_safe: overview.partial_review_safe,
   };
 }
 
