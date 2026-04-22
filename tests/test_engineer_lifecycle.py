@@ -992,7 +992,11 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         )
         # initial_prompt from launch_cfg is re-delivered.
         prompts = [p for (_, p, _) in sent_prompts]
-        self.assertIn("Engineer: get started on your queue.", prompts)
+        self.assertIn(
+            f"You are Alice (engineer, id={engineer.id}).\n\n"
+            "Engineer: get started on your queue.",
+            prompts,
+        )
 
     async def test_restart_agent_rejects_terminals(self):
         state = self._make_state()

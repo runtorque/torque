@@ -127,6 +127,7 @@ class DispatchPreambleTests(unittest.TestCase):
 
         self.assertEqual(
             prompt,
+            "You are Worker (worker, id=worker-1).\n\n"
             "Be careful.\n\nPriorities:\n- a\n- b\n\n"
             "Implement feature\n\nLOOM POSTSCRIPT\n",
         )
@@ -147,7 +148,11 @@ class DispatchPreambleTests(unittest.TestCase):
             postscript="LOOM POSTSCRIPT",
         )
 
-        self.assertEqual(prompt, "Implement feature\n\nLOOM POSTSCRIPT\n")
+        self.assertEqual(
+            prompt,
+            "You are Worker (worker, id=worker-1).\n\n"
+            "Implement feature\n\nLOOM POSTSCRIPT\n",
+        )
 
     def test_disable_role_preamble_omits_preamble_even_for_worker(self):
         self.role_mgr.save_role(
@@ -173,7 +178,11 @@ class DispatchPreambleTests(unittest.TestCase):
             disable_role_preamble=rendered["disable_role_preamble"],
         )
 
-        self.assertEqual(prompt, "Implement feature\n\nLOOM POSTSCRIPT\n")
+        self.assertEqual(
+            prompt,
+            "You are Worker (worker, id=worker-1).\n\n"
+            "Implement feature\n\nLOOM POSTSCRIPT\n",
+        )
 
     def test_engineer_and_terminal_agents_do_not_get_role_preamble(self):
         self.role_mgr.save_role(
@@ -193,7 +202,11 @@ class DispatchPreambleTests(unittest.TestCase):
             postscript="LOOM POSTSCRIPT",
         )
 
-        self.assertEqual(prompt, "Implement feature\n\nLOOM POSTSCRIPT\n")
+        self.assertEqual(
+            prompt,
+            "You are Engineer (engineer, id=engineer-1).\n\n"
+            "Implement feature\n\nLOOM POSTSCRIPT\n",
+        )
 
     def test_legacy_worker_without_kind_still_gets_role_preamble(self):
         self.role_mgr.save_role(
@@ -213,6 +226,7 @@ class DispatchPreambleTests(unittest.TestCase):
 
         self.assertEqual(
             prompt,
+            "You are Legacy Worker (worker, id=worker-legacy).\n\n"
             "Be careful.\n\nImplement feature\n\nLOOM POSTSCRIPT\n",
         )
 
@@ -235,6 +249,7 @@ class DispatchPreambleTests(unittest.TestCase):
             self.state, self.worker, self.task
         )
         self.assertEqual(loom_ctx["agent"]["kind"], "worker")
+        self.assertEqual(loom_ctx["agent"]["id"], "worker-1")
         self.assertEqual(loom_ctx["agent"]["role"], "reviewer")
         self.assertEqual(loom_ctx["agent"]["owner_engineer"], "Engineer")
 
@@ -379,4 +394,27 @@ class DispatchPreambleTests(unittest.TestCase):
             prompt,
             "Be careful.\n\nrole=reviewer\ncheckpoints=0\n"
             "Implement feature\n\nLOOM POSTSCRIPT\n",
+        )
+
+    def test_worker_dispatch_prompt_starts_with_identity_anchor(self):
+        loom_ctx = self.server_mod._build_loom_context(
+            self.state, self.worker, self.task
+        )
+        rendered = self._render_action(
+            "name: implement\nprompt: |\n  {{ TASK }}\n",
+            loom_context=loom_ctx,
+        )
+
+        prompt = self.server_mod._assemble_worker_prompt(
+            role_mgr=self.role_mgr,
+            cell=self.worker,
+            base_dir=str(self.project),
+            prompt_body=rendered["prompt"],
+            postscript="LOOM POSTSCRIPT",
+            disable_role_preamble=rendered["disable_role_preamble"],
+        )
+
+        self.assertTrue(
+            prompt.startswith("You are Worker (worker, id=worker-1).\n\n"),
+            prompt,
         )

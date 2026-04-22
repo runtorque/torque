@@ -99,6 +99,11 @@ from .external_tickets import (
     push_ticket_status,
 )
 from .mcp import create_mcp_handler
+from .identity import (
+    agent_identity_anchor,
+    agent_kind_for_identity,
+    prepend_agent_identity_anchor,
+)
 
 from .server_actions import _action_to_yaml
 from .server_agent import (
@@ -1415,6 +1420,7 @@ def _format_injected_mcp_message_prompt(
     sender_kind: str,
     recipient_kind: str,
     message_id: str,
+    recipient_anchor: str = "",
 ) -> str:
     sender_label = sender_name or sender_kind or "peer"
     if sender_kind and sender_name:
@@ -1426,14 +1432,19 @@ def _format_injected_mcp_message_prompt(
         if recipient_kind in {"architect", "engineer"}
         else "mcp__loom__loom_reply"
     )
-    return (
-        "\n"
-        f"## {header}\n"
-        f"{message}\n\n"
+    blocks = []
+    anchor = str(recipient_anchor or "").strip()
+    if anchor:
+        blocks.append(anchor)
+    blocks.append(f"## {header}")
+    body = str(message or "").strip("\n")
+    if body:
+        blocks.append(body)
+    blocks.append(
         f'Reply with: {reply_tool}(message_id="{message_id}", '
-        'message="your response")\n'
-        "---\n"
+        'message="your response")'
     )
+    return "\n" + "\n\n".join(blocks) + "\n---\n"
 
 
 def _mark_cross_kind_message_delivery(cell, message_id: str, *,
@@ -2013,10 +2024,7 @@ async def _handle_role_template_command(data: dict, role_mgr,
 
 
 def _agent_kind_for_context(cell) -> str:
-    kind = str(getattr(cell, "kind", "") or "").strip()
-    if kind in {"worker", "engineer", "architect"}:
-        return kind
-    return ""
+    return agent_kind_for_identity(cell)
 
 
 def _agent_is_worker_for_role_preamble(cell) -> bool:
@@ -2058,6 +2066,8 @@ def _assemble_worker_prompt(*, role_mgr, cell, base_dir: str = "",
     """Assemble the final worker prompt with optional role preamble.
 
     The final shape is:
+    {identity anchor block}
+
     {role preamble block}
 
     {task/action prompt block}
@@ -2068,6 +2078,10 @@ def _assemble_worker_prompt(*, role_mgr, cell, base_dir: str = "",
     included blocks, and the final prompt always ends with a trailing newline.
     """
     blocks = []
+
+    identity_anchor = agent_identity_anchor(cell)
+    if identity_anchor:
+        blocks.append(identity_anchor)
 
     if role_mgr and cell and not disable_role_preamble \
             and _agent_is_worker_for_role_preamble(cell):
@@ -2105,6 +2119,7 @@ def _build_loom_context(state: MatrixState, cell, task) -> dict:
         getattr(cell, "worktree_checkpoints", 0) or 0
     )
     agent_ctx = {
+        "id": cell_id,
         "name": getattr(cell, "name", ""),
         "slug": getattr(cell, "slug", ""),
         "type": getattr(cell, "agent_type", ""),
@@ -2765,7 +2780,8 @@ async def _handle_add_engineer_command(
     if cell.session_id:
         for prompt_text, send_kwargs in _new_agent_prompt_sequence(
                 launch_cfg,
-                startup_prompt=startup_prompt):
+                startup_prompt=startup_prompt,
+                cell=cell):
             await send_agent_prompt(cell, prompt_text, **send_kwargs)
     return {
         "id": cell.id,
@@ -2844,7 +2860,8 @@ async def _handle_add_architect_command(
     if cell.session_id:
         for prompt_text, send_kwargs in _new_agent_prompt_sequence(
                 launch_cfg,
-                startup_prompt=startup_prompt):
+                startup_prompt=startup_prompt,
+                cell=cell):
             await send_agent_prompt(cell, prompt_text, **send_kwargs)
     return {
         "id": cell.id,
@@ -3718,7 +3735,8 @@ async def _handle_restart_agent_command(
     if cell.session_id:
         for prompt_text, send_kwargs in _new_agent_prompt_sequence(
                 launch_cfg,
-                startup_prompt=startup_prompt):
+                startup_prompt=startup_prompt,
+                cell=cell):
             await send_agent_prompt(cell, prompt_text, **send_kwargs)
     return None
 
@@ -5363,7 +5381,8 @@ async def main(connection=None):
                             for prompt_text, send_kwargs in \
                                     _new_agent_prompt_sequence(
                                         launch_cfg,
-                                        startup_prompt=startup_prompt):
+                                        startup_prompt=startup_prompt,
+                                        cell=cell):
                                 await _send_agent_prompt(
                                     cell, prompt_text, **send_kwargs)
 
@@ -7134,8 +7153,11 @@ async def main(connection=None):
                                 task=task,
                             )
                             if data.get("_self_dispatch"):
-                                final_prompt = _build_self_dispatch_prompt(
-                                    shared_context_block,
+                                final_prompt = prepend_agent_identity_anchor(
+                                    _build_self_dispatch_prompt(
+                                        shared_context_block,
+                                    ),
+                                    cell,
                                 )
                             else:
                                 # Build loom context for template rendering
@@ -7312,7 +7334,8 @@ async def main(connection=None):
                                             launch_cfg,
                                             startup_prompt=
                                             startup_prompt,
-                                            final_prompt=final_prompt):
+                                            final_prompt=final_prompt,
+                                            cell=cell):
                                     await _send_agent_prompt(
                                         cell,
                                         prompt_text,
@@ -9329,6 +9352,14 @@ async def main(connection=None):
                     result = {"type": "ok", "delivered": False,
                               "reason": "no_session"}
                 else:
+                    recipient_anchor = ""
+                    if (
+                        str(getattr(target, "kind", "") or "").strip()
+                        == "engineer"
+                        and str(data.get("sender_kind", "") or "").strip()
+                        == "architect"
+                    ):
+                        recipient_anchor = agent_identity_anchor(target)
                     formatted = _format_injected_mcp_message_prompt(
                         message=str(data.get("message", "") or ""),
                         sender_name=str(data.get("sender_name", "") or ""),
@@ -9337,6 +9368,7 @@ async def main(connection=None):
                             getattr(target, "kind", "") or ""
                         ),
                         message_id=str(data.get("message_id", "") or ""),
+                        recipient_anchor=recipient_anchor,
                     )
                     try:
                         if hasattr(bridge, "prime_input_ready"):
@@ -9364,14 +9396,24 @@ async def main(connection=None):
                               "message": "Entry text is required"}
                 else:
                     evt = state.journal_append(
-                        group, entry_type, entry_text)
+                        group, entry_type, entry_text,
+                        author_cell_id=str(
+                            data.get("author_cell_id", "") or ""
+                        ).strip())
                     result = {"type": "ok", "id": evt["id"]}
 
             elif cmd == "weaver_journal_read":
                 group = data.get("group", "")
                 tail = data.get("tail", 20)
                 entry_type = data.get("entry_type", "")
-                entries = state.journal_read(group, tail, entry_type)
+                entries = state.journal_read(
+                    group,
+                    tail,
+                    entry_type,
+                    author_cell_id=str(
+                        data.get("author_cell_id", "") or ""
+                    ).strip(),
+                )
                 result = {"type": "journal", "entries": entries}
 
             elif cmd == "weaver_session_map_read":

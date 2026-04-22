@@ -2139,23 +2139,37 @@ class MatrixState:
         return cleaned
 
     def journal_append(self, group: str, entry_type: str,
-                       entry: str) -> dict:
+                       entry: str, author_cell_id: str = "") -> dict:
         """Append an entry to the weaver journal. Returns the entry dict."""
         import time
         ts = time.time()
         entry_id = 0
+        author_cell_id = str(author_cell_id or "").strip()
         if self.db:
-            entry_id = self.db.save_journal_entry(group, ts, entry_type, entry)
+            entry_id = self.db.save_journal_entry(
+                group,
+                ts,
+                entry_type,
+                entry,
+                author_cell_id=author_cell_id,
+            )
         evt = {"id": entry_id, "group": group, "timestamp": ts,
-               "type": entry_type, "entry": entry}
+               "type": entry_type, "entry": entry,
+               "author_cell_id": author_cell_id}
         self._emit("journal_append", **evt)
         return evt
 
     def journal_read(self, group: str, limit: int = 20,
-                     entry_type: str = "") -> list[dict]:
+                     entry_type: str = "",
+                     author_cell_id: str = "") -> list[dict]:
         """Read recent journal entries for a group."""
         if self.db:
-            return self.db.load_journal_entries(group, limit, entry_type)
+            return self.db.load_journal_entries(
+                group,
+                limit,
+                entry_type,
+                author_cell_id=str(author_cell_id or "").strip(),
+            )
         return []
 
     def load_decision(self, decision_id: str) -> dict | None:

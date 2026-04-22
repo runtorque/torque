@@ -30,6 +30,7 @@ from .mcp_weaver_tools.shared import (
     is_busy_agent as _is_busy_agent,
 )
 from .server_artifacts import serialize_task_for_mcp
+from .identity import prepend_agent_identity_anchor
 from .state import (
     ARCHIVED_LANE,
     board_task_is_closed,
@@ -396,6 +397,14 @@ def _deliver_architect_engineer_message(state, sender, recipient, *,
         "direction": "sent",
     })
     recipient_entry = dict(shared)
+    if (
+        str(getattr(sender, "kind", "") or "").strip() == "architect"
+        and str(getattr(recipient, "kind", "") or "").strip() == "engineer"
+    ):
+        recipient_entry["message"] = prepend_agent_identity_anchor(
+            message_text,
+            recipient,
+        )
     recipient_entry.update({
         "peer_id": sender.id,
         "peer_kind": str(getattr(sender, "kind", "") or "").strip(),
@@ -648,6 +657,27 @@ def build_scoped_state_view(state, *, caller_kind: str, caller_id: str,
         in visible_agent_ids
     )
     view_state.weaver_restricts_to_created_agents = lambda _group: False
+    if caller_kind == "engineer":
+        real_journal_read = state.journal_read
+        caller_author_id = str(caller_id or "").strip()
+
+        def _engineer_scoped_journal_read(
+            group,
+            limit=20,
+            entry_type="",
+            author_cell_id="",
+        ):
+            return real_journal_read(
+                group,
+                limit,
+                entry_type,
+                author_cell_id=(
+                    str(author_cell_id or "").strip()
+                    or caller_author_id
+                ),
+            )
+
+        view_state.journal_read = _engineer_scoped_journal_read
     return view_state
 
 
@@ -2583,6 +2613,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             "group": _weaver_group,
             "entry_type": args.get("type", "observation"),
             "entry": args.get("entry", ""),
+            "author_cell_id": str(caller_id or "").strip(),
         })
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
@@ -2598,15 +2629,21 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                     limit=args.get("limit", 20),
                 ),
             }), False
-        result = await handle_command({
-            "cmd": "weaver_journal_read",
-            "group": _weaver_group,
-            "tail": args.get("tail", 20),
-            "entry_type": args.get("type", ""),
-        })
-        if result and result.get("type") == "error":
-            return result.get("message", "Unknown error"), True
-        return json.dumps(result), False
+        scope = str(args.get("scope", "") or "").strip().lower()
+        include_cross_author = bool(args.get("include_cross_author", False))
+        if scope and scope not in {"self", "group"}:
+            return "scope must be one of: self, group", True
+        author_cell_id = ""
+        if caller_kind == "engineer" and scope != "group" \
+                and not include_cross_author:
+            author_cell_id = str(caller_id or "").strip()
+        entries = real_state.journal_read(
+            _weaver_group,
+            args.get("tail", 20),
+            args.get("type", ""),
+            author_cell_id=author_cell_id,
+        )
+        return json.dumps({"type": "journal", "entries": entries}), False
 
     # -- Interaction tools --------------------------------------------------
 

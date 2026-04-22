@@ -860,6 +860,23 @@ WEAVER_TOOLS = [
                     "description":
                         "Filter to a specific entry type.",
                 },
+                "scope": {
+                    "type": "string",
+                    "enum": ["self", "group"],
+                    "description": (
+                        "For engineer_journal_read, defaults to self "
+                        "(only entries authored by this engineer). Pass "
+                        "group to intentionally read cross-author group "
+                        "journal entries."
+                    ),
+                },
+                "include_cross_author": {
+                    "type": "boolean",
+                    "description": (
+                        "For engineer_journal_read, true is equivalent "
+                        "to scope=group. Defaults to false."
+                    ),
+                },
             },
         },
     },

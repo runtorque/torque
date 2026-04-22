@@ -326,10 +326,13 @@ CREATE TABLE IF NOT EXISTS weaver_journal (
     group_name  TEXT NOT NULL,
     timestamp   REAL NOT NULL,
     entry_type  TEXT NOT NULL,
-    entry       TEXT NOT NULL
+    entry       TEXT NOT NULL,
+    author_cell_id TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_weaver_journal_group
     ON weaver_journal(group_name, id DESC);
+CREATE INDEX IF NOT EXISTS idx_weaver_journal_group_author
+    ON weaver_journal(group_name, author_cell_id, id DESC);
 
 CREATE TABLE IF NOT EXISTS playbook_candidates (
     id                     TEXT PRIMARY KEY,
@@ -477,6 +480,18 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.executescript(_SCHEMA_SQL)
+    # Migrate: add journal author provenance for engineer-scoped reads
+    try:
+        conn.execute("SELECT author_cell_id FROM weaver_journal LIMIT 0")
+    except sqlite3.OperationalError:
+        conn.execute(
+            "ALTER TABLE weaver_journal ADD COLUMN "
+            "author_cell_id TEXT NOT NULL DEFAULT ''")
+        conn.commit()
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_weaver_journal_group_author "
+        "ON weaver_journal(group_name, author_cell_id, id DESC)")
+    conn.commit()
     # Migrate: add slug columns to existing tables
     for table in ("agents", "groups", "board_tasks"):
         try:
