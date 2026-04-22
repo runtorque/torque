@@ -8409,6 +8409,36 @@ test('diff review bulk collapse controls stay stable across refreshes', () => {
   assert.match(root.innerHTML, /0 of 3 collapsed/);
 });
 
+test('diff review surfaces stale-base warning before merge controls', () => {
+  const { context, document } = createDiffHarness();
+  const root = document.getElementById('diff-view-root');
+
+  runInContext(context, `
+    _diffViewOpen = true;
+    _diffViewAgentId = 'agent-1';
+    _diffViewData = {
+      agent_name: 'Worker',
+      branch: 'loom/worker',
+      base_branch: 'main',
+      stats: { files: 1, insertions: 1, deletions: 0 },
+      files: [{ path: 'src/a.js', status: 'modified', hunks: [] }],
+      stale_base_warning: '⚠ STALE BASE: loom/worker forks from 11111111 (old).',
+      stale_base: { stale: true },
+    };
+    _diffMergeCheck = {
+      clean: false,
+      conflicts: [],
+      stale_base_warning: '⚠ STALE BASE: loom/worker forks from 11111111 (old).',
+      stale_base: { stale: true },
+    };
+    renderDiffView();
+  `);
+
+  assert.match(root.innerHTML, /diff-stale-base-warning/);
+  assert.match(root.innerHTML, /STALE BASE/);
+  assert.match(root.innerHTML, /Rebase onto Main/);
+});
+
 test('diff review overlay hides the workspace shell so standalone merge review uses the full viewport', () => {
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
 

@@ -1019,6 +1019,15 @@ WEAVER_TOOLS = [
                         "Remove the worktree after a successful merge."
                     ),
                 },
+                "force_stale_base": {
+                    "type": "boolean",
+                    "description": (
+                        "Bypass the stale-base merge safety gate. Use only "
+                        "after intentionally accepting that the branch forked "
+                        "before the current base and re-running review is not "
+                        "desired."
+                    ),
+                },
             },
             "required": ["agent"],
         },

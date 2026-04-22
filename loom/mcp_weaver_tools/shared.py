@@ -121,11 +121,15 @@ async def run_worktree_merge_check(handle_command, agent_id: str):
 
 
 async def run_worktree_merge_check_with_options(handle_command, agent_id: str, *,
-                                                allow_dirty: bool = False):
-    result = await handle_command({
+                                                allow_dirty: bool = False,
+                                                allow_stale_base: bool = False):
+    payload = {
         "cmd": "worktree_check_merge",
         "id": agent_id,
-    })
+    }
+    if allow_stale_base:
+        payload["allow_stale_base"] = True
+    result = await handle_command(payload)
     if result and result.get("type") == "error":
         return result, result.get("message", "Unknown error"), True
     result = result or {}
@@ -134,6 +138,14 @@ async def run_worktree_merge_check_with_options(handle_command, agent_id: str, *
             result,
             "Worktree has uncommitted changes. Create a checkpoint or "
             "commit them before retrying.",
+            True,
+        )
+    if result.get("stale_base") and not allow_stale_base:
+        return (
+            result,
+            result.get("stale_base_warning")
+            or result.get("error")
+            or "Stale base — rebase before merge.",
             True,
         )
     if not result.get("clean", True) and result.get("error"):
