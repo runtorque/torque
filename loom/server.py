@@ -37,6 +37,8 @@ from .state import (
     ARCHIVED_LANE,
     BoardTask,
     MatrixState,
+    hot_json_dumps_async,
+    hot_json_dumps_bytes_async,
     merge_cleanup_flags,
     normalize_default_worker_concurrency,
     task_counts_as_done,
@@ -1810,12 +1812,20 @@ async def _send_ui_ws_json(ws, payload: dict) -> bool:
     if not ws or getattr(ws, "closed", False):
         return False
     try:
-        await ws.send_str(json.dumps(payload))
+        await ws.send_str(await hot_json_dumps_async(payload))
         return True
     except Exception as exc:
         if _is_closing_ui_ws_error(exc):
             return False
         raise
+
+
+async def _hot_json_response(
+    payload: dict, *, status: int = 200
+) -> web.Response:
+    body = await hot_json_dumps_bytes_async(payload)
+    return web.Response(
+        body=body, status=status, content_type="application/json")
 
 
 async def _register_ready_ui_ws_client(state: MatrixState, ws,
@@ -10057,6 +10067,8 @@ async def main(connection=None):
                 request_hash=request_hash or api_request_hash(data),
                 response=response_payload,
             )
+        if isinstance(payload, dict) and payload.get("type") == "state":
+            return await _hot_json_response(response_payload)
         return web.json_response(response_payload)
 
     # -- Profile harness endpoints -----------------------------------------

@@ -4,6 +4,7 @@ import sys
 import tempfile
 import types
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -18,6 +19,105 @@ def _install_aiohttp_stub():
     aiohttp.web = web
     sys.modules["aiohttp"] = aiohttp
     sys.modules["aiohttp.web"] = web
+
+
+class HotJsonSerializationTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        _install_aiohttp_stub()
+        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.reload(self.state_mod)
+
+    def test_hot_json_should_offload_uses_size_threshold_for_state_payloads(self):
+        small_delta = {
+            "type": "delta",
+            "seq": 1,
+            "ops": [{"op": "task_upsert", "id": "task-1"}],
+        }
+        large_delta = {
+            "type": "delta",
+            "seq": 2,
+            "ops": [{
+                "op": "task_upsert",
+                "value": "x" * self.state_mod.HOT_JSON_OFFLOAD_BYTES,
+            }],
+        }
+        small_state = {"type": "state", "seq": 1, "groups": {}}
+        large_state = {
+            "type": "state",
+            "seq": 1,
+            "payload": "x" * self.state_mod.HOT_JSON_OFFLOAD_BYTES,
+        }
+        small_wrapped_state = {
+            "ok": True,
+            "data": {"type": "state", "seq": 1, "groups": {}},
+        }
+
+        self.assertFalse(self.state_mod.hot_json_should_offload(small_delta))
+        self.assertTrue(self.state_mod.hot_json_should_offload(large_delta))
+        self.assertFalse(self.state_mod.hot_json_should_offload(small_state))
+        self.assertTrue(self.state_mod.hot_json_should_offload(large_state))
+        self.assertFalse(
+            self.state_mod.hot_json_should_offload(small_wrapped_state)
+        )
+
+    async def test_hot_json_dumps_async_inlines_small_and_offloads_large_payloads(self):
+        calls = []
+        original_to_thread = self.state_mod.asyncio.to_thread
+
+        async def recording_to_thread(func, /, *args, **kwargs):
+            calls.append((func, args, kwargs))
+            return func(*args, **kwargs)
+
+        self.state_mod.asyncio.to_thread = recording_to_thread
+        try:
+            small_state = {"type": "state", "seq": 1, "groups": {}}
+            small_wrapped_state = {
+                "ok": True,
+                "data": {"type": "state", "seq": 1, "groups": {}},
+            }
+            large_state = {
+                "type": "state",
+                "seq": 1,
+                "payload": "x" * self.state_mod.HOT_JSON_OFFLOAD_BYTES,
+            }
+
+            self.assertEqual(
+                json.loads(await self.state_mod.hot_json_dumps_async(small_state)),
+                small_state,
+            )
+            self.assertEqual(calls, [])
+
+            self.assertEqual(
+                json.loads(
+                    await self.state_mod.hot_json_dumps_async(small_wrapped_state)
+                ),
+                small_wrapped_state,
+            )
+            self.assertEqual(calls, [])
+
+            self.assertEqual(
+                json.loads(await self.state_mod.hot_json_dumps_async(large_state)),
+                large_state,
+            )
+            self.assertEqual(len(calls), 1)
+            self.assertIs(calls[0][0], self.state_mod.hot_json_dumps_bytes)
+        finally:
+            self.state_mod.asyncio.to_thread = original_to_thread
+
+    def test_hot_json_bytes_and_string_outputs_parse_equally(self):
+        payload = {
+            "task": "Check JSON 🚀",
+            "path": Path("/tmp/loom"),
+            "when": datetime(2026, 4, 22, 12, 0, tzinfo=timezone.utc),
+        }
+
+        raw_bytes = self.state_mod.hot_json_dumps_bytes(payload)
+        raw_str = self.state_mod.hot_json_dumps(payload)
+
+        self.assertIsInstance(raw_bytes, bytes)
+        self.assertIsInstance(raw_str, str)
+        self.assertEqual(raw_bytes.decode("utf-8"), raw_str)
+        self.assertEqual(json.loads(raw_bytes), json.loads(raw_str))
 
 
 class MatrixStateCleanupTests(unittest.TestCase):
@@ -35,6 +135,45 @@ class MatrixStateCleanupTests(unittest.TestCase):
             state.update_global_settings(xterm_scrollback=99)
 
         self.assertEqual(state.global_settings.xterm_scrollback, 4096)
+
+    def test_snapshot_msg_hot_json_round_trips(self):
+        state = self.state_mod.MatrixState()
+        state.groups["g"] = ["agent-1"]
+        state.agents["agent-1"] = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            activity_detail="Serializing café payload",
+        )
+        state.board_tasks["task-1"] = self.state_mod.BoardTask(
+            id="task-1",
+            task="Check JSON 🚀",
+            group="g",
+            lane="Backlog",
+        )
+
+        raw = state.snapshot_msg()
+        decoded = json.loads(raw)
+
+        self.assertEqual(decoded, {
+            "type": "state",
+            "seq": state._seq,
+            **state.to_dict(),
+        })
+        if self.state_mod.orjson is not None:
+            self.assertNotIn(": ", raw)
+
+    def test_hot_json_default_handles_guarded_types(self):
+        raw = self.state_mod.hot_json_dumps({
+            "path": Path("/tmp/loom"),
+            "when": datetime(2026, 4, 22, 12, 0, tzinfo=timezone.utc),
+        })
+
+        self.assertEqual(json.loads(raw), {
+            "path": "/tmp/loom",
+            "when": "2026-04-22T12:00:00+00:00",
+        })
 
     def test_remove_agent_expires_orphaned_asks_and_clears_weaver_question(self):
         state = self.state_mod.MatrixState()
@@ -1631,6 +1770,17 @@ class MatrixStateWeaverStreamTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(summary["count"], 1)
         self.assertEqual(summary["items"][0]["branch"], "loom/worker")
         self.assertEqual(summary["items"][0]["state"], "ready_to_merge")
+
+    async def test_snapshot_msg_async_round_trips_state_payload(self):
+        state, _product = self._make_state_with_open_stream()
+
+        raw = await state.snapshot_msg_async()
+
+        self.assertEqual(json.loads(raw), {
+            "type": "state",
+            "seq": state._seq,
+            **state.to_dict(),
+        })
 
     async def test_broadcast_appends_weaver_stream_deltas_for_task_changes(self):
         state, product = self._make_state_with_open_stream()
