@@ -2404,7 +2404,7 @@ test('_renderBoardCard hides redundant group chips and only shows execution badg
   `);
 
   assert.equal((html.match(/board-card-group/g) || []).length, 0);
-  assert.equal((html.match(/board-card-status/g) || []).length, 1);
+  assert.equal((html.match(/board-card-label board-card-status/g) || []).length, 1);
   assert.equal((html.match(/board-card-health-stalled/g) || []).length, 1);
 });
 
@@ -2476,9 +2476,10 @@ test('_renderBoardCard caps subordinate indentation at depth 3', () => {
   assert.match(html, /data-task-id="child2"[^>]*data-indent-level="2"[^>]*--board-card-indent-level:2/);
   assert.match(html, /data-task-id="child3"[^>]*data-indent-level="3"[^>]*--board-card-indent-level:3/);
   assert.match(html, /data-task-id="child4"[^>]*data-indent-level="3"[^>]*--board-card-indent-level:3/);
+  assert.equal((html.match(/board-card-status-bar/g) || []).length, 5);
 });
 
-test('_boardLaneEntryText and refresh delay track the current lane age', () => {
+test('_boardLaneEntryText and refresh delay track the current lane transition age', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);
   loadBoardScripts(context);
@@ -2487,21 +2488,43 @@ test('_boardLaneEntryText and refresh delay track the current lane age', () => {
     runInContext(
       context,
       `_boardLaneEntryText(
-        { lane_entered_at: '2026-04-07T12:00:00Z' },
+        {
+          lane: 'In Progress',
+          created_at: '2026-04-07T11:00:00Z',
+          lane_entered_at: '2026-04-07T12:00:00Z'
+        },
         Date.parse('2026-04-07T12:05:00Z')
       )`,
     ),
-    '[5m ago]',
+    'moved to In Progress · 5m ago',
   );
   assert.equal(
     runInContext(
       context,
       `_boardLaneEntryText(
-        { lane_entered_at: '2026-04-07T12:00:00Z' },
+        {
+          lane: 'In Progress',
+          created_at: '2026-04-07T11:00:00Z',
+          lane_entered_at: '2026-04-07T12:00:00Z'
+        },
         Date.parse('2026-04-07T12:06:00Z')
       )`,
     ),
-    '[6m ago]',
+    'moved to In Progress · 6m ago',
+  );
+  assert.equal(
+    runInContext(
+      context,
+      `_boardLaneEntryText(
+        {
+          lane: 'Backlog',
+          created_at: '2026-04-07T12:00:00Z',
+          lane_entered_at: '2026-04-07T12:00:00Z'
+        },
+        Date.parse('2026-04-07T13:00:00Z')
+      )`,
+    ),
+    'created · 1h ago',
   );
   assert.equal(
     runInContext(
@@ -2515,7 +2538,7 @@ test('_boardLaneEntryText and refresh delay track the current lane age', () => {
   );
 });
 
-test('_renderBoardCard shows the lane-entry timestamp badge in the card header', () => {
+test('_renderBoardCard shows the task status bar above the card title', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);
   context.Date.now = () => Date.parse('2026-04-07T12:05:00Z');
@@ -2527,6 +2550,7 @@ test('_renderBoardCard shows the lane-entry timestamp badge in the card header',
       group: 'alpha',
       task: 'Keep the board readable',
       lane: 'In Progress',
+      created_at: '2026-04-07T11:00:00Z',
       lane_entered_at: '2026-04-07T12:00:00Z',
       position: 1,
     },
@@ -2540,12 +2564,16 @@ test('_renderBoardCard shows the lane-entry timestamp badge in the card header',
     )
   `);
 
+  const statusIndex = html.indexOf('board-card-status-bar');
+  const titleIndex = html.indexOf('board-card-title');
+  assert.ok(statusIndex >= 0, 'status bar should render');
+  assert.ok(titleIndex > statusIndex, 'status bar should render above the title');
   assert.match(html, /board-card-heading/);
-  assert.match(html, /board-card-task-id/);
+  assert.match(html, /board-card-id/);
   assert.match(html, /root/);
-  assert.match(html, /board-card-lane-entered/);
-  assert.match(html, /\[5m ago\]/);
-  assert.match(html, /board-card-heading-meta/);
+  assert.match(html, /board-card-last-transition/);
+  assert.match(html, /moved to In Progress · 5m ago/);
+  assert.doesNotMatch(html, /board-card-heading-meta/);
 });
 
 test('board cards render created_by attribution badges and update across rerenders', () => {

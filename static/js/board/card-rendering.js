@@ -55,12 +55,24 @@ function _boardRelativeAgeText(diffSec) {
   return Math.floor(diffSec / 86400) + 'd ago';
 }
 
+function _boardCreatedInCurrentLane(task, enteredAt) {
+  if (!task) return false;
+  if (!task.lane_entered_at) return !!task.created_at;
+  if (!task.created_at || !enteredAt) return false;
+  var createdAt = new Date(task.created_at).getTime();
+  if (isNaN(createdAt)) return false;
+  return Math.abs(createdAt - enteredAt) < 1000;
+}
+
 function _boardLaneEntryText(task, nowMs) {
   var enteredAt = _boardLaneEntryTimestampMs(task);
   if (!enteredAt) return '';
   var current = typeof nowMs === 'number' ? nowMs : Date.now();
   var diffSec = Math.max(0, Math.floor((current - enteredAt) / 1000));
-  return '[' + _boardRelativeAgeText(diffSec) + ']';
+  var prefix = _boardCreatedInCurrentLane(task, enteredAt)
+    ? 'created'
+    : 'moved to ' + (task && task.lane ? task.lane : 'current lane');
+  return prefix + ' · ' + _boardRelativeAgeText(diffSec);
 }
 
 function _boardLaneEntryNextRefreshDelay(task, nowMs) {
@@ -656,19 +668,22 @@ function _renderBoardCard(t, childrenOf, depth) {
   // Done checkmark for subordinate cards
   var titlePrefix = (isSubordinate && isDone) ? '&#10003; ' : '';
   var laneEntryText = _boardLaneEntryText(t);
+  var statusBarTitle = (t.id && laneEntryText)
+    ? t.id + ' · ' + laneEntryText
+    : (t.id || laneEntryText || '');
+  cardHtml += '<div class="board-card-status-bar" title="' + esc(statusBarTitle) + '">';
+  if (t.id) {
+    cardHtml += '<span class="board-card-id">' + esc(t.id) + '</span>';
+  }
+  if (t.id && laneEntryText) {
+    cardHtml += '<span class="board-card-status-separator" aria-hidden="true">·</span>';
+  }
+  if (laneEntryText) {
+    cardHtml += '<span class="board-card-last-transition">' + esc(laneEntryText) + '</span>';
+  }
+  cardHtml += '</div>';
   cardHtml += '<div class="board-card-heading">';
   cardHtml += '<div class="board-card-title">' + titlePrefix + formatCode(t.task || '') + '</div>';
-  if (t.id || laneEntryText) {
-    cardHtml += '<div class="board-card-heading-meta">';
-    if (t.id) {
-      cardHtml += '<div class="board-card-task-id">' + esc(t.id) + '</div>';
-    }
-    if (laneEntryText) {
-      cardHtml += '<div class="board-card-lane-entered" title="Entered current lane ' + esc(laneEntryText.slice(1, -1)) + '">'
-        + esc(laneEntryText) + '</div>';
-    }
-    cardHtml += '</div>';
-  }
   cardHtml += '</div>';
   var meta = '';
   if (typeof _taskCreatedByBadgeHtml === 'function') {

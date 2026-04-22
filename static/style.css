@@ -2773,7 +2773,7 @@ body.runtime-embedded #panel-board .board-wide-lane-body {
   font-size: 9px;
   -webkit-line-clamp: 2;
 }
-.board-density-compact .board-card-lane-entered {
+.board-density-compact .board-card-status-bar {
   font-size: 7px;
   line-height: 12px;
 }
@@ -2812,7 +2812,7 @@ body.runtime-embedded #panel-board .board-wide-lane-body {
   font-size: 11px;
   -webkit-line-clamp: 6;
 }
-.board-density-detailed .board-card-lane-entered {
+.board-density-detailed .board-card-status-bar {
   font-size: 9px;
 }
 .board-density-detailed .board-card-meta {
@@ -2862,6 +2862,34 @@ body.runtime-embedded #panel-board .board-wide-lane-body {
 .board-card-info {
   flex: 1; min-width: 0;
   display: flex; flex-direction: column; gap: 1px;
+}
+.board-card-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  font-size: 8px;
+  line-height: 14px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.board-card-id {
+  flex: 0 0 auto;
+  font-family: var(--mono-font, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace);
+  color: var(--text-dim);
+}
+.board-card-status-separator {
+  flex: 0 0 auto;
+  color: var(--text-dim);
+  opacity: .7;
+}
+.board-card-last-transition {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-dim);
 }
 .board-card-heading {
   display: flex;
@@ -3195,7 +3223,7 @@ body.runtime-embedded #panel-board .board-wide-lane-body {
   padding: 3px 6px;
 }
 .board-card-subordinate .board-card-title { font-size: 9px; }
-.board-card-subordinate .board-card-lane-entered { font-size: 7px; }
+.board-card-subordinate .board-card-status-bar { font-size: 7px; line-height: 12px; }
 .board-card-subordinate .board-card-dot { width: 5px; height: 5px; }
 .board-card-subordinate .board-card-meta { gap: 2px; }
 .board-card-subordinate .board-card-label { font-size: 7px; }
