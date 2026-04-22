@@ -1,4 +1,5 @@
 import asyncio
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -325,6 +326,105 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNotNone(wt_path)
         self.assertRegex(engineer.worktree_branch, r"^loom/alice-[a-f0-9]+$")
+
+    async def test_engineer_worktree_disables_claude_auto_memory(self):
+        engineer = self._make_cell(agent_id="beef1234", name="Alice")
+        engineer.kind = "engineer"
+        engineer.slug = "alice"
+
+        wt_path = await self.mgr.create(
+            engineer,
+            str(self.repo_root),
+            base_branch="main",
+            state=self._make_state(engineer),
+        )
+
+        self.assertIsNotNone(wt_path)
+        settings_path = Path(wt_path) / ".claude" / "settings.local.json"
+        self.assertTrue(settings_path.exists())
+        settings = json.loads(settings_path.read_text())
+        self.assertIs(settings.get("autoMemoryEnabled"), False)
+        self.assertEqual(await self._git("status", "--porcelain", cwd=wt_path), "")
+
+    async def test_worker_worktree_disables_claude_auto_memory(self):
+        worker = self._make_cell(agent_id="cafe1234", name="Feature Worker")
+        worker.kind = "worker"
+        worker.slug = "feature-worker"
+
+        wt_path = await self.mgr.create(
+            worker,
+            str(self.repo_root),
+            base_branch="main",
+            state=self._make_state(worker),
+        )
+
+        self.assertIsNotNone(wt_path)
+        settings_path = Path(wt_path) / ".claude" / "settings.local.json"
+        self.assertTrue(settings_path.exists())
+        settings = json.loads(settings_path.read_text())
+        self.assertIs(settings.get("autoMemoryEnabled"), False)
+        self.assertEqual(await self._git("status", "--porcelain", cwd=wt_path), "")
+
+    async def test_claude_settings_merge_preserves_existing_keys(self):
+        settings_path = self.repo_root / ".claude" / "settings.local.json"
+        settings_path.parent.mkdir()
+        settings_path.write_text(
+            json.dumps({
+                "permissions": {"allow": ["Bash(git status)"]},
+                "autoMemoryEnabled": True,
+            }) + "\n"
+        )
+        await self._git("add", "-f", ".claude/settings.local.json")
+        await self._git("commit", "-m", "Add template Claude settings")
+
+        worker = self._make_cell(agent_id="cafe1234", name="Feature Worker")
+        worker.kind = "worker"
+        worker.slug = "feature-worker"
+
+        wt_path = await self.mgr.create(
+            worker,
+            str(self.repo_root),
+            base_branch="main",
+            state=self._make_state(worker),
+        )
+
+        self.assertIsNotNone(wt_path)
+        settings = json.loads(
+            (Path(wt_path) / ".claude" / "settings.local.json").read_text()
+        )
+        self.assertIs(settings.get("autoMemoryEnabled"), False)
+        self.assertEqual(
+            settings.get("permissions"),
+            {"allow": ["Bash(git status)"]},
+        )
+
+    async def test_existing_claude_dir_is_preserved_when_writing_settings(self):
+        claude_dir = self.repo_root / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / "template-note.md").write_text("keep me\n")
+        await self._git("add", ".claude/template-note.md")
+        await self._git("commit", "-m", "Add Claude template dir")
+
+        worker = self._make_cell(agent_id="cafe1234", name="Feature Worker")
+        worker.kind = "worker"
+        worker.slug = "feature-worker"
+
+        wt_path = await self.mgr.create(
+            worker,
+            str(self.repo_root),
+            base_branch="main",
+            state=self._make_state(worker),
+        )
+
+        self.assertIsNotNone(wt_path)
+        self.assertEqual(
+            (Path(wt_path) / ".claude" / "template-note.md").read_text(),
+            "keep me\n",
+        )
+        settings_path = Path(wt_path) / ".claude" / "settings.local.json"
+        self.assertTrue(settings_path.exists())
+        settings = json.loads(settings_path.read_text())
+        self.assertIs(settings.get("autoMemoryEnabled"), False)
 
     async def test_architect_branch_keeps_flat_naming(self):
         architect = self._make_cell(agent_id="fade1234", name="Productmind")

@@ -2,6 +2,7 @@
 
 import asyncio
 import glob
+import json
 import os
 import re
 from typing import Optional
@@ -21,6 +22,9 @@ LOOM_EXCLUDE_ENTRIES = [
     ".loom/loom-system-prompt-*.md",
 ]
 
+_CLAUDE_CODE_SETTINGS_DIR = ".claude"
+_CLAUDE_CODE_SETTINGS_FILE = "settings.local.json"
+_CLAUDE_CODE_AUTO_MEMORY_DISABLED_KINDS = {"engineer", "worker"}
 _HIGH_CHURN_THRESHOLD = 200
 _LOCKFILE_NAMES = {
     "package-lock.json",
@@ -413,6 +417,50 @@ def ensure_git_exclude(directory: str) -> None:
                       len(to_add), exclude)
     except Exception:
         log.debug("Could not update git exclude in %s", directory)
+
+
+def _write_claude_code_local_settings(worktree_path: str) -> None:
+    """Merge Loom's Claude Code local settings into a worktree."""
+    settings_dir = os.path.join(worktree_path, _CLAUDE_CODE_SETTINGS_DIR)
+    settings_path = os.path.join(settings_dir, _CLAUDE_CODE_SETTINGS_FILE)
+    os.makedirs(settings_dir, exist_ok=True)
+
+    settings = {}
+    if os.path.exists(settings_path):
+        try:
+            with open(settings_path, encoding="utf-8") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                settings = loaded
+            else:
+                log.warning(
+                    "Replacing non-object Claude Code settings in %s",
+                    settings_path,
+                )
+        except json.JSONDecodeError:
+            log.warning(
+                "Replacing invalid Claude Code settings JSON in %s",
+                settings_path,
+            )
+
+    settings["autoMemoryEnabled"] = False
+    with open(settings_path, "w", encoding="utf-8") as f:
+        json.dump(settings, f, indent=2)
+        f.write("\n")
+
+
+def _configure_claude_code_worktree_settings(cell, worktree_path: str) -> None:
+    """Disable Claude Code auto-memory for agent kinds that need isolation."""
+    kind = str(getattr(cell, "kind", "") or "").strip().lower()
+    if kind not in _CLAUDE_CODE_AUTO_MEMORY_DISABLED_KINDS:
+        return
+    try:
+        _write_claude_code_local_settings(worktree_path)
+    except Exception:
+        log.exception(
+            "Failed to write Claude Code local settings for '%s'",
+            getattr(cell, "name", ""),
+        )
 
 
 def _slugify_worktree_name(name: str, max_len: int = _WORKTREE_NAME_MAX_LEN) -> str:
@@ -1112,6 +1160,10 @@ class WorktreeManager:
 
             # Add .loom/ to .gitignore if not already there
             await self._ensure_gitignore(repo_root)
+
+            # Keep Claude Code's opportunistic auto-memory out of isolated
+            # engineer/worker worktrees; the file is covered by git exclude.
+            _configure_claude_code_worktree_settings(cell, wt_path)
 
             # Create configured symlinks
             if symlinks:
