@@ -7245,6 +7245,109 @@ test('renderAgentPanel keeps the same Events anchor visible when new digest rows
   assert.equal(newContent.scrollTop, 120);
 });
 
+test('renderAgentPanel keeps the same Messages anchor visible when new message cards are inserted above', () => {
+  const { context, document } = createWeaverHarness();
+  const panel = document.register('panel-agent');
+  const oldList = new FakeElement('messages-old');
+  const newList = new FakeElement('messages-new');
+  let currentList = oldList;
+
+  function makeAnchor(key, top, bottom) {
+    const el = new FakeElement();
+    el.setAttribute('data-agent-panel-anchor', key);
+    el.getBoundingClientRect = function() {
+      return { top, bottom, left: 0, right: 240, width: 240, height: bottom - top };
+    };
+    return el;
+  }
+
+  oldList.scrollTop = 100;
+  oldList.getBoundingClientRect = function() {
+    return { top: 0, bottom: 160, left: 0, right: 240, width: 240, height: 160 };
+  };
+  oldList.querySelectorAll = function(selector) {
+    if (selector === '[data-agent-panel-anchor]') {
+      return [
+        makeAnchor('message-msg-2', 20, 50),
+        makeAnchor('message-msg-1', 70, 100),
+      ];
+    }
+    return [];
+  };
+
+  newList.scrollTop = 0;
+  newList.getBoundingClientRect = function() {
+    return { top: 0, bottom: 160, left: 0, right: 240, width: 240, height: 160 };
+  };
+  newList.querySelectorAll = function(selector) {
+    if (selector === '[data-agent-panel-anchor]') {
+      return [
+        makeAnchor('message-msg-3', 10, 40),
+        makeAnchor('message-msg-2', 50, 80),
+        makeAnchor('message-msg-1', 100, 130),
+      ];
+    }
+    return [];
+  };
+
+  panel.querySelector = function(selector) {
+    if (selector === '.agent-panel-message-list') return currentList;
+    return null;
+  };
+  Object.defineProperty(panel, 'innerHTML', {
+    configurable: true,
+    get() {
+      return this._innerHTML || '';
+    },
+    set(value) {
+      this._innerHTML = value;
+      currentList = newList;
+    },
+  });
+
+  context.state.agents = {
+    'arch-1': {
+      id: 'arch-1',
+      name: 'Architect One',
+      group: 'alpha',
+      kind: 'architect',
+      cell_type: 'agent',
+      mcp_messages: [
+        { id: 'msg-3', action: 'engineer_message_architect', message: 'Newest message', timestamp: 30, sender_kind: 'engineer', direction: 'received' },
+        { id: 'msg-2', action: 'architect_reply', message: 'Anchored message', timestamp: 20, sender_kind: 'architect', direction: 'sent' },
+        { id: 'msg-1', action: 'engineer_message_architect', message: 'Oldest message', timestamp: 10, sender_kind: 'engineer', direction: 'received' },
+      ],
+    },
+  };
+  context.focusedItemId = 'arch-1';
+  runInContext(context, `_agentPanelLastSelectedTabByKind.architect = 'messages';`);
+
+  context.renderAgentPanel();
+
+  assert.equal(newList.scrollTop, 130);
+});
+
+test('agent Messages tab owns a full-height scroll region and preserves full body wrapping', () => {
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+
+  assert.match(
+    css,
+    /\.agent-panel-panel\[data-agent-panel-tab="messages"\] \.agent-panel-content\s*\{[^}]*display:\s*flex;[^}]*overflow:\s*hidden;[^}]*padding:\s*0;/s,
+  );
+  assert.match(
+    css,
+    /\.agent-panel-messages-tab\s*\{[^}]*flex:\s*1;[^}]*min-height:\s*0;[^}]*height:\s*100%;/s,
+  );
+  assert.match(
+    css,
+    /\.agent-panel-message-list\s*\{[^}]*flex:\s*1;[^}]*min-height:\s*0;[^}]*overflow-y:\s*auto;/s,
+  );
+  assert.match(
+    css,
+    /\.agent-panel-message-body\s*\{[^}]*white-space:\s*pre-wrap;[^}]*overflow-wrap:\s*anywhere;/s,
+  );
+});
+
 test('renderAgentCell shows per-engineer and architect digest pause controls with state-driven classes', () => {
   const { context } = createWeaverHarness();
   context.state.group_settings = {
