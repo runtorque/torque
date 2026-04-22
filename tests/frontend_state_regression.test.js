@@ -546,6 +546,20 @@ function boardCardDivCount(html) {
   return (String(html).match(/<div class="board-card(?:\s|")/g) || []).length;
 }
 
+function htmlClassCount(html, className) {
+  const escaped = String(className).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return (String(html).match(new RegExp('class="' + escaped + '(?:\\\\s|")', 'g')) || []).length;
+}
+
+function decodeHtmlAttr(value) {
+  return String(value)
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+}
+
 function attachStandalonePanelDom(document) {
   const get = (id) => document.elements.get(id) || null;
   const shell = get('standalone-sidebar-shell');
@@ -6857,6 +6871,100 @@ test('context panel renders compacted summaries as read-only entries', () => {
   assert.doesNotMatch(panel.innerHTML, /contextEditEntry/);
 });
 
+test('context panel virtualizes oversized task-scoped memory lists', () => {
+  const { context, document } = createContextHarness();
+  const panel = document.register('panel-context');
+  panel.clientWidth = 420;
+  const entries = [];
+  for (let i = 0; i < 500; i++) {
+    entries.push({
+      id: 'mem-' + i,
+      title: 'Memory ' + i,
+      content: 'Context entry ' + i,
+      entry_type: 'note',
+      pinned: false,
+      scope_kind: 'task',
+      scope_ref: 'task-1',
+      source_kind: 'manual',
+      source_id: 'note-' + i,
+      created_at: i,
+      updated_at: i,
+      links: [{ target_kind: 'task', target_ref: 'task-1' }],
+    });
+  }
+
+  context.__entries = entries;
+  runInContext(context, `
+    state.board_tasks = {
+      'task-1': { id: 'task-1', task: 'Task scoped memory', group: 'alpha' }
+    };
+    _boardFocusedTask = 'task-1';
+    _contextFocus = 'task';
+    _contextEntries = __entries.slice();
+    _contextSelectedId = 'mem-0';
+    _contextLastQueryKey = JSON.stringify(_contextBuildListQuery());
+    _contextCompactDetailOpen = false;
+  `);
+
+  context.renderContextPanel();
+
+  let html = panel.innerHTML;
+  assert.match(html, /data-context-virtualized="true"/);
+  assert.equal(htmlClassCount(html, 'context-card') < 80, true);
+  assert.match(html, /Memory 0/);
+  assert.doesNotMatch(html, /Memory 499/);
+  assert.equal(jsonValue(context, `_contextBuildListQuery().limit`), 100);
+
+  runInContext(context, `_contextScrollTop = 300 * _CONTEXT_LIST_ROW_HEIGHT; renderContextPanel();`);
+  html = panel.innerHTML;
+  assert.equal(htmlClassCount(html, 'context-card') < 80, true);
+  assert.match(html, /Memory 300/);
+});
+
+test('context panel clamps stale virtual scroll after scoped list shrinks', () => {
+  const { context, document } = createContextHarness();
+  const panel = document.register('panel-context');
+  panel.clientWidth = 420;
+  const entries = [];
+  for (let i = 0; i < 100; i++) {
+    entries.push({
+      id: 'mem-' + i,
+      title: 'Shrunk memory ' + i,
+      content: 'Context entry ' + i,
+      entry_type: 'note',
+      pinned: false,
+      scope_kind: 'task',
+      scope_ref: 'task-1',
+      source_kind: 'manual',
+      source_id: 'note-' + i,
+      created_at: i,
+      updated_at: i,
+      links: [],
+    });
+  }
+
+  context.__entries = entries;
+  runInContext(context, `
+    state.board_tasks = {
+      'task-1': { id: 'task-1', task: 'Task scoped memory', group: 'alpha' }
+    };
+    _boardFocusedTask = 'task-1';
+    _contextFocus = 'task';
+    _contextEntries = __entries.slice();
+    _contextSelectedId = 'mem-0';
+    _contextLastQueryKey = JSON.stringify(_contextBuildListQuery());
+    _contextCompactDetailOpen = false;
+    _contextScrollTop = 70000;
+    renderContextPanel();
+  `);
+
+  const html = panel.innerHTML;
+  assert.equal(htmlClassCount(html, 'context-card') > 0, true);
+  assert.match(html, /Shrunk memory/);
+  assert.equal(jsonValue(context, `_contextVirtualRange(100).start <= _contextVirtualRange(100).end`), true);
+  assert.equal(jsonValue(context, `_contextScrollTop <= (100 * _CONTEXT_LIST_ROW_HEIGHT)`), true);
+});
+
 test('context panel opens a new linked manual note for the current task', () => {
   const { context, document } = createContextHarness();
   document.register('panel-context');
@@ -9015,6 +9123,204 @@ test('renderAgentPanel preserves the selected Events tab across rerenders', () =
 
   assert.match(panel.innerHTML, /id="agent-panel-tab-events" class="agent-panel-tab active"/);
   assert.match(panel.innerHTML, /Already sent to Engineer One/);
+});
+
+test('worker worklog virtualizes assigned task history and preserves scroll position', () => {
+  const { context, document } = createWeaverHarness();
+  const panel = document.register('panel-agent');
+  const content = document.createElement('div');
+  content.classList.add('agent-panel-content');
+  content.scrollTop = 7000;
+  content.clientHeight = 280;
+  panel.setQuerySelector('.agent-panel-content', content);
+
+  context.state.agents = {
+    'worker-1': {
+      id: 'worker-1',
+      name: 'Worker One',
+      kind: 'worker',
+      group: 'alpha',
+      cell_type: 'agent',
+    },
+  };
+  context.focusedItemId = 'worker-1';
+  context.state.board_tasks = {};
+  for (let i = 0; i < 1000; i++) {
+    context.state.board_tasks['task-' + i] = {
+      id: 'task-' + i,
+      task: 'Assigned task ' + i,
+      group: 'alpha',
+      agent_id: 'worker-1',
+      lane: i % 2 ? 'Done' : 'In Progress',
+      status: 'status ' + i,
+      created_at: i,
+    };
+  }
+
+  runInContext(context, `_agentPanelLastSelectedTabByKind.worker = 'worklog'; renderAgentPanel();`);
+
+  assert.match(panel.innerHTML, /Task history/);
+  assert.match(panel.innerHTML, /1000/);
+  assert.equal(htmlClassCount(panel.innerHTML, 'agent-panel-worklog-item') < 80, true);
+  assert.equal(content.scrollTop, 7000);
+  assert.equal(
+    jsonValue(context, `_agentPanelWorkerTaskIdCacheByAgent['worker-1'].length`),
+    1000,
+  );
+
+  content.scrollTop = 21000;
+  assert.equal(typeof content.listeners.scroll, 'function');
+  content.listeners.scroll({ currentTarget: content });
+
+  assert.equal(content.scrollTop, 21000);
+  assert.equal(htmlClassCount(panel.innerHTML, 'agent-panel-worklog-item') < 80, true);
+  assert.equal(
+    jsonValue(context, `_agentPanelVirtualScrollByKey[_agentPanelFocusedSurfaceKey(state.agents['worker-1'], 'worklog', 'worker-tasks')].top`),
+    21000,
+  );
+});
+
+test('worker worklog clamps stale virtual scroll after task history shrinks', () => {
+  const { context, document } = createWeaverHarness();
+  const panel = document.register('panel-agent');
+  const content = document.createElement('div');
+  content.classList.add('agent-panel-content');
+  content.clientHeight = 280;
+  panel.setQuerySelector('.agent-panel-content', content);
+
+  context.state.agents = {
+    'worker-1': {
+      id: 'worker-1',
+      name: 'Worker One',
+      kind: 'worker',
+      group: 'alpha',
+      cell_type: 'agent',
+    },
+  };
+  context.focusedItemId = 'worker-1';
+  context.state.board_tasks = {};
+  for (let i = 0; i < 100; i++) {
+    context.state.board_tasks['task-' + i] = {
+      id: 'task-' + i,
+      task: 'Shrunk task ' + i,
+      group: 'alpha',
+      agent_id: 'worker-1',
+      lane: 'Done',
+      created_at: i,
+    };
+  }
+
+  runInContext(context, `
+    _agentPanelLastSelectedTabByKind.worker = 'worklog';
+    _agentPanelVirtualScrollByKey[
+      _agentPanelFocusedSurfaceKey(state.agents['worker-1'], 'worklog', 'worker-tasks')
+    ] = { top: 70000, viewportHeight: 280 };
+    renderAgentPanel();
+  `);
+
+  assert.match(panel.innerHTML, /Shrunk task/);
+  assert.equal(htmlClassCount(panel.innerHTML, 'agent-panel-worklog-item') > 0, true);
+  assert.equal(
+    jsonValue(context, `_agentPanelVirtualRange(_agentPanelFocusedSurfaceKey(state.agents['worker-1'], 'worklog', 'worker-tasks'), 100, _AGENT_PANEL_WORKLOG_ROW_HEIGHT).start <= _agentPanelVirtualRange(_agentPanelFocusedSurfaceKey(state.agents['worker-1'], 'worklog', 'worker-tasks'), 100, _AGENT_PANEL_WORKLOG_ROW_HEIGHT).end`),
+    true,
+  );
+  assert.equal(
+    jsonValue(context, `_agentPanelVirtualScrollByKey[_agentPanelFocusedSurfaceKey(state.agents['worker-1'], 'worklog', 'worker-tasks')].top <= (100 * _AGENT_PANEL_WORKLOG_ROW_HEIGHT)`),
+    true,
+  );
+});
+
+test('architect messages and decisions use virtual windows for large histories', () => {
+  const { context, document } = createWeaverHarness();
+  const panel = document.register('panel-agent');
+  const content = document.createElement('div');
+  content.classList.add('agent-panel-content');
+  content.clientHeight = 300;
+  const messageList = document.createElement('div');
+  messageList.classList.add('agent-panel-message-list');
+  messageList.clientHeight = 300;
+  panel.setQuerySelector('.agent-panel-content', content);
+  panel.setQuerySelector('.agent-panel-message-list', messageList);
+
+  context.state.agents = {
+    'arch-1': {
+      id: 'arch-1',
+      name: 'Architect One',
+      kind: 'architect',
+      group: 'alpha',
+      cell_type: 'agent',
+      mcp_messages: [],
+    },
+  };
+  context.state.decisions = {};
+  context.focusedItemId = 'arch-1';
+  for (let i = 0; i < 1000; i++) {
+    context.state.agents['arch-1'].mcp_messages.push({
+      id: 'msg-' + i,
+      action: 'progress',
+      message: 'Message ' + i,
+      timestamp: i,
+    });
+    context.state.decisions['decision-' + i] = {
+      id: 'decision-' + i,
+      architect_id: 'arch-1',
+      title: 'Decision ' + i,
+      rationale: 'Rationale ' + i,
+      status: i % 2 ? 'accepted' : 'proposed',
+      created_at: i,
+      updated_at: i,
+    };
+  }
+
+  runInContext(context, `_agentPanelLastSelectedTabByKind.architect = 'messages'; renderAgentPanel();`);
+  assert.match(panel.innerHTML, /Messages/);
+  assert.match(panel.innerHTML, /1000/);
+  assert.equal(htmlClassCount(panel.innerHTML, 'agent-panel-message-card') < 80, true);
+
+  runInContext(context, `_agentPanelLastSelectedTabByKind.architect = 'decisions'; renderAgentPanel();`);
+  const decisionRows = (panel.innerHTML.match(/architect-decision-card/g) || []).length;
+  assert.equal(decisionRows < 80, true);
+  assert.match(panel.innerHTML, /1000/);
+});
+
+test('ws task deltas avoid rerendering worker worklog for unrelated assigned tasks', () => {
+  const { context, sandbox, flushRaf } = createStandaloneDeltaBatchHarness(['weaver']);
+  runInContext(context, `
+    _activePanelApp = 'weaver';
+    focusedItemId = 'worker-1';
+    state.agents = {
+      'worker-1': { id: 'worker-1', kind: 'worker', group: 'alpha', cell_type: 'agent' },
+      'worker-2': { id: 'worker-2', kind: 'worker', group: 'alpha', cell_type: 'agent' },
+    };
+    state.board_tasks = {
+      'other-task': {
+        id: 'other-task',
+        task: 'Unrelated work',
+        group: 'alpha',
+        agent_id: 'worker-2',
+        lane: 'In Progress'
+      }
+    };
+    _currentGroup = function() { return 'alpha'; };
+    _resolveFocusedAgent = function() { return state.agents[focusedItemId] || null; };
+    _agentPanelKind = function(agent) { return (agent && agent.kind) || 'worker'; };
+    _agentPanelActiveTab = function() { return 'worklog'; };
+  `);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'task_upsert',
+      id: 'other-task',
+      task: 'Unrelated work updated',
+      group: 'alpha',
+      agent_id: 'worker-2',
+      lane: 'In Progress',
+    }],
+  });
+  flushRaf();
+
+  assert.equal(sandbox.renderCalls.weaver, 0);
 });
 
 test('renderAgentPanel shows workflow breach events in engineer cell history', () => {
@@ -11522,6 +11828,114 @@ test('Escape closes task history through the shared overlay key handler', () => 
   assert.equal(jsonValue(context, `_taskHistoryOpen`), false);
   assert.equal(overlay.classList.contains('visible'), false);
   assert.equal(document.getElementById('task-history-root').innerHTML, '');
+});
+
+test('task history virtualizes large histories and lazily renders expanded messages', () => {
+  const { context, document } = createTaskHistoryHarness();
+  const tasks = [];
+  const messages = [];
+  for (let i = 0; i < 1000; i++) {
+    tasks.push({
+      task_id: 'task-' + i,
+      task_title: 'Task ' + i,
+      outcome: i % 2 ? 'done' : 'in-progress',
+      started_at: 1000 - i,
+    });
+    messages.push({
+      task_id: 'task-' + i,
+      action: 'progress',
+      message: 'Message for task ' + i,
+      timestamp: 1000 - i,
+    });
+  }
+
+  context.showTaskHistory('agent-1');
+  context.taskHistoryReceiveDetail({
+    type: 'agent_history_detail',
+    record: { id: 'agent-1', name: 'History Agent' },
+    tasks,
+    messages,
+  });
+
+  let html = document.getElementById('task-history-root').innerHTML;
+  assert.match(html, /1000 tasks/);
+  assert.equal(htmlClassCount(html, 'th-task') < 80, true);
+  assert.match(html, /Task 0/);
+  assert.doesNotMatch(html, /Task 999/);
+
+  runInContext(context, `_taskHistoryExpandedTask = 'task-900'; renderTaskHistory();`);
+  html = document.getElementById('task-history-root').innerHTML;
+  assert.doesNotMatch(html, /Message for task 900/);
+
+  runInContext(context, `_taskHistoryScrollTop = 900 * _TASK_HISTORY_ROW_HEIGHT; renderTaskHistory();`);
+  html = document.getElementById('task-history-root').innerHTML;
+  assert.match(html, /Task 900/);
+  assert.match(html, /Message for task 900/);
+  assert.equal(jsonValue(context, `_taskHistoryExpandedTask`), 'task-900');
+});
+
+test('task history rendered row onclick expands visible tasks', () => {
+  const { context, document } = createTaskHistoryHarness();
+
+  context.showTaskHistory('agent-1');
+  context.taskHistoryReceiveDetail({
+    type: 'agent_history_detail',
+    record: { id: 'agent-1', name: 'History Agent' },
+    tasks: [{
+      task_id: 'task-1',
+      task_title: 'Clickable task',
+      outcome: 'done',
+      started_at: 100,
+    }],
+    messages: [{
+      task_id: 'task-1',
+      action: 'done',
+      message: 'Expanded from rendered click',
+      timestamp: 110,
+    }],
+  });
+
+  const html = document.getElementById('task-history-root').innerHTML;
+  const match = html.match(/<div class="th-task-row" onclick="([^"]*)"/);
+  assert.ok(match, 'expected rendered task row onclick');
+  const handler = decodeHtmlAttr(match[1]);
+
+  assert.equal(handler, 'toggleTaskHistoryItem("task-1")');
+  assert.doesNotThrow(() => runInContext(context, handler));
+  assert.match(
+    document.getElementById('task-history-root').innerHTML,
+    /Expanded from rendered click/,
+  );
+});
+
+test('task history keeps expanded item state across virtual window changes', () => {
+  const { context, document } = createTaskHistoryHarness();
+  const tasks = [];
+  for (let i = 0; i < 1000; i++) {
+    tasks.push({
+      task_id: 'task-' + i,
+      task_title: 'Task ' + i,
+      outcome: 'done',
+      started_at: 1000 - i,
+    });
+  }
+
+  context.showTaskHistory('agent-1');
+  context.taskHistoryReceiveDetail({
+    type: 'agent_history_detail',
+    record: { id: 'agent-1', name: 'History Agent' },
+    tasks,
+    messages: [{ task_id: 'task-10', action: 'done', message: 'Persist me', timestamp: 20 }],
+  });
+  context.toggleTaskHistoryItem('task-10');
+  assert.match(document.getElementById('task-history-root').innerHTML, /Persist me/);
+
+  runInContext(context, `_taskHistoryScrollTop = 700 * _TASK_HISTORY_ROW_HEIGHT; renderTaskHistory();`);
+  assert.equal(jsonValue(context, `_taskHistoryExpandedTask`), 'task-10');
+  assert.doesNotMatch(document.getElementById('task-history-root').innerHTML, /Persist me/);
+
+  runInContext(context, `_taskHistoryScrollTop = 0; renderTaskHistory();`);
+  assert.match(document.getElementById('task-history-root').innerHTML, /Persist me/);
 });
 
 test('Cmd+Option+E opens the add engineer modal through the shared key handler', () => {

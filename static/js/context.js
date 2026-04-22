@@ -18,6 +18,11 @@ var _contextEditor = null;
 var _contextSplitRatio = 0.38;
 var _contextResizeDrag = null;
 var _contextCompactDetailOpen = false;
+var _contextListRenderFrame = 0;
+var _CONTEXT_LIST_VIRTUAL_THRESHOLD = 80;
+var _CONTEXT_LIST_ROW_HEIGHT = 112;
+var _CONTEXT_LIST_OVERSCAN = 5;
+var _CONTEXT_LIST_DEFAULT_VIEWPORT = 520;
 
 function _contextCurrentAgent() {
   if (selectedAgentId && state && state.agents && state.agents[selectedAgentId]) {
@@ -335,6 +340,50 @@ function _renderContextEntryCard(entry) {
   return html;
 }
 
+function _contextVirtualRange(total) {
+  total = Math.max(0, Number(total) || 0);
+  if (total <= _CONTEXT_LIST_VIRTUAL_THRESHOLD) {
+    return {
+      start: 0,
+      end: total,
+      before: 0,
+      after: 0,
+      virtualized: false,
+    };
+  }
+  var viewport = _CONTEXT_LIST_DEFAULT_VIEWPORT;
+  var listEl = document.getElementById('context-list');
+  if (listEl && typeof listEl.clientHeight === 'number' && listEl.clientHeight > 0) {
+    viewport = listEl.clientHeight;
+  }
+  viewport = Math.max(120, viewport);
+  var rawScrollTop = Math.max(0, Number(_contextScrollTop || 0));
+  var maxScrollTop = Math.max(0, (total * _CONTEXT_LIST_ROW_HEIGHT) - viewport);
+  var scrollTop = Math.min(rawScrollTop, maxScrollTop);
+  if (scrollTop !== rawScrollTop) _contextScrollTop = scrollTop;
+  var visible = Math.ceil(viewport / _CONTEXT_LIST_ROW_HEIGHT) + (_CONTEXT_LIST_OVERSCAN * 2);
+  var start = Math.max(
+    0,
+    Math.floor(scrollTop / _CONTEXT_LIST_ROW_HEIGHT) - _CONTEXT_LIST_OVERSCAN
+  );
+  start = Math.min(start, Math.max(0, total - Math.max(1, visible)));
+  var end = Math.min(total, start + Math.max(1, visible));
+  return {
+    start: start,
+    end: end,
+    before: start * _CONTEXT_LIST_ROW_HEIGHT,
+    after: Math.max(0, (total - end) * _CONTEXT_LIST_ROW_HEIGHT),
+    virtualized: true,
+  };
+}
+
+function _contextVirtualSpacer(height) {
+  height = Math.max(0, Math.round(Number(height) || 0));
+  if (!height) return '';
+  return '<div class="context-virtual-spacer" aria-hidden="true" style="height:'
+    + height + 'px"></div>';
+}
+
 function _renderContextList() {
   if (_contextListLoading && !_contextEntries.length) {
     return '<div class="context-empty">Loading shared context…</div>';
@@ -346,9 +395,15 @@ function _renderContextList() {
     return '<div class="context-empty">No shared context matches the current filter.</div>';
   }
   var html = '';
-  for (var i = 0; i < _contextEntries.length; i++) {
+  var range = _contextVirtualRange(_contextEntries.length);
+  html += '<div class="context-virtual-list" style="display:flex;flex-direction:column;gap:8px" data-context-virtualized="'
+    + (range.virtualized ? 'true' : 'false') + '">';
+  html += _contextVirtualSpacer(range.before);
+  for (var i = range.start; i < range.end; i++) {
     html += _renderContextEntryCard(_contextEntries[i]);
   }
+  html += _contextVirtualSpacer(range.after);
+  html += '</div>';
   return html;
 }
 
@@ -562,6 +617,15 @@ function renderContextPanel() {
     listEl.scrollTop = _contextScrollTop;
     listEl.addEventListener('scroll', function() {
       _contextScrollTop = listEl.scrollTop;
+      if (_contextEntries.length > _CONTEXT_LIST_VIRTUAL_THRESHOLD && !_contextListRenderFrame) {
+        var scheduler = typeof requestAnimationFrame === 'function'
+          ? requestAnimationFrame
+          : function(fn) { return setTimeout(fn, 0); };
+        _contextListRenderFrame = scheduler(function() {
+          _contextListRenderFrame = 0;
+          renderContextPanel();
+        });
+      }
     });
   }
   if (_contextSearchHadFocus) {

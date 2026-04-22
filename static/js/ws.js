@@ -239,6 +239,9 @@ function _handleFullState(msg) {
   _awaitingFullState = false;
   state = msg;
   if (typeof _invalidateTaskLookupIndex === 'function') _invalidateTaskLookupIndex();
+  if (typeof _agentPanelWorkerTaskIdCacheByAgent !== 'undefined') {
+    _agentPanelWorkerTaskIdCacheByAgent = {};
+  }
   _applyRuntimeMode();
   if (typeof _standalonePanelSetLayoutFromState === 'function'
       && typeof _standalonePanelsEnabled === 'function'
@@ -327,9 +330,14 @@ function _handleDelta(msg) {
   const invalidations = _deltaSurfaceInvalidations(msg.ops, opGroupHints);
   _expectedSeq = msg.seq + 1;
   _applyDelta(msg.ops);
+  const taskDeltaChanges = _collectBoardTaskDeltaChanges(msg.ops, opGroupHints);
+  if (taskDeltaChanges.length
+      && typeof _agentPanelInvalidateWorkerTaskCacheForDeltas === 'function') {
+    _agentPanelInvalidateWorkerTaskCacheForDeltas(taskDeltaChanges);
+  }
   if (invalidations.board && typeof _boardQueueTaskDeltas === 'function') {
     _boardQueueTaskDeltas(
-      _collectBoardTaskDeltaChanges(msg.ops, opGroupHints),
+      taskDeltaChanges,
       { canPatch: _deltaOpsAreOnlyTaskDeltas(msg.ops) },
     );
   }

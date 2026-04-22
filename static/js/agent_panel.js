@@ -8,10 +8,20 @@ var _agentPanelCellEventsLastFetchEventAtById = {};
 var _AGENT_PANEL_CELL_EVENTS_REFRESH_MS = 1500;
 var _AGENT_PANEL_EVENTS_PAGE_SIZE = 20;
 var _AGENT_PANEL_EVENTS_SCROLL_THRESHOLD = 80;
+var _AGENT_PANEL_VIRTUAL_THRESHOLD = 80;
+var _AGENT_PANEL_VIRTUAL_OVERSCAN = 6;
+var _AGENT_PANEL_VIRTUAL_DEFAULT_VIEWPORT = 520;
+var _AGENT_PANEL_WORKLOG_ROW_HEIGHT = 70;
+var _AGENT_PANEL_MESSAGE_ROW_HEIGHT = 92;
+var _AGENT_PANEL_DECISION_ROW_HEIGHT = 116;
 var _agentPanelEventsPagerAgentId = '';
 var _agentPanelEventsVisibleLimit = _AGENT_PANEL_EVENTS_PAGE_SIZE;
 var _agentPanelEventsLastTotal = 0;
 var _agentPanelEventsPreRenderAtLiveTail = false;
+var _agentPanelVirtualScrollByKey = {};
+var _agentPanelRenderedVirtualMetas = [];
+var _agentPanelVirtualRenderFrame = 0;
+var _agentPanelWorkerTaskIdCacheByAgent = {};
 var _agentPanelTabSpecByKind = {
   architect: [
     { key: 'decisions', label: 'Decisions' },
@@ -252,6 +262,206 @@ function _agentPanelScrollContainer(root) {
   if (!root || typeof root.querySelector !== 'function') return null;
   return root.querySelector('.agent-panel-message-list')
     || root.querySelector('.agent-panel-content');
+}
+
+function _agentPanelVirtualKey(parts) {
+  var values = Array.isArray(parts) ? parts : [];
+  return values.map(function(part) {
+    return String(part == null ? '' : part).replace(/\|/g, '%7C');
+  }).join('|');
+}
+
+function _agentPanelFocusedSurfaceKey(agent, tab, surface) {
+  return _agentPanelVirtualKey([
+    'agent',
+    (agent && agent.id) || '',
+    tab || '',
+    surface || '',
+  ]);
+}
+
+function _agentPanelLegacyWorklogVirtualKey(group, restricted) {
+  return _agentPanelVirtualKey([
+    'legacy-worklog',
+    group || '',
+    restricted ? 'owned' : 'all',
+  ]);
+}
+
+function _agentPanelVirtualMetasForSurface(agent, activeTab) {
+  if (!agent) return [];
+  var kind = _agentPanelKind(agent);
+  if (kind === 'worker' && activeTab === 'worklog') {
+    return [{
+      key: _agentPanelFocusedSurfaceKey(agent, activeTab, 'worker-tasks'),
+      scrollSelector: '.agent-panel-content',
+    }];
+  }
+  if (kind === 'engineer' && activeTab === 'worklog') {
+    var engineerSettings = _agentPanelWeaverSettings(agent.group || '');
+    return [{
+      key: _agentPanelLegacyWorklogVirtualKey(
+        agent.group || '',
+        !!(engineerSettings && engineerSettings.restrict_to_created_agents)
+      ),
+      scrollSelector: '.agent-panel-content',
+    }];
+  }
+  if (kind === 'architect' && activeTab === 'decisions') {
+    return [{
+      key: _agentPanelFocusedSurfaceKey(agent, activeTab, 'decisions'),
+      scrollSelector: '.agent-panel-content',
+    }];
+  }
+  if (kind === 'architect' && activeTab === 'messages') {
+    return [{
+      key: _agentPanelFocusedSurfaceKey(agent, activeTab, 'messages'),
+      scrollSelector: '.agent-panel-message-list',
+    }];
+  }
+  return [];
+}
+
+function _agentPanelRecordVirtualScroll(key, container) {
+  if (!key || !container) return;
+  var rec = _agentPanelVirtualScrollByKey[key] || {};
+  if (typeof container.scrollTop === 'number') rec.top = Math.max(0, container.scrollTop);
+  if (typeof container.clientHeight === 'number' && container.clientHeight > 0) {
+    rec.viewportHeight = container.clientHeight;
+  }
+  _agentPanelVirtualScrollByKey[key] = rec;
+}
+
+function _agentPanelCaptureVirtualScrolls(root, metas) {
+  if (!root || typeof root.querySelector !== 'function') return;
+  metas = metas || [];
+  for (var i = 0; i < metas.length; i++) {
+    var meta = metas[i] || {};
+    var container = root.querySelector(meta.scrollSelector || '.agent-panel-content');
+    _agentPanelRecordVirtualScroll(meta.key, container);
+  }
+}
+
+function _agentPanelVirtualScrollTop(key) {
+  var rec = _agentPanelVirtualScrollByKey[key] || {};
+  return Math.max(0, Number(rec.top || 0));
+}
+
+function _agentPanelVirtualViewportHeight(key) {
+  var rec = _agentPanelVirtualScrollByKey[key] || {};
+  return Math.max(
+    120,
+    Number(rec.viewportHeight || 0) || _AGENT_PANEL_VIRTUAL_DEFAULT_VIEWPORT
+  );
+}
+
+function _agentPanelVirtualRange(key, total, rowHeight, overscan) {
+  total = Math.max(0, Number(total) || 0);
+  rowHeight = Math.max(1, Number(rowHeight) || _AGENT_PANEL_WORKLOG_ROW_HEIGHT);
+  overscan = Math.max(0, Number(overscan) || _AGENT_PANEL_VIRTUAL_OVERSCAN);
+  if (total <= _AGENT_PANEL_VIRTUAL_THRESHOLD) {
+    return {
+      start: 0,
+      end: total,
+      before: 0,
+      after: 0,
+      virtualized: false,
+    };
+  }
+  var viewport = _agentPanelVirtualViewportHeight(key);
+  var rawScrollTop = _agentPanelVirtualScrollTop(key);
+  var maxScrollTop = Math.max(0, (total * rowHeight) - viewport);
+  var scrollTop = Math.min(rawScrollTop, maxScrollTop);
+  if (scrollTop !== rawScrollTop && key) {
+    var rec = _agentPanelVirtualScrollByKey[key] || {};
+    rec.top = scrollTop;
+    _agentPanelVirtualScrollByKey[key] = rec;
+  }
+  var visible = Math.ceil(viewport / rowHeight) + (overscan * 2);
+  var start = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan);
+  start = Math.min(start, Math.max(0, total - Math.max(1, visible)));
+  var end = Math.min(total, start + Math.max(1, visible));
+  return {
+    start: start,
+    end: end,
+    before: start * rowHeight,
+    after: Math.max(0, (total - end) * rowHeight),
+    virtualized: true,
+  };
+}
+
+function _agentPanelVirtualSpacer(height, className) {
+  height = Math.max(0, Math.round(Number(height) || 0));
+  if (!height) return '';
+  return '<div class="' + _agentPanelEsc(className || 'agent-panel-virtual-spacer')
+    + '" aria-hidden="true" style="height:' + height + 'px"></div>';
+}
+
+function _agentPanelRegisterVirtualMeta(meta) {
+  if (!meta || !meta.key) return;
+  _agentPanelRenderedVirtualMetas.push(meta);
+}
+
+function _agentPanelRenderVirtualList(opts) {
+  opts = opts || {};
+  var key = String(opts.key || '');
+  var total = Math.max(0, Number(opts.total) || 0);
+  var rowHeight = Number(opts.rowHeight) || _AGENT_PANEL_WORKLOG_ROW_HEIGHT;
+  var range = _agentPanelVirtualRange(key, total, rowHeight, opts.overscan);
+  var listClass = opts.listClass || 'agent-panel-worklog-list';
+  var attrName = opts.anchorAttribute || 'data-agent-panel-virtual-key';
+  var html = '<div class="' + _agentPanelEsc(listClass) + '" '
+    + attrName + '="' + _agentPanelEsc(key) + '"'
+    + ' data-agent-panel-virtualized="' + (range.virtualized ? 'true' : 'false') + '">';
+  html += _agentPanelVirtualSpacer(range.before, opts.spacerClass);
+  for (var i = range.start; i < range.end; i++) {
+    html += opts.renderItem ? opts.renderItem(i) : '';
+  }
+  html += _agentPanelVirtualSpacer(range.after, opts.spacerClass);
+  html += '</div>';
+  _agentPanelRegisterVirtualMeta({
+    key: key,
+    total: total,
+    rowHeight: rowHeight,
+    scrollSelector: opts.scrollSelector || '.agent-panel-content',
+  });
+  return html;
+}
+
+function _agentPanelScheduleVirtualRender() {
+  if (_agentPanelVirtualRenderFrame) return;
+  var scheduler = typeof requestAnimationFrame === 'function'
+    ? requestAnimationFrame
+    : function(fn) { return setTimeout(fn, 0); };
+  _agentPanelVirtualRenderFrame = scheduler(function() {
+    _agentPanelVirtualRenderFrame = 0;
+    if (typeof renderAgentPanel === 'function') renderAgentPanel();
+  });
+}
+
+function _agentPanelVirtualScrollHandler(meta, evt) {
+  var container = (evt && (evt.currentTarget || evt.target)) || this;
+  if (!meta || !meta.key || !container) return;
+  _agentPanelRecordVirtualScroll(meta.key, container);
+  if (Number(meta.total || 0) <= _AGENT_PANEL_VIRTUAL_THRESHOLD) return;
+  _agentPanelScheduleVirtualRender();
+}
+
+function _agentPanelAttachVirtualScrolls(root) {
+  if (!root || typeof root.querySelector !== 'function') return;
+  for (var i = 0; i < _agentPanelRenderedVirtualMetas.length; i++) {
+    var meta = _agentPanelRenderedVirtualMetas[i] || {};
+    var container = root.querySelector(meta.scrollSelector || '.agent-panel-content');
+    if (!container || typeof container.addEventListener !== 'function') continue;
+    if (typeof container.scrollTop === 'number') {
+      _agentPanelRecordVirtualScroll(meta.key, container);
+    }
+    container.addEventListener('scroll', function(boundMeta) {
+      return function(evt) {
+        _agentPanelVirtualScrollHandler(boundMeta, evt);
+      };
+    }(meta));
+  }
 }
 
 function _agentPanelCaptureScrollAnchor(container) {
@@ -867,20 +1077,58 @@ function _agentPanelWorkerEvents(agent) {
 function _agentPanelWorkerTaskEntries(agent) {
   var agentId = String((agent && agent.id) || '');
   var tasks = [];
-  if (!state || !state.board_tasks) return tasks;
-  for (var taskId in state.board_tasks) {
-    var task = state.board_tasks[taskId];
-    if (!task) continue;
-    if (String(task.agent_id || '') !== agentId) continue;
-    tasks.push(task);
+  if (!agentId || !state || !state.board_tasks) return tasks;
+  var boardTaskCount = 0;
+  for (var countTaskId in state.board_tasks) {
+    if (Object.prototype.hasOwnProperty.call(state.board_tasks, countTaskId)) {
+      boardTaskCount++;
+    }
   }
-  tasks.sort(function(a, b) {
-    var aTs = Number((a && (a.started_at || a.created_at || a.updated_at)) || 0);
-    var bTs = Number((b && (b.started_at || b.created_at || b.updated_at)) || 0);
-    if (aTs !== bTs) return bTs - aTs;
-    return String((b && b.id) || '').localeCompare(String((a && a.id) || ''));
-  });
+  var cachedIds = _agentPanelWorkerTaskIdCacheByAgent[agentId];
+  if (cachedIds && cachedIds._boardTaskCount !== boardTaskCount) {
+    cachedIds = null;
+  }
+  if (!cachedIds) {
+    cachedIds = [];
+    for (var taskId in state.board_tasks) {
+      var candidate = state.board_tasks[taskId];
+      if (!candidate) continue;
+      if (String(candidate.agent_id || '') !== agentId) continue;
+      cachedIds.push(taskId);
+    }
+    cachedIds.sort(function(aId, bId) {
+      var a = state.board_tasks[aId];
+      var b = state.board_tasks[bId];
+      var aTs = Number((a && (a.started_at || a.created_at || a.updated_at)) || 0);
+      var bTs = Number((b && (b.started_at || b.created_at || b.updated_at)) || 0);
+      if (aTs !== bTs) return bTs - aTs;
+      return String((b && b.id) || bId || '').localeCompare(String((a && a.id) || aId || ''));
+    });
+    cachedIds._boardTaskCount = boardTaskCount;
+    _agentPanelWorkerTaskIdCacheByAgent[agentId] = cachedIds;
+  }
+  for (var i = 0; i < cachedIds.length; i++) {
+    var task = state.board_tasks[cachedIds[i]];
+    if (task && String(task.agent_id || '') === agentId) tasks.push(task);
+  }
   return tasks;
+}
+
+function _agentPanelInvalidateWorkerTaskCacheForTask(previous, next) {
+  var ids = {};
+  if (previous && previous.agent_id) ids[String(previous.agent_id)] = true;
+  if (next && next.agent_id) ids[String(next.agent_id)] = true;
+  for (var agentId in ids) {
+    delete _agentPanelWorkerTaskIdCacheByAgent[agentId];
+  }
+}
+
+function _agentPanelInvalidateWorkerTaskCacheForDeltas(changes) {
+  if (!Array.isArray(changes)) return;
+  for (var i = 0; i < changes.length; i++) {
+    var change = changes[i] || {};
+    _agentPanelInvalidateWorkerTaskCacheForTask(change.previous, change.next);
+  }
 }
 
 function _agentPanelRenderWorkerWorklogItem(agent, task) {
@@ -927,11 +1175,16 @@ function _agentPanelWorkerWorklog(agent) {
     html += '</div>';
     return html;
   }
-  html += '<div class="agent-panel-worklog-list">';
-  for (var i = 0; i < tasks.length; i++) {
-    html += _agentPanelRenderWorkerWorklogItem(agent, tasks[i]);
-  }
-  html += '</div>';
+  html += _agentPanelRenderVirtualList({
+    key: _agentPanelFocusedSurfaceKey(agent, 'worklog', 'worker-tasks'),
+    total: tasks.length,
+    rowHeight: _AGENT_PANEL_WORKLOG_ROW_HEIGHT,
+    listClass: 'agent-panel-worklog-list',
+    scrollSelector: '.agent-panel-content',
+    renderItem: function(index) {
+      return _agentPanelRenderWorkerWorklogItem(agent, tasks[index]);
+    },
+  });
   html += '</div>';
   return html;
 }
@@ -1002,6 +1255,61 @@ function _agentPanelArchitectHiredEngineers(agent) {
   return html;
 }
 
+function _agentPanelArchitectDecisionRows(decisions) {
+  decisions = Array.isArray(decisions) ? decisions : [];
+  if (typeof _weaverDecisionGroups === 'function'
+      && typeof _WEAVER_DECISION_STATUSES !== 'undefined') {
+    var grouped = _weaverDecisionGroups(decisions);
+    var groupedRows = [];
+    for (var statusIndex = 0; statusIndex < _WEAVER_DECISION_STATUSES.length; statusIndex++) {
+      var statusName = _WEAVER_DECISION_STATUSES[statusIndex];
+      var rows = grouped[statusName] || [];
+      for (var rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+        groupedRows.push({
+          status: statusName,
+          decision: rows[rowIndex],
+        });
+      }
+    }
+    return groupedRows;
+  }
+  return decisions.map(function(decision) {
+    return {
+      status: String((decision && decision.status) || 'proposed'),
+      decision: decision,
+    };
+  });
+}
+
+function _agentPanelArchitectDecisionItemHtml(agent, rows, index) {
+  var row = rows[index] || {};
+  var statusName = row.status || 'proposed';
+  var previous = rows[index - 1] || {};
+  var showStatus = index === 0 || previous.status !== statusName;
+  var html = '';
+  if (showStatus) {
+    html += '<div class="architect-decision-group-title">'
+      + _agentPanelEsc(statusName) + '</div>';
+  }
+  if (typeof _agentPanelLegacyRenderDecisionRow === 'function'
+      && typeof _WEAVER_DECISION_STATUSES !== 'undefined') {
+    html += _agentPanelLegacyRenderDecisionRow(agent.id, row.decision);
+    return html;
+  }
+  var decision = row.decision || {};
+  html += '<div class="detail-section-card architect-decision-card" data-agent-panel-anchor="decision-'
+    + _agentPanelEsc(decision.id || index) + '">';
+  html += '<div class="detail-section-card-head">';
+  html += '<span class="detail-section-primary">' + _agentPanelEsc(decision.title || 'Decision') + '</span>';
+  html += '<span class="detail-task-status">' + _agentPanelEsc(decision.status || 'proposed') + '</span>';
+  html += '</div>';
+  if (decision.rationale) {
+    html += '<div class="detail-section-card-body">' + _agentPanelEsc(decision.rationale) + '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
 function _agentPanelArchitectDecisionsHtml(agent) {
   var decisions = _agentPanelArchitectDecisions(agent && agent.id);
   var html = '<div class="agent-panel-worklog-tab">';
@@ -1015,42 +1323,17 @@ function _agentPanelArchitectDecisionsHtml(agent) {
     return html;
   }
 
-  if (typeof _weaverDecisionGroups === 'function' && typeof _agentPanelLegacyRenderDecisionRow === 'function'
-      && typeof _WEAVER_DECISION_STATUSES !== 'undefined') {
-    var grouped = _weaverDecisionGroups(decisions);
-    var hasRows = false;
-    for (var statusIndex = 0; statusIndex < _WEAVER_DECISION_STATUSES.length; statusIndex++) {
-      var statusName = _WEAVER_DECISION_STATUSES[statusIndex];
-      var rows = grouped[statusName] || [];
-      if (!rows.length) continue;
-      hasRows = true;
-      html += '<div class="architect-decision-group">';
-      html += '<div class="architect-decision-group-title">' + _agentPanelEsc(statusName)
-        + ' <span class="architect-decision-group-count">' + rows.length + '</span></div>';
-      for (var rowIndex = 0; rowIndex < rows.length; rowIndex++) {
-        html += _agentPanelLegacyRenderDecisionRow(agent.id, rows[rowIndex]);
-      }
-      html += '</div>';
-    }
-    if (!hasRows) {
-      html += '<div class="agent-panel-event-empty">No decisions yet.</div>';
-    }
-    html += '</div>';
-    return html;
-  }
-
-  for (var i = 0; i < decisions.length; i++) {
-    var decision = decisions[i] || {};
-    html += '<div class="detail-section-card architect-decision-card">';
-    html += '<div class="detail-section-card-head">';
-    html += '<span class="detail-section-primary">' + _agentPanelEsc(decision.title || 'Decision') + '</span>';
-    html += '<span class="detail-task-status">' + _agentPanelEsc(decision.status || 'proposed') + '</span>';
-    html += '</div>';
-    if (decision.rationale) {
-      html += '<div class="detail-section-card-body">' + _agentPanelEsc(decision.rationale) + '</div>';
-    }
-    html += '</div>';
-  }
+  var rows = _agentPanelArchitectDecisionRows(decisions);
+  html += _agentPanelRenderVirtualList({
+    key: _agentPanelFocusedSurfaceKey(agent, 'decisions', 'decisions'),
+    total: rows.length,
+    rowHeight: _AGENT_PANEL_DECISION_ROW_HEIGHT,
+    listClass: 'architect-decision-group',
+    scrollSelector: '.agent-panel-content',
+    renderItem: function(index) {
+      return _agentPanelArchitectDecisionItemHtml(agent, rows, index);
+    },
+  });
   html += '</div>';
   return html;
 }
@@ -1070,32 +1353,38 @@ function _agentPanelArchitectMessages(agent) {
     html += '</div>';
     return html;
   }
-  html += '<div class="agent-panel-message-list">';
-  for (var i = 0; i < messages.length; i++) {
-    var message = messages[i] || {};
-    var action = String(message.action || 'progress');
-    var direction = _agentPanelMessageDirection(agent, message);
-    var senderKind = _agentPanelMessageSenderKind(agent, message, direction);
-    var body = String(message.message || action || '');
-    var anchorKey = _agentPanelMessageKey(message, i);
-    html += '<div class="agent-panel-message-card agent-panel-message-' + _agentPanelAttr(direction)
-      + '" data-agent-panel-anchor="' + _agentPanelAttr(anchorKey) + '">';
-    html += '<div class="agent-panel-message-card-header">';
-    html += '<div class="agent-panel-message-meta">';
-    html += '<span class="agent-panel-message-sender">'
-      + _agentPanelEsc(_agentPanelMessageKindLabel(senderKind)) + '</span>';
-    html += '<span class="agent-panel-message-direction">'
-      + _agentPanelEsc(direction === 'in' ? 'In' : 'Out') + '</span>';
-    html += '<span class="agent-panel-message-action">'
-      + _agentPanelEsc(_agentPanelMessageActionLabel(action)) + '</span>';
-    html += '</div>';
-    html += '<span class="agent-panel-message-time">'
-      + _agentPanelEsc(_agentPanelTimestamp(message.timestamp)) + '</span>';
-    html += '</div>';
-    html += '<div class="agent-panel-message-body">' + _agentPanelEsc(body) + '</div>';
-    html += '</div>';
-  }
-  html += '</div>';
+  html += _agentPanelRenderVirtualList({
+    key: _agentPanelFocusedSurfaceKey(agent, 'messages', 'messages'),
+    total: messages.length,
+    rowHeight: _AGENT_PANEL_MESSAGE_ROW_HEIGHT,
+    listClass: 'agent-panel-message-list',
+    scrollSelector: '.agent-panel-message-list',
+    renderItem: function(index) {
+      var message = messages[index] || {};
+      var action = String(message.action || 'progress');
+      var direction = _agentPanelMessageDirection(agent, message);
+      var senderKind = _agentPanelMessageSenderKind(agent, message, direction);
+      var body = String(message.message || action || '');
+      var anchorKey = _agentPanelMessageKey(message, index);
+      var rowHtml = '<div class="agent-panel-message-card agent-panel-message-' + _agentPanelAttr(direction)
+        + '" data-agent-panel-anchor="' + _agentPanelAttr(anchorKey) + '">';
+      rowHtml += '<div class="agent-panel-message-card-header">';
+      rowHtml += '<div class="agent-panel-message-meta">';
+      rowHtml += '<span class="agent-panel-message-sender">'
+        + _agentPanelEsc(_agentPanelMessageKindLabel(senderKind)) + '</span>';
+      rowHtml += '<span class="agent-panel-message-direction">'
+        + _agentPanelEsc(direction === 'in' ? 'In' : 'Out') + '</span>';
+      rowHtml += '<span class="agent-panel-message-action">'
+        + _agentPanelEsc(_agentPanelMessageActionLabel(action)) + '</span>';
+      rowHtml += '</div>';
+      rowHtml += '<span class="agent-panel-message-time">'
+        + _agentPanelEsc(_agentPanelTimestamp(message.timestamp)) + '</span>';
+      rowHtml += '</div>';
+      rowHtml += '<div class="agent-panel-message-body">' + _agentPanelEsc(body) + '</div>';
+      rowHtml += '</div>';
+      return rowHtml;
+    },
+  });
   html += '</div>';
   return html;
 }
@@ -1166,6 +1455,9 @@ function renderAgentPanel() {
   if (!el) return;
   var agent = _resolveFocusedAgent();
   _agentPanelEventsEnsurePager(agent);
+  var agentKindForRender = agent ? _agentPanelKind(agent) : '';
+  var activeTabForRender = agent ? _agentPanelActiveTab(agentKindForRender) : '';
+  var virtualMetasForRender = _agentPanelVirtualMetasForSurface(agent, activeTabForRender);
 
   var panelStateOptions = {
     scrollSelectors: ['.agent-panel-content', '.agent-panel-message-list'],
@@ -1176,6 +1468,7 @@ function renderAgentPanel() {
           _agentPanelScrollContainer(root)
         );
       }
+      _agentPanelCaptureVirtualScrolls(root, virtualMetasForRender);
       snapshot.anchor = _agentPanelCaptureScrollAnchor(
         _agentPanelScrollContainer(root)
       );
@@ -1205,6 +1498,7 @@ function renderAgentPanel() {
   _agentPanelEventsPreRenderAtLiveTail = !!(
     panelState && panelState.agentPanelEventsAtLiveTail
   );
+  _agentPanelRenderedVirtualMetas = [];
   var html = '';
 
   if (!agent) {
@@ -1233,6 +1527,7 @@ function renderAgentPanel() {
   if (typeof _restoreSurfaceState === 'function') {
     _restoreSurfaceState(el, panelState, panelStateOptions);
   }
+  _agentPanelAttachVirtualScrolls(el);
   _agentPanelAttachEventsScroll(el, agent);
   _agentPanelEventsPreRenderAtLiveTail = false;
   var agentKind = agent ? _agentPanelKind(agent) : '';
@@ -1559,7 +1854,8 @@ function _agentPanelLegacyRenderDecisionRow(architectId, decision) {
   var supersededByIds = _weaverDecisionSupersededByIds(architectId, decision.id);
   var taskOptions = getArchitectDecisionTaskOptions(architectId);
   var engineerOptions = getArchitectDecisionEngineerOptions(architectId);
-  var html = '<div class="detail-section-card architect-decision-card">';
+  var html = '<div class="detail-section-card architect-decision-card" data-agent-panel-anchor="decision-'
+    + _agentPanelEsc(decision.id || '') + '">';
   html += '<div class="detail-section-card-head">';
   html += '<button type="button" class="architect-decision-toggle" onclick="'
     + _agentPanelEventAttr('weaverToggleDecision(' + decisionIdJs + ')') + '">';
@@ -1921,6 +2217,15 @@ function renderLegacyGroupPanel() {
   var el = document.getElementById('panel-agent');
   _weaverStopEventsCountdownTimer();
   if (!el) return;
+  var group = _agentPanelCurrentGroup();
+  var ws = _weaverGetSettings(group);
+  var activeTab = _weaverActiveTab(group);
+  var legacyVirtualMetas = activeTab === 'worklog'
+    ? [{
+      key: _agentPanelLegacyWorklogVirtualKey(group, !!(ws && ws.restrict_to_created_agents)),
+      scrollSelector: '.agent-panel-content',
+    }]
+    : [];
   var panelStateOptions = {
     scrollSelectors: ['.agent-panel-content'],
     captureFocusKey(active) {
@@ -1936,6 +2241,7 @@ function renderLegacyGroupPanel() {
     },
     capture: function(snapshot, root) {
       if (!snapshot || !root || typeof root.querySelector !== 'function') return;
+      _agentPanelCaptureVirtualScrolls(root, legacyVirtualMetas);
       snapshot.anchor = _weaverCaptureScrollAnchor(
         root.querySelector('.agent-panel-content')
       );
@@ -1950,15 +2256,13 @@ function renderLegacyGroupPanel() {
   };
   var panelState = _captureSurfaceState(el, panelStateOptions);
 
-  var group = _agentPanelCurrentGroup();
-  var ws = _weaverGetSettings(group);
   var weaver = group ? _weaverGetAgent(group) : null;
   var bstats = (state.weaver_buffer_stats && state.weaver_buffer_stats[group]) || null;
   var paused = weaver
     ? !!(_agentPanelDigestSettings(weaver) && _agentPanelDigestSettings(weaver).paused)
     : !!(ws && ws.paused);
-  var activeTab = _weaverActiveTab(group);
   var emptyMessage = _weaverPanelEmptyMessage(group, ws, weaver, bstats);
+  _agentPanelRenderedVirtualMetas = [];
 
   var html = '<div class="agent-panel-panel">';
 
@@ -2004,6 +2308,7 @@ function renderLegacyGroupPanel() {
   html += '</div>';
   el.innerHTML = html;
   _restoreSurfaceState(el, panelState, panelStateOptions);
+  _agentPanelAttachVirtualScrolls(el);
   _weaverSyncEventsCountdown(el, group, activeTab);
 }
 
@@ -2528,11 +2833,16 @@ function _agentPanelLegacyRenderWorklog(group, ws) {
     return html;
   }
 
-  html += '<div class="agent-panel-worklog-list">';
-  for (var i = 0; i < entries.length; i++) {
-    html += _agentPanelLegacyRenderWorklogItem(entries[i]);
-  }
-  html += '</div>';
+  html += _agentPanelRenderVirtualList({
+    key: _agentPanelLegacyWorklogVirtualKey(group, !!(ws && ws.restrict_to_created_agents)),
+    total: entries.length,
+    rowHeight: _AGENT_PANEL_WORKLOG_ROW_HEIGHT,
+    listClass: 'agent-panel-worklog-list',
+    scrollSelector: '.agent-panel-content',
+    renderItem: function(index) {
+      return _agentPanelLegacyRenderWorklogItem(entries[index]);
+    },
+  });
   html += '</div>';
   return html;
 }
