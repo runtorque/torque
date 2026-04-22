@@ -1226,6 +1226,51 @@ class ServerWeaverMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(follow_up.group, 'g')
         self.assertEqual(follow_up.labels, ['loom:weaver-message'])
 
+    async def test_send_user_message_routes_directly_through_terminal_adapter(self):
+        state = self._make_state()
+        worker = self.state_mod.AgentCell(
+            id='agent-1',
+            name='Worker',
+            group='g',
+            cell_type='agent',
+            session_id='session-1',
+            status='idle',
+        )
+        state.agents[worker.id] = worker
+        state.groups['g'] = [worker.id]
+        sent = []
+
+        class FakeBridge:
+            async def send_text(self, session_id, text):
+                sent.append((session_id, text))
+
+        delivered = await self.server_mod._handle_send_user_message_command(
+            {
+                'cmd': 'send_user_message',
+                'cell_id': worker.id,
+                'text': 'line one\nline two',
+            },
+            state,
+            FakeBridge(),
+        )
+
+        self.assertTrue(delivered)
+        self.assertEqual(sent, [('session-1', 'line one\nline two')])
+        self.assertEqual(worker.status, 'running')
+
+        ignored = await self.server_mod._handle_send_user_message_command(
+            {
+                'cmd': 'send_user_message',
+                'cell_id': worker.id,
+                'text': '   ',
+            },
+            state,
+            FakeBridge(),
+        )
+
+        self.assertFalse(ignored)
+        self.assertEqual(sent, [('session-1', 'line one\nline two')])
+
     def test_handle_weaver_reply_completes_follow_up_only_and_preserves_parent_state(self):
         state = self._make_state()
         parent = state.board_add_task(

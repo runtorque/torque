@@ -257,7 +257,7 @@ body.runtime-embedded #standalone-float-layer {
   min-height: 0;
   min-width: 0;
   display: grid;
-  grid-template-rows: auto auto 1fr auto;
+  grid-template-rows: auto auto 1fr auto auto;
   grid-template-columns: minmax(0, 1fr);
 }
 .terminal-topbar,
@@ -452,10 +452,65 @@ body.runtime-embedded #standalone-float-layer {
   border-color: var(--accent);
   color: var(--text);
 }
+.terminal-compose-slot {
+  display: none;
+}
+.terminal-compose {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+.terminal-compose-input {
+  flex: 1;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+  max-height: 88px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 10px;
+  resize: none;
+  overflow-y: auto;
+  background: rgba(13,17,23,.58);
+  color: var(--text);
+  font: 12px/1.35 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  outline: none;
+}
+.terminal-compose-input::placeholder {
+  color: color-mix(in srgb, var(--text-dim) 78%, transparent);
+}
+.terminal-compose-input:focus {
+  border-color: color-mix(in srgb, var(--accent) 54%, var(--border) 46%);
+  box-shadow: 0 0 0 1px rgba(88,166,255,.14);
+}
+.terminal-compose-submit {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 0 11px;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border) 58%);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 650;
+}
+.terminal-compose-submit:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+.terminal-compose-submit:disabled {
+  cursor: default;
+  opacity: .45;
+  color: var(--text-dim);
+  border-color: rgba(255,255,255,.07);
+  background: rgba(255,255,255,.03);
+}
 body.runtime-embedded .terminal-shell {
   padding: 10px 12px 0;
   gap: 8px;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
 }
 body.runtime-embedded .terminal-topbar,
 body.runtime-embedded .terminal-statusbar {
@@ -484,6 +539,9 @@ body.runtime-embedded .terminal-tab {
 }
 body.runtime-embedded .terminal-stage {
   padding: 0;
+}
+body.runtime-embedded .terminal-compose-slot {
+  display: block;
 }
 body.runtime-embedded .terminal-surface {
   padding: 10px 8px;

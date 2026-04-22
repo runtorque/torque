@@ -98,6 +98,18 @@ class FakeElement {
     return child;
   }
 
+  insertBefore(child, before) {
+    if (!before) return this.appendChild(child);
+    if (child.parentNode && Array.isArray(child.parentNode.children)) {
+      child.parentNode.children = child.parentNode.children.filter((item) => item !== child);
+    }
+    const idx = this.children.indexOf(before);
+    child.parentNode = this;
+    if (idx >= 0) this.children.splice(idx, 0, child);
+    else this.children.push(child);
+    return child;
+  }
+
   addEventListener(type, handler) {
     this.listeners[type] = handler;
   }
@@ -336,6 +348,9 @@ function loadBoardScripts(context) {
 function createEmbeddedTerminalHarness(overrides = {}) {
   const sockets = [];
   const terminals = [];
+  const loadRenderHelpers = !!overrides.loadRenderHelpers;
+  const sandboxOverrides = Object.assign({}, overrides);
+  delete sandboxOverrides.loadRenderHelpers;
 
   class FakeTerminal {
     constructor() {
@@ -422,14 +437,57 @@ function createEmbeddedTerminalHarness(overrides = {}) {
     ResizeObserver: FakeResizeObserver,
     WebSocket: FakeWebSocket,
     location: { protocol: 'http:', host: 'localhost:9000' },
-  }, overrides));
+  }, sandboxOverrides));
   const workspace = document.register('terminal-workspace');
   const status = new FakeElement('terminal-statusbar');
   workspace.setQuerySelector('.terminal-statusbar', status);
   document.setSelector('#terminal-workspace .terminal-statusbar', status);
   const context = vm.createContext(sandbox);
+  if (loadRenderHelpers) {
+    loadScript(context, 'static/js/render.js');
+    runInContext(context, `
+      var _cachedAgentTemplates = [];
+      var focusedItemId = null;
+      var selectedTerminalId = null;
+      getFilterByWindow = function() { return false; };
+    `);
+  }
   loadScript(context, 'static/js/terminal.js');
   return { context, sandbox, document, sockets, terminals, status };
+}
+
+function attachTerminalWorkspaceDom(document) {
+  const workspace = document.getElementById('terminal-workspace');
+  const shell = new FakeElement('terminal-shell');
+  const topbar = new FakeElement('terminal-topbar');
+  const tabs = new FakeElement('terminal-tabs');
+  const stage = new FakeElement('terminal-stage');
+  const compose = new FakeElement('terminal-compose-slot');
+  const statusbar = new FakeElement('terminal-statusbar');
+  const surface = new FakeElement('terminal-surface');
+  shell.classList.add('terminal-shell');
+  topbar.classList.add('terminal-topbar');
+  tabs.classList.add('terminal-tabs');
+  stage.classList.add('terminal-stage');
+  compose.classList.add('terminal-compose-slot');
+  statusbar.classList.add('terminal-statusbar');
+  surface.classList.add('terminal-surface');
+  workspace.appendChild(shell);
+  shell.appendChild(topbar);
+  shell.appendChild(tabs);
+  shell.appendChild(stage);
+  shell.appendChild(compose);
+  shell.appendChild(statusbar);
+  stage.appendChild(surface);
+  workspace.setQuerySelector('.terminal-shell', shell);
+  shell.setQuerySelector('.terminal-topbar', topbar);
+  shell.setQuerySelector('.terminal-tabs', tabs);
+  shell.setQuerySelector('.terminal-stage', stage);
+  shell.setQuerySelector('.terminal-compose-slot', compose);
+  shell.setQuerySelector('.terminal-statusbar', statusbar);
+  stage.setQuerySelector('.terminal-surface', surface);
+  document.setSelector('#terminal-workspace .terminal-statusbar', statusbar);
+  return { workspace, shell, topbar, tabs, stage, compose, statusbar, surface };
 }
 
 function runInContext(context, code) {
@@ -5833,6 +5891,174 @@ test('terminal workspace stays inert when embedded runtime is disabled', () => {
   assert.equal(jsonValue(context, '!!_embeddedTerminal'), false);
   assert.equal(jsonValue(context, '!!_embeddedTerminalWs'), false);
   assert.equal(jsonValue(context, '_embeddedTerminalSessionKey'), '');
+});
+
+test('embedded terminal compose renders only for standalone runtime and preserves drafts across rerenders', () => {
+  const { context, document, sandbox } = createEmbeddedTerminalHarness({
+    loadRenderHelpers: true,
+  });
+  const dom = attachTerminalWorkspaceDom(document);
+  document.body.classList.add('runtime-embedded');
+  sandbox.state.runtime = { embedded_terminal: true };
+  sandbox.state.groups = { alpha: ['agent-1'] };
+  sandbox.state.group_settings = { alpha: {} };
+  sandbox.state.children = { 'agent-1': [] };
+  sandbox.state.agents = {
+    'agent-1': {
+      id: 'agent-1',
+      name: 'Builder',
+      group: 'alpha',
+      cell_type: 'agent',
+      session_id: 'sess-1',
+      status: 'running',
+      current_path: '/repo',
+    },
+  };
+
+  runInContext(context, `
+    selectedAgentId = 'agent-1';
+    selectedTerminalId = 'agent-1';
+    _embeddedTerminalSessionKey = 'agent-1:sess-1';
+    renderTerminalWorkspace();
+  `);
+
+  assert.match(dom.compose.innerHTML, /class="terminal-compose"/);
+  assert.match(dom.compose.innerHTML, /Send a message to Builder/);
+
+  const input = document.register('terminal-compose-input-agent-1');
+  input.classList.add('terminal-compose-input');
+  input.dataset.cellId = 'agent-1';
+  input.value = 'Draft survives a digest update';
+  input.selectionStart = 6;
+  input.selectionEnd = 14;
+  const button = document.register('terminal-compose-submit-agent-1');
+  button.classList.add('terminal-compose-submit');
+  dom.compose.appendChild(input);
+  dom.compose.appendChild(button);
+  dom.compose.setQuerySelector('.terminal-compose-input', input);
+  dom.compose.setQuerySelector('.terminal-compose-submit', button);
+  dom.workspace.setQuerySelector('.terminal-compose-input', input);
+  document.activeElement = input;
+
+  runInContext(context, `
+    terminalComposeInput(document.getElementById('terminal-compose-input-agent-1'));
+    state.agents['agent-1'].activity_detail = 'Digest arrived';
+    renderTerminalWorkspace();
+  `);
+
+  assert.equal(input.focused, true);
+  assert.equal(input.value, 'Draft survives a digest update');
+  assert.equal(input.selectionStart, 6);
+  assert.equal(input.selectionEnd, 14);
+  assert.equal(button.disabled, false);
+  assert.equal(
+    jsonValue(context, `_terminalComposeDrafts['agent-1']`),
+    'Draft survives a digest update',
+  );
+
+  runInContext(context, `
+    state.runtime = { embedded_terminal: false };
+    document.getElementById('terminal-workspace').innerHTML = '<form class="terminal-compose">stale</form>';
+    renderTerminalWorkspace();
+  `);
+
+  assert.equal(dom.workspace.innerHTML, '');
+  assert.doesNotMatch(dom.workspace.innerHTML, /terminal-compose/);
+});
+
+test('embedded terminal compose submits on Enter, allows Shift+Enter, and clears on Escape', () => {
+  const { context, document, sandbox } = createEmbeddedTerminalHarness({
+    loadRenderHelpers: true,
+  });
+  const dom = attachTerminalWorkspaceDom(document);
+  document.body.classList.add('runtime-embedded');
+  sandbox.state.runtime = { embedded_terminal: true };
+  sandbox.state.groups = { alpha: ['agent-1'] };
+  sandbox.state.group_settings = { alpha: {} };
+  sandbox.state.children = { 'agent-1': [] };
+  sandbox.state.agents = {
+    'agent-1': {
+      id: 'agent-1',
+      name: 'Builder',
+      group: 'alpha',
+      cell_type: 'agent',
+      session_id: 'sess-1',
+      status: 'running',
+    },
+  };
+  runInContext(context, `
+    selectedAgentId = 'agent-1';
+    selectedTerminalId = 'agent-1';
+    _embeddedTerminalSessionKey = 'agent-1:sess-1';
+    renderTerminalWorkspace();
+  `);
+
+  const input = document.register('terminal-compose-input-agent-1');
+  input.classList.add('terminal-compose-input');
+  input.dataset.cellId = 'agent-1';
+  const button = document.register('terminal-compose-submit-agent-1');
+  button.classList.add('terminal-compose-submit');
+  dom.compose.appendChild(input);
+  dom.compose.appendChild(button);
+  dom.compose.setQuerySelector('.terminal-compose-input', input);
+  dom.compose.setQuerySelector('.terminal-compose-submit', button);
+  dom.workspace.setQuerySelector('.terminal-compose-input', input);
+
+  input.value = 'hello agent';
+  runInContext(context, `terminalComposeInput(document.getElementById('terminal-compose-input-agent-1'));`);
+  const enterEvt = {
+    key: 'Enter',
+    shiftKey: false,
+    preventDefaultCalled: false,
+    stopPropagationCalled: false,
+    preventDefault() { this.preventDefaultCalled = true; },
+    stopPropagation() { this.stopPropagationCalled = true; },
+  };
+  context.__enterEvt = enterEvt;
+  runInContext(context, `terminalComposeKeydown(__enterEvt, 'agent-1');`);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [{
+    cmd: 'send_user_message',
+    cell_id: 'agent-1',
+    text: 'hello agent',
+  }]);
+  assert.equal(enterEvt.preventDefaultCalled, true);
+  assert.equal(enterEvt.stopPropagationCalled, true);
+  assert.equal(input.value, '');
+  assert.equal(button.disabled, true);
+
+  input.value = 'line one';
+  runInContext(context, `terminalComposeInput(document.getElementById('terminal-compose-input-agent-1'));`);
+  const shiftEnterEvt = {
+    key: 'Enter',
+    shiftKey: true,
+    preventDefaultCalled: false,
+    stopPropagationCalled: false,
+    preventDefault() { this.preventDefaultCalled = true; },
+    stopPropagation() { this.stopPropagationCalled = true; },
+  };
+  context.__shiftEnterEvt = shiftEnterEvt;
+  runInContext(context, `terminalComposeKeydown(__shiftEnterEvt, 'agent-1');`);
+
+  assert.equal(sandbox.sendCalls.length, 1);
+  assert.equal(shiftEnterEvt.preventDefaultCalled, false);
+  assert.equal(input.value, 'line one');
+
+  const escapeEvt = {
+    key: 'Escape',
+    shiftKey: false,
+    preventDefaultCalled: false,
+    stopPropagationCalled: false,
+    preventDefault() { this.preventDefaultCalled = true; },
+    stopPropagation() { this.stopPropagationCalled = true; },
+  };
+  context.__escapeEvt = escapeEvt;
+  runInContext(context, `terminalComposeKeydown(__escapeEvt, 'agent-1');`);
+
+  assert.equal(escapeEvt.preventDefaultCalled, true);
+  assert.equal(escapeEvt.stopPropagationCalled, true);
+  assert.equal(input.value, '');
+  assert.equal(button.disabled, true);
 });
 
 test('embedded terminal ignores stale websocket output after a relaunch session swap', () => {
