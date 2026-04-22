@@ -198,6 +198,71 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('"summary"', text)
         self.assertEqual(calls[0]["summary_only"], True)
 
+    async def test_engineer_worktree_checkpoint_allows_reviewer_shared_snapshot(self):
+        state = self._make_state()
+        alice = self._add_engineer(state, "eng-alice", "Alice")
+        implementer = self._add_worker(
+            state,
+            "worker-impl",
+            "Implementer",
+            alice.id,
+        )
+        reviewer = self._add_worker(
+            state,
+            "worker-review",
+            "Reviewer",
+            alice.id,
+        )
+        for worker in (implementer, reviewer):
+            worker.worktree_path = "/tmp/shared-review-worktree"
+            worker.worktree_branch = "loom/shared-review"
+            worker.worktree_base_branch = "main"
+            worker.worktree_repo_root = "/tmp/repo"
+        root = self._add_task(
+            state,
+            "LOOM:1",
+            "Implement feature",
+            assigned_engineer_id=alice.id,
+        )
+        root.lane = "In Progress"
+        root.agent_id = implementer.id
+        root.action_name = "feature/implement"
+        review = self._add_task(
+            state,
+            "LOOM:1:review",
+            "Review feature",
+            assigned_engineer_id=alice.id,
+        )
+        review.lane = "In Progress"
+        review.parent_task_id = root.id
+        review.pipeline_root_id = root.id
+        review.pipeline_depth = 1
+        review.agent_id = reviewer.id
+        review.action_name = "feature/review"
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            self.assertEqual(payload["cmd"], "worktree_checkpoint")
+            # A reviewer shares the implementer's worktree, so the checkpoint
+            # command intentionally snapshots the selected reviewer's shared
+            # branch context instead of rejecting reviewer targets.
+            self.assertEqual(payload["id"], reviewer.id)
+            return {"type": "ok"}
+
+        text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_worktree_checkpoint",
+            {"agent": reviewer.id},
+            fake_handle_command,
+            state,
+            caller_id=alice.id,
+        )
+
+        self.assertFalse(is_error, text)
+        self.assertEqual(json.loads(text)["type"], "ok")
+        self.assertEqual(calls, [{"cmd": "worktree_checkpoint",
+                                  "id": reviewer.id}])
+
     async def test_engineer_merge_refuses_stale_base_unless_forced(self):
         state = self._make_state()
         alice = self._add_engineer(state, "eng-alice", "Alice")

@@ -2998,6 +2998,8 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         if not cell.worktree_base_branch:
             return "Agent has no base branch configured", True
 
+        # Review workers may share their implementer's worktree; diff follows
+        # the selected cell's shared branch context, not a reviewer-local fork.
         result = await handle_command({
             "cmd": "worktree_diff",
             "id": agent_id,

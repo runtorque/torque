@@ -111,6 +111,7 @@ from .server_agent import (
     runtime_env_vars_for_cell,
 )
 from .server_dispatch import (
+    _cells_share_worktree_context,
     _capture_auto_resume_targets,
     _find_active_worktree_owner,
     _maybe_auto_resume_targets,
@@ -691,6 +692,82 @@ def _is_feature_review_task(task) -> bool:
     return action_name == "feature/review"
 
 
+def _task_ancestry_has_agent(state: MatrixState, task,
+                             agent_id: str) -> bool:
+    """Return whether ``task`` or any ancestor is assigned to ``agent_id``."""
+    agent_id = str(agent_id or "").strip()
+    if not state or not task or not agent_id:
+        return False
+    seen = set()
+    cursor = task
+    while cursor and getattr(cursor, "id", "") not in seen:
+        seen.add(getattr(cursor, "id", ""))
+        if str(getattr(cursor, "agent_id", "") or "").strip() == agent_id:
+            return True
+        parent_id = str(getattr(cursor, "parent_task_id", "") or "").strip()
+        if not parent_id:
+            break
+        cursor = state.board_tasks.get(parent_id)
+    return False
+
+
+def _active_shared_worktree_review_for_cell(state: MatrixState, cell):
+    """Return an active reviewer task that owns ``cell``'s shared worktree.
+
+    LOOM:88 intentionally launches feature/review workers in the
+    implementer's worktree. During that review window, the implementer is a
+    suspended ancestor in the task graph, so Loom-originated checkpoint writes
+    from that implementer must fail closed while the reviewer owns the mutable
+    branch.
+    """
+    if (
+        not state
+        or not cell
+        or not (cell.worktree_path or cell.worktree_branch)
+    ):
+        return None
+    cell_id = str(getattr(cell, "id", "") or "").strip()
+    if not cell_id:
+        return None
+
+    for task in state.board_tasks.values():
+        if not _is_feature_review_task(task):
+            continue
+        if task_is_closed(task):
+            continue
+        reviewer_id = str(getattr(task, "agent_id", "") or "").strip()
+        if not reviewer_id or reviewer_id == cell_id:
+            continue
+        # When a review derives blocker fixes back to the implementer, the
+        # review task remains open/status=Fixing but no longer owns the
+        # foreground mutable branch; the descendant fix task does.
+        if not state.task_occupies_execution_slot(
+                task,
+                agent_id=reviewer_id):
+            continue
+        reviewer = state.agents.get(reviewer_id)
+        if not _cells_share_worktree_context(cell, reviewer):
+            continue
+        if _task_ancestry_has_agent(state, task, cell_id):
+            return task
+    return None
+
+
+def _shared_review_checkpoint_block_reason(state: MatrixState, cell) -> str:
+    """Explain why ``cell`` cannot checkpoint during an active review."""
+    review_task = _active_shared_worktree_review_for_cell(state, cell)
+    if not review_task:
+        return ""
+    review_label = getattr(review_task, "id", "") or "active review"
+    cell_label = getattr(cell, "name", "") or getattr(cell, "id", "")
+    return (
+        f"Cannot checkpoint '{cell_label}' while "
+        f"feature/review task {review_label} is active on the shared "
+        "worktree. Checkpoint the reviewer worker instead, or wait for "
+        "the review to finish."
+    )
+
+
 def _normalized_review_verdict_line(line: str) -> str:
     text = str(line or "").strip()
     while text[:1] in {"#", ">", "-", "*"}:
@@ -709,7 +786,13 @@ def _normalized_review_verdict_line(line: str) -> str:
 
 
 def _review_verdict_from_message(message: str) -> str:
-    """Return ``ship`` or a non-ship verdict parsed from a review message."""
+    """Return ``ship`` or a non-ship verdict parsed from a review message.
+
+    This is intentionally a lightweight free-form parser: explicit verdict
+    lines may have markdown/bullet prefixes and varied casing, but paraphrases
+    such as "looks good" or "approved" fail closed so reviewer cleanup does
+    not fire from an ambiguous message.
+    """
     for line in reversed(str(message or "").splitlines()):
         text = _normalized_review_verdict_line(line)
         if not text:
@@ -3751,11 +3834,19 @@ async def main(connection=None):
         state.history_snapshot_tokens(cell)
         # Auto-checkpoint
         if cell.worktree_path and cell.cell_type == "agent":
-            if cell.worktree_auto_checkpoint:
-                msg = _checkpoint_message(cell)
-                sha = await worktree_mgr.checkpoint(cell, message=msg)
-                if sha:
-                    state._db_save_agent(cell)
+            if not cell.worktree_auto_checkpoint:
+                return
+            block_reason = _shared_review_checkpoint_block_reason(
+                state,
+                cell,
+            )
+            if block_reason:
+                log.info("Skipping session-end checkpoint: %s", block_reason)
+                return
+            msg = _checkpoint_message(cell)
+            sha = await worktree_mgr.checkpoint(cell, message=msg)
+            if sha:
+                state._db_save_agent(cell)
 
     # Minimum seconds between progress-triggered checkpoints per agent.
     _CHECKPOINT_INTERVAL = 300  # 5 minutes
@@ -3765,6 +3856,10 @@ async def main(connection=None):
         if not cell.worktree_path or cell.cell_type != "agent":
             return
         if not cell.checkpoint_on_progress:
+            return
+        block_reason = _shared_review_checkpoint_block_reason(state, cell)
+        if block_reason:
+            log.info("Skipping progress checkpoint: %s", block_reason)
             return
         now = time.time()
         if (cell.last_checkpoint_at
@@ -5527,7 +5622,13 @@ async def main(connection=None):
 
             elif cmd == "worktree_checkpoint":
                 cell = state.agents.get(data["id"])
-                if cell and cell.worktree_path:
+                block_reason = _shared_review_checkpoint_block_reason(
+                    state,
+                    cell,
+                )
+                if block_reason:
+                    result = {"type": "error", "message": block_reason}
+                elif cell and cell.worktree_path:
                     msg = _checkpoint_message(cell)
                     await worktree_mgr.checkpoint(cell, message=msg)
                     state._emit_agent(cell)
@@ -8055,16 +8156,28 @@ async def main(connection=None):
                         if (cell.worktree_path
                                 and cell.cell_type == "agent"
                                 and cell.worktree_auto_checkpoint):
-                            try:
-                                cp_msg = _checkpoint_message(cell)
-                                sha = await worktree_mgr.checkpoint(
-                                    cell, message=cp_msg)
-                                if sha:
-                                    state._db_save_agent(cell)
-                            except Exception:
-                                log.exception(
-                                    "done auto-checkpoint failed for"
-                                    " '%s'", cell.name)
+                            block_reason = (
+                                _shared_review_checkpoint_block_reason(
+                                    state,
+                                    cell,
+                                )
+                            )
+                            if block_reason:
+                                log.info(
+                                    "Skipping done auto-checkpoint: %s",
+                                    block_reason,
+                                )
+                            else:
+                                try:
+                                    cp_msg = _checkpoint_message(cell)
+                                    sha = await worktree_mgr.checkpoint(
+                                        cell, message=cp_msg)
+                                    if sha:
+                                        state._db_save_agent(cell)
+                                except Exception:
+                                    log.exception(
+                                        "done auto-checkpoint failed for"
+                                        " '%s'", cell.name)
                         if task and not task_counts_as_done(task):
                             state.board_move_task(task.id, "Done")
                         if task:
