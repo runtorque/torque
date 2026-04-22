@@ -1724,6 +1724,21 @@ async def _queue_cell_prompt_send(cell, prompt: str, send_prompt, *,
     return True
 
 
+async def _handle_send_user_message_command(data, state: MatrixState,
+                                            bridge) -> bool:
+    cell_id = str(data.get("cell_id") or data.get("id") or "").strip()
+    text = str(data.get("text") or "")
+    if not cell_id or not text.strip():
+        return False
+    cell = state.agents.get(cell_id)
+    if not cell or not getattr(cell, "session_id", ""):
+        return False
+    cell.status = "running"
+    state._emit_agent(cell)
+    await bridge.send_text(cell.session_id, text)
+    return True
+
+
 async def _deliver_weaver_reply_and_resume(state: MatrixState, weaver, *,
                                            group: str,
                                            answer: str,
@@ -5232,6 +5247,9 @@ async def main(connection=None):
                     data.get("text", ""),
                     _send_agent_prompt,
                 )
+
+            elif cmd == "send_user_message":
+                await _handle_send_user_message_command(data, state, bridge)
 
             elif cmd == "broadcast_to_group":
                 for aid in state.groups.get(data["group"], []):

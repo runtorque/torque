@@ -9,6 +9,7 @@ let _embeddedTerminalPendingFocusKey = '';
 let _embeddedTerminalDropSurface = null;
 let _embeddedTerminalDropHandlers = null;
 let _embeddedTerminalDropDepth = 0;
+let _terminalComposeDrafts = Object.create(null);
 
 function isEmbeddedTerminalMode() {
   return !!(state && state.runtime && state.runtime.embedded_terminal);
@@ -175,15 +176,28 @@ function _ensureTerminalWorkspaceDom(root) {
       + '  <div class="terminal-topbar"></div>'
       + '  <div class="terminal-tabs"></div>'
       + '  <div class="terminal-stage"></div>'
+      + '  <div class="terminal-compose-slot"></div>'
       + '  <div class="terminal-statusbar"></div>'
       + '</div>';
     shell = root.querySelector('.terminal-shell');
+  }
+  let compose = shell.querySelector('.terminal-compose-slot');
+  if (!compose && document.createElement) {
+    compose = document.createElement('div');
+    compose.className = 'terminal-compose-slot';
+    const statusbar = shell.querySelector('.terminal-statusbar');
+    if (statusbar && typeof shell.insertBefore === 'function') {
+      shell.insertBefore(compose, statusbar);
+    } else if (typeof shell.appendChild === 'function') {
+      shell.appendChild(compose);
+    }
   }
   return {
     shell: shell,
     topbar: shell.querySelector('.terminal-topbar'),
     tabs: shell.querySelector('.terminal-tabs'),
     stage: shell.querySelector('.terminal-stage'),
+    compose: compose,
     statusbar: shell.querySelector('.terminal-statusbar'),
   };
 }
@@ -205,6 +219,180 @@ function _renderTerminalTabs(cells, activeId) {
       + '</button>';
   }
   return html;
+}
+
+function _terminalComposeDomId(cellId) {
+  const safe = String(cellId || '')
+    .replace(/[^A-Za-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return safe || 'selected';
+}
+
+function _terminalComposeInputId(cellId) {
+  return 'terminal-compose-input-' + _terminalComposeDomId(cellId);
+}
+
+function _terminalComposeButtonId(cellId) {
+  return 'terminal-compose-submit-' + _terminalComposeDomId(cellId);
+}
+
+function _terminalComposeContainerFor(el) {
+  for (let node = el; node; node = node.parentNode) {
+    if (node.classList && node.classList.contains('terminal-compose')) {
+      return node;
+    }
+  }
+  return null;
+}
+
+function _terminalComposeTextarea(root) {
+  return root && root.querySelector ? root.querySelector('.terminal-compose-input') : null;
+}
+
+function _terminalComposeButtonFor(el, cellId) {
+  const container = _terminalComposeContainerFor(el);
+  if (container && container.querySelector) {
+    const btn = container.querySelector('.terminal-compose-submit');
+    if (btn) return btn;
+  }
+  const id = _terminalComposeButtonId(cellId || (el && el.dataset ? el.dataset.cellId : ''));
+  return document.getElementById ? document.getElementById(id) : null;
+}
+
+function _terminalComposeAutoResize(el) {
+  if (!el) return;
+  if (typeof taskAutoResize === 'function') {
+    taskAutoResize(el);
+  } else if (typeof boardAddTaskAutoResize === 'function') {
+    boardAddTaskAutoResize(el);
+  }
+}
+
+function _terminalComposeSetButtonState(input) {
+  if (!input) return;
+  const cellId = input.dataset ? (input.dataset.cellId || '') : '';
+  const button = _terminalComposeButtonFor(input, cellId);
+  if (button) button.disabled = !String(input.value || '').trim();
+}
+
+function _terminalComposePersistFromDom(root) {
+  const input = _terminalComposeTextarea(root);
+  if (!input || !input.dataset || !input.dataset.cellId) return;
+  _terminalComposeDrafts[input.dataset.cellId] = String(input.value || '');
+}
+
+function _captureTerminalWorkspaceState(root, cell) {
+  if (typeof _captureSurfaceState !== 'function') return null;
+  const snapshot = _captureSurfaceState(root);
+  const active = document.activeElement;
+  if (snapshot && snapshot.focus && active && active.dataset
+      && active.dataset.cellId
+      && cell && active.dataset.cellId !== String(cell.id || '')) {
+    snapshot.focus = null;
+  }
+  return snapshot;
+}
+
+function _restoreTerminalWorkspaceState(root, snapshot, cell) {
+  if (typeof _restoreSurfaceState === 'function') {
+    _restoreSurfaceState(root, snapshot);
+  }
+  const input = _terminalComposeTextarea(root);
+  if (!input) return;
+  const cellId = input.dataset ? (input.dataset.cellId || '') : '';
+  if (cell && cellId === String(cell.id || '')
+      && Object.prototype.hasOwnProperty.call(_terminalComposeDrafts, cellId)) {
+    input.value = _terminalComposeDrafts[cellId];
+  }
+  _terminalComposeAutoResize(input);
+  _terminalComposeSetButtonState(input);
+}
+
+function _renderTerminalCompose(root, cell) {
+  if (!root) return;
+  if (!cell || !cell.session_id) {
+    root.innerHTML = '';
+    return;
+  }
+  const cellId = String(cell.id || '');
+  const inputId = _terminalComposeInputId(cellId);
+  const buttonId = _terminalComposeButtonId(cellId);
+  const draft = Object.prototype.hasOwnProperty.call(_terminalComposeDrafts, cellId)
+    ? _terminalComposeDrafts[cellId]
+    : '';
+  const disabled = !String(draft || '').trim();
+  root.innerHTML = ''
+    + '<form class="terminal-compose" data-cell-id="' + esc(cellId) + '" onsubmit="return terminalComposeSubmit(event, \'' + esc(cellId) + '\')">'
+    + '  <textarea id="' + esc(inputId) + '" class="terminal-compose-input" rows="1"'
+    + ' data-cell-id="' + esc(cellId) + '"'
+    + ' placeholder="Send a message to ' + esc(cell.name || 'terminal') + '\u2026"'
+    + ' oninput="terminalComposeInput(this)"'
+    + ' onkeydown="terminalComposeKeydown(event, \'' + esc(cellId) + '\')">' + esc(draft) + '</textarea>'
+    + '  <button id="' + esc(buttonId) + '" class="terminal-compose-submit" type="submit"'
+    + (disabled ? ' disabled' : '')
+    + ' title="Send message">Send</button>'
+    + '</form>';
+  const input = _terminalComposeTextarea(root);
+  if (input) {
+    input.value = draft;
+    _terminalComposeAutoResize(input);
+    _terminalComposeSetButtonState(input);
+  }
+}
+
+function terminalComposeInput(el) {
+  if (!el) return;
+  const cellId = el.dataset ? (el.dataset.cellId || '') : '';
+  if (cellId) _terminalComposeDrafts[cellId] = String(el.value || '');
+  _terminalComposeAutoResize(el);
+  _terminalComposeSetButtonState(el);
+}
+
+function terminalComposeClear(cellId) {
+  const id = String(cellId || '');
+  const input = document.getElementById ? document.getElementById(_terminalComposeInputId(id)) : null;
+  if (!input) return;
+  input.value = '';
+  if (id) _terminalComposeDrafts[id] = '';
+  _terminalComposeAutoResize(input);
+  _terminalComposeSetButtonState(input);
+}
+
+function terminalComposeSubmit(evt, cellId) {
+  if (evt && typeof evt.preventDefault === 'function') evt.preventDefault();
+  if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
+  const id = String(cellId || '');
+  let input = null;
+  if (evt && evt.currentTarget && evt.currentTarget.querySelector) {
+    input = evt.currentTarget.querySelector('.terminal-compose-input');
+  }
+  if (!input && document.getElementById) {
+    input = document.getElementById(_terminalComposeInputId(id));
+  }
+  if (!input) return false;
+  const text = String(input.value || '');
+  if (!text.trim()) {
+    terminalComposeClear(id);
+    return false;
+  }
+  send({ cmd: 'send_user_message', cell_id: id, text: text });
+  terminalComposeClear(id);
+  return false;
+}
+
+function terminalComposeKeydown(evt, cellId) {
+  if (!evt) return;
+  if (evt.key === 'Escape') {
+    if (typeof evt.preventDefault === 'function') evt.preventDefault();
+    if (typeof evt.stopPropagation === 'function') evt.stopPropagation();
+    terminalComposeClear(cellId);
+    return;
+  }
+  if (evt.key === 'Enter' && !evt.shiftKey) {
+    if (typeof evt.preventDefault === 'function') evt.preventDefault();
+    if (typeof evt.stopPropagation === 'function') evt.stopPropagation();
+    terminalComposeSubmit(evt, cellId);
+  }
 }
 
 function _disposeEmbeddedTerminal() {
@@ -531,6 +719,7 @@ function _openEmbeddedTerminalSocket(cell, sessionKey, expectedSessionId, attemp
 function renderTerminalWorkspace() {
   const root = document.getElementById('terminal-workspace');
   if (!root) return;
+  _terminalComposePersistFromDom(root);
   if (!isEmbeddedTerminalMode()) {
     root.innerHTML = '';
     root.classList.remove('active');
@@ -548,6 +737,7 @@ function renderTerminalWorkspace() {
   const showTabs = cells.length > 1;
   const displayPath = _terminalDisplayPath(cell);
   const dom = _ensureTerminalWorkspaceDom(root);
+  const workspaceState = _captureTerminalWorkspaceState(root, cell);
   const title = cell && cell.name ? cell.name : 'Terminal';
   dom.topbar.innerHTML = ''
     + '<div class="terminal-topbar-left">'
@@ -563,6 +753,7 @@ function renderTerminalWorkspace() {
   dom.tabs.innerHTML = showTabs ? _renderTerminalTabs(cells, cell ? cell.id : '') : '';
 
   if (!cell) {
+    _renderTerminalCompose(dom.compose, null);
     dom.stage.innerHTML = ''
       + '<div class="terminal-empty">'
       + '  <div class="terminal-empty-title">Open a shell</div>'
@@ -574,11 +765,13 @@ function renderTerminalWorkspace() {
       + '</div>';
     dom.statusbar.textContent = 'Standalone PTY workspace';
     _disposeEmbeddedTerminal();
+    _restoreTerminalWorkspaceState(root, workspaceState, null);
     return;
   }
 
   const sessionKey = cell.id + ':' + (cell.session_id || '');
   if (!cell.session_id) {
+    _renderTerminalCompose(dom.compose, null);
     dom.stage.innerHTML = ''
       + '<div class="terminal-empty">'
       + '  <div class="terminal-empty-title">' + esc(cell.name) + ' is stopped</div>'
@@ -588,6 +781,7 @@ function renderTerminalWorkspace() {
       + '</div>';
     dom.statusbar.textContent = _terminalStatusLabel(cell);
     _disposeEmbeddedTerminal();
+    _restoreTerminalWorkspaceState(root, workspaceState, cell);
     return;
   }
 
@@ -596,6 +790,8 @@ function renderTerminalWorkspace() {
     _connectEmbeddedTerminal(cell, dom.stage.querySelector('.terminal-surface'));
   }
 
+  _renderTerminalCompose(dom.compose, cell);
   dom.statusbar.textContent = (displayPath || 'No directory') + '  |  ' + _terminalStatusLabel(cell);
   dom.statusbar.title = cell.current_path || cell.directory || '';
+  _restoreTerminalWorkspaceState(root, workspaceState, cell);
 }
