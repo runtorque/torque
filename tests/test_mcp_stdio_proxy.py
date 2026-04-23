@@ -28,6 +28,11 @@ class MCPStdioProxyTests(unittest.TestCase):
         with mock.patch.object(self.proxy_mod.sys, "stdin", stdin), \
                 mock.patch.object(self.proxy_mod.sys, "stdout", stdout), \
                 mock.patch.object(
+                    self.proxy_mod.uuid,
+                    "uuid4",
+                    return_value=types.SimpleNamespace(hex="mcp-session-1"),
+                ), \
+                mock.patch.object(
                     self.proxy_mod,
                     "_proxy_request",
                     autospec=True,
@@ -36,7 +41,11 @@ class MCPStdioProxyTests(unittest.TestCase):
             rc = self.proxy_mod.serve_http_proxy("eng-1")
 
         self.assertEqual(rc, 0)
-        proxy_request.assert_called_once_with(payload, caller_id="eng-1")
+        proxy_request.assert_called_once_with(
+            payload,
+            caller_id="eng-1",
+            mcp_session_id="mcp-session-1",
+        )
         self.assertEqual(stdout_buffer.getvalue(), b"")
 
     def test_request_response_with_body_keeps_stdio_framing(self):
@@ -57,6 +66,11 @@ class MCPStdioProxyTests(unittest.TestCase):
         with mock.patch.object(self.proxy_mod.sys, "stdin", stdin), \
                 mock.patch.object(self.proxy_mod.sys, "stdout", stdout), \
                 mock.patch.object(
+                    self.proxy_mod.uuid,
+                    "uuid4",
+                    return_value=types.SimpleNamespace(hex="mcp-session-2"),
+                ), \
+                mock.patch.object(
                     self.proxy_mod,
                     "_proxy_request",
                     autospec=True,
@@ -65,5 +79,47 @@ class MCPStdioProxyTests(unittest.TestCase):
             rc = self.proxy_mod.serve_http_proxy("eng-2")
 
         self.assertEqual(rc, 0)
-        proxy_request.assert_called_once_with(payload, caller_id="eng-2")
+        proxy_request.assert_called_once_with(
+            payload,
+            caller_id="eng-2",
+            mcp_session_id="mcp-session-2",
+        )
         self.assertEqual(stdout_buffer.getvalue(), _frame(response_payload))
+
+    def test_proxy_request_forwards_mcp_session_header(self):
+        payload = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 9,
+            "method": "tools/list",
+        }).encode("utf-8")
+
+        with mock.patch.object(
+            self.proxy_mod,
+            "post_json_bytes_with_retry",
+            autospec=True,
+            return_value=b"{}",
+        ) as post_json, \
+                mock.patch.object(
+                    self.proxy_mod,
+                    "LoomDB",
+                    autospec=True,
+                ) as loom_db:
+            loom_db.return_value.init.return_value = None
+            loom_db.return_value.close.return_value = None
+            result = self.proxy_mod.asyncio.run(
+                self.proxy_mod._proxy_request(
+                    payload,
+                    caller_id="eng-3",
+                    mcp_session_id="mcp-session-3",
+                )
+            )
+
+        self.assertEqual(result, b"{}")
+        self.assertEqual(
+            post_json.call_args.kwargs["headers"],
+            {
+                "Content-Type": "application/json",
+                "X-Loom-Cell-Id": "eng-3",
+                "X-Loom-MCP-Session-Id": "mcp-session-3",
+            },
+        )
