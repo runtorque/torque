@@ -525,6 +525,137 @@ test('architect Messages tab renders full-height message cards instead of the co
   assert.doesNotMatch(panel.innerHTML, /class="mcp-text"/);
 });
 
+test('architect Messages tab renders newest-first regardless of source array order', () => {
+  const { context, panel } = createHarness();
+  context.state.agents = {
+    'arch-1': {
+      id: 'arch-1',
+      name: 'Planner',
+      kind: 'architect',
+      group: 'alpha',
+      cell_type: 'agent',
+      mcp_messages: [
+        { id: 'm-oldest', action: 'architect_message', message: 'OLDEST-BODY', timestamp: 100 },
+        { id: 'm-middle', action: 'architect_message', message: 'MIDDLE-BODY', timestamp: 200 },
+        { id: 'm-newest', action: 'architect_message', message: 'NEWEST-BODY', timestamp: 300 },
+      ],
+    },
+  };
+  context.focusedItemId = 'arch-1';
+
+  context.agentPanelSelectTab('messages');
+
+  const html = panel.innerHTML;
+  const iOldest = html.indexOf('OLDEST-BODY');
+  const iMiddle = html.indexOf('MIDDLE-BODY');
+  const iNewest = html.indexOf('NEWEST-BODY');
+  assert.ok(iNewest >= 0 && iMiddle >= 0 && iOldest >= 0, 'all three messages should render');
+  assert.ok(iNewest < iMiddle, 'newest message card must appear before middle card in DOM order');
+  assert.ok(iMiddle < iOldest, 'middle message card must appear before oldest card in DOM order');
+});
+
+test('architect Messages tab keeps newest-first when the source array is already newest-first (server insert-at-0 shape)', () => {
+  const { context, panel } = createHarness();
+  context.state.agents = {
+    'arch-1': {
+      id: 'arch-1',
+      name: 'Planner',
+      kind: 'architect',
+      group: 'alpha',
+      cell_type: 'agent',
+      mcp_messages: [
+        { id: 'm-newest', action: 'architect_message', message: 'NEWEST-BODY', timestamp: 300 },
+        { id: 'm-middle', action: 'architect_message', message: 'MIDDLE-BODY', timestamp: 200 },
+        { id: 'm-oldest', action: 'architect_message', message: 'OLDEST-BODY', timestamp: 100 },
+      ],
+    },
+  };
+  context.focusedItemId = 'arch-1';
+
+  context.agentPanelSelectTab('messages');
+
+  const html = panel.innerHTML;
+  const iOldest = html.indexOf('OLDEST-BODY');
+  const iMiddle = html.indexOf('MIDDLE-BODY');
+  const iNewest = html.indexOf('NEWEST-BODY');
+  assert.ok(iNewest < iMiddle && iMiddle < iOldest,
+    'newest-first ordering must be stable regardless of source array order');
+});
+
+test('architect Messages tab promotes a newly arrived message to the top on rerender without disturbing existing ordering', () => {
+  const { context, panel } = createHarness();
+  context.state.agents = {
+    'arch-1': {
+      id: 'arch-1',
+      name: 'Planner',
+      kind: 'architect',
+      group: 'alpha',
+      cell_type: 'agent',
+      mcp_messages: [
+        { id: 'm-old1', action: 'architect_message', message: 'OLD-ONE-BODY', timestamp: 100 },
+        { id: 'm-old2', action: 'architect_message', message: 'OLD-TWO-BODY', timestamp: 200 },
+      ],
+    },
+  };
+  context.focusedItemId = 'arch-1';
+  context.agentPanelSelectTab('messages');
+  const firstHtml = panel.innerHTML;
+  assert.ok(firstHtml.indexOf('OLD-TWO-BODY') < firstHtml.indexOf('OLD-ONE-BODY'),
+    'baseline: newer OLD-TWO-BODY must render before older OLD-ONE-BODY');
+
+  // Simulate a WS delta that prepends a new message (server inserts at index 0 with newer timestamp).
+  context.state.agents['arch-1'].mcp_messages = [
+    { id: 'm-brand-new', action: 'architect_message', message: 'BRAND-NEW-BODY', timestamp: 500 },
+    { id: 'm-old1', action: 'architect_message', message: 'OLD-ONE-BODY', timestamp: 100 },
+    { id: 'm-old2', action: 'architect_message', message: 'OLD-TWO-BODY', timestamp: 200 },
+  ];
+  context.renderAgentPanel();
+
+  const secondHtml = panel.innerHTML;
+  const iNew = secondHtml.indexOf('BRAND-NEW-BODY');
+  const iOld2 = secondHtml.indexOf('OLD-TWO-BODY');
+  const iOld1 = secondHtml.indexOf('OLD-ONE-BODY');
+  assert.ok(iNew >= 0 && iOld2 >= 0 && iOld1 >= 0, 'all three messages render after rerender');
+  assert.ok(iNew < iOld2 && iOld2 < iOld1,
+    'brand-new message must take the top slot; pre-existing ordering must remain newest-first below it');
+});
+
+test('architect Messages tab rerender routes through capture/restore so scroll + focus survive delta updates', () => {
+  const { context, panel, captureCalls, restoreCalls } = createHarness();
+  context.state.agents = {
+    'arch-1': {
+      id: 'arch-1',
+      name: 'Planner',
+      kind: 'architect',
+      group: 'alpha',
+      cell_type: 'agent',
+      mcp_messages: [
+        { id: 'm-a', action: 'architect_message', message: 'first', timestamp: 100 },
+        { id: 'm-b', action: 'architect_message', message: 'second', timestamp: 200 },
+      ],
+    },
+  };
+  context.focusedItemId = 'arch-1';
+  context.agentPanelSelectTab('messages');
+  const captureBefore = captureCalls.length;
+  const restoreBefore = restoreCalls.length;
+
+  // Rerender via state mutation (simulate WS delta)
+  context.state.agents['arch-1'].mcp_messages = [
+    { id: 'm-c', action: 'architect_message', message: 'third', timestamp: 300 },
+    { id: 'm-a', action: 'architect_message', message: 'first', timestamp: 100 },
+    { id: 'm-b', action: 'architect_message', message: 'second', timestamp: 200 },
+  ];
+  context.renderAgentPanel();
+
+  assert.ok(captureCalls.length > captureBefore, 'rerender must invoke _captureSurfaceState to snapshot scroll/focus');
+  assert.ok(restoreCalls.length > restoreBefore, 'rerender must invoke _restoreSurfaceState to reapply snapshot');
+  const latestCapture = captureCalls[captureCalls.length - 1];
+  const scrollSelectors = JSON.parse(JSON.stringify(latestCapture.opts.scrollSelectors));
+  assert.ok(scrollSelectors.indexOf('.agent-panel-message-list') >= 0,
+    'capture must include .agent-panel-message-list so message-list scroll is anchored across rerenders');
+});
+
 test('focused architect decision interactions rerender the agent panel instead of the legacy weaver surface', () => {
   const { context, panel } = createHarness();
   setFocusedAgent(context, {
