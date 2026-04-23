@@ -143,6 +143,33 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
                 **{k: v for k, v in payload.items() if k not in {"cmd", "id"}},
             )
             return {"type": "ok"}
+        if payload["cmd"] == "board_move_task":
+            task = self.state.board_tasks.get(payload.get("id", ""))
+            if not task:
+                return {"type": "error", "message": "Task not found"}
+            lane = str(payload.get("lane", "") or "").strip()
+            if not lane:
+                return {"type": "error", "message": "lane is required"}
+            if lane not in self.state.board_lanes:
+                return {"type": "error", "message": f"Unknown lane: {lane}"}
+            clear_status = payload.get("clear_status", False)
+            if not isinstance(clear_status, bool):
+                clear_status = False
+            previous_lane = task.lane
+            self.state.board_move_task(
+                task.id,
+                lane,
+                payload.get("position"),
+                clear_status=clear_status,
+            )
+            moved = self.state.board_tasks.get(task.id)
+            return {
+                "type": "task_moved",
+                "task_id": task.id,
+                "previous_lane": previous_lane,
+                "new_lane": moved.lane if moved else lane,
+                "status": moved.status if moved else "",
+            }
         if payload["cmd"] == "inject_mcp_message":
             agent = self.state.agents.get(payload.get("agent_id", ""))
             if not agent or not getattr(agent, "session_id", ""):
@@ -1475,6 +1502,121 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         reassign_payload = json.loads(reassign_text)
         self.assertEqual(reassign_payload["reason"], "engineer_dismissed")
         self.assertEqual(self.state.board_tasks[task.id].assigned_engineer_id, peer.id)
+
+    async def test_architect_task_move_uses_group_scope_and_can_clear_status(self):
+        architect = self._add_architect("arch-1", "Architect")
+        other_architect = self._add_architect("arch-2", "Other Architect")
+        task = self._add_task(
+            "task-move",
+            "Cleanup lane drift",
+            lane="Backlog",
+            status="Fixing",
+            created_by_architect_id=other_architect.id,
+        )
+
+        preserve_text, preserve_error = await self._call(
+            "architect_task_move",
+            {"task": task.id, "new_lane": "To Do"},
+            architect.id,
+        )
+
+        self.assertFalse(preserve_error, preserve_text)
+        preserve_payload = json.loads(preserve_text)
+        self.assertEqual(
+            preserve_payload,
+            {
+                "type": "task_moved",
+                "task_id": task.id,
+                "previous_lane": "Backlog",
+                "new_lane": "To Do",
+                "status": "Fixing",
+            },
+        )
+        self.assertEqual(self.state.board_tasks[task.id].lane, "To Do")
+        self.assertEqual(self.state.board_tasks[task.id].status, "Fixing")
+
+        with mock.patch.object(self.state, "_emit", wraps=self.state._emit) as emit_mock:
+            clear_text, clear_error = await self._call(
+                "architect_task_move",
+                {"task": task.id, "new_lane": "Done", "clear_status": True},
+                architect.id,
+            )
+
+        self.assertFalse(clear_error, clear_text)
+        clear_payload = json.loads(clear_text)
+        self.assertEqual(
+            clear_payload,
+            {
+                "type": "task_moved",
+                "task_id": task.id,
+                "previous_lane": "To Do",
+                "new_lane": "Done",
+                "status": "",
+            },
+        )
+        moved = self.state.board_tasks[task.id]
+        self.assertEqual(moved.lane, "Done")
+        self.assertEqual(moved.status, "")
+
+        db_task = self.db.load_all()["board_tasks"][task.id]
+        self.assertEqual(db_task["lane"], "Done")
+        self.assertEqual(db_task["status"], "")
+
+        task_upserts = [
+            call
+            for call in emit_mock.call_args_list
+            if call.args and call.args[0] == "task_upsert"
+        ]
+        self.assertTrue(task_upserts)
+        self.assertTrue(any(
+            call.kwargs.get("id") == task.id
+            and call.kwargs.get("lane") == "Done"
+            and call.kwargs.get("status") == ""
+            for call in task_upserts
+        ))
+
+    async def test_architect_task_move_rejects_unknown_lane(self):
+        architect = self._add_architect("arch-1", "Architect")
+        task = self._add_task(
+            "task-move",
+            "Cleanup lane drift",
+            lane="To Do",
+            status="Fixing",
+            created_by_architect_id=architect.id,
+        )
+
+        text, is_error = await self._call(
+            "architect_task_move",
+            {"task": task.id, "new_lane": "No Such Lane"},
+            architect.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertEqual(text, "Unknown lane: No Such Lane")
+        self.assertEqual(self.state.board_tasks[task.id].lane, "To Do")
+        self.assertEqual(self.state.board_tasks[task.id].status, "Fixing")
+
+    async def test_architect_task_move_rejects_out_of_group_task(self):
+        architect = self._add_architect("arch-1", "Architect")
+        self.state.groups["other"] = []
+        self.state._db_save_groups()
+        hidden_task = self.state.board_add_task(
+            "Other group task",
+            "other",
+            lane="Backlog",
+            id="task-other-group",
+        )
+        self.assertIsNotNone(hidden_task)
+
+        text, is_error = await self._call(
+            "architect_task_move",
+            {"task": hidden_task.id, "new_lane": "Done"},
+            architect.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertEqual(text, "Task not found")
+        self.assertEqual(self.state.board_tasks[hidden_task.id].lane, "Backlog")
 
     async def test_architect_and_engineer_messaging_respects_hiring_scope(self):
         architect = self._add_architect("arch-1", "Architect")

@@ -1134,6 +1134,40 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(root_task.verification_summary["manual_smoke_done"])
 
+    async def test_board_move_task_handler_can_clear_status(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        state.board_lanes = ["Backlog", "To Do", "In Progress", "Done"]
+        task = state.board_add_task(
+            "Manual cleanup",
+            "g",
+            lane="In Progress",
+            id="task-move",
+            status="Fixing",
+        )
+        self.assertIsNotNone(task)
+        handle_command = self._extract_handle_command(state)
+
+        result = await handle_command({
+            "cmd": "board_move_task",
+            "id": "task-move",
+            "lane": "Done",
+            "clear_status": True,
+        })
+
+        self.assertEqual(
+            result,
+            {
+                "type": "task_moved",
+                "task_id": "task-move",
+                "previous_lane": "In Progress",
+                "new_lane": "Done",
+                "status": "",
+            },
+        )
+        self.assertEqual(state.board_tasks["task-move"].lane, "Done")
+        self.assertEqual(state.board_tasks["task-move"].status, "")
+
     async def test_worktree_merge_auto_moves_sole_linked_task_to_done(self):
         state = self.state_mod.MatrixState()
         state.add_group("g")

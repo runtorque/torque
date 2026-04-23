@@ -4242,11 +4242,18 @@ class MatrixState:
                 self.recompute_task_health()
 
     def board_move_task(self, tid: str, lane: str,
-                        position: Optional[int] = None):
+                        position: Optional[int] = None,
+                        clear_status: bool = False):
         tid = self.resolve_task_alias(tid)
         task = self.board_tasks.get(tid)
         if not task or lane not in self.board_lanes:
             return
+        if lane == ARCHIVED_LANE and task.lane == ARCHIVED_LANE:
+            if clear_status and task.status:
+                self.board_update_task(tid, status="")
+            return
+        if clear_status:
+            task.status = ""
         if lane == ARCHIVED_LANE:
             self.board_archive_task(tid, position=position)
             return

@@ -7653,34 +7653,66 @@ async def main(connection=None):
             elif cmd == "board_move_task":
                 _mv_id = _resolve_task_id(state, data.get("id", ""))
                 _mv_task = state.board_tasks.get(_mv_id)
-                _mv_resume_targets = _capture_auto_resume_targets(
-                    state,
-                    task=_mv_task,
-                    group=_mv_task.group if _mv_task else "",
-                )
-                _mv_done_before = task_counts_as_done(_mv_task)
-                _mv_new = data.get("lane", "")
-                state.board_move_task(
-                    _mv_id, _mv_new, data.get("position"))
-                _mv_task_after = state.board_tasks.get(_mv_id)
-                # Moving out of Done may re-block dependents
-                if _mv_done_before and not task_counts_as_done(_mv_task_after):
-                    for _dt in state.board_get_dependents(_mv_id):
-                        if not task_is_closed(_dt):
-                            _panel_event(
-                                "task_blocked_by_dep", "",
-                                "", _dt.group,
-                                f"Task '{_dt.task[:60]}' is "
-                                "blocked again (dependency "
-                                "moved out of Done)",
-                                task_id=_dt.id)
-                await _maybe_auto_resume_targets(
-                    state,
-                    handle_command,
-                    _panel_event,
-                    targets=_mv_resume_targets,
-                    group=_mv_task_after.group if _mv_task_after else "",
-                )
+                if not _mv_task:
+                    result = {"type": "error", "message": "Task not found"}
+                else:
+                    _mv_resume_targets = _capture_auto_resume_targets(
+                        state,
+                        task=_mv_task,
+                        group=_mv_task.group if _mv_task else "",
+                    )
+                    _mv_done_before = task_counts_as_done(_mv_task)
+                    _mv_previous_lane = str(getattr(_mv_task, "lane", "") or "")
+                    _mv_new = data.get("lane", "")
+                    if not _mv_new:
+                        result = {"type": "error", "message": "lane is required"}
+                    elif _mv_new not in state.board_lanes:
+                        result = {
+                            "type": "error",
+                            "message": f"Unknown lane: {_mv_new}",
+                        }
+                    else:
+                        _mv_clear_status = data.get("clear_status", False)
+                        if not isinstance(_mv_clear_status, bool):
+                            _mv_clear_status = False
+                        state.board_move_task(
+                            _mv_id,
+                            _mv_new,
+                            data.get("position"),
+                            clear_status=_mv_clear_status,
+                        )
+                        _mv_task_after = state.board_tasks.get(_mv_id)
+                        result = {
+                            "type": "task_moved",
+                            "task_id": _mv_id,
+                            "previous_lane": _mv_previous_lane,
+                            "new_lane": (
+                                str(getattr(_mv_task_after, "lane", "") or "")
+                                if _mv_task_after else _mv_new
+                            ),
+                            "status": (
+                                str(getattr(_mv_task_after, "status", "") or "")
+                                if _mv_task_after else ""
+                            ),
+                        }
+                        # Moving out of Done may re-block dependents
+                        if _mv_done_before and not task_counts_as_done(_mv_task_after):
+                            for _dt in state.board_get_dependents(_mv_id):
+                                if not task_is_closed(_dt):
+                                    _panel_event(
+                                        "task_blocked_by_dep", "",
+                                        "", _dt.group,
+                                        f"Task '{_dt.task[:60]}' is "
+                                        "blocked again (dependency "
+                                        "moved out of Done)",
+                                        task_id=_dt.id)
+                        await _maybe_auto_resume_targets(
+                            state,
+                            handle_command,
+                            _panel_event,
+                            targets=_mv_resume_targets,
+                            group=_mv_task_after.group if _mv_task_after else "",
+                        )
 
             elif cmd == "board_reorder_task":
                 state.board_reorder_task(

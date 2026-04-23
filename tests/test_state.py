@@ -1922,6 +1922,48 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
         self.assertEqual(archived.archived_from_lane, "Done")
         self.assertEqual(archived.description, "Keep for reference")
 
+    def test_board_move_task_clears_status_for_archived_noop_and_persists(self):
+        from loom.db import LoomDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = LoomDB(Path(tmp.name) / "loom.db")
+        db.init()
+        self.addCleanup(db.close)
+
+        state = self.state_mod.MatrixState(db=db)
+        state.groups["g"] = []
+        state._db_save_groups()
+        task = state.board_add_task(
+            "Archived task",
+            "g",
+            lane="Backlog",
+            id="task-1",
+            status="Fixing",
+        )
+
+        self.assertIsNotNone(task)
+
+        state.board_archive_task(task.id)
+        state._delta_ops.clear()
+        state.board_move_task(task.id, "Archived", clear_status=True)
+
+        archived = state.board_tasks[task.id]
+        self.assertEqual(archived.lane, "Archived")
+        self.assertEqual(archived.status, "")
+        row = db._conn.execute(
+            "SELECT status FROM board_tasks WHERE id=?",
+            (task.id,),
+        ).fetchone()
+        self.assertEqual(row, ("",))
+        task_upserts = [
+            op for op in state._delta_ops
+            if op.get("op") == "task_upsert" and op.get("id") == task.id
+        ]
+        self.assertTrue(task_upserts)
+        self.assertEqual(task_upserts[-1]["lane"], "Archived")
+        self.assertEqual(task_upserts[-1]["status"], "")
+
     def test_lane_transition_timestamp_tracks_update_and_remove_lane_moves(self):
         state = self._make_state()
         state.board_add_lane("Review")

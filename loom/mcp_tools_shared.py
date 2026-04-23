@@ -3150,14 +3150,49 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         tid = _resolve_task(state, args.get("task", ""))
         if not tid:
             return "Task not found", True
+        task = state.board_tasks.get(tid)
+        if not task:
+            return "Task not found", True
+        requested_new_lane = str(args.get("new_lane", "") or "").strip()
+        requested_lane = str(args.get("lane", "") or "").strip()
+        if (
+            requested_new_lane
+            and requested_lane
+            and requested_new_lane != requested_lane
+        ):
+            return "lane and new_lane must match when both are provided", True
+        target_lane = requested_new_lane or requested_lane
+        if not target_lane:
+            required_arg = "new_lane" if tool_prefix == "architect_" else "lane"
+            return f"{required_arg} is required", True
+        if target_lane not in real_state.board_lanes:
+            return f"Unknown lane: {target_lane}", True
+        clear_status, clear_status_error = _optional_bool_arg(
+            args,
+            "clear_status",
+            False,
+        )
+        if clear_status_error:
+            return clear_status_error, True
+        previous_lane = str(getattr(task, "lane", "") or "")
         result = await handle_command({
             "cmd": "board_move_task",
             "id": tid,
-            "lane": args.get("lane", ""),
+            "lane": target_lane,
+            "clear_status": clear_status,
         })
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
-        return json.dumps(result) if result else '{"type":"ok"}', False
+        moved = real_state.board_tasks.get(tid)
+        if not moved:
+            return "Task not found", True
+        return json.dumps({
+            "type": "task_moved",
+            "task_id": tid,
+            "previous_lane": previous_lane,
+            "new_lane": str(getattr(moved, "lane", "") or ""),
+            "status": str(getattr(moved, "status", "") or ""),
+        }), False
 
     if tool_name == "task_dispatch":
         tid = _resolve_task(state, args.get("task", ""))

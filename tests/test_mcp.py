@@ -434,6 +434,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("architect_events_recent", architect_tool_names)
         self.assertIn("architect_deploy_state", architect_tool_names)
         self.assertIn("architect_task_chain", architect_tool_names)
+        self.assertIn("architect_task_move", architect_tool_names)
         self.assertIn("architect_decision_create", architect_tool_names)
         self.assertIn("architect_engineer_hire", architect_tool_names)
         self.assertIn("architect_engineer_message", architect_tool_names)
