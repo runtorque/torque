@@ -18,6 +18,10 @@ var _agentPanelEventsPagerAgentId = '';
 var _agentPanelEventsVisibleLimit = _AGENT_PANEL_EVENTS_PAGE_SIZE;
 var _agentPanelEventsLastTotal = 0;
 var _agentPanelEventsPreRenderAtLiveTail = false;
+// Per-(agentId, section) visible-limit pagers for the digest Queued / Sent
+// lists. Cell events keeps its own pager above because it also participates in
+// scroll-auto-grow; digest sections load-more on explicit click only.
+var _agentPanelSectionPagers = {};
 var _agentPanelVirtualScrollByKey = {};
 var _agentPanelRenderedVirtualMetas = [];
 var _agentPanelVirtualRenderFrame = 0;
@@ -713,6 +717,73 @@ function agentPanelLoadMoreEvents(evt) {
   renderAgentPanel();
 }
 
+function _agentPanelSectionPagerKey(agentId, section) {
+  return String(agentId || '') + '::' + String(section || '');
+}
+
+function _agentPanelSectionPage(agentId, section, events) {
+  events = Array.isArray(events) ? events : [];
+  var key = _agentPanelSectionPagerKey(agentId, section);
+  var pager = _agentPanelSectionPagers[key];
+  if (!pager) {
+    pager = { visibleLimit: _AGENT_PANEL_EVENTS_PAGE_SIZE, lastTotal: 0 };
+    _agentPanelSectionPagers[key] = pager;
+  }
+  var total = events.length;
+  // Same anchor-preservation trick as the Cell events pager: when new events
+  // land at the top (newest-first), grow the render window by the inserted
+  // rows so the row the user was looking at stays in the DOM for the shared
+  // anchor-restore helper.
+  var added = total - pager.lastTotal;
+  if (added > 0 && pager.lastTotal > 0 && !_agentPanelEventsPreRenderAtLiveTail) {
+    pager.visibleLimit += added;
+  }
+  pager.lastTotal = total;
+  if (pager.visibleLimit < _AGENT_PANEL_EVENTS_PAGE_SIZE) {
+    pager.visibleLimit = _AGENT_PANEL_EVENTS_PAGE_SIZE;
+  }
+  var visibleCount = Math.min(total, pager.visibleLimit);
+  return {
+    section: String(section || ''),
+    agentId: String(agentId || ''),
+    events: events.slice(0, visibleCount),
+    total: total,
+    visibleCount: visibleCount,
+    hasMore: visibleCount < total,
+  };
+}
+
+function _agentPanelRenderSectionLoadMore(page) {
+  if (!page || !page.hasMore) return '';
+  var remaining = Math.max(0, page.total - page.visibleCount);
+  var nextCount = Math.min(_AGENT_PANEL_EVENTS_PAGE_SIZE, remaining);
+  var section = _agentPanelEsc(page.section);
+  var agentId = _agentPanelEsc(page.agentId);
+  return '<button type="button" class="agent-panel-event-load-more"'
+    + ' data-agent-panel-section="' + section + '"'
+    + ' data-agent-panel-section-agent="' + agentId + '"'
+    + ' onclick="agentPanelLoadMoreSection(event, \'' + section
+    + '\', \'' + agentId + '\')">'
+    + 'Load ' + nextCount + ' older event' + (nextCount === 1 ? '' : 's')
+    + '</button>';
+}
+
+function agentPanelLoadMoreSection(evt, section, agentId) {
+  if (evt && typeof evt.preventDefault === 'function') evt.preventDefault();
+  if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
+  var resolvedId = String(agentId || '');
+  if (!resolvedId) {
+    var focused = _resolveFocusedAgent();
+    resolvedId = focused ? String(focused.id || '') : '';
+  }
+  if (!resolvedId) return;
+  var key = _agentPanelSectionPagerKey(resolvedId, section);
+  var pager = _agentPanelSectionPagers[key];
+  if (!pager) return;
+  pager.visibleLimit += _AGENT_PANEL_EVENTS_PAGE_SIZE;
+  renderAgentPanel();
+}
+
 function _agentPanelRenderTabs(kind, activeTab) {
   var tabs = _agentPanelTabSpec(kind);
   if (!tabs.length) return '';
@@ -857,6 +928,14 @@ function _agentPanelRenderEventsTab(bstats, sentEvents, paused, recipient, sendN
     return (b.id || 0) - (a.id || 0);
   });
 
+  // Queued and Sent are digest-scoped lists (events forwarded from child cells
+  // to this recipient). They are semantically distinct from "Cell events"
+  // which lists this cell's own lifecycle. Both sections cap at 20 + explicit
+  // "Load 20 older events" click to avoid unbounded panels on long histories.
+  var recipientId = (recipient && recipient.id) || '';
+  var queuedPage = _agentPanelSectionPage(recipientId, 'queued', queued);
+  var sentPage = _agentPanelSectionPage(recipientId, 'sent', sent);
+
   var html = '<div class="agent-panel-events-tab">';
   html += '<div class="agent-panel-events-toolbar">';
   html += '<div class="agent-panel-events-countdown">' + _esc(statusText) + '</div>';
@@ -864,18 +943,42 @@ function _agentPanelRenderEventsTab(bstats, sentEvents, paused, recipient, sendN
     + (sendDisabled ? ' disabled' : '')
     + ' onclick="' + _agentPanelEsc(sendNowExpr || 'weaverSendNow()') + '">Send queued now</button>';
   html += '</div>';
-  html += _agentPanelLegacyRenderEventSection(
+  html += _agentPanelRenderPagedEventSection(
     'Queued for next digest',
-    queued,
+    queuedPage,
     'queued',
     'No queued events.'
   );
-  html += _agentPanelLegacyRenderEventSection(
+  html += _agentPanelRenderPagedEventSection(
     sentTitle || 'Already sent to Weaver',
-    sent,
+    sentPage,
     'sent',
     'No digested events yet.'
   );
+  html += '</div>';
+  return html;
+}
+
+function _agentPanelRenderPagedEventSection(title, page, mode, emptyText) {
+  var total = (page && page.total) || 0;
+  var events = (page && page.events) || [];
+  var html = '<div class="agent-panel-event-section">';
+  html += '<div class="agent-panel-event-section-header">';
+  html += '<span class="agent-panel-event-section-title">' + _esc(title) + '</span>';
+  html += '<span class="agent-panel-event-section-count">'
+    + _agentPanelEventSectionCount(page) + '</span>';
+  html += '</div>';
+  if (!total) {
+    html += '<div class="agent-panel-event-empty">' + _esc(emptyText) + '</div>';
+    html += '</div>';
+    return html;
+  }
+  html += '<div class="agent-panel-event-list">';
+  for (var i = 0; i < events.length; i++) {
+    html += _agentPanelLegacyRenderEventItem(events[i], mode);
+  }
+  html += '</div>';
+  html += _agentPanelRenderSectionLoadMore(page);
   html += '</div>';
   return html;
 }
@@ -1162,11 +1265,14 @@ function _renderPersistentCellEvents(agent) {
 }
 
 function _renderEngineerEvents(agent) {
-  return _renderPersistentCellEvents(agent) + _renderAgentDigestEvents(agent);
+  // Digest controls (Send queued now + Queued + Already sent) render above
+  // Cell events so the actionable items stay visible without scrolling past
+  // the potentially long per-cell event log.
+  return _renderAgentDigestEvents(agent) + _renderPersistentCellEvents(agent);
 }
 
 function _renderArchitectEvents(agent) {
-  return _renderPersistentCellEvents(agent) + _renderAgentDigestEvents(agent);
+  return _renderAgentDigestEvents(agent) + _renderPersistentCellEvents(agent);
 }
 
 function _renderEngineerWorklog(agent) {
