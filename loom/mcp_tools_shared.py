@@ -826,6 +826,21 @@ def _resolve_architect_hired_engineer(state, caller_id: str,
     return engineer_id, ""
 
 
+def _resolve_group_engineer(state, caller_id: str,
+                            engineer_ident: str) -> tuple[str | None, str]:
+    engineer_id = _resolve_agent(state, engineer_ident)
+    if not engineer_id:
+        return None, f"Engineer not found: {engineer_ident}"
+    engineer = state.agents.get(engineer_id)
+    if not _is_engineer_like_cell(state, engineer):
+        return None, "engineer not found in scope"
+    caller_group = _caller_group(state, caller_id)
+    engineer_group = str(getattr(engineer, "group", "") or "").strip()
+    if not caller_group or engineer_group != caller_group:
+        return None, "engineer not found in scope"
+    return engineer_id, ""
+
+
 def _event_task_chain(state, event: dict) -> list:
     task_id = str((event or {}).get("task_id", "") or "").strip()
     task = getattr(state, "board_tasks", {}).get(task_id)
@@ -2772,39 +2787,65 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             return result.get("message", "Unknown error"), True
         return json.dumps(result) if result else '{"type":"ok"}', False
 
-    if tool_name == "task_reassign" and caller_kind == "architect":
-        tid = _resolve_task(state, args.get("task", ""))
+    if tool_name == "task_reassign":
+        task_state = state
+        if caller_kind == "engineer":
+            task_state = real_state
+        tid = _resolve_task(task_state, args.get("task", ""))
         if not tid:
             return "Task not found", True
-        task = state.board_tasks.get(tid)
+        task = task_state.board_tasks.get(tid)
         if not task:
             return "Task not found", True
-        if str(getattr(task, "created_by_architect_id", "") or "").strip() != str(
-            caller_id or ""
-        ).strip():
-            return "Task was not created by this architect", True
         engineer_ident = str(args.get("new_engineer_id", "") or "").strip()
         if not engineer_ident:
             return "new_engineer_id is required", True
-        engineer_id, engineer_error = _resolve_architect_hired_engineer(
-            real_state, caller_id, engineer_ident
-        )
+        caller_id_str = str(caller_id or "").strip()
+        old_engineer_id = _effective_assigned_engineer_id(task)
+
+        if caller_kind == "architect":
+            if str(
+                getattr(task, "created_by_architect_id", "") or ""
+            ).strip() != caller_id_str:
+                return "Task was not created by this architect", True
+            engineer_id, engineer_error = _resolve_architect_hired_engineer(
+                real_state, caller_id, engineer_ident
+            )
+        else:
+            caller_group = _caller_group(real_state, caller_id_str)
+            if str(getattr(task, "group", "") or "").strip() != caller_group:
+                return "Task not found", True
+            created_by_engineer_id = str(
+                getattr(task, "created_by_engineer_id", "") or ""
+            ).strip()
+            if (
+                old_engineer_id != caller_id_str
+                and created_by_engineer_id != caller_id_str
+            ):
+                return (
+                    "Task can only be reassigned by the assigned engineer "
+                    "or creator"
+                ), True
+            engineer_id, engineer_error = _resolve_group_engineer(
+                real_state, caller_id, engineer_ident
+            )
         if not engineer_id:
             return engineer_error, True
         engineer = real_state.agents.get(engineer_id)
         if _agent_dismissed_at(engineer):
             return _engineer_dismissed_error(engineer_id), True
-        result = await handle_command({
-            "cmd": "board_update_task",
-            "id": tid,
-            "assigned_engineer_id": engineer_id,
-        })
-        if result and result.get("type") == "error":
-            return result.get("message", "Unknown error"), True
+        real_state.board_update_task(tid, assigned_engineer_id=engineer_id)
+        if caller_kind == "architect":
+            return json.dumps({
+                "type": "ok",
+                "task_id": tid,
+                "assigned_engineer_id": engineer_id,
+            }), False
         return json.dumps({
             "type": "ok",
             "task_id": tid,
-            "assigned_engineer_id": engineer_id,
+            "from": old_engineer_id,
+            "to": engineer_id,
         }), False
 
     if tool_name == "task_edit":

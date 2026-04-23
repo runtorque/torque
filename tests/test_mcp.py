@@ -450,6 +450,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             tool["name"] for tool in listed_engineer.payload["result"]["tools"]
         ]
         self.assertIn("engineer_board_summary", engineer_tool_names)
+        self.assertIn("engineer_task_reassign", engineer_tool_names)
         self.assertIn("engineer_task_verify", engineer_tool_names)
         self.assertIn("engineer_message_architect", engineer_tool_names)
         self.assertIn("engineer_reply", engineer_tool_names)

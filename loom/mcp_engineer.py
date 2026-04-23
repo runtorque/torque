@@ -36,6 +36,27 @@ def _rename_tool_spec(tool: dict) -> dict:
 ENGINEER_TOOLS = [_rename_tool_spec(tool) for tool in WEAVER_TOOLS]
 ENGINEER_TOOLS.extend([
     {
+        "name": "engineer_task_reassign",
+        "description": (
+            "Reassign a task you currently own or originally created to "
+            "another engineer in your group."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "task": {
+                    "type": "string",
+                    "description": "Task ID or alias.",
+                },
+                "new_engineer_id": {
+                    "type": "string",
+                    "description": "Engineer id/slug/name to assign.",
+                },
+            },
+            "required": ["task", "new_engineer_id"],
+        },
+    },
+    {
         "name": "engineer_message_architect",
         "description": (
             "Send a direct message to the architect that hired this engineer. "
