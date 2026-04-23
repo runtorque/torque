@@ -227,7 +227,10 @@ class CompactSnapshotConsumerTests(unittest.TestCase):
         # does: full takes precedence, but local card fields survive.
         merged = {**card, **full}
         self.assertEqual(merged["description"], "full description with lots of detail")
-        self.assertEqual(merged["messages"], [{"message": "progress"}])
+        self.assertEqual(
+            merged["messages"],
+            [{"action": "progress", "message": "progress body"}],
+        )
         self.assertEqual(merged["status"], "on-review")
         self.assertEqual(merged["action_name"], "feature/implement")
 
