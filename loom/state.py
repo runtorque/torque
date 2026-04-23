@@ -162,10 +162,24 @@ COMPACT_BOARD_TASK_FIELDS = (
     "parent_task_id",
     "pipeline_depth",
     "status",
+    "created_at",
+    "updated_at",
+    "scheduled_at",
+    "depends_on",
+    "provider",
+    "external_id",
+    "external_url",
     "health_state",
+    "health_since",
+    "health_details",
     "verification_state",
     "verification_mode",
+    "verification_notes",
+    "verification_summary",
+    "messages",
     "lane_entered_at",
+    "worktree_boundary",
+    "resume_after_boundary_task_id",
 )
 
 
@@ -735,11 +749,38 @@ def board_task_compact(task: BoardTask) -> dict:
     """Return the compact board-card summary used by compact snapshots."""
     summary = {}
     for field_name in COMPACT_BOARD_TASK_FIELDS:
-        value = getattr(task, field_name)
-        if isinstance(value, list):
+        if field_name == "messages":
+            value = _compact_task_messages_preview(getattr(task, field_name))
+        else:
+            value = getattr(task, field_name)
+        if isinstance(value, dict):
+            value = dict(value)
+        elif isinstance(value, list):
             value = list(value)
         summary[field_name] = value
     return summary
+
+
+def _compact_task_messages_preview(messages) -> list[dict]:
+    entries = list(messages or [])
+    if not entries:
+        return []
+    last = entries[-1] if isinstance(entries[-1], dict) else {}
+    action = str(last.get("action", "") or "").strip()
+    count = len(entries)
+    if count == 1:
+        message = action or "1 update"
+    elif action:
+        message = f"{count} updates · last {action}"
+    else:
+        message = f"{count} updates"
+    preview = {
+        "count": count,
+        "message": message,
+    }
+    if action:
+        preview["action"] = action
+    return [preview]
 
 
 def task_is_closed(task: Optional[BoardTask]) -> bool:

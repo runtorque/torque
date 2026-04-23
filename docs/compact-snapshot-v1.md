@@ -2,7 +2,10 @@
 
 `compact-v1` is an opt-in WebSocket snapshot contract for clients that lazy-load
 heavy board data instead of receiving every persisted field on initial connect.
-The legacy full snapshot remains the default and keeps its existing shape.
+It eagerly keeps the small board-semantic fields the standalone UI needs for
+sorting, dependency traversal, verification/health previews, external-link
+badges, and branch-boundary notes. The legacy full snapshot remains the default
+and keeps its existing shape.
 
 ## Opt-in
 
@@ -35,7 +38,7 @@ also includes:
 ### Compact `board_tasks` entries
 
 Each non-archived task in `board_tasks` is a card summary with exactly these
-fields:
+eager fields:
 
 ```json
 {
@@ -52,17 +55,62 @@ fields:
   "parent_task_id": "",
   "pipeline_depth": 0,
   "status": "",
+  "created_at": "2026-04-22T22:00:00+00:00",
+  "updated_at": "2026-04-22T23:30:03.758052+00:00",
+  "scheduled_at": "",
+  "depends_on": ["LOOM:120"],
+  "provider": "github",
+  "external_id": "123",
+  "external_url": "https://github.com/openai/openai/issues/123",
   "health_state": "healthy",
+  "health_since": "2026-04-22T23:30:03.758052+00:00",
+  "health_details": { "reasons": ["recent_activity"] },
   "verification_state": "pending",
   "verification_mode": "deploy",
-  "lane_entered_at": "2026-04-22T23:30:03.758052+00:00"
+  "verification_notes": "needs smoke",
+  "verification_summary": { "tests_run": "targeted" },
+  "messages": [
+    {
+      "count": 3,
+      "action": "progress",
+      "message": "3 updates · last progress"
+    }
+  ],
+  "lane_entered_at": "2026-04-22T23:30:03.758052+00:00",
+  "worktree_boundary": {
+    "repo_root": "/repo",
+    "branch": "feature/review-point",
+    "status": "open"
+  },
+  "resume_after_boundary_task_id": ""
 }
 ```
 
-The compact summary intentionally omits heavy/detail fields such as `messages`,
-`description`, `context`, `criteria`, `instructions`, `attachments`, `artifacts`,
-`health_details`, `verification_summary`, `verification_notes`,
-`worktree_boundary`, and `action_vars`.
+### Eager card fields
+
+Compact cards eagerly carry:
+
+- card identity/layout fields (`id`, `task`, `slug`, `group`, `lane`,
+  `position`, `labels`, `action_name`, assignee/pipeline status fields)
+- timestamps used by board sorting/chips (`created_at`, `updated_at`,
+  `lane_entered_at`, `scheduled_at`)
+- dependency + external-link metadata (`depends_on`, `provider`, `external_id`,
+  `external_url`)
+- health + verification previews (`health_state`, `health_since`,
+  `health_details`, `verification_state`, `verification_mode`,
+  `verification_notes`, `verification_summary`)
+- branch-boundary metadata (`worktree_boundary`,
+  `resume_after_boundary_task_id`)
+- `messages` as a metadata-only preview list: zero or one preview entry. When
+  present, `count` is the total number of task messages and `action` is the
+  last message type. `message` is a derived label only; full message bodies are
+  still deferred.
+
+### Deferred detail fields
+
+The compact summary still defers heavy/detail fields such as `description`,
+`instructions`, `context`, `criteria`, `action_vars`, `agent_template`,
+`attachments`, `artifacts`, and full `messages` bodies.
 
 Archived tasks are omitted from the initial compact snapshot entirely.
 

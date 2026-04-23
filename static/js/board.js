@@ -1249,9 +1249,8 @@ function _boardGroupTaskCount(model) {
 function showTaskMessages(taskId) {
   var t = state.board_tasks[taskId];
   if (!t) return;
-  // Compact cards omit messages entirely — hydrate before deciding
-  // whether to render the popover, otherwise a task with messages on
-  // the server would appear to have none.
+  // Compact cards may only carry message-preview metadata — hydrate before
+  // deciding whether to render the popover so full message bodies win.
   if (typeof _compactModeActive === 'function'
       && _compactModeActive()
       && typeof _compactTaskHasFullDetail === 'function'
