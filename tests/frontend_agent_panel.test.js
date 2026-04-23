@@ -907,6 +907,238 @@ test('_weaverReceiveSessionMap keeps the focused-agent panel rendered when agent
   assert.doesNotMatch(panel.innerHTML, /Architects &amp; Engineers/);
 });
 
+function _eventsTabHarness(kind, agentId, agentName) {
+  const harness = createHarness();
+  setFocusedAgent(harness.context, {
+    id: agentId,
+    name: agentName,
+    kind: kind,
+    group: 'alpha',
+    cell_type: 'agent',
+  });
+  harness.context.state.agent_digest_settings[agentId] = {
+    agent_id: agentId,
+    paused: false,
+  };
+  vm.runInContext(
+    `_agentPanelLastSelectedTabByKind.${kind} = 'events';`,
+    harness.context
+  );
+  vm.runInContext(`_agentPanelSectionPagers = {};`, harness.context);
+  return harness;
+}
+
+test('engineer Events tab renders digest controls above Cell events', () => {
+  const { context, panel } = _eventsTabHarness('engineer', 'eng-order', 'Builder');
+  context.state.digest_buffer_stats['eng-order'] = {
+    agent_id: 'eng-order',
+    group: 'alpha',
+    buffered_events: 1,
+    queued_events: [
+      { id: 1, kind: 'task_completed', message: 'Queued digest item', timestamp: 40 },
+    ],
+    manual_flush_requested: false,
+  };
+  context.agentPanelReceiveCellEvents({
+    type: 'cell_events',
+    cell_id: 'eng-order',
+    events: [
+      { id: 100, cell_id: 'eng-order', kind: 'status_changed',
+        message: 'Cell event row', timestamp: 20, source: 'panel_events' },
+    ],
+  });
+
+  const html = panel.innerHTML;
+  const sendNowIdx = html.indexOf('Send queued now');
+  const queuedIdx = html.indexOf('Queued for next digest');
+  const sentIdx = html.indexOf('Already sent to Builder');
+  const cellEventsIdx = html.indexOf('Cell events');
+
+  assert.ok(sendNowIdx >= 0, 'Send queued now button must render');
+  assert.ok(queuedIdx >= 0, 'Queued section must render');
+  assert.ok(sentIdx >= 0, 'Already sent section must render');
+  assert.ok(cellEventsIdx >= 0, 'Cell events section must render');
+  assert.ok(sendNowIdx < cellEventsIdx,
+    'Send queued now must render before Cell events');
+  assert.ok(queuedIdx < cellEventsIdx,
+    'Queued for next digest must render before Cell events');
+  assert.ok(sentIdx < cellEventsIdx,
+    'Already sent must render before Cell events');
+});
+
+test('architect Events tab renders digest controls above Cell events', () => {
+  const { context, panel } = _eventsTabHarness('architect', 'arch-order', 'Planner');
+  context.state.digest_buffer_stats['arch-order'] = {
+    agent_id: 'arch-order',
+    group: 'alpha',
+    buffered_events: 2,
+    queued_events: [
+      { id: 1, kind: 'task_completed', message: 'A queued item', timestamp: 40 },
+    ],
+    manual_flush_requested: false,
+  };
+  context.state.digest_sent_events['arch-order'] = [
+    { id: 9, kind: 'task_completed', message: 'A sent item',
+      timestamp: 30, delivered_at: 35 },
+  ];
+  context.agentPanelReceiveCellEvents({
+    type: 'cell_events',
+    cell_id: 'arch-order',
+    events: [
+      { id: 200, cell_id: 'arch-order', kind: 'status_changed',
+        message: 'Arch cell event', timestamp: 25, source: 'panel_events' },
+    ],
+  });
+
+  const html = panel.innerHTML;
+  const sendNowIdx = html.indexOf('Send queued now');
+  const queuedIdx = html.indexOf('Queued for next digest');
+  const sentIdx = html.indexOf('Already sent to Planner');
+  const cellEventsIdx = html.indexOf('Cell events');
+
+  assert.ok(sendNowIdx >= 0 && queuedIdx >= 0 && sentIdx >= 0 && cellEventsIdx >= 0);
+  assert.ok(sendNowIdx < cellEventsIdx);
+  assert.ok(queuedIdx < cellEventsIdx);
+  assert.ok(sentIdx < cellEventsIdx);
+});
+
+test('Already sent section caps at 20 events and exposes a Load more button', () => {
+  const { context, panel } = _eventsTabHarness('engineer', 'eng-cap', 'Builder');
+  const sent = [];
+  for (let i = 0; i < 30; i++) {
+    sent.push({
+      id: 100 + i,
+      kind: 'task_completed',
+      message: 'Sent event ' + i,
+      timestamp: 1000 + i,
+      delivered_at: 2000 + i,
+    });
+  }
+  context.state.digest_sent_events['eng-cap'] = sent;
+
+  context.renderAgentPanel();
+
+  const html = panel.innerHTML;
+  const itemCount = (html.match(/agent-panel-event-item-sent/g) || []).length;
+  assert.equal(itemCount, 20, 'Only 20 sent items render initially');
+  assert.match(html, /Already sent to Builder/);
+  assert.match(html, /data-agent-panel-section="sent"/);
+  assert.match(html, /Load 10 older events/);
+  assert.match(html, /20 \/ 30/);
+});
+
+test('Queued section caps at 20 events and exposes a Load more button', () => {
+  const { context, panel } = _eventsTabHarness('engineer', 'eng-qcap', 'Builder');
+  const queued = [];
+  for (let i = 0; i < 25; i++) {
+    queued.push({
+      id: 500 + i,
+      kind: 'task_completed',
+      message: 'Queued event ' + i,
+      timestamp: 1000 + i,
+    });
+  }
+  context.state.digest_buffer_stats['eng-qcap'] = {
+    agent_id: 'eng-qcap',
+    group: 'alpha',
+    buffered_events: queued.length,
+    queued_events: queued,
+    manual_flush_requested: false,
+  };
+
+  context.renderAgentPanel();
+
+  const html = panel.innerHTML;
+  const itemCount = (html.match(/agent-panel-event-item-queued/g) || []).length;
+  assert.equal(itemCount, 20, 'Only 20 queued items render initially');
+  assert.match(html, /Queued for next digest/);
+  assert.match(html, /data-agent-panel-section="queued"/);
+  assert.match(html, /Load 5 older events/);
+});
+
+test('agentPanelLoadMoreSection expands the sent pager and preserves expansion across rerender', () => {
+  const { context, panel } = _eventsTabHarness('engineer', 'eng-expand', 'Builder');
+  const sent = [];
+  for (let i = 0; i < 45; i++) {
+    sent.push({
+      id: 600 + i,
+      kind: 'task_completed',
+      message: 'Sent event ' + i,
+      timestamp: 1000 + i,
+      delivered_at: 2000 + i,
+    });
+  }
+  context.state.digest_sent_events['eng-expand'] = sent;
+
+  context.renderAgentPanel();
+  let html = panel.innerHTML;
+  assert.match(html, /Load 20 older events/);
+  assert.equal(
+    (html.match(/agent-panel-event-item-sent/g) || []).length,
+    20
+  );
+
+  vm.runInContext(
+    `agentPanelLoadMoreSection(null, 'sent', 'eng-expand');`,
+    context
+  );
+
+  html = panel.innerHTML;
+  assert.equal(
+    (html.match(/agent-panel-event-item-sent/g) || []).length,
+    40,
+    'Load more extends the sent window to 40'
+  );
+  assert.match(html, /40 \/ 45/);
+
+  // Simulate a WebSocket delta rerender — expansion must survive.
+  context.renderAgentPanel();
+  html = panel.innerHTML;
+  assert.equal(
+    (html.match(/agent-panel-event-item-sent/g) || []).length,
+    40,
+    'Expansion is preserved across rerender'
+  );
+});
+
+test('sent section pager grows to anchor around newly delivered events so prior rows remain rendered', () => {
+  const { context, panel } = _eventsTabHarness('engineer', 'eng-anchor', 'Builder');
+  const sent = [];
+  for (let i = 0; i < 25; i++) {
+    sent.push({
+      id: 800 + i,
+      kind: 'task_completed',
+      message: 'Sent event ' + i,
+      timestamp: 1000 + i,
+      delivered_at: 2000 + i,
+    });
+  }
+  context.state.digest_sent_events['eng-anchor'] = sent.slice();
+
+  context.renderAgentPanel();
+  let html = panel.innerHTML;
+  assert.ok(html.indexOf('Sent event 5') >= 0,
+    'Initial render shows mid-range event');
+
+  // New deliveries land at the top (newest-first). The pager should grow so
+  // the previously visible "Sent event 5" row stays in the DOM for the shared
+  // anchor-restore helper to lock onto.
+  const fresh = [
+    { id: 900, kind: 'task_completed', message: 'Fresh delivery 1',
+      timestamp: 9000, delivered_at: 9001 },
+    { id: 901, kind: 'task_completed', message: 'Fresh delivery 2',
+      timestamp: 9002, delivered_at: 9003 },
+  ];
+  context.state.digest_sent_events['eng-anchor'] = fresh.concat(sent);
+
+  context.renderAgentPanel();
+  html = panel.innerHTML;
+  assert.ok(html.indexOf('Fresh delivery 1') >= 0,
+    'New top rows render');
+  assert.ok(html.indexOf('Sent event 5') >= 0,
+    'Previously visible row stays rendered after top-insert');
+});
+
 test('_weaverResetSessionMapMeta keeps the focused-agent panel rendered during reconnect resets', () => {
   const { context, panel } = createHarness();
   setFocusedAgent(context, {
