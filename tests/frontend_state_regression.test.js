@@ -9125,6 +9125,81 @@ test('renderAgentPanel preserves the selected Events tab across rerenders', () =
   assert.match(panel.innerHTML, /Already sent to Engineer One/);
 });
 
+test('agentPanelSelectTab rerenders only the active Agent tab body', () => {
+  const { context, document } = createWeaverHarness();
+  const panel = document.register('panel-agent');
+  let panelHtmlWrites = 0;
+  Object.defineProperty(panel, 'innerHTML', {
+    configurable: true,
+    get() {
+      return this._innerHTML || '';
+    },
+    set(value) {
+      panelHtmlWrites += 1;
+      this._innerHTML = value;
+    },
+  });
+
+  runInContext(context, `
+    renderCalls = { board: 0, context: 0 };
+    renderBoard = function() { renderCalls.board++; };
+    renderContextPanel = function() { renderCalls.context++; };
+  `);
+
+  context.state.agents = {
+    'worker-1': {
+      id: 'worker-1',
+      name: 'Worker One',
+      kind: 'worker',
+      group: 'alpha',
+      cell_type: 'agent',
+    },
+  };
+  context.state.board_tasks = {
+    'task-1': {
+      id: 'task-1',
+      task: 'Focused worker task',
+      group: 'alpha',
+      agent_id: 'worker-1',
+      lane: 'In Progress',
+      created_at: 10,
+    },
+  };
+  context.focusedItemId = 'worker-1';
+  runInContext(context, `_agentPanelLastSelectedTabByKind.worker = 'events';`);
+  context.renderAgentPanel();
+
+  const shell = document.createElement('div');
+  shell.classList.add('agent-panel-panel');
+  shell.setAttribute('data-agent-panel-agent-id', 'worker-1');
+  shell.setAttribute('data-agent-panel-kind', 'worker');
+  shell.setAttribute('data-agent-panel-tab', 'events');
+  const content = document.createElement('div');
+  content.classList.add('agent-panel-content');
+  const headerRight = document.createElement('div');
+  headerRight.setAttribute('data-agent-panel-header-right', '');
+  const eventsTab = document.createElement('button');
+  eventsTab.setAttribute('data-agent-panel-tab-key', 'events');
+  eventsTab.classList.add('agent-panel-tab', 'active');
+  const worklogTab = document.createElement('button');
+  worklogTab.setAttribute('data-agent-panel-tab-key', 'worklog');
+  worklogTab.classList.add('agent-panel-tab');
+  panel.setQuerySelector('.agent-panel-panel', shell);
+  panel.setQuerySelector('.agent-panel-content', content);
+  panel.setQuerySelector('[data-agent-panel-header-right]', headerRight);
+  panel.setQuerySelectorAll('.agent-panel-tab', [eventsTab, worklogTab]);
+
+  context.agentPanelSelectTab('worklog');
+
+  assert.equal(panelHtmlWrites, 1);
+  assert.match(content.innerHTML, /Task history/);
+  assert.match(content.innerHTML, /Focused worker task/);
+  assert.equal(shell.getAttribute('data-agent-panel-tab'), 'worklog');
+  assert.equal(eventsTab.classList.contains('active'), false);
+  assert.equal(worklogTab.classList.contains('active'), true);
+  assert.deepEqual(JSON.parse(JSON.stringify(context.renderCalls)), { board: 0, context: 0 });
+});
+
 test('worker worklog virtualizes assigned task history and preserves scroll position', () => {
   const { context, document } = createWeaverHarness();
   const panel = document.register('panel-agent');
@@ -9281,6 +9356,79 @@ test('architect messages and decisions use virtual windows for large histories',
   const decisionRows = (panel.innerHTML.match(/architect-decision-card/g) || []).length;
   assert.equal(decisionRows < 80, true);
   assert.match(panel.innerHTML, /1000/);
+});
+
+test('architect decision and message caches invalidate on relevant websocket deltas', () => {
+  const { context, document } = createWeaverWsHarness();
+  const panel = document.getElementById('panel-agent');
+  panel.querySelector = function() { return null; };
+  runInContext(context, `
+    state.groups = { alpha: ['arch-1'] };
+    state.agents = {
+      'arch-1': {
+        id: 'arch-1',
+        name: 'Architect One',
+        kind: 'architect',
+        group: 'alpha',
+        cell_type: 'agent',
+        mcp_messages: [
+          { id: 'msg-old', action: 'progress', message: 'Old architect message', timestamp: 10 }
+        ],
+      },
+    };
+    state.decisions = {
+      'decision-1': {
+        id: 'decision-1',
+        architect_id: 'arch-1',
+        title: 'Old cached decision',
+        rationale: 'old',
+        status: 'proposed',
+        updated_at: 10,
+      },
+    };
+    focusedItemId = 'arch-1';
+    _agentPanelLastSelectedTabByKind.architect = 'decisions';
+    _expectedSeq = 1;
+    renderAgentPanel();
+  `);
+  assert.match(panel.innerHTML, /Old cached decision/);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'decision_upsert',
+      id: 'decision-1',
+      architect_id: 'arch-1',
+      title: 'Fresh decision from delta',
+      rationale: 'new',
+      status: 'accepted',
+      updated_at: 11,
+    }],
+  });
+
+  assert.match(panel.innerHTML, /Fresh decision from delta/);
+  assert.doesNotMatch(panel.innerHTML, /Old cached decision/);
+
+  runInContext(context, `
+    _agentPanelLastSelectedTabByKind.architect = 'messages';
+    renderAgentPanel();
+    _expectedSeq = 2;
+  `);
+  assert.match(panel.innerHTML, /Old architect message/);
+
+  context._handleDelta({
+    seq: 2,
+    ops: [{
+      op: 'agent_upsert',
+      id: 'arch-1',
+      mcp_messages: [
+        { id: 'msg-new', action: 'architect_reply', message: 'Fresh architect message', timestamp: 20 }
+      ],
+    }],
+  });
+
+  assert.match(panel.innerHTML, /Fresh architect message/);
+  assert.doesNotMatch(panel.innerHTML, /Old architect message/);
 });
 
 test('ws task deltas avoid rerendering worker worklog for unrelated assigned tasks', () => {
