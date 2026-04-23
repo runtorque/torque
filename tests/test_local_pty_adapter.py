@@ -61,6 +61,65 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
 
         await adapter.close_session(cell.session_id)
 
+    async def test_create_session_preserves_existing_focus(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("Loom")
+        first = state.add_terminal(
+            name="Terminal 1",
+            group="Loom",
+            terminal_backend="pty",
+            command="sleep 30",
+        )
+        second = state.add_terminal(
+            name="Terminal 2",
+            group="Loom",
+            terminal_backend="pty",
+            command="sleep 30",
+        )
+        adapter = self.pty_mod.LocalPtyAdapter(state)
+
+        try:
+            await adapter.start()
+            await adapter.create_session(first)
+            first_session = first.session_id
+            self.assertIsNotNone(first_session)
+            self.assertEqual(state.active_session_id, first_session)
+
+            await adapter.create_session(second)
+            self.assertIsNotNone(second.session_id)
+            self.assertNotEqual(second.session_id, first_session)
+            # Creating a second session must not steal focus from the first.
+            self.assertEqual(state.active_session_id, first_session)
+        finally:
+            if first.session_id:
+                await adapter.close_session(first.session_id)
+            if second.session_id:
+                await adapter.close_session(second.session_id)
+
+    async def test_create_session_focuses_when_active_session_has_exited(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("Loom")
+        cell = state.add_terminal(
+            name="Terminal 1",
+            group="Loom",
+            terminal_backend="pty",
+            command="sleep 30",
+        )
+        # Simulate a previously active session that has already been torn down
+        # (e.g., the user closed the focused agent). The adapter should refocus
+        # the newly created session since nothing is actively tracked.
+        state.active_session_id = "stale-session-id"
+        adapter = self.pty_mod.LocalPtyAdapter(state)
+
+        try:
+            await adapter.start()
+            await adapter.create_session(cell)
+            self.assertIsNotNone(cell.session_id)
+            self.assertEqual(state.active_session_id, cell.session_id)
+        finally:
+            if cell.session_id:
+                await adapter.close_session(cell.session_id)
+
     async def test_write_input_accepts_raw_terminal_bytes(self):
         state = self.state_mod.MatrixState()
         state.add_group("Loom")
