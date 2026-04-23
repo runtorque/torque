@@ -3008,6 +3008,7 @@ class MatrixState:
             os.chmod(path, 0o600)
         except OSError:
             pass
+        self._emit("architect_journal_append", **record)
         return record
 
     def architect_journal_read(self, architect_id: str, *,

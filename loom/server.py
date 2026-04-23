@@ -3581,6 +3581,26 @@ async def _handle_weaver_journal_snapshot_command(
     }
 
 
+def _handle_architect_journal_read_command(
+        data: dict,
+        state: MatrixState) -> dict:
+    """Return recent architect journal entries for the standalone UI."""
+    architect_id = str(data.get("architect_id", "") or "").strip()
+    if not architect_id:
+        return {"type": "error", "message": "architect_id required"}
+    try:
+        limit = int(data.get("limit", 200) or 200)
+    except (TypeError, ValueError):
+        limit = 200
+    limit = max(1, min(limit, 500))
+    entries = state.architect_journal_read(architect_id, limit=limit)
+    return {
+        "type": "architect_journal_entries",
+        "architect_id": architect_id,
+        "entries": entries,
+    }
+
+
 async def _handle_engineer_dismiss_command(
         data: dict,
         state: MatrixState, *,
@@ -5336,6 +5356,9 @@ async def main(connection=None):
 
         if cmd == "weaver_journal_snapshot":
             return await _handle_weaver_journal_snapshot_command(data, state)
+
+        if cmd == "architect_journal_read":
+            return _handle_architect_journal_read_command(data, state)
 
         if cmd == "get_cell_events":
             cell_id = str(data.get("cell_id", "") or "")

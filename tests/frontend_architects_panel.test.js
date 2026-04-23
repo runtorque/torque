@@ -208,3 +208,113 @@ test('focused architect decision expand and collapse preserves scroll position',
   vm.runInContext(`weaverToggleDecision('decision-1')`, context);
   assert.equal(content.scrollTop, 180);
 });
+
+test('focused architect panel lists a journal tab alongside decisions', () => {
+  const { context, panel, sandbox } = createArchitectHarness();
+  sandbox.state.agents['arch-1'] = architect('arch-1', 'Productmind', 10);
+  sandbox.focusedItemId = 'arch-1';
+
+  context.renderAgentPanel();
+
+  assert.match(panel.innerHTML, /Decisions/);
+  assert.match(panel.innerHTML, /Journal/);
+});
+
+test('focused architect journal tab requests entries and renders them', () => {
+  const { context, panel, sandbox } = createArchitectHarness();
+  sandbox.state.agents['arch-1'] = architect('arch-1', 'Productmind', 10);
+  sandbox.focusedItemId = 'arch-1';
+
+  context.agentPanelSelectTab('journal');
+
+  const journalFetch = sandbox.sendCalls.find(function(call) {
+    return call && call.cmd === 'architect_journal_read' && call.architect_id === 'arch-1';
+  });
+  assert.ok(journalFetch, 'journal fetch should be dispatched on tab open');
+  assert.match(panel.innerHTML, /Loading architect journal/);
+
+  vm.runInContext(
+    `agentPanelReceiveArchitectJournal({architect_id:'arch-1', entries:[`
+      + `{id:'j-1', architect_id:'arch-1', type:'observation', entry:'Spotted a race', timestamp:1712345600},`
+      + `{id:'j-2', architect_id:'arch-1', type:'checkpoint', entry:'Holding at review gate', timestamp:1712345700}`
+      + `]})`,
+    context
+  );
+
+  assert.match(panel.innerHTML, /Spotted a race/);
+  assert.match(panel.innerHTML, /Current architect state/);
+  assert.match(panel.innerHTML, /Holding at review gate/);
+});
+
+test('focused architect journal entries reload after new delta append preserves scroll', () => {
+  const { context, sandbox, content } = createArchitectHarness();
+  sandbox.state.agents['arch-1'] = architect('arch-1', 'Productmind', 10);
+  sandbox.state.architect_journals = {
+    'arch-1': [
+      { id: 'j-1', architect_id: 'arch-1', type: 'observation', entry: 'First note', timestamp: 1712345600 },
+    ],
+  };
+  sandbox.focusedItemId = 'arch-1';
+
+  context.agentPanelSelectTab('journal');
+  content.scrollTop = 220;
+
+  sandbox.state.architect_journals['arch-1'].unshift({
+    id: 'j-2',
+    architect_id: 'arch-1',
+    type: 'decision',
+    entry: 'Pivot to incremental migration',
+    timestamp: 1712345700,
+  });
+  vm.runInContext(`_agentPanelInvalidateArchitectJournalCache('arch-1')`, context);
+  vm.runInContext(`renderAgentPanel()`, context);
+
+  assert.equal(content.scrollTop, 220);
+});
+
+test('focused architect journal shows decision count in header', () => {
+  const { context, panel, sandbox } = createArchitectHarness();
+  sandbox.state.agents['arch-1'] = architect('arch-1', 'Productmind', 10);
+  sandbox.state.decisions['decision-1'] = {
+    id: 'decision-1',
+    architect_id: 'arch-1',
+    title: 'Keep rollout paused',
+    status: 'accepted',
+    updated_at: 1712345670,
+  };
+  sandbox.state.architect_journals = {
+    'arch-1': [
+      { id: 'j-1', architect_id: 'arch-1', type: 'observation', entry: 'Observed regression', timestamp: 1712345600 },
+    ],
+  };
+  sandbox.focusedItemId = 'arch-1';
+
+  context.agentPanelSelectTab('journal');
+
+  assert.match(panel.innerHTML, /1 decision/);
+  assert.match(panel.innerHTML, /Observed regression/);
+});
+
+test('focused architect journal virtualizes long entry lists', () => {
+  const { context, panel, sandbox } = createArchitectHarness();
+  sandbox.state.agents['arch-1'] = architect('arch-1', 'Productmind', 10);
+  const entries = [];
+  for (let i = 0; i < 150; i++) {
+    entries.push({
+      id: 'j-' + i,
+      architect_id: 'arch-1',
+      type: i === 0 ? 'checkpoint' : 'observation',
+      entry: 'Entry #' + i,
+      timestamp: 1712345600 + i,
+    });
+  }
+  sandbox.state.architect_journals = { 'arch-1': entries };
+  sandbox.focusedItemId = 'arch-1';
+
+  context.agentPanelSelectTab('journal');
+
+  assert.match(panel.innerHTML, /data-agent-panel-virtualized="true"/);
+  const rendered = (panel.innerHTML.match(/architect-journal-j-\d+/g) || []).length;
+  assert.ok(rendered > 0 && rendered < entries.length,
+    `expected virtualization to render a subset, saw ${rendered}`);
+});
