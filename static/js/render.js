@@ -1465,8 +1465,23 @@ function _agentDetailMessageKey(message, index) {
 }
 
 function _toggleAgentDetailTask(agentId) {
-  const state = _agentDetailState(agentId);
-  state.task_expanded = !state.task_expanded;
+  const detailState = _agentDetailState(agentId);
+  detailState.task_expanded = !detailState.task_expanded;
+  // In compact mode the linked task card omits description/artifacts. Fire
+  // a hydrate when the panel is opening so the expanded body shows real
+  // description text instead of a false "Add description" placeholder.
+  if (detailState.task_expanded
+      && typeof _compactModeActive === 'function'
+      && _compactModeActive()
+      && typeof ensureTaskDetail === 'function') {
+    const task = _getAgentTask(agentId);
+    const taskId = task ? String(task.id || '') : '';
+    if (taskId
+        && typeof _compactTaskHasFullDetail === 'function'
+        && !_compactTaskHasFullDetail(task)) {
+      ensureTaskDetail(taskId, function() { render(); });
+    }
+  }
   render();
 }
 
@@ -1480,6 +1495,19 @@ function _toggleAgentDetailMessage(agentId, messageKey) {
 function agentDetailEditDescription(agentId, taskId) {
   const task = state && state.board_tasks ? state.board_tasks[taskId] : null;
   if (!task) return;
+  // Hydrate before opening the editor so the draft isn't seeded from an
+  // empty compact card — otherwise Save could overwrite an existing
+  // server-side description with whatever the user typed on top of "".
+  if (typeof _compactModeActive === 'function'
+      && _compactModeActive()
+      && typeof _compactTaskHasFullDetail === 'function'
+      && !_compactTaskHasFullDetail(task)
+      && typeof ensureTaskDetail === 'function') {
+    ensureTaskDetail(taskId, function() {
+      agentDetailEditDescription(agentId, taskId);
+    });
+    return;
+  }
   const editor = _agentDetailDescriptionState(agentId, task);
   editor.open = true;
   editor.draft = String(task.description || '');
@@ -1519,6 +1547,24 @@ function agentDetailSaveDescription(agentId, taskId) {
   const editor = _agentDetailDescriptionState(agentId, task);
   const input = document.getElementById('detail-description-input');
   if (input && 'value' in input) editor.draft = input.value;
+  // Defence in depth: never issue a destructive update against a card
+  // whose previous description we never actually loaded.
+  if (typeof _compactModeActive === 'function'
+      && _compactModeActive()
+      && typeof _compactTaskHasFullDetail === 'function'
+      && !_compactTaskHasFullDetail(task)
+      && typeof ensureTaskDetail === 'function') {
+    const pendingDraft = String(editor.draft || '');
+    ensureTaskDetail(taskId, function() {
+      const refreshed = state && state.board_tasks ? state.board_tasks[taskId] : null;
+      if (!refreshed) return;
+      const refreshedEditor = _agentDetailDescriptionState(agentId, refreshed);
+      refreshedEditor.open = true;
+      refreshedEditor.draft = pendingDraft;
+      agentDetailSaveDescription(agentId, taskId);
+    });
+    return;
+  }
   const previousDescription = String(task.description || '');
   const nextDescription = String(editor.draft || '').trim();
   editor.open = false;

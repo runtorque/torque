@@ -518,6 +518,163 @@ test('openTaskArtifactBrowser hydrates when the local card is compact', () => {
     'artifacts=1');
 });
 
+/* -- Agent-detail task panel hydrates before read/edit ------------------ */
+
+function createAgentDetailContext() {
+  const { context, sandbox } = createCompactContext({ flag: 'compact-v1' });
+  sandbox.state = {
+    snapshot_protocol: 'compact-v1',
+    board_tasks: {
+      't-card': {
+        id: 't-card', task: 'card', slug: 'card',
+        group: 'alpha', lane: 'To Do', position: 1,
+        action_name: 'feature/implement', agent_id: 'agent-1',
+      },
+    },
+  };
+  run(context, `_compactInitDeferredMaps()`);
+  sandbox.renderCalls = 0;
+  run(context, `
+    _agentDetailUiState = {};
+    render = function() { renderCalls++; };
+    _agentDetailState = function(agentId) {
+      if (!_agentDetailUiState[agentId]) {
+        _agentDetailUiState[agentId] = { task_expanded: false, description_editor: null };
+      }
+      return _agentDetailUiState[agentId];
+    };
+    _agentDetailDescriptionState = function(agentId, task) {
+      var s = _agentDetailState(agentId);
+      var tid = String((task && task.id) || '');
+      if (!s.description_editor || s.description_editor.task_id !== tid) {
+        s.description_editor = { task_id: tid, open: false,
+          draft: String((task && task.description) || '') };
+      } else if (!s.description_editor.open) {
+        s.description_editor.draft = String((task && task.description) || '');
+      }
+      return s.description_editor;
+    };
+    _getAgentTask = function(agentId) {
+      for (var id in state.board_tasks) {
+        if (state.board_tasks[id].agent_id === agentId) return state.board_tasks[id];
+      }
+      return null;
+    };
+    document = {
+      getElementById: function() { return null; },
+    };
+    requestAnimationFrame = function(fn) {};
+  `);
+  const source = fs.readFileSync(
+    path.join(repoRoot, 'static/js/render.js'), 'utf8');
+  const fns = [
+    'function _toggleAgentDetailTask',
+    'function agentDetailEditDescription',
+    'function agentDetailSaveDescription',
+  ];
+  fns.forEach(function(sig) {
+    const re = new RegExp(sig.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      + '\\([\\s\\S]*?\\n\\}', 'm');
+    const m = source.match(re);
+    if (!m) throw new Error('missing ' + sig);
+    vm.runInContext(m[0], context);
+  });
+  return { context, sandbox };
+}
+
+test('_toggleAgentDetailTask hydrates when expanding a compact task', () => {
+  const { context, sandbox } = createAgentDetailContext();
+  run(context, `_toggleAgentDetailTask('agent-1')`);
+  assertPlainEqual(
+    sandbox.sendCalls.map(function(c) { return c.cmd; }),
+    ['task_detail']);
+
+  run(context, `_compactHandleLazyResponse({
+    type: 'task_detail',
+    id: 't-card',
+    task: { id: 't-card', description: 'real body' }
+  })`);
+  assert.equal(sandbox.state.board_tasks['t-card'].description, 'real body');
+  // Collapsing should not re-fetch.
+  sandbox.sendCalls.length = 0;
+  run(context, `_toggleAgentDetailTask('agent-1')`);
+  assertPlainEqual(sandbox.sendCalls, []);
+});
+
+test('agentDetailEditDescription hydrates before opening the editor', () => {
+  const { context, sandbox } = createAgentDetailContext();
+  run(context, `agentDetailEditDescription('agent-1', 't-card')`);
+  // Editor did NOT open yet (would have been true after draft seeding).
+  assert.equal(
+    run(context, `_agentDetailState('agent-1').description_editor`) === null
+    || run(context, `_agentDetailState('agent-1').description_editor.open`),
+    false);
+  assertPlainEqual(
+    sandbox.sendCalls.map(function(c) { return c.cmd; }),
+    ['task_detail']);
+
+  run(context, `_compactHandleLazyResponse({
+    type: 'task_detail',
+    id: 't-card',
+    task: { id: 't-card', description: 'existing body' }
+  })`);
+  // Re-entry now seeds the editor from the real description.
+  const editor = plain(run(context,
+    `_agentDetailState('agent-1').description_editor`));
+  assert.equal(editor.open, true);
+  assert.equal(editor.draft, 'existing body');
+});
+
+test('agentDetailSaveDescription hydrates before issuing board_update_task', () => {
+  const { context, sandbox } = createAgentDetailContext();
+  // Simulate a pre-hydrate editor pointed at the compact card.
+  run(context, `
+    var editor = _agentDetailDescriptionState('agent-1', state.board_tasks['t-card']);
+    editor.open = true;
+    editor.draft = 'user typed note';
+  `);
+
+  run(context, `agentDetailSaveDescription('agent-1', 't-card')`);
+  // No destructive update yet — only a hydrate request.
+  assertPlainEqual(
+    sandbox.sendCalls.map(function(c) { return c.cmd; }),
+    ['task_detail']);
+
+  // Server delivers the real existing description.
+  run(context, `_compactHandleLazyResponse({
+    type: 'task_detail',
+    id: 't-card',
+    task: { id: 't-card', description: 'server original' }
+  })`);
+  // The re-entry issues the update carrying the user's draft (not "").
+  const update = sandbox.sendCalls.find(function(c) {
+    return c.cmd === 'board_update_task';
+  });
+  assert.ok(update, 'expected board_update_task after hydration');
+  assert.equal(update.id, 't-card');
+  assert.equal(update.description, 'user typed note');
+});
+
+test('agentDetailSaveDescription skips the update when draft matches hydrated text', () => {
+  const { context, sandbox } = createAgentDetailContext();
+  run(context, `
+    var editor = _agentDetailDescriptionState('agent-1', state.board_tasks['t-card']);
+    editor.open = true;
+    editor.draft = 'server original';
+  `);
+  run(context, `agentDetailSaveDescription('agent-1', 't-card')`);
+  run(context, `_compactHandleLazyResponse({
+    type: 'task_detail',
+    id: 't-card',
+    task: { id: 't-card', description: 'server original' }
+  })`);
+  const update = sandbox.sendCalls.find(function(c) {
+    return c.cmd === 'board_update_task';
+  });
+  assert.equal(update, undefined,
+    'must not overwrite when the hydrated description already matches');
+});
+
 test('archived_tasks merge layers over local compact summaries without loss', () => {
   const { context, sandbox } = createCompactContext();
   sandbox.state = {
