@@ -4248,6 +4248,10 @@ class MatrixState:
         task = self.board_tasks.get(tid)
         if not task or lane not in self.board_lanes:
             return
+        if lane == ARCHIVED_LANE and task.lane == ARCHIVED_LANE:
+            if clear_status and task.status:
+                self.board_update_task(tid, status="")
+            return
         if clear_status:
             task.status = ""
         if lane == ARCHIVED_LANE:
