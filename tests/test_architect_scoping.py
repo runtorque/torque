@@ -1081,6 +1081,75 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(denied_error)
         self.assertEqual(denied_text, "engineer not found in scope")
 
+    async def test_architect_ask_creates_visible_human_attention_task(self):
+        architect = self._add_architect("arch-1", "Architect")
+
+        text, is_error = await self._call(
+            "architect_ask",
+            {
+                "question": "Should we cut reporting from this milestone?",
+                "description": "Option A: cut reporting. Option B: delay launch.",
+            },
+            architect.id,
+        )
+
+        self.assertFalse(is_error, text)
+        payload = json.loads(text)
+        self.assertEqual(payload["type"], "ok")
+        task = self.state.board_tasks[payload["task_id"]]
+        self.assertEqual(task.task, "Should we cut reporting from this milestone?")
+        self.assertEqual(
+            task.description,
+            "Option A: cut reporting. Option B: delay launch.",
+        )
+        self.assertEqual(task.group, architect.group)
+        self.assertEqual(task.lane, "Backlog")
+        self.assertEqual(task.status, "Awaiting Input")
+        self.assertIn("loom:human", task.labels)
+        self.assertIn("architect-ask", task.labels)
+        self.assertEqual(task.created_by_architect_id, architect.id)
+        self.assertEqual(task.reply_agent_id, architect.id)
+        self.assertEqual(task.assigned_engineer_id, "")
+        self.assertEqual(task.agent_id, "")
+
+        summary_text, summary_error = await self._call(
+            "architect_board_summary",
+            {},
+            architect.id,
+        )
+        self.assertFalse(summary_error, summary_text)
+        summary = json.loads(summary_text)
+        self.assertEqual(summary["asks"]["count"], 1)
+        self.assertEqual(summary["asks"]["items"][0]["id"], task.id)
+        self.assertEqual(
+            summary["asks"]["items"][0]["created_by"],
+            f"architect:{architect.id}",
+        )
+
+        architect.mcp_messages.insert(0, {
+            "id": "msg-user-reply",
+            "action": "architect_ask_reply",
+            "message": "Cut reporting and ship the smaller milestone.",
+            "timestamp": 123.0,
+            "peer_id": "user",
+            "peer_kind": "human",
+            "peer_name": "User",
+            "direction": "received",
+            "task_id": task.id,
+        })
+        overview_text, overview_error = await self._call(
+            "architect_workspace_overview",
+            {},
+            architect.id,
+        )
+        self.assertFalse(overview_error, overview_text)
+        overview = json.loads(overview_text)
+        self.assertEqual(overview["unread_messages"][0]["peer_name"], "User")
+        self.assertEqual(
+            overview["unread_messages"][0]["snippet"],
+            "Cut reporting and ship the smaller milestone.",
+        )
+
     async def test_architect_task_reassign_only_allows_tasks_created_by_caller(self):
         architect = self._add_architect("arch-1", "Architect")
         other_architect = self._add_architect("arch-2", "Other Architect")

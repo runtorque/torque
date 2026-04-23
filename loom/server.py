@@ -2014,6 +2014,136 @@ def _handle_weaver_reply(state: MatrixState, cell, *, message: str,
     return {"type": "ok", "task_id": reply_task.id}
 
 
+def _is_architect_ask_task(task) -> bool:
+    labels = set(getattr(task, "labels", []) or [])
+    return "architect-ask" in labels and "loom:human" in labels
+
+
+def _architect_ask_reply_prompt(task, answer: str) -> str:
+    question = str(getattr(task, "task", "") or "").strip()
+    task_id = str(getattr(task, "id", "") or "").strip()
+    blocks = ["## User reply to architect ask"]
+    if task_id:
+        blocks.append(f"Task: {task_id}")
+    if question:
+        blocks.append(f"Question:\n{question}")
+    blocks.append(f"Answer:\n{str(answer or '').strip()}")
+    return "\n" + "\n\n".join(blocks) + "\n---\n"
+
+
+async def _resolve_architect_ask_task(
+        state: MatrixState,
+        bridge,
+        task,
+        answer: str,
+        panel_event=None) -> dict:
+    """Resolve an architect→user ask and enqueue the reply for the architect."""
+    answer = str(answer or "").strip()
+    if not task:
+        return {"type": "error", "message": "Task not found"}
+    if not _is_architect_ask_task(task):
+        return {"type": "error", "message": "Not an architect ask task"}
+    if not answer:
+        return {"type": "error", "message": "Answer is required"}
+
+    architect_id = str(
+        getattr(task, "reply_agent_id", "") or
+        getattr(task, "created_by_architect_id", "") or ""
+    ).strip()
+    architect = state.agents.get(architect_id) if architect_id else None
+    if (
+        not architect
+        or str(getattr(architect, "kind", "") or "").strip() != "architect"
+    ):
+        return {
+            "type": "error",
+            "message": "Architect ask has no linked architect",
+        }
+
+    question = str(getattr(task, "task", "") or "").strip()
+    message_text = (
+        f'Answer to your question "{question}":\n{answer}'
+        if question else answer
+    )
+    entry = {
+        "id": "msg-" + uuid.uuid4().hex[:12],
+        "thread_id": str(getattr(task, "id", "") or ""),
+        "reply_to_id": "",
+        "action": "architect_ask_reply",
+        "message": message_text,
+        "timestamp": time.time(),
+        "sender_id": "user",
+        "sender_kind": "human",
+        "peer_id": "user",
+        "peer_kind": "human",
+        "peer_name": "User",
+        "direction": "received",
+        "task_id": str(getattr(task, "id", "") or ""),
+        "question": question,
+        "answer": answer,
+        "delivered": False,
+        "buffered": True,
+    }
+
+    try:
+        if getattr(architect, "session_id", "") and bridge:
+            if hasattr(bridge, "prime_input_ready"):
+                bridge.prime_input_ready(architect.session_id)
+            await bridge.send_text(
+                architect.session_id,
+                _architect_ask_reply_prompt(task, answer),
+            )
+            entry["delivered"] = True
+            entry["buffered"] = False
+            architect.status = "running"
+    except Exception:
+        log.exception(
+            "Failed to inject architect ask reply %s to architect %s",
+            getattr(task, "id", ""),
+            architect.id,
+        )
+        entry["delivery_reason"] = "inject_failed"
+
+    architect.mcp_messages.insert(0, entry)
+    if len(architect.mcp_messages) > 20:
+        architect.mcp_messages[:] = architect.mcp_messages[:20]
+    state._emit_agent(architect)
+    state._db_save_agent(architect)
+    state.history_record_message(
+        architect.id,
+        "architect_ask_reply",
+        message_text,
+        task_id=str(getattr(task, "id", "") or ""),
+    )
+
+    messages = list(getattr(task, "messages", []) or [])
+    messages.append({
+        "timestamp": time.time(),
+        "action": "architect_ask_reply",
+        "message": answer,
+        "agent_name": "User",
+    })
+    if not task_is_closed(task):
+        state.board_move_task(task.id, "Done")
+    state.board_update_task(task.id, status="", messages=messages)
+
+    if panel_event:
+        panel_event(
+            "ask_resolved",
+            architect.id,
+            architect.name,
+            task.group,
+            "Resolved: " + (question[:120] if question else task.id),
+            task_id=task.id,
+        )
+    return {
+        "type": "ok",
+        "task_id": task.id,
+        "architect_id": architect.id,
+        "message_id": entry["id"],
+    }
+
+
 def _handle_weaver_flush_now_command(weaver_buffer, data: dict) -> dict:
     recipient_or_group = data.get("agent_id", "") or data.get("group", "")
     ok, message = weaver_buffer.request_manual_flush(recipient_or_group)
@@ -7942,6 +8072,14 @@ async def main(connection=None):
                 elif not answer.strip():
                     result = {"type": "error",
                               "message": "Answer is required"}
+                elif _is_architect_ask_task(task):
+                    result = await _resolve_architect_ask_task(
+                        state,
+                        bridge,
+                        task,
+                        answer,
+                        panel_event=_panel_event,
+                    )
                 elif not task.parent_task_id:
                     result = {"type": "error",
                               "message": "Ask task has no parent"}

@@ -680,6 +680,7 @@ def _architect_workspace_overview_json(state, architect_id: str,
                         "name",
                         "",
                     )
+                    or message.get("peer_name", "")
                     or ""
                 ),
                 "timestamp": message.get("timestamp", 0) or 0,
@@ -3634,6 +3635,45 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
         return json.dumps(result) if result else '{"type":"ok"}', False
+
+    if tool_name == "ask" and caller_kind == "architect":
+        question = str(args.get("question", "") or "").strip()
+        if not question:
+            return "Question is required", True
+
+        create_result = await handle_command({
+            "cmd": "board_add_task",
+            "task": question,
+            "description": str(args.get("description", "") or ""),
+            "group": _weaver_group,
+            "lane": "Backlog",
+            "labels": ["loom:human", "architect-ask"],
+        })
+        if create_result and create_result.get("type") == "error":
+            return create_result.get("message", "Unknown error"), True
+
+        task_id = str((create_result or {}).get("task_id", "") or "").strip()
+        if not task_id:
+            return "Failed to create architect ask task", True
+
+        update_result = await handle_command({
+            "cmd": "board_update_task",
+            "id": task_id,
+            "created_by_architect_id": str(caller_id or "").strip(),
+            "reply_agent_id": str(caller_id or "").strip(),
+            "assigned_engineer_id": "",
+            "agent_id": "",
+            "status": "Awaiting Input",
+        })
+        if update_result and update_result.get("type") == "error":
+            return update_result.get("message", "Unknown error"), True
+
+        return json.dumps({
+            "type": "ok",
+            "task_id": task_id,
+            "status": "Awaiting Input",
+            "labels": ["loom:human", "architect-ask"],
+        }), False
 
     if tool_name == "ask":
         question = args.get("question", "").strip()

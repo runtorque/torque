@@ -5880,7 +5880,7 @@ test('boardArchiveSuggestedDone archives only stale completed tasks', () => {
 });
 
 test('events attention items include active asks and blocked agents for the current group', () => {
-  const { context } = createEventsHarness();
+  const { context } = createEventsHarness({ stubRenderers: false });
   context.state.board_tasks = {
     parent: {
       id: 'parent',
@@ -5897,6 +5897,17 @@ test('events attention items include active asks and blocked agents for the curr
       parent_task_id: 'parent',
       lane: 'Backlog',
       created_at: '2099-01-02T00:00:00Z',
+    },
+    archAsk: {
+      id: 'archAsk',
+      group: 'alpha',
+      task: 'Choose milestone scope',
+      description: 'Option A: cut reports. Option B: delay launch.',
+      labels: ['loom:human', 'architect-ask'],
+      lane: 'Backlog',
+      reply_agent_id: 'arch-1',
+      created_by_architect_id: 'arch-1',
+      created_at: '2099-01-03T00:00:00Z',
     },
     doneAsk: {
       id: 'doneAsk',
@@ -5917,6 +5928,15 @@ test('events attention items include active asks and blocked agents for the curr
       activity_detail: 'Blocked on review',
       last_event_at: 100,
       cell_type: 'agent',
+    },
+    'arch-1': {
+      id: 'arch-1',
+      name: 'Architect',
+      slug: 'architect',
+      group: 'alpha',
+      needs_attention: false,
+      cell_type: 'agent',
+      kind: 'architect',
     },
     terminal: {
       id: 'terminal',
@@ -5940,9 +5960,16 @@ test('events attention items include active asks and blocked agents for the curr
 
   const items = jsonValue(context, '_eventsGetAttentionItems()');
 
-  assert.deepEqual(items.map((item) => item.id), ['ask', 'agent-1']);
-  assert.equal(items[0].parent_agent_id, 'agent-1');
-  assert.equal(items[1].type, 'blocked');
+  assert.deepEqual(items.map((item) => item.id), ['archAsk', 'ask', 'agent-1']);
+  assert.equal(items[0].is_architect_ask, true);
+  assert.equal(items[0].agent_name, 'Architect');
+  assert.equal(items[0].parent_agent_id, 'arch-1');
+  assert.equal(items[1].parent_agent_id, 'agent-1');
+  assert.equal(items[2].type, 'blocked');
+  assert.match(
+    runInContext(context, `_renderAttentionCard(_eventsGetAttentionItems()[0])`),
+    /Architect asks/,
+  );
 });
 
 test('event filtering respects the selected kind group and search query', () => {
