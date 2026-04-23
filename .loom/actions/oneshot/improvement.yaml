@@ -5,6 +5,8 @@ agent:
   name_prefix: improve
   tab_color: "#d2a8ff"
 
+implementation_depth: true
+
 prompt: |
   {% if loom.context.is_clean %}
   You are improving existing functionality. This is a refinement — not a new feature, not a bug fix. Focus on making what exists work better: cleaner code, better UX, improved performance, or reduced complexity.

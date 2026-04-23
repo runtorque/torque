@@ -12,8 +12,8 @@ class _BlockStr(str):
 _ACTION_KEY_ORDER = [
     "name", "description", "agent", "group", "worktree",
     "auto_close_on_done", "disable_role_preamble",
-    "review_required_above_loc", "prompt", "labels", "transitions",
-    "terminals",
+    "implementation_depth", "review_required_above_loc", "prompt",
+    "labels", "transitions", "terminals",
 ]
 
 
@@ -27,6 +27,17 @@ _ActionDumper.add_representer(
         "tag:yaml.org,2002:str", value, style="|"
     ),
 )
+
+
+def _coerce_bool(value) -> bool:
+    """Return a conservative boolean for editor-provided action metadata."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return False
 
 
 def _action_to_yaml(name: str, data: dict) -> str:
@@ -56,12 +67,27 @@ def _action_to_yaml(name: str, data: dict) -> str:
         doc["auto_close_on_done"] = True
     if data.get("disable_role_preamble"):
         doc["disable_role_preamble"] = True
+
+    review_required_above_loc = None
     if data.get("review_required_above_loc") is not None:
         try:
-            doc["review_required_above_loc"] = int(
-                data["review_required_above_loc"])
+            review_required_above_loc = int(data["review_required_above_loc"])
         except (TypeError, ValueError):
-            pass
+            review_required_above_loc = None
+
+    implementation_depth = _coerce_bool(data.get("implementation_depth"))
+    if implementation_depth:
+        doc["implementation_depth"] = True
+    elif (
+        "implementation_depth" in data
+        and review_required_above_loc is not None
+    ):
+        # Preserve explicit opt-outs when a retained LOC threshold would
+        # otherwise be interpreted as legacy gate-enabled metadata on reload.
+        doc["implementation_depth"] = False
+
+    if review_required_above_loc is not None:
+        doc["review_required_above_loc"] = review_required_above_loc
 
     prompt = data.get("prompt", "")
     if prompt:

@@ -88,6 +88,29 @@ class ServerModuleExtractionTests(unittest.TestCase):
 
         self.assertIn('review_required_above_loc: 100', yaml_text)
 
+    def test_action_to_yaml_round_trips_implementation_depth(self):
+        yaml_text = self.server_actions._action_to_yaml('oneshot/feature', {
+            'description': 'Implement feature',
+            'implementation_depth': True,
+            'prompt': '{{ TASK }}\n',
+        })
+
+        self.assertIn('implementation_depth: true', yaml_text)
+
+    def test_action_to_yaml_preserves_implementation_depth_false_with_threshold(self):
+        yaml_text = self.server_actions._action_to_yaml('feature/research', {
+            'description': 'Research',
+            'implementation_depth': False,
+            'review_required_above_loc': 100,
+            'prompt': '{{ TASK }}\n',
+        })
+        act = yaml.safe_load(yaml_text)
+
+        self.assertIn('implementation_depth: false', yaml_text)
+        self.assertIn('review_required_above_loc: 100', yaml_text)
+        self.assertIsNone(
+            self.server_mod._review_gate_threshold_from_action(act))
+
     def test_dispatch_queue_helper_respects_self_dispatch(self):
         active = self.state_mod.BoardTask(
             id='task-1',

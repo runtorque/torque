@@ -182,9 +182,23 @@ def _yaml_parse_block_scalar(lines, idx, parent_indent):
 # ActionManager
 # ---------------------------------------------------------------------------
 
+DEFAULT_REVIEW_REQUIRED_ABOVE_LOC = 150
+
+
 def _migrate_syntax(text):
     """Convert legacy ${VAR} to Jinja2 {{ VAR }} syntax."""
     return re.sub(r'\$\{(\w+)\}', r'{{ \1 }}', text)
+
+
+def _coerce_bool(value) -> bool:
+    """Return a conservative boolean for action YAML metadata."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return False
 
 
 # Stub loom context for preview renders (no real agent/task).
@@ -520,6 +534,9 @@ class ActionManager:
             "disable_role_preamble": bool(
                 act.get("disable_role_preamble", False)
             ),
+            "implementation_depth": _coerce_bool(
+                act.get("implementation_depth", False)
+            ),
             "terminals": act.get("terminals", []),
             "transitions": act.get("transitions", []),
             "max_depth": act.get("max_depth", None),
@@ -535,14 +552,30 @@ class ActionManager:
             return False
         return bool(act.get("auto_close_on_done", False))
 
+    def is_implementation_depth(self, action_name: str,
+                                base_dir: str = "") -> bool:
+        """Return whether an action is marked as code-mutating work."""
+        act = self.load_action(action_name, base_dir)
+        if not isinstance(act, dict):
+            return False
+        return _coerce_bool(act.get("implementation_depth", False))
+
     def get_review_required_above_loc(self, action_name: str,
                                       base_dir: str = "") -> int | None:
-        """Return the review-gate threshold for an action, if configured."""
+        """Return the implementation review-gate threshold for an action."""
         act = self.load_action(action_name, base_dir)
         if not isinstance(act, dict):
             return None
+        if not _coerce_bool(act.get("implementation_depth", False)):
+            # Backward compatibility for actions written before the
+            # implementation_depth metadata existed.
+            if (
+                "implementation_depth" in act
+                or "review_required_above_loc" not in act
+            ):
+                return None
         if "review_required_above_loc" not in act:
-            return None
+            return DEFAULT_REVIEW_REQUIRED_ABOVE_LOC
         try:
             threshold = int(act.get("review_required_above_loc"))
         except (TypeError, ValueError):
