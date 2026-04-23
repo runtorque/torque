@@ -1270,6 +1270,253 @@ test('sent section pager grows to anchor around newly delivered events so prior 
     'Previously visible row stays rendered after top-insert');
 });
 
+function _engineerPanelHarness(tab, agentId, agentName) {
+  const harness = createHarness();
+  harness.context.state.group_settings = {
+    alpha: { weaver_agent_id: 'weaver-1' },
+  };
+  harness.context.state.agents['weaver-1'] = {
+    id: 'weaver-1',
+    name: 'Weaver',
+    group: 'alpha',
+  };
+  setFocusedAgent(harness.context, {
+    id: agentId,
+    name: agentName,
+    kind: 'engineer',
+    group: 'alpha',
+    cell_type: 'agent',
+  });
+  vm.runInContext(
+    `_agentPanelLastSelectedTabByKind.engineer = '${tab}';`,
+    harness.context
+  );
+  vm.runInContext(`_agentPanelSectionPagers = {};`, harness.context);
+  return harness;
+}
+
+test('engineer journal caps at 20 entries and exposes a Load more button', () => {
+  const { context, panel } = _engineerPanelHarness('journal', 'eng-journal-cap', 'Builder');
+  const entries = [];
+  for (let i = 0; i < 25; i++) {
+    entries.push({
+      id: 1000 + i,
+      type: 'observation',
+      entry: 'Journal entry ' + i,
+      timestamp: 1000 + i,
+    });
+  }
+  context.state.weaver_journal.alpha = entries;
+
+  context.renderAgentPanel();
+
+  const html = panel.innerHTML;
+  const itemCount = (html.match(/data-weaver-anchor="journal-/g) || []).length;
+  assert.equal(itemCount, 20, 'Only 20 journal entries render initially');
+  assert.match(html, /Load 5 older entries/);
+  assert.match(html, /data-agent-panel-section="journal"/);
+  assert.match(html, /data-agent-panel-section-agent="alpha"/);
+});
+
+test('engineer journal Load more appends 20 more entries without a re-fetch', () => {
+  const { context, panel, sendCalls } = _engineerPanelHarness('journal', 'eng-journal-more', 'Builder');
+  const entries = [];
+  for (let i = 0; i < 45; i++) {
+    entries.push({
+      id: 1000 + i,
+      type: 'observation',
+      entry: 'Journal entry ' + i,
+      timestamp: 1000 + i,
+    });
+  }
+  context.state.weaver_journal.alpha = entries;
+
+  context.renderAgentPanel();
+  const sendsBefore = sendCalls.length;
+  assert.equal(
+    (panel.innerHTML.match(/data-weaver-anchor="journal-/g) || []).length,
+    20,
+  );
+
+  vm.runInContext(
+    `agentPanelLoadMoreSection(null, 'journal', 'alpha');`,
+    context,
+  );
+
+  const html = panel.innerHTML;
+  assert.equal(
+    (html.match(/data-weaver-anchor="journal-/g) || []).length,
+    40,
+    'Load more extends the journal window to 40',
+  );
+  assert.match(html, /Load 5 older entries/);
+  assert.equal(
+    sendCalls.length,
+    sendsBefore,
+    'Load more must not trigger a server fetch — windowing is frontend-only',
+  );
+});
+
+test('engineer journal pager grows to anchor around newly arriving entries', () => {
+  const { context, panel } = _engineerPanelHarness('journal', 'eng-journal-anchor', 'Builder');
+  const existing = [];
+  for (let i = 0; i < 25; i++) {
+    existing.push({
+      id: 3000 + i,
+      type: 'observation',
+      entry: 'Existing entry ' + i,
+      timestamp: 1000 + i,
+    });
+  }
+  context.state.weaver_journal.alpha = existing.slice();
+
+  context.renderAgentPanel();
+  let html = panel.innerHTML;
+  assert.ok(
+    html.indexOf('Existing entry 5') >= 0,
+    'Initial render shows mid-range anchor-candidate entry',
+  );
+
+  // WS delta: two fresh journal entries arrive while the user is scrolled
+  // into older history. The pager should grow so the row the anchor helper
+  // was about to lock onto stays in the DOM.
+  const fresh = [
+    { id: 3100, type: 'decision', entry: 'Fresh decision', timestamp: 9000 },
+    { id: 3101, type: 'plan', entry: 'Fresh plan', timestamp: 9001 },
+  ];
+  context.state.weaver_journal.alpha = fresh.concat(existing);
+
+  context.renderAgentPanel();
+  html = panel.innerHTML;
+  assert.ok(html.indexOf('Fresh decision') >= 0, 'Newest entries render at the top');
+  assert.ok(
+    html.indexOf('Existing entry 5') >= 0,
+    'Prior anchor row stays rendered after WS delta so anchor-restore can lock onto it',
+  );
+});
+
+test('engineer worklog caps at 20 dispatched tasks and exposes a Load more button', () => {
+  const { context, panel } = _engineerPanelHarness('worklog', 'eng-wkl-cap', 'Builder');
+  const entries = [];
+  for (let i = 0; i < 25; i++) {
+    entries.push({
+      id: 2000 + i,
+      task_id: 'LOOM:' + (2000 + i),
+      task_title: 'Dispatched task ' + i,
+      agent_id: 'eng-wkl-cap',
+      agent_name: 'Builder',
+      started_at: 1000 + i,
+    });
+  }
+  context.state.weaver_worklog.alpha = entries;
+
+  context.renderAgentPanel();
+
+  const html = panel.innerHTML;
+  const itemCount = (html.match(/data-weaver-anchor="worklog-/g) || []).length;
+  assert.equal(itemCount, 20, 'Only 20 worklog entries render initially');
+  assert.match(html, /Load 5 older tasks/);
+  assert.match(html, /data-agent-panel-section="worklog-all"/);
+  assert.match(html, /data-agent-panel-section-agent="alpha"/);
+});
+
+test('engineer worklog Load more appends 20 more tasks without a re-fetch', () => {
+  const { context, panel, sendCalls } = _engineerPanelHarness('worklog', 'eng-wkl-more', 'Builder');
+  const entries = [];
+  for (let i = 0; i < 45; i++) {
+    entries.push({
+      id: 2000 + i,
+      task_id: 'LOOM:' + (2000 + i),
+      task_title: 'Dispatched task ' + i,
+      agent_id: 'eng-wkl-more',
+      agent_name: 'Builder',
+      started_at: 1000 + i,
+    });
+  }
+  context.state.weaver_worklog.alpha = entries;
+
+  context.renderAgentPanel();
+  const sendsBefore = sendCalls.length;
+  assert.equal(
+    (panel.innerHTML.match(/data-weaver-anchor="worklog-/g) || []).length,
+    20,
+  );
+
+  vm.runInContext(
+    `agentPanelLoadMoreSection(null, 'worklog-all', 'alpha');`,
+    context,
+  );
+
+  const html = panel.innerHTML;
+  assert.equal(
+    (html.match(/data-weaver-anchor="worklog-/g) || []).length,
+    40,
+  );
+  assert.match(html, /Load 5 older tasks/);
+  assert.equal(
+    sendCalls.length,
+    sendsBefore,
+    'Worklog pager must not issue a server fetch on Load more',
+  );
+});
+
+test('engineer worklog pager grows to anchor around newly dispatched tasks', () => {
+  const { context, panel } = _engineerPanelHarness('worklog', 'eng-wkl-anchor', 'Builder');
+  const existing = [];
+  for (let i = 0; i < 25; i++) {
+    existing.push({
+      id: 4000 + i,
+      task_id: 'LOOM:' + (4000 + i),
+      task_title: 'Existing task ' + i,
+      agent_id: 'eng-wkl-anchor',
+      agent_name: 'Builder',
+      started_at: 1000 + i,
+    });
+  }
+  context.state.weaver_worklog.alpha = existing.slice();
+
+  context.renderAgentPanel();
+  let html = panel.innerHTML;
+  assert.ok(
+    html.indexOf('Existing task 5') >= 0,
+    'Initial render shows mid-range anchor-candidate task',
+  );
+
+  // WS delta: two fresh dispatched tasks land at the top while the user is
+  // scrolled into older history. The pager should grow so the previously
+  // visible row stays rendered for anchor-restore.
+  const fresh = [
+    {
+      id: 4100,
+      task_id: 'LOOM:4100',
+      task_title: 'Fresh dispatched task 1',
+      agent_id: 'eng-wkl-anchor',
+      agent_name: 'Builder',
+      started_at: 9000,
+    },
+    {
+      id: 4101,
+      task_id: 'LOOM:4101',
+      task_title: 'Fresh dispatched task 2',
+      agent_id: 'eng-wkl-anchor',
+      agent_name: 'Builder',
+      started_at: 9001,
+    },
+  ];
+  context.state.weaver_worklog.alpha = fresh.concat(existing);
+
+  context.renderAgentPanel();
+  html = panel.innerHTML;
+  assert.ok(
+    html.indexOf('Fresh dispatched task 1') >= 0,
+    'Newest tasks render at the top',
+  );
+  assert.ok(
+    html.indexOf('Existing task 5') >= 0,
+    'Prior anchor row stays rendered after WS delta so anchor-restore can lock onto it',
+  );
+});
+
 test('_weaverResetSessionMapMeta keeps the focused-agent panel rendered during reconnect resets', () => {
   const { context, panel } = createHarness();
   setFocusedAgent(context, {

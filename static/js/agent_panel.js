@@ -308,14 +308,11 @@ function _agentPanelVirtualMetasForSurface(agent, activeTab) {
     }];
   }
   if (kind === 'engineer' && activeTab === 'worklog') {
-    var engineerSettings = _agentPanelWeaverSettings(agent.group || '');
-    return [{
-      key: _agentPanelLegacyWorklogVirtualKey(
-        agent.group || '',
-        !!(engineerSettings && engineerSettings.restrict_to_created_agents)
-      ),
-      scrollSelector: '.agent-panel-content',
-    }];
+    // Engineer worklog now uses the "last 20 + Load older" section pager
+    // instead of windowed virtualization, so there is no virtual-scroll
+    // record to capture or restore. Scroll position survives rerenders
+    // through the shared anchor-restore helper.
+    return [];
   }
   if (kind === 'architect' && activeTab === 'decisions') {
     return [{
@@ -753,18 +750,28 @@ function _agentPanelSectionPage(agentId, section, events) {
   };
 }
 
-function _agentPanelRenderSectionLoadMore(page) {
+function _agentPanelRenderSectionLoadMore(page, noun) {
   if (!page || !page.hasMore) return '';
   var remaining = Math.max(0, page.total - page.visibleCount);
   var nextCount = Math.min(_AGENT_PANEL_EVENTS_PAGE_SIZE, remaining);
   var section = _agentPanelEsc(page.section);
   var agentId = _agentPanelEsc(page.agentId);
+  var singular = '';
+  var plural = '';
+  if (noun && typeof noun === 'object') {
+    singular = String(noun.singular || '');
+    plural = String(noun.plural || (singular ? singular + 's' : ''));
+  } else {
+    singular = String(noun || 'event');
+    plural = singular + 's';
+  }
+  var label = nextCount === 1 ? singular : plural;
   return '<button type="button" class="agent-panel-event-load-more"'
     + ' data-agent-panel-section="' + section + '"'
     + ' data-agent-panel-section-agent="' + agentId + '"'
     + ' onclick="agentPanelLoadMoreSection(event, \'' + section
     + '\', \'' + agentId + '\')">'
-    + 'Load ' + nextCount + ' older event' + (nextCount === 1 ? '' : 's')
+    + 'Load ' + nextCount + ' older ' + label
     + '</button>';
 }
 
@@ -3256,16 +3263,15 @@ function _agentPanelLegacyRenderWorklog(group, ws) {
     return html;
   }
 
-  html += _agentPanelRenderVirtualList({
-    key: _agentPanelLegacyWorklogVirtualKey(group, !!(ws && ws.restrict_to_created_agents)),
-    total: entries.length,
-    rowHeight: _AGENT_PANEL_WORKLOG_ROW_HEIGHT,
-    listClass: 'agent-panel-worklog-list',
-    scrollSelector: '.agent-panel-content',
-    renderItem: function(index) {
-      return _agentPanelLegacyRenderWorklogItem(entries[index]);
-    },
-  });
+  var restricted = !!(ws && ws.restrict_to_created_agents);
+  var section = restricted ? 'worklog-owned' : 'worklog-all';
+  var page = _agentPanelSectionPage(group, section, entries);
+  html += '<div class="agent-panel-worklog-list">';
+  for (var i = 0; i < page.events.length; i++) {
+    html += _agentPanelLegacyRenderWorklogItem(page.events[i]);
+  }
+  html += '</div>';
+  html += _agentPanelRenderSectionLoadMore(page, 'task');
   html += '</div>';
   return html;
 }
@@ -3362,10 +3368,18 @@ function _agentPanelLegacyRenderJournal(group) {
     return html;
   }
 
-  // Journal entries come from state.weaver_journal (populated by delta ops)
+  // Journal entries come from state.weaver_journal (populated by delta ops).
+  // Render a "last 20 + Load older" window so long sessions don't explode the
+  // DOM; the shared section pager in _agentPanelSectionPage grows the window on
+  // top-insert so the anchor-restore helper keeps the user's scroll position.
   var entries = (state.weaver_journal && state.weaver_journal[group]) || [];
   if (entries.length) {
-    html += _agentPanelLegacyRenderJournalEntries(entries, true);
+    var sorted = entries.slice().sort(function(a, b) {
+      return (b.id || 0) - (a.id || 0);
+    });
+    var page = _agentPanelSectionPage(group, 'journal', sorted);
+    html += _agentPanelLegacyRenderJournalEntries(page.events, true, true);
+    html += _agentPanelRenderSectionLoadMore(page, { singular: 'entry', plural: 'entries' });
   } else {
     html += '<div class="agent-panel-empty">No journal entries yet.</div>';
   }
@@ -3712,16 +3726,19 @@ function _agentPanelLegacyRenderSessionMapJournal(summary) {
   return html;
 }
 
-function _agentPanelLegacyRenderJournalEntries(entries, allowContextMenu) {
-  var sorted = (entries || []).slice().sort(function(a, b) {
-    return (b.id || 0) - (a.id || 0);
-  });
+function _agentPanelLegacyRenderJournalEntries(entries, allowContextMenu, alreadySorted) {
+  var sorted = alreadySorted
+    ? (entries || []).slice()
+    : (entries || []).slice().sort(function(a, b) {
+        return (b.id || 0) - (a.id || 0);
+      });
   var html = '<div class="agent-panel-journal">';
   for (var i = 0; i < sorted.length; i++) {
     var e = sorted[i];
     var typeClass = 'agent-panel-badge-' + (e.type || 'observation');
     var ago = _weaverTimeAgo(e.timestamp);
-    html += '<div class="agent-panel-entry"'
+    var anchorKey = 'journal-' + String(e.id || ('idx-' + i));
+    html += '<div class="agent-panel-entry" data-weaver-anchor="' + _esc(anchorKey) + '"'
       + (allowContextMenu && e.id
         ? ' oncontextmenu="weaverEntryCtx(event,' + e.id + ')"'
         : '')
