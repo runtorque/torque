@@ -299,6 +299,35 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
+        "name": "architect_engineer_journal_read",
+        "description": (
+            "Read recent journal entries from a hired engineer."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "engineer_id": {
+                    "type": "string",
+                    "description": "Hired engineer id/slug/name.",
+                },
+                "since": {
+                    "type": "number",
+                    "description": "Optional lower-bound timestamp filter.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum entries to return (default: 20, max: 100).",
+                },
+                "type_filter": {
+                    "type": "string",
+                    "enum": ["decision", "observation", "checkpoint", "plan"],
+                    "description": "Optional journal entry type filter.",
+                },
+            },
+            "required": ["engineer_id"],
+        },
+    },
+    {
         "name": "architect_reply",
         "description": "Reply to an existing architect↔engineer message thread.",
         "inputSchema": {

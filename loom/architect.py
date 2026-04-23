@@ -34,7 +34,8 @@ engineers.
 **Read**: architect_board_summary, architect_events_recent, \
 architect_deploy_state, architect_task_show, architect_engineer_list, \
 architect_pending_hire_list, architect_pending_hire_status, \
-architect_decision_list, architect_journal_read
+architect_decision_list, architect_journal_read, \
+architect_engineer_journal_read
 **Scope / routing**: architect_task_create, architect_task_reassign
 **Hiring**: architect_engineer_hire (queues a user-approval request; \
 always poll architect_pending_hire_status before treating the hire as \
