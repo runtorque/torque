@@ -158,7 +158,7 @@ run:
 	echo "Loom started (PID $$pid). Logs: $$data_dir/loom.log"
 
 ## stop: Kill any running loom instance (by port)
-stop:
+stop: _check_not_in_worker
 	@port="$(or $(LOOM_PORT),18932)"; \
 	pid=$$(lsof -ti TCP:$$port -sTCP:LISTEN 2>/dev/null); \
 	if [ -n "$$pid" ]; then \
@@ -167,6 +167,33 @@ stop:
 	else \
 		echo "No process on port $$port."; \
 	fi
+
+## _check_not_in_worker: Refuse stop/deploy when called from inside a Loom worker
+## worktree or with LOOM_CELL_ID set. The main daemon is the process being killed;
+## running this from a worker corrupts the in-memory dispatch pipeline on the
+## next boot. Override with FORCE=1 only after reading the failure-mode notes in
+## CLAUDE.md → "Never `make deploy` mid-session".
+.PHONY: _check_not_in_worker
+_check_not_in_worker:
+	@if [ -n "$$FORCE" ]; then \
+		exit 0; \
+	fi; \
+	if [ -n "$$LOOM_CELL_ID" ]; then \
+		echo "Error: LOOM_CELL_ID=$$LOOM_CELL_ID is set — you are inside a Loom worker."; \
+		echo "       \`make stop\`/\`make deploy\` would kill the daemon you are talking to."; \
+		echo "       See CLAUDE.md → 'Never \`make deploy\` mid-session'."; \
+		echo "       If you really mean it: FORCE=1 make <target>"; \
+		exit 1; \
+	fi; \
+	case "$$(pwd)" in \
+	*.loom/worktrees/*) \
+		echo "Error: pwd is under .loom/worktrees/ — you are inside a Loom worker worktree."; \
+		echo "       \`make stop\`/\`make deploy\` would kill the daemon that spawned you."; \
+		echo "       See CLAUDE.md → 'Never \`make deploy\` mid-session'."; \
+		echo "       If you really mean it: FORCE=1 make <target>"; \
+		exit 1; \
+		;; \
+	esac
 
 ## deploy: Stop old instance, install new files, prompt to restart
 deploy: stop install
