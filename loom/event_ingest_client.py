@@ -9,7 +9,7 @@ import uuid
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
-from . import event_ingest_daemon
+from . import event_ingest_daemon, profiling
 from .event_ingest_daemon import (
     PROTOCOL_VERSION,
     read_frame,
@@ -19,6 +19,13 @@ from .event_ingest_daemon import (
 log = logging.getLogger("loom.event_ingest_client")
 
 _RESPONSE_TYPES = {"ok", "error", "pong", "drain", "status"}
+
+
+def _record_trimmed_ack_counter(response: dict) -> None:
+    with contextlib.suppress(AttributeError, TypeError, ValueError):
+        trimmed = int(response.get("trimmed") or 0)
+        if trimmed > 0:
+            profiling.recorder().incr("events_ingest_ring_trimmed", trimmed)
 
 
 class EventIngestProtocolError(RuntimeError):
@@ -113,10 +120,12 @@ class EventIngestClient:
         )
 
     async def ack(self, *, up_to: int) -> dict:
-        return await self._call_with_reconnect_retry(
+        response = await self._call_with_reconnect_retry(
             "ack",
             up_to=int(up_to or 0),
         )
+        _record_trimmed_ack_counter(response)
+        return response
 
     async def status(self) -> dict:
         return await self._call_with_reconnect_retry("status")
