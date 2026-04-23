@@ -7,6 +7,7 @@ import os
 import sys
 import asyncio
 import urllib.error
+import uuid
 
 from .config import DB_FILE
 from .db import LoomDB
@@ -20,6 +21,8 @@ from .mcp_retry import (
     post_json_bytes_with_retry,
     queue_failed_mcp_write,
 )
+
+MCP_SESSION_HEADER = "X-Loom-MCP-Session-Id"
 
 def _loom_mcp_url() -> str:
     return loom_mcp_url()
@@ -65,12 +68,14 @@ def _jsonrpc_error(request_id, exc: Exception) -> bytes:
     }).encode("utf-8")
 
 
-async def _proxy_request(payload: bytes, *, caller_id: str) -> bytes:
+async def _proxy_request(payload: bytes, *, caller_id: str,
+                         mcp_session_id: str) -> bytes:
     parsed = json.loads(payload.decode("utf-8"))
     parsed, idempotency_key, tool_name = ensure_mcp_payload_idempotency(parsed)
     headers = {
         "Content-Type": "application/json",
         "X-Loom-Cell-Id": str(caller_id or "").strip(),
+        MCP_SESSION_HEADER: str(mcp_session_id or "").strip(),
     }
     if idempotency_key:
         headers[IDEMPOTENCY_HEADER] = idempotency_key
@@ -120,6 +125,10 @@ async def _serve_http_proxy_async(caller_id: str) -> int:
     """Proxy stdio-framed MCP requests to Loom's local HTTP endpoint."""
     reader = sys.stdin.buffer
     writer = sys.stdout.buffer
+    mcp_session_id = (
+        str(os.environ.get("LOOM_MCP_SESSION_ID", "") or "").strip()
+        or uuid.uuid4().hex
+    )
     while True:
         payload = _read_framed_message(reader)
         if payload is None:
@@ -128,7 +137,11 @@ async def _serve_http_proxy_async(caller_id: str) -> int:
         try:
             parsed = json.loads(payload.decode("utf-8"))
             request_id = parsed.get("id")
-            response_payload = await _proxy_request(payload, caller_id=caller_id)
+            response_payload = await _proxy_request(
+                payload,
+                caller_id=caller_id,
+                mcp_session_id=mcp_session_id,
+            )
         except urllib.error.HTTPError as exc:
             response_payload = exc.read() or _jsonrpc_error(request_id, exc)
         except Exception as exc:
