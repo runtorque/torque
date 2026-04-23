@@ -85,6 +85,7 @@ For dual mode, also run `make open` to get a browser window alongside the toolbe
 - The decision log is per-architect and persisted in `decisions`; pending hires are user-approved and approval creates engineers with `hired_by_architect_id=<architect.id>`.
 - Architect ↔ engineer messaging is the only architect cross-kind channel. Engineers may message only their hiring architect. Workers report only through `loom ai` status / derive / ask flows, not direct messaging tools.
 - Worker worktrees use `loom/<engineer-slug>/<worker-slug>-<shortid>` or `loom/user/<worker-slug>-<shortid>`; engineer / architect worktrees stay flat under `loom/<slug>-<shortid>`, and grandfathered flat worker branches remain valid.
+- Review-cycle fixes must stay on the implementer's branch: when a `feature/review` task derives a `feature/implement` fix, the derived task is parented to the review's parent task so worktree inheritance skips the reviewer. Merge also refuses sibling `feature/review` / `feature/implement` branches with commits absent from the merge target unless `force=true` is explicitly used after diffing those branches.
 - `loom doctor` is the verification surface for migration state, cleanup state, ignored legacy role files, and ownership / scope invariants.
 - The archived design / rollout record is [Agent Kinds Refactor](docs/plans/agent-kinds-refactor.md).
 

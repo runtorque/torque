@@ -307,6 +307,188 @@ def _stale_base_merge_result(aid: str, stale_base: dict | None) -> dict:
     }
 
 
+def _pipeline_root_id_for_task(task) -> str:
+    if not task:
+        return ""
+    return str(getattr(task, "pipeline_root_id", "") or task.id).strip()
+
+
+def _agent_pipeline_root_ids(state: MatrixState, agent_id: str) -> set[str]:
+    agent_id = str(agent_id or "").strip()
+    if not state or not agent_id:
+        return set()
+    root_ids = {
+        _pipeline_root_id_for_task(task)
+        for task in state.board_tasks.values()
+        if str(getattr(task, "agent_id", "") or "").strip() == agent_id
+    }
+    root_ids.discard("")
+    return root_ids
+
+
+def _review_cycle_merge_sibling_candidates(
+    state: MatrixState,
+    cell,
+) -> list[dict]:
+    """Return sibling review/implement branches in the same pipeline roots."""
+    if not state or not cell:
+        return []
+    target_agent_id = str(getattr(cell, "id", "") or "").strip()
+    target_branch = str(getattr(cell, "worktree_branch", "") or "").strip()
+    target_repo = str(getattr(cell, "worktree_repo_root", "") or "").strip()
+    if not target_agent_id or not target_branch:
+        return []
+    root_ids = _agent_pipeline_root_ids(state, target_agent_id)
+    if not root_ids:
+        return []
+
+    candidates_by_branch: dict[str, dict] = {}
+    eligible_actions = {"feature/implement", "feature/review"}
+    for task in state.board_tasks.values():
+        if _pipeline_root_id_for_task(task) not in root_ids:
+            continue
+        action_name = str(
+            getattr(task, "action_name", "") or ""
+        ).strip().lower()
+        if action_name not in eligible_actions:
+            continue
+        agent_id = str(getattr(task, "agent_id", "") or "").strip()
+        if not agent_id or agent_id == target_agent_id:
+            continue
+        agent = state.agents.get(agent_id)
+        if not agent:
+            continue
+        branch = str(getattr(agent, "worktree_branch", "") or "").strip()
+        if not branch or branch == target_branch:
+            continue
+        repo_root = str(
+            getattr(agent, "worktree_repo_root", "") or ""
+        ).strip()
+        if target_repo and repo_root and repo_root != target_repo:
+            continue
+        if branch in candidates_by_branch:
+            candidates_by_branch[branch]["task_ids"].append(task.id)
+            continue
+        candidates_by_branch[branch] = {
+            "branch": branch,
+            "agent_id": agent_id,
+            "agent_name": str(getattr(agent, "name", "") or ""),
+            "agent_slug": str(getattr(agent, "slug", "") or ""),
+            "task_id": task.id,
+            "task_ids": [task.id],
+            "task": str(getattr(task, "task", "") or ""),
+            "action_name": action_name,
+        }
+    return list(candidates_by_branch.values())
+
+
+async def _git_stdout(directory: str, *args: str) -> tuple[int, str]:
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "git", "-C", directory, *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await proc.communicate()
+        return proc.returncode, stdout.decode().strip()
+    except Exception:
+        log.debug("git command failed for %s: %s", directory, " ".join(args))
+        return 1, ""
+
+
+async def _review_cycle_sibling_branch_divergence(
+    state: MatrixState,
+    cell,
+    worktree_mgr: WorktreeManager,
+) -> list[dict]:
+    """Find sibling pipeline branches with commits absent from ``cell``."""
+    if not state or not cell or not worktree_mgr:
+        return []
+    target_branch = str(getattr(cell, "worktree_branch", "") or "").strip()
+    if not target_branch:
+        return []
+    repo_root = str(getattr(cell, "worktree_repo_root", "") or "").strip()
+    if not repo_root:
+        repo_root = await worktree_mgr.get_repo_root(
+            getattr(cell, "worktree_path", "") or ""
+        ) or ""
+    if not repo_root:
+        return []
+
+    diverged: list[dict] = []
+    for sibling in _review_cycle_merge_sibling_candidates(state, cell):
+        branch = sibling.get("branch", "")
+        if not branch:
+            continue
+        code, count_text = await _git_stdout(
+            repo_root, "rev-list", "--count", f"{target_branch}..{branch}"
+        )
+        if code != 0:
+            continue
+        try:
+            ahead = int((count_text.splitlines() or ["0"])[0] or 0)
+        except ValueError:
+            ahead = 0
+        if ahead <= 0:
+            continue
+        code, head_sha = await _git_stdout(repo_root, "rev-parse", branch)
+        if code != 0:
+            head_sha = ""
+        item = dict(sibling)
+        item["ahead"] = ahead
+        item["head_sha"] = head_sha
+        diverged.append(item)
+    diverged.sort(key=lambda item: (item.get("branch", ""), item.get("task_id", "")))
+    return diverged
+
+
+def _sibling_branch_divergence_merge_result(aid: str,
+                                            siblings: list[dict]) -> dict:
+    branch_names = [
+        str(item.get("branch", "") or "").strip()
+        for item in (siblings or [])
+        if str(item.get("branch", "") or "").strip()
+    ]
+    if not branch_names:
+        subject = "A sibling branch has"
+    elif len(branch_names) == 1:
+        subject = f"sibling branch {branch_names[0]} has"
+    else:
+        subject = "sibling branches " + ", ".join(branch_names) + " have"
+    message = (
+        f"{subject} unmerged commits that may contain the Ship-verdict fix "
+        "— diff sibling branches before merging. Pass force=true only after "
+        "intentionally accepting this divergence."
+    )
+    return {
+        "type": "worktree_merge",
+        "id": aid,
+        "ok": False,
+        "code": "sibling_branch_divergence",
+        "error": message,
+        "siblings": siblings or [],
+    }
+
+
+async def _sibling_branch_divergence_gate_for_merge(
+    state: MatrixState,
+    cell,
+    worktree_mgr: WorktreeManager,
+    aid: str,
+    data: dict,
+) -> dict | None:
+    if data.get("force"):
+        return None
+    siblings = await _review_cycle_sibling_branch_divergence(
+        state,
+        cell,
+        worktree_mgr,
+    )
+    if not siblings:
+        return None
+    return _sibling_branch_divergence_merge_result(aid, siblings)
+
+
 _WORKFLOW_BREACH_SUBKINDS = frozenset({
     "escape_clause_skip",
     "stale_base_catch",
@@ -623,6 +805,62 @@ def _derive_handoff_accepted(dispatch_result) -> bool:
         "ok",
         "queued",
     }
+
+
+def _ai_derive_parent_task(state: MatrixState, task):
+    """Return the structural parent for a newly derived ``loom ai`` task.
+
+    Review tasks hand fixes back to their implementation parent.  Making the
+    fix task a child of the implementer task keeps dispatch worktree
+    inheritance on the implementer's branch instead of walking through the
+    reviewer task/agent.
+    """
+    if not state or not task:
+        return None
+    if _is_feature_review_task(task):
+        parent_id = str(getattr(task, "parent_task_id", "") or "").strip()
+        parent = state.board_tasks.get(parent_id) if parent_id else None
+        if parent:
+            return parent
+    return task
+
+
+def _resolve_inherited_worktree_source(
+    state: MatrixState,
+    task,
+    inherit_from: str = "",
+):
+    """Resolve the agent whose worktree should seed a new task dispatch."""
+    if not state or not task:
+        return None
+    inherit_from = str(inherit_from or "").strip()
+    if inherit_from:
+        src = state.agents.get(inherit_from)
+        if src and getattr(src, "worktree_path", ""):
+            return src
+        return None
+
+    # HITL dispatch: walk parent chain to find the worktree before launching
+    # the session, so derived reviewers/fixes do not briefly create and run
+    # inside a throwaway branch.
+    parent_task_id = str(getattr(task, "parent_task_id", "") or "").strip()
+    seen = set()
+    while parent_task_id and parent_task_id not in seen:
+        seen.add(parent_task_id)
+        parent_task = state.board_tasks.get(parent_task_id)
+        if not parent_task:
+            break
+        parent_agent_id = str(
+            getattr(parent_task, "agent_id", "") or ""
+        ).strip()
+        if parent_agent_id:
+            parent_agent = state.agents.get(parent_agent_id)
+            if parent_agent and getattr(parent_agent, "worktree_path", ""):
+                return parent_agent
+        parent_task_id = str(
+            getattr(parent_task, "parent_task_id", "") or ""
+        ).strip()
+    return None
 
 
 def _agent_can_receive_dispatch(cell) -> bool:
@@ -6438,6 +6676,18 @@ async def main(connection=None):
                             ),
                         }
                     else:
+                        sibling_gate = (
+                            await _sibling_branch_divergence_gate_for_merge(
+                                state,
+                                cell,
+                                worktree_mgr,
+                                aid,
+                                data,
+                            )
+                        )
+                        if sibling_gate:
+                            result = sibling_gate
+                            return result
                         stale_base = await worktree_mgr.stale_base_info(cell)
                         if stale_base.get("stale") \
                                 and not data.get("force_stale_base"):
@@ -7351,29 +7601,15 @@ async def main(connection=None):
                                 explicit_template=explicit_template,
                                 overrides=launch_overrides,
                             )
-                            inherited_worktree_source = None
                             inherit_from = data.get(
                                 "inherit_worktree_from", "")
-                            if inherit_from:
-                                src = state.agents.get(inherit_from)
-                                if src and src.worktree_path:
-                                    inherited_worktree_source = src
-                            elif task.parent_task_id:
-                                # HITL dispatch: walk parent chain to find
-                                # the worktree before launching the session,
-                                # so derived reviewers do not briefly create
-                                # and run inside a throwaway branch.
-                                _ptid = task.parent_task_id
-                                while _ptid:
-                                    _pt = state.board_tasks.get(_ptid)
-                                    if not _pt:
-                                        break
-                                    if _pt.agent_id:
-                                        _pa = state.agents.get(_pt.agent_id)
-                                        if _pa and _pa.worktree_path:
-                                            inherited_worktree_source = _pa
-                                            break
-                                    _ptid = _pt.parent_task_id
+                            inherited_worktree_source = (
+                                _resolve_inherited_worktree_source(
+                                    state,
+                                    task,
+                                    inherit_from,
+                                )
+                            )
                             persistent_prompt_text = ""
                             startup_prompt = ""
                             if launch_cfg.get("agent_type"):
@@ -8928,6 +9164,15 @@ async def main(connection=None):
                                     root_id = \
                                         task.pipeline_root_id \
                                         or task.id
+                                    derive_parent_task = \
+                                        _ai_derive_parent_task(
+                                            state,
+                                            task,
+                                        )
+                                    derive_parent_task_id = (
+                                        derive_parent_task.id
+                                        if derive_parent_task else task.id
+                                    )
                                     derive_desc = data.get(
                                         "description", "")
                                     assigned_engineer_id = (
@@ -8948,7 +9193,7 @@ async def main(connection=None):
                                             action_name=act_name,
                                             action_vars=act_vars,
                                             labels=["loom:derived"],
-                                            parent_task_id=task.id,
+                                            parent_task_id=derive_parent_task_id,
                                             pipeline_depth=new_depth,
                                             pipeline_root_id=root_id,
                                             description=derive_desc,
@@ -8961,6 +9206,10 @@ async def main(connection=None):
                                             description=derive_desc,
                                             action_vars=act_vars,
                                         )
+                                        new_task.parent_task_id = (
+                                            derive_parent_task_id
+                                        )
+                                        new_task.pipeline_root_id = root_id
                                         _inherit_assigned_engineer_for_derived_task(
                                             task,
                                             new_task,
@@ -9029,8 +9278,8 @@ async def main(connection=None):
                                         elif tr_target == "parent":
                                             reuse_self = False
                                             pt = state.board_tasks.get(
-                                                task.parent_task_id) \
-                                                if task.parent_task_id \
+                                                derive_parent_task_id) \
+                                                if derive_parent_task_id \
                                                 else None
                                             if pt and pt.agent_id:
                                                 a = state.agents.get(
@@ -9140,6 +9389,14 @@ async def main(connection=None):
                                                     "inherit_worktree"
                                                     "_from"
                                                 ] = target_id
+                                            if not (tgt and
+                                                    tgt.worktree_path) \
+                                                    and cell.worktree_path \
+                                                    and derive_parent_task_id == task.id:
+                                                dispatch_data[
+                                                    "inherit_worktree"
+                                                    "_from"
+                                                ] = cell.id
                                             if cell.worktree_path:
                                                 dispatch_data[
                                                     "handoff_worktree_from"
@@ -9147,13 +9404,6 @@ async def main(connection=None):
                                             elif cell.worktree_branch:
                                                 dispatch_data[
                                                     "handoff_worktree_from"
-                                                ] = cell.id
-                                            if not (tgt and
-                                                    tgt.worktree_path) \
-                                                    and cell.worktree_path:
-                                                dispatch_data[
-                                                    "inherit_worktree"
-                                                    "_from"
                                                 ] = cell.id
                                             await state.broadcast()
                                             dr = \
@@ -9200,13 +9450,20 @@ async def main(connection=None):
                                                 dispatch_data[
                                                     "_created_by_weaver_id"
                                                 ] = owner_weaver_id
-                                            # Inherit worktree from
-                                            # parent agent
-                                            if cell.worktree_path:
+                                            # Worktree inheritance is resolved
+                                            # by dispatch_task from the derived
+                                            # task's structural parent.  Do not
+                                            # force the caller's branch here:
+                                            # review-derived fixes must skip
+                                            # the reviewer and land on the
+                                            # implementer's branch.
+                                            if cell.worktree_path \
+                                                    and derive_parent_task_id == task.id:
                                                 dispatch_data[
                                                     "inherit_worktree"
                                                     "_from"
                                                 ] = cell.id
+                                            if cell.worktree_path:
                                                 dispatch_data[
                                                     "handoff_worktree_from"
                                                 ] = cell.id

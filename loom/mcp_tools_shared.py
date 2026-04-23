@@ -3729,6 +3729,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
 
         # First check for conflicts / merge boundary eligibility
         force_stale_base = bool(args.get("force_stale_base"))
+        force_sibling_divergence = bool(args.get("force"))
         result, error_text, blocked = await _run_worktree_merge_check_with_options(
             handle_command,
             agent_id,
@@ -3764,6 +3765,8 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             )
         if force_stale_base:
             payload["force_stale_base"] = True
+        if force_sibling_divergence:
+            payload["force"] = True
         result = await handle_command(payload)
         if result and result.get("ok") is False:
             error = result.get("error", "Merge failed")
