@@ -3311,7 +3311,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         )
         if link_error:
             return link_error, True
-        decision = real_state.save_decision({
+        decision = await real_state.save_decision_async({
             "id": "decision-" + uuid.uuid4().hex[:12],
             "architect_id": str(caller_id or "").strip(),
             "title": title,
@@ -3385,7 +3385,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         if "archived" in args:
             patch["archived"] = bool(args.get("archived"))
 
-        updated = real_state.save_decision(patch)
+        updated = await real_state.save_decision_async(patch)
         if not updated:
             return "Failed to save decision", True
         return json.dumps(updated), False
@@ -3423,7 +3423,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 return link_error, True
             patch["linked_engineer_ids"] = linked_engineer_ids
 
-        updated = real_state.save_decision(patch)
+        updated = await real_state.save_decision_async(patch)
         if not updated:
             return "Failed to save decision", True
         return json.dumps(updated), False

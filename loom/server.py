@@ -3103,7 +3103,7 @@ async def _handle_architect_engineer_hire_command(
     if not name:
         return {"type": "error", "message": "Engineer name is required"}
 
-    pending_hire = state.save_pending_hire({
+    pending_hire = await state.save_pending_hire_async({
         "id": "hire-" + uuid.uuid4().hex[:12],
         "architect_id": architect.id,
         "requested_name": name,
@@ -3170,7 +3170,7 @@ async def _handle_pending_hire_approve_command(
     if created.get("type") == "error":
         return created
 
-    saved = state.save_pending_hire({
+    saved = await state.save_pending_hire_async({
         "id": pending_hire["id"],
         "status": "approved",
         "resolution_note": str(data.get("note", "") or "").strip(),
@@ -3196,7 +3196,7 @@ async def _handle_pending_hire_reject_command(
     if pending_hire["status"] == "rejected":
         return {"ok": True}
 
-    saved = state.save_pending_hire({
+    saved = await state.save_pending_hire_async({
         "id": pending_hire["id"],
         "status": "rejected",
         "resolution_note": str(data.get("note", "") or "").strip(),
@@ -3649,7 +3649,7 @@ async def _handle_delete_architect_command(
     archived_decisions = 0
     for decision in state.load_decisions_for_architect(
             architect.id, include_archived=False):
-        saved = state.save_decision({
+        saved = await state.save_decision_async({
             "id": decision["id"],
             "archived": True,
         })
@@ -3991,6 +3991,7 @@ async def main(connection=None):
     log.info("SQLite database opened at %s", DB_FILE)
     state = MatrixState(db=db)
     state.load()
+    db.enable_async_writes(True)
     capture_deploy_boot_state(state, loom_config.SCRIPT_DIR)
     log.info("State loaded: %d agents, %d groups",
              len(state.agents), len(state.groups))
@@ -10615,6 +10616,11 @@ async def main(connection=None):
             await runner.cleanup()
         except Exception:
             log.exception("HTTP runner cleanup failed")
+        try:
+            await state.flush_db_writes()
+            await db.close_async_writes()
+        except Exception:
+            log.exception("Async SQLite write queue shutdown failed")
         try:
             db.close()
         except Exception:

@@ -9,6 +9,9 @@ current save() already does sync file I/O.  Single-row upserts are faster
 than json.dumps() + write_text().
 """
 
+import asyncio
+import copy
+import contextlib
 import json
 import logging
 import os
@@ -16,6 +19,7 @@ import re
 import shutil
 import sqlite3
 import sys
+import threading
 import time
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -245,6 +249,169 @@ def _decode_digest_event_json(raw: str) -> dict:
     return event if isinstance(event, dict) else {}
 
 
+def _snapshot_db_payload(value):
+    """Copy a payload before it enters an async write queue.
+
+    Hot-path state objects keep mutating after ``_db_save_*`` returns.  The
+    queue must persist the value as it looked at enqueue time, not whatever
+    the dataclass happens to contain when the background drainer reaches it.
+    """
+    if hasattr(value, "__dataclass_fields__"):
+        return copy.deepcopy(value)
+    if isinstance(value, (dict, list, tuple, set)):
+        return copy.deepcopy(value)
+    return value
+
+
+class _QueuedAsyncDBWriter:
+    """Per-resource FIFO writer that runs synchronous LoomDB methods off-loop."""
+
+    def __init__(self, owner: "LoomDB", loop: asyncio.AbstractEventLoop):
+        self._owner = owner
+        self.loop = loop
+        self._queues: dict[str, asyncio.Queue] = {}
+        self._tasks: dict[str, asyncio.Task] = {}
+        self._worker_dbs: dict[str, "LoomDB"] = {}
+        self._worker_lock = threading.Lock()
+        self.closed = False
+
+    def enqueue_nowait(
+        self,
+        bucket: str,
+        method_name: str,
+        args: tuple,
+        kwargs: dict,
+    ) -> None:
+        if self.closed:
+            raise RuntimeError("LoomDB async writer is closed")
+        queue = self._queue_for(bucket)
+        queue.put_nowait((method_name, args, kwargs, None))
+        self._ensure_drainer(bucket)
+
+    async def enqueue(
+        self,
+        bucket: str,
+        method_name: str,
+        args: tuple,
+        kwargs: dict,
+    ):
+        if self.closed:
+            raise RuntimeError("LoomDB async writer is closed")
+        future = self.loop.create_future()
+        queue = self._queue_for(bucket)
+        queue.put_nowait((method_name, args, kwargs, future))
+        self._ensure_drainer(bucket)
+        return await future
+
+    async def flush(self) -> None:
+        """Wait until all currently queued/running writes complete."""
+        while True:
+            queues = list(self._queues.values())
+            if queues:
+                await asyncio.gather(*(queue.join() for queue in queues))
+            pending = [
+                task
+                for task in self._tasks.values()
+                if task is not None and not task.done()
+            ]
+            if not any(not queue.empty() for queue in self._queues.values()):
+                # A drainer may still be alive waiting for the next job; that
+                # is fine.  ``Queue.join`` already waited for in-flight work.
+                return
+            if not pending:
+                return
+
+    async def aclose(self) -> None:
+        if self.closed:
+            return
+        self.closed = True
+        await self.flush()
+        for task in list(self._tasks.values()):
+            task.cancel()
+        if self._tasks:
+            await asyncio.gather(*self._tasks.values(), return_exceptions=True)
+        self._tasks.clear()
+        self._queues.clear()
+        await asyncio.to_thread(self._close_worker_dbs)
+
+    def _queue_for(self, bucket: str) -> asyncio.Queue:
+        bucket = str(bucket or "misc")
+        queue = self._queues.get(bucket)
+        if queue is None:
+            queue = asyncio.Queue()
+            self._queues[bucket] = queue
+        return queue
+
+    def _ensure_drainer(self, bucket: str) -> None:
+        task = self._tasks.get(bucket)
+        if task is not None and not task.done():
+            return
+        self._tasks[bucket] = self.loop.create_task(self._drain(bucket))
+
+    async def _drain(self, bucket: str) -> None:
+        queue = self._queue_for(bucket)
+        try:
+            while True:
+                method_name, args, kwargs, future = await queue.get()
+                try:
+                    result = await asyncio.to_thread(
+                        self._run_sync_write,
+                        bucket,
+                        method_name,
+                        args,
+                        kwargs,
+                    )
+                except Exception as exc:
+                    if future is not None and not future.done():
+                        future.set_exception(exc)
+                    log.exception(
+                        "Async SQLite write failed (%s.%s)",
+                        bucket,
+                        method_name,
+                    )
+                else:
+                    if future is not None and not future.done():
+                        future.set_result(result)
+                finally:
+                    queue.task_done()
+        except asyncio.CancelledError:
+            raise
+
+    def _run_sync_write(
+        self,
+        bucket: str,
+        method_name: str,
+        args: tuple,
+        kwargs: dict,
+    ):
+        db = self._worker_db_for(bucket)
+        method = getattr(db, method_name)
+        return method(*args, **kwargs)
+
+    def _worker_db_for(self, bucket: str) -> "LoomDB":
+        bucket = str(bucket or "misc")
+        with self._worker_lock:
+            db = self._worker_dbs.get(bucket)
+            if db is not None:
+                return db
+            db = LoomDB(self._owner.db_path)
+            db._conn = sqlite3.connect(
+                str(self._owner.db_path),
+                check_same_thread=False,
+            )
+            db._conn.execute("PRAGMA foreign_keys=ON")
+            db._conn.execute("PRAGMA busy_timeout=5000")
+            self._worker_dbs[bucket] = db
+            return db
+
+    def _close_worker_dbs(self) -> None:
+        with self._worker_lock:
+            worker_dbs = list(self._worker_dbs.values())
+            self._worker_dbs.clear()
+        for db in worker_dbs:
+            with contextlib.suppress(Exception):
+                db.close()
+
 
 
 class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
@@ -253,6 +420,12 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
     def __init__(self, db_path: Path):
         self.db_path = db_path
         self._conn: Optional[sqlite3.Connection] = None
+        self._async_writer: Optional["_QueuedAsyncDBWriter"] = None
+        self.async_writes_enabled: bool = False
+
+    def enable_async_writes(self, enabled: bool = True) -> None:
+        """Toggle fire-and-forget async persistence for ``*_deferred`` calls."""
+        self.async_writes_enabled = bool(enabled)
 
     def _insert_agent_row(self, executor, cell) -> None:
         values = _serialize_agent_cell(cell)
@@ -665,6 +838,29 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             self._insert_agent_row(self._conn, cell)
             self._conn.commit()
 
+    def save_agent_deferred(self, cell) -> None:
+        """Persist an agent off-loop when called from asyncio code.
+
+        Synchronous callers keep the old immediate-write behavior.  Async
+        callers enqueue a point-in-time snapshot and return immediately; use
+        ``flush_async_writes`` during graceful shutdown/tests to wait for the
+        background drainer.
+        """
+        self.defer_write(
+            "agents",
+            "save_agent",
+            cell,
+            snapshot_args=True,
+        )
+
+    async def save_agent_async(self, cell):
+        """Queue and await an agent save without blocking the event loop."""
+        return await self._enqueue_async_write(
+            "agents",
+            "save_agent",
+            _snapshot_db_payload(cell),
+        )
+
     def save_board_task(self, task):
         """Upsert a board task."""
         with profiling.timer("sqlite_write_ms"), \
@@ -672,11 +868,137 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             self._insert_board_task_row(self._conn, task)
             self._conn.commit()
 
-    def delete_agent(self, agent_id: str):
+    def save_board_task_deferred(self, task) -> None:
+        """Persist a board task off-loop when called from asyncio code."""
+        self.defer_write(
+            "board_tasks",
+            "save_board_task",
+            task,
+            snapshot_args=True,
+        )
+
+    async def save_board_task_async(self, task):
+        """Queue and await a board-task save without blocking the event loop."""
+        return await self._enqueue_async_write(
+            "board_tasks",
+            "save_board_task",
+            _snapshot_db_payload(task),
+        )
+
+    def save_groups_and_members(
+        self,
+        groups: dict,
+        slugs: dict | None = None,
+    ) -> None:
+        """Persist groups plus each group's ordered membership list."""
+        self.save_groups(groups, slugs)
+        for group_name, members in (groups or {}).items():
+            self.save_group_members(group_name, members)
+
+    def save_groups_and_members_deferred(
+        self,
+        groups: dict,
+        slugs: dict | None = None,
+    ) -> None:
+        """Persist groups/members off-loop when called from asyncio code."""
+        self.defer_write(
+            "groups",
+            "save_groups_and_members",
+            groups,
+            slugs or {},
+            snapshot_args=True,
+        )
+
+    def defer_write(
+        self,
+        bucket: str,
+        method_name: str,
+        *args,
+        snapshot_args: bool = True,
+        **kwargs,
+    ):
+        """Run a sync write immediately or enqueue it for async contexts.
+
+        This is the fire-and-forget half of the async write facade.  It keeps
+        non-async tests/tools fully synchronous while moving daemon hot-path
+        writes to per-resource FIFO drainers when an event loop is running.
+        """
+        if not self.async_writes_enabled or str(self.db_path) == ":memory:":
+            return getattr(self, method_name)(*args, **kwargs)
+        try:
+            writer = self._get_async_writer()
+        except RuntimeError:
+            return getattr(self, method_name)(*args, **kwargs)
+        call_args = args
+        call_kwargs = kwargs
+        if snapshot_args:
+            call_args = tuple(_snapshot_db_payload(arg) for arg in args)
+            call_kwargs = {
+                key: _snapshot_db_payload(value)
+                for key, value in kwargs.items()
+            }
+        writer.enqueue_nowait(
+            str(bucket or "misc"),
+            method_name,
+            call_args,
+            call_kwargs,
+        )
+
+    async def _enqueue_async_write(
+        self,
+        bucket: str,
+        method_name: str,
+        *args,
+        **kwargs,
+    ):
+        if str(self.db_path) == ":memory:":
+            return getattr(self, method_name)(*args, **kwargs)
+        writer = self._get_async_writer()
+        return await writer.enqueue(
+            str(bucket or "misc"),
+            method_name,
+            tuple(args),
+            dict(kwargs),
+        )
+
+    def _get_async_writer(self) -> "_QueuedAsyncDBWriter":
+        loop = asyncio.get_running_loop()
+        writer = self._async_writer
+        if writer is not None and writer.loop is not loop:
+            raise RuntimeError(
+                "LoomDB async writer is bound to a different event loop"
+            )
+        if writer is None or writer.closed:
+            writer = _QueuedAsyncDBWriter(self, loop)
+            self._async_writer = writer
+        return writer
+
+    async def flush_async_writes(self) -> None:
+        """Wait for queued async SQLite writes to drain."""
+        writer = self._async_writer
+        if writer is not None:
+            await writer.flush()
+
+    async def close_async_writes(self) -> None:
+        """Drain and stop async SQLite write workers."""
+        writer = self._async_writer
+        if writer is not None:
+            await writer.aclose()
+            self._async_writer = None
+
+    def _delete_agent_sync(self, agent_id: str):
         self._conn.execute("DELETE FROM agents WHERE id=?", (agent_id,))
         self._conn.execute(
             "DELETE FROM group_members WHERE agent_id=?", (agent_id,))
         self._conn.commit()
+
+    def delete_agent(self, agent_id: str):
+        return self.defer_write(
+            "agents",
+            "_delete_agent_sync",
+            agent_id,
+            snapshot_args=False,
+        )
 
     def save_group(self, name: str, position: int):
         self._conn.execute(
@@ -684,7 +1006,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             (name, position))
         self._conn.commit()
 
-    def delete_group(self, name: str):
+    def _delete_group_sync(self, name: str):
         self._conn.execute("DELETE FROM groups WHERE name=?", (name,))
         self._conn.execute(
             "DELETE FROM group_members WHERE group_name=?", (name,))
@@ -693,6 +1015,21 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self._conn.execute(
             "DELETE FROM weaver_task_log WHERE group_name=?", (name,))
         self._conn.commit()
+
+    def delete_group(self, name: str):
+        result = self.defer_write(
+            "groups",
+            "_delete_group_sync",
+            name,
+            snapshot_args=False,
+        )
+        self.defer_write(
+            "group_settings",
+            "_delete_group_settings_sync",
+            name,
+            snapshot_args=False,
+        )
+        return result
 
     def save_groups(self, groups: dict, slugs: dict = None):
         """Bulk-save all groups with positions and slugs."""
@@ -734,10 +1071,18 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             [group_name] + list(d.values()))
         self._conn.commit()
 
-    def delete_group_settings(self, group_name: str):
+    def _delete_group_settings_sync(self, group_name: str):
         self._conn.execute(
             "DELETE FROM group_settings WHERE group_name=?", (group_name,))
         self._conn.commit()
+
+    def delete_group_settings(self, group_name: str):
+        return self.defer_write(
+            "group_settings",
+            "_delete_group_settings_sync",
+            group_name,
+            snapshot_args=False,
+        )
 
     def save_schedule(self, sched):
         """Upsert a schedule."""
@@ -767,9 +1112,17 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         ))
         self._conn.commit()
 
-    def delete_schedule(self, sid: str):
+    def _delete_schedule_sync(self, sid: str):
         self._conn.execute("DELETE FROM schedules WHERE id=?", (sid,))
         self._conn.commit()
+
+    def delete_schedule(self, sid: str):
+        return self.defer_write(
+            "schedules",
+            "_delete_schedule_sync",
+            sid,
+            snapshot_args=False,
+        )
 
     def save_ui_state(self, key: str, value):
         self._conn.execute(
@@ -815,12 +1168,20 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             )
         self._conn.commit()
 
-    def delete_auto_dispatch_queue(self, group_name: str):
+    def _delete_auto_dispatch_queue_sync(self, group_name: str):
         self._conn.execute(
             "DELETE FROM auto_dispatch_queue WHERE group_name=?",
             (group_name,),
         )
         self._conn.commit()
+
+    def delete_auto_dispatch_queue(self, group_name: str):
+        return self.defer_write(
+            "auto_dispatch_queue",
+            "_delete_auto_dispatch_queue_sync",
+            group_name,
+            snapshot_args=False,
+        )
 
     def _rewrite_attachment_refs(self, task_dict: dict,
                                  id_map: dict[str, str]) -> dict:
@@ -1930,6 +2291,14 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             raise RuntimeError(f"failed to load saved decision {decision_id}")
         return saved
 
+    async def save_decision_async(self, row_dict: dict) -> dict:
+        """Queue and await a decision save without blocking the event loop."""
+        return await self._enqueue_async_write(
+            "decisions",
+            "save_decision",
+            _snapshot_db_payload(row_dict or {}),
+        )
+
     def load_decisions_for_architect(self, architect_id: str, *,
                                      include_archived: bool = False) -> list[dict]:
         """Load persisted decisions for one architect, newest first."""
@@ -2097,6 +2466,14 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         if not saved:
             raise RuntimeError(f"failed to load saved pending hire {hire_id}")
         return saved
+
+    async def save_pending_hire_async(self, row_dict: dict) -> dict:
+        """Queue and await a pending-hire save without blocking the event loop."""
+        return await self._enqueue_async_write(
+            "pending_hires",
+            "save_pending_hire",
+            _snapshot_db_payload(row_dict or {}),
+        )
 
     def load_pending_hires(self, *, status_filter: str = "",
                            architect_id: str = "") -> list[dict]:
