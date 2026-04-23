@@ -24,7 +24,10 @@ function connect() {
   _firstStateReceived = false;
   _resyncPending = false;
   _awaitingFullState = false;
-  ws = new WebSocket(WS_URL);
+  var url = (typeof _compactPrepareWSUrl === 'function')
+    ? _compactPrepareWSUrl(WS_URL)
+    : WS_URL;
+  ws = new WebSocket(url);
   ws.onopen = () => {
     document.getElementById('conn-dot').classList.add('ok');
     document.getElementById('conn-dot').title = 'Connected';
@@ -42,6 +45,11 @@ function connect() {
   ws.onerror = () => ws.close();
   ws.onmessage = (e) => {
     const msg = JSON.parse(e.data);
+    if (typeof _compactHandleLazyResponse === 'function'
+        && _compactHandleLazyResponse(msg)) {
+      if (typeof renderActivePanel === 'function') renderActivePanel();
+      return;
+    }
     if (msg.type === 'state') {
       _handleFullState(msg);
     } else if (msg.type === 'delta') {
@@ -240,6 +248,7 @@ function _handleFullState(msg) {
   _resyncPending = false;
   _awaitingFullState = false;
   state = msg;
+  if (typeof _compactInitDeferredMaps === 'function') _compactInitDeferredMaps();
   if (typeof _invalidateTaskLookupIndex === 'function') _invalidateTaskLookupIndex();
   if (typeof _agentPanelWorkerTaskIdCacheByAgent !== 'undefined') {
     _agentPanelWorkerTaskIdCacheByAgent = {};
@@ -306,6 +315,9 @@ function _handleFullState(msg) {
     _syncSelectionToActiveSession();
   }
   _firstStateReceived = true;
+  if (typeof _compactAutoHydrateOnConnect === 'function') {
+    _compactAutoHydrateOnConnect();
+  }
   if (!dragInProgress) {
     render();
     if (!shouldRestorePanel && typeof renderActivePanel === 'function') {

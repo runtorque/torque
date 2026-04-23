@@ -2061,6 +2061,9 @@ function renderAgentPanel() {
   var el = document.getElementById('panel-agent');
   if (!el) return;
   var agent = _resolveFocusedAgent();
+  if (agent && agent.group && typeof lazyLoadWeaverJournal === 'function') {
+    lazyLoadWeaverJournal(agent.group);
+  }
   _agentPanelEventsEnsurePager(agent);
   var agentKindForRender = agent ? _agentPanelKind(agent) : '';
   var activeTabForRender = agent ? _agentPanelActiveTab(agentKindForRender) : '';

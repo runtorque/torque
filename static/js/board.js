@@ -3307,6 +3307,9 @@ function boardToggleArchived() {
   _boardShowArchived = !_boardShowArchived;
   _boardCardsScrollTop = 0;
   _boardRenderLimit = 50;
+  if (_boardShowArchived && typeof lazyLoadArchivedTasks === 'function') {
+    lazyLoadArchivedTasks(_currentGroup ? _currentGroup() : '');
+  }
   renderBoard();
 }
 
