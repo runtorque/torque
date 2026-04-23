@@ -8496,6 +8496,64 @@ test('standalone agent_upsert deltas batch current-group weaver rendering', () =
   });
 });
 
+test('new agent upserts without a focus_update preserve the active selection', () => {
+  const { context } = createWsRenderHarness();
+  runInContext(context, `
+    state.agents = {
+      'agent-1': {
+        id: 'agent-1',
+        name: 'Alpha',
+        group: 'alpha',
+        cell_type: 'agent',
+        session_id: 'sess-1',
+        status: 'running',
+      },
+    };
+    state.groups = { alpha: ['agent-1'] };
+    state.active_session_id = 'sess-1';
+    selectedAgentId = 'agent-1';
+    selectedTerminalId = 'agent-1';
+    focusedItemId = 'agent-1';
+  `);
+
+  // Standalone mode no longer steals focus when a new agent's xterm session
+  // attaches: the server only emits agent_upsert (no matching focus_update),
+  // so the browser keeps whatever terminal the user was already viewing.
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'agent_upsert',
+      id: 'agent-2',
+      name: 'Beta',
+      group: 'alpha',
+      cell_type: 'agent',
+      session_id: 'sess-2',
+      status: 'running',
+    }],
+  });
+
+  assert.equal(jsonValue(context, 'state.agents["agent-2"].name'), 'Beta');
+  assert.equal(jsonValue(context, 'state.active_session_id'), 'sess-1');
+  assert.equal(jsonValue(context, 'selectedAgentId'), 'agent-1');
+  assert.equal(jsonValue(context, 'selectedTerminalId'), 'agent-1');
+  assert.equal(jsonValue(context, 'focusedItemId'), 'agent-1');
+
+  // When the user explicitly switches (or the server later sends a
+  // focus_update for the new session), the selection follows normally.
+  context._handleDelta({
+    seq: 2,
+    ops: [{
+      op: 'focus_update',
+      active_session_id: 'sess-2',
+    }],
+  });
+
+  assert.equal(jsonValue(context, 'state.active_session_id'), 'sess-2');
+  assert.equal(jsonValue(context, 'selectedAgentId'), 'agent-2');
+  assert.equal(jsonValue(context, 'selectedTerminalId'), 'agent-2');
+  assert.equal(jsonValue(context, 'focusedItemId'), 'agent-2');
+});
+
 test('standalone task invalidation is scoped by group and active context selection', () => {
   const { context, sandbox, flushRaf } = createStandaloneDeltaBatchHarness(['board', 'context', 'events', 'weaver']);
   runInContext(context, `
