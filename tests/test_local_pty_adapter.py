@@ -78,6 +78,20 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
         )
         adapter = self.pty_mod.LocalPtyAdapter(state)
 
+        # Capture every batch of delta ops that gets flushed. `broadcast()`
+        # is the only path that flushes `_delta_ops`, so we can verify the
+        # quiet create still surfaces the new agent to the UI without
+        # relying on the focus_session code path.
+        flushed_batches: list[list[dict]] = []
+        orig_broadcast = state.broadcast
+
+        async def recording_broadcast():
+            if state._delta_ops:
+                flushed_batches.append(list(state._delta_ops))
+            await orig_broadcast()
+
+        state.broadcast = recording_broadcast
+
         try:
             await adapter.start()
             await adapter.create_session(first)
@@ -85,12 +99,33 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(first_session)
             self.assertEqual(state.active_session_id, first_session)
 
+            batches_before_second = len(flushed_batches)
             await adapter.create_session(second)
             self.assertIsNotNone(second.session_id)
             self.assertNotEqual(second.session_id, first_session)
             # Creating a second session must not steal focus from the first.
             self.assertEqual(state.active_session_id, first_session)
+
+            # And crucially, the quiet path must still flush the queued
+            # `agent_upsert` so the UI learns about the new cell right
+            # away instead of having to wait for an unrelated later
+            # mutation to piggyback the delta.
+            self.assertGreater(len(flushed_batches), batches_before_second)
+            new_ops = [
+                op
+                for batch in flushed_batches[batches_before_second:]
+                for op in batch
+            ]
+            self.assertTrue(
+                any(
+                    op.get("op") == "agent_upsert" and op.get("id") == second.id
+                    for op in new_ops
+                ),
+                f"second session's agent_upsert missing from flushed ops: {new_ops}",
+            )
+            self.assertEqual(state._delta_ops, [])
         finally:
+            state.broadcast = orig_broadcast
             if first.session_id:
                 await adapter.close_session(first.session_id)
             if second.session_id:

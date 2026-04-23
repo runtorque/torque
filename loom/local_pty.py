@@ -282,10 +282,16 @@ class LocalPtyAdapter:
         # currently active (first agent in a fresh UI, or the previously
         # active session has since exited). Otherwise the browser keeps its
         # current terminal focus — `agent_upsert` still surfaces the cell
-        # and the user can switch manually when they're ready.
+        # and the user can switch manually when they're ready. The quiet
+        # path must still flush the queued `agent_upsert` delta so the UI
+        # learns about the new cell right away; without the broadcast the
+        # new session would stay invisible until some later unrelated
+        # mutation flushed the accumulated ops.
         current_active = self.state.active_session_id or ""
         if not current_active or current_active not in self._sessions:
             await self.focus_session(session_id)
+        else:
+            await self.state.broadcast()
 
     async def close_session(self, session_id: str) -> None:
         session = self._sessions.get(session_id)
