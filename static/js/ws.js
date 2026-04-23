@@ -170,6 +170,8 @@ function connect() {
       if (typeof handleEventsPage === 'function') handleEventsPage(msg);
     } else if (msg.type === 'cell_events') {
       if (typeof agentPanelReceiveCellEvents === 'function') agentPanelReceiveCellEvents(msg);
+    } else if (msg.type === 'architect_journal_entries') {
+      if (typeof agentPanelReceiveArchitectJournal === 'function') agentPanelReceiveArchitectJournal(msg);
     } else if (msg.type === 'agent_history_list') {
       if (typeof agentHistoryReceiveList === 'function') agentHistoryReceiveList(msg);
     } else if (msg.type === 'agent_history_detail') {
@@ -490,6 +492,7 @@ function _deltaSurfaceInvalidations(ops, hints) {
         break;
       case 'journal_append':
       case 'journal_delete':
+      case 'architect_journal_append':
       case 'digest_buffer_stats':
       case 'digest_sent_push':
       case 'weaver_buffer_stats':
@@ -1383,6 +1386,21 @@ function _applyDelta(ops) {
         if (grpd && state.weaver_journal && state.weaver_journal[grpd]) {
           state.weaver_journal[grpd] = state.weaver_journal[grpd].filter(
             function(e) { return e.id !== op.id; });
+        }
+        break;
+      }
+
+      case 'architect_journal_append': {
+        var archId = op.architect_id || '';
+        if (archId && state.architect_journals && state.architect_journals[archId]) {
+          var entry = Object.assign({}, op);
+          delete entry.op;
+          var bucket = state.architect_journals[archId];
+          bucket.unshift(entry);
+          if (bucket.length > 500) bucket.length = 500;
+          if (typeof _agentPanelInvalidateArchitectJournalCache === 'function') {
+            _agentPanelInvalidateArchitectJournalCache(archId);
+          }
         }
         break;
       }

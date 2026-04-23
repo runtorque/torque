@@ -8088,6 +8088,38 @@ test('ws global settings delta live-applies xterm scrollback hook', () => {
   assert.equal(jsonValue(context, 'scrollbackApplyCalls'), 1);
 });
 
+test('ws architect_journal_append delta invalidates the weaver surface and rerenders agent panel', () => {
+  const { context, sandbox } = createWsRenderHarness();
+  sandbox._activePanelApp = 'weaver';
+  runInContext(context, `
+    state.architect_journals = {
+      'arch-1': [
+        { id: 'j-0', architect_id: 'arch-1', type: 'observation',
+          entry: 'First note', timestamp: 1712345600 },
+      ],
+    };
+  `);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'architect_journal_append',
+      id: 'j-1',
+      architect_id: 'arch-1',
+      type: 'checkpoint',
+      entry: 'Holding at review gate',
+      timestamp: 1712345700,
+    }],
+  });
+
+  assert.equal(jsonValue(context, 'state.architect_journals["arch-1"].length'), 2);
+  assert.equal(
+    jsonValue(context, 'state.architect_journals["arch-1"][0].id'),
+    'j-1'
+  );
+  assert.equal(jsonValue(context, 'renderCalls.weaver'), 1);
+});
+
 test('ws invalidation skips rerendering the active board for off-group task updates', () => {
   const { context, sandbox } = createWsRenderHarness();
   sandbox._activePanelApp = 'board';

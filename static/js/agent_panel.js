@@ -14,6 +14,8 @@ var _AGENT_PANEL_VIRTUAL_DEFAULT_VIEWPORT = 520;
 var _AGENT_PANEL_WORKLOG_ROW_HEIGHT = 70;
 var _AGENT_PANEL_MESSAGE_ROW_HEIGHT = 92;
 var _AGENT_PANEL_DECISION_ROW_HEIGHT = 116;
+var _AGENT_PANEL_JOURNAL_ROW_HEIGHT = 96;
+var _AGENT_PANEL_JOURNAL_REFRESH_MS = 1500;
 var _agentPanelEventsPagerAgentId = '';
 var _agentPanelEventsVisibleLimit = _AGENT_PANEL_EVENTS_PAGE_SIZE;
 var _agentPanelEventsLastTotal = 0;
@@ -29,9 +31,13 @@ var _agentPanelWorkerTaskIdCacheByAgent = {};
 var _agentPanelDecisionListCacheByArchitect = {};
 var _agentPanelDecisionRowsCacheByArchitect = {};
 var _agentPanelMessageListCacheByArchitect = {};
+var _agentPanelArchitectJournalByArchitect = {};
+var _agentPanelArchitectJournalLoadingById = {};
+var _agentPanelArchitectJournalLastFetchById = {};
 var _agentPanelTabSpecByKind = {
   architect: [
     { key: 'decisions', label: 'Decisions' },
+    { key: 'journal', label: 'Journal' },
     { key: 'hired_engineers', label: 'Hired engineers' },
     { key: 'messages', label: 'Messages' },
     { key: 'events', label: 'Events' },
@@ -324,6 +330,12 @@ function _agentPanelVirtualMetasForSurface(agent, activeTab) {
     return [{
       key: _agentPanelFocusedSurfaceKey(agent, activeTab, 'messages'),
       scrollSelector: '.agent-panel-message-list',
+    }];
+  }
+  if (kind === 'architect' && activeTab === 'journal') {
+    return [{
+      key: _agentPanelFocusedSurfaceKey(agent, activeTab, 'journal'),
+      scrollSelector: '.agent-panel-content',
     }];
   }
   return [];
@@ -1029,6 +1041,70 @@ function _agentPanelInvalidateArchitectMessageCache(agentId) {
   delete _agentPanelMessageListCacheByArchitect[key];
 }
 
+function _agentPanelInvalidateArchitectJournalCache(architectId) {
+  var key = String(architectId || '').trim();
+  if (!key) {
+    _agentPanelArchitectJournalByArchitect = {};
+    return;
+  }
+  delete _agentPanelArchitectJournalByArchitect[key];
+}
+
+function _agentPanelArchitectJournalEntries(agent) {
+  var architectId = String((agent && agent.id) || '').trim();
+  if (!architectId) return [];
+  if (state && state.architect_journals
+      && Array.isArray(state.architect_journals[architectId])) {
+    return state.architect_journals[architectId];
+  }
+  return [];
+}
+
+function _agentPanelArchitectJournalLatestCheckpoint(entries) {
+  entries = Array.isArray(entries) ? entries : [];
+  for (var i = 0; i < entries.length; i++) {
+    var entry = entries[i] || {};
+    if (String(entry.type || '').toLowerCase() === 'checkpoint') return entry;
+  }
+  return null;
+}
+
+function _agentPanelRequestArchitectJournal(agent) {
+  var architectId = String((agent && agent.id) || '').trim();
+  if (!architectId) return;
+  if (typeof send !== 'function') return;
+  if (_agentPanelArchitectJournalLoadingById[architectId]) return;
+  var now = Date.now();
+  var lastFetch = Number(_agentPanelArchitectJournalLastFetchById[architectId] || 0);
+  var hasCache = !!(state && state.architect_journals
+    && Array.isArray(state.architect_journals[architectId]));
+  if (hasCache && lastFetch
+      && (now - lastFetch) < _AGENT_PANEL_JOURNAL_REFRESH_MS) return;
+  _agentPanelArchitectJournalLoadingById[architectId] = true;
+  _agentPanelArchitectJournalLastFetchById[architectId] = now;
+  send({ cmd: 'architect_journal_read', architect_id: architectId, limit: 200 });
+}
+
+function agentPanelReceiveArchitectJournal(data) {
+  var architectId = String((data && data.architect_id) || '').trim();
+  if (!architectId) return;
+  if (!state.architect_journals) state.architect_journals = {};
+  state.architect_journals[architectId] = Array.isArray(data.entries)
+    ? data.entries.slice()
+    : [];
+  _agentPanelArchitectJournalLoadingById[architectId] = false;
+  _agentPanelArchitectJournalLastFetchById[architectId] = Date.now();
+  _agentPanelInvalidateArchitectJournalCache(architectId);
+  var focused = _resolveFocusedAgent();
+  if (focused && String(focused.id || '') === architectId
+      && _agentPanelKind(focused) === 'architect'
+      && _agentPanelActiveTab('architect') === 'journal') {
+    if (typeof _agentPanelRefreshCurrentTab === 'function'
+        && _agentPanelRefreshCurrentTab()) return;
+    if (typeof renderAgentPanel === 'function') renderAgentPanel();
+  }
+}
+
 function _agentPanelMessageCompareDesc(a, b) {
   var aTs = Number((a && a.timestamp) || 0);
   var bTs = Number((b && b.timestamp) || 0);
@@ -1318,6 +1394,8 @@ function _agentPanelTabRenderParts(agent, kind, activeTab) {
     } else if (activeTab === 'events') {
       parts.headerRightHtml = _agentPanelDigestHeaderRight(agent);
       parts.bodyHtml = _renderArchitectEvents(agent);
+    } else if (activeTab === 'journal') {
+      parts.bodyHtml = _agentPanelArchitectJournalHtml(agent);
     } else {
       parts.bodyHtml = _agentPanelArchitectDecisionsHtml(agent);
     }
@@ -1696,13 +1774,90 @@ function _agentPanelArchitectMessages(agent) {
   return html;
 }
 
+function _agentPanelArchitectJournalEntryHtml(entry, index) {
+  entry = entry || {};
+  var anchorKey = 'architect-journal-' + String(entry.id || index);
+  var entryType = String(entry.type || 'observation');
+  var typeClass = 'agent-panel-badge-' + entryType.replace(/[^a-z0-9_-]/gi, '').toLowerCase();
+  var html = '<div class="agent-panel-entry" data-agent-panel-anchor="'
+    + _agentPanelEsc(anchorKey) + '">';
+  html += '<div class="agent-panel-entry-header">';
+  html += '<span class="agent-panel-badge ' + _agentPanelEsc(typeClass) + '">'
+    + _agentPanelEsc(entryType) + '</span>';
+  html += '<span class="agent-panel-entry-time">'
+    + _agentPanelEsc(_agentPanelTimestamp(entry.timestamp)) + '</span>';
+  html += '</div>';
+  html += '<div class="agent-panel-entry-text">'
+    + _agentPanelEsc(entry.entry || '') + '</div>';
+  html += '</div>';
+  return html;
+}
+
+function _agentPanelArchitectJournalHtml(agent) {
+  _agentPanelRequestArchitectJournal(agent);
+  var architectId = String((agent && agent.id) || '');
+  var entries = _agentPanelArchitectJournalEntries(agent);
+  var decisionCount = _agentPanelArchitectDecisionList(architectId).length;
+  var loading = !!_agentPanelArchitectJournalLoadingById[architectId];
+  var latestCheckpoint = _agentPanelArchitectJournalLatestCheckpoint(entries);
+
+  var html = '<div class="agent-panel-worklog-tab">';
+  html += '<div class="agent-panel-worklog-header">';
+  html += '<span class="agent-panel-worklog-title">Journal</span>';
+  html += '<span class="agent-panel-worklog-count" data-agent-panel-journal-count>'
+    + entries.length + '</span>';
+  html += '<span class="agent-panel-worklog-note"> · '
+    + _agentPanelEsc(decisionCount + ' decision' + (decisionCount === 1 ? '' : 's'))
+    + '</span>';
+  html += '</div>';
+
+  if (latestCheckpoint) {
+    html += '<div class="detail-section-card agent-panel-checkpoint-card" '
+      + 'data-agent-panel-anchor="architect-journal-checkpoint">';
+    html += '<div class="detail-section-card-head">';
+    html += '<span class="detail-section-primary">Current architect state</span>';
+    html += '<span class="detail-task-status">'
+      + _agentPanelEsc(_agentPanelTimestamp(latestCheckpoint.timestamp))
+      + '</span>';
+    html += '</div>';
+    html += '<div class="detail-section-card-body">'
+      + _agentPanelEsc(latestCheckpoint.entry || '')
+      + '</div>';
+    html += '</div>';
+  }
+
+  if (loading && !entries.length) {
+    html += '<div class="agent-panel-empty">Loading architect journal…</div>';
+    html += '</div>';
+    return html;
+  }
+  if (!entries.length) {
+    html += '<div class="agent-panel-empty">No journal entries yet.</div>';
+    html += '</div>';
+    return html;
+  }
+
+  html += _agentPanelRenderVirtualList({
+    key: _agentPanelFocusedSurfaceKey(agent, 'journal', 'journal'),
+    total: entries.length,
+    rowHeight: _AGENT_PANEL_JOURNAL_ROW_HEIGHT,
+    listClass: 'agent-panel-journal',
+    scrollSelector: '.agent-panel-content',
+    renderItem: function(index) {
+      return _agentPanelArchitectJournalEntryHtml(entries[index], index);
+    },
+  });
+  html += '</div>';
+  return html;
+}
+
 function _renderArchitectPanel(agent) {
   var activeTab = _agentPanelActiveTab('architect');
   var parts = _agentPanelTabRenderParts(agent, 'architect', activeTab);
   return _agentPanelShell(
     'Architect: ' + ((agent && (agent.name || agent.id)) || 'Unknown')
       + ' · Group: ' + (((agent && agent.group) || '') || '—'),
-    'Decisions, hired engineers, architect messages, and digest queue.',
+    'Journal, decisions, hired engineers, architect messages, and digest queue.',
     'architect',
     activeTab,
     parts.bodyHtml,
