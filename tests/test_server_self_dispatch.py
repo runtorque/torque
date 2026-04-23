@@ -989,7 +989,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
     def _make_cell(value):
         return (lambda x: lambda: x)(value).__closure__[0]
 
-    def _extract_handle_command(self, state):
+    def _extract_handle_command(self, state, **closure_overrides):
         main_code = self.server_mod.main.__code__
         handle_code = next(
             const
@@ -1027,6 +1027,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
                 list_templates=lambda *args, **kwargs: [],
             ),
         })
+        closure_values.update(closure_overrides)
         closure = tuple(
             self._make_cell(closure_values[name])
             for name in handle_code.co_freevars
@@ -1132,6 +1133,121 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             "Smoke failed on login redirect",
         )
         self.assertTrue(root_task.verification_summary["manual_smoke_done"])
+
+    async def test_worktree_merge_auto_moves_sole_linked_task_to_done(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        worker = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            status="running",
+            worktree_path="/tmp/worker",
+            worktree_branch="loom/worker",
+            worktree_base_branch="main",
+            worktree_repo_root="/repo",
+        )
+        state.agents[worker.id] = worker
+        state.groups["g"].append(worker.id)
+        task = state.board_add_task(
+            "Ship merged change",
+            "g",
+            lane="In Progress",
+            id="LOOM:168",
+            agent_id=worker.id,
+        )
+        self.assertIsNotNone(task)
+        task.status = "On Review"
+
+        class FakeWorktreeManager:
+            async def has_uncommitted_changes(self, _cell):
+                return False
+
+            async def stale_base_info(self, _cell):
+                return {"stale": False}
+
+            async def check_merge_conflicts(self, _cell):
+                return {"clean": True, "tree_sha": "tree-sha"}
+
+            async def merge_untracked_overwrite_paths(
+                self, _repo_root, _base_branch, _tree_sha
+            ):
+                return []
+
+            async def server_merge(self, _cell, _msg, squash=True):
+                return {"ok": True, "sha": "abc123"}
+
+        async def fake_broadcast_toast(*_args, **_kwargs):
+            return None
+
+        async def fake_cleanup_after_merge(
+            _cell,
+            *,
+            close_agent=False,
+            remove_worktree=False,
+        ):
+            return {
+                "close_agent": close_agent,
+                "remove_worktree": remove_worktree,
+                "agent_closed": close_agent,
+                "worktree_removed": remove_worktree,
+                "errors": [],
+            }
+
+        async def fake_latest_boundary_state(_cell):
+            return {"latest": None, "clean": True, "reason": ""}
+
+        async def fake_reviewer_cleanup(*_args, **_kwargs):
+            return {"agents": [], "agent_closed": 0, "worktree_removed": 0, "errors": []}
+
+        async def fake_sibling_gate(*_args, **_kwargs):
+            return None
+
+        old_reviewer_cleanup = (
+            self.server_mod._cleanup_shipped_reviewers_for_merged_cell
+        )
+        old_sibling_gate = (
+            self.server_mod._sibling_branch_divergence_gate_for_merge
+        )
+        self.server_mod._cleanup_shipped_reviewers_for_merged_cell = (
+            fake_reviewer_cleanup
+        )
+        self.server_mod._sibling_branch_divergence_gate_for_merge = (
+            fake_sibling_gate
+        )
+        try:
+            handle_command = self._extract_handle_command(
+                state,
+                _broadcast_toast=fake_broadcast_toast,
+                _cleanup_after_merge=fake_cleanup_after_merge,
+                _latest_boundary_state_for_cell=fake_latest_boundary_state,
+                _mark_branch_boundaries_merged=lambda *_args, **_kwargs: None,
+                worktree_mgr=FakeWorktreeManager(),
+            )
+
+            result = await handle_command({
+                "cmd": "worktree_merge",
+                "id": worker.id,
+                "message": "Merge worker branch",
+                "close_agent_on_merge": True,
+                "remove_worktree_on_merge": True,
+            })
+        finally:
+            self.server_mod._cleanup_shipped_reviewers_for_merged_cell = (
+                old_reviewer_cleanup
+            )
+            self.server_mod._sibling_branch_divergence_gate_for_merge = (
+                old_sibling_gate
+            )
+
+        task = state.board_tasks["LOOM:168"]
+        self.assertEqual(result["type"], "worktree_merge")
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["sha"], "abc123")
+        self.assertEqual(task.lane, "Done")
+        self.assertEqual(task.status, "")
+        self.assertEqual(task.agent_id, "")
 
 
 class ServerAutoCloseOnDoneTests(unittest.IsolatedAsyncioTestCase):

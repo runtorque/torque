@@ -130,6 +130,46 @@ class ServerModuleExtractionTests(unittest.TestCase):
             self_dispatch=True,
         ))
 
+    def test_merge_auto_done_helper_skips_ambiguous_open_linked_tasks(self):
+        state = self.state_mod.MatrixState()
+        state.add_group('g')
+        worker = self.state_mod.AgentCell(
+            id='worker-1',
+            name='Worker',
+            group='g',
+            cell_type='agent',
+        )
+        state.agents[worker.id] = worker
+        state.groups['g'].append(worker.id)
+        first = state.board_add_task(
+            'First task',
+            'g',
+            lane='In Progress',
+            id='task-1',
+            agent_id=worker.id,
+        )
+        second = state.board_add_task(
+            'Second task',
+            'g',
+            lane='In Progress',
+            id='task-2',
+            agent_id=worker.id,
+        )
+
+        decision = self.server_mod._maybe_auto_move_merged_task_to_done(
+            state,
+            worker,
+            enabled=True,
+            cleanup_requested=True,
+        )
+
+        self.assertIsNotNone(first)
+        self.assertIsNotNone(second)
+        self.assertFalse(decision['moved'])
+        self.assertIn('2 open linked tasks', decision['reason'])
+        self.assertEqual(state.board_tasks['task-1'].lane, 'In Progress')
+        self.assertEqual(state.board_tasks['task-2'].lane, 'In Progress')
+
     def test_standalone_mode_skips_keybinding_installation(self):
         old = self.server_mod.STANDALONE
         try:

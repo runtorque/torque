@@ -3845,6 +3845,10 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             payload["remove_worktree_on_merge"] = bool(
                 args.get("remove_worktree_on_merge")
             )
+        if "auto_move_to_done" in args:
+            payload["auto_move_to_done"] = bool(
+                args.get("auto_move_to_done")
+            )
         if force_stale_base:
             payload["force_stale_base"] = True
         if force_sibling_divergence:
