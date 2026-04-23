@@ -63,15 +63,26 @@ function run(context, code) {
   return vm.runInContext(code, context);
 }
 
-test('_compactPrepareWSUrl is a no-op when the feature flag is unset', () => {
+test('_compactPrepareWSUrl appends ?compact=1 by default (unset flag opts in)', () => {
   const { context } = createCompactContext();
   assert.equal(
     run(context, `_compactPrepareWSUrl('ws://localhost:18932/ws')`),
-    'ws://localhost:18932/ws');
-  assert.equal(run(context, `_compactFlagEnabled()`), false);
+    'ws://localhost:18932/ws?compact=1');
+  assert.equal(run(context, `_compactFlagEnabled()`), true);
 });
 
-test('_compactPrepareWSUrl appends ?compact=1 when flag is compact-v1', () => {
+test('_compactPrepareWSUrl is a no-op when explicit legacy opt-out is set', () => {
+  for (const sentinel of ['legacy', 'off', '0', 'false']) {
+    const { context } = createCompactContext({ flag: sentinel });
+    assert.equal(
+      run(context, `_compactPrepareWSUrl('ws://localhost:18932/ws')`),
+      'ws://localhost:18932/ws',
+      'sentinel ' + sentinel + ' should disable compact');
+    assert.equal(run(context, `_compactFlagEnabled()`), false);
+  }
+});
+
+test('_compactPrepareWSUrl still honours explicit compact-v1 opt-in', () => {
   const { context } = createCompactContext({ flag: 'compact-v1' });
   assert.equal(
     run(context, `_compactPrepareWSUrl('ws://localhost:18932/ws')`),

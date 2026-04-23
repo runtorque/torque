@@ -1,15 +1,22 @@
 # Compact WebSocket Snapshot v1
 
-`compact-v1` is an opt-in WebSocket snapshot contract for clients that lazy-load
-heavy board data instead of receiving every persisted field on initial connect.
-It eagerly keeps the small board-semantic fields the standalone UI needs for
-sorting, dependency traversal, verification/health previews, external-link
-badges, and branch-boundary notes. The legacy full snapshot remains the default
-and keeps its existing shape.
+`compact-v1` is the default WebSocket snapshot contract for clients that
+lazy-load heavy board data instead of receiving every persisted field on
+initial connect. It eagerly keeps the small board-semantic fields the
+standalone UI needs for sorting, dependency traversal, verification/health
+previews, external-link badges, and branch-boundary notes. The legacy full
+snapshot is still available as an opt-out for rollback and for test harnesses
+that want the full shape.
 
-## Opt-in
+## Opt-in / opt-out
 
-Use either URL query opt-in before the socket opens:
+The official frontend ships compact-v1 by default. It appends `?compact=1`
+to the WebSocket URL unless the operator explicitly opts out by setting
+`localStorage["loom:snapshot_protocol"]` to one of `legacy`, `off`, `0`, or
+`false`. Backend handshake accepts any of these equivalent opt-in signals,
+which external consumers or pinned tests can use explicitly:
+
+URL query opt-in before the socket opens:
 
 ```text
 /ws?compact=1
@@ -24,6 +31,9 @@ or send a WebSocket connect/resync payload with the protocol flag:
 ```
 
 Query opt-in is preferred because it applies to the first snapshot frame.
+A client that sends none of the above still receives the legacy full shape,
+which is how rollback works: clear the flag from localStorage, reload, and
+the client drops back onto the legacy snapshot.
 
 ## Initial `state` snapshot
 
@@ -113,6 +123,17 @@ The compact summary still defers heavy/detail fields such as `description`,
 `attachments`, `artifacts`, and full `messages` bodies.
 
 Archived tasks are omitted from the initial compact snapshot entirely.
+
+### Description search scope under compact mode
+
+The board's text search matches across eager fields (title, id, action,
+agent, labels, verification notes, etc.) for every card. Description
+bodies stay lazy, so the search only looks inside `description` once the
+task's full detail has been hydrated — typically after the user opens its
+detail panel, edit modal, or artifact browser. The board's search input
+exposes this via a `title` tooltip so operators can opt in by clicking
+into the tasks they want described-text search to cover. A future phase
+may add a server-side text-search command if broader coverage is needed.
 
 ## Lazy-load commands
 

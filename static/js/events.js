@@ -218,9 +218,9 @@ function _eventsGetAttentionItems() {
 
   // Ask tasks (human-labeled, not done)
   var tasks = (state && state.board_tasks) || {};
-  // Compact cards drop description — hydrate every open ask so the feed
-  // shows real body text instead of an empty string. Parent tasks (whose
-  // description we also render) are hydrated on demand below.
+  // description remains lazy in compact-v1 — hydrate every open ask so
+  // the feed shows real body text, and the parent task so its description
+  // renders as context under the ask.
   if (typeof _compactHydrateTasksMatching === 'function'
       && typeof ensureTaskDetail === 'function') {
     var _parentsToHydrate = {};
