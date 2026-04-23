@@ -93,6 +93,23 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
+        "name": "architect_task_chain",
+        "description": (
+            "Show the full derived-task tree for one visible pipeline, rooted at "
+            "the pipeline root and annotated with summary stats."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "task": {
+                    "type": "string",
+                    "description": "Task ID, slug, or alias from the pipeline.",
+                }
+            },
+            "required": ["task"],
+        },
+    },
+    {
         "name": "architect_task_create",
         "description": (
             "Create a task for a specific engineer. The assigned_engineer_id is "

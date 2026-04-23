@@ -32,7 +32,8 @@ start and use these tools instead of freeform instructions to
 engineers.
 
 **Read**: architect_board_summary, architect_events_recent, \
-architect_deploy_state, architect_task_show, architect_engineer_list, \
+architect_deploy_state, architect_task_show, architect_task_chain, \
+architect_engineer_list, \
 architect_pending_hire_list, architect_pending_hire_status, \
 architect_decision_list, architect_journal_read, \
 architect_engineer_journal_read
