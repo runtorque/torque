@@ -262,6 +262,156 @@ class ReviewCycleBranchIsolationTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNone(forced)
 
+    def _make_review_fix_handoff_graph(self):
+        state = self._make_state()
+        implementer = self.state_mod.AgentCell(
+            id="impl-1",
+            name="Implementer",
+            group="g",
+            cell_type="agent",
+            session_id="impl-session",
+            status="running",
+            worktree_path="/repo/.loom/worktrees/impl",
+            worktree_branch="loom/shared",
+            worktree_repo_root="/repo",
+        )
+        reviewer = self.state_mod.AgentCell(
+            id="review-1",
+            name="Reviewer",
+            group="g",
+            cell_type="agent",
+            session_id="review-session",
+            status="running",
+            worktree_path="/repo/.loom/worktrees/impl",
+            worktree_branch="loom/shared",
+            worktree_repo_root="/repo",
+        )
+        state.agents = {implementer.id: implementer, reviewer.id: reviewer}
+        state.groups["g"].extend([implementer.id, reviewer.id])
+        root = state.board_add_task(
+            "Implement feature",
+            "g",
+            lane="In Progress",
+            id="task-root",
+            action_name="feature/implement",
+            agent_id=implementer.id,
+        )
+        review = state.board_add_task(
+            "Review feature",
+            "g",
+            lane="In Progress",
+            id="task-review",
+            action_name="feature/review",
+            parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=1,
+            agent_id=reviewer.id,
+        )
+        review.status = "Fixing"
+        fix = state.board_add_task(
+            "Fix review issues",
+            "g",
+            lane="In Progress",
+            id="task-fix",
+            action_name="feature/implement",
+            parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=2,
+            agent_id=implementer.id,
+        )
+        implementer.current_task_id = fix.id
+        reviewer.current_task_id = ""
+        return state, implementer, reviewer, root, review, fix
+
+    def test_review_derived_fix_sibling_releases_reviewer_slot_and_checkpoint_block(self):
+        (
+            state,
+            implementer,
+            reviewer,
+            _root,
+            review,
+            fix,
+        ) = self._make_review_fix_handoff_graph()
+
+        self.assertEqual(fix.parent_task_id, "task-root")
+        self.assertNotEqual(fix.parent_task_id, review.id)
+        self.assertEqual(
+            [task.id for task in state.review_handoff_followups(review.id)],
+            [fix.id],
+        )
+        self.assertFalse(
+            state.task_occupies_execution_slot(
+                review,
+                agent_id=reviewer.id,
+            )
+        )
+        self.assertFalse(state.agent_is_busy(reviewer.id))
+        self.assertIsNone(
+            self.server_mod._active_shared_worktree_review_for_cell(
+                state,
+                implementer,
+            )
+        )
+        self.assertEqual(
+            self.server_mod._shared_review_checkpoint_block_reason(
+                state,
+                implementer,
+            ),
+            "",
+        )
+
+    def test_review_derived_fix_sibling_cascades_review_and_root_when_done(self):
+        state, _implementer, _reviewer, root, review, fix = (
+            self._make_review_fix_handoff_graph()
+        )
+
+        state.board_move_task(fix.id, "Done")
+
+        self.assertEqual(state.board_tasks[fix.id].lane, "Done")
+        self.assertEqual(state.board_tasks[review.id].lane, "Done")
+        self.assertEqual(state.board_tasks[review.id].status, "")
+        self.assertEqual(state.board_tasks[root.id].lane, "Done")
+        self.assertFalse(state.task_has_unresolved_descendants(root.id))
+
+    def test_review_derived_fix_cascades_after_rereview_path_finishes(self):
+        state, _implementer, _reviewer, root, review, fix = (
+            self._make_review_fix_handoff_graph()
+        )
+        rereviewer = self.state_mod.AgentCell(
+            id="review-2",
+            name="Re-reviewer",
+            group="g",
+            cell_type="agent",
+            session_id="review-2-session",
+            status="running",
+            worktree_path="/repo/.loom/worktrees/impl",
+            worktree_branch="loom/shared",
+            worktree_repo_root="/repo",
+        )
+        state.agents[rereviewer.id] = rereviewer
+        state.groups["g"].append(rereviewer.id)
+        fix.status = "On Review"
+        rereview = state.board_add_task(
+            "Re-review fixes",
+            "g",
+            lane="In Progress",
+            id="task-rereview",
+            action_name="feature/review",
+            parent_task_id=fix.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=3,
+            agent_id=rereviewer.id,
+        )
+
+        state.board_move_task(rereview.id, "Done")
+
+        self.assertEqual(state.board_tasks[rereview.id].lane, "Done")
+        self.assertEqual(state.board_tasks[fix.id].lane, "Done")
+        self.assertEqual(state.board_tasks[review.id].lane, "Done")
+        self.assertEqual(state.board_tasks[root.id].lane, "Done")
+        self.assertFalse(state.task_has_unresolved_descendants(review.id))
+        self.assertFalse(state.task_has_unresolved_descendants(root.id))
+
     async def test_engineer_merge_passes_force_override_to_worktree_merge(self):
         state = self.state_mod.MatrixState()
         state.groups["loom"] = []
