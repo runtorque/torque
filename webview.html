@@ -14,19 +14,20 @@
 <div id="system-banner" hidden></div>
 <div id="pending-hire-banner" hidden></div>
 
-<!-- Header -->
-<header>
-  <div id="conn-dot" title="Disconnected"></div>
-  <h1>LOOM</h1>
-  <button class="hdr-btn" onclick="restartDaemon()" title="Restart Loom">&#x21BB;</button>
-  <button class="hdr-btn" onclick="openGlobalSettings()" title="Settings">&#9881;</button>
-  <button class="hdr-btn" onclick="openAddGroup()">+ Group</button>
-</header>
-
 <!-- Main area (rendered by JS) -->
 <div id="workspace-shell">
   <div id="standalone-sidebar-shell">
     <div id="standalone-main-stack">
+      <!-- Agent grid panel header. Lives inside the main stack so it
+           only spans the agent panel column (instead of stretching
+           above the terminal workspace in standalone mode). LOOM:116. -->
+      <header>
+        <div id="conn-dot" title="Disconnected"></div>
+        <h1>LOOM</h1>
+        <button class="hdr-btn" onclick="restartDaemon()" title="Restart Loom">&#x21BB;</button>
+        <button class="hdr-btn" onclick="openGlobalSettings()" title="Settings">&#9881;</button>
+        <button class="hdr-btn" onclick="openAddGroup()">+ Group</button>
+      </header>
       <main id="main"></main>
     </div>
     <div id="standalone-rail-resize-handle" title="Resize utility rail"></div>
