@@ -56,13 +56,14 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         return worker
 
     def _add_task(self, state, task_id, title, *, group="loom",
-                  assigned_engineer_id=""):
+                  assigned_engineer_id="", **kwargs):
         task = self.state_mod.BoardTask(
             id=task_id,
             task=title,
             group=group,
-            lane="Backlog",
+            lane=kwargs.pop("lane", "Backlog"),
             assigned_engineer_id=assigned_engineer_id,
+            **kwargs,
         )
         state.board_tasks[task.id] = task
         return task
@@ -461,6 +462,130 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(is_error)
         self.assertEqual(text, "Task not found")
+
+    async def test_engineer_task_reassign_transfers_task_between_board_summaries(self):
+        state = self._make_state()
+        alice = self._add_engineer(state, "eng-alice", "Alice")
+        bob = self._add_engineer(state, "eng-bob", "Bob")
+        task = self._add_task(
+            state,
+            "task-owned",
+            "Owned task",
+            assigned_engineer_id=alice.id,
+            created_by_engineer_id=alice.id,
+        )
+
+        async def fake_handle_command(_payload):
+            self.fail("reassign should update state directly")
+
+        text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_task_reassign",
+            {"task": task.id, "new_engineer_id": bob.slug},
+            fake_handle_command,
+            state,
+            caller_id=alice.id,
+        )
+
+        self.assertFalse(is_error, text)
+        self.assertEqual(
+            json.loads(text),
+            {
+                "type": "ok",
+                "task_id": task.id,
+                "from": alice.id,
+                "to": bob.id,
+            },
+        )
+        self.assertEqual(state.board_tasks[task.id].assigned_engineer_id, bob.id)
+
+        alice_summary_text, alice_summary_error = (
+            await self.mcp_engineer_mod._dispatch_engineer_tool(
+                "engineer_board_summary",
+                {},
+                fake_handle_command,
+                state,
+                caller_id=alice.id,
+            )
+        )
+        bob_summary_text, bob_summary_error = (
+            await self.mcp_engineer_mod._dispatch_engineer_tool(
+                "engineer_board_summary",
+                {},
+                fake_handle_command,
+                state,
+                caller_id=bob.id,
+            )
+        )
+
+        self.assertFalse(alice_summary_error, alice_summary_text)
+        self.assertFalse(bob_summary_error, bob_summary_text)
+        self.assertEqual(json.loads(alice_summary_text)["tasks_total"], 0)
+        self.assertEqual(json.loads(bob_summary_text)["tasks_total"], 1)
+
+    async def test_engineer_task_reassign_allows_creator_to_assign_unowned_task(self):
+        state = self._make_state()
+        alice = self._add_engineer(state, "eng-alice", "Alice")
+        bob = self._add_engineer(state, "eng-bob", "Bob")
+        task = self._add_task(
+            state,
+            "task-unassigned",
+            "Unassigned task",
+            created_by_engineer_id=alice.id,
+        )
+
+        async def fake_handle_command(_payload):
+            self.fail("reassign should update state directly")
+
+        text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_task_reassign",
+            {"task": task.id, "new_engineer_id": bob.id},
+            fake_handle_command,
+            state,
+            caller_id=alice.id,
+        )
+
+        self.assertFalse(is_error, text)
+        self.assertEqual(
+            json.loads(text),
+            {
+                "type": "ok",
+                "task_id": task.id,
+                "from": "",
+                "to": bob.id,
+            },
+        )
+        self.assertEqual(state.board_tasks[task.id].assigned_engineer_id, bob.id)
+
+    async def test_engineer_task_reassign_rejects_non_owner(self):
+        state = self._make_state()
+        alice = self._add_engineer(state, "eng-alice", "Alice")
+        bob = self._add_engineer(state, "eng-bob", "Bob")
+        charlie = self._add_engineer(state, "eng-charlie", "Charlie")
+        task = self._add_task(
+            state,
+            "task-owned",
+            "Owned task",
+            assigned_engineer_id=alice.id,
+            created_by_engineer_id=bob.id,
+        )
+
+        async def fake_handle_command(_payload):
+            self.fail("reassign should be rejected before dispatch")
+
+        text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_task_reassign",
+            {"task": task.id, "new_engineer_id": charlie.id},
+            fake_handle_command,
+            state,
+            caller_id=charlie.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertEqual(
+            text,
+            "Task can only be reassigned by the assigned engineer or creator",
+        )
+        self.assertEqual(state.board_tasks[task.id].assigned_engineer_id, alice.id)
 
     async def test_engineer_agent_message_rejects_out_of_scope_target(self):
         state = self._make_state()
