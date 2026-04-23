@@ -691,6 +691,20 @@ class ITerm2BridgeCore:
             if body and (settled_submit or "\n" in body):
                 await asyncio.sleep(submit_delay)
             await session.async_send_text(submit_key)
+        else:
+            # Silent-drop guard (LOOM:165 observability). Previously a
+            # missing iTerm2 session here dropped the prompt with zero
+            # signal, which produced DOA workers after daemon restarts —
+            # 90 min triage instead of an obvious log. Surface it.
+            cell = self._find_cell_by_session(session_id)
+            log.warning(
+                "send_text dropped: iTerm2 session %s not found "
+                "(cell=%s agent_type=%s prompt=%d chars)",
+                session_id,
+                (cell.slug or cell.name or cell.id) if cell else "<unknown>",
+                (cell.agent_type if cell else "") or "<none>",
+                len(text),
+            )
 
     async def write_input(self, session_id: str, data: str) -> None:
         session = await self._find_session(session_id)

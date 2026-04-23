@@ -308,6 +308,32 @@ class BridgeSendTextTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session.screen_reads, first_reads)
         self.assertEqual(delays, [0.25, 0.25, 0.3])
 
+    async def test_send_text_logs_warning_when_session_not_found(self):
+        # LOOM:165 observability — a missing iTerm2 session on dispatch
+        # used to silently drop the prompt, producing DOA workers after
+        # daemon restarts with zero log signal. Surface it.
+        session = FakeSession("present-session")
+        bridge, state = await self._make_bridge(session)
+        cell = self.state_mod.AgentCell(
+            id="agent-x",
+            name="ghost",
+            group="g",
+            cell_type="agent",
+            session_id="missing-session",
+            agent_type="claude-code",
+            command="claude",
+        )
+        state.agents[cell.id] = cell
+
+        with self.assertLogs("loom", level="WARNING") as logs:
+            await bridge.send_text("missing-session", "some prompt body\r")
+
+        joined = "\n".join(logs.output)
+        self.assertIn("send_text dropped", joined)
+        self.assertIn("missing-session", joined)
+        self.assertIn("claude-code", joined)
+        self.assertEqual(session.sent, [])  # no writes to any session
+
     async def test_send_text_claude_does_not_release_on_startup_banner(self):
         session = FakeSession(
             "session-3",

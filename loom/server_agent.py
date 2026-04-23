@@ -549,6 +549,20 @@ class AgentLaunchService:
                 if delay:
                     await asyncio.sleep(delay)
                 if not target_session_id or cell.session_id != target_session_id:
+                    # Silent-drop guard (LOOM:165 observability). A cell
+                    # whose session_id went empty or changed between
+                    # enqueue and send used to drop the prompt with no
+                    # signal; that is the DOA pattern we paid for in
+                    # wave 2. Surface it so post-mortems are 2 min not
+                    # 90 min.
+                    log.warning(
+                        "send_agent_prompt dropped: session mismatch for "
+                        "cell=%s (target=%s now=%s prompt=%d chars)",
+                        cell.slug or cell.name or cell.id,
+                        target_session_id or "<empty>",
+                        cell.session_id or "<empty>",
+                        len(prompt),
+                    )
                     return
                 if prime_input_ready \
                         and hasattr(self.bridge, "prime_input_ready"):
