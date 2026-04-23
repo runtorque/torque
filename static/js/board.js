@@ -1248,7 +1248,19 @@ function _boardGroupTaskCount(model) {
 
 function showTaskMessages(taskId) {
   var t = state.board_tasks[taskId];
-  if (!t || !t.messages || !t.messages.length) return;
+  if (!t) return;
+  // Compact cards omit messages entirely — hydrate before deciding
+  // whether to render the popover, otherwise a task with messages on
+  // the server would appear to have none.
+  if (typeof _compactModeActive === 'function'
+      && _compactModeActive()
+      && typeof _compactTaskHasFullDetail === 'function'
+      && !_compactTaskHasFullDetail(t)
+      && typeof ensureTaskDetail === 'function') {
+    ensureTaskDetail(taskId, function() { showTaskMessages(taskId); });
+    return;
+  }
+  if (!t.messages || !t.messages.length) return;
   var html = '';
   var total = t.messages.length;
   for (var i = total - 1; i >= 0; i--) {

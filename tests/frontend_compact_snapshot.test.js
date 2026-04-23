@@ -605,10 +605,12 @@ test('agentDetailEditDescription hydrates before opening the editor', () => {
   const { context, sandbox } = createAgentDetailContext();
   run(context, `agentDetailEditDescription('agent-1', 't-card')`);
   // Editor did NOT open yet (would have been true after draft seeding).
-  assert.equal(
-    run(context, `_agentDetailState('agent-1').description_editor`) === null
-    || run(context, `_agentDetailState('agent-1').description_editor.open`),
-    false);
+  assert.equal(run(context, `
+    (function(){
+      var e = _agentDetailState('agent-1').description_editor;
+      return e ? !!e.open : false;
+    })()
+  `), false);
   assertPlainEqual(
     sandbox.sendCalls.map(function(c) { return c.cmd; }),
     ['task_detail']);
@@ -673,6 +675,54 @@ test('agentDetailSaveDescription skips the update when draft matches hydrated te
   });
   assert.equal(update, undefined,
     'must not overwrite when the hydrated description already matches');
+});
+
+test('_compactHydrateTasksMatching fetches every non-loaded match and dedups', () => {
+  const { context, sandbox } = createCompactContext({ flag: 'compact-v1' });
+  sandbox.state = {
+    snapshot_protocol: 'compact-v1',
+    board_tasks: {
+      a: { id: 'a', agent_id: 'agent-1', lane: 'In Progress' },
+      b: { id: 'b', agent_id: 'agent-1', lane: 'To Do' },
+      c: { id: 'c', agent_id: 'agent-2', lane: 'To Do' },
+    },
+  };
+  run(context, `_compactInitDeferredMaps()`);
+  const fired = run(context, `
+    _compactHydrateTasksMatching(function(t) { return t.agent_id === 'agent-1'; })
+  `);
+  assert.equal(fired, 2);
+  assertPlainEqual(
+    sandbox.sendCalls.map(function(c) { return c.id; }),
+    ['a', 'b']);
+
+  // Second call is a no-op: both are in-flight already.
+  sandbox.sendCalls.length = 0;
+  run(context, `
+    _compactHydrateTasksMatching(function(t) { return t.agent_id === 'agent-1'; })
+  `);
+  assertPlainEqual(sandbox.sendCalls, []);
+
+  // After one resolves, the registry latches; a third call skips it.
+  run(context, `_compactHandleLazyResponse({
+    type: 'task_detail', id: 'a', task: { id: 'a', description: 'done' }
+  })`);
+  sandbox.sendCalls.length = 0;
+  run(context, `
+    _compactHydrateTasksMatching(function(t) { return t.agent_id === 'agent-1'; })
+  `);
+  assertPlainEqual(sandbox.sendCalls, []);
+});
+
+test('_compactHydrateTasksMatching is a no-op outside compact mode', () => {
+  const { context, sandbox } = createCompactContext();
+  sandbox.state = {
+    board_tasks: { a: { id: 'a' } },
+  };
+  assert.equal(
+    run(context, `_compactHydrateTasksMatching(function() { return true; })`),
+    0);
+  assertPlainEqual(sandbox.sendCalls, []);
 });
 
 test('archived_tasks merge layers over local compact summaries without loss', () => {

@@ -185,6 +185,32 @@ function ensureTaskDetail(taskId, cb) {
   return lazyLoadTaskDetail(taskId, cb);
 }
 
+/* Read-time hydrator for panels that iterate state.board_tasks and need
+ * heavy fields on every row they visit (e.g. the events attention feed
+ * walking all open asks, or the agent detail panel walking every task
+ * attached to one agent). Callers pass a predicate that matches the
+ * specific rows they read; rows missing full detail kick off a fetch.
+ * The next render (driven by the task_detail merge) paints the hydrated
+ * data. Bounded by ensureTaskDetail's per-task dedup, so repeated calls
+ * per render are free. */
+function _compactHydrateTasksMatching(predicate) {
+  if (!_compactModeActive() || typeof predicate !== 'function') return 0;
+  if (!state || !state.board_tasks) return 0;
+  var fired = 0;
+  for (var id in state.board_tasks) {
+    var task = state.board_tasks[id];
+    if (!task) continue;
+    try {
+      if (!predicate(task)) continue;
+    } catch (_err) {
+      continue;
+    }
+    if (_compactTaskHasFullDetail(task)) continue;
+    if (lazyLoadTaskDetail(id)) fired++;
+  }
+  return fired;
+}
+
 function _compactClearInFlight(key) {
   if (key in _compactInFlight) delete _compactInFlight[key];
 }

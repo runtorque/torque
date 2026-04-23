@@ -1796,6 +1796,15 @@ function _preservedMergeDiffForAgent(agent) {
   const repoRoot = agent.worktree_repo_root || agent.git_root || '';
   const branch = agent.worktree_branch || '';
   const branchKey = repoRoot && branch ? (repoRoot + '::' + branch) : '';
+  // Preserved-merge diffs live in task.artifacts / task.worktree_boundary,
+  // both of which compact cards omit. Hydrate tasks this agent has touched
+  // (task.agent_id === agent.id) so the "merged" badge can resolve to the
+  // real artifact instead of silently falling back to a non-clickable span.
+  if (typeof _compactHydrateTasksMatching === 'function' && agent.id) {
+    _compactHydrateTasksMatching(function(t) {
+      return !!(t && String(t.agent_id || '') === String(agent.id));
+    });
+  }
   let winner = null;
   let winnerArtifact = null;
   let winnerSort = '';
