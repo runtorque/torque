@@ -8114,7 +8114,6 @@ async def main(connection=None):
                             state._emit_agent(agent)
 
                             # Move ask task to Done (no cascade)
-                            from datetime import datetime, timezone
                             if not task_is_closed(task):
                                 state.board_move_task(
                                     task.id, "Done")
@@ -8618,11 +8617,9 @@ async def main(connection=None):
                                 from .cron import parse_cron, \
                                     next_run as cron_next
                                 parse_cron(cron_expr)
-                                from datetime import datetime, \
-                                    timezone as dt_tz
                                 nxt = cron_next(
                                     cron_expr,
-                                    datetime.now(dt_tz.utc), tz=tz)
+                                    datetime.now(timezone.utc), tz=tz)
                                 next_run_at = nxt.isoformat()
                             except ValueError as e:
                                 result = {
@@ -8688,11 +8685,9 @@ async def main(connection=None):
                                 from .cron import parse_cron, \
                                     next_run as cron_next
                                 parse_cron(new_cron)
-                                from datetime import datetime, \
-                                    timezone as dt_tz
                                 nxt = cron_next(
                                     new_cron,
-                                    datetime.now(dt_tz.utc),
+                                    datetime.now(timezone.utc),
                                     tz=new_tz)
                                 fields["next_run_at"] = nxt.isoformat()
                             except ValueError as e:
@@ -8724,9 +8719,8 @@ async def main(connection=None):
                     fields = {"enabled": True}
                     if sched.cron_expr:
                         from .cron import next_run as cron_next
-                        from datetime import datetime, timezone as dt_tz
                         nxt = cron_next(sched.cron_expr,
-                                        datetime.now(dt_tz.utc),
+                                        datetime.now(timezone.utc),
                                         tz=sched.timezone)
                         fields["next_run_at"] = nxt.isoformat()
                     elif sched.scheduled_at:
@@ -8759,8 +8753,7 @@ async def main(connection=None):
                     result = {"type": "error",
                               "message": "Schedule group not found"}
                 else:
-                    from datetime import datetime, timezone as dt_tz
-                    now = datetime.now(dt_tz.utc)
+                    now = datetime.now(timezone.utc)
                     title = sched.task_template or sched.name
                     title = (title
                              .replace("{date}",
