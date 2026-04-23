@@ -2061,6 +2061,9 @@ function renderAgentPanel() {
   var el = document.getElementById('panel-agent');
   if (!el) return;
   var agent = _resolveFocusedAgent();
+  if (agent && agent.group && typeof lazyLoadWeaverJournal === 'function') {
+    lazyLoadWeaverJournal(agent.group);
+  }
   _agentPanelEventsEnsurePager(agent);
   var agentKindForRender = agent ? _agentPanelKind(agent) : '';
   var activeTabForRender = agent ? _agentPanelActiveTab(agentKindForRender) : '';
@@ -4535,6 +4538,13 @@ function _weaverTaskHealthSummary(group) {
     return (a.title || '').localeCompare(b.title || '');
   });
   summary.items = summary.items.slice(0, 5);
+  // Compact cards omit health_details — hydrate the top-5 shown items so
+  // the "via source task" detail can render on the next pass.
+  if (typeof ensureTaskDetail === 'function'
+      && typeof _compactModeActive === 'function'
+      && _compactModeActive()) {
+    for (var i = 0; i < summary.items.length; i++) ensureTaskDetail(summary.items[i].id);
+  }
   return summary;
 }
 
@@ -4572,6 +4582,13 @@ function _weaverVerificationSummary(group) {
     return (a.title || '').localeCompare(b.title || '');
   });
   summary.items = summary.items.slice(0, 5);
+  // Compact cards omit verification_summary / verification_notes — hydrate
+  // the top-5 so the "detail" line renders real content on the next pass.
+  if (typeof ensureTaskDetail === 'function'
+      && typeof _compactModeActive === 'function'
+      && _compactModeActive()) {
+    for (var j = 0; j < summary.items.length; j++) ensureTaskDetail(summary.items[j].id);
+  }
   return summary;
 }
 

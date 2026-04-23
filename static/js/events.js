@@ -218,6 +218,21 @@ function _eventsGetAttentionItems() {
 
   // Ask tasks (human-labeled, not done)
   var tasks = (state && state.board_tasks) || {};
+  // Compact cards drop description — hydrate every open ask so the feed
+  // shows real body text instead of an empty string. Parent tasks (whose
+  // description we also render) are hydrated on demand below.
+  if (typeof _compactHydrateTasksMatching === 'function'
+      && typeof ensureTaskDetail === 'function') {
+    var _parentsToHydrate = {};
+    _compactHydrateTasksMatching(function(t) {
+      if (!t || !t.labels || t.labels.indexOf('loom:human') < 0) return false;
+      if (t.lane === 'Done') return false;
+      if (grp && t.group !== grp) return false;
+      if (t.parent_task_id) _parentsToHydrate[t.parent_task_id] = true;
+      return true;
+    });
+    for (var _pid in _parentsToHydrate) ensureTaskDetail(_pid);
+  }
   for (var id in tasks) {
     var t = tasks[id];
     if (!t.labels || t.labels.indexOf('loom:human') < 0) continue;

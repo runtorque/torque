@@ -502,6 +502,14 @@ function openEditTask(taskId) {
   var tasks = (state && state.board_tasks) || {};
   var t = tasks[taskId];
   if (!t) return;
+  if (typeof ensureTaskDetail === 'function'
+      && typeof _compactModeActive === 'function'
+      && _compactModeActive()
+      && typeof _compactTaskHasFullDetail === 'function'
+      && !_compactTaskHasFullDetail(t)) {
+    ensureTaskDetail(taskId, function() { openEditTask(taskId); });
+    return;
+  }
   _taskOpenModal({
     editId: taskId,
     title: 'Edit Task',

@@ -573,6 +573,16 @@ function openTaskArtifactBrowser(taskId) {
   var tasks = (state && state.board_tasks) || {};
   var task = tasks[taskId];
   if (!task) return;
+  // Compact cards don't carry attachments/artifacts — hydrate before
+  // rendering so the browser doesn't falsely report "no artifacts".
+  if (typeof ensureTaskDetail === 'function'
+      && typeof _compactModeActive === 'function'
+      && _compactModeActive()
+      && typeof _compactTaskHasFullDetail === 'function'
+      && !_compactTaskHasFullDetail(task)) {
+    ensureTaskDetail(taskId, function() { openTaskArtifactBrowser(taskId); });
+    return;
+  }
   var artifacts = _taskArtifactsCombined(task);
   document.getElementById('task-artifacts-modal-title').textContent = 'Artifacts - ' + (task.task || '').slice(0, 80);
   document.getElementById('task-artifacts-modal-summary').textContent =
@@ -611,6 +621,22 @@ function _findTaskArtifact(taskId, artifactId, filename, artifactPath) {
 }
 
 function openTaskArtifactById(taskId, artifactId, filename, artifactPath) {
+  // Deep-links can target artifacts that live only on the full BoardTask.
+  // If the local card is a compact summary, hydrate and retry before
+  // falling back to the empty browser.
+  var tasks = (state && state.board_tasks) || {};
+  var task = tasks[taskId];
+  if (task
+      && typeof ensureTaskDetail === 'function'
+      && typeof _compactModeActive === 'function'
+      && _compactModeActive()
+      && typeof _compactTaskHasFullDetail === 'function'
+      && !_compactTaskHasFullDetail(task)) {
+    ensureTaskDetail(taskId, function() {
+      openTaskArtifactById(taskId, artifactId, filename, artifactPath);
+    });
+    return true;
+  }
   var artifact = _findTaskArtifact(taskId, artifactId, filename, artifactPath);
   if (!artifact) return false;
   var url = _artifactFileUrl(taskId, artifact);

@@ -231,6 +231,11 @@ function taskHistoryReceiveDetail(msg) {
 
 function toggleTaskHistoryItem(taskId) {
   _taskHistoryExpandedTask = _taskHistoryExpandedTask === taskId ? '' : taskId;
+  if (_taskHistoryExpandedTask && typeof ensureTaskDetail === 'function') {
+    ensureTaskDetail(_taskHistoryExpandedTask, function() {
+      if (_taskHistoryOpen) renderTaskHistory();
+    });
+  }
   renderTaskHistory();
 }
 

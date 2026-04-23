@@ -1248,7 +1248,19 @@ function _boardGroupTaskCount(model) {
 
 function showTaskMessages(taskId) {
   var t = state.board_tasks[taskId];
-  if (!t || !t.messages || !t.messages.length) return;
+  if (!t) return;
+  // Compact cards omit messages entirely — hydrate before deciding
+  // whether to render the popover, otherwise a task with messages on
+  // the server would appear to have none.
+  if (typeof _compactModeActive === 'function'
+      && _compactModeActive()
+      && typeof _compactTaskHasFullDetail === 'function'
+      && !_compactTaskHasFullDetail(t)
+      && typeof ensureTaskDetail === 'function') {
+    ensureTaskDetail(taskId, function() { showTaskMessages(taskId); });
+    return;
+  }
+  if (!t.messages || !t.messages.length) return;
   var html = '';
   var total = t.messages.length;
   for (var i = total - 1; i >= 0; i--) {
@@ -3061,6 +3073,17 @@ function boardDuplicateTask(taskId) {
   _closeCtxMenu();
   var task = _boardTasks()[taskId];
   if (!task) return;
+  // In compact mode the local task card omits description / action_vars /
+  // agent_template. Hydrate the full BoardTask before cloning so we don't
+  // silently drop those fields on duplicate.
+  if (typeof ensureTaskDetail === 'function'
+      && typeof _compactModeActive === 'function'
+      && _compactModeActive()
+      && typeof _compactTaskHasFullDetail === 'function'
+      && !_compactTaskHasFullDetail(task)) {
+    ensureTaskDetail(taskId, function() { boardDuplicateTask(taskId); });
+    return;
+  }
   var clone = _boardTaskCloneFields(task);
   var msg = {
     cmd: 'board_add_task',
@@ -3079,6 +3102,14 @@ function boardCloneTask(taskId) {
   _closeCtxMenu();
   var task = _boardTasks()[taskId];
   if (!task) return;
+  if (typeof ensureTaskDetail === 'function'
+      && typeof _compactModeActive === 'function'
+      && _compactModeActive()
+      && typeof _compactTaskHasFullDetail === 'function'
+      && !_compactTaskHasFullDetail(task)) {
+    ensureTaskDetail(taskId, function() { boardCloneTask(taskId); });
+    return;
+  }
   var clone = _boardTaskCloneFields(task);
   _taskOpenModal({
     draftScope: 'clone:' + taskId,
@@ -3307,6 +3338,9 @@ function boardToggleArchived() {
   _boardShowArchived = !_boardShowArchived;
   _boardCardsScrollTop = 0;
   _boardRenderLimit = 50;
+  if (_boardShowArchived && typeof lazyLoadArchivedTasks === 'function') {
+    lazyLoadArchivedTasks(_currentGroup ? _currentGroup() : '');
+  }
   renderBoard();
 }
 
