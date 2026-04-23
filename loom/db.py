@@ -923,7 +923,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         non-async tests/tools fully synchronous while moving daemon hot-path
         writes to per-resource FIFO drainers when an event loop is running.
         """
-        if not self.async_writes_enabled:
+        if not self.async_writes_enabled or str(self.db_path) == ":memory:":
             return getattr(self, method_name)(*args, **kwargs)
         try:
             writer = self._get_async_writer()
@@ -986,11 +986,19 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             await writer.aclose()
             self._async_writer = None
 
-    def delete_agent(self, agent_id: str):
+    def _delete_agent_sync(self, agent_id: str):
         self._conn.execute("DELETE FROM agents WHERE id=?", (agent_id,))
         self._conn.execute(
             "DELETE FROM group_members WHERE agent_id=?", (agent_id,))
         self._conn.commit()
+
+    def delete_agent(self, agent_id: str):
+        return self.defer_write(
+            "agents",
+            "_delete_agent_sync",
+            agent_id,
+            snapshot_args=False,
+        )
 
     def save_group(self, name: str, position: int):
         self._conn.execute(
@@ -998,7 +1006,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             (name, position))
         self._conn.commit()
 
-    def delete_group(self, name: str):
+    def _delete_group_sync(self, name: str):
         self._conn.execute("DELETE FROM groups WHERE name=?", (name,))
         self._conn.execute(
             "DELETE FROM group_members WHERE group_name=?", (name,))
@@ -1007,6 +1015,14 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self._conn.execute(
             "DELETE FROM weaver_task_log WHERE group_name=?", (name,))
         self._conn.commit()
+
+    def delete_group(self, name: str):
+        return self.defer_write(
+            "groups",
+            "_delete_group_sync",
+            name,
+            snapshot_args=False,
+        )
 
     def save_groups(self, groups: dict, slugs: dict = None):
         """Bulk-save all groups with positions and slugs."""
@@ -1048,10 +1064,18 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             [group_name] + list(d.values()))
         self._conn.commit()
 
-    def delete_group_settings(self, group_name: str):
+    def _delete_group_settings_sync(self, group_name: str):
         self._conn.execute(
             "DELETE FROM group_settings WHERE group_name=?", (group_name,))
         self._conn.commit()
+
+    def delete_group_settings(self, group_name: str):
+        return self.defer_write(
+            "group_settings",
+            "_delete_group_settings_sync",
+            group_name,
+            snapshot_args=False,
+        )
 
     def save_schedule(self, sched):
         """Upsert a schedule."""
@@ -1081,9 +1105,17 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         ))
         self._conn.commit()
 
-    def delete_schedule(self, sid: str):
+    def _delete_schedule_sync(self, sid: str):
         self._conn.execute("DELETE FROM schedules WHERE id=?", (sid,))
         self._conn.commit()
+
+    def delete_schedule(self, sid: str):
+        return self.defer_write(
+            "schedules",
+            "_delete_schedule_sync",
+            sid,
+            snapshot_args=False,
+        )
 
     def save_ui_state(self, key: str, value):
         self._conn.execute(
@@ -1129,12 +1161,20 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             )
         self._conn.commit()
 
-    def delete_auto_dispatch_queue(self, group_name: str):
+    def _delete_auto_dispatch_queue_sync(self, group_name: str):
         self._conn.execute(
             "DELETE FROM auto_dispatch_queue WHERE group_name=?",
             (group_name,),
         )
         self._conn.commit()
+
+    def delete_auto_dispatch_queue(self, group_name: str):
+        return self.defer_write(
+            "auto_dispatch_queue",
+            "_delete_auto_dispatch_queue_sync",
+            group_name,
+            snapshot_args=False,
+        )
 
     def _rewrite_attachment_refs(self, task_dict: dict,
                                  id_map: dict[str, str]) -> dict:

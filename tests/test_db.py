@@ -2852,6 +2852,50 @@ class LoomDBAsyncWriteTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("agent-1", self.db.load_all()["agents"])
 
+    async def test_delete_board_task_is_ordered_after_deferred_save(self):
+        task = BoardTask(id="LOOM:race", task="Race", group="g")
+        original_save_board_task = LoomDB.save_board_task
+
+        def slow_save_board_task(db_self, saved_task):
+            time.sleep(0.15)
+            return original_save_board_task(db_self, saved_task)
+
+        with mock.patch.object(LoomDB, "save_board_task", slow_save_board_task):
+            self.db.save_board_task_deferred(task)
+            self.db.delete_board_task(task.id)
+            await asyncio.wait_for(self.db.flush_async_writes(), timeout=5.0)
+
+        self.assertFalse(self.db.board_task_exists(task.id))
+
+    async def test_delete_agent_is_ordered_after_deferred_save(self):
+        cell = AgentCell(id="agent-race", name="Agent", group="g")
+        original_save_agent = LoomDB.save_agent
+
+        def slow_save_agent(db_self, saved_cell):
+            time.sleep(0.15)
+            return original_save_agent(db_self, saved_cell)
+
+        with mock.patch.object(LoomDB, "save_agent", slow_save_agent):
+            self.db.save_agent_deferred(cell)
+            self.db.delete_agent(cell.id)
+            await asyncio.wait_for(self.db.flush_async_writes(), timeout=5.0)
+
+        self.assertNotIn(cell.id, self.db.load_all()["agents"])
+
+    async def test_memory_db_deferred_agent_save_falls_back_to_sync(self):
+        db = LoomDB(Path(":memory:"))
+        db.init()
+        db.enable_async_writes(True)
+        try:
+            cell = AgentCell(id="agent-memory", name="Agent", group="g")
+            db.save_agent_deferred(cell)
+            await asyncio.wait_for(db.flush_async_writes(), timeout=5.0)
+
+            self.assertIn(cell.id, db.load_all()["agents"])
+        finally:
+            await db.close_async_writes()
+            db.close()
+
     async def test_async_wrappers_return_saved_rows_after_queue_drain(self):
         task = BoardTask(id="LOOM:1", task="Ship it", group="g")
         await self.db.save_board_task_async(task)

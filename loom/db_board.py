@@ -238,9 +238,20 @@ class BoardPersistenceMixin:
         insert_board_task(self._conn, task)
         self._conn.commit()
 
-    def delete_board_task(self, task_id: str):
+    def _delete_board_task_sync(self, task_id: str):
         self._conn.execute("DELETE FROM board_tasks WHERE id=?", (task_id,))
         self._conn.commit()
+
+    def delete_board_task(self, task_id: str):
+        defer_write = getattr(self, "defer_write", None)
+        if callable(defer_write):
+            return defer_write(
+                "board_tasks",
+                "_delete_board_task_sync",
+                task_id,
+                snapshot_args=False,
+            )
+        return self._delete_board_task_sync(task_id)
 
     def board_task_exists(self, task_id: str) -> bool:
         row = self._conn.execute(
@@ -259,9 +270,20 @@ class BoardPersistenceMixin:
         replace_auto_dispatch_queue(self._conn, group_name, entries)
         self._conn.commit()
 
-    def delete_auto_dispatch_queue(self, group_name: str):
+    def _delete_auto_dispatch_queue_sync(self, group_name: str):
         self._conn.execute(
             "DELETE FROM auto_dispatch_queue WHERE group_name=?",
             (group_name,),
         )
         self._conn.commit()
+
+    def delete_auto_dispatch_queue(self, group_name: str):
+        defer_write = getattr(self, "defer_write", None)
+        if callable(defer_write):
+            return defer_write(
+                "auto_dispatch_queue",
+                "_delete_auto_dispatch_queue_sync",
+                group_name,
+                snapshot_args=False,
+            )
+        return self._delete_auto_dispatch_queue_sync(group_name)
