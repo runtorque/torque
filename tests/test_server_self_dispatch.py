@@ -976,6 +976,164 @@ class ServerSelfDispatchTests(unittest.TestCase):
         self.assertIsNone(allowed)
 
 
+class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        install_aiohttp_stub()
+        install_iterm2_stub()
+        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.reload(self.state_mod)
+        self.server_mod = importlib.import_module("loom.server")
+        self.server_mod = importlib.reload(self.server_mod)
+
+    @staticmethod
+    def _make_cell(value):
+        return (lambda x: lambda: x)(value).__closure__[0]
+
+    def _extract_handle_command(self, state):
+        main_code = self.server_mod.main.__code__
+        handle_code = next(
+            const
+            for const in main_code.co_consts
+            if isinstance(const, type(main_code))
+            and const.co_name == "handle_command"
+        )
+
+        class DummyBridge:
+            async def list_profiles(self):
+                return []
+
+            async def get_launch_context(self):
+                return types.SimpleNamespace(
+                    current_path="",
+                    current_profile="",
+                )
+
+        closure_values = {
+            name: None
+            for name in handle_code.co_freevars
+        }
+        closure_values.update({
+            "_panel_event": lambda *args, **kwargs: None,
+            "_resolve_base_dir": lambda group="": "",
+            "_runtime_payload": lambda: {},
+            "action_mgr": types.SimpleNamespace(
+                list_actions=lambda _base_dir: [],
+            ),
+            "bridge": DummyBridge(),
+            "handle_command": None,
+            "state": state,
+            "template_mgr": types.SimpleNamespace(
+                resolve_agent_config=lambda *args, **kwargs: {},
+                list_templates=lambda *args, **kwargs: [],
+            ),
+        })
+        closure = tuple(
+            self._make_cell(closure_values[name])
+            for name in handle_code.co_freevars
+        )
+        return types.FunctionType(
+            handle_code,
+            self.server_mod.__dict__,
+            "handle_command",
+            None,
+            closure,
+        )
+
+    async def test_board_verify_task_handler_accepts_minimal_payload(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        state.board_add_task("Verify deploy", "g", id="LOOM:160")
+        handle_command = self._extract_handle_command(state)
+
+        result = await handle_command({
+            "cmd": "board_verify_task",
+            "id": "LOOM:160",
+            "actor_name": "engineer-1",
+            "verification_state": "passed",
+        })
+
+        task = state.board_tasks["LOOM:160"]
+        self.assertEqual(
+            result,
+            {
+                "type": "verification_updated",
+                "task_id": "LOOM:160",
+                "message": "Verification updated: state=passed",
+            },
+        )
+        self.assertEqual(task.verification_state, "passed")
+        self.assertEqual(task.verification_updated_by, "engineer-1")
+        self.assertTrue(task.verification_updated_at)
+
+    async def test_board_verify_task_handler_accepts_smoke_and_notes_payload(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        root_task = state.board_add_task(
+            "Release billing changes",
+            "g",
+            id="LOOM:160",
+        )
+        task = state.board_add_task(
+            "Restart billing service",
+            "g",
+            id="LOOM:160:1",
+            pipeline_root_id="LOOM:160",
+        )
+        self.assertIsNotNone(root_task)
+        self.assertIsNotNone(task)
+        handle_command = self._extract_handle_command(state)
+
+        result = await handle_command({
+            "cmd": "board_verify_task",
+            "id": "LOOM:160:1",
+            "actor_name": "engineer-1",
+            "verification_mode": "restart",
+            "verification_notes": "Smoke failed on login redirect",
+            "tests_run": (
+                "python3 -m unittest "
+                "tests.test_server_self_dispatch"
+            ),
+            "human_validation_pending": (
+                "Confirm redirect recovers after restart"
+            ),
+            "deploy_needed": True,
+            "deploy_attempted": True,
+            "smoke_status": "failed",
+        })
+
+        task = state.board_tasks["LOOM:160:1"]
+        root_task = state.board_tasks["LOOM:160"]
+        self.assertEqual(result["type"], "verification_updated")
+        self.assertEqual(result["task_id"], "LOOM:160:1")
+        self.assertIn("state=failed", result["message"])
+        self.assertIn("mode=restart", result["message"])
+        self.assertIn("manual smoke done", result["message"])
+        self.assertEqual(task.verification_mode, "restart")
+        self.assertEqual(task.verification_state, "failed")
+        self.assertEqual(
+            task.verification_notes,
+            "Smoke failed on login redirect",
+        )
+        self.assertEqual(
+            task.verification_summary["tests_run"],
+            "python3 -m unittest tests.test_server_self_dispatch",
+        )
+        self.assertTrue(task.verification_summary["manual_smoke_done"])
+        self.assertTrue(task.verification_summary["deploy_needed"])
+        self.assertTrue(task.verification_summary["deploy_attempted"])
+        self.assertEqual(
+            task.verification_summary["human_validation_pending"],
+            "Confirm redirect recovers after restart",
+        )
+        self.assertEqual(root_task.verification_mode, "restart")
+        self.assertEqual(root_task.verification_state, "failed")
+        self.assertEqual(
+            root_task.verification_notes,
+            "Smoke failed on login redirect",
+        )
+        self.assertTrue(root_task.verification_summary["manual_smoke_done"])
+
+
 class ServerAutoCloseOnDoneTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub()
