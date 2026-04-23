@@ -10,7 +10,7 @@ import unittest
 import warnings
 from pathlib import Path
 
-from loom import event_ingest_daemon
+from loom import event_ingest_daemon, profiling
 from loom.event_ingest_db import EventIngestStore
 from loom.event_ingest_daemon import (
     EventIngestDaemon,
@@ -122,6 +122,42 @@ class EventIngestStoreTests(unittest.TestCase):
                 self.assertEqual(drained["events"][0]["event"], {"survives": True})
             finally:
                 reopened.close()
+
+
+class EventIngestClientCounterTests(unittest.IsolatedAsyncioTestCase):
+    async def test_ack_records_trimmed_rows_counter(self):
+        old_profile_enabled = os.environ.get("LOOM_PROFILE_ENABLED")
+        os.environ["LOOM_PROFILE_ENABLED"] = "1"
+        profiling.reset()
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                store = EventIngestStore(Path(tmp) / "ingest.db", max_rows=2).init()
+                try:
+                    store.append({"n": 1}, "trim-k1")
+                    store.append({"n": 2}, "trim-k2")
+                    store.append({"n": 3}, "trim-k3")
+                    trim_response = store.ack(up_to=3)
+                finally:
+                    store.close()
+
+                client = EventIngestClient(Path(tmp) / "unused.sock")
+
+                async def fake_call(op, **_payload):
+                    self.assertEqual(op, "ack")
+                    return trim_response
+
+                client._call_with_reconnect_retry = fake_call
+                ack = await client.ack(up_to=3)
+
+            self.assertEqual(ack["trimmed"], 1)
+            counters = profiling.recorder().snapshot()["counters"]
+            self.assertEqual(counters.get("events_ingest_ring_trimmed"), 1)
+        finally:
+            if old_profile_enabled is None:
+                os.environ.pop("LOOM_PROFILE_ENABLED", None)
+            else:
+                os.environ["LOOM_PROFILE_ENABLED"] = old_profile_enabled
+            profiling.reset()
 
 
 class EventIngestProtocolTests(unittest.IsolatedAsyncioTestCase):
