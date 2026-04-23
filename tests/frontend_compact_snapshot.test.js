@@ -324,6 +324,200 @@ test('task_detail merge preserves per-task fields the server did not send', () =
   assert.equal(t.lane_entered_at, '2026-04-22T00:00:00+00:00');
 });
 
+test('_compactTaskHasFullDetail only trusts the fully-loaded registry', () => {
+  // Guards against a partially enriched card (e.g. a delta that added one
+  // heavy field) short-circuiting a needed task_detail fetch.
+  const { context, sandbox } = createCompactContext();
+  sandbox.state = {
+    snapshot_protocol: 'compact-v1',
+    board_tasks: {
+      't-partial': {
+        id: 't-partial', task: 'x', lane: 'To Do',
+        action_vars: { foo: 'bar' },  // enriched by a delta, not by task_detail
+      },
+    },
+  };
+  run(context, `_compactInitDeferredMaps()`);
+  assert.equal(
+    run(context, `_compactTaskHasFullDetail(state.board_tasks['t-partial'])`),
+    false);
+
+  // A real task_detail response latches the registry.
+  run(context, `_compactHandleLazyResponse({
+    type: 'task_detail',
+    id: 't-partial',
+    task: { id: 't-partial', description: 'full' }
+  })`);
+  assert.equal(
+    run(context, `_compactTaskHasFullDetail(state.board_tasks['t-partial'])`),
+    true);
+});
+
+/* -- Board duplicate / clone / artifact consumers hydrate first ---------- */
+
+function createBoardConsumerContext() {
+  const { context, sandbox } = createCompactContext({ flag: 'compact-v1' });
+  sandbox.state = {
+    snapshot_protocol: 'compact-v1',
+    board_tasks: {
+      't-compact': {
+        id: 't-compact', task: 'Short card', slug: 'short-card',
+        group: 'alpha', lane: 'To Do', position: 2,
+        action_name: 'feature/implement', labels: ['perf'],
+      },
+    },
+  };
+  run(context, `_compactInitDeferredMaps()`);
+  // Stub out dependencies so we only exercise the hydrate-before-act path.
+  run(context, `
+    _closeCtxMenu = function() {};
+    _boardTasks = function() { return state.board_tasks; };
+    _currentGroup = function() { return 'alpha'; };
+    isSystemLabel = function(l) { return String(l).indexOf('loom:') === 0; };
+    _boardTaskCloneFields = function(task) {
+      return {
+        task: task.task || '',
+        description: task.description || '',
+        group: task.group || 'alpha',
+        action_name: task.action_name || '',
+        action_vars: Object.assign({}, task.action_vars || {}),
+        agent_template: task.agent_template || '',
+        labels: (task.labels || []).filter(function(l) { return !isSystemLabel(l); }),
+      };
+    };
+    _taskOpenModalCalls = [];
+    _taskOpenModal = function(cfg) { _taskOpenModalCalls.push(cfg); };
+  `);
+  return { context, sandbox };
+}
+
+test('boardDuplicateTask hydrates the full task before cloning', () => {
+  const { context, sandbox } = createBoardConsumerContext();
+  const boardSource = fs.readFileSync(
+    path.join(repoRoot, 'static/js/board.js'), 'utf8');
+  // Only load the helpers we need — the full board.js pulls in too many
+  // DOM dependencies. We extract just boardDuplicateTask + boardCloneTask.
+  const duplicateFn = boardSource.match(
+    /function boardDuplicateTask\(taskId\)\s*\{[\s\S]*?\n\}/m)[0];
+  const cloneFn = boardSource.match(
+    /function boardCloneTask\(taskId\)\s*\{[\s\S]*?\n\}/m)[0];
+  vm.runInContext(duplicateFn + '\n' + cloneFn, context);
+
+  run(context, `boardDuplicateTask('t-compact')`);
+  // First call fires task_detail and bails out — no board_add_task yet.
+  assertPlainEqual(
+    sandbox.sendCalls.map(function(c) { return c.cmd; }),
+    ['task_detail']);
+
+  // Server responds with heavy fields; the callback re-enters and
+  // now emits board_add_task carrying the hydrated action_vars/description.
+  run(context, `_compactHandleLazyResponse({
+    type: 'task_detail',
+    id: 't-compact',
+    task: {
+      id: 't-compact', task: 'Short card', group: 'alpha',
+      description: 'details', action_name: 'feature/implement',
+      action_vars: { foo: 'bar' }, agent_template: 'impl',
+      labels: ['perf']
+    }
+  })`);
+  const addTask = sandbox.sendCalls.find(function(c) {
+    return c.cmd === 'board_add_task';
+  });
+  assert.ok(addTask, 'board_add_task should have been sent after hydration');
+  assert.equal(addTask.description, 'details');
+  assert.equal(addTask.action_name, 'feature/implement');
+  assert.equal(addTask.agent_template, 'impl');
+  assertPlainEqual(addTask.action_vars, { foo: 'bar' });
+  assertPlainEqual(addTask.labels, ['perf']);
+});
+
+test('boardCloneTask hydrates before opening the clone modal', () => {
+  const { context, sandbox } = createBoardConsumerContext();
+  const boardSource = fs.readFileSync(
+    path.join(repoRoot, 'static/js/board.js'), 'utf8');
+  const duplicateFn = boardSource.match(
+    /function boardDuplicateTask\(taskId\)\s*\{[\s\S]*?\n\}/m)[0];
+  const cloneFn = boardSource.match(
+    /function boardCloneTask\(taskId\)\s*\{[\s\S]*?\n\}/m)[0];
+  vm.runInContext(duplicateFn + '\n' + cloneFn, context);
+
+  run(context, `boardCloneTask('t-compact')`);
+  assert.equal(run(context, `_taskOpenModalCalls.length`), 0);
+  assertPlainEqual(
+    sandbox.sendCalls.map(function(c) { return c.cmd; }),
+    ['task_detail']);
+
+  run(context, `_compactHandleLazyResponse({
+    type: 'task_detail',
+    id: 't-compact',
+    task: {
+      id: 't-compact', task: 'Short card', group: 'alpha',
+      description: 'details', action_name: 'feature/implement',
+      action_vars: { foo: 'bar' }, agent_template: 'impl',
+      labels: ['perf']
+    }
+  })`);
+  assert.equal(run(context, `_taskOpenModalCalls.length`), 1);
+  const cfg = plain(run(context, `_taskOpenModalCalls[0]`));
+  assert.equal(cfg.description, 'details');
+  assert.equal(cfg.agentTemplate, 'impl');
+  assertPlainEqual(cfg.actionVars, { foo: 'bar' });
+});
+
+test('openTaskArtifactBrowser hydrates when the local card is compact', () => {
+  const { context, sandbox } = createBoardConsumerContext();
+  const calls = { renderArtifact: [], modalVisible: false };
+  // Stub DOM bits and artifact helpers so we can tell whether the render
+  // path was entered with compact vs hydrated data.
+  run(context, `
+    _taskArtifactsCombined = function(task) {
+      return (task.attachments || []).concat(task.artifacts || []);
+    };
+    _renderArtifactCollection = function(list, opts) {
+      return 'artifacts=' + list.length;
+    };
+    document = {
+      _els: {},
+      getElementById: function(id) {
+        if (!this._els[id]) {
+          this._els[id] = { textContent: '', innerHTML: '',
+            classList: { add: function() {} } };
+        }
+        return this._els[id];
+      },
+    };
+  `);
+  const source = fs.readFileSync(
+    path.join(repoRoot, 'static/js/modals/task-artifacts.js'), 'utf8');
+  const fn = source.match(
+    /function openTaskArtifactBrowser\(taskId\)\s*\{[\s\S]*?\n\}/m)[0];
+  vm.runInContext(fn, context);
+
+  run(context, `openTaskArtifactBrowser('t-compact')`);
+  assertPlainEqual(
+    sandbox.sendCalls.map(function(c) { return c.cmd; }),
+    ['task_detail']);
+  // Compact-card render path should not run before the full task arrives.
+  assert.equal(run(context, `
+    (document._els['task-artifacts-modal-content']
+      && document._els['task-artifacts-modal-content'].innerHTML) || ''
+  `), '');
+
+  run(context, `_compactHandleLazyResponse({
+    type: 'task_detail',
+    id: 't-compact',
+    task: {
+      id: 't-compact', task: 'Short card',
+      artifacts: [{ id: 'a1', filename: 'out.log' }]
+    }
+  })`);
+  // Re-entry rendered the hydrated artifacts.
+  assert.equal(
+    run(context, `document._els['task-artifacts-modal-content'].innerHTML`),
+    'artifacts=1');
+});
+
 test('archived_tasks merge layers over local compact summaries without loss', () => {
   const { context, sandbox } = createCompactContext();
   sandbox.state = {

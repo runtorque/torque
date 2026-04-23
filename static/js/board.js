@@ -3061,6 +3061,17 @@ function boardDuplicateTask(taskId) {
   _closeCtxMenu();
   var task = _boardTasks()[taskId];
   if (!task) return;
+  // In compact mode the local task card omits description / action_vars /
+  // agent_template. Hydrate the full BoardTask before cloning so we don't
+  // silently drop those fields on duplicate.
+  if (typeof ensureTaskDetail === 'function'
+      && typeof _compactModeActive === 'function'
+      && _compactModeActive()
+      && typeof _compactTaskHasFullDetail === 'function'
+      && !_compactTaskHasFullDetail(task)) {
+    ensureTaskDetail(taskId, function() { boardDuplicateTask(taskId); });
+    return;
+  }
   var clone = _boardTaskCloneFields(task);
   var msg = {
     cmd: 'board_add_task',
@@ -3079,6 +3090,14 @@ function boardCloneTask(taskId) {
   _closeCtxMenu();
   var task = _boardTasks()[taskId];
   if (!task) return;
+  if (typeof ensureTaskDetail === 'function'
+      && typeof _compactModeActive === 'function'
+      && _compactModeActive()
+      && typeof _compactTaskHasFullDetail === 'function'
+      && !_compactTaskHasFullDetail(task)) {
+    ensureTaskDetail(taskId, function() { boardCloneTask(taskId); });
+    return;
+  }
   var clone = _boardTaskCloneFields(task);
   _taskOpenModal({
     draftScope: 'clone:' + taskId,

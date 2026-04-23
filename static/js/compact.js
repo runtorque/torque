@@ -148,11 +148,12 @@ function lazyLoadWeaverJournal(group, opts) {
 function _compactTaskHasFullDetail(task) {
   if (!task) return false;
   if (_compactTasksFullyLoaded[task.id]) return true;
-  for (var i = 0; i < COMPACT_HEAVY_TASK_FIELDS.length; i++) {
-    if (Object.prototype.hasOwnProperty.call(task, COMPACT_HEAVY_TASK_FIELDS[i])) {
-      return true;
-    }
-  }
+  // A delta might have enriched a single heavy field (e.g. a task_upsert
+  // carrying only action_vars) without actually delivering the rest. Only
+  // the fully-loaded registry — populated by an authoritative task_detail
+  // or archived_tasks merge — may short-circuit a fresh fetch in compact
+  // mode. Falling through means one extra round-trip in the rare
+  // partially-enriched case, but guarantees no consumer sees a stale card.
   return false;
 }
 
