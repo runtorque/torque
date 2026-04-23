@@ -17,6 +17,19 @@ make standalone # Launch daemon in standalone-only mode (no toolbelt)
 After `make deploy`, always restart from: **iTerm2 → Scripts menu → loom**
 For dual mode, also run `make open` to get a browser window alongside the toolbelt.
 
+## Never `make deploy` mid-session
+
+If you are a Loom worker or engineer running **inside the live daemon's Python runtime**, do NOT run `make deploy` (or `make stop`, or `make restart`) against the main daemon's port (18932 by default). `make stop` kills the daemon you are talking to, and the new boot inherits corrupted in-memory dispatch state (PTY subscriptions, pending-prompt queues, iTerm2 session cache).
+
+**Symptom if you ignore this:** every subsequent worker dispatch goes DOA. `codex` workers boot but receive no prompt (0 tokens, 0 worktree diff, 1 boot-event then silence). `claude-code` workers boot but every mutating tool auto-denies. `engineer_agent_message` wakes a DOA worker for one sub-call then it re-sticks. Only a user-initiated full restart recovers — observed class-bug, 6 workers across 2 engineers + 2 providers (perf wave 2026-04-22→23, LOOM:165/:166).
+
+**Enforcement:** the Makefile refuses `make stop` / `make deploy` / `make restart` when `LOOM_CELL_ID` is set OR pwd is under `.loom/worktrees/`. Override with `FORCE=1 make <target>` only when you have a specific reason and accept the runtime-corruption risk.
+
+**Alternatives:**
+- (a) Commit your change to main (engineer_merge or git merge), then ask the user to `make deploy` + restart from their own shell.
+- (b) Test against a separate instance on a different port: `make standalone-bg LOOM_PORT=18933 LOOM_PROFILE=desktop` — doesn't touch 18932.
+- (c) Ship observability-only changes (e.g. `log.warning` at silent-drop sites) that take effect on the next natural restart without requiring mid-session deploy.
+
 ## Architecture
 
 - **Entry point**: `loom.py` — thin wrapper that anchors paths and calls `iterm2.run_forever(main, retry=STANDALONE)`. In standalone mode, `retry=True` waits for iTerm2 and reconnects on restart.

@@ -96,6 +96,8 @@ If you change persisted state or object shape, you usually need to update all of
 - `make cli`: install the `loom` CLI symlink
 - `make test`: run the regression suite
 
+**Never `make deploy` from inside a worker/engineer shell.** The Makefile refuses `stop`/`deploy`/`restart` when `LOOM_CELL_ID` is set or pwd is under `.loom/worktrees/` — killing the daemon you are talking to corrupts the in-memory dispatch state on the next boot and DOA's every subsequent worker. Override with `FORCE=1` only when you accept the risk. Alternative: commit to main and ask the user to deploy, or test on a different port (`LOOM_PORT=18933`). See `CLAUDE.md → "Never make deploy mid-session"` for the full failure-mode notes.
+
 Useful runtime paths:
 
 - log: `~/Library/Application Support/iTerm2/Scripts/loom/loom/loom.log`
