@@ -1,4 +1,5 @@
 import importlib
+from pathlib import Path
 import unittest
 
 try:
@@ -64,7 +65,7 @@ class ReviewGateTests(unittest.IsolatedAsyncioTestCase):
     async def test_gate_fires_above_threshold_and_auto_derives_review(self):
         state, cell, task = self._state_cell_task()
         action_mgr = FakeActionManager(
-            {"review_required_above_loc": 100},
+            {"implementation_depth": True, "review_required_above_loc": 100},
             [{"action": "feature/review"}],
         )
         worktree_mgr = FakeWorktreeManager(
@@ -116,7 +117,7 @@ class ReviewGateTests(unittest.IsolatedAsyncioTestCase):
         cell.worktree_branch = "loom/worker-1"
         task.assigned_engineer_id = engineer.id
         action_mgr = FakeActionManager(
-            {"review_required_above_loc": 100},
+            {"implementation_depth": True, "review_required_above_loc": 100},
             [{"action": "feature/review"}],
         )
         worktree_mgr = FakeWorktreeManager(
@@ -160,7 +161,7 @@ class ReviewGateTests(unittest.IsolatedAsyncioTestCase):
     async def test_gate_skips_below_threshold(self):
         state, cell, task = self._state_cell_task()
         action_mgr = FakeActionManager(
-            {"review_required_above_loc": 100},
+            {"implementation_depth": True, "review_required_above_loc": 100},
             [{"action": "feature/review"}],
         )
         worktree_mgr = FakeWorktreeManager(
@@ -210,9 +211,12 @@ class ReviewGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result)
         self.assertEqual(calls, [])
 
-    async def test_gate_skips_when_no_review_transition_exists(self):
+    async def test_gate_fires_without_declared_review_transition(self):
         state, cell, task = self._state_cell_task(action_name="oneshot/fix")
-        action_mgr = FakeActionManager({"review_required_above_loc": 100}, [])
+        action_mgr = FakeActionManager(
+            {"implementation_depth": True, "review_required_above_loc": 100},
+            [],
+        )
         worktree_mgr = FakeWorktreeManager(
             {"files": 1, "insertions": 200, "deletions": 0},
         )
@@ -230,6 +234,103 @@ class ReviewGateTests(unittest.IsolatedAsyncioTestCase):
             lambda *args, **kwargs: None,
             cell=cell,
             task=task,
+        )
+
+        self.assertEqual(result["type"], "error")
+        self.assertEqual(calls[0]["action"], "derive")
+        self.assertEqual(calls[0]["action_name"], "feature/review")
+        self.assertTrue(calls[0]["_review_gate"])
+
+    async def test_gate_skips_when_implementation_depth_false(self):
+        state, cell, task = self._state_cell_task(action_name="feature/research")
+        action_mgr = FakeActionManager(
+            {
+                "implementation_depth": False,
+                "review_required_above_loc": 100,
+            },
+            [{"action": "feature/review"}],
+        )
+        worktree_mgr = FakeWorktreeManager(
+            {"files": 1, "insertions": 200, "deletions": 0},
+        )
+        calls = []
+
+        async def handle_command(payload):
+            calls.append(payload)
+            return {"type": "ok"}
+
+        result = await self.server_mod._maybe_apply_review_required_gate(
+            state,
+            action_mgr,
+            worktree_mgr,
+            handle_command,
+            lambda *args, **kwargs: None,
+            cell=cell,
+            task=task,
+        )
+
+        self.assertIsNone(result)
+        self.assertEqual(calls, [])
+
+    async def test_project_implementation_depth_actions_gate_by_default(self):
+        action_mgr = importlib.import_module("loom.actions").ActionManager()
+        repo_root = str(Path(__file__).resolve().parents[1])
+
+        for action_name in (
+            "oneshot/fix",
+            "oneshot/improvement",
+            "oneshot/feature",
+            "feature/implement",
+        ):
+            with self.subTest(action_name=action_name):
+                state, cell, task = self._state_cell_task(
+                    action_name=action_name,
+                )
+                worktree_mgr = FakeWorktreeManager(
+                    {"files": 1, "insertions": 151, "deletions": 0},
+                )
+                calls = []
+
+                async def handle_command(payload):
+                    calls.append(payload)
+                    return {"type": "ok", "task_id": "task-review"}
+
+                result = await self.server_mod._maybe_apply_review_required_gate(
+                    state,
+                    action_mgr,
+                    worktree_mgr,
+                    handle_command,
+                    lambda *args, **kwargs: None,
+                    cell=cell,
+                    task=task,
+                    base_dir=repo_root,
+                )
+
+                self.assertEqual(result["type"], "error")
+                self.assertEqual(calls[0]["action_name"], "feature/review")
+
+    async def test_project_research_action_does_not_gate(self):
+        action_mgr = importlib.import_module("loom.actions").ActionManager()
+        repo_root = str(Path(__file__).resolve().parents[1])
+        state, cell, task = self._state_cell_task(action_name="feature/research")
+        worktree_mgr = FakeWorktreeManager(
+            {"files": 1, "insertions": 500, "deletions": 0},
+        )
+        calls = []
+
+        async def handle_command(payload):
+            calls.append(payload)
+            return {"type": "ok", "task_id": "task-review"}
+
+        result = await self.server_mod._maybe_apply_review_required_gate(
+            state,
+            action_mgr,
+            worktree_mgr,
+            handle_command,
+            lambda *args, **kwargs: None,
+            cell=cell,
+            task=task,
+            base_dir=repo_root,
         )
 
         self.assertIsNone(result)
@@ -253,7 +354,7 @@ class ReviewGateTests(unittest.IsolatedAsyncioTestCase):
             "agent_name": "Reviewer",
         })
         action_mgr = FakeActionManager(
-            {"review_required_above_loc": 100},
+            {"implementation_depth": True, "review_required_above_loc": 100},
             [{"action": "feature/review"}],
         )
         worktree_mgr = FakeWorktreeManager(
@@ -281,7 +382,7 @@ class ReviewGateTests(unittest.IsolatedAsyncioTestCase):
     async def test_force_skip_review_bypasses_gate_and_records_audit(self):
         state, cell, task = self._state_cell_task()
         action_mgr = FakeActionManager(
-            {"review_required_above_loc": 100},
+            {"implementation_depth": True, "review_required_above_loc": 100},
             [{"action": "feature/review"}],
         )
         worktree_mgr = FakeWorktreeManager(

@@ -88,6 +88,15 @@ class ServerModuleExtractionTests(unittest.TestCase):
 
         self.assertIn('review_required_above_loc: 100', yaml_text)
 
+    def test_action_to_yaml_round_trips_implementation_depth(self):
+        yaml_text = self.server_actions._action_to_yaml('oneshot/feature', {
+            'description': 'Implement feature',
+            'implementation_depth': True,
+            'prompt': '{{ TASK }}\n',
+        })
+
+        self.assertIn('implementation_depth: true', yaml_text)
+
     def test_dispatch_queue_helper_respects_self_dispatch(self):
         active = self.state_mod.BoardTask(
             id='task-1',

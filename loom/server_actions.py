@@ -12,8 +12,8 @@ class _BlockStr(str):
 _ACTION_KEY_ORDER = [
     "name", "description", "agent", "group", "worktree",
     "auto_close_on_done", "disable_role_preamble",
-    "review_required_above_loc", "prompt", "labels", "transitions",
-    "terminals",
+    "implementation_depth", "review_required_above_loc", "prompt",
+    "labels", "transitions", "terminals",
 ]
 
 
@@ -56,6 +56,8 @@ def _action_to_yaml(name: str, data: dict) -> str:
         doc["auto_close_on_done"] = True
     if data.get("disable_role_preamble"):
         doc["disable_role_preamble"] = True
+    if data.get("implementation_depth"):
+        doc["implementation_depth"] = True
     if data.get("review_required_above_loc") is not None:
         try:
             doc["review_required_above_loc"] = int(

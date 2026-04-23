@@ -1700,6 +1700,8 @@ test('actions editor save payload preserves auto_close_on_done', () => {
   document.register('tpled-group').value = '';
   document.register('tpled-worktree').checked = false;
   document.register('tpled-auto-close-on-done').checked = true;
+  document.register('tpled-implementation-depth').checked = true;
+  document.register('tpled-review-required-above-loc').value = '125';
   document.register('tpled-disable-role-preamble').checked = true;
   document.register('tpled-prompt').value = '{{ TASK }}';
   document.register('tpled-labels').value = 'review';
@@ -1719,6 +1721,14 @@ test('actions editor save payload preserves auto_close_on_done', () => {
   assert.equal(
     jsonValue(context, 'sendCalls[0].action.disable_role_preamble'),
     true,
+  );
+  assert.equal(
+    jsonValue(context, 'sendCalls[0].action.implementation_depth'),
+    true,
+  );
+  assert.equal(
+    jsonValue(context, 'sendCalls[0].action.review_required_above_loc'),
+    125,
   );
   assert.deepEqual(jsonValue(context, 'sendCalls[0].action.transitions'), []);
 });

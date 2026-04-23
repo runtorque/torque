@@ -8,6 +8,7 @@ agent:
 labels:
   - bugfix
 
+implementation_depth: true
 review_required_above_loc: 150
 
 transitions:

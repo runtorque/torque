@@ -243,12 +243,15 @@ function renderTemplatesEditor() {
   html += '</details>';
 
   // Settings
-  html += '<details class="tpled-section"' + (d.group || d.worktree || d.auto_close_on_done ? ' open' : '') + '>';
+  html += '<details class="tpled-section"' + (d.group || d.worktree || d.auto_close_on_done || d.implementation_depth || d.review_required_above_loc != null ? ' open' : '') + '>';
   html += '<summary>Settings</summary>';
   html += '<label>Group</label>';
   html += '<input id="tpled-group" value="' + esc(d.group || '') + '" placeholder="Override target group" autocomplete="off" onchange="tplEditorMarkDirty()">';
   html += '<label class="gs-checkbox"><input id="tpled-worktree" type="checkbox"' + (d.worktree ? ' checked' : '') + ' onchange="tplEditorMarkDirty()"> Git worktree per agent</label>';
   html += '<label class="gs-checkbox"><input id="tpled-auto-close-on-done" type="checkbox"' + (d.auto_close_on_done ? ' checked' : '') + ' onchange="tplEditorMarkDirty()"> Auto-close agent after root task is done</label>';
+  html += '<label class="gs-checkbox"><input id="tpled-implementation-depth" type="checkbox"' + (d.implementation_depth ? ' checked' : '') + ' onchange="tplEditorMarkDirty()"> Implementation-depth action (code-mutating; review gate eligible)</label>';
+  html += '<label>Review gate LOC threshold</label>';
+  html += '<input id="tpled-review-required-above-loc" type="number" min="0" value="' + (d.review_required_above_loc != null ? esc(String(d.review_required_above_loc)) : '') + '" placeholder="Default 150 for implementation-depth actions" autocomplete="off" onchange="tplEditorMarkDirty()">';
   html += '</details>';
 
   // Prompt field (coalesce old format on load)
@@ -604,6 +607,7 @@ function _tplEditorSaveInner() {
 
   var transitions = _tplReadTransitions();
   var agentTemplate = (document.getElementById('tpled-agent-template').value || '').trim();
+  var reviewGateLocRaw = (document.getElementById('tpled-review-required-above-loc').value || '').trim();
   var legacyAgent = {
     name_prefix: (document.getElementById('tpled-agent-prefix').value || '').trim(),
     tab_color: (document.getElementById('tpled-agent-color').value || '').trim(),
@@ -617,10 +621,21 @@ function _tplEditorSaveInner() {
     worktree: document.getElementById('tpled-worktree').checked,
     auto_close_on_done: document.getElementById('tpled-auto-close-on-done').checked,
     disable_role_preamble: document.getElementById('tpled-disable-role-preamble').checked,
+    implementation_depth: document.getElementById('tpled-implementation-depth').checked,
     prompt: prompt,
     labels: labels,
     transitions: transitions,
   };
+  if (reviewGateLocRaw !== '') {
+    var reviewGateLoc = parseInt(reviewGateLocRaw, 10);
+    if (isNaN(reviewGateLoc) || reviewGateLoc < 0) {
+      var reviewGateEl = document.getElementById('tpled-review-required-above-loc');
+      if (reviewGateEl) { reviewGateEl.focus(); reviewGateEl.classList.add('input-error'); }
+      _showToast('Review gate LOC threshold must be a non-negative number', 'error');
+      return;
+    }
+    actData.review_required_above_loc = reviewGateLoc;
+  }
   if (agentTemplate) {
     actData.agent = agentTemplate;
   } else if (legacyAgent.name_prefix || legacyAgent.tab_color
@@ -675,6 +690,9 @@ function tplEditorDuplicate() {
 
 function _tplEditorReadForm() {
   var labelsRaw = (document.getElementById('tpled-labels').value || '').trim();
+  var reviewGateLocRaw = (document.getElementById('tpled-review-required-above-loc').value || '').trim();
+  var reviewGateLoc = reviewGateLocRaw !== '' ? parseInt(reviewGateLocRaw, 10) : null;
+  if (isNaN(reviewGateLoc)) reviewGateLoc = null;
   return {
     name: (document.getElementById('tpled-name').value || '').trim(),
     description: (document.getElementById('tpled-desc').value || '').trim(),
@@ -688,6 +706,8 @@ function _tplEditorReadForm() {
     worktree: document.getElementById('tpled-worktree').checked,
     auto_close_on_done: document.getElementById('tpled-auto-close-on-done').checked,
     disable_role_preamble: document.getElementById('tpled-disable-role-preamble').checked,
+    implementation_depth: document.getElementById('tpled-implementation-depth').checked,
+    review_required_above_loc: reviewGateLoc,
     prompt: document.getElementById('tpled-prompt').value || '',
     labels: labelsRaw ? labelsRaw.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [],
     transitions: _tplReadTransitions(),

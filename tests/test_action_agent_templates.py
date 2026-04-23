@@ -30,3 +30,12 @@ prompt: |
         self.assertEqual(rendered["command"], "codex")
         self.assertEqual(rendered["directory"], "/repo")
 
+    def test_render_action_passes_through_implementation_depth(self):
+        raw = """
+name: oneshot/feature
+implementation_depth: true
+prompt: |
+  {{ TASK }}
+"""
+        rendered = ActionManager().render_action(raw, {"TASK": "Ship feature"})
+        self.assertTrue(rendered["implementation_depth"])

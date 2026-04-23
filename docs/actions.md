@@ -109,6 +109,8 @@ prompt: |
 | **agent.env_vars** | object | no | Legacy inline field. Environment variables to set (deprecated). |
 | **worktree** | boolean | no | If `true`, create an isolated git worktree for the agent. |
 | **auto_close_on_done** | boolean | no | If `true`, Loom may auto-close the agent after `loom_done(...)`, but only when the pipeline root task is done and no queued or reply follow-up work remains. |
+| **implementation_depth** | boolean | no | Marks the action as code-mutating implementation work. When true, direct completion is eligible for the LOC review gate. |
+| **review_required_above_loc** | integer | no | Non-test LOC threshold for auto-deriving `feature/review` on implementation-depth actions. Defaults to 150 when `implementation_depth` is true. |
 | **labels** | list | no | Labels applied to the task on the board. |
 | **transitions** | list | no | Valid next actions for pipeline chaining (see [Pipelines](#pipelines)). |
 | **max_depth** | integer | no | Override the global `max_pipeline_depth` for this action. |

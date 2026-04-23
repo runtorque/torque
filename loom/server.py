@@ -69,7 +69,11 @@ from .worktree_boundaries import (
     started_successor_tasks,
     task_boundary,
 )
-from .actions import ActionManager, LOOM_CONTEXT_STUB
+from .actions import (
+    ActionManager,
+    DEFAULT_REVIEW_REQUIRED_ABOVE_LOC,
+    LOOM_CONTEXT_STUB,
+)
 from .artifacts import (
     normalize_artifacts,
     task_artifacts,
@@ -1090,26 +1094,39 @@ def _review_task_has_ship_verdict(task) -> bool:
 _REVIEW_GATE_ACTION = "feature/review"
 
 
+def _coerce_action_bool(value) -> bool:
+    """Return a conservative boolean for action YAML metadata."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return False
+
+
+def _action_is_implementation_depth(act: dict | None) -> bool:
+    """Return whether an action represents code-mutating implementation work."""
+    if not isinstance(act, dict):
+        return False
+    if "implementation_depth" in act:
+        return _coerce_action_bool(act.get("implementation_depth"))
+    # Backward compatibility: pre-field actions that already opted into the
+    # LOC review gate should keep their existing behavior until edited.
+    return "review_required_above_loc" in act
+
+
 def _review_gate_threshold_from_action(act: dict | None) -> int | None:
-    """Return an action's review-required LOC threshold, if configured."""
-    if not isinstance(act, dict) or "review_required_above_loc" not in act:
+    """Return an implementation action's review-required LOC threshold."""
+    if not _action_is_implementation_depth(act):
         return None
+    if "review_required_above_loc" not in act:
+        return DEFAULT_REVIEW_REQUIRED_ABOVE_LOC
     try:
         threshold = int(act.get("review_required_above_loc"))
     except (TypeError, ValueError):
         return None
     return threshold if threshold >= 0 else None
-
-
-def _has_review_gate_transition(transitions: list) -> bool:
-    """Return whether an action can transition to the review gate action."""
-    for transition in transitions or []:
-        if not isinstance(transition, dict):
-            continue
-        action_name = str(transition.get("action", "") or "").strip()
-        if action_name == _REVIEW_GATE_ACTION:
-            return True
-    return False
 
 
 def _chain_has_shipped_review(state: MatrixState, task) -> bool:
@@ -1183,10 +1200,6 @@ async def _maybe_apply_review_required_gate(
     act = action_mgr.load_action(task.action_name, base_dir)
     threshold = _review_gate_threshold_from_action(act)
     if threshold is None:
-        return None
-
-    transitions = action_mgr.get_transitions(task.action_name, base_dir)
-    if not _has_review_gate_transition(transitions):
         return None
 
     if _chain_has_shipped_review(state, task):
@@ -1273,6 +1286,7 @@ async def _maybe_apply_review_required_gate(
         "action_name": _REVIEW_GATE_ACTION,
         "message": title,
         "description": context,
+        "_review_gate": True,
     })
     if derive_result and derive_result.get("type") == "error":
         return {
@@ -9068,6 +9082,9 @@ async def main(connection=None):
                         derive_group = data.get("group", "")
                         reuse_self = data.get("reuse_self", False)
                         target_agent = data.get("target_agent", "")
+                        is_auto_review_gate = bool(
+                            data.get("_review_gate")
+                        ) and act_name == _REVIEW_GATE_ACTION
 
                         if not task:
                             result = {"type": "error",
@@ -9091,7 +9108,8 @@ async def main(connection=None):
                                 if isinstance(t, dict)
                                 and t.get("action")]
                             if cur_transitions and act_name \
-                                    and act_name not in valid_targets:
+                                    and act_name not in valid_targets \
+                                    and not is_auto_review_gate:
                                 result = {
                                     "type": "error",
                                     "message":
@@ -9141,6 +9159,9 @@ async def main(connection=None):
                                                 derive_status = tr.get(
                                                     "status", "")
                                                 break
+                                    if (not derive_status
+                                            and is_auto_review_gate):
+                                        derive_status = "On Review"
                                     if not derive_status and act_name:
                                         derive_status = act_name
                                     # Update parent task status
@@ -9300,7 +9321,8 @@ async def main(connection=None):
                                                     target_agent = \
                                                         a.slug or a.name
                                         elif tr_target == "" \
-                                                and cur_transitions:
+                                                and cur_transitions \
+                                                and not is_auto_review_gate:
                                             # No explicit target declared.
                                             # Reuse an ancestor thread only
                                             # when this derive is clearly

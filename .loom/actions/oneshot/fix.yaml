@@ -5,6 +5,7 @@ agent:
   name_prefix: fix
   tab_color: "#f85149"
 
+implementation_depth: true
 review_required_above_loc: 150
 
 transitions:

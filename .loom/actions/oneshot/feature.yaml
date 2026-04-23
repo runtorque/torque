@@ -5,6 +5,8 @@ agent:
   name_prefix: feat
   tab_color: "#3fb950"
 
+implementation_depth: true
+
 prompt: |
   {% if loom.context.is_clean %}
   You are implementing a feature. This is a quick, focused change — no review pipeline. Get it done cleanly in one pass.

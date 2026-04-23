@@ -8,6 +8,8 @@ agent:
 labels:
   - feature
 
+implementation_depth: true
+
 prompt: |
   You are implementing a feature. This is a quick, focused change — no review pipeline. Get it done cleanly in one pass.
 
