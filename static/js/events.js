@@ -224,17 +224,22 @@ function _eventsGetAttentionItems() {
     if (t.lane === 'Done') continue;
     if (grp && t.group !== grp) continue;
     var parent = _eventsAskParentTask(t);
-    var agent = _eventsAskAgent(t);
+    var isArchitectAsk = t.labels.indexOf('architect-ask') >= 0;
+    var architectId = t.reply_agent_id || t.created_by_architect_id || '';
+    var agent = isArchitectAsk && state && state.agents
+      ? (state.agents[architectId] || null)
+      : _eventsAskAgent(t);
     items.push({
       type: 'ask',
       id: t.id,
+      is_architect_ask: isArchitectAsk,
       agent_name: agent ? (agent.name || '') : '',
       agent_slug: agent ? (agent.slug || '') : '',
       group: t.group,
       message: t.task || '',
       description: t.description || '',
       timestamp: t.created_at ? new Date(t.created_at).getTime() / 1000 : 0,
-      parent_agent_id: parent ? (parent.agent_id || '') : '',
+      parent_agent_id: isArchitectAsk ? architectId : (parent ? (parent.agent_id || '') : ''),
       parent_task_title: parent ? (parent.task || '') : '',
       parent_task_description: parent ? (parent.description || '') : '',
     });
@@ -285,6 +290,7 @@ function _eventsAttentionSignature(items) {
       item.id || '',
       item.timestamp || 0,
       item.agent_name || '',
+      item.is_architect_ask ? 'architect' : '',
       item.message || '',
       item.description || '',
       item.parent_task_title || '',
@@ -745,7 +751,8 @@ function _renderAttentionCard(item) {
 
   if (item.type === 'ask') {
     var draft = _eventsResolveDrafts[item.id] || '';
-    html += '<div class="events-attention-label">&#x2753; Question</div>';
+    var askLabel = item.is_architect_ask ? 'Architect asks' : 'Question';
+    html += '<div class="events-attention-label">&#x2753; ' + esc(askLabel) + '</div>';
     if (item.agent_name) {
       html += '<div class="events-attention-agent"><strong>' + esc(item.agent_name) + '</strong>';
       if (item.agent_slug) {

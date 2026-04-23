@@ -156,6 +156,29 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
+        "name": "architect_ask",
+        "description": (
+            "Ask the user a blocking product/scope question. Creates a "
+            "visible Backlog task labeled as a human architect ask with "
+            "status 'Awaiting Input'; the user's reply is delivered to "
+            "the architect inbox."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": "The question the architect is asking the user.",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Longer context, decision options, or constraints.",
+                },
+            },
+            "required": ["question"],
+        },
+    },
+    {
         "name": "architect_engineer_list",
         "description": (
             "List engineers visible to this architect, marking each as hired "

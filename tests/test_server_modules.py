@@ -1553,6 +1553,81 @@ class ServerWeaverMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.board_tasks[second.id].lane, 'Backlog')
         self.assertTrue(worker.pending_weaver_message)
 
+    async def test_resolve_architect_ask_delivers_user_reply_to_architect_inbox(self):
+        state = self._make_state()
+        architect = self.state_mod.AgentCell(
+            id='arch-1',
+            name='Architect',
+            group='g',
+            cell_type='agent',
+            kind='architect',
+            session_id='session-arch',
+            status='idle',
+        )
+        state.agents[architect.id] = architect
+        state.groups['g'].append(architect.id)
+        ask = state.board_add_task(
+            'Should we defer reporting?',
+            'g',
+            lane='Backlog',
+            id='ask-1',
+            description='Option A: defer. Option B: delay launch.',
+            labels=['loom:human', 'architect-ask'],
+            status='Awaiting Input',
+            reply_agent_id=architect.id,
+            created_by_architect_id=architect.id,
+        )
+        sent = []
+        primed = []
+        events = []
+
+        class FakeBridge:
+            def prime_input_ready(self, session_id):
+                primed.append(session_id)
+
+            async def send_text(self, session_id, text):
+                sent.append((session_id, text))
+
+        def panel_event(kind, cell_id, agent_name, group, message, task_id=''):
+            events.append((kind, cell_id, agent_name, group, message, task_id))
+
+        result = await self.server_mod._resolve_architect_ask_task(
+            state,
+            FakeBridge(),
+            ask,
+            'Defer reporting and launch the smaller scope.',
+            panel_event=panel_event,
+        )
+
+        self.assertEqual(result['type'], 'ok')
+        self.assertEqual(result['task_id'], ask.id)
+        self.assertEqual(result['architect_id'], architect.id)
+        self.assertEqual(state.board_tasks[ask.id].lane, 'Done')
+        self.assertEqual(state.board_tasks[ask.id].status, '')
+        self.assertEqual(
+            state.board_tasks[ask.id].messages[-1]['action'],
+            'architect_ask_reply',
+        )
+        self.assertEqual(primed, ['session-arch'])
+        self.assertEqual(sent[0][0], 'session-arch')
+        self.assertIn('User reply to architect ask', sent[0][1])
+        self.assertIn('Should we defer reporting?', sent[0][1])
+        self.assertIn('Defer reporting', sent[0][1])
+        inbox = architect.mcp_messages[0]
+        self.assertEqual(inbox['action'], 'architect_ask_reply')
+        self.assertEqual(inbox['direction'], 'received')
+        self.assertEqual(inbox['peer_kind'], 'human')
+        self.assertEqual(inbox['peer_name'], 'User')
+        self.assertEqual(inbox['task_id'], ask.id)
+        self.assertTrue(inbox['delivered'])
+        self.assertFalse(inbox['buffered'])
+        self.assertIn('Defer reporting', inbox['message'])
+        self.assertEqual(
+            events,
+            [('ask_resolved', architect.id, architect.name, architect.group,
+              'Resolved: Should we defer reporting?', ask.id)],
+        )
+
 
 class ServerWorktreeMergeDiffTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
