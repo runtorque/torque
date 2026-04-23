@@ -1017,12 +1017,19 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self._conn.commit()
 
     def delete_group(self, name: str):
-        return self.defer_write(
+        result = self.defer_write(
             "groups",
             "_delete_group_sync",
             name,
             snapshot_args=False,
         )
+        self.defer_write(
+            "group_settings",
+            "_delete_group_settings_sync",
+            name,
+            snapshot_args=False,
+        )
+        return result
 
     def save_groups(self, groups: dict, slugs: dict = None):
         """Bulk-save all groups with positions and slugs."""

@@ -2882,6 +2882,32 @@ class LoomDBAsyncWriteTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertNotIn(cell.id, self.db.load_all()["agents"])
 
+    async def test_delete_group_clears_queued_group_settings_save(self):
+        self.db.save_group("stale", 0)
+        original_save_group_settings = LoomDB.save_group_settings
+
+        def slow_save_group_settings(db_self, group_name, settings):
+            time.sleep(0.15)
+            return original_save_group_settings(db_self, group_name, settings)
+
+        with mock.patch.object(
+            LoomDB,
+            "save_group_settings",
+            slow_save_group_settings,
+        ):
+            self.db.defer_write(
+                "group_settings",
+                "save_group_settings",
+                "stale",
+                GroupSettings(notifications=True),
+            )
+            self.db.delete_group("stale")
+            await asyncio.wait_for(self.db.flush_async_writes(), timeout=5.0)
+
+        loaded = self.db.load_all()
+        self.assertNotIn("stale", loaded["groups"])
+        self.assertNotIn("stale", loaded["group_settings"])
+
     async def test_memory_db_deferred_agent_save_falls_back_to_sync(self):
         db = LoomDB(Path(":memory:"))
         db.init()
