@@ -66,6 +66,19 @@ class FakeSession:
         return None
 
 
+class WarmupSession(FakeSession):
+    def __init__(self, session_id):
+        super().__init__(session_id)
+        self.ready = False
+        self.premature = []
+
+    async def async_send_text(self, text):
+        if not self.ready:
+            self.premature.append(text)
+            return
+        await super().async_send_text(text)
+
+
 class FakePrevTab:
     def __init__(self):
         self.select_calls = 0
@@ -94,6 +107,14 @@ class FakeWindow:
     async def async_create_tab(self, profile=None):
         self.created_profiles.append(profile)
         tab = FakeTab(FakeSession(f"session-{self.window_id}"))
+        self.tabs.append(tab)
+        return tab
+
+
+class WarmupWindow(FakeWindow):
+    async def async_create_tab(self, profile=None):
+        self.created_profiles.append(profile)
+        tab = FakeTab(WarmupSession(f"session-{self.window_id}"))
         self.tabs.append(tab)
         return tab
 
@@ -303,3 +324,45 @@ class CreateSessionWindowTargetTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(source_tab.select_calls, 1)
         self.assertEqual(focused_tab.select_calls, 0)
+
+    async def test_create_session_waits_for_fresh_tab_before_startup_writes(self):
+        focused = WarmupWindow("focused-window")
+        bridge, _state = await self._make_bridge(FakeApp(focused, [focused]))
+
+        real_sleep = self.bridge_mod.asyncio.sleep
+
+        async def fake_sleep(delay):
+            del delay
+            for tab in focused.tabs:
+                session = getattr(tab, "current_session", None)
+                if hasattr(session, "ready"):
+                    session.ready = True
+
+        self.bridge_mod.asyncio.sleep = fake_sleep
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                child = self.state_mod.AgentCell(
+                    id="child",
+                    name="child",
+                    group="g",
+                    cell_type="agent",
+                    profile="Default",
+                    command="codex",
+                    directory=tmpdir,
+                )
+
+                await bridge.create_session(child)
+                expected_cd = f"cd {tmpdir}\n"
+        finally:
+            self.bridge_mod.asyncio.sleep = real_sleep
+
+        session = focused.tabs[0].current_session
+        self.assertEqual(session.premature, [])
+        self.assertEqual(
+            session.sent,
+            [
+                expected_cd,
+                "export LOOM_CELL_ID=child\n",
+                "codex\n",
+            ],
+        )
