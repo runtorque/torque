@@ -31,9 +31,26 @@ or send a WebSocket connect/resync payload with the protocol flag:
 ```
 
 Query opt-in is preferred because it applies to the first snapshot frame.
-A client that sends none of the above still receives the legacy full shape,
-which is how rollback works: clear the flag from localStorage, reload, and
-the client drops back onto the legacy snapshot.
+
+### Rollback to the legacy snapshot
+
+The official frontend opts in to compact-v1 whenever
+`localStorage["loom:snapshot_protocol"]` is unset or holds any non-opt-out
+value, so **clearing the key does not roll back** — it leaves the client
+on compact. To drop a browser session back onto the legacy full snapshot,
+explicitly store one of the opt-out sentinels before reloading:
+
+```js
+// In devtools, on the Loom origin:
+localStorage.setItem('loom:snapshot_protocol', 'legacy');
+// then reload the page
+```
+
+`legacy`, `off`, `0`, and `false` all count as opt-out sentinels. The
+backend still honours any client that omits both the `?compact=1` query
+and the `protocol_version`/`compact` payload flags, so a pinned external
+consumer can keep the legacy shape by simply not sending any of the
+opt-in signals listed above.
 
 ## Initial `state` snapshot
 
