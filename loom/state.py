@@ -4244,6 +4244,7 @@ class MatrixState:
             return []
 
         changed: list[str] = []
+        self._cascade_review_handoff_completions(task, changed)
         pid = task.parent_task_id
         while pid:
             parent = self.board_tasks.get(pid)
@@ -4267,6 +4268,7 @@ class MatrixState:
                 clear_attention=True,
             )
             changed.append(parent.id)
+            self._cascade_review_handoff_completions(parent, changed)
             pid = next_pid
 
         if changed and recompute:
@@ -4441,6 +4443,108 @@ class MatrixState:
         chain.sort(key=lambda t: (t.pipeline_depth, t.created_at))
         return chain
 
+    @staticmethod
+    def _task_action_name(task: Optional[BoardTask]) -> str:
+        return str(getattr(task, "action_name", "") or "").strip().lower()
+
+    def _is_review_handoff_source(self, task: Optional[BoardTask]) -> bool:
+        return self._task_action_name(task) == "feature/review"
+
+    def _is_review_handoff_followup(self, review: Optional[BoardTask],
+                                    task: Optional[BoardTask]) -> bool:
+        """Return whether ``task`` is the implementation follow-up for review.
+
+        LOOM:88 review-derived fixes are structurally parented to the reviewed
+        implementation task (the review's parent) so dispatch inherits the
+        implementer's worktree instead of the reviewer's branch.  They still
+        behave like logical handoff descendants of the review for execution
+        slots and completion cascades.
+        """
+        if not review or not task or review.id == task.id:
+            return False
+        if not self._is_review_handoff_source(review):
+            return False
+        if self._task_action_name(task) not in {
+            "feature/implement",
+            "feature/fix-review",
+        }:
+            return False
+        review_parent_id = str(
+            getattr(review, "parent_task_id", "") or ""
+        ).strip()
+        if not review_parent_id:
+            return False
+        task_parent_id = str(
+            getattr(task, "parent_task_id", "") or ""
+        ).strip()
+        if task_parent_id != review_parent_id:
+            return False
+        review_root_id = str(
+            getattr(review, "pipeline_root_id", "") or review.id
+        ).strip()
+        task_root_id = str(
+            getattr(task, "pipeline_root_id", "") or task.id
+        ).strip()
+        if review_root_id != task_root_id:
+            return False
+        if int(getattr(task, "pipeline_depth", 0) or 0) <= int(
+                getattr(review, "pipeline_depth", 0) or 0):
+            return False
+        review_created = str(getattr(review, "created_at", "") or "")
+        task_created = str(getattr(task, "created_at", "") or "")
+        if review_created and task_created and task_created < review_created:
+            return False
+        return True
+
+    def review_handoff_followups(self, review_id: str) -> list[BoardTask]:
+        review_id = self.resolve_task_alias(review_id)
+        review = self.board_tasks.get(review_id)
+        if not self._is_review_handoff_source(review):
+            return []
+        followups = [
+            task for task in self.board_tasks.values()
+            if self._is_review_handoff_followup(review, task)
+        ]
+        followups.sort(key=lambda t: (t.pipeline_depth, t.created_at, t.id))
+        return followups
+
+    def _review_handoff_reviews_for_followup(
+            self, task: Optional[BoardTask]) -> list[BoardTask]:
+        if not task:
+            return []
+        reviews = [
+            review for review in self.board_tasks.values()
+            if self._is_review_handoff_followup(review, task)
+        ]
+        reviews.sort(key=lambda t: (t.pipeline_depth, t.created_at, t.id))
+        return reviews
+
+    def _cascade_review_handoff_completions(
+            self, task: Optional[BoardTask],
+            changed: list[str]) -> None:
+        """Complete review tasks whose sibling fix handoff is fully resolved."""
+        if not task or not task_counts_as_done(task):
+            return
+        if self.task_has_unresolved_descendants(task.id):
+            return
+        for review in self._review_handoff_reviews_for_followup(task):
+            if task_suppresses_done_cascade(review):
+                continue
+            if board_task_is_closed(review):
+                continue
+            if self.task_has_unresolved_descendants(review.id):
+                continue
+            review.status = ""
+            self._board_apply_archive_state(
+                review,
+                lane="Done",
+                archived_at="",
+                archived_from_lane="",
+                clear_attention=True,
+            )
+            if review.id not in changed:
+                changed.append(review.id)
+
     def task_open_descendants(self, task_id: str) -> list[BoardTask]:
         """Return all unresolved descendants for ``task_id``."""
         task_id = self.resolve_task_alias(task_id)
@@ -4448,9 +4552,16 @@ class MatrixState:
             return []
         descendants = []
         stack = self.board_get_children(task_id)
+        stack.extend(self.review_handoff_followups(task_id))
+        seen = set()
         while stack:
             current = stack.pop()
+            if current.id in seen:
+                continue
+            seen.add(current.id)
             stack.extend(self.board_get_children(current.id))
+            if self._is_review_handoff_source(current):
+                stack.extend(self.review_handoff_followups(current.id))
             if task_counts_as_done(current):
                 continue
             descendants.append(current)

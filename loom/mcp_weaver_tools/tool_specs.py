@@ -1045,6 +1045,15 @@ WEAVER_TOOLS = [
                         "desired."
                     ),
                 },
+                "force": {
+                    "type": "boolean",
+                    "description": (
+                        "Bypass the sibling-branch divergence safety gate. "
+                        "Use only after diffing sibling review/implement "
+                        "branches and intentionally accepting any commits "
+                        "not present on the merge target."
+                    ),
+                },
             },
             "required": ["agent"],
         },
