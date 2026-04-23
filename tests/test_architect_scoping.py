@@ -965,6 +965,26 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(is_error)
         self.assertEqual(text, "Task chain root not visible to this architect")
 
+    async def test_architect_task_chain_uses_same_group_scoped_resolver_as_task_show(self):
+        architect = self._add_architect("arch-1", "Architect")
+        self.state.groups["other"] = []
+        self.state._db_save_groups()
+        other_task = self._add_task(
+            "task-other-group",
+            "Cross-group task must stay hidden",
+            group="other",
+            created_by_architect_id=architect.id,
+        )
+
+        text, is_error = await self._call(
+            "architect_task_chain",
+            {"task": other_task.id},
+            architect.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertEqual(text, "Task not found")
+
     async def test_architect_board_summary_reads_full_group_with_created_by_attribution(self):
         architect = self._add_architect("arch-1", "Architect")
         other_architect = self._add_architect("arch-2", "Other Architect")

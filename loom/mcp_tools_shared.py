@@ -2149,7 +2149,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
 
     if tool_name == "task_chain" and caller_kind == "architect":
         return _architect_task_chain_json(
-            real_state,
+            state,
             caller_id,
             args.get("task", ""),
         )
