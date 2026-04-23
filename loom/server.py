@@ -230,6 +230,81 @@ def _worktree_merge_preserve_diff_enabled(
     )
 
 
+def _worktree_merge_auto_done_candidate(
+    state: MatrixState,
+    cell,
+) -> tuple[BoardTask | None, str]:
+    """Return the sole active linked task eligible for merge auto-Done."""
+    if not state or not cell:
+        return None, "missing state or agent"
+
+    linked_tasks = [
+        task
+        for task in state.board_tasks.values()
+        if task.agent_id == cell.id and not task_is_closed(task)
+    ]
+    if len(linked_tasks) != 1:
+        return None, f"{len(linked_tasks)} open linked tasks"
+
+    task = linked_tasks[0]
+    if task.lane in {"Backlog", "To Do"}:
+        return None, f"sole linked task {task.id} is still queued in {task.lane}"
+    return task, ""
+
+
+def _maybe_auto_move_merged_task_to_done(
+    state: MatrixState,
+    cell,
+    *,
+    enabled: bool,
+    cleanup_requested: bool,
+) -> dict:
+    """Move a sole active linked task to Done after a successful merge."""
+    decision = {"moved": False, "task_id": "", "reason": ""}
+
+    if not enabled:
+        decision["reason"] = "disabled by caller"
+    elif not cleanup_requested:
+        decision["reason"] = "merge cleanup not requested"
+    else:
+        task, reason = _worktree_merge_auto_done_candidate(state, cell)
+        if not task:
+            decision["reason"] = reason or "no eligible linked task"
+        elif state.task_has_unresolved_descendants(task.id):
+            decision["reason"] = (
+                f"task {task.id} still has unresolved descendants"
+            )
+        elif task_counts_as_done(task):
+            decision["reason"] = f"task {task.id} already counts as done"
+        else:
+            state.board_move_task(task.id, "Done")
+            if task.status:
+                task.status = ""
+                task.updated_at = datetime.now(timezone.utc).isoformat()
+                state._emit("task_upsert", **asdict(task))
+                state._db_save_task(task)
+            state.history_complete_task(cell.id, task.id, "done")
+            decision.update({
+                "moved": True,
+                "task_id": task.id,
+                "reason": "moved sole linked task to Done",
+            })
+
+    if decision["moved"]:
+        log.info(
+            "Merge auto-Done moved task %s for '%s'",
+            decision["task_id"],
+            getattr(cell, "name", ""),
+        )
+    else:
+        log.info(
+            "Merge auto-Done skipped for '%s': %s",
+            getattr(cell, "name", ""),
+            decision["reason"] or "no-op",
+        )
+    return decision
+
+
 def _latest_open_boundary_task_for_cell(state: MatrixState, cell):
     if not cell:
         return None
@@ -6968,19 +7043,6 @@ async def main(connection=None):
                                             _cleanup_after_merge,
                                         )
                                     )
-                                    # Unlink completed/archive-closed tasks from this agent so
-                                    # they don't re-appear in future merge
-                                    # messages.  Tasks stay on the board as a
-                                    # historical record.
-                                    for t in list(
-                                            state.board_tasks.values()):
-                                        if t.agent_id == cell.id \
-                                                and task_is_closed(t):
-                                            t.agent_id = ""
-                                            state._emit(
-                                                "task_upsert", **asdict(t))
-                                            state._db_save_task(t)
-
                                     legacy_close_flag = bool(
                                         data.get("close_on_merge"))
                                     explicit_close = (
@@ -7013,6 +7075,31 @@ async def main(connection=None):
                                     if queued_followups:
                                         close_flag = False
                                         remove_flag = False
+                                    _maybe_auto_move_merged_task_to_done(
+                                        state,
+                                        cell,
+                                        enabled=bool(
+                                            data.get(
+                                                "auto_move_to_done",
+                                                True,
+                                            )
+                                        ),
+                                        cleanup_requested=bool(
+                                            close_flag or remove_flag
+                                        ),
+                                    )
+                                    # Unlink completed/archive-closed tasks
+                                    # from this agent so they don't re-appear
+                                    # in future merge messages. Tasks stay on
+                                    # the board as a historical record.
+                                    for t in list(
+                                            state.board_tasks.values()):
+                                        if t.agent_id == cell.id \
+                                                and task_is_closed(t):
+                                            t.agent_id = ""
+                                            state._emit(
+                                                "task_upsert", **asdict(t))
+                                            state._db_save_task(t)
                                     clear_flag = bool(
                                         data.get("clear_context"))
                                     if queued_followups or close_flag \

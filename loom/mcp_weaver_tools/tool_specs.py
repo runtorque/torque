@@ -1036,6 +1036,14 @@ WEAVER_TOOLS = [
                         "Remove the worktree after a successful merge."
                     ),
                 },
+                "auto_move_to_done": {
+                    "type": "boolean",
+                    "description": (
+                        "When merge cleanup closes or removes the worker "
+                        "context, also move the sole linked active board "
+                        "task to Done. Defaults to true."
+                    ),
+                },
                 "force_stale_base": {
                     "type": "boolean",
                     "description": (
