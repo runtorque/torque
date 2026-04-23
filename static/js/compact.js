@@ -11,22 +11,18 @@
 const COMPACT_SNAPSHOT_PROTOCOL = 'compact-v1';
 const COMPACT_FLAG_STORAGE_KEY = 'loom:snapshot_protocol';
 
-/* Fields the compact board_tasks entry does NOT carry. If a local task is
- * missing these we must lazy-load the full detail before rendering modals
- * or history panels. Mirrors docs/compact-snapshot-v1.md §board_tasks. */
+/* Fields the compact board_tasks entry still defers entirely. If a local task
+ * needs these we must lazy-load the full detail before rendering modals or
+ * history panels. Mirrors docs/compact-snapshot-v1.md §board_tasks. */
 const COMPACT_HEAVY_TASK_FIELDS = [
   'description',
-  'messages',
   'artifacts',
   'attachments',
   'instructions',
   'context',
   'criteria',
   'action_vars',
-  'health_details',
-  'verification_summary',
-  'verification_notes',
-  'worktree_boundary',
+  'agent_template',
 ];
 
 function _compactFlagValue() {

@@ -254,21 +254,30 @@ class MatrixStateCleanupTests(unittest.TestCase):
             parent_task_id="parent-1",
             pipeline_depth=1,
             status="On Review",
+            created_at="2026-04-21T00:00:00+00:00",
+            updated_at="2026-04-22T00:00:00+00:00",
+            scheduled_at="2026-04-23T00:00:00+00:00",
+            depends_on=["task-0"],
+            provider="github",
+            external_id="123",
+            external_url="https://example.test/tasks/123",
             health_state="attention",
+            health_since="2026-04-22T12:00:00+00:00",
             health_details={"reason": "large"},
             verification_mode="deploy",
             verification_state="pending",
+            verification_notes="needs smoke",
+            verification_summary={"tests_run": "targeted"},
             lane_entered_at="2026-04-22T00:00:00+00:00",
+            worktree_boundary={"base": "main"},
+            resume_after_boundary_task_id="task-boundary",
             description="long description",
             context="legacy context",
             criteria="legacy criteria",
             instructions="legacy instructions",
-            messages=[{"message": "progress"}],
+            messages=[{"action": "progress", "message": "full progress body"}],
             attachments=[{"filename": "image.png"}],
             artifacts=[{"kind": "log"}],
-            verification_notes="needs smoke",
-            verification_summary={"tests_run": "targeted"},
-            worktree_boundary={"base": "main"},
             action_vars={"name": "value"},
         )
         state.board_tasks["task-archived"] = self.state_mod.BoardTask(
@@ -302,17 +311,32 @@ class MatrixStateCleanupTests(unittest.TestCase):
         )
         self.assertEqual(task["task"], "Heavy task")
         self.assertEqual(task["labels"], ["performance"])
-        self.assertNotIn("messages", task)
+        self.assertEqual(task["created_at"], "2026-04-21T00:00:00+00:00")
+        self.assertEqual(task["updated_at"], "2026-04-22T00:00:00+00:00")
+        self.assertEqual(task["scheduled_at"], "2026-04-23T00:00:00+00:00")
+        self.assertEqual(task["depends_on"], ["task-0"])
+        self.assertEqual(task["provider"], "github")
+        self.assertEqual(task["external_id"], "123")
+        self.assertEqual(
+            task["external_url"], "https://example.test/tasks/123")
+        self.assertEqual(task["health_since"], "2026-04-22T12:00:00+00:00")
+        self.assertEqual(task["health_details"], {"reason": "large"})
+        self.assertEqual(task["verification_notes"], "needs smoke")
+        self.assertEqual(
+            task["verification_summary"], {"tests_run": "targeted"})
+        self.assertEqual(
+            task["messages"],
+            [{"count": 1, "action": "progress", "message": "progress"}],
+        )
+        self.assertEqual(task["worktree_boundary"], {"base": "main"})
+        self.assertEqual(
+            task["resume_after_boundary_task_id"], "task-boundary")
         self.assertNotIn("description", task)
         self.assertNotIn("context", task)
         self.assertNotIn("criteria", task)
         self.assertNotIn("instructions", task)
         self.assertNotIn("attachments", task)
         self.assertNotIn("artifacts", task)
-        self.assertNotIn("health_details", task)
-        self.assertNotIn("verification_summary", task)
-        self.assertNotIn("worktree_boundary", task)
-        self.assertNotIn("verification_notes", task)
         self.assertNotIn("action_vars", task)
         self.assertNotIn("task-archived", compact["board_tasks"])
         self.assertNotIn("decisions", compact)
@@ -320,6 +344,71 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertNotIn("weaver_journal", compact)
         self.assertNotIn("weaver_worklog", compact)
         self.assertNotIn("weaver_streams", compact)
+
+    def test_compact_snapshot_preserves_most_of_full_size_reduction(self):
+        state = self.state_mod.MatrixState()
+        state.groups["g"] = []
+        long_text = "detail " * 2000
+        action_blob = "vars " * 1000
+        message_blob = "message " * 1500
+        for i in range(8):
+            state.board_tasks[f"task-{i}"] = self.state_mod.BoardTask(
+                id=f"task-{i}",
+                task=f"Task {i}",
+                slug=f"task-{i}",
+                group="g",
+                lane="In Progress",
+                position=i,
+                action_name="feature/implement",
+                labels=["performance", "compact"],
+                agent_id=f"agent-{i}",
+                assigned_engineer_id=f"eng-{i}",
+                parent_task_id="",
+                pipeline_depth=0,
+                status="On Review",
+                created_at="2026-04-21T00:00:00+00:00",
+                updated_at="2026-04-22T00:00:00+00:00",
+                scheduled_at="2026-04-23T00:00:00+00:00",
+                depends_on=["root"],
+                provider="github",
+                external_id=f"{i}",
+                external_url=f"https://example.test/tasks/{i}",
+                health_state="attention",
+                health_since="2026-04-22T12:00:00+00:00",
+                health_details={"reason": "recent_activity", "silence_secs": 12},
+                verification_mode="deploy",
+                verification_state="pending",
+                verification_notes="needs smoke",
+                verification_summary={"tests_run": "targeted"},
+                lane_entered_at="2026-04-22T00:00:00+00:00",
+                worktree_boundary={"repo_root": "/tmp/repo", "branch": "main"},
+                resume_after_boundary_task_id="boundary-1",
+                description=long_text,
+                instructions=long_text,
+                context=long_text,
+                criteria=long_text,
+                action_vars={"payload": action_blob},
+                messages=[
+                    {
+                        "timestamp": 1_700_000_000 + i,
+                        "action": "progress",
+                        "message": message_blob,
+                        "agent_name": "worker",
+                    }
+                    for _ in range(6)
+                ],
+                attachments=[{"filename": "image.png", "mime_type": "image/png"}],
+                artifacts=[{"kind": "log", "summary": long_text[:200]}],
+            )
+
+        full_bytes = len(self.state_mod.hot_json_dumps_bytes(state.to_dict()))
+        compact_bytes = len(
+            self.state_mod.hot_json_dumps_bytes(state.to_dict_compact()))
+        reduction = 1 - (compact_bytes / full_bytes)
+
+        # LOOM:154 phase-1 measured ~98% reduction. Preserve at least 95% of
+        # that win after eagerly restoring board-semantic metadata.
+        self.assertGreaterEqual(reduction, 0.931)
 
     def test_compact_snapshot_does_not_run_deferred_db_loaders(self):
         state = self.state_mod.MatrixState()

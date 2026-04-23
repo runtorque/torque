@@ -6,7 +6,8 @@ standalone UI consumer does it:
   1. Client opts in via query (`?compact=1`) — backend flips the snapshot
      shape to the compact summary.
   2. Initial state is lean: no archived tasks, no decisions, no pending
-     hires, and board_tasks entries are card summaries with no heavy fields.
+     hires, and board_tasks entries are card summaries with eager
+     board-semantic fields plus a metadata-only message preview.
   3. Client issues each lazy-load command — the server returns the full
      detail and the local task entry can be merged back to the legacy shape.
 
@@ -38,25 +39,35 @@ COMPACT_CARD_FIELDS = {
     "parent_task_id",
     "pipeline_depth",
     "status",
+    "created_at",
+    "updated_at",
+    "scheduled_at",
+    "depends_on",
+    "provider",
+    "external_id",
+    "external_url",
     "health_state",
+    "health_since",
+    "health_details",
     "verification_state",
     "verification_mode",
+    "verification_notes",
+    "verification_summary",
+    "messages",
     "lane_entered_at",
+    "worktree_boundary",
+    "resume_after_boundary_task_id",
 }
 
 HEAVY_TASK_FIELDS = {
     "description",
-    "messages",
     "artifacts",
     "attachments",
     "instructions",
     "context",
     "criteria",
     "action_vars",
-    "health_details",
-    "verification_summary",
-    "verification_notes",
-    "worktree_boundary",
+    "agent_template",
 }
 
 
@@ -82,9 +93,26 @@ class CompactSnapshotConsumerTests(unittest.TestCase):
             action_name="feature/implement",
             labels=["performance"],
             agent_id="agent-1",
+            assigned_engineer_id="eng-1",
+            created_at="2026-04-21T00:00:00+00:00",
+            updated_at="2026-04-22T00:00:00+00:00",
+            scheduled_at="2026-04-23T00:00:00+00:00",
+            depends_on=["task-root"],
+            provider="github",
+            external_id="123",
+            external_url="https://example.test/tasks/123",
             status="on-review",
+            health_state="attention",
+            health_since="2026-04-22T12:00:00+00:00",
+            health_details={"reason": "recent_activity"},
+            verification_mode="deploy",
+            verification_state="pending",
+            verification_notes="needs smoke",
+            verification_summary={"tests_run": "targeted"},
+            worktree_boundary={"repo_root": "/tmp/repo", "branch": "main"},
+            resume_after_boundary_task_id="task-boundary",
             description="full description with lots of detail",
-            messages=[{"message": "progress"}],
+            messages=[{"action": "progress", "message": "progress body"}],
             artifacts=[{"kind": "log", "url": "http://x"}],
             attachments=[{"kind": "pr", "url": "http://pr"}],
         )
@@ -150,6 +178,27 @@ class CompactSnapshotConsumerTests(unittest.TestCase):
             HEAVY_TASK_FIELDS.isdisjoint(card.keys()),
             msg=f"card leaked heavy fields: {set(card.keys()) & HEAVY_TASK_FIELDS}",
         )
+        self.assertEqual(card["created_at"], "2026-04-21T00:00:00+00:00")
+        self.assertEqual(card["updated_at"], "2026-04-22T00:00:00+00:00")
+        self.assertEqual(card["scheduled_at"], "2026-04-23T00:00:00+00:00")
+        self.assertEqual(card["depends_on"], ["task-root"])
+        self.assertEqual(card["provider"], "github")
+        self.assertEqual(card["external_id"], "123")
+        self.assertEqual(
+            card["external_url"], "https://example.test/tasks/123")
+        self.assertEqual(card["health_since"], "2026-04-22T12:00:00+00:00")
+        self.assertEqual(card["health_details"], {"reason": "recent_activity"})
+        self.assertEqual(card["verification_notes"], "needs smoke")
+        self.assertEqual(
+            card["verification_summary"], {"tests_run": "targeted"})
+        self.assertEqual(
+            card["messages"],
+            [{"count": 1, "action": "progress", "message": "progress"}],
+        )
+        self.assertEqual(
+            card["worktree_boundary"], {"repo_root": "/tmp/repo", "branch": "main"})
+        self.assertEqual(
+            card["resume_after_boundary_task_id"], "task-boundary")
 
         for deferred in ("decisions", "pending_hires",
                          "weaver_journal", "weaver_worklog", "weaver_streams"):
@@ -178,7 +227,10 @@ class CompactSnapshotConsumerTests(unittest.TestCase):
         # does: full takes precedence, but local card fields survive.
         merged = {**card, **full}
         self.assertEqual(merged["description"], "full description with lots of detail")
-        self.assertEqual(merged["messages"], [{"message": "progress"}])
+        self.assertEqual(
+            merged["messages"],
+            [{"action": "progress", "message": "progress body"}],
+        )
         self.assertEqual(merged["status"], "on-review")
         self.assertEqual(merged["action_name"], "feature/implement")
 
