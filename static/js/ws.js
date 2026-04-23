@@ -492,6 +492,7 @@ function _deltaSurfaceInvalidations(ops, hints) {
         break;
       case 'journal_append':
       case 'journal_delete':
+      case 'architect_journal_append':
       case 'digest_buffer_stats':
       case 'digest_sent_push':
       case 'weaver_buffer_stats':
