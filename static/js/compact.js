@@ -1,11 +1,13 @@
 /* Compact-snapshot consumer (compact-v1).
  *
- * Opt-in WebSocket protocol that sends a lean initial snapshot and lazy-loads
- * heavy task/decision/hire/archive/weaver detail on demand. See
- * docs/compact-snapshot-v1.md for the wire contract.
+ * Default-on WebSocket protocol that sends a lean initial snapshot and
+ * lazy-loads heavy task/decision/hire/archive/weaver detail on demand.
+ * See docs/compact-snapshot-v1.md for the wire contract.
  *
- * Safe rollout: localStorage flag "loom:snapshot_protocol" = "compact-v1"
- * (or "1"/"compact") appends ?compact=1 to the WS URL. Default off.
+ * Rollback hatch: localStorage flag "loom:snapshot_protocol" = "legacy"
+ * (or "off" / "0" / "false") drops the client back onto the legacy full
+ * snapshot for the session. Any other value (including unset) opts into
+ * compact-v1.
  */
 
 const COMPACT_SNAPSHOT_PROTOCOL = 'compact-v1';
@@ -36,9 +38,11 @@ function _compactFlagValue() {
 }
 
 function _compactFlagEnabled() {
+  // Default-on: compact is the normal path. Operators who need the legacy
+  // full-snapshot shape can set localStorage["loom:snapshot_protocol"] to
+  // one of the opt-out sentinels below.
   var v = _compactFlagValue();
-  return v === '1' || v === 'true' || v === 'yes'
-    || v === 'compact' || v === COMPACT_SNAPSHOT_PROTOCOL;
+  return v !== 'legacy' && v !== 'off' && v !== '0' && v !== 'false';
 }
 
 function _compactPrepareWSUrl(url) {

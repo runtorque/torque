@@ -332,9 +332,20 @@ function _boardVisibleTasksFromScoped(scopedTasks) {
   if (_boardSearchQuery) {
     var q = _boardSearchQuery.toLowerCase();
     var filtered = {};
+    // Description is lazy in compact-v1 — only include it for tasks whose
+    // full detail has been loaded so a stale `undefined` can't match (or
+    // silently fail to match) a query aimed at description body text.
+    var compactActive = typeof _compactModeActive === 'function'
+      && _compactModeActive();
     for (var id in out) {
       var t = out[id];
-      var parts = [t.task, t.description, t.id, t.action_name, t.agent_id];
+      var descriptionForSearch = t.description || '';
+      if (compactActive
+          && typeof _compactTaskHasFullDetail === 'function'
+          && !_compactTaskHasFullDetail(t)) {
+        descriptionForSearch = '';
+      }
+      var parts = [t.task, descriptionForSearch, t.id, t.action_name, t.agent_id];
       parts.push(t.verification_mode || '');
       parts.push(t.verification_state || '');
       parts.push(t.verification_notes || '');
@@ -1249,8 +1260,10 @@ function _boardGroupTaskCount(model) {
 function showTaskMessages(taskId) {
   var t = state.board_tasks[taskId];
   if (!t) return;
-  // Compact cards may only carry message-preview metadata — hydrate before
-  // deciding whether to render the popover so full message bodies win.
+  // The compact preview carries a single-entry placeholder whose length
+  // mirrors "has messages" truthfully, so gate cheaply before paying the
+  // hydrate cost on cards with no messages.
+  if (!t.messages || !t.messages.length) return;
   if (typeof _compactModeActive === 'function'
       && _compactModeActive()
       && typeof _compactTaskHasFullDetail === 'function'
@@ -1259,7 +1272,6 @@ function showTaskMessages(taskId) {
     ensureTaskDetail(taskId, function() { showTaskMessages(taskId); });
     return;
   }
-  if (!t.messages || !t.messages.length) return;
   var html = '';
   var total = t.messages.length;
   for (var i = total - 1; i >= 0; i--) {
@@ -1742,10 +1754,15 @@ function renderBoard() {
   var showViewMenuButton = !!_boardSelectedLane;
   var recentQuickViewActive = _boardQuickView === 'recent' || _boardQuickView === 'touched';
 
+  var searchHint = 'Searches titles, IDs, actions, agents, labels, and verification notes.';
+  if (typeof _compactModeActive === 'function' && _compactModeActive()) {
+    searchHint += ' Description bodies are searched only for tasks whose detail has been opened.';
+  }
   html += '<div class="board-search-bar">';
   html += '<div class="board-search-input-wrap">';
   html += '<input type="text" class="board-search-input" id="board-search-input"'
     + ' placeholder="Search tasks..." value="' + esc(_boardSearchQuery) + '"'
+    + ' title="' + esc(searchHint) + '"'
     + ' oninput="boardUpdateSearch(this.value)">';
   html += '</div>';
   if (showToolbar) {

@@ -1,15 +1,22 @@
 # Compact WebSocket Snapshot v1
 
-`compact-v1` is an opt-in WebSocket snapshot contract for clients that lazy-load
-heavy board data instead of receiving every persisted field on initial connect.
-It eagerly keeps the small board-semantic fields the standalone UI needs for
-sorting, dependency traversal, verification/health previews, external-link
-badges, and branch-boundary notes. The legacy full snapshot remains the default
-and keeps its existing shape.
+`compact-v1` is the default WebSocket snapshot contract for clients that
+lazy-load heavy board data instead of receiving every persisted field on
+initial connect. It eagerly keeps the small board-semantic fields the
+standalone UI needs for sorting, dependency traversal, verification/health
+previews, external-link badges, and branch-boundary notes. The legacy full
+snapshot is still available as an opt-out for rollback and for test harnesses
+that want the full shape.
 
-## Opt-in
+## Opt-in / opt-out
 
-Use either URL query opt-in before the socket opens:
+The official frontend ships compact-v1 by default. It appends `?compact=1`
+to the WebSocket URL unless the operator explicitly opts out by setting
+`localStorage["loom:snapshot_protocol"]` to one of `legacy`, `off`, `0`, or
+`false`. Backend handshake accepts any of these equivalent opt-in signals,
+which external consumers or pinned tests can use explicitly:
+
+URL query opt-in before the socket opens:
 
 ```text
 /ws?compact=1
@@ -24,6 +31,26 @@ or send a WebSocket connect/resync payload with the protocol flag:
 ```
 
 Query opt-in is preferred because it applies to the first snapshot frame.
+
+### Rollback to the legacy snapshot
+
+The official frontend opts in to compact-v1 whenever
+`localStorage["loom:snapshot_protocol"]` is unset or holds any non-opt-out
+value, so **clearing the key does not roll back** — it leaves the client
+on compact. To drop a browser session back onto the legacy full snapshot,
+explicitly store one of the opt-out sentinels before reloading:
+
+```js
+// In devtools, on the Loom origin:
+localStorage.setItem('loom:snapshot_protocol', 'legacy');
+// then reload the page
+```
+
+`legacy`, `off`, `0`, and `false` all count as opt-out sentinels. The
+backend still honours any client that omits both the `?compact=1` query
+and the `protocol_version`/`compact` payload flags, so a pinned external
+consumer can keep the legacy shape by simply not sending any of the
+opt-in signals listed above.
 
 ## Initial `state` snapshot
 
@@ -113,6 +140,17 @@ The compact summary still defers heavy/detail fields such as `description`,
 `attachments`, `artifacts`, and full `messages` bodies.
 
 Archived tasks are omitted from the initial compact snapshot entirely.
+
+### Description search scope under compact mode
+
+The board's text search matches across eager fields (title, id, action,
+agent, labels, verification notes, etc.) for every card. Description
+bodies stay lazy, so the search only looks inside `description` once the
+task's full detail has been hydrated — typically after the user opens its
+detail panel, edit modal, or artifact browser. The board's search input
+exposes this via a `title` tooltip so operators can opt in by clicking
+into the tasks they want described-text search to cover. A future phase
+may add a server-side text-search command if broader coverage is needed.
 
 ## Lazy-load commands
 

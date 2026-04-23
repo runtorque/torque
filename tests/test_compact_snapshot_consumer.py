@@ -310,6 +310,126 @@ class CompactSnapshotConsumerTests(unittest.TestCase):
             [{"id": 1, "entry": "w1"}],
         )
 
+    # -- Size budget -----------------------------------------------------
+
+    def test_compact_card_preserves_size_reduction_under_v2_contract(self):
+        """Lock the phase-2 goal: even with the v2-eager fields added to the
+        summary, a production-sized task's compact card must keep at least
+        95% of the phase-1 98-99% size reduction (i.e. >= ~94% smaller than
+        the legacy full dict)."""
+        from dataclasses import asdict
+        import json as _json
+
+        long_msg = "x" * 400
+        description = ("Background and context for this task. " * 200).strip()
+        messages = [
+            {
+                "timestamp": 1000 + i,
+                "action": "progress",
+                "agent_name": "worker-" + str(i),
+                "message": "step " + str(i) + " " + long_msg,
+            }
+            for i in range(80)
+        ]
+        artifacts = [
+            {
+                "id": "artifact-" + str(i),
+                "type": "log",
+                "title": "log " + str(i),
+                "path": "/tmp/run-" + str(i) + ".log",
+                "storage": {"kind": "path", "content": "y" * 2000},
+                "summary": ("summary line " * 50).strip(),
+                "metadata": {"boundary_recorded_at": "2026-04-22T12:00:00+00:00"},
+            }
+            for i in range(10)
+        ]
+        attachments = [
+            {
+                "id": "att-" + str(i),
+                "type": "file_ref",
+                "filename": "file-" + str(i) + ".txt",
+                "content": "attachment body " * 200,
+            }
+            for i in range(6)
+        ]
+        instructions = ("Do the thing. " * 80).strip()
+        context_text = ("Relevant context lines " * 80).strip()
+        criteria = ("Acceptance criteria bullet " * 50).strip()
+        action_vars = {
+            "target_module": "loom.state",
+            "notes": "some notes " * 100,
+            "long": "z" * 2000,
+        }
+
+        task = self.state_mod.BoardTask(
+            id="LOOM:200",
+            task="perf: finalize compact consumer",
+            slug="perf-finalize-compact-consumer",
+            group="loom",
+            lane="In Progress",
+            position=42,
+            action_name="feature/implement",
+            labels=["performance", "p1"],
+            agent_id="agent-uuid-000000000000",
+            assigned_engineer_id="eng-uuid-000000000000",
+            created_at="2026-04-22T22:00:00+00:00",
+            updated_at="2026-04-22T23:30:03.758052+00:00",
+            depends_on=["LOOM:120"],
+            provider="github",
+            external_id="123",
+            external_url="https://github.com/x/y/issues/123",
+            health_state="healthy",
+            health_since="2026-04-22T23:30:03.758052+00:00",
+            health_details={"reasons": ["recent_activity"]},
+            verification_state="pending",
+            verification_mode="deploy",
+            verification_notes="needs smoke on review env",
+            verification_summary={"tests_run": "targeted"},
+            lane_entered_at="2026-04-22T23:30:03.758052+00:00",
+            worktree_boundary={
+                "repo_root": "/repo",
+                "branch": "feature/x",
+                "status": "open",
+            },
+            description=description,
+            messages=messages,
+            artifacts=artifacts,
+            attachments=attachments,
+            instructions=instructions,
+            context=context_text,
+            criteria=criteria,
+            action_vars=action_vars,
+            agent_template="engineer-default",
+        )
+
+        legacy_bytes = len(
+            _json.dumps(asdict(task), default=str).encode("utf-8"))
+        compact_bytes = len(
+            _json.dumps(
+                self.state_mod.board_task_compact(task), default=str
+            ).encode("utf-8"))
+
+        reduction = 1.0 - (compact_bytes / legacy_bytes)
+        # ≥95% of the phase-1 ~99.09% reduction = 94.14%. Pad slightly to
+        # 0.94 so the test stays robust against tiny shape/format changes.
+        self.assertGreaterEqual(
+            reduction,
+            0.94,
+            msg=(
+                f"compact reduction degraded to {reduction*100:.2f}% "
+                f"({compact_bytes} / {legacy_bytes}) — v2 must keep "
+                "≥94% reduction vs the legacy dict"
+            ),
+        )
+        # Absolute per-card cap: stay under 3 KB even after adding the 13
+        # v2-eager fields. Budget in the frontend render path assumes cards
+        # are cheap enough to iterate without pagination overhead.
+        self.assertLess(
+            compact_bytes,
+            3_000,
+            msg=f"compact per-card size {compact_bytes} B exceeds 3 KB budget",
+        )
+
     # -- Delta compatibility ---------------------------------------------
 
     def test_delta_task_upsert_carries_full_task_for_compact_clients(self):
