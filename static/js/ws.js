@@ -242,6 +242,12 @@ function _handleFullState(msg) {
   if (typeof _agentPanelWorkerTaskIdCacheByAgent !== 'undefined') {
     _agentPanelWorkerTaskIdCacheByAgent = {};
   }
+  if (typeof _agentPanelInvalidateArchitectDecisionCache === 'function') {
+    _agentPanelInvalidateArchitectDecisionCache();
+  }
+  if (typeof _agentPanelInvalidateArchitectMessageCache === 'function') {
+    _agentPanelInvalidateArchitectMessageCache();
+  }
   _applyRuntimeMode();
   if (typeof _standalonePanelSetLayoutFromState === 'function'
       && typeof _standalonePanelsEnabled === 'function'
@@ -1149,6 +1155,7 @@ function _applyDelta(ops) {
     switch (op.op) {
       case 'agent_upsert': {
         const id = op.id;
+        const previousAgent = state.agents[id] ? Object.assign({}, state.agents[id]) : null;
         if (state.agents[id]) {
           Object.assign(state.agents[id], op);
         } else {
@@ -1156,6 +1163,13 @@ function _applyDelta(ops) {
         }
         // Clean the 'op' key from the agent data
         delete state.agents[id].op;
+        if (Object.prototype.hasOwnProperty.call(op, 'mcp_messages')
+            && typeof _agentPanelInvalidateArchitectMessageCache === 'function') {
+          _agentPanelInvalidateArchitectMessageCache(id);
+          if (previousAgent && previousAgent.id && previousAgent.id !== id) {
+            _agentPanelInvalidateArchitectMessageCache(previousAgent.id);
+          }
+        }
         break;
       }
       case 'agent_remove':
@@ -1479,6 +1493,15 @@ function _applyDelta(ops) {
         if (!state.decisions) state.decisions = {};
         var decisionId = op.id;
         if (decisionId) {
+          var previousDecision = state.decisions[decisionId] || null;
+          if (typeof _agentPanelInvalidateArchitectDecisionCache === 'function') {
+            _agentPanelInvalidateArchitectDecisionCache(op.architect_id || (previousDecision && previousDecision.architect_id) || '');
+            if (previousDecision
+                && previousDecision.architect_id
+                && previousDecision.architect_id !== op.architect_id) {
+              _agentPanelInvalidateArchitectDecisionCache(previousDecision.architect_id);
+            }
+          }
           var decision = Object.assign({}, op);
           delete decision.op;
           state.decisions[decisionId] = decision;
@@ -1487,6 +1510,10 @@ function _applyDelta(ops) {
       }
 
       case 'decision_remove':
+        if (typeof _agentPanelInvalidateArchitectDecisionCache === 'function') {
+          var removedDecision = state.decisions ? state.decisions[op.id] : null;
+          _agentPanelInvalidateArchitectDecisionCache(op.architect_id || (removedDecision && removedDecision.architect_id) || '');
+        }
         if (state.decisions) delete state.decisions[op.id];
         break;
 
