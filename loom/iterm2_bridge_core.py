@@ -20,6 +20,7 @@ from .terminal_adapter import (
 from .worktree import ensure_git_exclude
 
 _TITLE_RE = re.compile(r"^\[(.+?)\]\s+(.+)$")
+_FRESH_SESSION_STARTUP_DELAY = 0.12
 
 
 class ITerm2BridgeCore:
@@ -370,6 +371,22 @@ class ITerm2BridgeCore:
         cell.window_id = window.window_id
         log.info("Tab created: session_id=%s window=%s",
                  session.session_id, window.window_id)
+
+        startup_warmed = False
+
+        async def _send_startup_text(text: str, *, settle: float = 0.0):
+            nonlocal startup_warmed
+            if not startup_warmed:
+                startup_warmed = True
+                # Fresh iTerm2 tabs can drop the first write if we race the
+                # shell bootstrap. Warm the session once before sending the
+                # launch sequence so derived dispatches do not wedge with an
+                # empty shell and no agent process.
+                await asyncio.sleep(_FRESH_SESSION_STARTUP_DELAY)
+            await session.async_send_text(text)
+            if settle > 0:
+                await asyncio.sleep(settle)
+
         if cell.parent_id:
             parent = self.state.agents.get(cell.parent_id)
             parent_name = parent.name if parent else "?"
@@ -400,12 +417,11 @@ class ITerm2BridgeCore:
 
         # Shell override
         if shell:
-            await session.async_send_text(f"exec {shell}\n")
-            await asyncio.sleep(0.3)
+            await _send_startup_text(f"exec {shell}\n", settle=0.3)
 
         # Directory (expanduser so ~ works even when quoted)
         if launch_dir:
-            await session.async_send_text(f"cd {shlex.quote(launch_dir)}\n")
+            await _send_startup_text(f"cd {shlex.quote(launch_dir)}\n")
 
         # Auto-detect agent type from boot command
         if cell.cell_type == "agent" and not cell.agent_type and cell.command:
@@ -425,12 +441,12 @@ class ITerm2BridgeCore:
             exports = " ".join(
                 f"{k}={shlex.quote(os.path.expanduser(v))}"
                 for k, v in env_vars.items())
-            await session.async_send_text(f"export {exports}\n")
+            await _send_startup_text(f"export {exports}\n")
 
         # Source .env file (after env vars, before init script)
         if env_file:
             expanded = os.path.expanduser(env_file)
-            await session.async_send_text(
+            await _send_startup_text(
                 f"[ -f {shlex.quote(expanded)} ] && source {shlex.quote(expanded)}\n")
 
         # Install agent hooks and MCP config (if adapter supports it)
@@ -467,7 +483,7 @@ class ITerm2BridgeCore:
 
         # Init script
         if init_script:
-            await session.async_send_text(
+            await _send_startup_text(
                 f"source {shlex.quote(os.path.expanduser(init_script))}\n")
 
         # Boot command (with session resume for supported agents)
@@ -483,7 +499,7 @@ class ITerm2BridgeCore:
                              adapter.display_name,
                              cell.agent_session_id, cell.name)
         if boot_cmd:
-            await session.async_send_text(boot_cmd + "\n")
+            await _send_startup_text(boot_cmd + "\n")
             # Awareness agents start as idle — hooks will set activity
             # when the agent actually starts working
             cell.status = "running" if not cell.agent_type else "idle"
