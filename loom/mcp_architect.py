@@ -173,6 +173,28 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
+        "name": "architect_task_move",
+        "description": (
+            "Move any visible task in this architect's group to an existing "
+            "board lane, optionally clearing its status badge."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "task": {"type": "string", "description": "Task ID or alias."},
+                "new_lane": {
+                    "type": "string",
+                    "description": "Target lane name. Must already exist.",
+                },
+                "clear_status": {
+                    "type": "boolean",
+                    "description": "Clear the task's status badge while moving it.",
+                },
+            },
+            "required": ["task", "new_lane"],
+        },
+    },
+    {
         "name": "architect_ask",
         "description": (
             "Ask the user a blocking product/scope question. Creates a "
