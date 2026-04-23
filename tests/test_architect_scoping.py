@@ -1608,6 +1608,81 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(path.exists())
             self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
 
+    async def test_architect_engineer_journal_read_scopes_to_hired_engineers(self):
+        architect = self._add_architect("arch-1", "Architect")
+        other_architect = self._add_architect("arch-2", "Other Architect")
+        hired = self._add_engineer(
+            "eng-hired",
+            "Hired Engineer",
+            hired_by_architect_id=architect.id,
+        )
+        other_hired = self._add_engineer(
+            "eng-other",
+            "Other Engineer",
+            hired_by_architect_id=other_architect.id,
+        )
+
+        with mock.patch("time.time", side_effect=[100.0, 200.0, 300.0, 400.0]):
+            self.state.journal_append(
+                "loom",
+                "checkpoint",
+                "Old checkpoint",
+                author_cell_id=hired.id,
+            )
+            self.state.journal_append(
+                "loom",
+                "plan",
+                "Recent plan",
+                author_cell_id=hired.id,
+            )
+            self.state.journal_append(
+                "loom",
+                "observation",
+                "Recent observation",
+                author_cell_id=hired.id,
+            )
+            self.state.journal_append(
+                "loom",
+                "plan",
+                "Other engineer plan",
+                author_cell_id=other_hired.id,
+            )
+
+        read_text, read_error = await self._call(
+            "architect_engineer_journal_read",
+            {
+                "engineer_id": hired.id,
+                "since": 150,
+                "limit": 10,
+                "type_filter": "plan",
+            },
+            architect.id,
+        )
+
+        self.assertFalse(read_error, read_text)
+        payload = json.loads(read_text)
+        self.assertEqual(payload["type"], "journal")
+        self.assertEqual(
+            payload["entries"],
+            [{
+                "id": 2,
+                "group": "loom",
+                "timestamp": 200.0,
+                "type": "plan",
+                "entry": "Recent plan",
+                "author_cell_id": hired.id,
+            }],
+        )
+        self.assertEqual(self.handle_calls, [])
+
+        denied_text, denied_error = await self._call(
+            "architect_engineer_journal_read",
+            {"engineer_id": other_hired.id},
+            architect.id,
+        )
+        self.assertTrue(denied_error)
+        self.assertEqual(denied_text, "engineer not found in scope")
+
     async def test_architect_workspace_overview_self_state_reads_latest_history_counts(self):
         architect = self._add_architect("arch-1", "Architect")
         other_architect = self._add_architect("arch-2", "Other Architect")

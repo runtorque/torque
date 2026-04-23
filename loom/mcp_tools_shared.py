@@ -3541,6 +3541,54 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         )
         return json.dumps({"type": "journal", "entries": entries}), False
 
+    if tool_name == "engineer_journal_read" and caller_kind == "architect":
+        engineer_ident = str(args.get("engineer_id", "") or "").strip()
+        if not engineer_ident:
+            return "engineer_id is required", True
+        engineer_id, engineer_error = _resolve_architect_hired_engineer(
+            real_state, caller_id, engineer_ident
+        )
+        if not engineer_id:
+            return engineer_error, True
+        type_filter = str(args.get("type_filter", "") or "").strip()
+        if type_filter and type_filter not in _JOURNAL_ENTRY_TYPES:
+            return (
+                "type_filter must be one of: decision, observation, checkpoint, plan",
+                True,
+            )
+        try:
+            since_value = float(args.get("since", 0) or 0)
+        except (TypeError, ValueError):
+            since_value = 0.0
+        try:
+            limit_value = int(args.get("limit", 20) or 20)
+        except (TypeError, ValueError):
+            limit_value = 20
+        if limit_value <= 0:
+            return json.dumps({"type": "journal", "entries": []}), False
+        limit_value = min(limit_value, 100)
+        engineer = real_state.agents.get(engineer_id)
+        engineer_group = str(getattr(engineer, "group", "") or "").strip()
+        if not engineer_group:
+            return json.dumps({"type": "journal", "entries": []}), False
+        entries = real_state.journal_read(
+            engineer_group,
+            limit_value,
+            type_filter,
+            author_cell_id=engineer_id,
+        )
+        if since_value:
+            filtered = []
+            for entry in entries:
+                try:
+                    timestamp = float((entry or {}).get("timestamp", 0) or 0)
+                except (TypeError, ValueError):
+                    timestamp = 0.0
+                if timestamp > since_value:
+                    filtered.append(entry)
+            entries = filtered
+        return json.dumps({"type": "journal", "entries": entries}), False
+
     # -- Interaction tools --------------------------------------------------
 
     if tool_name == "engineer_message" and caller_kind == "architect":
