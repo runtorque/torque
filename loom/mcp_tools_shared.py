@@ -39,6 +39,7 @@ from .state import (
     get_weaver_notification_preset,
     normalize_default_worker_concurrency,
     normalize_weaver_digest_verbosity,
+    task_counts_as_done,
 )
 from .task_health import HEALTH_SEVERITY
 from .weaver_hints import compute_weaver_hints
@@ -75,6 +76,7 @@ _ARCHITECT_EVENTS_RECENT_MAX_LIMIT = 100
 _ARCHITECT_EVENTS_RECENT_LOAD_LIMIT = 500
 _ARCHITECT_EVENTS_RECENT_MESSAGE_LIMIT = 120
 _ARCHITECT_EVENTS_RECENT_RESPONSE_LIMIT = 10_000
+_ARCHITECT_TASK_CHAIN_NODE_LIMIT = 50
 
 # ---------------------------------------------------------------------------
 # Shared scoping helpers
@@ -974,6 +976,208 @@ def _architect_event_visible(state, caller_id: str, caller_group: str,
         _event_involves_engineer(state, event, engineer_id, attribution)
         for engineer_id in hired_engineers
     )
+
+
+def _task_chain_sort_key(task) -> tuple[int, str, str]:
+    try:
+        depth = int(getattr(task, "pipeline_depth", 0) or 0)
+    except (TypeError, ValueError):
+        depth = 0
+    return (
+        depth,
+        str(getattr(task, "created_at", "") or ""),
+        str(getattr(task, "id", "") or ""),
+    )
+
+
+def _task_chain_depth(task) -> int:
+    try:
+        return max(0, int(getattr(task, "pipeline_depth", 0) or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _resolve_task_chain_root(state, task):
+    if not state or not task:
+        return None
+    root_id = str(getattr(task, "pipeline_root_id", "") or "").strip()
+    if root_id:
+        root = state.board_tasks.get(root_id)
+        if root:
+            return root
+    current = task
+    seen = {str(getattr(task, "id", "") or "").strip()}
+    while current:
+        parent_id = str(getattr(current, "parent_task_id", "") or "").strip()
+        if not parent_id or parent_id in seen:
+            break
+        parent = state.board_tasks.get(parent_id)
+        if not parent:
+            break
+        current = parent
+        seen.add(parent_id)
+    return current
+
+
+def _architect_task_chain_root_visible(state, caller_id: str, root_task) -> bool:
+    if not state or not root_task:
+        return False
+    caller_id = str(caller_id or "").strip()
+    if not caller_id:
+        return False
+    if str(getattr(root_task, "created_by_architect_id", "") or "").strip() == caller_id:
+        return True
+    return _effective_assigned_engineer_id(root_task) in _architect_hired_engineer_ids(
+        state,
+        caller_id,
+    )
+
+
+def _collect_task_chain_tasks(state, root_task) -> dict[str, object]:
+    if not state or not root_task:
+        return {}
+    root_id = str(getattr(root_task, "id", "") or "").strip()
+    root_group = str(getattr(root_task, "group", "") or "").strip()
+    tasks_by_id: dict[str, object] = {}
+
+    def _include(candidate) -> None:
+        if not candidate:
+            return
+        task_id = str(getattr(candidate, "id", "") or "").strip()
+        if not task_id:
+            return
+        if root_group and str(getattr(candidate, "group", "") or "").strip() != root_group:
+            return
+        tasks_by_id[task_id] = candidate
+
+    _include(root_task)
+    for task in state.board_get_chain(root_id):
+        _include(task)
+
+    pending = [root_id]
+    seen: set[str] = set()
+    while pending:
+        current_id = pending.pop(0)
+        if current_id in seen:
+            continue
+        seen.add(current_id)
+        for child in sorted(state.board_get_children(current_id), key=_task_chain_sort_key):
+            child_id = str(getattr(child, "id", "") or "").strip()
+            if not child_id:
+                continue
+            _include(child)
+            if child_id not in seen:
+                pending.append(child_id)
+    return tasks_by_id
+
+
+def _build_task_chain_tree(root_task, tasks_by_id: dict[str, object]
+                           ) -> tuple[dict, dict, bool]:
+    root_id = str(getattr(root_task, "id", "") or "").strip()
+    children_by_parent: dict[str, list[str]] = {
+        task_id: [] for task_id in tasks_by_id
+    }
+    orphan_ids: list[str] = []
+    for task_id, task in tasks_by_id.items():
+        if task_id == root_id:
+            continue
+        parent_id = str(getattr(task, "parent_task_id", "") or "").strip()
+        if parent_id and parent_id in tasks_by_id and parent_id != task_id:
+            children_by_parent.setdefault(parent_id, []).append(task_id)
+        else:
+            orphan_ids.append(task_id)
+    for child_ids in children_by_parent.values():
+        child_ids.sort(key=lambda tid: _task_chain_sort_key(tasks_by_id[tid]))
+    if orphan_ids:
+        root_children = children_by_parent.setdefault(root_id, [])
+        root_children.extend(sorted(
+            orphan_ids,
+            key=lambda tid: _task_chain_sort_key(tasks_by_id[tid]),
+        ))
+        root_children[:] = list(dict.fromkeys(root_children))
+
+    stats = {
+        "total_nodes": 0,
+        "done": 0,
+        "in_progress": 0,
+        "max_depth": 0,
+    }
+    truncated = False
+    visited: set[str] = set()
+
+    def _build(task_id: str, depth: int) -> dict | None:
+        nonlocal truncated
+        if truncated or task_id in visited:
+            return None
+        task = tasks_by_id.get(task_id)
+        if not task:
+            return None
+        if stats["total_nodes"] >= _ARCHITECT_TASK_CHAIN_NODE_LIMIT:
+            truncated = True
+            return None
+        visited.add(task_id)
+        stats["total_nodes"] += 1
+        if task_counts_as_done(task):
+            stats["done"] += 1
+        if str(getattr(task, "lane", "") or "").strip() == "In Progress":
+            stats["in_progress"] += 1
+        stats["max_depth"] = max(stats["max_depth"], depth, _task_chain_depth(task))
+        children = []
+        for child_id in children_by_parent.get(task_id, []):
+            child = _build(child_id, depth + 1)
+            if child is not None:
+                children.append(child)
+            if truncated:
+                break
+        return {
+            "task_id": task.id,
+            "title": getattr(task, "task", "") or "",
+            "lane": getattr(task, "lane", "") or "",
+            "status": getattr(task, "status", "") or "",
+            "action_name": getattr(task, "action_name", "") or "",
+            "agent_id": getattr(task, "agent_id", "") or "",
+            "children": children,
+        }
+
+    tree = _build(root_id, 0) or {
+        "task_id": root_id,
+        "title": getattr(root_task, "task", "") or "",
+        "lane": getattr(root_task, "lane", "") or "",
+        "status": getattr(root_task, "status", "") or "",
+        "action_name": getattr(root_task, "action_name", "") or "",
+        "agent_id": getattr(root_task, "agent_id", "") or "",
+        "children": [],
+    }
+    return tree, stats, truncated
+
+
+def _architect_task_chain_json(state, caller_id: str, task_ident: str) -> tuple[str, bool]:
+    task_id = _resolve_task(state, task_ident)
+    if not task_id:
+        return "Task not found", True
+    task = state.board_tasks.get(task_id)
+    if not task:
+        return "Task not found", True
+    root_task = _resolve_task_chain_root(state, task) or task
+    if not _architect_task_chain_root_visible(state, caller_id, root_task):
+        return "Task chain root not visible to this architect", True
+    tasks_by_id = _collect_task_chain_tasks(state, root_task)
+    tree, stats, truncated = _build_task_chain_tree(root_task, tasks_by_id)
+    payload = {
+        "root": {
+            "task_id": root_task.id,
+            "title": getattr(root_task, "task", "") or "",
+            "lane": getattr(root_task, "lane", "") or "",
+            "status": getattr(root_task, "status", "") or "",
+            "assigned_engineer_id": _effective_assigned_engineer_id(root_task),
+        },
+        "focus_task_id": task_id,
+        "tree": tree,
+        "stats": stats,
+    }
+    if truncated:
+        payload["truncated"] = True
+    return _compact_json(payload), False
 
 
 def _clip_event_message(value: str) -> str:
@@ -1942,6 +2146,13 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         return _compact_json(
             architect_deploy_state_payload(real_state, _weaver_group)
         ), False
+
+    if tool_name == "task_chain" and caller_kind == "architect":
+        return _architect_task_chain_json(
+            state,
+            caller_id,
+            args.get("task", ""),
+        )
 
     if tool_name == "board_summary":
         summary_streams = _weaver_streams(

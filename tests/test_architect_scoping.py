@@ -814,6 +814,177 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertLessEqual(len(data["health_summary"]), 120)
         self.assertEqual(data["created_by"], f"architect:{architect.id}")
 
+    async def test_architect_task_chain_returns_rooted_tree_for_visible_pipeline(self):
+        architect = self._add_architect("arch-1", "Architect")
+        engineer = self._add_engineer(
+            "eng-alice", "Alice", hired_by_architect_id=architect.id
+        )
+        worker_one = self._add_worker("worker-1", "Worker One", engineer.id)
+        worker_two = self._add_worker("worker-2", "Worker Two", engineer.id)
+        worker_three = self._add_worker("worker-3", "Worker Three", engineer.id)
+
+        root = self._add_task(
+            "LOOM:75",
+            "Pipeline root",
+            lane="Done",
+            status="shipped",
+            assigned_engineer_id=engineer.id,
+            created_by_architect_id=architect.id,
+        )
+        child_one = self._add_task(
+            "LOOM:75:1",
+            "Implementation",
+            lane="Done",
+            status="merged",
+            parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=1,
+            action_name="feature/implement",
+            agent_id=worker_one.id,
+        )
+        child_two = self._add_task(
+            "LOOM:75:2",
+            "Follow-up review",
+            lane="Done",
+            status="approved",
+            parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=1,
+            action_name="feature/review",
+            agent_id=worker_two.id,
+        )
+        grandchild_one = self._add_task(
+            "LOOM:75:3",
+            "Fix blockers",
+            lane="In Progress",
+            status="editing",
+            parent_task_id=child_one.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=2,
+            action_name="feature/fix-review",
+            agent_id=worker_one.id,
+        )
+        grandchild_two = self._add_task(
+            "LOOM:75:4",
+            "Verification",
+            lane="Done",
+            status="passed",
+            parent_task_id=child_one.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=2,
+            action_name="feature/verify",
+            agent_id=worker_two.id,
+        )
+        leaf = self._add_task(
+            "LOOM:75:5",
+            "Ship follow-up",
+            lane="In Progress",
+            status="awaiting-review",
+            parent_task_id=grandchild_one.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=3,
+            action_name="feature/review",
+            agent_id=worker_three.id,
+        )
+
+        text, is_error = await self._call(
+            "architect_task_chain",
+            {"task": leaf.id},
+            architect.id,
+        )
+
+        self.assertFalse(is_error, text)
+        data = json.loads(text)
+        self.assertEqual(
+            data["root"],
+            {
+                "task_id": root.id,
+                "title": root.task,
+                "lane": "Done",
+                "status": "shipped",
+                "assigned_engineer_id": engineer.id,
+            },
+        )
+        self.assertEqual(data["focus_task_id"], leaf.id)
+        self.assertEqual(
+            data["stats"],
+            {
+                "total_nodes": 6,
+                "done": 4,
+                "in_progress": 2,
+                "max_depth": 3,
+            },
+        )
+        self.assertEqual(data["tree"]["task_id"], root.id)
+        self.assertEqual(data["tree"]["children"][0]["task_id"], child_one.id)
+        self.assertEqual(data["tree"]["children"][1]["task_id"], child_two.id)
+        self.assertEqual(
+            [item["task_id"] for item in data["tree"]["children"][0]["children"]],
+            [grandchild_one.id, grandchild_two.id],
+        )
+        self.assertEqual(
+            data["tree"]["children"][0]["children"][0]["children"][0]["task_id"],
+            leaf.id,
+        )
+        self.assertEqual(
+            data["tree"]["children"][0]["children"][0]["children"][0]["agent_id"],
+            worker_three.id,
+        )
+        self.assertEqual(
+            data["tree"]["children"][0]["children"][0]["children"][0]["status"],
+            "awaiting-review",
+        )
+
+    async def test_architect_task_chain_rejects_out_of_scope_root(self):
+        architect = self._add_architect("arch-1", "Architect")
+        other_architect = self._add_architect("arch-2", "Other Architect")
+        self._add_engineer("eng-alice", "Alice", hired_by_architect_id=architect.id)
+        hidden_engineer = self._add_engineer(
+            "eng-bob", "Bob", hired_by_architect_id=other_architect.id
+        )
+        hidden_root = self._add_task(
+            "task-hidden-root",
+            "Hidden pipeline root",
+            assigned_engineer_id=hidden_engineer.id,
+            created_by_architect_id=other_architect.id,
+        )
+        self._add_task(
+            "task-hidden-child",
+            "Hidden pipeline child",
+            parent_task_id=hidden_root.id,
+            pipeline_root_id=hidden_root.id,
+            pipeline_depth=1,
+        )
+
+        text, is_error = await self._call(
+            "architect_task_chain",
+            {"task": hidden_root.id},
+            architect.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertEqual(text, "Task chain root not visible to this architect")
+
+    async def test_architect_task_chain_uses_same_group_scoped_resolver_as_task_show(self):
+        architect = self._add_architect("arch-1", "Architect")
+        self.state.groups["other"] = []
+        self.state._db_save_groups()
+        other_task = self._add_task(
+            "task-other-group",
+            "Cross-group task must stay hidden",
+            group="other",
+            created_by_architect_id=architect.id,
+        )
+
+        text, is_error = await self._call(
+            "architect_task_chain",
+            {"task": other_task.id},
+            architect.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertEqual(text, "Task not found")
+
     async def test_architect_board_summary_reads_full_group_with_created_by_attribution(self):
         architect = self._add_architect("arch-1", "Architect")
         other_architect = self._add_architect("arch-2", "Other Architect")
