@@ -3663,6 +3663,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             "reply_agent_id": str(caller_id or "").strip(),
             "assigned_engineer_id": "",
             "agent_id": "",
+            "action_name": "",
             "status": "Awaiting Input",
         })
         if update_result and update_result.get("type") == "error":

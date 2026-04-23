@@ -122,12 +122,15 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
     async def _handle_command(self, payload):
         self.handle_calls.append(dict(payload))
         if payload["cmd"] == "board_add_task":
+            group = payload.get("group", "")
+            gs = self.state.get_group_settings(group)
             task = self.state.board_add_task(
                 payload.get("task", ""),
-                payload.get("group", ""),
+                group,
                 lane=payload.get("lane", ""),
                 description=payload.get("description", ""),
                 labels=payload.get("labels", []),
+                action_name=payload.get("action_name", "") or gs.board_default_action,
                 assigned_engineer_id=payload.get("assigned_engineer_id", ""),
                 created_by_engineer_id=payload.get("created_by_engineer_id", ""),
             )
@@ -1083,6 +1086,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_architect_ask_creates_visible_human_attention_task(self):
         architect = self._add_architect("arch-1", "Architect")
+        self.state.get_group_settings("loom").board_default_action = "feature/implement"
 
         text, is_error = await self._call(
             "architect_ask",
@@ -1107,6 +1111,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(task.status, "Awaiting Input")
         self.assertIn("loom:human", task.labels)
         self.assertIn("architect-ask", task.labels)
+        self.assertEqual(task.action_name, "")
         self.assertEqual(task.created_by_architect_id, architect.id)
         self.assertEqual(task.reply_agent_id, architect.id)
         self.assertEqual(task.assigned_engineer_id, "")
