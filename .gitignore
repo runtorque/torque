@@ -19,3 +19,9 @@ state.json
 
 # claude-code MCP lock (runtime artifact)
 .mcp.json.lock
+
+# claude-code scheduled tasks (runtime artifact)
+.claude/scheduled_tasks.lock
+
+# perf harness run output
+tests/perf/runs/
