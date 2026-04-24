@@ -1199,6 +1199,8 @@ class LoomDBTests(unittest.TestCase):
                 "custom_instructions": "Focus on regressions.",
                 "restrict_to_created_agents": True,
                 "pending_question": "Need approval",
+                "pending_question_set_at": 123.5,
+                "pending_question_actor_id": "eng-1",
                 "pending_note": "FYI: release notes are ready",
                 "pending_note_kind": "note",
                 "enabled_events": ["task_completed"],
@@ -1217,6 +1219,8 @@ class LoomDBTests(unittest.TestCase):
 
         loaded = self.db.load_weaver_settings("g")
         self.assertEqual(loaded["pending_question"], "Need approval")
+        self.assertEqual(loaded["pending_question_set_at"], 123.5)
+        self.assertEqual(loaded["pending_question_actor_id"], "eng-1")
         self.assertTrue(loaded["restrict_to_created_agents"])
         self.assertEqual(loaded["pending_note"], "FYI: release notes are ready")
         self.assertEqual(loaded["pending_note_kind"], "note")
@@ -3028,6 +3032,7 @@ class LoomDBAsyncWriteTests(unittest.IsolatedAsyncioTestCase):
             {
                 "group": "g",
                 "pending_question": "Need approval",
+                "pending_question_actor_id": "eng-1",
                 "pending_note": "FYI",
                 "pending_note_kind": "note",
                 "paused": True,
@@ -3035,6 +3040,7 @@ class LoomDBAsyncWriteTests(unittest.IsolatedAsyncioTestCase):
         )
         weaver_settings = self.db.load_all_weaver_settings()["g"]
         self.assertEqual(weaver_settings["pending_question"], "Need approval")
+        self.assertEqual(weaver_settings["pending_question_actor_id"], "eng-1")
         self.assertEqual(weaver_settings["pending_note"], "FYI")
         self.assertEqual(weaver_settings["pending_note_kind"], "note")
         self.assertTrue(weaver_settings["paused"])

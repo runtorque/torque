@@ -464,6 +464,40 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             self.shared_mod._ARCHITECT_EVENTS_RECENT_MESSAGE_LIMIT,
         )
 
+    async def test_architect_events_recent_stamps_engineer_ask_digest_recipient(self):
+        architect = self._add_architect("arch-1", "Architect")
+        hired = self._add_engineer(
+            "eng-hired", "Hired", hired_by_architect_id=architect.id
+        )
+        user_engineer = self._add_engineer("eng-user", "User Engineer")
+
+        self._save_panel_event(
+            1,
+            "engineer_awaiting_human_input",
+            cell_id=hired.id,
+            agent_name=hired.name,
+            message="Awaiting human input: Need approval?",
+        )
+        self._save_panel_event(
+            2,
+            "engineer_awaiting_human_input",
+            cell_id=user_engineer.id,
+            agent_name=user_engineer.name,
+            message="Awaiting human input: User-owned engineer question",
+        )
+
+        text, is_error = await self._call(
+            "architect_events_recent",
+            {"limit": 10, "kind_filter": "engineer_awaiting_human_input"},
+            architect.id,
+        )
+
+        self.assertFalse(is_error, text)
+        events = json.loads(text)["events"]
+        self.assertEqual([event["id"] for event in events], ["1"])
+        self.assertEqual(events[0]["digest_recipients"], [architect.id])
+        self.assertEqual(events[0]["cell_id"], hired.id)
+
     async def test_architect_events_recent_default_response_stays_bounded(self):
         architect = self._add_architect("arch-1", "Architect")
         engineer = self._add_engineer(
@@ -1990,6 +2024,101 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
 
         denied_text, denied_error = await self._call(
             "architect_engineer_journal_read",
+            {"engineer_id": other_hired.id},
+            architect.id,
+        )
+        self.assertTrue(denied_error)
+        self.assertEqual(denied_text, "engineer not found in scope")
+
+    async def test_architect_engineer_pending_question_reads_hired_engineer_question(self):
+        architect = self._add_architect("arch-1", "Architect")
+        other_architect = self._add_architect("arch-2", "Other Architect")
+        hired = self._add_engineer(
+            "eng-hired",
+            "Hired Engineer",
+            hired_by_architect_id=architect.id,
+        )
+        other_hired = self._add_engineer(
+            "eng-other",
+            "Other Engineer",
+            hired_by_architect_id=other_architect.id,
+        )
+        question = "Need product approval for the rollout plan?\nFull context stays intact."
+
+        with mock.patch("time.time", return_value=1234.5):
+            self.state.update_weaver_settings(
+                "loom",
+                pending_question=question,
+                paused=True,
+                _pending_question_actor_id=hired.id,
+            )
+
+        read_text, read_error = await self._call(
+            "architect_engineer_pending_question",
+            {"engineer_id": hired.id},
+            architect.id,
+        )
+
+        self.assertFalse(read_error, read_text)
+        payload = json.loads(read_text)
+        self.assertEqual(payload["type"], "engineer_pending_question")
+        self.assertEqual(payload["engineer_id"], hired.id)
+        self.assertEqual(payload["question"], question)
+        self.assertEqual(payload["set_at"], 1234.5)
+        self.assertTrue(payload["paused"])
+        self.assertEqual(payload["note"], "Question is awaiting human input.")
+        self.assertEqual(self.handle_calls, [])
+
+        reloaded = self.state_mod.MatrixState(db=self.db)
+        reloaded.load()
+        persisted_text, persisted_error = await self.mcp_architect_mod._dispatch_architect_tool(
+            "architect_engineer_pending_question",
+            {"engineer_id": hired.id},
+            self._handle_command,
+            reloaded,
+            caller_id=architect.id,
+        )
+        self.assertFalse(persisted_error, persisted_text)
+        persisted_payload = json.loads(persisted_text)
+        self.assertEqual(persisted_payload["question"], question)
+        self.assertEqual(persisted_payload["set_at"], 1234.5)
+
+        with mock.patch("time.time", return_value=2345.6):
+            self.state.update_weaver_settings(
+                "loom",
+                pending_question="Secret question from other architect's engineer",
+                paused=True,
+                _pending_question_actor_id=other_hired.id,
+            )
+
+        empty_text, empty_error = await self._call(
+            "architect_engineer_pending_question",
+            {"engineer_id": hired.id},
+            architect.id,
+        )
+        self.assertFalse(empty_error, empty_text)
+        empty_payload = json.loads(empty_text)
+        self.assertEqual(empty_payload["engineer_id"], hired.id)
+        self.assertEqual(empty_payload["question"], "")
+        self.assertEqual(empty_payload["set_at"], 0.0)
+        self.assertFalse(empty_payload["paused"])
+        self.assertEqual(empty_payload["note"], "No pending question for engineer.")
+
+        other_text, other_error = await self._call(
+            "architect_engineer_pending_question",
+            {"engineer_id": other_hired.id},
+            other_architect.id,
+        )
+        self.assertFalse(other_error, other_text)
+        other_payload = json.loads(other_text)
+        self.assertEqual(
+            other_payload["question"],
+            "Secret question from other architect's engineer",
+        )
+        self.assertEqual(other_payload["set_at"], 2345.6)
+
+        denied_text, denied_error = await self._call(
+            "architect_engineer_pending_question",
             {"engineer_id": other_hired.id},
             architect.id,
         )

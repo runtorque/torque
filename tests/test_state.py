@@ -591,6 +591,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
         state.weaver_settings["g"] = self.state_mod.WeaverSettings(
             group="g",
             pending_question="Need approval",
+            pending_question_actor_id=weaver.id,
             pending_note="FYI",
             pending_note_kind="note",
             paused=True,
@@ -601,6 +602,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertEqual(cleaned, {"asks": 0, "weaver_questions": 0})
         ws = state.weaver_settings["g"]
         self.assertEqual(ws.pending_question, "Need approval")
+        self.assertEqual(ws.pending_question_actor_id, weaver.id)
         self.assertEqual(ws.pending_note, "FYI")
         self.assertEqual(ws.pending_note_kind, "note")
         self.assertTrue(ws.paused)
@@ -630,6 +632,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
             {
                 "group": "g",
                 "pending_question": "Need approval",
+                "pending_question_actor_id": weaver.id,
                 "pending_note": "FYI",
                 "pending_note_kind": "note",
                 "paused": True,
@@ -641,6 +644,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
 
         ws = state.weaver_settings["g"]
         self.assertEqual(ws.pending_question, "Need approval")
+        self.assertEqual(ws.pending_question_actor_id, weaver.id)
         self.assertEqual(ws.pending_note, "FYI")
         self.assertEqual(ws.pending_note_kind, "note")
         self.assertTrue(ws.paused)
@@ -973,10 +977,17 @@ class MatrixStateCleanupTests(unittest.TestCase):
         settings = state.get_agent_digest_settings("arch-1")
         self.assertEqual(
             settings.enabled_events,
-            ["task_completed", "engineer_queue_empty"],
+            [
+                "task_completed",
+                "engineer_queue_empty",
+                "engineer_awaiting_human_input",
+                "engineer_ask_resolved",
+            ],
         )
         persisted = db.load_agent_digest_settings("arch-1")
         self.assertIn("engineer_queue_empty", persisted["enabled_events"])
+        self.assertIn("engineer_awaiting_human_input", persisted["enabled_events"])
+        self.assertIn("engineer_ask_resolved", persisted["enabled_events"])
 
     def test_agent_visibility_to_weaver_respects_owned_agent_setting(self):
         state = self.state_mod.MatrixState()
@@ -1065,6 +1076,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
         state.weaver_settings["g"] = self.state_mod.WeaverSettings(
             group="g",
             pending_question="Need review",
+            pending_question_actor_id="eng-1",
             pending_note="FYI: branch is ready",
             pending_note_kind="note",
             paused=True,
@@ -1074,6 +1086,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
 
         ws = state.weaver_settings["g"]
         self.assertEqual(ws.pending_question, "")
+        self.assertEqual(ws.pending_question_actor_id, "")
         self.assertFalse(ws.paused)
         self.assertEqual(ws.pending_note, "FYI: branch is ready")
         self.assertEqual(ws.pending_note_kind, "note")

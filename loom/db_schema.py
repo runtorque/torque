@@ -292,7 +292,9 @@ CREATE TABLE IF NOT EXISTS weaver_settings (
     weaver_directory   TEXT NOT NULL DEFAULT '',
     weaver_profile     TEXT NOT NULL DEFAULT '',
     weaver_shell       TEXT NOT NULL DEFAULT '',
-    weaver_tab_color   TEXT NOT NULL DEFAULT ''
+    weaver_tab_color   TEXT NOT NULL DEFAULT '',
+    pending_question_set_at REAL NOT NULL DEFAULT 0,
+    pending_question_actor_id TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS agent_digest_settings (
@@ -875,6 +877,28 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
             conn.execute(
                 "ALTER TABLE weaver_settings ADD COLUMN "
                 "pending_question TEXT NOT NULL DEFAULT ''")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass  # table may not exist yet
+    try:
+        conn.execute(
+            "SELECT pending_question_set_at FROM weaver_settings LIMIT 0")
+    except sqlite3.OperationalError:
+        try:
+            conn.execute(
+                "ALTER TABLE weaver_settings ADD COLUMN "
+                "pending_question_set_at REAL NOT NULL DEFAULT 0")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass  # table may not exist yet
+    try:
+        conn.execute(
+            "SELECT pending_question_actor_id FROM weaver_settings LIMIT 0")
+    except sqlite3.OperationalError:
+        try:
+            conn.execute(
+                "ALTER TABLE weaver_settings ADD COLUMN "
+                "pending_question_actor_id TEXT NOT NULL DEFAULT ''")
             conn.commit()
         except sqlite3.OperationalError:
             pass  # table may not exist yet

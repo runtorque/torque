@@ -2402,6 +2402,7 @@ async def _deliver_weaver_reply_and_resume(state: MatrixState, weaver, *,
         group,
         pending_question="",
         paused=False,
+        _pending_question_actor_id=getattr(weaver, "id", "") or "",
     )
     weaver_buffer.on_delivery_resumed(group)
     state.journal_append(
@@ -2410,6 +2411,21 @@ async def _deliver_weaver_reply_and_resume(state: MatrixState, weaver, *,
         f"Human replied: {answer}",
     )
     return {"type": "ok"}
+
+
+def _pending_question_reply_target(state: MatrixState, group: str):
+    """Return the agent that should receive a human reply for pending_question.
+
+    Actor-scoped engineer asks should reply to the engineer that asked the
+    question. Legacy rows without an actor fall back to the group weaver.
+    """
+    ws = state.get_weaver_settings(group)
+    actor_id = str(
+        getattr(ws, "pending_question_actor_id", "") or ""
+    ).strip()
+    if actor_id:
+        return state.agents.get(actor_id), "Engineer"
+    return state.get_weaver_for_group(group), "Weaver"
 
 
 def _resolve_ai_report_task(state: MatrixState, cell, *,
@@ -10503,10 +10519,21 @@ async def main(connection=None):
                     result = {"type": "error",
                               "message": "Question is required"}
                 else:
+                    engineer_id = str(
+                        data.get("engineer_id", "")
+                        or data.get("cell_id", "")
+                        or ""
+                    ).strip()
+                    if not engineer_id:
+                        weaver = state.get_weaver_for_group(group)
+                        engineer_id = str(
+                            getattr(weaver, "id", "") or ""
+                        ).strip()
                     await state.update_weaver_settings_async(
                         group,
                         pending_question=question,
-                        paused=True)
+                        paused=True,
+                        _pending_question_actor_id=engineer_id)
                     log.info(
                         "weaver_ask persisted pending question for group=%s "
                         "pending_question_len=%d paused=True",
@@ -10556,14 +10583,17 @@ async def main(connection=None):
                     result = {"type": "error",
                               "message": "Answer is required"}
                 else:
-                    weaver = state.get_weaver_for_group(group)
-                    if not weaver or not weaver.session_id:
+                    reply_target, target_label = _pending_question_reply_target(
+                        state,
+                        group,
+                    )
+                    if not reply_target or not reply_target.session_id:
                         result = {"type": "error",
-                                  "message": "Weaver is not running"}
+                                  "message": f"{target_label} is not running"}
                     else:
                         result = await _deliver_weaver_reply_and_resume(
                             state,
-                            weaver,
+                            reply_target,
                             group=group,
                             answer=answer,
                             send_prompt=_send_agent_prompt,
@@ -10578,8 +10608,19 @@ async def main(connection=None):
 
             elif cmd == "weaver_resume":
                 group = data.get("group", "")
+                engineer_id = str(
+                    data.get("engineer_id", "")
+                    or data.get("cell_id", "")
+                    or ""
+                ).strip()
+                if not engineer_id:
+                    weaver = state.get_weaver_for_group(group)
+                    engineer_id = str(getattr(weaver, "id", "") or "").strip()
                 await state.update_weaver_settings_async(
-                    group, paused=False, pending_question="")
+                    group,
+                    paused=False,
+                    pending_question="",
+                    _pending_question_actor_id=engineer_id)
                 weaver_buffer.on_delivery_resumed(group)
                 result = {"type": "ok"}
 

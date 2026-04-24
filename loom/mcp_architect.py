@@ -367,6 +367,23 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
+        "name": "architect_engineer_pending_question",
+        "description": (
+            "Read the current blocking human-input question for a hired "
+            "engineer, if one is pending."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "engineer_id": {
+                    "type": "string",
+                    "description": "Hired engineer id/slug/name.",
+                },
+            },
+            "required": ["engineer_id"],
+        },
+    },
+    {
         "name": "architect_reply",
         "description": "Reply to an existing architect↔engineer message thread.",
         "inputSchema": {
