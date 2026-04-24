@@ -578,6 +578,17 @@ def _rename_column_if_needed(
     return True
 
 
+def _drop_index_if_exists(conn: sqlite3.Connection, index_name: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='index' AND name=?",
+        (index_name,),
+    ).fetchone()
+    if not row:
+        return False
+    conn.execute(f"DROP INDEX IF EXISTS {index_name}")
+    return True
+
+
 def _migrate_legacy_engineer_schema_names(conn: sqlite3.Connection) -> None:
     changed = False
     for suffix in ("settings", "task_log", "journal"):
@@ -646,6 +657,15 @@ def _migrate_legacy_engineer_schema_names(conn: sqlite3.Connection) -> None:
         )
         or changed
     )
+    for suffix in (
+        "task_log_group",
+        "journal_group",
+        "journal_group_author",
+    ):
+        changed = (
+            _drop_index_if_exists(conn, "idx_" + _legacy_engineer_name(suffix))
+            or changed
+        )
     if changed:
         conn.commit()
 
@@ -751,7 +771,14 @@ def _migrate_legacy_engineer_payload_names(conn: sqlite3.Connection) -> None:
             if isinstance(obj, list):
                 return [rewrite(item) for item in obj]
             if isinstance(obj, dict):
-                return {k: rewrite(v) for k, v in obj.items()}
+                next_obj = {}
+                for key, item in obj.items():
+                    next_key = key
+                    if key == _LEGACY_ENGINEER_PREFIX:
+                        next_key = "engineer"
+                        changed = True
+                    next_obj[next_key] = rewrite(item)
+                return next_obj
             return obj
 
         rewritten = rewrite(parsed)

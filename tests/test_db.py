@@ -1359,15 +1359,28 @@ class LoomDBTests(unittest.TestCase):
             "VALUES ('g', 'T-1', 'Do work', 'agent-1', 10.0)"
         )
         conn.execute(
+            f"CREATE INDEX idx_{legacy}_task_log_group "
+            f"ON {legacy}_task_log(group_name, started_at DESC, id DESC)"
+        )
+        conn.execute(
             f"CREATE TABLE {legacy}_journal ("
             "id INTEGER PRIMARY KEY AUTOINCREMENT, "
             "group_name TEXT NOT NULL, timestamp REAL NOT NULL, "
+            "author_cell_id TEXT NOT NULL DEFAULT '', "
             "entry_type TEXT NOT NULL, entry TEXT NOT NULL)"
         )
         conn.execute(
             f"INSERT INTO {legacy}_journal "
             "(group_name, timestamp, entry_type, entry) "
             "VALUES ('g', 20.0, 'plan', 'Continue')"
+        )
+        conn.execute(
+            f"CREATE INDEX idx_{legacy}_journal_group "
+            f"ON {legacy}_journal(group_name, id DESC)"
+        )
+        conn.execute(
+            f"CREATE INDEX idx_{legacy}_journal_group_author "
+            f"ON {legacy}_journal(group_name, author_cell_id, id DESC)"
         )
         conn.execute(
             "CREATE TABLE auto_dispatch_queue ("
@@ -1430,6 +1443,15 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(task_log[0]["task_id"], "T-1")
         journal = migrated.load_journal_entries("g", limit=10)
         self.assertEqual(journal[0]["entry"], "Continue")
+        schema_text = "\n".join(
+            str(part or "")
+            for row in migrated._conn.execute(
+                "SELECT name, tbl_name, sql FROM sqlite_master "
+                "WHERE name NOT LIKE 'sqlite_%'"
+            ).fetchall()
+            for part in row
+        )
+        self.assertNotIn(legacy, schema_text)
 
     def test_init_renames_legacy_engineer_payload_names(self):
         legacy = "wea" + "ver"
@@ -1445,6 +1467,27 @@ class LoomDBTests(unittest.TestCase):
                 messages=[{"action": f"{legacy}_message"}],
             )
         )
+        seeded.save_ui_state(
+            "standalone_panel_layout",
+            json.dumps(
+                {
+                    "version": 1,
+                    "bottom": {
+                        "tabs": [legacy],
+                        "active": legacy,
+                    },
+                    "floats": {
+                        legacy: {
+                            "x": 40,
+                            "y": 50,
+                            "width": 420,
+                            "height": 320,
+                        },
+                    },
+                }
+            ),
+        )
+        seeded.save_ui_state("panel_active", legacy)
         seeded.close()
 
         migrated = LoomDB(legacy_path)
@@ -1456,6 +1499,18 @@ class LoomDBTests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(json.loads(task[0]), ["loom:engineer-message"])
         self.assertEqual(json.loads(task[1])[0]["action"], "engineer_message")
+        layout_row = migrated._conn.execute(
+            "SELECT value FROM ui_state WHERE key='standalone_panel_layout'"
+        ).fetchone()
+        layout = json.loads(layout_row[0])
+        self.assertIn("engineer", layout["floats"])
+        self.assertNotIn(legacy, layout["floats"])
+        self.assertEqual(layout["bottom"]["tabs"], ["engineer"])
+        self.assertEqual(layout["bottom"]["active"], "engineer")
+        panel_row = migrated._conn.execute(
+            "SELECT value FROM ui_state WHERE key='panel_active'"
+        ).fetchone()
+        self.assertEqual(panel_row[0], "engineer")
 
     def test_engineer_settings_load_backfills_heartbeat_from_legacy_rows(self):
         self.db._conn.execute(
