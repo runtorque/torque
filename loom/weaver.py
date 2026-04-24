@@ -78,6 +78,11 @@ def _record_digest_health(db, event: str, error: str = "") -> None:
 
 
 def _call_digest_db_with_lock_retry(db, operation, *, attempts: int = 4):
+    # LoomDB owns transactional retry/health semantics for real SQLite writes.
+    # Keep this wrapper for lightweight test/fake DBs that expose only the
+    # digest persistence methods.
+    if hasattr(db, "_run_sqlite_write_with_lock_retry"):
+        return operation()
     attempts = max(1, int(attempts or 1))
     for attempt in range(1, attempts + 1):
         try:

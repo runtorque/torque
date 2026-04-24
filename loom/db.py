@@ -893,6 +893,12 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             error=error,
         )
 
+    def _rollback_after_failed_write(self) -> None:
+        try:
+            self._conn.rollback()
+        except Exception:
+            log.debug("Failed to rollback SQLite write before retry", exc_info=True)
+
     def _run_sqlite_write_with_lock_retry(
         self,
         operation,
@@ -905,20 +911,27 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             try:
                 return operation()
             except Exception as exc:
-                if not _is_sqlite_lock_error(exc) or attempt >= attempts:
-                    if _is_sqlite_lock_error(exc):
+                if _is_sqlite_lock_error(exc):
+                    # A lock can surface after SQLite has staged writes but
+                    # before commit. Roll back before recording health or
+                    # sleeping; otherwise the health-counter commit can commit
+                    # the partially failed payload and retry duplicates it.
+                    self._rollback_after_failed_write()
+                    if attempt >= attempts:
                         self._record_reliability_event_safe(
                             surface=surface,
                             event="drop",
                             error=str(exc),
                         )
-                    raise
-                self._record_reliability_event_safe(
-                    surface=surface,
-                    event="retry",
-                    error=str(exc),
-                )
-                time.sleep(_sqlite_retry_backoff(attempt))
+                        raise
+                    self._record_reliability_event_safe(
+                        surface=surface,
+                        event="retry",
+                        error=str(exc),
+                    )
+                    time.sleep(_sqlite_retry_backoff(attempt))
+                    continue
+                raise
 
     def load_mcp_health_summary(self, *, since: float = 0) -> dict:
         """Return counts of recent MCP retry/drop/dedupe/replay events."""
@@ -1996,17 +2009,21 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
     ) -> int:
         """Persist one queued digest event and return its queue row ID."""
         def _operation():
-            cur = self._conn.execute(
-                "INSERT INTO digest_queued_events "
-                "(recipient_id, event_json, enqueued_at) VALUES (?,?,?)",
-                (
-                    str(recipient_id or ""),
-                    _digest_event_json(event),
-                    float(enqueued_at or 0),
-                ),
-            )
-            self._conn.commit()
-            return int(cur.lastrowid or 0)
+            try:
+                cur = self._conn.execute(
+                    "INSERT INTO digest_queued_events "
+                    "(recipient_id, event_json, enqueued_at) VALUES (?,?,?)",
+                    (
+                        str(recipient_id or ""),
+                        _digest_event_json(event),
+                        float(enqueued_at or 0),
+                    ),
+                )
+                self._conn.commit()
+                return int(cur.lastrowid or 0)
+            except Exception:
+                self._conn.rollback()
+                raise
 
         return self._run_sqlite_write_with_lock_retry(
             _operation,
@@ -2102,7 +2119,8 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         ]
 
         def _operation():
-            with self._conn:
+            try:
+                self._conn.execute("BEGIN")
                 if sent_rows:
                     self._conn.executemany(
                         "INSERT INTO digest_sent_events "
@@ -2122,6 +2140,10 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                     recipient_id,
                     keep=sent_cap,
                 )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
 
         self._run_sqlite_write_with_lock_retry(_operation, surface="digest")
 
