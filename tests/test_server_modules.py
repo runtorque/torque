@@ -180,6 +180,21 @@ class ServerModuleExtractionTests(unittest.TestCase):
         finally:
             self.server_mod.STANDALONE = old
 
+    def test_get_keybinding_defaults_in_standalone_mode_returns_empty_dict(self):
+        # Standalone mode leaves the keybindings module unimported;
+        # the helper must not call get_default_bindings() on None.
+        self.assertEqual(self.server_mod._get_keybinding_defaults(None), {})
+
+    def test_get_keybinding_defaults_delegates_to_module_when_present(self):
+        sentinel = {'add_agent': {'modifiers': ['cmd'], 'character': 'a'}}
+        fake_module = types.SimpleNamespace(
+            get_default_bindings=lambda: sentinel,
+        )
+        self.assertEqual(
+            self.server_mod._get_keybinding_defaults(fake_module),
+            sentinel,
+        )
+
     def test_compact_snapshot_opt_in_from_query_or_payload(self):
         request = types.SimpleNamespace(query={'compact': '1'})
         self.assertTrue(self.server_mod._request_wants_compact_snapshot(request))
