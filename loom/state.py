@@ -2762,41 +2762,48 @@ class MatrixState:
         self.update_agent_digest_settings(agent_id)
         return self.agent_digest_settings.get(agent_id)
 
-    def update_weaver_settings(self, group: str, **fields):
-        """Update weaver settings for a group."""
+    def _normalize_weaver_settings_value(self, key: str, value):
+        if key == "autonomy_mode":
+            return normalize_weaver_autonomy_mode(value)
+        if key == "default_worker_concurrency":
+            return normalize_default_worker_concurrency(value)
+        if key == "wave_size_preference":
+            return normalize_weaver_wave_size_preference(value)
+        if key == "same_agent_follow_up_preference":
+            return normalize_weaver_same_agent_follow_up_preference(value)
+        if key == "digest_verbosity":
+            return normalize_weaver_digest_verbosity(value)
+        if key == "escalation_style":
+            return normalize_weaver_escalation_style(value)
+        if key == "restrict_to_created_agents":
+            return bool(value)
+        if key in {
+                "weaver_model", "weaver_reasoning_effort",
+                "weaver_directory", "weaver_profile",
+                "weaver_shell", "weaver_tab_color"}:
+            return str(value or "").strip()
+        return value
+
+    def _apply_weaver_settings_fields(
+            self, group: str, fields: dict) -> tuple[WeaverSettings, dict]:
         ws = self.weaver_settings.get(group)
         if ws is None:
             ws = WeaverSettings(group=group)
             self.weaver_settings[group] = ws
         valid = set(WeaverSettings.__dataclass_fields__)
+        applied = {}
         for key, value in fields.items():
             if key in valid:
-                if key == "autonomy_mode":
-                    value = normalize_weaver_autonomy_mode(value)
-                elif key == "default_worker_concurrency":
-                    value = normalize_default_worker_concurrency(value)
-                elif key == "wave_size_preference":
-                    value = normalize_weaver_wave_size_preference(value)
-                elif key == "same_agent_follow_up_preference":
-                    value = normalize_weaver_same_agent_follow_up_preference(
-                        value)
-                elif key == "digest_verbosity":
-                    value = normalize_weaver_digest_verbosity(value)
-                elif key == "escalation_style":
-                    value = normalize_weaver_escalation_style(value)
-                elif key == "restrict_to_created_agents":
-                    value = bool(value)
-                elif key in {
-                        "weaver_model", "weaver_reasoning_effort",
-                        "weaver_directory", "weaver_profile",
-                        "weaver_shell", "weaver_tab_color"}:
-                    value = str(value or "").strip()
+                value = self._normalize_weaver_settings_value(key, value)
                 setattr(ws, key, value)
+                applied[key] = value
         d = asdict(ws)
         d.pop("group", None)
         self._emit("weaver_settings_update", group=group, **d)
-        if self.db:
-            self.db.save_weaver_settings(group, asdict(ws))
+        return ws, applied
+
+    def _sync_legacy_weaver_digest_settings(self, group: str,
+                                            fields: dict) -> None:
         legacy_weaver = self.get_weaver_for_group(group)
         if legacy_weaver and legacy_weaver.id in self.agent_digest_settings:
             digest_fields = {
@@ -2813,6 +2820,21 @@ class MatrixState:
             }
             if digest_fields:
                 self.update_agent_digest_settings(legacy_weaver.id, **digest_fields)
+
+    def update_weaver_settings(self, group: str, **fields):
+        """Update weaver settings for a group."""
+        ws, applied = self._apply_weaver_settings_fields(group, fields)
+        if self.db:
+            self.db.save_weaver_settings(group, asdict(ws))
+        self._sync_legacy_weaver_digest_settings(group, applied)
+
+    async def update_weaver_settings_async(self, group: str, **fields) -> bool:
+        """Update and await persistence for weaver settings for a group."""
+        ws, applied = self._apply_weaver_settings_fields(group, fields)
+        if self.db:
+            await self.db.save_weaver_settings_async(group, asdict(ws))
+        self._sync_legacy_weaver_digest_settings(group, applied)
+        return True
 
     def weaver_restricts_to_created_agents(self, group: str) -> bool:
         """Return whether the group's Weaver is restricted to owned agents."""
@@ -2955,7 +2977,32 @@ class MatrixState:
             parent, exclude_task_id=task.id, emit=emit)
         return changed
 
-    def cleanup_orphaned_attention(self, emit: bool = True) -> dict[str, int]:
+    def _agent_persisted_in_db(self, agent_id: str) -> bool:
+        agent_id = str(agent_id or "").strip()
+        if not agent_id or not self.db:
+            return False
+        try:
+            return bool(self.db.agent_exists(agent_id))
+        except Exception:
+            log.exception("Failed to check persisted agent %s", agent_id)
+            return False
+
+    def _attention_source_agent_available(
+            self, agent_id: str, live_agents: set[str], *,
+            allow_persisted_agent_fallback: bool) -> bool:
+        agent_id = str(agent_id or "").strip()
+        if not agent_id:
+            return False
+        if agent_id in live_agents:
+            return True
+        return (
+            allow_persisted_agent_fallback
+            and self._agent_persisted_in_db(agent_id)
+        )
+
+    def cleanup_orphaned_attention(
+            self, emit: bool = True, *,
+            allow_persisted_agent_fallback: bool = True) -> dict[str, int]:
         """Expire asks and pending weaver questions whose source agent is gone."""
         cleaned = {"asks": 0, "weaver_questions": 0}
         live_agents = set(self.agents)
@@ -2963,14 +3010,29 @@ class MatrixState:
         for group, ws in self.weaver_settings.items():
             gs = self.group_settings.get(group)
             weaver_id = gs.weaver_agent_id if gs else ""
-            if ws.pending_question and (not weaver_id or weaver_id not in live_agents):
+            weaver_available = self._attention_source_agent_available(
+                weaver_id,
+                live_agents,
+                allow_persisted_agent_fallback=allow_persisted_agent_fallback,
+            )
+            if ws.pending_question and not weaver_available:
+                log.warning(
+                    "Clearing stale weaver pending question for group=%s "
+                    "weaver_id=%r in_memory=%s persisted=%s "
+                    "pending_question_len=%d",
+                    group,
+                    weaver_id,
+                    bool(weaver_id and weaver_id in live_agents),
+                    bool(weaver_id and self._agent_persisted_in_db(weaver_id)),
+                    len(ws.pending_question or ""),
+                )
                 ws.pending_question = ""
                 ws.paused = False
                 ws.pending_note = ""
                 ws.pending_note_kind = ""
                 self._save_weaver_settings(group, emit=emit)
                 cleaned["weaver_questions"] += 1
-            elif ws.pending_note and (not weaver_id or weaver_id not in live_agents):
+            elif ws.pending_note and not weaver_available:
                 ws.pending_note = ""
                 ws.pending_note_kind = ""
                 self._save_weaver_settings(group, emit=emit)
@@ -2981,7 +3043,12 @@ class MatrixState:
                 continue
             parent = self.board_tasks.get(task.parent_task_id)
             parent_agent_id = parent.agent_id if parent else ""
-            if not parent or not parent_agent_id or parent_agent_id not in live_agents:
+            parent_agent_available = self._attention_source_agent_available(
+                parent_agent_id,
+                live_agents,
+                allow_persisted_agent_fallback=allow_persisted_agent_fallback,
+            )
+            if not parent or not parent_agent_available:
                 if self._expire_orphaned_ask(task, reason, emit=emit):
                     cleaned["asks"] += 1
 
@@ -3887,7 +3954,7 @@ class MatrixState:
                 self._emit("agent_remove", id=child_id,
                            group=child.group,
                            cell_type=child.cell_type)
-        self.cleanup_orphaned_attention()
+        self.cleanup_orphaned_attention(allow_persisted_agent_fallback=False)
         # Unlink from board tasks
         for t in self.board_tasks.values():
             if t.agent_id == aid:

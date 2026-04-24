@@ -2398,7 +2398,7 @@ async def _deliver_weaver_reply_and_resume(state: MatrixState, weaver, *,
         prime_input_ready=True,
         wait_for_delivery=True,
     )
-    state.update_weaver_settings(
+    await state.update_weaver_settings_async(
         group,
         pending_question="",
         paused=False,
@@ -10474,7 +10474,7 @@ async def main(connection=None):
                           "weaver_shell", "weaver_tab_color"):
                     if k in data:
                         fields[k] = data[k]
-                state.update_weaver_settings(group, **fields)
+                await state.update_weaver_settings_async(group, **fields)
                 result = {"type": "ok"}
 
             elif cmd == "weaver_ask":
@@ -10484,10 +10484,16 @@ async def main(connection=None):
                     result = {"type": "error",
                               "message": "Question is required"}
                 else:
-                    state.update_weaver_settings(
+                    await state.update_weaver_settings_async(
                         group,
                         pending_question=question,
                         paused=True)
+                    log.info(
+                        "weaver_ask persisted pending question for group=%s "
+                        "pending_question_len=%d paused=True",
+                        group,
+                        len(str(question or "")),
+                    )
                     weaver_buffer.on_delivery_paused(group)
                     # Also log to journal
                     state.journal_append(
@@ -10506,7 +10512,7 @@ async def main(connection=None):
                     result = {"type": "error",
                               "message": "kind must be 'note' or 'question'"}
                 else:
-                    state.update_weaver_settings(
+                    await state.update_weaver_settings_async(
                         group,
                         pending_note=message,
                         pending_note_kind=kind)
@@ -10518,7 +10524,7 @@ async def main(connection=None):
 
             elif cmd == "weaver_dismiss_note":
                 group = data.get("group", "")
-                state.update_weaver_settings(
+                await state.update_weaver_settings_async(
                     group,
                     pending_note="",
                     pending_note_kind="")
@@ -10547,13 +10553,13 @@ async def main(connection=None):
 
             elif cmd == "weaver_pause":
                 group = data.get("group", "")
-                state.update_weaver_settings(group, paused=True)
+                await state.update_weaver_settings_async(group, paused=True)
                 weaver_buffer.on_delivery_paused(group)
                 result = {"type": "ok"}
 
             elif cmd == "weaver_resume":
                 group = data.get("group", "")
-                state.update_weaver_settings(
+                await state.update_weaver_settings_async(
                     group, paused=False, pending_question="")
                 weaver_buffer.on_delivery_resumed(group)
                 result = {"type": "ok"}
