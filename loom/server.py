@@ -10717,6 +10717,12 @@ async def main(connection=None):
             raw = await request.json()
         except Exception:
             profiling.recorder().incr("events_dropped_invalid_json")
+            if hasattr(db, "record_mcp_health_event_safe"):
+                db.record_mcp_health_event_safe(
+                    surface="events",
+                    event="drop",
+                    error="invalid JSON",
+                )
             profiling.recorder().observe_ms(
                 "event_endpoint_ms", time.perf_counter() - request_started)
             return web.json_response({}, status=400)
@@ -10742,6 +10748,12 @@ async def main(connection=None):
         except Exception as exc:
             log.exception("Failed to durably enqueue agent event")
             profiling.recorder().incr("events_dropped_ingest_unavailable")
+            if hasattr(db, "record_mcp_health_event_safe"):
+                db.record_mcp_health_event_safe(
+                    surface="events",
+                    event="drop",
+                    error=str(exc) or type(exc).__name__,
+                )
             profiling.recorder().observe_ms(
                 "event_endpoint_ms", time.perf_counter() - request_started)
             return web.json_response(
@@ -10750,11 +10762,22 @@ async def main(connection=None):
             )
         if response.get("type") == "error":
             profiling.recorder().incr("events_dropped_ingest_error")
+            if hasattr(db, "record_mcp_health_event_safe"):
+                db.record_mcp_health_event_safe(
+                    surface="events",
+                    event="drop",
+                    error=str(response.get("message", "ingest error")),
+                )
             profiling.recorder().observe_ms(
                 "event_endpoint_ms", time.perf_counter() - request_started)
             return web.json_response(
                 {"ok": False, "error": response.get("message", "ingest error")},
                 status=500,
+            )
+        if response.get("duplicate") and hasattr(db, "record_mcp_health_event_safe"):
+            db.record_mcp_health_event_safe(
+                surface="events",
+                event="dedupe",
             )
         profiling.recorder().incr("events_enqueued")
 

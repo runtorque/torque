@@ -8,6 +8,7 @@ system prompt assembly for ``--append-system-prompt-file``.
 import asyncio
 import logging
 import re
+import sqlite3
 import time
 
 from .digest_routing import (
@@ -57,6 +58,42 @@ _ASK_DIGEST_MARKUP_PREFIX_RE = re.compile(
 _ASK_DIGEST_LABEL_RE = re.compile(
     r"^(?P<label>[A-Za-z][A-Za-z0-9 /;_-]{0,40}?):\s*(?P<value>.+)$"
 )
+
+
+
+def _is_sqlite_lock_error(exc: BaseException) -> bool:
+    if not isinstance(exc, sqlite3.OperationalError):
+        return False
+    msg = str(exc).lower()
+    return "database is locked" in msg or "database table is locked" in msg
+
+
+def _record_digest_health(db, event: str, error: str = "") -> None:
+    if db and hasattr(db, "record_mcp_health_event_safe"):
+        db.record_mcp_health_event_safe(
+            surface="digest",
+            event=event,
+            error=error,
+        )
+
+
+def _call_digest_db_with_lock_retry(db, operation, *, attempts: int = 4):
+    # LoomDB owns transactional retry/health semantics for real SQLite writes.
+    # Keep this wrapper for lightweight test/fake DBs that expose only the
+    # digest persistence methods.
+    if hasattr(db, "_run_sqlite_write_with_lock_retry"):
+        return operation()
+    attempts = max(1, int(attempts or 1))
+    for attempt in range(1, attempts + 1):
+        try:
+            return operation()
+        except Exception as exc:
+            if not _is_sqlite_lock_error(exc) or attempt >= attempts:
+                if _is_sqlite_lock_error(exc):
+                    _record_digest_health(db, "drop", str(exc))
+                raise
+            _record_digest_health(db, "retry", str(exc))
+            time.sleep((0.01, 0.025, 0.05)[min(attempt - 1, 2)])
 
 _ARCHITECT_DIGEST_MAX_LINES = 40
 _ARCHITECT_EVENT_LABELS = {
@@ -672,10 +709,13 @@ class WeaverEventBuffer:
         if not db:
             return
         try:
-            queue_id = db.save_digest_queued_event(
-                recipient_id,
-                self._storage_event(event),
-                enqueued_at,
+            queue_id = _call_digest_db_with_lock_retry(
+                db,
+                lambda: db.save_digest_queued_event(
+                    recipient_id,
+                    self._storage_event(event),
+                    enqueued_at,
+                ),
             )
             if queue_id:
                 event["_digest_queue_id"] = queue_id
@@ -710,11 +750,14 @@ class WeaverEventBuffer:
             for original, snapshot in zip(events, snapshots)
         ]
         try:
-            db.complete_digest_delivery(
-                recipient_id,
-                sent_rows,
-                queue_ids,
-                sent_cap=200,
+            _call_digest_db_with_lock_retry(
+                db,
+                lambda: db.complete_digest_delivery(
+                    recipient_id,
+                    sent_rows,
+                    queue_ids,
+                    sent_cap=200,
+                ),
             )
         except Exception:
             log.exception(

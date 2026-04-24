@@ -1398,6 +1398,56 @@ class LoomDBTests(unittest.TestCase):
         )
         self.assertEqual([evt["delivered_at"] for evt in sent], [20.0, 20.0])
 
+
+    def test_sqlite_lock_retry_rolls_back_before_health_commit(self):
+        attempts = {"count": 0}
+        event = {"kind": "task_completed", "message": "no duplicate"}
+
+        def operation():
+            attempts["count"] += 1
+            self.db._conn.execute(
+                "INSERT INTO digest_queued_events "
+                "(recipient_id, event_json, enqueued_at) VALUES (?,?,?)",
+                ("eng-1", json.dumps(event, separators=(",", ":")), 10.0),
+            )
+            if attempts["count"] == 1:
+                raise sqlite3.OperationalError("database is locked")
+            self.db._conn.commit()
+
+        self.db._run_sqlite_write_with_lock_retry(operation, surface="digest")
+
+        queued = self.db.load_digest_queued_events()["eng-1"]
+        self.assertEqual([evt["message"] for evt in queued], ["no duplicate"])
+        health = self.db.load_mcp_health_summary(since=0)
+        self.assertEqual(health["surfaces"]["digest"]["events"].get("retry"), 1)
+
+    def test_digest_delivery_lock_retry_rolls_back_partial_sent_rows(self):
+        attempts = {"count": 0}
+        event_json = json.dumps(
+            {"kind": "task_completed", "message": "deliver once"},
+            separators=(",", ":"),
+        )
+
+        def operation():
+            attempts["count"] += 1
+            self.db._conn.execute("BEGIN")
+            self.db._conn.execute(
+                "INSERT INTO digest_sent_events "
+                "(recipient_id, event_json, enqueued_at, delivered_at) "
+                "VALUES (?,?,?,?)",
+                ("eng-1", event_json, 10.0, 20.0),
+            )
+            if attempts["count"] == 1:
+                raise sqlite3.OperationalError("database is locked")
+            self.db._conn.commit()
+
+        self.db._run_sqlite_write_with_lock_retry(operation, surface="digest")
+
+        sent = self.db.load_digest_sent_events()["eng-1"]
+        self.assertEqual([evt["message"] for evt in sent], ["deliver once"])
+        health = self.db.load_mcp_health_summary(since=0)
+        self.assertEqual(health["surfaces"]["digest"]["events"].get("retry"), 1)
+
     def test_digest_sent_events_are_capped_per_recipient(self):
         self.db.complete_digest_delivery(
             "eng-1",
