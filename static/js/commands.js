@@ -786,13 +786,31 @@ function selectPrincipal(principalId, groupName) {
   const current = String((state && state.selected_principal_id) || '');
   const group = String(groupName || _principalFocusGroupFallback() || '').trim();
   focusedItemId = _principalRowFocusId(group, id);
+  const prevSelectedId = typeof selectedAgentId !== 'undefined' ? selectedAgentId : null;
+  /* Architect principal: also make the architect the focused agent so the
+     detail view (renderAgentDetails) surfaces in the panel body. User
+     principal is not an agent — leave selectedAgentId alone. */
+  let selectionChanged = false;
+  if (id && state && state.agents && state.agents[id]) {
+    if (selectedAgentId !== id) {
+      selectedAgentId = id;
+      selectionChanged = true;
+      send({ cmd: 'select_agent', id: id });
+    }
+  }
   if (id === current) {
+    if (selectionChanged && typeof _syncPanelsAfterSelectionChange === 'function') {
+      _syncPanelsAfterSelectionChange(prevSelectedId);
+    }
     render();
     return;
   }
   state.selected_principal_id = id;
   send({ cmd: 'ui_select_principal', principal_id: id });
   render();
+  if (selectionChanged && typeof _syncPanelsAfterSelectionChange === 'function') {
+    _syncPanelsAfterSelectionChange(prevSelectedId);
+  }
 }
 
 function _principalRowFocusId(groupName, principalId) {
