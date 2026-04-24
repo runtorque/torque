@@ -630,6 +630,19 @@ body.runtime-embedded .terminal-empty {
   align-items: start;
   min-width: 0;
 }
+.agent-section--filtered {
+  display: block;
+}
+.agent-section--empty {
+  display: block;
+  padding: 12px 8px;
+  color: var(--text-dim);
+  font-style: italic;
+}
+.agent-section-empty-msg {
+  font-size: 10px;
+  color: var(--text-dim);
+}
 .agent-section-divider {
   border-top: 1px solid color-mix(in srgb, var(--border) 86%, transparent);
   margin: 3px 0;
@@ -804,6 +817,115 @@ body.runtime-embedded .terminal-empty {
   color: var(--text-dim);
   background: transparent;
   border-color: var(--border);
+}
+/* ------------------------------------------------------------------ */
+/* Principals row — User + architects filter selector                  */
+/* ------------------------------------------------------------------ */
+.principals-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 7px;
+  padding: 4px 8px 6px;
+  min-width: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 62%, transparent);
+  margin-bottom: 4px;
+}
+.principal-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: var(--agent-architect-column-width);
+  min-height: 64px;
+  padding: 10px 6px 14px;
+  box-sizing: border-box;
+  background: color-mix(in srgb, var(--bg-cell) 68%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 66%, transparent);
+  border-radius: var(--radius);
+  color: var(--text);
+  cursor: pointer;
+  transition: background .15s, border-color .15s, opacity .15s;
+}
+.principal-card.dim {
+  opacity: .55;
+}
+.principal-card.dim:hover,
+.principal-card.dim:focus-visible {
+  opacity: 1;
+  background: color-mix(in srgb, var(--bg-cell) 82%, transparent);
+  outline: none;
+}
+.principal-card.selected {
+  border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-cell));
+}
+.principal-card.focused {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+.principal-card-icon {
+  font-size: 18px;
+  line-height: 1;
+  color: var(--text-dim);
+}
+.principal-card.selected .principal-card-icon {
+  color: var(--accent);
+}
+.principal-card-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 9px;
+  font-weight: 700;
+}
+.principal-card-kind {
+  position: absolute;
+  right: 3px;
+  top: 2px;
+  padding: 0 4px;
+  border: 1px solid color-mix(in srgb, var(--text-dim) 34%, transparent);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 7px;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+}
+.principal-card-badge {
+  position: absolute;
+  left: 3px;
+  bottom: 2px;
+  padding: 0 4px;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 7px;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: .03em;
+  background: color-mix(in srgb, var(--bg) 50%, transparent);
+  max-width: calc(100% - 8px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.principal-card-new {
+  align-self: stretch;
+}
+@media (max-width: 400px) {
+  .principals-row {
+    gap: 5px;
+    padding: 3px 6px 5px;
+  }
+  .principal-card {
+    min-height: 56px;
+    padding: 8px 4px 12px;
+  }
 }
 /* ------------------------------------------------------------------ */
 /* Menu popovers                                                       */

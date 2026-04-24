@@ -8749,6 +8749,25 @@ async def main(connection=None):
                     state._db_save_ui("board_panel_height",
                                       state.board_panel_height)
 
+            elif cmd == "ui_select_principal":
+                raw_principal = str(data.get("principal_id", "") or "").strip()
+                # Empty string is "user" (the default principal).
+                # Otherwise must be an existing architect agent.
+                if raw_principal:
+                    target = state.agents.get(raw_principal)
+                    if not target or (target.kind or "") != "architect":
+                        raw_principal = ""
+                state.selected_principal_id = raw_principal
+                state._emit(
+                    "ui_update",
+                    key="selected_principal_id",
+                    value=state.selected_principal_id,
+                )
+                state._db_save_ui(
+                    "selected_principal_id",
+                    state.selected_principal_id,
+                )
+
             elif cmd == "standalone_set_panel_layout":
                 layout = data.get("layout", {})
                 if not isinstance(layout, dict):

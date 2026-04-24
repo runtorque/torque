@@ -2327,3 +2327,59 @@ class AgentCellActivityClockTests(unittest.TestCase):
         self.assertEqual(cell.last_progress_at, 123.0)
         self.assertEqual(cell.last_heartbeat_at, 123.0)
         self.assertEqual(cell.last_activity_at, 123.0)
+
+
+class SelectedPrincipalIdTests(unittest.TestCase):
+    def setUp(self):
+        _install_aiohttp_stub()
+        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.reload(self.state_mod)
+
+    def test_default_is_empty_string(self):
+        state = self.state_mod.MatrixState()
+        self.assertEqual(state.selected_principal_id, "")
+
+    def test_to_dict_includes_selected_principal_id(self):
+        state = self.state_mod.MatrixState()
+        state.selected_principal_id = "architect-a"
+        d = state.to_dict()
+        self.assertEqual(d["selected_principal_id"], "architect-a")
+
+    def test_to_dict_compact_includes_selected_principal_id(self):
+        state = self.state_mod.MatrixState()
+        state.selected_principal_id = "architect-b"
+        d = state.to_dict_compact()
+        self.assertEqual(d["selected_principal_id"], "architect-b")
+
+    def test_persists_and_restores_selected_principal_id(self):
+        from loom.db import LoomDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = LoomDB(Path(tmp.name) / "loom.db")
+        db.init()
+        self.addCleanup(db.close)
+
+        # A group is required for MatrixState.load() to exit its fast-path
+        # early return for empty databases.
+        db.save_groups({"g": []}, {"g": "g"})
+        db.save_ui_state("selected_principal_id", "architect-42")
+
+        state = self.state_mod.MatrixState(db=db)
+        state.load()
+
+        self.assertEqual(state.selected_principal_id, "architect-42")
+
+    def test_defaults_to_empty_when_ui_state_missing(self):
+        from loom.db import LoomDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = LoomDB(Path(tmp.name) / "loom.db")
+        db.init()
+        self.addCleanup(db.close)
+
+        state = self.state_mod.MatrixState(db=db)
+        state.load()
+
+        self.assertEqual(state.selected_principal_id, "")

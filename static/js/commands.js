@@ -776,3 +776,44 @@ function sendBroadcast() {
     document.getElementById('broadcast-input').value = '';
   }
 }
+
+/* Principal selector — top-row filter for the agent grid.
+   `principalId` is an architect id, or '' to select the user principal.
+   `groupName` scopes the focus target so multi-group workspaces don't
+   collide on nav ids (selection itself is global state). */
+function selectPrincipal(principalId, groupName) {
+  const id = String(principalId || '').trim();
+  const current = String((state && state.selected_principal_id) || '');
+  const group = String(groupName || _principalFocusGroupFallback() || '').trim();
+  focusedItemId = _principalRowFocusId(group, id);
+  if (id === current) {
+    render();
+    return;
+  }
+  state.selected_principal_id = id;
+  send({ cmd: 'ui_select_principal', principal_id: id });
+  render();
+}
+
+function _principalRowFocusId(groupName, principalId) {
+  const id = String(principalId || '').trim();
+  const group = String(groupName || '').trim();
+  return 'principal:' + group + ':' + (id || 'user');
+}
+
+function _principalFocusGroupFallback() {
+  // Derive a sensible group when the caller omits one — prefer the currently
+  // focused principal's group, else the focused agent's group, else the
+  // first group in the nav order.
+  const meta = (typeof window !== 'undefined' && window._navGridItemMeta)
+    ? window._navGridItemMeta[focusedItemId]
+    : null;
+  if (meta && meta.group) return meta.group;
+  if (focusedItemId && state && state.agents && state.agents[focusedItemId]) {
+    return state.agents[focusedItemId].group || '';
+  }
+  const order = (typeof window !== 'undefined' && window._navGroupOrder)
+    ? window._navGroupOrder
+    : [];
+  return order.length ? order[0] : '';
+}
