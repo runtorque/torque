@@ -467,20 +467,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("engineer_task_verify", engineer_tool_names)
         self.assertIn("engineer_message_architect", engineer_tool_names)
         self.assertIn("engineer_reply", engineer_tool_names)
-        self.assertNotIn("engineer_board_summary", engineer_tool_names)
         self.assertNotIn("architect_workspace_overview", engineer_tool_names)
-
-        listed_engineer = await handler(
-            FakeRequest(
-                {"jsonrpc": "2.0", "id": 13, "method": "tools/list"},
-                headers={"X-Loom-Cell-Id": engineer.id},
-            )
-        )
-        engineer_tool_names = [
-            tool["name"] for tool in listed_engineer.payload["result"]["tools"]
-        ]
-        self.assertNotIn("engineer_board_summary", engineer_tool_names)
-        self.assertNotIn("engineer_board_summary", engineer_tool_names)
         self.assertNotIn("architect_board_summary", engineer_tool_names)
 
         missing_header = await handler(
@@ -509,12 +496,10 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                 }
             )
         )
-        self.assertEqual(
-            removed_alias.payload["error"]["message"],
-            (
-                "engineer_* MCP tools were removed; use engineer_* or architect_* "
-                "instead (for example engineer_agents_list)"
-            ),
+        self.assertTrue(removed_alias.payload["result"]["isError"])
+        self.assertIn(
+            "X-Loom-Cell-Id header is required",
+            removed_alias.payload["result"]["content"][0]["text"],
         )
 
         denied_architect_summary = await handler(

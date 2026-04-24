@@ -699,14 +699,6 @@ ALL_TOOLS = TOOLS + ARCHITECT_TOOLS + ENGINEER_TOOLS
 _ALL_TOOL_MAP = {t["name"]: t for t in ALL_TOOLS}
 
 
-def _removed_engineer_tool_message(tool_name: str) -> str:
-    replacement = str(tool_name or "").replace("engineer_", "engineer_", 1)
-    return (
-        "engineer_* MCP tools were removed; use engineer_* or architect_* "
-        f"instead (for example {replacement})"
-    )
-
-
 def _visible_tools(state, cell_id: str):
     """Return the MCP tool list visible to the caller."""
     tools = list(TOOLS)
@@ -1034,23 +1026,6 @@ async def dispatch_mcp_rpc_body(
                             first_tool_call_ts=first_tool_call_ts,
                         )
                     return _jsonrpc_ok(req_id, cached), 200
-
-        if str(tool_name or "").startswith("engineer_"):
-            if session_wake_pending:
-                _queue_session_wake_entry(
-                    state,
-                    cell_id=cell_id,
-                    caller_kind=caller_kind,
-                    first_tool_call_ts=first_tool_call_ts,
-                )
-            return (
-                _jsonrpc_error(
-                    req_id,
-                    -32602,
-                    _removed_engineer_tool_message(tool_name),
-                ),
-                200,
-            )
 
         if tool_name not in _ALL_TOOL_MAP:
             if session_wake_pending:

@@ -873,33 +873,11 @@ def _collect_stage_6_cleanup_section(
         _column_exists(conn, "board_tasks", "engineer_owner_id"),
     ])
 
+    # The engineer namespace is the primary MCP surface. The historical alias
+    # surface was removed before this rename pass, so there is no longer a live
+    # module or tool prefix to detect here; keep the report field stable for
+    # existing doctor consumers.
     engineer_tool_aliases_present = False
-    try:
-        from . import mcp as loom_mcp
-    except Exception:
-        loom_mcp = None
-    if loom_mcp is not None:
-        engineer_tool_aliases_present = any(
-            str(tool.get("name", "") or "").startswith("engineer_")
-            for tool in getattr(loom_mcp, "ALL_TOOLS", [])
-        )
-    try:
-        mcp_source = (Path(__file__).resolve().parent / "mcp.py").read_text(
-            encoding="utf-8"
-        )
-    except OSError:
-        mcp_source = ""
-    try:
-        shared_source = (
-            Path(__file__).resolve().parent / "mcp_tools_shared.py"
-        ).read_text(encoding="utf-8")
-    except OSError:
-        shared_source = ""
-    engineer_tool_aliases_present = engineer_tool_aliases_present or any([
-        "from .mcp_engineer import" in mcp_source,
-        "import loom.mcp_engineer" in mcp_source,
-        "_resolve_engineer_alias_caller" in shared_source,
-    ])
 
     return {
         "legacy_template_files_ignored": len(ignored_legacy_files),

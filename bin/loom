@@ -4352,6 +4352,18 @@ def build_parser():
     p.add_argument("identifier", help="Engineer ID, slug, or name")
     p.set_defaults(func=cmd_engineer_rehire)
 
+    p = eng_sub.add_parser("journal", aliases=["j"],
+                           help="Read engineer decision journal")
+    p.add_argument("-g", "--group", help="Group name")
+    p.add_argument("-n", "--tail", type=int, default=20,
+                   help="Number of entries (default: 20)")
+    p.add_argument("-t", "--type",
+                   choices=["decision", "observation", "checkpoint", "plan"],
+                   help="Filter by entry type")
+    p.add_argument("--json", action="store_true",
+                   help="JSON output")
+    p.set_defaults(func=cmd_engineer_journal)
+
     # -- workflow breach ----------------------------------------------------
     p = sub.add_parser("workflow-breach",
                        help="Report a workflow-discipline breach event")
@@ -4970,24 +4982,6 @@ def build_parser():
     p = dig_sub.add_parser("resume", help="Resume digest delivery for one agent")
     p.add_argument("identifier", help="Agent ID, slug, name, or ID prefix")
     p.set_defaults(func=cmd_digest_resume)
-
-    # -- engineer -------------------------------------------------------------
-    weav = sub.add_parser("engineer", aliases=["w"],
-                          help="Engineer orchestrator commands")
-    weav.set_defaults(func=cmd_engineer_journal, _sub_parser=weav)
-    weav_sub = weav.add_subparsers(dest="engineer_cmd")
-
-    p = weav_sub.add_parser("journal", aliases=["j"],
-                            help="Read engineer decision journal")
-    p.add_argument("-g", "--group", help="Group name")
-    p.add_argument("-n", "--tail", type=int, default=20,
-                   help="Number of entries (default: 20)")
-    p.add_argument("-t", "--type",
-                   choices=["decision", "observation", "checkpoint", "plan"],
-                   help="Filter by entry type")
-    p.add_argument("--json", action="store_true",
-                   help="JSON output")
-    p.set_defaults(func=cmd_engineer_journal)
 
     # -- logs ---------------------------------------------------------------
     p = sub.add_parser("logs", help="Tail daemon log")

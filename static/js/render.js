@@ -2065,26 +2065,26 @@ function renderAgentCell(a, options) {
   if (a.id === focusedItemId) cls.push('focused');
   if (a.status === 'stopped') cls.push('stopped');
   const _isArchitect = (a.kind || '') === 'architect';
-  const _isEngineer = (a.kind || '') === 'engineer';
+  const _isEngineerKind = (a.kind || '') === 'engineer';
   const _isWorker = (a.kind || '') === 'worker';
   const _isDismissed = _isDismissedEngineer(a);
   // Check if this agent is the engineer for its group
   const _gs = (state.group_settings || {})[a.group];
-  const _isEngineer = _gs && _gs.engineer_agent_id === a.id;
+  const _isDesignatedEngineer = _gs && _gs.engineer_agent_id === a.id;
   // Check if engineer is awaiting human input
-  const _engineerWs = _isEngineer && state.engineer_settings
+  const _engineerWs = _isDesignatedEngineer && state.engineer_settings
     ? state.engineer_settings[a.group] : null;
   const _engineerPaused = !!(_engineerWs && _engineerWs.paused);
   const _engineerAsking = _engineerWs && _engineerWs.pending_question;
-  const _isDigestRecipient = _isEngineer || _isArchitect;
+  const _isDigestRecipient = _isEngineerKind || _isArchitect;
   const _agentDigestSettings = _isDigestRecipient && state.agent_digest_settings
     ? state.agent_digest_settings[String(a.id || '')] : null;
   let _digestPaused = !!(_agentDigestSettings && _agentDigestSettings.paused);
-  if (!_agentDigestSettings && _isDigestRecipient && _isEngineer) {
+  if (!_agentDigestSettings && _isDigestRecipient && _isDesignatedEngineer) {
     _digestPaused = _engineerPaused;
   }
   if (_isArchitect) cls.push('architect');
-  if (_isEngineer) cls.push('engineer');
+  if (_isEngineerKind) cls.push('engineer');
   if (_isWorker) cls.push('worker');
   if (_isDismissed) cls.push('dismissed');
 
@@ -2119,7 +2119,7 @@ function renderAgentCell(a, options) {
   if (_isDigestRecipient) {
     const digestAgentArg = encodeURIComponent(a.id || '');
     h += `<button class="cell-engineer-toggle ${_digestPaused ? 'paused' : 'running'}" draggable="false" data-focus-key="agent-digest-toggle:${esc(a.id)}" onclick="event.stopPropagation();toggleDigestPauseForAgent(decodeURIComponent('${digestAgentArg}'))" title="${_digestPaused ? 'Resume event delivery' : 'Pause event delivery'}">${_digestPaused ? '&#x25B6;' : '&#x23F8;'}</button>`;
-  } else if (_isEngineer) {
+  } else if (_isDesignatedEngineer) {
     const engineerGroupArg = encodeURIComponent(a.group || '');
     h += `<button class="cell-engineer-toggle ${_engineerPaused ? 'paused' : 'running'}" draggable="false" data-focus-key="agent-engineer-toggle:${esc(a.id)}" onclick="event.stopPropagation();engineerTogglePauseForGroup(decodeURIComponent('${engineerGroupArg}'))" title="${_engineerPaused ? 'Resume Engineer event delivery' : 'Pause Engineer event delivery'}">${_engineerPaused ? '&#x25B6;' : '&#x23F8;'}</button>`;
   }
@@ -2128,7 +2128,7 @@ function renderAgentCell(a, options) {
   h += `<div class="cell-name">${esc(a.name)}</div>`;
   if (_isArchitect) {
     h += `<div class="cell-architect-badge">architect</div>`;
-  } else if (_isEngineer) {
+  } else if (_isEngineerKind) {
     if (_isDismissed) h += `<div class="cell-dismissed-badge" title="Dismissed engineer">\u23F8 dismissed</div>`;
     else h += `<div class="cell-engineer-badge">engineer</div>`;
   } else if (_isWorker) {

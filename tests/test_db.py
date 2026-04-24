@@ -1294,6 +1294,145 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(entries[0]["entry"], "Legacy entry")
         self.assertEqual(entries[0]["author_cell_id"], "")
 
+    def test_init_renames_legacy_engineer_schema_and_payload_names(self):
+        legacy = "wea" + "ver"
+        legacy_path = Path(self.tmp.name) / "legacy-engineer-names.db"
+        conn = sqlite3.connect(str(legacy_path))
+        conn.execute(
+            "CREATE TABLE group_settings ("
+            f"group_name TEXT PRIMARY KEY, {legacy}_agent_id TEXT NOT NULL DEFAULT '')"
+        )
+        conn.execute(
+            f"INSERT INTO group_settings (group_name, {legacy}_agent_id) "
+            "VALUES ('g', 'eng-1')"
+        )
+        conn.execute(
+            f"CREATE TABLE {legacy}_settings ("
+            "group_name TEXT PRIMARY KEY, "
+            "push_interval INTEGER NOT NULL DEFAULT 60, "
+            "max_interval INTEGER NOT NULL DEFAULT 300, "
+            "enabled_events TEXT NOT NULL DEFAULT '[]', "
+            f"{legacy}_provider TEXT NOT NULL DEFAULT '', "
+            f"{legacy}_boot_command TEXT NOT NULL DEFAULT '')"
+        )
+        conn.execute(
+            f"INSERT INTO {legacy}_settings "
+            f"(group_name, push_interval, max_interval, enabled_events, "
+            f"{legacy}_provider, {legacy}_boot_command) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("g", 45, 90, json.dumps(["task_completed"]), "codex", "codex --fast"),
+        )
+        conn.execute(
+            f"CREATE TABLE {legacy}_task_log ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "group_name TEXT NOT NULL, task_id TEXT NOT NULL, "
+            "task_title TEXT NOT NULL, agent_id TEXT NOT NULL, "
+            "agent_name TEXT NOT NULL DEFAULT '', "
+            "agent_slug TEXT NOT NULL DEFAULT '', "
+            "agent_owned INTEGER NOT NULL DEFAULT 0, "
+            "started_at REAL NOT NULL)"
+        )
+        conn.execute(
+            f"INSERT INTO {legacy}_task_log "
+            "(group_name, task_id, task_title, agent_id, started_at) "
+            "VALUES ('g', 'T-1', 'Do work', 'agent-1', 10.0)"
+        )
+        conn.execute(
+            f"CREATE TABLE {legacy}_journal ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "group_name TEXT NOT NULL, timestamp REAL NOT NULL, "
+            "entry_type TEXT NOT NULL, entry TEXT NOT NULL)"
+        )
+        conn.execute(
+            f"INSERT INTO {legacy}_journal "
+            "(group_name, timestamp, entry_type, entry) "
+            "VALUES ('g', 20.0, 'plan', 'Continue')"
+        )
+        conn.execute(
+            "CREATE TABLE auto_dispatch_queue ("
+            "group_name TEXT NOT NULL, position INTEGER NOT NULL DEFAULT 0, "
+            "task_id TEXT NOT NULL, agent_group TEXT NOT NULL DEFAULT '', "
+            "max_concurrent INTEGER NOT NULL DEFAULT 1, "
+            "target_agent_id TEXT NOT NULL DEFAULT '', "
+            f"{legacy}_owner_id TEXT NOT NULL DEFAULT '', "
+            "enqueued_at TEXT NOT NULL DEFAULT '', "
+            "PRIMARY KEY (group_name, position))"
+        )
+        conn.execute(
+            "INSERT INTO auto_dispatch_queue "
+            f"(group_name, position, task_id, {legacy}_owner_id) "
+            "VALUES ('g', 0, 'T-1', 'eng-1')"
+        )
+        conn.execute(
+            "CREATE TABLE board_tasks ("
+            "id TEXT PRIMARY KEY, task TEXT NOT NULL, "
+            "group_name TEXT NOT NULL DEFAULT '', "
+            "labels TEXT NOT NULL DEFAULT '[]', "
+            "messages TEXT NOT NULL DEFAULT '[]')"
+        )
+        conn.execute(
+            "INSERT INTO board_tasks (id, task, group_name, labels, messages) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (
+                "T-1",
+                "Follow up",
+                "g",
+                json.dumps([f"loom:{legacy}-message"]),
+                json.dumps([{"action": f"{legacy}_message"}]),
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        migrated = LoomDB(legacy_path)
+        self.addCleanup(migrated.close)
+        migrated.init()
+
+        tables = {
+            row[0]
+            for row in migrated._conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        self.assertIn("engineer_settings", tables)
+        self.assertIn("engineer_task_log", tables)
+        self.assertIn("engineer_journal", tables)
+        self.assertNotIn(f"{legacy}_settings", tables)
+        self.assertNotIn(f"{legacy}_task_log", tables)
+        self.assertNotIn(f"{legacy}_journal", tables)
+
+        settings_columns = {
+            row[1]
+            for row in migrated._conn.execute(
+                "PRAGMA table_info(engineer_settings)"
+            ).fetchall()
+        }
+        self.assertIn("engineer_provider", settings_columns)
+        self.assertIn("engineer_boot_command", settings_columns)
+        self.assertNotIn(f"{legacy}_provider", settings_columns)
+        loaded = migrated.load_engineer_settings("g")
+        self.assertEqual(loaded["engineer_provider"], "codex")
+        self.assertEqual(loaded["engineer_boot_command"], "codex --fast")
+
+        group_row = migrated._conn.execute(
+            "SELECT engineer_agent_id FROM group_settings WHERE group_name='g'"
+        ).fetchone()
+        self.assertEqual(group_row[0], "eng-1")
+        queue_row = migrated._conn.execute(
+            "SELECT engineer_owner_id FROM auto_dispatch_queue "
+            "WHERE group_name='g'"
+        ).fetchone()
+        self.assertEqual(queue_row[0], "eng-1")
+        task_log = migrated.load_engineer_task_log("g", limit=10)
+        self.assertEqual(task_log[0]["task_id"], "T-1")
+        journal = migrated.load_journal_entries("g", limit=10)
+        self.assertEqual(journal[0]["entry"], "Continue")
+        task = migrated._conn.execute(
+            "SELECT labels, messages FROM board_tasks WHERE id='T-1'"
+        ).fetchone()
+        self.assertEqual(json.loads(task[0]), ["loom:engineer-message"])
+        self.assertEqual(json.loads(task[1])[0]["action"], "engineer_message")
+
     def test_engineer_settings_load_backfills_heartbeat_from_legacy_rows(self):
         self.db._conn.execute(
             """

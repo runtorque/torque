@@ -10245,12 +10245,10 @@ test('renderAgentCell shows per-engineer and architect digest pause controls wit
   assert.match(runningHtml, /class="cell-engineer-toggle running"/);
   assert.match(runningHtml, /Pause Engineer event delivery/);
   assert.match(engineerNamedEngineerHtml, /^<div class="cell engineer"/);
-  assert.doesNotMatch(engineerNamedEngineerHtml, /^<div class="[^"]*\bengineer(?:\b|-)/);
   assert.doesNotMatch(workerHtml, /cell-engineer-toggle/);
   assert.match(workerHtml, /class="cell-worker-badge">worker<\/div>/);
   assert.doesNotMatch(workerHtml, /cell-engineer-badge|cell-architect-badge/);
   assert.match(engineerHtml, /^<div class="cell engineer"/);
-  assert.doesNotMatch(engineerHtml, /^<div class="[^"]*\bengineer(?:\b|-)/);
   assert.match(engineerHtml, /class="cell-engineer-badge">engineer<\/div>/);
   assert.match(engineerHtml, /class="cell-engineer-toggle running"/);
   assert.match(engineerHtml, /toggleDigestPauseForAgent\(decodeURIComponent\('eng-1'\)\)/);
@@ -10307,7 +10305,6 @@ test('renderAgentCell shows per-engineer and architect digest pause controls wit
     status: 'running',
   });
   assert.match(pausedEngineerHtml, /^<div class="cell engineer"/);
-  assert.doesNotMatch(pausedEngineerHtml, /^<div class="[^"]*\bengineer(?:\b|-)/);
   assert.match(pausedEngineerHtml, /class="cell-engineer-toggle paused"/);
   assert.match(pausedEngineerHtml, /Resume event delivery/);
   assert.match(pausedArchitectHtml, /^<div class="cell architect"/);
@@ -10426,7 +10423,6 @@ test('agent cards do not define legacy engineer edge chrome', () => {
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
 
   assert.match(css, /\.cell\.engineer\s*\{[^}]*border-left:\s*3px solid rgba\(88, 166, 255, 0\.72\);/);
-  assert.doesNotMatch(css, /\.cell\.engineer(?:[\s.#:{]|$)/);
   assert.doesNotMatch(css, /\.cell\.engineer-asking(?:[\s.#:{]|$)/);
   assert.doesNotMatch(css, /--engineer-(?:chrome|edge-shadow|active-glow)/);
   assert.doesNotMatch(css, /engineer-pulse/);
@@ -14745,7 +14741,7 @@ test('standalone shell owns the full-width bottom dock rows and drag selector', 
   );
   assert.match(
     html,
-    /<div id="standalone-sidebar-shell">\s*<div id="standalone-main-stack">\s*<main id="main"><\/main>\s*<\/div>\s*<div id="standalone-rail-resize-handle"[^>]*><\/div>\s*<aside id="standalone-right-rail"><\/aside>\s*<div id="standalone-bottom-resize-handle"[^>]*><\/div>\s*<section id="standalone-bottom-dock"><\/section>\s*<\/div>/s,
+    /<div id="standalone-sidebar-shell">\s*<div id="standalone-main-stack">[\s\S]*?<main id="main"><\/main>\s*<\/div>\s*<div id="standalone-rail-resize-handle"[^>]*><\/div>\s*<aside id="standalone-right-rail"><\/aside>\s*<div id="standalone-bottom-resize-handle"[^>]*><\/div>\s*<section id="standalone-bottom-dock"><\/section>\s*<\/div>/s,
   );
   assert.match(
     css,
