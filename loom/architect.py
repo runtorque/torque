@@ -221,7 +221,14 @@ def build_architect_system_prompt(group: str,
 
     custom = ""
     if architect_settings is not None:
-        custom = str(getattr(architect_settings, "custom_instructions", "") or "").strip()
+        custom = str(
+            getattr(
+                architect_settings,
+                "architect_custom_instructions",
+                getattr(architect_settings, "custom_instructions", ""),
+            )
+            or ""
+        ).strip()
     if custom:
         parts.append("## Custom Instructions\n" + custom)
 

@@ -323,6 +323,31 @@ class AgentLaunchService:
         resolved["worktree"] = False
         return resolved
 
+    def resolve_architect_launch_config(self, group: str, *,
+                                      base_dir: str = "",
+                                      explicit_template: str = "",
+                                      overrides: dict[str, Any] | None = None) -> dict:
+        """Resolve launch config for architect agents in a group."""
+        merged = dict(overrides or {})
+        settings_getter = getattr(self.state, "get_architect_settings", None)
+        ws = settings_getter(group) if callable(settings_getter) else None
+        if getattr(ws, "architect_provider", ""):
+            merged["provider"] = ws.architect_provider
+        if getattr(ws, "architect_boot_command", ""):
+            merged["command"] = ws.architect_boot_command
+        if getattr(ws, "architect_model", ""):
+            merged["model"] = ws.architect_model
+        if getattr(ws, "architect_reasoning_effort", ""):
+            merged["reasoning_effort"] = ws.architect_reasoning_effort
+        resolved = self.resolve_agent_launch_config(
+            group,
+            base_dir=base_dir,
+            explicit_template=explicit_template,
+            overrides=merged,
+        )
+        resolved["worktree"] = False
+        return resolved
+
     async def create_child_terminals(self, group: str, parent_cell,
                                      terminals: list[dict] | None = None,
                                      count: int = 0):

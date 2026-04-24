@@ -2837,6 +2837,48 @@ def cmd_engineer_rehire(args):
         print(f"Rehired \"{engineer['name']}\"{suffix}")
 
 
+def _parse_key_value_settings(items):
+    updates = {}
+    for kv in items or []:
+        if "=" not in kv:
+            die(f"Invalid setting format: {kv} (expected key=value)")
+        key, value = kv.split("=", 1)
+        try:
+            value = json.loads(value)
+        except (json.JSONDecodeError, ValueError):
+            pass
+        updates[key] = value
+    return updates
+
+
+def cmd_architect_settings(args):
+    """Show or update per-group Architect settings."""
+    state_data = get_state(args.port)
+    group = resolve_group(state_data, args.group)
+    if args.set:
+        updates = _parse_key_value_settings(args.set)
+        resp = api_call(
+            "update_architect_settings",
+            port=args.port,
+            group=group,
+            settings=updates,
+        )
+        check_ok(resp)
+        print(f"Architect settings for \"{group}\" updated")
+        return
+
+    resp = api_call("get_architect_settings", port=args.port, group=group)
+    data = check_ok(resp)
+    settings = data.get("settings", {})
+    if args.json:
+        print(json.dumps(settings, indent=2))
+        return
+    print(f"Architect settings for \"{group}\":")
+    for key, value in sorted(settings.items()):
+        if value or value == 0 or value is False:
+            print(f"  {key}: {value}")
+
+
 def cmd_task_verify(args):
     """Record a deploy/restart verification checkpoint for a task."""
     st = get_state_local(args.port)
@@ -4542,6 +4584,21 @@ def build_parser():
     p.add_argument("--json", action="store_true",
                    help="JSON output")
     p.set_defaults(func=cmd_engineer_journal)
+
+    # -- architect ----------------------------------------------------------
+    arch = sub.add_parser("architect", help="Architect management")
+    arch.set_defaults(func=None, _sub_parser=arch)
+    arch_sub = arch.add_subparsers(dest="architect_cmd")
+
+    p = arch_sub.add_parser("settings",
+                            help="Show or update architect settings")
+    p.add_argument("-g", "--group", default="loom",
+                   help="Group name (default: loom)")
+    p.add_argument("-s", "--set", action="append", metavar="KEY=VALUE",
+                   help="Update settings (e.g., -s architect_paused=true)")
+    p.add_argument("--json", action="store_true",
+                   help="Output raw JSON")
+    p.set_defaults(func=cmd_architect_settings)
 
     # -- workflow breach ----------------------------------------------------
     p = sub.add_parser("workflow-breach",

@@ -14,6 +14,8 @@ class _FakeState:
                  engineer_model="", engineer_reasoning_effort="",
                  engineer_directory="", engineer_profile="",
                  engineer_shell="", engineer_tab_color="",
+                 architect_provider="", architect_boot_command="",
+                 architect_model="", architect_reasoning_effort="",
                  agent_provider="", agent_boot_command="",
                  agent_model="", agent_reasoning_effort="",
                  default_command="claude", git_worktree=False):
@@ -53,6 +55,12 @@ class _FakeState:
             engineer_shell=engineer_shell,
             engineer_tab_color=engineer_tab_color,
         )
+        self._architect_settings = types.SimpleNamespace(
+            architect_provider=architect_provider,
+            architect_boot_command=architect_boot_command,
+            architect_model=architect_model,
+            architect_reasoning_effort=architect_reasoning_effort,
+        )
         self._default_command = default_command
 
     def get_group_settings(self, group):
@@ -60,6 +68,9 @@ class _FakeState:
 
     def get_engineer_settings(self, group):
         return self._engineer_settings
+
+    def get_architect_settings(self, group):
+        return self._architect_settings
 
     def get_default_command(self):
         return self._default_command
@@ -216,6 +227,47 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resolved["profile"], "Ops")
         self.assertEqual(resolved["shell"], "fish")
         self.assertEqual(resolved["tab_color"], "")
+        self.assertFalse(resolved["worktree"])
+
+    def test_resolve_architect_launch_config_prefers_architect_specific_overrides(self):
+        service = self.server_agent_mod.AgentLaunchService(
+            state=_FakeState(
+                architect_provider="codex",
+                architect_boot_command="codex --architect",
+                git_worktree=True,
+            ),
+            connection=None,
+            bridge=_FakeBridge(),
+            worktree_mgr=None,
+            template_mgr=_FakeTemplateManager(),
+        )
+
+        resolved = service.resolve_architect_launch_config("backend")
+
+        self.assertEqual(resolved["provider"], "codex")
+        self.assertEqual(resolved["command"], "codex --architect")
+        self.assertFalse(resolved["worktree"])
+
+    def test_resolve_architect_launch_config_applies_model_and_reasoning_defaults(self):
+        service = self.server_agent_mod.AgentLaunchService(
+            state=_FakeState(
+                architect_provider="codex",
+                architect_model="gpt-5",
+                architect_reasoning_effort="high",
+            ),
+            connection=None,
+            bridge=_FakeBridge(),
+            worktree_mgr=None,
+            template_mgr=_FakeTemplateManager(),
+        )
+
+        resolved = service.resolve_architect_launch_config("backend")
+
+        self.assertEqual(resolved["agent_type"], "codex")
+        self.assertEqual(
+            resolved["command"],
+            "codex --model gpt-5 -c model_reasoning_effort=high",
+        )
         self.assertFalse(resolved["worktree"])
 
     def test_resolve_agent_launch_config_detects_default_provider_from_command(self):

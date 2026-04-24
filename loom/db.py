@@ -100,8 +100,11 @@ _AGENT_INSERT_SQL = """
 """
 
 # GroupSettings fields that store dicts — persisted as JSON text.
-_GS_JSON_FIELDS = {"env_vars", "agent_env_vars", "terminal_env_vars",
-                    "board_default_labels", "worktree_symlinks"}
+_GS_JSON_FIELDS = {
+    "env_vars", "agent_env_vars", "terminal_env_vars",
+    "board_default_labels", "worktree_symlinks",
+    "architect_review_gate_thresholds",
+}
 
 # GroupSettings fields that are booleans — stored as INTEGER 0/1.
 _GS_BOOL_FIELDS = {
@@ -112,7 +115,7 @@ _GS_BOOL_FIELDS = {
     "dispatch_auto_terminals",
     "notifications", "notify_on_finish", "notify_on_error",
     "notify_on_attention", "terminal_always_custom_dialog",
-    "terminal_close_on_disconnect",
+    "terminal_close_on_disconnect", "architect_paused",
 }
 
 def _serialize_agent_cell(cell):

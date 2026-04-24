@@ -396,6 +396,7 @@
       <button class="gs-tab active" data-tab="group" onclick="switchGsTab('group')">Group</button>
       <button class="gs-tab" data-tab="agents" onclick="switchGsTab('agents')">Agents</button>
       <button class="gs-tab" data-tab="engineer" onclick="switchGsTab('engineer')">Engineer</button>
+      <button class="gs-tab" data-tab="architect" onclick="switchGsTab('architect')">Architect</button>
     </div>
 
     <!-- Group tab -->
@@ -744,6 +745,67 @@
             <label class="gs-checkbox"><input id="gs-engineer-event-task-derived" type="checkbox" onchange="syncGsEngineerNotificationPreset()"> task_derived</label>
             <label class="gs-checkbox"><input id="gs-engineer-event-agent-progress" type="checkbox" onchange="syncGsEngineerNotificationPreset()"> agent_progress</label>
             <label class="gs-checkbox"><input id="gs-engineer-event-task-health-alert" type="checkbox" onchange="syncGsEngineerNotificationPreset()"> task_health_alert</label>
+          </div>
+        </div>
+      </details>
+    </div>
+
+    <!-- Architect tab -->
+    <div class="gs-pane" data-pane="architect">
+      <details id="gs-architect-boot-section" class="task-modal-section" open>
+        <summary>Boot configuration</summary>
+        <div class="task-modal-section-body">
+          <label>Boot command</label>
+          <input id="gs-architect-boot-cmd" placeholder="Use provider default" autocomplete="off">
+          <label>Provider</label>
+          <select id="gs-architect-provider" onchange="onGsArchitectProviderChange()"></select>
+          <label>Model</label>
+          <input id="gs-architect-model" placeholder="Use provider default" autocomplete="off">
+          <label>Reasoning effort</label>
+          <select id="gs-architect-reasoning-effort"></select>
+        </div>
+      </details>
+
+      <details id="gs-architect-behavior-section" class="task-modal-section" open>
+        <summary>Behavior</summary>
+        <div class="task-modal-section-body">
+          <label>Autonomy</label>
+          <select id="gs-architect-autonomy-mode">
+            <option value="dispatch_freely">Dispatch freely</option>
+            <option value="dispatch_after_confirm">Dispatch after confirm</option>
+            <option value="ask_always">Ask always</option>
+          </select>
+          <label class="gs-checkbox">
+            <input id="gs-architect-paused" type="checkbox"> Event delivery paused
+            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Pauses Loom Digest delivery to architect agents in this group. Resuming sends queued events when the architect is idle.">?</span>
+          </label>
+        </div>
+      </details>
+
+      <details id="gs-architect-custom-section" class="task-modal-section" open>
+        <summary>Custom instructions</summary>
+        <div class="task-modal-section-body">
+          <textarea id="gs-architect-custom-instructions" rows="6" class="gs-autogrow" oninput="_autoGrowTextArea('gs-architect-custom-instructions')" placeholder="Instructions appended after Loom's built-in Architect policy..."></textarea>
+        </div>
+      </details>
+
+      <details id="gs-architect-deferred-section" class="task-modal-section gs-deferred-section" open>
+        <summary>Deferred <span class="label-hint">(storage only — wiring in LOOM:196)</span></summary>
+        <div class="task-modal-section-body">
+          <div class="label-hint task-modal-section-intro">⊘ These values are saved now, but do not change runtime behavior until LOOM:196 wires them.</div>
+          <label>⊘ Digest verbosity</label>
+          <select id="gs-architect-digest-verbosity" title="Stored only in v1; runtime wiring is deferred to LOOM:196.">
+            <option value="terse">Terse</option>
+            <option value="balanced">Balanced</option>
+            <option value="verbose">Verbose</option>
+          </select>
+          <label>⊘ Journal checkpoint</label>
+          <input id="gs-architect-journal-checkpoint" placeholder="every_10_actions" autocomplete="off" title="Stored only in v1; runtime wiring is deferred to LOOM:196.">
+          <label>⊘ Review-gate thresholds</label>
+          <div class="gs-threshold-grid" title="Stored only in v1; runtime wiring is deferred to LOOM:196.">
+            <input id="gs-architect-review-ship-direct-max" type="number" min="0" placeholder="ship: 50">
+            <input id="gs-architect-review-default-above" type="number" min="0" placeholder="review: 150">
+            <label class="gs-checkbox"><input id="gs-architect-review-bypass" type="checkbox"> self-review bypass</label>
           </div>
         </div>
       </details>
