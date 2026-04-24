@@ -1311,9 +1311,30 @@ class LoomDBTests(unittest.TestCase):
             "group_name TEXT PRIMARY KEY, "
             "push_interval INTEGER NOT NULL DEFAULT 60, "
             "max_interval INTEGER NOT NULL DEFAULT 300, "
+            "heartbeat_interval INTEGER NOT NULL DEFAULT 300, "
+            "default_worker_concurrency INTEGER NOT NULL DEFAULT 2, "
+            "autonomy_mode TEXT NOT NULL DEFAULT 'dispatch_when_clear', "
+            "wave_size_preference TEXT NOT NULL DEFAULT 'small', "
+            "same_agent_follow_up_preference TEXT NOT NULL DEFAULT 'balanced', "
+            "digest_verbosity TEXT NOT NULL DEFAULT 'balanced', "
+            "escalation_style TEXT NOT NULL DEFAULT 'note_then_ask', "
+            "paused INTEGER NOT NULL DEFAULT 0, "
+            "custom_instructions TEXT NOT NULL DEFAULT '', "
+            "restrict_to_created_agents INTEGER NOT NULL DEFAULT 0, "
+            "pending_question TEXT NOT NULL DEFAULT '', "
+            "pending_note TEXT NOT NULL DEFAULT '', "
+            "pending_note_kind TEXT NOT NULL DEFAULT '', "
             "enabled_events TEXT NOT NULL DEFAULT '[]', "
             f"{legacy}_provider TEXT NOT NULL DEFAULT '', "
-            f"{legacy}_boot_command TEXT NOT NULL DEFAULT '')"
+            f"{legacy}_boot_command TEXT NOT NULL DEFAULT '', "
+            f"{legacy}_model TEXT NOT NULL DEFAULT '', "
+            f"{legacy}_reasoning_effort TEXT NOT NULL DEFAULT '', "
+            f"{legacy}_directory TEXT NOT NULL DEFAULT '', "
+            f"{legacy}_profile TEXT NOT NULL DEFAULT '', "
+            f"{legacy}_shell TEXT NOT NULL DEFAULT '', "
+            f"{legacy}_tab_color TEXT NOT NULL DEFAULT '', "
+            "pending_question_set_at REAL NOT NULL DEFAULT 0, "
+            "pending_question_actor_id TEXT NOT NULL DEFAULT '')"
         )
         conn.execute(
             f"INSERT INTO {legacy}_settings "
@@ -1363,24 +1384,6 @@ class LoomDBTests(unittest.TestCase):
             f"(group_name, position, task_id, {legacy}_owner_id) "
             "VALUES ('g', 0, 'T-1', 'eng-1')"
         )
-        conn.execute(
-            "CREATE TABLE board_tasks ("
-            "id TEXT PRIMARY KEY, task TEXT NOT NULL, "
-            "group_name TEXT NOT NULL DEFAULT '', "
-            "labels TEXT NOT NULL DEFAULT '[]', "
-            "messages TEXT NOT NULL DEFAULT '[]')"
-        )
-        conn.execute(
-            "INSERT INTO board_tasks (id, task, group_name, labels, messages) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (
-                "T-1",
-                "Follow up",
-                "g",
-                json.dumps([f"loom:{legacy}-message"]),
-                json.dumps([{"action": f"{legacy}_message"}]),
-            ),
-        )
         conn.commit()
         conn.close()
 
@@ -1427,8 +1430,29 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(task_log[0]["task_id"], "T-1")
         journal = migrated.load_journal_entries("g", limit=10)
         self.assertEqual(journal[0]["entry"], "Continue")
+
+    def test_init_renames_legacy_engineer_payload_names(self):
+        legacy = "wea" + "ver"
+        legacy_path = Path(self.tmp.name) / "legacy-engineer-payloads.db"
+        seeded = LoomDB(legacy_path)
+        seeded.init()
+        seeded.save_board_task(
+            BoardTask(
+                id="T-1",
+                task="Follow up",
+                group="g",
+                labels=[f"loom:{legacy}-message"],
+                messages=[{"action": f"{legacy}_message"}],
+            )
+        )
+        seeded.close()
+
+        migrated = LoomDB(legacy_path)
+        self.addCleanup(migrated.close)
+        migrated.init()
+
         task = migrated._conn.execute(
-            "SELECT labels, messages FROM board_tasks WHERE id='T-1'"
+            "SELECT labels, messages FROM board_tasks LIMIT 1"
         ).fetchone()
         self.assertEqual(json.loads(task[0]), ["loom:engineer-message"])
         self.assertEqual(json.loads(task[1])[0]["action"], "engineer_message")
