@@ -22,6 +22,7 @@ from .mcp_architect import ARCHITECT_TOOLS, _dispatch_architect_tool
 from .mcp_engineer import ENGINEER_TOOLS, _dispatch_engineer_tool
 from .mcp_retry import (
     IDEMPOTENCY_HEADER,
+    derive_idempotency_key,
     is_mcp_write_tool,
     mcp_idempotency_key_from_body,
     mcp_request_hash,
@@ -722,7 +723,8 @@ def _visible_tools(state, cell_id: str):
 # Tool dispatch
 # ---------------------------------------------------------------------------
 
-async def _dispatch_tool(name, args, cell_id, handle_command, state):
+async def _dispatch_tool(name, args, cell_id, handle_command, state, *,
+                         idempotency_key: str = ""):
     """Execute a tool call and return (content_text, is_error)."""
 
     if name == "loom_context":
@@ -751,6 +753,11 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state):
         ):
             if key in args:
                 payload[key] = args[key]
+        if idempotency_key:
+            payload["idempotency_key"] = derive_idempotency_key(
+                idempotency_key,
+                payload,
+            )
         result = await handle_command(payload)
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
@@ -829,6 +836,11 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state):
 
     # Build the ai_report command payload
     payload = {"cmd": "ai_report", "cell_id": cell_id, "action": action}
+    if idempotency_key:
+        payload["idempotency_key"] = derive_idempotency_key(
+            idempotency_key,
+            payload,
+        )
 
     if action == "done":
         if args.get("message"):
@@ -1080,7 +1092,9 @@ async def dispatch_mcp_rpc_body(
             else:
                 text, is_error = await _dispatch_engineer_tool(
                     tool_name, arguments, handle_command, state,
-                    caller_id=cell_id)
+                    caller_id=cell_id,
+                    idempotency_key=idempotency_key,
+                )
                 result = {
                     "content": [{"type": "text", "text": text}],
                     "isError": is_error,
@@ -1112,7 +1126,9 @@ async def dispatch_mcp_rpc_body(
             else:
                 text, is_error = await _dispatch_architect_tool(
                     tool_name, arguments, handle_command, state,
-                    caller_id=cell_id)
+                    caller_id=cell_id,
+                    idempotency_key=idempotency_key,
+                )
                 result = {
                     "content": [{"type": "text", "text": text}],
                     "isError": is_error,
@@ -1132,7 +1148,9 @@ async def dispatch_mcp_rpc_body(
             else:
                 text, is_error = await _dispatch_tool(
                     tool_name, arguments, cell_id,
-                    handle_command, state)
+                    handle_command, state,
+                    idempotency_key=idempotency_key,
+                )
                 result = {
                     "content": [{"type": "text", "text": text}],
                     "isError": is_error,

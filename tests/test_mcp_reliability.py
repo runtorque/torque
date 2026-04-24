@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 try:
     from helpers import install_aiohttp_stub
@@ -71,6 +72,7 @@ class MCPIdempotencyTests(unittest.IsolatedAsyncioTestCase):
         )
         self.mcp = importlib.import_module("loom.mcp")
         self.mcp = importlib.reload(self.mcp)
+        self.state_mod = importlib.import_module("loom.state")
 
     async def test_duplicate_mcp_write_with_same_key_does_not_run_twice(self):
         calls = []
@@ -151,6 +153,74 @@ class MCPIdempotencyTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("error", response)
         self.assertIn("Idempotency key", response["error"]["message"])
+
+    async def test_architect_journal_retry_after_outer_receipt_loss_reuses_internal_record(self):
+        architect = AgentCell(
+            id="arch-1",
+            name="Architect",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+        )
+        self.state.agents[architect.id] = architect
+
+        async def handle_command(payload):
+            if payload.get("cmd") != "architect_journal_append":
+                raise AssertionError(f"unexpected payload: {payload}")
+            return self.state.architect_journal_append(
+                payload.get("architect_id", ""),
+                payload.get("entry_type", ""),
+                payload.get("entry", ""),
+                idempotency_key=payload.get("idempotency_key", ""),
+                request_hash=api_request_hash(payload),
+            )
+
+        body = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "architect_journal",
+                "arguments": {
+                    "type": "plan",
+                    "entry": "Durably checkpoint this architect note.",
+                    IDEMPOTENCY_ARG: "journal-outer-idem",
+                },
+            },
+        }
+
+        with mock.patch.object(self.state_mod, "DATA_DIR", Path(self.tmp.name)):
+            first, status = await self.mcp.dispatch_mcp_rpc_body(
+                body,
+                cell_id=architect.id,
+                handle_command=handle_command,
+                state=self.state,
+            )
+            self.assertEqual(status, 200)
+            first_record = json.loads(first["result"]["content"][0]["text"])
+            self.assertEqual(first_record["type"], "plan")
+
+            self.db._conn.execute(
+                "DELETE FROM mcp_idempotency WHERE idempotency_key=?",
+                ("journal-outer-idem",),
+            )
+            self.db._conn.commit()
+
+            retry_body = json.loads(json.dumps(body))
+            retry_body["id"] = 2
+            second, status = await self.mcp.dispatch_mcp_rpc_body(
+                retry_body,
+                cell_id=architect.id,
+                handle_command=handle_command,
+                state=self.state,
+            )
+
+            self.assertEqual(status, 200)
+            second_record = json.loads(second["result"]["content"][0]["text"])
+            self.assertEqual(second_record["id"], first_record["id"])
+            entries = self.state.architect_journal_read(architect.id, limit=10)
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0]["entry"], first_record["entry"])
 
 
 class MCPFailedWriteReplayTests(unittest.IsolatedAsyncioTestCase):
@@ -247,6 +317,93 @@ class MCPFailedWriteReplayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.db.load_failed_writes(), [])
         health = self.db.load_mcp_health_summary(since=0)
         self.assertEqual(health["totals"].get("dedupe"), 1)
+
+    async def test_internal_failed_write_replay_dedupes_existing_command_receipt(self):
+        from loom.server import (
+            _internal_failed_write_key,
+            replay_internal_failed_write_payload,
+        )
+
+        payload = {
+            "cmd": "ai_report",
+            "cell_id": "agent-1",
+            "action": "done",
+            "message": "All set.",
+            "idempotency_key": "internal-ai-idem",
+        }
+        cached_response = {"type": "ok", "message": "All set."}
+        self.db.save_command_receipt(
+            idempotency_key="internal-ai-idem",
+            surface="internal",
+            command_name="ai_report:done",
+            request_hash=api_request_hash(payload),
+            response=cached_response,
+        )
+        self.db.enqueue_failed_write(
+            idempotency_key=_internal_failed_write_key("internal-ai-idem"),
+            endpoint="/internal/cmd",
+            surface="internal",
+            tool_name="ai_report:done",
+            caller_id="agent-1",
+            payload=payload,
+            attempts=2,
+            last_error="daemon exited before reply",
+        )
+        calls = []
+        results = []
+
+        async def handle_command(unexpected_payload):
+            calls.append(dict(unexpected_payload))
+            raise AssertionError("internal replay should have been deduped")
+
+        async def sender(write):
+            result = await replay_internal_failed_write_payload(
+                self.db,
+                write["payload"],
+                handle_command,
+            )
+            results.append(result)
+            return result
+
+        summary = await replay_failed_writes(self.db, sender)
+
+        self.assertEqual(summary, {"attempted": 1, "replayed": 1, "failed": 0})
+        self.assertEqual(results, [cached_response])
+        self.assertEqual(calls, [])
+        self.assertEqual(self.db.load_failed_writes(), [])
+
+    def test_architect_journal_replay_recovers_existing_jsonl_entry_without_duplicate(self):
+        state = MatrixState(db=self.db)
+        state_mod = importlib.import_module("loom.state")
+
+        with mock.patch.object(state_mod, "DATA_DIR", Path(self.tmp.name)):
+            first = state.architect_journal_append(
+                "arch-1",
+                "checkpoint",
+                "Remember this exact checkpoint.",
+                idempotency_key="journal-recover-idem",
+                request_hash="journal-recover-hash",
+            )
+            self.db._conn.execute(
+                "DELETE FROM command_receipts WHERE idempotency_key=?",
+                ("journal-recover-idem",),
+            )
+            self.db._conn.commit()
+
+            replayed = state.architect_journal_append(
+                "arch-1",
+                "checkpoint",
+                "Remember this exact checkpoint.",
+                idempotency_key="journal-recover-idem",
+                request_hash="journal-recover-hash",
+            )
+
+            self.assertEqual(replayed["id"], first["id"])
+            entries = state.architect_journal_read("arch-1", limit=10)
+            self.assertEqual(len(entries), 1)
+            receipt = self.db.load_command_receipt("journal-recover-idem")
+            self.assertIsNotNone(receipt)
+            self.assertEqual(receipt["response"]["id"], first["id"])
 
     def test_doctor_mcp_health_reports_recent_retry_drop_counts(self):
         self.db.record_mcp_health_event(

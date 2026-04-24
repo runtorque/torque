@@ -629,7 +629,8 @@ def exit_if_invalid_architect_binding(state=None) -> str:
 
 
 async def _dispatch_architect_tool(name, args, handle_command, state,
-                                   caller_id: str = ""):
+                                   caller_id: str = "",
+                                   idempotency_key: str = ""):
     caller_id = str(caller_id or "").strip() or bound_architect_id_from_env()
     if str(name or "").strip() not in _ARCHITECT_TOOL_NAMES:
         return f"Unknown architect tool: {name}", True
@@ -641,6 +642,7 @@ async def _dispatch_architect_tool(name, args, handle_command, state,
         tool_prefix="architect_",
         caller_kind="architect",
         caller_id=caller_id,
+        idempotency_key=idempotency_key,
     )
 
 

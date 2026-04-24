@@ -1,6 +1,8 @@
 """AgentCell dataclass and MatrixState persistence layer."""
 
 import asyncio
+import copy
+import hashlib
 import json
 import os
 import re
@@ -694,6 +696,20 @@ def _safe_journal_filename(value: str) -> str:
     return token or "architect"
 
 
+@dataclass
+class CriticalWriteCapture:
+    command_name: str
+    idempotency_key: str
+    request_hash: str
+    agents: dict[str, object] = field(default_factory=dict)
+    deleted_agents: set[str] = field(default_factory=set)
+    tasks: dict[str, object] = field(default_factory=dict)
+    deleted_tasks: set[str] = field(default_factory=set)
+    task_id_counters: dict[str, int] = field(default_factory=dict)
+    pipeline_task_counters: dict[str, int] = field(default_factory=dict)
+    task_id_aliases: dict[str, str] = field(default_factory=dict)
+
+
 def _normalize_board_lanes(lanes) -> list[str]:
     current = []
     seen = set()
@@ -1078,6 +1094,7 @@ class MatrixState:
         # hot path so UI mutations feel instant.
         self._weaver_recompute_pending: set[str] = set()
         self._weaver_recompute_task = None
+        self._critical_write_capture: CriticalWriteCapture | None = None
 
     # -- Delta emission -----------------------------------------------------
 
@@ -1683,10 +1700,122 @@ class MatrixState:
 
     # -- Targeted persistence helpers ----------------------------------------
 
+    def begin_critical_write_capture(
+        self,
+        *,
+        command_name: str,
+        idempotency_key: str,
+        request_hash: str,
+    ) -> None:
+        """Capture agent/task persistence for one critical idempotent write."""
+        if self._critical_write_capture is not None:
+            raise RuntimeError("critical write capture is already active")
+        self._critical_write_capture = CriticalWriteCapture(
+            command_name=str(command_name or ""),
+            idempotency_key=str(idempotency_key or ""),
+            request_hash=str(request_hash or ""),
+        )
+
+    def _critical_write_capture_agent(self, cell: AgentCell) -> bool:
+        capture = self._critical_write_capture
+        if capture is None:
+            return False
+        capture.deleted_agents.discard(str(cell.id or ""))
+        capture.agents[str(cell.id or "")] = copy.deepcopy(cell)
+        return True
+
+    def _critical_write_capture_delete_agent(self, agent_id: str) -> bool:
+        capture = self._critical_write_capture
+        aid = str(agent_id or "").strip()
+        if capture is None or not aid:
+            return False
+        capture.agents.pop(aid, None)
+        capture.deleted_agents.add(aid)
+        return True
+
+    def _critical_write_capture_task(self, task: BoardTask) -> bool:
+        capture = self._critical_write_capture
+        if capture is None:
+            return False
+        capture.deleted_tasks.discard(str(task.id or ""))
+        capture.tasks[str(task.id or "")] = copy.deepcopy(task)
+        return True
+
+    def _critical_write_capture_delete_task(self, task_id: str) -> bool:
+        capture = self._critical_write_capture
+        tid = str(task_id or "").strip()
+        if capture is None or not tid:
+            return False
+        capture.tasks.pop(tid, None)
+        capture.deleted_tasks.add(tid)
+        return True
+
+    def _critical_write_capture_task_id_counter(self, group_prefix: str) -> bool:
+        capture = self._critical_write_capture
+        prefix = normalize_group_prefix(group_prefix)
+        if capture is None or not prefix:
+            return False
+        capture.task_id_counters[prefix] = max(
+            1,
+            int(self.task_id_counters.get(prefix, 1) or 1),
+        )
+        return True
+
+    def _critical_write_capture_pipeline_task_counter(self, root_task_id: str) -> bool:
+        capture = self._critical_write_capture
+        root_id = str(root_task_id or "").strip()
+        if capture is None or not root_id:
+            return False
+        capture.pipeline_task_counters[root_id] = max(
+            1,
+            int(self.pipeline_task_counters.get(root_id, 1) or 1),
+        )
+        return True
+
+    def _critical_write_capture_task_id_alias(self, legacy_id: str) -> bool:
+        capture = self._critical_write_capture
+        alias = str(legacy_id or "").strip()
+        if capture is None or not alias:
+            return False
+        task_id = str(self.task_id_aliases.get(alias, "") or "").strip()
+        if not task_id:
+            return False
+        capture.task_id_aliases[alias] = task_id
+        return True
+
+    def finalize_critical_write_capture(self, response, *,
+                                        delete_failed_write_key: str = "",
+                                        surface: str = "internal"):
+        """Persist one captured critical write atomically with its receipt."""
+        capture = self._critical_write_capture
+        self._critical_write_capture = None
+        if not capture or not self.db:
+            return
+        self.db.persist_command_capture(
+            agents=capture.agents,
+            deleted_agents=capture.deleted_agents,
+            tasks=capture.tasks,
+            deleted_tasks=capture.deleted_tasks,
+            task_id_counters=capture.task_id_counters,
+            pipeline_task_counters=capture.pipeline_task_counters,
+            task_id_aliases=capture.task_id_aliases,
+            idempotency_key=capture.idempotency_key,
+            surface=surface,
+            command_name=capture.command_name,
+            request_hash=capture.request_hash,
+            response=response,
+            delete_failed_write_key=delete_failed_write_key,
+        )
+
+    def clear_critical_write_capture(self) -> None:
+        self._critical_write_capture = None
+
     def _db_save_agent(self, cell: AgentCell):
         """Persist a single agent to SQLite."""
         if self.db:
             try:
+                if self._critical_write_capture_agent(cell):
+                    return
                 self.db.save_agent_deferred(cell)
             except Exception:
                 log.exception("Failed to save agent %s", cell.id)
@@ -1694,6 +1823,8 @@ class MatrixState:
     def _db_delete_agent(self, agent_id: str):
         if self.db:
             try:
+                if self._critical_write_capture_delete_agent(agent_id):
+                    return
                 self.db.delete_agent(agent_id)
             except Exception:
                 log.exception("Failed to delete agent %s", agent_id)
@@ -1763,6 +1894,8 @@ class MatrixState:
     def _db_save_task(self, task: BoardTask):
         if self.db:
             try:
+                if self._critical_write_capture_task(task):
+                    return
                 self.db.save_board_task_deferred(task)
             except Exception:
                 log.exception("Failed to save task %s", task.id)
@@ -1770,6 +1903,8 @@ class MatrixState:
     def _db_delete_task(self, task_id: str):
         if self.db:
             try:
+                if self._critical_write_capture_delete_task(task_id):
+                    return
                 self.db.delete_board_task(task_id)
             except Exception:
                 log.exception("Failed to delete task %s", task_id)
@@ -1777,6 +1912,8 @@ class MatrixState:
     def _db_save_task_id_counter(self, group_prefix: str):
         if self.db:
             try:
+                if self._critical_write_capture_task_id_counter(group_prefix):
+                    return
                 self.db.defer_write(
                     "task_id_counters",
                     "save_task_id_counter",
@@ -1789,6 +1926,8 @@ class MatrixState:
     def _db_save_pipeline_task_counter(self, root_task_id: str):
         if self.db:
             try:
+                if self._critical_write_capture_pipeline_task_counter(root_task_id):
+                    return
                 self.db.defer_write(
                     "pipeline_task_counters",
                     "save_pipeline_task_counter",
@@ -1806,6 +1945,8 @@ class MatrixState:
                     task = self.board_tasks.get(self.resolve_task_alias(task_id))
                     if task:
                         self._db_save_task(task)
+                    if self._critical_write_capture_task_id_alias(legacy_id):
+                        return
                     self.db.defer_write(
                         "task_id_aliases",
                         "save_task_id_alias",
@@ -3021,21 +3162,85 @@ class MatrixState:
             _safe_journal_filename(architect_id) + ".jsonl"
         )
 
+    def _architect_journal_entry_id(self, architect_id: str,
+                                    idempotency_key: str) -> str:
+        digest = hashlib.sha256(
+            f"{architect_id}:{idempotency_key}".encode("utf-8")
+        ).hexdigest()
+        return digest[:12]
+
+    def _recover_architect_journal_entry(self, architect_id: str, *,
+                                         record_id: str,
+                                         request_hash: str = "") -> dict | None:
+        for existing in self.architect_journal_read(
+            architect_id,
+            limit=1_000_000,
+        ):
+            if str((existing or {}).get("id", "") or "") != record_id:
+                continue
+            existing_hash = str(
+                (existing or {}).get("request_hash", "") or ""
+            ).strip()
+            if request_hash and existing_hash and existing_hash != request_hash:
+                raise ValueError(
+                    "Idempotency key was reused for a different architect journal append"
+                )
+            return existing
+        return None
+
     def architect_journal_append(self, architect_id: str, entry_type: str,
-                                 entry: str) -> dict:
+                                 entry: str, *,
+                                 idempotency_key: str = "",
+                                 request_hash: str = "") -> dict:
         """Append one architect journal entry to its JSONL file."""
         import time
 
         architect_id = str(architect_id or "").strip()
         if not architect_id:
             raise ValueError("architect_id is required")
+        idem_key = str(idempotency_key or "").strip()
+        request_hash = str(request_hash or "").strip()
+        if idem_key:
+            receipt = self.db.load_command_receipt(idem_key) if self.db else None
+            if receipt:
+                existing_hash = str(receipt.get("request_hash", "") or "").strip()
+                if request_hash and existing_hash and existing_hash != request_hash:
+                    raise ValueError(
+                        "Idempotency key was reused for a different architect journal append"
+                    )
+                response = receipt.get("response")
+                if isinstance(response, dict):
+                    return response
+            recovered = self._recover_architect_journal_entry(
+                architect_id,
+                record_id=self._architect_journal_entry_id(
+                    architect_id,
+                    idem_key,
+                ),
+                request_hash=request_hash,
+            )
+            if recovered:
+                if self.db:
+                    self.db.save_command_receipt(
+                        idempotency_key=idem_key,
+                        surface="internal",
+                        command_name="architect_journal_append",
+                        request_hash=request_hash,
+                        response=recovered,
+                    )
+                return recovered
         record = {
-            "id": uuid.uuid4().hex[:12],
+            "id": (
+                self._architect_journal_entry_id(architect_id, idem_key)
+                if idem_key else uuid.uuid4().hex[:12]
+            ),
             "architect_id": architect_id,
             "timestamp": time.time(),
             "type": str(entry_type or "").strip(),
             "entry": str(entry or ""),
         }
+        if request_hash:
+            record["request_hash"] = request_hash
         path = self._architect_journal_path(architect_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(
@@ -3049,6 +3254,14 @@ class MatrixState:
             os.chmod(path, 0o600)
         except OSError:
             pass
+        if idem_key and self.db:
+            self.db.save_command_receipt(
+                idempotency_key=idem_key,
+                surface="internal",
+                command_name="architect_journal_append",
+                request_hash=request_hash,
+                response=record,
+            )
         self._emit("architect_journal_append", **record)
         return record
 
