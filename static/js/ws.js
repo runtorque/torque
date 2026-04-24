@@ -2,7 +2,13 @@
 
 const WS_URL = `ws://${location.host}/ws`;
 let ws = null;
-let state = { agents: {}, groups: {}, children: {}, active_session_id: null };
+let state = {
+  agents: {},
+  groups: {},
+  children: {},
+  active_session_id: null,
+  selected_principal_id: '',
+};
 let dragInProgress = false;
 let selectedAgentId = null;
 let selectedTerminalId = null;
@@ -294,6 +300,9 @@ function _handleFullState(msg) {
   if (!state.weaver_worklog) state.weaver_worklog = {};
   if (!state.weaver_streams) state.weaver_streams = {};
   if (!state.weaver_session_maps) state.weaver_session_maps = {};
+  if (typeof state.selected_principal_id !== 'string') {
+    state.selected_principal_id = '';
+  }
   if (typeof _applyEmbeddedTerminalScrollbackFromSettings === 'function') {
     _applyEmbeddedTerminalScrollbackFromSettings();
   }
@@ -1022,6 +1031,9 @@ function _applyUiSurfaceInvalidation(flags, key) {
       || key === 'board_lane_sorts_by_group'
       || key === 'board_card_density_by_group') {
     _markSurface(flags, 'board');
+  }
+  if (key === 'selected_principal_id') {
+    _markSurface(flags, 'main');
   }
 }
 

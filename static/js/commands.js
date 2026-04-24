@@ -776,3 +776,20 @@ function sendBroadcast() {
     document.getElementById('broadcast-input').value = '';
   }
 }
+
+/* Principal selector — top-row filter for the agent grid.
+   `principalId` is an architect id, or '' to select the user principal. */
+function selectPrincipal(principalId) {
+  const id = String(principalId || '').trim();
+  const current = String((state && state.selected_principal_id) || '');
+  if (id === current) return;
+  state.selected_principal_id = id;
+  focusedItemId = _principalRowFocusId(id);
+  send({ cmd: 'ui_select_principal', principal_id: id });
+  render();
+}
+
+function _principalRowFocusId(principalId) {
+  const id = String(principalId || '').trim();
+  return 'principal:' + (id || 'user');
+}

@@ -1067,6 +1067,10 @@ class MatrixState:
         self.auto_dispatch_queues: dict[str, list[AutoDispatchQueueEntry]] = {}
         self.panel_active: str = ""  # '' | 'board' | 'actions' | 'events'
         self.board_panel_height: int = 0  # 0 = use CSS default
+        # Agent panel principals-row filter. Empty string means "user" (the
+        # default). When set to an architect id, the grid filters to that
+        # architect's engineers + their workers.
+        self.selected_principal_id: str = ""
         self.standalone_panel_layout: dict = {}
         self.events_dismissed_attention: dict[str, float] = {}
         self.board_filters_by_group: dict[str, dict] = {}
@@ -1603,6 +1607,7 @@ class MatrixState:
             },
             "panel_active": self.panel_active,
             "board_panel_height": self.board_panel_height,
+            "selected_principal_id": self.selected_principal_id,
             "standalone_panel_layout": self.standalone_panel_layout,
             "events_dismissed_attention": self.events_dismissed_attention,
             "board_filters_by_group": self.board_filters_by_group,
@@ -1688,6 +1693,7 @@ class MatrixState:
             },
             "panel_active": self.panel_active,
             "board_panel_height": self.board_panel_height,
+            "selected_principal_id": self.selected_principal_id,
             "standalone_panel_layout": self.standalone_panel_layout,
             "events_dismissed_attention": self.events_dismissed_attention,
             "board_filters_by_group": self.board_filters_by_group,
@@ -2433,6 +2439,9 @@ class MatrixState:
                 pa = "board"
             self.panel_active = pa
             self.board_panel_height = data.get("board_panel_height", 0)
+            self.selected_principal_id = str(
+                data.get("selected_principal_id", "") or ""
+            )
             self.standalone_panel_layout = data.get(
                 "standalone_panel_layout", {}
             ) or {}

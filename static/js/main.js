@@ -517,6 +517,17 @@ function _focusNavId(id, opts) {
       ? meta.colIndex
       : null;
   }
+  // Auto-commit principal filter when focus lands on a principal card.
+  if (meta && meta.type === 'principal'
+      && typeof selectPrincipal === 'function') {
+    const currentPrincipal = String((state && state.selected_principal_id) || '');
+    const targetPrincipal = String(meta.principalId || '');
+    if (currentPrincipal !== targetPrincipal) {
+      selectPrincipal(targetPrincipal);
+      // selectPrincipal already called render() with the new focus.
+      return;
+    }
+  }
   render();
   const el = _findFocusedNavElement(id);
   if (opts.focusDom && el && typeof el.focus === 'function') el.focus();
@@ -644,6 +655,16 @@ function moveFocusDown() {
     const targetRowIdx = Math.max(0, Math.min(rows.length - 1, meta.rowIndex + 1));
     const targetRow = rows[targetRowIdx];
     if (!targetRow || !targetRow.items || targetRow.items.length === 0) return;
+    // Arrow-down from a principal card lands on the first engineer in that
+    // principal's grid (not the column-preserved position).
+    if (meta.type === 'principal') {
+      for (const item of targetRow.items) {
+        if (item && item.type === 'agent') {
+          _focusNavId(item.id, { preserveColumn: false });
+          return;
+        }
+      }
+    }
     const preferred = typeof _navPreferredColumn === 'number'
       ? _navPreferredColumn
       : (typeof meta.colIndex === 'number' ? meta.colIndex : 0);
@@ -668,6 +689,19 @@ function moveFocusUp() {
     const targetRowIdx = Math.max(0, Math.min(rows.length - 1, meta.rowIndex - 1));
     const targetRow = rows[targetRowIdx];
     if (!targetRow || !targetRow.items || targetRow.items.length === 0) return;
+    // Arrow-up from an engineer/worker lands on the currently-selected
+    // principal card, not the column-preserved position.
+    if (targetRow.rowType === 'principals-row') {
+      const currentPrincipal = String((state && state.selected_principal_id) || '');
+      const principalNavId = 'principal:' + (currentPrincipal || 'user');
+      const hasPrincipal = targetRow.items.some(function(item) {
+        return item && item.id === principalNavId;
+      });
+      if (hasPrincipal) {
+        _focusNavId(principalNavId, { preserveColumn: true });
+        return;
+      }
+    }
     const preferred = typeof _navPreferredColumn === 'number'
       ? _navPreferredColumn
       : (typeof meta.colIndex === 'number' ? meta.colIndex : 0);
@@ -743,13 +777,15 @@ function switchGroup(delta) {
 function activateFocused() {
   if (!focusedItemId) return;
   const meta = _navMeta(focusedItemId);
+  if (meta && meta.type === 'principal'
+      && typeof selectPrincipal === 'function') {
+    selectPrincipal(String(meta.principalId || ''));
+    return;
+  }
   if (meta && meta.type === 'control') {
     if (meta.controlType === 'section-new-engineer'
         && typeof openAddEngineerForSection === 'function') {
       openAddEngineerForSection(meta.group || '', meta.architectId || '');
-    } else if (meta.controlType === 'loose-new-worker'
-        && typeof openAddWorkerModal === 'function') {
-      openAddWorkerModal(meta.group || '');
     } else if (meta.controlType === 'agent-new-architect'
         && typeof openAddArchitectForGroup === 'function') {
       openAddArchitectForGroup(meta.group || '');

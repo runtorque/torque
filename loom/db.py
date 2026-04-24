@@ -3379,6 +3379,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             for key in (
                 "panel_active",
                 "board_panel_height",
+                "selected_principal_id",
                 "standalone_panel_layout",
             ):
                 val = state_dict.get(key)
@@ -3633,6 +3634,9 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 or ("board" if ui.get("board_panel_open", "False") == "True"
                     else ""),
             "board_panel_height": int(ui.get("board_panel_height", "0")),
+            "selected_principal_id": str(
+                ui.get("selected_principal_id", "") or ""
+            ),
             "standalone_panel_layout": (
                 json.loads(ui.get("standalone_panel_layout", "{}"))
                 if ui.get("standalone_panel_layout") else {}

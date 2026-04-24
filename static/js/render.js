@@ -565,6 +565,167 @@ function _agentGridSectionKey(section) {
   return 'architect:' + String((section.architect && section.architect.id) || '');
 }
 
+/* Resolve the currently selected principal id, falling back to the user
+   principal (empty string) when the stored architect id no longer exists
+   in the visible agent set. */
+function _resolveSelectedPrincipalId(sections) {
+  const stored = String((state && state.selected_principal_id) || '');
+  if (!stored) return '';
+  for (let i = 0; i < (sections || []).length; i++) {
+    const section = sections[i];
+    if (section && section.architect && String(section.architect.id) === stored) {
+      return stored;
+    }
+  }
+  return '';
+}
+
+function _principalSectionMatches(section, principalId) {
+  if (!section) return false;
+  const id = String(principalId || '');
+  if (!id) return section.type === 'user';
+  return !!(section.architect && String(section.architect.id) === id);
+}
+
+function _principalCardNavId(principalId) {
+  const id = String(principalId || '');
+  return 'principal:' + (id || 'user');
+}
+
+function _principalCardFocusedClass(navId) {
+  return (navId && typeof focusedItemId !== 'undefined' && focusedItemId === navId)
+    ? ' focused'
+    : '';
+}
+
+/* Compute engineer/status counts for a section for principals-row badges. */
+function _principalStatusCounts(section) {
+  const counts = { engineers: 0, running: 0, idle: 0, error: 0, attention: 0 };
+  if (!section) return counts;
+  const rows = section.rows || [];
+  for (const row of rows) {
+    if (!row || !row.engineer) continue;
+    counts.engineers += 1;
+    const agents = [row.engineer].concat(row.workers || []);
+    for (const a of agents) {
+      if (!a) continue;
+      if (a.needs_attention) counts.attention += 1;
+      const cls = typeof agentStatusClass === 'function' ? agentStatusClass(a) : '';
+      if (cls === 'attention') counts.error += 1;
+      else if (cls === 'working') counts.running += 1;
+      else counts.idle += 1;
+    }
+  }
+  return counts;
+}
+
+function _renderPrincipalBadgeHtml(counts) {
+  if (!counts) return '';
+  const parts = [];
+  parts.push(String(counts.engineers || 0) + ' eng');
+  if (counts.running) parts.push(String(counts.running) + ' run');
+  if (counts.error) parts.push('!' + String(counts.error));
+  if (!counts.running && !counts.error && counts.engineers) {
+    parts.push('idle');
+  }
+  return '<span class="principal-card-badge"'
+    + ' data-principal-badge-counts="' + esc(JSON.stringify(counts)) + '"'
+    + ' title="' + esc(counts.engineers + ' engineer(s), '
+      + counts.running + ' running, '
+      + counts.idle + ' idle, '
+      + counts.error + ' error') + '">'
+    + esc(parts.join(' · '))
+    + '</span>';
+}
+
+function _renderPrincipalUserCard(groupName, section, selectedPrincipalId) {
+  const isSelected = !selectedPrincipalId;
+  const navId = _principalCardNavId('');
+  const counts = _principalStatusCounts(section);
+  const classes = ['principal-card', 'principal-card--user'];
+  if (isSelected) classes.push('selected');
+  else classes.push('dim');
+  classes.push(_principalCardFocusedClass(navId).trim());
+  const badgeHtml = isSelected ? '' : _renderPrincipalBadgeHtml(counts);
+  return '<button type="button" class="' + esc(classes.filter(Boolean).join(' ')) + '"'
+    + ' data-principal-card="user"'
+    + ' data-principal-id=""'
+    + ' data-nav-id="' + esc(navId) + '"'
+    + ' data-focus-key="' + esc(navId) + '"'
+    + ' aria-pressed="' + (isSelected ? 'true' : 'false') + '"'
+    + ' onclick="event.stopPropagation();selectPrincipal(\'\')"'
+    + ' title="User-owned engineers">'
+    + '<span class="principal-card-icon">●</span>'
+    + '<span class="principal-card-name">User</span>'
+    + '<span class="principal-card-kind">owner</span>'
+    + badgeHtml
+    + '</button>';
+}
+
+function _renderPrincipalArchitectCard(section, selectedPrincipalId) {
+  const architect = section && section.architect;
+  if (!architect) return '';
+  const id = String(architect.id || '');
+  const isSelected = String(selectedPrincipalId || '') === id;
+  const navId = _principalCardNavId(id);
+  const counts = _principalStatusCounts(section);
+  const classes = ['principal-card', 'principal-card--architect'];
+  if (isSelected) classes.push('selected');
+  else classes.push('dim');
+  classes.push(_principalCardFocusedClass(navId).trim());
+  const badgeHtml = isSelected ? '' : _renderPrincipalBadgeHtml(counts);
+  const displayName = architect.name || architect.slug || id;
+  return '<button type="button" class="' + esc(classes.filter(Boolean).join(' ')) + '"'
+    + ' data-principal-card="architect"'
+    + ' data-principal-id="' + esc(id) + '"'
+    + ' data-nav-id="' + esc(navId) + '"'
+    + ' data-focus-key="' + esc(navId) + '"'
+    + ' aria-pressed="' + (isSelected ? 'true' : 'false') + '"'
+    + ' onclick="event.stopPropagation();selectPrincipal(' + _jsStringAttr(id) + ')"'
+    + ' title="Architect ' + esc(displayName) + '">'
+    + '<span class="principal-card-icon">△</span>'
+    + '<span class="principal-card-name">' + esc(displayName) + '</span>'
+    + '<span class="principal-card-kind">arch</span>'
+    + badgeHtml
+    + '</button>';
+}
+
+function _renderPrincipalNewArchitectGhost(groupName, disabled) {
+  const groupArg = _jsStringAttr(groupName);
+  const navId = _gridNavControlId('agent-new-architect', groupName, '');
+  const focusKey = _gridNavControlFocusKey('agent-new-architect', groupName, 'user');
+  return '<button type="button" class="ghost-card ghost-card--architect principal-card-new' + _gridNavFocusedClass(navId) + '"'
+    + ' data-action="new-architect"'
+    + ' data-nav-id="' + esc(navId) + '"'
+    + ' data-group="' + esc(groupName) + '"'
+    + ' data-focus-key="' + esc(focusKey) + '"'
+    + (disabled ? ' disabled aria-disabled="true" title="Agent limit reached"' : ' title="Create a new architect in this group"')
+    + (disabled ? '' : ' onclick="event.stopPropagation();openAddArchitectForGroup(' + groupArg + ')"')
+    + '>+ New Architect</button>';
+}
+
+function _renderPrincipalsRow(groupName, sections, selectedPrincipalId, opts) {
+  opts = opts || {};
+  const disabled = !!opts.disabled;
+  let html = '<div class="principals-row"'
+    + ' data-principals-row-group="' + esc(groupName) + '"'
+    + ' role="tablist">';
+  let userSection = null;
+  const architectSections = [];
+  for (const section of sections) {
+    if (!section) continue;
+    if (section.type === 'user') userSection = section;
+    else if (section.architect) architectSections.push(section);
+  }
+  html += _renderPrincipalUserCard(groupName, userSection, selectedPrincipalId);
+  for (const section of architectSections) {
+    html += _renderPrincipalArchitectCard(section, selectedPrincipalId);
+  }
+  html += _renderPrincipalNewArchitectGhost(groupName, disabled);
+  html += '</div>';
+  return html;
+}
+
 function _gridNavControlId(controlType, groupName, sectionKey) {
   let id = 'grid-control:' + String(controlType || '') + ':' + String(groupName || '');
   if (sectionKey) id += ':' + String(sectionKey);
@@ -574,9 +735,6 @@ function _gridNavControlId(controlType, groupName, sectionKey) {
 function _gridNavControlFocusKey(controlType, groupName, sectionKey) {
   if (controlType === 'section-new-engineer') {
     return 'section-new-engineer:' + String(groupName || '') + ':' + String(sectionKey || '');
-  }
-  if (controlType === 'loose-new-worker') {
-    return 'loose-new-worker:' + String(groupName || '') + ':' + String(sectionKey || '');
   }
   if (controlType === 'agent-new-architect') {
     return 'agent-new-architect:' + String(groupName || '');
@@ -708,56 +866,61 @@ function _buildAgentGridNavigationModel(groupContexts) {
     model.navGroupOrder.push(ctx.gname);
     const groupNav = [];
     if (!ctx.collapsed) {
-      for (const section of ctx.agentLayout.sections) {
-        const sectionKey = _agentGridSectionKey(section);
-        if (section.type === 'user') {
-          const architectControlId = _gridNavControlId('agent-new-architect', ctx.gname, '');
-          if (!ctx.atAgentCap) {
-            const architectControl = {
-              id: architectControlId,
-              type: 'control',
-              controlType: 'agent-new-architect',
-              group: ctx.gname,
-              sectionKey,
-              focusKey: _gridNavControlFocusKey('agent-new-architect', ctx.gname, sectionKey),
-            };
-            addRow({
-              group: ctx.gname,
-              sectionKey,
-              rowKey: sectionKey + ':agent-new-architect',
-              rowType: 'architect-creation-row',
-              items: [architectControl],
-            });
-            addCreationControl(Object.assign({}, architectControl, {
-              sort: model.itemMeta[architectControlId] ? model.itemMeta[architectControlId].sort : sortOrder++,
-            }));
-          }
+      const selectedPrincipalId = ctx.selectedPrincipalId || '';
 
-          const workerItems = ((section && section.looseWorkers) || []).map(worker => ({
-            id: worker.id,
-            type: 'agent',
-            agentKind: 'worker',
-          }));
-          const controlId = _gridNavControlId('loose-new-worker', ctx.gname, sectionKey);
-          const looseControl = {
-            id: controlId,
-            type: 'control',
-            controlType: 'loose-new-worker',
-            group: ctx.gname,
-            sectionKey,
-            focusKey: _gridNavControlFocusKey('loose-new-worker', ctx.gname, sectionKey),
-          };
-          addRow({
-            group: ctx.gname,
-            sectionKey,
-            rowKey: sectionKey + ':loose-workers',
-            rowType: 'loose-workers-strip',
-            items: workerItems.concat([looseControl]),
-          });
-          addCreationControl(Object.assign({}, looseControl, {
-            sort: model.itemMeta[controlId] ? model.itemMeta[controlId].sort : sortOrder++,
-          }));
-        }
+      // Principals row: user card + architects + + New Architect.
+      const principalsRowItems = [];
+      const userPrincipalNavId = _principalCardNavId('');
+      const userPrincipalItem = {
+        id: userPrincipalNavId,
+        type: 'principal',
+        principalId: '',
+        group: ctx.gname,
+        focusKey: userPrincipalNavId,
+      };
+      principalsRowItems.push(userPrincipalItem);
+
+      for (const section of ctx.agentLayout.sections) {
+        if (!section || !section.architect) continue;
+        const archId = String(section.architect.id || '');
+        const navId = _principalCardNavId(archId);
+        principalsRowItems.push({
+          id: navId,
+          type: 'principal',
+          principalId: archId,
+          group: ctx.gname,
+          focusKey: navId,
+        });
+      }
+
+      if (!ctx.atAgentCap) {
+        const newArchitectControlId = _gridNavControlId('agent-new-architect', ctx.gname, '');
+        const newArchitectControl = {
+          id: newArchitectControlId,
+          type: 'control',
+          controlType: 'agent-new-architect',
+          group: ctx.gname,
+          sectionKey: 'user',
+          focusKey: _gridNavControlFocusKey('agent-new-architect', ctx.gname, 'user'),
+        };
+        principalsRowItems.push(newArchitectControl);
+        addCreationControl(Object.assign({}, newArchitectControl, {
+          sort: sortOrder++,
+        }));
+      }
+
+      addRow({
+        group: ctx.gname,
+        sectionKey: 'principals',
+        rowKey: 'principals:' + ctx.gname,
+        rowType: 'principals-row',
+        items: principalsRowItems,
+      });
+
+      // Grid: only the section matching the selected principal.
+      for (const section of ctx.agentLayout.sections) {
+        if (!_principalSectionMatches(section, selectedPrincipalId)) continue;
+        const sectionKey = _agentGridSectionKey(section);
 
         for (let sectionRowIndex = 0; sectionRowIndex < section.rows.length; sectionRowIndex++) {
           const row = section.rows[sectionRowIndex];
@@ -767,13 +930,6 @@ function _buildAgentGridNavigationModel(groupContexts) {
             agentKind: 'worker',
           }));
           const rowItems = [];
-          if (section.architect && sectionRowIndex === 0) {
-            rowItems.push({
-              id: section.architect.id,
-              type: 'agent',
-              agentKind: 'architect',
-            });
-          }
           rowItems.push({
             id: row.engineer.id,
             type: 'agent',
@@ -787,21 +943,6 @@ function _buildAgentGridNavigationModel(groupContexts) {
             architectId: section.architect ? section.architect.id : '',
             engineerId: row.engineer.id,
             items: rowItems.concat(workerItems),
-          });
-        }
-
-        if (section.architect && section.rows.length === 0) {
-          addRow({
-            group: ctx.gname,
-            sectionKey,
-            rowKey: sectionKey + ':architect-anchor',
-            rowType: 'architect-anchor-row',
-            architectId: section.architect.id,
-            items: [{
-              id: section.architect.id,
-              type: 'agent',
-              agentKind: 'architect',
-            }],
           });
         }
 
@@ -933,16 +1074,6 @@ function _jsStringAttr(value) {
   return esc(JSON.stringify(String(value || '')));
 }
 
-function _renderUserSectionCard(groupName) {
-  return '<div class="agent-section-user-card"'
-    + ' data-agent-section-card="user"'
-    + ' title="User-owned engineers and detached workers">'
-    + '<div class="agent-section-user-icon">\u25CF</div>'
-    + '<div class="agent-section-user-name">User</div>'
-    + '<div class="agent-section-user-badge">owner</div>'
-    + '</div>';
-}
-
 function _renderSectionControlsSlot(groupName, section, opts) {
   opts = opts || {};
   const sectionKey = _agentGridSectionKey(section);
@@ -964,56 +1095,6 @@ function _renderSectionControlsSlot(groupName, section, opts) {
     + (disabled ? '' : ' onclick="event.stopPropagation();openAddEngineerForSection(' + groupArg + ',' + architectArg + ')"')
     + '>+ New Engineer</button>'
     + '</div>';
-}
-
-function _renderLooseWorkersStrip(groupName, section, renderCell) {
-  const sectionKey = _agentGridSectionKey(section);
-  const workers = (section && section.looseWorkers) || [];
-  let html = '<div class="loose-workers-strip"'
-    + ' data-agent-row-shape="loose-workers-strip"'
-    + ' data-section-key="' + esc(sectionKey) + '">';
-  for (const worker of workers) html += renderCell(worker);
-  const navId = _gridNavControlId('loose-new-worker', groupName, sectionKey);
-  const focusKey = _gridNavControlFocusKey('loose-new-worker', groupName, sectionKey);
-  html += '<button type="button" class="ghost-card ghost-card--worker loose-workers-new-worker-btn' + _gridNavFocusedClass(navId) + '"'
-    + ' data-action="new-worker"'
-    + ' data-nav-id="' + esc(navId) + '"'
-    + ' data-focus-key="' + esc(focusKey) + '"'
-    + ' aria-label="Create detached worker"'
-    + ' onclick="event.stopPropagation();openAddWorkerModal(\'' + esc(groupName) + '\')"'
-    + ' title="Create a user-owned detached worker">+ New Worker</button>';
-  html += '</div>';
-  return html;
-}
-
-function _renderNewArchitectGhostButton(gname, disabled) {
-  const groupArg = _jsStringAttr(gname);
-  const navId = _gridNavControlId('agent-new-architect', gname, '');
-  const focusKey = _gridNavControlFocusKey('agent-new-architect', gname, 'user');
-  return '<button type="button" class="ghost-card ghost-card--architect' + _gridNavFocusedClass(navId) + '"'
-    + ' data-action="new-architect"'
-    + ' data-nav-id="' + esc(navId) + '"'
-    + ' data-group="' + esc(gname) + '"'
-    + ' data-focus-key="' + esc(focusKey) + '"'
-    + (disabled ? ' disabled aria-disabled="true" title="Agent limit reached"' : ' title="Create a new architect in this group"')
-    + (disabled ? '' : ' onclick="event.stopPropagation();openAddArchitectForGroup(' + groupArg + ')"')
-    + '>+ New Architect</button>';
-}
-
-function _renderSectionArchitectColumn(groupName, section, renderCell, opts) {
-  opts = opts || {};
-  const sectionKey = _agentGridSectionKey(section);
-  let html = '<div class="agent-section-architect-column"'
-    + ' data-agent-section-column="architect"'
-    + ' data-section-key="' + esc(sectionKey) + '">';
-  if (section && section.architect) {
-    html += renderCell(section.architect);
-  } else {
-    html += _renderUserSectionCard(groupName);
-    html += _renderNewArchitectGhostButton(groupName, !!opts.disabled);
-  }
-  html += '</div>';
-  return html;
 }
 
 function _renderEngineerRow(row, renderCell) {
@@ -1088,6 +1169,7 @@ function render() {
     _ensureGroupCollapsedInitialized(gname, gsLocal);
     const collapsed = collapsedGroups.has(gname);
     const agentLayout = _buildHierarchicalAgentSections(cells.agents);
+    const selectedPrincipalId = _resolveSelectedPrincipalId(agentLayout.sections);
     groupContexts.push({
       gname,
       aids: cells.aids,
@@ -1097,6 +1179,7 @@ function render() {
       gsLocal,
       collapsed,
       agentLayout,
+      selectedPrincipalId,
       atAgentCap: gsLocal.max_agents > 0 && cells.agents.length >= gsLocal.max_agents,
     });
   }
@@ -1128,33 +1211,47 @@ function render() {
     const agentLayout = ctx.agentLayout;
     const visibleAgentById = agentLayout.visibleAgentById;
     const visibleEngineerIds = agentLayout.visibleEngineerIds;
+    const selectedPrincipalId = ctx.selectedPrincipalId || '';
+
+    /* Principals row: User + architects + + New Architect, wraps when narrow. */
+    html += _renderPrincipalsRow(
+      gname,
+      agentLayout.sections,
+      selectedPrincipalId,
+      { disabled: ctx.atAgentCap },
+    );
+
     html += `<div class="agent-grid agent-grid-hierarchical" data-drop-group="${esc(gname)}" data-drop-type="agent">`;
     const renderCellForGrid = function(a) {
       return renderAgentCell(a, { visibleEngineerIds, visibleAgentById });
     };
+    let renderedAnySection = false;
     for (let sectionIndex = 0; sectionIndex < agentLayout.sections.length; sectionIndex++) {
       const section = agentLayout.sections[sectionIndex];
-      if (sectionIndex > 0) {
-        html += '<div class="agent-section-divider" role="separator"></div>';
-      }
+      if (!_principalSectionMatches(section, selectedPrincipalId)) continue;
       const sectionKey = _agentGridSectionKey(section);
       const sectionClasses = [
         'agent-section',
+        'agent-section--filtered',
         section.type === 'user' ? 'agent-section-user' : 'agent-section-architect',
       ];
       html += '<section class="' + sectionClasses.join(' ') + '"'
         + ' data-agent-section="' + esc(sectionKey) + '">';
-      html += _renderSectionArchitectColumn(gname, section, renderCellForGrid, { disabled: ctx.atAgentCap });
       html += '<div class="agent-section-body"'
         + ' data-agent-section-column="body"'
         + ' data-section-key="' + esc(sectionKey) + '">';
-      if (section.type === 'user') {
-        html += _renderLooseWorkersStrip(gname, section, renderCellForGrid);
-      }
       for (const row of section.rows) html += _renderEngineerRow(row, renderCellForGrid);
       html += _renderSectionControlsSlot(gname, section, { disabled: ctx.atAgentCap });
       html += '</div>';
       html += '</section>';
+      renderedAnySection = true;
+    }
+    if (!renderedAnySection) {
+      // Selected principal has no matching section (e.g. empty group).
+      html += '<div class="agent-section agent-section--empty"'
+        + ' data-agent-section="empty">'
+        + '<div class="agent-section-empty-msg">No engineers yet.</div>'
+        + '</div>';
     }
     html += `</div>`;
 

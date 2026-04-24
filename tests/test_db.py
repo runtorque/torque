@@ -1084,6 +1084,18 @@ class LoomDBTests(unittest.TestCase):
 
         self.assertEqual(loaded["board_card_density_by_group"], density)
 
+    def test_load_all_restores_selected_principal_id(self):
+        self.db.save_ui_state("selected_principal_id", "architect-7")
+
+        loaded = self.db.load_all()
+
+        self.assertEqual(loaded["selected_principal_id"], "architect-7")
+
+    def test_load_all_defaults_selected_principal_id_to_empty(self):
+        loaded = self.db.load_all()
+
+        self.assertEqual(loaded["selected_principal_id"], "")
+
     def test_load_all_restores_events_dismissed_attention(self):
         dismissed = {
             "ask-1": 123.0,
