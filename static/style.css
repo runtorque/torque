@@ -1962,6 +1962,53 @@ body.runtime-embedded .term-row.term-add {
 .btn-green:hover { filter: brightness(1.15); }
 .hidden { display: none !important; }
 
+/* Specializations picker */
+.specializations-picker {
+  display: flex; flex-direction: column; gap: 6px;
+  margin-bottom: 6px;
+}
+.specializations-selected {
+  list-style: none; padding: 0; margin: 0;
+  display: flex; flex-direction: column; gap: 3px;
+}
+.specializations-selected:empty { display: none; }
+.specialization-entry {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 4px 6px;
+  background: var(--bg-input, rgba(255,255,255,0.03));
+  border: 1px solid var(--border, rgba(255,255,255,0.1));
+  border-radius: var(--radius);
+  font-size: 11px;
+}
+.specialization-controls-row {
+  display: flex; gap: 2px;
+}
+.specialization-controls-row button {
+  background: transparent; border: none; color: var(--text-dim);
+  cursor: pointer; padding: 0 4px;
+  font-size: 12px; line-height: 1;
+}
+.specialization-controls-row button:hover { color: var(--text); }
+.specializations-controls {
+  display: flex; gap: 6px; align-items: center;
+}
+.specializations-controls select { flex: 1; }
+.specializations-footer { font-size: 11px; }
+.btn-link {
+  background: transparent; border: none; color: var(--accent);
+  cursor: pointer; padding: 0; font-size: 11px; font-weight: 600;
+}
+.btn-link:hover { filter: brightness(1.2); }
+.btn-secondary {
+  padding: 4px 10px; border-radius: var(--radius);
+  font-size: 11px; font-weight: 600;
+  background: var(--bg-input, rgba(255,255,255,0.08));
+  color: var(--text);
+  border: 1px solid var(--border, rgba(255,255,255,0.1));
+  cursor: pointer;
+}
+.btn-secondary:hover { filter: brightness(1.15); }
+
 /* Color swatches */
 .color-swatches {
   display: flex; gap: 3px; padding: 2px;

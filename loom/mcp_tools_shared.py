@@ -2930,6 +2930,61 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             return result.get("message", "Unknown error"), True
         return json.dumps(result), False
 
+    if tool_name == "specializations_list":
+        result = await handle_command({
+            "cmd": "list_specializations",
+            "group": args.get("group", "") or _engineer_group,
+            "scope": str(args.get("scope", "") or "").strip(),
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps(result), False
+
+    if tool_name == "specialization_show":
+        result = await handle_command({
+            "cmd": "get_specialization",
+            "name": args.get("name", ""),
+            "group": args.get("group", "") or _engineer_group,
+            "scope": str(args.get("scope", "") or "").strip(),
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps(result), False
+
+    if tool_name == "specialization_save":
+        name = str(args.get("name", "") or "").strip()
+        if not name:
+            return "name is required", True
+        payload = args.get("data")
+        if payload is None:
+            payload = args.get("specialization", {})
+        if not isinstance(payload, dict):
+            return "data must be an object", True
+        result = await handle_command({
+            "cmd": "save_specialization",
+            "name": name,
+            "data": payload,
+            "scope": str(args.get("scope", "project") or "project"),
+            "group": args.get("group", "") or _engineer_group,
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps(result) if result else '{"type":"ok"}', False
+
+    if tool_name == "specialization_delete":
+        name = str(args.get("name", "") or "").strip()
+        if not name:
+            return "name is required", True
+        result = await handle_command({
+            "cmd": "delete_specialization",
+            "name": name,
+            "scope": str(args.get("scope", "") or "").strip(),
+            "group": args.get("group", "") or _engineer_group,
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps(result) if result else '{"type":"ok"}', False
+
     # -- Write tools --------------------------------------------------------
 
     if tool_name == "engineer_hire" and caller_kind == "architect":

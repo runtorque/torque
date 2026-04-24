@@ -1207,4 +1207,120 @@ ENGINEER_TOOLS = [
             "required": ["agent"],
         },
     },
+    # -- Specializations -------------------------------------------------
+    {
+        "name": "engineer_specializations_list",
+        "description": (
+            "List engineer specializations available (project and user "
+            "scope). Specializations shape an engineer's boot preamble "
+            "and triage priorities (e.g. 'ui-ux', 'security-focused')."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "group": {
+                    "type": "string",
+                    "description": (
+                        "Group name to resolve project-scoped "
+                        "specializations."
+                    ),
+                },
+                "scope": {
+                    "type": "string",
+                    "description": (
+                        "Optional scope filter: 'project' or 'user'. "
+                        "Default returns both."
+                    ),
+                },
+            },
+        },
+    },
+    {
+        "name": "engineer_specialization_show",
+        "description": (
+            "Show full details of a specialization including its "
+            "description, preamble, and priorities."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Specialization name (e.g. 'ui-ux').",
+                },
+                "group": {
+                    "type": "string",
+                    "description": (
+                        "Group name to resolve project-scoped "
+                        "specializations."
+                    ),
+                },
+                "scope": {
+                    "type": "string",
+                    "description": "Optional scope: 'project' or 'user'.",
+                },
+            },
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "engineer_specialization_save",
+        "description": (
+            "Create or update a specialization YAML file. Fields: "
+            "description, preamble, priorities (list of strings). Saves "
+            "to the requested scope (default: project)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Specialization name (file slug).",
+                },
+                "data": {
+                    "type": "object",
+                    "description": (
+                        "Specialization fields: description, preamble, "
+                        "priorities."
+                    ),
+                },
+                "scope": {
+                    "type": "string",
+                    "description": (
+                        "'project' (default) or 'user' (~/.loom/"
+                        "specializations)."
+                    ),
+                },
+                "group": {
+                    "type": "string",
+                    "description": "Group name for project scope resolution.",
+                },
+            },
+            "required": ["name", "data"],
+        },
+    },
+    {
+        "name": "engineer_specialization_delete",
+        "description": (
+            "Delete a specialization YAML file by name."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Specialization name to delete.",
+                },
+                "scope": {
+                    "type": "string",
+                    "description": "Optional scope: 'project' or 'user'.",
+                },
+                "group": {
+                    "type": "string",
+                    "description": "Group name for project scope resolution.",
+                },
+            },
+            "required": ["name"],
+        },
+    },
 ]

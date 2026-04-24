@@ -90,6 +90,7 @@ _AGENT_PERSISTED_COLS = [
     "queue_empty_emitted",
     "kind", "role", "owner_engineer_id", "hired_by_architect_id",
     "dismissed_at", "persistent",
+    "engineer_specializations",
 ]
 
 _AGENT_INSERT_SQL = """
@@ -165,6 +166,11 @@ def _serialize_agent_cell(cell):
         d.get("hired_by_architect_id", ""),
         int(d.get("dismissed_at", 0) or 0),
         int(d.get("persistent", 0) or 0),
+        json.dumps([
+            str(n or "").strip()
+            for n in (d.get("engineer_specializations") or [])
+            if str(n or "").strip()
+        ]),
     )
 
 
@@ -463,6 +469,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self._refuse_unmigrated_legacy_rows_if_needed()
         self._migrate_kinds_schema_if_needed()
         self._ensure_agent_dismissed_at_column()
+        self._ensure_agent_engineer_specializations_column()
         self._backfill_kinds_if_needed()
         self._fixup_kinds_task_assignments_if_needed()
         self._cleanup_kinds_legacy_columns_if_needed()
@@ -489,6 +496,17 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             self._conn.execute(
                 "ALTER TABLE agents ADD COLUMN dismissed_at "
                 "INTEGER NOT NULL DEFAULT 0"
+            )
+            self._conn.commit()
+
+    def _ensure_agent_engineer_specializations_column(self):
+        try:
+            self._conn.execute(
+                "SELECT engineer_specializations FROM agents LIMIT 0")
+        except sqlite3.OperationalError:
+            self._conn.execute(
+                "ALTER TABLE agents ADD COLUMN engineer_specializations "
+                "TEXT NOT NULL DEFAULT '[]'"
             )
             self._conn.commit()
 
@@ -3492,6 +3510,21 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 d["last_progress_at"],
                 d["last_heartbeat_at"],
             )
+            raw_specs = d.get("engineer_specializations", "")
+            if isinstance(raw_specs, str):
+                try:
+                    decoded = json.loads(raw_specs or "[]")
+                except (json.JSONDecodeError, TypeError):
+                    decoded = []
+            else:
+                decoded = raw_specs or []
+            if not isinstance(decoded, list):
+                decoded = []
+            d["engineer_specializations"] = [
+                str(item or "").strip()
+                for item in decoded
+                if str(item or "").strip()
+            ]
             agents[d["id"]] = d
 
         # Groups (ordered)
