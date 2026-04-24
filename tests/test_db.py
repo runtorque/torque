@@ -3011,6 +3011,22 @@ class LoomDBAsyncWriteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resolved["status"], "approved")
         self.assertEqual(resolved["created_engineer_id"], "engineer-1")
 
+        await self.db.save_weaver_settings_async(
+            "g",
+            {
+                "group": "g",
+                "pending_question": "Need approval",
+                "pending_note": "FYI",
+                "pending_note_kind": "note",
+                "paused": True,
+            },
+        )
+        weaver_settings = self.db.load_all_weaver_settings()["g"]
+        self.assertEqual(weaver_settings["pending_question"], "Need approval")
+        self.assertEqual(weaver_settings["pending_note"], "FYI")
+        self.assertEqual(weaver_settings["pending_note_kind"], "note")
+        self.assertTrue(weaver_settings["paused"])
+
         self.db.defer_write(
             "group_settings",
             "save_group_settings",

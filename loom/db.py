@@ -2235,6 +2235,15 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         ))
         self._conn.commit()
 
+    async def save_weaver_settings_async(self, group_name: str, settings: dict):
+        """Queue and await a weaver-settings save without blocking the event loop."""
+        return await self._enqueue_async_write(
+            "weaver_settings",
+            "save_weaver_settings",
+            group_name,
+            _snapshot_db_payload(settings or {}),
+        )
+
     def save_agent_digest_settings(self, agent_id: str, settings: dict):
         """Upsert per-agent digest settings."""
         enabled_events = json.dumps(
@@ -2372,6 +2381,17 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self._conn.execute(
             "DELETE FROM weaver_settings WHERE group_name=?", (group_name,))
         self._conn.commit()
+
+    def agent_exists(self, agent_id: str) -> bool:
+        """Return whether an agent/cell row exists in SQLite."""
+        agent_id = str(agent_id or "").strip()
+        if not agent_id:
+            return False
+        row = self._conn.execute(
+            "SELECT 1 FROM agents WHERE id=? LIMIT 1",
+            (agent_id,),
+        ).fetchone()
+        return bool(row)
 
     def delete_agent_digest_settings(self, agent_id: str):
         self._conn.execute(

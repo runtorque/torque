@@ -562,6 +562,89 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertFalse(state.weaver_settings["g"].paused)
         self.assertEqual(state._delta_ops, [])
 
+    def test_cleanup_orphaned_attention_keeps_persisted_weaver_during_boot(self):
+        from loom.db import LoomDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = LoomDB(Path(tmp.name) / "loom.db")
+        db.init()
+        self.addCleanup(db.close)
+        weaver = self.state_mod.AgentCell(
+            id="weaver-1",
+            name="Engineer",
+            group="g",
+            cell_type="agent",
+        )
+        db.save_group("g", 0)
+        db.save_agent(weaver)
+        db.save_group_settings(
+            "g",
+            self.state_mod.GroupSettings(weaver_agent_id=weaver.id),
+        )
+
+        state = self.state_mod.MatrixState(db=db)
+        state.groups["g"] = []
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            weaver_agent_id=weaver.id
+        )
+        state.weaver_settings["g"] = self.state_mod.WeaverSettings(
+            group="g",
+            pending_question="Need approval",
+            pending_note="FYI",
+            pending_note_kind="note",
+            paused=True,
+        )
+
+        cleaned = state.cleanup_orphaned_attention(emit=False)
+
+        self.assertEqual(cleaned, {"asks": 0, "weaver_questions": 0})
+        ws = state.weaver_settings["g"]
+        self.assertEqual(ws.pending_question, "Need approval")
+        self.assertEqual(ws.pending_note, "FYI")
+        self.assertEqual(ws.pending_note_kind, "note")
+        self.assertTrue(ws.paused)
+
+    def test_load_preserves_pending_question_for_persisted_weaver(self):
+        from loom.db import LoomDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = LoomDB(Path(tmp.name) / "loom.db")
+        db.init()
+        self.addCleanup(db.close)
+        weaver = self.state_mod.AgentCell(
+            id="weaver-1",
+            name="Engineer",
+            group="g",
+            cell_type="agent",
+        )
+        db.save_groups_and_members({"g": [weaver.id]}, {"g": "g"})
+        db.save_agent(weaver)
+        db.save_group_settings(
+            "g",
+            self.state_mod.GroupSettings(weaver_agent_id=weaver.id),
+        )
+        db.save_weaver_settings(
+            "g",
+            {
+                "group": "g",
+                "pending_question": "Need approval",
+                "pending_note": "FYI",
+                "pending_note_kind": "note",
+                "paused": True,
+            },
+        )
+
+        state = self.state_mod.MatrixState(db=db)
+        state.load()
+
+        ws = state.weaver_settings["g"]
+        self.assertEqual(ws.pending_question, "Need approval")
+        self.assertEqual(ws.pending_note, "FYI")
+        self.assertEqual(ws.pending_note_kind, "note")
+        self.assertTrue(ws.paused)
+
     def test_cleanup_stale_boundary_successors_clears_merged_refs(self):
         state = self.state_mod.MatrixState()
         boundary = self.state_mod.BoardTask(
