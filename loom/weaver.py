@@ -114,6 +114,8 @@ _ARCHITECT_EVENT_LABELS = {
     "engineer_rehired": "engineer rehired",
     "workflow_breach": "workflow breach",
     "engineer_queue_empty": "queue empty",
+    "engineer_awaiting_human_input": "awaiting human input",
+    "engineer_ask_resolved": "ask resolved",
     "agent_progress": "progress",
 }
 _ARCHITECT_PIPELINE_ACTIVITY_EVENTS = ARCHITECT_COARSE_EVENTS.intersection({
@@ -1025,22 +1027,32 @@ class WeaverEventBuffer:
 
         if is_legacy_weaver:
             group = cell.group
+
+            def _owns_pending_question(ws) -> bool:
+                owner_id = str(
+                    getattr(ws, "pending_question_actor_id", "") or ""
+                ).strip()
+                # Back-compat: legacy pending questions created before actor
+                # persistence are owned by the group weaver.
+                return not owner_id or owner_id == cell.id
+
             # Track when the weaver goes idle while a question is pending.
             # Only auto-clear pending_question when the weaver becomes
             # active AFTER having been idle — this prevents clearing the
             # question during the same tool-call turn that set it.
             if not cell.activity or cell.activity == "waiting":
                 ws = self._state.get_weaver_settings(group)
-                if ws.pending_question:
+                if ws.pending_question and _owns_pending_question(ws):
                     self._was_idle_with_question.add(group)
             elif cell.activity and cell.activity not in ("", "waiting"):
                 if group in self._was_idle_with_question:
                     self._was_idle_with_question.discard(group)
                     ws = self._state.get_weaver_settings(group)
-                    if ws.pending_question:
+                    if ws.pending_question and _owns_pending_question(ws):
                         self._state.update_weaver_settings(
                             group, pending_question="",
-                            paused=False)
+                            paused=False,
+                            _pending_question_actor_id=cell.id)
 
         if (
                 self._digest_recipient(cell.id)

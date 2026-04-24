@@ -114,6 +114,10 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         _install_aiohttp_stub()
         self.state_mod = importlib.import_module("loom.state")
         self.state_mod = importlib.reload(self.state_mod)
+        self.events_mod = importlib.import_module("loom.events")
+        self.events_mod = importlib.reload(self.events_mod)
+        self.routing_mod = importlib.import_module("loom.digest_routing")
+        self.routing_mod = importlib.reload(self.routing_mod)
         self.weaver_mod = importlib.import_module("loom.weaver")
         self.weaver_mod = importlib.reload(self.weaver_mod)
 
@@ -184,6 +188,11 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
             state.agents[cell.id] = cell
             state.groups[group].append(cell.id)
         return architect, assigned, other, worker
+
+    def _attach_panel_log(self, state):
+        panel_log = self.events_mod.PanelEventLog(max_size=20)
+        state.panel_log = panel_log
+        return panel_log
 
     async def test_persisted_digest_state_reloads_on_buffer_construction(self):
         state, _, weaver = self._make_state()
@@ -1445,11 +1454,199 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
             digest.index("second while paused"),
         )
 
-    async def test_pending_question_clears_only_after_weaver_becomes_active(self):
-        state, group, weaver = self._make_state()
+    async def test_engineer_ask_emits_architect_scoped_human_input_event(self):
+        state, group, engineer = self._make_state()
+        panel_log = self._attach_panel_log(state)
+        architect = self.state_mod.AgentCell(
+            id="arch-1",
+            name="Planner",
+            slug="planner",
+            group=group,
+            cell_type="agent",
+            kind="architect",
+            persistent=True,
+        )
+        state.agents[architect.id] = architect
+        engineer.hired_by_architect_id = architect.id
+        question = "Need a rollout decision? " + ("extra context " * 30)
+
+        state.update_weaver_settings(
+            group,
+            pending_question=question,
+            paused=True,
+            _pending_question_actor_id=engineer.id,
+        )
+
+        self.assertEqual(
+            state.get_weaver_settings(group).pending_question_actor_id,
+            engineer.id,
+        )
+        events = panel_log.get_recent(10)
+        self.assertEqual(len(events), 1)
+        event = events[0]
+        self.assertEqual(event["kind"], "engineer_awaiting_human_input")
+        self.assertEqual(event["cell_id"], engineer.id)
+        self.assertEqual(event["agent_name"], engineer.name)
+        self.assertIn("Need a rollout decision?", event["message"])
+        self.assertLessEqual(len(event["message"]), 225)
+        self.assertEqual(
+            self.routing_mod.resolve_digest_recipients(state, event),
+            [architect.id],
+        )
+
+    async def test_engineer_ask_without_hiring_architect_has_no_digest_recipient(self):
+        state, group, engineer = self._make_state()
+        panel_log = self._attach_panel_log(state)
+
+        state.update_weaver_settings(
+            group,
+            pending_question="Need input from the human.",
+            paused=True,
+            _pending_question_actor_id=engineer.id,
+        )
+
+        event = panel_log.get_recent(10)[0]
+        self.assertEqual(event["kind"], "engineer_awaiting_human_input")
+        self.assertEqual(
+            self.routing_mod.resolve_digest_recipients(state, event),
+            [],
+        )
+
+    async def test_same_question_text_with_new_actor_emits_new_engineer_ask(self):
+        state, group, engineer = self._make_state()
+        panel_log = self._attach_panel_log(state)
+        architect = self.state_mod.AgentCell(
+            id="arch-1",
+            name="Planner",
+            group=group,
+            cell_type="agent",
+            kind="architect",
+            persistent=True,
+        )
+        other_engineer = self.state_mod.AgentCell(
+            id="eng-2",
+            name="Other Engineer",
+            group=group,
+            cell_type="agent",
+            kind="engineer",
+            hired_by_architect_id=architect.id,
+            persistent=True,
+        )
+        state.agents[architect.id] = architect
+        state.agents[other_engineer.id] = other_engineer
+        engineer.hired_by_architect_id = architect.id
+        question = "Same blocker text"
+
+        with mock.patch("time.time", side_effect=[100.0, 101.0, 200.0, 201.0]):
+            state.update_weaver_settings(
+                group,
+                pending_question=question,
+                paused=True,
+                _pending_question_actor_id=engineer.id,
+            )
+            state.update_weaver_settings(
+                group,
+                pending_question=question,
+                paused=True,
+                _pending_question_actor_id=other_engineer.id,
+            )
+
+        ws = state.get_weaver_settings(group)
+        self.assertEqual(ws.pending_question_actor_id, other_engineer.id)
+        self.assertEqual(ws.pending_question_set_at, 200.0)
+        events = panel_log.get_recent(10)
+        self.assertEqual(
+            [event["cell_id"] for event in events],
+            [engineer.id, other_engineer.id],
+        )
+
+    async def test_engineer_resume_emits_ask_resolved_event(self):
+        state, group, engineer = self._make_state()
+        panel_log = self._attach_panel_log(state)
+        architect = self.state_mod.AgentCell(
+            id="arch-1",
+            name="Planner",
+            group=group,
+            cell_type="agent",
+            kind="architect",
+            persistent=True,
+        )
+        state.agents[architect.id] = architect
+        engineer.hired_by_architect_id = architect.id
         state.weaver_settings[group] = self.state_mod.WeaverSettings(
             group=group,
             pending_question="Need approval",
+            paused=True,
+        )
+
+        state.update_weaver_settings(
+            group,
+            pending_question="",
+            paused=False,
+            _pending_question_actor_id=engineer.id,
+        )
+
+        ws = state.get_weaver_settings(group)
+        self.assertEqual(ws.pending_question, "")
+        self.assertEqual(ws.pending_question_actor_id, "")
+        events = panel_log.get_recent(10)
+        self.assertEqual(len(events), 1)
+        event = events[0]
+        self.assertEqual(event["kind"], "engineer_ask_resolved")
+        self.assertEqual(event["cell_id"], engineer.id)
+        self.assertIn("Need approval", event["message"])
+        self.assertEqual(
+            self.routing_mod.resolve_digest_recipients(state, event),
+            [architect.id],
+        )
+
+    async def test_group_weaver_activity_does_not_clear_actor_owned_pending_question(self):
+        state, group, weaver = self._make_state()
+        panel_log = self._attach_panel_log(state)
+        owner = self.state_mod.AgentCell(
+            id="eng-owner",
+            name="Owner Engineer",
+            group=group,
+            cell_type="agent",
+            kind="engineer",
+            persistent=True,
+        )
+        state.agents[owner.id] = owner
+        state.weaver_settings[group] = self.state_mod.WeaverSettings(
+            group=group,
+            pending_question="Owner needs input",
+            pending_question_actor_id=owner.id,
+            paused=True,
+        )
+        buffer = self.weaver_mod.WeaverEventBuffer(state, FakeBridge())
+
+        buffer.on_agent_activity_change(weaver)
+        weaver.activity = "thinking"
+        buffer.on_agent_activity_change(weaver)
+
+        ws = state.get_weaver_settings(group)
+        self.assertEqual(ws.pending_question, "Owner needs input")
+        self.assertEqual(ws.pending_question_actor_id, owner.id)
+        self.assertTrue(ws.paused)
+        self.assertEqual(panel_log.get_recent(10), [])
+
+    async def test_pending_question_clears_only_after_weaver_becomes_active(self):
+        state, group, weaver = self._make_state()
+        panel_log = self._attach_panel_log(state)
+        architect = self.state_mod.AgentCell(
+            id="arch-1",
+            name="Planner",
+            group=group,
+            cell_type="agent",
+            kind="architect",
+            persistent=True,
+        )
+        state.agents[architect.id] = architect
+        weaver.hired_by_architect_id = architect.id
+        state.weaver_settings[group] = self.state_mod.WeaverSettings(
+            group=group,
+            pending_question="Need approval",
+            pending_question_actor_id=weaver.id,
             paused=True,
         )
         buffer = self.weaver_mod.WeaverEventBuffer(state, FakeBridge())
@@ -1465,4 +1662,14 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
 
         ws = state.get_weaver_settings(group)
         self.assertEqual(ws.pending_question, "")
+        self.assertEqual(ws.pending_question_actor_id, "")
         self.assertFalse(ws.paused)
+        events = panel_log.get_recent(10)
+        self.assertEqual(len(events), 1)
+        event = events[0]
+        self.assertEqual(event["kind"], "engineer_ask_resolved")
+        self.assertEqual(event["cell_id"], weaver.id)
+        self.assertEqual(
+            self.routing_mod.resolve_digest_recipients(state, event),
+            [architect.id],
+        )

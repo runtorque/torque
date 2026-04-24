@@ -25,6 +25,12 @@ from .config import DATA_DIR, DEFAULT_COMMAND, log
 from . import profiling
 from .artifacts import normalize_artifacts, normalize_attachments
 from .db import LoomDB
+from .engineer_ask_events import (
+    ENGINEER_ASK_RESOLVED,
+    ENGINEER_AWAITING_HUMAN_INPUT,
+    emit_engineer_ask_resolved_event,
+    emit_engineer_awaiting_human_input_event,
+)
 from .task_ids import (
     format_derived_task_id,
     format_root_task_id,
@@ -119,6 +125,8 @@ _ARCHITECT_DIGEST_DEFAULT_ENABLED_EVENTS = [
     "engineer_rehired",
     "workflow_breach",
     "engineer_queue_empty",
+    ENGINEER_AWAITING_HUMAN_INPUT,
+    ENGINEER_ASK_RESOLVED,
 ]
 _WEAVER_ESCALATION_STYLES = {
     "ask_early",
@@ -956,6 +964,8 @@ class WeaverSettings:
     custom_instructions: str = ""        # user-defined instructions appended to weaver system prompt
     restrict_to_created_agents: bool = False  # limit Weaver agent visibility/control to its own created agents
     pending_question: str = ""           # question awaiting human reply (non-empty = awaiting input)
+    pending_question_set_at: float = 0.0  # unix timestamp when pending_question was set
+    pending_question_actor_id: str = ""  # engineer who set pending_question
     pending_note: str = ""               # non-blocking note/question for the human
     pending_note_kind: str = ""          # "note" | "question" | ""
     weaver_provider: str = ""            # adapter name override (empty = use group default)
@@ -2720,9 +2730,18 @@ class MatrixState:
             if str(getattr(cell, "kind", "") or "").strip() != "architect":
                 continue
             enabled = list(getattr(settings, "enabled_events", []) or [])
-            if "engineer_queue_empty" in enabled:
+            backfill_event_kinds = [
+                "engineer_queue_empty",
+                ENGINEER_AWAITING_HUMAN_INPUT,
+                ENGINEER_ASK_RESOLVED,
+            ]
+            missing = [
+                event_kind for event_kind in backfill_event_kinds
+                if event_kind not in enabled
+            ]
+            if not missing:
                 continue
-            enabled.append("engineer_queue_empty")
+            enabled.extend(missing)
             settings.enabled_events = enabled
             if not bool(getattr(settings, "architect_digest", False)):
                 settings.architect_digest = True
@@ -2786,6 +2805,13 @@ class MatrixState:
             return normalize_weaver_escalation_style(value)
         if key == "restrict_to_created_agents":
             return bool(value)
+        if key == "pending_question_set_at":
+            try:
+                return float(value or 0)
+            except (TypeError, ValueError):
+                return 0.0
+        if key == "pending_question_actor_id":
+            return str(value or "").strip()
         if key in {
                 "weaver_model", "weaver_reasoning_effort",
                 "weaver_directory", "weaver_profile",
@@ -2795,10 +2821,20 @@ class MatrixState:
 
     def _apply_weaver_settings_fields(
             self, group: str, fields: dict) -> tuple[WeaverSettings, dict]:
+        fields = dict(fields or {})
+        pending_question_actor_id = str(
+            fields.pop("_pending_question_actor_id", "") or ""
+        ).strip()
         ws = self.weaver_settings.get(group)
         if ws is None:
             ws = WeaverSettings(group=group)
             self.weaver_settings[group] = ws
+        previous_pending_question = str(
+            getattr(ws, "pending_question", "") or ""
+        )
+        previous_pending_actor_id = str(
+            getattr(ws, "pending_question_actor_id", "") or ""
+        ).strip()
         valid = set(WeaverSettings.__dataclass_fields__)
         applied = {}
         for key, value in fields.items():
@@ -2806,9 +2842,71 @@ class MatrixState:
                 value = self._normalize_weaver_settings_value(key, value)
                 setattr(ws, key, value)
                 applied[key] = value
+        if (
+                "pending_question" in applied
+                and "pending_question_set_at" not in applied):
+            current_pending_question = str(
+                getattr(ws, "pending_question", "") or ""
+            )
+            if current_pending_question:
+                pending_question_actor_changed = bool(
+                    pending_question_actor_id
+                    and pending_question_actor_id != previous_pending_actor_id
+                )
+                pending_question_is_new = (
+                    current_pending_question != previous_pending_question
+                    or pending_question_actor_changed
+                )
+                if pending_question_is_new:
+                    ws.pending_question_set_at = time.time()
+                    applied["pending_question_set_at"] = ws.pending_question_set_at
+                    if (
+                            pending_question_actor_id
+                            or "pending_question_actor_id" not in applied):
+                        ws.pending_question_actor_id = pending_question_actor_id
+                        applied["pending_question_actor_id"] = (
+                            pending_question_actor_id
+                        )
+                if pending_question_actor_id:
+                    ws.pending_question_actor_id = pending_question_actor_id
+                    applied["pending_question_actor_id"] = pending_question_actor_id
+            elif previous_pending_question:
+                ws.pending_question_set_at = 0.0
+                ws.pending_question_actor_id = ""
+                applied["pending_question_set_at"] = 0.0
+                applied["pending_question_actor_id"] = ""
         d = asdict(ws)
         d.pop("group", None)
         self._emit("weaver_settings_update", group=group, **d)
+        if "pending_question" in applied:
+            current_pending_question = str(
+                getattr(ws, "pending_question", "") or ""
+            )
+            current_pending_actor_id = str(
+                getattr(ws, "pending_question_actor_id", "") or ""
+            ).strip()
+            if current_pending_question and (
+                    current_pending_question != previous_pending_question
+                    or (
+                        current_pending_actor_id
+                        and current_pending_actor_id != previous_pending_actor_id
+                    )):
+                emit_engineer_awaiting_human_input_event(
+                    self,
+                    group=group,
+                    question=current_pending_question,
+                    engineer_id=current_pending_actor_id,
+                )
+            elif previous_pending_question and not current_pending_question:
+                emit_engineer_ask_resolved_event(
+                    self,
+                    group=group,
+                    question=previous_pending_question,
+                    engineer_id=(
+                        pending_question_actor_id
+                        or previous_pending_actor_id
+                    ),
+                )
         return ws, applied
 
     def _sync_legacy_weaver_digest_settings(self, group: str,
@@ -3019,27 +3117,53 @@ class MatrixState:
         for group, ws in self.weaver_settings.items():
             gs = self.group_settings.get(group)
             weaver_id = gs.weaver_agent_id if gs else ""
+            question_source_id = (
+                str(getattr(ws, "pending_question_actor_id", "") or "").strip()
+                or weaver_id
+            )
+            question_source_available = self._attention_source_agent_available(
+                question_source_id,
+                live_agents,
+                allow_persisted_agent_fallback=allow_persisted_agent_fallback,
+            )
             weaver_available = self._attention_source_agent_available(
                 weaver_id,
                 live_agents,
                 allow_persisted_agent_fallback=allow_persisted_agent_fallback,
             )
-            if ws.pending_question and not weaver_available:
+            if ws.pending_question and not question_source_available:
+                stale_question = ws.pending_question
+                stale_actor_id = (
+                    str(getattr(ws, "pending_question_actor_id", "") or "").strip()
+                    or weaver_id
+                )
                 log.warning(
                     "Clearing stale weaver pending question for group=%s "
-                    "weaver_id=%r in_memory=%s persisted=%s "
+                    "source_agent_id=%r in_memory=%s persisted=%s "
                     "pending_question_len=%d",
                     group,
-                    weaver_id,
-                    bool(weaver_id and weaver_id in live_agents),
-                    bool(weaver_id and self._agent_persisted_in_db(weaver_id)),
+                    question_source_id,
+                    bool(question_source_id and question_source_id in live_agents),
+                    bool(
+                        question_source_id
+                        and self._agent_persisted_in_db(question_source_id)
+                    ),
                     len(ws.pending_question or ""),
                 )
                 ws.pending_question = ""
+                ws.pending_question_set_at = 0.0
+                ws.pending_question_actor_id = ""
                 ws.paused = False
                 ws.pending_note = ""
                 ws.pending_note_kind = ""
                 self._save_weaver_settings(group, emit=emit)
+                if emit:
+                    emit_engineer_ask_resolved_event(
+                        self,
+                        group=group,
+                        question=stale_question,
+                        engineer_id=stale_actor_id,
+                    )
                 cleaned["weaver_questions"] += 1
             elif ws.pending_note and not weaver_available:
                 ws.pending_note = ""

@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from .engineer_ask_events import (
+    ENGINEER_ASK_EVENT_KINDS,
+    ENGINEER_ASK_RESOLVED,
+    ENGINEER_AWAITING_HUMAN_INPUT,
+)
 from .state import AgentDigestSettings, WEAVER_MANDATORY_EVENTS
 
 ARCHITECT_COARSE_EVENTS = frozenset({
@@ -25,6 +30,8 @@ ARCHITECT_COARSE_EVENTS = frozenset({
     "engineer_rehired",
     "workflow_breach",
     "engineer_queue_empty",
+    ENGINEER_AWAITING_HUMAN_INPUT,
+    ENGINEER_ASK_RESOLVED,
 })
 
 # Back-compat for earlier Phase 1 tests/imports.
@@ -134,14 +141,18 @@ def candidate_digest_recipients(state, event: dict) -> list[str]:
                 if architect and _cell_kind(architect) == "architect":
                     recipients.append(architect.id)
     elif kind == "engineer":
-        recipients.append(source.id)
-        if architect_eligible:
-            architect_id = str(
-                getattr(source, "hired_by_architect_id", "") or ""
-            ).strip()
-            architect = state.agents.get(architect_id) if architect_id else None
+        architect_id = str(
+            getattr(source, "hired_by_architect_id", "") or ""
+        ).strip()
+        architect = state.agents.get(architect_id) if architect_id else None
+        if _event_kind(event) in ENGINEER_ASK_EVENT_KINDS:
             if architect and _cell_kind(architect) == "architect":
                 recipients.append(architect.id)
+        else:
+            recipients.append(source.id)
+            if architect_eligible:
+                if architect and _cell_kind(architect) == "architect":
+                    recipients.append(architect.id)
     elif kind == "architect":
         return []
     elif str(getattr(source, "id", "") or "").strip():

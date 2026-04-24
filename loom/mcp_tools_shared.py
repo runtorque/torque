@@ -1285,6 +1285,46 @@ def _architect_events_recent_json(state, architect_id: str, architect_group: str
         truncated = True
 
 
+def _architect_engineer_pending_question_json(
+        state, architect_id: str, args: dict) -> tuple[str, bool]:
+    engineer_ident = str(args.get("engineer_id", "") or "").strip()
+    if not engineer_ident:
+        return "engineer_id is required", True
+    engineer_id, engineer_error = _resolve_architect_hired_engineer(
+        state, architect_id, engineer_ident
+    )
+    if not engineer_id:
+        return engineer_error, True
+    engineer = state.agents.get(engineer_id)
+    engineer_group = str(getattr(engineer, "group", "") or "").strip()
+    payload = {
+        "type": "engineer_pending_question",
+        "engineer_id": engineer_id,
+        "question": "",
+        "set_at": 0.0,
+        "paused": False,
+        "note": "",
+    }
+    if not engineer_group:
+        payload["note"] = "Engineer has no group."
+        return _compact_json(payload), False
+    ws = state.get_weaver_settings(engineer_group)
+    question = str(getattr(ws, "pending_question", "") or "")
+    pending_owner_id = str(
+        getattr(ws, "pending_question_actor_id", "") or ""
+    ).strip()
+    if not question or pending_owner_id != engineer_id:
+        payload["note"] = "No pending question for engineer."
+        return _compact_json(payload), False
+    payload.update({
+        "question": question,
+        "set_at": float(getattr(ws, "pending_question_set_at", 0.0) or 0.0),
+        "paused": bool(getattr(ws, "paused", False)),
+        "note": "Question is awaiting human input.",
+    })
+    return _compact_json(payload), False
+
+
 def _normalize_decision_links(state, caller_id: str, *,
                               task_ids=None,
                               engineer_ids=None) -> tuple[list[str], list[str], str]:
@@ -2161,6 +2201,13 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             real_state,
             caller_id,
             _weaver_group,
+            args,
+        )
+
+    if tool_name == "engineer_pending_question" and caller_kind == "architect":
+        return _architect_engineer_pending_question_json(
+            real_state,
+            caller_id,
             args,
         )
 
@@ -3586,6 +3633,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         result = await handle_command({
             "cmd": "weaver_resume",
             "group": _weaver_group,
+            "engineer_id": str(caller_id or "").strip(),
         })
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
@@ -4052,6 +4100,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             "cmd": "weaver_ask",
             "group": _weaver_group,
             "question": question,
+            "engineer_id": str(caller_id or "").strip(),
         })
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True

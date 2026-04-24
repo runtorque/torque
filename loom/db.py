@@ -2203,8 +2203,10 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                  weaver_provider, weaver_boot_command,
                  weaver_model, weaver_reasoning_effort,
                  weaver_directory, weaver_profile,
-                 weaver_shell, weaver_tab_color)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 weaver_shell, weaver_tab_color,
+                 pending_question_set_at,
+                 pending_question_actor_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             group_name,
             settings.get("push_interval", 60),
@@ -2232,6 +2234,8 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             settings.get("weaver_profile", ""),
             settings.get("weaver_shell", ""),
             settings.get("weaver_tab_color", ""),
+            float(settings.get("pending_question_set_at", 0) or 0),
+            settings.get("pending_question_actor_id", ""),
         ))
         self._conn.commit()
 
@@ -2294,7 +2298,9 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "weaver_provider, weaver_boot_command, "
             "weaver_model, weaver_reasoning_effort, "
             "weaver_directory, weaver_profile, "
-            "weaver_shell, weaver_tab_color "
+            "weaver_shell, weaver_tab_color, "
+            "pending_question_set_at, "
+            "pending_question_actor_id "
             "FROM weaver_settings "
             "WHERE group_name=?", (group_name,)).fetchone()
         if not row:
@@ -2340,6 +2346,8 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "weaver_profile": row[22] if len(row) > 22 else "",
             "weaver_shell": row[23] if len(row) > 23 else "",
             "weaver_tab_color": row[24] if len(row) > 24 else "",
+            "pending_question_set_at": row[25] if len(row) > 25 else 0.0,
+            "pending_question_actor_id": row[26] if len(row) > 26 else "",
         }
 
     def load_agent_digest_settings(self, agent_id: str) -> dict | None:
@@ -2412,7 +2420,9 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "weaver_provider, weaver_boot_command, "
             "weaver_model, weaver_reasoning_effort, "
             "weaver_directory, weaver_profile, "
-            "weaver_shell, weaver_tab_color "
+            "weaver_shell, weaver_tab_color, "
+            "pending_question_set_at, "
+            "pending_question_actor_id "
             "FROM weaver_settings"
         ).fetchall()
         result = {}
@@ -2458,6 +2468,8 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 "weaver_profile": row[22] if len(row) > 22 else "",
                 "weaver_shell": row[23] if len(row) > 23 else "",
                 "weaver_tab_color": row[24] if len(row) > 24 else "",
+                "pending_question_set_at": row[25] if len(row) > 25 else 0.0,
+                "pending_question_actor_id": row[26] if len(row) > 26 else "",
             }
         return result
 

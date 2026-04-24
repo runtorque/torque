@@ -996,6 +996,50 @@ class ServerPromptQueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(ws.paused)
         self.assertEqual(ws.pending_question, '')
 
+    def test_pending_question_reply_target_prefers_actor_owner(self):
+        state = self.state_mod.MatrixState()
+        state.add_group('g')
+        group_weaver = self.state_mod.AgentCell(
+            id='weaver-1',
+            name='Group Weaver',
+            group='g',
+            cell_type='agent',
+            session_id='session-weaver',
+        )
+        owner = self.state_mod.AgentCell(
+            id='eng-1',
+            name='Asking Engineer',
+            group='g',
+            cell_type='agent',
+            session_id='session-engineer',
+        )
+        state.agents[group_weaver.id] = group_weaver
+        state.agents[owner.id] = owner
+        state.group_settings['g'] = self.state_mod.GroupSettings(
+            weaver_agent_id=group_weaver.id,
+        )
+        state.update_weaver_settings(
+            'g',
+            pending_question='Need approval',
+            pending_question_actor_id=owner.id,
+            paused=True,
+        )
+
+        target, label = self.server_mod._pending_question_reply_target(state, 'g')
+
+        self.assertIs(target, owner)
+        self.assertEqual(label, 'Engineer')
+
+        state.update_weaver_settings(
+            'g',
+            pending_question='Legacy question',
+            pending_question_actor_id='',
+            paused=True,
+        )
+        target, label = self.server_mod._pending_question_reply_target(state, 'g')
+        self.assertIs(target, group_weaver)
+        self.assertEqual(label, 'Weaver')
+
 
 class ServerWebSocketResyncTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
