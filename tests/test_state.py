@@ -607,6 +607,74 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertEqual(ws.pending_note_kind, "note")
         self.assertTrue(ws.paused)
 
+    def test_cleanup_orphaned_attention_false_fallback_clears_persisted_agent_row(self):
+        from loom.db import LoomDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = LoomDB(Path(tmp.name) / "loom.db")
+        db.init()
+        self.addCleanup(db.close)
+        engineer = self.state_mod.AgentCell(
+            id="engineer-1",
+            name="Engineer",
+            group="g",
+            cell_type="agent",
+        )
+        parent = self.state_mod.BoardTask(
+            id="task-1",
+            task="Parent task",
+            group="g",
+            lane="In Progress",
+            agent_id=engineer.id,
+            status="Awaiting Input",
+        )
+        ask = self.state_mod.BoardTask(
+            id="ask-1",
+            task="Review plan",
+            group="g",
+            lane="Backlog",
+            labels=["loom:human", "loom:derived"],
+            parent_task_id=parent.id,
+        )
+        db.save_group("g", 0)
+        db.save_agent(engineer)
+        self.assertTrue(db.agent_exists(engineer.id))
+
+        state = self.state_mod.MatrixState(db=db)
+        state.groups["g"] = []
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            engineer_agent_id=engineer.id
+        )
+        state.engineer_settings["g"] = self.state_mod.EngineerSettings(
+            group="g",
+            pending_question="Need approval",
+            pending_question_set_at=123.0,
+            pending_question_actor_id=engineer.id,
+            pending_note="FYI",
+            pending_note_kind="note",
+            paused=True,
+        )
+        state.board_tasks[parent.id] = parent
+        state.board_tasks[ask.id] = ask
+
+        cleaned = state.cleanup_orphaned_attention(
+            emit=False,
+            allow_persisted_agent_fallback=False,
+        )
+
+        self.assertTrue(db.agent_exists(engineer.id))
+        self.assertEqual(cleaned, {"asks": 1, "engineer_questions": 1})
+        ws = state.engineer_settings["g"]
+        self.assertEqual(ws.pending_question, "")
+        self.assertEqual(ws.pending_question_set_at, 0.0)
+        self.assertEqual(ws.pending_question_actor_id, "")
+        self.assertEqual(ws.pending_note, "")
+        self.assertEqual(ws.pending_note_kind, "")
+        self.assertFalse(ws.paused)
+        self.assertEqual(state.board_tasks[parent.id].status, "")
+        self.assertEqual(state.board_tasks[ask.id].lane, "Done")
+
     def test_load_preserves_pending_question_for_persisted_engineer(self):
         from loom.db import LoomDB
 
