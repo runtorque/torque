@@ -1,5 +1,157 @@
 let _engineerLaunchContext = null;
 
+function _engineerLaunchSpecializationsFor(cell) {
+  if (!cell) return [];
+  const raw = cell.engineer_specializations || [];
+  return Array.isArray(raw) ? raw.slice() : [];
+}
+
+function renderEngineerLaunchSpecializations() {
+  if (!_engineerLaunchContext) return;
+  const selectedEl = document.getElementById('engineer-launch-specializations-selected');
+  const availableEl = document.getElementById('engineer-launch-specializations-available');
+  if (!selectedEl || !availableEl) return;
+  const selected = _engineerLaunchContext.specializations || [];
+  const available = (state.specializations || [])
+    .map(function (s) { return s && s.name; })
+    .filter(Boolean);
+
+  selectedEl.innerHTML = '';
+  selected.forEach(function (name, idx) {
+    const li = document.createElement('li');
+    li.className = 'specialization-entry';
+    const tag = idx === 0 ? ' (primary)' : '';
+    const label = document.createElement('span');
+    label.textContent = name + tag;
+    li.appendChild(label);
+
+    const controls = document.createElement('span');
+    controls.className = 'specialization-controls-row';
+    if (idx > 0) {
+      const up = document.createElement('button');
+      up.type = 'button';
+      up.textContent = '↑';
+      up.title = 'Move up';
+      up.onclick = function () { engineerLaunchMoveSpecialization(idx, -1); };
+      controls.appendChild(up);
+    }
+    if (idx < selected.length - 1) {
+      const down = document.createElement('button');
+      down.type = 'button';
+      down.textContent = '↓';
+      down.title = 'Move down';
+      down.onclick = function () { engineerLaunchMoveSpecialization(idx, 1); };
+      controls.appendChild(down);
+    }
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.textContent = '×';
+    remove.title = 'Remove';
+    remove.onclick = function () { engineerLaunchRemoveSpecialization(idx); };
+    controls.appendChild(remove);
+    li.appendChild(controls);
+    selectedEl.appendChild(li);
+  });
+
+  availableEl.innerHTML = '';
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = available.length ? 'Pick a specialization...' : 'No specializations available';
+  availableEl.appendChild(placeholder);
+  available.forEach(function (name) {
+    if (selected.indexOf(name) >= 0) return;
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name;
+    const meta = (state.specializations || []).find(function (s) {
+      return s && s.name === name;
+    });
+    if (meta && meta.preamble) {
+      opt.title = String(meta.preamble).slice(0, 200);
+    }
+    availableEl.appendChild(opt);
+  });
+}
+
+function engineerLaunchAddSpecialization() {
+  if (!_engineerLaunchContext) return;
+  const availableEl = document.getElementById('engineer-launch-specializations-available');
+  if (!availableEl) return;
+  const name = availableEl.value;
+  if (!name) return;
+  const selected = _engineerLaunchContext.specializations || [];
+  if (selected.indexOf(name) < 0) {
+    selected.push(name);
+    _engineerLaunchContext.specializations = selected;
+  }
+  _engineerLaunchContext.specializations_touched = true;
+  renderEngineerLaunchSpecializations();
+}
+
+function engineerLaunchRemoveSpecialization(idx) {
+  if (!_engineerLaunchContext) return;
+  const selected = _engineerLaunchContext.specializations || [];
+  if (idx < 0 || idx >= selected.length) return;
+  selected.splice(idx, 1);
+  _engineerLaunchContext.specializations = selected;
+  _engineerLaunchContext.specializations_touched = true;
+  renderEngineerLaunchSpecializations();
+}
+
+function engineerLaunchMoveSpecialization(idx, delta) {
+  if (!_engineerLaunchContext) return;
+  const selected = _engineerLaunchContext.specializations || [];
+  const newIdx = idx + delta;
+  if (newIdx < 0 || newIdx >= selected.length) return;
+  const moved = selected.splice(idx, 1)[0];
+  selected.splice(newIdx, 0, moved);
+  _engineerLaunchContext.specializations = selected;
+  _engineerLaunchContext.specializations_touched = true;
+  renderEngineerLaunchSpecializations();
+}
+
+function openNewSpecializationDialog() {
+  const modal = document.getElementById('modal-new-specialization');
+  if (!modal) return;
+  document.getElementById('new-specialization-name').value = '';
+  document.getElementById('new-specialization-description').value = '';
+  document.getElementById('new-specialization-preamble').value = '';
+  document.getElementById('new-specialization-priorities').value = '';
+  document.getElementById('new-specialization-scope').value = 'project';
+  modal.classList.add('visible');
+  document.getElementById('new-specialization-name').focus();
+}
+
+function submitNewSpecializationDialog() {
+  const name = (document.getElementById('new-specialization-name').value || '').trim();
+  if (!name) {
+    document.getElementById('new-specialization-name').focus();
+    return;
+  }
+  const description = (document.getElementById('new-specialization-description').value || '').trim();
+  const preamble = (document.getElementById('new-specialization-preamble').value || '').trim();
+  const prioritiesRaw = (document.getElementById('new-specialization-priorities').value || '').trim();
+  const priorities = prioritiesRaw
+    ? prioritiesRaw.split(/\n+/).map(function (s) { return s.trim(); }).filter(Boolean)
+    : [];
+  const scope = document.getElementById('new-specialization-scope').value || 'project';
+  const data = { name: name };
+  if (description) data.description = description;
+  if (preamble) data.preamble = preamble;
+  if (priorities.length) data.priorities = priorities;
+
+  const group = _engineerLaunchContext ? _engineerLaunchContext.group : '';
+  send({
+    cmd: 'save_specialization',
+    name: name,
+    data: data,
+    scope: scope,
+    group: group,
+  });
+  send({ cmd: 'list_specializations', group: group });
+  document.getElementById('modal-new-specialization').classList.remove('visible');
+}
+
 function _defaultEngineerLaunchSettings() {
   return {
     engineer_provider: '',
@@ -64,6 +216,7 @@ function openEngineerLaunchDialog(group, agentId) {
     group: group,
     agent_id: cell ? cell.id : '',
     mode: cell ? 'relaunch' : 'create',
+    specializations: _engineerLaunchSpecializationsFor(cell),
     notification_settings: {
       push_interval: ws.push_interval,
       max_interval: ws.max_interval,
@@ -71,6 +224,8 @@ function openEngineerLaunchDialog(group, agentId) {
       enabled_events: (ws.enabled_events || []).slice(),
     },
   };
+  send({ cmd: 'list_specializations', group: group });
+  renderEngineerLaunchSpecializations();
 
   document.getElementById('engineer-launch-title').textContent =
     cell ? 'Relaunch Engineer' : 'Create Engineer';
@@ -144,10 +299,29 @@ function submitEngineerLaunchDialog() {
     enabled_events: notificationSettings.enabled_events,
   });
 
+  const specializations = (_engineerLaunchContext.specializations || []).slice();
+  const engineerId = _engineerLaunchContext.agent_id;
+
   if (_engineerLaunchContext.mode === 'create') {
-    send({ cmd: 'add_agent', name: 'Engineer', group: group, is_engineer: true });
-  } else if (_engineerLaunchContext.agent_id) {
-    send({ cmd: 'relaunch_agent', id: _engineerLaunchContext.agent_id });
+    const payload = {
+      cmd: 'add_agent',
+      name: 'Engineer',
+      group: group,
+      is_engineer: true,
+    };
+    if (specializations.length > 0) {
+      payload.specializations = specializations;
+    }
+    send(payload);
+  } else if (engineerId) {
+    if (_engineerLaunchContext.specializations_touched) {
+      send({
+        cmd: 'set_engineer_specializations',
+        engineer_id: engineerId,
+        specializations: specializations,
+      });
+    }
+    send({ cmd: 'relaunch_agent', id: engineerId });
   }
 
   _engineerLaunchContext = null;

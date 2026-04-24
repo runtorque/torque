@@ -541,11 +541,13 @@ def _build_policy_section(engineer_settings=None, group_settings=None) -> str:
 
 def _build_engineer_base_system_prompt(group: str, engineer_settings=None,
                                        action_system_prompt: str = "",
-                                       group_settings=None) -> str:
+                                       group_settings=None,
+                                       specializations_preamble: str = ""
+                                       ) -> str:
     """Assemble the base system prompt for an engineer agent.
 
     Concatenates: base identity → action system_prompt → structured policy
-    section → custom instructions.
+    section → specialization preamble → custom instructions.
     """
     parts = [_BASE_SYSTEM_PROMPT.format(group=group)]
 
@@ -554,6 +556,13 @@ def _build_engineer_base_system_prompt(group: str, engineer_settings=None,
 
     if engineer_settings or group_settings:
         parts.append(_build_policy_section(engineer_settings, group_settings))
+
+    specializations_block = str(specializations_preamble or "").strip()
+    if specializations_block:
+        parts.append(
+            "## Specializations\n"
+            f"{specializations_block}"
+        )
 
     if engineer_settings and engineer_settings.custom_instructions:
         ci = engineer_settings.custom_instructions.strip()
@@ -567,13 +576,15 @@ def _build_engineer_base_system_prompt(group: str, engineer_settings=None,
 
 def build_engineer_system_prompt(group: str, engineer_settings=None,
                                  action_system_prompt: str = "",
-                                 group_settings=None) -> str:
+                                 group_settings=None,
+                                 specializations_preamble: str = "") -> str:
     """Assemble the engineer boot prompt with architect escalation guidance."""
     prompt = _build_engineer_base_system_prompt(
         group,
         engineer_settings,
         action_system_prompt,
         group_settings=group_settings,
+        specializations_preamble=specializations_preamble,
     ).rstrip()
     return prompt + "\n\n" + _ENGINEER_ARCHITECT_ESCALATION_SECTION + "\n"
 

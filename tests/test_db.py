@@ -158,6 +158,35 @@ class LoomDBTests(unittest.TestCase):
         if close_conn:
             conn.close()
 
+    def test_engineer_specializations_round_trip(self):
+        cell = AgentCell(
+            id="engineer-1",
+            name="Engineer",
+            group="g",
+            slug="engineer",
+            cell_type="agent",
+            kind="engineer",
+            engineer_specializations=["ui-ux", "security-focus"],
+        )
+        self.db.save_agent(cell)
+        self.db.save_groups({"g": [cell.id]}, {"g": "g"})
+        self.db.save_group_members("g", [cell.id])
+
+        loaded = self.db.load_all()
+        self.assertEqual(
+            loaded["agents"]["engineer-1"]["engineer_specializations"],
+            ["ui-ux", "security-focus"],
+        )
+
+    def test_engineer_specializations_migration_is_idempotent(self):
+        # Column already exists after init(); calling ensure again is a no-op.
+        self.db._ensure_agent_engineer_specializations_column()
+        columns = {
+            row[1]
+            for row in self.db._conn.execute("PRAGMA table_info(agents)")
+        }
+        self.assertIn("engineer_specializations", columns)
+
     def test_load_all_roundtrips_json_and_boolean_fields(self):
         cell = AgentCell(
             id="agent-1",

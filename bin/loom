@@ -1275,6 +1275,87 @@ def _yaml_parse_block_scalar(lines, idx, parent_indent):
 
 
 # ---------------------------------------------------------------------------
+# Specialization utilities
+# ---------------------------------------------------------------------------
+
+GLOBAL_SPECIALIZATIONS_DIR = os.path.expanduser("~/.loom/specializations")
+
+
+def find_specializations_dirs():
+    """Return specialization directories in priority order (project, user)."""
+    dirs = []
+    d = os.getcwd()
+    while True:
+        candidate = os.path.join(d, ".loom", "specializations")
+        if os.path.isdir(candidate):
+            dirs.append(candidate)
+            break
+        parent = os.path.dirname(d)
+        if parent == d:
+            break
+        d = parent
+    if os.path.isdir(GLOBAL_SPECIALIZATIONS_DIR) \
+            and GLOBAL_SPECIALIZATIONS_DIR not in dirs:
+        dirs.append(GLOBAL_SPECIALIZATIONS_DIR)
+    return dirs
+
+
+def find_specializations_dir():
+    dirs = find_specializations_dirs()
+    return dirs[0] if dirs else None
+
+
+def _spec_path(name, dirs=None):
+    for tdir in (dirs or find_specializations_dirs()):
+        for suffix in ("", ".yaml", ".yml"):
+            path = os.path.join(tdir, name + suffix)
+            if os.path.isfile(path):
+                return path
+    return None
+
+
+def list_specializations_local():
+    """List specializations. Returns list of {name, description, global}."""
+    seen = {}
+    for tdir in find_specializations_dirs():
+        is_global = (tdir == GLOBAL_SPECIALIZATIONS_DIR)
+        if not os.path.isdir(tdir):
+            continue
+        for fname in sorted(os.listdir(tdir)):
+            if not fname.endswith((".yaml", ".yml")):
+                continue
+            name = fname.rsplit(".", 1)[0]
+            if name in seen:
+                continue
+            path = os.path.join(tdir, fname)
+            try:
+                with open(path) as f:
+                    spec = parse_yaml(f.read()) or {}
+                desc = spec.get("description", "")
+            except Exception:
+                desc = "(parse error)"
+            seen[name] = {
+                "name": name,
+                "description": desc,
+                "global": is_global,
+                "path": path,
+            }
+    return sorted(seen.values(), key=lambda t: t["name"])
+
+
+def load_specialization_local(name):
+    """Load a specialization by name, returning its parsed dict or None."""
+    path = _spec_path(name)
+    if not path:
+        return None
+    try:
+        with open(path) as f:
+            return parse_yaml(f.read()) or {}
+    except Exception as exc:
+        die(f"Failed to parse specialization {name}: {exc}")
+
+
+# ---------------------------------------------------------------------------
 # Action utilities
 # ---------------------------------------------------------------------------
 
@@ -2964,6 +3045,104 @@ prompt: |
     print(f"  Edit it, then run: loom dispatch \"your task\" --action {args.name}")
 
 
+# -- Specializations --------------------------------------------------------
+
+def cmd_specialization_list(args):
+    items = list_specializations_local()
+    if args.json:
+        print(json.dumps(items, indent=2))
+        return
+    if not items:
+        dirs = find_specializations_dirs()
+        if dirs:
+            print(f"No specializations found in {dirs[0]}")
+        else:
+            print("No specialization directories found")
+            print("  Project: .loom/specializations/  (in repo root)")
+            print("  Global:  ~/.loom/specializations/")
+        return
+    dirs = find_specializations_dirs()
+    print(f"{_bold('Specializations')}  {_dim(', '.join(dirs))}\n")
+    for item in items:
+        tag = _dim(" (global)") if item.get("global") else ""
+        desc = item.get("description", "") or ""
+        print(f"  {item['name']:<20} {_dim(desc)}{tag}")
+
+
+def cmd_specialization_show(args):
+    spec = load_specialization_local(args.name)
+    if spec is None:
+        die(f"Specialization \"{args.name}\" not found")
+    if args.json:
+        print(json.dumps(spec, indent=2))
+        return
+    _print_dict(spec)
+
+
+def cmd_specialization_create(args):
+    tdir = None
+    if args.scope == "user":
+        tdir = GLOBAL_SPECIALIZATIONS_DIR
+    else:
+        tdir = find_specializations_dir()
+        if not tdir:
+            root = os.getcwd()
+            tdir = os.path.join(root, ".loom", "specializations")
+    os.makedirs(tdir, exist_ok=True)
+    path = os.path.join(tdir, f"{args.name}.yaml")
+    if os.path.exists(path):
+        die(f"Specialization \"{args.name}\" already exists at {path}")
+
+    if args.from_file:
+        if not os.path.isfile(args.from_file):
+            die(f"--from-file source not found: {args.from_file}")
+        with open(args.from_file) as f:
+            content = f.read()
+        try:
+            parsed = parse_yaml(content) or {}
+        except Exception as exc:
+            die(f"Failed to parse source YAML: {exc}")
+        if not isinstance(parsed, dict):
+            die("Source YAML must be a mapping")
+        parsed.setdefault("name", args.name)
+        with open(path, "w") as f:
+            f.write(content if isinstance(content, str) else "")
+    else:
+        starter = f"""name: {args.name}
+description: ""
+
+priorities:
+  - Describe priority one.
+  - Describe priority two.
+
+preamble: |
+  You are a {args.name}-focused engineer.
+"""
+        with open(path, "w") as f:
+            f.write(starter)
+    print(f"Created {path}")
+
+
+def cmd_specialization_edit(args):
+    path = _spec_path(args.name)
+    if not path:
+        die(f"Specialization \"{args.name}\" not found")
+    editor = os.environ.get("EDITOR", "vi")
+    try:
+        import subprocess
+        subprocess.call([editor, path])
+    except Exception as exc:
+        die(f"Failed to launch editor: {exc}")
+
+
+def cmd_specialization_delete(args):
+    path = _spec_path(args.name)
+    if not path:
+        die(f"Specialization \"{args.name}\" not found")
+    os.remove(path)
+    print(f"Deleted {path}")
+
+
 # -- Logs -------------------------------------------------------------------
 
 def cmd_logs(args):
@@ -4642,6 +4821,38 @@ def build_parser():
     p = act_sub.add_parser("create", help="Create a starter action")
     p.add_argument("name", help="Action name")
     p.set_defaults(func=cmd_action_create)
+
+    # -- specialization -----------------------------------------------------
+    spec_cmd = sub.add_parser("specialization", aliases=["spec"],
+                              help="Engineer specialization management")
+    spec_cmd.set_defaults(func=None, _sub_parser=spec_cmd)
+    spec_sub = spec_cmd.add_subparsers(dest="specialization_cmd")
+
+    p = spec_sub.add_parser("list", aliases=["ls"],
+                            help="List available specializations")
+    p.set_defaults(func=cmd_specialization_list)
+
+    p = spec_sub.add_parser("show", help="Show specialization contents")
+    p.add_argument("name", help="Specialization name")
+    p.set_defaults(func=cmd_specialization_show)
+
+    p = spec_sub.add_parser("create", help="Create a starter specialization")
+    p.add_argument("name", help="Specialization name")
+    p.add_argument("--from-file", dest="from_file",
+                   help="Seed the new file from an existing YAML")
+    p.add_argument("--scope", choices=("project", "user"),
+                   default="project",
+                   help="Where to save (default: project)")
+    p.set_defaults(func=cmd_specialization_create)
+
+    p = spec_sub.add_parser("edit", help="Open specialization in $EDITOR")
+    p.add_argument("name", help="Specialization name")
+    p.set_defaults(func=cmd_specialization_edit)
+
+    p = spec_sub.add_parser("delete", aliases=["rm"],
+                            help="Delete a specialization")
+    p.add_argument("name", help="Specialization name")
+    p.set_defaults(func=cmd_specialization_delete)
 
     # -- board --------------------------------------------------------------
     brd = sub.add_parser("board", aliases=["bd"],

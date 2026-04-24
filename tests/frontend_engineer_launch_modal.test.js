@@ -189,7 +189,10 @@ test('submitEngineerLaunchDialog persists settings then creates a Engineer', () 
 
   vm.runInContext('submitEngineerLaunchDialog()', context);
 
-  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
+  const callsWithoutSpecFetch = sandbox.sendCalls.filter(
+    (msg) => msg.cmd !== 'list_specializations',
+  );
+  assert.deepEqual(JSON.parse(JSON.stringify(callsWithoutSpecFetch)), [
     {
       cmd: 'engineer_update_settings',
       group: 'alpha',
@@ -218,6 +221,47 @@ test('submitEngineerLaunchDialog persists settings then creates a Engineer', () 
   ]);
 });
 
+test('openEngineerLaunchDialog fetches specializations and renders them', () => {
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/modals.js');
+  loadScript(context, 'static/js/modals/engineer-launch.js');
+
+  vm.runInContext(`openEngineerLaunchDialog('alpha')`, context);
+
+  const specFetch = sandbox.sendCalls.find(
+    (msg) => msg.cmd === 'list_specializations',
+  );
+  assert.ok(specFetch, 'list_specializations should be requested');
+  assert.equal(specFetch.group, 'alpha');
+});
+
+test('specializations picker reorders and submits ordered list on save', () => {
+  const { sandbox, ensure } = createSandbox();
+  sandbox.state.specializations = [
+    { name: 'ui-ux', preamble: 'UX.', priorities: [] },
+    { name: 'security', preamble: 'Sec.', priorities: [] },
+  ];
+  sandbox.state.agents['engineer-1'].engineer_specializations = ['ui-ux'];
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/modals.js');
+  loadScript(context, 'static/js/modals/engineer-launch.js');
+
+  vm.runInContext(`openEngineerLaunchDialog('alpha', 'engineer-1')`, context);
+
+  ensure('engineer-launch-specializations-available').value = 'security';
+  vm.runInContext('engineerLaunchAddSpecialization()', context);
+  vm.runInContext('engineerLaunchMoveSpecialization(1, -1)', context);
+  vm.runInContext('submitEngineerLaunchDialog()', context);
+
+  const setCall = sandbox.sendCalls.find(
+    (msg) => msg.cmd === 'set_engineer_specializations',
+  );
+  assert.ok(setCall, 'set_engineer_specializations should be sent');
+  assert.deepEqual(setCall.specializations, ['security', 'ui-ux']);
+  assert.equal(setCall.engineer_id, 'engineer-1');
+});
+
 test('submitEngineerLaunchDialog persists settings then relaunches the designated Engineer', () => {
   const { sandbox, ensure } = createSandbox();
   const context = vm.createContext(sandbox);
@@ -230,7 +274,10 @@ test('submitEngineerLaunchDialog persists settings then relaunches the designate
   vm.runInContext('submitEngineerLaunchDialog()', context);
 
   assert.equal(ensure('engineer-launch-title').textContent, 'Relaunch Engineer');
-  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
+  const callsWithoutSpecFetch2 = sandbox.sendCalls.filter(
+    (msg) => msg.cmd !== 'list_specializations',
+  );
+  assert.deepEqual(JSON.parse(JSON.stringify(callsWithoutSpecFetch2)), [
     {
       cmd: 'engineer_update_settings',
       group: 'alpha',

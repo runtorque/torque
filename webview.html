@@ -263,6 +263,19 @@
         <select id="engineer-launch-reasoning-effort"></select>
         <label>Custom instructions</label>
         <textarea id="engineer-launch-custom-instructions" rows="5" placeholder="Instructions appended after Loom's built-in Engineer policy..."></textarea>
+        <label>Specializations
+          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Ordered list of specialization YAMLs. The first one is the primary focus; each adds a preamble block to the engineer's boot prompt.">?</span>
+        </label>
+        <div id="engineer-launch-specializations-picker" class="specializations-picker">
+          <ul id="engineer-launch-specializations-selected" class="specializations-selected"></ul>
+          <div class="specializations-controls">
+            <select id="engineer-launch-specializations-available"></select>
+            <button type="button" class="btn-secondary" onclick="engineerLaunchAddSpecialization()">+ Add</button>
+          </div>
+          <div class="specializations-footer">
+            <button type="button" class="btn-link" onclick="openNewSpecializationDialog()">+ New specialization</button>
+          </div>
+        </div>
       </div>
     </div>
     <div class="task-modal-section">
@@ -327,6 +340,30 @@
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeModals()">Cancel</button>
       <button class="btn-primary" id="engineer-launch-submit-btn" onclick="submitEngineerLaunchDialog()">Create Engineer</button>
+    </div>
+  </div>
+</div>
+
+<!-- New Specialization modal -->
+<div class="overlay" id="modal-new-specialization">
+  <div class="modal">
+    <h2>New specialization</h2>
+    <label>Name</label>
+    <input id="new-specialization-name" placeholder="e.g. ui-ux" autocomplete="off">
+    <label>Description</label>
+    <input id="new-specialization-description" placeholder="One-line summary" autocomplete="off">
+    <label>Preamble</label>
+    <textarea id="new-specialization-preamble" rows="4" placeholder="You are a &lt;focus&gt; engineer..."></textarea>
+    <label>Priorities <span class="label-hint">one per line</span></label>
+    <textarea id="new-specialization-priorities" rows="4" placeholder="Priority 1&#10;Priority 2"></textarea>
+    <label>Scope</label>
+    <select id="new-specialization-scope">
+      <option value="project">Project</option>
+      <option value="user">User (~/.loom)</option>
+    </select>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModals()">Cancel</button>
+      <button class="btn-primary" onclick="submitNewSpecializationDialog()">Create</button>
     </div>
   </div>
 </div>

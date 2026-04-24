@@ -567,6 +567,7 @@ class AgentCell:
     role: str = ""  # worker-role slug mirrored from template during migration
     owner_engineer_id: str = ""  # owning engineer for worker/terminal agents
     hired_by_architect_id: str = ""  # architect provenance for hires
+    engineer_specializations: list[str] = field(default_factory=list)  # ordered, primary first
     dismissed_at: int = 0  # unix timestamp when an engineer is paused/dismissed
     persistent: bool = False  # architect/engineer survive across sessions
     queue_empty_emitted: bool = True  # suppress duplicate engineer queue-empty events

@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS agents (
     idle_timeout          INTEGER NOT NULL DEFAULT 0,
     tasks_dispatched      INTEGER NOT NULL DEFAULT 0,
     queue_empty_emitted   INTEGER NOT NULL DEFAULT 1,
-    dismissed_at          INTEGER NOT NULL DEFAULT 0
+    dismissed_at          INTEGER NOT NULL DEFAULT 0,
+    engineer_specializations TEXT NOT NULL DEFAULT '[]'
 );
 
 CREATE TABLE IF NOT EXISTS groups (

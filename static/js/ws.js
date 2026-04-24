@@ -140,6 +140,21 @@ function connect() {
           && typeof agentTemplateReceiveDetail === 'function') {
         agentTemplateReceiveDetail(msg);
       }
+    } else if (msg.type === 'specializations') {
+      state.specializations = Array.isArray(msg.specializations)
+        ? msg.specializations
+        : [];
+      if (typeof renderEngineerLaunchSpecializations === 'function') {
+        renderEngineerLaunchSpecializations();
+      }
+    } else if (msg.type === 'specialization_detail') {
+      state.specialization_detail = msg.specialization || null;
+    } else if (msg.type === 'engineer_specializations') {
+      const agents = state.agents || {};
+      const cell = agents[msg.engineer_id];
+      if (cell) {
+        cell.engineer_specializations = msg.specializations || [];
+      }
     } else if (msg.type === 'template_rendered') {
       if (typeof _handleRenderedTemplate === 'function') {
         _handleRenderedTemplate(msg);

@@ -151,3 +151,33 @@ class EngineerPromptTests(unittest.TestCase):
         self.assertIn("engineer_message_architect", prompt)
         self.assertIn("non-trivial product or scope decision", prompt)
         self.assertIn("If you are user-owned", prompt)
+
+    def test_prompt_includes_specializations_block(self):
+        preamble = (
+            "Specializations: ui-ux (primary), security\n\n"
+            "You are a UI/UX engineer.\n\n"
+            "Priorities:\n- rerender hygiene\n- accessibility"
+        )
+        prompt = self.engineer_mod.build_engineer_system_prompt(
+            "Loom",
+            SimpleNamespace(custom_instructions="Use concise notes."),
+            specializations_preamble=preamble,
+        )
+
+        self.assertIn("## Specializations", prompt)
+        self.assertIn("Specializations: ui-ux (primary), security", prompt)
+        self.assertIn("You are a UI/UX engineer.", prompt)
+        self.assertIn("- rerender hygiene", prompt)
+        # Specializations block precedes custom instructions.
+        self.assertLess(
+            prompt.index("## Specializations"),
+            prompt.index("## Custom Instructions"),
+        )
+
+    def test_prompt_omits_specializations_section_when_empty(self):
+        prompt = self.engineer_mod.build_engineer_system_prompt(
+            "Loom",
+            SimpleNamespace(custom_instructions="Use concise notes."),
+            specializations_preamble="",
+        )
+        self.assertNotIn("## Specializations", prompt)

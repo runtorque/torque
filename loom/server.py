@@ -104,6 +104,7 @@ from .memory import (
     normalize_retention_kind,
 )
 from .roles import RoleManager
+from .specializations import SpecializationManager
 from .external_tickets import (
     ExternalTicketError,
     build_completion_comment,
@@ -4658,6 +4659,7 @@ async def main(connection=None):
     worktree_mgr = WorktreeManager()
     action_mgr = ActionManager()
     template_mgr = RoleManager()
+    specialization_mgr = SpecializationManager()
     agent_launch = AgentLaunchService(
         state=state,
         connection=connection,
@@ -4665,6 +4667,24 @@ async def main(connection=None):
         worktree_mgr=worktree_mgr,
         template_mgr=template_mgr,
     )
+
+    def _resolve_engineer_specializations_preamble(cell) -> str:
+        """Return the combined specialization preamble for an engineer cell."""
+        if not cell:
+            return ""
+        names = list(
+            getattr(cell, "engineer_specializations", []) or [])
+        if not names:
+            return ""
+        base_dir = getattr(cell, "directory", "") or ""
+        try:
+            return specialization_mgr.render_engineer_preamble(
+                names, base_dir=base_dir)
+        except Exception:
+            log.exception(
+                "failed to render engineer specializations for %s",
+                getattr(cell, "id", ""))
+            return ""
 
     from .engineer import EngineerEventBuffer
     async def _inject_digest_message(target, message: str, **kwargs):
@@ -5113,18 +5133,14 @@ async def main(connection=None):
         if cell.cell_type != "agent" or not launch_cfg.get("agent_type"):
             return ""
         gs = state.get_group_settings(cell.group)
-        if gs.engineer_agent_id == cell.id:
+        if gs.engineer_agent_id == cell.id or cell.kind == "engineer":
             from .engineer import build_engineer_system_prompt
             ws = state.get_engineer_settings(cell.group)
+            spec_preamble = _resolve_engineer_specializations_preamble(cell)
             return build_engineer_system_prompt(
                 cell.group, ws, launch_cfg.get("system_prompt", ""),
-                group_settings=gs)
-        if cell.kind == "engineer":
-            from .engineer import build_engineer_system_prompt
-            ws = state.get_engineer_settings(cell.group)
-            return build_engineer_system_prompt(
-                cell.group, ws, launch_cfg.get("system_prompt", ""),
-                group_settings=gs)
+                group_settings=gs,
+                specializations_preamble=spec_preamble)
         if cell.kind == "architect":
             return _architect_persistent_prompt_text(
                 group=cell.group,
@@ -5883,6 +5899,125 @@ async def main(connection=None):
         if role_template_result is not None:
             return role_template_result
 
+        if cmd == "list_specializations":
+            base_dir = await _resolve_base_dir(data.get("group", ""))
+            scope = data.get("scope", "") or ""
+            items = specialization_mgr.list_specializations(
+                base_dir=base_dir, scope=scope)
+            return {
+                "type": "specializations",
+                "group": data.get("group", ""),
+                "specializations": items,
+            }
+
+        if cmd == "get_specialization":
+            base_dir = await _resolve_base_dir(data.get("group", ""))
+            scope = data.get("scope", "") or ""
+            name = str(data.get("name", "") or "").strip()
+            if not name:
+                return {"type": "error",
+                        "message": "Specialization name required"}
+            spec = specialization_mgr.get_specialization(
+                name, base_dir=base_dir, scope=scope)
+            if not spec:
+                return {
+                    "type": "error",
+                    "message": f"Specialization \"{name}\" not found",
+                }
+            return {
+                "type": "specialization_detail",
+                "name": name,
+                "specialization": spec,
+            }
+
+        if cmd == "save_specialization":
+            base_dir = await _resolve_base_dir(data.get("group", ""))
+            scope = data.get("scope", "project") or "project"
+            name = str(data.get("name", "") or "").strip()
+            if not name:
+                return {"type": "error",
+                        "message": "Specialization name required"}
+            payload = data.get("data")
+            if payload is None:
+                payload = data.get("specialization", {})
+            old_name = str(data.get("old_name", "") or "").strip()
+            if old_name and old_name != name:
+                specialization_mgr.delete_specialization(
+                    old_name, base_dir=base_dir)
+                specialization_mgr.delete_specialization(
+                    old_name, scope="user", base_dir=base_dir)
+            try:
+                specialization_mgr.save_specialization(
+                    name, payload or {}, scope=scope, base_dir=base_dir)
+            except ValueError as exc:
+                return {"type": "error", "message": str(exc)}
+            return {
+                "type": "specializations",
+                "group": data.get("group", ""),
+                "specializations": specialization_mgr.list_specializations(
+                    base_dir=base_dir),
+                "saved": name,
+            }
+
+        if cmd == "delete_specialization":
+            base_dir = await _resolve_base_dir(data.get("group", ""))
+            scope = data.get("scope", "") or ""
+            name = str(data.get("name", "") or "").strip()
+            if not name:
+                return {"type": "error",
+                        "message": "Specialization name required"}
+            deleted = specialization_mgr.delete_specialization(
+                name, scope=scope, base_dir=base_dir)
+            if not deleted:
+                return {
+                    "type": "error",
+                    "message": f"Specialization \"{name}\" not found",
+                }
+            return {
+                "type": "specializations",
+                "group": data.get("group", ""),
+                "specializations": specialization_mgr.list_specializations(
+                    base_dir=base_dir),
+                "deleted": name,
+            }
+
+        if cmd == "set_engineer_specializations":
+            engineer_ident = str(data.get("engineer_id", "") or "").strip()
+            if not engineer_ident:
+                return {
+                    "type": "error",
+                    "message": "engineer_id is required",
+                }
+            agent_id = _resolve_agent_id(state, engineer_ident)
+            cell = state.agents.get(agent_id) if agent_id else None
+            if not cell or cell.kind != "engineer":
+                return {
+                    "type": "error",
+                    "message": f"Engineer \"{engineer_ident}\" not found",
+                }
+            raw = data.get("specializations", [])
+            if not isinstance(raw, list):
+                return {
+                    "type": "error",
+                    "message": "specializations must be a list",
+                }
+            names = []
+            seen = set()
+            for item in raw:
+                token = str(item or "").strip()
+                if not token or token in seen:
+                    continue
+                names.append(token)
+                seen.add(token)
+            cell.engineer_specializations = names
+            state._emit_agent(cell)
+            state._db_save_agent(cell)
+            return {
+                "type": "engineer_specializations",
+                "engineer_id": cell.id,
+                "specializations": names,
+            }
+
         if cmd == "get_template":
             base_dir = await _resolve_base_dir(data.get("group", ""))
             scope = data.get("scope", "")
@@ -6249,14 +6384,33 @@ async def main(connection=None):
                     )
 
                     persistent_prompt_text = ""
+                    pending_specializations = [
+                        str(item or "").strip()
+                        for item in (data.get("specializations", []) or [])
+                        if str(item or "").strip()
+                    ] if is_engineer else []
                     # Engineer: build persistent prompt and skip worktree
                     if is_engineer:
                         from .engineer import build_engineer_system_prompt
                         ws = state.get_engineer_settings(group)
                         action_sp = launch_cfg.get("system_prompt", "")
+                        spec_preamble = ""
+                        if pending_specializations:
+                            try:
+                                spec_preamble = (
+                                    specialization_mgr.render_engineer_preamble(
+                                        pending_specializations,
+                                        base_dir=base_dir,
+                                    )
+                                )
+                            except Exception:
+                                log.exception(
+                                    "failed to render specializations "
+                                    "for new engineer in group=%s", group)
                         persistent_prompt_text = build_engineer_system_prompt(
                             group, ws, action_sp,
-                            group_settings=state.get_group_settings(group))
+                            group_settings=state.get_group_settings(group),
+                            specializations_preamble=spec_preamble)
                         launch_cfg["worktree"] = False
                     startup_prompt = _startup_prompt_for_new_agent(
                         agent_type=launch_cfg.get("agent_type", ""),
@@ -6284,6 +6438,11 @@ async def main(connection=None):
                     if cell:
                         # Designate as engineer
                         if is_engineer:
+                            if pending_specializations:
+                                cell.engineer_specializations = list(
+                                    pending_specializations)
+                                state._emit_agent(cell)
+                                state._db_save_agent(cell)
                             state.update_group_settings(
                                 group, engineer_agent_id=cell.id)
                             # Reorder now that engineer_agent_id is set
