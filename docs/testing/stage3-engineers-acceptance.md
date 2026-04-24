@@ -4,7 +4,7 @@
 > scoping, engineer lifecycle UI, CLI assignment flags, and doctor reporting.
 
 This assumes Stage 1 and Stage 2 are already deployed and healthy, and that the
-existing migrated Weaver engineer is still present.
+existing migrated Engineer engineer is still present.
 
 ## Preflight
 
@@ -14,7 +14,7 @@ Record the current engineer baseline before deploy:
 loom engineer list
 ```
 
-Expected: at least the existing `Weaver` engineer is listed.
+Expected: at least the existing `Engineer` engineer is listed.
 
 Keep the live database and backup paths handy:
 
@@ -59,7 +59,7 @@ Expected:
 - `Result: PASS`
 - an `[engineers]` section is present
 - `total` is `1`
-- the default `weaver_*` routing target is `Weaver`
+- the default `engineer_*` routing target is `Engineer`
 
 ## Add a second engineer
 
@@ -73,7 +73,7 @@ Expected:
 
 - `alice` appears in the Agent panel immediately
 - `alice` also appears in the main agent list
-- `loom engineer list` now shows both `Weaver` and `alice`
+- `loom engineer list` now shows both `Engineer` and `alice`
 
 ## Assign work to Alice
 
@@ -100,7 +100,7 @@ launch a worker through the normal engineer flow.
 Expected in the UI:
 
 - the new worker appears indented underneath `alice`
-- it does **not** appear under `Weaver`
+- it does **not** appear under `Engineer`
 
 ## Verify engineer MCP scoping
 
@@ -110,18 +110,18 @@ Expected:
 
 - the response includes `alice`
 - the response includes Alice's worker(s)
-- the response does **not** include `Weaver`
-- the response does **not** include Weaver-owned workers
+- the response does **not** include `Engineer`
+- the response does **not** include Engineer-owned workers
 
-## Verify legacy `weaver_*` compatibility
+## Verify legacy `engineer_*` compatibility
 
-From the original Weaver engineer session, run a legacy alias such as
-`weaver_agents_list`.
+From the original Engineer engineer session, run a legacy alias such as
+`engineer_agents_list`.
 
 Expected:
 
 - the call still succeeds
-- the response reflects Weaver's scope, not Alice's
+- the response reflects Engineer's scope, not Alice's
 
 ## Delete Alice and verify orphan transfer
 
@@ -156,7 +156,7 @@ Restart Loom again from the Scripts menu.
 Expected after restart:
 
 - `alice` stays deleted
-- `Weaver` still exists and is still persistent/relaunchable
+- `Engineer` still exists and is still persistent/relaunchable
 - the transferred worker(s) remain user-owned
 - `loom doctor` still reports a healthy Stage 3 state
 

@@ -32,8 +32,8 @@ The product center of gravity is `loom/server.py` plus `loom/state.py`. Most oth
 - `loom/actions.py`: YAML loading plus Jinja2 prompt rendering for actions
 - `loom/templates.py`: agent template discovery and config resolution
 - `loom/worktree.py`, `loom/worktree_boundaries.py`: git worktree lifecycle and merge-boundary logic
-- `loom/mcp.py`, `loom/mcp_weaver.py`, `loom/mcp_weaver_tools/`: MCP tool surfaces for agents and the per-group weaver
-- `loom/weaver.py`: weaver system prompt, digest buffering, idle-gated delivery
+- `loom/mcp.py`, `loom/mcp_engineer.py`, `loom/mcp_engineer_tools/`: MCP tool surfaces for agents and the per-group engineer
+- `loom/engineer.py`: engineer system prompt, digest buffering, idle-gated delivery
 - `loom/adapters/`: provider-specific agent integrations (`claude-code`, `codex`, `gemini-cli`, fallback generic)
 - `loom/memory.py`, `loom/artifacts.py`, `loom/external_tickets.py`: shared memory, task artifacts, and external issue linkage
 
@@ -56,7 +56,7 @@ Primary files:
 - `static/js/render.js`: main grid rendering
 - `static/js/board*.js`: board UI and card behavior
 - `static/js/modals*.js`: modal flows
-- `static/js/actions.js`, `templates.js`, `events.js`, `context.js`, `weaver.js`, `diff.js`, `taskhistory.js`: feature panels
+- `static/js/actions.js`, `templates.js`, `events.js`, `context.js`, `engineer.js`, `diff.js`, `taskhistory.js`: feature panels
 - `static/style.css`: single stylesheet
 
 ## Data Model Rules
@@ -81,7 +81,7 @@ If you change persisted state or object shape, you usually need to update all of
 - Action prompts are Jinja2 templates, but only the `prompt` field is rendered. Actions must include `{{ TASK }}` or `{{ loom.task.title }}`.
 - Project-local `.loom/actions/` and `.loom/agents/` override user-global definitions under `~/.loom/`.
 - Worktree support is a core feature. Changes in task dispatch, merge flow, or agent reuse often also affect worktree inheritance and boundary tracking.
-- Weaver behavior is not isolated to one file. Changes often span `weaver.py`, `mcp_weaver.py`, server command handling, board/event UI, and tests.
+- Engineer behavior is not isolated to one file. Changes often span `engineer.py`, `mcp_engineer.py`, server command handling, board/event UI, and tests.
 - Runtime-generated Loom files inside repos/worktrees are intentional. Be careful around `.claude/`, `.codex/`, `.mcp.json`, and `.loom/worktrees/` behavior.
 - When changing a live frontend panel, do not replace an interactive subtree unless you either keep its DOM stable or explicitly capture and restore the operator state it owns before paint.
 - Frontend rerender-stability fixes must ship with Node frontend regression coverage in `tests/frontend_state_regression.test.js` or a nearby targeted frontend test.
@@ -116,7 +116,7 @@ When touching specific areas, prefer targeted tests first, but keep the full sui
 
 ## High-Value Checks Before You Ship
 
-- If you changed task, action, weaver, or MCP behavior, verify both backend and board/UI expectations.
+- If you changed task, action, engineer, or MCP behavior, verify both backend and board/UI expectations.
 - If you changed frontend state shape, verify delta application and the relevant Node regression tests.
 - If you changed persistence, verify daemon writes and CLI offline reads both still work.
 - If you changed worktree behavior, check gitignore/exclude handling, inheritance, merge detection, and cleanup paths.

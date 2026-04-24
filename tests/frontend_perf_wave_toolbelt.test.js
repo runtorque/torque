@@ -37,21 +37,21 @@ function createAgentPanelHarness() {
       agents: {},
       board_tasks: {},
       groups: { alpha: [] },
-      weaver_settings: {},
-      weaver_buffer_stats: {},
-      weaver_sent_events: {},
-      weaver_worklog: {},
-      weaver_journal: {},
-      weaver_session_maps: {},
+      engineer_settings: {},
+      engineer_buffer_stats: {},
+      engineer_sent_events: {},
+      engineer_worklog: {},
+      engineer_journal: {},
+      engineer_session_maps: {},
       agent_digest_settings: {},
       digest_buffer_stats: {},
       digest_sent_events: {},
       panel_events: [],
       decisions: {},
-      group_settings: { alpha: { weaver_agent_id: 'weaver-1' } },
+      group_settings: { alpha: { engineer_agent_id: 'engineer-1' } },
     },
     focusedItemId: '',
-    _activePanelApp: 'weaver',
+    _activePanelApp: 'engineer',
     document: {
       activeElement: null,
       getElementById(id) { return id === 'panel-agent' ? panel : null; },
@@ -64,7 +64,7 @@ function createAgentPanelHarness() {
     _restoreSurfaceState(root, snapshot, opts) {
       if (opts && typeof opts.restore === 'function') opts.restore(root, snapshot);
     },
-    _weaverStopEventsCountdownTimer() {},
+    _engineerStopEventsCountdownTimer() {},
     _currentGroup() { return 'alpha'; },
     setInterval() { return 1; },
     clearInterval() {},
@@ -83,7 +83,7 @@ function focusEngineerForJournal(context, agentId) {
     id: agentId, name: 'Builder', kind: 'engineer',
     group: 'alpha', cell_type: 'agent',
   };
-  context.state.agents['weaver-1'] = { id: 'weaver-1', name: 'Weaver', group: 'alpha' };
+  context.state.agents['engineer-1'] = { id: 'engineer-1', name: 'Engineer', group: 'alpha' };
   context.focusedItemId = agentId;
   vm.runInContext(
     `_agentPanelLastSelectedTabByKind.engineer = 'journal';`
@@ -97,19 +97,19 @@ test('[toolbelt] engineer journal virtualization caps at 20 entries and renders 
   focusEngineerForJournal(context, 'eng-tb-virt');
   // Assert the harness genuinely simulates toolbelt mode — not standalone.
   assert.equal(sandbox.state.runtime.embedded_terminal, false);
-  assert.equal(sandbox._activePanelApp, 'weaver');
+  assert.equal(sandbox._activePanelApp, 'engineer');
 
   const entries = [];
   for (let i = 0; i < 25; i++) {
     entries.push({ id: 1000 + i, type: 'observation',
       entry: 'Journal entry ' + i, timestamp: 1000 + i });
   }
-  context.state.weaver_journal.alpha = entries;
+  context.state.engineer_journal.alpha = entries;
 
   context.renderAgentPanel();
 
   const html = panel.innerHTML;
-  const rendered = (html.match(/data-weaver-anchor="journal-/g) || []).length;
+  const rendered = (html.match(/data-engineer-anchor="journal-/g) || []).length;
   assert.equal(rendered, 20, 'section pager renders only 20 entries under toolbelt');
   assert.match(html, /Load 5 older entries/);
   assert.match(html, /data-agent-panel-section="journal"/);
@@ -125,11 +125,11 @@ test('[toolbelt] engineer journal Load older grows the window without a server f
     entries.push({ id: 2000 + i, type: 'observation',
       entry: 'J ' + i, timestamp: 1000 + i });
   }
-  context.state.weaver_journal.alpha = entries;
+  context.state.engineer_journal.alpha = entries;
 
   context.renderAgentPanel();
   assert.equal(
-    (panel.innerHTML.match(/data-weaver-anchor="journal-/g) || []).length,
+    (panel.innerHTML.match(/data-engineer-anchor="journal-/g) || []).length,
     20,
   );
   const sendsBefore = sendCalls.length;
@@ -139,7 +139,7 @@ test('[toolbelt] engineer journal Load older grows the window without a server f
     context,
   );
 
-  const rendered = (panel.innerHTML.match(/data-weaver-anchor="journal-/g) || []).length;
+  const rendered = (panel.innerHTML.match(/data-engineer-anchor="journal-/g) || []).length;
   assert.equal(rendered, 40, 'Load older advances the window to 40');
   assert.equal(sendCalls.length, sendsBefore, 'Load older is pure frontend windowing');
 });
@@ -152,11 +152,11 @@ test('[toolbelt] engineer journal pager grows to preserve anchor across WS delta
     existing.push({ id: 3000 + i, type: 'observation',
       entry: 'Existing ' + i, timestamp: 1000 + i });
   }
-  context.state.weaver_journal.alpha = existing.slice();
+  context.state.engineer_journal.alpha = existing.slice();
   context.renderAgentPanel();
   assert.ok(panel.innerHTML.indexOf('Existing 5') >= 0);
 
-  context.state.weaver_journal.alpha = [
+  context.state.engineer_journal.alpha = [
     { id: 3100, type: 'decision', entry: 'Fresh 1', timestamp: 9000 },
     { id: 3101, type: 'plan', entry: 'Fresh 2', timestamp: 9001 },
   ].concat(existing);
@@ -187,7 +187,7 @@ function createDeltaSurfaceHarness() {
     setTimeout() {},
     clearTimeout() {},
     _currentGroup() { return 'alpha'; },
-    _focusedWeaverAgent() { return null; },
+    _focusedEngineerAgent() { return null; },
     _standalonePanelsEnabled() { return false; },
   };
   sandbox.global = sandbox;
@@ -207,7 +207,7 @@ test('[toolbelt] _deltaSurfaceInvalidations skips board rerender for an events-o
   const plain = JSON.parse(JSON.stringify(flags));
   assert.equal(plain.board, false, 'board must stay un-invalidated under toolbelt');
   assert.equal(plain.events, true);
-  assert.equal(plain.weaver, true);
+  assert.equal(plain.engineer, true);
   assert.equal(plain.main, false);
   assert.equal(sandbox._activePanelApp, 'board');
 });
@@ -307,7 +307,7 @@ function createSurfaceStateHarness() {
   const sandbox = {
     console,
     state: { runtime: { embedded_terminal: false } },
-    _activePanelApp: 'weaver',
+    _activePanelApp: 'engineer',
     document: { activeElement: null, getElementById() { return null; } },
   };
   sandbox.global = sandbox;
@@ -353,5 +353,5 @@ test('[toolbelt] _captureSurfaceState preserves agent-panel-event-list scroll ac
   )(root, snapshot);
 
   assert.equal(eventList.scrollTop, 240, 'guardrail must restore scroll under toolbelt');
-  assert.equal(sandbox._activePanelApp, 'weaver');
+  assert.equal(sandbox._activePanelApp, 'engineer');
 });

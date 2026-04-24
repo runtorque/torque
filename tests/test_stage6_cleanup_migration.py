@@ -37,7 +37,7 @@ class Stage6CleanupMigrationTests(unittest.TestCase):
                 slug="worker",
                 kind="worker",
                 role="researcher",
-                owner_engineer_id="weaver-1",
+                owner_engineer_id="engineer-1",
             )
         )
         db.save_board_task(
@@ -45,7 +45,7 @@ class Stage6CleanupMigrationTests(unittest.TestCase):
                 id="TASK:1",
                 task="Cleanup me",
                 group="g",
-                assigned_engineer_id="weaver-1",
+                assigned_engineer_id="engineer-1",
             )
         )
         db.close()
@@ -55,16 +55,16 @@ class Stage6CleanupMigrationTests(unittest.TestCase):
             "ALTER TABLE agents ADD COLUMN template TEXT NOT NULL DEFAULT ''"
         )
         conn.execute(
-            "ALTER TABLE agents ADD COLUMN created_by_weaver_id TEXT NOT NULL DEFAULT ''"
+            "ALTER TABLE agents ADD COLUMN created_by_engineer_id TEXT NOT NULL DEFAULT ''"
         )
         conn.execute(
-            "ALTER TABLE board_tasks ADD COLUMN weaver_owner_id TEXT NOT NULL DEFAULT ''"
+            "ALTER TABLE board_tasks ADD COLUMN engineer_owner_id TEXT NOT NULL DEFAULT ''"
         )
         conn.execute(
-            "UPDATE agents SET template=role, created_by_weaver_id=owner_engineer_id"
+            "UPDATE agents SET template=role, created_by_engineer_id=owner_engineer_id"
         )
         conn.execute(
-            "UPDATE board_tasks SET weaver_owner_id=assigned_engineer_id"
+            "UPDATE board_tasks SET engineer_owner_id=assigned_engineer_id"
         )
         conn.execute(
             "UPDATE meta SET value='2' WHERE key='schema_kinds_migration_version'"
@@ -85,7 +85,7 @@ class Stage6CleanupMigrationTests(unittest.TestCase):
                 slug="worker",
                 kind="worker",
                 role="researcher",
-                owner_engineer_id="weaver-1",
+                owner_engineer_id="engineer-1",
             )
         )
         db.save_board_task(
@@ -93,7 +93,7 @@ class Stage6CleanupMigrationTests(unittest.TestCase):
                 id="TASK:1",
                 task="Guard me",
                 group="g",
-                assigned_engineer_id="weaver-1",
+                assigned_engineer_id="engineer-1",
             )
         )
         db.close()
@@ -103,18 +103,18 @@ class Stage6CleanupMigrationTests(unittest.TestCase):
             "ALTER TABLE agents ADD COLUMN template TEXT NOT NULL DEFAULT ''"
         )
         conn.execute(
-            "ALTER TABLE agents ADD COLUMN created_by_weaver_id TEXT NOT NULL DEFAULT ''"
+            "ALTER TABLE agents ADD COLUMN created_by_engineer_id TEXT NOT NULL DEFAULT ''"
         )
         conn.execute(
-            "ALTER TABLE board_tasks ADD COLUMN weaver_owner_id TEXT NOT NULL DEFAULT ''"
+            "ALTER TABLE board_tasks ADD COLUMN engineer_owner_id TEXT NOT NULL DEFAULT ''"
         )
         conn.execute(
-            "UPDATE agents SET template='researcher', created_by_weaver_id='weaver-1', "
+            "UPDATE agents SET template='researcher', created_by_engineer_id='engineer-1', "
             "kind='', role='', owner_engineer_id='', hired_by_architect_id='', persistent=0 "
             "WHERE id='worker-1'"
         )
         conn.execute(
-            "UPDATE board_tasks SET weaver_owner_id='weaver-1', assigned_engineer_id='', "
+            "UPDATE board_tasks SET engineer_owner_id='engineer-1', assigned_engineer_id='', "
             "created_by_architect_id='', suggested_action='' WHERE id='TASK:1'"
         )
         conn.execute(
@@ -152,19 +152,19 @@ class Stage6CleanupMigrationTests(unittest.TestCase):
             for row in migrated._conn.execute("PRAGMA table_info(board_tasks)").fetchall()
         }
         self.assertNotIn("template", agent_columns)
-        self.assertNotIn("created_by_weaver_id", agent_columns)
-        self.assertNotIn("weaver_owner_id", task_columns)
+        self.assertNotIn("created_by_engineer_id", agent_columns)
+        self.assertNotIn("engineer_owner_id", task_columns)
         self.assertEqual(
             migrated._conn.execute(
                 "SELECT kind, role, owner_engineer_id FROM agents WHERE id='worker-1'"
             ).fetchone(),
-            ("worker", "researcher", "weaver-1"),
+            ("worker", "researcher", "engineer-1"),
         )
         self.assertEqual(
             migrated._conn.execute(
                 "SELECT assigned_engineer_id FROM board_tasks WHERE id='TASK:1'"
             ).fetchone(),
-            ("weaver-1",),
+            ("engineer-1",),
         )
 
     def test_upgrade_guard_refuses_unmigrated_pre_stage1_rows(self):
@@ -201,7 +201,7 @@ class Stage6CleanupMigrationTests(unittest.TestCase):
                 template="researcher",
                 role="researcher",
                 kind="worker",
-                owner_engineer_id="weaver-1",
+                owner_engineer_id="engineer-1",
             )
         )
         seeded.close()
@@ -211,10 +211,10 @@ class Stage6CleanupMigrationTests(unittest.TestCase):
             "ALTER TABLE agents ADD COLUMN template TEXT NOT NULL DEFAULT ''"
         )
         conn.execute(
-            "ALTER TABLE agents ADD COLUMN created_by_weaver_id TEXT NOT NULL DEFAULT ''"
+            "ALTER TABLE agents ADD COLUMN created_by_engineer_id TEXT NOT NULL DEFAULT ''"
         )
         conn.execute(
-            "UPDATE agents SET template='researcher', created_by_weaver_id='weaver-1', "
+            "UPDATE agents SET template='researcher', created_by_engineer_id='engineer-1', "
             "kind='', role='', owner_engineer_id='' WHERE id='worker-1'"
         )
         conn.execute(

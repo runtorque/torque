@@ -81,12 +81,12 @@ function createSandbox() {
     return elements.get(id);
   }
 
-  const gsTabs = ['group', 'agents', 'weaver'].map((name) => {
+  const gsTabs = ['group', 'agents', 'engineer'].map((name) => {
     const el = new FakeElement(`tab-${name}`);
     el.dataset.tab = name;
     return el;
   });
-  const gsPanes = ['group', 'agents', 'weaver'].map((name) => {
+  const gsPanes = ['group', 'agents', 'engineer'].map((name) => {
     const el = new FakeElement(`pane-${name}`);
     el.dataset.pane = name;
     return el;
@@ -104,7 +104,7 @@ function createSandbox() {
     TAB_COLORS: [],
     state: {
       agents: {
-        'weaver-1': { id: 'weaver-1', name: 'Weaver', status: 'running' },
+        'engineer-1': { id: 'engineer-1', name: 'Engineer', status: 'running' },
       },
     },
     _cachedAgentTemplates: [],
@@ -133,7 +133,7 @@ function createSandbox() {
         if (selector === '#gs-color-swatches .swatch'
           || selector === '#gs-agent-color-swatches .swatch'
           || selector === '#gs-terminal-color-swatches .swatch'
-          || selector === '#gs-weaver-color-swatches .swatch') return [];
+          || selector === '#gs-engineer-color-swatches .swatch') return [];
         return [];
       },
       querySelector(selector) {
@@ -166,31 +166,31 @@ function seedProviders(context, providers) {
   vm.runInContext(`_cachedProviders = ${JSON.stringify(providers)};`, context);
 }
 
-test('group settings modal populates weaver fields and honors weaver tab deep-link', () => {
+test('group settings modal populates engineer fields and honors engineer tab deep-link', () => {
   const { sandbox, ensure } = createSandbox();
   const context = vm.createContext(sandbox);
   loadModals(context);
   seedProviders(context, sandbox._cachedProviders);
 
-  vm.runInContext('_gsInitialTab = "weaver"', context);
+  vm.runInContext('_gsInitialTab = "engineer"', context);
   vm.runInContext(`_showGroupSettings("alpha", {
     settings: {
-      weaver_agent_id: "weaver-1",
+      engineer_agent_id: "engineer-1",
       agent_provider: "codex",
       agent_model: "gpt-5.1",
       agent_reasoning_effort: "minimal",
       worktree_merge_cleanup: "close_remove",
       worktree_merge_preserve_diff: true
     },
-    weaver_settings: {
-      weaver_provider: "codex",
-      weaver_boot_command: "codex --model gpt-5",
-      weaver_model: "gpt-5.1-codex",
-      weaver_reasoning_effort: "xhigh",
-      weaver_directory: "/repo/.loom/weaver",
-      weaver_profile: "Ops",
-      weaver_shell: "fish",
-      weaver_tab_color: "none",
+    engineer_settings: {
+      engineer_provider: "codex",
+      engineer_boot_command: "codex --model gpt-5",
+      engineer_model: "gpt-5.1-codex",
+      engineer_reasoning_effort: "xhigh",
+      engineer_directory: "/repo/.loom/engineer",
+      engineer_profile: "Ops",
+      engineer_shell: "fish",
+      engineer_tab_color: "none",
       custom_instructions: "Watch for regressions.",
       restrict_to_created_agents: true,
       autonomy_mode: "aggressive_auto_continue",
@@ -207,67 +207,67 @@ test('group settings modal populates weaver fields and honors weaver tab deep-li
     profiles: ["Default", "Ops"]
   })`, context);
 
-  assert.equal(ensure('gs-weaver-provider').value, 'codex');
-  assert.equal(ensure('gs-weaver-boot-cmd').value, 'codex --model gpt-5');
+  assert.equal(ensure('gs-engineer-provider').value, 'codex');
+  assert.equal(ensure('gs-engineer-boot-cmd').value, 'codex --model gpt-5');
   assert.equal(ensure('gs-agent-model').value, 'gpt-5.1');
   assert.equal(ensure('gs-agent-reasoning-effort').value, 'minimal');
   assert.deepEqual(
     ensure('gs-agent-reasoning-effort').children.map((child) => child.value),
     ['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh'],
   );
-  assert.equal(ensure('gs-weaver-model').value, 'gpt-5.1-codex');
-  assert.equal(ensure('gs-weaver-reasoning-effort').value, 'xhigh');
-  assert.equal(ensure('gs-weaver-directory').value, '/repo/.loom/weaver');
-  assert.equal(ensure('gs-weaver-profile').value, 'Ops');
-  assert.equal(ensure('gs-weaver-shell').value, 'fish');
+  assert.equal(ensure('gs-engineer-model').value, 'gpt-5.1-codex');
+  assert.equal(ensure('gs-engineer-reasoning-effort').value, 'xhigh');
+  assert.equal(ensure('gs-engineer-directory').value, '/repo/.loom/engineer');
+  assert.equal(ensure('gs-engineer-profile').value, 'Ops');
+  assert.equal(ensure('gs-engineer-shell').value, 'fish');
   assert.deepEqual(
-    ensure('gs-weaver-reasoning-effort').children.map((child) => child.value),
+    ensure('gs-engineer-reasoning-effort').children.map((child) => child.value),
     ['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh'],
   );
-  assert.equal(ensure('gs-weaver-custom-instructions').value, 'Watch for regressions.');
-  assert.equal(ensure('gs-weaver-restrict-to-created-agents').checked, true);
-  assert.equal(ensure('gs-weaver-autonomy-mode').value, 'aggressive_auto_continue');
-  assert.equal(ensure('gs-weaver-default-worker-concurrency').value, '4');
-  assert.equal(ensure('gs-weaver-wave-size-preference').value, 'large');
-  assert.equal(ensure('gs-weaver-same-agent-follow-up-preference').value, 'prefer_same_agent');
-  assert.equal(ensure('gs-weaver-notification-preset').value, 'custom');
-  assert.equal(ensure('gs-weaver-digest-verbosity').value, 'detailed');
-  assert.equal(ensure('gs-weaver-escalation-style').value, 'keep_moving');
+  assert.equal(ensure('gs-engineer-custom-instructions').value, 'Watch for regressions.');
+  assert.equal(ensure('gs-engineer-restrict-to-created-agents').checked, true);
+  assert.equal(ensure('gs-engineer-autonomy-mode').value, 'aggressive_auto_continue');
+  assert.equal(ensure('gs-engineer-default-worker-concurrency').value, '4');
+  assert.equal(ensure('gs-engineer-wave-size-preference').value, 'large');
+  assert.equal(ensure('gs-engineer-same-agent-follow-up-preference').value, 'prefer_same_agent');
+  assert.equal(ensure('gs-engineer-notification-preset').value, 'custom');
+  assert.equal(ensure('gs-engineer-digest-verbosity').value, 'detailed');
+  assert.equal(ensure('gs-engineer-escalation-style').value, 'keep_moving');
   assert.equal(ensure('gs-wt-merge-cleanup').value, 'close_remove');
   assert.equal(ensure('gs-wt-merge-preserve-diff').checked, true);
-  assert.equal(ensure('gs-weaver-agent-name').textContent, 'Weaver');
-  assert.equal(ensure('gs-weaver-provider-section').open, true);
-  assert.equal(ensure('gs-weaver-autonomy-section').open, true);
-  assert.equal(ensure('gs-weaver-digest-section').open, false);
-  assert.equal(ensure('gs-weaver-event-agent-started').checked, true);
-  assert.equal(ensure('gs-weaver-event-agent-progress').checked, true);
-  assert.equal(ensure('gs-weaver-provider').focused, true);
+  assert.equal(ensure('gs-engineer-agent-name').textContent, 'Engineer');
+  assert.equal(ensure('gs-engineer-provider-section').open, true);
+  assert.equal(ensure('gs-engineer-autonomy-section').open, true);
+  assert.equal(ensure('gs-engineer-digest-section').open, false);
+  assert.equal(ensure('gs-engineer-event-agent-started').checked, true);
+  assert.equal(ensure('gs-engineer-event-agent-progress').checked, true);
+  assert.equal(ensure('gs-engineer-provider').focused, true);
   assert.equal(ensure('modal-group-settings').classList.contains('visible'), true);
 });
 
-test('group settings resets the Weaver section defaults when reopened', () => {
+test('group settings resets the Engineer section defaults when reopened', () => {
   const { sandbox, ensure } = createSandbox();
   const context = vm.createContext(sandbox);
   loadModals(context);
   seedProviders(context, sandbox._cachedProviders);
 
-  ensure('gs-weaver-provider-section').open = false;
-  ensure('gs-weaver-autonomy-section').open = false;
-  ensure('gs-weaver-digest-section').open = true;
+  ensure('gs-engineer-provider-section').open = false;
+  ensure('gs-engineer-autonomy-section').open = false;
+  ensure('gs-engineer-digest-section').open = true;
 
   vm.runInContext(`_showGroupSettings("alpha", {
     settings: {},
-    weaver_settings: {},
+    engineer_settings: {},
     profiles: ["Default"]
   })`, context);
 
-  assert.equal(ensure('gs-weaver-provider-section').open, true);
-  assert.equal(ensure('gs-weaver-autonomy-section').open, true);
-  assert.equal(ensure('gs-weaver-digest-section').open, false);
-  assert.equal(ensure('gs-weaver-notification-preset').value, 'normal');
+  assert.equal(ensure('gs-engineer-provider-section').open, true);
+  assert.equal(ensure('gs-engineer-autonomy-section').open, true);
+  assert.equal(ensure('gs-engineer-digest-section').open, false);
+  assert.equal(ensure('gs-engineer-notification-preset').value, 'normal');
 });
 
-test('submitGroupSettings sends group and weaver updates separately', () => {
+test('submitGroupSettings sends group and engineer updates separately', () => {
   const { sandbox, ensure } = createSandbox();
   const context = vm.createContext(sandbox);
   loadModals(context);
@@ -280,29 +280,29 @@ test('submitGroupSettings sends group and weaver updates separately', () => {
   ensure('gs-terminal-boot-cmd').value = 'npm run dev';
   ensure('gs-wt-merge-cleanup').value = 'remove';
   ensure('gs-wt-merge-preserve-diff').checked = true;
-  ensure('gs-weaver-provider').value = 'codex';
-  ensure('gs-weaver-boot-cmd').value = 'codex --model gpt-5';
+  ensure('gs-engineer-provider').value = 'codex';
+  ensure('gs-engineer-boot-cmd').value = 'codex --model gpt-5';
   ensure('gs-agent-model').value = 'gpt-5';
   ensure('gs-agent-reasoning-effort').value = 'minimal';
-  ensure('gs-weaver-model').value = 'gpt-5.1';
-  ensure('gs-weaver-reasoning-effort').value = 'xhigh';
-  ensure('gs-weaver-directory').value = '/repo/.loom/weaver';
-  ensure('gs-weaver-profile').value = 'Ops';
-  ensure('gs-weaver-shell').value = 'fish';
-  vm.runInContext(`_gsWeaverColor = 'none';`, context);
-  ensure('gs-weaver-custom-instructions').value = 'Stay focused';
-  ensure('gs-weaver-restrict-to-created-agents').checked = true;
-  ensure('gs-weaver-autonomy-mode').value = 'suggest_only';
-  ensure('gs-weaver-default-worker-concurrency').value = '3';
-  ensure('gs-weaver-wave-size-preference').value = 'small';
-  ensure('gs-weaver-same-agent-follow-up-preference').value = 'prefer_fresh_agent';
-  ensure('gs-weaver-digest-verbosity').value = 'compact';
-  ensure('gs-weaver-escalation-style').value = 'ask_early';
-  ensure('gs-weaver-push-interval').value = '120';
-  ensure('gs-weaver-max-interval').value = '600';
-  ensure('gs-weaver-heartbeat-interval').value = '60';
-  ensure('gs-weaver-event-agent-started').checked = true;
-  ensure('gs-weaver-event-agent-progress').checked = true;
+  ensure('gs-engineer-model').value = 'gpt-5.1';
+  ensure('gs-engineer-reasoning-effort').value = 'xhigh';
+  ensure('gs-engineer-directory').value = '/repo/.loom/engineer';
+  ensure('gs-engineer-profile').value = 'Ops';
+  ensure('gs-engineer-shell').value = 'fish';
+  vm.runInContext(`_gsEngineerColor = 'none';`, context);
+  ensure('gs-engineer-custom-instructions').value = 'Stay focused';
+  ensure('gs-engineer-restrict-to-created-agents').checked = true;
+  ensure('gs-engineer-autonomy-mode').value = 'suggest_only';
+  ensure('gs-engineer-default-worker-concurrency').value = '3';
+  ensure('gs-engineer-wave-size-preference').value = 'small';
+  ensure('gs-engineer-same-agent-follow-up-preference').value = 'prefer_fresh_agent';
+  ensure('gs-engineer-digest-verbosity').value = 'compact';
+  ensure('gs-engineer-escalation-style').value = 'ask_early';
+  ensure('gs-engineer-push-interval').value = '120';
+  ensure('gs-engineer-max-interval').value = '600';
+  ensure('gs-engineer-heartbeat-interval').value = '60';
+  ensure('gs-engineer-event-agent-started').checked = true;
+  ensure('gs-engineer-event-agent-progress').checked = true;
 
   vm.runInContext('submitGroupSettings()', context);
 
@@ -319,16 +319,16 @@ test('submitGroupSettings sends group and weaver updates separately', () => {
     JSON.parse(JSON.stringify(sandbox.sendCalls[0].settings.worktree_symlinks)),
     ['etl/**/node_modules'],
   );
-  assert.equal(sandbox.sendCalls[1].cmd, 'weaver_update_settings');
+  assert.equal(sandbox.sendCalls[1].cmd, 'engineer_update_settings');
   assert.equal(sandbox.sendCalls[1].group, 'alpha');
-  assert.equal(sandbox.sendCalls[1].weaver_provider, 'codex');
-  assert.equal(sandbox.sendCalls[1].weaver_boot_command, 'codex --model gpt-5');
-  assert.equal(sandbox.sendCalls[1].weaver_model, 'gpt-5.1');
-  assert.equal(sandbox.sendCalls[1].weaver_reasoning_effort, 'xhigh');
-  assert.equal(sandbox.sendCalls[1].weaver_directory, '/repo/.loom/weaver');
-  assert.equal(sandbox.sendCalls[1].weaver_profile, 'Ops');
-  assert.equal(sandbox.sendCalls[1].weaver_shell, 'fish');
-  assert.equal(sandbox.sendCalls[1].weaver_tab_color, 'none');
+  assert.equal(sandbox.sendCalls[1].engineer_provider, 'codex');
+  assert.equal(sandbox.sendCalls[1].engineer_boot_command, 'codex --model gpt-5');
+  assert.equal(sandbox.sendCalls[1].engineer_model, 'gpt-5.1');
+  assert.equal(sandbox.sendCalls[1].engineer_reasoning_effort, 'xhigh');
+  assert.equal(sandbox.sendCalls[1].engineer_directory, '/repo/.loom/engineer');
+  assert.equal(sandbox.sendCalls[1].engineer_profile, 'Ops');
+  assert.equal(sandbox.sendCalls[1].engineer_shell, 'fish');
+  assert.equal(sandbox.sendCalls[1].engineer_tab_color, 'none');
   assert.equal(sandbox.sendCalls[1].custom_instructions, 'Stay focused');
   assert.equal(sandbox.sendCalls[1].restrict_to_created_agents, true);
   assert.equal(sandbox.sendCalls[1].autonomy_mode, 'suggest_only');
@@ -347,11 +347,11 @@ test('group settings notification presets rewrite detailed controls before submi
   seedProviders(context, sandbox._cachedProviders);
 
   vm.runInContext('_settingsGroup = "alpha";', context);
-  ensure('gs-weaver-notification-preset').value = 'quiet';
+  ensure('gs-engineer-notification-preset').value = 'quiet';
 
-  vm.runInContext('onGsWeaverNotificationPresetChange(); submitGroupSettings()', context);
+  vm.runInContext('onGsEngineerNotificationPresetChange(); submitGroupSettings()', context);
 
-  assert.equal(sandbox.sendCalls[1].cmd, 'weaver_update_settings');
+  assert.equal(sandbox.sendCalls[1].cmd, 'engineer_update_settings');
   assert.equal(sandbox.sendCalls[1].digest_verbosity, 'compact');
   assert.equal(sandbox.sendCalls[1].push_interval, 120);
   assert.equal(sandbox.sendCalls[1].max_interval, 600);
@@ -360,22 +360,22 @@ test('group settings notification presets rewrite detailed controls before submi
     JSON.parse(JSON.stringify(sandbox.sendCalls[1].enabled_events)),
     ['task_derived', 'task_health_alert'],
   );
-  assert.equal(ensure('gs-weaver-notification-preset').value, 'quiet');
+  assert.equal(ensure('gs-engineer-notification-preset').value, 'quiet');
 });
 
-test('group settings describes absent Weaver state without legacy creation copy', () => {
+test('group settings describes absent Engineer state without legacy creation copy', () => {
   const { sandbox, ensure } = createSandbox();
   const context = vm.createContext(sandbox);
   loadModals(context);
 
   vm.runInContext(`_showGroupSettings("alpha", {
     settings: {},
-    weaver_settings: {},
+    engineer_settings: {},
     profiles: ["Default"]
   })`, context);
 
-  assert.equal(ensure('gs-weaver-agent-name').textContent, 'No weaver agent');
-  assert.equal(ensure('gs-weaver-agent-meta').textContent, 'No designated Weaver is configured for this group.');
+  assert.equal(ensure('gs-engineer-agent-name').textContent, 'No engineer agent');
+  assert.equal(ensure('gs-engineer-agent-meta').textContent, 'No designated Engineer is configured for this group.');
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), []);
 });
 

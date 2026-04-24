@@ -1,4 +1,4 @@
-"""Shared helpers for Weaver MCP tools."""
+"""Shared helpers for Engineer MCP tools."""
 
 from __future__ import annotations
 
@@ -76,15 +76,15 @@ def is_busy_agent(state, agent_id: str) -> bool:
 
 
 def active_worker_ids(state, group: str) -> set[str]:
-    """Count active non-weaver agents for a group."""
+    """Count active non-engineer agents for a group."""
     active: set[str] = set()
-    weaver_id = state.get_group_settings(group).weaver_agent_id
+    engineer_id = state.get_group_settings(group).engineer_agent_id
     for cell in state.agents.values():
         if cell.cell_type != "agent":
             continue
         if cell.group != group:
             continue
-        if cell.id == weaver_id:
+        if cell.id == engineer_id:
             continue
         if is_busy_agent(state, cell.id):
             active.add(cell.id)

@@ -1,7 +1,7 @@
 # Proposal: Stream-Centered Orchestration
 
 **Status**: Draft proposal  
-**Audience**: product, Weaver orchestration, backend/state, frontend UI  
+**Audience**: product, Engineer orchestration, backend/state, frontend UI  
 **Primary goal**: unify streams, same-agent queues, queue gates, and waves into one coherent operating model
 
 ---
@@ -91,7 +91,7 @@ Today Loom has most of the raw ingredients to answer those questions, but they a
 
 This causes several pains:
 
-1. **The Weaver reconstructs stream state manually** instead of reading it directly.
+1. **The Engineer reconstructs stream state manually** instead of reading it directly.
 2. **Same-agent queued work** can continue when a review blocker should have preempted it.
 3. **Human validation** is represented as notes instead of as a first-class gate.
 4. **Review/fix/re-review loops** create bookkeeping noise that obscures the real critical path.
@@ -110,7 +110,7 @@ The missing abstraction is the stream.
    Streams represent the lifecycle of one reviewable branch/worktree slice across multiple tasks.
 
 3. **Waves stay about scheduling, not branch traffic control**  
-   The Weaver should choose which streams are active in parallel. It should not need to micromanage blocker preemption inside each active stream.
+   The Engineer should choose which streams are active in parallel. It should not need to micromanage blocker preemption inside each active stream.
 
 4. **One mutable foreground owner at a time**  
    A stream should have one foreground mutable task/lane at a time. Review and validation may exist around it, but should not compete with the stream queue.
@@ -136,9 +136,9 @@ Examples:
 
 - Add Events tab to the Agent panel
 - Add Worklog tab to the Agent panel
-- Keep Weaver Events next-dispatch timing accurate without full-panel rerender
+- Keep Engineer Events next-dispatch timing accurate without full-panel rerender
 - Review self-dispatch prompt submission fix
-- Resolve merge conflicts for Weaver ownership branch
+- Resolve merge conflicts for Engineer ownership branch
 
 A product task answers:
 
@@ -163,7 +163,7 @@ Examples:
 - Review Events implementation
 - Fix self-dispatch priming regression
 - Resolve merge conflict in db/state/modals files
-- Validate Weaver Events stream after manual smoke
+- Validate Engineer Events stream after manual smoke
 
 A workflow task answers:
 
@@ -177,7 +177,7 @@ A **visibility item** is not product scope and usually should not be treated as 
 
 Examples:
 
-- a Weaver note to a worker
+- a Engineer note to a worker
 - a worker reply to the designated engineer
 - a prompt such as "Proceed with the derived task you just created"
 - a short queue-control or reprioritization message
@@ -349,22 +349,22 @@ The stream can be synthesized from:
   "branch": "loom/add-events-tab...",
 
   "agent_id": "837241c8",
-  "agent_name": "add-events-tab-to-the-weaver-panel-for",
-  "agent_slug": "add-events-tab-to-the-weaver-panel-for",
+  "agent_name": "add-events-tab-to-the-engineer-panel-for",
+  "agent_slug": "add-events-tab-to-the-engineer-panel-for",
 
   "foreground_task_id": "LOOM:342",
-  "foreground_task_title": "Keep Weaver Events next-dispatch timing accurate...",
+  "foreground_task_title": "Keep Engineer Events next-dispatch timing accurate...",
 
   "product_task_ids": ["LOOM:333", "LOOM:334", "LOOM:342"],
   "workflow_task_ids": ["LOOM:333:4", "LOOM:333:5", "LOOM:342:1"],
   "queued_task_ids": [],
   "started_task_ids": ["LOOM:342"],
   "visibility_items": [
-    {"kind": "weaver_message", "summary": "Reprioritized blocker fix before queued work"}
+    {"kind": "engineer_message", "summary": "Reprioritized blocker fix before queued work"}
   ],
 
   "latest_boundary_task_id": "LOOM:342:1",
-  "latest_boundary_task_title": "Review Weaver Events countdown update",
+  "latest_boundary_task_title": "Review Engineer Events countdown update",
   "latest_boundary_recorded_at": "...",
   "latest_reviewed_commit_sha": "fbcf26b...",
 
@@ -376,7 +376,7 @@ The stream can be synthesized from:
   "validation_state": "pending_human_validation",
   "merge_state": "not_ready",
 
-  "gate_reason": "Live/manual Weaver-panel smoke pending",
+  "gate_reason": "Live/manual Engineer-panel smoke pending",
   "recommended_next_action": "merge_after_validation",
 
   "branch_advanced": false,
@@ -521,7 +521,7 @@ A wave captures planning decisions such as:
 
 ```text
 Wave 12
-├── Stream A: Weaver Events + Worklog
+├── Stream A: Engineer Events + Worklog
 ├── Stream B: Interactive agent detail panel
 └── Stream C: Self-dispatch prompt bug
 ```
@@ -550,20 +550,20 @@ That is a much better product model.
 
 ## Wireframes
 
-## 1) Weaver board: current wave overview
+## 1) Engineer board: current wave overview
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────┐
-│ Weaver Board                                                        │
+│ Engineer Board                                                        │
 ├──────────────────────────────────────────────────────────────────────┤
 │ Active Wave: Wave 12                                                │
 │ Goal: 1 risky stream + 2 smaller parallel streams                   │
 │                                                                      │
 │ Streams in wave                                                      │
 │                                                                      │
-│  [A] Weaver Events + Worklog                                         │
+│  [A] Engineer Events + Worklog                                         │
 │      state: fixing_blockers                                          │
-│      branch: loom/add-events-tab-to-the-weaver-p-837241c             │
+│      branch: loom/add-events-tab-to-the-engineer-p-837241c             │
 │      foreground: Fix self-dispatch priming regression                │
 │      gate: waiting for re-review                                     │
 │      queue: Add Worklog tab (paused by blocker)                      │
@@ -586,14 +586,14 @@ That is a much better product model.
 
 ```text
 ┌───────────────────────────────────────────────────────────────┐
-│ Stream: Weaver Events + Worklog                               │
+│ Stream: Engineer Events + Worklog                               │
 ├───────────────────────────────────────────────────────────────┤
-│ Branch        loom/add-events-tab-to-the-weaver-p-837241c     │
+│ Branch        loom/add-events-tab-to-the-engineer-p-837241c     │
 │ State         Awaiting human validation                        │
 │ Code          Reviewed clean                                   │
 │ Validation    Pending manual smoke                             │
 │ Merge         Not ready                                        │
-│ Gate          Live/manual Weaver-panel smoke pending           │
+│ Gate          Live/manual Engineer-panel smoke pending           │
 │ Next action   Merge after validation                           │
 │ Latest commit fbcf26b                                          │
 │ Roots         LOOM:333, LOOM:334, LOOM:342                     │
@@ -666,7 +666,7 @@ Implement task A
 ## 5) Relationship diagram
 
 ```text
-          Planner / Weaver
+          Planner / Engineer
                  │
                  ▼
                Wave
@@ -732,7 +732,7 @@ A derived task owns:
 
 ## UX implications
 
-### Weaver board
+### Engineer board
 
 Add an **Open Streams** section that shows, for each stream:
 
@@ -757,7 +757,7 @@ Task cards should also visually distinguish:
 - **product tasks** (deliverables / asks)
 - **workflow tasks** (review, fix, validation, merge-conflict, etc.)
 
-Visibility items such as Weaver messages should not show up as root/product task cards by default. They belong in history/timeline surfaces, not in the primary backlog narrative.
+Visibility items such as Engineer messages should not show up as root/product task cards by default. They belong in history/timeline surfaces, not in the primary backlog narrative.
 
 ### Agent detail panel
 
@@ -782,7 +782,7 @@ Examples:
 
 - Add Events tab
 - Add Worklog tab
-- Keep Weaver Events next-dispatch timing accurate
+- Keep Engineer Events next-dispatch timing accurate
 
 ### Workflow tasks
 These are operational steps created so the stream can move safely. They should remain first-class and auditable, but they should be rendered as process, not as product scope.
@@ -799,9 +799,9 @@ These exist only so the user can see that communication or steering happened. Th
 
 Examples:
 
-- Weaver asks a worker to reprioritize a blocker fix
+- Engineer asks a worker to reprioritize a blocker fix
 - Worker replies acknowledging the new priority
-- Weaver sends a short note like "Proceed with the derived task you just created"
+- Engineer sends a short note like "Proceed with the derived task you just created"
 
 ### Visibility-item defaults
 - Visibility-first by default: storing and rendering the communication should not require creating a board task card.
@@ -817,7 +817,7 @@ A visibility item should only be promoted into a workflow task when it creates a
 - Product tasks should appear in backlog/wave planning as the main deliverables.
 - Workflow tasks should be shown inside the stream as operational steps, ideally collapsed under the stream unless expanded.
 - Visibility items should appear in stream history/timeline and agent history, not as root/product task cards by default.
-- A Weaver question/message should never be treated as a root/product task. If Loom still stores it as an internal record for correlation, UI layers should classify and render it as visibility-only.
+- A Engineer question/message should never be treated as a root/product task. If Loom still stores it as an internal record for correlation, UI layers should classify and render it as visibility-only.
 
 ## Proposed controls
 
@@ -847,8 +847,8 @@ The rest can follow.
 
 ### New read tools
 
-- `weaver_streams_list`
-- `weaver_stream_show`
+- `engineer_streams_list`
+- `engineer_stream_show`
 
 These should expose:
 
@@ -868,7 +868,7 @@ These should expose:
 
 ### Existing summaries
 
-`weaver_board_summary` should be enriched to show streams directly instead of only raw branch-boundary facts.
+`engineer_board_summary` should be enriched to show streams directly instead of only raw branch-boundary facts.
 
 ---
 
@@ -886,8 +886,8 @@ Likely new module:
 
 Likely consumers:
 
-- `loom/mcp_weaver.py`
-- Weaver board UI
+- `loom/mcp_engineer.py`
+- Engineer board UI
 
 Validation behavior included in Phase 1:
 
@@ -933,7 +933,7 @@ This proposal does **not** require:
 
 - replacing tasks with streams
 - removing derived tasks
-- turning Weaver communication visibility into root/product tasks
+- turning Engineer communication visibility into root/product tasks
 - redesigning all communication as workflow tasks
 - introducing a `branch_streams` table in the MVP
 - redesigning all board lanes around stream states
@@ -982,7 +982,7 @@ Loom should adopt a **stream-centered orchestration model**:
 2. treat **queue state and priority** as stream behavior
 3. treat **waves** as the scheduling layer across streams
 4. keep **tasks and derived tasks** as the explicit, auditable work records inside each stream
-5. keep **Weaver/worker communication** as visibility-thread state by default, promoting it to workflow tasks only when explicit closure semantics are needed
+5. keep **Engineer/worker communication** as visibility-thread state by default, promoting it to workflow tasks only when explicit closure semantics are needed
 
 If implemented this way, Loom will become much easier to reason about in exactly the places that currently slow orchestration down:
 

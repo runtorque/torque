@@ -1,4 +1,4 @@
-"""Shared Weaver hint synthesis helpers."""
+"""Shared Engineer hint synthesis helpers."""
 
 from __future__ import annotations
 
@@ -10,10 +10,10 @@ from .task_health import (
 )
 from .worktree_streams import compute_worktree_streams, member_task_ids_for_stream
 
-WEAVER_HINT_RESEND_COOLDOWN_SECS = 30 * 60
-WEAVER_HINT_GROUP_CLEANUP_MIN = 2
-WEAVER_HINT_GROUP_READY_TO_MERGE_MIN = 2
-WEAVER_HINT_GROUP_IDLE_RISK_MIN = 2
+ENGINEER_HINT_RESEND_COOLDOWN_SECS = 30 * 60
+ENGINEER_HINT_GROUP_CLEANUP_MIN = 2
+ENGINEER_HINT_GROUP_READY_TO_MERGE_MIN = 2
+ENGINEER_HINT_GROUP_IDLE_RISK_MIN = 2
 
 _MAX_PREVIEW_ITEMS = 3
 _SEVERE_LONG_RUNNING_STATES = {
@@ -23,9 +23,9 @@ _SEVERE_LONG_RUNNING_STATES = {
 _LONG_RUNNING_STATES = _SEVERE_LONG_RUNNING_STATES | {HEALTH_IDLE_RISK}
 
 
-def compute_weaver_hints(state, group: str, *, weaver_id: str = "",
+def compute_engineer_hints(state, group: str, *, engineer_id: str = "",
                          visibility_limit: int = 10) -> list[dict]:
-    """Return current non-blocking actionable hints for one Weaver group."""
+    """Return current non-blocking actionable hints for one Engineer group."""
     group = str(group or "").strip()
     if not group:
         return []
@@ -46,20 +46,20 @@ def compute_weaver_hints(state, group: str, *, weaver_id: str = "",
                 task_to_stream_id.setdefault(task_id, stream_id)
 
     hints = []
-    hints.extend(_merged_cleanup_hints(state, group, weaver_id=weaver_id))
+    hints.extend(_merged_cleanup_hints(state, group, engineer_id=engineer_id))
     hints.extend(
         _ready_to_merge_hints(
             state,
             group,
             streams=streams,
-            weaver_id=weaver_id,
+            engineer_id=engineer_id,
         )
     )
     hints.extend(
         _long_running_hints(
             state,
             group,
-            weaver_id=weaver_id,
+            engineer_id=engineer_id,
             task_to_stream_id=task_to_stream_id,
         )
     )
@@ -73,11 +73,11 @@ def compute_weaver_hints(state, group: str, *, weaver_id: str = "",
     return hints
 
 
-def _merged_cleanup_hints(state, group: str, *, weaver_id: str) -> list[dict]:
+def _merged_cleanup_hints(state, group: str, *, engineer_id: str) -> list[dict]:
     candidates = []
     for cell in state.agents.values():
         if not _is_visible_actionable_agent(
-                state, cell, group=group, weaver_id=weaver_id):
+                state, cell, group=group, engineer_id=engineer_id):
             continue
         if not getattr(cell, "worktree_path", ""):
             continue
@@ -91,7 +91,7 @@ def _merged_cleanup_hints(state, group: str, *, weaver_id: str) -> list[dict]:
             continue
         candidates.append(cell)
 
-    if len(candidates) < WEAVER_HINT_GROUP_CLEANUP_MIN:
+    if len(candidates) < ENGINEER_HINT_GROUP_CLEANUP_MIN:
         return []
 
     candidates.sort(key=lambda cell: (_agent_label(cell).lower(), cell.id))
@@ -112,7 +112,7 @@ def _merged_cleanup_hints(state, group: str, *, weaver_id: str) -> list[dict]:
 
 
 def _ready_to_merge_hints(state, group: str, *, streams: list[dict],
-                          weaver_id: str) -> list[dict]:
+                          engineer_id: str) -> list[dict]:
     candidates = []
     for stream in streams:
         if str(stream.get("state", "") or "").strip() != "ready_to_merge":
@@ -122,13 +122,13 @@ def _ready_to_merge_hints(state, group: str, *, streams: list[dict],
             continue
         agent = state.agents.get(agent_id)
         if not _is_visible_actionable_agent(
-                state, agent, group=group, weaver_id=weaver_id):
+                state, agent, group=group, engineer_id=engineer_id):
             continue
         if state.agent_is_busy(agent_id):
             continue
         candidates.append((stream, agent))
 
-    if len(candidates) < WEAVER_HINT_GROUP_READY_TO_MERGE_MIN:
+    if len(candidates) < ENGINEER_HINT_GROUP_READY_TO_MERGE_MIN:
         return []
 
     candidates.sort(
@@ -159,7 +159,7 @@ def _ready_to_merge_hints(state, group: str, *, streams: list[dict],
     }]
 
 
-def _long_running_hints(state, group: str, *, weaver_id: str,
+def _long_running_hints(state, group: str, *, engineer_id: str,
                         task_to_stream_id: dict[str, str]) -> list[dict]:
     selected = {}
     for task in state.board_tasks.values():
@@ -190,9 +190,9 @@ def _long_running_hints(state, group: str, *, weaver_id: str,
             continue
         agent = state.agents.get(agent_id)
         if not _is_visible_actionable_agent(
-                state, agent, group=group, weaver_id=weaver_id):
+                state, agent, group=group, engineer_id=engineer_id):
             continue
-        if state.agent_pending_weaver_reply_tasks(agent_id):
+        if state.agent_pending_engineer_reply_tasks(agent_id):
             continue
 
         health_state = str(getattr(task, "health_state", "") or "").strip()
@@ -209,7 +209,7 @@ def _long_running_hints(state, group: str, *, weaver_id: str,
             idle_risk_candidates.append((task, source_task, agent))
 
     hints = [hint for hint in severe_hints if hint]
-    if len(idle_risk_candidates) >= WEAVER_HINT_GROUP_IDLE_RISK_MIN:
+    if len(idle_risk_candidates) >= ENGINEER_HINT_GROUP_IDLE_RISK_MIN:
         idle_risk_candidates.sort(
             key=lambda item: (
                 _agent_label(item[2]).lower(),
@@ -234,7 +234,7 @@ def _long_running_hints(state, group: str, *, weaver_id: str,
             "fingerprint": "idle_risk:" + ",".join(sorted(task_ids)),
             "message": (
                 f"{len(idle_risk_candidates)} active tasks are at idle risk "
-                f"without Weaver follow-up: {_preview_list(preview)}"
+                f"without Engineer follow-up: {_preview_list(preview)}"
             ),
             "agent_ids": agent_ids,
             "task_ids": task_ids,
@@ -254,11 +254,11 @@ def _severe_long_running_hint(task, *, source_task, agent, stream_id: str) -> di
         if duration:
             message = (
                 f"{agent_name} has been stalled on {task_name} for {duration} "
-                "without Weaver follow-up"
+                "without Engineer follow-up"
             )
         else:
             message = (
-                f"{agent_name} has stalled on {task_name} without Weaver "
+                f"{agent_name} has stalled on {task_name} without Engineer "
                 "follow-up"
             )
         priority = 70
@@ -267,11 +267,11 @@ def _severe_long_running_hint(task, *, source_task, agent, stream_id: str) -> di
         if stale_reason:
             message = (
                 f"{agent_name} looks idle on {task_name} ({stale_reason}) "
-                "without Weaver follow-up"
+                "without Engineer follow-up"
             )
         else:
             message = (
-                f"{agent_name} looks idle on {task_name} without Weaver "
+                f"{agent_name} looks idle on {task_name} without Engineer "
                 "follow-up"
             )
         priority = 60
@@ -315,14 +315,14 @@ def _prefer_long_running_candidate(candidate, incumbent) -> bool:
     )
 
 
-def _is_visible_actionable_agent(state, cell, *, group: str, weaver_id: str) -> bool:
+def _is_visible_actionable_agent(state, cell, *, group: str, engineer_id: str) -> bool:
     if not cell or getattr(cell, "cell_type", "") != "agent":
         return False
     if getattr(cell, "group", "") != group:
         return False
-    if weaver_id and getattr(cell, "id", "") == weaver_id:
+    if engineer_id and getattr(cell, "id", "") == engineer_id:
         return False
-    if weaver_id and not state.agent_is_visible_to_weaver(weaver_id, cell.id):
+    if engineer_id and not state.agent_is_visible_to_engineer(engineer_id, cell.id):
         return False
     return True
 

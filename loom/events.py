@@ -68,7 +68,7 @@ def _effective_owner_engineer_id(cell) -> str:
     owner_id = str(getattr(cell, "owner_engineer_id", "") or "").strip()
     if owner_id:
         return owner_id
-    return str(getattr(cell, "created_by_weaver_id", "") or "").strip()
+    return str(getattr(cell, "created_by_engineer_id", "") or "").strip()
 
 
 def engineer_has_queue_work(state, engineer) -> bool:
@@ -580,7 +580,7 @@ class EventBus:
         self._log = event_log
         self._notifier = notifier
         self._panel_log = panel_log
-        self._weaver_buffer = None  # WeaverEventBuffer, set from server.py
+        self._engineer_buffer = None  # EngineerEventBuffer, set from server.py
         self._timers: dict[str, asyncio.TimerHandle] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
         self.on_session_start = None  # callback(cell) — agent TUI ready
@@ -621,9 +621,9 @@ class EventBus:
                  cell.activity_detail[:50] if cell.activity_detail else "")
         if self._notifier:
             self._notifier.on_event(event)
-        # Notify weaver buffer of activity change (for idle-gated delivery)
-        if self._weaver_buffer:
-            self._weaver_buffer.on_agent_activity_change(cell)
+        # Notify engineer buffer of activity change (for idle-gated delivery)
+        if self._engineer_buffer:
+            self._engineer_buffer.on_agent_activity_change(cell)
         # Auto-unlink agent from parent task when idle after derive
         if prev_activity and not cell.activity and cell.current_task_id:
             self._maybe_unlink_post_derive(cell)

@@ -48,7 +48,7 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
             cell_type="agent",
             kind="worker",
             owner_engineer_id=owner_id,
-            created_by_weaver_id=owner_id,
+            created_by_engineer_id=owner_id,
             status="idle",
         )
         state.agents[agent_id] = worker

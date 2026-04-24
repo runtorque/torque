@@ -109,9 +109,9 @@ test('_compactInitDeferredMaps seeds empty maps on compact state', () => {
   run(context, `_compactInitDeferredMaps()`);
   assertPlainEqual(sandbox.state.decisions, {});
   assertPlainEqual(sandbox.state.pending_hires, {});
-  assertPlainEqual(sandbox.state.weaver_journal, {});
-  assertPlainEqual(sandbox.state.weaver_worklog, {});
-  assertPlainEqual(sandbox.state.weaver_streams, {});
+  assertPlainEqual(sandbox.state.engineer_journal, {});
+  assertPlainEqual(sandbox.state.engineer_worklog, {});
+  assertPlainEqual(sandbox.state.engineer_streams, {});
 });
 
 test('_compactInitDeferredMaps is a no-op when snapshot is legacy', () => {
@@ -160,15 +160,15 @@ test('lazyLoadArchivedTasks sends once per group', () => {
   ]);
 });
 
-test('lazyLoadWeaverJournal requires a group and dedups per group', () => {
+test('lazyLoadEngineerJournal requires a group and dedups per group', () => {
   const { context, sandbox } = createCompactContext();
   sandbox.state = { snapshot_protocol: 'compact-v1' };
   run(context, `_compactInitDeferredMaps()`);
-  assert.equal(run(context, `lazyLoadWeaverJournal('')`), false);
-  assert.equal(run(context, `lazyLoadWeaverJournal('alpha')`), true);
-  assert.equal(run(context, `lazyLoadWeaverJournal('alpha')`), false);
+  assert.equal(run(context, `lazyLoadEngineerJournal('')`), false);
+  assert.equal(run(context, `lazyLoadEngineerJournal('alpha')`), true);
+  assert.equal(run(context, `lazyLoadEngineerJournal('alpha')`), false);
   assertPlainEqual(sandbox.sendCalls, [
-    { cmd: 'weaver_journal_snapshot', group: 'alpha' },
+    { cmd: 'engineer_journal_snapshot', group: 'alpha' },
   ]);
 });
 
@@ -225,7 +225,7 @@ test('_compactHandleLazyResponse merges decisions and pending_hires snapshots', 
   assert.deepEqual(Object.keys(sandbox.state.pending_hires), ['h-1']);
 });
 
-test('_compactHandleLazyResponse merges archived_tasks and weaver_journal_snapshot', () => {
+test('_compactHandleLazyResponse merges archived_tasks and engineer_journal_snapshot', () => {
   const { context, sandbox } = createCompactContext();
   sandbox.state = { snapshot_protocol: 'compact-v1' };
   run(context, `_compactInitDeferredMaps()`);
@@ -237,17 +237,17 @@ test('_compactHandleLazyResponse merges archived_tasks and weaver_journal_snapsh
   assert.equal(sandbox.state.board_tasks['t-arch'].description, 'hist');
 
   run(context, `_compactHandleLazyResponse({
-    type: 'weaver_journal_snapshot',
+    type: 'engineer_journal_snapshot',
     group: 'alpha',
-    weaver_journal: { alpha: [{ id: 1, entry: 'j1' }] },
-    weaver_worklog: { alpha: [{ id: 2, entry: 'w1' }] },
-    weaver_streams: { alpha: { count: 3, items: [] } }
+    engineer_journal: { alpha: [{ id: 1, entry: 'j1' }] },
+    engineer_worklog: { alpha: [{ id: 2, entry: 'w1' }] },
+    engineer_streams: { alpha: { count: 3, items: [] } }
   })`);
-  assertPlainEqual(sandbox.state.weaver_journal.alpha,
+  assertPlainEqual(sandbox.state.engineer_journal.alpha,
     [{ id: 1, entry: 'j1' }]);
-  assertPlainEqual(sandbox.state.weaver_worklog.alpha,
+  assertPlainEqual(sandbox.state.engineer_worklog.alpha,
     [{ id: 2, entry: 'w1' }]);
-  assertPlainEqual(sandbox.state.weaver_streams.alpha,
+  assertPlainEqual(sandbox.state.engineer_streams.alpha,
     { count: 3, items: [] });
 });
 

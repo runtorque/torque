@@ -2,7 +2,7 @@
 
 The task board is a Kanban-style interface for organizing work. Tasks move through lanes as agents work on them. The board integrates with [actions](actions.md) and [pipelines](actions.md#pipelines) so agents can report progress, derive follow-up tasks, and hand off work automatically.
 
-In standalone mode, the board remains the primary lower workspace while utility panels such as Events, Shared Context, Actions, Weaver, and the Agent Library open separately around it.
+In standalone mode, the board remains the primary lower workspace while utility panels such as Events, Shared Context, Actions, Engineer, and the Agent Library open separately around it.
 
 For the day-to-day narrative from task creation through completion, start with the [Workflow Guide](workflow-guide.md).
 
@@ -215,7 +215,7 @@ Once an agent is working on a task, it can report status back to Loom using Loom
 
 When a task is dispatched with an action that has [transitions](actions.md#pipelines), the available Loom MCP tools are appended to the prompt as a postscript so the agent knows what reporting options it has.
 
-When a worker has a pending Weaver-message follow-up task, it can answer through `loom_reply(...)`. That closes only the reply task with an `answered` outcome; it does not auto-complete the parent implementation or review task.
+When a worker has a pending Engineer-message follow-up task, it can answer through `loom_reply(...)`. That closes only the reply task with an `answered` outcome; it does not auto-complete the parent implementation or review task.
 
 For board-level checkpoint updates outside an agent session, use `loom task verify ...` from the CLI or `engineer_task_verify(...)` from the designated engineer. Those paths stamp verification audit fields and emit a `task_verification_updated` event so pending or failed checkpoints stay visible at the orchestration layer.
 

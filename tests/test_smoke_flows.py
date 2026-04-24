@@ -52,7 +52,7 @@ class LoomSmokeFlowTests(unittest.IsolatedAsyncioTestCase):
         self.state.groups["g"].append(self.engineer.id)
         self.state.update_group_settings(
             "g",
-            weaver_agent_id=self.engineer.id,
+            engineer_agent_id=self.engineer.id,
             dispatch_lane="In Progress",
         )
 
@@ -161,8 +161,8 @@ class LoomSmokeFlowTests(unittest.IsolatedAsyncioTestCase):
                     return {"type": "error", "message": "Agent creation failed"}
                 agent.kind = "worker"
                 agent.owner_engineer_id = payload.get("owner_engineer_id", "")
-                agent.created_by_weaver_id = payload.get(
-                    "_created_by_weaver_id", ""
+                agent.created_by_engineer_id = payload.get(
+                    "_created_by_engineer_id", ""
                 )
                 agent.agent_type = payload.get("agent_type", "") or "codex"
                 agent.status = "running"

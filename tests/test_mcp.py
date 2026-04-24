@@ -352,9 +352,9 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_create_mcp_handler_exposes_only_current_mcp_surfaces(self):
         state = self.state_mod.MatrixState()
-        weaver = self.state_mod.AgentCell(
-            id="weaver-1",
-            name="Weaver",
+        engineer = self.state_mod.AgentCell(
+            id="engineer-1",
+            name="Engineer",
             group="g",
             cell_type="agent",
         )
@@ -378,13 +378,13 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             group="g",
             cell_type="agent",
         )
-        state.agents[weaver.id] = weaver
+        state.agents[engineer.id] = engineer
         state.agents[architect.id] = architect
         state.agents[engineer.id] = engineer
         state.agents[worker.id] = worker
-        state.groups["g"] = [weaver.id, architect.id, engineer.id, worker.id]
+        state.groups["g"] = [engineer.id, architect.id, engineer.id, worker.id]
         state.group_settings["g"] = self.state_mod.GroupSettings(
-            weaver_agent_id=weaver.id
+            engineer_agent_id=engineer.id
         )
         state.board_lanes = ["Backlog", "To Do", "In Progress", "Done"]
 
@@ -409,7 +409,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("loom_memory_publish", tool_names)
         self.assertIn("loom_memory_read", tool_names)
         self.assertIn("loom_memory_link", tool_names)
-        self.assertNotIn("weaver_board_summary", tool_names)
+        self.assertNotIn("engineer_board_summary", tool_names)
         self.assertNotIn("engineer_board_summary", tool_names)
         self.assertNotIn("architect_board_summary", tool_names)
         self.assertNotIn("architect_workspace_overview", tool_names)
@@ -424,7 +424,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             tool["name"] for tool in listed_worker.payload["result"]["tools"]
         ]
         self.assertIn("loom_progress", worker_tool_names)
-        self.assertNotIn("weaver_board_summary", worker_tool_names)
+        self.assertNotIn("engineer_board_summary", worker_tool_names)
         self.assertNotIn("engineer_board_summary", worker_tool_names)
         self.assertNotIn("architect_board_summary", worker_tool_names)
         self.assertNotIn("architect_workspace_overview", worker_tool_names)
@@ -450,7 +450,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("architect_engineer_journal_read", architect_tool_names)
         self.assertIn("architect_engineer_pending_question", architect_tool_names)
         self.assertIn("architect_ask", architect_tool_names)
-        self.assertNotIn("weaver_board_summary", architect_tool_names)
+        self.assertNotIn("engineer_board_summary", architect_tool_names)
         self.assertNotIn("engineer_board_summary", architect_tool_names)
 
         listed_engineer = await handler(
@@ -467,21 +467,21 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("engineer_task_verify", engineer_tool_names)
         self.assertIn("engineer_message_architect", engineer_tool_names)
         self.assertIn("engineer_reply", engineer_tool_names)
-        self.assertNotIn("weaver_board_summary", engineer_tool_names)
+        self.assertNotIn("engineer_board_summary", engineer_tool_names)
         self.assertNotIn("architect_workspace_overview", engineer_tool_names)
 
-        listed_weaver = await handler(
+        listed_engineer = await handler(
             FakeRequest(
                 {"jsonrpc": "2.0", "id": 13, "method": "tools/list"},
-                headers={"X-Loom-Cell-Id": weaver.id},
+                headers={"X-Loom-Cell-Id": engineer.id},
             )
         )
-        weaver_tool_names = [
-            tool["name"] for tool in listed_weaver.payload["result"]["tools"]
+        engineer_tool_names = [
+            tool["name"] for tool in listed_engineer.payload["result"]["tools"]
         ]
-        self.assertNotIn("weaver_board_summary", weaver_tool_names)
-        self.assertNotIn("engineer_board_summary", weaver_tool_names)
-        self.assertNotIn("architect_board_summary", weaver_tool_names)
+        self.assertNotIn("engineer_board_summary", engineer_tool_names)
+        self.assertNotIn("engineer_board_summary", engineer_tool_names)
+        self.assertNotIn("architect_board_summary", engineer_tool_names)
 
         missing_header = await handler(
             FakeRequest(
@@ -505,14 +505,14 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                     "jsonrpc": "2.0",
                     "id": 3,
                     "method": "tools/call",
-                    "params": {"name": "weaver_agents_list", "arguments": {}},
+                    "params": {"name": "engineer_agents_list", "arguments": {}},
                 }
             )
         )
         self.assertEqual(
             removed_alias.payload["error"]["message"],
             (
-                "weaver_* MCP tools were removed; use engineer_* or architect_* "
+                "engineer_* MCP tools were removed; use engineer_* or architect_* "
                 "instead (for example engineer_agents_list)"
             ),
         )
@@ -775,7 +775,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         state.agents[engineer.id] = engineer
         state.groups["g"] = [engineer.id]
         state.group_settings["g"] = self.state_mod.GroupSettings(
-            weaver_agent_id=engineer.id
+            engineer_agent_id=engineer.id
         )
         journal_entries = []
 
@@ -808,7 +808,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         state.journal_read = fake_journal_read
 
         async def fake_handle_command(payload):
-            if payload.get("cmd") == "weaver_journal_append":
+            if payload.get("cmd") == "engineer_journal_append":
                 return fake_journal_append(
                     payload["group"],
                     payload["entry_type"],

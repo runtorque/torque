@@ -58,7 +58,7 @@ class DispatchPreambleTests(unittest.TestCase):
             role="reviewer",
             template="reviewer",
             owner_engineer_id="engineer-1",
-            created_by_weaver_id="engineer-1",
+            created_by_engineer_id="engineer-1",
         )
         self.legacy_worker = self.state_mod.AgentCell(
             id="worker-legacy",
@@ -70,7 +70,7 @@ class DispatchPreambleTests(unittest.TestCase):
             role="reviewer",
             template="reviewer",
             owner_engineer_id="engineer-1",
-            created_by_weaver_id="engineer-1",
+            created_by_engineer_id="engineer-1",
         )
         for cell in (self.engineer, self.worker, self.legacy_worker):
             self.state.agents[cell.id] = cell
@@ -330,7 +330,7 @@ class DispatchPreambleTests(unittest.TestCase):
             role="reviewer",
             template="reviewer",
             owner_engineer_id="",
-            created_by_weaver_id="",
+            created_by_engineer_id="",
             worktree_repo_root="",
             git_root="",
             worktree_branch="",

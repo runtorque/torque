@@ -10,7 +10,7 @@ This page is the operator-facing reference hub for Loom. Use it when you need th
 | Board lanes, dispatch, and task movement | [Task Board](board.md) |
 | Action files, transitions, and pipelines | [Actions & Templates](actions.md) |
 | Agent launch, provider behavior, prompts, resume, and hooks | [Agents & Sessions](agents-and-sessions.md) |
-| Weaver orchestration and MCP tools | [Weaver](weaver.md) |
+| Engineer orchestration and MCP tools | [Engineer](engineer.md) |
 | Git worktrees, checkpointing, and merge flow | [Worktrees](worktrees.md) |
 | Symptom-first recovery steps | [Troubleshooting](troubleshooting.md) |
 
@@ -51,7 +51,7 @@ Loom has a few settings surfaces. The details live in the linked pages; this sec
 
 | Surface | Use it for |
 |---|---|
-| [Group Settings](group-settings.md) | Defaults for directories, boot commands, shells, windows, worktrees, terminal defaults, and Weaver behavior |
+| [Group Settings](group-settings.md) | Defaults for directories, boot commands, shells, windows, worktrees, terminal defaults, and Engineer behavior |
 | [Agent Templates](agent-templates.md) | Reusable launch presets with provider, model, prompt, worktree, and child terminal defaults |
 | [Actions & Templates](actions.md) | Prompt rendering, variables, transitions, and pipelines used by dispatch and derive |
 | Top-level README environment variable reference | Runtime defaults like `LOOM_PORT`, `LOOM_DEFAULT_CMD`, `LOOM_STANDALONE`, `LOOM_BIND_ALL`, and desktop-shell overrides such as `LOOM_DESKTOP_MODE` |
@@ -59,7 +59,7 @@ Loom has a few settings surfaces. The details live in the linked pages; this sec
 ### High-impact settings to remember
 
 - `session_resume` controls whether relaunch tries to continue the provider conversation.
-- Agent and Weaver `model` / `reasoning_effort` defaults only auto-apply when Loom is shaping the adapter's normal command path.
+- Agent and Engineer `model` / `reasoning_effort` defaults only auto-apply when Loom is shaping the adapter's normal command path.
 - Git worktree settings decide whether agents launch in isolated branches and how those worktrees are checkpointed or merged.
 - `worktree_merge_preserve_diff` saves a pre-merge patch artifact on the latest open branch-boundary task instead of making you reconstruct the merge later.
 - `restrict_to_created_agents` limits designated-engineer-only tools and views to agents originally launched by that engineer while leaving the human board view unchanged.

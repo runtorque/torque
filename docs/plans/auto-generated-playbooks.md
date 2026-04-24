@@ -87,7 +87,7 @@ That makes the consumer and the activation path concrete:
 - **draft candidates** are used only by the human reviewer
 - **published playbook recipes** are used by Loom operators in task creation/dispatch flows
 
-The designated engineer is **not** a v1 consumer of raw generated candidates. A later phase may let Weaver recommend or execute **published** playbooks, but unpublished drafts must remain inert.
+The designated engineer is **not** a v1 consumer of raw generated candidates. A later phase may let Engineer recommend or execute **published** playbooks, but unpublished drafts must remain inert.
 
 ---
 
@@ -390,16 +390,16 @@ In practice, a published playbook should usually point to:
 - optional guidance on when to stop, ask, or branch
 - a clear operator-facing activation point in task creation or dispatch
 
-### Weaver integration
+### Engineer integration
 
-Weaver integration should be deferred until after publication exists.
+Engineer integration should be deferred until after publication exists.
 
-If added later, Weaver may:
+If added later, Engineer may:
 
 - recommend a **published** playbook when planning work
 - choose a **published** playbook as part of an explicit orchestration strategy
 
-Weaver should not read or act on unpublished candidate drafts.
+Engineer should not read or act on unpublished candidate drafts.
 
 ---
 
@@ -431,7 +431,7 @@ Weaver should not read or act on unpublished candidate drafts.
    Implement safe generation or validation of the referenced action/template/transition bundle from an approved playbook.
 
 8. **Surface only published playbooks operationally**
-   Expose published recipes in task creation/dispatch flows. Do not surface raw candidates to Weaver or normal operators.
+   Expose published recipes in task creation/dispatch flows. Do not surface raw candidates to Engineer or normal operators.
 
 9. **Backtest before enabling by default**
    Run the miner over existing Loom history fixtures and real projects to measure false positives and ambiguous families.
@@ -449,6 +449,6 @@ The first implementation should stay intentionally narrow:
 - suggest only entry action, template, and simple linear stage sequences
 - require human approval for every publication
 - surface only **published** playbooks in task creation/dispatch flows
-- keep Weaver out of the loop until a later published-playbook integration step
+- keep Engineer out of the loop until a later published-playbook integration step
 
 That scope is enough to prove whether Loom can learn useful workflows from history without claiming more certainty than the data supports.

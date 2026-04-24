@@ -92,7 +92,7 @@ If you are a Loom worker or engineer running **inside the live daemon's Python r
 - Ownership is explicit: workers use `owner_engineer_id`; tasks use `assigned_engineer_id`; engineers may carry `hired_by_architect_id`; architect-created tasks carry `created_by_architect_id`.
 - Worker dispatch prepends role `preamble` / `priorities` unless the action sets `disable_role_preamble: true`.
 - The Jinja `loom` namespace includes `loom.agent.kind`, `loom.agent.role`, `loom.agent.owner_engineer`, and for architect-hired workers `loom.agent.hired_by_architect`.
-- MCP tool surfaces are final: `engineer_*`, `architect_*`, and worker-side `loom ai`. The legacy `weaver_*` alias surface is gone.
+- MCP tool surfaces are final: `engineer_*`, `architect_*`, and worker-side `loom ai`. The legacy `engineer_*` alias surface is gone.
 - Engineer scoping is strict: an engineer sees only itself, its owned workers / terminals, and tasks assigned to it in-group. Engineer-created workers and tasks are auto-stamped with that engineer's ownership ids. Deleting an engineer transfers owned workers and assigned tasks back to the user by clearing those ids.
 - Architects are user-created only and are never hired. `LOOM_ARCHITECT_ID` binds architect MCP sessions. Architects can create / reassign only their own architect-created tasks, and only to engineers they hired.
 - The decision log is per-architect and persisted in `decisions`; pending hires are user-approved and approval creates engineers with `hired_by_architect_id=<architect.id>`.

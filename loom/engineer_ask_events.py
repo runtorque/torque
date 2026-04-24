@@ -30,7 +30,7 @@ def _resolve_engineer_cell(state, group: str, engineer_id: str = ""):
     group = str(group or "").strip()
     if not group:
         return None
-    getter = getattr(state, "get_weaver_for_group", None)
+    getter = getattr(state, "get_engineer_for_group", None)
     if callable(getter):
         return getter(group)
     return None

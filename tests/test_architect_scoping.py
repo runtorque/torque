@@ -84,7 +84,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             cell_type="agent",
             kind="worker",
             owner_engineer_id=owner_engineer_id,
-            created_by_weaver_id=owner_engineer_id,
+            created_by_engineer_id=owner_engineer_id,
             status="idle",
         )
         self.state.agents[cell.id] = cell
@@ -1684,7 +1684,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             architect.mcp_messages[0]["message"],
             "Need a scope decision.",
         )
-        self.assertTrue(hired.pending_weaver_message)
+        self.assertTrue(hired.pending_engineer_message)
         self.assertEqual(
             [op["op"] for op in self.state._delta_ops[-2:]],
             ["agent_upsert", "agent_upsert"],
@@ -1716,7 +1716,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             architect.mcp_messages[0]["action"],
             "engineer_message_architect",
         )
-        self.assertFalse(hired.pending_weaver_message)
+        self.assertFalse(hired.pending_engineer_message)
 
         engineer_denied_text, engineer_denied_error = await self._call_engineer(
             "engineer_message_architect",
@@ -2046,7 +2046,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         question = "Need product approval for the rollout plan?\nFull context stays intact."
 
         with mock.patch("time.time", return_value=1234.5):
-            self.state.update_weaver_settings(
+            self.state.update_engineer_settings(
                 "loom",
                 pending_question=question,
                 paused=True,
@@ -2084,7 +2084,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(persisted_payload["set_at"], 1234.5)
 
         with mock.patch("time.time", return_value=2345.6):
-            self.state.update_weaver_settings(
+            self.state.update_engineer_settings(
                 "loom",
                 pending_question="Secret question from other architect's engineer",
                 paused=True,

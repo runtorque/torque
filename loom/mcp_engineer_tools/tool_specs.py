@@ -1,27 +1,27 @@
-"""Weaver MCP tool schema definitions."""
+"""Engineer MCP tool schema definitions."""
 
 
-WEAVER_TOOLS = [
+ENGINEER_TOOLS = [
     # -- Read tools ---------------------------------------------------------
     {
-        "name": "weaver_board_summary",
+        "name": "engineer_board_summary",
         "description": (
-            "Return a compact board overview for the weaver's group. "
+            "Return a compact board overview for the engineer's group. "
             "Includes lane counts, active agent status, pending asks, "
-            "task-health rollups, current non-blocking Weaver hints, and "
+            "task-health rollups, current non-blocking Engineer hints, and "
             "key label counts without embedding full task lists. Also "
             "includes compact computed stream summaries derived from "
             "branch/worktree state. When owned-agent restriction is "
             "enabled, hint and agent rollups only include agents this "
-            "Weaver can control."
+            "Engineer can control."
         ),
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
-        "name": "weaver_session_map",
+        "name": "engineer_session_map",
         "description": (
             "Return a deterministic structured Session Map for the "
-            "weaver's group. This is the current orchestration snapshot "
+            "engineer's group. This is the current orchestration snapshot "
             "used for recovery: active streams, pending asks and human "
             "gates, unhealthy tasks, verification gates, branch-boundary "
             "state, active agents, queued follow-up work, recent "
@@ -32,9 +32,9 @@ WEAVER_TOOLS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
-        "name": "weaver_streams_list",
+        "name": "engineer_streams_list",
         "description": (
-            "List computed branch/worktree streams for the weaver's group. "
+            "List computed branch/worktree streams for the engineer's group. "
             "Returns compact stream objects including identity, ownership, "
             "product/workflow membership, product-queue state, queue gates, "
             "recent visibility items, state, live/dormant/orphaned "
@@ -80,7 +80,7 @@ WEAVER_TOOLS = [
         },
     },
     {
-        "name": "weaver_stream_show",
+        "name": "engineer_stream_show",
         "description": (
             "Show one computed stream by stream id, branch identity, or a "
             "related task id. Returns the full compact stream payload with "
@@ -119,7 +119,7 @@ WEAVER_TOOLS = [
         },
     },
     {
-        "name": "weaver_board_list",
+        "name": "engineer_board_list",
         "description": (
             "List all tasks on the board grouped by lane. "
             "Supports optional filters by lane, label, task health, or "
@@ -155,7 +155,7 @@ WEAVER_TOOLS = [
         },
     },
     {
-        "name": "weaver_task_show",
+        "name": "engineer_task_show",
         "description": (
             "Show full details for a task by ID or legacy alias. "
             "Returns title, description, labels, action, action variables, "
@@ -176,24 +176,24 @@ WEAVER_TOOLS = [
         },
     },
     {
-        "name": "weaver_agents_list",
+        "name": "engineer_agents_list",
         "description": (
             "List all active agents with their name, slug, status, "
             "group, current task, and activity detail. When owned-agent "
-            "restriction is enabled, only agents created by this Weaver "
+            "restriction is enabled, only agents created by this Engineer "
             "are listed."
         ),
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
-        "name": "weaver_agent_show",
+        "name": "engineer_agent_show",
         "description": (
             "Show detailed information about a specific agent. "
             "Returns agent metadata, worktree state (path, branch, "
             "diff stats, checkpoints), task history with messages, "
             "session info, and child terminals. Use for post-completion "
             "review before merging. When owned-agent restriction is "
-            "enabled, the target agent must have been created by this Weaver."
+            "enabled, the target agent must have been created by this Engineer."
         ),
         "inputSchema": {
             "type": "object",
@@ -207,7 +207,7 @@ WEAVER_TOOLS = [
         },
     },
     {
-        "name": "weaver_actions_list",
+        "name": "engineer_actions_list",
         "description": (
             "List available actions (project and user scope) with "
             "name, description, variables, and scope. Use this to "
@@ -226,7 +226,7 @@ WEAVER_TOOLS = [
         },
     },
     {
-        "name": "weaver_action_show",
+        "name": "engineer_action_show",
         "description": (
             "Show full details of an action including its YAML contents, "
             "prompt template, transitions, and discovered variables."
@@ -252,7 +252,7 @@ WEAVER_TOOLS = [
     },
     # -- Write tools --------------------------------------------------------
     {
-        "name": "weaver_task_create",
+        "name": "engineer_task_create",
         "description": (
             "Create a new task on the board. Specify a title and "
             "optionally attach an action, group, lane, labels, and "
@@ -319,7 +319,7 @@ WEAVER_TOOLS = [
         },
     },
     {
-        "name": "weaver_task_edit",
+        "name": "engineer_task_edit",
         "description": (
             "Edit fields on an existing task. Only the fields you "
             "provide will be updated — omitted fields are unchanged."
@@ -376,7 +376,7 @@ WEAVER_TOOLS = [
         },
     },
     {
-        "name": "weaver_task_upload_artifact",
+        "name": "engineer_task_upload_artifact",
         "description": (
             "Upload and attach an image or other artifact to a specific board "
             "task. Provide a local_path or inline content, and Loom stores the "
@@ -440,7 +440,7 @@ WEAVER_TOOLS = [
         },
     },
     {
-        "name": "weaver_task_verify",
+        "name": "engineer_task_verify",
         "description": (
             "Record a deploy/restart verification checkpoint for a task. "
             "Use this for explicit attempt, smoke pass/fail, and notes "
@@ -493,7 +493,7 @@ WEAVER_TOOLS = [
         },
     },
     {
-        "name": "weaver_task_move",
+        "name": "engineer_task_move",
         "description": "Move a task to a different lane on the board.",
         "inputSchema": {
             "type": "object",
@@ -511,13 +511,13 @@ WEAVER_TOOLS = [
         },
     },
     {
-        "name": "weaver_task_dispatch",
+        "name": "engineer_task_dispatch",
         "description": (
             "Dispatch a task to an agent. Creates a new agent by "
             "default, or dispatches to an existing agent if specified. "
             "The task moves to In Progress and the agent receives "
             "the rendered prompt. When owned-agent restriction is enabled, "
-            "existing-agent dispatch can only target agents created by this Weaver."
+            "existing-agent dispatch can only target agents created by this Engineer."
         ),
         "inputSchema": {
             "type": "object",
@@ -575,7 +575,7 @@ WEAVER_TOOLS = [
         },
     },
     {
-        "name": "weaver_batch_dispatch",
+        "name": "engineer_batch_dispatch",
         "description": (
             "Dispatch a planned batch of tasks with an explicit "
             "or default concurrency cap. Tasks are processed in request order. "
@@ -620,7 +620,7 @@ WEAVER_TOOLS = [
                     "description": (
                         "Maximum number of active worker agents "
                         "allowed in the group after this call. If "
-                        "omitted, Loom uses the group's stored Weaver "
+                        "omitted, Loom uses the group's stored Engineer "
                         "default."
                     ),
                 },
@@ -629,7 +629,7 @@ WEAVER_TOOLS = [
         },
     },
     {
-        "name": "weaver_task_resolve",
+        "name": "engineer_task_resolve",
         "description": (
             "Resolve an ask task by providing an answer. The answer "
             "is sent to the parent task's agent and the ask task "
@@ -654,7 +654,7 @@ WEAVER_TOOLS = [
     },
     # -- Event tools --------------------------------------------------------
     {
-        "name": "weaver_events",
+        "name": "engineer_events",
         "description": (
             "Poll for recent events. Use after context cleanup to "
             "catch up on what happened. Returns panel events filtered "
@@ -687,7 +687,7 @@ WEAVER_TOOLS = [
         },
     },
     {
-        "name": "weaver_launch_settings",
+        "name": "engineer_launch_settings",
         "description": (
             "Update the designated engineer's persisted launch settings. "
             "These settings are used the next time the designated engineer is created "
@@ -723,7 +723,7 @@ WEAVER_TOOLS = [
         },
     },
     {
-        "name": "weaver_notifications",
+        "name": "engineer_notifications",
         "description": (
             "Configure digest noise. Use a quiet, normal, or noisy preset "
             "for fast tuning, or override digest verbosity, event types, "
@@ -789,9 +789,9 @@ WEAVER_TOOLS = [
         },
     },
     {
-        "name": "weaver_resume",
+        "name": "engineer_resume",
         "description": (
-            "Resume event delivery after a weaver_ask. Call this "
+            "Resume event delivery after a engineer_ask. Call this "
             "after the human has responded (via the panel or "
             "directly in your terminal) to unpause event pushes."
         ),
@@ -799,12 +799,12 @@ WEAVER_TOOLS = [
     },
     # -- Context tools ------------------------------------------------------
     {
-        "name": "weaver_journal",
+        "name": "engineer_journal",
         "description": (
-            "Append an entry to the weaver's persistent decision "
+            "Append an entry to the engineer's persistent decision "
             "journal. Use this to record decisions, observations, and "
             "periodic checkpoints. The journal survives context "
-            "cleanup — read it back with weaver_journal_read to "
+            "cleanup — read it back with engineer_journal_read to "
             "resume orchestration."
         ),
         "inputSchema": {
@@ -835,10 +835,10 @@ WEAVER_TOOLS = [
         },
     },
     {
-        "name": "weaver_journal_read",
+        "name": "engineer_journal_read",
         "description": (
             "Read recent journal entries. Use after context cleanup "
-            "or startup to recover the weaver's decision history "
+            "or startup to recover the engineer's decision history "
             "and resume orchestration."
         ),
         "inputSchema": {
@@ -882,15 +882,15 @@ WEAVER_TOOLS = [
     },
     # -- Interaction tools --------------------------------------------------
     {
-        "name": "weaver_agent_message",
+        "name": "engineer_agent_message",
         "description": (
             "Send a message to any agent's terminal. The agent can "
-            "reply via loom_reply, which appears in the weaver's "
+            "reply via loom_reply, which appears in the engineer's "
             "next event digest. Loom also creates a visible follow-up "
             "task for the exchange and returns its task id. Use for: "
             "redirecting agents, providing context, answering questions. "
             "When owned-agent restriction is enabled, only agents "
-            "created by this Weaver can be targeted."
+            "created by this Engineer can be targeted."
         ),
         "inputSchema": {
             "type": "object",
@@ -909,7 +909,7 @@ WEAVER_TOOLS = [
         },
     },
     {
-        "name": "weaver_ask",
+        "name": "engineer_ask",
         "description": (
             "Ask the human a question. The question is displayed in "
             "the Agent panel and event pushes are automatically "
@@ -918,9 +918,9 @@ WEAVER_TOOLS = [
             "decision — prioritization, design decisions, approval, "
             "or clarification that should stop dispatch until "
             "answered. Do not use this for status updates, soft "
-            "questions, or next-wave proposals; use weaver_note for "
+            "questions, or next-wave proposals; use engineer_note for "
             "those. After the human responds (via the panel or "
-            "directly in your terminal), call weaver_resume to "
+            "directly in your terminal), call engineer_resume to "
             "unpause event delivery."
         ),
         "inputSchema": {
@@ -935,12 +935,12 @@ WEAVER_TOOLS = [
         },
     },
     {
-        "name": "weaver_note",
+        "name": "engineer_note",
         "description": (
             "Post a non-blocking note or soft question for the human, "
             "including next-wave proposals or status/context that "
             "should stay visible without pausing orchestration. "
-            "Unlike weaver_ask, this does not pause event delivery or "
+            "Unlike engineer_ask, this does not pause event delivery or "
             "put Loom into awaiting-input mode."
         ),
         "inputSchema": {
@@ -960,13 +960,13 @@ WEAVER_TOOLS = [
         },
     },
     {
-        "name": "weaver_agent_close",
+        "name": "engineer_agent_close",
         "description": (
             "Close an agent — ends its terminal session and removes "
             "it from the group. The agent's worktree (if any) is "
             "preserved on disk. Use after merging or when the agent "
             "is no longer needed. When owned-agent restriction is "
-            "enabled, only agents created by this Weaver can be closed."
+            "enabled, only agents created by this Engineer can be closed."
         ),
         "inputSchema": {
             "type": "object",
@@ -980,13 +980,13 @@ WEAVER_TOOLS = [
         },
     },
     {
-        "name": "weaver_agent_relaunch",
+        "name": "engineer_agent_relaunch",
         "description": (
             "Relaunch a stopped agent — re-creates the terminal "
             "session. If the agent has a worktree, it is reused. "
             "If session_resume is enabled, the previous Claude Code "
             "session is resumed. When owned-agent restriction is "
-            "enabled, only agents created by this Weaver can be relaunched."
+            "enabled, only agents created by this Engineer can be relaunched."
         ),
         "inputSchema": {
             "type": "object",
@@ -1001,14 +1001,14 @@ WEAVER_TOOLS = [
     },
     # -- Worktree tools -----------------------------------------------------
     {
-        "name": "weaver_merge",
+        "name": "engineer_merge",
         "description": (
             "Merge an agent's worktree branch into the base branch "
             "(usually main). Uses server-side merge — no interactive "
-            "resolution. If there are conflicts, use weaver_rebase "
+            "resolution. If there are conflicts, use engineer_rebase "
             "to replay the branch onto base before retrying the merge. "
             "When owned-agent restriction is enabled, only agents created "
-            "by this Weaver can be targeted."
+            "by this Engineer can be targeted."
         ),
         "inputSchema": {
             "type": "object",
@@ -1067,13 +1067,13 @@ WEAVER_TOOLS = [
         },
     },
     {
-        "name": "weaver_rebase",
+        "name": "engineer_rebase",
         "description": (
             "Rebase an agent's worktree branch onto its base branch. "
-            "Useful after weaver_merge reports conflicts. Returns "
+            "Useful after engineer_merge reports conflicts. Returns "
             "post-rebase merge readiness, and aborts automatically "
             "if conflicts still require manual resolution. When owned-agent "
-            "restriction is enabled, only agents created by this Weaver can "
+            "restriction is enabled, only agents created by this Engineer can "
             "be targeted."
         ),
         "inputSchema": {
@@ -1088,12 +1088,12 @@ WEAVER_TOOLS = [
         },
     },
     {
-        "name": "weaver_create_pr",
+        "name": "engineer_create_pr",
         "description": (
             "Create a GitHub pull request for an agent's worktree "
             "branch. Pushes the branch to origin and creates a PR "
             "via the GitHub CLI (gh). Returns the PR URL. When owned-agent "
-            "restriction is enabled, only agents created by this Weaver can "
+            "restriction is enabled, only agents created by this Engineer can "
             "be targeted."
         ),
         "inputSchema": {
@@ -1119,7 +1119,7 @@ WEAVER_TOOLS = [
         },
     },
     {
-        "name": "weaver_diff",
+        "name": "engineer_diff",
         "description": (
             "Get the diff of an agent's worktree branch against "
             "its base branch. Can return a structured summary, "
@@ -1128,7 +1128,7 @@ WEAVER_TOOLS = [
             "merge or PR. Reviewer workers may share the implementer's "
             "worktree, so targeting a reviewer reports that shared branch. "
             "When owned-agent restriction is enabled, only agents created "
-            "by this Weaver can be targeted."
+            "by this Engineer can be targeted."
         ),
         "inputSchema": {
             "type": "object",
@@ -1167,12 +1167,12 @@ WEAVER_TOOLS = [
         },
     },
     {
-        "name": "weaver_worktree_remove",
+        "name": "engineer_worktree_remove",
         "description": (
             "Remove an agent's worktree from disk. Use after merging "
             "to clean up. The agent's directory reverts to the "
             "original repo root. When owned-agent restriction is enabled, "
-            "only agents created by this Weaver can be targeted."
+            "only agents created by this Engineer can be targeted."
         ),
         "inputSchema": {
             "type": "object",
@@ -1186,7 +1186,7 @@ WEAVER_TOOLS = [
         },
     },
     {
-        "name": "weaver_worktree_checkpoint",
+        "name": "engineer_worktree_checkpoint",
         "description": (
             "Create a checkpoint commit on an agent's worktree. "
             "Commits all current changes with an auto-generated "
@@ -1194,7 +1194,7 @@ WEAVER_TOOLS = [
             "operations. When targeting a reviewer that shares an "
             "implementer's worktree, this snapshots the shared branch. "
             "When owned-agent restriction is enabled, only agents "
-            "created by this Weaver can be targeted."
+            "created by this Engineer can be targeted."
         ),
         "inputSchema": {
             "type": "object",

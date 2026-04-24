@@ -17,7 +17,7 @@ A group gives you:
 - Default settings for new agents and terminals
 - A dedicated grid in the UI
 - Broadcast to every session in that group
-- Per-group board, weaver, and dispatch defaults
+- Per-group board, engineer, and dispatch defaults
 - Optional filtering so the group only appears in windows where it has active sessions
 
 Configure group defaults from the gear icon on the group header. See [Group Settings](group-settings.md).

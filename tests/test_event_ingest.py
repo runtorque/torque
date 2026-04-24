@@ -394,23 +394,23 @@ class EventIngestClientAndDrainerTests(unittest.IsolatedAsyncioTestCase):
             bus = EventBus(state, EventLog(), panel_log=panel_log)
             bus.start()
             session_end_seen: list[str] = []
-            weaver_seen: list[str] = []
+            engineer_seen: list[str] = []
 
             async def on_session_end(ended_cell):
                 session_end_seen.append(ended_cell.id)
 
-            class FakeWeaverBuffer:
+            class FakeEngineerBuffer:
                 def on_agent_activity_change(self, changed_cell):
-                    weaver_seen.append(changed_cell.id)
+                    engineer_seen.append(changed_cell.id)
 
             bus.on_session_end = on_session_end
-            bus._weaver_buffer = FakeWeaverBuffer()
+            bus._engineer_buffer = FakeEngineerBuffer()
 
             drainer = EventIngestDrainer(client, bus, state, batch_size=10)
             processed = await drainer.drain_once()
             self.assertEqual(processed, 1)
             self.assertEqual(session_end_seen, [cell.id])
-            self.assertEqual(weaver_seen, [cell.id])
+            self.assertEqual(engineer_seen, [cell.id])
             self.assertEqual([evt["kind"] for evt in panel_seen], ["agent_finished"])
             self.assertEqual(cell.status, "idle")
             self.assertEqual(cell.last_summary, "finished from backlog")

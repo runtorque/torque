@@ -83,7 +83,7 @@ def _serialize_board_task(task):
     group_name = d.pop("group", d.pop("group_name", ""))
     assigned_engineer_id = (
         d.get("assigned_engineer_id", "")
-        or d.get("weaver_owner_id", "")
+        or d.get("engineer_owner_id", "")
     )
     return (
         d.get("id", ""),
@@ -164,7 +164,7 @@ def decode_board_task_row(row, cols):
     )
     d["worktree_boundary"] = _json_loads(d.get("worktree_boundary", "{}"), {})
     d.setdefault(
-        "weaver_owner_id",
+        "engineer_owner_id",
         str(d.get("assigned_engineer_id", "") or ""),
     )
     return d
@@ -189,7 +189,7 @@ def replace_auto_dispatch_queue(executor, group_name, entries):
         executor.execute(
             "INSERT INTO auto_dispatch_queue "
             "(group_name, position, task_id, agent_group, "
-            "max_concurrent, target_agent_id, weaver_owner_id, enqueued_at) "
+            "max_concurrent, target_agent_id, engineer_owner_id, enqueued_at) "
             "VALUES (?,?,?,?,?,?,?,?)",
             (
                 group_name,
@@ -198,7 +198,7 @@ def replace_auto_dispatch_queue(executor, group_name, entries):
                 item.get("agent_group", ""),
                 int(item.get("max_concurrent", 1) or 1),
                 item.get("target_agent_id", ""),
-                item.get("weaver_owner_id", ""),
+                item.get("engineer_owner_id", ""),
                 item.get("enqueued_at", ""),
             ),
         )
@@ -214,7 +214,7 @@ def decode_auto_dispatch_queue_rows(rows):
             agent_group,
             max_concurrent,
             target_agent_id,
-            weaver_owner_id,
+            engineer_owner_id,
             enqueued_at,
         ) = row
         queues.setdefault(group_name, []).append(
@@ -223,7 +223,7 @@ def decode_auto_dispatch_queue_rows(rows):
                 "agent_group": agent_group or "",
                 "max_concurrent": int(max_concurrent or 1),
                 "target_agent_id": target_agent_id or "",
-                "weaver_owner_id": weaver_owner_id or "",
+                "engineer_owner_id": engineer_owner_id or "",
                 "enqueued_at": enqueued_at or "",
             }
         )

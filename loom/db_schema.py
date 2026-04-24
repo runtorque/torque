@@ -118,7 +118,7 @@ CREATE TABLE IF NOT EXISTS group_settings (
     board_default_labels        TEXT NOT NULL DEFAULT '[]',
     board_default_lane          TEXT NOT NULL DEFAULT '',
     board_default_action        TEXT NOT NULL DEFAULT '',
-    weaver_agent_id             TEXT NOT NULL DEFAULT ''
+    engineer_agent_id             TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS board_tasks (
@@ -253,7 +253,7 @@ CREATE TABLE IF NOT EXISTS agent_messages (
 CREATE INDEX IF NOT EXISTS idx_agent_messages_agent ON agent_messages (agent_id);
 CREATE INDEX IF NOT EXISTS idx_agent_messages_task ON agent_messages (task_id);
 
-CREATE TABLE IF NOT EXISTS weaver_task_log (
+CREATE TABLE IF NOT EXISTS engineer_task_log (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     group_name  TEXT NOT NULL,
     task_id     TEXT NOT NULL,
@@ -264,10 +264,10 @@ CREATE TABLE IF NOT EXISTS weaver_task_log (
     agent_owned INTEGER NOT NULL DEFAULT 0,
     started_at  REAL NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_weaver_task_log_group
-    ON weaver_task_log(group_name, started_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_engineer_task_log_group
+    ON engineer_task_log(group_name, started_at DESC, id DESC);
 
-CREATE TABLE IF NOT EXISTS weaver_settings (
+CREATE TABLE IF NOT EXISTS engineer_settings (
     group_name         TEXT PRIMARY KEY,
     push_interval      INTEGER NOT NULL DEFAULT 60,
     max_interval       INTEGER NOT NULL DEFAULT 300,
@@ -285,14 +285,14 @@ CREATE TABLE IF NOT EXISTS weaver_settings (
     pending_note       TEXT NOT NULL DEFAULT '',
     pending_note_kind  TEXT NOT NULL DEFAULT '',
     enabled_events     TEXT NOT NULL DEFAULT '["agent_started","task_dispatched","task_derived","task_health_alert"]',
-    weaver_provider    TEXT NOT NULL DEFAULT '',
-    weaver_boot_command TEXT NOT NULL DEFAULT '',
-    weaver_model       TEXT NOT NULL DEFAULT '',
-    weaver_reasoning_effort TEXT NOT NULL DEFAULT '',
-    weaver_directory   TEXT NOT NULL DEFAULT '',
-    weaver_profile     TEXT NOT NULL DEFAULT '',
-    weaver_shell       TEXT NOT NULL DEFAULT '',
-    weaver_tab_color   TEXT NOT NULL DEFAULT '',
+    engineer_provider    TEXT NOT NULL DEFAULT '',
+    engineer_boot_command TEXT NOT NULL DEFAULT '',
+    engineer_model       TEXT NOT NULL DEFAULT '',
+    engineer_reasoning_effort TEXT NOT NULL DEFAULT '',
+    engineer_directory   TEXT NOT NULL DEFAULT '',
+    engineer_profile     TEXT NOT NULL DEFAULT '',
+    engineer_shell       TEXT NOT NULL DEFAULT '',
+    engineer_tab_color   TEXT NOT NULL DEFAULT '',
     pending_question_set_at REAL NOT NULL DEFAULT 0,
     pending_question_actor_id TEXT NOT NULL DEFAULT ''
 );
@@ -328,7 +328,7 @@ CREATE TABLE IF NOT EXISTS digest_sent_events (
 CREATE INDEX IF NOT EXISTS idx_digest_sent_recipient
     ON digest_sent_events (recipient_id, delivered_at DESC);
 
-CREATE TABLE IF NOT EXISTS weaver_journal (
+CREATE TABLE IF NOT EXISTS engineer_journal (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     group_name  TEXT NOT NULL,
     timestamp   REAL NOT NULL,
@@ -336,8 +336,8 @@ CREATE TABLE IF NOT EXISTS weaver_journal (
     entry       TEXT NOT NULL,
     author_cell_id TEXT NOT NULL DEFAULT ''
 );
-CREATE INDEX IF NOT EXISTS idx_weaver_journal_group
-    ON weaver_journal(group_name, id DESC);
+CREATE INDEX IF NOT EXISTS idx_engineer_journal_group
+    ON engineer_journal(group_name, id DESC);
 
 CREATE TABLE IF NOT EXISTS playbook_candidates (
     id                     TEXT PRIMARY KEY,
@@ -395,7 +395,7 @@ CREATE TABLE IF NOT EXISTS auto_dispatch_queue (
     agent_group      TEXT NOT NULL DEFAULT '',
     max_concurrent   INTEGER NOT NULL DEFAULT 1,
     target_agent_id  TEXT NOT NULL DEFAULT '',
-    weaver_owner_id  TEXT NOT NULL DEFAULT '',
+    engineer_owner_id  TEXT NOT NULL DEFAULT '',
     enqueued_at      TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (group_name, position)
 );
@@ -532,22 +532,256 @@ CREATE INDEX IF NOT EXISTS idx_mcp_health_events_recent
     ON mcp_health_events(timestamp DESC, surface, tool_name, event);
 """
 
+_LEGACY_ENGINEER_PREFIX = "wea" + "ver"
+
+
+def _legacy_engineer_name(suffix: str) -> str:
+    return f"{_LEGACY_ENGINEER_PREFIX}_{suffix}"
+
+
+def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        (table,),
+    ).fetchone()
+    return bool(row)
+
+
+def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    if not _table_exists(conn, table):
+        return False
+    try:
+        conn.execute(f"SELECT {column} FROM {table} LIMIT 0")
+        return True
+    except sqlite3.OperationalError:
+        return False
+
+
+def _rename_table_if_needed(
+        conn: sqlite3.Connection, old_name: str, new_name: str) -> bool:
+    if not _table_exists(conn, old_name) or _table_exists(conn, new_name):
+        return False
+    conn.execute(f"ALTER TABLE {old_name} RENAME TO {new_name}")
+    return True
+
+
+def _rename_column_if_needed(
+        conn: sqlite3.Connection, table: str,
+        old_name: str, new_name: str) -> bool:
+    if (
+            not _column_exists(conn, table, old_name)
+            or _column_exists(conn, table, new_name)):
+        return False
+    conn.execute(
+        f"ALTER TABLE {table} RENAME COLUMN {old_name} TO {new_name}"
+    )
+    return True
+
+
+def _migrate_legacy_engineer_schema_names(conn: sqlite3.Connection) -> None:
+    changed = False
+    for suffix in ("settings", "task_log", "journal"):
+        changed = (
+            _rename_table_if_needed(
+                conn,
+                _legacy_engineer_name(suffix),
+                f"engineer_{suffix}",
+            )
+            or changed
+        )
+
+    for suffix in (
+        "provider",
+        "boot_command",
+        "model",
+        "reasoning_effort",
+        "directory",
+        "profile",
+        "shell",
+        "tab_color",
+    ):
+        changed = (
+            _rename_column_if_needed(
+                conn,
+                "engineer_settings",
+                _legacy_engineer_name(suffix),
+                f"engineer_{suffix}",
+            )
+            or changed
+        )
+
+    changed = (
+        _rename_column_if_needed(
+            conn,
+            "group_settings",
+            _legacy_engineer_name("agent_id"),
+            "engineer_agent_id",
+        )
+        or changed
+    )
+    changed = (
+        _rename_column_if_needed(
+            conn,
+            "auto_dispatch_queue",
+            _legacy_engineer_name("owner_id"),
+            "engineer_owner_id",
+        )
+        or changed
+    )
+    changed = (
+        _rename_column_if_needed(
+            conn,
+            "agents",
+            "created_by_" + _LEGACY_ENGINEER_PREFIX + "_id",
+            "created_by_engineer_id",
+        )
+        or changed
+    )
+    changed = (
+        _rename_column_if_needed(
+            conn,
+            "board_tasks",
+            _legacy_engineer_name("owner_id"),
+            "engineer_owner_id",
+        )
+        or changed
+    )
+    if changed:
+        conn.commit()
+
+
+def _migrate_legacy_engineer_payload_names(conn: sqlite3.Connection) -> None:
+    legacy_label = f"loom:{_LEGACY_ENGINEER_PREFIX}-message"
+    engineer_label = "loom:engineer-message"
+    legacy_action = _legacy_engineer_name("message")
+    changed = False
+
+    try:
+        rows = conn.execute(
+            "SELECT id, labels, messages FROM board_tasks"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+    for task_id, labels_json, messages_json in rows:
+        labels_changed = False
+        try:
+            labels = json.loads(labels_json or "[]")
+        except (json.JSONDecodeError, TypeError):
+            labels = []
+        if isinstance(labels, list):
+            next_labels = []
+            for label in labels:
+                if label == legacy_label:
+                    next_labels.append(engineer_label)
+                    labels_changed = True
+                else:
+                    next_labels.append(label)
+        else:
+            next_labels = labels
+
+        messages_changed = False
+        try:
+            messages = json.loads(messages_json or "[]")
+        except (json.JSONDecodeError, TypeError):
+            messages = []
+        if isinstance(messages, list):
+            next_messages = []
+            for message in messages:
+                if isinstance(message, dict):
+                    message = dict(message)
+                    if message.get("action") == legacy_action:
+                        message["action"] = "engineer_message"
+                        messages_changed = True
+                next_messages.append(message)
+        else:
+            next_messages = messages
+
+        if labels_changed or messages_changed:
+            conn.execute(
+                "UPDATE board_tasks SET labels=?, messages=? WHERE id=?",
+                (
+                    json.dumps(next_labels),
+                    json.dumps(next_messages),
+                    task_id,
+                ),
+            )
+            changed = True
+
+    try:
+        conn.execute(
+            "UPDATE panel_events SET kind=? WHERE kind=?",
+            ("engineer_message", legacy_action),
+        )
+        changed = changed or bool(conn.total_changes)
+    except sqlite3.OperationalError:
+        pass
+    try:
+        conn.execute(
+            "UPDATE agent_messages SET action=? WHERE action=?",
+            ("engineer_message", legacy_action),
+        )
+        changed = changed or bool(conn.total_changes)
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        ui_rows = conn.execute("SELECT key, value FROM ui_state").fetchall()
+    except sqlite3.OperationalError:
+        ui_rows = []
+    for key, value in ui_rows:
+        if value == _LEGACY_ENGINEER_PREFIX:
+            conn.execute(
+                "UPDATE ui_state SET value=? WHERE key=?",
+                ("engineer", key),
+            )
+            changed = True
+            continue
+        if not isinstance(value, str) or _LEGACY_ENGINEER_PREFIX not in value:
+            continue
+        try:
+            parsed = json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        def rewrite(obj):
+            nonlocal changed
+            if obj == _LEGACY_ENGINEER_PREFIX:
+                changed = True
+                return "engineer"
+            if isinstance(obj, list):
+                return [rewrite(item) for item in obj]
+            if isinstance(obj, dict):
+                return {k: rewrite(v) for k, v in obj.items()}
+            return obj
+
+        rewritten = rewrite(parsed)
+        if rewritten != parsed:
+            conn.execute(
+                "UPDATE ui_state SET value=? WHERE key=?",
+                (json.dumps(rewritten), key),
+            )
+
+    if changed:
+        conn.commit()
+
+
 def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
     """Create tables and apply in-place SQLite migrations."""
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
+    _migrate_legacy_engineer_schema_names(conn)
     conn.executescript(_SCHEMA_SQL)
     # Migrate: add journal author provenance for engineer-scoped reads
     try:
-        conn.execute("SELECT author_cell_id FROM weaver_journal LIMIT 0")
+        conn.execute("SELECT author_cell_id FROM engineer_journal LIMIT 0")
     except sqlite3.OperationalError:
         conn.execute(
-            "ALTER TABLE weaver_journal ADD COLUMN "
+            "ALTER TABLE engineer_journal ADD COLUMN "
             "author_cell_id TEXT NOT NULL DEFAULT ''")
         conn.commit()
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_weaver_journal_group_author "
-        "ON weaver_journal(group_name, author_cell_id, id DESC)")
+        "CREATE INDEX IF NOT EXISTS idx_engineer_journal_group_author "
+        "ON engineer_journal(group_name, author_cell_id, id DESC)")
     conn.commit()
     # Migrate: add slug columns to existing tables
     for table in ("agents", "groups", "board_tasks"):
@@ -838,14 +1072,14 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
             "ALTER TABLE group_settings ADD COLUMN "
             "worktree_merge_preserve_diff INTEGER NOT NULL DEFAULT 0")
         conn.commit()
-    # Migrate: add weaver_agent_id column to group_settings
+    # Migrate: add engineer_agent_id column to group_settings
     try:
         conn.execute(
-            "SELECT weaver_agent_id FROM group_settings LIMIT 0")
+            "SELECT engineer_agent_id FROM group_settings LIMIT 0")
     except sqlite3.OperationalError:
         conn.execute(
             "ALTER TABLE group_settings ADD COLUMN "
-            "weaver_agent_id TEXT NOT NULL DEFAULT ''")
+            "engineer_agent_id TEXT NOT NULL DEFAULT ''")
         conn.commit()
     # Migrate: add checkpoint_on_progress to group_settings + agents
     for table in ("group_settings", "agents"):
@@ -868,36 +1102,36 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
                 f"ALTER TABLE {table} ADD COLUMN "
                 f"{col} TEXT NOT NULL DEFAULT 'iterm2'")
             conn.commit()
-    # Migrate: add pending_question column to weaver_settings
+    # Migrate: add pending_question column to engineer_settings
     try:
         conn.execute(
-            "SELECT pending_question FROM weaver_settings LIMIT 0")
+            "SELECT pending_question FROM engineer_settings LIMIT 0")
     except sqlite3.OperationalError:
         try:
             conn.execute(
-                "ALTER TABLE weaver_settings ADD COLUMN "
+                "ALTER TABLE engineer_settings ADD COLUMN "
                 "pending_question TEXT NOT NULL DEFAULT ''")
             conn.commit()
         except sqlite3.OperationalError:
             pass  # table may not exist yet
     try:
         conn.execute(
-            "SELECT pending_question_set_at FROM weaver_settings LIMIT 0")
+            "SELECT pending_question_set_at FROM engineer_settings LIMIT 0")
     except sqlite3.OperationalError:
         try:
             conn.execute(
-                "ALTER TABLE weaver_settings ADD COLUMN "
+                "ALTER TABLE engineer_settings ADD COLUMN "
                 "pending_question_set_at REAL NOT NULL DEFAULT 0")
             conn.commit()
         except sqlite3.OperationalError:
             pass  # table may not exist yet
     try:
         conn.execute(
-            "SELECT pending_question_actor_id FROM weaver_settings LIMIT 0")
+            "SELECT pending_question_actor_id FROM engineer_settings LIMIT 0")
     except sqlite3.OperationalError:
         try:
             conn.execute(
-                "ALTER TABLE weaver_settings ADD COLUMN "
+                "ALTER TABLE engineer_settings ADD COLUMN "
                 "pending_question_actor_id TEXT NOT NULL DEFAULT ''")
             conn.commit()
         except sqlite3.OperationalError:
@@ -905,52 +1139,52 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
     for col in ("pending_note", "pending_note_kind"):
         try:
             conn.execute(
-                f"SELECT {col} FROM weaver_settings LIMIT 0")
+                f"SELECT {col} FROM engineer_settings LIMIT 0")
         except sqlite3.OperationalError:
             try:
                 conn.execute(
-                    f"ALTER TABLE weaver_settings ADD COLUMN "
+                    f"ALTER TABLE engineer_settings ADD COLUMN "
                     f"{col} TEXT NOT NULL DEFAULT ''")
                 conn.commit()
             except sqlite3.OperationalError:
                 pass
     try:
         conn.execute(
-            "SELECT restrict_to_created_agents FROM weaver_settings LIMIT 0")
+            "SELECT restrict_to_created_agents FROM engineer_settings LIMIT 0")
     except sqlite3.OperationalError:
         try:
             conn.execute(
-                "ALTER TABLE weaver_settings ADD COLUMN "
+                "ALTER TABLE engineer_settings ADD COLUMN "
                 "restrict_to_created_agents INTEGER NOT NULL DEFAULT 0")
             conn.commit()
         except sqlite3.OperationalError:
             pass
-    # Migrate: add weaver_provider and launch override columns
-    for col in ("weaver_provider", "weaver_boot_command",
-                "weaver_model", "weaver_reasoning_effort",
-                "weaver_directory", "weaver_profile",
-                "weaver_shell", "weaver_tab_color"):
+    # Migrate: add engineer_provider and launch override columns
+    for col in ("engineer_provider", "engineer_boot_command",
+                "engineer_model", "engineer_reasoning_effort",
+                "engineer_directory", "engineer_profile",
+                "engineer_shell", "engineer_tab_color"):
         try:
             conn.execute(
-                f"SELECT {col} FROM weaver_settings LIMIT 0")
+                f"SELECT {col} FROM engineer_settings LIMIT 0")
         except sqlite3.OperationalError:
             try:
                 conn.execute(
-                    f"ALTER TABLE weaver_settings ADD COLUMN "
+                    f"ALTER TABLE engineer_settings ADD COLUMN "
                     f"{col} TEXT NOT NULL DEFAULT ''")
                 conn.commit()
             except sqlite3.OperationalError:
                 pass
     try:
         conn.execute(
-            "SELECT heartbeat_interval FROM weaver_settings LIMIT 0")
+            "SELECT heartbeat_interval FROM engineer_settings LIMIT 0")
     except sqlite3.OperationalError:
         try:
             conn.execute(
-                "ALTER TABLE weaver_settings ADD COLUMN "
+                "ALTER TABLE engineer_settings ADD COLUMN "
                 "heartbeat_interval INTEGER NOT NULL DEFAULT 300")
             conn.execute(
-                "UPDATE weaver_settings "
+                "UPDATE engineer_settings "
                 "SET heartbeat_interval = max_interval")
             conn.commit()
         except sqlite3.OperationalError:
@@ -965,11 +1199,11 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
     ):
         try:
             conn.execute(
-                f"SELECT {col} FROM weaver_settings LIMIT 0")
+                f"SELECT {col} FROM engineer_settings LIMIT 0")
         except sqlite3.OperationalError:
             try:
                 conn.execute(
-                    f"ALTER TABLE weaver_settings ADD COLUMN "
+                    f"ALTER TABLE engineer_settings ADD COLUMN "
                     f"{col} "
                     f"{'INTEGER' if col == 'default_worker_concurrency' else 'TEXT'} "
                     f"NOT NULL DEFAULT {default}")
@@ -978,7 +1212,7 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
                 pass
     try:
         conn.execute(
-            "UPDATE weaver_settings "
+            "UPDATE engineer_settings "
             "SET enabled_events = ? "
             "WHERE enabled_events = ?",
             (
@@ -1015,12 +1249,12 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
                 pass
     try:
         conn.execute(
-            "SELECT weaver_owner_id FROM auto_dispatch_queue LIMIT 0")
+            "SELECT engineer_owner_id FROM auto_dispatch_queue LIMIT 0")
     except sqlite3.OperationalError:
         try:
             conn.execute(
                 "ALTER TABLE auto_dispatch_queue ADD COLUMN "
-                "weaver_owner_id TEXT NOT NULL DEFAULT ''")
+                "engineer_owner_id TEXT NOT NULL DEFAULT ''")
             conn.commit()
         except sqlite3.OperationalError:
             pass
@@ -1052,6 +1286,7 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
             migrated = True
     if migrated:
         conn.commit()
+    _migrate_legacy_engineer_payload_names(conn)
     # Backfill agent history for existing agents
     backfill_agent_history()
     # Set schema version if not present

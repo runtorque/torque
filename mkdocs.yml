@@ -40,7 +40,7 @@ nav:
       - Agent Templates: agent-templates.md
       - Worktrees: worktrees.md
       - Schedules: schedules.md
-      - Weaver: weaver.md
+      - Engineer: engineer.md
   - Operate Loom:
       - Operations: operations.md
       - Troubleshooting: troubleshooting.md
@@ -63,5 +63,5 @@ nav:
           - Pipelines: plans/pipelines.md
           - Standalone Application: plans/standalone_application.md
           - Task Board Plan: plans/task-board.md
-          - Weaver Plan: plans/weaver.md
+          - Engineer Plan: plans/engineer.md
           - Workflow Automation: plans/workflow-automation.md

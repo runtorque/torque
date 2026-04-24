@@ -24,7 +24,7 @@ function createSandbox() {
   sandbox.send = function(message) {
     sandbox.sendCalls.push(message);
   };
-  sandbox.openWeaverLaunchDialog = function(group, agentId) {
+  sandbox.openEngineerLaunchDialog = function(group, agentId) {
     sandbox.modalCalls.push({ group, agentId: agentId || '' });
   };
   sandbox.global = sandbox;
@@ -38,28 +38,28 @@ function loadScript(context, relPath) {
   vm.runInContext(source, context, { filename });
 }
 
-test('relaunchAgent routes stopped designated weavers through the launch dialog', () => {
+test('relaunchAgent routes stopped designated engineers through the launch dialog', () => {
   const sandbox = createSandbox();
-  sandbox.state.group_settings.alpha = { weaver_agent_id: 'weaver-1' };
-  sandbox.state.agents['weaver-1'] = {
-    id: 'weaver-1',
+  sandbox.state.group_settings.alpha = { engineer_agent_id: 'engineer-1' };
+  sandbox.state.agents['engineer-1'] = {
+    id: 'engineer-1',
     group: 'alpha',
     status: 'stopped',
   };
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/commands.js');
 
-  vm.runInContext(`relaunchAgent('weaver-1')`, context);
+  vm.runInContext(`relaunchAgent('engineer-1')`, context);
 
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.modalCalls)), [
-    { group: 'alpha', agentId: 'weaver-1' },
+    { group: 'alpha', agentId: 'engineer-1' },
   ]);
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), []);
 });
 
 test('relaunchAgent keeps normal agents on the plain relaunch path', () => {
   const sandbox = createSandbox();
-  sandbox.state.group_settings.alpha = { weaver_agent_id: 'weaver-1' };
+  sandbox.state.group_settings.alpha = { engineer_agent_id: 'engineer-1' };
   sandbox.state.agents['agent-1'] = {
     id: 'agent-1',
     group: 'alpha',
@@ -76,11 +76,11 @@ test('relaunchAgent keeps normal agents on the plain relaunch path', () => {
   ]);
 });
 
-test('designated weaver context menu shows Restart Weaver and routes through the launch dialog', () => {
+test('designated engineer context menu shows Restart Engineer and routes through the launch dialog', () => {
   const sandbox = createSandbox();
-  sandbox.state.group_settings.alpha = { weaver_agent_id: 'weaver-1' };
-  sandbox.state.agents['weaver-1'] = {
-    id: 'weaver-1',
+  sandbox.state.group_settings.alpha = { engineer_agent_id: 'engineer-1' };
+  sandbox.state.agents['engineer-1'] = {
+    id: 'engineer-1',
     group: 'alpha',
     status: 'stopped',
     cell_type: 'agent',
@@ -98,26 +98,26 @@ test('designated weaver context menu shows Restart Weaver and routes through the
     stopPropagation() {},
   };
   sandbox.__event = event;
-  vm.runInContext(`onCellContextMenu(__event, 'weaver-1')`, context);
+  vm.runInContext(`onCellContextMenu(__event, 'engineer-1')`, context);
 
   assert.equal(sandbox.contextMenuCalls.length, 1);
   const items = JSON.parse(JSON.stringify(sandbox.contextMenuCalls[0].items));
-  assert.equal(items.some((item) => item.label === 'Restart Weaver…'), true);
+  assert.equal(items.some((item) => item.label === 'Restart Engineer…'), true);
   assert.equal(items.some((item) => item.label === 'Relaunch'), false);
 
-  const restartItem = sandbox.contextMenuCalls[0].items.find((item) => item.label === 'Restart Weaver…');
+  const restartItem = sandbox.contextMenuCalls[0].items.find((item) => item.label === 'Restart Engineer…');
   assert.ok(restartItem);
   vm.runInContext(restartItem.action, context);
 
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.modalCalls)), [
-    { group: 'alpha', agentId: 'weaver-1' },
+    { group: 'alpha', agentId: 'engineer-1' },
   ]);
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), []);
 });
 
 test('normal agent context menu keeps the existing relaunch action', () => {
   const sandbox = createSandbox();
-  sandbox.state.group_settings.alpha = { weaver_agent_id: 'weaver-1' };
+  sandbox.state.group_settings.alpha = { engineer_agent_id: 'engineer-1' };
   sandbox.state.agents['agent-1'] = {
     id: 'agent-1',
     group: 'alpha',
@@ -143,5 +143,5 @@ test('normal agent context menu keeps the existing relaunch action', () => {
   const items = JSON.parse(JSON.stringify(sandbox.contextMenuCalls[0].items));
   assert.equal(items.some((item) => item.label === 'Relaunch'), true);
   assert.equal(items.some((item) => item.label === 'Restart…'), true);
-  assert.equal(items.some((item) => item.label === 'Restart Weaver…'), false);
+  assert.equal(items.some((item) => item.label === 'Restart Engineer…'), false);
 });

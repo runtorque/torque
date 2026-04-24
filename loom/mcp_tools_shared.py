@@ -21,7 +21,7 @@ from .config import log
 from .deploy_state import architect_deploy_state_payload
 from .digest_routing import resolve_digest_recipients
 from .mcp_retry import derive_idempotency_key
-from .mcp_weaver_tools.shared import (
+from .mcp_engineer_tools.shared import (
     active_worker_ids as _active_worker_ids,
     blocked_dependency_titles as _blocked_dependency_titles,
     format_worktree_conflicts as _format_worktree_conflicts,
@@ -37,14 +37,14 @@ from .identity import prepend_agent_identity_anchor
 from .state import (
     ARCHIVED_LANE,
     board_task_is_closed,
-    get_weaver_notification_preset,
+    get_engineer_notification_preset,
     normalize_default_worker_concurrency,
-    normalize_weaver_digest_verbosity,
+    normalize_engineer_digest_verbosity,
     task_counts_as_done,
 )
 from .task_health import HEALTH_SEVERITY
-from .weaver_hints import compute_weaver_hints
-from .weaver_session_map import build_weaver_session_map
+from .engineer_hints import compute_engineer_hints
+from .engineer_session_map import build_engineer_session_map
 from .worktree_streams import compute_worktree_streams, member_task_ids_for_stream
 
 _STREAM_STATES = (
@@ -106,7 +106,7 @@ def _effective_owner_engineer_id(cell) -> str:
     owner_id = str(getattr(cell, "owner_engineer_id", "") or "").strip()
     if owner_id:
         return owner_id
-    return str(getattr(cell, "created_by_weaver_id", "") or "").strip()
+    return str(getattr(cell, "created_by_engineer_id", "") or "").strip()
 
 
 def _effective_assigned_engineer_id(task) -> str:
@@ -1308,7 +1308,7 @@ def _architect_engineer_pending_question_json(
     if not engineer_group:
         payload["note"] = "Engineer has no group."
         return _compact_json(payload), False
-    ws = state.get_weaver_settings(engineer_group)
+    ws = state.get_engineer_settings(engineer_group)
     question = str(getattr(ws, "pending_question", "") or "")
     pending_owner_id = str(
         getattr(ws, "pending_question_actor_id", "") or ""
@@ -1520,9 +1520,9 @@ def _deliver_architect_engineer_message(state, sender, recipient, *,
         mark_progress=False,
     )
     if str(getattr(recipient, "kind", "") or "").strip() == "engineer":
-        recipient.pending_weaver_message = True
+        recipient.pending_engineer_message = True
     if str(getattr(sender, "kind", "") or "").strip() == "engineer":
-        sender.pending_weaver_message = False
+        sender.pending_engineer_message = False
     state._emit_agent(sender)
     state._emit_agent(recipient)
     return shared
@@ -1751,13 +1751,13 @@ def build_scoped_state_view(state, *, caller_kind: str, caller_id: str,
         group_settings = state.get_group_settings(caller_group)
         view_state.group_settings[caller_group] = replace(
             group_settings,
-            weaver_agent_id=str(getattr(caller_cell, "id", "") or ""),
+            engineer_agent_id=str(getattr(caller_cell, "id", "") or ""),
         )
-    view_state.agent_is_visible_to_weaver = (
-        lambda _weaver_id, agent_id: str(agent_id or "").strip()
+    view_state.agent_is_visible_to_engineer = (
+        lambda _engineer_id, agent_id: str(agent_id or "").strip()
         in visible_agent_ids
     )
-    view_state.weaver_restricts_to_created_agents = lambda _group: False
+    view_state.engineer_restricts_to_created_agents = lambda _group: False
     if caller_kind == "engineer":
         real_journal_read = state.journal_read
         caller_author_id = str(caller_id or "").strip()
@@ -1782,44 +1782,44 @@ def build_scoped_state_view(state, *, caller_kind: str, caller_id: str,
     return view_state
 
 
-def _agent_visible_to_weaver(state, weaver_cell, agent_id: str) -> bool:
-    if not weaver_cell:
+def _agent_visible_to_engineer(state, engineer_cell, agent_id: str) -> bool:
+    if not engineer_cell:
         return False
-    return state.agent_is_visible_to_weaver(weaver_cell.id, agent_id)
+    return state.agent_is_visible_to_engineer(engineer_cell.id, agent_id)
 
 
-def _task_agent_payload_for_weaver(state, weaver_cell, agent_id: str) -> dict:
+def _task_agent_payload_for_engineer(state, engineer_cell, agent_id: str) -> dict:
     """Return safe agent details for task views without leaking hidden agents."""
     if not agent_id:
         return {}
     agent = state.agents.get(agent_id)
     if not agent or agent.cell_type != "agent":
-        if weaver_cell and state.weaver_restricts_to_created_agents(
-                weaver_cell.group):
+        if engineer_cell and state.engineer_restricts_to_created_agents(
+                engineer_cell.group):
             return {"agent_hidden": True}
         return {}
-    if _agent_visible_to_weaver(state, weaver_cell, agent_id):
+    if _agent_visible_to_engineer(state, engineer_cell, agent_id):
         return {
             "agent_name": agent.slug or agent.name,
             "agent_status": agent.status,
         }
-    if state.weaver_restricts_to_created_agents(weaver_cell.group):
+    if state.engineer_restricts_to_created_agents(engineer_cell.group):
         return {"agent_hidden": True}
     return {}
 
 
-def _stream_payload_for_weaver(state, weaver_cell, stream: dict) -> dict:
+def _stream_payload_for_engineer(state, engineer_cell, stream: dict) -> dict:
     """Return a stream payload with hidden agent identity scrubbed."""
     payload = dict(stream or {})
     agent_id = str(payload.get("agent_id", "") or "").strip()
     if not agent_id:
         return payload
-    if _agent_visible_to_weaver(state, weaver_cell, agent_id):
+    if _agent_visible_to_engineer(state, engineer_cell, agent_id):
         return payload
     payload["agent_id"] = ""
     payload["agent_name"] = ""
     payload["agent_slug"] = ""
-    if state.weaver_restricts_to_created_agents(weaver_cell.group):
+    if state.engineer_restricts_to_created_agents(engineer_cell.group):
         payload["agent_hidden"] = True
     return payload
 
@@ -2060,7 +2060,7 @@ def _agent_health_payload_for_response(state, cell, *, current_task=None,
     }
 
 
-def _weaver_streams(state, weaver_cell, group: str, *,
+def _engineer_streams(state, engineer_cell, group: str, *,
                     include_merged: bool = True,
                     include_orphaned: bool = False,
                     visibility_limit: int = 10,
@@ -2068,7 +2068,7 @@ def _weaver_streams(state, weaver_cell, group: str, *,
                     branch_filter: str = "",
                     repo_root_filter: str = "") -> list[dict]:
     streams = [
-        _stream_payload_for_weaver(state, weaver_cell, stream)
+        _stream_payload_for_engineer(state, engineer_cell, stream)
         for stream in compute_worktree_streams(
             state,
             group=group,
@@ -2158,7 +2158,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                                idempotency_key: str = ""):
     """Execute a scoped orchestration tool call and return (text, is_error)."""
 
-    _weaver_cell, _weaver_group, caller_kind, auth_error, auth_structured = authorize_caller(
+    _engineer_cell, _engineer_group, caller_kind, auth_error, auth_structured = authorize_caller(
         state, caller_kind=caller_kind, caller_id=caller_id
     )
     if auth_error:
@@ -2170,7 +2170,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
 
     view_state = build_scoped_state_view(
         state, caller_kind=caller_kind, caller_id=caller_id,
-        caller_cell=_weaver_cell, caller_group=_weaver_group,
+        caller_cell=_engineer_cell, caller_group=_engineer_group,
     )
     real_state = state
     state = view_state
@@ -2192,15 +2192,15 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         return _architect_workspace_overview_json(
             real_state,
             caller_id,
-            _weaver_cell,
-            _weaver_group,
+            _engineer_cell,
+            _engineer_group,
         ), False
 
     if tool_name == "events_recent" and caller_kind == "architect":
         return _architect_events_recent_json(
             real_state,
             caller_id,
-            _weaver_group,
+            _engineer_group,
             args,
         )
 
@@ -2213,7 +2213,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
 
     if tool_name == "deploy_state" and caller_kind == "architect":
         return _compact_json(
-            architect_deploy_state_payload(real_state, _weaver_group)
+            architect_deploy_state_payload(real_state, _engineer_group)
         ), False
 
     if tool_name == "task_chain" and caller_kind == "architect":
@@ -2224,16 +2224,16 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         )
 
     if tool_name == "board_summary":
-        summary_streams = _weaver_streams(
+        summary_streams = _engineer_streams(
             state,
-            _weaver_cell,
-            _weaver_group,
+            _engineer_cell,
+            _engineer_group,
             include_merged=False,
             visibility_limit=5,
         )
         tasks = [
             t for t in state.board_tasks.values()
-            if t.group == _weaver_group
+            if t.group == _engineer_group
         ]
         archived_tasks = [t for t in tasks if t.lane == ARCHIVED_LANE]
         visible_tasks = [t for t in tasks if t.lane != ARCHIVED_LANE]
@@ -2341,9 +2341,9 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         for lane_name in sorted(extra_lanes):
             ordered_lanes[lane_name] = extra_lanes[lane_name]
 
-        gs = state.get_group_settings(_weaver_group)
-        weaver_id = gs.weaver_agent_id or (
-            _weaver_cell.id if _weaver_cell and _weaver_cell.group == _weaver_group
+        gs = state.get_group_settings(_engineer_group)
+        engineer_id = gs.engineer_agent_id or (
+            _engineer_cell.id if _engineer_cell and _engineer_cell.group == _engineer_group
             else ""
         )
         agent_status_counts = {
@@ -2361,9 +2361,9 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         agents = [
             c for c in state.agents.values()
             if c.cell_type == "agent"
-            and c.group == _weaver_group
-            and c.id != weaver_id
-            and _agent_visible_to_weaver(state, _weaver_cell, c.id)
+            and c.group == _engineer_group
+            and c.id != engineer_id
+            and _agent_visible_to_engineer(state, _engineer_cell, c.id)
         ]
         agents.sort(key=lambda c: ((c.slug or c.name or c.id).lower(), c.id))
 
@@ -2437,7 +2437,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             )
 
         summary = {
-            "group": _weaver_group,
+            "group": _engineer_group,
             "tasks_total": len(visible_tasks),
             "archived_total": len(archived_tasks),
             "lanes": ordered_lanes,
@@ -2482,10 +2482,10 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 "truncated": len(boundary_items) > 10,
             },
         }
-        hints = compute_weaver_hints(
+        hints = compute_engineer_hints(
             summary_state,
-            _weaver_group,
-            weaver_id=_weaver_cell.id if _weaver_cell else "",
+            _engineer_group,
+            engineer_id=_engineer_cell.id if _engineer_cell else "",
         )
         summary["hints"] = {
             "count": len(hints),
@@ -2501,25 +2501,25 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
 
     if tool_name == "session_map":
         return json.dumps(
-            build_weaver_session_map(
+            build_engineer_session_map(
                 state,
-                _weaver_group,
-                weaver_cell=_weaver_cell,
+                _engineer_group,
+                engineer_cell=_engineer_cell,
             )
         ), False
 
     if tool_name == "streams_list":
-        streams = _weaver_streams(
+        streams = _engineer_streams(
             state,
-            _weaver_cell,
-            _weaver_group,
+            _engineer_cell,
+            _engineer_group,
             state_filter=str(args.get("state", "") or "").strip(),
             branch_filter=str(args.get("branch", "") or "").strip(),
             repo_root_filter=str(args.get("repo_root", "") or "").strip(),
             include_orphaned=bool(args.get("include_orphaned", False)),
         )
         return json.dumps({
-            "group": _weaver_group,
+            "group": _engineer_group,
             "count": len(streams),
             "streams": streams,
         }), False
@@ -2532,12 +2532,12 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             if not task_id:
                 return "Task not found", True
             task = state.board_tasks.get(task_id)
-            if not task or task.group != _weaver_group:
+            if not task or task.group != _engineer_group:
                 return "Task not found", True
-        streams = _weaver_streams(
+        streams = _engineer_streams(
             state,
-            _weaver_cell,
-            _weaver_group,
+            _engineer_cell,
+            _engineer_group,
             include_orphaned=True,
         )
         stream, error_text = _resolve_stream_payload(
@@ -2559,8 +2559,8 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
 
         lanes = {}
         for t in state.board_tasks.values():
-            # Always scope to weaver's group
-            if t.group != _weaver_group:
+            # Always scope to engineer's group
+            if t.group != _engineer_group:
                 continue
             if t.lane == ARCHIVED_LANE and lane_filter != ARCHIVED_LANE:
                 continue
@@ -2578,8 +2578,8 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             agent_name = ""
             agent_hidden = False
             if t.agent_id:
-                agent_payload = _task_agent_payload_for_weaver(
-                    state, _weaver_cell, t.agent_id
+                agent_payload = _task_agent_payload_for_engineer(
+                    state, _engineer_cell, t.agent_id
                 )
                 agent_name = agent_payload.get("agent_name", "")
                 agent_hidden = bool(agent_payload.get("agent_hidden"))
@@ -2630,7 +2630,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         if not tid:
             return "Task not found", True
         task = state.board_tasks.get(tid)
-        if not task or task.group != _weaver_group:
+        if not task or task.group != _engineer_group:
             return "Task not found", True
         d = serialize_task_for_mcp(task, tasks_by_id=state.board_tasks)
         d.update(_task_health_payload_for_response(state, task))
@@ -2638,10 +2638,10 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         d["action"] = task.action_name
         if caller_kind == "architect":
             d["created_by"] = _task_created_by_classifier(task)
-        if task.agent_id and not _agent_visible_to_weaver(
-                state, _weaver_cell, task.agent_id):
+        if task.agent_id and not _agent_visible_to_engineer(
+                state, _engineer_cell, task.agent_id):
             d["agent_id"] = ""
-            if state.weaver_restricts_to_created_agents(_weaver_group):
+            if state.engineer_restricts_to_created_agents(_engineer_group):
                 d["agent_hidden"] = True
         # Include recent messages (last 10 only)
         if task.messages:
@@ -2649,8 +2649,8 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         # Enrich with agent info
         if task.agent_id:
             d.update(
-                _task_agent_payload_for_weaver(
-                    state, _weaver_cell, task.agent_id
+                _task_agent_payload_for_engineer(
+                    state, _engineer_cell, task.agent_id
                 )
             )
         # Auto-include pipeline chain for pipeline tasks
@@ -2658,13 +2658,13 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             chain = state.board_get_chain(tid)
             d["pipeline_chain"] = []
             for ct in chain:
-                if ct.group != _weaver_group:
+                if ct.group != _engineer_group:
                     continue
                 agent_slug = ""
                 agent_hidden = False
                 if ct.agent_id:
-                    agent_payload = _task_agent_payload_for_weaver(
-                        state, _weaver_cell, ct.agent_id
+                    agent_payload = _task_agent_payload_for_engineer(
+                        state, _engineer_cell, ct.agent_id
                     )
                     agent_slug = agent_payload.get("agent_name", "")
                     agent_hidden = bool(agent_payload.get("agent_hidden"))
@@ -2748,9 +2748,9 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         for c in state.agents.values():
             if c.cell_type != "agent":
                 continue
-            if c.group != _weaver_group:
+            if c.group != _engineer_group:
                 continue
-            if not _agent_visible_to_weaver(state, _weaver_cell, c.id):
+            if not _agent_visible_to_engineer(state, _engineer_cell, c.id):
                 continue
             current_task = state.agent_current_task(c.id)
             agents.append({
@@ -2796,7 +2796,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             },
         }
         current_task = state.agent_current_task(agent_id)
-        if current_task and current_task.group != _weaver_group:
+        if current_task and current_task.group != _engineer_group:
             current_task = None
         d.update(
             _agent_health_payload_for_response(
@@ -2822,7 +2822,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             }
             boundary_tasks = []
             for t in state.board_tasks.values():
-                if t.group != _weaver_group:
+                if t.group != _engineer_group:
                     continue
                 boundary = getattr(t, "worktree_boundary", {}) or {}
                 if not isinstance(boundary, dict):
@@ -2881,7 +2881,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         # Task history — all tasks ever assigned to this agent
         tasks = []
         for t in state.board_tasks.values():
-            if t.group != _weaver_group:
+            if t.group != _engineer_group:
                 continue
             if t.agent_id != agent_id:
                 continue
@@ -2906,7 +2906,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             d["tasks"] = tasks
 
         # Current task (may differ from tasks list if unlinked)
-        if current_task and current_task.group == _weaver_group:
+        if current_task and current_task.group == _engineer_group:
             d["current_task_id"] = current_task.id
 
         return json.dumps(d), False
@@ -2914,7 +2914,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
     if tool_name == "actions_list":
         result = await handle_command({
             "cmd": "list_actions",
-            "group": args.get("group", "") or _weaver_group,
+            "group": args.get("group", "") or _engineer_group,
         })
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
@@ -2924,7 +2924,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         result = await handle_command({
             "cmd": "get_action",
             "name": args.get("name", ""),
-            "group": args.get("group", "") or _weaver_group,
+            "group": args.get("group", "") or _engineer_group,
         })
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
@@ -2993,7 +2993,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             requested_group = str(args.get("group", "") or "").strip()
             if not requested_group:
                 return "group is required", True
-            if requested_group != _weaver_group:
+            if requested_group != _engineer_group:
                 return "group must match the architect's group", True
             assigned_engineer_ident = str(
                 args.get("assigned_engineer_id", "") or ""
@@ -3018,7 +3018,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 "cmd": "board_add_task",
                 "task": title,
                 "description": args.get("description", ""),
-                "group": _weaver_group,
+                "group": _engineer_group,
                 "lane": args.get("lane", ""),
                 "labels": args.get("labels", []),
                 "assigned_engineer_id": assigned_engineer_id,
@@ -3050,7 +3050,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             "cmd": "board_add_task",
             "task": args.get("title", ""),
             "description": args.get("description", ""),
-            "group": _weaver_group,
+            "group": _engineer_group,
             "lane": args.get("lane", ""),
             "action_name": args.get("action", ""),
             "action_vars": args.get("action_vars", {}),
@@ -3185,7 +3185,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         tid = _resolve_task(state, args.get("task", ""))
         if not tid:
             return "Task not found", True
-        actor_name = getattr(_weaver_cell, "name", "") or caller_kind
+        actor_name = getattr(_engineer_cell, "name", "") or caller_kind
         payload = {
             "cmd": "board_verify_task",
             "id": tid,
@@ -3270,8 +3270,8 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         payload = {
             "cmd": "dispatch_task",
             "id": tid,
-            "_weaver_dispatch_group": _weaver_group,
-            "_weaver_dispatch_id": _weaver_cell.id,
+            "_engineer_dispatch_group": _engineer_group,
+            "_engineer_dispatch_id": _engineer_cell.id,
         }
         agent_ident = args.get("agent", "")
         if agent_ident:
@@ -3283,13 +3283,13 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             payload["agent_id"] = agent_id
         else:
             payload["create_agent"] = True
-            payload["_created_by_weaver_id"] = _weaver_cell.id
+            payload["_created_by_engineer_id"] = _engineer_cell.id
             payload["owner_engineer_id"] = str(caller_id or "").strip()
-            if _weaver_cell:
-                if _weaver_cell.session_id:
-                    payload["target_session_id"] = _weaver_cell.session_id
-                if _weaver_cell.window_id:
-                    payload["target_window_id"] = _weaver_cell.window_id
+            if _engineer_cell:
+                if _engineer_cell.session_id:
+                    payload["target_session_id"] = _engineer_cell.session_id
+                if _engineer_cell.window_id:
+                    payload["target_window_id"] = _engineer_cell.window_id
             agent_type = args.get("agent_type", "")
             if agent_type:
                 payload["agent_type"] = agent_type
@@ -3317,8 +3317,8 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         raw_max_concurrent = args.get("max_concurrent", None)
         if raw_max_concurrent is None:
             max_concurrent = normalize_default_worker_concurrency(
-                state.get_weaver_settings(
-                    _weaver_group).default_worker_concurrency
+                state.get_engineer_settings(
+                    _engineer_group).default_worker_concurrency
             )
         elif not isinstance(raw_max_concurrent, int) \
                 or raw_max_concurrent < 1:
@@ -3327,10 +3327,10 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             max_concurrent = raw_max_concurrent
 
         dispatch_lane = (
-            state.get_group_settings(_weaver_group).dispatch_lane
+            state.get_group_settings(_engineer_group).dispatch_lane
             or "In Progress"
         )
-        active_agents = _active_worker_ids(state, _weaver_group)
+        active_agents = _active_worker_ids(state, _engineer_group)
         active_before = len(active_agents)
         group_agents = {}
         seen_task_ids = set()
@@ -3384,9 +3384,9 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             if not task:
                 _fail(idx, task_ident, "task_not_found", "Task not found.")
                 continue
-            if task.group != _weaver_group:
+            if task.group != _engineer_group:
                 _fail(idx, task_ident, "wrong_group",
-                      "Task is outside the weaver's group.", tid)
+                      "Task is outside the engineer's group.", tid)
                 continue
             if task.agent_id:
                 _fail(idx, task_ident, "already_assigned",
@@ -3426,14 +3426,14 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 needs_capacity = not _is_busy_agent(state, target_agent_id)
             if needs_capacity and len(active_agents) >= max_concurrent:
                 queue_entry = state.auto_dispatch_queue_add(
-                    _weaver_group,
+                    _engineer_group,
                     tid,
                     agent_group=agent_group,
                     max_concurrent=max_concurrent,
                     target_agent_id=target_agent_id,
-                    weaver_owner_id=_weaver_cell.id,
+                    engineer_owner_id=_engineer_cell.id,
                 )
-                queue = state.auto_dispatch_queues.get(_weaver_group, [])
+                queue = state.auto_dispatch_queues.get(_engineer_group, [])
                 item = {
                     "index": idx,
                     "task": task_ident,
@@ -3456,14 +3456,14 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             payload = {
                 "cmd": "dispatch_task",
                 "id": tid,
-                "_weaver_dispatch_group": _weaver_group,
-                "_weaver_dispatch_id": _weaver_cell.id,
+                "_engineer_dispatch_group": _engineer_group,
+                "_engineer_dispatch_id": _engineer_cell.id,
             }
             if target_agent_id:
                 payload["agent_id"] = target_agent_id
             else:
                 payload["create_agent"] = True
-                payload["_created_by_weaver_id"] = _weaver_cell.id
+                payload["_created_by_engineer_id"] = _engineer_cell.id
                 payload["owner_engineer_id"] = str(caller_id or "").strip()
 
             result = await handle_command(payload)
@@ -3556,9 +3556,9 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         else:
             events = []
 
-        # Scope to weaver's group
+        # Scope to engineer's group
         events = [e for e in events
-                  if e.get("group", "") == _weaver_group]
+                  if e.get("group", "") == _engineer_group]
         if type_filter:
             events = [e for e in events if e.get("kind") in type_filter]
 
@@ -3569,38 +3569,38 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
     if tool_name == "launch_settings":
         fields = {}
         mapping = {
-            "provider": "weaver_provider",
-            "command": "weaver_boot_command",
-            "model": "weaver_model",
-            "reasoning_effort": "weaver_reasoning_effort",
+            "provider": "engineer_provider",
+            "command": "engineer_boot_command",
+            "model": "engineer_model",
+            "reasoning_effort": "engineer_reasoning_effort",
         }
         for src, dest in mapping.items():
             if src in args:
                 fields[dest] = str(args.get(src, "") or "").strip()
         result = await handle_command({
-            "cmd": "weaver_update_settings",
-            "group": _weaver_group,
+            "cmd": "engineer_update_settings",
+            "group": _engineer_group,
             **fields,
         })
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
         return json.dumps({"type": "ok", "settings": asdict(
-            state.get_weaver_settings(_weaver_group))}), False
+            state.get_engineer_settings(_engineer_group))}), False
 
     if tool_name == "notifications":
-        ws = state.get_weaver_settings(_weaver_group)
+        ws = state.get_engineer_settings(_engineer_group)
         fields = {}
         preset_name = str(args.get("preset", "") or "").strip().lower()
         if preset_name:
             try:
-                fields.update(get_weaver_notification_preset(preset_name))
+                fields.update(get_engineer_notification_preset(preset_name))
             except ValueError:
                 return (
                     "Unknown notification preset. Use quiet, normal, or noisy.",
                     True,
                 )
         if "digest_verbosity" in args:
-            fields["digest_verbosity"] = normalize_weaver_digest_verbosity(
+            fields["digest_verbosity"] = normalize_engineer_digest_verbosity(
                 args["digest_verbosity"]
             )
         if "push_interval" in args:
@@ -3620,19 +3620,19 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             fields["enabled_events"] = sorted(current)
 
         result = await handle_command({
-            "cmd": "weaver_update_settings",
-            "group": _weaver_group,
+            "cmd": "engineer_update_settings",
+            "group": _engineer_group,
             **fields,
         })
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
         return json.dumps({"type": "ok", "settings": asdict(
-            state.get_weaver_settings(_weaver_group))}), False
+            state.get_engineer_settings(_engineer_group))}), False
 
     if tool_name == "resume":
         result = await handle_command({
-            "cmd": "weaver_resume",
-            "group": _weaver_group,
+            "cmd": "engineer_resume",
+            "group": _engineer_group,
             "engineer_id": str(caller_id or "").strip(),
         })
         if result and result.get("type") == "error":
@@ -3831,8 +3831,8 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 return result.get("message", "Unknown error"), True
             return json.dumps(result), False
         result = await handle_command({
-            "cmd": "weaver_journal_append",
-            "group": _weaver_group,
+            "cmd": "engineer_journal_append",
+            "group": _engineer_group,
             "entry_type": args.get("type", "observation"),
             "entry": args.get("entry", ""),
             "author_cell_id": str(caller_id or "").strip(),
@@ -3860,7 +3860,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 and not include_cross_author:
             author_cell_id = str(caller_id or "").strip()
         entries = real_state.journal_read(
-            _weaver_group,
+            _engineer_group,
             args.get("tail", 20),
             args.get("type", ""),
             author_cell_id=author_cell_id,
@@ -4043,7 +4043,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             return agent_error, True
 
         result = await handle_command({
-            "cmd": "weaver_message",
+            "cmd": "engineer_message",
             "agent_id": agent_id,
             "message": args.get("message", ""),
         })
@@ -4060,7 +4060,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             "cmd": "board_add_task",
             "task": question,
             "description": str(args.get("description", "") or ""),
-            "group": _weaver_group,
+            "group": _engineer_group,
             "lane": "Backlog",
             "labels": ["loom:human", "architect-ask"],
         })
@@ -4097,8 +4097,8 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             return "Question is required", True
 
         result = await handle_command({
-            "cmd": "weaver_ask",
-            "group": _weaver_group,
+            "cmd": "engineer_ask",
+            "group": _engineer_group,
             "question": question,
             "engineer_id": str(caller_id or "").strip(),
         })
@@ -4122,8 +4122,8 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             return "kind must be 'note' or 'question'", True
 
         result = await handle_command({
-            "cmd": "weaver_note",
-            "group": _weaver_group,
+            "cmd": "engineer_note",
+            "group": _engineer_group,
             "message": message,
             "kind": kind,
         })

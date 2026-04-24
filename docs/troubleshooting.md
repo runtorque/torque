@@ -2,7 +2,7 @@
 
 This page is for operating Loom when something is wrong. Start with the symptom that matches what you see, then follow the smallest recovery step that fixes it.
 
-For command details, see [CLI Reference](cli.md). For the underlying behavior of agents, worktrees, and orchestration, use [Agents & Sessions](agents-and-sessions.md), [Worktrees](worktrees.md), and [Weaver](weaver.md).
+For command details, see [CLI Reference](cli.md). For the underlying behavior of agents, worktrees, and orchestration, use [Agents & Sessions](agents-and-sessions.md), [Worktrees](worktrees.md), and [Engineer](engineer.md).
 
 ## First checks
 
@@ -209,7 +209,7 @@ This usually means the UI is connected to an old daemon instance or the daemon l
 - A human-in-the-loop ask task is still waiting for an answer.
 - The schedule exists but is disabled or timed differently than expected.
 
-## Weaver is not progressing or event digests look wrong
+## Engineer is not progressing or event digests look wrong
 
 ### Symptoms
 
@@ -225,7 +225,7 @@ This usually means the UI is connected to an old daemon instance or the daemon l
 4. Relaunch the designated engineer if the session itself stopped.
 5. Use the journal and recent event views in the engineer workflow to recover context before dispatching more work.
 
-See [Weaver](weaver.md) for the full operating model and MCP tool surface.
+See [Engineer](engineer.md) for the full operating model and MCP tool surface.
 
 ## Broken or stale agent state recovery
 

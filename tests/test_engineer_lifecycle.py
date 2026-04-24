@@ -139,7 +139,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         )
         worker.kind = "worker"
         worker.owner_engineer_id = engineer.id
-        worker.created_by_weaver_id = engineer.id
+        worker.created_by_engineer_id = engineer.id
         state._emit_agent(worker)
         return worker
 
@@ -197,7 +197,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(group, "loom")
             return temp_dir
 
-        def fake_resolve_weaver_launch_config(group, *, base_dir="",
+        def fake_resolve_engineer_launch_config(group, *, base_dir="",
                                               explicit_template="",
                                               overrides=None):
             self.assertEqual(group, "loom")
@@ -225,7 +225,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 },
                 state,
                 resolve_base_dir=fake_resolve_base_dir,
-                resolve_weaver_launch_config=fake_resolve_weaver_launch_config,
+                resolve_engineer_launch_config=fake_resolve_engineer_launch_config,
                 create_agent_with_config=service.create_agent_with_config,
                 send_agent_prompt=fake_send_agent_prompt,
             )
@@ -262,7 +262,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             del group
             return "/tmp/project"
 
-        def fake_resolve_weaver_launch_config(*args, **kwargs):
+        def fake_resolve_engineer_launch_config(*args, **kwargs):
             raise AssertionError("should not resolve launch config")
 
         async def fake_create_agent_with_config(*args, **kwargs):
@@ -275,7 +275,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             {"name": "Alice"},
             state,
             resolve_base_dir=fake_resolve_base_dir,
-            resolve_weaver_launch_config=fake_resolve_weaver_launch_config,
+            resolve_engineer_launch_config=fake_resolve_engineer_launch_config,
             create_agent_with_config=fake_create_agent_with_config,
             send_agent_prompt=fake_send_agent_prompt,
         )
@@ -346,7 +346,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(worker.kind, "worker")
         self.assertFalse(worker.persistent)
         self.assertEqual(worker.owner_engineer_id, "")
-        self.assertEqual(worker.created_by_weaver_id, "")
+        self.assertEqual(worker.created_by_engineer_id, "")
         self.assertEqual(worker.hired_by_architect_id, "")
         self.assertEqual(worker.template, "worker/reviewer")
         self.assertEqual(len(bridge.create_session_calls), 1)
@@ -410,7 +410,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(group, "loom")
             return temp_dir
 
-        def fake_resolve_weaver_launch_config(group, *, base_dir="",
+        def fake_resolve_engineer_launch_config(group, *, base_dir="",
                                               explicit_template="",
                                               overrides=None):
             self.assertEqual(group, "loom")
@@ -435,7 +435,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 },
                 state,
                 resolve_base_dir=fake_resolve_base_dir,
-                resolve_weaver_launch_config=fake_resolve_weaver_launch_config,
+                resolve_engineer_launch_config=fake_resolve_engineer_launch_config,
                 create_agent_with_config=service.create_agent_with_config,
                 send_agent_prompt=fake_send_agent_prompt,
             )
@@ -480,7 +480,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             async def fake_send_agent_prompt(*args, **kwargs):
                 del args, kwargs
 
-            def fake_resolve_weaver_launch_config(*args, **kwargs):
+            def fake_resolve_engineer_launch_config(*args, **kwargs):
                 del args, kwargs
                 cfg = self._launch_config(subdir)
                 cfg["worktree"] = launch_worktree
@@ -492,7 +492,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
                     {"name": "Productmind", "group": "loom"},
                     state,
                     resolve_base_dir=fake_resolve_base_dir,
-                    resolve_weaver_launch_config=fake_resolve_weaver_launch_config,
+                    resolve_engineer_launch_config=fake_resolve_engineer_launch_config,
                     create_agent_with_config=service.create_agent_with_config,
                     send_agent_prompt=fake_send_agent_prompt,
                 )
@@ -565,7 +565,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             tab_color="",
         )
         worker.owner_engineer_id = engineer.id
-        worker.created_by_weaver_id = engineer.id
+        worker.created_by_engineer_id = engineer.id
         task = state.board_add_task(
             "Review implementation",
             "loom",
@@ -587,7 +587,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, {"transferred_agents": 1, "transferred_tasks": 1})
         self.assertEqual(worker.owner_engineer_id, "")
-        self.assertEqual(worker.created_by_weaver_id, "")
+        self.assertEqual(worker.created_by_engineer_id, "")
         self.assertEqual(state.board_tasks[task.id].assigned_engineer_id, "")
         self.assertNotIn(engineer.id, state.agents)
         self.assertEqual(removed, [engineer.id])
@@ -703,7 +703,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(group, "loom")
             return temp_dir
 
-        def fake_resolve_weaver_launch_config(group, *, base_dir="",
+        def fake_resolve_engineer_launch_config(group, *, base_dir="",
                                               explicit_template="",
                                               overrides=None):
             self.assertEqual(group, "loom")
@@ -719,11 +719,11 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 worktree_mgr=_FakeWorktreeManager(),
                 resolve_base_dir=fake_resolve_base_dir,
                 resolve_agent_launch_config=lambda *a, **k: {},
-                resolve_weaver_launch_config=fake_resolve_weaver_launch_config,
+                resolve_engineer_launch_config=fake_resolve_engineer_launch_config,
                 apply_persistent_prompt=lambda *a, **k: None,
                 build_cell_persistent_prompt=lambda *a, **k: "persistent",
                 persistent_prompt_filename=lambda cell: f"{cell.id}.md",
-                is_designated_weaver=lambda cell: False,
+                is_designated_engineer=lambda cell: False,
                 panel_event=lambda *args, **kwargs: panel_events.append(args),
             )
 
@@ -749,11 +749,11 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             worktree_mgr=_FakeWorktreeManager(),
             resolve_base_dir=lambda group: temp_dir,
             resolve_agent_launch_config=lambda *a, **k: {},
-            resolve_weaver_launch_config=lambda *a, **k: {},
+            resolve_engineer_launch_config=lambda *a, **k: {},
             apply_persistent_prompt=lambda *a, **k: None,
             build_cell_persistent_prompt=lambda *a, **k: "",
             persistent_prompt_filename=lambda cell: f"{cell.id}.md",
-            is_designated_weaver=lambda cell: False,
+            is_designated_engineer=lambda cell: False,
         )
         self.assertTrue(second["already_hired"])
 
@@ -784,11 +784,11 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 worktree_mgr=_FakeWorktreeManager(),
                 resolve_base_dir=fake_resolve_base_dir,
                 resolve_agent_launch_config=lambda *a, **k: {},
-                resolve_weaver_launch_config=lambda *a, **k: self._launch_config(temp_dir),
+                resolve_engineer_launch_config=lambda *a, **k: self._launch_config(temp_dir),
                 apply_persistent_prompt=lambda *a, **k: None,
                 build_cell_persistent_prompt=lambda *a, **k: "persistent",
                 persistent_prompt_filename=lambda cell: f"{cell.id}.md",
-                is_designated_weaver=lambda cell: False,
+                is_designated_engineer=lambda cell: False,
             )
 
         self.assertEqual(result["type"], "error")
@@ -846,11 +846,11 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             worktree_mgr=_FakeWorktreeManager(),
             resolve_base_dir=fake_resolve_base_dir,
             resolve_agent_launch_config=lambda *args, **kwargs: {},
-            resolve_weaver_launch_config=lambda *args, **kwargs: {},
+            resolve_engineer_launch_config=lambda *args, **kwargs: {},
             apply_persistent_prompt=lambda *args, **kwargs: None,
             build_cell_persistent_prompt=lambda *args, **kwargs: "",
             persistent_prompt_filename=lambda cell: f"{cell.id}.md",
-            is_designated_weaver=lambda cell: False,
+            is_designated_engineer=lambda cell: False,
         )
 
         self.assertEqual(result, {"type": "error", "message": "Agent not found"})
@@ -869,9 +869,9 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             return temp_dir
 
         def fake_resolve_agent_launch_config(*args, **kwargs):
-            raise AssertionError("engineer relaunch must use weaver launch config")
+            raise AssertionError("engineer relaunch must use engineer launch config")
 
-        def fake_resolve_weaver_launch_config(group, *, base_dir="",
+        def fake_resolve_engineer_launch_config(group, *, base_dir="",
                                               explicit_template="",
                                               overrides=None):
             self.assertEqual(group, "loom")
@@ -895,11 +895,11 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 worktree_mgr=_FakeWorktreeManager(),
                 resolve_base_dir=fake_resolve_base_dir,
                 resolve_agent_launch_config=fake_resolve_agent_launch_config,
-                resolve_weaver_launch_config=fake_resolve_weaver_launch_config,
+                resolve_engineer_launch_config=fake_resolve_engineer_launch_config,
                 apply_persistent_prompt=fake_apply_persistent_prompt,
                 build_cell_persistent_prompt=fake_build_cell_persistent_prompt,
                 persistent_prompt_filename=lambda cell: f"{cell.id}.md",
-                is_designated_weaver=lambda cell: False,
+                is_designated_engineer=lambda cell: False,
             )
 
         self.assertIsNone(result)
@@ -915,7 +915,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.server_agent_mod.ENGINEER_MCP_ENTRYPOINT,
         )
 
-    async def test_relaunch_stopped_architect_uses_weaver_launch_and_architect_mcp_entrypoint(self):
+    async def test_relaunch_stopped_architect_uses_engineer_launch_and_architect_mcp_entrypoint(self):
         state = self._make_state()
         architect = self._add_architect_cell(state, "arch-1", "Loomer")
         architect.status = "stopped"
@@ -928,14 +928,14 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
         def fake_resolve_agent_launch_config(*args, **kwargs):
             raise AssertionError(
-                "architect relaunch must use weaver launch config")
+                "architect relaunch must use engineer launch config")
 
-        def fake_resolve_weaver_launch_config(group, *, base_dir="",
+        def fake_resolve_engineer_launch_config(group, *, base_dir="",
                                               explicit_template="",
                                               overrides=None):
             self.assertEqual(group, "loom")
             self.assertEqual(overrides, {})
-            # Weaver launch config sets worktree=False — architects
+            # Engineer launch config sets worktree=False — architects
             # must NOT spawn a worktree on relaunch.
             cfg = self._launch_config(temp_dir)
             cfg["worktree"] = False
@@ -950,11 +950,11 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 worktree_mgr=_FakeWorktreeManager(),
                 resolve_base_dir=fake_resolve_base_dir,
                 resolve_agent_launch_config=fake_resolve_agent_launch_config,
-                resolve_weaver_launch_config=fake_resolve_weaver_launch_config,
+                resolve_engineer_launch_config=fake_resolve_engineer_launch_config,
                 apply_persistent_prompt=lambda *a, **k: None,
                 build_cell_persistent_prompt=lambda *a, **k: "",
                 persistent_prompt_filename=lambda cell: f"{cell.id}.md",
-                is_designated_weaver=lambda cell: False,
+                is_designated_engineer=lambda cell: False,
             )
 
         self.assertIsNone(result)
@@ -992,7 +992,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             del group
             return temp_dir
 
-        def fake_resolve_weaver_launch_config(group, *, base_dir="",
+        def fake_resolve_engineer_launch_config(group, *, base_dir="",
                                               explicit_template="",
                                               overrides=None):
             del group, base_dir, explicit_template, overrides
@@ -1012,11 +1012,11 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 worktree_mgr=_FakeWorktreeManager(),
                 resolve_base_dir=fake_resolve_base_dir,
                 resolve_agent_launch_config=lambda *a, **k: {},
-                resolve_weaver_launch_config=fake_resolve_weaver_launch_config,
+                resolve_engineer_launch_config=fake_resolve_engineer_launch_config,
                 apply_persistent_prompt=lambda *a, **k: None,
                 build_cell_persistent_prompt=lambda *a, **k: "persistent",
                 persistent_prompt_filename=lambda cell: f"{cell.id}.md",
-                is_designated_weaver=lambda cell: False,
+                is_designated_engineer=lambda cell: False,
                 send_agent_prompt=fake_send_agent_prompt,
             )
 
@@ -1068,11 +1068,11 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             worktree_mgr=_FakeWorktreeManager(),
             resolve_base_dir=fake_resolve_base_dir,
             resolve_agent_launch_config=lambda *a, **k: {},
-            resolve_weaver_launch_config=lambda *a, **k: {},
+            resolve_engineer_launch_config=lambda *a, **k: {},
             apply_persistent_prompt=lambda *a, **k: None,
             build_cell_persistent_prompt=lambda *a, **k: "",
             persistent_prompt_filename=lambda cell: f"{cell.id}.md",
-            is_designated_weaver=lambda cell: False,
+            is_designated_engineer=lambda cell: False,
             send_agent_prompt=noop,
         )
 
@@ -1090,11 +1090,11 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             del group
             return temp_dir
 
-        def fake_resolve_weaver_launch_config(group, *, base_dir="",
+        def fake_resolve_engineer_launch_config(group, *, base_dir="",
                                               explicit_template="",
                                               overrides=None):
             del group, base_dir, explicit_template, overrides
-            # Simulate the bug trigger: group-level weaver settings can't
+            # Simulate the bug trigger: group-level engineer settings can't
             # describe this engineer's specific provider, so the resolver
             # returns an empty agent_type/command.  These must NOT clobber
             # the cell's persisted values.
@@ -1126,11 +1126,11 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 worktree_mgr=_FakeWorktreeManager(),
                 resolve_base_dir=fake_resolve_base_dir,
                 resolve_agent_launch_config=lambda *a, **k: {},
-                resolve_weaver_launch_config=fake_resolve_weaver_launch_config,
+                resolve_engineer_launch_config=fake_resolve_engineer_launch_config,
                 apply_persistent_prompt=lambda *a, **k: None,
                 build_cell_persistent_prompt=lambda *a, **k: "",
                 persistent_prompt_filename=lambda cell: f"{cell.id}.md",
-                is_designated_weaver=lambda cell: False,
+                is_designated_engineer=lambda cell: False,
             )
 
         self.assertEqual(engineer.agent_type, "codex")

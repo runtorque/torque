@@ -1,13 +1,13 @@
-"""Deterministic Session Map read model for Weaver recovery."""
+"""Deterministic Session Map read model for Engineer recovery."""
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from .mcp_weaver_tools.shared import worktree_boundary_overview
+from .mcp_engineer_tools.shared import worktree_boundary_overview
 from .state import ARCHIVED_LANE, board_task_is_closed
 from .task_health import HEALTH_SEVERITY
-from .weaver_hints import compute_weaver_hints
+from .engineer_hints import compute_engineer_hints
 from .worktree_streams import (
     compute_worktree_streams,
     stream_identity_for_agent,
@@ -26,7 +26,7 @@ _QUEUE_STATE_ORDER = {
 _JOURNAL_TYPES = {"decision", "plan", "checkpoint"}
 
 
-def build_weaver_session_map(state, group: str, *, weaver_cell=None,
+def build_engineer_session_map(state, group: str, *, engineer_cell=None,
                              item_limit: int = _ITEM_LIMIT,
                              journal_scan_limit: int = _JOURNAL_SCAN_LIMIT) -> dict:
     """Return a deterministic structured orchestration snapshot for ``group``."""
@@ -42,7 +42,7 @@ def build_weaver_session_map(state, group: str, *, weaver_cell=None,
     archived_tasks = [task for task in tasks if getattr(task, "lane", "") == ARCHIVED_LANE]
 
     streams = [
-        _scrub_stream(state, weaver_cell, stream)
+        _scrub_stream(state, engineer_cell, stream)
         for stream in compute_worktree_streams(
             state,
             group=group,
@@ -60,20 +60,20 @@ def build_weaver_session_map(state, group: str, *, weaver_cell=None,
     branch_boundaries = _build_branch_boundaries(
         state,
         streams,
-        weaver_cell=weaver_cell,
+        engineer_cell=engineer_cell,
         limit=item_limit,
     )
     agents = _build_agents(
         state,
         group,
-        weaver_cell=weaver_cell,
+        engineer_cell=engineer_cell,
         limit=item_limit,
     )
     queued_follow_up = _build_queued_follow_up(
         state,
         group,
         streams,
-        weaver_cell=weaver_cell,
+        engineer_cell=engineer_cell,
         limit=item_limit,
     )
     journal = _build_journal(
@@ -85,7 +85,7 @@ def build_weaver_session_map(state, group: str, *, weaver_cell=None,
     hints = _build_hints(
         state,
         group,
-        weaver_cell=weaver_cell,
+        engineer_cell=engineer_cell,
         limit=item_limit,
     )
 
@@ -278,7 +278,7 @@ def _build_verification(tasks, *, limit: int) -> dict:
     }
 
 
-def _build_branch_boundaries(state, streams: list[dict], *, weaver_cell, limit: int) -> dict:
+def _build_branch_boundaries(state, streams: list[dict], *, engineer_cell, limit: int) -> dict:
     items = []
     seen = set()
     for stream in streams:
@@ -321,7 +321,7 @@ def _build_branch_boundaries(state, streams: list[dict], *, weaver_cell, limit: 
             or str(boundary_data.get("recorded_by_agent_id", "") or "").strip()
         )
         agent = state.agents.get(agent_id) if agent_id else None
-        if agent_id and _agent_visible(state, weaver_cell, agent_id):
+        if agent_id and _agent_visible(state, engineer_cell, agent_id):
             overview["agent_id"] = agent_id
             overview["agent_name"] = str(
                 stream.get("agent_name", "")
@@ -333,7 +333,7 @@ def _build_branch_boundaries(state, streams: list[dict], *, weaver_cell, limit: 
         elif agent_id:
             overview["agent_id"] = ""
             overview["agent_name"] = ""
-            if _hidden_agent_marker(state, weaver_cell):
+            if _hidden_agent_marker(state, engineer_cell):
                 overview["agent_hidden"] = True
         items.append(overview)
     items.sort(
@@ -351,11 +351,11 @@ def _build_branch_boundaries(state, streams: list[dict], *, weaver_cell, limit: 
     }
 
 
-def _build_agents(state, group: str, *, weaver_cell, limit: int) -> dict:
-    weaver_id = (
-        getattr(weaver_cell, "id", "") or ""
-        if weaver_cell and getattr(weaver_cell, "group", "") == group
-        else state.get_group_settings(group).weaver_agent_id or ""
+def _build_agents(state, group: str, *, engineer_cell, limit: int) -> dict:
+    engineer_id = (
+        getattr(engineer_cell, "id", "") or ""
+        if engineer_cell and getattr(engineer_cell, "group", "") == group
+        else state.get_group_settings(group).engineer_agent_id or ""
     )
     counts = {
         "idle": 0,
@@ -371,9 +371,9 @@ def _build_agents(state, group: str, *, weaver_cell, limit: int) -> dict:
             continue
         if getattr(cell, "group", "") != group:
             continue
-        if weaver_id and getattr(cell, "id", "") == weaver_id:
+        if engineer_id and getattr(cell, "id", "") == engineer_id:
             continue
-        if not _agent_visible(state, weaver_cell, getattr(cell, "id", "")):
+        if not _agent_visible(state, engineer_cell, getattr(cell, "id", "")):
             continue
         total += 1
         if getattr(cell, "needs_attention", False):
@@ -419,7 +419,7 @@ def _build_agents(state, group: str, *, weaver_cell, limit: int) -> dict:
 
 
 def _build_queued_follow_up(state, group: str, streams: list[dict], *,
-                            weaver_cell, limit: int) -> dict:
+                            engineer_cell, limit: int) -> dict:
     items = []
     for stream in streams:
         for queue_item in stream.get("queue_items", []) or []:
@@ -455,7 +455,7 @@ def _build_queued_follow_up(state, group: str, streams: list[dict], *,
             "max_concurrent": int(getattr(entry, "max_concurrent", 1) or 1),
             "enqueued_at": str(getattr(entry, "enqueued_at", "") or "").strip(),
         }
-        if target_agent_id and _agent_visible(state, weaver_cell, target_agent_id):
+        if target_agent_id and _agent_visible(state, engineer_cell, target_agent_id):
             item["target_agent_id"] = target_agent_id
             item["target_agent_name"] = (
                 getattr(target_agent, "name", "")
@@ -465,7 +465,7 @@ def _build_queued_follow_up(state, group: str, streams: list[dict], *,
         elif target_agent_id:
             item["target_agent_id"] = ""
             item["target_agent_name"] = ""
-            if _hidden_agent_marker(state, weaver_cell):
+            if _hidden_agent_marker(state, engineer_cell):
                 item["target_agent_hidden"] = True
         items.append(item)
 
@@ -500,11 +500,11 @@ def _build_journal(state, group: str, *, limit: int, journal_scan_limit: int) ->
     }
 
 
-def _build_hints(state, group: str, *, weaver_cell, limit: int) -> dict:
-    hints = compute_weaver_hints(
+def _build_hints(state, group: str, *, engineer_cell, limit: int) -> dict:
+    hints = compute_engineer_hints(
         state,
         group,
-        weaver_id=getattr(weaver_cell, "id", "") or "",
+        engineer_id=getattr(engineer_cell, "id", "") or "",
     )
     return {
         "count": len(hints),
@@ -523,34 +523,34 @@ def _stream_state_counts(streams: list[dict]) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
-def _scrub_stream(state, weaver_cell, stream: dict) -> dict:
+def _scrub_stream(state, engineer_cell, stream: dict) -> dict:
     payload = dict(stream or {})
     agent_id = str(payload.get("agent_id", "") or "").strip()
     if not agent_id:
         return payload
-    if _agent_visible(state, weaver_cell, agent_id):
+    if _agent_visible(state, engineer_cell, agent_id):
         return payload
     payload["agent_id"] = ""
     payload["agent_name"] = ""
     payload["agent_slug"] = ""
-    if _hidden_agent_marker(state, weaver_cell):
+    if _hidden_agent_marker(state, engineer_cell):
         payload["agent_hidden"] = True
     return payload
 
 
-def _agent_visible(state, weaver_cell, agent_id: str) -> bool:
+def _agent_visible(state, engineer_cell, agent_id: str) -> bool:
     agent_id = str(agent_id or "").strip()
     if not agent_id:
         return False
-    if not weaver_cell:
+    if not engineer_cell:
         return True
-    return state.agent_is_visible_to_weaver(getattr(weaver_cell, "id", ""), agent_id)
+    return state.agent_is_visible_to_engineer(getattr(engineer_cell, "id", ""), agent_id)
 
 
-def _hidden_agent_marker(state, weaver_cell) -> bool:
+def _hidden_agent_marker(state, engineer_cell) -> bool:
     return bool(
-        weaver_cell
-        and state.weaver_restricts_to_created_agents(getattr(weaver_cell, "group", ""))
+        engineer_cell
+        and state.engineer_restricts_to_created_agents(getattr(engineer_cell, "group", ""))
     )
 
 

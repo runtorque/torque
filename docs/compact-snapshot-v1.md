@@ -216,23 +216,23 @@ Response shape:
 { "type": "archived_tasks", "group": "loom", "board_tasks": { "task-id": {} } }
 ```
 
-### `weaver_journal_snapshot`
+### `engineer_journal_snapshot`
 
-Fetches deferred per-group Weaver panel data.
+Fetches deferred per-group Engineer panel data.
 
 ```json
-{ "cmd": "weaver_journal_snapshot", "group": "loom", "limit": 50 }
+{ "cmd": "engineer_journal_snapshot", "group": "loom", "limit": 50 }
 ```
 
 Response shape:
 
 ```json
 {
-  "type": "weaver_journal_snapshot",
+  "type": "engineer_journal_snapshot",
   "group": "loom",
-  "weaver_journal": { "loom": [] },
-  "weaver_worklog": { "loom": [] },
-  "weaver_streams": { "loom": { "count": 0, "by_state": {}, "items": [], "truncated": false } }
+  "engineer_journal": { "loom": [] },
+  "engineer_worklog": { "loom": [] },
+  "engineer_streams": { "loom": { "count": 0, "by_state": {}, "items": [], "truncated": false } }
 }
 ```
 
@@ -252,6 +252,6 @@ change without immediately re-fetching `task_detail`.
 3. Open task detail/modal/history flows by fetching `task_detail` when the local
    task entry lacks full-detail fields.
 4. Load archived tasks only when the archived tab opens.
-5. Load Weaver journal/worklog/streams when the Weaver panel opens for a group.
+5. Load Engineer journal/worklog/streams when the Engineer panel opens for a group.
 6. Keep existing delta application logic; compact mode does not change op names
    or payload shapes.

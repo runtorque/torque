@@ -11,29 +11,17 @@ from __future__ import annotations
 import json
 import os
 import sys
-from copy import deepcopy
 
 from .mcp_stdio_proxy import serve_http_proxy
 from .mcp_tools_shared import authorize_caller, dispatch_scoped_tool
-from .mcp_weaver_tools.tool_specs import WEAVER_TOOLS
+from .mcp_engineer_tools.tool_specs import (
+    ENGINEER_TOOLS as ENGINEER_ORCHESTRATION_TOOLS,
+)
 
 
 _ENV_VAR = "LOOM_ENGINEER_ID"
 
-
-def _rename_tool_spec(tool: dict) -> dict:
-    renamed = deepcopy(tool)
-    renamed["name"] = str(renamed.get("name", "")).replace(
-        "weaver_", "engineer_", 1
-    )
-    description = str(renamed.get("description", "") or "")
-    description = description.replace("Weaver", "Engineer")
-    description = description.replace("weaver", "engineer")
-    renamed["description"] = description
-    return renamed
-
-
-ENGINEER_TOOLS = [_rename_tool_spec(tool) for tool in WEAVER_TOOLS]
+ENGINEER_TOOLS = list(ENGINEER_ORCHESTRATION_TOOLS)
 ENGINEER_TOOLS.extend([
     {
         "name": "engineer_task_reassign",

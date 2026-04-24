@@ -188,8 +188,8 @@ async function removeAgent(id) {
 function relaunchAgent(id) {
   const cell = state.agents ? state.agents[id] : null;
   const gs = cell && state.group_settings ? state.group_settings[cell.group] : null;
-  if (cell && cell.status === 'stopped' && gs && gs.weaver_agent_id === id) {
-    openWeaverLaunchDialog(cell.group, id);
+  if (cell && cell.status === 'stopped' && gs && gs.engineer_agent_id === id) {
+    openEngineerLaunchDialog(cell.group, id);
     return;
   }
   send({ cmd: 'relaunch_agent', id });
@@ -243,7 +243,7 @@ function _engineerOwnedWorkerCount(engineerId) {
     if (cell.cell_type !== 'agent') continue;
     var ownerId = String(
       cell.owner_engineer_id
-      || cell.created_by_weaver_id
+      || cell.created_by_engineer_id
       || ''
     ).trim();
     if (ownerId === String(engineerId)) count += 1;
@@ -684,7 +684,7 @@ function onCellContextMenu(e, id) {
   const cell = state.agents[id];
   if (!cell) return;
   const gs = (state.group_settings || {})[cell.group] || {};
-  const isDesignatedWeaver = gs.weaver_agent_id === id;
+  const isDesignatedEngineer = gs.engineer_agent_id === id;
   const isDismissedEngineer = _isEngineerDismissedCell(cell);
 
   const items = [
@@ -693,7 +693,7 @@ function onCellContextMenu(e, id) {
   ];
   if (cell.status === 'stopped' && !isDismissedEngineer) {
     items.push({
-      label: isDesignatedWeaver ? 'Restart Weaver\u2026' : 'Relaunch',
+      label: isDesignatedEngineer ? 'Restart Engineer\u2026' : 'Relaunch',
       action: `relaunchAgent('${id}')`,
     });
   }

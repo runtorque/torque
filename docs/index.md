@@ -35,7 +35,7 @@ Loom is an iTerm2 Toolbelt plugin for organizing AI agents and terminal sessions
 
 ### I want Loom to coordinate the work for me
 
-- [Weaver](weaver.md) — Loom's orchestrator agent for dispatching work, tracking progress, and asking for human input when needed
+- [Engineer](engineer.md) — Loom's orchestrator agent for dispatching work, tracking progress, and asking for human input when needed
 
 ### I need commands, settings, or help fixing Loom
 
@@ -63,7 +63,7 @@ Loom is an iTerm2 Toolbelt plugin for organizing AI agents and terminal sessions
 - [Streams & Waves](streams-and-waves.md)
 - [Actions & Templates](actions.md)
 - [Agent Templates](agent-templates.md)
-- [Weaver](weaver.md)
+- [Engineer](engineer.md)
 - [Worktrees](worktrees.md)
 - [Schedules](schedules.md)
 

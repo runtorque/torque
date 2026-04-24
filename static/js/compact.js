@@ -1,7 +1,7 @@
 /* Compact-snapshot consumer (compact-v1).
  *
  * Default-on WebSocket protocol that sends a lean initial snapshot and
- * lazy-loads heavy task/decision/hire/archive/weaver detail on demand.
+ * lazy-loads heavy task/decision/hire/archive/engineer detail on demand.
  * See docs/compact-snapshot-v1.md for the wire contract.
  *
  * Rollback hatch: localStorage flag "loom:snapshot_protocol" = "legacy"
@@ -57,7 +57,7 @@ function _compactModeActive() {
 }
 
 /* Called after _handleFullState assigns the new snapshot onto `state`. In
- * compact mode the backend omits decisions/pending_hires/archived/weaver
+ * compact mode the backend omits decisions/pending_hires/archived/engineer
  * detail entirely; initialize them to empty maps so render code can treat
  * "missing" the same as "empty" without null-guarding everywhere. */
 function _compactInitDeferredMaps() {
@@ -65,13 +65,13 @@ function _compactInitDeferredMaps() {
   if (!state.decisions) state.decisions = {};
   if (!state.pending_hires) state.pending_hires = {};
   if (!state.board_tasks_archived) state.board_tasks_archived = {};
-  if (!state.weaver_journal) state.weaver_journal = {};
-  if (!state.weaver_worklog) state.weaver_worklog = {};
-  if (!state.weaver_streams) state.weaver_streams = {};
+  if (!state.engineer_journal) state.engineer_journal = {};
+  if (!state.engineer_worklog) state.engineer_worklog = {};
+  if (!state.engineer_streams) state.engineer_streams = {};
   // Reset dedup/fetched bookkeeping so a resync can re-hydrate cleanly.
   _compactInFlight = {};
   _compactArchivedFetchedGroups = {};
-  _compactWeaverFetchedGroups = {};
+  _compactEngineerFetchedGroups = {};
   _compactTasksFullyLoaded = {};
   _compactDecisionsFetched = false;
   _compactPendingHiresFetched = false;
@@ -81,7 +81,7 @@ function _compactInitDeferredMaps() {
 var _compactInFlight = {};
 var _compactPendingTaskDetailCbs = {};
 var _compactArchivedFetchedGroups = {};
-var _compactWeaverFetchedGroups = {};
+var _compactEngineerFetchedGroups = {};
 var _compactTasksFullyLoaded = {};
 var _compactDecisionsFetched = false;
 var _compactPendingHiresFetched = false;
@@ -127,15 +127,15 @@ function lazyLoadArchivedTasks(group) {
   return true;
 }
 
-function lazyLoadWeaverJournal(group, opts) {
+function lazyLoadEngineerJournal(group, opts) {
   if (!_compactModeActive()) return false;
   var g = String(group || '');
   if (!g) return false;
-  if (_compactWeaverFetchedGroups[g]) return false;
-  var key = 'weaver_journal:' + g;
+  if (_compactEngineerFetchedGroups[g]) return false;
+  var key = 'engineer_journal:' + g;
   if (_compactInFlight[key]) return false;
   _compactInFlight[key] = true;
-  var payload = { cmd: 'weaver_journal_snapshot', group: g };
+  var payload = { cmd: 'engineer_journal_snapshot', group: g };
   if (opts && typeof opts.limit === 'number') payload.limit = opts.limit;
   if (opts && typeof opts.worklog_limit === 'number') {
     payload.worklog_limit = opts.worklog_limit;
@@ -286,20 +286,20 @@ function _compactApplyArchivedTasks(msg) {
   }
 }
 
-function _compactApplyWeaverJournalSnapshot(msg) {
+function _compactApplyEngineerJournalSnapshot(msg) {
   var g = msg && msg.group ? String(msg.group) : '';
   if (!g) return;
-  _compactClearInFlight('weaver_journal:' + g);
-  _compactWeaverFetchedGroups[g] = true;
-  if (!state.weaver_journal) state.weaver_journal = {};
-  if (!state.weaver_worklog) state.weaver_worklog = {};
-  if (!state.weaver_streams) state.weaver_streams = {};
-  var journal = (msg.weaver_journal && msg.weaver_journal[g]) || [];
-  var worklog = (msg.weaver_worklog && msg.weaver_worklog[g]) || [];
-  var streams = msg.weaver_streams && msg.weaver_streams[g];
-  state.weaver_journal[g] = journal.slice();
-  state.weaver_worklog[g] = worklog.slice();
-  if (streams !== undefined) state.weaver_streams[g] = streams;
+  _compactClearInFlight('engineer_journal:' + g);
+  _compactEngineerFetchedGroups[g] = true;
+  if (!state.engineer_journal) state.engineer_journal = {};
+  if (!state.engineer_worklog) state.engineer_worklog = {};
+  if (!state.engineer_streams) state.engineer_streams = {};
+  var journal = (msg.engineer_journal && msg.engineer_journal[g]) || [];
+  var worklog = (msg.engineer_worklog && msg.engineer_worklog[g]) || [];
+  var streams = msg.engineer_streams && msg.engineer_streams[g];
+  state.engineer_journal[g] = journal.slice();
+  state.engineer_worklog[g] = worklog.slice();
+  if (streams !== undefined) state.engineer_streams[g] = streams;
 }
 
 /* Route one of the lazy-load response frames. Returns true if the message
@@ -320,8 +320,8 @@ function _compactHandleLazyResponse(msg) {
     case 'archived_tasks':
       _compactApplyArchivedTasks(msg);
       return true;
-    case 'weaver_journal_snapshot':
-      _compactApplyWeaverJournalSnapshot(msg);
+    case 'engineer_journal_snapshot':
+      _compactApplyEngineerJournalSnapshot(msg);
       return true;
     default:
       return false;

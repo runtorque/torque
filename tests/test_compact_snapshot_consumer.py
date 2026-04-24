@@ -201,7 +201,7 @@ class CompactSnapshotConsumerTests(unittest.TestCase):
             card["resume_after_boundary_task_id"], "task-boundary")
 
         for deferred in ("decisions", "pending_hires",
-                         "weaver_journal", "weaver_worklog", "weaver_streams"):
+                         "engineer_journal", "engineer_worklog", "engineer_streams"):
             self.assertNotIn(
                 deferred,
                 compact,
@@ -278,16 +278,16 @@ class CompactSnapshotConsumerTests(unittest.TestCase):
         # Default filter must be 'pending' per the contract.
         self.assertEqual(state.db.status_filter, "pending")
 
-    def test_weaver_journal_round_trip_returns_group_payload(self):
+    def test_engineer_journal_round_trip_returns_group_payload(self):
         state = self.state_mod.MatrixState()
         state.groups["alpha"] = []
-        state.weaver_worklog["alpha"] = [{"id": 1, "entry": "w1"}]
+        state.engineer_worklog["alpha"] = [{"id": 1, "entry": "w1"}]
         state.journal_read = lambda group, limit=20, **_kw: [
             {"id": 1, "group": group, "entry": f"limit={limit}"},
         ]
 
         async def run():
-            return await self.server_mod._handle_weaver_journal_snapshot_command(
+            return await self.server_mod._handle_engineer_journal_snapshot_command(
                 {
                     "group": "alpha",
                     "limit": 5,
@@ -299,14 +299,14 @@ class CompactSnapshotConsumerTests(unittest.TestCase):
 
         result = asyncio.run(run())
 
-        self.assertEqual(result["type"], "weaver_journal_snapshot")
+        self.assertEqual(result["type"], "engineer_journal_snapshot")
         self.assertEqual(result["group"], "alpha")
         self.assertEqual(
-            result["weaver_journal"]["alpha"],
+            result["engineer_journal"]["alpha"],
             [{"id": 1, "group": "alpha", "entry": "limit=5"}],
         )
         self.assertEqual(
-            result["weaver_worklog"]["alpha"],
+            result["engineer_worklog"]["alpha"],
             [{"id": 1, "entry": "w1"}],
         )
 

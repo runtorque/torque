@@ -1,13 +1,13 @@
 /* Standalone-only panel workspace manager */
 
-var _standalonePanelApps = ['board', 'actions', 'templates', 'context', 'events', 'weaver'];
+var _standalonePanelApps = ['board', 'actions', 'templates', 'context', 'events', 'engineer'];
 var _standalonePanelTitles = {
   board: 'Board',
   actions: 'Actions',
   templates: 'Library',
   context: 'Context',
   events: 'Events',
-  weaver: 'Agent',
+  engineer: 'Agent',
 };
 var _standalonePanelDefaults = {
   board: 'bottom',
@@ -15,7 +15,7 @@ var _standalonePanelDefaults = {
   templates: 'right',
   context: 'right',
   events: 'right',
-  weaver: 'bottom',
+  engineer: 'bottom',
 };
 var _standalonePanelLayoutVersion = 1;
 var _standalonePanelLayout = null;
@@ -32,7 +32,7 @@ function _standalonePanelsEnabled() {
 }
 
 function _standalonePanelRootId(app) {
-  if (app === 'weaver') return 'panel-agent';
+  if (app === 'engineer') return 'panel-agent';
   return 'panel-' + app;
 }
 
@@ -366,10 +366,10 @@ function _migrateStandalonePanelLayoutFromLegacyState() {
       layout.bottom.size
     );
   }
-  if (active === 'weaver') {
-    layout.bottom.tabs = ['board', 'weaver'];
-    layout.bottom.active = 'weaver';
-    layout.last_active = 'weaver';
+  if (active === 'engineer') {
+    layout.bottom.tabs = ['board', 'engineer'];
+    layout.bottom.active = 'engineer';
+    layout.last_active = 'engineer';
   } else if (active && layout.right.tabs.indexOf(active) >= 0) {
     layout.right.active = active;
     layout.last_active = active;

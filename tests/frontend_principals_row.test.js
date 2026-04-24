@@ -95,7 +95,7 @@ function createSandbox() {
   sandbox.renderAgentPanel = function() {};
   sandbox.renderPendingHireBanner = function() {};
   sandbox._currentPanelSurfaces = function() { return []; };
-  sandbox._updateWeaverTaskbarBadge = function() {};
+  sandbox._updateEngineerTaskbarBadge = function() {};
   sandbox._pruneAgentDoneFlourishes = function() {};
   sandbox._captureAgentDetailDrafts = function() {};
   sandbox._embeddedRuntimeEnabled = function() { return false; };

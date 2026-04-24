@@ -309,10 +309,10 @@ class ServerModuleExtractionTests(unittest.TestCase):
             [{'message': 'archived progress'}],
         )
 
-    def test_weaver_journal_snapshot_command_returns_group_payloads(self):
+    def test_engineer_journal_snapshot_command_returns_group_payloads(self):
         state = self.state_mod.MatrixState()
         state.groups['g'] = []
-        state.weaver_worklog['g'] = [
+        state.engineer_worklog['g'] = [
             {'id': 2, 'entry': 'new'},
             {'id': 1, 'entry': 'old'},
         ]
@@ -321,7 +321,7 @@ class ServerModuleExtractionTests(unittest.TestCase):
         ]
 
         async def run():
-            return await self.server_mod._handle_weaver_journal_snapshot_command(
+            return await self.server_mod._handle_engineer_journal_snapshot_command(
                 {
                     'group': 'g',
                     'limit': 7,
@@ -333,18 +333,18 @@ class ServerModuleExtractionTests(unittest.TestCase):
 
         result = asyncio.run(run())
 
-        self.assertEqual(result['type'], 'weaver_journal_snapshot')
+        self.assertEqual(result['type'], 'engineer_journal_snapshot')
         self.assertEqual(result['group'], 'g')
         self.assertEqual(
-            result['weaver_journal'],
+            result['engineer_journal'],
             {'g': [{'id': 1, 'group': 'g', 'entry': 'limit=7'}]},
         )
         self.assertEqual(
-            result['weaver_worklog'],
+            result['engineer_worklog'],
             {'g': [{'id': 2, 'entry': 'new'}]},
         )
         self.assertEqual(
-            result['weaver_streams']['g'],
+            result['engineer_streams']['g'],
             {'count': 0, 'by_state': {}, 'items': [], 'truncated': False},
         )
 
@@ -417,7 +417,7 @@ class ServerModuleExtractionTests(unittest.TestCase):
         self.assertEqual(state.board_tasks[parent.id].lane, 'Done')
         self.assertEqual(state.board_tasks[child.id].lane, 'Archived')
 
-    def test_weaver_flush_now_command_reports_success(self):
+    def test_engineer_flush_now_command_reports_success(self):
         calls = []
 
         class FakeBuffer:
@@ -425,7 +425,7 @@ class ServerModuleExtractionTests(unittest.TestCase):
                 calls.append(group)
                 return True, ""
 
-        result = self.server_mod._handle_weaver_flush_now_command(
+        result = self.server_mod._handle_engineer_flush_now_command(
             FakeBuffer(),
             {'group': 'g'},
         )
@@ -433,7 +433,7 @@ class ServerModuleExtractionTests(unittest.TestCase):
         self.assertEqual(calls, ['g'])
         self.assertEqual(result, {'type': 'ok'})
 
-    def test_weaver_flush_now_command_accepts_agent_id(self):
+    def test_engineer_flush_now_command_accepts_agent_id(self):
         calls = []
 
         class FakeBuffer:
@@ -441,7 +441,7 @@ class ServerModuleExtractionTests(unittest.TestCase):
                 calls.append(recipient_or_group)
                 return True, ""
 
-        result = self.server_mod._handle_weaver_flush_now_command(
+        result = self.server_mod._handle_engineer_flush_now_command(
             FakeBuffer(),
             {'agent_id': 'eng-1'},
         )
@@ -516,14 +516,14 @@ class ServerModuleExtractionTests(unittest.TestCase):
         self.assertFalse(state.get_agent_digest_settings('eng-1').paused)
         self.assertEqual(calls, [('resumed', 'eng-1')])
 
-    def test_weaver_flush_now_command_surfaces_pause_error(self):
+    def test_engineer_flush_now_command_surfaces_pause_error(self):
         class FakeBuffer:
             def request_manual_flush(self, group):
                 self.group = group
                 return False, "Delivery is paused"
 
         buffer = FakeBuffer()
-        result = self.server_mod._handle_weaver_flush_now_command(
+        result = self.server_mod._handle_engineer_flush_now_command(
             buffer,
             {'group': 'g'},
         )
@@ -543,10 +543,10 @@ class ServerModuleExtractionTests(unittest.TestCase):
             self.addCleanup(db.close)
             db.save_agent(
                 self.state_mod.AgentCell(
-                    id='weaver-1',
-                    name='Weaver',
+                    id='engineer-1',
+                    name='Engineer',
                     group='loom',
-                    slug='weaver',
+                    slug='engineer',
                     cell_type='agent',
                     kind='engineer',
                     persistent=True,
@@ -942,23 +942,23 @@ class ServerPromptQueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(queued_tasks[0].done())
 
         state = self.state_mod.MatrixState()
-        state.update_weaver_settings('g', paused=True)
-        self.assertTrue(state.get_weaver_settings('g').paused)
+        state.update_engineer_settings('g', paused=True)
+        self.assertTrue(state.get_engineer_settings('g').paused)
 
         release.set()
         await queued_tasks[0]
 
-    async def test_deliver_weaver_reply_waits_for_prompt_before_resuming_delivery(self):
+    async def test_deliver_engineer_reply_waits_for_prompt_before_resuming_delivery(self):
         state = self.state_mod.MatrixState()
         state.add_group('g')
-        state.update_weaver_settings(
+        state.update_engineer_settings(
             'g',
             pending_question='Need approval',
             paused=True,
         )
-        weaver = self.state_mod.AgentCell(
-            id='weaver-1',
-            name='Weaver',
+        engineer = self.state_mod.AgentCell(
+            id='engineer-1',
+            name='Engineer',
             group='g',
             cell_type='agent',
             session_id='session-1',
@@ -968,7 +968,7 @@ class ServerPromptQueueTests(unittest.IsolatedAsyncioTestCase):
         release = asyncio.Event()
 
         async def fake_send_prompt(cell, prompt, **kwargs):
-            self.assertIs(cell, weaver)
+            self.assertIs(cell, engineer)
             self.assertIn('## Human Reply', prompt)
             self.assertTrue(kwargs.get('background'))
             self.assertTrue(kwargs.get('prime_input_ready'))
@@ -986,19 +986,19 @@ class ServerPromptQueueTests(unittest.IsolatedAsyncioTestCase):
                 sequence.append(f'resume:{group}')
 
         task = asyncio.create_task(
-            self.server_mod._deliver_weaver_reply_and_resume(
+            self.server_mod._deliver_engineer_reply_and_resume(
                 state,
-                weaver,
+                engineer,
                 group='g',
                 answer='Ship it',
                 send_prompt=fake_send_prompt,
-                weaver_buffer=FakeBuffer(),
+                engineer_buffer=FakeBuffer(),
             )
         )
 
         await started.wait()
         self.assertEqual(sequence, ['reply-start'])
-        ws = state.get_weaver_settings('g')
+        ws = state.get_engineer_settings('g')
         self.assertTrue(ws.paused)
         self.assertEqual(ws.pending_question, 'Need approval')
 
@@ -1007,19 +1007,19 @@ class ServerPromptQueueTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, {'type': 'ok'})
         self.assertEqual(sequence, ['reply-start', 'reply-finish', 'resume:g'])
-        ws = state.get_weaver_settings('g')
+        ws = state.get_engineer_settings('g')
         self.assertFalse(ws.paused)
         self.assertEqual(ws.pending_question, '')
 
     def test_pending_question_reply_target_prefers_actor_owner(self):
         state = self.state_mod.MatrixState()
         state.add_group('g')
-        group_weaver = self.state_mod.AgentCell(
-            id='weaver-1',
-            name='Group Weaver',
+        group_engineer = self.state_mod.AgentCell(
+            id='engineer-1',
+            name='Group Engineer',
             group='g',
             cell_type='agent',
-            session_id='session-weaver',
+            session_id='session-engineer',
         )
         owner = self.state_mod.AgentCell(
             id='eng-1',
@@ -1028,12 +1028,12 @@ class ServerPromptQueueTests(unittest.IsolatedAsyncioTestCase):
             cell_type='agent',
             session_id='session-engineer',
         )
-        state.agents[group_weaver.id] = group_weaver
+        state.agents[group_engineer.id] = group_engineer
         state.agents[owner.id] = owner
         state.group_settings['g'] = self.state_mod.GroupSettings(
-            weaver_agent_id=group_weaver.id,
+            engineer_agent_id=group_engineer.id,
         )
-        state.update_weaver_settings(
+        state.update_engineer_settings(
             'g',
             pending_question='Need approval',
             pending_question_actor_id=owner.id,
@@ -1045,15 +1045,15 @@ class ServerPromptQueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(target, owner)
         self.assertEqual(label, 'Engineer')
 
-        state.update_weaver_settings(
+        state.update_engineer_settings(
             'g',
             pending_question='Legacy question',
             pending_question_actor_id='',
             paused=True,
         )
         target, label = self.server_mod._pending_question_reply_target(state, 'g')
-        self.assertIs(target, group_weaver)
-        self.assertEqual(label, 'Weaver')
+        self.assertIs(target, group_engineer)
+        self.assertEqual(label, 'Engineer')
 
 
 class ServerWebSocketResyncTests(unittest.IsolatedAsyncioTestCase):
@@ -1104,11 +1104,11 @@ class ServerWebSocketResyncTests(unittest.IsolatedAsyncioTestCase):
 
         state.add_group('new-group')
         await state.broadcast()
-        # Drain the deferred weaver-stream recompute so the resync
+        # Drain the deferred engineer-stream recompute so the resync
         # snapshot sees a settled seq instead of racing the follow-up
         # broadcast spawned by the group mutation.
-        if state._weaver_recompute_task is not None:
-            await state._weaver_recompute_task
+        if state._engineer_recompute_task is not None:
+            await state._engineer_recompute_task
 
         release_snapshot.set()
         ok = await register
@@ -1173,12 +1173,12 @@ class ServerWebSocketResyncTests(unittest.IsolatedAsyncioTestCase):
 
         state.add_group('resynced-group')
         await state.broadcast()
-        # Drain the deferred weaver-stream recompute so seq numbers are
+        # Drain the deferred engineer-stream recompute so seq numbers are
         # settled before the resync retry observes them. Without this
-        # the ready_ws client also receives the follow-up weaver_streams
+        # the ready_ws client also receives the follow-up engineer_streams
         # delta, which isn't what this test is exercising.
-        if state._weaver_recompute_task is not None:
-            await state._weaver_recompute_task
+        if state._engineer_recompute_task is not None:
+            await state._engineer_recompute_task
         settled_seq = state._seq
         settled_ready_msgs = list(ready_ws.messages)
 
@@ -1236,7 +1236,7 @@ class ServerMergeCleanupTests(unittest.IsolatedAsyncioTestCase):
             status='running',
             directory='/repo',
             template='default',
-            created_by_weaver_id='weaver-1',
+            created_by_engineer_id='engineer-1',
         )
         emitted = []
         saved = []
@@ -1304,7 +1304,7 @@ class ServerMergeCleanupTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(closed, ['session-old'])
-        self.assertEqual(cell.created_by_weaver_id, 'weaver-1')
+        self.assertEqual(cell.created_by_engineer_id, 'engineer-1')
         self.assertEqual(cell.session_id, 'session-new')
         self.assertEqual(cell.agent_session_id, '')
         self.assertEqual(cell.status, 'stopped')
@@ -1348,7 +1348,7 @@ class ServerMergeCleanupTests(unittest.IsolatedAsyncioTestCase):
         )
 
 
-class ServerWeaverMessageFlowTests(unittest.IsolatedAsyncioTestCase):
+class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub()
         self.state_mod = importlib.import_module('loom.state')
@@ -1368,10 +1368,10 @@ class ServerWeaverMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         state.groups['g'] = []
         return state
 
-    def _add_weaver_and_worker(self, state, *, current_task_id=''):
-        weaver = self.state_mod.AgentCell(
-            id='weaver-1',
-            name='Weaver',
+    def _add_engineer_and_worker(self, state, *, current_task_id=''):
+        engineer = self.state_mod.AgentCell(
+            id='engineer-1',
+            name='Engineer',
             group='g',
             cell_type='agent',
         )
@@ -1384,16 +1384,16 @@ class ServerWeaverMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             status='running',
             current_task_id=current_task_id,
         )
-        state.agents[weaver.id] = weaver
+        state.agents[engineer.id] = engineer
         state.agents[worker.id] = worker
-        state.groups['g'] = [weaver.id, worker.id]
+        state.groups['g'] = [engineer.id, worker.id]
         state.group_settings['g'] = self.state_mod.GroupSettings(
-            weaver_agent_id=weaver.id
+            engineer_agent_id=engineer.id
         )
         state.history_record_agent(worker)
-        return weaver, worker
+        return engineer, worker
 
-    async def test_send_weaver_message_creates_derived_follow_up_task_and_history(self):
+    async def test_send_engineer_message_creates_derived_follow_up_task_and_history(self):
         state = self._make_state()
         parent = state.board_add_task(
             'Implement feature',
@@ -1402,7 +1402,7 @@ class ServerWeaverMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             id='task-parent',
             agent_id='agent-1',
         )
-        _weaver, worker = self._add_weaver_and_worker(
+        _engineer, worker = self._add_engineer_and_worker(
             state,
             current_task_id=parent.id,
         )
@@ -1428,7 +1428,7 @@ class ServerWeaverMessageFlowTests(unittest.IsolatedAsyncioTestCase):
                 'task_id': task_id,
             })
 
-        result = await self.server_mod._send_weaver_message_to_agent(
+        result = await self.server_mod._send_engineer_message_to_agent(
             state,
             FakeBridge(),
             worker,
@@ -1444,9 +1444,9 @@ class ServerWeaverMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(follow_up.reply_agent_id, worker.id)
         self.assertEqual(follow_up.status, 'Awaiting Reply')
         self.assertIn('loom:derived', follow_up.labels)
-        self.assertIn('loom:weaver-message', follow_up.labels)
-        self.assertEqual(follow_up.messages[-1]['action'], 'weaver_message')
-        self.assertTrue(worker.pending_weaver_message)
+        self.assertIn('loom:engineer-message', follow_up.labels)
+        self.assertEqual(follow_up.messages[-1]['action'], 'engineer_message')
+        self.assertTrue(worker.pending_engineer_message)
         self.assertEqual(primed, ['session-1'])
         self.assertEqual(sent[0][0], 'session-1')
         self.assertIn(f'Task: {follow_up.id}', sent[0][1])
@@ -1455,7 +1455,7 @@ class ServerWeaverMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             sent[0][1],
         )
         self.assertEqual(events, [{
-            'kind': 'weaver_message',
+            'kind': 'engineer_message',
             'cell_id': worker.id,
             'agent_name': worker.name,
             'group': worker.group,
@@ -1467,17 +1467,17 @@ class ServerWeaverMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             follow_up.id,
         )
         self.assertEqual(
-            state.weaver_worklog[worker.group][0]['task_id'],
+            state.engineer_worklog[worker.group][0]['task_id'],
             follow_up.id,
         )
         self.assertEqual(
             self.db.load_agent_messages_by_task(follow_up.id)[0]['action'],
-            'weaver_message',
+            'engineer_message',
         )
 
-    async def test_send_weaver_message_without_active_task_creates_root_follow_up(self):
+    async def test_send_engineer_message_without_active_task_creates_root_follow_up(self):
         state = self._make_state()
-        _weaver, worker = self._add_weaver_and_worker(state)
+        _engineer, worker = self._add_engineer_and_worker(state)
 
         class FakeBridge:
             def prime_input_ready(self, _session_id):
@@ -1486,7 +1486,7 @@ class ServerWeaverMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             async def send_text(self, _session_id, _text):
                 return None
 
-        result = await self.server_mod._send_weaver_message_to_agent(
+        result = await self.server_mod._send_engineer_message_to_agent(
             state,
             FakeBridge(),
             worker,
@@ -1499,7 +1499,7 @@ class ServerWeaverMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(follow_up.pipeline_root_id, '')
         self.assertEqual(follow_up.pipeline_depth, 0)
         self.assertEqual(follow_up.group, 'g')
-        self.assertEqual(follow_up.labels, ['loom:weaver-message'])
+        self.assertEqual(follow_up.labels, ['loom:engineer-message'])
 
     async def test_send_user_message_routes_directly_through_terminal_adapter(self):
         state = self._make_state()
@@ -1546,7 +1546,7 @@ class ServerWeaverMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(ignored)
         self.assertEqual(sent, [('session-1', 'line one\nline two')])
 
-    def test_handle_weaver_reply_completes_follow_up_only_and_preserves_parent_state(self):
+    def test_handle_engineer_reply_completes_follow_up_only_and_preserves_parent_state(self):
         state = self._make_state()
         parent = state.board_add_task(
             'Implement feature',
@@ -1556,12 +1556,12 @@ class ServerWeaverMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             agent_id='agent-1',
             status='Reviewing',
         )
-        _weaver, worker = self._add_weaver_and_worker(
+        _engineer, worker = self._add_engineer_and_worker(
             state,
             current_task_id=parent.id,
         )
         follow_up = state.board_add_task(
-            'Weaver: Need rebase status',
+            'Engineer: Need rebase status',
             'g',
             lane='Backlog',
             id='task-reply',
@@ -1569,17 +1569,17 @@ class ServerWeaverMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             pipeline_root_id=parent.id,
             pipeline_depth=1,
             reply_agent_id=worker.id,
-            labels=['loom:derived', 'loom:weaver-message'],
+            labels=['loom:derived', 'loom:engineer-message'],
             status='Awaiting Reply',
         )
         state.history_record_dispatch(worker, follow_up)
-        worker.pending_weaver_message = True
+        worker.pending_engineer_message = True
         events = []
 
         def panel_event(kind, cell_id, agent_name, group, message, task_id=''):
             events.append((kind, cell_id, agent_name, group, message, task_id))
 
-        result = self.server_mod._handle_weaver_reply(
+        result = self.server_mod._handle_engineer_reply(
             state,
             worker,
             message='Rebased successfully',
@@ -1592,7 +1592,7 @@ class ServerWeaverMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.board_tasks[follow_up.id].status, '')
         self.assertEqual(state.board_tasks[parent.id].lane, 'In Progress')
         self.assertEqual(state.board_tasks[parent.id].status, 'Reviewing')
-        self.assertFalse(worker.pending_weaver_message)
+        self.assertFalse(worker.pending_engineer_message)
         self.assertEqual(
             state.board_tasks[follow_up.id].messages[-1]['action'],
             'reply',
@@ -1610,35 +1610,35 @@ class ServerWeaverMessageFlowTests(unittest.IsolatedAsyncioTestCase):
               'Rebased successfully', follow_up.id)],
         )
 
-    def test_handle_weaver_reply_requires_explicit_task_when_multiple_are_pending(self):
+    def test_handle_engineer_reply_requires_explicit_task_when_multiple_are_pending(self):
         state = self._make_state()
-        _weaver, worker = self._add_weaver_and_worker(state)
+        _engineer, worker = self._add_engineer_and_worker(state)
         first = state.board_add_task(
-            'Weaver: First question',
+            'Engineer: First question',
             'g',
             lane='Backlog',
             id='task-first',
             reply_agent_id=worker.id,
-            labels=['loom:weaver-message'],
+            labels=['loom:engineer-message'],
             status='Awaiting Reply',
         )
         second = state.board_add_task(
-            'Weaver: Second question',
+            'Engineer: Second question',
             'g',
             lane='Backlog',
             id='task-second',
             reply_agent_id=worker.id,
-            labels=['loom:weaver-message'],
+            labels=['loom:engineer-message'],
             status='Awaiting Reply',
         )
-        worker.pending_weaver_message = True
+        worker.pending_engineer_message = True
 
-        ambiguous = self.server_mod._handle_weaver_reply(
+        ambiguous = self.server_mod._handle_engineer_reply(
             state,
             worker,
             message='Need task id',
         )
-        answered = self.server_mod._handle_weaver_reply(
+        answered = self.server_mod._handle_engineer_reply(
             state,
             worker,
             message='Answer for the first thread',
@@ -1646,11 +1646,11 @@ class ServerWeaverMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(ambiguous['type'], 'error')
-        self.assertIn('Multiple pending weaver messages', ambiguous['message'])
+        self.assertIn('Multiple pending engineer messages', ambiguous['message'])
         self.assertEqual(answered, {'type': 'ok', 'task_id': first.id})
         self.assertEqual(state.board_tasks[first.id].lane, 'Done')
         self.assertEqual(state.board_tasks[second.id].lane, 'Backlog')
-        self.assertTrue(worker.pending_weaver_message)
+        self.assertTrue(worker.pending_engineer_message)
 
     async def test_resolve_architect_ask_delivers_user_reply_to_architect_inbox(self):
         state = self._make_state()

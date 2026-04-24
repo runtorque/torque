@@ -216,7 +216,7 @@ class CliDoctorTests(unittest.TestCase):
             "stage_6_cleanup": {
                 "legacy_template_files_ignored": 1,
                 "legacy_columns_present": False,
-                "weaver_tool_aliases_present": False,
+                "engineer_tool_aliases_present": False,
             },
         }
         with mock.patch.object(self.cli, "get_doctor_local", return_value=report):
@@ -298,7 +298,7 @@ class CliDoctorTests(unittest.TestCase):
                 self.cli.cmd_doctor(SimpleNamespace(port=18932, json=False))
 
         text = out.getvalue()
-        self.assertNotIn("default (weaver_* routing)", text)
+        self.assertNotIn("default (engineer_* routing)", text)
 
     def test_cmd_doctor_exits_nonzero_for_invalid_architect_state(self):
         report = {

@@ -134,7 +134,7 @@ function agentPanelSelectTab(tab) {
 
 function _agentPanelTimeAgo(ts) {
   if (typeof _relativeTime === 'function') return _relativeTime(ts);
-  if (typeof _weaverTimeAgo === 'function') return _weaverTimeAgo(ts);
+  if (typeof _engineerTimeAgo === 'function') return _engineerTimeAgo(ts);
   ts = Number(ts || 0);
   if (!ts) return '';
   var diff = (Date.now() / 1000) - ts;
@@ -179,7 +179,7 @@ function _agentPanelMessageKindLabel(kind) {
   if (kind === 'engineer') return 'Engineer';
   if (kind === 'worker') return 'Worker';
   if (kind === 'user' || kind === 'human') return 'User';
-  if (kind === 'weaver' || kind === 'system' || kind === 'loom') return 'User';
+  if (kind === 'engineer' || kind === 'system' || kind === 'loom') return 'User';
   return kind.charAt(0).toUpperCase() + kind.slice(1).replace(/_/g, ' ');
 }
 
@@ -207,7 +207,7 @@ function _agentPanelMessageDirection(agent, message) {
   if (action === 'engineer_message_architect' || action === 'engineer_reply') {
     return kind === 'engineer' ? 'out' : 'in';
   }
-  if (action === 'weaver_message' || action === 'system') return 'in';
+  if (action === 'engineer_message' || action === 'system') return 'in';
   return 'out';
 }
 
@@ -231,7 +231,7 @@ function _agentPanelMessageSenderKind(agent, message, direction) {
   var action = String(message.action || '').trim();
   if (action.indexOf('architect_') === 0) return 'architect';
   if (action.indexOf('engineer_') === 0) return 'engineer';
-  if (action === 'weaver_message' || action === 'system') return 'user';
+  if (action === 'engineer_message' || action === 'system') return 'user';
   return _agentPanelKind(agent) || 'user';
 }
 
@@ -245,7 +245,7 @@ function _agentPanelAnchorItems(container) {
   if (!container || typeof container.querySelectorAll !== 'function') return [];
   var results = [];
   var seen = [];
-  var selectors = ['[data-agent-panel-anchor]', '[data-weaver-anchor]'];
+  var selectors = ['[data-agent-panel-anchor]', '[data-engineer-anchor]'];
   for (var i = 0; i < selectors.length; i++) {
     var items = container.querySelectorAll(selectors[i]) || [];
     for (var j = 0; j < items.length; j++) {
@@ -263,12 +263,12 @@ function _agentPanelAnchorKey(item) {
   if (!item) return '';
   if (item.dataset) {
     if (item.dataset.agentPanelAnchor) return String(item.dataset.agentPanelAnchor);
-    if (item.dataset.weaverAnchor) return String(item.dataset.weaverAnchor);
+    if (item.dataset.engineerAnchor) return String(item.dataset.engineerAnchor);
   }
   if (typeof item.getAttribute === 'function') {
     var key = item.getAttribute('data-agent-panel-anchor');
     if (key) return String(key);
-    key = item.getAttribute('data-weaver-anchor');
+    key = item.getAttribute('data-engineer-anchor');
     if (key) return String(key);
   }
   return '';
@@ -844,16 +844,16 @@ function _agentPanelShell(title, subtitle, kind, activeTab, bodyHtml, headerRigh
   return html;
 }
 
-function _agentPanelWeaverSettings(group) {
-  if (typeof _weaverGetSettings === 'function') return _weaverGetSettings(group);
-  return (state && state.weaver_settings && group) ? (state.weaver_settings[group] || null) : null;
+function _agentPanelEngineerSettings(group) {
+  if (typeof _engineerGetSettings === 'function') return _engineerGetSettings(group);
+  return (state && state.engineer_settings && group) ? (state.engineer_settings[group] || null) : null;
 }
 
-function _agentPanelWeaverAgent(group) {
-  if (typeof _weaverGetAgent === 'function') return _weaverGetAgent(group);
+function _agentPanelEngineerAgent(group) {
+  if (typeof _engineerGetAgent === 'function') return _engineerGetAgent(group);
   if (!group || !state || !state.group_settings || !state.agents) return null;
   var settings = state.group_settings[group];
-  return settings && settings.weaver_agent_id ? (state.agents[settings.weaver_agent_id] || null) : null;
+  return settings && settings.engineer_agent_id ? (state.agents[settings.engineer_agent_id] || null) : null;
 }
 
 function _agentPanelDigestSettings(agent) {
@@ -863,9 +863,9 @@ function _agentPanelDigestSettings(agent) {
     return state.agent_digest_settings[agentId];
   }
   var group = String((agent && agent.group) || '');
-  var legacyWeaver = group ? _agentPanelWeaverAgent(group) : null;
-  if (legacyWeaver && String(legacyWeaver.id || '') === agentId) {
-    return _agentPanelWeaverSettings(group);
+  var legacyEngineer = group ? _agentPanelEngineerAgent(group) : null;
+  if (legacyEngineer && String(legacyEngineer.id || '') === agentId) {
+    return _agentPanelEngineerSettings(group);
   }
   return null;
 }
@@ -877,14 +877,14 @@ function _agentPanelDigestBufferStats(agent) {
     return state.digest_buffer_stats[agentId];
   }
   var group = String((agent && agent.group) || '');
-  var legacyWeaver = group ? _agentPanelWeaverAgent(group) : null;
+  var legacyEngineer = group ? _agentPanelEngineerAgent(group) : null;
   if (
-    legacyWeaver
-    && String(legacyWeaver.id || '') === agentId
-    && state.weaver_buffer_stats
-    && state.weaver_buffer_stats[group]
+    legacyEngineer
+    && String(legacyEngineer.id || '') === agentId
+    && state.engineer_buffer_stats
+    && state.engineer_buffer_stats[group]
   ) {
-    return state.weaver_buffer_stats[group];
+    return state.engineer_buffer_stats[group];
   }
   return null;
 }
@@ -896,14 +896,14 @@ function _agentPanelDigestSentEvents(agent) {
     return state.digest_sent_events[agentId].slice();
   }
   var group = String((agent && agent.group) || '');
-  var legacyWeaver = group ? _agentPanelWeaverAgent(group) : null;
+  var legacyEngineer = group ? _agentPanelEngineerAgent(group) : null;
   if (
-    legacyWeaver
-    && String(legacyWeaver.id || '') === agentId
-    && state.weaver_sent_events
-    && state.weaver_sent_events[group]
+    legacyEngineer
+    && String(legacyEngineer.id || '') === agentId
+    && state.engineer_sent_events
+    && state.engineer_sent_events[group]
   ) {
-    return state.weaver_sent_events[group].slice();
+    return state.engineer_sent_events[group].slice();
   }
   return [];
 }
@@ -928,7 +928,7 @@ function _agentPanelDigestHeaderRight(agent) {
   var html = '';
   if (bstats && bstats.buffered_events > 0) {
     html += '<span class="agent-panel-buffer-stats">'
-      + _agentPanelEsc(_weaverHeaderBufferStats(bstats, paused, agent))
+      + _agentPanelEsc(_engineerHeaderBufferStats(bstats, paused, agent))
       + '</span>';
   }
   html += _agentPanelDigestPauseButton(agent);
@@ -939,7 +939,7 @@ function _agentPanelRenderEventsTab(bstats, sentEvents, paused, recipient, sendN
   var queued = (bstats && bstats.queued_events) ? bstats.queued_events.slice() : [];
   var sent = Array.isArray(sentEvents) ? sentEvents.slice() : [];
   var sendDisabled = paused || !queued.length;
-  var statusText = _weaverEventsStatusText(bstats, paused, recipient);
+  var statusText = _engineerEventsStatusText(bstats, paused, recipient);
 
   sent.sort(function(a, b) {
     var deliveredDiff = (b.delivered_at || 0) - (a.delivered_at || 0);
@@ -958,9 +958,9 @@ function _agentPanelRenderEventsTab(bstats, sentEvents, paused, recipient, sendN
   var html = '<div class="agent-panel-events-tab">';
   html += '<div class="agent-panel-events-toolbar">';
   html += '<div class="agent-panel-events-countdown">' + _esc(statusText) + '</div>';
-  html += '<button id="weaver-send-now-btn" class="agent-panel-send-now-btn"'
+  html += '<button id="engineer-send-now-btn" class="agent-panel-send-now-btn"'
     + (sendDisabled ? ' disabled' : '')
-    + ' onclick="' + _agentPanelEsc(sendNowExpr || 'weaverSendNow()') + '">Send queued now</button>';
+    + ' onclick="' + _agentPanelEsc(sendNowExpr || 'engineerSendNow()') + '">Send queued now</button>';
   html += '</div>';
   html += _agentPanelRenderPagedEventSection(
     'Queued for next digest',
@@ -969,7 +969,7 @@ function _agentPanelRenderEventsTab(bstats, sentEvents, paused, recipient, sendN
     'No queued events.'
   );
   html += _agentPanelRenderPagedEventSection(
-    sentTitle || 'Already sent to Weaver',
+    sentTitle || 'Already sent to Engineer',
     sentPage,
     'sent',
     'No digested events yet.'
@@ -1197,7 +1197,7 @@ function _agentPanelGroupWideNote(group) {
 function _renderEngineerJournal(agent) {
   var group = String((agent && agent.group) || '');
   if (typeof _agentPanelLegacyRenderJournal === 'function') return _agentPanelLegacyRenderJournal(group);
-  var entries = (state && state.weaver_journal && state.weaver_journal[group]) || [];
+  var entries = (state && state.engineer_journal && state.engineer_journal[group]) || [];
   if (typeof _agentPanelLegacyRenderJournalEntries === 'function') return _agentPanelLegacyRenderJournalEntries(entries, true);
   if (!entries.length) return '<div class="agent-panel-empty">No journal entries yet.</div>';
   var html = '<div class="agent-panel-journal">';
@@ -1289,8 +1289,8 @@ function _agentPanelRenderCellEventItem(evt, index) {
   evt = evt || {};
   var rawId = evt.id || ('idx-' + index);
   var anchorKey = 'cell-event-' + String(rawId);
-  var kind = typeof _weaverEventKindLabel === 'function'
-    ? _weaverEventKindLabel(evt.kind)
+  var kind = typeof _engineerEventKindLabel === 'function'
+    ? _engineerEventKindLabel(evt.kind)
     : String(evt.kind || 'event').replace(/_/g, ' ');
   var summary = evt.message || kind;
   var source = String(evt.source || '');
@@ -1360,7 +1360,7 @@ function _renderArchitectEvents(agent) {
 
 function _renderEngineerWorklog(agent) {
   var group = String((agent && agent.group) || '');
-  var ws = _agentPanelWeaverSettings(group);
+  var ws = _agentPanelEngineerSettings(group);
   if (typeof _agentPanelLegacyRenderWorklog === 'function') return _agentPanelLegacyRenderWorklog(group, ws);
   return '<div class="agent-panel-empty">No dispatched tasks yet.</div>';
 }
@@ -1437,8 +1437,8 @@ function _agentPanelWorkerEvents(agent) {
   for (var i = 0; i < page.events.length; i++) {
     var evt = page.events[i] || {};
     var anchorKey = 'worker-event-' + String(evt.id || i);
-    var kind = typeof _weaverEventKindLabel === 'function'
-      ? _weaverEventKindLabel(evt.kind)
+    var kind = typeof _engineerEventKindLabel === 'function'
+      ? _engineerEventKindLabel(evt.kind)
       : String(evt.kind || 'event').replace(/_/g, ' ');
     var summary = evt.message || kind;
     html += '<div class="agent-panel-event-item agent-panel-event-item-sent" data-agent-panel-anchor="'
@@ -1642,12 +1642,12 @@ function _agentPanelArchitectHiredEngineers(agent) {
 
 function _agentPanelArchitectDecisionRows(decisions) {
   decisions = Array.isArray(decisions) ? decisions : [];
-  if (typeof _weaverDecisionGroups === 'function'
-      && typeof _WEAVER_DECISION_STATUSES !== 'undefined') {
-    var grouped = _weaverDecisionGroups(decisions);
+  if (typeof _engineerDecisionGroups === 'function'
+      && typeof _ENGINEER_DECISION_STATUSES !== 'undefined') {
+    var grouped = _engineerDecisionGroups(decisions);
     var groupedRows = [];
-    for (var statusIndex = 0; statusIndex < _WEAVER_DECISION_STATUSES.length; statusIndex++) {
-      var statusName = _WEAVER_DECISION_STATUSES[statusIndex];
+    for (var statusIndex = 0; statusIndex < _ENGINEER_DECISION_STATUSES.length; statusIndex++) {
+      var statusName = _ENGINEER_DECISION_STATUSES[statusIndex];
       var rows = grouped[statusName] || [];
       for (var rowIndex = 0; rowIndex < rows.length; rowIndex++) {
         groupedRows.push({
@@ -1677,7 +1677,7 @@ function _agentPanelArchitectDecisionItemHtml(agent, rows, index) {
       + _agentPanelEsc(statusName) + '</div>';
   }
   if (typeof _agentPanelLegacyRenderDecisionRow === 'function'
-      && typeof _WEAVER_DECISION_STATUSES !== 'undefined') {
+      && typeof _ENGINEER_DECISION_STATUSES !== 'undefined') {
     html += _agentPanelLegacyRenderDecisionRow(agent.id, row.decision);
     return html;
   }
@@ -1992,8 +1992,8 @@ function _agentPanelHeaderRight(root) {
 function _agentPanelRenderFocusedTabInPlace(agent, kind, previousTab, activeTab) {
   var el = document.getElementById('panel-agent');
   if (!el || !agent || kind === 'terminal') return false;
-  if (typeof _weaverStopEventsCountdownTimer === 'function') {
-    _weaverStopEventsCountdownTimer();
+  if (typeof _engineerStopEventsCountdownTimer === 'function') {
+    _engineerStopEventsCountdownTimer();
   }
   var shell = (typeof el.querySelector === 'function')
     ? el.querySelector('.agent-panel-panel')
@@ -2040,8 +2040,8 @@ function _agentPanelRenderFocusedTabInPlace(agent, kind, previousTab, activeTab)
   _agentPanelEventsPreRenderAtLiveTail = false;
   if (agent
       && (kind === 'engineer' || kind === 'architect')
-      && typeof _weaverSyncEventsCountdown === 'function') {
-    _weaverSyncEventsCountdown(el, agent.group || '', activeTab);
+      && typeof _engineerSyncEventsCountdown === 'function') {
+    _engineerSyncEventsCountdown(el, agent.group || '', activeTab);
   }
   return true;
 }
@@ -2055,14 +2055,14 @@ function _agentPanelRefreshCurrentTab() {
 }
 
 function renderAgentPanel() {
-  if (typeof _weaverStopEventsCountdownTimer === 'function') {
-    _weaverStopEventsCountdownTimer();
+  if (typeof _engineerStopEventsCountdownTimer === 'function') {
+    _engineerStopEventsCountdownTimer();
   }
   var el = document.getElementById('panel-agent');
   if (!el) return;
   var agent = _resolveFocusedAgent();
-  if (agent && agent.group && typeof lazyLoadWeaverJournal === 'function') {
-    lazyLoadWeaverJournal(agent.group);
+  if (agent && agent.group && typeof lazyLoadEngineerJournal === 'function') {
+    lazyLoadEngineerJournal(agent.group);
   }
   _agentPanelEventsEnsurePager(agent);
   var agentKindForRender = agent ? _agentPanelKind(agent) : '';
@@ -2117,35 +2117,35 @@ function renderAgentPanel() {
   var agentKind = agent ? _agentPanelKind(agent) : '';
   if (agent
       && (agentKind === 'engineer' || agentKind === 'architect')
-      && typeof _weaverSyncEventsCountdown === 'function') {
-    _weaverSyncEventsCountdown(el, agent.group || '', _agentPanelActiveTab(agentKind));
+      && typeof _engineerSyncEventsCountdown === 'function') {
+    _engineerSyncEventsCountdown(el, agent.group || '', _agentPanelActiveTab(agentKind));
   }
 }
 
 
-/* ---- Legacy weaver support moved into agent_panel.js (stage 5) ---- */
+/* ---- Legacy engineer support moved into agent_panel.js (stage 5) ---- */
 /* Agent panel — journal + events + worklog */
 
-var _weaverReplyDraft = '';
-var _weaverActiveTabByGroup = {};
-var _weaverJournalSubviewByGroup = {};
-var _weaverSessionMapMetaByGroup = {};
-var _weaverHealthOrder = ['blocked', 'stale-in-progress', 'stalled', 'thrashing', 'idle-risk'];
-var _weaverHealthLabels = {
+var _engineerReplyDraft = '';
+var _engineerActiveTabByGroup = {};
+var _engineerJournalSubviewByGroup = {};
+var _engineerSessionMapMetaByGroup = {};
+var _engineerHealthOrder = ['blocked', 'stale-in-progress', 'stalled', 'thrashing', 'idle-risk'];
+var _engineerHealthLabels = {
   'blocked': 'Blocked',
   'stale-in-progress': 'Stale in progress',
   'stalled': 'Stalled',
   'thrashing': 'Thrashing',
   'idle-risk': 'Idle risk',
 };
-var _weaverVerificationLabels = {
+var _engineerVerificationLabels = {
   'pending': 'Verify pending',
   'attempted': 'Verify attempted',
   'passed': 'Verified',
   'failed': 'Verify failed',
 };
-var _weaverEventsCountdownTimer = 0;
-var _weaverHealthSeverity = {
+var _engineerEventsCountdownTimer = 0;
+var _engineerHealthSeverity = {
   'healthy': 0,
   'idle-risk': 1,
   'thrashing': 2,
@@ -2154,24 +2154,24 @@ var _weaverHealthSeverity = {
   'blocked': 5,
 };
 
-function _weaverCreatedSortValue(cell) {
+function _engineerCreatedSortValue(cell) {
   if (!cell) return '';
   return String(cell.created_at || cell.updated_at || cell.id || '');
 }
 
-function _weaverSortByCreatedAt(a, b) {
-  return _weaverCreatedSortValue(a).localeCompare(_weaverCreatedSortValue(b));
+function _engineerSortByCreatedAt(a, b) {
+  return _engineerCreatedSortValue(a).localeCompare(_engineerCreatedSortValue(b));
 }
 
-var _weaverArchitectExpanded = {};
-var _weaverArchitectDecisionUi = {};
-var _WEAVER_DECISION_STATUSES = ['proposed', 'accepted', 'revised', 'rejected'];
+var _engineerArchitectExpanded = {};
+var _engineerArchitectDecisionUi = {};
+var _ENGINEER_DECISION_STATUSES = ['proposed', 'accepted', 'revised', 'rejected'];
 
-function _weaverDecisionFocusKey(decisionId, field) {
-  return 'weaver-decision-' + String(field || '') + ':' + String(decisionId || '');
+function _engineerDecisionFocusKey(decisionId, field) {
+  return 'engineer-decision-' + String(field || '') + ':' + String(decisionId || '');
 }
 
-function _weaverGroupAgents(group) {
+function _engineerGroupAgents(group) {
   var agents = [];
   if (!state || !state.agents) return agents;
   for (var agentId in state.agents) {
@@ -2180,18 +2180,18 @@ function _weaverGroupAgents(group) {
     if (group && agent.group !== group) continue;
     agents.push(agent);
   }
-  agents.sort(_weaverSortByCreatedAt);
+  agents.sort(_engineerSortByCreatedAt);
   return agents;
 }
 
-function _weaverArchitectAgents(group) {
-  return _weaverGroupAgents(group).filter(function(agent) {
+function _engineerArchitectAgents(group) {
+  return _engineerGroupAgents(group).filter(function(agent) {
     return (agent.kind || '') === 'architect';
   });
 }
 
-function _weaverEngineerAgents(group, architectId) {
-  return _weaverGroupAgents(group).filter(function(agent) {
+function _engineerEngineerAgents(group, architectId) {
+  return _engineerGroupAgents(group).filter(function(agent) {
     if ((agent.kind || '') !== 'engineer') return false;
     var hiredByArchitectId = String(agent.hired_by_architect_id || '').trim();
     if (typeof architectId === 'undefined') return true;
@@ -2200,31 +2200,31 @@ function _weaverEngineerAgents(group, architectId) {
   });
 }
 
-function _weaverWorkerOwnerId(agent) {
+function _engineerWorkerOwnerId(agent) {
   return String(
-    (agent && (agent.owner_engineer_id || agent.created_by_weaver_id)) || ''
+    (agent && (agent.owner_engineer_id || agent.created_by_engineer_id)) || ''
   ).trim();
 }
 
-function _weaverWorkerAgents(group, engineerId) {
-  return _weaverGroupAgents(group).filter(function(agent) {
+function _engineerWorkerAgents(group, engineerId) {
+  return _engineerGroupAgents(group).filter(function(agent) {
     return (agent.kind || '') !== 'architect'
       && (agent.kind || '') !== 'engineer'
-      && _weaverWorkerOwnerId(agent) === String(engineerId || '').trim();
+      && _engineerWorkerOwnerId(agent) === String(engineerId || '').trim();
   });
 }
 
-function _weaverAgentStatusLabel(agent) {
+function _engineerAgentStatusLabel(agent) {
   if (!agent || agent.status === 'stopped') return 'stopped';
   if (agent.activity || agent.activity_detail) return 'running';
   return 'idle';
 }
 
-function _weaverEngineerStatusLabel(agent) {
-  return _weaverAgentStatusLabel(agent);
+function _engineerEngineerStatusLabel(agent) {
+  return _engineerAgentStatusLabel(agent);
 }
 
-function _weaverEngineerTransferCounts(engineerId) {
+function _engineerEngineerTransferCounts(engineerId) {
   var counts = { workers: 0, tasks: 0 };
   if (!engineerId) return counts;
   if (state && state.agents) {
@@ -2232,7 +2232,7 @@ function _weaverEngineerTransferCounts(engineerId) {
       var agent = state.agents[agentId];
       if (!agent || agent.id === engineerId || agent.cell_type !== 'agent') continue;
       if ((agent.owner_engineer_id || '') === engineerId
-          || (agent.created_by_weaver_id || '') === engineerId) {
+          || (agent.created_by_engineer_id || '') === engineerId) {
         counts.workers += 1;
       }
     }
@@ -2246,24 +2246,24 @@ function _weaverEngineerTransferCounts(engineerId) {
   return counts;
 }
 
-function _weaverArchitectTransferCounts(architectId) {
+function _engineerArchitectTransferCounts(architectId) {
   var counts = { engineers: 0, decisions: 0 };
   var architectKey = String(architectId || '').trim();
   if (!architectKey) return counts;
-  counts.engineers = _weaverEngineerAgents(_agentPanelCurrentGroup(), architectKey).length;
+  counts.engineers = _engineerEngineerAgents(_agentPanelCurrentGroup(), architectKey).length;
   counts.decisions = _architectDecisionsForAgent(architectKey).length;
   return counts;
 }
 
-function _weaverArchitectExpandedState(architectId) {
+function _engineerArchitectExpandedState(architectId) {
   var key = String(architectId || '').trim();
-  return !!_weaverArchitectExpanded[key];
+  return !!_engineerArchitectExpanded[key];
 }
 
-function _weaverDecisionUiState(decisionId, decision) {
+function _engineerDecisionUiState(decisionId, decision) {
   var key = String(decisionId || '').trim();
-  if (!_weaverArchitectDecisionUi[key]) {
-    _weaverArchitectDecisionUi[key] = {
+  if (!_engineerArchitectDecisionUi[key]) {
+    _engineerArchitectDecisionUi[key] = {
       expanded: false,
       editing: false,
       draft: { title: '', rationale: '', status: 'proposed' },
@@ -2271,7 +2271,7 @@ function _weaverDecisionUiState(decisionId, decision) {
       link_engineer_id: '',
     };
   }
-  var entry = _weaverArchitectDecisionUi[key];
+  var entry = _engineerArchitectDecisionUi[key];
   var current = decision
     || (state && state.decisions ? state.decisions[key] : null)
     || (state && state.architect_decisions ? state.architect_decisions[key] : null)
@@ -2284,15 +2284,15 @@ function _weaverDecisionUiState(decisionId, decision) {
   return entry;
 }
 
-function _weaverMultilineHtml(text) {
+function _engineerMultilineHtml(text) {
   var formatter = (typeof formatCode === 'function') ? formatCode : _agentPanelEsc;
   return formatter(text || '').replace(/\n/g, '<br>');
 }
 
-function _weaverDecisionGroups(decisions) {
+function _engineerDecisionGroups(decisions) {
   var grouped = {};
-  for (var i = 0; i < _WEAVER_DECISION_STATUSES.length; i++) {
-    grouped[_WEAVER_DECISION_STATUSES[i]] = [];
+  for (var i = 0; i < _ENGINEER_DECISION_STATUSES.length; i++) {
+    grouped[_ENGINEER_DECISION_STATUSES[i]] = [];
   }
   for (var j = 0; j < decisions.length; j++) {
     var decision = decisions[j] || {};
@@ -2326,7 +2326,7 @@ function getArchitectDecisionTaskOptions(architectId) {
 function getArchitectDecisionEngineerOptions(architectId) {
   var architect = state && state.agents ? state.agents[String(architectId || '')] : null;
   var group = architect ? architect.group : '';
-  var engineers = _weaverEngineerAgents(group);
+  var engineers = _engineerEngineerAgents(group);
   return engineers.map(function(engineer) {
     var label = engineer.name || engineer.id || '';
     if (engineer.slug) label += ' (' + engineer.slug + ')';
@@ -2334,7 +2334,7 @@ function getArchitectDecisionEngineerOptions(architectId) {
   });
 }
 
-function _weaverDecisionSupersededByIds(architectId, decisionId) {
+function _engineerDecisionSupersededByIds(architectId, decisionId) {
   var architectKey = String(architectId || '').trim();
   var decisionKey = String(decisionId || '').trim();
   var ids = [];
@@ -2364,7 +2364,7 @@ function _weaverDecisionSupersededByIds(architectId, decisionId) {
   return ids;
 }
 
-function _weaverDecisionRefsHtml(ids, emptyText) {
+function _engineerDecisionRefsHtml(ids, emptyText) {
   var values = Array.isArray(ids) ? ids.filter(function(id) {
     return String(id || '').trim();
   }) : [];
@@ -2380,7 +2380,7 @@ function _weaverDecisionRefsHtml(ids, emptyText) {
   return html;
 }
 
-function _weaverDecisionMetaRowHtml(label, valueHtml) {
+function _engineerDecisionMetaRowHtml(label, valueHtml) {
   return '<div class="detail-section-card-meta architect-decision-meta-row">'
     + '<span class="architect-decision-meta-label">' + _agentPanelEsc(label) + '</span>'
     + '<span class="architect-decision-meta-value">' + (valueHtml || '') + '</span>'
@@ -2399,7 +2399,7 @@ function _agentPanelLegacyRenderWorkerRows(workers, levelClass) {
     if (worker.slug) html += '<span class="engineer-row-slug">' + _esc(worker.slug) + '</span>';
     html += '</div>';
     html += '<div class="engineer-row-meta">';
-    html += '<span class="engineer-row-status engineer-row-status-' + _esc(_weaverAgentStatusLabel(worker)) + '">' + _esc(_weaverAgentStatusLabel(worker)) + '</span>';
+    html += '<span class="engineer-row-status engineer-row-status-' + _esc(_engineerAgentStatusLabel(worker)) + '">' + _esc(_engineerAgentStatusLabel(worker)) + '</span>';
     html += '</div></div>';
   }
   return html;
@@ -2409,8 +2409,8 @@ function _agentPanelLegacyRenderEngineerTreeRows(group, engineers, levelClass, w
   var html = '';
   for (var i = 0; i < engineers.length; i++) {
     var engineer = engineers[i];
-    var status = _weaverEngineerStatusLabel(engineer);
-    var workers = _weaverWorkerAgents(group, engineer.id);
+    var status = _engineerEngineerStatusLabel(engineer);
+    var workers = _engineerWorkerAgents(group, engineer.id);
     html += '<div class="engineer-row ' + levelClass + '">';
     html += '<div class="engineer-row-main">';
     html += '<span class="engineer-row-name">' + _esc(engineer.name || engineer.id || '') + '</span>';
@@ -2426,23 +2426,23 @@ function _agentPanelLegacyRenderEngineerTreeRows(group, engineers, levelClass, w
 }
 
 function _agentPanelLegacyRenderDecisionRow(architectId, decision) {
-  var ui = _weaverDecisionUiState(decision.id, decision);
+  var ui = _engineerDecisionUiState(decision.id, decision);
   var decisionIdJs = JSON.stringify(String(decision.id || ''));
   var architectIdJs = JSON.stringify(String(architectId || ''));
-  var titleFocusKey = _weaverDecisionFocusKey(decision.id, 'title');
-  var rationaleFocusKey = _weaverDecisionFocusKey(decision.id, 'rationale');
-  var statusFocusKey = _weaverDecisionFocusKey(decision.id, 'status');
+  var titleFocusKey = _engineerDecisionFocusKey(decision.id, 'title');
+  var rationaleFocusKey = _engineerDecisionFocusKey(decision.id, 'rationale');
+  var statusFocusKey = _engineerDecisionFocusKey(decision.id, 'status');
   var linkedTaskIds = Array.isArray(decision.linked_task_ids) ? decision.linked_task_ids : [];
   var linkedEngineerIds = Array.isArray(decision.linked_engineer_ids) ? decision.linked_engineer_ids : [];
   var supersedesId = String(decision.supersedes || '').trim();
-  var supersededByIds = _weaverDecisionSupersededByIds(architectId, decision.id);
+  var supersededByIds = _engineerDecisionSupersededByIds(architectId, decision.id);
   var taskOptions = getArchitectDecisionTaskOptions(architectId);
   var engineerOptions = getArchitectDecisionEngineerOptions(architectId);
   var html = '<div class="detail-section-card architect-decision-card" data-agent-panel-anchor="decision-'
     + _agentPanelEsc(decision.id || '') + '">';
   html += '<div class="detail-section-card-head">';
   html += '<button type="button" class="architect-decision-toggle" onclick="'
-    + _agentPanelEventAttr('weaverToggleDecision(' + decisionIdJs + ')') + '">';
+    + _agentPanelEventAttr('engineerToggleDecision(' + decisionIdJs + ')') + '">';
   html += '<span class="detail-section-primary" title="' + _esc(decision.title || '') + '">' + _esc(decision.title || 'Decision') + '</span>';
   html += '<span class="detail-task-status">' + _esc(decision.status || 'proposed') + '</span>';
   html += '<span class="detail-expand-caret">' + (ui.expanded ? '\u25BE' : '\u25B8') + '</span>';
@@ -2450,11 +2450,11 @@ function _agentPanelLegacyRenderDecisionRow(architectId, decision) {
   html += '<div class="detail-section-card-actions">';
   if (!ui.editing) {
     html += '<button type="button" class="detail-inline-editor-btn" onclick="'
-      + _agentPanelEventAttr('event.stopPropagation();weaverStartDecisionEdit(' + decisionIdJs + ')')
+      + _agentPanelEventAttr('event.stopPropagation();engineerStartDecisionEdit(' + decisionIdJs + ')')
       + '">Edit</button>';
   }
   html += '<button type="button" class="detail-inline-editor-btn" onclick="'
-    + _agentPanelEventAttr('event.stopPropagation();weaverArchiveDecision(' + architectIdJs + ',' + decisionIdJs + ')')
+    + _agentPanelEventAttr('event.stopPropagation();engineerArchiveDecision(' + architectIdJs + ',' + decisionIdJs + ')')
     + '">Archive</button>';
   html += '</div></div>';
   if (ui.expanded || ui.editing) {
@@ -2463,49 +2463,49 @@ function _agentPanelLegacyRenderDecisionRow(architectId, decision) {
       html += '<input class="detail-inline-description-input architect-decision-input"'
         + ' data-focus-key="' + _esc(titleFocusKey) + '"'
         + ' value="' + _esc(ui.draft.title || '') + '"'
-        + ' oninput="' + _agentPanelEventAttr('weaverDecisionDraftInput(' + decisionIdJs + ',\'title\',this.value)') + '"'
+        + ' oninput="' + _agentPanelEventAttr('engineerDecisionDraftInput(' + decisionIdJs + ',\'title\',this.value)') + '"'
         + ' placeholder="Decision title">';
       html += '<textarea class="detail-inline-description-input architect-decision-textarea" rows="4"'
         + ' data-focus-key="' + _esc(rationaleFocusKey) + '"'
-        + ' oninput="' + _agentPanelEventAttr('weaverDecisionDraftInput(' + decisionIdJs + ',\'rationale\',this.value)') + '"'
+        + ' oninput="' + _agentPanelEventAttr('engineerDecisionDraftInput(' + decisionIdJs + ',\'rationale\',this.value)') + '"'
         + ' placeholder="Decision rationale...">' + _esc(ui.draft.rationale || '') + '</textarea>';
       html += '<select class="architect-decision-status-select"'
         + ' data-focus-key="' + _esc(statusFocusKey) + '"'
-        + ' onchange="' + _agentPanelEventAttr('weaverDecisionDraftInput(' + decisionIdJs + ',\'status\',this.value)') + '">';
-      for (var statusIndex = 0; statusIndex < _WEAVER_DECISION_STATUSES.length; statusIndex++) {
-        var statusOption = _WEAVER_DECISION_STATUSES[statusIndex];
+        + ' onchange="' + _agentPanelEventAttr('engineerDecisionDraftInput(' + decisionIdJs + ',\'status\',this.value)') + '">';
+      for (var statusIndex = 0; statusIndex < _ENGINEER_DECISION_STATUSES.length; statusIndex++) {
+        var statusOption = _ENGINEER_DECISION_STATUSES[statusIndex];
         var selected = ui.draft.status === statusOption ? ' selected' : '';
         html += '<option value="' + _esc(statusOption) + '"' + selected + '>' + _esc(statusOption) + '</option>';
       }
       html += '</select>';
       html += '<div class="detail-inline-editor-actions">';
       html += '<button type="button" class="detail-inline-editor-btn detail-inline-editor-btn-primary" onclick="'
-        + _agentPanelEventAttr('weaverSaveDecisionEdit(' + architectIdJs + ',' + decisionIdJs + ')')
+        + _agentPanelEventAttr('engineerSaveDecisionEdit(' + architectIdJs + ',' + decisionIdJs + ')')
         + '">Save</button>';
       html += '<button type="button" class="detail-inline-editor-btn" onclick="'
-        + _agentPanelEventAttr('weaverCancelDecisionEdit(' + decisionIdJs + ')')
+        + _agentPanelEventAttr('engineerCancelDecisionEdit(' + decisionIdJs + ')')
         + '">Cancel</button>';
       html += '</div>';
     } else {
       if (decision.rationale) {
-        html += '<div class="detail-section-card-body">' + _weaverMultilineHtml(decision.rationale) + '</div>';
+        html += '<div class="detail-section-card-body">' + _engineerMultilineHtml(decision.rationale) + '</div>';
       }
-      html += _weaverDecisionMetaRowHtml(
+      html += _engineerDecisionMetaRowHtml(
         'Status',
         '<span class="detail-task-status">' + _agentPanelEsc(decision.status || 'proposed') + '</span>'
           + (decision.archived ? ' <span class="architect-decision-ref-empty">archived</span>' : '')
       );
-      html += _weaverDecisionMetaRowHtml('Linked tasks', _weaverDecisionRefsHtml(linkedTaskIds, 'None'));
-      html += _weaverDecisionMetaRowHtml('Linked engineers', _weaverDecisionRefsHtml(linkedEngineerIds, 'None'));
+      html += _engineerDecisionMetaRowHtml('Linked tasks', _engineerDecisionRefsHtml(linkedTaskIds, 'None'));
+      html += _engineerDecisionMetaRowHtml('Linked engineers', _engineerDecisionRefsHtml(linkedEngineerIds, 'None'));
       if (supersedesId) {
-        html += _weaverDecisionMetaRowHtml('Supersedes', _weaverDecisionRefsHtml([supersedesId], 'None'));
+        html += _engineerDecisionMetaRowHtml('Supersedes', _engineerDecisionRefsHtml([supersedesId], 'None'));
       }
       if (supersededByIds.length) {
-        html += _weaverDecisionMetaRowHtml('Superseded by', _weaverDecisionRefsHtml(supersededByIds, 'None'));
+        html += _engineerDecisionMetaRowHtml('Superseded by', _engineerDecisionRefsHtml(supersededByIds, 'None'));
       }
       html += '<div class="architect-decision-link-row">';
       html += '<select class="architect-decision-link-select" onchange="'
-        + _agentPanelEventAttr('weaverDecisionLinkSelect(' + decisionIdJs + ',\'task\',this.value)')
+        + _agentPanelEventAttr('engineerDecisionLinkSelect(' + decisionIdJs + ',\'task\',this.value)')
         + '">';
       html += '<option value="">Link task…</option>';
       for (var taskIndex = 0; taskIndex < taskOptions.length; taskIndex++) {
@@ -2515,10 +2515,10 @@ function _agentPanelLegacyRenderDecisionRow(architectId, decision) {
       }
       html += '</select>';
       html += '<button type="button" class="detail-inline-editor-btn" onclick="'
-        + _agentPanelEventAttr('weaverLinkDecisionTask(' + architectIdJs + ',' + decisionIdJs + ')')
+        + _agentPanelEventAttr('engineerLinkDecisionTask(' + architectIdJs + ',' + decisionIdJs + ')')
         + '">Link task</button>';
       html += '<select class="architect-decision-link-select" onchange="'
-        + _agentPanelEventAttr('weaverDecisionLinkSelect(' + decisionIdJs + ',\'engineer\',this.value)')
+        + _agentPanelEventAttr('engineerDecisionLinkSelect(' + decisionIdJs + ',\'engineer\',this.value)')
         + '">';
       html += '<option value="">Link engineer…</option>';
       for (var engineerIndex = 0; engineerIndex < engineerOptions.length; engineerIndex++) {
@@ -2528,7 +2528,7 @@ function _agentPanelLegacyRenderDecisionRow(architectId, decision) {
       }
       html += '</select>';
       html += '<button type="button" class="detail-inline-editor-btn" onclick="'
-        + _agentPanelEventAttr('weaverLinkDecisionEngineer(' + architectIdJs + ',' + decisionIdJs + ')')
+        + _agentPanelEventAttr('engineerLinkDecisionEngineer(' + architectIdJs + ',' + decisionIdJs + ')')
         + '">Link engineer</button>';
       html += '</div>';
     }
@@ -2539,7 +2539,7 @@ function _agentPanelLegacyRenderDecisionRow(architectId, decision) {
 }
 
 function _agentPanelLegacyRenderArchitectRoster(group) {
-  var architects = _weaverArchitectAgents(group);
+  var architects = _engineerArchitectAgents(group);
   var html = '<section class="engineers-roster architects-roster">';
   html += '<div class="engineers-roster-header">';
   html += '<span class="engineers-roster-title">Architects</span>';
@@ -2553,9 +2553,9 @@ function _agentPanelLegacyRenderArchitectRoster(group) {
   html += '<div class="engineers-roster-list">';
   for (var i = 0; i < architects.length; i++) {
     var architect = architects[i];
-    var status = _weaverAgentStatusLabel(architect);
-    var expanded = _weaverArchitectExpandedState(architect.id);
-    var hireCounts = _weaverArchitectTransferCounts(architect.id);
+    var status = _engineerAgentStatusLabel(architect);
+    var expanded = _engineerArchitectExpandedState(architect.id);
+    var hireCounts = _engineerArchitectTransferCounts(architect.id);
     var architectIdJs = JSON.stringify(String(architect.id || ''));
     html += '<div class="architect-row' + (expanded ? ' expanded' : '') + '">';
     html += '<div class="engineer-row architect-parent-row">';
@@ -2570,14 +2570,14 @@ function _agentPanelLegacyRenderArchitectRoster(group) {
     html += '<div class="engineer-row-meta">';
     html += '<span class="engineer-row-status engineer-row-status-' + _esc(status) + '">' + _esc(status) + '</span>';
     html += '<button type="button" class="engineer-row-btn" onclick="event.stopPropagation();relaunchAgent(\'' + _esc(architect.id) + '\')">Relaunch</button>';
-    html += '<button type="button" class="engineer-row-btn" onclick="event.stopPropagation();weaverRenameArchitect(\'' + _esc(architect.id) + '\')">Rename</button>';
-    html += '<button type="button" class="engineer-row-btn" onclick="event.stopPropagation();weaverToggleArchitect(\'' + _esc(architect.id) + '\')">' + (expanded ? 'Hide decision log' : 'Open decision log') + '</button>';
-    html += '<button type="button" class="engineer-row-btn engineer-row-btn-danger" onclick="event.stopPropagation();weaverDeleteArchitect(\'' + _esc(architect.id) + '\')">Delete</button>';
+    html += '<button type="button" class="engineer-row-btn" onclick="event.stopPropagation();engineerRenameArchitect(\'' + _esc(architect.id) + '\')">Rename</button>';
+    html += '<button type="button" class="engineer-row-btn" onclick="event.stopPropagation();engineerToggleArchitect(\'' + _esc(architect.id) + '\')">' + (expanded ? 'Hide decision log' : 'Open decision log') + '</button>';
+    html += '<button type="button" class="engineer-row-btn engineer-row-btn-danger" onclick="event.stopPropagation();engineerDeleteArchitect(\'' + _esc(architect.id) + '\')">Delete</button>';
     html += '</div></div>';
     if (expanded) {
-      var hiredEngineers = _weaverEngineerAgents(group, architect.id);
+      var hiredEngineers = _engineerEngineerAgents(group, architect.id);
       var decisions = _architectDecisionsForAgent(architect.id);
-      var grouped = _weaverDecisionGroups(decisions);
+      var grouped = _engineerDecisionGroups(decisions);
       html += '<div class="architect-row-body">';
       html += '<div class="architect-roster-section-head"><span class="architect-roster-section-title">Hired engineers</span><span class="architect-roster-section-count">' + hiredEngineers.length + '</span></div>';
       if (hiredEngineers.length) {
@@ -2594,8 +2594,8 @@ function _agentPanelLegacyRenderArchitectRoster(group) {
         + _agentPanelEventAttr('event.stopPropagation();openArchitectDecisionModal(' + architectIdJs + ')')
         + '">+ New decision</button></span></div>';
       var hasDecisionRows = false;
-      for (var statusIndex = 0; statusIndex < _WEAVER_DECISION_STATUSES.length; statusIndex++) {
-        var statusName = _WEAVER_DECISION_STATUSES[statusIndex];
+      for (var statusIndex = 0; statusIndex < _ENGINEER_DECISION_STATUSES.length; statusIndex++) {
+        var statusName = _ENGINEER_DECISION_STATUSES[statusIndex];
         var rows = grouped[statusName] || [];
         if (!rows.length) continue;
         hasDecisionRows = true;
@@ -2619,7 +2619,7 @@ function _agentPanelLegacyRenderArchitectRoster(group) {
 }
 
 function _agentPanelLegacyRenderEngineerRoster(group) {
-  var engineers = _weaverEngineerAgents(group, null);
+  var engineers = _engineerEngineerAgents(group, null);
   var html = '<section class="engineers-roster">';
   html += '<div class="engineers-roster-header">';
   html += '<span class="engineers-roster-title">Engineers</span>';
@@ -2643,17 +2643,17 @@ function _agentPanelLegacyRenderEngineerRoster(group) {
   return html;
 }
 
-function weaverOpenAddEngineer() {
+function engineerOpenAddEngineer() {
   if (typeof openAddEngineerModal === 'function') openAddEngineerModal();
 }
 
-function weaverOpenAddArchitect() {
+function engineerOpenAddArchitect() {
   if (typeof openAddArchitectModal === 'function') {
     openAddArchitectModal(_agentPanelCurrentGroup());
   }
 }
 
-function weaverRenameEngineer(engineerId) {
+function engineerRenameEngineer(engineerId) {
   var engineer = state && state.agents ? state.agents[engineerId] : null;
   if (!engineer) return;
   var currentName = String(engineer.name || '').trim();
@@ -2664,10 +2664,10 @@ function weaverRenameEngineer(engineerId) {
   send({ cmd: 'rename_engineer', id: engineerId, new_name: nextName });
 }
 
-async function weaverDeleteEngineer(engineerId) {
+async function engineerDeleteEngineer(engineerId) {
   var engineer = state && state.agents ? state.agents[engineerId] : null;
   if (!engineer) return;
-  var counts = _weaverEngineerTransferCounts(engineerId);
+  var counts = _engineerEngineerTransferCounts(engineerId);
   var message = 'Deleting ' + (engineer.name || engineerId)
     + ' will transfer its ' + counts.workers + ' workers and ' + counts.tasks
     + ' tasks to the user. Continue?';
@@ -2679,7 +2679,7 @@ async function weaverDeleteEngineer(engineerId) {
   }
 }
 
-function weaverRenameArchitect(architectId) {
+function engineerRenameArchitect(architectId) {
   var architect = state && state.agents ? state.agents[architectId] : null;
   if (!architect) return;
   var currentName = String(architect.name || '').trim();
@@ -2690,10 +2690,10 @@ function weaverRenameArchitect(architectId) {
   send({ cmd: 'update_agent', id: architectId, name: nextName });
 }
 
-async function weaverDeleteArchitect(architectId) {
+async function engineerDeleteArchitect(architectId) {
   var architect = state && state.agents ? state.agents[architectId] : null;
   if (!architect) return;
-  var counts = _weaverArchitectTransferCounts(architectId);
+  var counts = _engineerArchitectTransferCounts(architectId);
   var message = 'Deleting ' + (architect.name || architectId)
     + ' will transfer ' + counts.engineers + ' hired engineer'
     + (counts.engineers === 1 ? '' : 's')
@@ -2707,39 +2707,39 @@ async function weaverDeleteArchitect(architectId) {
   }
 }
 
-function weaverToggleArchitect(architectId) {
+function engineerToggleArchitect(architectId) {
   var key = String(architectId || '').trim();
   if (!key) return;
-  _weaverArchitectExpanded[key] = !_weaverArchitectExpanded[key];
+  _engineerArchitectExpanded[key] = !_engineerArchitectExpanded[key];
   _agentPanelRefreshVisibleSurface();
 }
 
-function weaverToggleDecision(decisionId) {
-  var ui = _weaverDecisionUiState(decisionId);
+function engineerToggleDecision(decisionId) {
+  var ui = _engineerDecisionUiState(decisionId);
   ui.expanded = !ui.expanded;
   _agentPanelRefreshVisibleSurface();
 }
 
-function weaverStartDecisionEdit(decisionId) {
-  var ui = _weaverDecisionUiState(decisionId);
+function engineerStartDecisionEdit(decisionId) {
+  var ui = _engineerDecisionUiState(decisionId);
   ui.expanded = true;
   ui.editing = true;
   _agentPanelRefreshVisibleSurface();
 }
 
-function weaverDecisionDraftInput(decisionId, field, value) {
-  var ui = _weaverDecisionUiState(decisionId);
+function engineerDecisionDraftInput(decisionId, field, value) {
+  var ui = _engineerDecisionUiState(decisionId);
   ui.draft[field] = String(value || '');
 }
 
-function weaverCancelDecisionEdit(decisionId) {
-  var ui = _weaverDecisionUiState(decisionId);
+function engineerCancelDecisionEdit(decisionId) {
+  var ui = _engineerDecisionUiState(decisionId);
   ui.editing = false;
   _agentPanelRefreshVisibleSurface();
 }
 
-function weaverSaveDecisionEdit(architectId, decisionId) {
-  var ui = _weaverDecisionUiState(decisionId);
+function engineerSaveDecisionEdit(architectId, decisionId) {
+  var ui = _engineerDecisionUiState(decisionId);
   send({
     cmd: 'architect_decision_update',
     architect_id: String(architectId || ''),
@@ -2753,7 +2753,7 @@ function weaverSaveDecisionEdit(architectId, decisionId) {
   _agentPanelRefreshVisibleSurface();
 }
 
-function weaverArchiveDecision(architectId, decisionId) {
+function engineerArchiveDecision(architectId, decisionId) {
   send({
     cmd: 'architect_decision_update',
     architect_id: String(architectId || ''),
@@ -2763,14 +2763,14 @@ function weaverArchiveDecision(architectId, decisionId) {
   if (typeof _showToast === 'function') _showToast('Decision archived', 'success');
 }
 
-function weaverDecisionLinkSelect(decisionId, kind, value) {
-  var ui = _weaverDecisionUiState(decisionId);
+function engineerDecisionLinkSelect(decisionId, kind, value) {
+  var ui = _engineerDecisionUiState(decisionId);
   if (kind === 'task') ui.link_task_id = String(value || '');
   if (kind === 'engineer') ui.link_engineer_id = String(value || '');
 }
 
-function weaverLinkDecisionTask(architectId, decisionId) {
-  var ui = _weaverDecisionUiState(decisionId);
+function engineerLinkDecisionTask(architectId, decisionId) {
+  var ui = _engineerDecisionUiState(decisionId);
   if (!ui.link_task_id) return;
   send({
     cmd: 'architect_decision_link',
@@ -2783,8 +2783,8 @@ function weaverLinkDecisionTask(architectId, decisionId) {
   _agentPanelRefreshVisibleSurface();
 }
 
-function weaverLinkDecisionEngineer(architectId, decisionId) {
-  var ui = _weaverDecisionUiState(decisionId);
+function engineerLinkDecisionEngineer(architectId, decisionId) {
+  var ui = _engineerDecisionUiState(decisionId);
   if (!ui.link_engineer_id) return;
   send({
     cmd: 'architect_decision_link',
@@ -2799,11 +2799,11 @@ function weaverLinkDecisionEngineer(architectId, decisionId) {
 
 function renderLegacyGroupPanel() {
   var el = document.getElementById('panel-agent');
-  _weaverStopEventsCountdownTimer();
+  _engineerStopEventsCountdownTimer();
   if (!el) return;
   var group = _agentPanelCurrentGroup();
-  var ws = _weaverGetSettings(group);
-  var activeTab = _weaverActiveTab(group);
+  var ws = _engineerGetSettings(group);
+  var activeTab = _engineerActiveTab(group);
   var legacyVirtualMetas = activeTab === 'worklog'
     ? [{
       key: _agentPanelLegacyWorklogVirtualKey(group, !!(ws && ws.restrict_to_created_agents)),
@@ -2826,13 +2826,13 @@ function renderLegacyGroupPanel() {
     capture: function(snapshot, root) {
       if (!snapshot || !root || typeof root.querySelector !== 'function') return;
       _agentPanelCaptureVirtualScrolls(root, legacyVirtualMetas);
-      snapshot.anchor = _weaverCaptureScrollAnchor(
+      snapshot.anchor = _engineerCaptureScrollAnchor(
         root.querySelector('.agent-panel-content')
       );
     },
     restore: function(root, snapshot) {
       if (!root || !snapshot || typeof root.querySelector !== 'function') return;
-      _weaverRestoreScrollAnchor(
+      _engineerRestoreScrollAnchor(
         root.querySelector('.agent-panel-content'),
         snapshot.anchor
       );
@@ -2840,12 +2840,12 @@ function renderLegacyGroupPanel() {
   };
   var panelState = _captureSurfaceState(el, panelStateOptions);
 
-  var weaver = group ? _weaverGetAgent(group) : null;
-  var bstats = (state.weaver_buffer_stats && state.weaver_buffer_stats[group]) || null;
-  var paused = weaver
-    ? !!(_agentPanelDigestSettings(weaver) && _agentPanelDigestSettings(weaver).paused)
+  var engineer = group ? _engineerGetAgent(group) : null;
+  var bstats = (state.engineer_buffer_stats && state.engineer_buffer_stats[group]) || null;
+  var paused = engineer
+    ? !!(_agentPanelDigestSettings(engineer) && _agentPanelDigestSettings(engineer).paused)
     : !!(ws && ws.paused);
-  var emptyMessage = _weaverPanelEmptyMessage(group, ws, weaver, bstats);
+  var emptyMessage = _engineerPanelEmptyMessage(group, ws, engineer, bstats);
   _agentPanelRenderedVirtualMetas = [];
 
   var html = '<div class="agent-panel-panel">';
@@ -2859,17 +2859,17 @@ function renderLegacyGroupPanel() {
   html += '<div class="agent-panel-subtitle">Architect roster, engineer hierarchy, orchestration journal, digest queue, worklog, and session map.</div>';
   html += '</div>';
   html += '<div class="agent-panel-header-right">';
-  html += '<button type="button" class="agent-panel-add-engineer-btn" onclick="weaverOpenAddArchitect()">+ Add Architect</button>';
-  html += '<button type="button" class="agent-panel-add-engineer-btn" onclick="weaverOpenAddEngineer()">+ Add Engineer</button>';
+  html += '<button type="button" class="agent-panel-add-engineer-btn" onclick="engineerOpenAddArchitect()">+ Add Architect</button>';
+  html += '<button type="button" class="agent-panel-add-engineer-btn" onclick="engineerOpenAddEngineer()">+ Add Engineer</button>';
   // Buffer stats + Pause/Resume toggle
   if (!emptyMessage && group) {
     if (bstats && bstats.buffered_events > 0) {
       html += '<span class="agent-panel-buffer-stats">'
-           + _esc(_weaverHeaderBufferStats(bstats, paused, weaver))
+           + _esc(_engineerHeaderBufferStats(bstats, paused, engineer))
            + '</span>';
     }
-    if (weaver && weaver.id) {
-      html += _agentPanelDigestPauseButton(weaver);
+    if (engineer && engineer.id) {
+      html += _agentPanelDigestPauseButton(engineer);
     }
   }
   html += '</div>';
@@ -2882,7 +2882,7 @@ function renderLegacyGroupPanel() {
   if (emptyMessage) {
     html += '<div class="agent-panel-empty">' + _esc(emptyMessage) + '</div>';
   } else if (activeTab === 'events') {
-    html += _agentPanelLegacyRenderEvents(group, ws, weaver, bstats);
+    html += _agentPanelLegacyRenderEvents(group, ws, engineer, bstats);
   } else if (activeTab === 'worklog') {
     html += _agentPanelLegacyRenderWorklog(group, ws);
   } else {
@@ -2893,17 +2893,17 @@ function renderLegacyGroupPanel() {
   el.innerHTML = html;
   _restoreSurfaceState(el, panelState, panelStateOptions);
   _agentPanelAttachVirtualScrolls(el);
-  _weaverSyncEventsCountdown(el, group, activeTab);
+  _engineerSyncEventsCountdown(el, group, activeTab);
 }
 
-function weaverTogglePause() {
-  weaverTogglePauseForGroup(_agentPanelCurrentGroup());
+function engineerTogglePause() {
+  engineerTogglePauseForGroup(_agentPanelCurrentGroup());
 }
 
-function weaverTogglePauseForGroup(group) {
+function engineerTogglePauseForGroup(group) {
   if (!group) return;
-  var ws = _weaverGetSettings(group);
-  var cmd = (ws && ws.paused) ? 'weaver_resume' : 'weaver_pause';
+  var ws = _engineerGetSettings(group);
+  var cmd = (ws && ws.paused) ? 'engineer_resume' : 'engineer_pause';
   send({ cmd: cmd, group: group });
 }
 
@@ -2920,11 +2920,11 @@ function agentPanelTogglePauseForAgent(agentId) {
   toggleDigestPauseForAgent(agentId);
 }
 
-function weaverSelectTab(tab, group) {
+function engineerSelectTab(tab, group) {
   group = group || _agentPanelCurrentGroup();
   if (!group) return;
   if (tab !== 'events' && tab !== 'worklog') tab = 'journal';
-  _weaverActiveTabByGroup[group] = tab;
+  _engineerActiveTabByGroup[group] = tab;
   if (typeof _resolveFocusedAgent === 'function') {
     var focusedAgent = _resolveFocusedAgent();
     if (focusedAgent && _agentPanelKind(focusedAgent) === 'engineer' && typeof agentPanelSelectTab === 'function') {
@@ -2935,58 +2935,58 @@ function weaverSelectTab(tab, group) {
   _agentPanelRefreshVisibleSurface();
 }
 
-function weaverSendNow() {
+function engineerSendNow() {
   var group = _agentPanelCurrentGroup();
   if (!group) return;
-  send({ cmd: 'weaver_flush_now', group: group });
+  send({ cmd: 'engineer_flush_now', group: group });
 }
 
 function agentPanelSendNow(agentId) {
   agentId = String(agentId || '');
   if (!agentId) return;
-  send({ cmd: 'weaver_flush_now', agent_id: agentId });
+  send({ cmd: 'engineer_flush_now', agent_id: agentId });
 }
 
-function _weaverActiveTab(group) {
+function _engineerActiveTab(group) {
   if (!group) return 'journal';
-  var tab = _weaverActiveTabByGroup[group] || 'journal';
+  var tab = _engineerActiveTabByGroup[group] || 'journal';
   if (tab === 'events' || tab === 'worklog') return tab;
   return 'journal';
 }
 
-function _weaverJournalSubview(group) {
+function _engineerJournalSubview(group) {
   if (!group) return 'journal';
-  return _weaverJournalSubviewByGroup[group] === 'session_map'
+  return _engineerJournalSubviewByGroup[group] === 'session_map'
     ? 'session_map'
     : 'journal';
 }
 
-function _weaverSessionMapMeta(group) {
+function _engineerSessionMapMeta(group) {
   if (!group) return { loading: false, stale: false };
-  if (!_weaverSessionMapMetaByGroup[group]) {
-    _weaverSessionMapMetaByGroup[group] = { loading: false, stale: false };
+  if (!_engineerSessionMapMetaByGroup[group]) {
+    _engineerSessionMapMetaByGroup[group] = { loading: false, stale: false };
   }
-  return _weaverSessionMapMetaByGroup[group];
+  return _engineerSessionMapMetaByGroup[group];
 }
 
-function _weaverSessionMapData(group) {
-  if (!group || !state || !state.weaver_session_maps) return null;
-  return state.weaver_session_maps[group] || null;
+function _engineerSessionMapData(group) {
+  if (!group || !state || !state.engineer_session_maps) return null;
+  return state.engineer_session_maps[group] || null;
 }
 
-function _weaverRequestSessionMap(group, force) {
+function _engineerRequestSessionMap(group, force) {
   if (!group) return;
-  var meta = _weaverSessionMapMeta(group);
-  var hasData = !!_weaverSessionMapData(group);
+  var meta = _engineerSessionMapMeta(group);
+  var hasData = !!_engineerSessionMapData(group);
   if (meta.loading) return;
   if (!force && hasData && !meta.stale) return;
   meta.loading = true;
-  send({ cmd: 'weaver_session_map_read', group: group });
+  send({ cmd: 'engineer_session_map_read', group: group });
 }
 
-function _weaverResetSessionMapMeta(options) {
+function _engineerResetSessionMapMeta(options) {
   options = options || {};
-  var groups = Object.keys(_weaverSessionMapMetaByGroup || {});
+  var groups = Object.keys(_engineerSessionMapMetaByGroup || {});
   if (!groups.length) return;
   var clearStale = options.clearStale !== false;
   var refetchOpenMissing = !!options.refetchOpenMissing;
@@ -2994,28 +2994,28 @@ function _weaverResetSessionMapMeta(options) {
   for (var i = 0; i < groups.length; i++) {
     var group = groups[i];
     if (!group) continue;
-    var meta = _weaverSessionMapMeta(group);
+    var meta = _engineerSessionMapMeta(group);
     var wasLoading = !!meta.loading;
     meta.loading = false;
     if (clearStale) meta.stale = false;
-    if (refetchOpenMissing && _weaverIsSessionMapOpen(group) && !_weaverSessionMapData(group)) {
-      _weaverRequestSessionMap(group, true);
-      if (_weaverShouldRenderCurrentGroup(group)) shouldRender = true;
+    if (refetchOpenMissing && _engineerIsSessionMapOpen(group) && !_engineerSessionMapData(group)) {
+      _engineerRequestSessionMap(group, true);
+      if (_engineerShouldRenderCurrentGroup(group)) shouldRender = true;
       continue;
     }
-    if (wasLoading && _weaverShouldRenderCurrentGroup(group)) shouldRender = true;
+    if (wasLoading && _engineerShouldRenderCurrentGroup(group)) shouldRender = true;
   }
   if (shouldRender) _agentPanelRefreshVisibleSurface();
 }
 
-function _weaverIsSessionMapOpen(group) {
-  return _weaverJournalSubview(group) === 'session_map';
+function _engineerIsSessionMapOpen(group) {
+  return _engineerJournalSubview(group) === 'session_map';
 }
 
-function _weaverShouldRenderCurrentGroup(group) {
+function _engineerShouldRenderCurrentGroup(group) {
   return !!group
-    && ((typeof _panelAppVisible === 'function' && _panelAppVisible('weaver'))
-      || (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'weaver'))
+    && ((typeof _panelAppVisible === 'function' && _panelAppVisible('engineer'))
+      || (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'engineer'))
     && _agentPanelCurrentGroup() === group;
 }
 
@@ -3027,50 +3027,50 @@ function _agentPanelRefreshVisibleSurface() {
   if (typeof renderAgentPanel === 'function') renderAgentPanel();
 }
 
-function weaverOpenSessionMap(group) {
+function engineerOpenSessionMap(group) {
   group = group || _agentPanelCurrentGroup();
   if (!group) return;
-  _weaverJournalSubviewByGroup[group] = 'session_map';
-  _weaverRequestSessionMap(group, false);
+  _engineerJournalSubviewByGroup[group] = 'session_map';
+  _engineerRequestSessionMap(group, false);
   _agentPanelRefreshVisibleSurface();
 }
 
-function weaverCloseSessionMap(group) {
+function engineerCloseSessionMap(group) {
   group = group || _agentPanelCurrentGroup();
   if (!group) return;
-  _weaverJournalSubviewByGroup[group] = 'journal';
+  _engineerJournalSubviewByGroup[group] = 'journal';
   _agentPanelRefreshVisibleSurface();
 }
 
-function weaverRefreshSessionMap(group) {
+function engineerRefreshSessionMap(group) {
   group = group || _agentPanelCurrentGroup();
   if (!group) return;
-  _weaverRequestSessionMap(group, true);
+  _engineerRequestSessionMap(group, true);
   _agentPanelRefreshVisibleSurface();
 }
 
-function _weaverReceiveSessionMap(msg) {
+function _engineerReceiveSessionMap(msg) {
   var group = (msg && msg.group) || '';
   if (!group) return;
-  var meta = _weaverSessionMapMeta(group);
+  var meta = _engineerSessionMapMeta(group);
   meta.loading = false;
   meta.stale = false;
-  if (_weaverShouldRenderCurrentGroup(group)) {
+  if (_engineerShouldRenderCurrentGroup(group)) {
     _agentPanelRefreshVisibleSurface();
   }
 }
 
-function _weaverMarkSessionMapStale(groups) {
+function _engineerMarkSessionMapStale(groups) {
   if (!groups || !groups.length) return;
   var shouldRender = false;
   for (var i = 0; i < groups.length; i++) {
     var group = groups[i];
     if (!group) continue;
-    var meta = _weaverSessionMapMeta(group);
+    var meta = _engineerSessionMapMeta(group);
     meta.stale = true;
-    if (_weaverIsSessionMapOpen(group)) {
-      _weaverRequestSessionMap(group, false);
-      if (_weaverShouldRenderCurrentGroup(group)) shouldRender = true;
+    if (_engineerIsSessionMapOpen(group)) {
+      _engineerRequestSessionMap(group, false);
+      if (_engineerShouldRenderCurrentGroup(group)) shouldRender = true;
     }
   }
   if (shouldRender) _agentPanelRefreshVisibleSurface();
@@ -3079,34 +3079,34 @@ function _weaverMarkSessionMapStale(groups) {
 function _agentPanelLegacyRenderTabs(group, activeTab) {
   if (!group) return '';
   var html = '<div class="agent-panel-tabs">';
-  html += '<button id="weaver-tab-journal" class="agent-panel-tab'
+  html += '<button id="engineer-tab-journal" class="agent-panel-tab'
     + (activeTab === 'journal' ? ' active' : '')
-    + '" onclick="weaverSelectTab(\'journal\')">Journal</button>';
-  html += '<button id="weaver-tab-events" class="agent-panel-tab'
+    + '" onclick="engineerSelectTab(\'journal\')">Journal</button>';
+  html += '<button id="engineer-tab-events" class="agent-panel-tab'
     + (activeTab === 'events' ? ' active' : '')
-    + '" onclick="weaverSelectTab(\'events\')">Events</button>';
-  html += '<button id="weaver-tab-worklog" class="agent-panel-tab'
+    + '" onclick="engineerSelectTab(\'events\')">Events</button>';
+  html += '<button id="engineer-tab-worklog" class="agent-panel-tab'
     + (activeTab === 'worklog' ? ' active' : '')
-    + '" onclick="weaverSelectTab(\'worklog\')">Worklog</button>';
+    + '" onclick="engineerSelectTab(\'worklog\')">Worklog</button>';
   html += '</div>';
   return html;
 }
 
-function _agentPanelLegacyRenderEvents(group, ws, weaver, bstats) {
+function _agentPanelLegacyRenderEvents(group, ws, engineer, bstats) {
   if (!group) {
-    return '<div class="agent-panel-empty">No weaver configured for any group.</div>';
+    return '<div class="agent-panel-empty">No engineer configured for any group.</div>';
   }
   var paused = !!(ws && ws.paused);
-  var sent = (state.weaver_sent_events && state.weaver_sent_events[group])
-    ? state.weaver_sent_events[group].slice()
+  var sent = (state.engineer_sent_events && state.engineer_sent_events[group])
+    ? state.engineer_sent_events[group].slice()
     : [];
   return _agentPanelRenderEventsTab(
     bstats,
     sent,
     paused,
-    weaver,
-    'weaverSendNow()',
-    'Already sent to Weaver'
+    engineer,
+    'engineerSendNow()',
+    'Already sent to Engineer'
   );
 }
 
@@ -3131,18 +3131,18 @@ function _agentPanelLegacyRenderEventSection(title, events, mode, emptyText) {
 }
 
 function _agentPanelLegacyRenderEventItem(event, mode) {
-  var kind = _weaverEventKindLabel(event && event.kind);
+  var kind = _engineerEventKindLabel(event && event.kind);
   var agentName = event && event.agent_name ? String(event.agent_name) : '';
   var message = event && event.message ? String(event.message) : '';
   var summary = agentName && message
     ? agentName + ' — ' + message
     : (message || agentName || kind);
   var meta = (mode === 'sent')
-    ? 'sent ' + _weaverTimeAgo(event && event.delivered_at)
-    : 'queued ' + _weaverTimeAgo(event && event.timestamp);
+    ? 'sent ' + _engineerTimeAgo(event && event.delivered_at)
+    : 'queued ' + _engineerTimeAgo(event && event.timestamp);
   if (mode === 'sent' && event && event.timestamp && event.delivered_at
       && Math.abs(event.delivered_at - event.timestamp) >= 30) {
-    meta += ' · event ' + _weaverTimeAgo(event.timestamp);
+    meta += ' · event ' + _engineerTimeAgo(event.timestamp);
   }
   var anchorKey = mode + '-' + String(event && event.id ? event.id : ('idx-' + meta));
   if (mode === 'sent' && event && event.delivered_at) {
@@ -3150,7 +3150,7 @@ function _agentPanelLegacyRenderEventItem(event, mode) {
   }
 
   var html = '<div class="agent-panel-event-item agent-panel-event-item-' + _esc(mode) + '"'
-    + ' data-weaver-anchor="' + _esc(anchorKey) + '">';
+    + ' data-engineer-anchor="' + _esc(anchorKey) + '">';
   html += '<div class="agent-panel-event-item-header">';
   html += '<span class="agent-panel-event-kind">' + _esc(kind) + '</span>';
   html += '<span class="agent-panel-event-meta">' + _esc(meta) + '</span>';
@@ -3163,24 +3163,24 @@ function _agentPanelLegacyRenderEventItem(event, mode) {
   return html;
 }
 
-function _weaverHeaderBufferStats(bstats, paused, weaver) {
+function _engineerHeaderBufferStats(bstats, paused, engineer) {
   if (!bstats || !bstats.buffered_events) return '';
   var evtCount = bstats.buffered_events;
   var label = evtCount + ' event' + (evtCount === 1 ? '' : 's');
-  var nextPushIn = _weaverCountdownSeconds(bstats);
+  var nextPushIn = _engineerCountdownSeconds(bstats);
   if (paused) return label + ' paused';
   if (bstats.manual_flush_requested) {
-    if (weaver && weaver.activity && weaver.activity !== 'waiting') {
+    if (engineer && engineer.activity && engineer.activity !== 'waiting') {
       return label + ' queued for idle send';
     }
     return label + ' sending';
   }
   if (nextPushIn <= 0) return label + ' ready';
-  return label + ' in ' + _weaverFormatCountdown(nextPushIn);
+  return label + ' in ' + _engineerFormatCountdown(nextPushIn);
 }
 
-function _weaverEventsStatusText(bstats, paused, weaver) {
-  var recipientName = String((weaver && (weaver.name || weaver.id)) || 'recipient');
+function _engineerEventsStatusText(bstats, paused, engineer) {
+  var recipientName = String((engineer && (engineer.name || engineer.id)) || 'recipient');
   if (!bstats || !bstats.buffered_events) {
     return 'No queued events.';
   }
@@ -3188,22 +3188,22 @@ function _weaverEventsStatusText(bstats, paused, weaver) {
     return 'Delivery is paused — resume to send queued events.';
   }
   if (bstats.manual_flush_requested) {
-    if (weaver && weaver.activity && weaver.activity !== 'waiting') {
+    if (engineer && engineer.activity && engineer.activity !== 'waiting') {
       return 'Send requested — queued events will deliver when ' + recipientName + ' goes idle.';
     }
     return 'Sending queued events now.';
   }
-  var nextPushIn = _weaverCountdownSeconds(bstats);
+  var nextPushIn = _engineerCountdownSeconds(bstats);
   if (nextPushIn <= 0) {
-    if (weaver && weaver.activity && weaver.activity !== 'waiting') {
+    if (engineer && engineer.activity && engineer.activity !== 'waiting') {
       return 'Eligible now — waiting for ' + recipientName + ' to go idle.';
     }
     return 'Eligible to send now.';
   }
-  return 'Next eligible send in ' + _weaverFormatCountdown(nextPushIn) + '.';
+  return 'Next eligible send in ' + _engineerFormatCountdown(nextPushIn) + '.';
 }
 
-function _weaverFormatCountdown(seconds) {
+function _engineerFormatCountdown(seconds) {
   var remaining = Math.max(0, Number(seconds) || 0);
   if (remaining < 60) return remaining + 's';
   var minutes = Math.floor(remaining / 60);
@@ -3211,7 +3211,7 @@ function _weaverFormatCountdown(seconds) {
   return minutes + 'm' + (secs > 0 ? String(secs).padStart(2, '0') + 's' : '');
 }
 
-function _weaverCountdownSeconds(bstats) {
+function _engineerCountdownSeconds(bstats) {
   if (!bstats) return 0;
   var nextPushAt = Number(bstats.next_push_at || 0);
   if (nextPushAt > 0) {
@@ -3220,24 +3220,24 @@ function _weaverCountdownSeconds(bstats) {
   return Math.max(0, Math.ceil(Number(bstats.next_push_in || 0)));
 }
 
-function _weaverShouldLiveUpdateCountdown(group, activeTab) {
-  var surfaceState = _weaverVisibleEventsSurfaceState(group, activeTab);
+function _engineerShouldLiveUpdateCountdown(group, activeTab) {
+  var surfaceState = _engineerVisibleEventsSurfaceState(group, activeTab);
   if (!surfaceState.group || surfaceState.tab !== 'events') return false;
-  var payload = _weaverEventsSurfacePayload(surfaceState);
+  var payload = _engineerEventsSurfacePayload(surfaceState);
   if (!payload.bstats || !payload.bstats.buffered_events) return false;
   if (payload.paused) return false;
   if (payload.bstats.manual_flush_requested) return false;
-  return _weaverCountdownSeconds(payload.bstats) > 0;
+  return _engineerCountdownSeconds(payload.bstats) > 0;
 }
 
-function _weaverStopEventsCountdownTimer() {
-  if (_weaverEventsCountdownTimer && typeof clearInterval === 'function') {
-    clearInterval(_weaverEventsCountdownTimer);
+function _engineerStopEventsCountdownTimer() {
+  if (_engineerEventsCountdownTimer && typeof clearInterval === 'function') {
+    clearInterval(_engineerEventsCountdownTimer);
   }
-  _weaverEventsCountdownTimer = 0;
+  _engineerEventsCountdownTimer = 0;
 }
 
-function _weaverVisibleEventsSurfaceState(group, activeTab) {
+function _engineerVisibleEventsSurfaceState(group, activeTab) {
   var fallbackGroup = String(group || '');
   var fallbackTab = String(activeTab || '');
   if (typeof _resolveFocusedAgent === 'function'
@@ -3260,11 +3260,11 @@ function _weaverVisibleEventsSurfaceState(group, activeTab) {
   return {
     agentId: '',
     group: currentGroup,
-    tab: String(_weaverActiveTab(currentGroup) || fallbackTab || 'journal'),
+    tab: String(_engineerActiveTab(currentGroup) || fallbackTab || 'journal'),
   };
 }
 
-function _weaverEventsSurfacePayload(surfaceState) {
+function _engineerEventsSurfacePayload(surfaceState) {
   var agentId = String((surfaceState && surfaceState.agentId) || '');
   var group = String((surfaceState && surfaceState.group) || '');
   if (agentId && state && state.agents && state.agents[agentId]) {
@@ -3276,69 +3276,69 @@ function _weaverEventsSurfacePayload(surfaceState) {
       bstats: _agentPanelDigestBufferStats(recipient),
     };
   }
-  var ws = _weaverGetSettings(group);
+  var ws = _engineerGetSettings(group);
   return {
-    recipient: group ? _weaverGetAgent(group) : null,
+    recipient: group ? _engineerGetAgent(group) : null,
     paused: !!(ws && ws.paused),
-    bstats: (state.weaver_buffer_stats && state.weaver_buffer_stats[group]) || null,
+    bstats: (state.engineer_buffer_stats && state.engineer_buffer_stats[group]) || null,
   };
 }
 
-function _weaverSyncEventsCountdown(panel, group, activeTab) {
+function _engineerSyncEventsCountdown(panel, group, activeTab) {
   if (!panel || typeof panel.querySelector !== 'function') return;
   var countdownEl = panel.querySelector('.agent-panel-events-countdown');
   if (!countdownEl) return;
-  var surfaceState = _weaverVisibleEventsSurfaceState(group, activeTab);
+  var surfaceState = _engineerVisibleEventsSurfaceState(group, activeTab);
   var surfaceGroup = surfaceState.group;
   var surfaceTab = surfaceState.tab;
-  var payload = _weaverEventsSurfacePayload(surfaceState);
-  countdownEl.textContent = _weaverEventsStatusText(
+  var payload = _engineerEventsSurfacePayload(surfaceState);
+  countdownEl.textContent = _engineerEventsStatusText(
     payload.bstats,
     payload.paused,
     payload.recipient
   );
-  if (!_weaverShouldLiveUpdateCountdown(surfaceGroup, surfaceTab)
+  if (!_engineerShouldLiveUpdateCountdown(surfaceGroup, surfaceTab)
       || typeof setInterval !== 'function') {
     return;
   }
-  _weaverEventsCountdownTimer = setInterval(function() {
+  _engineerEventsCountdownTimer = setInterval(function() {
     var currentPanel = document.getElementById('panel-agent');
     if (!currentPanel) {
-      _weaverStopEventsCountdownTimer();
+      _engineerStopEventsCountdownTimer();
       return;
     }
-    var currentState = _weaverVisibleEventsSurfaceState(group, activeTab);
+    var currentState = _engineerVisibleEventsSurfaceState(group, activeTab);
     var currentGroup = currentState.group;
     var currentTab = currentState.tab;
     var currentCountdown = currentPanel.querySelector('.agent-panel-events-countdown');
     if (!currentCountdown || currentTab !== 'events') {
-      _weaverStopEventsCountdownTimer();
+      _engineerStopEventsCountdownTimer();
       return;
     }
-    var currentPayload = _weaverEventsSurfacePayload(currentState);
-    currentCountdown.textContent = _weaverEventsStatusText(
+    var currentPayload = _engineerEventsSurfacePayload(currentState);
+    currentCountdown.textContent = _engineerEventsStatusText(
       currentPayload.bstats,
       currentPayload.paused,
       currentPayload.recipient
     );
-    if (!_weaverShouldLiveUpdateCountdown(currentGroup, currentTab)) {
-      _weaverStopEventsCountdownTimer();
+    if (!_engineerShouldLiveUpdateCountdown(currentGroup, currentTab)) {
+      _engineerStopEventsCountdownTimer();
     }
   }, 1000);
 }
 
-function _weaverEventKindLabel(kind) {
+function _engineerEventKindLabel(kind) {
   kind = String(kind || '');
   if (!kind) return 'event';
   return kind.replace(/_/g, ' ');
 }
 
-function _weaverCaptureScrollAnchor(container) {
+function _engineerCaptureScrollAnchor(container) {
   if (!container || typeof container.querySelectorAll !== 'function'
       || typeof container.getBoundingClientRect !== 'function') {
     return null;
   }
-  var items = container.querySelectorAll('[data-weaver-anchor]');
+  var items = container.querySelectorAll('[data-engineer-anchor]');
   if (!items || !items.length) return null;
   var containerRect = container.getBoundingClientRect();
   var best = null;
@@ -3355,23 +3355,23 @@ function _weaverCaptureScrollAnchor(container) {
   if (!best || typeof best.getBoundingClientRect !== 'function') return null;
   var anchorRect = best.getBoundingClientRect();
   return {
-    key: best.getAttribute ? best.getAttribute('data-weaver-anchor') : '',
+    key: best.getAttribute ? best.getAttribute('data-engineer-anchor') : '',
     offset: anchorRect.top - containerRect.top,
   };
 }
 
-function _weaverRestoreScrollAnchor(container, snapshot) {
+function _engineerRestoreScrollAnchor(container, snapshot) {
   if (!container || !snapshot || !snapshot.key
       || typeof container.querySelectorAll !== 'function'
       || typeof container.getBoundingClientRect !== 'function'
       || typeof container.scrollTop !== 'number') {
     return;
   }
-  var items = container.querySelectorAll('[data-weaver-anchor]');
+  var items = container.querySelectorAll('[data-engineer-anchor]');
   var target = null;
   for (var i = 0; i < items.length; i++) {
     var item = items[i];
-    var key = item && item.getAttribute ? item.getAttribute('data-weaver-anchor') : '';
+    var key = item && item.getAttribute ? item.getAttribute('data-engineer-anchor') : '';
     if (key === snapshot.key) {
       target = item;
       break;
@@ -3387,11 +3387,11 @@ function _weaverRestoreScrollAnchor(container, snapshot) {
 
 function _agentPanelLegacyRenderWorklog(group, ws) {
   if (!group) {
-    return '<div class="agent-panel-empty">No weaver configured for any group.</div>';
+    return '<div class="agent-panel-empty">No engineer configured for any group.</div>';
   }
 
-  var entries = (state.weaver_worklog && state.weaver_worklog[group])
-    ? state.weaver_worklog[group].slice()
+  var entries = (state.engineer_worklog && state.engineer_worklog[group])
+    ? state.engineer_worklog[group].slice()
     : [];
   if (ws && ws.restrict_to_created_agents) {
     entries = entries.filter(function(entry) {
@@ -3410,9 +3410,9 @@ function _agentPanelLegacyRenderWorklog(group, ws) {
   html += '<span class="agent-panel-worklog-count">' + entries.length + '</span>';
   html += '</div>';
   if (ws && ws.restrict_to_created_agents) {
-    html += '<div class="agent-panel-worklog-note">Showing only tasks sent to Weaver-created agents.</div>';
+    html += '<div class="agent-panel-worklog-note">Showing only tasks sent to Engineer-created agents.</div>';
   } else {
-    html += '<div class="agent-panel-worklog-note">Recent tasks this Weaver dispatched in this group.</div>';
+    html += '<div class="agent-panel-worklog-note">Recent tasks this Engineer dispatched in this group.</div>';
   }
 
   if (!entries.length) {
@@ -3442,11 +3442,11 @@ function _agentPanelLegacyRenderWorklogItem(entry) {
   var taskId = (entry && entry.task_id) || '';
   var lane = task ? (task.lane || '') : 'Not on board';
   var status = task ? String(task.status || '').trim() : '';
-  var agentName = _weaverWorklogAgentLabel(entry, task);
-  var meta = 'dispatched ' + _weaverTimeAgo(entry && entry.started_at);
+  var agentName = _engineerWorklogAgentLabel(entry, task);
+  var meta = 'dispatched ' + _engineerTimeAgo(entry && entry.started_at);
   var anchorKey = 'worklog-' + String(entry && entry.id ? entry.id : taskId || meta);
 
-  var html = '<div class="agent-panel-worklog-item" data-weaver-anchor="' + _esc(anchorKey) + '">';
+  var html = '<div class="agent-panel-worklog-item" data-engineer-anchor="' + _esc(anchorKey) + '">';
   html += '<div class="agent-panel-worklog-item-header">';
   html += '<div class="agent-panel-worklog-task">';
   html += '<div class="agent-panel-worklog-task-title">' + _esc(title) + '</div>';
@@ -3467,7 +3467,7 @@ function _agentPanelLegacyRenderWorklogItem(entry) {
   return html;
 }
 
-function _weaverWorklogAgentLabel(entry, task) {
+function _engineerWorklogAgentLabel(entry, task) {
   var taskAgent = (task && task.agent_id && state.agents && state.agents[task.agent_id])
     ? state.agents[task.agent_id]
     : null;
@@ -3484,24 +3484,24 @@ function _weaverWorklogAgentLabel(entry, task) {
 
 function _agentPanelLegacyRenderJournal(group) {
   if (!group) {
-    return '<div class="agent-panel-empty">No weaver configured for any group.</div>';
+    return '<div class="agent-panel-empty">No engineer configured for any group.</div>';
   }
 
   var html = '';
-  var subview = _weaverJournalSubview(group);
+  var subview = _engineerJournalSubview(group);
 
   // Pending question banner
-  var ws = _weaverGetSettings(group);
+  var ws = _engineerGetSettings(group);
   if (ws && ws.pending_question) {
     html += '<div class="agent-panel-ask-banner">';
-    html += '<div class="agent-panel-ask-label">Weaver is asking:</div>';
+    html += '<div class="agent-panel-ask-label">Engineer is asking:</div>';
     html += '<div class="agent-panel-ask-question">' + _esc(ws.pending_question) + '</div>';
-    html += '<textarea class="agent-panel-ask-reply" id="weaver-reply-input" '
+    html += '<textarea class="agent-panel-ask-reply" id="engineer-reply-input" '
          + 'placeholder="Type your reply..." rows="2" '
-         + 'oninput="_weaverReplyDraft=this.value">' + _esc(_weaverReplyDraft) + '</textarea>';
+         + 'oninput="_engineerReplyDraft=this.value">' + _esc(_engineerReplyDraft) + '</textarea>';
     html += '<div class="agent-panel-ask-actions">';
-    html += '<button class="agent-panel-dismiss-btn" onclick="weaverDismissQuestion()">Dismiss</button>';
-    html += '<button class="agent-panel-reply-btn" onclick="weaverReply()">Send Reply</button>';
+    html += '<button class="agent-panel-dismiss-btn" onclick="engineerDismissQuestion()">Dismiss</button>';
+    html += '<button class="agent-panel-reply-btn" onclick="engineerReply()">Send Reply</button>';
     html += '</div>';
     html += '</div>';
   }
@@ -3510,12 +3510,12 @@ function _agentPanelLegacyRenderJournal(group) {
     html += '<div class="agent-panel-note-banner">';
     html += '<div class="agent-panel-note-label">'
       + (noteKind === 'question'
-        ? 'Weaver asks (non-blocking):'
-        : 'Weaver note:')
+        ? 'Engineer asks (non-blocking):'
+        : 'Engineer note:')
       + '</div>';
     html += '<div class="agent-panel-note-text">' + _esc(ws.pending_note) + '</div>';
     html += '<div class="agent-panel-note-actions">';
-    html += '<button class="agent-panel-dismiss-btn" onclick="weaverDismissNote()">Dismiss</button>';
+    html += '<button class="agent-panel-dismiss-btn" onclick="engineerDismissNote()">Dismiss</button>';
     html += '</div>';
     html += '</div>';
   }
@@ -3526,11 +3526,11 @@ function _agentPanelLegacyRenderJournal(group) {
     return html;
   }
 
-  // Journal entries come from state.weaver_journal (populated by delta ops).
+  // Journal entries come from state.engineer_journal (populated by delta ops).
   // Render a "last 20 + Load older" window so long sessions don't explode the
   // DOM; the shared section pager in _agentPanelSectionPage grows the window on
   // top-insert so the anchor-restore helper keeps the user's scroll position.
-  var entries = (state.weaver_journal && state.weaver_journal[group]) || [];
+  var entries = (state.engineer_journal && state.engineer_journal[group]) || [];
   if (entries.length) {
     var sorted = entries.slice().sort(function(a, b) {
       return (b.id || 0) - (a.id || 0);
@@ -3549,16 +3549,16 @@ function _agentPanelLegacyRenderJournalToolbar(group, subview) {
   var html = '<div class="agent-panel-session-map-toolbar">';
   html += '<div class="agent-panel-session-map-actions">';
   if (subview === 'session_map') {
-    html += '<button class="agent-panel-session-map-btn" onclick=\'weaverCloseSessionMap('
+    html += '<button class="agent-panel-session-map-btn" onclick=\'engineerCloseSessionMap('
       + groupJs + ")\'>Back to Journal</button>";
-    html += '<button class="agent-panel-session-map-btn primary" onclick=\'weaverRefreshSessionMap('
+    html += '<button class="agent-panel-session-map-btn primary" onclick=\'engineerRefreshSessionMap('
       + groupJs + ")\'>Refresh</button>";
   } else {
-    html += '<button class="agent-panel-session-map-btn primary" onclick=\'weaverOpenSessionMap('
+    html += '<button class="agent-panel-session-map-btn primary" onclick=\'engineerOpenSessionMap('
       + groupJs + ")\'>Session Map</button>";
   }
   html += '</div>';
-  var status = _weaverSessionMapStatus(group, subview);
+  var status = _engineerSessionMapStatus(group, subview);
   if (status) {
     html += '<div class="agent-panel-session-map-status">' + _esc(status) + '</div>';
   }
@@ -3566,10 +3566,10 @@ function _agentPanelLegacyRenderJournalToolbar(group, subview) {
   return html;
 }
 
-function _weaverSessionMapStatus(group, subview) {
-  var meta = _weaverSessionMapMeta(group);
+function _engineerSessionMapStatus(group, subview) {
+  var meta = _engineerSessionMapMeta(group);
   if (subview !== 'session_map') return '';
-  if (meta.loading && _weaverSessionMapData(group)) {
+  if (meta.loading && _engineerSessionMapData(group)) {
     return 'Refreshing deterministic snapshot…';
   }
   if (meta.loading) return 'Loading deterministic snapshot…';
@@ -3578,8 +3578,8 @@ function _weaverSessionMapStatus(group, subview) {
 }
 
 function _agentPanelLegacyRenderSessionMap(group) {
-  var sessionMap = _weaverSessionMapData(group);
-  var meta = _weaverSessionMapMeta(group);
+  var sessionMap = _engineerSessionMapData(group);
+  var meta = _engineerSessionMapMeta(group);
   if (!sessionMap) {
     return '<div class="agent-panel-session-map-empty">'
       + _esc(meta.loading
@@ -3626,7 +3626,7 @@ function _agentPanelLegacyRenderSessionMapOverview(overview) {
 }
 
 function _agentPanelLegacyRenderSessionMapHints(summary) {
-  var items = _weaverSummaryItems(summary);
+  var items = _engineerSummaryItems(summary);
   if (!items.length) return '';
   var html = '<div class="agent-panel-health-summary">';
   html += '<div class="agent-panel-health-header">';
@@ -3639,7 +3639,7 @@ function _agentPanelLegacyRenderSessionMapHints(summary) {
     var item = items[i];
     html += '<div class="agent-panel-session-map-list-item">';
     html += '<span class="agent-panel-health-pill agent-panel-health-pill-notice">'
-      + _esc(_weaverHumanizeToken(item.kind || 'hint')) + '</span>';
+      + _esc(_engineerHumanizeToken(item.kind || 'hint')) + '</span>';
     html += '<span class="agent-panel-session-map-item-text">' + _esc(item.message || '') + '</span>';
     html += '</div>';
   }
@@ -3649,7 +3649,7 @@ function _agentPanelLegacyRenderSessionMapHints(summary) {
 }
 
 function _agentPanelLegacyRenderSessionMapStreams(summary) {
-  var streams = _weaverSummaryItems(summary);
+  var streams = _engineerSummaryItems(summary);
   if (!streams.length) return '';
   var html = '<div class="agent-panel-streams-summary">';
   html += '<div class="agent-panel-health-header">';
@@ -3667,7 +3667,7 @@ function _agentPanelLegacyRenderSessionMapStreams(summary) {
 }
 
 function _agentPanelLegacyRenderSessionMapAsks(title, summary, pillLabel) {
-  var items = _weaverSummaryItems(summary);
+  var items = _engineerSummaryItems(summary);
   if (!items.length) return '';
   var html = '<div class="agent-panel-health-summary">';
   html += '<div class="agent-panel-health-header">';
@@ -3691,7 +3691,7 @@ function _agentPanelLegacyRenderSessionMapAsks(title, summary, pillLabel) {
 }
 
 function _agentPanelLegacyRenderSessionMapHumanGates(summary) {
-  var items = _weaverSummaryItems(summary);
+  var items = _engineerSummaryItems(summary);
   if (!items.length) return '';
   var html = '<div class="agent-panel-health-summary">';
   html += '<div class="agent-panel-health-header">';
@@ -3719,7 +3719,7 @@ function _agentPanelLegacyRenderSessionMapHumanGates(summary) {
 }
 
 function _agentPanelLegacyRenderSessionMapTaskHealth(summary) {
-  var items = _weaverSummaryItems(summary);
+  var items = _engineerSummaryItems(summary);
   if (!items.length) return '';
 
   var html = '<div class="agent-panel-health-summary">';
@@ -3732,7 +3732,7 @@ function _agentPanelLegacyRenderSessionMapTaskHealth(summary) {
     var item = items[i];
     html += '<div class="agent-panel-health-item">';
     html += '<span class="agent-panel-health-item-state agent-panel-health-pill-' + _esc(item.health_state || 'blocked') + '">'
-      + _esc(_weaverHealthLabels[item.health_state] || item.health_state || 'Unhealthy') + '</span>';
+      + _esc(_engineerHealthLabels[item.health_state] || item.health_state || 'Unhealthy') + '</span>';
     html += '<span class="agent-panel-health-item-title">' + _esc(item.title || '') + '</span>';
     if (item.via) {
       html += '<span class="agent-panel-health-item-via">via ' + _esc(item.via) + '</span>';
@@ -3745,7 +3745,7 @@ function _agentPanelLegacyRenderSessionMapTaskHealth(summary) {
 }
 
 function _agentPanelLegacyRenderSessionMapVerification(summary) {
-  var items = _weaverSummaryItems(summary);
+  var items = _engineerSummaryItems(summary);
   if (!items.length) return '';
   var html = '<div class="agent-panel-verification-summary">';
   html += '<div class="agent-panel-health-header">';
@@ -3757,7 +3757,7 @@ function _agentPanelLegacyRenderSessionMapVerification(summary) {
     var item = items[i];
     html += '<div class="agent-panel-verification-item">';
     html += '<span class="agent-panel-health-pill agent-panel-health-pill-' + _esc(item.verification_state || 'pending') + '">'
-      + _esc(_weaverVerificationLabels[item.verification_state] || item.verification_state || 'Verification') + '</span>';
+      + _esc(_engineerVerificationLabels[item.verification_state] || item.verification_state || 'Verification') + '</span>';
     html += '<span class="agent-panel-verification-item-title">' + _esc(item.title || '') + '</span>';
     if (item.verification_mode) {
       html += '<span class="agent-panel-verification-item-meta">' + _esc(item.verification_mode) + '</span>';
@@ -3772,7 +3772,7 @@ function _agentPanelLegacyRenderSessionMapVerification(summary) {
 }
 
 function _agentPanelLegacyRenderSessionMapBoundaries(summary) {
-  var items = _weaverSummaryItems(summary);
+  var items = _engineerSummaryItems(summary);
   if (!items.length) return '';
   var html = '<div class="agent-panel-health-summary">';
   html += '<div class="agent-panel-health-header">';
@@ -3813,7 +3813,7 @@ function _agentPanelLegacyRenderSessionMapBoundaries(summary) {
 }
 
 function _agentPanelLegacyRenderSessionMapAgents(summary) {
-  var items = _weaverSummaryItems(summary);
+  var items = _engineerSummaryItems(summary);
   if (!items.length) return '';
   var html = '<div class="agent-panel-health-summary">';
   html += '<div class="agent-panel-health-header">';
@@ -3840,7 +3840,7 @@ function _agentPanelLegacyRenderSessionMapAgents(summary) {
 }
 
 function _agentPanelLegacyRenderSessionMapQueuedFollowUp(summary) {
-  var items = _weaverSummaryItems(summary);
+  var items = _engineerSummaryItems(summary);
   if (!items.length) return '';
   var html = '<div class="agent-panel-health-summary">';
   html += '<div class="agent-panel-health-header">';
@@ -3851,7 +3851,7 @@ function _agentPanelLegacyRenderSessionMapQueuedFollowUp(summary) {
   html += '<div class="agent-panel-health-list">';
   for (var i = 0; i < items.length; i++) {
     var item = items[i];
-    var pill = item.source === 'dispatch_queue' ? 'Dispatch queue' : _weaverHumanizeToken(item.queue_state || 'Stream queue');
+    var pill = item.source === 'dispatch_queue' ? 'Dispatch queue' : _engineerHumanizeToken(item.queue_state || 'Stream queue');
     html += '<div class="agent-panel-session-map-list-item">';
     html += '<span class="agent-panel-health-pill agent-panel-health-pill-notice">' + _esc(pill) + '</span>';
     html += '<span class="agent-panel-session-map-item-text">' + _esc(item.task_title || item.task_id || '') + '</span>';
@@ -3871,7 +3871,7 @@ function _agentPanelLegacyRenderSessionMapQueuedFollowUp(summary) {
 }
 
 function _agentPanelLegacyRenderSessionMapJournal(summary) {
-  var items = _weaverSummaryItems(summary);
+  var items = _engineerSummaryItems(summary);
   if (!items.length) return '';
   var html = '<div class="agent-panel-health-summary">';
   html += '<div class="agent-panel-health-header">';
@@ -3894,11 +3894,11 @@ function _agentPanelLegacyRenderJournalEntries(entries, allowContextMenu, alread
   for (var i = 0; i < sorted.length; i++) {
     var e = sorted[i];
     var typeClass = 'agent-panel-badge-' + (e.type || 'observation');
-    var ago = _weaverTimeAgo(e.timestamp);
+    var ago = _engineerTimeAgo(e.timestamp);
     var anchorKey = 'journal-' + String(e.id || ('idx-' + i));
-    html += '<div class="agent-panel-entry" data-weaver-anchor="' + _esc(anchorKey) + '"'
+    html += '<div class="agent-panel-entry" data-engineer-anchor="' + _esc(anchorKey) + '"'
       + (allowContextMenu && e.id
-        ? ' oncontextmenu="weaverEntryCtx(event,' + e.id + ')"'
+        ? ' oncontextmenu="engineerEntryCtx(event,' + e.id + ')"'
         : '')
       + '>';
     html += '<div class="agent-panel-entry-header">';
@@ -3912,7 +3912,7 @@ function _agentPanelLegacyRenderJournalEntries(entries, allowContextMenu, alread
   return html;
 }
 
-function _weaverSummaryItems(summary) {
+function _engineerSummaryItems(summary) {
   if (!summary || typeof summary !== 'object') return [];
   if (Array.isArray(summary.items)) return summary.items.slice();
   if (Array.isArray(summary.entries)) return summary.entries.slice();
@@ -3920,7 +3920,7 @@ function _weaverSummaryItems(summary) {
 }
 
 function _agentPanelLegacyRenderOpenStreams(group) {
-  var summary = _weaverOpenStreamsSummary(group);
+  var summary = _engineerOpenStreamsSummary(group);
   if (!summary.show) return '';
 
   var html = '<div class="agent-panel-streams-summary">';
@@ -3945,36 +3945,36 @@ function _agentPanelLegacyRenderOpenStreams(group) {
   return html;
 }
 
-function _weaverOpenStreamsSummary(group) {
+function _engineerOpenStreamsSummary(group) {
   var result = { show: false, streams: [] };
   if (!group || !state) return result;
-  var raw = _weaverRawStreamPayload(group);
+  var raw = _engineerRawStreamPayload(group);
   if (typeof raw === 'undefined') {
     return result;
   }
   result.show = true;
-  var items = _weaverStreamItemsFromPayload(raw);
+  var items = _engineerStreamItemsFromPayload(raw);
   for (var i = 0; i < items.length; i++) {
-    if (_weaverStreamIsOpen(items[i])) result.streams.push(items[i]);
+    if (_engineerStreamIsOpen(items[i])) result.streams.push(items[i]);
   }
   return result;
 }
 
-function _weaverRawStreamPayload(group) {
+function _engineerRawStreamPayload(group) {
   if (!group || !state) return undefined;
-  if (state.weaver_streams
-      && Object.prototype.hasOwnProperty.call(state.weaver_streams, group)) {
-    return state.weaver_streams[group];
+  if (state.engineer_streams
+      && Object.prototype.hasOwnProperty.call(state.engineer_streams, group)) {
+    return state.engineer_streams[group];
   }
-  if (state.weaver_board_summary
-      && state.weaver_board_summary[group]
-      && state.weaver_board_summary[group].streams) {
-    return state.weaver_board_summary[group].streams;
+  if (state.engineer_board_summary
+      && state.engineer_board_summary[group]
+      && state.engineer_board_summary[group].streams) {
+    return state.engineer_board_summary[group].streams;
   }
   return undefined;
 }
 
-function _weaverStreamItemsFromPayload(raw) {
+function _engineerStreamItemsFromPayload(raw) {
   if (Array.isArray(raw)) return raw.slice();
   if (!raw || typeof raw !== 'object') return [];
   if (Array.isArray(raw.items)) return raw.items.slice();
@@ -3985,28 +3985,28 @@ function _weaverStreamItemsFromPayload(raw) {
   return [];
 }
 
-function _weaverStreamIsOpen(stream) {
+function _engineerStreamIsOpen(stream) {
   if (!stream) return false;
   if (stream.is_open === false) return false;
-  var mergeState = String(_weaverStreamMergeState(stream) || '').toLowerCase();
-  var stateName = String(_weaverStreamStateName(stream) || '').toLowerCase();
+  var mergeState = String(_engineerStreamMergeState(stream) || '').toLowerCase();
+  var stateName = String(_engineerStreamStateName(stream) || '').toLowerCase();
   return mergeState !== 'merged' && stateName !== 'merged';
 }
 
 function _agentPanelLegacyRenderOpenStreamCard(stream, index) {
-  var title = _weaverStreamTitle(stream);
-  var branch = _weaverShortBranchLabel(_weaverStreamBranch(stream));
-  var stateMeta = _weaverStreamStateMeta(stream);
-  var mergeMeta = _weaverStreamMergeMeta(stream);
-  var gateReason = _weaverStreamGateReason(stream);
-  var nextAction = _weaverStreamActionLabel(stream);
-  var latestCommit = _weaverStreamLatestReviewedCommit(stream);
-  var productTasks = _weaverStreamTaskItems(stream, 'product');
-  var workflowTasks = _weaverStreamTaskItems(stream, 'workflow');
-  var visibilityItems = _weaverStreamVisibilityItems(stream);
-  var key = _weaverStreamAnchorKey(stream, index, title, branch);
+  var title = _engineerStreamTitle(stream);
+  var branch = _engineerShortBranchLabel(_engineerStreamBranch(stream));
+  var stateMeta = _engineerStreamStateMeta(stream);
+  var mergeMeta = _engineerStreamMergeMeta(stream);
+  var gateReason = _engineerStreamGateReason(stream);
+  var nextAction = _engineerStreamActionLabel(stream);
+  var latestCommit = _engineerStreamLatestReviewedCommit(stream);
+  var productTasks = _engineerStreamTaskItems(stream, 'product');
+  var workflowTasks = _engineerStreamTaskItems(stream, 'workflow');
+  var visibilityItems = _engineerStreamVisibilityItems(stream);
+  var key = _engineerStreamAnchorKey(stream, index, title, branch);
 
-  var html = '<div class="agent-panel-stream-card" data-weaver-anchor="' + _esc(key) + '">';
+  var html = '<div class="agent-panel-stream-card" data-engineer-anchor="' + _esc(key) + '">';
   html += '<div class="agent-panel-stream-card-header">';
   html += '<div class="agent-panel-stream-heading">';
   html += '<div class="agent-panel-stream-title-row">';
@@ -4107,7 +4107,7 @@ function _agentPanelLegacyRenderStreamVisibilityGroup(items) {
   html += '<div class="agent-panel-stream-visibility-list">';
   for (var i = 0; i < items.length && i < 2; i++) {
     var item = items[i];
-    var kind = _weaverVisibilityKindLabel(item);
+    var kind = _engineerVisibilityKindLabel(item);
     html += '<div class="agent-panel-stream-visibility-item">';
     if (kind) {
       html += '<span class="agent-panel-stream-visibility-kind">' + _esc(kind) + '</span>';
@@ -4124,7 +4124,7 @@ function _agentPanelLegacyRenderStreamVisibilityGroup(items) {
   return html;
 }
 
-function _weaverStreamAnchorKey(stream, index, title, branch) {
+function _engineerStreamAnchorKey(stream, index, title, branch) {
   var parts = [
     stream && (stream.stream_id || stream.id || ''),
     stream && (stream.agent_id || ''),
@@ -4135,8 +4135,8 @@ function _weaverStreamAnchorKey(stream, index, title, branch) {
   return 'stream-' + parts.join('-');
 }
 
-function _weaverStreamStateMeta(stream) {
-  var name = _weaverStreamStateName(stream);
+function _engineerStreamStateMeta(stream) {
+  var name = _engineerStreamStateName(stream);
   var labels = {
     'implementing': 'Implementing',
     'reviewing': 'In review',
@@ -4147,15 +4147,15 @@ function _weaverStreamStateMeta(stream) {
   };
   return {
     raw: name,
-    label: labels[name] || _weaverHumanizeToken(name || 'implementing'),
-    className: _weaverClassSuffix(name || 'implementing'),
+    label: labels[name] || _engineerHumanizeToken(name || 'implementing'),
+    className: _engineerClassSuffix(name || 'implementing'),
   };
 }
 
-function _weaverStreamStateName(stream) {
+function _engineerStreamStateName(stream) {
   var stateName = String((stream && stream.state) || '').toLowerCase();
   var validationState = String((stream && stream.validation_state) || '').toLowerCase();
-  var mergeState = String(_weaverStreamMergeState(stream) || '').toLowerCase();
+  var mergeState = String(_engineerStreamMergeState(stream) || '').toLowerCase();
   if (validationState === 'pending_human_validation') {
     return 'awaiting_human_validation';
   }
@@ -4164,28 +4164,28 @@ function _weaverStreamStateName(stream) {
   return 'implementing';
 }
 
-function _weaverStreamMergeState(stream) {
+function _engineerStreamMergeState(stream) {
   return (stream && (stream.merge_state || stream.merge_readiness)) || '';
 }
 
-function _weaverStreamMergeMeta(stream) {
-  var mergeState = String(_weaverStreamMergeState(stream) || '').toLowerCase();
+function _engineerStreamMergeMeta(stream) {
+  var mergeState = String(_engineerStreamMergeState(stream) || '').toLowerCase();
   var labels = {
     'ready': 'Ready to merge',
     'not_ready': 'Not ready to merge',
     'merged': 'Merged',
   };
-  if (!mergeState && _weaverStreamStateName(stream) === 'ready_to_merge') {
+  if (!mergeState && _engineerStreamStateName(stream) === 'ready_to_merge') {
     mergeState = 'ready';
   }
   return {
     raw: mergeState,
     label: labels[mergeState] || '',
-    className: _weaverClassSuffix(mergeState || 'unknown'),
+    className: _engineerClassSuffix(mergeState || 'unknown'),
   };
 }
 
-function _weaverStreamGateReason(stream) {
+function _engineerStreamGateReason(stream) {
   return String(
     (stream && (
       stream.gate_reason
@@ -4195,7 +4195,7 @@ function _weaverStreamGateReason(stream) {
   );
 }
 
-function _weaverStreamActionLabel(stream) {
+function _engineerStreamActionLabel(stream) {
   var action = String((stream && stream.recommended_next_action) || '').toLowerCase();
   var labels = {
     'continue_implementation': 'Continue implementation',
@@ -4211,10 +4211,10 @@ function _weaverStreamActionLabel(stream) {
     'fix_review_blocker': 'Fix review blocker',
     'resolve_merge_conflict': 'Resolve merge conflict',
   };
-  return labels[action] || _weaverHumanizeToken(action);
+  return labels[action] || _engineerHumanizeToken(action);
 }
 
-function _weaverStreamLatestReviewedCommit(stream) {
+function _engineerStreamLatestReviewedCommit(stream) {
   var value = '';
   if (stream) {
     if (stream.latest_reviewed_commit_sha) value = String(stream.latest_reviewed_commit_sha);
@@ -4227,7 +4227,7 @@ function _weaverStreamLatestReviewedCommit(stream) {
   return value;
 }
 
-function _weaverStreamTaskItems(stream, kind) {
+function _engineerStreamTaskItems(stream, kind) {
   var arrays = [];
   if (kind === 'product') {
     arrays = [
@@ -4252,7 +4252,7 @@ function _weaverStreamTaskItems(stream, kind) {
   var items = [];
   var seen = {};
   for (var j = 0; j < raw.length; j++) {
-    var item = _weaverNormalizeStreamTaskItem(raw[j]);
+    var item = _engineerNormalizeStreamTaskItem(raw[j]);
     if (!item.title && !item.id) continue;
     var key = item.id || item.title;
     if (seen[key]) continue;
@@ -4262,16 +4262,16 @@ function _weaverStreamTaskItems(stream, kind) {
   return items;
 }
 
-function _weaverNormalizeStreamTaskItem(item) {
+function _engineerNormalizeStreamTaskItem(item) {
   if (typeof item === 'string' || typeof item === 'number') {
     var taskId = String(item);
-    return _weaverStreamTaskFromId(taskId);
+    return _engineerStreamTaskFromId(taskId);
   }
   if (!item || typeof item !== 'object') return { id: '', title: '' };
   var id = item.id || item.task_id || '';
   var title = item.title || item.task || item.name || '';
   if (!title && id) {
-    var resolved = _weaverStreamTaskFromId(id);
+    var resolved = _engineerStreamTaskFromId(id);
     title = resolved.title;
   }
   return {
@@ -4280,7 +4280,7 @@ function _weaverNormalizeStreamTaskItem(item) {
   };
 }
 
-function _weaverStreamTaskFromId(taskId) {
+function _engineerStreamTaskFromId(taskId) {
   var task = state && state.board_tasks ? state.board_tasks[taskId] : null;
   return {
     id: String(taskId || ''),
@@ -4288,7 +4288,7 @@ function _weaverStreamTaskFromId(taskId) {
   };
 }
 
-function _weaverStreamVisibilityItems(stream) {
+function _engineerStreamVisibilityItems(stream) {
   var raw = [];
   if (stream) {
     if (Array.isArray(stream.visibility_items)) raw = stream.visibility_items;
@@ -4313,16 +4313,16 @@ function _weaverStreamVisibilityItems(stream) {
   return items;
 }
 
-function _weaverVisibilityKindLabel(item) {
+function _engineerVisibilityKindLabel(item) {
   if (!item) return '';
   var status = String(item.status || '').toLowerCase();
   var kind = String(item.kind || '').toLowerCase();
-  if (status) return _weaverHumanizeToken(status);
-  if (kind) return _weaverHumanizeToken(kind);
+  if (status) return _engineerHumanizeToken(status);
+  if (kind) return _engineerHumanizeToken(kind);
   return 'Note';
 }
 
-function _weaverStreamTitle(stream) {
+function _engineerStreamTitle(stream) {
   var title = '';
   if (stream) {
     title = stream.short_label
@@ -4334,25 +4334,25 @@ function _weaverStreamTitle(stream) {
       || '';
   }
   if (!title) {
-    var productTasks = _weaverStreamTaskItems(stream, 'product');
+    var productTasks = _engineerStreamTaskItems(stream, 'product');
     if (productTasks.length) title = productTasks[0].title || '';
   }
   if (!title && stream && stream.latest_boundary_task_title) {
     title = stream.latest_boundary_task_title;
   }
   if (title) return String(title);
-  return _weaverShortBranchLabel(_weaverStreamBranch(stream)) || 'Untitled stream';
+  return _engineerShortBranchLabel(_engineerStreamBranch(stream)) || 'Untitled stream';
 }
 
-function _weaverStreamBranch(stream) {
+function _engineerStreamBranch(stream) {
   return String((stream && (stream.branch || stream.worktree_branch || stream.stream_branch)) || '');
 }
 
-function _weaverShortBranchLabel(branch) {
+function _engineerShortBranchLabel(branch) {
   return String(branch || '').replace(/^loom\//, '');
 }
 
-function _weaverHumanizeToken(value) {
+function _engineerHumanizeToken(value) {
   var text = String(value || '').trim();
   if (!text) return '';
   text = text.replace(/[_-]+/g, ' ');
@@ -4361,12 +4361,12 @@ function _weaverHumanizeToken(value) {
   });
 }
 
-function _weaverClassSuffix(value) {
+function _engineerClassSuffix(value) {
   return String(value || 'unknown').toLowerCase().replace(/[^a-z0-9_-]+/g, '-');
 }
 
 function _agentPanelLegacyRenderTaskHealth(group) {
-  var summary = _weaverTaskHealthSummary(group);
+  var summary = _engineerTaskHealthSummary(group);
   if (!summary.total) return '';
 
   var html = '<div class="agent-panel-health-summary">';
@@ -4375,12 +4375,12 @@ function _agentPanelLegacyRenderTaskHealth(group) {
   html += '<span class="agent-panel-health-total">' + summary.total + ' unhealthy</span>';
   html += '</div>';
   html += '<div class="agent-panel-health-counts">';
-  for (var i = 0; i < _weaverHealthOrder.length; i++) {
-    var stateName = _weaverHealthOrder[i];
+  for (var i = 0; i < _engineerHealthOrder.length; i++) {
+    var stateName = _engineerHealthOrder[i];
     var count = summary.counts[stateName] || 0;
     if (!count) continue;
     html += '<span class="agent-panel-health-pill agent-panel-health-pill-' + _esc(stateName) + '">'
-      + count + ' ' + _esc(_weaverHealthLabels[stateName]) + '</span>';
+      + count + ' ' + _esc(_engineerHealthLabels[stateName]) + '</span>';
   }
   html += '</div>';
   if (summary.items.length) {
@@ -4389,7 +4389,7 @@ function _agentPanelLegacyRenderTaskHealth(group) {
       var item = summary.items[j];
       html += '<div class="agent-panel-health-item">';
       html += '<span class="agent-panel-health-item-state agent-panel-health-pill-' + _esc(item.health_state) + '">'
-        + _esc(_weaverHealthLabels[item.health_state] || item.health_state) + '</span>';
+        + _esc(_engineerHealthLabels[item.health_state] || item.health_state) + '</span>';
       html += '<span class="agent-panel-health-item-title">' + _esc(item.title) + '</span>';
       if (item.via) {
         html += '<span class="agent-panel-health-item-via">via ' + _esc(item.via) + '</span>';
@@ -4403,7 +4403,7 @@ function _agentPanelLegacyRenderTaskHealth(group) {
 }
 
 function _agentPanelLegacyRenderVerificationSummary(group) {
-  var summary = _weaverVerificationSummary(group);
+  var summary = _engineerVerificationSummary(group);
   if (!summary.total) return '';
 
   var html = '<div class="agent-panel-verification-summary">';
@@ -4417,14 +4417,14 @@ function _agentPanelLegacyRenderVerificationSummary(group) {
     var count = summary.counts[stateName] || 0;
     if (!count) continue;
     html += '<span class="agent-panel-health-pill agent-panel-health-pill-' + _esc(stateName) + '">'
-      + count + ' ' + _esc(_weaverVerificationLabels[stateName] || stateName) + '</span>';
+      + count + ' ' + _esc(_engineerVerificationLabels[stateName] || stateName) + '</span>';
   }
   html += '</div>';
   for (var j = 0; j < summary.items.length; j++) {
     var item = summary.items[j];
     html += '<div class="agent-panel-verification-item">';
     html += '<span class="agent-panel-health-pill agent-panel-health-pill-' + _esc(item.verification_state) + '">'
-      + _esc(_weaverVerificationLabels[item.verification_state] || item.verification_state) + '</span>';
+      + _esc(_engineerVerificationLabels[item.verification_state] || item.verification_state) + '</span>';
     html += '<span class="agent-panel-verification-item-title">' + _esc(item.title) + '</span>';
     if (item.verification_mode) {
       html += '<span class="agent-panel-verification-item-meta">' + _esc(item.verification_mode) + '</span>';
@@ -4446,7 +4446,7 @@ function _agentPanelLegacyRenderBoundarySummary(group) {
     var agent = state.agents[agentId];
     if (!agent || agent.cell_type !== 'agent' || agent.group !== group) continue;
     var settings = (state.group_settings || {})[group] || {};
-    if (settings.weaver_agent_id === agent.id) continue;
+    if (settings.engineer_agent_id === agent.id) continue;
     var overview = typeof _branchBoundaryOverviewForAgent === 'function'
       ? _branchBoundaryOverviewForAgent(agent)
       : null;
@@ -4507,7 +4507,7 @@ function _agentPanelLegacyRenderBoundarySummary(group) {
   return html;
 }
 
-function _weaverTaskHealthSummary(group) {
+function _engineerTaskHealthSummary(group) {
   var summary = {
     counts: { 'blocked': 0, 'stalled': 0, 'thrashing': 0, 'idle-risk': 0 },
     items: [],
@@ -4531,7 +4531,7 @@ function _weaverTaskHealthSummary(group) {
     });
   }
   summary.items.sort(function(a, b) {
-    var sev = (_weaverHealthSeverity[b.health_state] || 0) - (_weaverHealthSeverity[a.health_state] || 0);
+    var sev = (_engineerHealthSeverity[b.health_state] || 0) - (_engineerHealthSeverity[a.health_state] || 0);
     if (sev) return sev;
     var timeCmp = (a.health_since || '').localeCompare(b.health_since || '');
     if (timeCmp) return timeCmp;
@@ -4541,7 +4541,7 @@ function _weaverTaskHealthSummary(group) {
   return summary;
 }
 
-function _weaverVerificationSummary(group) {
+function _engineerVerificationSummary(group) {
   var summary = {
     counts: { pending: 0, attempted: 0, passed: 0, failed: 0 },
     order: ['failed', 'pending', 'attempted', 'passed'],
@@ -4580,21 +4580,21 @@ function _weaverVerificationSummary(group) {
 
 // -- Journal context menu --------------------------------------------------
 
-function weaverEntryCtx(e, entryId) {
+function engineerEntryCtx(e, entryId) {
   e.preventDefault();
   e.stopPropagation();
   showContextMenu(e.clientX, e.clientY, [
-    { label: 'Delete entry', danger: true, action: 'weaverDeleteEntry(' + entryId + ')' },
+    { label: 'Delete entry', danger: true, action: 'engineerDeleteEntry(' + entryId + ')' },
   ]);
 }
 
-function weaverDeleteEntry(entryId) {
+function engineerDeleteEntry(entryId) {
   var group = _agentPanelCurrentGroup();
   if (!group) return;
-  send({ cmd: 'weaver_journal_delete', group: group, entry_id: entryId });
+  send({ cmd: 'engineer_journal_delete', group: group, entry_id: entryId });
   // Optimistic removal from local state
-  if (state.weaver_journal && state.weaver_journal[group]) {
-    state.weaver_journal[group] = state.weaver_journal[group].filter(
+  if (state.engineer_journal && state.engineer_journal[group]) {
+    state.engineer_journal[group] = state.engineer_journal[group].filter(
       function(e) { return e.id !== entryId; });
   }
   _agentPanelRefreshVisibleSurface();
@@ -4602,37 +4602,37 @@ function weaverDeleteEntry(entryId) {
 
 // -- Human reply -----------------------------------------------------------
 
-function weaverReply() {
-  var input = document.getElementById('weaver-reply-input');
+function engineerReply() {
+  var input = document.getElementById('engineer-reply-input');
   if (!input) return;
   var answer = input.value.trim();
   if (!answer) return;
   var group = _agentPanelCurrentGroup();
   if (!group) return;
-  _weaverReplyDraft = '';
+  _engineerReplyDraft = '';
   // Blur so the re-render skip guard doesn't block the banner clearing
   input.blur();
-  send({ cmd: 'weaver_reply', group: group, answer: answer });
+  send({ cmd: 'engineer_reply', group: group, answer: answer });
 }
 
-function weaverDismissQuestion() {
+function engineerDismissQuestion() {
   var group = _agentPanelCurrentGroup();
   if (!group) return;
-  _weaverReplyDraft = '';
-  send({ cmd: 'weaver_resume', group: group });
+  _engineerReplyDraft = '';
+  send({ cmd: 'engineer_resume', group: group });
 }
 
-function weaverDismissNote() {
+function engineerDismissNote() {
   var group = _agentPanelCurrentGroup();
   if (!group) return;
-  send({ cmd: 'weaver_dismiss_note', group: group });
+  send({ cmd: 'engineer_dismiss_note', group: group });
 }
 
 // -- Event handlers --------------------------------------------------------
 
-function weaverInstrInput(textarea) {
-  _weaverCustomInstrDirty = true;
-  _weaverCustomInstrDraft = textarea.value;
+function engineerInstrInput(textarea) {
+  _engineerCustomInstrDirty = true;
+  _engineerCustomInstrDraft = textarea.value;
   // Show save button (re-render just the settings section would be heavy;
   // instead just toggle the button visibility)
   var btn = textarea.parentElement.querySelector('.agent-panel-save-btn');
@@ -4640,35 +4640,35 @@ function weaverInstrInput(textarea) {
     var b = document.createElement('button');
     b.className = 'agent-panel-save-btn';
     b.textContent = 'Save';
-    b.onclick = weaverSaveInstructions;
+    b.onclick = engineerSaveInstructions;
     textarea.parentElement.appendChild(b);
   }
 }
 
-function weaverSaveInstructions() {
+function engineerSaveInstructions() {
   var group = _agentPanelCurrentGroup();
   if (!group) return;
   send({
-    cmd: 'weaver_update_settings',
+    cmd: 'engineer_update_settings',
     group: group,
-    custom_instructions: _weaverCustomInstrDraft,
+    custom_instructions: _engineerCustomInstrDraft,
   });
-  _weaverCustomInstrDirty = false;
-  _weaverCustomInstrDraft = '';
+  _engineerCustomInstrDirty = false;
+  _engineerCustomInstrDraft = '';
 }
 
-function weaverUpdateSetting(key, value) {
+function engineerUpdateSetting(key, value) {
   var group = _agentPanelCurrentGroup();
   if (!group) return;
-  var payload = { cmd: 'weaver_update_settings', group: group };
+  var payload = { cmd: 'engineer_update_settings', group: group };
   payload[key] = value;
   send(payload);
 }
 
-function weaverToggleEvent(evt, enabled) {
+function engineerToggleEvent(evt, enabled) {
   var group = _agentPanelCurrentGroup();
   if (!group) return;
-  var ws = _weaverGetSettings(group);
+  var ws = _engineerGetSettings(group);
   var current = (ws && ws.enabled_events) ? ws.enabled_events.slice() : [];
   if (enabled && current.indexOf(evt) < 0) {
     current.push(evt);
@@ -4676,7 +4676,7 @@ function weaverToggleEvent(evt, enabled) {
     current = current.filter(function(e) { return e !== evt; });
   }
   send({
-    cmd: 'weaver_update_settings',
+    cmd: 'engineer_update_settings',
     group: group,
     enabled_events: current,
   });
@@ -4684,45 +4684,45 @@ function weaverToggleEvent(evt, enabled) {
 
 // -- Helpers ---------------------------------------------------------------
 
-function _weaverGetSettings(group) {
-  if (!group || !state.weaver_settings) return null;
-  return state.weaver_settings[group] || null;
+function _engineerGetSettings(group) {
+  if (!group || !state.engineer_settings) return null;
+  return state.engineer_settings[group] || null;
 }
 
-function _weaverPanelEmptyMessage(group, ws, weaver, bstats) {
-  if (!group) return 'Select a group to inspect Weaver orchestration state.';
-  if (_weaverHasPanelState(group, ws, weaver, bstats)) return '';
-  return 'No Weaver configured for ' + group + ' yet.';
+function _engineerPanelEmptyMessage(group, ws, engineer, bstats) {
+  if (!group) return 'Select a group to inspect Engineer orchestration state.';
+  if (_engineerHasPanelState(group, ws, engineer, bstats)) return '';
+  return 'No Engineer configured for ' + group + ' yet.';
 }
 
-function _weaverHasPanelState(group, ws, weaver, bstats) {
+function _engineerHasPanelState(group, ws, engineer, bstats) {
   if (!group) return false;
-  if (weaver) return true;
-  if (_weaverGroupHasConfiguredAgent(group)) return true;
-  if (_weaverGroupHasState(ws)) return true;
-  if (_weaverGroupHasState(bstats)) return true;
-  if (_weaverGroupStoreHasState(state.weaver_board_summary, group)) return true;
-  if (_weaverGroupStoreHasState(state.weaver_buffer_stats, group)) return true;
-  if (_weaverGroupStoreHasState(state.weaver_journal, group)) return true;
-  if (_weaverGroupStoreHasState(state.weaver_sent_events, group)) return true;
-  if (_weaverGroupStoreHasState(state.weaver_session_maps, group)) return true;
-  if (_weaverGroupStoreHasState(state.weaver_streams, group)) return true;
-  if (_weaverGroupStoreHasState(state.weaver_worklog, group)) return true;
+  if (engineer) return true;
+  if (_engineerGroupHasConfiguredAgent(group)) return true;
+  if (_engineerGroupHasState(ws)) return true;
+  if (_engineerGroupHasState(bstats)) return true;
+  if (_engineerGroupStoreHasState(state.engineer_board_summary, group)) return true;
+  if (_engineerGroupStoreHasState(state.engineer_buffer_stats, group)) return true;
+  if (_engineerGroupStoreHasState(state.engineer_journal, group)) return true;
+  if (_engineerGroupStoreHasState(state.engineer_sent_events, group)) return true;
+  if (_engineerGroupStoreHasState(state.engineer_session_maps, group)) return true;
+  if (_engineerGroupStoreHasState(state.engineer_streams, group)) return true;
+  if (_engineerGroupStoreHasState(state.engineer_worklog, group)) return true;
   return false;
 }
 
-function _weaverGroupHasConfiguredAgent(group) {
+function _engineerGroupHasConfiguredAgent(group) {
   if (!group || !state || !state.group_settings) return false;
   var settings = state.group_settings[group];
-  return !!(settings && settings.weaver_agent_id);
+  return !!(settings && settings.engineer_agent_id);
 }
 
-function _weaverGroupStoreHasState(store, group) {
+function _engineerGroupStoreHasState(store, group) {
   if (!store || !group) return false;
-  return _weaverGroupHasState(store[group]);
+  return _engineerGroupHasState(store[group]);
 }
 
-function _weaverGroupHasState(value) {
+function _engineerGroupHasState(value) {
   if (value == null) return false;
   if (Array.isArray(value)) return value.length > 0;
   if (typeof value === 'object') return Object.keys(value).length > 0;
@@ -4757,14 +4757,14 @@ function _agentPanelCurrentGroup() {
   return '';
 }
 
-function _weaverGetAgent(group) {
+function _engineerGetAgent(group) {
   if (!group || !state.group_settings) return null;
   var gs = state.group_settings[group];
-  if (!gs || !gs.weaver_agent_id) return null;
-  return state.agents ? state.agents[gs.weaver_agent_id] : null;
+  if (!gs || !gs.engineer_agent_id) return null;
+  return state.agents ? state.agents[gs.engineer_agent_id] : null;
 }
 
-function _weaverTimeAgo(ts) {
+function _engineerTimeAgo(ts) {
   if (!ts) return '';
   var diff = (Date.now() / 1000) - ts;
   if (diff < 60) return 'just now';

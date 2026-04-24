@@ -52,15 +52,15 @@ loom doctor --json | jq '{result: .result, architects: .architects.total, engine
 Expected before this smoke begins:
 
 - `architects = 0`
-- `engineers = 1` (the default `Weaver` engineer)
+- `engineers = 1` (the default `Engineer` engineer)
 - `pending_hires = 0`
 
 Capture the current default engineer id for reference:
 
 ```bash
-WEAVER_ID="$(sqlite3 "$DB" "SELECT id FROM agents WHERE kind='engineer' AND name='Weaver' LIMIT 1;")"
-echo "$WEAVER_ID"
-test -n "$WEAVER_ID"
+ENGINEER_ID="$(sqlite3 "$DB" "SELECT id FROM agents WHERE kind='engineer' AND name='Engineer' LIMIT 1;")"
+echo "$ENGINEER_ID"
+test -n "$ENGINEER_ID"
 ```
 
 ### 1.2 Deploy the build and restart Loom
@@ -450,7 +450,7 @@ Expected:
 - exit code `0`
 - `Result: PASS`
 - `architect:   1`
-- `engineer:    2` (the original `Weaver` engineer plus `alice`)
+- `engineer:    2` (the original `Engineer` engineer plus `alice`)
 - `[pending_hires]` shows `pending: 0`
 - `[worktrees]` is populated and `nonconforming:         0`
 
@@ -512,12 +512,12 @@ Expected:
 - there is no `architect_agent_message` tool
 - `architect_engineer_message` with the worker id fails with `engineer not found in scope`
 
-### R2. Weaver cannot message alice's worker
+### R2. Engineer cannot message alice's worker
 
-In the default `Weaver` engineer session, paste this prompt after replacing `WORKER_ID_VALUE`:
+In the default `Engineer` engineer session, paste this prompt after replacing `WORKER_ID_VALUE`:
 
 ```text
-Call weaver_agent_message with:
+Call engineer_agent_message with:
 {"agent":"WORKER_ID_VALUE","message":"this should fail"}
 Return only the exact JSON result or error.
 ```

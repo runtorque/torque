@@ -34,8 +34,8 @@ class DigestRoutingTests(unittest.IsolatedAsyncioTestCase):
         self.state_mod = importlib.reload(self.state_mod)
         self.routing_mod = importlib.import_module("loom.digest_routing")
         self.routing_mod = importlib.reload(self.routing_mod)
-        self.weaver_mod = importlib.import_module("loom.weaver")
-        self.weaver_mod = importlib.reload(self.weaver_mod)
+        self.engineer_mod = importlib.import_module("loom.engineer")
+        self.engineer_mod = importlib.reload(self.engineer_mod)
 
     def _make_state(self):
         state = self.state_mod.MatrixState()
@@ -45,7 +45,7 @@ class DigestRoutingTests(unittest.IsolatedAsyncioTestCase):
 
     def _add_agent(self, state, *, agent_id, name, group, kind,
                    owner_engineer_id="", hired_by_architect_id="",
-                   created_by_weaver_id="", running=True):
+                   created_by_engineer_id="", running=True):
         cell = self.state_mod.AgentCell(
             id=agent_id,
             name=name,
@@ -55,7 +55,7 @@ class DigestRoutingTests(unittest.IsolatedAsyncioTestCase):
             kind=kind,
             owner_engineer_id=owner_engineer_id,
             hired_by_architect_id=hired_by_architect_id,
-            created_by_weaver_id=created_by_weaver_id,
+            created_by_engineer_id=created_by_engineer_id,
             session_id=f"session-{agent_id}" if running else "",
             status="running" if running else "stopped",
             persistent=kind in {"engineer", "architect"},
@@ -286,7 +286,7 @@ class DigestRoutingTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertNotIn(
             "engineer_queue_empty",
-            self.state_mod.WEAVER_MANDATORY_EVENTS,
+            self.state_mod.ENGINEER_MANDATORY_EVENTS,
         )
 
     def test_candidate_worker_recipients_exclude_worker_self(self):
@@ -601,7 +601,7 @@ class DigestRoutingTests(unittest.IsolatedAsyncioTestCase):
             kind="engineer",
         )
         state.group_settings[group] = self.state_mod.GroupSettings(
-            weaver_agent_id=legacy.id
+            engineer_agent_id=legacy.id
         )
         task = state.board_add_task(
             "Verify release",
@@ -698,7 +698,7 @@ class DigestRoutingTests(unittest.IsolatedAsyncioTestCase):
         state.update_agent_digest_settings(engineer_a.id)
         state.update_agent_digest_settings(engineer_b.id)
 
-        buffer = self.weaver_mod.WeaverEventBuffer(state, FakeBridge())
+        buffer = self.engineer_mod.EngineerEventBuffer(state, FakeBridge())
         buffer._loop = asyncio.get_running_loop()
 
         buffer.on_panel_event(
@@ -774,7 +774,7 @@ class DigestRoutingTests(unittest.IsolatedAsyncioTestCase):
         )
 
         bridge = FakeBridge()
-        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer = self.engineer_mod.EngineerEventBuffer(state, bridge)
         buffer._loop = asyncio.get_running_loop()
 
         state.update_agent_digest_settings(engineer_a.id, paused=True)
@@ -836,7 +836,7 @@ class DigestRoutingTests(unittest.IsolatedAsyncioTestCase):
         )
 
         bridge = FakeBridge()
-        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer = self.engineer_mod.EngineerEventBuffer(state, bridge)
         buffer._loop = asyncio.get_running_loop()
         buffer.on_panel_event(
             {
@@ -882,7 +882,7 @@ class DigestRoutingTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertNotIn(engineer.id, state.agent_digest_settings)
 
-        buffer = self.weaver_mod.WeaverEventBuffer(state, FakeBridge())
+        buffer = self.engineer_mod.EngineerEventBuffer(state, FakeBridge())
         buffer._loop = asyncio.get_running_loop()
         buffer.on_panel_event(
             {
@@ -924,7 +924,7 @@ class DigestRoutingTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertNotIn(architect.id, state.agent_digest_settings)
 
-        buffer = self.weaver_mod.WeaverEventBuffer(state, FakeBridge())
+        buffer = self.engineer_mod.EngineerEventBuffer(state, FakeBridge())
         buffer._loop = asyncio.get_running_loop()
         buffer.on_panel_event(
             {

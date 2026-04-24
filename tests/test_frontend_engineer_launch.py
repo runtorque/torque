@@ -3,10 +3,10 @@ import unittest
 from pathlib import Path
 
 
-class FrontendWeaverLaunchTests(unittest.TestCase):
-    def test_frontend_weaver_launch_modal(self):
+class FrontendEngineerLaunchTests(unittest.TestCase):
+    def test_frontend_engineer_launch_modal(self):
         root = Path(__file__).resolve().parents[1]
-        script = Path(__file__).with_name('frontend_weaver_launch_modal.test.js')
+        script = Path(__file__).with_name('frontend_engineer_launch_modal.test.js')
         proc = subprocess.run(
             ['node', '--test', str(script)],
             cwd=root,
@@ -16,7 +16,7 @@ class FrontendWeaverLaunchTests(unittest.TestCase):
 
         if proc.returncode != 0:
             self.fail(
-                'frontend weaver launch modal tests failed\n'
+                'frontend engineer launch modal tests failed\n'
                 f'stdout:\n{proc.stdout}\n'
                 f'stderr:\n{proc.stderr}'
             )

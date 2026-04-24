@@ -770,7 +770,7 @@ def _collect_drift_section(conn: sqlite3.Connection) -> dict:
     role_exists = _column_exists(conn, "agents", "role")
     owner_exists = _column_exists(conn, "agents", "owner_engineer_id")
     assigned_exists = _column_exists(conn, "board_tasks", "assigned_engineer_id")
-    legacy_task_owner_exists = _column_exists(conn, "board_tasks", "weaver_owner_id")
+    legacy_task_owner_exists = _column_exists(conn, "board_tasks", "engineer_owner_id")
 
     if role_exists:
         template_role = int(
@@ -797,8 +797,8 @@ def _collect_drift_section(conn: sqlite3.Connection) -> dict:
             _fetch_scalar(
                 conn,
                 "SELECT COUNT(*) FROM agents "
-                "WHERE (created_by_weaver_id != '' OR owner_engineer_id != '') "
-                "AND created_by_weaver_id != owner_engineer_id",
+                "WHERE (created_by_engineer_id != '' OR owner_engineer_id != '') "
+                "AND created_by_engineer_id != owner_engineer_id",
                 default=0,
             )
             or 0
@@ -807,7 +807,7 @@ def _collect_drift_section(conn: sqlite3.Connection) -> dict:
         created_owner = int(
             _fetch_scalar(
                 conn,
-                "SELECT COUNT(*) FROM agents WHERE created_by_weaver_id != ''",
+                "SELECT COUNT(*) FROM agents WHERE created_by_engineer_id != ''",
                 default=0,
             )
             or 0
@@ -824,8 +824,8 @@ def _collect_drift_section(conn: sqlite3.Connection) -> dict:
             _fetch_scalar(
                 conn,
                 "SELECT COUNT(*) FROM board_tasks "
-                "WHERE (weaver_owner_id != '' OR assigned_engineer_id != '') "
-                "AND weaver_owner_id != assigned_engineer_id",
+                "WHERE (engineer_owner_id != '' OR assigned_engineer_id != '') "
+                "AND engineer_owner_id != assigned_engineer_id",
                 default=0,
             )
             or 0
@@ -833,8 +833,8 @@ def _collect_drift_section(conn: sqlite3.Connection) -> dict:
 
     return {
         "agents_template_role": template_role,
-        "agents_created_by_weaver_owner_engineer": created_owner,
-        "board_tasks_weaver_owner_assigned_engineer": task_owner,
+        "agents_created_by_engineer_owner_engineer": created_owner,
+        "board_tasks_engineer_owner_assigned_engineer": task_owner,
         "board_tasks_legacy_column_present": legacy_task_owner_exists,
     }
 
@@ -869,18 +869,18 @@ def _collect_stage_6_cleanup_section(
     ignored_legacy_files = _collect_ignored_legacy_template_files(base_dir)
     legacy_columns_present = any([
         _column_exists(conn, "agents", "template"),
-        _column_exists(conn, "agents", "created_by_weaver_id"),
-        _column_exists(conn, "board_tasks", "weaver_owner_id"),
+        _column_exists(conn, "agents", "created_by_engineer_id"),
+        _column_exists(conn, "board_tasks", "engineer_owner_id"),
     ])
 
-    weaver_tool_aliases_present = False
+    engineer_tool_aliases_present = False
     try:
         from . import mcp as loom_mcp
     except Exception:
         loom_mcp = None
     if loom_mcp is not None:
-        weaver_tool_aliases_present = any(
-            str(tool.get("name", "") or "").startswith("weaver_")
+        engineer_tool_aliases_present = any(
+            str(tool.get("name", "") or "").startswith("engineer_")
             for tool in getattr(loom_mcp, "ALL_TOOLS", [])
         )
     try:
@@ -895,17 +895,17 @@ def _collect_stage_6_cleanup_section(
         ).read_text(encoding="utf-8")
     except OSError:
         shared_source = ""
-    weaver_tool_aliases_present = weaver_tool_aliases_present or any([
-        "from .mcp_weaver import" in mcp_source,
-        "import loom.mcp_weaver" in mcp_source,
-        "_resolve_weaver_alias_caller" in shared_source,
+    engineer_tool_aliases_present = engineer_tool_aliases_present or any([
+        "from .mcp_engineer import" in mcp_source,
+        "import loom.mcp_engineer" in mcp_source,
+        "_resolve_engineer_alias_caller" in shared_source,
     ])
 
     return {
         "legacy_template_files_ignored": len(ignored_legacy_files),
         "ignored_legacy_files": ignored_legacy_files,
         "legacy_columns_present": legacy_columns_present,
-        "weaver_tool_aliases_present": weaver_tool_aliases_present,
+        "engineer_tool_aliases_present": engineer_tool_aliases_present,
     }
 
 
@@ -937,7 +937,7 @@ def _check_template_role_drift(report: dict) -> dict:
 
 
 def _check_created_owner_drift(report: dict) -> dict:
-    count = int(report["drift"]["agents_created_by_weaver_owner_engineer"] or 0)
+    count = int(report["drift"]["agents_created_by_engineer_owner_engineer"] or 0)
     return {
         "name": "agents_created_by_owner_drift",
         "status": "pass" if count == 0 else "fail",
@@ -946,7 +946,7 @@ def _check_created_owner_drift(report: dict) -> dict:
 
 
 def _check_task_owner_drift(report: dict) -> dict:
-    count = int(report["drift"]["board_tasks_weaver_owner_assigned_engineer"] or 0)
+    count = int(report["drift"]["board_tasks_engineer_owner_assigned_engineer"] or 0)
     return {
         "name": "board_tasks_owner_drift",
         "status": "pass" if count == 0 else "fail",
@@ -1048,11 +1048,11 @@ def _check_stage_6_legacy_columns_removed(report: dict) -> dict:
     }
 
 
-def _check_stage_6_weaver_tool_aliases_removed(report: dict) -> dict:
+def _check_stage_6_engineer_tool_aliases_removed(report: dict) -> dict:
     cleanup = report.get("stage_6_cleanup", {}) or {}
-    present = bool(cleanup.get("weaver_tool_aliases_present"))
+    present = bool(cleanup.get("engineer_tool_aliases_present"))
     return {
-        "name": "stage_6_weaver_tool_aliases_removed",
+        "name": "stage_6_engineer_tool_aliases_removed",
         "status": "pass" if not present else "fail",
         "details": {"present": present},
     }
@@ -1151,7 +1151,7 @@ _DOCTOR_CHECKS = [
     _check_task_owner_drift,
     _check_invalid_architect_hired_binding,
     _check_stage_6_legacy_columns_removed,
-    _check_stage_6_weaver_tool_aliases_removed,
+    _check_stage_6_engineer_tool_aliases_removed,
 ]
 
 _DOCTOR_WARNINGS = [
@@ -1390,10 +1390,10 @@ def format_doctor_report(report: dict) -> str:
         "[drift]",
         "  agents.template ↔ role:                 "
         f"{int(drift.get('agents_template_role', 0) or 0)}",
-        "  agents.created_by_weaver_id ↔ owner_engineer_id: "
-        f"{int(drift.get('agents_created_by_weaver_owner_engineer', 0) or 0)}",
-        "  board_tasks.weaver_owner_id ↔ assigned_engineer_id: "
-        f"{int(drift.get('board_tasks_weaver_owner_assigned_engineer', 0) or 0)}",
+        "  agents.created_by_engineer_id ↔ owner_engineer_id: "
+        f"{int(drift.get('agents_created_by_engineer_owner_engineer', 0) or 0)}",
+        "  board_tasks.engineer_owner_id ↔ assigned_engineer_id: "
+        f"{int(drift.get('board_tasks_engineer_owner_assigned_engineer', 0) or 0)}",
         "",
         "[roles]",
         "  roles_dir:                      "
@@ -1408,8 +1408,8 @@ def format_doctor_report(report: dict) -> str:
         f"{int(stage_6_cleanup.get('legacy_template_files_ignored', 0) or 0)}",
         "  legacy_columns_present:         "
         f"{str(bool(stage_6_cleanup.get('legacy_columns_present'))).lower()}",
-        "  weaver_tool_aliases_present:    "
-        f"{str(bool(stage_6_cleanup.get('weaver_tool_aliases_present'))).lower()}",
+        "  engineer_tool_aliases_present:    "
+        f"{str(bool(stage_6_cleanup.get('engineer_tool_aliases_present'))).lower()}",
         "",
         (
             "Result: PASS (with warnings)"
@@ -1537,12 +1537,12 @@ def format_doctor_report(report: dict) -> str:
                 )
             elif name == "agents_created_by_owner_drift":
                 lines.append(
-                    "  - agents.created_by_weaver_id ↔ owner_engineer_id drift: "
+                    "  - agents.created_by_engineer_id ↔ owner_engineer_id drift: "
                     f"{details.get('count', 0)}"
                 )
             elif name == "board_tasks_owner_drift":
                 lines.append(
-                    "  - board_tasks.weaver_owner_id ↔ assigned_engineer_id drift: "
+                    "  - board_tasks.engineer_owner_id ↔ assigned_engineer_id drift: "
                     f"{details.get('count', 0)}"
                 )
             elif name == "invalid_architect_hired_by_architect":
@@ -1557,9 +1557,9 @@ def format_doctor_report(report: dict) -> str:
                     "  - legacy kinds-refactor columns are still present; "
                     "complete the stage-6 cleanup migration"
                 )
-            elif name == "stage_6_weaver_tool_aliases_removed":
+            elif name == "stage_6_engineer_tool_aliases_removed":
                 lines.append(
-                    "  - weaver_* MCP aliases are still present; "
+                    "  - engineer_* MCP aliases are still present; "
                     "remove the legacy alias surface"
                 )
             else:

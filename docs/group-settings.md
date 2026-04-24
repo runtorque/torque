@@ -2,7 +2,7 @@
 
 Each group has configurable settings that act as defaults when creating agents and terminals. Open the settings modal by clicking the gear icon (++2699++) on the group header, or right-click the header and select **Settings...**.
 
-Settings are organized into three tabs: **Group**, **Agents**, and **Weaver**.
+Settings are organized into three tabs: **Group**, **Agents**, and **Engineer**.
 
 ## Group tab
 
@@ -104,9 +104,9 @@ These settings override the group defaults when creating terminals specifically.
 
 Same as the agent version, but applies to the "+ New terminal" button.
 
-## Weaver tab
+## Engineer tab
 
-The **Weaver** tab owns per-group Weaver configuration.
+The **Engineer** tab owns per-group Engineer configuration.
 
 | Setting | Description |
 |---------|-------------|
@@ -118,7 +118,7 @@ The **Weaver** tab owns per-group Weaver configuration.
 | **Reasoning effort** | Optional provider-specific reasoning-effort override for the designated engineer. Unsupported providers ignore it. |
 | **Custom Instructions** | Extra instructions appended to the designated-engineer system prompt. |
 | **Push / Max / Heartbeat intervals** | Controls digest cadence and idle heartbeat behavior. |
-| **Events** | Choose which optional event types appear in Weaver digests. Mandatory event types are always enabled. |
+| **Events** | Choose which optional event types appear in Engineer digests. Mandatory event types are always enabled. |
 
 The designated engineer can be restarted from its context menu. The restart flow reuses the same launch dialog, so provider, command, model, reasoning effort, and policy settings stay editable even after that engineer already exists.
 

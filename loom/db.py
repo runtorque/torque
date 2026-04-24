@@ -67,9 +67,9 @@ _KINDS_SCHEMA_MIGRATION_VERSION_KEY = "schema_kinds_migration_version"
 _KINDS_SCHEMA_MIGRATION_MIGRATED_AT_KEY = "schema_kinds_migration_migrated_at"
 _KINDS_TASK_ASSIGNMENT_FIXUP_APPLIED_KEY = "schema_kinds_task_assignment_fixup_applied"
 _KINDS_SCHEMA_BACKUP_NAME = "loom.db.pre-kinds.bak"
-_KINDS_WEAVER_OVERRIDE_ENV = "LOOM_MIGRATE_WEAVER_ID"
-_KINDS_WEAVER_GROUP = "loom"
-_KINDS_WEAVER_NAME = "Weaver"
+_KINDS_ENGINEER_OVERRIDE_ENV = "LOOM_MIGRATE_ENGINEER_ID"
+_KINDS_ENGINEER_GROUP = "loom"
+_KINDS_ENGINEER_NAME = "Engineer"
 _AGENT_ACTIVITY_TS_MIGRATION_VERSION = 1
 _AGENT_ACTIVITY_TS_MIGRATION_VERSION_KEY = (
     "schema_agent_activity_timestamps_version"
@@ -120,7 +120,7 @@ def _serialize_agent_cell(cell):
     role = d.get("role", "") or d.get("template", "")
     owner_engineer_id = (
         d.get("owner_engineer_id", "")
-        or d.get("created_by_weaver_id", "")
+        or d.get("created_by_engineer_id", "")
     )
     return (
         d.get("id", ""),
@@ -244,7 +244,7 @@ def _decode_pending_hire_row(row, cols) -> dict:
 
 
 def _digest_event_json(event: dict) -> str:
-    """Encode a digest event without WeaverEventBuffer private metadata."""
+    """Encode a digest event without EngineerEventBuffer private metadata."""
     payload = {
         str(key): value
         for key, value in dict(event or {}).items()
@@ -467,7 +467,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self._fixup_kinds_task_assignments_if_needed()
         self._cleanup_kinds_legacy_columns_if_needed()
         self._backfill_empty_worker_kinds_if_needed()
-        self._migrate_agent_digest_settings_from_legacy_weaver_settings()
+        self._migrate_agent_digest_settings_from_legacy_engineer_settings()
         self.migrate_task_ids_if_needed()
 
     def _ensure_board_task_engineer_provenance_column(self):
@@ -977,32 +977,32 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "pending_failed_writes": pending_failed_writes,
         }
 
-    def _legacy_weaver_rows_exist(self) -> bool:
+    def _legacy_engineer_rows_exist(self) -> bool:
         row = self._conn.execute(
-            "SELECT 1 FROM weaver_settings LIMIT 1"
+            "SELECT 1 FROM engineer_settings LIMIT 1"
         ).fetchone()
         return bool(row)
 
-    def _migrate_agent_digest_settings_from_legacy_weaver_settings(self):
+    def _migrate_agent_digest_settings_from_legacy_engineer_settings(self):
         """Backfill per-agent digest settings from legacy per-group rows."""
-        if not self._legacy_weaver_rows_exist():
+        if not self._legacy_engineer_rows_exist():
             return
         try:
-            legacy_rows = self.load_all_weaver_settings()
+            legacy_rows = self.load_all_engineer_settings()
         except sqlite3.OperationalError:
             return
         if not legacy_rows:
             return
         for group_name, settings in legacy_rows.items():
             row = self._conn.execute(
-                "SELECT weaver_agent_id FROM group_settings "
+                "SELECT engineer_agent_id FROM group_settings "
                 "WHERE group_name=?",
                 (group_name,),
             ).fetchone()
             engineer_id = str((row[0] if row else "") or "").strip()
             if not engineer_id:
                 log.warning(
-                    "Skipping legacy weaver_settings migration for '%s': no designated engineer",
+                    "Skipping legacy engineer_settings migration for '%s': no designated engineer",
                     group_name,
                 )
                 continue
@@ -1012,14 +1012,14 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             ).fetchone()
             if not agent_row:
                 log.warning(
-                    "Skipping legacy weaver_settings migration for '%s': agent '%s' missing",
+                    "Skipping legacy engineer_settings migration for '%s': agent '%s' missing",
                     group_name,
                     engineer_id,
                 )
                 continue
             if str(agent_row[0] or "").strip() != "engineer":
                 log.warning(
-                    "Skipping legacy weaver_settings migration for '%s': agent '%s' is not an engineer",
+                    "Skipping legacy engineer_settings migration for '%s': agent '%s' is not an engineer",
                     group_name,
                     engineer_id,
                 )
@@ -1293,7 +1293,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self._conn.execute(
             "DELETE FROM group_settings WHERE group_name=?", (name,))
         self._conn.execute(
-            "DELETE FROM weaver_task_log WHERE group_name=?", (name,))
+            "DELETE FROM engineer_task_log WHERE group_name=?", (name,))
         self._conn.commit()
 
     def delete_group(self, name: str):
@@ -1433,7 +1433,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             self._conn.execute(
                 "INSERT INTO auto_dispatch_queue "
                 "(group_name, position, task_id, agent_group, "
-                "max_concurrent, target_agent_id, weaver_owner_id, enqueued_at) "
+                "max_concurrent, target_agent_id, engineer_owner_id, enqueued_at) "
                 "VALUES (?,?,?,?,?,?,?,?)",
                 (
                     group_name,
@@ -1442,7 +1442,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                     item.get("agent_group", ""),
                     int(item.get("max_concurrent", 1) or 1),
                     item.get("target_agent_id", ""),
-                    item.get("weaver_owner_id", ""),
+                    item.get("engineer_owner_id", ""),
                     item.get("enqueued_at", ""),
                 ),
             )
@@ -1729,7 +1729,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             ("schedules", "last_task_id"),
             ("agent_tasks", "task_id"),
             ("agent_messages", "task_id"),
-            ("weaver_task_log", "task_id"),
+            ("engineer_task_log", "task_id"),
             ("memory_entries", "task_id"),
         ):
             _rewrite_single_ref(table, column)
@@ -2182,16 +2182,16 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             (recipient_id, excess),
         )
 
-    # -- Weaver settings & journal -------------------------------------------
+    # -- Engineer settings & journal -------------------------------------------
 
-    def save_weaver_settings(self, group_name: str, settings: dict):
-        """Upsert weaver settings for a group."""
+    def save_engineer_settings(self, group_name: str, settings: dict):
+        """Upsert engineer settings for a group."""
         enabled_events = json.dumps(
             settings.get("enabled_events",
                          ["agent_started", "task_dispatched",
                           "task_derived", "task_health_alert"]))
         self._conn.execute("""
-            INSERT OR REPLACE INTO weaver_settings
+            INSERT OR REPLACE INTO engineer_settings
                 (group_name, push_interval, max_interval, heartbeat_interval,
                  default_worker_concurrency, autonomy_mode,
                  wave_size_preference, same_agent_follow_up_preference,
@@ -2200,10 +2200,10 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                  custom_instructions, restrict_to_created_agents,
                  pending_question, pending_note,
                  pending_note_kind, enabled_events,
-                 weaver_provider, weaver_boot_command,
-                 weaver_model, weaver_reasoning_effort,
-                 weaver_directory, weaver_profile,
-                 weaver_shell, weaver_tab_color,
+                 engineer_provider, engineer_boot_command,
+                 engineer_model, engineer_reasoning_effort,
+                 engineer_directory, engineer_profile,
+                 engineer_shell, engineer_tab_color,
                  pending_question_set_at,
                  pending_question_actor_id)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
@@ -2226,24 +2226,24 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             settings.get("pending_note", ""),
             settings.get("pending_note_kind", ""),
             enabled_events,
-            settings.get("weaver_provider", ""),
-            settings.get("weaver_boot_command", ""),
-            settings.get("weaver_model", ""),
-            settings.get("weaver_reasoning_effort", ""),
-            settings.get("weaver_directory", ""),
-            settings.get("weaver_profile", ""),
-            settings.get("weaver_shell", ""),
-            settings.get("weaver_tab_color", ""),
+            settings.get("engineer_provider", ""),
+            settings.get("engineer_boot_command", ""),
+            settings.get("engineer_model", ""),
+            settings.get("engineer_reasoning_effort", ""),
+            settings.get("engineer_directory", ""),
+            settings.get("engineer_profile", ""),
+            settings.get("engineer_shell", ""),
+            settings.get("engineer_tab_color", ""),
             float(settings.get("pending_question_set_at", 0) or 0),
             settings.get("pending_question_actor_id", ""),
         ))
         self._conn.commit()
 
-    async def save_weaver_settings_async(self, group_name: str, settings: dict):
-        """Queue and await a weaver-settings save without blocking the event loop."""
+    async def save_engineer_settings_async(self, group_name: str, settings: dict):
+        """Queue and await a engineer-settings save without blocking the event loop."""
         return await self._enqueue_async_write(
-            "weaver_settings",
-            "save_weaver_settings",
+            "engineer_settings",
+            "save_engineer_settings",
             group_name,
             _snapshot_db_payload(settings or {}),
         )
@@ -2286,8 +2286,8 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         )
         self._conn.commit()
 
-    def load_weaver_settings(self, group_name: str) -> dict | None:
-        """Load weaver settings for a group. Returns None if not set."""
+    def load_engineer_settings(self, group_name: str) -> dict | None:
+        """Load engineer settings for a group. Returns None if not set."""
         row = self._conn.execute(
             "SELECT group_name, push_interval, max_interval, heartbeat_interval, "
             "default_worker_concurrency, autonomy_mode, "
@@ -2295,13 +2295,13 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "digest_verbosity, escalation_style, paused, "
             "custom_instructions, restrict_to_created_agents, "
             "pending_question, pending_note, pending_note_kind, enabled_events, "
-            "weaver_provider, weaver_boot_command, "
-            "weaver_model, weaver_reasoning_effort, "
-            "weaver_directory, weaver_profile, "
-            "weaver_shell, weaver_tab_color, "
+            "engineer_provider, engineer_boot_command, "
+            "engineer_model, engineer_reasoning_effort, "
+            "engineer_directory, engineer_profile, "
+            "engineer_shell, engineer_tab_color, "
             "pending_question_set_at, "
             "pending_question_actor_id "
-            "FROM weaver_settings "
+            "FROM engineer_settings "
             "WHERE group_name=?", (group_name,)).fetchone()
         if not row:
             return None
@@ -2338,14 +2338,14 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "pending_note": row[14],
             "pending_note_kind": row[15],
             "enabled_events": enabled,
-            "weaver_provider": row[17] if len(row) > 17 else "",
-            "weaver_boot_command": row[18] if len(row) > 18 else "",
-            "weaver_model": row[19] if len(row) > 19 else "",
-            "weaver_reasoning_effort": row[20] if len(row) > 20 else "",
-            "weaver_directory": row[21] if len(row) > 21 else "",
-            "weaver_profile": row[22] if len(row) > 22 else "",
-            "weaver_shell": row[23] if len(row) > 23 else "",
-            "weaver_tab_color": row[24] if len(row) > 24 else "",
+            "engineer_provider": row[17] if len(row) > 17 else "",
+            "engineer_boot_command": row[18] if len(row) > 18 else "",
+            "engineer_model": row[19] if len(row) > 19 else "",
+            "engineer_reasoning_effort": row[20] if len(row) > 20 else "",
+            "engineer_directory": row[21] if len(row) > 21 else "",
+            "engineer_profile": row[22] if len(row) > 22 else "",
+            "engineer_shell": row[23] if len(row) > 23 else "",
+            "engineer_tab_color": row[24] if len(row) > 24 else "",
             "pending_question_set_at": row[25] if len(row) > 25 else 0.0,
             "pending_question_actor_id": row[26] if len(row) > 26 else "",
         }
@@ -2385,9 +2385,9 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "wake_on_digest": bool(row[8]) if len(row) > 8 else False,
         }
 
-    def delete_weaver_settings(self, group_name: str):
+    def delete_engineer_settings(self, group_name: str):
         self._conn.execute(
-            "DELETE FROM weaver_settings WHERE group_name=?", (group_name,))
+            "DELETE FROM engineer_settings WHERE group_name=?", (group_name,))
         self._conn.commit()
 
     def agent_exists(self, agent_id: str) -> bool:
@@ -2408,8 +2408,8 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         )
         self._conn.commit()
 
-    def load_all_weaver_settings(self) -> dict[str, dict]:
-        """Load weaver settings for all groups. Returns {group: settings}."""
+    def load_all_engineer_settings(self) -> dict[str, dict]:
+        """Load engineer settings for all groups. Returns {group: settings}."""
         rows = self._conn.execute(
             "SELECT group_name, push_interval, max_interval, heartbeat_interval, "
             "default_worker_concurrency, autonomy_mode, "
@@ -2417,13 +2417,13 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "digest_verbosity, escalation_style, paused, "
             "custom_instructions, restrict_to_created_agents, "
             "pending_question, pending_note, pending_note_kind, enabled_events, "
-            "weaver_provider, weaver_boot_command, "
-            "weaver_model, weaver_reasoning_effort, "
-            "weaver_directory, weaver_profile, "
-            "weaver_shell, weaver_tab_color, "
+            "engineer_provider, engineer_boot_command, "
+            "engineer_model, engineer_reasoning_effort, "
+            "engineer_directory, engineer_profile, "
+            "engineer_shell, engineer_tab_color, "
             "pending_question_set_at, "
             "pending_question_actor_id "
-            "FROM weaver_settings"
+            "FROM engineer_settings"
         ).fetchall()
         result = {}
         for row in rows:
@@ -2460,14 +2460,14 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 "pending_note": row[14],
                 "pending_note_kind": row[15],
                 "enabled_events": enabled,
-                "weaver_provider": row[17] if len(row) > 17 else "",
-                "weaver_boot_command": row[18] if len(row) > 18 else "",
-                "weaver_model": row[19] if len(row) > 19 else "",
-                "weaver_reasoning_effort": row[20] if len(row) > 20 else "",
-                "weaver_directory": row[21] if len(row) > 21 else "",
-                "weaver_profile": row[22] if len(row) > 22 else "",
-                "weaver_shell": row[23] if len(row) > 23 else "",
-                "weaver_tab_color": row[24] if len(row) > 24 else "",
+                "engineer_provider": row[17] if len(row) > 17 else "",
+                "engineer_boot_command": row[18] if len(row) > 18 else "",
+                "engineer_model": row[19] if len(row) > 19 else "",
+                "engineer_reasoning_effort": row[20] if len(row) > 20 else "",
+                "engineer_directory": row[21] if len(row) > 21 else "",
+                "engineer_profile": row[22] if len(row) > 22 else "",
+                "engineer_shell": row[23] if len(row) > 23 else "",
+                "engineer_tab_color": row[24] if len(row) > 24 else "",
                 "pending_question_set_at": row[25] if len(row) > 25 else 0.0,
                 "pending_question_actor_id": row[26] if len(row) > 26 else "",
             }
@@ -2511,10 +2511,10 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
     def save_journal_entry(self, group_name: str, timestamp: float,
                            entry_type: str, entry: str,
                            author_cell_id: str = "") -> int:
-        """Insert a weaver journal entry. Returns the new row ID."""
+        """Insert a engineer journal entry. Returns the new row ID."""
         author_cell_id = str(author_cell_id or "").strip()
         c = self._conn.execute(
-            "INSERT INTO weaver_journal "
+            "INSERT INTO engineer_journal "
             "(group_name, timestamp, entry_type, entry, author_cell_id) "
             "VALUES (?,?,?,?,?)",
             (group_name, timestamp, entry_type, entry, author_cell_id))
@@ -2537,7 +2537,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         params.append(limit)
         rows = self._conn.execute(
             "SELECT id, group_name, timestamp, entry_type, entry, "
-            "author_cell_id FROM weaver_journal WHERE "
+            "author_cell_id FROM engineer_journal WHERE "
             + " AND ".join(filters)
             + " ORDER BY id DESC LIMIT ?",
             params,
@@ -2843,10 +2843,10 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self._conn.execute("DELETE FROM pending_hires WHERE id=?", (hire_id,))
         self._conn.commit()
 
-    def save_weaver_task_log_entry(self, record: dict) -> int:
-        """Insert a persisted Weaver dispatch/worklog row."""
+    def save_engineer_task_log_entry(self, record: dict) -> int:
+        """Insert a persisted Engineer dispatch/worklog row."""
         c = self._conn.execute(
-            "INSERT INTO weaver_task_log "
+            "INSERT INTO engineer_task_log "
             "(group_name, task_id, task_title, agent_id, agent_name, "
             "agent_slug, agent_owned, started_at) VALUES (?,?,?,?,?,?,?,?)",
             (
@@ -2863,11 +2863,11 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self._conn.commit()
         return c.lastrowid
 
-    def load_weaver_task_log(self, group_name: str, limit: int = 100) -> list[dict]:
-        """Load recent persisted Weaver dispatch rows for a group."""
+    def load_engineer_task_log(self, group_name: str, limit: int = 100) -> list[dict]:
+        """Load recent persisted Engineer dispatch rows for a group."""
         rows = self._conn.execute(
             "SELECT id, group_name, task_id, task_title, agent_id, agent_name, "
-            "agent_slug, agent_owned, started_at FROM weaver_task_log "
+            "agent_slug, agent_owned, started_at FROM engineer_task_log "
             "WHERE group_name=? ORDER BY started_at DESC, id DESC LIMIT ?",
             (group_name, limit),
         ).fetchall()
@@ -2886,21 +2886,21 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             for row in rows
         ]
 
-    def trim_weaver_task_log(self, group_name: str, limit: int = 200):
-        """Trim persisted Weaver worklog rows for a group to ``limit``."""
+    def trim_engineer_task_log(self, group_name: str, limit: int = 200):
+        """Trim persisted Engineer worklog rows for a group to ``limit``."""
         self._conn.execute(
-            "DELETE FROM weaver_task_log WHERE group_name=? AND id NOT IN ("
-            "SELECT id FROM weaver_task_log WHERE group_name=? "
+            "DELETE FROM engineer_task_log WHERE group_name=? AND id NOT IN ("
+            "SELECT id FROM engineer_task_log WHERE group_name=? "
             "ORDER BY started_at DESC, id DESC LIMIT ?"
             ")",
             (group_name, group_name, limit),
         )
         self._conn.commit()
 
-    def rename_weaver_task_log_group(self, old_name: str, new_name: str):
-        """Move persisted Weaver worklog rows to a renamed group."""
+    def rename_engineer_task_log_group(self, old_name: str, new_name: str):
+        """Move persisted Engineer worklog rows to a renamed group."""
         self._conn.execute(
-            "UPDATE weaver_task_log SET group_name=? WHERE group_name=?",
+            "UPDATE engineer_task_log SET group_name=? WHERE group_name=?",
             (new_name, old_name),
         )
         self._conn.commit()
@@ -3373,7 +3373,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                         INSERT INTO auto_dispatch_queue
                             (group_name, position, task_id, agent_group,
                              max_concurrent, target_agent_id,
-                             weaver_owner_id, enqueued_at)
+                             engineer_owner_id, enqueued_at)
                         VALUES (?,?,?,?,?,?,?,?)
                     """, (
                         gname,
@@ -3382,7 +3382,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                         item.get("agent_group", ""),
                         int(item.get("max_concurrent", 1) or 1),
                         item.get("target_agent_id", ""),
-                        item.get("weaver_owner_id", ""),
+                        item.get("engineer_owner_id", ""),
                         item.get("enqueued_at", ""),
                     ))
 
@@ -3471,7 +3471,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             d["group"] = d.pop("group_name")
             d.setdefault("template", str(d.get("role", "") or ""))
             d.setdefault(
-                "created_by_weaver_id",
+                "created_by_engineer_id",
                 str(d.get("owner_engineer_id", "") or ""),
             )
             d["worktree_auto_checkpoint"] = bool(
@@ -3545,7 +3545,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             for row in rows:
                 d = decode_board_task_row(row, cols)
                 d.setdefault(
-                    "weaver_owner_id",
+                    "engineer_owner_id",
                     str(d.get("assigned_engineer_id", "") or ""),
                 )
                 board_tasks[d["id"]] = d
@@ -3622,7 +3622,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         try:
             rows = c.execute(
                 "SELECT group_name, position, task_id, agent_group, "
-                "max_concurrent, target_agent_id, weaver_owner_id, enqueued_at "
+                "max_concurrent, target_agent_id, engineer_owner_id, enqueued_at "
                 "FROM auto_dispatch_queue ORDER BY group_name, position"
             ).fetchall()
             auto_dispatch_queues = decode_auto_dispatch_queue_rows(rows)
@@ -3889,40 +3889,40 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             self._kinds_backup_path(),
         )
 
-    def _find_weaver_candidate_ids(self) -> list[str]:
+    def _find_engineer_candidate_ids(self) -> list[str]:
         template_sql = self._optional_column_sql("agents", "template")
         created_by_sql = self._optional_column_sql(
-            "agents", "created_by_weaver_id"
+            "agents", "created_by_engineer_id"
         )
         rows = self._conn.execute(
             f"SELECT id, name, {template_sql}, {created_by_sql} "
             "FROM agents WHERE cell_type='agent' AND group_name=?",
-            (_KINDS_WEAVER_GROUP,),
+            (_KINDS_ENGINEER_GROUP,),
         ).fetchall()
         referenced_ids = {
-            str(created_by_weaver_id or "").strip()
-            for _agent_id, _name, _template, created_by_weaver_id in rows
-            if str(created_by_weaver_id or "").strip()
+            str(created_by_engineer_id or "").strip()
+            for _agent_id, _name, _template, created_by_engineer_id in rows
+            if str(created_by_engineer_id or "").strip()
         }
         candidates = set()
-        for agent_id, name, template, created_by_weaver_id in rows:
+        for agent_id, name, template, created_by_engineer_id in rows:
             agent_id = str(agent_id or "").strip()
             if not agent_id:
                 continue
-            if re.search(r"weaver", str(name or ""), re.IGNORECASE):
+            if re.search(r"engineer", str(name or ""), re.IGNORECASE):
                 candidates.add(agent_id)
                 continue
-            if str(template or "").strip().lower() == "weaver":
+            if str(template or "").strip().lower() == "engineer":
                 candidates.add(agent_id)
                 continue
-            if not str(created_by_weaver_id or "").strip() and agent_id in referenced_ids:
+            if not str(created_by_engineer_id or "").strip() and agent_id in referenced_ids:
                 candidates.add(agent_id)
         return sorted(candidates)
 
-    def _configured_weaver_candidate_id(self) -> str:
+    def _configured_engineer_candidate_id(self) -> str:
         row = self._conn.execute(
-            "SELECT weaver_agent_id FROM group_settings WHERE group_name=?",
-            (_KINDS_WEAVER_GROUP,),
+            "SELECT engineer_agent_id FROM group_settings WHERE group_name=?",
+            (_KINDS_ENGINEER_GROUP,),
         ).fetchone()
         configured_id = str(row[0] or "").strip() if row else ""
         if not configured_id:
@@ -3931,42 +3931,42 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "SELECT 1 FROM agents "
             "WHERE id=? AND cell_type='agent' AND group_name=? "
             "LIMIT 1",
-            (configured_id, _KINDS_WEAVER_GROUP),
+            (configured_id, _KINDS_ENGINEER_GROUP),
         ).fetchone()
         return configured_id if exists else ""
 
-    def _resolve_weaver_backfill_target(self) -> tuple[Optional[str], bool]:
-        configured_id = self._configured_weaver_candidate_id()
+    def _resolve_engineer_backfill_target(self) -> tuple[Optional[str], bool]:
+        configured_id = self._configured_engineer_candidate_id()
         if configured_id:
             return configured_id, True
 
-        candidate_ids = self._find_weaver_candidate_ids()
+        candidate_ids = self._find_engineer_candidate_ids()
         if not candidate_ids:
-            log.info("migration: no Weaver found, skipping engineer backfill")
+            log.info("migration: no Engineer found, skipping engineer backfill")
             return None, True
         if len(candidate_ids) == 1:
             return candidate_ids[0], True
 
-        override = str(os.getenv(_KINDS_WEAVER_OVERRIDE_ENV, "") or "").strip()
+        override = str(os.getenv(_KINDS_ENGINEER_OVERRIDE_ENV, "") or "").strip()
         if override and override in candidate_ids:
             return override, True
 
         if override:
             log.error(
-                "migration: multiple Weaver candidates found %s; %s=%r did not match",
+                "migration: multiple Engineer candidates found %s; %s=%r did not match",
                 candidate_ids,
-                _KINDS_WEAVER_OVERRIDE_ENV,
+                _KINDS_ENGINEER_OVERRIDE_ENV,
                 override,
             )
         else:
             log.error(
-                "migration: multiple Weaver candidates found %s; set %s to continue",
+                "migration: multiple Engineer candidates found %s; set %s to continue",
                 candidate_ids,
-                _KINDS_WEAVER_OVERRIDE_ENV,
+                _KINDS_ENGINEER_OVERRIDE_ENV,
             )
         return None, False
 
-    def _resolve_backfilled_weaver_identity(self, engineer_id: str) -> tuple[str, str]:
+    def _resolve_backfilled_engineer_identity(self, engineer_id: str) -> tuple[str, str]:
         rows = self._conn.execute(
             "SELECT id, name, slug FROM agents"
         ).fetchall()
@@ -3976,7 +3976,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             if str(agent_id or "") != str(engineer_id or "")
             and str(name or "").strip()
         }
-        target_name = _unique_value(_KINDS_WEAVER_NAME, existing_names)
+        target_name = _unique_value(_KINDS_ENGINEER_NAME, existing_names)
         existing_slugs = {
             str(slug or "").strip()
             for agent_id, _name, slug in rows
@@ -4035,37 +4035,37 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 ).fetchone()
             count += int(row[0] or 0)
 
-        if self._column_exists("agents", "created_by_weaver_id"):
+        if self._column_exists("agents", "created_by_engineer_id"):
             if not self._column_exists("agents", "kind"):
                 row = self._conn.execute(
                     "SELECT COUNT(*) FROM agents "
-                    "WHERE TRIM(COALESCE(created_by_weaver_id, '')) != ''"
+                    "WHERE TRIM(COALESCE(created_by_engineer_id, '')) != ''"
                 ).fetchone()
             elif not self._column_exists("agents", "owner_engineer_id"):
                 row = self._conn.execute(
                     "SELECT COUNT(*) FROM agents "
-                    "WHERE TRIM(COALESCE(created_by_weaver_id, '')) != '' "
+                    "WHERE TRIM(COALESCE(created_by_engineer_id, '')) != '' "
                     "AND TRIM(COALESCE(kind, '')) = ''"
                 ).fetchone()
             else:
                 row = self._conn.execute(
                     "SELECT COUNT(*) FROM agents "
-                    "WHERE TRIM(COALESCE(created_by_weaver_id, '')) != '' "
+                    "WHERE TRIM(COALESCE(created_by_engineer_id, '')) != '' "
                     "AND (TRIM(COALESCE(kind, '')) = '' "
                     "OR TRIM(COALESCE(owner_engineer_id, '')) = '')"
                 ).fetchone()
             count += int(row[0] or 0)
 
-        if self._column_exists("board_tasks", "weaver_owner_id"):
+        if self._column_exists("board_tasks", "engineer_owner_id"):
             if not self._column_exists("board_tasks", "assigned_engineer_id"):
                 row = self._conn.execute(
                     "SELECT COUNT(*) FROM board_tasks "
-                    "WHERE TRIM(COALESCE(weaver_owner_id, '')) != ''"
+                    "WHERE TRIM(COALESCE(engineer_owner_id, '')) != ''"
                 ).fetchone()
             else:
                 row = self._conn.execute(
                     "SELECT COUNT(*) FROM board_tasks "
-                    "WHERE TRIM(COALESCE(weaver_owner_id, '')) != '' "
+                    "WHERE TRIM(COALESCE(engineer_owner_id, '')) != '' "
                     "AND TRIM(COALESCE(assigned_engineer_id, '')) = ''"
                 ).fetchone()
             count += int(row[0] or 0)
@@ -4091,11 +4091,11 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                     drift_rows.add(key)
 
         if (
-            self._column_exists("agents", "created_by_weaver_id")
+            self._column_exists("agents", "created_by_engineer_id")
             and self._column_exists("agents", "owner_engineer_id")
         ):
             for agent_id, legacy_owner, owner_engineer_id in self._conn.execute(
-                "SELECT id, created_by_weaver_id, owner_engineer_id FROM agents"
+                "SELECT id, created_by_engineer_id, owner_engineer_id FROM agents"
             ).fetchall():
                 legacy_owner = str(legacy_owner or "").strip()
                 owner_engineer_id = str(owner_engineer_id or "").strip()
@@ -4108,11 +4108,11 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                     drift_rows.add(key)
 
         if (
-            self._column_exists("board_tasks", "weaver_owner_id")
+            self._column_exists("board_tasks", "engineer_owner_id")
             and self._column_exists("board_tasks", "assigned_engineer_id")
         ):
             for task_id, legacy_owner, assigned_engineer_id in self._conn.execute(
-                "SELECT id, weaver_owner_id, assigned_engineer_id FROM board_tasks"
+                "SELECT id, engineer_owner_id, assigned_engineer_id FROM board_tasks"
             ).fetchall():
                 legacy_owner = str(legacy_owner or "").strip()
                 assigned_engineer_id = str(assigned_engineer_id or "").strip()
@@ -4195,9 +4195,9 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
 
         agents_has_legacy = any(
             self._column_exists("agents", col)
-            for col in ("template", "created_by_weaver_id")
+            for col in ("template", "created_by_engineer_id")
         )
-        tasks_has_legacy = self._column_exists("board_tasks", "weaver_owner_id")
+        tasks_has_legacy = self._column_exists("board_tasks", "engineer_owner_id")
         if version < _KINDS_BACKFILL_MIGRATION_VERSION and (
             agents_has_legacy or tasks_has_legacy
         ):
@@ -4225,12 +4225,12 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             self._rebuild_table_without_columns(
                 "agents",
                 new_table="agents_new",
-                drop_columns={"template", "created_by_weaver_id"},
+                drop_columns={"template", "created_by_engineer_id"},
             )
             self._rebuild_table_without_columns(
                 "board_tasks",
                 new_table="board_tasks_new",
-                drop_columns={"weaver_owner_id"},
+                drop_columns={"engineer_owner_id"},
             )
             self._conn.execute(
                 "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
@@ -4287,7 +4287,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             updated,
         )
 
-    def _load_group_weaver_map(self) -> dict[str, str]:
+    def _load_group_engineer_map(self) -> dict[str, str]:
         valid_agent_ids_by_group: dict[str, set[str]] = {}
         for agent_id, group_name in self._conn.execute(
             "SELECT id, group_name FROM agents WHERE cell_type='agent'"
@@ -4299,33 +4299,33 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             valid_agent_ids_by_group.setdefault(group_name, set()).add(agent_id)
 
         rows = self._conn.execute(
-            "SELECT group_name, weaver_agent_id FROM group_settings"
+            "SELECT group_name, engineer_agent_id FROM group_settings"
         ).fetchall()
-        group_weaver_map: dict[str, str] = {}
-        for group_name, weaver_agent_id in rows:
+        group_engineer_map: dict[str, str] = {}
+        for group_name, engineer_agent_id in rows:
             group_name = str(group_name or "").strip()
             if not group_name:
                 continue
-            weaver_agent_id = str(weaver_agent_id or "").strip()
+            engineer_agent_id = str(engineer_agent_id or "").strip()
             if (
-                weaver_agent_id
-                and weaver_agent_id
+                engineer_agent_id
+                and engineer_agent_id
                 in valid_agent_ids_by_group.get(group_name, set())
             ):
-                group_weaver_map[group_name] = weaver_agent_id
+                group_engineer_map[group_name] = engineer_agent_id
                 continue
-            if weaver_agent_id:
+            if engineer_agent_id:
                 log.warning(
-                    "migration: ignoring stale weaver_agent_id=%r for group=%r",
-                    weaver_agent_id,
+                    "migration: ignoring stale engineer_agent_id=%r for group=%r",
+                    engineer_agent_id,
                     group_name,
                 )
-            group_weaver_map[group_name] = ""
-        return group_weaver_map
+            group_engineer_map[group_name] = ""
+        return group_engineer_map
 
     def _backfill_task_assignments_from_group_settings(
         self,
-        group_weaver_map: dict[str, str],
+        group_engineer_map: dict[str, str],
         *,
         only_unassigned: bool,
         reset_stage1_fields: bool,
@@ -4344,7 +4344,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             task_id = str(task_id or "").strip()
             if not task_id:
                 continue
-            assigned_engineer_id = group_weaver_map.get(
+            assigned_engineer_id = group_engineer_map.get(
                 str(group_name or "").strip(),
                 "",
             )
@@ -4381,7 +4381,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         if version >= _KINDS_BACKFILL_MIGRATION_VERSION:
             return
 
-        engineer_id, proceed = self._resolve_weaver_backfill_target()
+        engineer_id, proceed = self._resolve_engineer_backfill_target()
         if not proceed:
             return
 
@@ -4392,19 +4392,19 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
 
             engineer_name = engineer_slug = ""
             if engineer_id:
-                engineer_name, engineer_slug = self._resolve_backfilled_weaver_identity(
+                engineer_name, engineer_slug = self._resolve_backfilled_engineer_identity(
                     engineer_id
                 )
 
             template_sql = self._optional_column_sql("agents", "template")
             created_by_sql = self._optional_column_sql(
-                "agents", "created_by_weaver_id"
+                "agents", "created_by_engineer_id"
             )
             rows = self._conn.execute(
                 f"SELECT id, cell_type, {template_sql}, {created_by_sql} "
                 "FROM agents"
             ).fetchall()
-            for agent_id, cell_type, template, created_by_weaver_id in rows:
+            for agent_id, cell_type, template, created_by_engineer_id in rows:
                 agent_id = str(agent_id or "").strip()
                 cell_type = str(cell_type or "").strip()
                 if not agent_id:
@@ -4433,7 +4433,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                     "WHERE id=?",
                     (
                         str(template or ""),
-                        str(created_by_weaver_id or ""),
+                        str(created_by_engineer_id or ""),
                         agent_id,
                     ),
                 )
@@ -4442,10 +4442,10 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             task_count = int(
                 self._conn.execute("SELECT COUNT(*) FROM board_tasks").fetchone()[0]
             )
-            group_weaver_map = self._load_group_weaver_map()
-            configured_loom_weaver_id = group_weaver_map.get(_KINDS_WEAVER_GROUP, "")
+            group_engineer_map = self._load_group_engineer_map()
+            configured_loom_engineer_id = group_engineer_map.get(_KINDS_ENGINEER_GROUP, "")
             self._backfill_task_assignments_from_group_settings(
-                group_weaver_map,
+                group_engineer_map,
                 only_unassigned=False,
                 reset_stage1_fields=True,
             )
@@ -4492,9 +4492,9 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         updated = 0
         try:
             self._conn.execute("BEGIN")
-            group_weaver_map = self._load_group_weaver_map()
+            group_engineer_map = self._load_group_engineer_map()
             updated = self._backfill_task_assignments_from_group_settings(
-                group_weaver_map,
+                group_engineer_map,
                 only_unassigned=True,
                 reset_stage1_fields=False,
             )

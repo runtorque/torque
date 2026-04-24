@@ -62,9 +62,9 @@ function _agentSettingsProviderForReasoning() {
   return _getProviderValue('gs-agent-provider') || _runtimeDefaultProviderName();
 }
 
-function _weaverProviderForReasoning() {
+function _engineerProviderForReasoning() {
   return (
-    _getProviderValue('gs-weaver-provider')
+    _getProviderValue('gs-engineer-provider')
     || _getProviderValue('gs-agent-provider')
     || _runtimeDefaultProviderName()
   );
@@ -161,8 +161,8 @@ function onGsProviderChange() {
     'Provider default',
     'Not supported for this provider'
   );
-  if (!_getProviderValue('gs-weaver-provider')) {
-    onGsWeaverProviderChange();
+  if (!_getProviderValue('gs-engineer-provider')) {
+    onGsEngineerProviderChange();
   }
 }
 
@@ -190,17 +190,17 @@ function onAddProviderChange() {
   );
 }
 
-function onGsWeaverProviderChange() {
-  const input = document.getElementById('gs-weaver-boot-cmd');
+function onGsEngineerProviderChange() {
+  const input = document.getElementById('gs-engineer-boot-cmd');
   if (input) {
-    const effectiveProvider = _weaverProviderForReasoning();
+    const effectiveProvider = _engineerProviderForReasoning();
     const meta = effectiveProvider ? _findProviderMeta(effectiveProvider) : null;
     input.placeholder = (meta ? meta.command : _runtimeDefaultCommand()) + ' (default)';
   }
   _populateReasoningEffortSelect(
-    'gs-weaver-reasoning-effort',
-    _weaverProviderForReasoning(),
-    document.getElementById('gs-weaver-reasoning-effort').value,
+    'gs-engineer-reasoning-effort',
+    _engineerProviderForReasoning(),
+    document.getElementById('gs-engineer-reasoning-effort').value,
     'Provider default',
     'Not supported for this provider'
   );
@@ -643,7 +643,7 @@ let _settingsGroup = null;
 let _gsColor = '';
 let _gsAgentColor = '';
 let _gsTerminalColor = '';
-let _gsWeaverColor = '';
+let _gsEngineerColor = '';
 let _gsInitialTab = 'group';
 let _gsInitialSubtab = '';
 
@@ -727,7 +727,7 @@ function _setSelectValue(id, value, fallback) {
   el.value = value != null && value !== '' ? String(value) : String(fallback);
 }
 
-const _WEAVER_NOTIFICATION_PRESETS = {
+const _ENGINEER_NOTIFICATION_PRESETS = {
   quiet: {
     label: 'Quiet',
     description: 'Major milestones only, slower digests, and no idle heartbeat.',
@@ -768,8 +768,8 @@ const _WEAVER_NOTIFICATION_PRESETS = {
   },
 };
 
-function _defaultWeaverNotificationSettings() {
-  const preset = _WEAVER_NOTIFICATION_PRESETS.normal;
+function _defaultEngineerNotificationSettings() {
+  const preset = _ENGINEER_NOTIFICATION_PRESETS.normal;
   return {
     digest_verbosity: preset.digest_verbosity,
     push_interval: preset.push_interval,
@@ -779,9 +779,9 @@ function _defaultWeaverNotificationSettings() {
   };
 }
 
-function _getWeaverNotificationPresetSettings(name) {
-  const preset = _WEAVER_NOTIFICATION_PRESETS[String(name || '').trim().toLowerCase()];
-  if (!preset) return _defaultWeaverNotificationSettings();
+function _getEngineerNotificationPresetSettings(name) {
+  const preset = _ENGINEER_NOTIFICATION_PRESETS[String(name || '').trim().toLowerCase()];
+  if (!preset) return _defaultEngineerNotificationSettings();
   return {
     digest_verbosity: preset.digest_verbosity,
     push_interval: preset.push_interval,
@@ -791,13 +791,13 @@ function _getWeaverNotificationPresetSettings(name) {
   };
 }
 
-function _sortedWeaverEvents(events) {
+function _sortedEngineerEvents(events) {
   return Array.from(new Set((events || []).map((value) => String(value || ''))))
     .filter(Boolean)
     .sort();
 }
 
-function _matchWeaverNotificationPreset(settings) {
+function _matchEngineerNotificationPreset(settings) {
   const current = settings || {};
   const digestVerbosity = String(
     current.digest_verbosity != null && current.digest_verbosity !== ''
@@ -807,15 +807,15 @@ function _matchWeaverNotificationPreset(settings) {
   const pushInterval = parseInt(current.push_interval, 10);
   const maxInterval = parseInt(current.max_interval, 10);
   const heartbeatInterval = parseInt(current.heartbeat_interval, 10);
-  const enabledEvents = _sortedWeaverEvents(current.enabled_events);
+  const enabledEvents = _sortedEngineerEvents(current.enabled_events);
 
-  for (const [name, preset] of Object.entries(_WEAVER_NOTIFICATION_PRESETS)) {
+  for (const [name, preset] of Object.entries(_ENGINEER_NOTIFICATION_PRESETS)) {
     if (
       digestVerbosity === preset.digest_verbosity
       && pushInterval === preset.push_interval
       && maxInterval === preset.max_interval
       && heartbeatInterval === preset.heartbeat_interval
-      && JSON.stringify(enabledEvents) === JSON.stringify(_sortedWeaverEvents(preset.enabled_events))
+      && JSON.stringify(enabledEvents) === JSON.stringify(_sortedEngineerEvents(preset.enabled_events))
     ) {
       return name;
     }
@@ -823,10 +823,10 @@ function _matchWeaverNotificationPreset(settings) {
   return 'custom';
 }
 
-function _setWeaverNotificationPresetHint(id, presetName) {
+function _setEngineerNotificationPresetHint(id, presetName) {
   const el = document.getElementById(id);
   if (!el) return;
-  const preset = _WEAVER_NOTIFICATION_PRESETS[presetName];
+  const preset = _ENGINEER_NOTIFICATION_PRESETS[presetName];
   if (preset) {
     el.textContent = `${preset.label}: ${preset.description} Manual tweaks switch this to Custom.`;
     return;
@@ -834,73 +834,73 @@ function _setWeaverNotificationPresetHint(id, presetName) {
   el.textContent = 'Custom detailed settings. Pick a preset to overwrite the detailed notification controls below.';
 }
 
-function _groupFormWeaverNotificationSettings() {
+function _groupFormEngineerNotificationSettings() {
   return {
-    digest_verbosity: document.getElementById('gs-weaver-digest-verbosity').value,
-    push_interval: parseInt(document.getElementById('gs-weaver-push-interval').value, 10) || 60,
-    max_interval: parseInt(document.getElementById('gs-weaver-max-interval').value, 10) || 300,
-    heartbeat_interval: parseInt(document.getElementById('gs-weaver-heartbeat-interval').value, 10),
-    enabled_events: _getWeaverEnabledEvents(),
+    digest_verbosity: document.getElementById('gs-engineer-digest-verbosity').value,
+    push_interval: parseInt(document.getElementById('gs-engineer-push-interval').value, 10) || 60,
+    max_interval: parseInt(document.getElementById('gs-engineer-max-interval').value, 10) || 300,
+    heartbeat_interval: parseInt(document.getElementById('gs-engineer-heartbeat-interval').value, 10),
+    enabled_events: _getEngineerEnabledEvents(),
   };
 }
 
-function _applyGsWeaverNotificationPreset(name) {
-  const preset = _getWeaverNotificationPresetSettings(name);
-  _setSelectValue('gs-weaver-digest-verbosity', preset.digest_verbosity, 'balanced');
-  _setSelectValue('gs-weaver-push-interval', preset.push_interval, 60);
-  _setSelectValue('gs-weaver-max-interval', preset.max_interval, 300);
-  _setSelectValue('gs-weaver-heartbeat-interval', preset.heartbeat_interval, 300);
-  _setWeaverEventCheckboxes(preset.enabled_events);
+function _applyGsEngineerNotificationPreset(name) {
+  const preset = _getEngineerNotificationPresetSettings(name);
+  _setSelectValue('gs-engineer-digest-verbosity', preset.digest_verbosity, 'balanced');
+  _setSelectValue('gs-engineer-push-interval', preset.push_interval, 60);
+  _setSelectValue('gs-engineer-max-interval', preset.max_interval, 300);
+  _setSelectValue('gs-engineer-heartbeat-interval', preset.heartbeat_interval, 300);
+  _setEngineerEventCheckboxes(preset.enabled_events);
 }
 
-function syncGsWeaverNotificationPreset() {
-  const preset = _matchWeaverNotificationPreset(_groupFormWeaverNotificationSettings());
-  _setSelectValue('gs-weaver-notification-preset', preset, 'custom');
-  _setWeaverNotificationPresetHint('gs-weaver-notification-preset-hint', preset);
+function syncGsEngineerNotificationPreset() {
+  const preset = _matchEngineerNotificationPreset(_groupFormEngineerNotificationSettings());
+  _setSelectValue('gs-engineer-notification-preset', preset, 'custom');
+  _setEngineerNotificationPresetHint('gs-engineer-notification-preset-hint', preset);
 }
 
-function onGsWeaverNotificationPresetChange() {
-  const el = document.getElementById('gs-weaver-notification-preset');
+function onGsEngineerNotificationPresetChange() {
+  const el = document.getElementById('gs-engineer-notification-preset');
   if (!el) return;
   const preset = el.value;
   if (preset && preset !== 'custom') {
-    _applyGsWeaverNotificationPreset(preset);
+    _applyGsEngineerNotificationPreset(preset);
   }
-  syncGsWeaverNotificationPreset();
+  syncGsEngineerNotificationPreset();
 }
 
-function _setWeaverEventCheckboxes(enabled) {
+function _setEngineerEventCheckboxes(enabled) {
   const current = new Set(enabled || []);
-  document.getElementById('gs-weaver-event-agent-started').checked = current.has('agent_started');
-  document.getElementById('gs-weaver-event-task-dispatched').checked = current.has('task_dispatched');
-  document.getElementById('gs-weaver-event-task-derived').checked = current.has('task_derived');
-  document.getElementById('gs-weaver-event-agent-progress').checked = current.has('agent_progress');
-  document.getElementById('gs-weaver-event-task-health-alert').checked = current.has('task_health_alert');
+  document.getElementById('gs-engineer-event-agent-started').checked = current.has('agent_started');
+  document.getElementById('gs-engineer-event-task-dispatched').checked = current.has('task_dispatched');
+  document.getElementById('gs-engineer-event-task-derived').checked = current.has('task_derived');
+  document.getElementById('gs-engineer-event-agent-progress').checked = current.has('agent_progress');
+  document.getElementById('gs-engineer-event-task-health-alert').checked = current.has('task_health_alert');
 }
 
-function _getWeaverEnabledEvents() {
+function _getEngineerEnabledEvents() {
   const events = [];
-  if (document.getElementById('gs-weaver-event-agent-started').checked) events.push('agent_started');
-  if (document.getElementById('gs-weaver-event-task-dispatched').checked) events.push('task_dispatched');
-  if (document.getElementById('gs-weaver-event-task-derived').checked) events.push('task_derived');
-  if (document.getElementById('gs-weaver-event-agent-progress').checked) events.push('agent_progress');
-  if (document.getElementById('gs-weaver-event-task-health-alert').checked) events.push('task_health_alert');
+  if (document.getElementById('gs-engineer-event-agent-started').checked) events.push('agent_started');
+  if (document.getElementById('gs-engineer-event-task-dispatched').checked) events.push('task_dispatched');
+  if (document.getElementById('gs-engineer-event-task-derived').checked) events.push('task_derived');
+  if (document.getElementById('gs-engineer-event-agent-progress').checked) events.push('agent_progress');
+  if (document.getElementById('gs-engineer-event-task-health-alert').checked) events.push('task_health_alert');
   return events;
 }
 
-function _renderGsWeaverSummary(group, weaver, ws) {
-  const nameEl = document.getElementById('gs-weaver-agent-name');
-  const metaEl = document.getElementById('gs-weaver-agent-meta');
+function _renderGsEngineerSummary(group, engineer, ws) {
+  const nameEl = document.getElementById('gs-engineer-agent-name');
+  const metaEl = document.getElementById('gs-engineer-agent-meta');
   if (!nameEl || !metaEl) return;
-  if (weaver) {
-    nameEl.textContent = weaver.name;
+  if (engineer) {
+    nameEl.textContent = engineer.name;
     const parts = [];
-    if (weaver.status) parts.push(weaver.status);
+    if (engineer.status) parts.push(engineer.status);
     if (ws && ws.paused) parts.push('event delivery paused');
-    metaEl.textContent = parts.length ? parts.join(' • ') : 'Weaver agent configured for this group.';
+    metaEl.textContent = parts.length ? parts.join(' • ') : 'Engineer agent configured for this group.';
   } else {
-    nameEl.textContent = 'No weaver agent';
-    metaEl.textContent = 'No designated Weaver is configured for this group.';
+    nameEl.textContent = 'No engineer agent';
+    metaEl.textContent = 'No designated Engineer is configured for this group.';
   }
 }
 
@@ -909,20 +909,20 @@ function _setDetailsOpen(id, open) {
   if (el) el.open = !!open;
 }
 
-function _resetGsWeaverSections() {
-  _setDetailsOpen('gs-weaver-provider-section', true);
-  _setDetailsOpen('gs-weaver-autonomy-section', true);
-  _setDetailsOpen('gs-weaver-digest-section', false);
+function _resetGsEngineerSections() {
+  _setDetailsOpen('gs-engineer-provider-section', true);
+  _setDetailsOpen('gs-engineer-autonomy-section', true);
+  _setDetailsOpen('gs-engineer-digest-section', false);
 }
 
 function _showGroupSettings(group, data) {
   _settingsGroup = group;
   const s = data.settings;
   const ws = Object.assign(
-    _defaultWeaverNotificationSettings(),
-    data.weaver_settings || {}
+    _defaultEngineerNotificationSettings(),
+    data.engineer_settings || {}
   );
-  const weaver = s.weaver_agent_id && state.agents ? state.agents[s.weaver_agent_id] : null;
+  const engineer = s.engineer_agent_id && state.agents ? state.agents[s.engineer_agent_id] : null;
 
   document.getElementById('gs-title').textContent = group + ' Settings';
 
@@ -989,66 +989,66 @@ function _showGroupSettings(group, data) {
   _gsTerminalColor = s.terminal_tab_color || '';
   _renderSwatches('gs-terminal-color-swatches', _gsTerminalColor, 'selectGsTerminalColor', true);
 
-  /* -- Weaver tab -- */
-  _populateProviderSelect('gs-weaver-provider', ws.weaver_provider || '', true);
-  document.getElementById('gs-weaver-boot-cmd').value = ws.weaver_boot_command || '';
-  document.getElementById('gs-weaver-model').value = ws.weaver_model || '';
-  document.getElementById('gs-weaver-reasoning-effort').value = ws.weaver_reasoning_effort || '';
-  document.getElementById('gs-weaver-directory').value = ws.weaver_directory || '';
-  document.getElementById('gs-weaver-shell').value = ws.weaver_shell || '';
-  document.getElementById('gs-weaver-custom-instructions').value = ws.custom_instructions || '';
+  /* -- Engineer tab -- */
+  _populateProviderSelect('gs-engineer-provider', ws.engineer_provider || '', true);
+  document.getElementById('gs-engineer-boot-cmd').value = ws.engineer_boot_command || '';
+  document.getElementById('gs-engineer-model').value = ws.engineer_model || '';
+  document.getElementById('gs-engineer-reasoning-effort').value = ws.engineer_reasoning_effort || '';
+  document.getElementById('gs-engineer-directory').value = ws.engineer_directory || '';
+  document.getElementById('gs-engineer-shell').value = ws.engineer_shell || '';
+  document.getElementById('gs-engineer-custom-instructions').value = ws.custom_instructions || '';
   _populateProfileSelect(
-    document.getElementById('gs-weaver-profile'),
+    document.getElementById('gs-engineer-profile'),
     data.profiles,
-    ws.weaver_profile,
+    ws.engineer_profile,
     'Same as agent/group'
   );
-  _gsWeaverColor = ws.weaver_tab_color || '';
+  _gsEngineerColor = ws.engineer_tab_color || '';
   _renderSwatches(
-    'gs-weaver-color-swatches',
-    _gsWeaverColor,
-    'selectGsWeaverColor',
+    'gs-engineer-color-swatches',
+    _gsEngineerColor,
+    'selectGsEngineerColor',
     true
   );
-  onGsWeaverProviderChange();
-  document.getElementById('gs-weaver-restrict-to-created-agents').checked = !!ws.restrict_to_created_agents;
-  _setSelectValue('gs-weaver-autonomy-mode', ws.autonomy_mode, 'dispatch_when_clear');
+  onGsEngineerProviderChange();
+  document.getElementById('gs-engineer-restrict-to-created-agents').checked = !!ws.restrict_to_created_agents;
+  _setSelectValue('gs-engineer-autonomy-mode', ws.autonomy_mode, 'dispatch_when_clear');
   _setSelectValue(
-    'gs-weaver-default-worker-concurrency',
+    'gs-engineer-default-worker-concurrency',
     ws.default_worker_concurrency,
     2
   );
   _setSelectValue(
-    'gs-weaver-wave-size-preference',
+    'gs-engineer-wave-size-preference',
     ws.wave_size_preference,
     'small'
   );
   _setSelectValue(
-    'gs-weaver-same-agent-follow-up-preference',
+    'gs-engineer-same-agent-follow-up-preference',
     ws.same_agent_follow_up_preference,
     'balanced'
   );
   _setSelectValue(
-    'gs-weaver-digest-verbosity',
+    'gs-engineer-digest-verbosity',
     ws.digest_verbosity,
     'balanced'
   );
   _setSelectValue(
-    'gs-weaver-escalation-style',
+    'gs-engineer-escalation-style',
     ws.escalation_style,
     'note_then_ask'
   );
-  _setSelectValue('gs-weaver-push-interval', ws.push_interval, 60);
-  _setSelectValue('gs-weaver-max-interval', ws.max_interval, 300);
+  _setSelectValue('gs-engineer-push-interval', ws.push_interval, 60);
+  _setSelectValue('gs-engineer-max-interval', ws.max_interval, 300);
   _setSelectValue(
-    'gs-weaver-heartbeat-interval',
+    'gs-engineer-heartbeat-interval',
     ws.heartbeat_interval,
     ws.max_interval || 300
   );
-  _setWeaverEventCheckboxes(ws.enabled_events || []);
-  syncGsWeaverNotificationPreset();
-  _renderGsWeaverSummary(group, weaver, ws);
-  _resetGsWeaverSections();
+  _setEngineerEventCheckboxes(ws.enabled_events || []);
+  syncGsEngineerNotificationPreset();
+  _renderGsEngineerSummary(group, engineer, ws);
+  _resetGsEngineerSections();
 
   const initialTab = _gsInitialTab || 'group';
   const initialSubtab = _gsInitialSubtab || '';
@@ -1060,7 +1060,7 @@ function _showGroupSettings(group, data) {
   _gsInitialTab = 'group';
   _gsInitialSubtab = '';
   document.getElementById('modal-group-settings').classList.add('visible');
-  const focusId = initialTab === 'weaver' ? 'gs-weaver-provider' : 'gs-directory';
+  const focusId = initialTab === 'engineer' ? 'gs-engineer-provider' : 'gs-directory';
   const focusEl = document.getElementById(focusId);
   if (focusEl) focusEl.focus();
 }
@@ -1083,9 +1083,9 @@ function selectGsTerminalColor(hex) {
     s.classList.toggle('selected', (s.dataset.color || '') === hex);
   });
 }
-function selectGsWeaverColor(hex) {
-  _gsWeaverColor = hex;
-  document.querySelectorAll('#gs-weaver-color-swatches .swatch').forEach(s => {
+function selectGsEngineerColor(hex) {
+  _gsEngineerColor = hex;
+  document.querySelectorAll('#gs-engineer-color-swatches .swatch').forEach(s => {
     s.classList.toggle('selected', (s.dataset.color || '') === hex);
   });
 }
@@ -1149,31 +1149,31 @@ function submitGroupSettings() {
     terminal_always_custom_dialog: document.getElementById('gs-terminal-always-custom').checked,
     terminal_close_on_disconnect: document.getElementById('gs-terminal-close-on-disconnect').checked,
   };
-  const weaverSettings = {
-    weaver_provider: _getProviderValue('gs-weaver-provider'),
-    weaver_boot_command: document.getElementById('gs-weaver-boot-cmd').value.trim(),
-    weaver_model: document.getElementById('gs-weaver-model').value.trim(),
-    weaver_reasoning_effort: document.getElementById('gs-weaver-reasoning-effort').value,
-    weaver_directory: document.getElementById('gs-weaver-directory').value.trim(),
-    weaver_profile: document.getElementById('gs-weaver-profile').value,
-    weaver_shell: document.getElementById('gs-weaver-shell').value,
-    weaver_tab_color: _gsWeaverColor,
-    custom_instructions: document.getElementById('gs-weaver-custom-instructions').value,
-    restrict_to_created_agents: document.getElementById('gs-weaver-restrict-to-created-agents').checked,
-    autonomy_mode: document.getElementById('gs-weaver-autonomy-mode').value,
-    default_worker_concurrency: parseInt(document.getElementById('gs-weaver-default-worker-concurrency').value, 10) || 2,
-    wave_size_preference: document.getElementById('gs-weaver-wave-size-preference').value,
-    same_agent_follow_up_preference: document.getElementById('gs-weaver-same-agent-follow-up-preference').value,
-    digest_verbosity: document.getElementById('gs-weaver-digest-verbosity').value,
-    escalation_style: document.getElementById('gs-weaver-escalation-style').value,
-    push_interval: parseInt(document.getElementById('gs-weaver-push-interval').value, 10) || 60,
-    max_interval: parseInt(document.getElementById('gs-weaver-max-interval').value, 10) || 300,
-    heartbeat_interval: parseInt(document.getElementById('gs-weaver-heartbeat-interval').value, 10),
-    enabled_events: _getWeaverEnabledEvents(),
+  const engineerSettings = {
+    engineer_provider: _getProviderValue('gs-engineer-provider'),
+    engineer_boot_command: document.getElementById('gs-engineer-boot-cmd').value.trim(),
+    engineer_model: document.getElementById('gs-engineer-model').value.trim(),
+    engineer_reasoning_effort: document.getElementById('gs-engineer-reasoning-effort').value,
+    engineer_directory: document.getElementById('gs-engineer-directory').value.trim(),
+    engineer_profile: document.getElementById('gs-engineer-profile').value,
+    engineer_shell: document.getElementById('gs-engineer-shell').value,
+    engineer_tab_color: _gsEngineerColor,
+    custom_instructions: document.getElementById('gs-engineer-custom-instructions').value,
+    restrict_to_created_agents: document.getElementById('gs-engineer-restrict-to-created-agents').checked,
+    autonomy_mode: document.getElementById('gs-engineer-autonomy-mode').value,
+    default_worker_concurrency: parseInt(document.getElementById('gs-engineer-default-worker-concurrency').value, 10) || 2,
+    wave_size_preference: document.getElementById('gs-engineer-wave-size-preference').value,
+    same_agent_follow_up_preference: document.getElementById('gs-engineer-same-agent-follow-up-preference').value,
+    digest_verbosity: document.getElementById('gs-engineer-digest-verbosity').value,
+    escalation_style: document.getElementById('gs-engineer-escalation-style').value,
+    push_interval: parseInt(document.getElementById('gs-engineer-push-interval').value, 10) || 60,
+    max_interval: parseInt(document.getElementById('gs-engineer-max-interval').value, 10) || 300,
+    heartbeat_interval: parseInt(document.getElementById('gs-engineer-heartbeat-interval').value, 10),
+    enabled_events: _getEngineerEnabledEvents(),
   };
 
   send({ cmd: 'update_group_settings', group: _settingsGroup, settings });
-  send({ cmd: 'weaver_update_settings', group: _settingsGroup, ...weaverSettings });
+  send({ cmd: 'engineer_update_settings', group: _settingsGroup, ...engineerSettings });
   _settingsGroup = null;
   closeModals();
 }
