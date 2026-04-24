@@ -442,5 +442,162 @@ class MCPFailedWriteReplayTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("architect_journal", rendered)
 
 
+class CriticalWriteCaptureIsolationTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        install_aiohttp_stub(include_json_helpers=True)
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.db = LoomDB(Path(self.tmp.name) / "loom.db")
+        self.db.init()
+        self.addCleanup(self.db.close)
+        self.state = MatrixState(db=self.db)
+        self.state.add_group("g")
+        self.state.agents["agent-1"] = AgentCell(
+            id="agent-1",
+            name="Alpha",
+            group="g",
+            cell_type="agent",
+        )
+        self.state.agents["agent-2"] = AgentCell(
+            id="agent-2",
+            name="Beta",
+            group="g",
+            cell_type="agent",
+        )
+
+    async def test_overlapping_critical_receipts_are_isolated_per_task(self):
+        from loom.server import _internal_failed_write_key
+
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def critical_write(agent_id: str, *, idem_key: str, new_name: str,
+                                 hold_open: bool = False):
+            payload = {
+                "cmd": "ai_report",
+                "cell_id": agent_id,
+                "action": "name",
+                "message": new_name,
+                "idempotency_key": idem_key,
+            }
+            failed_write_key = _internal_failed_write_key(idem_key)
+            self.db.enqueue_failed_write(
+                idempotency_key=failed_write_key,
+                endpoint="/internal/cmd",
+                surface="internal",
+                tool_name="ai_report:name",
+                caller_id=agent_id,
+                payload=payload,
+                attempts=0,
+                last_error="pending",
+            )
+            capture_active = False
+            try:
+                self.state.begin_critical_write_capture(
+                    command_name="ai_report:name",
+                    idempotency_key=idem_key,
+                    request_hash=api_request_hash(payload),
+                )
+                capture_active = True
+                cell = self.state.agents[agent_id]
+                cell.name = new_name
+                self.state._db_save_agent(cell)
+                if hold_open:
+                    started.set()
+                    await release.wait()
+                self.state.finalize_critical_write_capture(
+                    {"type": "ok", "agent_id": agent_id, "name": new_name},
+                    delete_failed_write_key=failed_write_key,
+                    surface="internal",
+                )
+                capture_active = False
+            finally:
+                if capture_active:
+                    self.state.clear_critical_write_capture()
+
+        async def first_write():
+            await critical_write(
+                "agent-1",
+                idem_key="idem-alpha",
+                new_name="Alpha renamed",
+                hold_open=True,
+            )
+
+        async def second_write():
+            await started.wait()
+            try:
+                await critical_write(
+                    "agent-2",
+                    idem_key="idem-beta",
+                    new_name="Beta renamed",
+                )
+            finally:
+                release.set()
+
+        await asyncio.gather(
+            asyncio.create_task(first_write()),
+            asyncio.create_task(second_write()),
+        )
+
+        receipt_alpha = self.db.load_command_receipt("idem-alpha")
+        receipt_beta = self.db.load_command_receipt("idem-beta")
+        self.assertEqual(receipt_alpha["response"]["name"], "Alpha renamed")
+        self.assertEqual(receipt_beta["response"]["name"], "Beta renamed")
+        self.assertEqual(self.db.load_failed_writes(), [])
+        self.assertEqual(
+            self.db._conn.execute(
+                "SELECT name FROM agents WHERE id=?",
+                ("agent-1",),
+            ).fetchone()[0],
+            "Alpha renamed",
+        )
+        self.assertEqual(
+            self.db._conn.execute(
+                "SELECT name FROM agents WHERE id=?",
+                ("agent-2",),
+            ).fetchone()[0],
+            "Beta renamed",
+        )
+
+    async def test_unrelated_task_write_does_not_fall_into_other_task_capture(self):
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def hold_capture_open():
+            capture_active = False
+            try:
+                self.state.begin_critical_write_capture(
+                    command_name="ai_report:done",
+                    idempotency_key="idem-held-open",
+                    request_hash="request-held-open",
+                )
+                capture_active = True
+                started.set()
+                await release.wait()
+            finally:
+                if capture_active:
+                    self.state.clear_critical_write_capture()
+
+        async def unrelated_task_mutation():
+            await started.wait()
+            created = self.state.board_add_task("Outside capture", "g")
+            await self.state.flush_db_writes()
+            release.set()
+            return created
+
+        hold_task = asyncio.create_task(hold_capture_open())
+        mutate_task = asyncio.create_task(unrelated_task_mutation())
+        created = await mutate_task
+        await hold_task
+
+        self.assertIsNotNone(created)
+        persisted = self.db._conn.execute(
+            "SELECT id FROM board_tasks WHERE id=?",
+            (created.id,),
+        ).fetchone()
+        self.assertIsNotNone(persisted)
+        self.assertIsNone(self.db.load_command_receipt("idem-held-open"))
+
+
 if __name__ == "__main__":
     unittest.main()

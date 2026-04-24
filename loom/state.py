@@ -2,6 +2,7 @@
 
 import asyncio
 import copy
+import contextvars
 import hashlib
 import json
 import os
@@ -1094,7 +1095,12 @@ class MatrixState:
         # hot path so UI mutations feel instant.
         self._weaver_recompute_pending: set[str] = set()
         self._weaver_recompute_task = None
-        self._critical_write_capture: CriticalWriteCapture | None = None
+        self._critical_write_capture_var: contextvars.ContextVar[
+            CriticalWriteCapture | None
+        ] = contextvars.ContextVar(
+            f"matrix_state_critical_write_capture_{id(self)}",
+            default=None,
+        )
 
     # -- Delta emission -----------------------------------------------------
 
@@ -1708,16 +1714,19 @@ class MatrixState:
         request_hash: str,
     ) -> None:
         """Capture agent/task persistence for one critical idempotent write."""
-        if self._critical_write_capture is not None:
+        if self._current_critical_write_capture() is not None:
             raise RuntimeError("critical write capture is already active")
-        self._critical_write_capture = CriticalWriteCapture(
+        self._critical_write_capture_var.set(CriticalWriteCapture(
             command_name=str(command_name or ""),
             idempotency_key=str(idempotency_key or ""),
             request_hash=str(request_hash or ""),
-        )
+        ))
+
+    def _current_critical_write_capture(self) -> CriticalWriteCapture | None:
+        return self._critical_write_capture_var.get()
 
     def _critical_write_capture_agent(self, cell: AgentCell) -> bool:
-        capture = self._critical_write_capture
+        capture = self._current_critical_write_capture()
         if capture is None:
             return False
         capture.deleted_agents.discard(str(cell.id or ""))
@@ -1725,7 +1734,7 @@ class MatrixState:
         return True
 
     def _critical_write_capture_delete_agent(self, agent_id: str) -> bool:
-        capture = self._critical_write_capture
+        capture = self._current_critical_write_capture()
         aid = str(agent_id or "").strip()
         if capture is None or not aid:
             return False
@@ -1734,7 +1743,7 @@ class MatrixState:
         return True
 
     def _critical_write_capture_task(self, task: BoardTask) -> bool:
-        capture = self._critical_write_capture
+        capture = self._current_critical_write_capture()
         if capture is None:
             return False
         capture.deleted_tasks.discard(str(task.id or ""))
@@ -1742,7 +1751,7 @@ class MatrixState:
         return True
 
     def _critical_write_capture_delete_task(self, task_id: str) -> bool:
-        capture = self._critical_write_capture
+        capture = self._current_critical_write_capture()
         tid = str(task_id or "").strip()
         if capture is None or not tid:
             return False
@@ -1751,7 +1760,7 @@ class MatrixState:
         return True
 
     def _critical_write_capture_task_id_counter(self, group_prefix: str) -> bool:
-        capture = self._critical_write_capture
+        capture = self._current_critical_write_capture()
         prefix = normalize_group_prefix(group_prefix)
         if capture is None or not prefix:
             return False
@@ -1762,7 +1771,7 @@ class MatrixState:
         return True
 
     def _critical_write_capture_pipeline_task_counter(self, root_task_id: str) -> bool:
-        capture = self._critical_write_capture
+        capture = self._current_critical_write_capture()
         root_id = str(root_task_id or "").strip()
         if capture is None or not root_id:
             return False
@@ -1773,7 +1782,7 @@ class MatrixState:
         return True
 
     def _critical_write_capture_task_id_alias(self, legacy_id: str) -> bool:
-        capture = self._critical_write_capture
+        capture = self._current_critical_write_capture()
         alias = str(legacy_id or "").strip()
         if capture is None or not alias:
             return False
@@ -1787,8 +1796,8 @@ class MatrixState:
                                         delete_failed_write_key: str = "",
                                         surface: str = "internal"):
         """Persist one captured critical write atomically with its receipt."""
-        capture = self._critical_write_capture
-        self._critical_write_capture = None
+        capture = self._current_critical_write_capture()
+        self._critical_write_capture_var.set(None)
         if not capture or not self.db:
             return
         self.db.persist_command_capture(
@@ -1808,7 +1817,7 @@ class MatrixState:
         )
 
     def clear_critical_write_capture(self) -> None:
-        self._critical_write_capture = None
+        self._critical_write_capture_var.set(None)
 
     def _db_save_agent(self, cell: AgentCell):
         """Persist a single agent to SQLite."""
