@@ -47,6 +47,18 @@ from loom.task_ids import (
 
 log = logging.getLogger("loom")
 
+
+def _is_sqlite_lock_error(exc: BaseException) -> bool:
+    if not isinstance(exc, sqlite3.OperationalError):
+        return False
+    msg = str(exc).lower()
+    return "database is locked" in msg or "database table is locked" in msg
+
+
+def _sqlite_retry_backoff(attempt: int) -> float:
+    backoffs = (0.01, 0.025, 0.05)
+    return backoffs[min(max(0, attempt - 1), len(backoffs) - 1)]
+
 _KINDS_SCHEMA_MIGRATION_VERSION = 1
 _KINDS_BACKFILL_MIGRATION_VERSION = 2
 _KINDS_CLEANUP_MIGRATION_VERSION = 3
@@ -825,6 +837,88 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             ),
         )
         self._conn.commit()
+
+    def record_mcp_health_event_safe(
+        self,
+        *,
+        surface: str,
+        tool_name: str = "",
+        event: str,
+        error: str = "",
+    ) -> None:
+        try:
+            self.record_mcp_health_event(
+                surface=surface,
+                tool_name=tool_name,
+                event=event,
+                error=error,
+            )
+            return
+        except Exception:
+            pass
+        # Async panel-event flushes run in worker threads where the main
+        # sqlite connection is not usable. Fall back to a short-lived
+        # connection so health counters are still captured.
+        try:
+            conn = sqlite3.connect(str(self.db_path))
+            try:
+                conn.execute(
+                    "INSERT INTO mcp_health_events "
+                    "(timestamp, surface, tool_name, event, error) "
+                    "VALUES (?,?,?,?,?)",
+                    (
+                        time.time(),
+                        str(surface or ""),
+                        str(tool_name or ""),
+                        str(event or ""),
+                        str(error or "")[:500],
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception:
+            log.debug("Failed to record MCP health event", exc_info=True)
+
+    def _record_reliability_event_safe(
+        self,
+        *,
+        surface: str,
+        event: str,
+        error: str = "",
+    ) -> None:
+        self.record_mcp_health_event_safe(
+            surface=surface,
+            event=event,
+            error=error,
+        )
+
+    def _run_sqlite_write_with_lock_retry(
+        self,
+        operation,
+        *,
+        surface: str,
+        attempts: int = 4,
+    ):
+        attempts = max(1, int(attempts or 1))
+        for attempt in range(1, attempts + 1):
+            try:
+                return operation()
+            except Exception as exc:
+                if not _is_sqlite_lock_error(exc) or attempt >= attempts:
+                    if _is_sqlite_lock_error(exc):
+                        self._record_reliability_event_safe(
+                            surface=surface,
+                            event="drop",
+                            error=str(exc),
+                        )
+                    raise
+                self._record_reliability_event_safe(
+                    surface=surface,
+                    event="retry",
+                    error=str(exc),
+                )
+                time.sleep(_sqlite_retry_backoff(attempt))
 
     def load_mcp_health_summary(self, *, since: float = 0) -> dict:
         """Return counts of recent MCP retry/drop/dedupe/replay events."""
@@ -1816,16 +1910,22 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         updates = list(updates or [])
         if not events and not updates and max_size is None:
             return 0
-        if separate_connection:
-            conn = sqlite3.connect(str(self.db_path))
-            try:
-                conn.execute("PRAGMA foreign_keys=ON")
-                return self._save_panel_events_batch_on_conn(
-                    conn, events, updates, max_size)
-            finally:
-                conn.close()
-        return self._save_panel_events_batch_on_conn(
-            self._conn, events, updates, max_size)
+        def _operation():
+            if separate_connection:
+                conn = sqlite3.connect(str(self.db_path))
+                try:
+                    conn.execute("PRAGMA foreign_keys=ON")
+                    return self._save_panel_events_batch_on_conn(
+                        conn, events, updates, max_size)
+                finally:
+                    conn.close()
+            return self._save_panel_events_batch_on_conn(
+                self._conn, events, updates, max_size)
+
+        return self._run_sqlite_write_with_lock_retry(
+            _operation,
+            surface="panel_events",
+        )
 
     def update_panel_event(self, evt: dict):
         """Update an existing panel event row."""
@@ -1895,17 +1995,23 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         enqueued_at: float,
     ) -> int:
         """Persist one queued digest event and return its queue row ID."""
-        cur = self._conn.execute(
-            "INSERT INTO digest_queued_events "
-            "(recipient_id, event_json, enqueued_at) VALUES (?,?,?)",
-            (
-                str(recipient_id or ""),
-                _digest_event_json(event),
-                float(enqueued_at or 0),
-            ),
+        def _operation():
+            cur = self._conn.execute(
+                "INSERT INTO digest_queued_events "
+                "(recipient_id, event_json, enqueued_at) VALUES (?,?,?)",
+                (
+                    str(recipient_id or ""),
+                    _digest_event_json(event),
+                    float(enqueued_at or 0),
+                ),
+            )
+            self._conn.commit()
+            return int(cur.lastrowid or 0)
+
+        return self._run_sqlite_write_with_lock_retry(
+            _operation,
+            surface="digest",
         )
-        self._conn.commit()
-        return int(cur.lastrowid or 0)
 
     def load_digest_queued_events(self) -> dict[str, list[dict]]:
         """Load queued digest events grouped by recipient in delivery order."""
@@ -1995,26 +2101,29 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             for event, enqueued_at, delivered_at in (sent_events or [])
         ]
 
-        with self._conn:
-            if sent_rows:
-                self._conn.executemany(
-                    "INSERT INTO digest_sent_events "
-                    "(recipient_id, event_json, enqueued_at, delivered_at) "
-                    "VALUES (?,?,?,?)",
-                    sent_rows,
+        def _operation():
+            with self._conn:
+                if sent_rows:
+                    self._conn.executemany(
+                        "INSERT INTO digest_sent_events "
+                        "(recipient_id, event_json, enqueued_at, delivered_at) "
+                        "VALUES (?,?,?,?)",
+                        sent_rows,
+                    )
+                for i in range(0, len(clean_queue_ids), 500):
+                    chunk = clean_queue_ids[i:i + 500]
+                    placeholders = ",".join("?" for _ in chunk)
+                    self._conn.execute(
+                        "DELETE FROM digest_queued_events "
+                        f"WHERE recipient_id=? AND id IN ({placeholders})",
+                        (recipient_id, *chunk),
+                    )
+                self._prune_digest_sent_events_uncommitted(
+                    recipient_id,
+                    keep=sent_cap,
                 )
-            for i in range(0, len(clean_queue_ids), 500):
-                chunk = clean_queue_ids[i:i + 500]
-                placeholders = ",".join("?" for _ in chunk)
-                self._conn.execute(
-                    "DELETE FROM digest_queued_events "
-                    f"WHERE recipient_id=? AND id IN ({placeholders})",
-                    (recipient_id, *chunk),
-                )
-            self._prune_digest_sent_events_uncommitted(
-                recipient_id,
-                keep=sent_cap,
-            )
+
+        self._run_sqlite_write_with_lock_retry(_operation, surface="digest")
 
     def prune_digest_sent_events(self, recipient_id: str, *, keep: int = 200):
         """Keep only the newest sent digest events for one recipient."""

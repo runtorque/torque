@@ -1,5 +1,6 @@
 import asyncio
 import importlib
+import sqlite3
 import sys
 import time
 import types
@@ -30,7 +31,10 @@ class FakeBridge:
 
 
 class FakeDigestDB:
-    def __init__(self, *, queued=None, sent=None):
+    def __init__(self, *, queued=None, sent=None, fail_queue_locks=0, fail_complete_locks=0):
+        self.fail_queue_locks = int(fail_queue_locks or 0)
+        self.fail_complete_locks = int(fail_complete_locks or 0)
+        self.health = []
         self.queued = {
             recipient_id: [dict(evt) for evt in events]
             for recipient_id, events in (queued or {}).items()
@@ -52,7 +56,13 @@ class FakeDigestDB:
     def save_agent_digest_settings(self, agent_id, settings):
         self.saved_settings.append((agent_id, dict(settings)))
 
+    def record_mcp_health_event_safe(self, **kwargs):
+        self.health.append(dict(kwargs))
+
     def save_digest_queued_event(self, recipient_id, event, enqueued_at):
+        if self.fail_queue_locks > 0:
+            self.fail_queue_locks -= 1
+            raise sqlite3.OperationalError("database is locked")
         row_id = self.next_queue_id
         self.next_queue_id += 1
         stored = dict(event)
@@ -81,6 +91,9 @@ class FakeDigestDB:
         *,
         sent_cap=200,
     ):
+        if self.fail_complete_locks > 0:
+            self.fail_complete_locks -= 1
+            raise sqlite3.OperationalError("database is locked")
         self.completed.append((recipient_id, list(queue_ids)))
         remove_ids = {int(row_id) for row_id in queue_ids}
         self.queued[recipient_id] = [
@@ -237,6 +250,37 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.completed, [(weaver.id, [queue_id])])
         self.assertEqual(db.sent[weaver.id][0]["message"], "persist then deliver")
         self.assertEqual(db.sent[weaver.id][0]["delivered_at"], 120.0)
+        buffer.stop()
+
+
+    async def test_digest_queue_and_delivery_retry_sqlite_locks(self):
+        state, group, weaver = self._make_state()
+        db = FakeDigestDB(fail_queue_locks=1, fail_complete_locks=1)
+        state.db = db
+        bridge = FakeBridge()
+        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer._loop = asyncio.get_running_loop()
+
+        with mock.patch.object(self.weaver_mod.time, "time", return_value=100.0):
+            buffer.on_panel_event({
+                "group": group,
+                "kind": "task_completed",
+                "message": "lock retry digest",
+            })
+
+        self.assertEqual(len(db.queued[weaver.id]), 1)
+        queue_id = db.queued[weaver.id][0]["_digest_queue_id"]
+
+        with mock.patch.object(self.weaver_mod.time, "time", return_value=120.0):
+            ok, message = buffer.request_manual_flush(weaver.id)
+            self.assertTrue(ok)
+            self.assertEqual(message, "")
+            await asyncio.sleep(0.05)
+
+        self.assertEqual(db.queued[weaver.id], [])
+        self.assertEqual(db.completed, [(weaver.id, [queue_id])])
+        self.assertEqual([evt["event"] for evt in db.health], ["retry", "retry"])
+        self.assertEqual({evt["surface"] for evt in db.health}, {"digest"})
         buffer.stop()
 
     async def test_persisted_paused_queue_flushes_after_resume(self):

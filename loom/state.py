@@ -5038,6 +5038,11 @@ class MatrixState:
     async def broadcast(self):
         """Send accumulated deltas to all WS clients.
 
+        WS delivery is explicitly fire-and-forget/best-effort: there is no
+        ACK/replay protocol for individual frames. Clients recover from
+        disconnects or missed deltas by requesting a fresh durable snapshot;
+        high-level events additionally rely on panel_events persistence.
+
         If there are no delta ops (e.g. broadcast after a focus change
         where the _emit was called), this is a no-op — the delta was
         already queued by _emit().
@@ -5091,6 +5096,13 @@ class MatrixState:
             if isinstance(result, BaseException)
         }
         if dead:
+            db = getattr(self, "db", None)
+            if db and hasattr(db, "record_mcp_health_event_safe"):
+                db.record_mcp_health_event_safe(
+                    surface="ws",
+                    event="drop",
+                    error=f"failed clients: {len(dead)}",
+                )
             async with self._ws_clients_lock:
                 self._ws_clients -= dead
         if weaver_groups:

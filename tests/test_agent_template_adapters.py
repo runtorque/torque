@@ -118,6 +118,10 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             self.assertEqual(len(installed["hooks"]["Notification"]), 1)
             session_start_hook = installed["hooks"]["SessionStart"][0]["hooks"][0]
             self.assertIn("http://localhost:18933/events", session_start_hook["command"])
+            self.assertIn("--fail", session_start_hook["command"])
+            self.assertIn("--retry 3", session_start_hook["command"])
+            self.assertIn("event_id", session_start_hook["command"])
+            self.assertNotIn("> /dev/null", session_start_hook["command"])
             self.assertNotIn("http://localhost:18932/events", session_start_hook["command"])
 
             adapter.uninstall_hooks(tmp)
@@ -378,6 +382,10 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             self.assertEqual(len(installed["hooks"]["PreToolUse"]), 1)
             session_start_hook = installed["hooks"]["SessionStart"][0]["hooks"][0]
             self.assertIn("http://localhost:18933/events", session_start_hook["command"])
+            self.assertIn("--fail", session_start_hook["command"])
+            self.assertIn("--retry 3", session_start_hook["command"])
+            self.assertIn("event_id", session_start_hook["command"])
+            self.assertNotIn("> /dev/null", session_start_hook["command"])
             self.assertNotIn("http://localhost:18932/events", session_start_hook["command"])
 
             adapter.uninstall_hooks(tmp)

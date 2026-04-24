@@ -195,6 +195,9 @@ class PanelEventLog:
     independently; a hard process crash can lose events that are still only in
     memory (normally bounded by the small flush window/threshold), while
     graceful daemon shutdown must call ``aclose()`` to flush pending events.
+    WebSocket broadcasts are intentionally fire-and-forget/best-effort;
+    recovery is via this durable panel_events log and state snapshots, not a
+    WS ACK protocol.
     """
 
     def __init__(self, max_size: int = 500, db=None,
@@ -359,9 +362,15 @@ class PanelEventLog:
                         update_rows,
                         separate_connection=True,
                     )
-                except Exception:
+                except Exception as exc:
                     self._last_flush_failed = True
                     self._requeue_pending_batch(events, updates)
+                    if hasattr(self._db, "record_mcp_health_event_safe"):
+                        self._db.record_mcp_health_event_safe(
+                            surface="panel_events",
+                            event="drop",
+                            error=str(exc) or type(exc).__name__,
+                        )
                     log.exception(
                         "Failed to persist %d panel events and %d updates",
                         len(events), len(updates))
@@ -394,8 +403,14 @@ class PanelEventLog:
                 updates,
                 separate_connection=False,
             )
-        except Exception:
+        except Exception as exc:
             self._requeue_pending_batch(events, updates)
+            if hasattr(self._db, "record_mcp_health_event_safe"):
+                self._db.record_mcp_health_event_safe(
+                    surface="panel_events",
+                    event="drop",
+                    error=str(exc) or type(exc).__name__,
+                )
             log.exception(
                 "Failed to synchronously persist %d panel events and %d updates",
                 len(events), len(updates))

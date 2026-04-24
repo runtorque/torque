@@ -1,12 +1,14 @@
 import asyncio
 import importlib
 import os
+import sqlite3
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 try:
     from helpers import install_aiohttp_stub
@@ -200,6 +202,50 @@ class EventBusTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await panel_log.aclose()
 
+
+    async def test_panel_event_log_retries_sqlite_lock_without_duplicates(self):
+        db = self._make_temp_db()
+        panel_log = self.events_mod.PanelEventLog(
+            max_size=10,
+            db=db,
+            flush_max_events=1,
+            flush_interval=60.0,
+        )
+        from loom.db import LoomDB
+
+        original = LoomDB._save_panel_events_batch_on_conn
+        calls = {"count": 0}
+
+        def flaky(conn, events, updates, max_size):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise sqlite3.OperationalError("database is locked")
+            return original(conn, events, updates, max_size)
+
+        try:
+            with mock.patch.object(
+                LoomDB, "_save_panel_events_batch_on_conn", side_effect=flaky
+            ):
+                panel_log.append(
+                    kind="task_dispatched",
+                    cell_id="agent-1",
+                    agent_name="Agent",
+                    group="g",
+                    message="retry-once",
+                )
+                await asyncio.wait_for(panel_log.flush(), timeout=2.0)
+
+            persisted = db.load_panel_events(limit=10)
+            self.assertEqual([evt["message"] for evt in persisted], ["retry-once"])
+            self.assertEqual(len(persisted), 1)
+            health = db.load_mcp_health_summary(since=0)
+            self.assertEqual(
+                health["surfaces"]["panel_events"]["events"].get("retry"),
+                1,
+            )
+        finally:
+            await panel_log.aclose()
+
     def test_panel_event_log_forced_crash_mid_batch_loses_pending_queue(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
@@ -208,6 +254,7 @@ class EventBusTests(unittest.IsolatedAsyncioTestCase):
         code = f"""
 import asyncio
 import os
+import sqlite3
 from pathlib import Path
 
 from loom.db import LoomDB

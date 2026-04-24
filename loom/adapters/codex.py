@@ -84,6 +84,38 @@ def _current_loom_port() -> str:
     return port or "18932"
 
 
+
+def _loom_event_curl_command(url: str) -> str:
+    """Return a command hook that posts stdin JSON durably to /events.
+
+    The Python shim adds a deterministic event_id when the agent hook payload
+    does not provide one, allowing the /events ingest idempotency layer to
+    dedupe bounded curl retries. curl uses --fail plus retry so transient 503s
+    are not silently dropped by the hook source.
+    """
+    py = (
+        "import sys,json,hashlib;"
+        "p=json.load(sys.stdin);"
+        "b=json.dumps(p,sort_keys=True,separators=(',',':')).encode();"
+        "p.setdefault('event_id',hashlib.sha256(b).hexdigest());"
+        "print(json.dumps(p,separators=(',',':')))"
+    )
+    curl = (
+        "curl --fail --show-error --silent --retry 3 --retry-delay 1"
+        + " --retry-connrefused -X POST " + shlex.quote(url)
+        + ' -H "Content-Type: application/json"'
+        + ' -H "X-Loom-Cell-Id: $LOOM_CELL_ID"'
+        + ' --data-binary @"$tmp"'
+    )
+    # Use a temp file rather than piping into curl so curl can rewind the
+    # request body for HTTP 503 retry attempts.
+    return (
+        "tmp=$(mktemp); "
+        "trap 'rm -f \"$tmp\"' EXIT; "
+        "python3 -c " + shlex.quote(py) + ' > "$tmp" && '
+        + curl
+    )
+
 def _loom_hook_url() -> str:
     return f"http://localhost:{_current_loom_port()}/events"
 
@@ -335,15 +367,12 @@ class CodexAdapter(AgentAdapter):
         All hooks use command type with curl to POST to Loom's /events
         endpoint.  Codex hooks receive JSON on stdin.
         """
-        timeout = 3
+        timeout = 8
 
         def _cmd_hook(matcher=None):
             h = {"type": "command", "timeout": timeout,
                  "command": (
-                     'curl -s -X POST ' + _loom_hook_url()
-                     + ' -H "Content-Type: application/json"'
-                     + ' -H "X-Loom-Cell-Id: $LOOM_CELL_ID"'
-                     + ' -d "$(cat)" > /dev/null 2>&1'
+                     _loom_event_curl_command(_loom_hook_url())
                  )}
             entry = {"hooks": [h]}
             if matcher:
