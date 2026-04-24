@@ -523,7 +523,7 @@ function _focusNavId(id, opts) {
     const currentPrincipal = String((state && state.selected_principal_id) || '');
     const targetPrincipal = String(meta.principalId || '');
     if (currentPrincipal !== targetPrincipal) {
-      selectPrincipal(targetPrincipal);
+      selectPrincipal(targetPrincipal, meta.group || '');
       // selectPrincipal already called render() with the new focus.
       return;
     }
@@ -693,7 +693,8 @@ function moveFocusUp() {
     // principal card, not the column-preserved position.
     if (targetRow.rowType === 'principals-row') {
       const currentPrincipal = String((state && state.selected_principal_id) || '');
-      const principalNavId = 'principal:' + (currentPrincipal || 'user');
+      const targetGroup = targetRow.group || '';
+      const principalNavId = 'principal:' + targetGroup + ':' + (currentPrincipal || 'user');
       const hasPrincipal = targetRow.items.some(function(item) {
         return item && item.id === principalNavId;
       });

@@ -587,9 +587,10 @@ function _principalSectionMatches(section, principalId) {
   return !!(section.architect && String(section.architect.id) === id);
 }
 
-function _principalCardNavId(principalId) {
+function _principalCardNavId(groupName, principalId) {
   const id = String(principalId || '');
-  return 'principal:' + (id || 'user');
+  const group = String(groupName || '');
+  return 'principal:' + group + ':' + (id || 'user');
 }
 
 function _principalCardFocusedClass(navId) {
@@ -640,20 +641,22 @@ function _renderPrincipalBadgeHtml(counts) {
 
 function _renderPrincipalUserCard(groupName, section, selectedPrincipalId) {
   const isSelected = !selectedPrincipalId;
-  const navId = _principalCardNavId('');
+  const navId = _principalCardNavId(groupName, '');
   const counts = _principalStatusCounts(section);
   const classes = ['principal-card', 'principal-card--user'];
   if (isSelected) classes.push('selected');
   else classes.push('dim');
   classes.push(_principalCardFocusedClass(navId).trim());
   const badgeHtml = isSelected ? '' : _renderPrincipalBadgeHtml(counts);
+  const groupArg = _jsStringAttr(groupName);
   return '<button type="button" class="' + esc(classes.filter(Boolean).join(' ')) + '"'
     + ' data-principal-card="user"'
     + ' data-principal-id=""'
+    + ' data-principal-group="' + esc(groupName) + '"'
     + ' data-nav-id="' + esc(navId) + '"'
     + ' data-focus-key="' + esc(navId) + '"'
     + ' aria-pressed="' + (isSelected ? 'true' : 'false') + '"'
-    + ' onclick="event.stopPropagation();selectPrincipal(\'\')"'
+    + ' onclick="event.stopPropagation();selectPrincipal(\'\',' + groupArg + ')"'
     + ' title="User-owned engineers">'
     + '<span class="principal-card-icon">●</span>'
     + '<span class="principal-card-name">User</span>'
@@ -662,12 +665,12 @@ function _renderPrincipalUserCard(groupName, section, selectedPrincipalId) {
     + '</button>';
 }
 
-function _renderPrincipalArchitectCard(section, selectedPrincipalId) {
+function _renderPrincipalArchitectCard(groupName, section, selectedPrincipalId) {
   const architect = section && section.architect;
   if (!architect) return '';
   const id = String(architect.id || '');
   const isSelected = String(selectedPrincipalId || '') === id;
-  const navId = _principalCardNavId(id);
+  const navId = _principalCardNavId(groupName, id);
   const counts = _principalStatusCounts(section);
   const classes = ['principal-card', 'principal-card--architect'];
   if (isSelected) classes.push('selected');
@@ -675,13 +678,15 @@ function _renderPrincipalArchitectCard(section, selectedPrincipalId) {
   classes.push(_principalCardFocusedClass(navId).trim());
   const badgeHtml = isSelected ? '' : _renderPrincipalBadgeHtml(counts);
   const displayName = architect.name || architect.slug || id;
+  const groupArg = _jsStringAttr(groupName);
   return '<button type="button" class="' + esc(classes.filter(Boolean).join(' ')) + '"'
     + ' data-principal-card="architect"'
     + ' data-principal-id="' + esc(id) + '"'
+    + ' data-principal-group="' + esc(groupName) + '"'
     + ' data-nav-id="' + esc(navId) + '"'
     + ' data-focus-key="' + esc(navId) + '"'
     + ' aria-pressed="' + (isSelected ? 'true' : 'false') + '"'
-    + ' onclick="event.stopPropagation();selectPrincipal(' + _jsStringAttr(id) + ')"'
+    + ' onclick="event.stopPropagation();selectPrincipal(' + _jsStringAttr(id) + ',' + groupArg + ')"'
     + ' title="Architect ' + esc(displayName) + '">'
     + '<span class="principal-card-icon">△</span>'
     + '<span class="principal-card-name">' + esc(displayName) + '</span>'
@@ -719,7 +724,7 @@ function _renderPrincipalsRow(groupName, sections, selectedPrincipalId, opts) {
   }
   html += _renderPrincipalUserCard(groupName, userSection, selectedPrincipalId);
   for (const section of architectSections) {
-    html += _renderPrincipalArchitectCard(section, selectedPrincipalId);
+    html += _renderPrincipalArchitectCard(groupName, section, selectedPrincipalId);
   }
   html += _renderPrincipalNewArchitectGhost(groupName, disabled);
   html += '</div>';
@@ -870,7 +875,7 @@ function _buildAgentGridNavigationModel(groupContexts) {
 
       // Principals row: user card + architects + + New Architect.
       const principalsRowItems = [];
-      const userPrincipalNavId = _principalCardNavId('');
+      const userPrincipalNavId = _principalCardNavId(ctx.gname, '');
       const userPrincipalItem = {
         id: userPrincipalNavId,
         type: 'principal',
@@ -883,7 +888,7 @@ function _buildAgentGridNavigationModel(groupContexts) {
       for (const section of ctx.agentLayout.sections) {
         if (!section || !section.architect) continue;
         const archId = String(section.architect.id || '');
-        const navId = _principalCardNavId(archId);
+        const navId = _principalCardNavId(ctx.gname, archId);
         principalsRowItems.push({
           id: navId,
           type: 'principal',
@@ -1235,19 +1240,28 @@ function render() {
         'agent-section--filtered',
         section.type === 'user' ? 'agent-section-user' : 'agent-section-architect',
       ];
+      if (!section.rows || section.rows.length === 0) {
+        sectionClasses.push('agent-section--empty');
+      }
       html += '<section class="' + sectionClasses.join(' ') + '"'
         + ' data-agent-section="' + esc(sectionKey) + '">';
       html += '<div class="agent-section-body"'
         + ' data-agent-section-column="body"'
         + ' data-section-key="' + esc(sectionKey) + '">';
-      for (const row of section.rows) html += _renderEngineerRow(row, renderCellForGrid);
+      if (!section.rows || section.rows.length === 0) {
+        html += '<div class="agent-section-empty-msg">No engineers yet.</div>';
+      } else {
+        for (const row of section.rows) html += _renderEngineerRow(row, renderCellForGrid);
+      }
       html += _renderSectionControlsSlot(gname, section, { disabled: ctx.atAgentCap });
       html += '</div>';
       html += '</section>';
       renderedAnySection = true;
     }
     if (!renderedAnySection) {
-      // Selected principal has no matching section (e.g. empty group).
+      // Stored principal id does not match any section (e.g. architect
+      // deleted and fallback resolution missed). Shouldn't happen in
+      // practice because _resolveSelectedPrincipalId falls back to user.
       html += '<div class="agent-section agent-section--empty"'
         + ' data-agent-section="empty">'
         + '<div class="agent-section-empty-msg">No engineers yet.</div>'

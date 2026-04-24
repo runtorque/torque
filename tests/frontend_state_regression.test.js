@@ -14446,7 +14446,7 @@ test('main grid keyboard navigation traverses logical rows across sections', () 
   // + New Architect) is row 0; then user-section engineer rows; then + New
   // Engineer control. Architects' engineers are hidden unless filtered in.
   assert.deepEqual(jsonValue(context, `window._navGridRows.map(function(row) { return { type: row.rowType, items: row.items.map(function(item) { return item.id; }) }; })`), [
-    { type: 'principals-row', items: ['principal:user', 'principal:arch-a', 'principal:arch-b', 'grid-control:agent-new-architect:loom'] },
+    { type: 'principals-row', items: ['principal:loom:user', 'principal:loom:arch-a', 'principal:loom:arch-b', 'grid-control:agent-new-architect:loom'] },
     { type: 'engineer-row', items: ['eng-user-a', 'worker-user-a1', 'worker-user-a2'] },
     { type: 'engineer-row', items: ['eng-user-b', 'worker-user-b1'] },
     { type: 'section-creation-row', items: ['grid-control:section-new-engineer:loom:user'] },
@@ -14464,12 +14464,12 @@ test('main grid keyboard navigation traverses logical rows across sections', () 
   // Arrow-up from first engineer lands on the selected principal (user).
   runInContext(context, `focusedItemId = 'eng-user-a'; render();`);
   runInContext(context, `moveFocusUp();`);
-  assert.equal(jsonValue(context, `focusedItemId`), 'principal:user');
+  assert.equal(jsonValue(context, `focusedItemId`), 'principal:loom:user');
 
   // Arrow-right across principals row switches the filter to arch-a;
   // arrow-down lands on arch-a's engineer.
   runInContext(context, `moveFocusHorizontal(1);`);
-  assert.equal(jsonValue(context, `focusedItemId`), 'principal:arch-a');
+  assert.equal(jsonValue(context, `focusedItemId`), 'principal:loom:arch-a');
   assert.equal(jsonValue(context, `state.selected_principal_id`), 'arch-a');
   runInContext(context, `moveFocusDown();`);
   assert.equal(jsonValue(context, `focusedItemId`), 'eng-a');

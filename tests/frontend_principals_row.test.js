@@ -315,8 +315,10 @@ test('principals row registers principal items in the nav grid rows', () => {
   assert.equal(principalsRow.items.length, 3);
   assert.equal(principalsRow.items[0].type, 'principal');
   assert.equal(principalsRow.items[0].principalId, '');
+  assert.equal(principalsRow.items[0].id, 'principal:loom:user');
   assert.equal(principalsRow.items[1].type, 'principal');
   assert.equal(principalsRow.items[1].principalId, 'arch-a');
+  assert.equal(principalsRow.items[1].id, 'principal:loom:arch-a');
   assert.equal(principalsRow.items[2].type, 'control');
 });
 
@@ -328,9 +330,9 @@ test('arrow-right on principals row focuses next principal and commits the filte
   vm.runInContext('render();', context);
 
   // Simulate arrow-right from user principal → architect principal.
-  vm.runInContext("focusedItemId = 'principal:user'; moveFocusHorizontal(1);", context);
+  vm.runInContext("focusedItemId = 'principal:loom:user'; moveFocusHorizontal(1);", context);
 
-  assert.equal(vm.runInContext('focusedItemId', context), 'principal:arch-a');
+  assert.equal(vm.runInContext('focusedItemId', context), 'principal:loom:arch-a');
   assert.equal(sandbox.state.selected_principal_id, 'arch-a');
   assert.ok(sandbox.sendCalls.some(function(c) {
     return c.cmd === 'ui_select_principal' && c.principal_id === 'arch-a';
@@ -347,7 +349,54 @@ test('arrow-up from an engineer returns to the currently-selected principal card
 
   vm.runInContext("focusedItemId = 'eng-arch'; moveFocusUp();", context);
 
-  assert.equal(vm.runInContext('focusedItemId', context), 'principal:arch-a');
+  assert.equal(vm.runInContext('focusedItemId', context), 'principal:loom:arch-a');
+});
+
+test('principal nav ids are group-scoped so multi-group workspaces do not collide', () => {
+  const { context, sandbox } = createHarness();
+  sandbox.state.groups = { alpha: ['eng-a'], beta: ['eng-b'] };
+  sandbox.state.group_settings = {
+    alpha: { collapsed_default: false },
+    beta: { collapsed_default: false },
+  };
+  sandbox.state.agents['eng-a'] = engineer('eng-a', 'Alice', '', 1);
+  sandbox.state.agents['eng-a'].group = 'alpha';
+  sandbox.state.agents['eng-b'] = engineer('eng-b', 'Bob', '', 2);
+  sandbox.state.agents['eng-b'].group = 'beta';
+  vm.runInContext('render();', context);
+
+  const meta = vm.runInContext('JSON.stringify(window._navGridItemMeta)', context);
+  const parsed = JSON.parse(meta);
+  assert.ok(parsed['principal:alpha:user'], 'alpha user principal nav id registered');
+  assert.ok(parsed['principal:beta:user'], 'beta user principal nav id registered');
+  assert.equal(parsed['principal:alpha:user'].group, 'alpha');
+  assert.equal(parsed['principal:beta:user'].group, 'beta');
+
+  // Arrow-down from alpha's user principal lands on alpha's engineer, not beta's.
+  vm.runInContext("focusedItemId = 'principal:alpha:user'; moveFocusDown();", context);
+  assert.equal(vm.runInContext('focusedItemId', context), 'eng-a');
+});
+
+test('empty selected principal renders the "No engineers yet." placeholder', () => {
+  const { context, sandbox, mainEl } = createHarness();
+  sandbox.state.groups.loom = [];
+  sandbox.state.selected_principal_id = '';
+  vm.runInContext('render();', context);
+
+  assert.match(mainEl.innerHTML, /No engineers yet\./);
+  assert.match(mainEl.innerHTML, /agent-section--empty/);
+});
+
+test('architect with no engineers renders the empty placeholder when selected', () => {
+  const { context, sandbox, mainEl } = createHarness();
+  sandbox.state.groups.loom = ['arch-a'];
+  sandbox.state.agents['arch-a'] = architect('arch-a', 'Productmind', 2);
+  sandbox.state.selected_principal_id = 'arch-a';
+  vm.runInContext('render();', context);
+
+  assert.match(mainEl.innerHTML, /data-agent-section="architect:arch-a"[\s\S]*No engineers yet\./);
+  // The + New Engineer control still renders so the operator can add one.
+  assert.match(mainEl.innerHTML, /\+ New Engineer/);
 });
 
 test('narrow viewports allow the principals row to wrap via flex-wrap', () => {
