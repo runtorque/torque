@@ -70,14 +70,14 @@ function createSandbox() {
     console,
     state: {
       agents: {
-        'weaver-1': { id: 'weaver-1', group: 'alpha', status: 'stopped' },
+        'engineer-1': { id: 'engineer-1', group: 'alpha', status: 'stopped' },
       },
-      weaver_settings: {
+      engineer_settings: {
         alpha: {
-          weaver_provider: 'codex',
-          weaver_boot_command: 'codex --model gpt-5.4',
-          weaver_model: 'gpt-5.4',
-          weaver_reasoning_effort: 'medium',
+          engineer_provider: 'codex',
+          engineer_boot_command: 'codex --model gpt-5.4',
+          engineer_model: 'gpt-5.4',
+          engineer_reasoning_effort: 'medium',
           custom_instructions: 'Keep waves tight.',
           autonomy_mode: 'aggressive_auto_continue',
           default_worker_concurrency: 4,
@@ -117,7 +117,7 @@ function createSandbox() {
         return new FakeElement(tag);
       },
       querySelectorAll(selector) {
-        if (selector === '.overlay') return [ensure('modal-weaver-launch')];
+        if (selector === '.overlay') return [ensure('modal-engineer-launch')];
         if (selector === '.hint-pop') return [];
         return [];
       },
@@ -141,62 +141,62 @@ function loadScript(context, relPath) {
   vm.runInContext(source, context, { filename });
 }
 
-test('openWeaverLaunchDialog populates persisted weaver launch settings', () => {
+test('openEngineerLaunchDialog populates persisted engineer launch settings', () => {
   const { sandbox, ensure } = createSandbox();
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/modals.js');
-  loadScript(context, 'static/js/modals/weaver-launch.js');
+  loadScript(context, 'static/js/modals/engineer-launch.js');
 
-  vm.runInContext(`openWeaverLaunchDialog('alpha')`, context);
+  vm.runInContext(`openEngineerLaunchDialog('alpha')`, context);
 
-  assert.equal(ensure('weaver-launch-title').textContent, 'Create Weaver');
-  assert.equal(ensure('weaver-launch-group').textContent, 'alpha');
-  assert.equal(ensure('weaver-launch-submit-btn').textContent, 'Create Weaver');
-  assert.equal(ensure('weaver-launch-provider').value, 'codex');
-  assert.equal(ensure('weaver-launch-boot-cmd').value, 'codex --model gpt-5.4');
-  assert.equal(ensure('weaver-launch-model').value, 'gpt-5.4');
-  assert.equal(ensure('weaver-launch-reasoning-effort').value, 'medium');
-  assert.equal(ensure('weaver-launch-custom-instructions').value, 'Keep waves tight.');
-  assert.equal(ensure('weaver-launch-autonomy-mode').value, 'aggressive_auto_continue');
-  assert.equal(ensure('weaver-launch-default-worker-concurrency').value, '4');
-  assert.equal(ensure('weaver-launch-wave-size-preference').value, 'large');
-  assert.equal(ensure('weaver-launch-same-agent-follow-up-preference').value, 'prefer_same_agent');
-  assert.equal(ensure('weaver-launch-notification-preset').value, 'noisy');
-  assert.equal(ensure('weaver-launch-digest-verbosity').value, 'detailed');
-  assert.equal(ensure('weaver-launch-escalation-style').value, 'keep_moving');
-  assert.equal(ensure('modal-weaver-launch').classList.contains('visible'), true);
+  assert.equal(ensure('engineer-launch-title').textContent, 'Create Engineer');
+  assert.equal(ensure('engineer-launch-group').textContent, 'alpha');
+  assert.equal(ensure('engineer-launch-submit-btn').textContent, 'Create Engineer');
+  assert.equal(ensure('engineer-launch-provider').value, 'codex');
+  assert.equal(ensure('engineer-launch-boot-cmd').value, 'codex --model gpt-5.4');
+  assert.equal(ensure('engineer-launch-model').value, 'gpt-5.4');
+  assert.equal(ensure('engineer-launch-reasoning-effort').value, 'medium');
+  assert.equal(ensure('engineer-launch-custom-instructions').value, 'Keep waves tight.');
+  assert.equal(ensure('engineer-launch-autonomy-mode').value, 'aggressive_auto_continue');
+  assert.equal(ensure('engineer-launch-default-worker-concurrency').value, '4');
+  assert.equal(ensure('engineer-launch-wave-size-preference').value, 'large');
+  assert.equal(ensure('engineer-launch-same-agent-follow-up-preference').value, 'prefer_same_agent');
+  assert.equal(ensure('engineer-launch-notification-preset').value, 'noisy');
+  assert.equal(ensure('engineer-launch-digest-verbosity').value, 'detailed');
+  assert.equal(ensure('engineer-launch-escalation-style').value, 'keep_moving');
+  assert.equal(ensure('modal-engineer-launch').classList.contains('visible'), true);
 });
 
-test('submitWeaverLaunchDialog persists settings then creates a Weaver', () => {
+test('submitEngineerLaunchDialog persists settings then creates a Engineer', () => {
   const { sandbox, ensure } = createSandbox();
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/modals.js');
-  loadScript(context, 'static/js/modals/weaver-launch.js');
+  loadScript(context, 'static/js/modals/engineer-launch.js');
 
-  vm.runInContext(`openWeaverLaunchDialog('alpha')`, context);
-  ensure('weaver-launch-provider').value = 'codex';
-  ensure('weaver-launch-boot-cmd').value = 'codex --model gpt-5.5';
-  ensure('weaver-launch-model').value = 'gpt-5.5';
-  ensure('weaver-launch-reasoning-effort').value = 'high';
-  ensure('weaver-launch-custom-instructions').value = 'Watch deploy risk.';
-  ensure('weaver-launch-autonomy-mode').value = 'suggest_only';
-  ensure('weaver-launch-default-worker-concurrency').value = '3';
-  ensure('weaver-launch-wave-size-preference').value = 'small';
-  ensure('weaver-launch-same-agent-follow-up-preference').value = 'prefer_fresh_agent';
-  ensure('weaver-launch-notification-preset').value = 'quiet';
-  vm.runInContext('onWeaverLaunchNotificationPresetChange()', context);
-  ensure('weaver-launch-escalation-style').value = 'ask_early';
+  vm.runInContext(`openEngineerLaunchDialog('alpha')`, context);
+  ensure('engineer-launch-provider').value = 'codex';
+  ensure('engineer-launch-boot-cmd').value = 'codex --model gpt-5.5';
+  ensure('engineer-launch-model').value = 'gpt-5.5';
+  ensure('engineer-launch-reasoning-effort').value = 'high';
+  ensure('engineer-launch-custom-instructions').value = 'Watch deploy risk.';
+  ensure('engineer-launch-autonomy-mode').value = 'suggest_only';
+  ensure('engineer-launch-default-worker-concurrency').value = '3';
+  ensure('engineer-launch-wave-size-preference').value = 'small';
+  ensure('engineer-launch-same-agent-follow-up-preference').value = 'prefer_fresh_agent';
+  ensure('engineer-launch-notification-preset').value = 'quiet';
+  vm.runInContext('onEngineerLaunchNotificationPresetChange()', context);
+  ensure('engineer-launch-escalation-style').value = 'ask_early';
 
-  vm.runInContext('submitWeaverLaunchDialog()', context);
+  vm.runInContext('submitEngineerLaunchDialog()', context);
 
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
     {
-      cmd: 'weaver_update_settings',
+      cmd: 'engineer_update_settings',
       group: 'alpha',
-      weaver_provider: 'codex',
-      weaver_boot_command: 'codex --model gpt-5.5',
-      weaver_model: 'gpt-5.5',
-      weaver_reasoning_effort: 'high',
+      engineer_provider: 'codex',
+      engineer_boot_command: 'codex --model gpt-5.5',
+      engineer_model: 'gpt-5.5',
+      engineer_reasoning_effort: 'high',
       custom_instructions: 'Watch deploy risk.',
       autonomy_mode: 'suggest_only',
       default_worker_concurrency: 3,
@@ -211,33 +211,33 @@ test('submitWeaverLaunchDialog persists settings then creates a Weaver', () => {
     },
     {
       cmd: 'add_agent',
-      name: 'Weaver',
+      name: 'Engineer',
       group: 'alpha',
-      is_weaver: true,
+      is_engineer: true,
     },
   ]);
 });
 
-test('submitWeaverLaunchDialog persists settings then relaunches the designated Weaver', () => {
+test('submitEngineerLaunchDialog persists settings then relaunches the designated Engineer', () => {
   const { sandbox, ensure } = createSandbox();
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/modals.js');
-  loadScript(context, 'static/js/modals/weaver-launch.js');
+  loadScript(context, 'static/js/modals/engineer-launch.js');
 
-  vm.runInContext(`openWeaverLaunchDialog('alpha', 'weaver-1')`, context);
-  ensure('weaver-launch-provider').value = 'codex';
+  vm.runInContext(`openEngineerLaunchDialog('alpha', 'engineer-1')`, context);
+  ensure('engineer-launch-provider').value = 'codex';
 
-  vm.runInContext('submitWeaverLaunchDialog()', context);
+  vm.runInContext('submitEngineerLaunchDialog()', context);
 
-  assert.equal(ensure('weaver-launch-title').textContent, 'Relaunch Weaver');
+  assert.equal(ensure('engineer-launch-title').textContent, 'Relaunch Engineer');
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
     {
-      cmd: 'weaver_update_settings',
+      cmd: 'engineer_update_settings',
       group: 'alpha',
-      weaver_provider: 'codex',
-      weaver_boot_command: 'codex --model gpt-5.4',
-      weaver_model: 'gpt-5.4',
-      weaver_reasoning_effort: 'medium',
+      engineer_provider: 'codex',
+      engineer_boot_command: 'codex --model gpt-5.4',
+      engineer_model: 'gpt-5.4',
+      engineer_reasoning_effort: 'medium',
       custom_instructions: 'Keep waves tight.',
       autonomy_mode: 'aggressive_auto_continue',
       default_worker_concurrency: 4,
@@ -258,7 +258,7 @@ test('submitWeaverLaunchDialog persists settings then relaunches the designated 
     },
     {
       cmd: 'relaunch_agent',
-      id: 'weaver-1',
+      id: 'engineer-1',
     },
   ]);
 });

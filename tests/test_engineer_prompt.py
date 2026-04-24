@@ -18,14 +18,14 @@ def _install_aiohttp_stub():
     sys.modules["aiohttp.web"] = web
 
 
-class WeaverPromptTests(unittest.TestCase):
+class EngineerPromptTests(unittest.TestCase):
     def setUp(self):
         _install_aiohttp_stub()
-        self.weaver_mod = importlib.import_module("loom.weaver")
-        self.weaver_mod = importlib.reload(self.weaver_mod)
+        self.engineer_mod = importlib.import_module("loom.engineer")
+        self.engineer_mod = importlib.reload(self.engineer_mod)
 
     def test_prompt_includes_compact_operational_guidance_sections(self):
-        prompt = self.weaver_mod.build_weaver_system_prompt("Loom")
+        prompt = self.engineer_mod.build_engineer_system_prompt("Loom")
 
         self.assertIn("## Core orchestration model", prompt)
         self.assertIn("engineer_streams_list", prompt)
@@ -98,7 +98,7 @@ class WeaverPromptTests(unittest.TestCase):
         self.assertIn("Actions and worker prompts can handle sequential same-agent", prompt)
 
     def test_prompt_includes_structured_policy_overrides(self):
-        prompt = self.weaver_mod.build_weaver_system_prompt(
+        prompt = self.engineer_mod.build_engineer_system_prompt(
             "Loom",
             SimpleNamespace(
                 autonomy_mode="suggest_only",
@@ -134,7 +134,7 @@ class WeaverPromptTests(unittest.TestCase):
         self.assertIn("Shape Loom digests as detailed by default.", prompt)
 
     def test_prompt_uses_markdown_heading_for_custom_instructions(self):
-        prompt = self.weaver_mod.build_weaver_system_prompt(
+        prompt = self.engineer_mod.build_engineer_system_prompt(
             "Loom",
             SimpleNamespace(
                 custom_instructions="Use concise notes.",
@@ -145,7 +145,7 @@ class WeaverPromptTests(unittest.TestCase):
         self.assertIn("Use concise notes.", prompt)
 
     def test_engineer_prompt_includes_architect_escalation_guidance(self):
-        prompt = self.weaver_mod.build_engineer_system_prompt("Loom")
+        prompt = self.engineer_mod.build_engineer_system_prompt("Loom")
 
         self.assertIn("## Architect escalation", prompt)
         self.assertIn("engineer_message_architect", prompt)

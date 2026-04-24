@@ -72,7 +72,7 @@ See [Actions & Templates](actions.md) for the full guide.
 
 ## Streams and waves
 
-When Loom's Weaver is coordinating larger pieces of work, it reasons at two levels:
+When Loom's Engineer is coordinating larger pieces of work, it reasons at two levels:
 
 - a **stream** is one branch/worktree execution lane that moves through implementation, review, blocker fixes, validation, and merge
 - a **wave** is the set of streams and/or standalone tasks the designated engineer intentionally activates in parallel

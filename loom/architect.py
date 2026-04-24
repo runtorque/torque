@@ -4,7 +4,7 @@ The architect is a user-created persistent agent that owns product-level
 scope for a group: hiring engineers, routing work to them, recording
 decisions, and maintaining a private journal so context survives /clear
 and daemon restarts. This module assembles the architect's boot prompt
-in the same shape as the engineer prompt (``loom/weaver.py``) so the two
+in the same shape as the engineer prompt (``loom/engineer.py``) so the two
 surfaces stay structurally comparable.
 """
 
@@ -183,7 +183,7 @@ decisions, or request a hire.
 
 # ---------------------------------------------------------------------------
 # Policy section (placeholder — to be populated when architects gain
-# per-group settings analogous to WeaverSettings).
+# per-group settings analogous to EngineerSettings).
 # ---------------------------------------------------------------------------
 
 def _build_policy_section(architect_settings=None, group_settings=None) -> str:
@@ -192,7 +192,7 @@ def _build_policy_section(architect_settings=None, group_settings=None) -> str:
     Intentionally a stub until architects have their own settings
     surface. When ``architect_settings`` and ``group_settings`` gain
     fields (autonomy posture, hiring posture, digest verbosity), this
-    helper should mirror ``weaver._build_policy_section``.
+    helper should mirror ``engineer._build_policy_section``.
     """
     return ""
 

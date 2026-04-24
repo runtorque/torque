@@ -496,10 +496,10 @@ TOOLS = [
     {
         "name": "loom_reply",
         "description": (
-            "Reply to a message from the weaver (orchestrator agent). "
-            "The reply is delivered to the weaver in its next event "
-            "digest. Only works when you have a pending weaver message. "
-            "When multiple Weaver follow-up tasks are open, include the "
+            "Reply to a message from the engineer (orchestrator agent). "
+            "The reply is delivered to the engineer in its next event "
+            "digest. Only works when you have a pending engineer message. "
+            "When multiple Engineer follow-up tasks are open, include the "
             "task id to choose which message you are answering."
         ),
         "inputSchema": {
@@ -508,13 +508,13 @@ TOOLS = [
                 "task": {
                     "type": "string",
                     "description": (
-                        "Optional task ID for the specific Weaver "
+                        "Optional task ID for the specific Engineer "
                         "follow-up you are answering."
                     ),
                 },
                 "message": {
                     "type": "string",
-                    "description": "Your reply to the weaver.",
+                    "description": "Your reply to the engineer.",
                 },
             },
             "required": ["message"],
@@ -697,14 +697,6 @@ _TOOL_MAP = {t["name"]: t for t in TOOLS}
 # Combined tool list
 ALL_TOOLS = TOOLS + ARCHITECT_TOOLS + ENGINEER_TOOLS
 _ALL_TOOL_MAP = {t["name"]: t for t in ALL_TOOLS}
-
-
-def _removed_weaver_tool_message(tool_name: str) -> str:
-    replacement = str(tool_name or "").replace("weaver_", "engineer_", 1)
-    return (
-        "weaver_* MCP tools were removed; use engineer_* or architect_* "
-        f"instead (for example {replacement})"
-    )
 
 
 def _visible_tools(state, cell_id: str):
@@ -1034,23 +1026,6 @@ async def dispatch_mcp_rpc_body(
                             first_tool_call_ts=first_tool_call_ts,
                         )
                     return _jsonrpc_ok(req_id, cached), 200
-
-        if str(tool_name or "").startswith("weaver_"):
-            if session_wake_pending:
-                _queue_session_wake_entry(
-                    state,
-                    cell_id=cell_id,
-                    caller_kind=caller_kind,
-                    first_tool_call_ts=first_tool_call_ts,
-                )
-            return (
-                _jsonrpc_error(
-                    req_id,
-                    -32602,
-                    _removed_weaver_tool_message(tool_name),
-                ),
-                200,
-            )
 
         if tool_name not in _ALL_TOOL_MAP:
             if session_wake_pending:

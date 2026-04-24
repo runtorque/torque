@@ -4,7 +4,7 @@
 > add their own acceptance docs instead of extending this one indefinitely.
 
 This protocol assumes you are upgrading an existing Loom install that already
-has a live Weaver/loom-group workflow. Fresh-install and edge-case migration
+has a live Engineer/loom-group workflow. Fresh-install and edge-case migration
 paths are covered separately by automated tests.
 
 ## Preflight
@@ -95,13 +95,13 @@ Expected: a `CREATE TABLE decisions (...)` statement is printed.
 
 ## Verify backfill
 
-Exactly one engineer row should exist for the promoted Weaver:
+Exactly one engineer row should exist for the promoted Engineer:
 
 ```bash
 sqlite3 "$DB" "SELECT id, name, kind, persistent FROM agents WHERE kind='engineer';"
 ```
 
-Expected: exactly one row; name `Weaver`; `persistent=1`.
+Expected: exactly one row; name `Engineer`; `persistent=1`.
 
 No unmigrated agents should remain:
 

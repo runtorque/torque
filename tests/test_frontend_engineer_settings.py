@@ -3,10 +3,10 @@ import unittest
 from pathlib import Path
 
 
-class FrontendNewDropdownWeaverTests(unittest.TestCase):
-    def test_frontend_new_dropdown_weaver(self):
+class FrontendEngineerSettingsTests(unittest.TestCase):
+    def test_frontend_engineer_settings(self):
         root = Path(__file__).resolve().parents[1]
-        script = Path(__file__).with_name('frontend_new_dropdown_weaver.test.js')
+        script = Path(__file__).with_name('frontend_engineer_settings.test.js')
         proc = subprocess.run(
             ['node', '--test', str(script)],
             cwd=root,
@@ -16,7 +16,7 @@ class FrontendNewDropdownWeaverTests(unittest.TestCase):
 
         if proc.returncode != 0:
             self.fail(
-                'frontend weaver relaunch tests failed\n'
+                'frontend engineer settings tests failed\n'
                 f'stdout:\n{proc.stdout}\n'
                 f'stderr:\n{proc.stderr}'
             )

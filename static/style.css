@@ -1068,7 +1068,7 @@ body.runtime-embedded .terminal-empty {
 .cell.engineer.dismissed .cell-name {
   color: var(--text-dim);
 }
-.cell-weaver-ask {
+.cell-engineer-ask {
   font-size: 8px;
   color: var(--amber);
   font-weight: 600;
@@ -1212,19 +1212,19 @@ body.runtime-embedded .terminal-empty {
   pointer-events: none;
 }
 .cell:hover .cell-close,
-.cell:hover .cell-weaver-toggle,
+.cell:hover .cell-engineer-toggle,
 .cell:hover .cell-relaunch,
 .cell.focused .cell-close,
-.cell.focused .cell-weaver-toggle,
+.cell.focused .cell-engineer-toggle,
 .cell.focused .cell-relaunch,
 .cell:focus-within .cell-close,
-.cell:focus-within .cell-weaver-toggle,
+.cell:focus-within .cell-engineer-toggle,
 .cell:focus-within .cell-relaunch {
   opacity: 1;
   pointer-events: auto;
 }
 .cell-close:hover { background: var(--red); color: #fff; }
-.cell-weaver-toggle {
+.cell-engineer-toggle {
   width: 16px; height: 16px;
   display: flex; align-items: center; justify-content: center;
   padding: 0;
@@ -1237,15 +1237,15 @@ body.runtime-embedded .terminal-empty {
   transition: opacity .15s, color .15s, border-color .15s, background .15s;
   pointer-events: none;
 }
-.cell-weaver-toggle.running {
+.cell-engineer-toggle.running {
   color: var(--green);
 }
-.cell-weaver-toggle.paused {
+.cell-engineer-toggle.paused {
   color: var(--amber);
 }
-.cell-weaver-toggle:hover,
-.cell-weaver-toggle:focus-visible,
-.cell-weaver-toggle:active {
+.cell-engineer-toggle:hover,
+.cell-engineer-toggle:focus-visible,
+.cell-engineer-toggle:active {
   background: color-mix(in srgb, currentColor 14%, transparent);
   border-color: color-mix(in srgb, currentColor 70%, transparent);
   outline: none;

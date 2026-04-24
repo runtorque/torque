@@ -20,7 +20,7 @@ Expected:
 - `loom doctor` reports `Result: PASS` or `PASS (with warnings)`
 - `[stage_6_cleanup]` is present
 - `legacy_columns_present: false`
-- `weaver_tool_aliases_present: false`
+- `engineer_tool_aliases_present: false`
 - if `~/.loom/agents/*.yaml` still exists without a matching role, `legacy_template_files_ignored` is non-zero and the warning names the ignored file(s)
 
 ## 2. Legacy role files are ignored
@@ -44,7 +44,7 @@ Expected:
 
 - ownership fields remain correct (`owner_engineer_id`, `assigned_engineer_id`, `created_by_architect_id`, `hired_by_architect_id`)
 - worker prompts still include role preamble / priorities when configured
-- no `weaver_*` tool name appears anywhere in the active flow
+- no `engineer_*` tool name appears anywhere in the active flow
 
 ## 4. Unsupported direct upgrade is refused
 
@@ -66,6 +66,6 @@ sqlite3 "$DB" ".schema board_tasks"
 
 Expected:
 
-- `agents` no longer contains `template` or `created_by_weaver_id`
-- `board_tasks` no longer contains `weaver_owner_id`
+- `agents` no longer contains `template` or `created_by_engineer_id`
+- `board_tasks` no longer contains `engineer_owner_id`
 - `meta.schema_kinds_migration_version` is `3`

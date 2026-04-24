@@ -80,7 +80,7 @@ class CommunicationGraphTests(unittest.IsolatedAsyncioTestCase):
             kind="worker",
             status="idle",
             owner_engineer_id=owner_engineer_id,
-            created_by_weaver_id=owner_engineer_id,
+            created_by_engineer_id=owner_engineer_id,
         )
         self.state.agents[cell.id] = cell
         self.state.groups["loom"].append(cell.id)
@@ -109,7 +109,7 @@ class CommunicationGraphTests(unittest.IsolatedAsyncioTestCase):
 
     async def _handle_command(self, payload):
         self.handle_calls.append(dict(payload))
-        if payload["cmd"] == "weaver_message":
+        if payload["cmd"] == "engineer_message":
             return {"type": "ok", "agent_id": payload["agent_id"]}
         self.fail(f"Unexpected command: {payload}")
 
@@ -250,5 +250,5 @@ class CommunicationGraphTests(unittest.IsolatedAsyncioTestCase):
             engineer.id,
         )
         self.assertFalse(agent_error, agent_text)
-        self.assertEqual(self.handle_calls[-1]["cmd"], "weaver_message")
+        self.assertEqual(self.handle_calls[-1]["cmd"], "engineer_message")
         self.assertEqual(self.handle_calls[-1]["agent_id"], worker.id)

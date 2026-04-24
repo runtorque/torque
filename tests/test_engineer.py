@@ -109,7 +109,7 @@ class FakeDigestDB:
             self.sent[recipient_id] = self.sent[recipient_id][-sent_cap:]
 
 
-class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
+class EngineerEventBufferTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         _install_aiohttp_stub()
         self.state_mod = importlib.import_module("loom.state")
@@ -118,17 +118,17 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.events_mod = importlib.reload(self.events_mod)
         self.routing_mod = importlib.import_module("loom.digest_routing")
         self.routing_mod = importlib.reload(self.routing_mod)
-        self.weaver_mod = importlib.import_module("loom.weaver")
-        self.weaver_mod = importlib.reload(self.weaver_mod)
+        self.engineer_mod = importlib.import_module("loom.engineer")
+        self.engineer_mod = importlib.reload(self.engineer_mod)
 
     def _make_state(self):
         state = self.state_mod.MatrixState()
         group = "g"
         state.groups[group] = []
-        weaver = self.state_mod.AgentCell(
-            id="weaver-1",
-            name="Weaver",
-            slug="weaver",
+        engineer = self.state_mod.AgentCell(
+            id="engineer-1",
+            name="Engineer",
+            slug="engineer",
             group=group,
             cell_type="agent",
             session_id="session-1",
@@ -137,12 +137,12 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
             kind="engineer",
             persistent=True,
         )
-        state.agents[weaver.id] = weaver
+        state.agents[engineer.id] = engineer
         state.group_settings[group] = self.state_mod.GroupSettings(
-            weaver_agent_id=weaver.id
+            engineer_agent_id=engineer.id
         )
-        state.weaver_settings[group] = self.state_mod.WeaverSettings(group=group)
-        return state, group, weaver
+        state.engineer_settings[group] = self.state_mod.EngineerSettings(group=group)
+        return state, group, engineer
 
     def _add_architect_digest_team(self, state, group, *,
                                    worker_owner_id="eng-assigned"):
@@ -195,10 +195,10 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         return panel_log
 
     async def test_persisted_digest_state_reloads_on_buffer_construction(self):
-        state, _, weaver = self._make_state()
+        state, _, engineer = self._make_state()
         state.db = FakeDigestDB(
             queued={
-                weaver.id: [
+                engineer.id: [
                     {
                         "kind": "task_completed",
                         "message": "survived restart",
@@ -208,7 +208,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
                 ],
             },
             sent={
-                weaver.id: [
+                engineer.id: [
                     {
                         "kind": "task_completed",
                         "message": f"sent {i}",
@@ -219,88 +219,88 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
             },
         )
 
-        buffer = self.weaver_mod.WeaverEventBuffer(state, FakeBridge())
+        buffer = self.engineer_mod.EngineerEventBuffer(state, FakeBridge())
 
-        stats = buffer.get_buffer_stats(weaver.id)
+        stats = buffer.get_buffer_stats(engineer.id)
         self.assertEqual(stats["buffered_events"], 1)
         self.assertEqual(stats["queued_events"][0]["message"], "survived restart")
-        self.assertEqual(buffer._buffer_started[weaver.id], 50.0)
-        sent = buffer.get_sent_events(weaver.id)
+        self.assertEqual(buffer._buffer_started[engineer.id], 50.0)
+        sent = buffer.get_sent_events(engineer.id)
         self.assertEqual(len(sent), 200)
         self.assertEqual(sent[0]["message"], "sent 5")
         self.assertEqual(sent[-1]["message"], "sent 204")
 
     async def test_manual_flush_moves_persisted_queue_rows_to_sent_history(self):
-        state, group, weaver = self._make_state()
+        state, group, engineer = self._make_state()
         db = FakeDigestDB()
         state.db = db
         bridge = FakeBridge()
-        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer = self.engineer_mod.EngineerEventBuffer(state, bridge)
         buffer._loop = asyncio.get_running_loop()
 
-        with mock.patch.object(self.weaver_mod.time, "time", return_value=100.0):
+        with mock.patch.object(self.engineer_mod.time, "time", return_value=100.0):
             buffer.on_panel_event({
                 "group": group,
                 "kind": "task_completed",
                 "message": "persist then deliver",
             })
 
-        self.assertEqual(len(db.queued[weaver.id]), 1)
-        queue_id = db.queued[weaver.id][0]["_digest_queue_id"]
+        self.assertEqual(len(db.queued[engineer.id]), 1)
+        queue_id = db.queued[engineer.id][0]["_digest_queue_id"]
 
-        with mock.patch.object(self.weaver_mod.time, "time", return_value=120.0):
-            ok, message = buffer.request_manual_flush(weaver.id)
+        with mock.patch.object(self.engineer_mod.time, "time", return_value=120.0):
+            ok, message = buffer.request_manual_flush(engineer.id)
             self.assertTrue(ok)
             self.assertEqual(message, "")
             await asyncio.sleep(0.05)
 
         self.assertEqual(bridge.sent and bridge.sent[0].count("persist then deliver"), 1)
-        self.assertEqual(db.queued[weaver.id], [])
-        self.assertEqual(db.completed, [(weaver.id, [queue_id])])
-        self.assertEqual(db.sent[weaver.id][0]["message"], "persist then deliver")
-        self.assertEqual(db.sent[weaver.id][0]["delivered_at"], 120.0)
+        self.assertEqual(db.queued[engineer.id], [])
+        self.assertEqual(db.completed, [(engineer.id, [queue_id])])
+        self.assertEqual(db.sent[engineer.id][0]["message"], "persist then deliver")
+        self.assertEqual(db.sent[engineer.id][0]["delivered_at"], 120.0)
         buffer.stop()
 
 
     async def test_digest_queue_and_delivery_retry_sqlite_locks(self):
-        state, group, weaver = self._make_state()
+        state, group, engineer = self._make_state()
         db = FakeDigestDB(fail_queue_locks=1, fail_complete_locks=1)
         state.db = db
         bridge = FakeBridge()
-        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer = self.engineer_mod.EngineerEventBuffer(state, bridge)
         buffer._loop = asyncio.get_running_loop()
 
-        with mock.patch.object(self.weaver_mod.time, "time", return_value=100.0):
+        with mock.patch.object(self.engineer_mod.time, "time", return_value=100.0):
             buffer.on_panel_event({
                 "group": group,
                 "kind": "task_completed",
                 "message": "lock retry digest",
             })
 
-        self.assertEqual(len(db.queued[weaver.id]), 1)
-        queue_id = db.queued[weaver.id][0]["_digest_queue_id"]
+        self.assertEqual(len(db.queued[engineer.id]), 1)
+        queue_id = db.queued[engineer.id][0]["_digest_queue_id"]
 
-        with mock.patch.object(self.weaver_mod.time, "time", return_value=120.0):
-            ok, message = buffer.request_manual_flush(weaver.id)
+        with mock.patch.object(self.engineer_mod.time, "time", return_value=120.0):
+            ok, message = buffer.request_manual_flush(engineer.id)
             self.assertTrue(ok)
             self.assertEqual(message, "")
             await asyncio.sleep(0.05)
 
-        self.assertEqual(db.queued[weaver.id], [])
-        self.assertEqual(db.completed, [(weaver.id, [queue_id])])
+        self.assertEqual(db.queued[engineer.id], [])
+        self.assertEqual(db.completed, [(engineer.id, [queue_id])])
         self.assertEqual([evt["event"] for evt in db.health], ["retry", "retry"])
         self.assertEqual({evt["surface"] for evt in db.health}, {"digest"})
         buffer.stop()
 
     async def test_persisted_paused_queue_flushes_after_resume(self):
-        state, _, weaver = self._make_state()
-        state.agent_digest_settings[weaver.id] = self.state_mod.AgentDigestSettings(
-            agent_id=weaver.id,
+        state, _, engineer = self._make_state()
+        state.agent_digest_settings[engineer.id] = self.state_mod.AgentDigestSettings(
+            agent_id=engineer.id,
             paused=True,
         )
         db = FakeDigestDB(
             queued={
-                weaver.id: [
+                engineer.id: [
                     {
                         "kind": "task_completed",
                         "message": "queued while paused",
@@ -312,38 +312,38 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         )
         state.db = db
         bridge = FakeBridge()
-        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer = self.engineer_mod.EngineerEventBuffer(state, bridge)
         buffer._loop = asyncio.get_running_loop()
 
-        buffer._check_weaver_flush(weaver)
+        buffer._check_engineer_flush(engineer)
         await asyncio.sleep(0.05)
         self.assertEqual(bridge.sent, [])
-        self.assertEqual(buffer.get_buffer_stats(weaver.id)["buffered_events"], 1)
+        self.assertEqual(buffer.get_buffer_stats(engineer.id)["buffered_events"], 1)
 
-        state.agent_digest_settings[weaver.id].paused = False
-        with mock.patch.object(self.weaver_mod.time, "time", return_value=180.0):
-            buffer.on_delivery_resumed(weaver.id)
+        state.agent_digest_settings[engineer.id].paused = False
+        with mock.patch.object(self.engineer_mod.time, "time", return_value=180.0):
+            buffer.on_delivery_resumed(engineer.id)
             await asyncio.sleep(0.05)
 
         self.assertEqual(len(bridge.sent), 1)
         self.assertIn("queued while paused", bridge.sent[0])
-        self.assertEqual(db.queued[weaver.id], [])
-        self.assertEqual(db.sent[weaver.id][0]["message"], "queued while paused")
+        self.assertEqual(db.queued[engineer.id], [])
+        self.assertEqual(db.sent[engineer.id][0]["message"], "queued while paused")
         buffer.stop()
 
     async def test_simultaneous_flush_triggers_only_one_digest(self):
-        state, group, weaver = self._make_state()
+        state, group, engineer = self._make_state()
         bridge = FakeBridge()
-        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer = self.engineer_mod.EngineerEventBuffer(state, bridge)
         buffer._loop = asyncio.get_running_loop()
-        buffer._last_push[weaver.id] = time.time() - 61
+        buffer._last_push[engineer.id] = time.time() - 61
 
         buffer.on_panel_event({
             "group": group,
             "kind": "task_completed",
             "message": "done",
         })
-        buffer._check_weaver_flush(weaver)
+        buffer._check_engineer_flush(engineer)
 
         await asyncio.sleep(0.05)
 
@@ -353,18 +353,18 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("Heartbeat", bridge.sent[0])
 
     async def test_idle_buffered_events_wait_for_push_interval_before_flushing(self):
-        state, group, weaver = self._make_state()
-        state.weaver_settings[group] = self.state_mod.WeaverSettings(
+        state, group, engineer = self._make_state()
+        state.engineer_settings[group] = self.state_mod.EngineerSettings(
             group=group,
             push_interval=60,
             max_interval=300,
             heartbeat_interval=300,
         )
         bridge = FakeBridge()
-        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer = self.engineer_mod.EngineerEventBuffer(state, bridge)
         buffer._loop = asyncio.get_running_loop()
 
-        with mock.patch.object(self.weaver_mod.time, "time", return_value=100.0):
+        with mock.patch.object(self.engineer_mod.time, "time", return_value=100.0):
             buffer.on_panel_event({
                 "group": group,
                 "kind": "task_completed",
@@ -374,13 +374,13 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0.05)
         self.assertEqual(bridge.sent, [])
 
-        with mock.patch.object(self.weaver_mod.time, "time", return_value=159.0):
-            buffer._check_weaver_flush(weaver)
+        with mock.patch.object(self.engineer_mod.time, "time", return_value=159.0):
+            buffer._check_engineer_flush(engineer)
         await asyncio.sleep(0.05)
         self.assertEqual(bridge.sent, [])
 
-        with mock.patch.object(self.weaver_mod.time, "time", return_value=160.0):
-            buffer._check_weaver_flush(weaver)
+        with mock.patch.object(self.engineer_mod.time, "time", return_value=160.0):
+            buffer._check_engineer_flush(engineer)
             await asyncio.sleep(0.05)
 
         self.assertEqual(len(bridge.sent), 1)
@@ -388,31 +388,31 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         buffer.stop()
 
     async def test_max_interval_caps_buffered_digest_delay(self):
-        state, group, weaver = self._make_state()
-        state.weaver_settings[group] = self.state_mod.WeaverSettings(
+        state, group, engineer = self._make_state()
+        state.engineer_settings[group] = self.state_mod.EngineerSettings(
             group=group,
             push_interval=120,
             max_interval=30,
             heartbeat_interval=300,
         )
         bridge = FakeBridge()
-        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer = self.engineer_mod.EngineerEventBuffer(state, bridge)
         buffer._loop = asyncio.get_running_loop()
 
-        with mock.patch.object(self.weaver_mod.time, "time", return_value=100.0):
+        with mock.patch.object(self.engineer_mod.time, "time", return_value=100.0):
             buffer.on_panel_event({
                 "group": group,
                 "kind": "task_completed",
                 "message": "respect max interval",
             })
 
-        with mock.patch.object(self.weaver_mod.time, "time", return_value=129.0):
-            buffer._check_weaver_flush(weaver)
+        with mock.patch.object(self.engineer_mod.time, "time", return_value=129.0):
+            buffer._check_engineer_flush(engineer)
         await asyncio.sleep(0.05)
         self.assertEqual(bridge.sent, [])
 
-        with mock.patch.object(self.weaver_mod.time, "time", return_value=130.0):
-            buffer._check_weaver_flush(weaver)
+        with mock.patch.object(self.engineer_mod.time, "time", return_value=130.0):
+            buffer._check_engineer_flush(engineer)
             await asyncio.sleep(0.05)
 
         self.assertEqual(len(bridge.sent), 1)
@@ -420,25 +420,25 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         buffer.stop()
 
     async def test_buffer_stats_count_down_while_idle_events_wait_to_flush(self):
-        state, group, weaver = self._make_state()
-        state.weaver_settings[group] = self.state_mod.WeaverSettings(
+        state, group, engineer = self._make_state()
+        state.engineer_settings[group] = self.state_mod.EngineerSettings(
             group=group,
             push_interval=60,
             max_interval=300,
             heartbeat_interval=300,
         )
         bridge = FakeBridge()
-        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer = self.engineer_mod.EngineerEventBuffer(state, bridge)
         buffer._loop = asyncio.get_running_loop()
 
-        with mock.patch.object(self.weaver_mod.time, "time", return_value=100.0):
+        with mock.patch.object(self.engineer_mod.time, "time", return_value=100.0):
             buffer.on_panel_event({
                 "group": group,
                 "kind": "task_completed",
                 "message": "count me down",
             })
 
-        with mock.patch.object(self.weaver_mod.time, "time", return_value=115.0):
+        with mock.patch.object(self.engineer_mod.time, "time", return_value=115.0):
             stats = buffer.get_buffer_stats(group)
 
         self.assertEqual(stats["buffered_events"], 1)
@@ -447,18 +447,18 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         buffer.stop()
 
     async def test_manual_flush_sends_queued_events_before_push_interval(self):
-        state, group, weaver = self._make_state()
-        state.weaver_settings[group] = self.state_mod.WeaverSettings(
+        state, group, engineer = self._make_state()
+        state.engineer_settings[group] = self.state_mod.EngineerSettings(
             group=group,
             push_interval=60,
             max_interval=300,
             heartbeat_interval=300,
         )
         bridge = FakeBridge()
-        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer = self.engineer_mod.EngineerEventBuffer(state, bridge)
         buffer._loop = asyncio.get_running_loop()
 
-        with mock.patch.object(self.weaver_mod.time, "time", return_value=100.0):
+        with mock.patch.object(self.engineer_mod.time, "time", return_value=100.0):
             buffer.on_panel_event({
                 "group": group,
                 "kind": "task_completed",
@@ -481,13 +481,13 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         buffer.stop()
 
     async def test_manual_flush_rejects_paused_delivery_without_dropping_queue(self):
-        state, group, weaver = self._make_state()
-        state.weaver_settings[group] = self.state_mod.WeaverSettings(
+        state, group, engineer = self._make_state()
+        state.engineer_settings[group] = self.state_mod.EngineerSettings(
             group=group,
             paused=True,
         )
         bridge = FakeBridge()
-        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer = self.engineer_mod.EngineerEventBuffer(state, bridge)
         buffer._loop = asyncio.get_running_loop()
 
         buffer.on_panel_event({
@@ -506,7 +506,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         buffer.stop()
 
     async def test_overdue_idle_push_uses_digest_format(self):
-        state, group, weaver = self._make_state()
+        state, group, engineer = self._make_state()
         task = state.board_add_task(
             "Investigate blocked review",
             group,
@@ -526,9 +526,9 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         state.agents[active.id] = active
 
         bridge = FakeBridge()
-        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer = self.engineer_mod.EngineerEventBuffer(state, bridge)
         buffer._loop = asyncio.get_running_loop()
-        buffer._last_push[weaver.id] = time.time() - 301
+        buffer._last_push[engineer.id] = time.time() - 301
 
         buffer._timer_tick()
         await asyncio.sleep(0.05)
@@ -541,15 +541,15 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("Heartbeat", bridge.sent[0])
 
     async def test_idle_heartbeat_can_be_disabled(self):
-        state, group, weaver = self._make_state()
-        state.weaver_settings[group] = self.state_mod.WeaverSettings(
+        state, group, engineer = self._make_state()
+        state.engineer_settings[group] = self.state_mod.EngineerSettings(
             group=group,
             heartbeat_interval=0,
         )
         bridge = FakeBridge()
-        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer = self.engineer_mod.EngineerEventBuffer(state, bridge)
         buffer._loop = asyncio.get_running_loop()
-        buffer._last_push[weaver.id] = time.time() - 600
+        buffer._last_push[engineer.id] = time.time() - 600
 
         buffer._timer_tick()
         await asyncio.sleep(0.05)
@@ -557,11 +557,11 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(bridge.sent, [])
 
     async def test_idle_heartbeat_does_not_duplicate_regular_event_pushes(self):
-        state, group, weaver = self._make_state()
+        state, group, engineer = self._make_state()
         bridge = FakeBridge()
-        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer = self.engineer_mod.EngineerEventBuffer(state, bridge)
         buffer._loop = asyncio.get_running_loop()
-        buffer._last_push[weaver.id] = time.time() - 600
+        buffer._last_push[engineer.id] = time.time() - 600
 
         buffer.on_panel_event({
             "group": group,
@@ -574,13 +574,13 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(bridge.sent), 1)
         self.assertIn("## Loom Digest (1 event)", bridge.sent[0])
 
-    async def test_idle_heartbeat_does_not_fire_while_weaver_is_active(self):
-        state, group, weaver = self._make_state()
-        weaver.activity = "thinking"
+    async def test_idle_heartbeat_does_not_fire_while_engineer_is_active(self):
+        state, group, engineer = self._make_state()
+        engineer.activity = "thinking"
         bridge = FakeBridge()
-        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer = self.engineer_mod.EngineerEventBuffer(state, bridge)
         buffer._loop = asyncio.get_running_loop()
-        buffer._last_push[weaver.id] = time.time() - 600
+        buffer._last_push[engineer.id] = time.time() - 600
 
         buffer._timer_tick()
         await asyncio.sleep(0.05)
@@ -588,15 +588,15 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(bridge.sent, [])
 
     async def test_compact_digest_verbosity_truncates_event_list(self):
-        state, group, weaver = self._make_state()
-        state.weaver_settings[group] = self.state_mod.WeaverSettings(
+        state, group, engineer = self._make_state()
+        state.engineer_settings[group] = self.state_mod.EngineerSettings(
             group=group,
             digest_verbosity="compact",
         )
         bridge = FakeBridge()
-        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer = self.engineer_mod.EngineerEventBuffer(state, bridge)
         buffer._loop = asyncio.get_running_loop()
-        buffer._last_push[weaver.id] = time.time() - 61
+        buffer._last_push[engineer.id] = time.time() - 61
 
         for idx in range(7):
             buffer.on_panel_event({
@@ -612,8 +612,8 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("… 2 more events", bridge.sent[0])
 
     async def test_detailed_digest_verbosity_includes_attention_even_with_events(self):
-        state, group, weaver = self._make_state()
-        state.weaver_settings[group] = self.state_mod.WeaverSettings(
+        state, group, engineer = self._make_state()
+        state.engineer_settings[group] = self.state_mod.EngineerSettings(
             group=group,
             digest_verbosity="detailed",
         )
@@ -627,9 +627,9 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         task.health_state = "blocked"
 
         bridge = FakeBridge()
-        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer = self.engineer_mod.EngineerEventBuffer(state, bridge)
         buffer._loop = asyncio.get_running_loop()
-        buffer._last_push[weaver.id] = time.time() - 61
+        buffer._last_push[engineer.id] = time.time() - 61
         buffer.on_panel_event({
             "group": group,
             "kind": "task_completed",
@@ -645,7 +645,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         )
 
     def test_ask_created_digest_includes_recommended_action_summary(self):
-        state, group, weaver = self._make_state()
+        state, group, engineer = self._make_state()
         ask = state.board_add_task(
             "Need approval to merge release branch",
             group,
@@ -658,7 +658,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNotNone(ask)
 
-        buffer = self.weaver_mod.WeaverEventBuffer(state, FakeBridge())
+        buffer = self.engineer_mod.EngineerEventBuffer(state, FakeBridge())
         digest = buffer._format_digest(
             group,
             [{
@@ -678,8 +678,8 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("Smoke tests already passed", digest)
 
     def test_compact_ask_created_digest_clips_long_context(self):
-        state, group, weaver = self._make_state()
-        state.weaver_settings[group] = self.state_mod.WeaverSettings(
+        state, group, engineer = self._make_state()
+        state.engineer_settings[group] = self.state_mod.EngineerSettings(
             group=group,
             digest_verbosity="compact",
         )
@@ -695,7 +695,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNotNone(ask)
 
-        buffer = self.weaver_mod.WeaverEventBuffer(state, FakeBridge())
+        buffer = self.engineer_mod.EngineerEventBuffer(state, FakeBridge())
         digest = buffer._format_digest(
             group,
             [{
@@ -715,7 +715,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("support signs off", digest)
 
     async def test_architect_digest_uses_inject_and_rolls_up_worker_events(self):
-        state, group, _weaver = self._make_state()
+        state, group, _engineer = self._make_state()
         architect = self.state_mod.AgentCell(
             id="arch-1",
             name="Planner",
@@ -769,7 +769,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         async def inject_message(target, text, **kwargs):
             injected.append((target.id, text, kwargs))
 
-        buffer = self.weaver_mod.WeaverEventBuffer(
+        buffer = self.engineer_mod.EngineerEventBuffer(
             state,
             FakeBridge(),
             inject_message=inject_message,
@@ -799,7 +799,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(injected[0][2]["action"], "digest")
 
     def test_architect_digest_task_done_uses_assigned_engineer_without_owner(self):
-        state, group, _weaver = self._make_state()
+        state, group, _engineer = self._make_state()
         _architect, assigned, _other, worker = self._add_architect_digest_team(
             state,
             group,
@@ -813,7 +813,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
             assigned_engineer_id=assigned.id,
         )
         self.assertIsNotNone(task)
-        buffer = self.weaver_mod.WeaverEventBuffer(state, FakeBridge())
+        buffer = self.engineer_mod.EngineerEventBuffer(state, FakeBridge())
 
         engineer = buffer._architect_digest_engineer({
             "group": group,
@@ -827,7 +827,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(getattr(engineer, "id", ""), assigned.id)
 
     def test_architect_digest_task_done_prefers_assignment_over_worker_owner(self):
-        state, group, _weaver = self._make_state()
+        state, group, _engineer = self._make_state()
         _architect, assigned, other, worker = self._add_architect_digest_team(
             state,
             group,
@@ -841,7 +841,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
             assigned_engineer_id=assigned.id,
         )
         self.assertIsNotNone(task)
-        buffer = self.weaver_mod.WeaverEventBuffer(state, FakeBridge())
+        buffer = self.engineer_mod.EngineerEventBuffer(state, FakeBridge())
 
         engineer = buffer._architect_digest_engineer({
             "group": group,
@@ -856,7 +856,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(getattr(engineer, "id", ""), other.id)
 
     def test_architect_digest_task_scoped_events_prefer_assignment(self):
-        state, group, _weaver = self._make_state()
+        state, group, _engineer = self._make_state()
         _architect, assigned, _other, worker = self._add_architect_digest_team(
             state,
             group,
@@ -870,7 +870,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
             assigned_engineer_id=assigned.id,
         )
         self.assertIsNotNone(task)
-        buffer = self.weaver_mod.WeaverEventBuffer(state, FakeBridge())
+        buffer = self.engineer_mod.EngineerEventBuffer(state, FakeBridge())
 
         for kind in (
             "task_blocked",
@@ -892,7 +892,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(getattr(engineer, "id", ""), assigned.id)
 
     def test_architect_digest_task_done_without_assignment_or_owner_is_unassigned(self):
-        state, group, _weaver = self._make_state()
+        state, group, _engineer = self._make_state()
         architect, _assigned, _other, worker = self._add_architect_digest_team(
             state,
             group,
@@ -905,7 +905,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
             agent_id=worker.id,
         )
         self.assertIsNotNone(task)
-        buffer = self.weaver_mod.WeaverEventBuffer(state, FakeBridge())
+        buffer = self.engineer_mod.EngineerEventBuffer(state, FakeBridge())
 
         digest = buffer._format_digest(
             group,
@@ -918,14 +918,14 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
                 "task_id": task.id,
             }],
             "1 task active",
-            weaver=architect,
+            engineer=architect,
         )
 
         self.assertIn("### Unassigned engineer", digest)
         self.assertIn("Worker Bee: done task-1", digest)
 
     def test_architect_digest_task_done_and_derive_resolve_same_assignment(self):
-        state, group, _weaver = self._make_state()
+        state, group, _engineer = self._make_state()
         _architect, assigned, _other, worker = self._add_architect_digest_team(
             state,
             group,
@@ -939,7 +939,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
             assigned_engineer_id=assigned.id,
         )
         self.assertIsNotNone(task)
-        buffer = self.weaver_mod.WeaverEventBuffer(state, FakeBridge())
+        buffer = self.engineer_mod.EngineerEventBuffer(state, FakeBridge())
         done_engineer = buffer._architect_digest_engineer({
             "group": group,
             "cell_id": worker.id,
@@ -961,7 +961,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(getattr(derive_engineer, "id", ""), assigned.id)
 
     def test_architect_digest_ask_created_uses_parent_task_assignment(self):
-        state, group, _weaver = self._make_state()
+        state, group, _engineer = self._make_state()
         _architect, assigned, _other, worker = self._add_architect_digest_team(
             state,
             group,
@@ -984,7 +984,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
             pipeline_depth=1,
         )
         self.assertIsNotNone(ask_task)
-        buffer = self.weaver_mod.WeaverEventBuffer(state, FakeBridge())
+        buffer = self.engineer_mod.EngineerEventBuffer(state, FakeBridge())
 
         engineer = buffer._architect_digest_engineer({
             "group": group,
@@ -998,7 +998,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(getattr(engineer, "id", ""), assigned.id)
 
     async def test_architect_digest_fanout_task_completed_uses_task_assignment(self):
-        state, group, _weaver = self._make_state()
+        state, group, _engineer = self._make_state()
         architect, assigned, _other, worker = self._add_architect_digest_team(
             state,
             group,
@@ -1024,7 +1024,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         async def inject_message(target, text, **kwargs):
             injected.append((target.id, text, kwargs))
 
-        buffer = self.weaver_mod.WeaverEventBuffer(
+        buffer = self.engineer_mod.EngineerEventBuffer(
             state,
             FakeBridge(),
             inject_message=inject_message,
@@ -1047,7 +1047,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Worker Bee: done task-1", digest)
 
     def test_architect_digest_groups_workflow_breaches_by_subkind(self):
-        state, group, _weaver = self._make_state()
+        state, group, _engineer = self._make_state()
         architect = self.state_mod.AgentCell(
             id="arch-1",
             name="Planner",
@@ -1076,7 +1076,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
             architect.id,
             architect_digest=True,
         )
-        buffer = self.weaver_mod.WeaverEventBuffer(state, FakeBridge())
+        buffer = self.engineer_mod.EngineerEventBuffer(state, FakeBridge())
 
         digest = buffer._format_digest(
             group,
@@ -1104,7 +1104,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
                 },
             ],
             "1 task active",
-            weaver=architect,
+            engineer=architect,
         )
 
         self.assertIn("workflow breach/escape clause skip ×1", digest)
@@ -1113,7 +1113,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("operator rebased after stale-base warning", digest)
 
     def test_architect_digest_formats_engineer_queue_empty_compactly(self):
-        state, group, _weaver = self._make_state()
+        state, group, _engineer = self._make_state()
         architect = self.state_mod.AgentCell(
             id="arch-1",
             name="Planner",
@@ -1140,7 +1140,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
             architect.id,
             architect_digest=True,
         )
-        buffer = self.weaver_mod.WeaverEventBuffer(state, FakeBridge())
+        buffer = self.engineer_mod.EngineerEventBuffer(state, FakeBridge())
 
         digest = buffer._format_digest(
             group,
@@ -1153,7 +1153,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
                 "message": "",
             }],
             "0 active tasks",
-            weaver=architect,
+            engineer=architect,
         )
 
         self.assertIn("### Courier", digest)
@@ -1161,7 +1161,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("queue empty — queue empty", digest)
 
     def test_architect_digest_caps_lines_with_elision_footer(self):
-        state, group, _weaver = self._make_state()
+        state, group, _engineer = self._make_state()
         architect = self.state_mod.AgentCell(
             id="arch-1",
             name="Planner",
@@ -1192,7 +1192,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
                 "message": f"Review slice {idx}",
             })
 
-        buffer = self.weaver_mod.WeaverEventBuffer(state, FakeBridge())
+        buffer = self.engineer_mod.EngineerEventBuffer(state, FakeBridge())
         digest = buffer._format_digest(
             group,
             events,
@@ -1206,15 +1206,15 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(digest.endswith("---"))
 
     async def test_task_artifact_uploaded_digest_includes_ref_and_preview(self):
-        state, group, weaver = self._make_state()
-        state.weaver_settings[group] = self.state_mod.WeaverSettings(
+        state, group, engineer = self._make_state()
+        state.engineer_settings[group] = self.state_mod.EngineerSettings(
             group=group,
             enabled_events=["task_artifact_uploaded"],
         )
         bridge = FakeBridge()
-        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer = self.engineer_mod.EngineerEventBuffer(state, bridge)
         buffer._loop = asyncio.get_running_loop()
-        buffer._last_push[weaver.id] = time.time() - 61
+        buffer._last_push[engineer.id] = time.time() - 61
 
         buffer.on_panel_event({
             "group": group,
@@ -1234,7 +1234,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("E assert 1 == 2", bridge.sent[0])
 
     async def test_board_summary_in_digest_mentions_task_health(self):
-        state, group, weaver = self._make_state()
+        state, group, engineer = self._make_state()
         task = state.board_add_task(
             "Investigate stalled dispatch",
             group,
@@ -1245,15 +1245,15 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         task.health_state = "stalled"
 
         bridge = FakeBridge()
-        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer = self.engineer_mod.EngineerEventBuffer(state, bridge)
         summary = buffer._board_summary(group)
 
         self.assertIn("1 In Progress", summary)
         self.assertIn("health 1 stalled", summary)
         self.assertIn("Investigate stalled dispatch (stalled)", summary)
 
-    def test_build_weaver_system_prompt_contains_first_session_guidance(self):
-        text = self.weaver_mod.build_weaver_system_prompt("g")
+    def test_build_engineer_system_prompt_contains_first_session_guidance(self):
+        text = self.engineer_mod.build_engineer_system_prompt("g")
 
         self.assertIn("You are the designated engineer", text)
         self.assertIn("First session", text)
@@ -1263,7 +1263,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("Don't start dispatching tasks without human guidance.", text)
 
     async def test_idle_heartbeat_surfaces_stale_in_progress_attention(self):
-        state, group, weaver = self._make_state()
+        state, group, engineer = self._make_state()
         task = state.board_add_task(
             "Close the loop on merge",
             group,
@@ -1274,9 +1274,9 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         task.health_state = "stale-in-progress"
 
         bridge = FakeBridge()
-        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer = self.engineer_mod.EngineerEventBuffer(state, bridge)
         buffer._loop = asyncio.get_running_loop()
-        buffer._last_push[weaver.id] = time.time() - 301
+        buffer._last_push[engineer.id] = time.time() - 301
 
         buffer._timer_tick()
         await asyncio.sleep(0.05)
@@ -1288,7 +1288,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_idle_hint_digest_sends_without_events_and_respects_cooldown(self):
-        state, group, weaver = self._make_state()
+        state, group, engineer = self._make_state()
         for worker_id in ("worker-a", "worker-b"):
             worker = self.state_mod.AgentCell(
                 id=worker_id,
@@ -1306,10 +1306,10 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
             state.groups[group].append(worker.id)
 
         bridge = FakeBridge()
-        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer = self.engineer_mod.EngineerEventBuffer(state, bridge)
         buffer._loop = asyncio.get_running_loop()
 
-        buffer._check_weaver_flush(weaver)
+        buffer._check_engineer_flush(engineer)
         await asyncio.sleep(0.05)
 
         self.assertEqual(len(bridge.sent), 1)
@@ -1317,7 +1317,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Hints:", bridge.sent[0])
         self.assertIn("merged branches ready for cleanup", bridge.sent[0])
 
-        buffer._check_weaver_flush(weaver)
+        buffer._check_engineer_flush(engineer)
         await asyncio.sleep(0.05)
         self.assertEqual(len(bridge.sent), 1)
 
@@ -1336,7 +1336,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         state.agents[worker_c.id] = worker_c
         state.groups[group].append(worker_c.id)
 
-        buffer._check_weaver_flush(weaver)
+        buffer._check_engineer_flush(engineer)
         await asyncio.sleep(0.05)
 
         self.assertEqual(len(bridge.sent), 2)
@@ -1344,8 +1344,8 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         buffer.stop()
 
     async def test_due_hints_piggyback_on_buffered_event_digest(self):
-        state, group, weaver = self._make_state()
-        state.weaver_settings[group] = self.state_mod.WeaverSettings(
+        state, group, engineer = self._make_state()
+        state.engineer_settings[group] = self.state_mod.EngineerSettings(
             group=group,
             push_interval=60,
             max_interval=300,
@@ -1368,10 +1368,10 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
             state.groups[group].append(worker.id)
 
         bridge = FakeBridge()
-        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer = self.engineer_mod.EngineerEventBuffer(state, bridge)
         buffer._loop = asyncio.get_running_loop()
 
-        with mock.patch.object(self.weaver_mod.time, "time", return_value=100.0):
+        with mock.patch.object(self.engineer_mod.time, "time", return_value=100.0):
             buffer.on_panel_event({
                 "group": group,
                 "kind": "task_completed",
@@ -1381,13 +1381,13 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0.05)
         self.assertEqual(bridge.sent, [])
 
-        with mock.patch.object(self.weaver_mod.time, "time", return_value=159.0):
-            buffer._check_weaver_flush(weaver)
+        with mock.patch.object(self.engineer_mod.time, "time", return_value=159.0):
+            buffer._check_engineer_flush(engineer)
         await asyncio.sleep(0.05)
         self.assertEqual(bridge.sent, [])
 
-        with mock.patch.object(self.weaver_mod.time, "time", return_value=160.0):
-            buffer._check_weaver_flush(weaver)
+        with mock.patch.object(self.engineer_mod.time, "time", return_value=160.0):
+            buffer._check_engineer_flush(engineer)
             await asyncio.sleep(0.05)
 
         self.assertEqual(len(bridge.sent), 1)
@@ -1397,14 +1397,14 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("merged branches ready for cleanup", bridge.sent[0])
         buffer.stop()
 
-    async def test_paused_weaver_buffers_events_without_flushing(self):
-        state, group, weaver = self._make_state()
-        state.weaver_settings[group] = self.state_mod.WeaverSettings(
+    async def test_paused_engineer_buffers_events_without_flushing(self):
+        state, group, engineer = self._make_state()
+        state.engineer_settings[group] = self.state_mod.EngineerSettings(
             group=group,
             paused=True,
         )
         bridge = FakeBridge()
-        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer = self.engineer_mod.EngineerEventBuffer(state, bridge)
         buffer._loop = asyncio.get_running_loop()
 
         buffer.on_panel_event({
@@ -1412,7 +1412,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
             "kind": "task_completed",
             "message": "done",
         })
-        buffer._check_weaver_flush(weaver)
+        buffer._check_engineer_flush(engineer)
 
         await asyncio.sleep(0.05)
 
@@ -1421,12 +1421,12 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_resume_flushes_events_buffered_while_paused_in_order(self):
         state, group, _ = self._make_state()
-        state.weaver_settings[group] = self.state_mod.WeaverSettings(
+        state.engineer_settings[group] = self.state_mod.EngineerSettings(
             group=group,
             paused=True,
         )
         bridge = FakeBridge()
-        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer = self.engineer_mod.EngineerEventBuffer(state, bridge)
         buffer._loop = asyncio.get_running_loop()
 
         buffer.on_panel_event({
@@ -1440,7 +1440,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
             "message": "second while paused",
         })
 
-        state.update_weaver_settings(group, paused=False)
+        state.update_engineer_settings(group, paused=False)
         buffer.on_delivery_resumed(group)
 
         await asyncio.sleep(0.05)
@@ -1470,7 +1470,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         engineer.hired_by_architect_id = architect.id
         question = "Need a rollout decision? " + ("extra context " * 30)
 
-        state.update_weaver_settings(
+        state.update_engineer_settings(
             group,
             pending_question=question,
             paused=True,
@@ -1478,7 +1478,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(
-            state.get_weaver_settings(group).pending_question_actor_id,
+            state.get_engineer_settings(group).pending_question_actor_id,
             engineer.id,
         )
         events = panel_log.get_recent(10)
@@ -1498,7 +1498,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         state, group, engineer = self._make_state()
         panel_log = self._attach_panel_log(state)
 
-        state.update_weaver_settings(
+        state.update_engineer_settings(
             group,
             pending_question="Need input from the human.",
             paused=True,
@@ -1538,20 +1538,20 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         question = "Same blocker text"
 
         with mock.patch("time.time", side_effect=[100.0, 101.0, 200.0, 201.0]):
-            state.update_weaver_settings(
+            state.update_engineer_settings(
                 group,
                 pending_question=question,
                 paused=True,
                 _pending_question_actor_id=engineer.id,
             )
-            state.update_weaver_settings(
+            state.update_engineer_settings(
                 group,
                 pending_question=question,
                 paused=True,
                 _pending_question_actor_id=other_engineer.id,
             )
 
-        ws = state.get_weaver_settings(group)
+        ws = state.get_engineer_settings(group)
         self.assertEqual(ws.pending_question_actor_id, other_engineer.id)
         self.assertEqual(ws.pending_question_set_at, 200.0)
         events = panel_log.get_recent(10)
@@ -1573,20 +1573,20 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         )
         state.agents[architect.id] = architect
         engineer.hired_by_architect_id = architect.id
-        state.weaver_settings[group] = self.state_mod.WeaverSettings(
+        state.engineer_settings[group] = self.state_mod.EngineerSettings(
             group=group,
             pending_question="Need approval",
             paused=True,
         )
 
-        state.update_weaver_settings(
+        state.update_engineer_settings(
             group,
             pending_question="",
             paused=False,
             _pending_question_actor_id=engineer.id,
         )
 
-        ws = state.get_weaver_settings(group)
+        ws = state.get_engineer_settings(group)
         self.assertEqual(ws.pending_question, "")
         self.assertEqual(ws.pending_question_actor_id, "")
         events = panel_log.get_recent(10)
@@ -1600,8 +1600,8 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
             [architect.id],
         )
 
-    async def test_group_weaver_activity_does_not_clear_actor_owned_pending_question(self):
-        state, group, weaver = self._make_state()
+    async def test_group_engineer_activity_does_not_clear_actor_owned_pending_question(self):
+        state, group, engineer = self._make_state()
         panel_log = self._attach_panel_log(state)
         owner = self.state_mod.AgentCell(
             id="eng-owner",
@@ -1612,26 +1612,26 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
             persistent=True,
         )
         state.agents[owner.id] = owner
-        state.weaver_settings[group] = self.state_mod.WeaverSettings(
+        state.engineer_settings[group] = self.state_mod.EngineerSettings(
             group=group,
             pending_question="Owner needs input",
             pending_question_actor_id=owner.id,
             paused=True,
         )
-        buffer = self.weaver_mod.WeaverEventBuffer(state, FakeBridge())
+        buffer = self.engineer_mod.EngineerEventBuffer(state, FakeBridge())
 
-        buffer.on_agent_activity_change(weaver)
-        weaver.activity = "thinking"
-        buffer.on_agent_activity_change(weaver)
+        buffer.on_agent_activity_change(engineer)
+        engineer.activity = "thinking"
+        buffer.on_agent_activity_change(engineer)
 
-        ws = state.get_weaver_settings(group)
+        ws = state.get_engineer_settings(group)
         self.assertEqual(ws.pending_question, "Owner needs input")
         self.assertEqual(ws.pending_question_actor_id, owner.id)
         self.assertTrue(ws.paused)
         self.assertEqual(panel_log.get_recent(10), [])
 
-    async def test_pending_question_clears_only_after_weaver_becomes_active(self):
-        state, group, weaver = self._make_state()
+    async def test_pending_question_clears_only_after_engineer_becomes_active(self):
+        state, group, engineer = self._make_state()
         panel_log = self._attach_panel_log(state)
         architect = self.state_mod.AgentCell(
             id="arch-1",
@@ -1642,25 +1642,25 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
             persistent=True,
         )
         state.agents[architect.id] = architect
-        weaver.hired_by_architect_id = architect.id
-        state.weaver_settings[group] = self.state_mod.WeaverSettings(
+        engineer.hired_by_architect_id = architect.id
+        state.engineer_settings[group] = self.state_mod.EngineerSettings(
             group=group,
             pending_question="Need approval",
-            pending_question_actor_id=weaver.id,
+            pending_question_actor_id=engineer.id,
             paused=True,
         )
-        buffer = self.weaver_mod.WeaverEventBuffer(state, FakeBridge())
+        buffer = self.engineer_mod.EngineerEventBuffer(state, FakeBridge())
 
-        buffer.on_agent_activity_change(weaver)
+        buffer.on_agent_activity_change(engineer)
         self.assertEqual(
-            state.get_weaver_settings(group).pending_question,
+            state.get_engineer_settings(group).pending_question,
             "Need approval",
         )
 
-        weaver.activity = "thinking"
-        buffer.on_agent_activity_change(weaver)
+        engineer.activity = "thinking"
+        buffer.on_agent_activity_change(engineer)
 
-        ws = state.get_weaver_settings(group)
+        ws = state.get_engineer_settings(group)
         self.assertEqual(ws.pending_question, "")
         self.assertEqual(ws.pending_question_actor_id, "")
         self.assertFalse(ws.paused)
@@ -1668,7 +1668,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(events), 1)
         event = events[0]
         self.assertEqual(event["kind"], "engineer_ask_resolved")
-        self.assertEqual(event["cell_id"], weaver.id)
+        self.assertEqual(event["cell_id"], engineer.id)
         self.assertEqual(
             self.routing_mod.resolve_digest_recipients(state, event),
             [architect.id],

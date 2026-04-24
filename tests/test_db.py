@@ -95,19 +95,19 @@ class LoomDBTests(unittest.TestCase):
             "ALTER TABLE agents ADD COLUMN template TEXT NOT NULL DEFAULT ''"
         )
         conn.execute(
-            "ALTER TABLE agents ADD COLUMN created_by_weaver_id TEXT NOT NULL DEFAULT ''"
+            "ALTER TABLE agents ADD COLUMN created_by_engineer_id TEXT NOT NULL DEFAULT ''"
         )
         conn.execute(
-            "ALTER TABLE board_tasks ADD COLUMN weaver_owner_id TEXT NOT NULL DEFAULT ''"
+            "ALTER TABLE board_tasks ADD COLUMN engineer_owner_id TEXT NOT NULL DEFAULT ''"
         )
         for agent in agents or []:
             item = dict(agent) if isinstance(agent, dict) else agent.__dict__
             conn.execute(
-                "UPDATE agents SET template=?, created_by_weaver_id=? WHERE id=?",
+                "UPDATE agents SET template=?, created_by_engineer_id=? WHERE id=?",
                 (
                     str(item.get("template", "") or item.get("role", "") or ""),
                     str(
-                        item.get("created_by_weaver_id", "")
+                        item.get("created_by_engineer_id", "")
                         or item.get("owner_engineer_id", "")
                         or ""
                     ),
@@ -117,10 +117,10 @@ class LoomDBTests(unittest.TestCase):
         for task in tasks or []:
             item = dict(task) if isinstance(task, dict) else task.__dict__
             conn.execute(
-                "UPDATE board_tasks SET weaver_owner_id=? WHERE id=?",
+                "UPDATE board_tasks SET engineer_owner_id=? WHERE id=?",
                 (
                     str(
-                        item.get("weaver_owner_id", "")
+                        item.get("engineer_owner_id", "")
                         or item.get("assigned_engineer_id", "")
                         or ""
                     ),
@@ -152,7 +152,7 @@ class LoomDBTests(unittest.TestCase):
             conn = sqlite3.connect(str(self.db.db_path))
             close_conn = True
         conn.execute(
-            "ALTER TABLE board_tasks ADD COLUMN weaver_owner_id TEXT NOT NULL DEFAULT ''"
+            "ALTER TABLE board_tasks ADD COLUMN engineer_owner_id TEXT NOT NULL DEFAULT ''"
         )
         conn.commit()
         if close_conn:
@@ -183,10 +183,10 @@ class LoomDBTests(unittest.TestCase):
             session_resume=False,
             idle_timeout=9,
             tasks_dispatched=3,
-            created_by_weaver_id="weaver-1",
+            created_by_engineer_id="engineer-1",
             kind="worker",
             role="researcher",
-            owner_engineer_id="weaver-1",
+            owner_engineer_id="engineer-1",
             hired_by_architect_id="architect-1",
             persistent=True,
             queue_empty_emitted=False,
@@ -298,7 +298,7 @@ class LoomDBTests(unittest.TestCase):
                 "agent_group": "release",
                 "max_concurrent": 2,
                 "target_agent_id": "agent-1",
-                "weaver_owner_id": "weaver-1",
+                "engineer_owner_id": "engineer-1",
                 "enqueued_at": "2026-04-07T09:00:00+00:00",
             }
         ])
@@ -312,8 +312,8 @@ class LoomDBTests(unittest.TestCase):
         self.assertFalse(loaded["agents"]["agent-1"]["session_resume"])
         self.assertTrue(loaded["agents"]["agent-1"]["worktree_auto_checkpoint"])
         self.assertEqual(
-            loaded["agents"]["agent-1"]["created_by_weaver_id"],
-            "weaver-1",
+            loaded["agents"]["agent-1"]["created_by_engineer_id"],
+            "engineer-1",
         )
         self.assertEqual(loaded["agents"]["agent-1"]["last_progress_at"], 111.0)
         self.assertEqual(loaded["agents"]["agent-1"]["last_heartbeat_at"], 222.0)
@@ -322,7 +322,7 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(loaded["agents"]["agent-1"]["role"], "researcher")
         self.assertEqual(
             loaded["agents"]["agent-1"]["owner_engineer_id"],
-            "weaver-1",
+            "engineer-1",
         )
         self.assertEqual(
             loaded["agents"]["agent-1"]["hired_by_architect_id"],
@@ -437,8 +437,8 @@ class LoomDBTests(unittest.TestCase):
             "agent-1",
         )
         self.assertEqual(
-            loaded["auto_dispatch_queues"]["g"][0]["weaver_owner_id"],
-            "weaver-1",
+            loaded["auto_dispatch_queues"]["g"][0]["engineer_owner_id"],
+            "engineer-1",
         )
 
     def test_agent_activity_timestamp_migration_is_idempotent(self):
@@ -577,7 +577,7 @@ class LoomDBTests(unittest.TestCase):
                 name="Dual Writer",
                 group="g",
                 template="researcher",
-                created_by_weaver_id="weaver-1",
+                created_by_engineer_id="engineer-1",
             )
         )
         self.assertEqual(
@@ -585,7 +585,7 @@ class LoomDBTests(unittest.TestCase):
                 "SELECT role, owner_engineer_id "
                 "FROM agents WHERE id='agent-dual-write'"
             ).fetchone(),
-            ("researcher", "weaver-1"),
+            ("researcher", "engineer-1"),
         )
 
         self.db.save_agent(
@@ -594,7 +594,7 @@ class LoomDBTests(unittest.TestCase):
                 name="Dual Writer",
                 group="g",
                 role="planner",
-                owner_engineer_id="weaver-2",
+                owner_engineer_id="engineer-2",
             )
         )
         self.assertEqual(
@@ -602,7 +602,7 @@ class LoomDBTests(unittest.TestCase):
                 "SELECT role, owner_engineer_id "
                 "FROM agents WHERE id='agent-dual-write'"
             ).fetchone(),
-            ("planner", "weaver-2"),
+            ("planner", "engineer-2"),
         )
 
     def test_save_agent_prefers_kinds_columns_over_legacy_inputs(self):
@@ -613,8 +613,8 @@ class LoomDBTests(unittest.TestCase):
                 group="g",
                 template="researcher",
                 role="planner",
-                created_by_weaver_id="weaver-1",
-                owner_engineer_id="weaver-2",
+                created_by_engineer_id="engineer-1",
+                owner_engineer_id="engineer-2",
             )
         )
         self.assertEqual(
@@ -622,7 +622,7 @@ class LoomDBTests(unittest.TestCase):
                 "SELECT role, owner_engineer_id "
                 "FROM agents WHERE id='agent-dual-conflict'"
             ).fetchone(),
-            ("planner", "weaver-2"),
+            ("planner", "engineer-2"),
         )
 
     def test_save_board_task_maps_legacy_owner_into_new_column(self):
@@ -631,7 +631,7 @@ class LoomDBTests(unittest.TestCase):
                 "id": "task-dual-assigned",
                 "task": "Assigned-first",
                 "group": "g",
-                "assigned_engineer_id": "weaver-1",
+                "assigned_engineer_id": "engineer-1",
             }
         )
         self.assertEqual(
@@ -639,7 +639,7 @@ class LoomDBTests(unittest.TestCase):
                 "SELECT assigned_engineer_id "
                 "FROM board_tasks WHERE id='task-dual-assigned'"
             ).fetchone(),
-            ("weaver-1",),
+            ("engineer-1",),
         )
 
         self.db.save_board_task(
@@ -647,7 +647,7 @@ class LoomDBTests(unittest.TestCase):
                 "id": "task-dual-legacy",
                 "task": "Legacy-first",
                 "group": "g",
-                "weaver_owner_id": "weaver-2",
+                "engineer_owner_id": "engineer-2",
             }
         )
         self.assertEqual(
@@ -655,7 +655,7 @@ class LoomDBTests(unittest.TestCase):
                 "SELECT assigned_engineer_id "
                 "FROM board_tasks WHERE id='task-dual-legacy'"
             ).fetchone(),
-            ("weaver-2",),
+            ("engineer-2",),
         )
 
     def test_save_board_task_prefers_assigned_engineer_over_legacy_owner(self):
@@ -665,7 +665,7 @@ class LoomDBTests(unittest.TestCase):
                 "task": "Conflict",
                 "group": "g",
                 "assigned_engineer_id": "engineer-new",
-                "weaver_owner_id": "engineer-legacy",
+                "engineer_owner_id": "engineer-legacy",
             }
         )
         self.assertEqual(
@@ -682,7 +682,7 @@ class LoomDBTests(unittest.TestCase):
                 "id": "task-no-legacy-owner",
                 "task": "No legacy owner column",
                 "group": "g",
-                "weaver_owner_id": "engineer-legacy",
+                "engineer_owner_id": "engineer-legacy",
             }
         )
 
@@ -777,14 +777,14 @@ class LoomDBTests(unittest.TestCase):
                         "name": "Worker",
                         "group": "g",
                         "role": "researcher",
-                        "owner_engineer_id": "weaver-1",
+                        "owner_engineer_id": "engineer-1",
                     },
                     "agent-2": {
                         "id": "agent-2",
                         "name": "Legacy Worker",
                         "group": "g",
                         "template": "planner",
-                        "created_by_weaver_id": "weaver-2",
+                        "created_by_engineer_id": "engineer-2",
                     },
                 },
                 "groups": {"g": ["agent-1", "agent-2"]},
@@ -794,13 +794,13 @@ class LoomDBTests(unittest.TestCase):
                         "id": "task-1",
                         "task": "Assigned-first",
                         "group": "g",
-                        "assigned_engineer_id": "weaver-1",
+                        "assigned_engineer_id": "engineer-1",
                     },
                     "task-2": {
                         "id": "task-2",
                         "task": "Legacy-first",
                         "group": "g",
-                        "weaver_owner_id": "weaver-2",
+                        "engineer_owner_id": "engineer-2",
                     },
                 },
             }
@@ -813,8 +813,8 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(
             agent_rows,
             [
-                ("agent-1", "researcher", "weaver-1"),
-                ("agent-2", "planner", "weaver-2"),
+                ("agent-1", "researcher", "engineer-1"),
+                ("agent-2", "planner", "engineer-2"),
             ],
         )
         task_rows = self.db._conn.execute(
@@ -824,8 +824,8 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(
             task_rows,
             [
-                ("task-1", "weaver-1"),
-                ("task-2", "weaver-2"),
+                ("task-1", "engineer-1"),
+                ("task-2", "engineer-2"),
             ],
         )
 
@@ -1034,7 +1034,7 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(loaded["board_tasks"]["LOOM:1"]["reply_agent_id"], "")
         self.assertEqual(loaded["auto_dispatch_queues"]["Loom"][0]["task_id"], "LOOM:1:1")
         self.assertEqual(
-            loaded["auto_dispatch_queues"]["Loom"][0]["weaver_owner_id"],
+            loaded["auto_dispatch_queues"]["Loom"][0]["engineer_owner_id"],
             "",
         )
         self.assertEqual(loaded["schedules"]["sched"]["last_task_id"], "LOOM:1")
@@ -1116,7 +1116,7 @@ class LoomDBTests(unittest.TestCase):
             "bottom": {
                 "open": True,
                 "size": 280,
-                "tabs": ["board", "weaver"],
+                "tabs": ["board", "engineer"],
                 "active": "board",
             },
             "right": {
@@ -1181,8 +1181,8 @@ class LoomDBTests(unittest.TestCase):
             [4, 5],
         )
 
-    def test_weaver_settings_and_journal_roundtrip(self):
-        self.db.save_weaver_settings(
+    def test_engineer_settings_and_journal_roundtrip(self):
+        self.db.save_engineer_settings(
             "g",
             {
                 "group": "g",
@@ -1204,20 +1204,20 @@ class LoomDBTests(unittest.TestCase):
                 "pending_note": "FYI: release notes are ready",
                 "pending_note_kind": "note",
                 "enabled_events": ["task_completed"],
-                "weaver_provider": "codex",
-                "weaver_boot_command": "codex --model gpt-5",
-                "weaver_model": "gpt-5.1",
-                "weaver_reasoning_effort": "high",
-                "weaver_directory": "/repo/.loom/weaver",
-                "weaver_profile": "Ops",
-                "weaver_shell": "fish",
-                "weaver_tab_color": "none",
+                "engineer_provider": "codex",
+                "engineer_boot_command": "codex --model gpt-5",
+                "engineer_model": "gpt-5.1",
+                "engineer_reasoning_effort": "high",
+                "engineer_directory": "/repo/.loom/engineer",
+                "engineer_profile": "Ops",
+                "engineer_shell": "fish",
+                "engineer_tab_color": "none",
             },
         )
         first = self.db.save_journal_entry("g", 10.0, "decision", "Ship it")
         second = self.db.save_journal_entry("g", 20.0, "plan", "Add tests")
 
-        loaded = self.db.load_weaver_settings("g")
+        loaded = self.db.load_engineer_settings("g")
         self.assertEqual(loaded["pending_question"], "Need approval")
         self.assertEqual(loaded["pending_question_set_at"], 123.5)
         self.assertEqual(loaded["pending_question_actor_id"], "eng-1")
@@ -1234,13 +1234,13 @@ class LoomDBTests(unittest.TestCase):
         )
         self.assertEqual(loaded["digest_verbosity"], "detailed")
         self.assertEqual(loaded["escalation_style"], "keep_moving")
-        self.assertEqual(loaded["weaver_boot_command"], "codex --model gpt-5")
-        self.assertEqual(loaded["weaver_model"], "gpt-5.1")
-        self.assertEqual(loaded["weaver_reasoning_effort"], "high")
-        self.assertEqual(loaded["weaver_directory"], "/repo/.loom/weaver")
-        self.assertEqual(loaded["weaver_profile"], "Ops")
-        self.assertEqual(loaded["weaver_shell"], "fish")
-        self.assertEqual(loaded["weaver_tab_color"], "none")
+        self.assertEqual(loaded["engineer_boot_command"], "codex --model gpt-5")
+        self.assertEqual(loaded["engineer_model"], "gpt-5.1")
+        self.assertEqual(loaded["engineer_reasoning_effort"], "high")
+        self.assertEqual(loaded["engineer_directory"], "/repo/.loom/engineer")
+        self.assertEqual(loaded["engineer_profile"], "Ops")
+        self.assertEqual(loaded["engineer_shell"], "fish")
+        self.assertEqual(loaded["engineer_tab_color"], "none")
 
         entries = self.db.load_journal_entries("g", limit=10)
 
@@ -1251,11 +1251,11 @@ class LoomDBTests(unittest.TestCase):
             [entries[1]],
         )
 
-    def test_init_migrates_legacy_weaver_journal_author_column_before_index(self):
+    def test_init_migrates_legacy_engineer_journal_author_column_before_index(self):
         legacy_path = Path(self.tmp.name) / "legacy-journal.db"
         conn = sqlite3.connect(str(legacy_path))
         conn.execute("""
-            CREATE TABLE weaver_journal (
+            CREATE TABLE engineer_journal (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 group_name  TEXT NOT NULL,
                 timestamp   REAL NOT NULL,
@@ -1264,7 +1264,7 @@ class LoomDBTests(unittest.TestCase):
             )
         """)
         conn.execute(
-            "INSERT INTO weaver_journal "
+            "INSERT INTO engineer_journal "
             "(group_name, timestamp, entry_type, entry) "
             "VALUES ('g', 10.0, 'plan', 'Legacy entry')"
         )
@@ -1279,7 +1279,7 @@ class LoomDBTests(unittest.TestCase):
         cols = {
             row[1]
             for row in migrated._conn.execute(
-                "PRAGMA table_info(weaver_journal)"
+                "PRAGMA table_info(engineer_journal)"
             ).fetchall()
         }
         self.assertIn("author_cell_id", cols)
@@ -1287,20 +1287,238 @@ class LoomDBTests(unittest.TestCase):
             migrated._conn.execute(
                 "SELECT name FROM sqlite_master "
                 "WHERE type='index' "
-                "AND name='idx_weaver_journal_group_author'"
+                "AND name='idx_engineer_journal_group_author'"
             ).fetchone()
         )
         entries = migrated.load_journal_entries("g", limit=10)
         self.assertEqual(entries[0]["entry"], "Legacy entry")
         self.assertEqual(entries[0]["author_cell_id"], "")
 
-    def test_weaver_settings_load_backfills_heartbeat_from_legacy_rows(self):
+    def test_init_renames_legacy_engineer_schema_and_payload_names(self):
+        legacy = "wea" + "ver"
+        legacy_path = Path(self.tmp.name) / "legacy-engineer-names.db"
+        conn = sqlite3.connect(str(legacy_path))
+        conn.execute(
+            "CREATE TABLE group_settings ("
+            f"group_name TEXT PRIMARY KEY, {legacy}_agent_id TEXT NOT NULL DEFAULT '')"
+        )
+        conn.execute(
+            f"INSERT INTO group_settings (group_name, {legacy}_agent_id) "
+            "VALUES ('g', 'eng-1')"
+        )
+        conn.execute(
+            f"CREATE TABLE {legacy}_settings ("
+            "group_name TEXT PRIMARY KEY, "
+            "push_interval INTEGER NOT NULL DEFAULT 60, "
+            "max_interval INTEGER NOT NULL DEFAULT 300, "
+            "heartbeat_interval INTEGER NOT NULL DEFAULT 300, "
+            "default_worker_concurrency INTEGER NOT NULL DEFAULT 2, "
+            "autonomy_mode TEXT NOT NULL DEFAULT 'dispatch_when_clear', "
+            "wave_size_preference TEXT NOT NULL DEFAULT 'small', "
+            "same_agent_follow_up_preference TEXT NOT NULL DEFAULT 'balanced', "
+            "digest_verbosity TEXT NOT NULL DEFAULT 'balanced', "
+            "escalation_style TEXT NOT NULL DEFAULT 'note_then_ask', "
+            "paused INTEGER NOT NULL DEFAULT 0, "
+            "custom_instructions TEXT NOT NULL DEFAULT '', "
+            "restrict_to_created_agents INTEGER NOT NULL DEFAULT 0, "
+            "pending_question TEXT NOT NULL DEFAULT '', "
+            "pending_note TEXT NOT NULL DEFAULT '', "
+            "pending_note_kind TEXT NOT NULL DEFAULT '', "
+            "enabled_events TEXT NOT NULL DEFAULT '[]', "
+            f"{legacy}_provider TEXT NOT NULL DEFAULT '', "
+            f"{legacy}_boot_command TEXT NOT NULL DEFAULT '', "
+            f"{legacy}_model TEXT NOT NULL DEFAULT '', "
+            f"{legacy}_reasoning_effort TEXT NOT NULL DEFAULT '', "
+            f"{legacy}_directory TEXT NOT NULL DEFAULT '', "
+            f"{legacy}_profile TEXT NOT NULL DEFAULT '', "
+            f"{legacy}_shell TEXT NOT NULL DEFAULT '', "
+            f"{legacy}_tab_color TEXT NOT NULL DEFAULT '', "
+            "pending_question_set_at REAL NOT NULL DEFAULT 0, "
+            "pending_question_actor_id TEXT NOT NULL DEFAULT '')"
+        )
+        conn.execute(
+            f"INSERT INTO {legacy}_settings "
+            f"(group_name, push_interval, max_interval, enabled_events, "
+            f"{legacy}_provider, {legacy}_boot_command) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("g", 45, 90, json.dumps(["task_completed"]), "codex", "codex --fast"),
+        )
+        conn.execute(
+            f"CREATE TABLE {legacy}_task_log ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "group_name TEXT NOT NULL, task_id TEXT NOT NULL, "
+            "task_title TEXT NOT NULL, agent_id TEXT NOT NULL, "
+            "agent_name TEXT NOT NULL DEFAULT '', "
+            "agent_slug TEXT NOT NULL DEFAULT '', "
+            "agent_owned INTEGER NOT NULL DEFAULT 0, "
+            "started_at REAL NOT NULL)"
+        )
+        conn.execute(
+            f"INSERT INTO {legacy}_task_log "
+            "(group_name, task_id, task_title, agent_id, started_at) "
+            "VALUES ('g', 'T-1', 'Do work', 'agent-1', 10.0)"
+        )
+        conn.execute(
+            f"CREATE INDEX idx_{legacy}_task_log_group "
+            f"ON {legacy}_task_log(group_name, started_at DESC, id DESC)"
+        )
+        conn.execute(
+            f"CREATE TABLE {legacy}_journal ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "group_name TEXT NOT NULL, timestamp REAL NOT NULL, "
+            "author_cell_id TEXT NOT NULL DEFAULT '', "
+            "entry_type TEXT NOT NULL, entry TEXT NOT NULL)"
+        )
+        conn.execute(
+            f"INSERT INTO {legacy}_journal "
+            "(group_name, timestamp, entry_type, entry) "
+            "VALUES ('g', 20.0, 'plan', 'Continue')"
+        )
+        conn.execute(
+            f"CREATE INDEX idx_{legacy}_journal_group "
+            f"ON {legacy}_journal(group_name, id DESC)"
+        )
+        conn.execute(
+            f"CREATE INDEX idx_{legacy}_journal_group_author "
+            f"ON {legacy}_journal(group_name, author_cell_id, id DESC)"
+        )
+        conn.execute(
+            "CREATE TABLE auto_dispatch_queue ("
+            "group_name TEXT NOT NULL, position INTEGER NOT NULL DEFAULT 0, "
+            "task_id TEXT NOT NULL, agent_group TEXT NOT NULL DEFAULT '', "
+            "max_concurrent INTEGER NOT NULL DEFAULT 1, "
+            "target_agent_id TEXT NOT NULL DEFAULT '', "
+            f"{legacy}_owner_id TEXT NOT NULL DEFAULT '', "
+            "enqueued_at TEXT NOT NULL DEFAULT '', "
+            "PRIMARY KEY (group_name, position))"
+        )
+        conn.execute(
+            "INSERT INTO auto_dispatch_queue "
+            f"(group_name, position, task_id, {legacy}_owner_id) "
+            "VALUES ('g', 0, 'T-1', 'eng-1')"
+        )
+        conn.commit()
+        conn.close()
+
+        migrated = LoomDB(legacy_path)
+        self.addCleanup(migrated.close)
+        migrated.init()
+
+        tables = {
+            row[0]
+            for row in migrated._conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        self.assertIn("engineer_settings", tables)
+        self.assertIn("engineer_task_log", tables)
+        self.assertIn("engineer_journal", tables)
+        self.assertNotIn(f"{legacy}_settings", tables)
+        self.assertNotIn(f"{legacy}_task_log", tables)
+        self.assertNotIn(f"{legacy}_journal", tables)
+
+        settings_columns = {
+            row[1]
+            for row in migrated._conn.execute(
+                "PRAGMA table_info(engineer_settings)"
+            ).fetchall()
+        }
+        self.assertIn("engineer_provider", settings_columns)
+        self.assertIn("engineer_boot_command", settings_columns)
+        self.assertNotIn(f"{legacy}_provider", settings_columns)
+        loaded = migrated.load_engineer_settings("g")
+        self.assertEqual(loaded["engineer_provider"], "codex")
+        self.assertEqual(loaded["engineer_boot_command"], "codex --fast")
+
+        group_row = migrated._conn.execute(
+            "SELECT engineer_agent_id FROM group_settings WHERE group_name='g'"
+        ).fetchone()
+        self.assertEqual(group_row[0], "eng-1")
+        queue_row = migrated._conn.execute(
+            "SELECT engineer_owner_id FROM auto_dispatch_queue "
+            "WHERE group_name='g'"
+        ).fetchone()
+        self.assertEqual(queue_row[0], "eng-1")
+        task_log = migrated.load_engineer_task_log("g", limit=10)
+        self.assertEqual(task_log[0]["task_id"], "T-1")
+        journal = migrated.load_journal_entries("g", limit=10)
+        self.assertEqual(journal[0]["entry"], "Continue")
+        schema_text = "\n".join(
+            str(part or "")
+            for row in migrated._conn.execute(
+                "SELECT name, tbl_name, sql FROM sqlite_master "
+                "WHERE name NOT LIKE 'sqlite_%'"
+            ).fetchall()
+            for part in row
+        )
+        self.assertNotIn(legacy, schema_text)
+
+    def test_init_renames_legacy_engineer_payload_names(self):
+        legacy = "wea" + "ver"
+        legacy_path = Path(self.tmp.name) / "legacy-engineer-payloads.db"
+        seeded = LoomDB(legacy_path)
+        seeded.init()
+        seeded.save_board_task(
+            BoardTask(
+                id="T-1",
+                task="Follow up",
+                group="g",
+                labels=[f"loom:{legacy}-message"],
+                messages=[{"action": f"{legacy}_message"}],
+            )
+        )
+        seeded.save_ui_state(
+            "standalone_panel_layout",
+            json.dumps(
+                {
+                    "version": 1,
+                    "bottom": {
+                        "tabs": [legacy],
+                        "active": legacy,
+                    },
+                    "floats": {
+                        legacy: {
+                            "x": 40,
+                            "y": 50,
+                            "width": 420,
+                            "height": 320,
+                        },
+                    },
+                }
+            ),
+        )
+        seeded.save_ui_state("panel_active", legacy)
+        seeded.close()
+
+        migrated = LoomDB(legacy_path)
+        self.addCleanup(migrated.close)
+        migrated.init()
+
+        task = migrated._conn.execute(
+            "SELECT labels, messages FROM board_tasks LIMIT 1"
+        ).fetchone()
+        self.assertEqual(json.loads(task[0]), ["loom:engineer-message"])
+        self.assertEqual(json.loads(task[1])[0]["action"], "engineer_message")
+        layout_row = migrated._conn.execute(
+            "SELECT value FROM ui_state WHERE key='standalone_panel_layout'"
+        ).fetchone()
+        layout = json.loads(layout_row[0])
+        self.assertIn("engineer", layout["floats"])
+        self.assertNotIn(legacy, layout["floats"])
+        self.assertEqual(layout["bottom"]["tabs"], ["engineer"])
+        self.assertEqual(layout["bottom"]["active"], "engineer")
+        panel_row = migrated._conn.execute(
+            "SELECT value FROM ui_state WHERE key='panel_active'"
+        ).fetchone()
+        self.assertEqual(panel_row[0], "engineer")
+
+    def test_engineer_settings_load_backfills_heartbeat_from_legacy_rows(self):
         self.db._conn.execute(
             """
-            INSERT INTO weaver_settings
+            INSERT INTO engineer_settings
                 (group_name, push_interval, max_interval, paused,
                  custom_instructions, pending_question, enabled_events,
-                 weaver_provider, weaver_boot_command)
+                 engineer_provider, engineer_boot_command)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
@@ -1317,7 +1535,7 @@ class LoomDBTests(unittest.TestCase):
         )
         self.db._conn.commit()
 
-        loaded = self.db.load_weaver_settings("legacy")
+        loaded = self.db.load_engineer_settings("legacy")
 
         self.assertEqual(loaded["max_interval"], 240)
         self.assertEqual(loaded["heartbeat_interval"], 240)
@@ -1330,10 +1548,10 @@ class LoomDBTests(unittest.TestCase):
         )
         self.assertEqual(loaded["digest_verbosity"], "balanced")
         self.assertEqual(loaded["escalation_style"], "note_then_ask")
-        self.assertEqual(loaded["weaver_directory"], "")
-        self.assertEqual(loaded["weaver_profile"], "")
-        self.assertEqual(loaded["weaver_shell"], "")
-        self.assertEqual(loaded["weaver_tab_color"], "")
+        self.assertEqual(loaded["engineer_directory"], "")
+        self.assertEqual(loaded["engineer_profile"], "")
+        self.assertEqual(loaded["engineer_shell"], "")
+        self.assertEqual(loaded["engineer_tab_color"], "")
 
     def test_agent_digest_settings_roundtrip(self):
         self.db.save_agent_digest_settings(
@@ -1490,11 +1708,11 @@ class LoomDBTests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(row[0], 200)
 
-    def test_init_migrates_legacy_weaver_settings_to_agent_digest_settings(self):
+    def test_init_migrates_legacy_engineer_settings_to_agent_digest_settings(self):
         self.db.save_group("g", 0)
         self.db.save_group_settings(
             "g",
-            GroupSettings(weaver_agent_id="eng-1"),
+            GroupSettings(engineer_agent_id="eng-1"),
         )
         self.db.save_agent(
             AgentCell(
@@ -1505,7 +1723,7 @@ class LoomDBTests(unittest.TestCase):
                 persistent=True,
             )
         )
-        self.db.save_weaver_settings(
+        self.db.save_engineer_settings(
             "g",
             {
                 "group": "g",
@@ -1533,8 +1751,8 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(loaded["digest_verbosity"], "compact")
         self.assertEqual(loaded["enabled_events"], ["task_completed"])
 
-    def test_weaver_task_log_roundtrip_and_group_rename(self):
-        first_id = self.db.save_weaver_task_log_entry(
+    def test_engineer_task_log_roundtrip_and_group_rename(self):
+        first_id = self.db.save_engineer_task_log_entry(
             {
                 "group": "g",
                 "task_id": "LOOM:1",
@@ -1546,7 +1764,7 @@ class LoomDBTests(unittest.TestCase):
                 "started_at": 10.0,
             }
         )
-        second_id = self.db.save_weaver_task_log_entry(
+        second_id = self.db.save_engineer_task_log_entry(
             {
                 "group": "g",
                 "task_id": "LOOM:2",
@@ -1559,22 +1777,22 @@ class LoomDBTests(unittest.TestCase):
             }
         )
 
-        loaded = self.db.load_weaver_task_log("g", limit=10)
+        loaded = self.db.load_engineer_task_log("g", limit=10)
 
         self.assertEqual([entry["id"] for entry in loaded], [second_id, first_id])
         self.assertEqual(loaded[0]["task_id"], "LOOM:2")
         self.assertFalse(loaded[0]["agent_owned"])
         self.assertEqual(loaded[1]["agent_slug"], "worker-one")
 
-        self.db.rename_weaver_task_log_group("g", "renamed")
-        renamed = self.db.load_weaver_task_log("renamed", limit=10)
+        self.db.rename_engineer_task_log_group("g", "renamed")
+        renamed = self.db.load_engineer_task_log("renamed", limit=10)
 
         self.assertEqual([entry["task_id"] for entry in renamed], ["LOOM:2", "LOOM:1"])
-        self.assertEqual(self.db.load_weaver_task_log("g", limit=10), [])
+        self.assertEqual(self.db.load_engineer_task_log("g", limit=10), [])
 
-        self.db.trim_weaver_task_log("renamed", limit=1)
+        self.db.trim_engineer_task_log("renamed", limit=1)
         self.assertEqual(
-            [entry["task_id"] for entry in self.db.load_weaver_task_log("renamed", limit=10)],
+            [entry["task_id"] for entry in self.db.load_engineer_task_log("renamed", limit=10)],
             ["LOOM:2"],
         )
 
@@ -1909,7 +2127,7 @@ class LoomDBTests(unittest.TestCase):
             joined_logs,
         )
         self.assertIn(
-            "migration: no Weaver found, skipping engineer backfill",
+            "migration: no Engineer found, skipping engineer backfill",
             joined_logs,
         )
         self.assertIn(
@@ -2145,7 +2363,7 @@ class LoomDBTests(unittest.TestCase):
             "4",
         )
 
-    def test_init_backfills_kinds_with_root_weaver_candidate(self):
+    def test_init_backfills_kinds_with_root_engineer_candidate(self):
         path = self._seed_stage1a_db(
             "kinds-backfill-root.db",
             agents=[
@@ -2161,13 +2379,13 @@ class LoomDBTests(unittest.TestCase):
                     group="loom",
                     slug="worker-one",
                     template="researcher",
-                    created_by_weaver_id="root-1",
+                    created_by_engineer_id="root-1",
                 ),
                 AgentCell(
-                    id="other-weaver",
-                    name="Weaver",
+                    id="other-engineer",
+                    name="Engineer",
                     group="alpha",
-                    slug="weaver",
+                    slug="engineer",
                 ),
                 AgentCell(
                     id="term-1",
@@ -2199,7 +2417,7 @@ class LoomDBTests(unittest.TestCase):
             "SELECT name, slug, kind, role, owner_engineer_id, persistent "
             "FROM agents WHERE id='root-1'"
         ).fetchone()
-        self.assertEqual(engineer, ("Weaver-2", "weaver-2", "engineer", "", "", 1))
+        self.assertEqual(engineer, ("Engineer-2", "engineer-2", "engineer", "", "", 1))
 
         worker = migrated._conn.execute(
             "SELECT kind, role, owner_engineer_id, hired_by_architect_id, persistent "
@@ -2250,9 +2468,9 @@ class LoomDBTests(unittest.TestCase):
             captured,
         )
 
-    def test_init_backfills_configured_loom_weaver_without_heuristic_match(self):
+    def test_init_backfills_configured_loom_engineer_without_heuristic_match(self):
         path = self._seed_stage1a_db(
-            "kinds-backfill-configured-weaver.db",
+            "kinds-backfill-configured-engineer.db",
             agents=[
                 AgentCell(
                     id="root-1",
@@ -2273,7 +2491,7 @@ class LoomDBTests(unittest.TestCase):
                 BoardTask(id="ALPHA:1", task="Alpha task", group="alpha"),
             ],
             group_settings={
-                "loom": GroupSettings(weaver_agent_id="root-1"),
+                "loom": GroupSettings(engineer_agent_id="root-1"),
             },
         )
 
@@ -2288,12 +2506,12 @@ class LoomDBTests(unittest.TestCase):
             "migration: kinds backfill applied (engineer=root-1, workers=1, tasks=2)",
             joined_logs,
         )
-        self.assertNotIn("no Weaver found", joined_logs)
+        self.assertNotIn("no Engineer found", joined_logs)
         self.assertEqual(
             migrated._conn.execute(
                 "SELECT name, slug, kind, persistent FROM agents WHERE id='root-1'"
             ).fetchone(),
-            ("Weaver", "weaver", "engineer", 1),
+            ("Engineer", "engineer", "engineer", 1),
         )
         self.assertEqual(
             migrated._conn.execute(
@@ -2318,9 +2536,9 @@ class LoomDBTests(unittest.TestCase):
             "4",
         )
 
-    def test_init_backfills_existing_agents_without_promoting_when_no_weaver_found(self):
+    def test_init_backfills_existing_agents_without_promoting_when_no_engineer_found(self):
         path = self._seed_stage1a_db(
-            "kinds-backfill-no-weaver.db",
+            "kinds-backfill-no-engineer.db",
             agents=[
                 AgentCell(
                     id="agent-1",
@@ -2348,7 +2566,7 @@ class LoomDBTests(unittest.TestCase):
 
         joined_logs = "\n".join(cm.output)
         self.assertIn(
-            "migration: no Weaver found, skipping engineer backfill",
+            "migration: no Engineer found, skipping engineer backfill",
             joined_logs,
         )
         self.assertIn(
@@ -2381,29 +2599,29 @@ class LoomDBTests(unittest.TestCase):
             "4",
         )
 
-    def test_init_skips_ambiguous_weaver_backfill_without_override(self):
+    def test_init_skips_ambiguous_engineer_backfill_without_override(self):
         path = self._seed_stage1a_db(
             "kinds-backfill-ambiguous.db",
             agents=[
                 AgentCell(
-                    id="weaver-a",
-                    name="Weaver Alpha",
+                    id="engineer-a",
+                    name="Engineer Alpha",
                     group="loom",
-                    slug="weaver-alpha",
+                    slug="engineer-alpha",
                 ),
                 AgentCell(
-                    id="weaver-b",
+                    id="engineer-b",
                     name="Bob",
                     group="loom",
                     slug="bob",
-                    template="weaver",
+                    template="engineer",
                 ),
                 AgentCell(
                     id="worker-1",
                     name="Worker",
                     group="loom",
                     slug="worker",
-                    created_by_weaver_id="weaver-a",
+                    created_by_engineer_id="engineer-a",
                 ),
             ],
             tasks=[BoardTask(id="LOOM:1", task="Task", group="loom")],
@@ -2416,9 +2634,9 @@ class LoomDBTests(unittest.TestCase):
             migrated.init()
 
         joined_logs = "\n".join(cm.output)
-        self.assertIn("multiple Weaver candidates found", joined_logs)
-        self.assertIn("weaver-a", joined_logs)
-        self.assertIn("weaver-b", joined_logs)
+        self.assertIn("multiple Engineer candidates found", joined_logs)
+        self.assertIn("engineer-a", joined_logs)
+        self.assertIn("engineer-b", joined_logs)
 
         self.assertEqual(
             migrated._conn.execute(
@@ -2433,8 +2651,8 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(
             rows,
             [
-                ("weaver-a", "", "", "", 0),
-                ("weaver-b", "", "", "", 0),
+                ("engineer-a", "", "", "", 0),
+                ("engineer-b", "", "", "", 0),
                 ("worker-1", "", "", "", 0),
             ],
         )
@@ -2446,22 +2664,22 @@ class LoomDBTests(unittest.TestCase):
             "",
         )
 
-    def test_init_uses_configured_loom_weaver_to_disambiguate_candidates(self):
+    def test_init_uses_configured_loom_engineer_to_disambiguate_candidates(self):
         path = self._seed_stage1a_db(
             "kinds-backfill-configured-disambiguation.db",
             agents=[
                 AgentCell(
-                    id="weaver-a",
-                    name="Weaver Alpha",
+                    id="engineer-a",
+                    name="Engineer Alpha",
                     group="loom",
-                    slug="weaver-alpha",
+                    slug="engineer-alpha",
                 ),
                 AgentCell(
-                    id="weaver-b",
+                    id="engineer-b",
                     name="Bob",
                     group="loom",
                     slug="bob",
-                    template="weaver",
+                    template="engineer",
                 ),
                 AgentCell(
                     id="worker-1",
@@ -2469,12 +2687,12 @@ class LoomDBTests(unittest.TestCase):
                     group="loom",
                     slug="worker",
                     template="researcher",
-                    created_by_weaver_id="weaver-b",
+                    created_by_engineer_id="engineer-b",
                 ),
             ],
             tasks=[BoardTask(id="LOOM:1", task="Task", group="loom")],
             group_settings={
-                "loom": GroupSettings(weaver_agent_id="weaver-b"),
+                "loom": GroupSettings(engineer_agent_id="engineer-b"),
             },
         )
 
@@ -2486,20 +2704,20 @@ class LoomDBTests(unittest.TestCase):
 
         joined_logs = "\n".join(cm.output)
         self.assertIn(
-            "migration: kinds backfill applied (engineer=weaver-b, workers=2, tasks=1)",
+            "migration: kinds backfill applied (engineer=engineer-b, workers=2, tasks=1)",
             joined_logs,
         )
-        self.assertNotIn("multiple Weaver candidates found", joined_logs)
+        self.assertNotIn("multiple Engineer candidates found", joined_logs)
         self.assertEqual(
             migrated._conn.execute(
-                "SELECT name, slug, kind, persistent FROM agents WHERE id='weaver-b'"
+                "SELECT name, slug, kind, persistent FROM agents WHERE id='engineer-b'"
             ).fetchone(),
-            ("Weaver", "weaver", "engineer", 1),
+            ("Engineer", "engineer", "engineer", 1),
         )
         self.assertEqual(
             migrated._conn.execute(
                 "SELECT kind, role, owner_engineer_id, persistent "
-                "FROM agents WHERE id='weaver-a'"
+                "FROM agents WHERE id='engineer-a'"
             ).fetchone(),
             ("worker", "", "", 0),
         )
@@ -2507,7 +2725,7 @@ class LoomDBTests(unittest.TestCase):
             migrated._conn.execute(
                 "SELECT assigned_engineer_id FROM board_tasks WHERE id='LOOM:1'"
             ).fetchone()[0],
-            "weaver-b",
+            "engineer-b",
         )
         self.assertEqual(
             migrated._conn.execute(
@@ -2516,22 +2734,22 @@ class LoomDBTests(unittest.TestCase):
             "4",
         )
 
-    def test_init_uses_env_override_for_ambiguous_weaver_backfill(self):
+    def test_init_uses_env_override_for_ambiguous_engineer_backfill(self):
         path = self._seed_stage1a_db(
             "kinds-backfill-override.db",
             agents=[
                 AgentCell(
-                    id="weaver-a",
-                    name="Weaver Alpha",
+                    id="engineer-a",
+                    name="Engineer Alpha",
                     group="loom",
-                    slug="weaver-alpha",
+                    slug="engineer-alpha",
                 ),
                 AgentCell(
-                    id="weaver-b",
+                    id="engineer-b",
                     name="Bob",
                     group="loom",
                     slug="bob",
-                    template="weaver",
+                    template="engineer",
                 ),
                 AgentCell(
                     id="worker-1",
@@ -2539,7 +2757,7 @@ class LoomDBTests(unittest.TestCase):
                     group="loom",
                     slug="worker",
                     template="researcher",
-                    created_by_weaver_id="weaver-b",
+                    created_by_engineer_id="engineer-b",
                 ),
             ],
             tasks=[BoardTask(id="LOOM:1", task="Task", group="loom")],
@@ -2548,26 +2766,26 @@ class LoomDBTests(unittest.TestCase):
         migrated = LoomDB(path)
         self.addCleanup(migrated.close)
 
-        with mock.patch.dict("os.environ", {"LOOM_MIGRATE_WEAVER_ID": "weaver-b"}):
+        with mock.patch.dict("os.environ", {"LOOM_MIGRATE_ENGINEER_ID": "engineer-b"}):
             with self.assertLogs("loom", level="INFO") as cm:
                 migrated.init()
 
         joined_logs = "\n".join(cm.output)
         self.assertIn(
-            "migration: kinds backfill applied (engineer=weaver-b, workers=2, tasks=1)",
+            "migration: kinds backfill applied (engineer=engineer-b, workers=2, tasks=1)",
             joined_logs,
         )
 
         engineer = migrated._conn.execute(
-            "SELECT name, slug, kind, persistent FROM agents WHERE id='weaver-b'"
+            "SELECT name, slug, kind, persistent FROM agents WHERE id='engineer-b'"
         ).fetchone()
-        self.assertEqual(engineer, ("Weaver", "weaver", "engineer", 1))
+        self.assertEqual(engineer, ("Engineer", "engineer", "engineer", 1))
         self.assertEqual(
             migrated._conn.execute(
                 "SELECT kind, role, owner_engineer_id, persistent "
                 "FROM agents WHERE id='worker-1'"
             ).fetchone(),
-            ("worker", "researcher", "weaver-b", 0),
+            ("worker", "researcher", "engineer-b", 0),
         )
         self.assertEqual(
             migrated._conn.execute(
@@ -2583,7 +2801,7 @@ class LoomDBTests(unittest.TestCase):
             "4",
         )
 
-    def test_init_backfills_task_assignments_from_group_settings_weaver(self):
+    def test_init_backfills_task_assignments_from_group_settings_engineer(self):
         path = self._seed_stage1a_db(
             "kinds-backfill-task-assignment.db",
             agents=[
@@ -2607,7 +2825,7 @@ class LoomDBTests(unittest.TestCase):
                 BoardTask(id="ALPHA:1", task="Alpha task", group="alpha"),
             ],
             group_settings={
-                "loom": GroupSettings(weaver_agent_id="root-1"),
+                "loom": GroupSettings(engineer_agent_id="root-1"),
             },
         )
 
@@ -2633,9 +2851,9 @@ class LoomDBTests(unittest.TestCase):
             "1",
         )
 
-    def test_init_ignores_stale_group_settings_weaver_without_engineer(self):
+    def test_init_ignores_stale_group_settings_engineer_without_engineer(self):
         path = self._seed_stage1a_db(
-            "kinds-backfill-stale-group-weaver.db",
+            "kinds-backfill-stale-group-engineer.db",
             agents=[
                 AgentCell(
                     id="worker-1",
@@ -2646,7 +2864,7 @@ class LoomDBTests(unittest.TestCase):
             ],
             tasks=[BoardTask(id="LOOM:1", task="Loom task", group="loom")],
             group_settings={
-                "loom": GroupSettings(weaver_agent_id="stale-id"),
+                "loom": GroupSettings(engineer_agent_id="stale-id"),
             },
         )
 
@@ -2657,7 +2875,7 @@ class LoomDBTests(unittest.TestCase):
             migrated.init()
 
         self.assertIn(
-            "migration: ignoring stale weaver_agent_id='stale-id' for group='loom'",
+            "migration: ignoring stale engineer_agent_id='stale-id' for group='loom'",
             "\n".join(cm.output),
         )
         self.assertEqual(
@@ -2673,27 +2891,27 @@ class LoomDBTests(unittest.TestCase):
             "4",
         )
 
-    def test_init_ignores_stale_group_settings_weaver_with_heuristic_engineer(self):
+    def test_init_ignores_stale_group_settings_engineer_with_heuristic_engineer(self):
         path = self._seed_stage1a_db(
-            "kinds-backfill-stale-group-weaver-heuristic.db",
+            "kinds-backfill-stale-group-engineer-heuristic.db",
             agents=[
                 AgentCell(
                     id="root-1",
-                    name="Weaver",
+                    name="Engineer",
                     group="loom",
-                    slug="weaver",
+                    slug="engineer",
                 ),
                 AgentCell(
                     id="worker-1",
                     name="Worker",
                     group="loom",
                     slug="worker",
-                    created_by_weaver_id="root-1",
+                    created_by_engineer_id="root-1",
                 ),
             ],
             tasks=[BoardTask(id="LOOM:1", task="Loom task", group="loom")],
             group_settings={
-                "loom": GroupSettings(weaver_agent_id="stale-id"),
+                "loom": GroupSettings(engineer_agent_id="stale-id"),
             },
         )
 
@@ -2704,7 +2922,7 @@ class LoomDBTests(unittest.TestCase):
             migrated.init()
 
         self.assertIn(
-            "migration: ignoring stale weaver_agent_id='stale-id' for group='loom'",
+            "migration: ignoring stale engineer_agent_id='stale-id' for group='loom'",
             "\n".join(cm.output),
         )
         self.assertEqual(
@@ -2732,9 +2950,9 @@ class LoomDBTests(unittest.TestCase):
             agents=[
                 AgentCell(
                     id="root-1",
-                    name="Weaver",
+                    name="Engineer",
                     group="loom",
-                    slug="weaver",
+                    slug="engineer",
                     kind="engineer",
                     persistent=True,
                 ),
@@ -2758,7 +2976,7 @@ class LoomDBTests(unittest.TestCase):
                 ),
             ],
             group_settings={
-                "loom": GroupSettings(weaver_agent_id="root-1"),
+                "loom": GroupSettings(engineer_agent_id="root-1"),
             },
         )
         conn = sqlite3.connect(str(path))
@@ -2811,22 +3029,22 @@ class LoomDBTests(unittest.TestCase):
             "1",
         )
 
-    def test_init_fixup_ignores_stale_group_settings_weaver_for_unassigned_tasks(self):
+    def test_init_fixup_ignores_stale_group_settings_engineer_for_unassigned_tasks(self):
         path = self._seed_stage1a_db(
-            "kinds-backfill-fixup-stale-group-weaver.db",
+            "kinds-backfill-fixup-stale-group-engineer.db",
             agents=[
                 AgentCell(
                     id="root-1",
-                    name="Weaver",
+                    name="Engineer",
                     group="loom",
-                    slug="weaver",
+                    slug="engineer",
                     kind="engineer",
                     persistent=True,
                 ),
             ],
             tasks=[BoardTask(id="LOOM:1", task="Needs fixup", group="loom")],
             group_settings={
-                "loom": GroupSettings(weaver_agent_id="stale-id"),
+                "loom": GroupSettings(engineer_agent_id="stale-id"),
             },
         )
         conn = sqlite3.connect(str(path))
@@ -2853,7 +3071,7 @@ class LoomDBTests(unittest.TestCase):
 
         joined_logs = "\n".join(cm.output)
         self.assertIn(
-            "migration: ignoring stale weaver_agent_id='stale-id' for group='loom'",
+            "migration: ignoring stale engineer_agent_id='stale-id' for group='loom'",
             joined_logs,
         )
         self.assertIn(
@@ -3027,7 +3245,7 @@ class LoomDBAsyncWriteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resolved["status"], "approved")
         self.assertEqual(resolved["created_engineer_id"], "engineer-1")
 
-        await self.db.save_weaver_settings_async(
+        await self.db.save_engineer_settings_async(
             "g",
             {
                 "group": "g",
@@ -3038,12 +3256,12 @@ class LoomDBAsyncWriteTests(unittest.IsolatedAsyncioTestCase):
                 "paused": True,
             },
         )
-        weaver_settings = self.db.load_all_weaver_settings()["g"]
-        self.assertEqual(weaver_settings["pending_question"], "Need approval")
-        self.assertEqual(weaver_settings["pending_question_actor_id"], "eng-1")
-        self.assertEqual(weaver_settings["pending_note"], "FYI")
-        self.assertEqual(weaver_settings["pending_note_kind"], "note")
-        self.assertTrue(weaver_settings["paused"])
+        engineer_settings = self.db.load_all_engineer_settings()["g"]
+        self.assertEqual(engineer_settings["pending_question"], "Need approval")
+        self.assertEqual(engineer_settings["pending_question_actor_id"], "eng-1")
+        self.assertEqual(engineer_settings["pending_note"], "FYI")
+        self.assertEqual(engineer_settings["pending_note_kind"], "note")
+        self.assertTrue(engineer_settings["paused"])
 
         self.db.defer_write(
             "group_settings",

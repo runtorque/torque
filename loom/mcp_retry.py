@@ -105,7 +105,7 @@ _API_READ_COMMANDS = {
     "list_templates",
     "memory_list",
     "memory_read",
-    "weaver_journal_read",
+    "engineer_journal_read",
     "architect_decision_list",
     "pending_hire_list",
 }

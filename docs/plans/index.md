@@ -20,5 +20,5 @@ They are not the primary user-facing docs. For day-to-day usage, start from [Get
 - [Standalone Application](standalone_application.md)
 - [Standalone xterm.js Execution](standalone_xterm_execution.md)
 - [Task Board](task-board.md)
-- [Weaver](weaver.md)
+- [Engineer](engineer.md)
 - [Workflow Automation](workflow-automation.md)

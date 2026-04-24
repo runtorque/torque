@@ -27,7 +27,7 @@ from .worktree_boundaries import (
 )
 
 _QUEUED_LANES = {"Backlog", "To Do"}
-_VISIBILITY_LABELS = {"loom:weaver-message"}
+_VISIBILITY_LABELS = {"loom:engineer-message"}
 _WORKFLOW_LABELS = {"loom:derived", "review-fix", "loom:human"}
 _HELD_LABELS = {"loom:hold", "hold"}
 _REVIEW_HINTS = ("review", "re-review")
@@ -981,7 +981,7 @@ def _is_visibility_task(task) -> bool:
     if status == "awaiting reply":
         return True
     for message in getattr(task, "messages", []) or []:
-        if str(message.get("action", "") or "").strip() in {"weaver_message", "reply"}:
+        if str(message.get("action", "") or "").strip() in {"engineer_message", "reply"}:
             return True
     return False
 
@@ -1552,9 +1552,9 @@ def _recent_visibility_items(tasks: list[Any], *, limit: int = 10) -> list[dict]
         task_items = []
         for message in getattr(task, "messages", []) or []:
             action = str(message.get("action", "") or "").strip()
-            if action not in {"weaver_message", "reply"}:
+            if action not in {"engineer_message", "reply"}:
                 continue
-            kind = "agent_reply" if action == "reply" else "weaver_message"
+            kind = "agent_reply" if action == "reply" else "engineer_message"
             summary = _summarize_visibility_message(
                 str(message.get("message", "") or "").strip()
             )
@@ -1570,7 +1570,7 @@ def _recent_visibility_items(tasks: list[Any], *, limit: int = 10) -> list[dict]
         if not task_items:
             created = _parse_iso(getattr(task, "created_at", "") or "")
             task_items.append({
-                "kind": "weaver_message",
+                "kind": "engineer_message",
                 "task_id": getattr(task, "id", "") or "",
                 "task_title": getattr(task, "task", "") or "",
                 "summary": _summarize_visibility_message(

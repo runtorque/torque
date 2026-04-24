@@ -16,11 +16,11 @@ function createSandbox() {
       agents: {},
       board_tasks: {},
       children: {},
-      weaver_settings: {},
-      weaver_journal: {},
-      weaver_sent_events: {},
-      weaver_buffer_stats: {},
-      weaver_worklog: {},
+      engineer_settings: {},
+      engineer_journal: {},
+      engineer_sent_events: {},
+      engineer_buffer_stats: {},
+      engineer_worklog: {},
     },
     focusedItemId: '',
     document: {
@@ -99,7 +99,7 @@ test('focused engineer worklog tab renders the group worklog entries', () => {
   const { context, panel, sandbox } = createHarness();
   sandbox.state.agents['eng-alice'] = engineer('eng-alice', 'Alice', 10);
   sandbox.state.agents['worker-1'] = { id: 'worker-1', name: 'Worker One' };
-  sandbox.state.weaver_worklog.loom = [
+  sandbox.state.engineer_worklog.loom = [
     {
       id: 4,
       task_id: 'LOOM:9',

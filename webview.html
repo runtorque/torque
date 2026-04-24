@@ -240,41 +240,41 @@
   </div>
 </div>
 
-<!-- Weaver launch / relaunch modal -->
-<div class="overlay" id="modal-weaver-launch">
+<!-- Engineer launch / relaunch modal -->
+<div class="overlay" id="modal-engineer-launch">
   <div class="modal modal-tall">
-    <h2 id="weaver-launch-title">Launch Weaver</h2>
+    <h2 id="engineer-launch-title">Launch Engineer</h2>
     <div class="task-modal-body">
     <div class="task-modal-section">
       <div class="task-modal-section-body">
         <label>Group</label>
-        <div id="weaver-launch-group" class="label-hint"></div>
+        <div id="engineer-launch-group" class="label-hint"></div>
       </div>
     </div>
     <div class="task-modal-section">
       <div class="task-modal-section-body">
         <label>Provider</label>
-        <select id="weaver-launch-provider" onchange="onWeaverLaunchProviderChange()"></select>
+        <select id="engineer-launch-provider" onchange="onEngineerLaunchProviderChange()"></select>
         <label>Boot command</label>
-        <input id="weaver-launch-boot-cmd" placeholder="Use provider default" autocomplete="off">
+        <input id="engineer-launch-boot-cmd" placeholder="Use provider default" autocomplete="off">
         <label>Model</label>
-        <input id="weaver-launch-model" placeholder="Use provider default" autocomplete="off">
+        <input id="engineer-launch-model" placeholder="Use provider default" autocomplete="off">
         <label>Reasoning effort</label>
-        <select id="weaver-launch-reasoning-effort"></select>
+        <select id="engineer-launch-reasoning-effort"></select>
         <label>Custom instructions</label>
-        <textarea id="weaver-launch-custom-instructions" rows="5" placeholder="Instructions appended after Loom's built-in Weaver policy..."></textarea>
+        <textarea id="engineer-launch-custom-instructions" rows="5" placeholder="Instructions appended after Loom's built-in Engineer policy..."></textarea>
       </div>
     </div>
     <div class="task-modal-section">
       <div class="task-modal-section-body">
         <label>Autonomy mode</label>
-        <select id="weaver-launch-autonomy-mode">
+        <select id="engineer-launch-autonomy-mode">
           <option value="suggest_only">Suggest only</option>
           <option value="dispatch_when_clear">Dispatch when clear</option>
           <option value="aggressive_auto_continue">Aggressive auto-continue</option>
         </select>
         <label>Default worker concurrency</label>
-        <select id="weaver-launch-default-worker-concurrency">
+        <select id="engineer-launch-default-worker-concurrency">
           <option value="1">1 worker</option>
           <option value="2">2 workers</option>
           <option value="3">3 workers</option>
@@ -288,35 +288,35 @@
     <div class="task-modal-section">
       <div class="task-modal-section-body">
         <label>Wave size preference</label>
-        <select id="weaver-launch-wave-size-preference">
+        <select id="engineer-launch-wave-size-preference">
           <option value="small">Small reviewable waves</option>
           <option value="balanced">Balanced waves</option>
           <option value="large">Fill available capacity</option>
         </select>
         <label>Same-agent follow-up preference</label>
-        <select id="weaver-launch-same-agent-follow-up-preference">
+        <select id="engineer-launch-same-agent-follow-up-preference">
           <option value="balanced">Balanced</option>
           <option value="prefer_same_agent">Prefer same agent</option>
           <option value="prefer_fresh_agent">Prefer fresh agent</option>
         </select>
         <label>Notification noise
-          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Quick presets for how chatty Weaver digests should be. You can fine-tune the detailed notification controls later in Group Settings.">?</span>
+          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Quick presets for how chatty Engineer digests should be. You can fine-tune the detailed notification controls later in Group Settings.">?</span>
         </label>
-        <select id="weaver-launch-notification-preset" onchange="onWeaverLaunchNotificationPresetChange()">
+        <select id="engineer-launch-notification-preset" onchange="onEngineerLaunchNotificationPresetChange()">
           <option value="quiet">Quiet</option>
           <option value="normal">Normal</option>
           <option value="noisy">Noisy</option>
           <option value="custom">Custom</option>
         </select>
-        <div id="weaver-launch-notification-preset-hint" class="label-hint task-modal-section-intro"></div>
+        <div id="engineer-launch-notification-preset-hint" class="label-hint task-modal-section-intro"></div>
         <label>Digest verbosity</label>
-        <select id="weaver-launch-digest-verbosity" onchange="syncWeaverLaunchNotificationPreset()">
+        <select id="engineer-launch-digest-verbosity" onchange="syncEngineerLaunchNotificationPreset()">
           <option value="compact">Compact</option>
           <option value="balanced">Balanced</option>
           <option value="detailed">Detailed</option>
         </select>
         <label>Escalation style</label>
-        <select id="weaver-launch-escalation-style">
+        <select id="engineer-launch-escalation-style">
           <option value="ask_early">Ask early</option>
           <option value="note_then_ask">Note first, ask when blocked</option>
           <option value="keep_moving">Keep moving unless blocked</option>
@@ -326,7 +326,7 @@
     </div>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeModals()">Cancel</button>
-      <button class="btn-primary" id="weaver-launch-submit-btn" onclick="submitWeaverLaunchDialog()">Create Weaver</button>
+      <button class="btn-primary" id="engineer-launch-submit-btn" onclick="submitEngineerLaunchDialog()">Create Engineer</button>
     </div>
   </div>
 </div>
@@ -358,7 +358,7 @@
     <div class="gs-tabs">
       <button class="gs-tab active" data-tab="group" onclick="switchGsTab('group')">Group</button>
       <button class="gs-tab" data-tab="agents" onclick="switchGsTab('agents')">Agents</button>
-      <button class="gs-tab" data-tab="weaver" onclick="switchGsTab('weaver')">Weaver</button>
+      <button class="gs-tab" data-tab="engineer" onclick="switchGsTab('engineer')">Engineer</button>
     </div>
 
     <!-- Group tab -->
@@ -563,66 +563,66 @@
       </div>
     </div>
 
-    <!-- Weaver tab -->
-    <div class="gs-pane" data-pane="weaver">
-      <details id="gs-weaver-provider-section" class="task-modal-section" open>
+    <!-- Engineer tab -->
+    <div class="gs-pane" data-pane="engineer">
+      <details id="gs-engineer-provider-section" class="task-modal-section" open>
         <summary>Provider</summary>
         <div class="task-modal-section-body">
           <label>Agent</label>
-          <div id="gs-weaver-agent-summary" class="gs-inline-card">
+          <div id="gs-engineer-agent-summary" class="gs-inline-card">
             <div class="gs-inline-card-main">
-              <div id="gs-weaver-agent-name">No weaver agent</div>
-              <div id="gs-weaver-agent-meta" class="label-hint">No designated Weaver is configured for this group.</div>
+              <div id="gs-engineer-agent-name">No engineer agent</div>
+              <div id="gs-engineer-agent-meta" class="label-hint">No designated Engineer is configured for this group.</div>
             </div>
           </div>
           <label class="gs-checkbox">
-            <input id="gs-weaver-restrict-to-created-agents" type="checkbox">
-            Only show/manage agents launched by this Weaver
-            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="When enabled, this Weaver can only list, inspect, message, close, relaunch, or use worktree tools on worker agents it originally created. Human operators still see all agents on the board.">?</span>
+            <input id="gs-engineer-restrict-to-created-agents" type="checkbox">
+            Only show/manage agents launched by this Engineer
+            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="When enabled, this Engineer can only list, inspect, message, close, relaunch, or use worktree tools on worker agents it originally created. Human operators still see all agents on the board.">?</span>
           </label>
           <label>Provider</label>
-          <select id="gs-weaver-provider" onchange="onGsWeaverProviderChange()"></select>
+          <select id="gs-engineer-provider" onchange="onGsEngineerProviderChange()"></select>
           <label>Command override</label>
-          <input id="gs-weaver-boot-cmd" placeholder="Use provider default" autocomplete="off">
+          <input id="gs-engineer-boot-cmd" placeholder="Use provider default" autocomplete="off">
           <label>Model</label>
-          <input id="gs-weaver-model" placeholder="Use provider default" autocomplete="off">
+          <input id="gs-engineer-model" placeholder="Use provider default" autocomplete="off">
           <label>Reasoning effort</label>
-          <select id="gs-weaver-reasoning-effort"></select>
+          <select id="gs-engineer-reasoning-effort"></select>
           <label>Terminal overrides</label>
-          <div class="label-hint task-modal-section-intro">Optional launch overrides for the designated Weaver only. Leave blank to inherit the usual agent/group defaults.</div>
+          <div class="label-hint task-modal-section-intro">Optional launch overrides for the designated Engineer only. Leave blank to inherit the usual agent/group defaults.</div>
           <label>Directory</label>
-          <input id="gs-weaver-directory" placeholder="Same as agent/group" autocomplete="off">
+          <input id="gs-engineer-directory" placeholder="Same as agent/group" autocomplete="off">
           <label>Profile</label>
-          <select id="gs-weaver-profile"></select>
+          <select id="gs-engineer-profile"></select>
           <label>Shell</label>
-          <select id="gs-weaver-shell">
+          <select id="gs-engineer-shell">
             <option value="">Same as agent/group</option>
             <option value="zsh">zsh</option>
             <option value="bash">bash</option>
             <option value="fish">fish</option>
           </select>
           <label>Tab color</label>
-          <div class="color-swatches" id="gs-weaver-color-swatches"></div>
+          <div class="color-swatches" id="gs-engineer-color-swatches"></div>
           <label>Custom instructions <span class="label-hint">expert override</span></label>
-          <textarea id="gs-weaver-custom-instructions" rows="5" placeholder="Instructions appended after Loom's built-in Weaver policy..."></textarea>
+          <textarea id="gs-engineer-custom-instructions" rows="5" placeholder="Instructions appended after Loom's built-in Engineer policy..."></textarea>
         </div>
       </details>
 
-      <details id="gs-weaver-autonomy-section" class="task-modal-section" open>
+      <details id="gs-engineer-autonomy-section" class="task-modal-section" open>
         <summary>Autonomy mode
-          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="How proactively the Weaver should continue work without waiting for you. Use a preset instead of writing custom instructions for common behavior.">?</span>
+          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="How proactively the Engineer should continue work without waiting for you. Use a preset instead of writing custom instructions for common behavior.">?</span>
         </summary>
         <div class="task-modal-section-body">
           <label>Mode</label>
-          <select id="gs-weaver-autonomy-mode">
+          <select id="gs-engineer-autonomy-mode">
             <option value="suggest_only">Suggest only</option>
             <option value="dispatch_when_clear">Dispatch when clear</option>
             <option value="aggressive_auto_continue">Aggressive auto-continue</option>
           </select>
           <label>Default worker concurrency
-            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Used as the default max_concurrent value when the Weaver dispatches a wave without specifying one explicitly. Counts non-Weaver worker agents only.">?</span>
+            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Used as the default max_concurrent value when the Engineer dispatches a wave without specifying one explicitly. Counts non-Engineer worker agents only.">?</span>
           </label>
-          <select id="gs-weaver-default-worker-concurrency">
+          <select id="gs-engineer-default-worker-concurrency">
             <option value="1">1 worker</option>
             <option value="2">2 workers</option>
             <option value="3">3 workers</option>
@@ -632,35 +632,35 @@
             <option value="8">8 workers</option>
           </select>
           <label>Wave size preference</label>
-          <select id="gs-weaver-wave-size-preference">
+          <select id="gs-engineer-wave-size-preference">
             <option value="small">Small reviewable waves</option>
             <option value="balanced">Balanced waves</option>
             <option value="large">Fill available capacity</option>
           </select>
           <label>Same-agent follow-up preference</label>
-          <select id="gs-weaver-same-agent-follow-up-preference">
+          <select id="gs-engineer-same-agent-follow-up-preference">
             <option value="balanced">Balanced</option>
             <option value="prefer_same_agent">Prefer same agent</option>
             <option value="prefer_fresh_agent">Prefer fresh agent</option>
           </select>
           <label>Notification noise
-            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Quick presets for how much digest noise Weaver should send. Detailed changes below switch the preset to Custom.">?</span>
+            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Quick presets for how much digest noise Engineer should send. Detailed changes below switch the preset to Custom.">?</span>
           </label>
-          <select id="gs-weaver-notification-preset" onchange="onGsWeaverNotificationPresetChange()">
+          <select id="gs-engineer-notification-preset" onchange="onGsEngineerNotificationPresetChange()">
             <option value="quiet">Quiet</option>
             <option value="normal">Normal</option>
             <option value="noisy">Noisy</option>
             <option value="custom">Custom</option>
           </select>
-          <div id="gs-weaver-notification-preset-hint" class="label-hint task-modal-section-intro"></div>
+          <div id="gs-engineer-notification-preset-hint" class="label-hint task-modal-section-intro"></div>
           <label>Digest verbosity</label>
-          <select id="gs-weaver-digest-verbosity" onchange="syncGsWeaverNotificationPreset()">
+          <select id="gs-engineer-digest-verbosity" onchange="syncGsEngineerNotificationPreset()">
             <option value="compact">Compact</option>
             <option value="balanced">Balanced</option>
             <option value="detailed">Detailed</option>
           </select>
           <label>Escalation style</label>
-          <select id="gs-weaver-escalation-style">
+          <select id="gs-engineer-escalation-style">
             <option value="ask_early">Ask early</option>
             <option value="note_then_ask">Note first, ask when blocked</option>
             <option value="keep_moving">Keep moving unless blocked</option>
@@ -668,12 +668,12 @@
         </div>
       </details>
 
-      <details id="gs-weaver-digest-section" class="task-modal-section">
+      <details id="gs-engineer-digest-section" class="task-modal-section">
         <summary>Digest details</summary>
         <div class="task-modal-section-body">
-          <div class="label-hint task-modal-section-intro">Advanced notification controls. Heartbeats and optional event types affect digest noise, not the Weaver's orchestration policy presets.</div>
+          <div class="label-hint task-modal-section-intro">Advanced notification controls. Heartbeats and optional event types affect digest noise, not the Engineer's orchestration policy presets.</div>
           <label>Push interval</label>
-          <select id="gs-weaver-push-interval" onchange="syncGsWeaverNotificationPreset()">
+          <select id="gs-engineer-push-interval" onchange="syncGsEngineerNotificationPreset()">
             <option value="10">10s</option>
             <option value="30">30s</option>
             <option value="60">60s</option>
@@ -681,14 +681,14 @@
             <option value="300">300s</option>
           </select>
           <label>Max interval</label>
-          <select id="gs-weaver-max-interval" onchange="syncGsWeaverNotificationPreset()">
+          <select id="gs-engineer-max-interval" onchange="syncGsEngineerNotificationPreset()">
             <option value="60">60s</option>
             <option value="120">120s</option>
             <option value="300">300s</option>
             <option value="600">600s</option>
           </select>
           <label>Idle heartbeat</label>
-          <select id="gs-weaver-heartbeat-interval" onchange="syncGsWeaverNotificationPreset()">
+          <select id="gs-engineer-heartbeat-interval" onchange="syncGsEngineerNotificationPreset()">
             <option value="0">Off</option>
             <option value="60">1 min</option>
             <option value="120">2 min</option>
@@ -702,11 +702,11 @@
             <label class="gs-checkbox"><input type="checkbox" checked disabled> agent_reply <span class="label-hint">(mandatory)</span></label>
             <label class="gs-checkbox"><input type="checkbox" checked disabled> agent_blocked <span class="label-hint">(mandatory)</span></label>
             <label class="gs-checkbox"><input type="checkbox" checked disabled> ask_created <span class="label-hint">(mandatory)</span></label>
-            <label class="gs-checkbox"><input id="gs-weaver-event-agent-started" type="checkbox" onchange="syncGsWeaverNotificationPreset()"> agent_started</label>
-            <label class="gs-checkbox"><input id="gs-weaver-event-task-dispatched" type="checkbox" onchange="syncGsWeaverNotificationPreset()"> task_dispatched</label>
-            <label class="gs-checkbox"><input id="gs-weaver-event-task-derived" type="checkbox" onchange="syncGsWeaverNotificationPreset()"> task_derived</label>
-            <label class="gs-checkbox"><input id="gs-weaver-event-agent-progress" type="checkbox" onchange="syncGsWeaverNotificationPreset()"> agent_progress</label>
-            <label class="gs-checkbox"><input id="gs-weaver-event-task-health-alert" type="checkbox" onchange="syncGsWeaverNotificationPreset()"> task_health_alert</label>
+            <label class="gs-checkbox"><input id="gs-engineer-event-agent-started" type="checkbox" onchange="syncGsEngineerNotificationPreset()"> agent_started</label>
+            <label class="gs-checkbox"><input id="gs-engineer-event-task-dispatched" type="checkbox" onchange="syncGsEngineerNotificationPreset()"> task_dispatched</label>
+            <label class="gs-checkbox"><input id="gs-engineer-event-task-derived" type="checkbox" onchange="syncGsEngineerNotificationPreset()"> task_derived</label>
+            <label class="gs-checkbox"><input id="gs-engineer-event-agent-progress" type="checkbox" onchange="syncGsEngineerNotificationPreset()"> agent_progress</label>
+            <label class="gs-checkbox"><input id="gs-engineer-event-task-health-alert" type="checkbox" onchange="syncGsEngineerNotificationPreset()"> task_health_alert</label>
           </div>
         </div>
       </details>
@@ -1065,7 +1065,7 @@
     </span>
     <span>Context</span>
   </button>
-  <button class="taskbar-app" data-app="weaver" onclick="togglePanel('weaver')">&#x2696; Agent</button>
+  <button class="taskbar-app" data-app="engineer" onclick="togglePanel('engineer')">&#x2696; Agent</button>
   <button class="taskbar-app" data-app="events" onclick="togglePanel('events')">&#x26A0; Events</button>
   <div class="taskbar-spacer"></div>
   <button id="taskbar-restore-layout" class="taskbar-aux-btn"
@@ -1184,7 +1184,7 @@
 <script src="/static/vendor/xterm/addon-fit.js"></script>
 <script src="/static/js/terminal.js"></script>
 <script src="/static/js/modals.js"></script>
-<script src="/static/js/modals/weaver-launch.js"></script>
+<script src="/static/js/modals/engineer-launch.js"></script>
 <script src="/static/js/modals/add-cell.js"></script>
 <script src="/static/js/modals/task-artifacts.js"></script>
 <script src="/static/js/modals/task-modal.js"></script>

@@ -335,7 +335,7 @@ class ServerSelfDispatchTests(unittest.TestCase):
                 "smoke_status": "failed",
                 "verification_notes": "Smoke failed on login redirect",
             },
-            "Weaver",
+            "Engineer",
             lambda current: saved.append(current.id),
             root_task=root_task,
             timestamp="2026-04-07T18:05:00+00:00",
@@ -345,7 +345,7 @@ class ServerSelfDispatchTests(unittest.TestCase):
         self.assertEqual(task.verification_mode, "restart")
         self.assertEqual(task.verification_state, "failed")
         self.assertTrue(task.verification_summary["manual_smoke_done"])
-        self.assertEqual(task.verification_updated_by, "Weaver")
+        self.assertEqual(task.verification_updated_by, "Engineer")
         self.assertEqual(root_task.verification_state, "failed")
         self.assertEqual(root_task.verification_mode, "restart")
         self.assertTrue(root_task.verification_summary["manual_smoke_done"])
@@ -1483,7 +1483,7 @@ class ServerAutoCloseOnDoneTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, [])
         self.assertEqual(closed, [])
 
-    async def test_auto_close_on_done_skips_same_agent_queue_and_weaver_followups(self):
+    async def test_auto_close_on_done_skips_same_agent_queue_and_engineer_followups(self):
         state = self._make_state()
         reviewer = self.state_mod.AgentCell(
             id="review-1",
@@ -1515,12 +1515,12 @@ class ServerAutoCloseOnDoneTests(unittest.IsolatedAsyncioTestCase):
             target_agent_id=reviewer.id,
         )
         state.board_add_task(
-            "Weaver: need reply",
+            "Engineer: need reply",
             "g",
             lane="Backlog",
             id="task-reply",
             reply_agent_id=reviewer.id,
-            labels=["loom:weaver-message"],
+            labels=["loom:engineer-message"],
             status="Awaiting Reply",
         )
 
@@ -1795,16 +1795,16 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
 
     def _make_state(self):
         state = self.state_mod.MatrixState()
-        weaver = self.state_mod.AgentCell(
-            id="weaver-1",
-            name="Weaver",
+        engineer = self.state_mod.AgentCell(
+            id="engineer-1",
+            name="Engineer",
             group="g",
             cell_type="agent",
         )
-        state.agents[weaver.id] = weaver
-        state.groups["g"] = [weaver.id]
+        state.agents[engineer.id] = engineer
+        state.groups["g"] = [engineer.id]
         state.group_settings["g"] = self.state_mod.GroupSettings(
-            weaver_agent_id=weaver.id
+            engineer_agent_id=engineer.id
         )
         return state
 
@@ -1853,7 +1853,7 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("g", state.auto_dispatch_queues)
         self.assertEqual(panel_events[0][0], "task_auto_dispatched")
 
-    async def test_pump_auto_dispatch_queue_forwards_weaver_owner_on_new_agents(self):
+    async def test_pump_auto_dispatch_queue_forwards_engineer_owner_on_new_agents(self):
         state = self._make_state()
         task = state.board_add_task("Queued task", "g", id="task-1")
         self.assertIsNotNone(task)
@@ -1861,13 +1861,13 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
             "g",
             "task-1",
             max_concurrent=1,
-            weaver_owner_id="weaver-1",
+            engineer_owner_id="engineer-1",
         )
 
         async def handle_command(payload):
             self.assertEqual(payload["cmd"], "dispatch_task")
             self.assertTrue(payload["create_agent"])
-            self.assertEqual(payload["_created_by_weaver_id"], "weaver-1")
+            self.assertEqual(payload["_created_by_engineer_id"], "engineer-1")
             queued_task = state.board_tasks[payload["id"]]
             agent = self.state_mod.AgentCell(
                 id="agent-1",
@@ -1875,7 +1875,7 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
                 group="g",
                 cell_type="agent",
                 current_task_id=queued_task.id,
-                created_by_weaver_id=payload["_created_by_weaver_id"],
+                created_by_engineer_id=payload["_created_by_engineer_id"],
             )
             state.agents[agent.id] = agent
             state.groups["g"].append(agent.id)
@@ -1891,8 +1891,8 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(
-            state.agents["agent-1"].created_by_weaver_id,
-            "weaver-1",
+            state.agents["agent-1"].created_by_engineer_id,
+            "engineer-1",
         )
 
     async def test_pump_auto_dispatch_queue_binds_agent_group_followups(self):
@@ -2275,7 +2275,7 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_stream_auto_resume_respects_suggest_only_mode(self):
         state = self._make_state()
-        state.update_weaver_settings("g", autonomy_mode="suggest_only")
+        state.update_engineer_settings("g", autonomy_mode="suggest_only")
         owner = self.state_mod.AgentCell(
             id="agent-1",
             name="Worker",
@@ -2462,9 +2462,9 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_auto_resume_targets_capture_cross_group_dependents(self):
         state = self._make_state()
-        weaver_b = self.state_mod.AgentCell(
-            id="weaver-b",
-            name="Weaver B",
+        engineer_b = self.state_mod.AgentCell(
+            id="engineer-b",
+            name="Engineer B",
             group="B",
             cell_type="agent",
         )
@@ -2479,11 +2479,11 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
             worktree_repo_root="/repo",
             worktree_branch="loom/worker-b",
         )
-        state.agents[weaver_b.id] = weaver_b
+        state.agents[engineer_b.id] = engineer_b
         state.agents[owner_b.id] = owner_b
-        state.groups["B"] = [weaver_b.id, owner_b.id]
+        state.groups["B"] = [engineer_b.id, owner_b.id]
         state.group_settings["B"] = self.state_mod.GroupSettings(
-            weaver_agent_id=weaver_b.id
+            engineer_agent_id=engineer_b.id
         )
 
         external = state.board_add_task(

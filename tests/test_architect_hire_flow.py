@@ -152,7 +152,7 @@ class ArchitectHireFlowTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(group, "loom")
             return self.tmp.name
 
-        def fake_resolve_weaver_launch_config(group, *, base_dir="", explicit_template="", overrides=None):
+        def fake_resolve_engineer_launch_config(group, *, base_dir="", explicit_template="", overrides=None):
             self.assertEqual(group, "loom")
             self.assertEqual(base_dir, self.tmp.name)
             self.assertEqual(explicit_template, "")
@@ -175,7 +175,7 @@ class ArchitectHireFlowTests(unittest.IsolatedAsyncioTestCase):
             {"id": pending_hire["id"]},
             self.state,
             resolve_base_dir=fake_resolve_base_dir,
-            resolve_weaver_launch_config=fake_resolve_weaver_launch_config,
+            resolve_engineer_launch_config=fake_resolve_engineer_launch_config,
             create_agent_with_config=service.create_agent_with_config,
             send_agent_prompt=fake_send_agent_prompt,
         )
@@ -198,7 +198,7 @@ class ArchitectHireFlowTests(unittest.IsolatedAsyncioTestCase):
             {"id": pending_hire["id"]},
             self.state,
             resolve_base_dir=fake_resolve_base_dir,
-            resolve_weaver_launch_config=fake_resolve_weaver_launch_config,
+            resolve_engineer_launch_config=fake_resolve_engineer_launch_config,
             create_agent_with_config=service.create_agent_with_config,
             send_agent_prompt=fake_send_agent_prompt,
         )

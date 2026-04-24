@@ -16,12 +16,12 @@
         - button "✕" [ref=e548] [cursor=pointer]
       - generic [ref=e550]:
         - generic [ref=e551]:
-          - generic "Weaver (running)" [ref=e552]:
+          - generic "Engineer (running)" [ref=e552]:
             - generic [ref=e553]:
               - button "✕" [ref=e554] [cursor=pointer]
               - button "⏸" [ref=e555] [cursor=pointer]
             - generic [ref=e556]: ⬟
-            - generic [ref=e557]: Weaver
+            - generic [ref=e557]: Engineer
             - generic [ref=e558]: CX
           - generic "research-standalone-xterm (running)" [ref=e559]:
             - generic [ref=e560]:
@@ -50,7 +50,7 @@
             - button "▾" [ref=e580]
         - generic [ref=e581]:
           - generic [ref=e582]:
-            - generic [ref=e583]: Weaver
+            - generic [ref=e583]: Engineer
             - generic [ref=e584]: Codex
             - generic [ref=e585]: Idle
           - generic [ref=e586]:
@@ -64,7 +64,7 @@
             - generic [ref=e594]: Session ended
         - generic [ref=e595]:
           - generic [ref=e596]:
-            - generic [ref=e597]: Weaver terminals
+            - generic [ref=e597]: Engineer terminals
             - generic [ref=e598]: "0"
           - generic [ref=e600] [cursor=pointer]:
             - generic [ref=e601]: +
@@ -79,12 +79,12 @@
         - button "⌘" [ref=e611] [cursor=pointer]
         - button "✕" [ref=e612] [cursor=pointer]
       - generic [ref=e615]:
-        - generic "Weaver (running)" [ref=e616]:
+        - generic "Engineer (running)" [ref=e616]:
           - generic [ref=e617]:
             - button "✕"
             - button "▶"
           - generic [ref=e618]: ⬟
-          - generic [ref=e619]: Weaver
+          - generic [ref=e619]: Engineer
           - generic [ref=e620]: CC
         - generic [ref=e621] [cursor=pointer]:
           - generic [ref=e622]: +
@@ -99,12 +99,12 @@
         - button "⌘" [ref=e631] [cursor=pointer]
         - button "✕" [ref=e632] [cursor=pointer]
       - generic [ref=e635]:
-        - generic "Weaver (idle)" [ref=e636]:
+        - generic "Engineer (idle)" [ref=e636]:
           - generic [ref=e637]:
             - button "✕"
             - button "▶"
           - generic [ref=e638]: ⬟
-          - generic [ref=e639]: Weaver
+          - generic [ref=e639]: Engineer
           - generic [ref=e640]: CC
         - generic "social-network (idle)" [ref=e641]:
           - generic [ref=e642]:
@@ -119,7 +119,7 @@
           - button "▾" [ref=e650]
   - generic [ref=e652]:
     - generic [ref=e653]:
-      - generic [ref=e654]: Weaver — Loom
+      - generic [ref=e654]: Engineer — Loom
       - button "⏸" [ref=e656] [cursor=pointer]
     - generic [ref=e657]:
       - button "Journal" [ref=e658] [cursor=pointer]
@@ -155,12 +155,12 @@
           - generic [ref=e689]:
             - generic [ref=e690]: checkpoint
             - generic [ref=e691]: 2m ago
-          - generic [ref=e692]: "Checkpoint after opening the parallel performance-investigation wave: board now has 2 active in-progress tasks. LOOM:371 remains on agent 9c62eadd (`research-standalone-xterm`) for standalone PTY/xterm startup parity, while LOOM:372 is now running on agent af5c677c (`research-perf-regression`) to investigate the recent UI hang / slow command-dispatch regression. The performance stream includes the user’s concrete repro that the Weaver pause/unpause-events control itself responds slowly, so the likely hot path includes websocket command delivery, server weaver pause/resume handlers, and frontend rerender pressure. No further wave expansion yet; these two streams are independent and high priority."
+          - generic [ref=e692]: "Checkpoint after opening the parallel performance-investigation wave: board now has 2 active in-progress tasks. LOOM:371 remains on agent 9c62eadd (`research-standalone-xterm`) for standalone PTY/xterm startup parity, while LOOM:372 is now running on agent af5c677c (`research-perf-regression`) to investigate the recent UI hang / slow command-dispatch regression. The performance stream includes the user’s concrete repro that the Engineer pause/unpause-events control itself responds slowly, so the likely hot path includes websocket command delivery, server engineer pause/resume handlers, and frontend rerender pressure. No further wave expansion yet; these two streams are independent and high priority."
         - generic [ref=e693]:
           - generic [ref=e694]:
             - generic [ref=e695]: decision
             - generic [ref=e696]: 3m ago
-          - generic [ref=e697]: "Created and dispatched LOOM:372 (`feature/research`) to new agent af5c677c (`research-perf-regression`) to investigate the newly reported UI hangs / slow command dispatch regression in parallel with LOOM:371. I updated the task before dispatch to include the user's concrete repro clue that the Weaver pause/unpause-events control itself is slow to take effect, which strongly suggests a command round-trip and/or UI rerender regression rather than a standalone-only issue. This is an appropriate parallel wave because it targets a separate high-priority product-quality problem and can progress independently while the standalone PTY/xterm startup parity stream continues."
+          - generic [ref=e697]: "Created and dispatched LOOM:372 (`feature/research`) to new agent af5c677c (`research-perf-regression`) to investigate the newly reported UI hangs / slow command dispatch regression in parallel with LOOM:371. I updated the task before dispatch to include the user's concrete repro clue that the Engineer pause/unpause-events control itself is slow to take effect, which strongly suggests a command round-trip and/or UI rerender regression rather than a standalone-only issue. This is an appropriate parallel wave because it targets a separate high-priority product-quality problem and can progress independently while the standalone PTY/xterm startup parity stream continues."
         - generic [ref=e698]:
           - generic [ref=e699]:
             - generic [ref=e700]: checkpoint
@@ -170,12 +170,12 @@
           - generic [ref=e704]:
             - generic [ref=e705]: decision
             - generic [ref=e706]: 8m ago
-          - generic [ref=e707]: "Approved the LOOM:370 research plan at Weaver level and advanced the stream into implementation. Because LOOM:370 had already completed and cleared the agent's linked-task context, I did not ask the same agent to derive directly — that pattern previously hit the Loom workflow bug where post-completion derivation fails with 'No linked task to derive from'. Instead I manually created LOOM:371 (`feature/implement`) with the approved bounded scope and dispatched it back to agent 9c62eadd on the same branch so the stream keeps its context and worktree continuity. Implementation scope is intentionally narrow: bring standalone `loom/local_pty.py` startup/input-ready behavior into parity with the iTerm2 bridge path, prove the Codex first-send loss is fixed, and only absorb other directly related startup issues if they show up in smoke testing."
+          - generic [ref=e707]: "Approved the LOOM:370 research plan at Engineer level and advanced the stream into implementation. Because LOOM:370 had already completed and cleared the agent's linked-task context, I did not ask the same agent to derive directly — that pattern previously hit the Loom workflow bug where post-completion derivation fails with 'No linked task to derive from'. Instead I manually created LOOM:371 (`feature/implement`) with the approved bounded scope and dispatched it back to agent 9c62eadd on the same branch so the stream keeps its context and worktree continuity. Implementation scope is intentionally narrow: bring standalone `loom/local_pty.py` startup/input-ready behavior into parity with the iTerm2 bridge path, prove the Codex first-send loss is fixed, and only absorb other directly related startup issues if they show up in smoke testing."
         - generic [ref=e708]:
           - generic [ref=e709]:
             - generic [ref=e710]: observation
             - generic [ref=e711]: 11m ago
-          - generic [ref=e712]: "Confirmed a digest/agent rollup mismatch on 2026-04-12: the user-facing digest mentioned an additional active item (`deploy-waves-1-2-data-quality-fixes-5`), but `weaver_agents_list` and `weaver_board_summary` still show only one active Loom worker (`research-standalone-xterm` on LOOM:370) plus the Weaver itself. Treating the extra label as stale or non-Loom noise unless it later appears in Loom's actual board/agent state."
+          - generic [ref=e712]: "Confirmed a digest/agent rollup mismatch on 2026-04-12: the user-facing digest mentioned an additional active item (`deploy-waves-1-2-data-quality-fixes-5`), but `engineer_agents_list` and `engineer_board_summary` still show only one active Loom worker (`research-standalone-xterm` on LOOM:370) plus the Engineer itself. Treating the extra label as stale or non-Loom noise unless it later appears in Loom's actual board/agent state."
         - generic [ref=e713]:
           - generic [ref=e714]:
             - generic [ref=e715]: checkpoint
@@ -205,12 +205,12 @@
           - generic [ref=e739]:
             - generic [ref=e740]: decision
             - generic [ref=e741]: 47m ago
-          - generic [ref=e742]: "Created LOOM:369 as a ready oneshot/fix task for the missing Open Streams UI wiring bug. Scope is to restore the Open Streams section in the Weaver Journal tab by fixing the backend→frontend data plumbing (`weaver_streams` / board-summary hydration) while preserving group scoping and rerender stability. Per user request, the task was not dispatched."
+          - generic [ref=e742]: "Created LOOM:369 as a ready oneshot/fix task for the missing Open Streams UI wiring bug. Scope is to restore the Open Streams section in the Engineer Journal tab by fixing the backend→frontend data plumbing (`engineer_streams` / board-summary hydration) while preserving group scoping and rerender stability. Per user request, the task was not dispatched."
         - generic [ref=e743]:
           - generic [ref=e744]:
             - generic [ref=e745]: decision
             - generic [ref=e746]: 1h ago
-          - generic [ref=e747]: Cleaned up stale Loom metadata for the dormant native desktop shell stream after confirming its commits were already on main. Cleared worktree_boundary and resume_after_boundary_task_id for LOOM:305, LOOM:306, LOOM:307, LOOM:308, and LOOM:309:1 via board_update_task. Verified the cleanup by confirming weaver_stream_show(task='LOOM:305') now returns 'Stream not found' and the former boundary tasks no longer carry worktree_boundary metadata.
+          - generic [ref=e747]: Cleaned up stale Loom metadata for the dormant native desktop shell stream after confirming its commits were already on main. Cleared worktree_boundary and resume_after_boundary_task_id for LOOM:305, LOOM:306, LOOM:307, LOOM:308, and LOOM:309:1 via board_update_task. Verified the cleanup by confirming engineer_stream_show(task='LOOM:305') now returns 'Stream not found' and the former boundary tasks no longer carry worktree_boundary metadata.
         - generic [ref=e748]:
           - generic [ref=e749]:
             - generic [ref=e750]: decision
@@ -220,7 +220,7 @@
           - generic [ref=e754]:
             - generic [ref=e755]: checkpoint
             - generic [ref=e756]: 4h ago
-          - generic [ref=e757]: Per user instruction on 2026-04-12, merged LOOM:346 and LOOM:352 despite pending manual validation. I cherry-picked LOOM:346 boundary commit a31f081 onto main as be50ce2c9d5bf5a9c0efa5c76f32b19478882cd4, resolved the webview Weaver-pane conflict by combining LOOM:346's collapsible section ordering with LOOM:347's terminal overrides, and reran node --test tests/frontend_group_settings_modal.test.js tests/frontend_state_regression.test.js plus python3 -m unittest tests.test_frontend_group_settings tests.test_frontend_state. I cherry-picked LOOM:352 boundary commit f6f685a onto main as 066c647ed28d02de03f5db5505522e9034c09318 and reran the same targeted frontend tests. I then marked both tasks' worktree boundaries merged in Loom. Also discarded the dormant ready-to-merge streams for LOOM:118–118:2, LOOM:263–268, and LOOM:261/269 by clearing their stored worktree boundaries in Loom and deleting local branches loom/remove-slug-system-use-ids-as-8559a44, loom/fix-task-card-label-editor-int-b97de8f, and loom/add-weaver-creation-to-the-new-5644046.
+          - generic [ref=e757]: Per user instruction on 2026-04-12, merged LOOM:346 and LOOM:352 despite pending manual validation. I cherry-picked LOOM:346 boundary commit a31f081 onto main as be50ce2c9d5bf5a9c0efa5c76f32b19478882cd4, resolved the webview Engineer-pane conflict by combining LOOM:346's collapsible section ordering with LOOM:347's terminal overrides, and reran node --test tests/frontend_group_settings_modal.test.js tests/frontend_state_regression.test.js plus python3 -m unittest tests.test_frontend_group_settings tests.test_frontend_state. I cherry-picked LOOM:352 boundary commit f6f685a onto main as 066c647ed28d02de03f5db5505522e9034c09318 and reran the same targeted frontend tests. I then marked both tasks' worktree boundaries merged in Loom. Also discarded the dormant ready-to-merge streams for LOOM:118–118:2, LOOM:263–268, and LOOM:261/269 by clearing their stored worktree boundaries in Loom and deleting local branches loom/remove-slug-system-use-ids-as-8559a44, loom/fix-task-card-label-editor-int-b97de8f, and loom/add-engineer-creation-to-the-new-5644046.
         - generic [ref=e758]:
           - generic [ref=e759]:
             - generic [ref=e760]: checkpoint
@@ -230,7 +230,7 @@
           - generic [ref=e764]:
             - generic [ref=e765]: observation
             - generic [ref=e766]: 19h ago
-          - generic [ref=e767]: "Note for human: Board is idle after merging LOOM:348. Remaining Backlog items are all deferred, so I did not auto-dispatch a new wave. The main non-deferred outstanding work is dormant manual-validation-gated streams: LOOM:346 (Weaver settings section order/collapse smoke) and LOOM:352 (nested-task indentation live board smoke). There are also older dormant ready-to-merge streams if we want to do cleanup/merge work next."
+          - generic [ref=e767]: "Note for human: Board is idle after merging LOOM:348. Remaining Backlog items are all deferred, so I did not auto-dispatch a new wave. The main non-deferred outstanding work is dormant manual-validation-gated streams: LOOM:346 (Engineer settings section order/collapse smoke) and LOOM:352 (nested-task indentation live board smoke). There are also older dormant ready-to-merge streams if we want to do cleanup/merge work next."
         - generic [ref=e768]:
           - generic [ref=e769]:
             - generic [ref=e770]: decision
@@ -240,7 +240,7 @@
           - generic [ref=e774]:
             - generic [ref=e775]: checkpoint
             - generic [ref=e776]: 19h ago
-          - generic [ref=e777]: "Checkpoint after LOOM:347 and LOOM:351 completion wave: merged LOOM:347 Weaver terminal override settings at 2c440a90feccb6a1bba6bb1a1f7e0957e781ccc2 after manual Weaver review because the required feature/review derive failed with \"No linked task to derive from\". Merged LOOM:351 mark-verified action at cbe14d611135ca7ac8d256622fd881a3d6e545b5. Closed both completed agents. Dispatched LOOM:348 to new agent 30a5cec8 as the next board/task UI stream; board should now have one active worker and 7 backlog tasks."
+          - generic [ref=e777]: "Checkpoint after LOOM:347 and LOOM:351 completion wave: merged LOOM:347 Engineer terminal override settings at 2c440a90feccb6a1bba6bb1a1f7e0957e781ccc2 after manual Engineer review because the required feature/review derive failed with \"No linked task to derive from\". Merged LOOM:351 mark-verified action at cbe14d611135ca7ac8d256622fd881a3d6e545b5. Closed both completed agents. Dispatched LOOM:348 to new agent 30a5cec8 as the next board/task UI stream; board should now have one active worker and 7 backlog tasks."
         - generic [ref=e778]:
           - generic [ref=e779]:
             - generic [ref=e780]: decision
@@ -260,12 +260,12 @@
           - generic [ref=e794]:
             - generic [ref=e795]: decision
             - generic [ref=e796]: 20h ago
-          - generic [ref=e797]: Resolved LOOM:347:1 with user approval. The LOOM:347 stream may proceed with the bounded implementation plan for persisted Weaver terminal override settings (directory/profile/shell/tab color), launch-resolution overlay, and Group Settings UI, while explicitly leaving the quick Create/Relaunch Weaver modal unchanged for this pass.
+          - generic [ref=e797]: Resolved LOOM:347:1 with user approval. The LOOM:347 stream may proceed with the bounded implementation plan for persisted Engineer terminal override settings (directory/profile/shell/tab color), launch-resolution overlay, and Group Settings UI, while explicitly leaving the quick Create/Relaunch Engineer modal unchanged for this pass.
         - generic [ref=e798]:
           - generic [ref=e799]:
             - generic [ref=e800]: decision
             - generic [ref=e801]: 20h ago
-          - generic [ref=e802]: LOOM:347 research produced a bounded implementation plan but correctly requested human approval because it adds persisted SQLite columns for Weaver terminal override settings. Hold the LOOM:347 stream awaiting user approval or revision. LOOM:354 completion was already processed by merging it and reusing agent 03a138c0 for LOOM:351, so the only new blocker is the LOOM:347:1 approval ask.
+          - generic [ref=e802]: LOOM:347 research produced a bounded implementation plan but correctly requested human approval because it adds persisted SQLite columns for Engineer terminal override settings. Hold the LOOM:347 stream awaiting user approval or revision. LOOM:354 completion was already processed by merging it and reusing agent 03a138c0 for LOOM:351, so the only new blocker is the LOOM:347:1 approval ask.
         - generic [ref=e803]:
           - generic [ref=e804]:
             - generic [ref=e805]: checkpoint
@@ -280,12 +280,12 @@
           - generic [ref=e814]:
             - generic [ref=e815]: checkpoint
             - generic [ref=e816]: 20h ago
-          - generic [ref=e817]: "Checkpoint after LOOM:366 merge and next-wave dispatch: board moved from idle to two active streams. LOOM:347 is now researching Weaver terminal override settings on agent 7349e952. LOOM:354 is now implementing the inline add-task lane picker on agent 03a138c0. LOOM:348 and LOOM:351 remain in Backlog and are intentionally held so only one new board/task UI implementation stream is active at a time."
+          - generic [ref=e817]: "Checkpoint after LOOM:366 merge and next-wave dispatch: board moved from idle to two active streams. LOOM:347 is now researching Engineer terminal override settings on agent 7349e952. LOOM:354 is now implementing the inline add-task lane picker on agent 03a138c0. LOOM:348 and LOOM:351 remain in Backlog and are intentionally held so only one new board/task UI implementation stream is active at a time."
         - generic [ref=e818]:
           - generic [ref=e819]:
             - generic [ref=e820]: decision
             - generic [ref=e821]: 20h ago
-          - generic [ref=e822]: "Board is idle after merging LOOM:366. Current ready backlog is LOOM:347, LOOM:348, LOOM:351, and LOOM:354. User signaled there are more tasks ready for dispatching. To keep the next wave reviewable while respecting the dormant LOOM:346/352 validation gates, dispatch a conservative two-stream wave: LOOM:347 (feature/research on Weaver terminal override settings) plus LOOM:354 (oneshot/feature for inline add-task lane picker). Hold LOOM:348 and LOOM:351 until one board/task UI path lands."
+          - generic [ref=e822]: "Board is idle after merging LOOM:366. Current ready backlog is LOOM:347, LOOM:348, LOOM:351, and LOOM:354. User signaled there are more tasks ready for dispatching. To keep the next wave reviewable while respecting the dormant LOOM:346/352 validation gates, dispatch a conservative two-stream wave: LOOM:347 (feature/research on Engineer terminal override settings) plus LOOM:354 (oneshot/feature for inline add-task lane picker). Hold LOOM:348 and LOOM:351 until one board/task UI path lands."
         - generic [ref=e823]:
           - generic [ref=e824]:
             - generic [ref=e825]: decision
@@ -295,17 +295,17 @@
           - generic [ref=e829]:
             - generic [ref=e830]: decision
             - generic [ref=e831]: 20h ago
-          - generic [ref=e832]: Processed completion of the Weaver hint-generation blocker-fix review. Stream loom/research-weaver-hint-generatio-5a7dc5b was ready_to_merge after LOOM:365:5 passed clean review, so I merged it into main (merge commit 55403669) and closed review agent 344ccdd3. With the board otherwise idle and a freshly reported user-facing board bug ready to go, I immediately dispatched LOOM:366 (quick-label optimistic update fix) to new agent cb87f581 rather than leaving the board idle.
+          - generic [ref=e832]: Processed completion of the Engineer hint-generation blocker-fix review. Stream loom/research-engineer-hint-generatio-5a7dc5b was ready_to_merge after LOOM:365:5 passed clean review, so I merged it into main (merge commit 55403669) and closed review agent 344ccdd3. With the board otherwise idle and a freshly reported user-facing board bug ready to go, I immediately dispatched LOOM:366 (quick-label optimistic update fix) to new agent cb87f581 rather than leaving the board idle.
         - generic [ref=e833]:
           - generic [ref=e834]:
             - generic [ref=e835]: decision
             - generic [ref=e836]: 20h ago
-          - generic [ref=e837]: Processed the blocker-fix review handoff on the Weaver hint-generation stream. LOOM:365:5 (feature/review) was derived and is now active on review agent 344ccdd3. I closed the now-idle fixer agent 18586e29 to keep a single mutable owner on the stream while the review runs.
+          - generic [ref=e837]: Processed the blocker-fix review handoff on the Engineer hint-generation stream. LOOM:365:5 (feature/review) was derived and is now active on review agent 344ccdd3. I closed the now-idle fixer agent 18586e29 to keep a single mutable owner on the stream while the review runs.
         - generic [ref=e838]:
           - generic [ref=e839]:
             - generic [ref=e840]: decision
             - generic [ref=e841]: 20h ago
-          - generic [ref=e842]: "Processed review blocker derivation on the Weaver hint-generation stream. LOOM:365:4 was auto-dispatched with two concrete blockers: (1) only displayed digest hints should enter cooldown, with regression coverage for over-limit hint sets; (2) cleanup/ready-to-merge hints must exclude dirty worktrees to avoid destructive or guaranteed-failing suggestions. I closed the now-idle review agent 8aeb1974 and left fixer agent 18586e29 as the sole active owner on the stream."
+          - generic [ref=e842]: "Processed review blocker derivation on the Engineer hint-generation stream. LOOM:365:4 was auto-dispatched with two concrete blockers: (1) only displayed digest hints should enter cooldown, with regression coverage for over-limit hint sets; (2) cleanup/ready-to-merge hints must exclude dirty worktrees to avoid destructive or guaranteed-failing suggestions. I closed the now-idle review agent 8aeb1974 and left fixer agent 18586e29 as the sole active owner on the stream."
         - generic [ref=e843]:
           - generic [ref=e844]:
             - generic [ref=e845]: decision
@@ -315,7 +315,7 @@
           - generic [ref=e849]:
             - generic [ref=e850]: decision
             - generic [ref=e851]: 20h ago
-          - generic [ref=e852]: "Investigated the newly reported post-LOOM:337 quick-label lag and created LOOM:366 as a ready oneshot/fix task. Root cause appears to be stale local task state during boardQuickAddLabel/boardQuickRemoveLabel rerenders: the quick editor stays open but rerenders against old state until task_upsert arrives. Separately, LOOM:365:2 completed implementation of Weaver hint-generation v1 without expressing the required feature/review transition, so I sent the implementation agent a follow-up to derive the proper review handoff on the same branch/worktree rather than merging directly."
+          - generic [ref=e852]: "Investigated the newly reported post-LOOM:337 quick-label lag and created LOOM:366 as a ready oneshot/fix task. Root cause appears to be stale local task state during boardQuickAddLabel/boardQuickRemoveLabel rerenders: the quick editor stays open but rerenders against old state until task_upsert arrives. Separately, LOOM:365:2 completed implementation of Engineer hint-generation v1 without expressing the required feature/review transition, so I sent the implementation agent a follow-up to derive the proper review handoff on the same branch/worktree rather than merging directly."
         - generic [ref=e853]:
           - generic [ref=e854]:
             - generic [ref=e855]: decision
@@ -325,17 +325,17 @@
           - generic [ref=e859]:
             - generic [ref=e860]: decision
             - generic [ref=e861]: 21h ago
-          - generic [ref=e862]: Resolved LOOM:365:1 with human approval for the bounded Weaver hint-generation v1 plan. The research agent can now proceed from plan approval into the next action on the same stream per the feature/research workflow.
+          - generic [ref=e862]: Resolved LOOM:365:1 with human approval for the bounded Engineer hint-generation v1 plan. The research agent can now proceed from plan approval into the next action on the same stream per the feature/research workflow.
         - generic [ref=e863]:
           - generic [ref=e864]:
             - generic [ref=e865]: decision
             - generic [ref=e866]: 22h ago
-          - generic [ref=e867]: "Idle-board planning turn: with 0 active workers and backlog remaining, I groomed raw triage LOOM:365 into a dispatchable research task (action feature/research, label ready) focused on proactive Weaver hints for cleanup and long-running-task nudges. I then dispatched LOOM:365 to new agent 5a7dc5b9 because the other ready triage work remains intentionally paused behind manual validation on LOOM:346 and LOOM:352."
+          - generic [ref=e867]: "Idle-board planning turn: with 0 active workers and backlog remaining, I groomed raw triage LOOM:365 into a dispatchable research task (action feature/research, label ready) focused on proactive Engineer hints for cleanup and long-running-task nudges. I then dispatched LOOM:365 to new agent 5a7dc5b9 because the other ready triage work remains intentionally paused behind manual validation on LOOM:346 and LOOM:352."
         - generic [ref=e868]:
           - generic [ref=e869]:
             - generic [ref=e870]: observation
             - generic [ref=e871]: 22h ago
-          - generic [ref=e872]: "Note for human: Board is now idle after merging LOOM:364. I did not auto-dispatch the next wave because the remaining ready triage work is still gated behind manual validation on LOOM:346 (Weaver settings UI smoke) and LOOM:352 (board indentation smoke), and LOOM:365 is still a raw triage item that needs grooming before dispatch."
+          - generic [ref=e872]: "Note for human: Board is now idle after merging LOOM:364. I did not auto-dispatch the next wave because the remaining ready triage work is still gated behind manual validation on LOOM:346 (Engineer settings UI smoke) and LOOM:352 (board indentation smoke), and LOOM:365 is still a raw triage item that needs grooming before dispatch."
         - generic [ref=e873]:
           - generic [ref=e874]:
             - generic [ref=e875]: decision
@@ -360,22 +360,22 @@
           - generic [ref=e894]:
             - generic [ref=e895]: decision
             - generic [ref=e896]: 22h ago
-          - generic [ref=e897]: "Performed a worker cleanup sweep after the user flagged agent sprawl. Closed seven no-longer-needed worker sessions while preserving their worktrees: merged/completed streams `classify-or-suppress-orphaned`, `fix-derived-task-follow-up-prompt-so-it`, `if-i-right-click-on-an-agent-and-click`, `when-a-derived-task-is-marked-as-merged`, and `review-orphaned-historical-stream`, plus the paused awaiting-human-validation streams `modify-the-weaver-settings-so-that-we` and `when-showing-tasks-in-the-ui-we-should`. Left only the two active implementation agents (`review-the-important-when-you-are-done` on LOOM:364 and `add-an-animation-to-the-agent-s-card` on LOOM:345) plus Weaver running."
+          - generic [ref=e897]: "Performed a worker cleanup sweep after the user flagged agent sprawl. Closed seven no-longer-needed worker sessions while preserving their worktrees: merged/completed streams `classify-or-suppress-orphaned`, `fix-derived-task-follow-up-prompt-so-it`, `if-i-right-click-on-an-agent-and-click`, `when-a-derived-task-is-marked-as-merged`, and `review-orphaned-historical-stream`, plus the paused awaiting-human-validation streams `modify-the-engineer-settings-so-that-we` and `when-showing-tasks-in-the-ui-we-should`. Left only the two active implementation agents (`review-the-important-when-you-are-done` on LOOM:364 and `add-an-animation-to-the-agent-s-card` on LOOM:345) plus Engineer running."
         - generic [ref=e898]:
           - generic [ref=e899]:
             - generic [ref=e900]: decision
             - generic [ref=e901]: 22h ago
-          - generic [ref=e902]: "LOOM:344 research completed with a bounded cleanup plan for the mandatory Loom MCP completion-message prompt flow, and I treated it as Weaver-approvable. I created LOOM:364 (`Implement completion-message prompt cleanup for Loom MCP dispatch postscript`) and dispatched it to the same agent `review-the-important-when-you-are-done` so it can reuse the fresh prompt/context investigation on its existing clean branch."
+          - generic [ref=e902]: "LOOM:344 research completed with a bounded cleanup plan for the mandatory Loom MCP completion-message prompt flow, and I treated it as Engineer-approvable. I created LOOM:364 (`Implement completion-message prompt cleanup for Loom MCP dispatch postscript`) and dispatched it to the same agent `review-the-important-when-you-are-done` so it can reuse the fresh prompt/context investigation on its existing clean branch."
         - generic [ref=e903]:
           - generic [ref=e904]:
             - generic [ref=e905]: decision
             - generic [ref=e906]: 22h ago
-          - generic [ref=e907]: "Merged the shared popup-fix branch from agent `if-i-right-click-on-an-agent-and-click` after LOOM:355 and LOOM:349 both completed with passed frontend regression coverage and Playwright/manual smoke. I did not backfill another dispatch slot immediately because the remaining ready backlog is concentrated on surfaces currently paused behind pending manual validation (Weaver settings behind LOOM:346 and board/task UI behind LOOM:352), while LOOM:344 research and LOOM:345 agent-card polish are still actively in progress."
+          - generic [ref=e907]: "Merged the shared popup-fix branch from agent `if-i-right-click-on-an-agent-and-click` after LOOM:355 and LOOM:349 both completed with passed frontend regression coverage and Playwright/manual smoke. I did not backfill another dispatch slot immediately because the remaining ready backlog is concentrated on surfaces currently paused behind pending manual validation (Engineer settings behind LOOM:346 and board/task UI behind LOOM:352), while LOOM:344 research and LOOM:345 agent-card polish are still actively in progress."
         - generic [ref=e908]:
           - generic [ref=e909]:
             - generic [ref=e910]: decision
             - generic [ref=e911]: 22h ago
-          - generic [ref=e912]: LOOM:286 completed with passed targeted tests and manual smoke, so I merged its branch into main. To keep the wave at three active streams without widening onto the pending-validation Weaver settings or board-task surfaces, I dispatched LOOM:345 as the next independent UI polish task on the agent-card surface.
+          - generic [ref=e912]: LOOM:286 completed with passed targeted tests and manual smoke, so I merged its branch into main. To keep the wave at three active streams without widening onto the pending-validation Engineer settings or board-task surfaces, I dispatched LOOM:345 as the next independent UI polish task on the agent-card surface.
         - generic [ref=e913]:
           - generic [ref=e914]:
             - generic [ref=e915]: decision
@@ -385,7 +385,7 @@
           - generic [ref=e919]:
             - generic [ref=e920]: decision
             - generic [ref=e921]: 22h ago
-          - generic [ref=e922]: LOOM:350 completed with passed targeted backend verification and only optional live smoke remaining, so I treated the slot as free and dispatched LOOM:286 next. That keeps the wave full with an unrelated bugfix on derived-task dispatch semantics while avoiding the board and Weaver-settings surfaces that are still waiting on manual UI validation.
+          - generic [ref=e922]: LOOM:350 completed with passed targeted backend verification and only optional live smoke remaining, so I treated the slot as free and dispatched LOOM:286 next. That keeps the wave full with an unrelated bugfix on derived-task dispatch semantics while avoiding the board and Engineer-settings surfaces that are still waiting on manual UI validation.
         - generic [ref=e923]:
           - generic [ref=e924]:
             - generic [ref=e925]: decision
@@ -408,5 +408,5 @@
     - button "Context" [ref=e15] [cursor=pointer]:
       - img [ref=e17]
       - generic [ref=e20]: Context
-    - button "⚖ Weaver" [active] [ref=e21] [cursor=pointer]
+    - button "⚖ Engineer" [active] [ref=e21] [cursor=pointer]
     - button "⚠ Events" [ref=e22] [cursor=pointer]

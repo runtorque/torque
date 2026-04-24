@@ -30,7 +30,7 @@ function baseSandbox() {
       agents: {},
       board_tasks: {},
       children: {},
-      weaver_settings: {},
+      engineer_settings: {},
       pending_hires: {},
       decisions: {},
     },
@@ -201,11 +201,11 @@ test('focused architect decision expand and collapse preserves scroll position',
   context.renderAgentPanel();
   content.scrollTop = 180;
 
-  vm.runInContext(`weaverToggleDecision('decision-1')`, context);
+  vm.runInContext(`engineerToggleDecision('decision-1')`, context);
   assert.equal(content.scrollTop, 180);
 
   content.scrollTop = 180;
-  vm.runInContext(`weaverToggleDecision('decision-1')`, context);
+  vm.runInContext(`engineerToggleDecision('decision-1')`, context);
   assert.equal(content.scrollTop, 180);
 });
 

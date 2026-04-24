@@ -8,7 +8,7 @@ Loom is a local orchestration system built around a long-running Python daemon a
 
 The daemon:
 
-- manages groups, agents, terminals, tasks, schedules, and weaver state
+- manages groups, agents, terminals, tasks, schedules, and engineer state
 - exposes HTTP and WebSocket endpoints
 - talks to iTerm2 through the Python API
 - persists state in SQLite
@@ -23,7 +23,7 @@ Primary modules:
 - `loom/actions.py`
 - `loom/worktree.py`
 - `loom/mcp.py`
-- `loom/mcp_weaver.py`
+- `loom/mcp_engineer.py`
 
 ### Frontend
 
@@ -43,7 +43,7 @@ SQLite is the source of truth for persistent state, including:
 - group settings
 - board tasks and lanes
 - schedules
-- weaver settings and journal
+- engineer settings and journal
 - agent history
 
 This is also what lets some CLI reads work without the daemon.
@@ -95,14 +95,14 @@ When enabled, Loom creates one git worktree per agent. The worktree manager hand
 
 See [Worktrees](worktrees.md) for the user workflow.
 
-## Weaver and MCP
+## Engineer and MCP
 
 Loom exposes two MCP-oriented surfaces:
 
 - agent-facing Loom tools for reporting progress and deriving work
-- weaver-facing orchestration tools for board control, journaling, notifications, agent messaging, and worktree operations
+- engineer-facing orchestration tools for board control, journaling, notifications, agent messaging, and worktree operations
 
-The weaver is implemented as a special per-group agent with persistent instructions and a journal-backed recovery path.
+The engineer is implemented as a special per-group agent with persistent instructions and a journal-backed recovery path.
 
 ## Runtime Modes
 
@@ -118,5 +118,5 @@ That works because the UI is already served over HTTP/WebSocket and is not tied 
 
 - [Operations](operations.md)
 - [Actions & Templates](actions.md)
-- [Weaver](weaver.md)
+- [Engineer](engineer.md)
 - [Plans Archive](plans/index.md)

@@ -275,7 +275,7 @@ def _get_group_display_ids(state, group_name):
             continue
         owner_id = str(
             getattr(cell, "owner_engineer_id", "")
-            or getattr(cell, "created_by_weaver_id", "")
+            or getattr(cell, "created_by_engineer_id", "")
             or ""
         ).strip()
         owner = visible_agents.get(owner_id) if owner_id else None

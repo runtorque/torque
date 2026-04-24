@@ -3539,7 +3539,7 @@ def cmd_ai_reply(args):
                     cell_id=cell["id"], action="reply",
                     message=args.message)
     check_ok(resp)
-    print("Reply sent to weaver.")
+    print("Reply sent to engineer.")
 
 
 def _resolve_digest_agent(args):
@@ -3693,25 +3693,25 @@ def cmd_memory_unpin(args):
     print(f"Unpinned: {entry.get('id', args.entry_id)}")
 
 
-def cmd_weaver_journal(args):
-    """Read weaver journal entries from SQLite."""
+def cmd_engineer_journal(args):
+    """Read engineer journal entries from SQLite."""
     st = get_state_local(args.port)
     group = getattr(args, "group", "")
-    # Auto-detect group: find one with a weaver_agent_id
+    # Auto-detect group: find one with a engineer_agent_id
     if not group:
         for gn, gs in st.get("group_settings", {}).items():
-            if isinstance(gs, dict) and gs.get("weaver_agent_id"):
+            if isinstance(gs, dict) and gs.get("engineer_agent_id"):
                 group = gn
                 break
     if not group:
-        _die("No weaver found. Use -g to specify a group.")
+        _die("No engineer found. Use -g to specify a group.")
 
     # Try reading from daemon API first, fallback to SQLite
     tail = getattr(args, "tail", 20) or 20
     entry_type = getattr(args, "type", "") or ""
     def _read_journal(conn):
         sql = ("SELECT id, group_name, timestamp, entry_type, entry "
-               "FROM weaver_journal WHERE group_name=?")
+               "FROM engineer_journal WHERE group_name=?")
         params = [group]
         if entry_type:
             sql += " AND entry_type=?"
@@ -3729,7 +3729,7 @@ def cmd_weaver_journal(args):
             entries = []
     else:
         try:
-            resp = api_call("weaver_journal_read", port=args.port,
+            resp = api_call("engineer_journal_read", port=args.port,
                             group=group, tail=tail, entry_type=entry_type)
             data = check_ok(resp)
             entries = data.get("entries", [])
@@ -4352,6 +4352,18 @@ def build_parser():
     p.add_argument("identifier", help="Engineer ID, slug, or name")
     p.set_defaults(func=cmd_engineer_rehire)
 
+    p = eng_sub.add_parser("journal", aliases=["j"],
+                           help="Read engineer decision journal")
+    p.add_argument("-g", "--group", help="Group name")
+    p.add_argument("-n", "--tail", type=int, default=20,
+                   help="Number of entries (default: 20)")
+    p.add_argument("-t", "--type",
+                   choices=["decision", "observation", "checkpoint", "plan"],
+                   help="Filter by entry type")
+    p.add_argument("--json", action="store_true",
+                   help="JSON output")
+    p.set_defaults(func=cmd_engineer_journal)
+
     # -- workflow breach ----------------------------------------------------
     p = sub.add_parser("workflow-breach",
                        help="Report a workflow-discipline breach event")
@@ -4807,8 +4819,8 @@ def build_parser():
     p.set_defaults(func=cmd_ai_ask)
 
     p = ai_sub.add_parser("reply",
-                          help="Reply to a message from the weaver")
-    p.add_argument("message", help="Reply text to send back to the weaver")
+                          help="Reply to a message from the engineer")
+    p.add_argument("message", help="Reply text to send back to the engineer")
     p.add_argument("task_ref", nargs="?",
                    help="Task slug/ID (auto-detected)")
     p.set_defaults(func=cmd_ai_reply)
@@ -4970,24 +4982,6 @@ def build_parser():
     p = dig_sub.add_parser("resume", help="Resume digest delivery for one agent")
     p.add_argument("identifier", help="Agent ID, slug, name, or ID prefix")
     p.set_defaults(func=cmd_digest_resume)
-
-    # -- weaver -------------------------------------------------------------
-    weav = sub.add_parser("weaver", aliases=["w"],
-                          help="Weaver orchestrator commands")
-    weav.set_defaults(func=cmd_weaver_journal, _sub_parser=weav)
-    weav_sub = weav.add_subparsers(dest="weaver_cmd")
-
-    p = weav_sub.add_parser("journal", aliases=["j"],
-                            help="Read weaver decision journal")
-    p.add_argument("-g", "--group", help="Group name")
-    p.add_argument("-n", "--tail", type=int, default=20,
-                   help="Number of entries (default: 20)")
-    p.add_argument("-t", "--type",
-                   choices=["decision", "observation", "checkpoint", "plan"],
-                   help="Filter by entry type")
-    p.add_argument("--json", action="store_true",
-                   help="JSON output")
-    p.set_defaults(func=cmd_weaver_journal)
 
     # -- logs ---------------------------------------------------------------
     p = sub.add_parser("logs", help="Tail daemon log")

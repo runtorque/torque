@@ -13,5 +13,5 @@
     - button "Context" [ref=e15] [cursor=pointer]:
       - img [ref=e17]
       - generic [ref=e20]: Context
-    - button "⚖ Weaver" [ref=e21] [cursor=pointer]
+    - button "⚖ Engineer" [ref=e21] [cursor=pointer]
     - button "⚠ Events" [ref=e22] [cursor=pointer]

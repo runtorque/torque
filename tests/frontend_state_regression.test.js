@@ -691,7 +691,7 @@ function createContextHarness() {
   return { context, document };
 }
 
-function createWeaverHarness() {
+function createEngineerHarness() {
   const { sandbox, document } = createSandbox({
     _cachedProviders: [],
     _esc(value) { return String(value); },
@@ -702,7 +702,7 @@ function createWeaverHarness() {
   return { context, document };
 }
 
-function createWeaverWsHarness() {
+function createEngineerWsHarness() {
   const { sandbox, document } = createSandbox({
     _cachedProviders: [],
     _esc(value) { return String(value); },
@@ -718,7 +718,7 @@ function createWeaverWsHarness() {
   runInContext(context, `
     send = function(message) { sendCalls.push(message); };
     render = function() {};
-    _activePanelApp = 'weaver';
+    _activePanelApp = 'engineer';
     _panelStateRestored = true;
   `);
   return { context, document, sandbox };
@@ -748,7 +748,7 @@ function createWsRenderHarness() {
     actions: 0,
     context: 0,
     events: 0,
-    weaver: 0,
+    engineer: 0,
     templates: 0,
   };
   document.register('main');
@@ -770,7 +770,7 @@ function createWsRenderHarness() {
     renderTemplatesPanel = function() { renderCalls.actions++; };
     renderContextPanel = function() { renderCalls.context++; };
     renderEvents = function() { renderCalls.events++; };
-    renderAgentPanel = function() { renderCalls.weaver++; };
+    renderAgentPanel = function() { renderCalls.engineer++; };
     renderAgentTemplatesPanel = function() { renderCalls.templates++; };
     updateEventsAttentionBadge = function() {};
     _expectedSeq = 1;
@@ -799,7 +799,7 @@ function createStandaloneDeltaBatchHarness(visibleSurfaces = ['board']) {
     actions: 0,
     context: 0,
     events: 0,
-    weaver: 0,
+    engineer: 0,
     templates: 0,
   };
   document.register('main');
@@ -814,7 +814,7 @@ function createStandaloneDeltaBatchHarness(visibleSurfaces = ['board']) {
     renderTemplatesPanel = function() { renderCalls.actions++; };
     renderContextPanel = function() { renderCalls.context++; };
     renderEvents = function() { renderCalls.events++; };
-    renderAgentPanel = function() { renderCalls.weaver++; };
+    renderAgentPanel = function() { renderCalls.engineer++; };
     renderAgentTemplatesPanel = function() { renderCalls.templates++; };
     updateEventsAttentionBadge = function() {};
     _expectedSeq = 1;
@@ -846,7 +846,7 @@ function createTemplatesHarness() {
 }
 
 function createMainHarness(overrides = {}) {
-  const taskbarButtons = ['board', 'actions', 'templates', 'context', 'events', 'weaver'].map((app) => {
+  const taskbarButtons = ['board', 'actions', 'templates', 'context', 'events', 'engineer'].map((app) => {
     const button = new FakeElement();
     button.dataset.app = app;
     return button;
@@ -906,8 +906,8 @@ function createMainHarness(overrides = {}) {
     'gs-terminal-cmd-args',
     'gs-terminal-init-script',
     'gs-terminal-directory',
-    'gs-weaver-boot-cmd',
-    'gs-weaver-custom-instructions',
+    'gs-engineer-boot-cmd',
+    'gs-engineer-custom-instructions',
   ].forEach((id) => {
     document.register(id);
   });
@@ -942,7 +942,7 @@ function createStandaloneWsSyncHarness() {
     actions: 0,
     context: 0,
     events: 0,
-    weaver: 0,
+    engineer: 0,
     templates: 0,
   };
   loadScript(context, 'static/js/render.js');
@@ -953,7 +953,7 @@ function createStandaloneWsSyncHarness() {
     renderTemplatesPanel = function() { renderCalls.actions++; };
     renderContextPanel = function() { renderCalls.context++; };
     renderEvents = function() { renderCalls.events++; };
-    renderAgentPanel = function() { renderCalls.weaver++; };
+    renderAgentPanel = function() { renderCalls.engineer++; };
     renderAgentPanel = function() {};
     renderAgentTemplatesPanel = function() { renderCalls.templates++; };
     updateEventsAttentionBadge = function() {};
@@ -1148,8 +1148,8 @@ function createMainNavigationHarness() {
     'gs-terminal-cmd-args',
     'gs-terminal-init-script',
     'gs-terminal-directory',
-    'gs-weaver-boot-cmd',
-    'gs-weaver-custom-instructions',
+    'gs-engineer-boot-cmd',
+    'gs-engineer-custom-instructions',
   ].forEach((id) => document.register(id));
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/constants.js');
@@ -1199,8 +1199,8 @@ function createPanelHarness() {
     'gs-terminal-cmd-args',
     'gs-terminal-init-script',
     'gs-terminal-directory',
-    'gs-weaver-boot-cmd',
-    'gs-weaver-custom-instructions',
+    'gs-engineer-boot-cmd',
+    'gs-engineer-custom-instructions',
   ].forEach((id) => document.register(id));
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/panel_manager.js');
@@ -1242,8 +1242,8 @@ function createWorkspaceResizeHarness() {
     'gs-terminal-cmd-args',
     'gs-terminal-init-script',
     'gs-terminal-directory',
-    'gs-weaver-boot-cmd',
-    'gs-weaver-custom-instructions',
+    'gs-engineer-boot-cmd',
+    'gs-engineer-custom-instructions',
   ].forEach((id) => document.register(id));
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/panel_manager.js');
@@ -1407,8 +1407,8 @@ function createDiffKeyHarness() {
     'gs-terminal-cmd-args',
     'gs-terminal-init-script',
     'gs-terminal-directory',
-    'gs-weaver-boot-cmd',
-    'gs-weaver-custom-instructions',
+    'gs-engineer-boot-cmd',
+    'gs-engineer-custom-instructions',
   ].forEach((id) => document.register(id));
   const context = vm.createContext(sandbox);
   loadModalScripts(context);
@@ -1450,8 +1450,8 @@ function createTaskHistoryHarness(options = {}) {
       'gs-terminal-cmd-args',
       'gs-terminal-init-script',
       'gs-terminal-directory',
-      'gs-weaver-boot-cmd',
-      'gs-weaver-custom-instructions',
+      'gs-engineer-boot-cmd',
+      'gs-engineer-custom-instructions',
     ].forEach((id) => document.register(id));
     loadScript(context, 'static/js/main.js');
   }
@@ -1539,8 +1539,8 @@ test('board visible tasks combine group, search, label, action, and agent filter
   assert.deepEqual(jsonValue(context, 'Object.keys(_boardVisibleTasks()).sort()'), ['task-1']);
 });
 
-test('weaver task health summary prioritizes severe unhealthy tasks', () => {
-  const { context } = createWeaverHarness();
+test('engineer task health summary prioritizes severe unhealthy tasks', () => {
+  const { context } = createEngineerHarness();
   context.state.board_tasks = {
     healthy: {
       id: 'healthy',
@@ -1567,7 +1567,7 @@ test('weaver task health summary prioritizes severe unhealthy tasks', () => {
     },
   };
 
-  const summary = jsonValue(context, `_weaverTaskHealthSummary('alpha')`);
+  const summary = jsonValue(context, `_engineerTaskHealthSummary('alpha')`);
 
   assert.equal(summary.total, 2);
   assert.deepEqual(summary.counts, {
@@ -1579,8 +1579,8 @@ test('weaver task health summary prioritizes severe unhealthy tasks', () => {
   assert.deepEqual(summary.items.map((item) => item.id), ['blocked', 'stalled']);
 });
 
-test('weaver journal does not render dispatch overlap summaries', () => {
-  const { context } = createWeaverHarness();
+test('engineer journal does not render dispatch overlap summaries', () => {
+  const { context } = createEngineerHarness();
   context.state.dispatch_overlap_groups = {
     alpha: {
       counts: { notice: 1, warning: 1, conflict: 1 },
@@ -3449,9 +3449,9 @@ test('ws close clears pending resync guards', () => {
   loadScript(context, 'static/js/ws.js');
 
   runInContext(context, `
-    _weaverResetSessionMapMetaCalls = [];
-    _weaverResetSessionMapMeta = function(options) {
-      _weaverResetSessionMapMetaCalls.push(options || {});
+    _engineerResetSessionMapMetaCalls = [];
+    _engineerResetSessionMapMeta = function(options) {
+      _engineerResetSessionMapMetaCalls.push(options || {});
     };
     connect();
     _resyncPending = true;
@@ -3461,7 +3461,7 @@ test('ws close clears pending resync guards', () => {
 
   assert.equal(jsonValue(context, '_resyncPending'), false);
   assert.equal(jsonValue(context, '_awaitingFullState'), false);
-  assert.deepEqual(jsonValue(context, '_weaverResetSessionMapMetaCalls'), [
+  assert.deepEqual(jsonValue(context, '_engineerResetSessionMapMetaCalls'), [
     { clearStale: false },
   ]);
 });
@@ -4233,7 +4233,7 @@ test('decision and pending-hire deltas invalidate the main surface', () => {
     board: false,
     context: false,
     events: false,
-    weaver: true,
+    engineer: true,
     templates: false,
   });
   assert.deepEqual(jsonValue(context, `state.pending_hires["hire-1"]`), {
@@ -4261,7 +4261,7 @@ test('decision and pending-hire deltas invalidate the main surface', () => {
     board: false,
     context: false,
     events: false,
-    weaver: true,
+    engineer: true,
     templates: false,
   });
   assert.equal(
@@ -6376,7 +6376,7 @@ test('agent history task links open the board and focus the selected task', () =
   assert.equal(focusedCard.scrollIntoViewOptions.block, 'nearest');
 });
 
-test('agent history renders answered outcomes for weaver follow-up tasks', () => {
+test('agent history renders answered outcomes for engineer follow-up tasks', () => {
   const { context, document } = createAgentHistoryHarness();
   const detail = document.register('ah-detail-agent-1');
 
@@ -6385,7 +6385,7 @@ test('agent history renders answered outcomes for weaver follow-up tasks', () =>
       record: { id: 'agent-1', template: '', worktree_branch: '', created_at: 1 },
       tasks: [{
         task_id: 'task-1',
-        task_title: 'Weaver: Need rebase status',
+        task_title: 'Engineer: Need rebase status',
         outcome: 'answered',
         started_at: 1,
         completed_at: 2
@@ -8116,9 +8116,9 @@ test('ws global settings delta live-applies xterm scrollback hook', () => {
   assert.equal(jsonValue(context, 'scrollbackApplyCalls'), 1);
 });
 
-test('ws architect_journal_append delta invalidates the weaver surface and rerenders agent panel', () => {
+test('ws architect_journal_append delta invalidates the engineer surface and rerenders agent panel', () => {
   const { context, sandbox } = createWsRenderHarness();
-  sandbox._activePanelApp = 'weaver';
+  sandbox._activePanelApp = 'engineer';
   runInContext(context, `
     state.architect_journals = {
       'arch-1': [
@@ -8145,7 +8145,7 @@ test('ws architect_journal_append delta invalidates the weaver surface and reren
     jsonValue(context, 'state.architect_journals["arch-1"][0].id'),
     'j-1'
   );
-  assert.equal(jsonValue(context, 'renderCalls.weaver'), 1);
+  assert.equal(jsonValue(context, 'renderCalls.engineer'), 1);
 });
 
 test('ws invalidation skips rerendering the active board for off-group task updates', () => {
@@ -8169,7 +8169,7 @@ test('ws invalidation skips rerendering the active board for off-group task upda
     actions: 0,
     context: 0,
     events: 0,
-    weaver: 0,
+    engineer: 0,
     templates: 0,
   });
 });
@@ -8195,7 +8195,7 @@ test('ws invalidation skips rerendering the active events panel for off-group ta
     actions: 0,
     context: 0,
     events: 0,
-    weaver: 0,
+    engineer: 0,
     templates: 0,
   });
 });
@@ -8228,7 +8228,7 @@ test('ws invalidation skips rerendering the active board for off-group task remo
     actions: 0,
     context: 0,
     events: 0,
-    weaver: 0,
+    engineer: 0,
     templates: 0,
   });
 });
@@ -8261,7 +8261,7 @@ test('ws invalidation skips rerendering the active events panel for off-group ta
     actions: 0,
     context: 0,
     events: 0,
-    weaver: 0,
+    engineer: 0,
     templates: 0,
   });
 });
@@ -8417,7 +8417,7 @@ test('standalone task delta renders are batched to one frame with immediate stat
     actions: 0,
     context: 0,
     events: 0,
-    weaver: 0,
+    engineer: 0,
     templates: 0,
   });
 
@@ -8429,7 +8429,7 @@ test('standalone task delta renders are batched to one frame with immediate stat
     actions: 0,
     context: 1,
     events: 0,
-    weaver: 0,
+    engineer: 0,
     templates: 0,
   });
 });
@@ -8460,13 +8460,13 @@ test('standalone event_append deltas batch events rendering and keep log state i
     actions: 0,
     context: 0,
     events: 1,
-    weaver: 0,
+    engineer: 0,
     templates: 0,
   });
 });
 
-test('standalone agent_upsert deltas batch current-group weaver rendering', () => {
-  const { context, sandbox, rafCallbacks, flushRaf } = createStandaloneDeltaBatchHarness(['weaver']);
+test('standalone agent_upsert deltas batch current-group engineer rendering', () => {
+  const { context, sandbox, rafCallbacks, flushRaf } = createStandaloneDeltaBatchHarness(['engineer']);
 
   for (let i = 1; i <= 20; i++) {
     context._handleDelta({
@@ -8492,7 +8492,7 @@ test('standalone agent_upsert deltas batch current-group weaver rendering', () =
     actions: 0,
     context: 0,
     events: 0,
-    weaver: 1,
+    engineer: 1,
     templates: 0,
   });
 });
@@ -8556,7 +8556,7 @@ test('new agent upserts without a focus_update preserve the active selection', (
 });
 
 test('standalone task invalidation is scoped by group and active context selection', () => {
-  const { context, sandbox, flushRaf } = createStandaloneDeltaBatchHarness(['board', 'context', 'events', 'weaver']);
+  const { context, sandbox, flushRaf } = createStandaloneDeltaBatchHarness(['board', 'context', 'events', 'engineer']);
   runInContext(context, `
     state.board_tasks = {
       'task-1': { id: 'task-1', task: 'Selected', group: 'alpha', lane: 'In Progress', position: 1 },
@@ -8585,7 +8585,7 @@ test('standalone task invalidation is scoped by group and active context selecti
     actions: 0,
     context: 0,
     events: 0,
-    weaver: 0,
+    engineer: 0,
     templates: 0,
   });
 
@@ -8607,7 +8607,7 @@ test('standalone task invalidation is scoped by group and active context selecti
     actions: 0,
     context: 0,
     events: 0,
-    weaver: 0,
+    engineer: 0,
     templates: 0,
   });
 
@@ -8629,7 +8629,7 @@ test('standalone task invalidation is scoped by group and active context selecti
     actions: 0,
     context: 1,
     events: 0,
-    weaver: 0,
+    engineer: 0,
     templates: 0,
   });
 });
@@ -8740,7 +8740,7 @@ test('standalone no-agent boundary task title deltas invalidate the main grid', 
     actions: 0,
     context: 0,
     events: 0,
-    weaver: 0,
+    engineer: 0,
     templates: 0,
   });
 });
@@ -8803,7 +8803,7 @@ test('standalone no-agent boundary follower lane deltas invalidate the main grid
     actions: 0,
     context: 0,
     events: 0,
-    weaver: 0,
+    engineer: 0,
     templates: 0,
   });
 });
@@ -8843,7 +8843,7 @@ test('standalone sequence gap cancels pending batched renders and requests one r
     actions: 0,
     context: 0,
     events: 0,
-    weaver: 0,
+    engineer: 0,
     templates: 0,
   });
 });
@@ -8875,26 +8875,26 @@ test('ws invalidation skips rerendering the active context panel for off-group a
     actions: 0,
     context: 0,
     events: 0,
-    weaver: 0,
+    engineer: 0,
     templates: 0,
   });
 });
 
 test('renderAgentPanel preserves focused reply draft across rerenders', () => {
-  const { context, document } = createWeaverHarness();
+  const { context, document } = createEngineerHarness();
   const panel = document.register('panel-agent');
-  const input = document.register('weaver-reply-input');
+  const input = document.register('engineer-reply-input');
   input.value = 'Proceed with merge';
   input.selectionStart = 8;
   input.selectionEnd = 13;
   panel.appendChild(input);
   document.activeElement = input;
 
-  context.state.weaver_settings = {
+  context.state.engineer_settings = {
     alpha: { pending_question: 'Merge this branch?' },
   };
 
-  runInContext(context, `_weaverReplyDraft = '';`);
+  runInContext(context, `_engineerReplyDraft = '';`);
   context.renderAgentPanel();
 
   assert.equal(input.focused, true);
@@ -8904,7 +8904,7 @@ test('renderAgentPanel preserves focused reply draft across rerenders', () => {
 });
 
 test('renderAgentPanel preserves focused architect decision title editor across rerenders', () => {
-  const { context, document } = createWeaverHarness();
+  const { context, document } = createEngineerHarness();
   const panel = document.register('panel-agent');
   const content = document.createElement('div');
   content.classList.add('agent-panel-content');
@@ -8934,13 +8934,13 @@ test('renderAgentPanel preserves focused architect decision title editor across 
   };
 
   runInContext(context, `
-    _weaverArchitectExpanded['arch-1'] = true;
-    weaverStartDecisionEdit('decision-1');
-    weaverDecisionDraftInput('decision-1', 'title', 'Updated direction');
+    _engineerArchitectExpanded['arch-1'] = true;
+    engineerStartDecisionEdit('decision-1');
+    engineerDecisionDraftInput('decision-1', 'title', 'Updated direction');
   `);
 
   const oldInput = document.createElement('input');
-  oldInput.dataset.focusKey = 'weaver-decision-title:decision-1';
+  oldInput.dataset.focusKey = 'engineer-decision-title:decision-1';
   oldInput.value = 'Updated direction';
   oldInput.selectionStart = 7;
   oldInput.selectionEnd = 16;
@@ -8948,8 +8948,8 @@ test('renderAgentPanel preserves focused architect decision title editor across 
   document.activeElement = oldInput;
 
   const restoredInput = document.createElement('input');
-  restoredInput.dataset.focusKey = 'weaver-decision-title:decision-1';
-  panel.setQuerySelector('[data-focus-key="weaver-decision-title:decision-1"]', restoredInput);
+  restoredInput.dataset.focusKey = 'engineer-decision-title:decision-1';
+  panel.setQuerySelector('[data-focus-key="engineer-decision-title:decision-1"]', restoredInput);
 
   context.renderAgentPanel();
 
@@ -8958,13 +8958,13 @@ test('renderAgentPanel preserves focused architect decision title editor across 
   assert.equal(restoredInput.selectionStart, 7);
   assert.equal(restoredInput.selectionEnd, 16);
   assert.equal(
-    jsonValue(context, `_weaverArchitectDecisionUi['decision-1'].draft.title`),
+    jsonValue(context, `_engineerArchitectDecisionUi['decision-1'].draft.title`),
     'Updated direction',
   );
 });
 
 test('renderAgentPanel preserves focused architect decision rationale editor across rerenders', () => {
-  const { context, document } = createWeaverHarness();
+  const { context, document } = createEngineerHarness();
   const panel = document.register('panel-agent');
   const content = document.createElement('div');
   content.classList.add('agent-panel-content');
@@ -8994,13 +8994,13 @@ test('renderAgentPanel preserves focused architect decision rationale editor acr
   };
 
   runInContext(context, `
-    _weaverArchitectExpanded['arch-1'] = true;
-    weaverStartDecisionEdit('decision-1');
-    weaverDecisionDraftInput('decision-1', 'rationale', 'Keep the UI stable across refreshes');
+    _engineerArchitectExpanded['arch-1'] = true;
+    engineerStartDecisionEdit('decision-1');
+    engineerDecisionDraftInput('decision-1', 'rationale', 'Keep the UI stable across refreshes');
   `);
 
   const oldTextarea = document.createElement('textarea');
-  oldTextarea.dataset.focusKey = 'weaver-decision-rationale:decision-1';
+  oldTextarea.dataset.focusKey = 'engineer-decision-rationale:decision-1';
   oldTextarea.value = 'Keep the UI stable across refreshes';
   oldTextarea.selectionStart = 9;
   oldTextarea.selectionEnd = 18;
@@ -9008,8 +9008,8 @@ test('renderAgentPanel preserves focused architect decision rationale editor acr
   document.activeElement = oldTextarea;
 
   const restoredTextarea = document.createElement('textarea');
-  restoredTextarea.dataset.focusKey = 'weaver-decision-rationale:decision-1';
-  panel.setQuerySelector('[data-focus-key="weaver-decision-rationale:decision-1"]', restoredTextarea);
+  restoredTextarea.dataset.focusKey = 'engineer-decision-rationale:decision-1';
+  panel.setQuerySelector('[data-focus-key="engineer-decision-rationale:decision-1"]', restoredTextarea);
 
   context.renderAgentPanel();
 
@@ -9018,13 +9018,13 @@ test('renderAgentPanel preserves focused architect decision rationale editor acr
   assert.equal(restoredTextarea.selectionStart, 9);
   assert.equal(restoredTextarea.selectionEnd, 18);
   assert.equal(
-    jsonValue(context, `_weaverArchitectDecisionUi['decision-1'].draft.rationale`),
+    jsonValue(context, `_engineerArchitectDecisionUi['decision-1'].draft.rationale`),
     'Keep the UI stable across refreshes',
   );
 });
 
 test('renderAgentPanel preserves expanded architect decision state and scroll across decision WS deltas', () => {
-  const { context, document } = createWeaverWsHarness();
+  const { context, document } = createEngineerWsHarness();
   const panel = document.getElementById('panel-agent');
   const content = document.createElement('div');
   content.classList.add('agent-panel-content');
@@ -9069,7 +9069,7 @@ test('renderAgentPanel preserves expanded architect decision state and scroll ac
     focusedItemId = 'arch-1';
     _expectedSeq = 1;
     renderAgentPanel();
-    weaverToggleDecision('decision-1');
+    engineerToggleDecision('decision-1');
   `);
   content.scrollTop = 144;
 
@@ -9102,7 +9102,7 @@ test('renderAgentPanel preserves expanded architect decision state and scroll ac
   });
 
   assert.equal(content.scrollTop, 144);
-  assert.equal(jsonValue(context, `_weaverArchitectDecisionUi['decision-1'].expanded`), true);
+  assert.equal(jsonValue(context, `_engineerArchitectDecisionUi['decision-1'].expanded`), true);
   assert.match(panel.innerHTML, /Updated rationale from server/);
   assert.match(panel.innerHTML, /Linked tasks/);
   assert.match(panel.innerHTML, /LOOM:200/);
@@ -9115,7 +9115,7 @@ test('renderAgentPanel preserves expanded architect decision state and scroll ac
 });
 
 test('renderAgentPanel preserves focused architect decision edit draft across decision WS deltas', () => {
-  const { context, document, sandbox } = createWeaverWsHarness();
+  const { context, document, sandbox } = createEngineerWsHarness();
   const panel = document.getElementById('panel-agent');
   const content = document.createElement('div');
   content.classList.add('agent-panel-content');
@@ -9148,15 +9148,15 @@ test('renderAgentPanel preserves focused architect decision edit draft across de
     focusedItemId = 'arch-1';
     _expectedSeq = 1;
     renderAgentPanel();
-    weaverStartDecisionEdit('decision-1');
-    weaverDecisionDraftInput('decision-1', 'title', 'Draft title');
-    weaverDecisionDraftInput('decision-1', 'rationale', 'Draft rationale');
-    weaverDecisionDraftInput('decision-1', 'status', 'accepted');
+    engineerStartDecisionEdit('decision-1');
+    engineerDecisionDraftInput('decision-1', 'title', 'Draft title');
+    engineerDecisionDraftInput('decision-1', 'rationale', 'Draft rationale');
+    engineerDecisionDraftInput('decision-1', 'status', 'accepted');
   `);
   content.scrollTop = 96;
 
   const oldInput = document.createElement('input');
-  oldInput.dataset.focusKey = 'weaver-decision-title:decision-1';
+  oldInput.dataset.focusKey = 'engineer-decision-title:decision-1';
   oldInput.value = 'Draft title';
   oldInput.selectionStart = 2;
   oldInput.selectionEnd = 7;
@@ -9164,8 +9164,8 @@ test('renderAgentPanel preserves focused architect decision edit draft across de
   document.activeElement = oldInput;
 
   const restoredInput = document.createElement('input');
-  restoredInput.dataset.focusKey = 'weaver-decision-title:decision-1';
-  panel.setQuerySelector('[data-focus-key="weaver-decision-title:decision-1"]', restoredInput);
+  restoredInput.dataset.focusKey = 'engineer-decision-title:decision-1';
+  panel.setQuerySelector('[data-focus-key="engineer-decision-title:decision-1"]', restoredInput);
 
   context._handleDelta({
     seq: 1,
@@ -9187,12 +9187,12 @@ test('renderAgentPanel preserves focused architect decision edit draft across de
   assert.equal(restoredInput.value, 'Draft title');
   assert.equal(restoredInput.selectionStart, 2);
   assert.equal(restoredInput.selectionEnd, 7);
-  assert.equal(jsonValue(context, `_weaverArchitectDecisionUi['decision-1'].editing`), true);
-  assert.equal(jsonValue(context, `_weaverArchitectDecisionUi['decision-1'].draft.title`), 'Draft title');
-  assert.equal(jsonValue(context, `_weaverArchitectDecisionUi['decision-1'].draft.rationale`), 'Draft rationale');
-  assert.equal(jsonValue(context, `_weaverArchitectDecisionUi['decision-1'].draft.status`), 'accepted');
+  assert.equal(jsonValue(context, `_engineerArchitectDecisionUi['decision-1'].editing`), true);
+  assert.equal(jsonValue(context, `_engineerArchitectDecisionUi['decision-1'].draft.title`), 'Draft title');
+  assert.equal(jsonValue(context, `_engineerArchitectDecisionUi['decision-1'].draft.rationale`), 'Draft rationale');
+  assert.equal(jsonValue(context, `_engineerArchitectDecisionUi['decision-1'].draft.status`), 'accepted');
 
-  runInContext(context, `weaverSaveDecisionEdit('arch-1', 'decision-1')`);
+  runInContext(context, `engineerSaveDecisionEdit('arch-1', 'decision-1')`);
 
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
     {
@@ -9207,7 +9207,7 @@ test('renderAgentPanel preserves focused architect decision edit draft across de
 });
 
 test('renderAgentPanel preserves the selected Events tab across rerenders', () => {
-  const { context, document } = createWeaverHarness();
+  const { context, document } = createEngineerHarness();
   const panel = document.register('panel-agent');
   panel.querySelector = function() { return null; };
   context.state.agents = {
@@ -9254,7 +9254,7 @@ test('renderAgentPanel preserves the selected Events tab across rerenders', () =
 });
 
 test('agentPanelSelectTab rerenders only the active Agent tab body', () => {
-  const { context, document } = createWeaverHarness();
+  const { context, document } = createEngineerHarness();
   const panel = document.register('panel-agent');
   let panelHtmlWrites = 0;
   Object.defineProperty(panel, 'innerHTML', {
@@ -9329,7 +9329,7 @@ test('agentPanelSelectTab rerenders only the active Agent tab body', () => {
 });
 
 test('worker worklog virtualizes assigned task history and preserves scroll position', () => {
-  const { context, document } = createWeaverHarness();
+  const { context, document } = createEngineerHarness();
   const panel = document.register('panel-agent');
   const content = document.createElement('div');
   content.classList.add('agent-panel-content');
@@ -9384,7 +9384,7 @@ test('worker worklog virtualizes assigned task history and preserves scroll posi
 });
 
 test('worker worklog clamps stale virtual scroll after task history shrinks', () => {
-  const { context, document } = createWeaverHarness();
+  const { context, document } = createEngineerHarness();
   const panel = document.register('panel-agent');
   const content = document.createElement('div');
   content.classList.add('agent-panel-content');
@@ -9434,7 +9434,7 @@ test('worker worklog clamps stale virtual scroll after task history shrinks', ()
 });
 
 test('architect messages and decisions use virtual windows for large histories', () => {
-  const { context, document } = createWeaverHarness();
+  const { context, document } = createEngineerHarness();
   const panel = document.register('panel-agent');
   const content = document.createElement('div');
   content.classList.add('agent-panel-content');
@@ -9487,7 +9487,7 @@ test('architect messages and decisions use virtual windows for large histories',
 });
 
 test('architect decision and message caches invalidate on relevant websocket deltas', () => {
-  const { context, document } = createWeaverWsHarness();
+  const { context, document } = createEngineerWsHarness();
   const panel = document.getElementById('panel-agent');
   panel.querySelector = function() { return null; };
   runInContext(context, `
@@ -9560,9 +9560,9 @@ test('architect decision and message caches invalidate on relevant websocket del
 });
 
 test('ws task deltas avoid rerendering worker worklog for unrelated assigned tasks', () => {
-  const { context, sandbox, flushRaf } = createStandaloneDeltaBatchHarness(['weaver']);
+  const { context, sandbox, flushRaf } = createStandaloneDeltaBatchHarness(['engineer']);
   runInContext(context, `
-    _activePanelApp = 'weaver';
+    _activePanelApp = 'engineer';
     focusedItemId = 'worker-1';
     state.agents = {
       'worker-1': { id: 'worker-1', kind: 'worker', group: 'alpha', cell_type: 'agent' },
@@ -9596,11 +9596,11 @@ test('ws task deltas avoid rerendering worker worklog for unrelated assigned tas
   });
   flushRaf();
 
-  assert.equal(sandbox.renderCalls.weaver, 0);
+  assert.equal(sandbox.renderCalls.engineer, 0);
 });
 
 test('renderAgentPanel shows workflow breach events in engineer cell history', () => {
-  const { context, document } = createWeaverHarness();
+  const { context, document } = createEngineerHarness();
   const panel = document.register('panel-agent');
   panel.querySelector = function() { return null; };
   context.state.agents = {
@@ -9637,7 +9637,7 @@ test('renderAgentPanel shows workflow breach events in engineer cell history', (
 });
 
 test('renderAgentPanel preserves the selected architect Events tab across rerenders', () => {
-  const { context, document } = createWeaverHarness();
+  const { context, document } = createEngineerHarness();
   const panel = document.register('panel-agent');
   panel.querySelector = function() { return null; };
   context.state.agents = {
@@ -9684,10 +9684,10 @@ test('renderAgentPanel preserves the selected architect Events tab across rerend
 });
 
 test('renderAgentPanel preserves the selected Worklog tab across rerenders', () => {
-  const { context, document } = createWeaverHarness();
+  const { context, document } = createEngineerHarness();
   const panel = document.register('panel-agent');
   panel.querySelector = function() { return null; };
-  context.state.weaver_worklog = {
+  context.state.engineer_worklog = {
     alpha: [
       {
         id: 3,
@@ -9728,15 +9728,15 @@ test('renderAgentPanel preserves the selected Worklog tab across rerenders', () 
 });
 
 test('renderAgentPanel keeps the same Events anchor visible when new digest rows are inserted above', () => {
-  const { context, document } = createWeaverHarness();
+  const { context, document } = createEngineerHarness();
   const panel = document.register('panel-agent');
-  const oldContent = new FakeElement('weaver-content-old');
-  const newContent = new FakeElement('weaver-content-new');
+  const oldContent = new FakeElement('engineer-content-old');
+  const newContent = new FakeElement('engineer-content-new');
   let currentContent = oldContent;
 
   function makeAnchor(key, top, bottom) {
     const el = new FakeElement();
-    el.setAttribute('data-weaver-anchor', key);
+    el.setAttribute('data-engineer-anchor', key);
     el.getBoundingClientRect = function() {
       return { top, bottom, left: 0, right: 200, width: 200, height: bottom - top };
     };
@@ -9748,7 +9748,7 @@ test('renderAgentPanel keeps the same Events anchor visible when new digest rows
     return { top: 0, bottom: 120, left: 0, right: 200, width: 200, height: 120 };
   };
   oldContent.querySelectorAll = function(selector) {
-    if (selector === '[data-weaver-anchor]') {
+    if (selector === '[data-engineer-anchor]') {
       return [
         makeAnchor('sent-2-8', 20, 40),
         makeAnchor('sent-1-6', 60, 80),
@@ -9762,7 +9762,7 @@ test('renderAgentPanel keeps the same Events anchor visible when new digest rows
     return { top: 0, bottom: 120, left: 0, right: 200, width: 200, height: 120 };
   };
   newContent.querySelectorAll = function(selector) {
-    if (selector === '[data-weaver-anchor]') {
+    if (selector === '[data-engineer-anchor]') {
       return [
         makeAnchor('sent-3-10', 10, 30),
         makeAnchor('sent-2-8', 40, 60),
@@ -9806,7 +9806,7 @@ test('renderAgentPanel keeps the same Events anchor visible when new digest rows
       { id: 1, kind: 'task_completed', message: 'Oldest digest', timestamp: 4, delivered_at: 6 },
     ],
   };
-  runInContext(context, `_weaverActiveTabByGroup.alpha = 'events';`);
+  runInContext(context, `_engineerActiveTabByGroup.alpha = 'events';`);
 
   context.renderAgentPanel();
 
@@ -9814,7 +9814,7 @@ test('renderAgentPanel keeps the same Events anchor visible when new digest rows
 });
 
 test('renderAgentPanel paginates worker Events and resets the page when focus changes', () => {
-  const { context, document } = createWeaverHarness();
+  const { context, document } = createEngineerHarness();
   const panel = document.register('panel-agent');
   context.state.agents = {
     'worker-1': {
@@ -9878,7 +9878,7 @@ test('renderAgentPanel paginates worker Events and resets the page when focus ch
 });
 
 test('renderAgentPanel preserves Events scroll anchor when a focused-agent event delta inserts above', () => {
-  const { context, document } = createWeaverWsHarness();
+  const { context, document } = createEngineerWsHarness();
   const panel = document.getElementById('panel-agent');
   const oldContent = new FakeElement('events-content-old');
   const newContent = new FakeElement('events-content-new');
@@ -9988,7 +9988,7 @@ test('renderAgentPanel preserves Events scroll anchor when a focused-agent event
 });
 
 test('renderAgentPanel keeps the current newest-first Events live tail pinned on event deltas', () => {
-  const { context, document } = createWeaverWsHarness();
+  const { context, document } = createEngineerWsHarness();
   const panel = document.getElementById('panel-agent');
   const oldContent = new FakeElement('events-live-old');
   const newContent = new FakeElement('events-live-new');
@@ -10072,7 +10072,7 @@ test('renderAgentPanel keeps the current newest-first Events live tail pinned on
 });
 
 test('renderAgentPanel keeps the same Messages anchor visible when new message cards are inserted above', () => {
-  const { context, document } = createWeaverHarness();
+  const { context, document } = createEngineerHarness();
   const panel = document.register('panel-agent');
   const oldList = new FakeElement('messages-old');
   const newList = new FakeElement('messages-new');
@@ -10175,16 +10175,16 @@ test('agent Messages tab owns a full-height scroll region and preserves full bod
 });
 
 test('renderAgentCell shows per-engineer and architect digest pause controls with state-driven classes', () => {
-  const { context } = createWeaverHarness();
+  const { context } = createEngineerHarness();
   context.state.group_settings = {
-    alpha: { weaver_agent_id: 'weaver-1' },
+    alpha: { engineer_agent_id: 'engineer-1' },
   };
   context.state.children = {};
-  context.state.weaver_settings = {
+  context.state.engineer_settings = {
     alpha: { paused: false },
   };
   context.state.agents = {
-    'weaver-1': { id: 'weaver-1', name: 'Weaver', group: 'alpha', cell_type: 'agent' },
+    'engineer-1': { id: 'engineer-1', name: 'Engineer', group: 'alpha', cell_type: 'agent' },
     'eng-1': { id: 'eng-1', name: 'Engineer', group: 'alpha', kind: 'engineer', cell_type: 'agent' },
     'arch-1': { id: 'arch-1', name: 'Architect', group: 'alpha', kind: 'architect', cell_type: 'agent' },
   };
@@ -10192,19 +10192,19 @@ test('renderAgentCell shows per-engineer and architect digest pause controls wit
     'eng-1': { agent_id: 'eng-1', paused: false },
     'arch-1': { agent_id: 'arch-1', paused: false, architect_digest: true },
   };
-  runInContext(context, `focusedItemId = ''; selectedAgentId = 'weaver-1';`);
+  runInContext(context, `focusedItemId = ''; selectedAgentId = 'engineer-1';`);
 
   const runningHtml = context.renderAgentCell({
-    id: 'weaver-1',
-    name: 'Weaver',
+    id: 'engineer-1',
+    name: 'Engineer',
     icon: '🧶',
     group: 'alpha',
     cell_type: 'agent',
     status: 'running',
   });
-  const engineerNamedWeaverHtml = context.renderAgentCell({
-    id: 'eng-weaver',
-    name: 'Weaver',
+  const engineerNamedEngineerHtml = context.renderAgentCell({
+    id: 'eng-engineer',
+    name: 'Engineer',
     icon: '🛠️',
     group: 'alpha',
     kind: 'engineer',
@@ -10240,29 +10240,27 @@ test('renderAgentCell shows per-engineer and architect digest pause controls wit
   });
 
   assert.match(runningHtml, /^<div class="cell selected"/);
-  assert.doesNotMatch(runningHtml, /^<div class="[^"]*\bweaver(?:\b|-)/);
+  assert.doesNotMatch(runningHtml, /^<div class="[^"]*\bengineer(?:\b|-)/);
   assert.match(runningHtml, /class="cell-header-controls">/);
-  assert.match(runningHtml, /class="cell-weaver-toggle running"/);
-  assert.match(runningHtml, /Pause Weaver event delivery/);
-  assert.match(engineerNamedWeaverHtml, /^<div class="cell engineer"/);
-  assert.doesNotMatch(engineerNamedWeaverHtml, /^<div class="[^"]*\bweaver(?:\b|-)/);
-  assert.doesNotMatch(workerHtml, /cell-weaver-toggle/);
+  assert.match(runningHtml, /class="cell-engineer-toggle running"/);
+  assert.match(runningHtml, /Pause Engineer event delivery/);
+  assert.match(engineerNamedEngineerHtml, /^<div class="cell engineer"/);
+  assert.doesNotMatch(workerHtml, /cell-engineer-toggle/);
   assert.match(workerHtml, /class="cell-worker-badge">worker<\/div>/);
   assert.doesNotMatch(workerHtml, /cell-engineer-badge|cell-architect-badge/);
   assert.match(engineerHtml, /^<div class="cell engineer"/);
-  assert.doesNotMatch(engineerHtml, /^<div class="[^"]*\bweaver(?:\b|-)/);
   assert.match(engineerHtml, /class="cell-engineer-badge">engineer<\/div>/);
-  assert.match(engineerHtml, /class="cell-weaver-toggle running"/);
+  assert.match(engineerHtml, /class="cell-engineer-toggle running"/);
   assert.match(engineerHtml, /toggleDigestPauseForAgent\(decodeURIComponent\('eng-1'\)\)/);
   assert.match(engineerHtml, /Pause event delivery/);
-  assert.doesNotMatch(engineerHtml, /Pause Weaver event delivery/);
+  assert.doesNotMatch(engineerHtml, /Pause Engineer event delivery/);
   assert.match(architectHtml, /^<div class="cell architect"/);
-  assert.doesNotMatch(architectHtml, /^<div class="[^"]*\bweaver(?:\b|-)/);
+  assert.doesNotMatch(architectHtml, /^<div class="[^"]*\bengineer(?:\b|-)/);
   assert.match(architectHtml, /class="cell-architect-badge">architect<\/div>/);
-  assert.match(architectHtml, /class="cell-weaver-toggle running"/);
+  assert.match(architectHtml, /class="cell-engineer-toggle running"/);
   assert.match(architectHtml, /toggleDigestPauseForAgent\(decodeURIComponent\('arch-1'\)\)/);
   assert.match(architectHtml, /Pause event delivery/);
-  assert.doesNotMatch(architectHtml, /Pause Weaver event delivery/);
+  assert.doesNotMatch(architectHtml, /Pause Engineer event delivery/);
 
   runInContext(context, `toggleDigestPauseForAgent('eng-1')`);
   runInContext(context, `toggleDigestPauseForAgent('arch-1')`);
@@ -10271,10 +10269,10 @@ test('renderAgentCell shows per-engineer and architect digest pause controls wit
     { cmd: 'digest_pause', agent_id: 'arch-1' },
   ]);
 
-  context.state.weaver_settings.alpha.paused = true;
+  context.state.engineer_settings.alpha.paused = true;
   const pausedHtml = context.renderAgentCell({
-    id: 'weaver-1',
-    name: 'Weaver',
+    id: 'engineer-1',
+    name: 'Engineer',
     icon: '🧶',
     group: 'alpha',
     cell_type: 'agent',
@@ -10282,9 +10280,9 @@ test('renderAgentCell shows per-engineer and architect digest pause controls wit
   });
 
   assert.match(pausedHtml, /^<div class="cell selected"/);
-  assert.doesNotMatch(pausedHtml, /^<div class="[^"]*\bweaver(?:\b|-)/);
-  assert.match(pausedHtml, /class="cell-weaver-toggle paused"/);
-  assert.match(pausedHtml, /Resume Weaver event delivery/);
+  assert.doesNotMatch(pausedHtml, /^<div class="[^"]*\bengineer(?:\b|-)/);
+  assert.match(pausedHtml, /class="cell-engineer-toggle paused"/);
+  assert.match(pausedHtml, /Resume Engineer event delivery/);
 
   context.state.agent_digest_settings['eng-1'].paused = true;
   context.state.agent_digest_settings['arch-1'].paused = true;
@@ -10307,21 +10305,20 @@ test('renderAgentCell shows per-engineer and architect digest pause controls wit
     status: 'running',
   });
   assert.match(pausedEngineerHtml, /^<div class="cell engineer"/);
-  assert.doesNotMatch(pausedEngineerHtml, /^<div class="[^"]*\bweaver(?:\b|-)/);
-  assert.match(pausedEngineerHtml, /class="cell-weaver-toggle paused"/);
+  assert.match(pausedEngineerHtml, /class="cell-engineer-toggle paused"/);
   assert.match(pausedEngineerHtml, /Resume event delivery/);
   assert.match(pausedArchitectHtml, /^<div class="cell architect"/);
-  assert.doesNotMatch(pausedArchitectHtml, /^<div class="[^"]*\bweaver(?:\b|-)/);
-  assert.match(pausedArchitectHtml, /class="cell-weaver-toggle paused"/);
+  assert.doesNotMatch(pausedArchitectHtml, /^<div class="[^"]*\bengineer(?:\b|-)/);
+  assert.match(pausedArchitectHtml, /class="cell-engineer-toggle paused"/);
   assert.match(pausedArchitectHtml, /Resume event delivery/);
 
-  context.state.weaver_settings.alpha = {
+  context.state.engineer_settings.alpha = {
     paused: false,
     pending_question: 'Need input',
   };
   const askingHtml = context.renderAgentCell({
-    id: 'weaver-1',
-    name: 'Weaver',
+    id: 'engineer-1',
+    name: 'Engineer',
     icon: '🧶',
     group: 'alpha',
     cell_type: 'agent',
@@ -10329,7 +10326,7 @@ test('renderAgentCell shows per-engineer and architect digest pause controls wit
   });
 
   assert.match(askingHtml, /^<div class="cell selected"/);
-  assert.doesNotMatch(askingHtml, /^<div class="[^"]*\bweaver(?:\b|-)/);
+  assert.doesNotMatch(askingHtml, /^<div class="[^"]*\bengineer(?:\b|-)/);
   assert.match(askingHtml, /\? awaiting input/);
 });
 
@@ -10359,7 +10356,7 @@ test('renderAgentCell keeps done flourish timing stable across rerenders', () =>
     selectedAgentId = '';
     state.children = {};
     state.group_settings = {};
-    state.weaver_settings = {};
+    state.engineer_settings = {};
     _startAgentDoneFlourish('agent-1', 'Done');
   `);
 
@@ -10388,17 +10385,17 @@ test('renderAgentCell keeps done flourish timing stable across rerenders', () =>
   assert.equal(jsonValue(context, 'renderCalls'), 1);
 });
 
-test('weaver agent card toggle shares the close control reveal affordances and icon-only default chrome', () => {
+test('engineer agent card toggle shares the close control reveal affordances and icon-only default chrome', () => {
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
 
   assert.match(css, /\.cell-header-controls\s*\{[^}]*position:\s*absolute;[^}]*display:\s*flex;[^}]*align-items:\s*center;/);
-  assert.match(css, /\.cell-weaver-toggle\s*\{[^}]*opacity:\s*0;[^}]*pointer-events:\s*none;/);
-  assert.match(css, /\.cell-weaver-toggle\s*\{[^}]*border:\s*1px solid transparent;[^}]*background:\s*transparent;/);
-  assert.match(css, /\.cell:hover \.cell-close,\s*\.cell:hover \.cell-weaver-toggle,\s*\.cell:hover \.cell-relaunch,\s*\.cell.focused \.cell-close,\s*\.cell.focused \.cell-weaver-toggle,\s*\.cell.focused \.cell-relaunch,\s*\.cell:focus-within \.cell-close,\s*\.cell:focus-within \.cell-weaver-toggle,\s*\.cell:focus-within \.cell-relaunch\s*\{[^}]*opacity:\s*1;[^}]*pointer-events:\s*auto;/);
-  assert.match(css, /\.cell-weaver-toggle:hover,\s*\.cell-weaver-toggle:focus-visible,\s*\.cell-weaver-toggle:active\s*\{/);
-  assert.match(css, /\.cell-weaver-toggle:hover,\s*\.cell-weaver-toggle:focus-visible,\s*\.cell-weaver-toggle:active\s*\{[^}]*background:/);
-  assert.match(css, /\.cell-weaver-toggle:hover,\s*\.cell-weaver-toggle:focus-visible,\s*\.cell-weaver-toggle:active\s*\{[^}]*border-color:/);
-  assert.match(css, /\.cell-weaver-toggle:hover,\s*\.cell-weaver-toggle:focus-visible,\s*\.cell-weaver-toggle:active\s*\{[^}]*outline:\s*none;/);
+  assert.match(css, /\.cell-engineer-toggle\s*\{[^}]*opacity:\s*0;[^}]*pointer-events:\s*none;/);
+  assert.match(css, /\.cell-engineer-toggle\s*\{[^}]*border:\s*1px solid transparent;[^}]*background:\s*transparent;/);
+  assert.match(css, /\.cell:hover \.cell-close,\s*\.cell:hover \.cell-engineer-toggle,\s*\.cell:hover \.cell-relaunch,\s*\.cell.focused \.cell-close,\s*\.cell.focused \.cell-engineer-toggle,\s*\.cell.focused \.cell-relaunch,\s*\.cell:focus-within \.cell-close,\s*\.cell:focus-within \.cell-engineer-toggle,\s*\.cell:focus-within \.cell-relaunch\s*\{[^}]*opacity:\s*1;[^}]*pointer-events:\s*auto;/);
+  assert.match(css, /\.cell-engineer-toggle:hover,\s*\.cell-engineer-toggle:focus-visible,\s*\.cell-engineer-toggle:active\s*\{/);
+  assert.match(css, /\.cell-engineer-toggle:hover,\s*\.cell-engineer-toggle:focus-visible,\s*\.cell-engineer-toggle:active\s*\{[^}]*background:/);
+  assert.match(css, /\.cell-engineer-toggle:hover,\s*\.cell-engineer-toggle:focus-visible,\s*\.cell-engineer-toggle:active\s*\{[^}]*border-color:/);
+  assert.match(css, /\.cell-engineer-toggle:hover,\s*\.cell-engineer-toggle:focus-visible,\s*\.cell-engineer-toggle:active\s*\{[^}]*outline:\s*none;/);
 });
 
 test('agent role badges render in the bottom-right opposite the agent type label', () => {
@@ -10422,25 +10419,24 @@ test('agent role badges render in the bottom-right opposite the agent type label
   assert.match(workerRule, /color:\s*var\(--green\);/);
 });
 
-test('agent cards do not define legacy weaver edge chrome', () => {
+test('agent cards do not define legacy engineer edge chrome', () => {
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
 
   assert.match(css, /\.cell\.engineer\s*\{[^}]*border-left:\s*3px solid rgba\(88, 166, 255, 0\.72\);/);
-  assert.doesNotMatch(css, /\.cell\.weaver(?:[\s.#:{]|$)/);
-  assert.doesNotMatch(css, /\.cell\.weaver-asking(?:[\s.#:{]|$)/);
-  assert.doesNotMatch(css, /--weaver-(?:chrome|edge-shadow|active-glow)/);
-  assert.doesNotMatch(css, /weaver-pulse/);
-  assert.match(css, /\.cell-weaver-ask\s*\{/);
+  assert.doesNotMatch(css, /\.cell\.engineer-asking(?:[\s.#:{]|$)/);
+  assert.doesNotMatch(css, /--engineer-(?:chrome|edge-shadow|active-glow)/);
+  assert.doesNotMatch(css, /engineer-pulse/);
+  assert.match(css, /\.cell-engineer-ask\s*\{/);
 });
 
 test('renderAgentPanel shows branch review-point summary in Session Map view', () => {
-  const { context, document } = createWeaverHarness();
+  const { context, document } = createEngineerHarness();
   const panel = document.register('panel-agent');
 
   context.state.agents = {
-    'weaver-1': {
-      id: 'weaver-1',
-      name: 'Weaver',
+    'engineer-1': {
+      id: 'engineer-1',
+      name: 'Engineer',
       group: 'alpha',
       cell_type: 'agent',
       status: 'running',
@@ -10459,10 +10455,10 @@ test('renderAgentPanel shows branch review-point summary in Session Map view', (
   };
   context.state.group_settings = {
     alpha: {
-      weaver_agent_id: 'weaver-1',
+      engineer_agent_id: 'engineer-1',
     },
   };
-  context.state.weaver_session_maps = {
+  context.state.engineer_session_maps = {
     alpha: {
       branch_boundaries: {
         items: [
@@ -10477,7 +10473,7 @@ test('renderAgentPanel shows branch review-point summary in Session Map view', (
       },
     },
   };
-  context._weaverJournalSubviewByGroup.alpha = 'session_map';
+  context._engineerJournalSubviewByGroup.alpha = 'session_map';
   context.focusedItemId = 'agent-1';
 
   context.renderAgentPanel();
@@ -10506,19 +10502,19 @@ test('task deltas do not rerender the templates panel when it is active', () => 
     actions: 0,
     context: 0,
     events: 0,
-    weaver: 0,
+    engineer: 0,
     templates: 0,
   });
 });
 
-test('weaver settings deltas rerender the main grid for card pause state updates', () => {
+test('engineer settings deltas rerender the main grid for card pause state updates', () => {
   const { context, sandbox } = createWsRenderHarness();
   sandbox._activePanelApp = 'board';
 
   context._handleDelta({
     seq: 1,
     ops: [
-      { op: 'weaver_settings_update', group: 'alpha', paused: true },
+      { op: 'engineer_settings_update', group: 'alpha', paused: true },
     ],
   });
 
@@ -10528,7 +10524,7 @@ test('weaver settings deltas rerender the main grid for card pause state updates
     actions: 0,
     context: 0,
     events: 0,
-    weaver: 0,
+    engineer: 0,
     templates: 0,
   });
 });
@@ -10550,20 +10546,20 @@ test('agent digest deltas rerender the main grid for engineer card pause state u
     actions: 0,
     context: 0,
     events: 0,
-    weaver: 0,
+    engineer: 0,
     templates: 0,
   });
 });
 
-test('weaver sent-event deltas rerender only the active agent panel surface', () => {
+test('engineer sent-event deltas rerender only the active agent panel surface', () => {
   const { context, sandbox } = createWsRenderHarness();
-  sandbox._activePanelApp = 'weaver';
+  sandbox._activePanelApp = 'engineer';
 
   context._handleDelta({
     seq: 1,
     ops: [
       {
-        op: 'weaver_sent_events',
+        op: 'engineer_sent_events',
         group: 'alpha',
         events: [
           { id: 11, kind: 'task_completed', message: 'Merged cleanly', timestamp: 1, delivered_at: 2 },
@@ -10578,17 +10574,17 @@ test('weaver sent-event deltas rerender only the active agent panel surface', ()
     actions: 0,
     context: 0,
     events: 0,
-    weaver: 1,
+    engineer: 1,
     templates: 0,
   });
-  assert.deepEqual(jsonValue(context, 'state.weaver_sent_events.alpha'), [
+  assert.deepEqual(jsonValue(context, 'state.engineer_sent_events.alpha'), [
     { id: 11, kind: 'task_completed', message: 'Merged cleanly', timestamp: 1, delivered_at: 2 },
   ]);
 });
 
 test('renderActivePanel routes the agent slot through renderAgentPanel only', () => {
   const { context, sandbox } = createWsRenderHarness();
-  sandbox._activePanelApp = 'weaver';
+  sandbox._activePanelApp = 'engineer';
   sandbox.renderCalls.agent = 0;
   runInContext(context, `
     renderAgentPanel = function() { renderCalls.agent++; };
@@ -10606,20 +10602,20 @@ test('togglePanel renders the agent slot through renderAgentPanel only', () => {
     },
   });
 
-  context.togglePanel('weaver');
+  context.togglePanel('engineer');
 
   assert.equal(sandbox.agentPanelCalls, 1);
 });
 
-test('weaver worklog deltas rerender only the active agent panel surface', () => {
+test('engineer worklog deltas rerender only the active agent panel surface', () => {
   const { context, sandbox } = createWsRenderHarness();
-  sandbox._activePanelApp = 'weaver';
+  sandbox._activePanelApp = 'engineer';
 
   context._handleDelta({
     seq: 1,
     ops: [
       {
-        op: 'weaver_worklog_append',
+        op: 'engineer_worklog_append',
         group: 'alpha',
         entry: {
           id: 7,
@@ -10640,10 +10636,10 @@ test('weaver worklog deltas rerender only the active agent panel surface', () =>
     actions: 0,
     context: 0,
     events: 0,
-    weaver: 1,
+    engineer: 1,
     templates: 0,
   });
-  assert.deepEqual(jsonValue(context, 'state.weaver_worklog.alpha'), [
+  assert.deepEqual(jsonValue(context, 'state.engineer_worklog.alpha'), [
     {
       id: 7,
       task_id: 'LOOM:7',
@@ -10656,15 +10652,15 @@ test('weaver worklog deltas rerender only the active agent panel surface', () =>
   ]);
 });
 
-test('weaver stream deltas rerender only the active agent panel surface', () => {
+test('engineer stream deltas rerender only the active agent panel surface', () => {
   const { context, sandbox } = createWsRenderHarness();
-  sandbox._activePanelApp = 'weaver';
+  sandbox._activePanelApp = 'engineer';
 
   context._handleDelta({
     seq: 1,
     ops: [
       {
-        op: 'weaver_streams',
+        op: 'engineer_streams',
         group: 'alpha',
         streams: {
           count: 1,
@@ -10688,10 +10684,10 @@ test('weaver stream deltas rerender only the active agent panel surface', () => 
     actions: 0,
     context: 0,
     events: 0,
-    weaver: 1,
+    engineer: 1,
     templates: 0,
   });
-  assert.deepEqual(jsonValue(context, 'state.weaver_streams.alpha'), {
+  assert.deepEqual(jsonValue(context, 'state.engineer_streams.alpha'), {
     count: 1,
     by_state: { awaiting_human_validation: 1 },
     items: [
@@ -10705,15 +10701,15 @@ test('weaver stream deltas rerender only the active agent panel surface', () => 
   });
 });
 
-test('weaver Session Map responses rerender only the active agent panel surface', () => {
+test('engineer Session Map responses rerender only the active agent panel surface', () => {
   const { context, sandbox } = createWsRenderHarness();
-  sandbox._activePanelApp = 'weaver';
+  sandbox._activePanelApp = 'engineer';
   runInContext(context, `
     _currentGroup = function() { return 'alpha'; };
   `);
 
-  context._handleWeaverSessionMapMessage({
-    type: 'weaver_session_map',
+  context._handleEngineerSessionMapMessage({
+    type: 'engineer_session_map',
     group: 'alpha',
     session_map: {
       group: 'alpha',
@@ -10728,10 +10724,10 @@ test('weaver Session Map responses rerender only the active agent panel surface'
     actions: 0,
     context: 0,
     events: 0,
-    weaver: 1,
+    engineer: 1,
     templates: 0,
   });
-  assert.deepEqual(jsonValue(context, 'state.weaver_session_maps.alpha'), {
+  assert.deepEqual(jsonValue(context, 'state.engineer_session_maps.alpha'), {
     group: 'alpha',
     overview: { tasks_total: 3 },
     streams: { items: [] },
@@ -10739,29 +10735,29 @@ test('weaver Session Map responses rerender only the active agent panel surface'
 });
 
 test('full state re-requests an open Session Map after reconnect clears cached data', () => {
-  const { context, sandbox } = createWeaverWsHarness();
+  const { context, sandbox } = createEngineerWsHarness();
 
   runInContext(context, `
-    state.groups = { alpha: ['weaver-1'] };
+    state.groups = { alpha: ['engineer-1'] };
     state.agents = {
-      'weaver-1': {
-        id: 'weaver-1',
+      'engineer-1': {
+        id: 'engineer-1',
         group: 'alpha',
-        name: 'Weaver',
+        name: 'Engineer',
         cell_type: 'agent',
         status: 'running'
       }
     };
     state.group_settings = {
-      alpha: { weaver_agent_id: 'weaver-1' }
+      alpha: { engineer_agent_id: 'engineer-1' }
     };
   `);
 
-  context.weaverOpenSessionMap('alpha');
+  context.engineerOpenSessionMap('alpha');
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
-    { cmd: 'weaver_session_map_read', group: 'alpha' },
+    { cmd: 'engineer_session_map_read', group: 'alpha' },
   ]);
-  assert.deepEqual(jsonValue(context, '_weaverSessionMapMetaByGroup.alpha'), {
+  assert.deepEqual(jsonValue(context, '_engineerSessionMapMetaByGroup.alpha'), {
     loading: true,
     stale: false,
   });
@@ -10770,33 +10766,33 @@ test('full state re-requests an open Session Map after reconnect clears cached d
   context._handleFullState({
     type: 'state',
     seq: 1,
-    groups: { alpha: ['weaver-1'] },
+    groups: { alpha: ['engineer-1'] },
     agents: {
-      'weaver-1': {
-        id: 'weaver-1',
+      'engineer-1': {
+        id: 'engineer-1',
         group: 'alpha',
-        name: 'Weaver',
+        name: 'Engineer',
         cell_type: 'agent',
         status: 'running',
       },
     },
     group_settings: {
-      alpha: { weaver_agent_id: 'weaver-1' },
+      alpha: { engineer_agent_id: 'engineer-1' },
     },
     board_tasks: {},
     board_lanes: [],
     panel_events: [],
-    weaver_buffer_stats: {},
-    weaver_sent_events: {},
-    weaver_worklog: {},
-    weaver_streams: {},
-    weaver_session_maps: {},
+    engineer_buffer_stats: {},
+    engineer_sent_events: {},
+    engineer_worklog: {},
+    engineer_streams: {},
+    engineer_session_maps: {},
   });
 
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
-    { cmd: 'weaver_session_map_read', group: 'alpha' },
+    { cmd: 'engineer_session_map_read', group: 'alpha' },
   ]);
-  assert.deepEqual(jsonValue(context, '_weaverSessionMapMetaByGroup.alpha'), {
+  assert.deepEqual(jsonValue(context, '_engineerSessionMapMetaByGroup.alpha'), {
     loading: true,
     stale: false,
   });
@@ -10805,9 +10801,9 @@ test('full state re-requests an open Session Map after reconnect clears cached d
 test('task deltas mark the current group Session Map stale', () => {
   const { context } = createWsRenderHarness();
   runInContext(context, `
-    _weaverMarkedGroups = [];
-    _weaverMarkSessionMapStale = function(groups) {
-      _weaverMarkedGroups = groups.slice();
+    _engineerMarkedGroups = [];
+    _engineerMarkSessionMapStale = function(groups) {
+      _engineerMarkedGroups = groups.slice();
     };
   `);
 
@@ -10824,10 +10820,10 @@ test('task deltas mark the current group Session Map stale', () => {
     ],
   });
 
-  assert.deepEqual(jsonValue(context, '_weaverMarkedGroups'), ['alpha']);
+  assert.deepEqual(jsonValue(context, '_engineerMarkedGroups'), ['alpha']);
 });
 
-test('full state hydrates weaver streams for the journal tab', () => {
+test('full state hydrates engineer streams for the journal tab', () => {
   const { context } = createWsRenderHarness();
 
   runInContext(context, `
@@ -10838,7 +10834,7 @@ test('full state hydrates weaver streams for the journal tab', () => {
       board_lanes: [],
       board_tasks: {},
       panel_events: [],
-      weaver_streams: {
+      engineer_streams: {
         alpha: {
           count: 1,
           by_state: { ready_to_merge: 1 },
@@ -10855,7 +10851,7 @@ test('full state hydrates weaver streams for the journal tab', () => {
     });
   `);
 
-  assert.deepEqual(jsonValue(context, 'state.weaver_streams.alpha'), {
+  assert.deepEqual(jsonValue(context, 'state.engineer_streams.alpha'), {
     count: 1,
     by_state: { ready_to_merge: 1 },
     items: [
@@ -10995,17 +10991,17 @@ test('task modal and add-agent labels rename template UI to role UI', () => {
 test('standalone panel titles use current operator-facing names', () => {
   const { context } = createPanelHarness();
   assert.equal(jsonValue(context, `_standalonePanelTitle('templates')`), 'Library');
-  assert.equal(jsonValue(context, `_standalonePanelTitle('weaver')`), 'Agent');
+  assert.equal(jsonValue(context, `_standalonePanelTitle('engineer')`), 'Agent');
 });
 
 test('taskbar labels the selected-agent panel as Agent', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
-  assert.match(html, /<button class="taskbar-app" data-app="weaver" onclick="togglePanel\('weaver'\)">&#x2696; Agent<\/button>/);
+  assert.match(html, /<button class="taskbar-app" data-app="engineer" onclick="togglePanel\('engineer'\)">&#x2696; Agent<\/button>/);
   assert.doesNotMatch(html, /&#x2696; Architects<\/button>/);
 });
 
 test('renderAgentPanel shows the focused-agent empty state when nothing is focused', () => {
-  const { context, document } = createWeaverHarness();
+  const { context, document } = createEngineerHarness();
   const panel = document.register('panel-agent');
   panel.querySelector = function() { return null; };
 
@@ -11066,7 +11062,7 @@ test('event deltas rerender only the active events panel', () => {
     actions: 0,
     context: 0,
     events: 0,
-    weaver: 0,
+    engineer: 0,
     templates: 0,
   });
 
@@ -11085,7 +11081,7 @@ test('event deltas rerender only the active events panel', () => {
     actions: 0,
     context: 0,
     events: 1,
-    weaver: 0,
+    engineer: 0,
     templates: 0,
   });
 });
@@ -11663,23 +11659,23 @@ test('task modal keeps external and verification collapsed by default with respo
   assert.match(css, /\.task-modal-check-grid\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(160px,\s*1fr\)\);/);
 });
 
-test('weaver group settings keep provider first and digest details collapsed by default', () => {
+test('engineer group settings keep provider first and digest details collapsed by default', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
 
-  const providerIndex = html.indexOf('<details id="gs-weaver-provider-section" class="task-modal-section" open>');
-  const autonomyIndex = html.indexOf('<details id="gs-weaver-autonomy-section" class="task-modal-section" open>');
-  const digestIndex = html.indexOf('<details id="gs-weaver-digest-section" class="task-modal-section">');
+  const providerIndex = html.indexOf('<details id="gs-engineer-provider-section" class="task-modal-section" open>');
+  const autonomyIndex = html.indexOf('<details id="gs-engineer-autonomy-section" class="task-modal-section" open>');
+  const digestIndex = html.indexOf('<details id="gs-engineer-digest-section" class="task-modal-section">');
 
   assert.notEqual(providerIndex, -1);
   assert.notEqual(autonomyIndex, -1);
   assert.notEqual(digestIndex, -1);
   assert.ok(providerIndex < autonomyIndex);
   assert.ok(autonomyIndex < digestIndex);
-  assert.match(html, /<details id="gs-weaver-provider-section" class="task-modal-section" open>\s*<summary>Provider<\/summary>/);
-  assert.match(html, /<details id="gs-weaver-autonomy-section" class="task-modal-section" open>\s*<summary>Autonomy mode/);
-  assert.match(html, /<details id="gs-weaver-digest-section" class="task-modal-section">\s*<summary>Digest details<\/summary>/);
-  assert.equal(html.includes('<details id="gs-weaver-digest-section" class="task-modal-section" open>'), false);
+  assert.match(html, /<details id="gs-engineer-provider-section" class="task-modal-section" open>\s*<summary>Provider<\/summary>/);
+  assert.match(html, /<details id="gs-engineer-autonomy-section" class="task-modal-section" open>\s*<summary>Autonomy mode/);
+  assert.match(html, /<details id="gs-engineer-digest-section" class="task-modal-section">\s*<summary>Digest details<\/summary>/);
+  assert.equal(html.includes('<details id="gs-engineer-digest-section" class="task-modal-section" open>'), false);
   assert.match(css, /\.task-modal-section\[open\] summary\s*\{[^}]*border-bottom:\s*1px solid var\(--border\);/);
   assert.match(css, /\.task-modal-section-intro\s*\{[^}]*margin-bottom:\s*8px;/);
 });
@@ -12758,7 +12754,7 @@ test('main render renders engineer rows under the user principal and exposes row
     loom: ['eng-a', 'worker-a', 'eng-b', 'worker-b', 'agent-user'],
   };
   sandbox.state.group_settings = {
-    loom: { collapsed_default: false, weaver_agent_id: 'eng-a' },
+    loom: { collapsed_default: false, engineer_agent_id: 'eng-a' },
   };
   sandbox.state.children = {};
   sandbox.state.agents = {
@@ -12851,7 +12847,7 @@ test('main render falls back to state.groups ordering within hierarchy buckets w
     loom: ['worker-a-2', 'eng-b', 'worker-b-2', 'eng-a', 'worker-b-1', 'agent-user', 'worker-a-1'],
   };
   sandbox.state.group_settings = {
-    loom: { collapsed_default: false, weaver_agent_id: 'eng-a' },
+    loom: { collapsed_default: false, engineer_agent_id: 'eng-a' },
   };
   sandbox.state.children = {};
   sandbox.state.agents = {
@@ -12953,7 +12949,7 @@ test('main render orders sections user-first then architect creation order', () 
     loom: ['worker-hired-a', 'arch-a', 'eng-hired-a', 'arch-b', 'eng-hired-b', 'worker-user', 'eng-user', 'worker-user-owned'],
   };
   sandbox.state.group_settings = {
-    loom: { collapsed_default: false, weaver_agent_id: '' },
+    loom: { collapsed_default: false, engineer_agent_id: '' },
   };
   sandbox.state.children = {};
   sandbox.state.agents = {
@@ -13072,7 +13068,7 @@ test('main render uses containment primitives and retires cell hierarchy indenta
     loom: ['arch-a', 'eng-hired', 'worker-hired', 'orphan'],
   };
   sandbox.state.group_settings = {
-    loom: { collapsed_default: false, weaver_agent_id: '' },
+    loom: { collapsed_default: false, engineer_agent_id: '' },
   };
   sandbox.state.children = {};
   sandbox.state.agents = {
@@ -13152,7 +13148,7 @@ test('main render anchors each architect once in a fixed left column with engine
     loom: ['arch-a', 'eng-a1', 'worker-a1', 'eng-a2', 'worker-a2', 'eng-a3'],
   };
   sandbox.state.group_settings = {
-    loom: { collapsed_default: false, weaver_agent_id: '' },
+    loom: { collapsed_default: false, engineer_agent_id: '' },
   };
   sandbox.state.children = {};
   sandbox.state.agents = {
@@ -13288,7 +13284,7 @@ test('main render keeps wrapped workers inside their engineer row and fixes arch
   ids.push('eng-b');
 
   sandbox.state.groups = { loom: ids };
-  sandbox.state.group_settings = { loom: { collapsed_default: false, weaver_agent_id: '' } };
+  sandbox.state.group_settings = { loom: { collapsed_default: false, engineer_agent_id: '' } };
   sandbox.state.children = {};
   sandbox.state.agents = agents;
 
@@ -13330,7 +13326,7 @@ test('main render keeps dismissed engineers in-place and preserves scroll across
     loom: ['eng-dismissed', 'worker-dismissed', 'eng-active', 'worker-active'],
   };
   sandbox.state.group_settings = {
-    loom: { collapsed_default: false, weaver_agent_id: '' },
+    loom: { collapsed_default: false, engineer_agent_id: '' },
   };
   sandbox.state.children = {};
   sandbox.state.agents = {
@@ -14745,7 +14741,7 @@ test('standalone shell owns the full-width bottom dock rows and drag selector', 
   );
   assert.match(
     html,
-    /<div id="standalone-sidebar-shell">\s*<div id="standalone-main-stack">\s*<main id="main"><\/main>\s*<\/div>\s*<div id="standalone-rail-resize-handle"[^>]*><\/div>\s*<aside id="standalone-right-rail"><\/aside>\s*<div id="standalone-bottom-resize-handle"[^>]*><\/div>\s*<section id="standalone-bottom-dock"><\/section>\s*<\/div>/s,
+    /<div id="standalone-sidebar-shell">\s*<div id="standalone-main-stack">[\s\S]*?<main id="main"><\/main>\s*<\/div>\s*<div id="standalone-rail-resize-handle"[^>]*><\/div>\s*<aside id="standalone-right-rail"><\/aside>\s*<div id="standalone-bottom-resize-handle"[^>]*><\/div>\s*<section id="standalone-bottom-dock"><\/section>\s*<\/div>/s,
   );
   assert.match(
     css,
@@ -14984,11 +14980,11 @@ test('standalone startup preserves persisted layouts by widening the sidebar whe
   runInContext(context, `
     state = {
       runtime: { embedded_terminal: true },
-      panel_active: 'weaver',
+      panel_active: 'engineer',
       board_panel_height: 420,
       standalone_panel_layout: {
         version: 1,
-        bottom: { open: true, size: 280, tabs: ['board', 'weaver'], active: 'weaver' },
+        bottom: { open: true, size: 280, tabs: ['board', 'engineer'], active: 'engineer' },
         right: { open: true, size: 320, tabs: ['actions', 'events'], active: 'events' },
         floats: {},
         last_active: 'events',
@@ -15002,7 +14998,7 @@ test('standalone startup preserves persisted layouts by widening the sidebar whe
   assert.equal(jsonValue(context, `sendCalls.length`), 0);
   assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout()`), {
     version: 1,
-    bottom: { open: true, size: 280, tabs: ['board', 'weaver'], active: 'weaver' },
+    bottom: { open: true, size: 280, tabs: ['board', 'engineer'], active: 'engineer' },
     right: { open: true, size: 320, tabs: ['actions', 'events'], active: 'events' },
     floats: {},
     last_active: 'events',
@@ -15071,16 +15067,16 @@ test('restoreStandaloneLayoutDefaults resets width and ignores legacy state', ()
   runInContext(context, `
     state = {
       runtime: { embedded_terminal: true },
-      panel_active: 'weaver',
+      panel_active: 'engineer',
       board_panel_height: 420,
       standalone_panel_layout: {
         version: 1,
-        bottom: { open: true, size: 280, tabs: ['board', 'weaver'], active: 'weaver' },
+        bottom: { open: true, size: 280, tabs: ['board', 'engineer'], active: 'engineer' },
         right: { open: true, size: 320, tabs: ['actions', 'events'], active: 'events' },
         floats: {
           context: { x: 50, y: 60, width: 400, height: 300, z: 2 },
         },
-        last_active: 'weaver',
+        last_active: 'engineer',
       },
     };
     _restorePanelState();
@@ -15134,7 +15130,7 @@ test('standalone startup restore keeps panel roots attached across the first dou
     active_session_id: null,
     standalone_panel_layout: {
       version: 1,
-      bottom: { open: true, size: 280, tabs: ['board', 'weaver'], active: 'board' },
+      bottom: { open: true, size: 280, tabs: ['board', 'engineer'], active: 'board' },
       right: { open: true, size: 320, tabs: ['actions', 'templates', 'context', 'events'], active: 'context' },
       floats: {},
       last_active: 'context',
@@ -15178,7 +15174,7 @@ test('standalone task deltas rerender only affected visible docked surfaces', ()
     actions: 0,
     context: 0,
     events: 0,
-    weaver: 0,
+    engineer: 0,
     templates: 0,
   });
 });
@@ -15209,7 +15205,7 @@ test('standalone render tracks Actions as a visible surface', () => {
     actions: 1,
     context: 0,
     events: 0,
-    weaver: 0,
+    engineer: 0,
     templates: 0,
   });
 });
@@ -15229,7 +15225,7 @@ test('standalone full-state resync loads and rerenders newly visible Actions', (
     _standalonePanelSetLayoutFromState(state.standalone_panel_layout, { fromServer: true });
     tplEditorLoadCalls = 0;
   `);
-  sandbox.renderCalls = { main: 0, board: 0, actions: 0, context: 0, events: 0, weaver: 0, templates: 0 };
+  sandbox.renderCalls = { main: 0, board: 0, actions: 0, context: 0, events: 0, engineer: 0, templates: 0 };
 
   context._handleFullState({
     seq: 1,
@@ -15256,7 +15252,7 @@ test('standalone full-state resync loads and rerenders newly visible Actions', (
     actions: 1,
     context: 0,
     events: 0,
-    weaver: 0,
+    engineer: 0,
     templates: 0,
   });
 });
@@ -15314,7 +15310,7 @@ test('standalone layout ui_update loads and rerenders newly visible Actions', ()
     _standalonePanelSetLayoutFromState(state.standalone_panel_layout, { fromServer: true });
     tplEditorLoadCalls = 0;
   `);
-  sandbox.renderCalls = { main: 0, board: 0, actions: 0, context: 0, events: 0, weaver: 0, templates: 0 };
+  sandbox.renderCalls = { main: 0, board: 0, actions: 0, context: 0, events: 0, engineer: 0, templates: 0 };
 
   context._handleDelta({
     seq: 1,
@@ -15341,7 +15337,7 @@ test('standalone layout ui_update loads and rerenders newly visible Actions', ()
     actions: 1,
     context: 0,
     events: 0,
-    weaver: 0,
+    engineer: 0,
     templates: 0,
   });
 });

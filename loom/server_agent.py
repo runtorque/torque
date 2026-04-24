@@ -66,11 +66,11 @@ def _build_self_dispatch_prompt(shared_context_block: str = "") -> str:
 
 def _startup_prompt_for_new_agent(*, agent_type: str = "",
                                   persistent_prompt_text: str = "",
-                                  is_weaver: bool = False) -> str:
+                                  is_engineer: bool = False) -> str:
     """Return the first interactive prompt for a newly created agent."""
     if not persistent_prompt_text:
         return ""
-    if is_weaver:
+    if is_engineer:
         return persistent_prompt_text
     adapter = get_adapter(agent_type) if agent_type else None
     if not adapter:
@@ -291,29 +291,29 @@ class AgentLaunchService:
             "terminals": resolved.get("terminals", []),
         }
 
-    def resolve_weaver_launch_config(self, group: str, *,
+    def resolve_engineer_launch_config(self, group: str, *,
                                      base_dir: str = "",
                                      explicit_template: str = "",
                                      overrides: dict[str, Any] | None = None) -> dict:
         """Resolve launch config for the designated engineer in a group."""
         merged = dict(overrides or {})
-        ws = self.state.get_weaver_settings(group)
-        if getattr(ws, "weaver_provider", ""):
-            merged["provider"] = ws.weaver_provider
-        if getattr(ws, "weaver_boot_command", ""):
-            merged["command"] = ws.weaver_boot_command
-        if getattr(ws, "weaver_model", ""):
-            merged["model"] = ws.weaver_model
-        if getattr(ws, "weaver_reasoning_effort", ""):
-            merged["reasoning_effort"] = ws.weaver_reasoning_effort
-        if getattr(ws, "weaver_directory", ""):
-            merged["directory"] = ws.weaver_directory
-        if getattr(ws, "weaver_profile", ""):
-            merged["profile"] = ws.weaver_profile
-        if getattr(ws, "weaver_shell", ""):
-            merged["shell"] = ws.weaver_shell
-        if getattr(ws, "weaver_tab_color", ""):
-            merged["tab_color"] = ws.weaver_tab_color
+        ws = self.state.get_engineer_settings(group)
+        if getattr(ws, "engineer_provider", ""):
+            merged["provider"] = ws.engineer_provider
+        if getattr(ws, "engineer_boot_command", ""):
+            merged["command"] = ws.engineer_boot_command
+        if getattr(ws, "engineer_model", ""):
+            merged["model"] = ws.engineer_model
+        if getattr(ws, "engineer_reasoning_effort", ""):
+            merged["reasoning_effort"] = ws.engineer_reasoning_effort
+        if getattr(ws, "engineer_directory", ""):
+            merged["directory"] = ws.engineer_directory
+        if getattr(ws, "engineer_profile", ""):
+            merged["profile"] = ws.engineer_profile
+        if getattr(ws, "engineer_shell", ""):
+            merged["shell"] = ws.engineer_shell
+        if getattr(ws, "engineer_tab_color", ""):
+            merged["tab_color"] = ws.engineer_tab_color
         resolved = self.resolve_agent_launch_config(
             group,
             base_dir=base_dir,
@@ -426,7 +426,7 @@ class AgentLaunchService:
                                        target_session_id: str = "",
                                        target_window_id: str = "",
                                        persistent_prompt_text: str = "",
-                                       created_by_weaver_id: str = "",
+                                       created_by_engineer_id: str = "",
                                        owner_engineer_id: str = "",
                                        kind: str = "",
                                        persistent: bool = False,
@@ -464,9 +464,9 @@ class AgentLaunchService:
             launch_cfg.get("worktree_merge_squash", True)
         )
         cell.template = explicit_template or launch_cfg.get("template", "")
-        cell.created_by_weaver_id = str(created_by_weaver_id or "").strip()
+        cell.created_by_engineer_id = str(created_by_engineer_id or "").strip()
         cell.owner_engineer_id = str(owner_engineer_id or "").strip() or str(
-            created_by_weaver_id or ""
+            created_by_engineer_id or ""
         ).strip()
         if launch_cfg.get("agent_type"):
             cell.agent_type = launch_cfg["agent_type"]

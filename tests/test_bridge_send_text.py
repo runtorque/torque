@@ -345,7 +345,7 @@ class BridgeSendTextTests(unittest.IsolatedAsyncioTestCase):
         bridge, state = await self._make_bridge(session)
         cell = self.state_mod.AgentCell(
             id="agent-3",
-            name="weaver",
+            name="engineer",
             group="g",
             cell_type="agent",
             session_id="session-3",
@@ -365,10 +365,10 @@ class BridgeSendTextTests(unittest.IsolatedAsyncioTestCase):
         orig_wait_for = self.bridge_mod.asyncio.wait_for
         self.bridge_mod.asyncio.wait_for = fake_wait_for
         try:
-            await bridge.send_text("session-3", "hello weaver\r")
+            await bridge.send_text("session-3", "hello engineer\r")
         finally:
             self.bridge_mod.asyncio.wait_for = orig_wait_for
 
-        self.assertEqual(session.sent, ["hello weaver", "\r"])
+        self.assertEqual(session.sent, ["hello engineer", "\r"])
         self.assertEqual(session.screen_reads, 0)
         self.assertEqual(timeouts, [30.0])

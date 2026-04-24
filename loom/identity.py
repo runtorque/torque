@@ -14,7 +14,7 @@ def agent_kind_for_identity(cell) -> str:
     if kind in IDENTITY_KINDS:
         return kind
     # Legacy worker cells may predate the explicit ``kind='worker'`` field.
-    if str(getattr(cell, "created_by_weaver_id", "") or "").strip():
+    if str(getattr(cell, "created_by_engineer_id", "") or "").strip():
         return "worker"
     return ""
 

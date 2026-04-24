@@ -153,7 +153,7 @@ from .server_prompts import (
     build_dispatch_postscript,
     build_loom_system_prompt,
 )
-from .weaver_session_map import build_weaver_session_map
+from .engineer_session_map import build_engineer_session_map
 
 
 def _should_install_keybindings() -> bool:
@@ -606,7 +606,7 @@ def _workflow_breach_engineer_for(state: MatrixState, *,
         str(getattr(task, "assigned_engineer_id", "") or "").strip(),
         str(getattr(task, "created_by_engineer_id", "") or "").strip(),
         str(getattr(worker, "owner_engineer_id", "") or "").strip(),
-        str(getattr(worker, "created_by_weaver_id", "") or "").strip(),
+        str(getattr(worker, "created_by_engineer_id", "") or "").strip(),
     ]
     if worker and str(getattr(worker, "kind", "") or "").strip() == "engineer":
         candidate_ids.append(str(getattr(worker, "id", "") or "").strip())
@@ -1449,7 +1449,7 @@ def _shipped_review_cleanup_candidates(state: MatrixState, merged_cell) -> list:
                 continue
             if _agent_has_targeted_auto_dispatch_work(state, agent_id):
                 continue
-            if _agent_has_pending_weaver_followups(state, agent_id):
+            if _agent_has_pending_engineer_followups(state, agent_id):
                 continue
             cell = state.agents.get(agent_id)
             if not cell or getattr(cell, "cell_type", "") != "agent":
@@ -1592,15 +1592,15 @@ def _agent_has_targeted_auto_dispatch_work(state: MatrixState,
     return False
 
 
-def _agent_has_pending_weaver_followups(state: MatrixState,
+def _agent_has_pending_engineer_followups(state: MatrixState,
                                         agent_id: str) -> bool:
     """Return whether the agent still owes the designated engineer a visible reply."""
     if not agent_id:
         return False
-    if state.agent_pending_weaver_reply_tasks(agent_id):
+    if state.agent_pending_engineer_reply_tasks(agent_id):
         return True
     cell = state.agents.get(agent_id)
-    return bool(cell and cell.pending_weaver_message)
+    return bool(cell and cell.pending_engineer_message)
 
 
 async def _maybe_auto_close_root_done_agents(
@@ -1652,7 +1652,7 @@ async def _maybe_auto_close_root_done_agents(
             continue
         if _agent_has_targeted_auto_dispatch_work(state, agent_id):
             continue
-        if _agent_has_pending_weaver_followups(state, agent_id):
+        if _agent_has_pending_engineer_followups(state, agent_id):
             continue
 
         cell = state.agents.get(agent_id)
@@ -1681,33 +1681,33 @@ def _append_mcp_message(cell, action: str, message: str = ""):
         cell.mcp_messages[:] = cell.mcp_messages[:20]
 
 
-def _weaver_display_name(state: MatrixState, group: str) -> str:
-    weaver_id = state.get_group_settings(group).weaver_agent_id or ""
-    weaver = state.agents.get(weaver_id) if weaver_id else None
-    name = (weaver.name if weaver else "").strip()
-    return name or "Weaver"
+def _engineer_display_name(state: MatrixState, group: str) -> str:
+    engineer_id = state.get_group_settings(group).engineer_agent_id or ""
+    engineer = state.agents.get(engineer_id) if engineer_id else None
+    name = (engineer.name if engineer else "").strip()
+    return name or "Engineer"
 
 
-def _summarize_weaver_message(message: str, *, limit: int = 72) -> str:
+def _summarize_engineer_message(message: str, *, limit: int = 72) -> str:
     lines = [
         line.strip() for line in str(message or "").splitlines()
         if line.strip()
     ]
     summary = lines[0] if lines else str(message or "").strip()
     if not summary:
-        return "Weaver follow-up"
+        return "Engineer follow-up"
     if len(summary) <= limit:
         return summary
     return summary[:limit - 1].rstrip() + "…"
 
 
-def _weaver_followup_task_title(message: str) -> str:
-    return f"Weaver: {_summarize_weaver_message(message)}"
+def _engineer_followup_task_title(message: str) -> str:
+    return f"Engineer: {_summarize_engineer_message(message)}"
 
 
 def _format_mcp_message_prompt(message: str, *,
-                               sender_name: str = "Weaver",
-                               sender_kind: str = "weaver",
+                               sender_name: str = "Engineer",
+                               sender_kind: str = "engineer",
                                task_id: str = "") -> str:
     # System-origin payloads (e.g. Loom digests) bring their own header
     # and trailing separator; wrapping them would double-up the chrome.
@@ -1729,11 +1729,11 @@ def _format_mcp_message_prompt(message: str, *,
     return prompt
 
 
-def _format_weaver_message_prompt(message: str, task_id: str) -> str:
+def _format_engineer_message_prompt(message: str, task_id: str) -> str:
     return _format_mcp_message_prompt(
         message,
-        sender_name="Weaver",
-        sender_kind="weaver",
+        sender_name="Engineer",
+        sender_kind="engineer",
         task_id=task_id,
     )
 
@@ -1923,12 +1923,12 @@ def _emit_task_artifact_uploaded_event(panel_event, task, actor, artifact) -> No
     )
 
 
-def _create_weaver_followup_task(state: MatrixState, target, message: str
+def _create_engineer_followup_task(state: MatrixState, target, message: str
                                  ) -> Optional[BoardTask]:
     if not target or not target.group:
         return None
     active_task = state.agent_current_task(target.id)
-    labels = ["loom:weaver-message"]
+    labels = ["loom:engineer-message"]
     kwargs = {
         "description": message,
         "status": "Awaiting Reply",
@@ -1945,18 +1945,18 @@ def _create_weaver_followup_task(state: MatrixState, target, message: str
             "pipeline_root_id": active_task.pipeline_root_id or active_task.id,
         })
     return state.board_add_task(
-        task=_weaver_followup_task_title(message),
+        task=_engineer_followup_task_title(message),
         group=task_group,
         lane="Backlog",
         **kwargs,
     )
 
 
-def _resolve_pending_weaver_reply_task(state: MatrixState, cell, *,
+def _resolve_pending_engineer_reply_task(state: MatrixState, cell, *,
                                        task_id: str = ""
                                        ) -> tuple[Optional[BoardTask],
                                                   list[BoardTask], str]:
-    pending = state.agent_pending_weaver_reply_tasks(cell.id) if cell else []
+    pending = state.agent_pending_engineer_reply_tasks(cell.id) if cell else []
     if not cell:
         return None, pending, "Cell not found"
     explicit = _resolve_task_id(state, task_id) if task_id else ""
@@ -1974,35 +1974,35 @@ def _resolve_pending_weaver_reply_task(state: MatrixState, cell, *,
     if len(pending) == 1:
         return pending[0], pending, ""
     if not pending:
-        return None, pending, "No pending weaver message to reply to"
+        return None, pending, "No pending engineer message to reply to"
     ids = ", ".join(task.id for task in pending[:5])
     if len(pending) > 5:
         ids += ", …"
     return None, pending, (
-        "Multiple pending weaver messages; reply with task=<id>. "
+        "Multiple pending engineer messages; reply with task=<id>. "
         f"Open reply tasks: {ids}"
     )
 
 
-async def _send_weaver_message_to_agent(state: MatrixState, bridge, target,
+async def _send_engineer_message_to_agent(state: MatrixState, bridge, target,
                                         message: str, panel_event) -> dict:
     if not target or not target.session_id:
         return {"type": "error", "message": "Agent is not running"}
-    follow_up = _create_weaver_followup_task(state, target, message)
+    follow_up = _create_engineer_followup_task(state, target, message)
     if not follow_up:
         return {
             "type": "error",
-            "message": "Failed to create Weaver follow-up task",
+            "message": "Failed to create Engineer follow-up task",
         }
     try:
         if hasattr(bridge, "prime_input_ready"):
             bridge.prime_input_ready(target.session_id)
         await bridge.send_text(
             target.session_id,
-            _format_weaver_message_prompt(message, follow_up.id),
+            _format_engineer_message_prompt(message, follow_up.id),
         )
     except Exception as exc:
-        log.exception("Failed to send Weaver message to agent %s", target.id)
+        log.exception("Failed to send Engineer message to agent %s", target.id)
         state.board_remove_task(follow_up.id)
         return {
             "type": "error",
@@ -2011,9 +2011,9 @@ async def _send_weaver_message_to_agent(state: MatrixState, bridge, target,
 
     follow_up.messages.append({
         "timestamp": time.time(),
-        "action": "weaver_message",
+        "action": "engineer_message",
         "message": message,
-        "agent_name": _weaver_display_name(state, target.group),
+        "agent_name": _engineer_display_name(state, target.group),
     })
     state.board_update_task(
         follow_up.id,
@@ -2023,19 +2023,19 @@ async def _send_weaver_message_to_agent(state: MatrixState, bridge, target,
     state.history_record_dispatch(
         target,
         follow_up,
-        weaver_group=target.group,
-        weaver_id=group_settings.weaver_agent_id if group_settings else "",
+        engineer_group=target.group,
+        engineer_id=group_settings.engineer_agent_id if group_settings else "",
     )
     state.history_record_message(
         target.id,
-        "weaver_message",
+        "engineer_message",
         message,
         task_id=follow_up.id,
     )
-    target.pending_weaver_message = True
+    target.pending_engineer_message = True
     state._emit_agent(target)
     panel_event(
-        "weaver_message",
+        "engineer_message",
         target.id,
         target.name,
         target.group,
@@ -2045,18 +2045,18 @@ async def _send_weaver_message_to_agent(state: MatrixState, bridge, target,
     return {"type": "ok", "task_id": follow_up.id}
 
 
-def _handle_weaver_reply(state: MatrixState, cell, *, message: str,
+def _handle_engineer_reply(state: MatrixState, cell, *, message: str,
                          task_id: str = "", panel_event=None) -> dict:
     if not message:
         return {"type": "error", "message": "Reply message is required"}
-    reply_task, pending, error = _resolve_pending_weaver_reply_task(
+    reply_task, pending, error = _resolve_pending_engineer_reply_task(
         state,
         cell,
         task_id=task_id,
     )
     if error:
         if not pending:
-            cell.pending_weaver_message = False
+            cell.pending_engineer_message = False
             state._emit_agent(cell)
         return {"type": "error", "message": error}
 
@@ -2081,8 +2081,8 @@ def _handle_weaver_reply(state: MatrixState, cell, *, message: str,
     state.history_complete_task(cell.id, reply_task.id, "answered")
     if not task_counts_as_done(reply_task):
         state.board_move_task(reply_task.id, "Done")
-    cell.pending_weaver_message = bool(
-        state.agent_pending_weaver_reply_tasks(cell.id)
+    cell.pending_engineer_message = bool(
+        state.agent_pending_engineer_reply_tasks(cell.id)
     )
     state._emit_agent(cell)
     if panel_event:
@@ -2227,9 +2227,9 @@ async def _resolve_architect_ask_task(
     }
 
 
-def _handle_weaver_flush_now_command(weaver_buffer, data: dict) -> dict:
+def _handle_engineer_flush_now_command(engineer_buffer, data: dict) -> dict:
     recipient_or_group = data.get("agent_id", "") or data.get("group", "")
-    ok, message = weaver_buffer.request_manual_flush(recipient_or_group)
+    ok, message = engineer_buffer.request_manual_flush(recipient_or_group)
     if ok:
         return {"type": "ok"}
     return {"type": "error", "message": message or "Unable to send queued events"}
@@ -2237,7 +2237,7 @@ def _handle_weaver_flush_now_command(weaver_buffer, data: dict) -> dict:
 
 def _handle_digest_pause_resume_command(
     state: MatrixState,
-    weaver_buffer,
+    engineer_buffer,
     data: dict,
     *,
     paused: bool,
@@ -2251,9 +2251,9 @@ def _handle_digest_pause_resume_command(
         }
     state.update_agent_digest_settings(agent_id, paused=paused)
     if paused:
-        weaver_buffer.on_delivery_paused(agent_id)
+        engineer_buffer.on_delivery_paused(agent_id)
     else:
-        weaver_buffer.on_delivery_resumed(agent_id)
+        engineer_buffer.on_delivery_resumed(agent_id)
     return {
         "type": "ok",
         "agent_id": agent_id,
@@ -2388,11 +2388,11 @@ async def _handle_send_user_message_command(data, state: MatrixState,
     return True
 
 
-async def _deliver_weaver_reply_and_resume(state: MatrixState, weaver, *,
+async def _deliver_engineer_reply_and_resume(state: MatrixState, engineer, *,
                                            group: str,
                                            answer: str,
                                            send_prompt,
-                                           weaver_buffer) -> dict:
+                                           engineer_buffer) -> dict:
     formatted = (
         "\n"
         "## Human Reply\n"
@@ -2400,19 +2400,19 @@ async def _deliver_weaver_reply_and_resume(state: MatrixState, weaver, *,
         "---\n"
     )
     await _queue_cell_prompt_send(
-        weaver,
+        engineer,
         formatted,
         send_prompt,
         prime_input_ready=True,
         wait_for_delivery=True,
     )
-    await state.update_weaver_settings_async(
+    await state.update_engineer_settings_async(
         group,
         pending_question="",
         paused=False,
-        _pending_question_actor_id=getattr(weaver, "id", "") or "",
+        _pending_question_actor_id=getattr(engineer, "id", "") or "",
     )
-    weaver_buffer.on_delivery_resumed(group)
+    engineer_buffer.on_delivery_resumed(group)
     state.journal_append(
         group,
         "observation",
@@ -2425,15 +2425,15 @@ def _pending_question_reply_target(state: MatrixState, group: str):
     """Return the agent that should receive a human reply for pending_question.
 
     Actor-scoped engineer asks should reply to the engineer that asked the
-    question. Legacy rows without an actor fall back to the group weaver.
+    question. Legacy rows without an actor fall back to the group engineer.
     """
-    ws = state.get_weaver_settings(group)
+    ws = state.get_engineer_settings(group)
     actor_id = str(
         getattr(ws, "pending_question_actor_id", "") or ""
     ).strip()
     if actor_id:
         return state.agents.get(actor_id), "Engineer"
-    return state.get_weaver_for_group(group), "Weaver"
+    return state.get_engineer_for_group(group), "Engineer"
 
 
 def _resolve_ai_report_task(state: MatrixState, cell, *,
@@ -2744,7 +2744,7 @@ def _agent_is_worker_for_role_preamble(cell) -> bool:
         return True
     if kind in {"engineer", "architect", "terminal"}:
         return False
-    return bool(str(getattr(cell, "created_by_weaver_id", "") or "").strip())
+    return bool(str(getattr(cell, "created_by_engineer_id", "") or "").strip())
 
 
 def _agent_role_slug(cell) -> str:
@@ -2758,7 +2758,7 @@ def _agent_role_slug(cell) -> str:
 def _agent_owner_engineer_name(state: MatrixState, cell) -> str:
     owner_id = str(getattr(cell, "owner_engineer_id", "") or "").strip()
     if not owner_id:
-        owner_id = str(getattr(cell, "created_by_weaver_id", "") or "").strip()
+        owner_id = str(getattr(cell, "created_by_engineer_id", "") or "").strip()
     if not owner_id:
         return ""
     owner = state.agents.get(owner_id)
@@ -3152,8 +3152,8 @@ async def _relaunch_agent_after_worktree_removal(
         state,
         resolve_base_dir,
         resolve_agent_launch_config,
-        resolve_weaver_launch_config=None,
-        is_designated_weaver=None,
+        resolve_engineer_launch_config=None,
+        is_designated_engineer=None,
         apply_persistent_prompt,
         build_cell_persistent_prompt):
     """Reset an agent session after its worktree is removed."""
@@ -3166,13 +3166,13 @@ async def _relaunch_agent_after_worktree_removal(
     cell.agent_session_id = ""
     base_dir = cell.worktree_repo_root or cell.directory \
         or await resolve_base_dir(cell.group)
-    use_weaver_launch = (
+    use_engineer_launch = (
         str(getattr(cell, "kind", "") or "").strip() in ("engineer", "architect")
-        or bool(is_designated_weaver and is_designated_weaver(cell))
+        or bool(is_designated_engineer and is_designated_engineer(cell))
     )
     resolver = (
-        resolve_weaver_launch_config
-        if use_weaver_launch and resolve_weaver_launch_config
+        resolve_engineer_launch_config
+        if use_engineer_launch and resolve_engineer_launch_config
         else resolve_agent_launch_config
     )
     launch_cfg = resolver(
@@ -3199,7 +3199,7 @@ async def _relaunch_agent_after_worktree_removal(
 def _resolve_engineer_group(state: MatrixState) -> str:
     """Return the reserved engineer group, preferring the designated engineer."""
     for group_name, group_settings in state.group_settings.items():
-        engineer_id = str(getattr(group_settings, "weaver_agent_id", "") or "")
+        engineer_id = str(getattr(group_settings, "engineer_agent_id", "") or "")
         cell = state.agents.get(engineer_id)
         if cell and cell.cell_type == "agent" \
                 and str(getattr(cell, "kind", "") or "").strip() == "engineer":
@@ -3268,7 +3268,7 @@ def _effective_owner_engineer_id(cell) -> str:
     owner_id = str(getattr(cell, "owner_engineer_id", "") or "").strip()
     if owner_id:
         return owner_id
-    return str(getattr(cell, "created_by_weaver_id", "") or "").strip()
+    return str(getattr(cell, "created_by_engineer_id", "") or "").strip()
 
 
 def _dismissal_close_cells(state: MatrixState, engineer) -> list:
@@ -3426,7 +3426,7 @@ async def _handle_add_engineer_command(
         data: dict,
         state: MatrixState, *,
         resolve_base_dir,
-        resolve_weaver_launch_config,
+        resolve_engineer_launch_config,
         create_agent_with_config,
         send_agent_prompt) -> dict:
     """Create and launch a persistent engineer agent."""
@@ -3448,25 +3448,25 @@ async def _handle_add_engineer_command(
         for key in ("command", "provider", "directory")
         if str(data.get(key, "") or "").strip()
     }
-    launch_cfg = resolve_weaver_launch_config(
+    launch_cfg = resolve_engineer_launch_config(
         group,
         base_dir=base_dir,
         explicit_template="",
         overrides=overrides,
     )
 
-    from .weaver import build_engineer_system_prompt
+    from .engineer import build_engineer_system_prompt
 
     persistent_prompt_text = build_engineer_system_prompt(
         group,
-        state.get_weaver_settings(group),
+        state.get_engineer_settings(group),
         launch_cfg.get("system_prompt", ""),
         group_settings=state.get_group_settings(group),
     )
     startup_prompt = _startup_prompt_for_new_agent(
         agent_type=launch_cfg.get("agent_type", ""),
         persistent_prompt_text=persistent_prompt_text,
-        is_weaver=True,
+        is_engineer=True,
     )
 
     cell = await create_agent_with_config(
@@ -3475,7 +3475,7 @@ async def _handle_add_engineer_command(
         launch_cfg,
         explicit_template="",
         persistent_prompt_text=persistent_prompt_text,
-        created_by_weaver_id="",
+        created_by_engineer_id="",
         owner_engineer_id="",
         kind="engineer",
         persistent=True,
@@ -3504,7 +3504,7 @@ async def _handle_add_architect_command(
         data: dict,
         state: MatrixState, *,
         resolve_base_dir,
-        resolve_weaver_launch_config,
+        resolve_engineer_launch_config,
         create_agent_with_config,
         send_agent_prompt) -> dict:
     """Create and launch a persistent architect agent."""
@@ -3526,7 +3526,7 @@ async def _handle_add_architect_command(
         for key in ("command", "provider", "directory")
         if str(data.get(key, "") or "").strip()
     }
-    launch_cfg = resolve_weaver_launch_config(
+    launch_cfg = resolve_engineer_launch_config(
         group,
         base_dir=base_dir,
         explicit_template="",
@@ -3548,7 +3548,7 @@ async def _handle_add_architect_command(
     startup_prompt = _startup_prompt_for_new_agent(
         agent_type=launch_cfg.get("agent_type", ""),
         persistent_prompt_text=persistent_prompt_text,
-        is_weaver=True,
+        is_engineer=True,
     )
 
     cell = await create_agent_with_config(
@@ -3557,7 +3557,7 @@ async def _handle_add_architect_command(
         launch_cfg,
         explicit_template="",
         persistent_prompt_text=persistent_prompt_text,
-        created_by_weaver_id="",
+        created_by_engineer_id="",
         owner_engineer_id="",
         kind="architect",
         persistent=True,
@@ -3594,8 +3594,8 @@ async def _handle_add_worker_command(
 
     supplied_owner = str(data.get("owner_engineer_id", "") or "").strip()
     supplied_legacy_owner = str(
-        data.get("created_by_weaver_id", "")
-        or data.get("_created_by_weaver_id", "")
+        data.get("created_by_engineer_id", "")
+        or data.get("_created_by_engineer_id", "")
         or ""
     ).strip()
     if supplied_owner or supplied_legacy_owner:
@@ -3619,8 +3619,8 @@ async def _handle_add_worker_command(
             "group",
             "kind",
             "owner_engineer_id",
-            "created_by_weaver_id",
-            "_created_by_weaver_id",
+            "created_by_engineer_id",
+            "_created_by_engineer_id",
             "hired_by_architect_id",
     ):
         overrides.pop(key, None)
@@ -3641,7 +3641,7 @@ async def _handle_add_worker_command(
         launch_cfg,
         explicit_template=explicit_template,
         persistent_prompt_text="",
-        created_by_weaver_id="",
+        created_by_engineer_id="",
         owner_engineer_id="",
         kind="worker",
         persistent=False,
@@ -3703,7 +3703,7 @@ async def _handle_pending_hire_approve_command(
         data: dict,
         state: MatrixState, *,
         resolve_base_dir,
-        resolve_weaver_launch_config,
+        resolve_engineer_launch_config,
         create_agent_with_config,
         send_agent_prompt) -> dict:
     """Approve a pending architect hire and create the engineer."""
@@ -3740,7 +3740,7 @@ async def _handle_pending_hire_approve_command(
         },
         state,
         resolve_base_dir=resolve_base_dir,
-        resolve_weaver_launch_config=resolve_weaver_launch_config,
+        resolve_engineer_launch_config=resolve_engineer_launch_config,
         create_agent_with_config=create_agent_with_config,
         send_agent_prompt=send_agent_prompt,
     )
@@ -3856,10 +3856,10 @@ def _handle_archived_tasks_command(data: dict, state: MatrixState) -> dict:
     }
 
 
-async def _handle_weaver_journal_snapshot_command(
+async def _handle_engineer_journal_snapshot_command(
         data: dict,
         state: MatrixState) -> dict:
-    """Return deferred per-group Weaver journal/worklog/stream snapshots."""
+    """Return deferred per-group Engineer journal/worklog/stream snapshots."""
     group = str(data.get("group", "") or "").strip()
     if not group:
         return {"type": "error", "message": "group required"}
@@ -3884,23 +3884,23 @@ async def _handle_weaver_journal_snapshot_command(
         try:
             from .worktree_streams import prefill_branch_exists_for_state
             await prefill_branch_exists_for_state(state)
-            streams = state._weaver_stream_payload(group)
+            streams = state._engineer_stream_payload(group)
         except Exception:
-            log.exception("Failed to load weaver streams for %s", group)
+            log.exception("Failed to load engineer streams for %s", group)
 
     return {
-        "type": "weaver_journal_snapshot",
+        "type": "engineer_journal_snapshot",
         "group": group,
-        "weaver_journal": {
+        "engineer_journal": {
             group: state.journal_read(group, limit=limit),
         },
-        "weaver_worklog": {
+        "engineer_worklog": {
             group: [
                 dict(entry)
-                for entry in list(state.weaver_worklog.get(group, []))[:worklog_limit]
+                for entry in list(state.engineer_worklog.get(group, []))[:worklog_limit]
             ],
         },
-        "weaver_streams": {
+        "engineer_streams": {
             group: streams,
         },
     }
@@ -4001,11 +4001,11 @@ async def _handle_engineer_rehire_command(
         worktree_mgr,
         resolve_base_dir,
         resolve_agent_launch_config,
-        resolve_weaver_launch_config,
+        resolve_engineer_launch_config,
         apply_persistent_prompt,
         build_cell_persistent_prompt,
         persistent_prompt_filename,
-        is_designated_weaver,
+        is_designated_engineer,
         panel_event=None) -> dict:
     """Resume a dismissed engineer with the same id/slug and launch config."""
     engineer = _resolve_engineer_cell(
@@ -4081,11 +4081,11 @@ async def _handle_engineer_rehire_command(
             worktree_mgr=worktree_mgr,
             resolve_base_dir=resolve_base_dir,
             resolve_agent_launch_config=resolve_agent_launch_config,
-            resolve_weaver_launch_config=resolve_weaver_launch_config,
+            resolve_engineer_launch_config=resolve_engineer_launch_config,
             apply_persistent_prompt=apply_persistent_prompt,
             build_cell_persistent_prompt=build_cell_persistent_prompt,
             persistent_prompt_filename=persistent_prompt_filename,
-            is_designated_weaver=is_designated_weaver,
+            is_designated_engineer=is_designated_engineer,
         )
     except Exception as exc:
         log.exception("Failed to rehire engineer '%s'", engineer.name)
@@ -4150,13 +4150,13 @@ async def _handle_delete_engineer_command(
         if cell.cell_type != "agent":
             continue
         owner_id = str(getattr(cell, "owner_engineer_id", "") or "").strip()
-        creator_id = str(getattr(cell, "created_by_weaver_id", "") or "").strip()
+        creator_id = str(getattr(cell, "created_by_engineer_id", "") or "").strip()
         if owner_id != engineer.id and creator_id != engineer.id:
             continue
         if owner_id == engineer.id:
             cell.owner_engineer_id = ""
         if creator_id == engineer.id:
-            cell.created_by_weaver_id = ""
+            cell.created_by_engineer_id = ""
         transferred_agents += 1
         state._emit_agent(cell)
         state._db_save_agent(cell)
@@ -4303,11 +4303,11 @@ async def _handle_relaunch_agent_command(
         worktree_mgr,
         resolve_base_dir,
         resolve_agent_launch_config,
-        resolve_weaver_launch_config,
+        resolve_engineer_launch_config,
         apply_persistent_prompt,
         build_cell_persistent_prompt,
         persistent_prompt_filename,
-        is_designated_weaver) -> dict | None:
+        is_designated_engineer) -> dict | None:
     """Relaunch a stopped agent or terminal using current launch settings."""
     cell = state.agents.get(data.get("id", ""))
     if not cell:
@@ -4328,12 +4328,12 @@ async def _handle_relaunch_agent_command(
     gs = state.get_group_settings(cell.group)
     base_dir = cell.worktree_repo_root or cell.directory \
         or await resolve_base_dir(cell.group)
-    use_weaver_launch = (
+    use_engineer_launch = (
         str(getattr(cell, "kind", "") or "").strip() in ("engineer", "architect")
-        or is_designated_weaver(cell)
+        or is_designated_engineer(cell)
     )
     resolver = (
-        resolve_weaver_launch_config if use_weaver_launch
+        resolve_engineer_launch_config if use_engineer_launch
         else resolve_agent_launch_config
     )
     launch_cfg = resolver(
@@ -4348,7 +4348,7 @@ async def _handle_relaunch_agent_command(
         launch_cfg.get("idle_timeout", cell.idle_timeout) or 0)
     if cell.cell_type == "agent":
         # Fall back to the cell's persisted values when the re-resolved
-        # launch_cfg has empty entries.  The group-level weaver_settings
+        # launch_cfg has empty entries.  The group-level engineer_settings
         # can't encode per-agent provider/command choices, so resolving
         # without overrides often returns a generic default that would
         # otherwise clobber an architect or engineer's actual config —
@@ -4447,11 +4447,11 @@ async def _handle_restart_agent_command(
         worktree_mgr,
         resolve_base_dir,
         resolve_agent_launch_config,
-        resolve_weaver_launch_config,
+        resolve_engineer_launch_config,
         apply_persistent_prompt,
         build_cell_persistent_prompt,
         persistent_prompt_filename,
-        is_designated_weaver,
+        is_designated_engineer,
         send_agent_prompt) -> dict | None:
     """Restart an agent from scratch using its original launch parameters.
 
@@ -4496,12 +4496,12 @@ async def _handle_restart_agent_command(
     base_dir = cell.worktree_repo_root or cell.directory \
         or await resolve_base_dir(cell.group)
     kind = str(getattr(cell, "kind", "") or "").strip()
-    use_weaver_launch = (
+    use_engineer_launch = (
         kind in ("engineer", "architect")
-        or is_designated_weaver(cell)
+        or is_designated_engineer(cell)
     )
     resolver = (
-        resolve_weaver_launch_config if use_weaver_launch
+        resolve_engineer_launch_config if use_engineer_launch
         else resolve_agent_launch_config
     )
     launch_cfg = resolver(
@@ -4559,7 +4559,7 @@ async def _handle_restart_agent_command(
     startup_prompt = _startup_prompt_for_new_agent(
         agent_type=launch_cfg.get("agent_type", ""),
         persistent_prompt_text=persistent_prompt_text,
-        is_weaver=use_weaver_launch,
+        is_engineer=use_engineer_launch,
     )
 
     await bridge.create_session(
@@ -4666,19 +4666,19 @@ async def main(connection=None):
         template_mgr=template_mgr,
     )
 
-    from .weaver import WeaverEventBuffer
+    from .engineer import EngineerEventBuffer
     async def _inject_digest_message(target, message: str, **kwargs):
         await inject_mcp_message(state, bridge, target, message, **kwargs)
 
-    weaver_buffer = WeaverEventBuffer(
+    engineer_buffer = EngineerEventBuffer(
         state,
         bridge,
         inject_message=_inject_digest_message,
     )
-    weaver_buffer.start()
-    event_bus._weaver_buffer = weaver_buffer
-    panel_log.on_event = weaver_buffer.on_panel_event
-    log.info("Weaver event buffer started")
+    engineer_buffer.start()
+    event_bus._engineer_buffer = engineer_buffer
+    panel_log.on_event = engineer_buffer.on_panel_event
+    log.info("Engineer event buffer started")
 
 
     async def _safe_remove_worktree(cell):
@@ -4753,8 +4753,8 @@ async def main(connection=None):
                 state=state,
                 resolve_base_dir=_resolve_base_dir,
                 resolve_agent_launch_config=_resolve_agent_launch_config,
-                resolve_weaver_launch_config=_resolve_weaver_launch_config,
-                is_designated_weaver=_is_designated_weaver,
+                resolve_engineer_launch_config=_resolve_engineer_launch_config,
+                is_designated_engineer=_is_designated_engineer,
                 apply_persistent_prompt=_apply_persistent_prompt,
                 build_cell_persistent_prompt=_build_cell_persistent_prompt,
             )
@@ -4943,7 +4943,7 @@ async def main(connection=None):
 
     async def _state_payload(*, compact: bool = False) -> dict:
         # Prefill the per-repo branch cache before legacy state.to_dict()
-        # runs — otherwise the sync weaver-stream snapshot inside it would
+        # runs — otherwise the sync engineer-stream snapshot inside it would
         # fork `git show-ref` per branch on the event loop, stalling the WS.
         if not compact:
             try:
@@ -4956,7 +4956,7 @@ async def main(connection=None):
             "type": "state",
             "seq": state._seq,
             **state_payload,
-            **weaver_buffer.export_state(),
+            **engineer_buffer.export_state(),
             "providers": get_providers(),
             "runtime": _runtime_payload(),
         }
@@ -5029,11 +5029,11 @@ async def main(connection=None):
             overrides=overrides,
         )
 
-    def _resolve_weaver_launch_config(group: str, *,
+    def _resolve_engineer_launch_config(group: str, *,
                                       base_dir: str = "",
                                       explicit_template: str = "",
                                       overrides: dict | None = None) -> dict:
-        return agent_launch.resolve_weaver_launch_config(
+        return agent_launch.resolve_engineer_launch_config(
             group,
             base_dir=base_dir,
             explicit_template=explicit_template,
@@ -5060,7 +5060,7 @@ async def main(connection=None):
                                         target_session_id: str = "",
                                         target_window_id: str = "",
                                         persistent_prompt_text: str = "",
-                                        created_by_weaver_id: str = "",
+                                        created_by_engineer_id: str = "",
                                         owner_engineer_id: str = "",
                                         kind: str = "",
                                         persistent: bool = False,
@@ -5075,7 +5075,7 @@ async def main(connection=None):
             target_session_id=target_session_id,
             target_window_id=target_window_id,
             persistent_prompt_text=persistent_prompt_text,
-            created_by_weaver_id=created_by_weaver_id,
+            created_by_engineer_id=created_by_engineer_id,
             owner_engineer_id=owner_engineer_id,
             kind=kind,
             persistent=persistent,
@@ -5113,15 +5113,15 @@ async def main(connection=None):
         if cell.cell_type != "agent" or not launch_cfg.get("agent_type"):
             return ""
         gs = state.get_group_settings(cell.group)
-        if gs.weaver_agent_id == cell.id:
-            from .weaver import build_weaver_system_prompt
-            ws = state.get_weaver_settings(cell.group)
-            return build_weaver_system_prompt(
+        if gs.engineer_agent_id == cell.id:
+            from .engineer import build_engineer_system_prompt
+            ws = state.get_engineer_settings(cell.group)
+            return build_engineer_system_prompt(
                 cell.group, ws, launch_cfg.get("system_prompt", ""),
                 group_settings=gs)
         if cell.kind == "engineer":
-            from .weaver import build_engineer_system_prompt
-            ws = state.get_weaver_settings(cell.group)
+            from .engineer import build_engineer_system_prompt
+            ws = state.get_engineer_settings(cell.group)
             return build_engineer_system_prompt(
                 cell.group, ws, launch_cfg.get("system_prompt", ""),
                 group_settings=gs)
@@ -5134,20 +5134,20 @@ async def main(connection=None):
         return _build_dispatch_persistent_prompt(
             launch_cfg.get("system_prompt", ""))
 
-    def _is_designated_weaver(cell) -> bool:
+    def _is_designated_engineer(cell) -> bool:
         if not cell or cell.cell_type != "agent":
             return False
         gs = state.get_group_settings(cell.group)
-        return bool(gs and gs.weaver_agent_id == cell.id)
+        return bool(gs and gs.engineer_agent_id == cell.id)
 
-    def _ownership_weaver_id_for_dispatch_source(cell) -> str:
-        """Return the immutable Weaver owner id to stamp on new agents."""
+    def _ownership_engineer_id_for_dispatch_source(cell) -> str:
+        """Return the immutable Engineer owner id to stamp on new agents."""
         if not cell or cell.cell_type != "agent":
             return ""
-        owner_id = str(getattr(cell, "created_by_weaver_id", "") or "").strip()
+        owner_id = str(getattr(cell, "created_by_engineer_id", "") or "").strip()
         if owner_id:
             return owner_id
-        if _is_designated_weaver(cell):
+        if _is_designated_engineer(cell):
             return cell.id
         return ""
 
@@ -5671,7 +5671,7 @@ async def main(connection=None):
                 "type": "group_settings",
                 "group": group,
                 "settings": asdict(gs),
-                "weaver_settings": asdict(state.get_weaver_settings(group)),
+                "engineer_settings": asdict(state.get_engineer_settings(group)),
                 "resolved_agent_defaults": template_mgr.resolve_agent_config(
                     "", gs, {}, base_dir=base_dir),
                 "profiles": pnames,
@@ -5714,8 +5714,8 @@ async def main(connection=None):
         if cmd == "archived_tasks":
             return _handle_archived_tasks_command(data, state)
 
-        if cmd == "weaver_journal_snapshot":
-            return await _handle_weaver_journal_snapshot_command(data, state)
+        if cmd == "engineer_journal_snapshot":
+            return await _handle_engineer_journal_snapshot_command(data, state)
 
         if cmd == "architect_journal_read":
             return _handle_architect_journal_read_command(data, state)
@@ -6106,7 +6106,7 @@ async def main(connection=None):
                     data,
                     state,
                     resolve_base_dir=_resolve_base_dir,
-                    resolve_weaver_launch_config=_resolve_weaver_launch_config,
+                    resolve_engineer_launch_config=_resolve_engineer_launch_config,
                     create_agent_with_config=_create_agent_with_config,
                     send_agent_prompt=_send_agent_prompt,
                 )
@@ -6116,7 +6116,7 @@ async def main(connection=None):
                     data,
                     state,
                     resolve_base_dir=_resolve_base_dir,
-                    resolve_weaver_launch_config=_resolve_weaver_launch_config,
+                    resolve_engineer_launch_config=_resolve_engineer_launch_config,
                     create_agent_with_config=_create_agent_with_config,
                     send_agent_prompt=_send_agent_prompt,
                 )
@@ -6142,7 +6142,7 @@ async def main(connection=None):
                     data,
                     state,
                     resolve_base_dir=_resolve_base_dir,
-                    resolve_weaver_launch_config=_resolve_weaver_launch_config,
+                    resolve_engineer_launch_config=_resolve_engineer_launch_config,
                     create_agent_with_config=_create_agent_with_config,
                     send_agent_prompt=_send_agent_prompt,
                 )
@@ -6172,11 +6172,11 @@ async def main(connection=None):
                     worktree_mgr=worktree_mgr,
                     resolve_base_dir=_resolve_base_dir,
                     resolve_agent_launch_config=_resolve_agent_launch_config,
-                    resolve_weaver_launch_config=_resolve_weaver_launch_config,
+                    resolve_engineer_launch_config=_resolve_engineer_launch_config,
                     apply_persistent_prompt=_apply_persistent_prompt,
                     build_cell_persistent_prompt=_build_cell_persistent_prompt,
                     persistent_prompt_filename=_persistent_prompt_filename,
-                    is_designated_weaver=_is_designated_weaver,
+                    is_designated_engineer=_is_designated_engineer,
                     panel_event=_panel_event,
                 )
 
@@ -6215,22 +6215,22 @@ async def main(connection=None):
 
             elif cmd == "add_agent":
                 group = data["group"]
-                is_weaver = data.get("is_weaver", False)
+                is_engineer = data.get("is_engineer", False)
 
-                # Enforce one weaver per group
-                if is_weaver:
+                # Enforce one engineer per group
+                if is_engineer:
                     gs_check = state.get_group_settings(group)
-                    if gs_check.weaver_agent_id:
+                    if gs_check.engineer_agent_id:
                         existing = state.agents.get(
-                            gs_check.weaver_agent_id)
+                            gs_check.engineer_agent_id)
                         ename = existing.name if existing else "unknown"
                         result = {
                             "type": "error",
                             "message": (
                                 f"Group '{group}' already has a "
-                                f"weaver: {ename}")}
+                                f"engineer: {ename}")}
                         # Skip agent creation — jump to broadcast
-                        is_weaver = False
+                        is_engineer = False
                         data = {}  # prevent fallthrough
 
                 if data:
@@ -6238,8 +6238,8 @@ async def main(connection=None):
                     explicit_template = data.get("template", "").strip()
                     _overrides = dict(data)
                     resolver = (
-                        _resolve_weaver_launch_config
-                        if is_weaver else _resolve_agent_launch_config
+                        _resolve_engineer_launch_config
+                        if is_engineer else _resolve_agent_launch_config
                     )
                     launch_cfg = resolver(
                         group,
@@ -6249,25 +6249,25 @@ async def main(connection=None):
                     )
 
                     persistent_prompt_text = ""
-                    # Weaver: build persistent prompt and skip worktree
-                    if is_weaver:
-                        from .weaver import build_weaver_system_prompt
-                        ws = state.get_weaver_settings(group)
+                    # Engineer: build persistent prompt and skip worktree
+                    if is_engineer:
+                        from .engineer import build_engineer_system_prompt
+                        ws = state.get_engineer_settings(group)
                         action_sp = launch_cfg.get("system_prompt", "")
-                        persistent_prompt_text = build_weaver_system_prompt(
+                        persistent_prompt_text = build_engineer_system_prompt(
                             group, ws, action_sp,
                             group_settings=state.get_group_settings(group))
                         launch_cfg["worktree"] = False
                     startup_prompt = _startup_prompt_for_new_agent(
                         agent_type=launch_cfg.get("agent_type", ""),
                         persistent_prompt_text=persistent_prompt_text,
-                        is_weaver=is_weaver,
+                        is_engineer=is_engineer,
                     )
 
                     name = (data.get("name", "") or "").strip()
                     if not name:
-                        if is_weaver:
-                            name = "Weaver"
+                        if is_engineer:
+                            name = "Engineer"
                         elif explicit_template:
                             name = _suggest_template_agent_name(
                                 group, explicit_template, base_dir)
@@ -6282,11 +6282,11 @@ async def main(connection=None):
                             "target_window_id", ""),
                         persistent_prompt_text=persistent_prompt_text)
                     if cell:
-                        # Designate as weaver
-                        if is_weaver:
+                        # Designate as engineer
+                        if is_engineer:
                             state.update_group_settings(
-                                group, weaver_agent_id=cell.id)
-                            # Reorder now that weaver_agent_id is set
+                                group, engineer_agent_id=cell.id)
+                            # Reorder now that engineer_agent_id is set
                             # (the reorder in create_session ran too early)
                             await bridge.reorder_tabs()
 
@@ -6431,11 +6431,11 @@ async def main(connection=None):
                     worktree_mgr=worktree_mgr,
                     resolve_base_dir=_resolve_base_dir,
                     resolve_agent_launch_config=_resolve_agent_launch_config,
-                    resolve_weaver_launch_config=_resolve_weaver_launch_config,
+                    resolve_engineer_launch_config=_resolve_engineer_launch_config,
                     apply_persistent_prompt=_apply_persistent_prompt,
                     build_cell_persistent_prompt=_build_cell_persistent_prompt,
                     persistent_prompt_filename=_persistent_prompt_filename,
-                    is_designated_weaver=_is_designated_weaver,
+                    is_designated_engineer=_is_designated_engineer,
                 )
 
             elif cmd == "restart_agent":
@@ -6446,11 +6446,11 @@ async def main(connection=None):
                     worktree_mgr=worktree_mgr,
                     resolve_base_dir=_resolve_base_dir,
                     resolve_agent_launch_config=_resolve_agent_launch_config,
-                    resolve_weaver_launch_config=_resolve_weaver_launch_config,
+                    resolve_engineer_launch_config=_resolve_engineer_launch_config,
                     apply_persistent_prompt=_apply_persistent_prompt,
                     build_cell_persistent_prompt=_build_cell_persistent_prompt,
                     persistent_prompt_filename=_persistent_prompt_filename,
-                    is_designated_weaver=_is_designated_weaver,
+                    is_designated_engineer=_is_designated_engineer,
                     send_agent_prompt=_send_agent_prompt,
                 )
 
@@ -6567,8 +6567,8 @@ async def main(connection=None):
                             state=state,
                             resolve_base_dir=_resolve_base_dir,
                             resolve_agent_launch_config=_resolve_agent_launch_config,
-                            resolve_weaver_launch_config=_resolve_weaver_launch_config,
-                            is_designated_weaver=_is_designated_weaver,
+                            resolve_engineer_launch_config=_resolve_engineer_launch_config,
+                            is_designated_engineer=_is_designated_engineer,
                             apply_persistent_prompt=_apply_persistent_prompt,
                             build_cell_persistent_prompt=_build_cell_persistent_prompt,
                         )
@@ -7754,10 +7754,10 @@ async def main(connection=None):
                     actor = state.agents.get(cell_id) if cell_id else None
                     provenance = {
                         "source": (
-                            "weaver"
+                            "engineer"
                             if actor and actor.id == state.get_group_settings(
                                 task.group
-                            ).weaver_agent_id
+                            ).engineer_agent_id
                             else "agent"
                         ),
                         "agent_id": actor.id if actor else "",
@@ -7918,7 +7918,7 @@ async def main(connection=None):
                             "handoff_worktree_from", "")
                         dispatch_owner_id = str(
                             data.get("owner_engineer_id", "")
-                            or data.get("_created_by_weaver_id", "")
+                            or data.get("_created_by_engineer_id", "")
                             or ""
                         ).strip()
                         if agent_id:
@@ -7974,7 +7974,7 @@ async def main(connection=None):
                                     state.board_move_task(tid, "To Do")
                                     queue_cap = (
                                         normalize_default_worker_concurrency(
-                                            state.get_weaver_settings(
+                                            state.get_engineer_settings(
                                                 task.group
                                             ).default_worker_concurrency
                                         )
@@ -7984,9 +7984,9 @@ async def main(connection=None):
                                         tid,
                                         target_agent_id=cell.id,
                                         max_concurrent=queue_cap,
-                                        weaver_owner_id=str(
+                                        engineer_owner_id=str(
                                             data.get(
-                                                "_weaver_dispatch_id", ""
+                                                "_engineer_dispatch_id", ""
                                             ) or ""
                                         ),
                                     )
@@ -8071,8 +8071,8 @@ async def main(connection=None):
                                 target_window_id=data.get(
                                     "target_window_id", ""),
                                 persistent_prompt_text=persistent_prompt_text,
-                                created_by_weaver_id=data.get(
-                                    "_created_by_weaver_id", ""),
+                                created_by_engineer_id=data.get(
+                                    "_created_by_engineer_id", ""),
                                 owner_engineer_id=data.get(
                                     "owner_engineer_id", ""),
                                 kind="worker",
@@ -8312,12 +8312,12 @@ async def main(connection=None):
                             state.history_record_dispatch(
                                 cell,
                                 task,
-                                weaver_group=data.get(
-                                    "_weaver_dispatch_group",
+                                engineer_group=data.get(
+                                    "_engineer_dispatch_group",
                                     "",
                                 ),
-                                weaver_id=data.get(
-                                    "_weaver_dispatch_id",
+                                engineer_id=data.get(
+                                    "_engineer_dispatch_id",
                                     "",
                                 ),
                             )
@@ -8481,7 +8481,7 @@ async def main(connection=None):
                         role=preview_role_slug,
                         template=preview_role_slug,
                         owner_engineer_id="",
-                        created_by_weaver_id="",
+                        created_by_engineer_id="",
                         worktree_repo_root="",
                         git_root="",
                         worktree_branch="",
@@ -9911,14 +9911,14 @@ async def main(connection=None):
                                                 "id": new_task.id,
                                                 "create_agent": True,
                                             }
-                                            owner_weaver_id = \
-                                                _ownership_weaver_id_for_dispatch_source(
+                                            owner_engineer_id = \
+                                                _ownership_engineer_id_for_dispatch_source(
                                                     cell
                                                 )
-                                            if owner_weaver_id:
+                                            if owner_engineer_id:
                                                 dispatch_data[
-                                                    "_created_by_weaver_id"
-                                                ] = owner_weaver_id
+                                                    "_created_by_engineer_id"
+                                                ] = owner_engineer_id
                                             # Worktree inheritance is resolved
                                             # by dispatch_task from the derived
                                             # task's structural parent.  Do not
@@ -10075,7 +10075,7 @@ async def main(connection=None):
                                       "slug": cell.slug}
 
                     elif action == "reply":
-                        result = _handle_weaver_reply(
+                        result = _handle_engineer_reply(
                             state,
                             cell,
                             message=message,
@@ -10328,9 +10328,9 @@ async def main(connection=None):
                 pipelines = action_mgr.discover_pipelines(base_dir)
                 result = {"type": "pipelines", "pipelines": pipelines}
 
-            # -- Weaver commands ------------------------------------------
+            # -- Engineer commands ------------------------------------------
 
-            elif cmd == "weaver_message":
+            elif cmd == "engineer_message":
                 agent_ident = data.get("agent_id", "")
                 msg_text = data.get("message", "")
                 agent_id = _resolve_agent_id(state, agent_ident)
@@ -10342,7 +10342,7 @@ async def main(connection=None):
                               "message": "Message is required"}
                 else:
                     target = state.agents.get(agent_id)
-                    result = await _send_weaver_message_to_agent(
+                    result = await _send_engineer_message_to_agent(
                         state,
                         bridge,
                         target,
@@ -10436,7 +10436,7 @@ async def main(connection=None):
                     except ValueError as exc:
                         result = {"type": "error", "message": str(exc)}
 
-            elif cmd == "weaver_journal_append":
+            elif cmd == "engineer_journal_append":
                 group = data.get("group", "")
                 entry_type = data.get("entry_type", "")
                 entry_text = data.get("entry", "")
@@ -10457,7 +10457,7 @@ async def main(connection=None):
                         ).strip())
                     result = {"type": "ok", "id": evt["id"]}
 
-            elif cmd == "weaver_journal_read":
+            elif cmd == "engineer_journal_read":
                 group = data.get("group", "")
                 tail = data.get("tail", 20)
                 entry_type = data.get("entry_type", "")
@@ -10471,7 +10471,7 @@ async def main(connection=None):
                 )
                 result = {"type": "journal", "entries": entries}
 
-            elif cmd == "weaver_session_map_read":
+            elif cmd == "engineer_session_map_read":
                 group = str(data.get("group", "") or "").strip()
                 if not group:
                     result = {
@@ -10480,24 +10480,24 @@ async def main(connection=None):
                     }
                 else:
                     result = {
-                        "type": "weaver_session_map",
+                        "type": "engineer_session_map",
                         "group": group,
-                        "session_map": build_weaver_session_map(state, group),
+                        "session_map": build_engineer_session_map(state, group),
                     }
 
-            elif cmd == "weaver_journal_delete":
+            elif cmd == "engineer_journal_delete":
                 group = data.get("group", "")
                 entry_id = data.get("entry_id", 0)
                 if entry_id and db:
                     db._conn.execute(
-                        "DELETE FROM weaver_journal WHERE id=? "
+                        "DELETE FROM engineer_journal WHERE id=? "
                         "AND group_name=?", (entry_id, group))
                     db._conn.commit()
                     state._emit("journal_delete",
                                 group=group, id=entry_id)
                 result = {"type": "ok"}
 
-            elif cmd == "weaver_update_settings":
+            elif cmd == "engineer_update_settings":
                 group = data.get("group", "")
                 fields = {}
                 for k in ("push_interval", "max_interval",
@@ -10510,17 +10510,17 @@ async def main(connection=None):
                           "escalation_style",
                           "pending_note", "pending_note_kind",
                           "custom_instructions", "enabled_events",
-                          "paused", "weaver_provider",
-                          "weaver_boot_command", "weaver_model",
-                          "weaver_reasoning_effort",
-                          "weaver_directory", "weaver_profile",
-                          "weaver_shell", "weaver_tab_color"):
+                          "paused", "engineer_provider",
+                          "engineer_boot_command", "engineer_model",
+                          "engineer_reasoning_effort",
+                          "engineer_directory", "engineer_profile",
+                          "engineer_shell", "engineer_tab_color"):
                     if k in data:
                         fields[k] = data[k]
-                await state.update_weaver_settings_async(group, **fields)
+                await state.update_engineer_settings_async(group, **fields)
                 result = {"type": "ok"}
 
-            elif cmd == "weaver_ask":
+            elif cmd == "engineer_ask":
                 group = data.get("group", "")
                 question = data.get("question", "")
                 if not question:
@@ -10533,29 +10533,29 @@ async def main(connection=None):
                         or ""
                     ).strip()
                     if not engineer_id:
-                        weaver = state.get_weaver_for_group(group)
+                        engineer = state.get_engineer_for_group(group)
                         engineer_id = str(
-                            getattr(weaver, "id", "") or ""
+                            getattr(engineer, "id", "") or ""
                         ).strip()
-                    await state.update_weaver_settings_async(
+                    await state.update_engineer_settings_async(
                         group,
                         pending_question=question,
                         paused=True,
                         _pending_question_actor_id=engineer_id)
                     log.info(
-                        "weaver_ask persisted pending question for group=%s "
+                        "engineer_ask persisted pending question for group=%s "
                         "pending_question_len=%d paused=True",
                         group,
                         len(str(question or "")),
                     )
-                    weaver_buffer.on_delivery_paused(group)
+                    engineer_buffer.on_delivery_paused(group)
                     # Also log to journal
                     state.journal_append(
                         group, "observation",
                         f"Asked human: {question}")
                     result = {"type": "ok"}
 
-            elif cmd == "weaver_note":
+            elif cmd == "engineer_note":
                 group = data.get("group", "")
                 message = data.get("message", "")
                 kind = data.get("kind", "note")
@@ -10566,7 +10566,7 @@ async def main(connection=None):
                     result = {"type": "error",
                               "message": "kind must be 'note' or 'question'"}
                 else:
-                    await state.update_weaver_settings_async(
+                    await state.update_engineer_settings_async(
                         group,
                         pending_note=message,
                         pending_note_kind=kind)
@@ -10576,15 +10576,15 @@ async def main(connection=None):
                         f"{prefix} for human: {message}")
                     result = {"type": "ok"}
 
-            elif cmd == "weaver_dismiss_note":
+            elif cmd == "engineer_dismiss_note":
                 group = data.get("group", "")
-                await state.update_weaver_settings_async(
+                await state.update_engineer_settings_async(
                     group,
                     pending_note="",
                     pending_note_kind="")
                 result = {"type": "ok"}
 
-            elif cmd == "weaver_reply":
+            elif cmd == "engineer_reply":
                 group = data.get("group", "")
                 answer = data.get("answer", "")
                 if not answer:
@@ -10599,22 +10599,22 @@ async def main(connection=None):
                         result = {"type": "error",
                                   "message": f"{target_label} is not running"}
                     else:
-                        result = await _deliver_weaver_reply_and_resume(
+                        result = await _deliver_engineer_reply_and_resume(
                             state,
                             reply_target,
                             group=group,
                             answer=answer,
                             send_prompt=_send_agent_prompt,
-                            weaver_buffer=weaver_buffer,
+                            engineer_buffer=engineer_buffer,
                         )
 
-            elif cmd == "weaver_pause":
+            elif cmd == "engineer_pause":
                 group = data.get("group", "")
-                await state.update_weaver_settings_async(group, paused=True)
-                weaver_buffer.on_delivery_paused(group)
+                await state.update_engineer_settings_async(group, paused=True)
+                engineer_buffer.on_delivery_paused(group)
                 result = {"type": "ok"}
 
-            elif cmd == "weaver_resume":
+            elif cmd == "engineer_resume":
                 group = data.get("group", "")
                 engineer_id = str(
                     data.get("engineer_id", "")
@@ -10622,20 +10622,20 @@ async def main(connection=None):
                     or ""
                 ).strip()
                 if not engineer_id:
-                    weaver = state.get_weaver_for_group(group)
-                    engineer_id = str(getattr(weaver, "id", "") or "").strip()
-                await state.update_weaver_settings_async(
+                    engineer = state.get_engineer_for_group(group)
+                    engineer_id = str(getattr(engineer, "id", "") or "").strip()
+                await state.update_engineer_settings_async(
                     group,
                     paused=False,
                     pending_question="",
                     _pending_question_actor_id=engineer_id)
-                weaver_buffer.on_delivery_resumed(group)
+                engineer_buffer.on_delivery_resumed(group)
                 result = {"type": "ok"}
 
             elif cmd == "digest_pause":
                 result = _handle_digest_pause_resume_command(
                     state,
-                    weaver_buffer,
+                    engineer_buffer,
                     data,
                     paused=True,
                 )
@@ -10643,14 +10643,14 @@ async def main(connection=None):
             elif cmd == "digest_resume":
                 result = _handle_digest_pause_resume_command(
                     state,
-                    weaver_buffer,
+                    engineer_buffer,
                     data,
                     paused=False,
                 )
 
-            elif cmd == "weaver_flush_now":
-                result = _handle_weaver_flush_now_command(
-                    weaver_buffer, data)
+            elif cmd == "engineer_flush_now":
+                result = _handle_engineer_flush_now_command(
+                    engineer_buffer, data)
 
             elif cmd == "restart":
                 log.info("Restart requested — cleaning up and re-executing")

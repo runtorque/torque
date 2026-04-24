@@ -480,7 +480,7 @@ function _ahActionIcon(action) {
     done: '\u2713', ready: '\u2713', blocked: '\u26A0',
     error: '\u2717', progress: '\u25B6', derive: '\u2192',
     ask: '\u2753', name: '\u270E',
-    weaver_message: '\u2709', reply: '\u21A9'
+    engineer_message: '\u2709', reply: '\u21A9'
   };
   return icons[action] || '\u2022';
 }

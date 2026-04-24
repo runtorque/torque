@@ -1,6 +1,6 @@
 # Loom
 
-Loom is an iTerm2-first agent orchestration workspace for people who already live in the terminal. It gives you structured groups, managed agent sessions, companion terminals, worktrees, a task board, action-driven dispatch, and a semi-autonomous weaver, all backed by a local Python daemon and a web UI that runs in the Toolbelt, a browser, or a native desktop shell.
+Loom is an iTerm2-first agent orchestration workspace for people who already live in the terminal. It gives you structured groups, managed agent sessions, companion terminals, worktrees, a task board, action-driven dispatch, and a semi-autonomous engineer, all backed by a local Python daemon and a web UI that runs in the Toolbelt, a browser, or a native desktop shell.
 
 ## What Loom Covers
 
@@ -8,7 +8,7 @@ Loom is an iTerm2-first agent orchestration workspace for people who already liv
 - Dispatch tasks from reusable actions and templates
 - Run isolated git worktrees per agent
 - Track work on a built-in task board with pipelines and human-review gates
-- Orchestrate work with a per-group weaver agent
+- Orchestrate work with a per-group engineer agent
 - Control Loom from the `loom` CLI
 
 ## Start Here
@@ -34,7 +34,7 @@ Loom is an iTerm2-first agent orchestration workspace for people who already liv
 - [Task Lifecycle](docs/task-lifecycle.md) — understand how tasks move from backlog to completion
 - [Actions & Templates](docs/actions.md) — define reusable prompts, variables, and pipelines
 - [Agent Templates](docs/agent-templates.md) — save reusable agent launch presets
-- [Weaver](docs/weaver.md) — use Loom's orchestrator agent for semi-autonomous task management
+- [Engineer](docs/engineer.md) — use Loom's orchestrator agent for semi-autonomous task management
 - [Worktrees](docs/worktrees.md) — isolate agent changes in separate git worktrees
 
 ### Reference and project docs
@@ -116,7 +116,7 @@ The docs are organized by job:
 - [Worktrees](docs/worktrees.md) for isolated branches and checkpoints
 - [Sessions](docs/sessions.md) for groups, agents, terminals, broadcast, relaunch, and navigation
 - [Schedules](docs/schedules.md) for recurring and one-shot task dispatch
-- [Weaver](docs/weaver.md) for orchestrator workflows and tools
+- [Engineer](docs/engineer.md) for orchestrator workflows and tools
 - [Operations](docs/operations.md) for runtime modes, logs, deploy/update, and notifications
 - [Architecture](docs/architecture.md) for the high-level system design
 - [CLI Reference](docs/cli.md) for command-by-command reference

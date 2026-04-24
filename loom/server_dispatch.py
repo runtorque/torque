@@ -52,13 +52,13 @@ def _is_busy_agent(state: MatrixState, agent_id: str) -> bool:
 
 def _active_worker_ids(state: MatrixState, group: str) -> set[str]:
     active = set()
-    weaver_id = state.get_group_settings(group).weaver_agent_id
+    engineer_id = state.get_group_settings(group).engineer_agent_id
     for cell in state.agents.values():
         if cell.cell_type != "agent":
             continue
         if cell.group != group:
             continue
-        if cell.id == weaver_id:
+        if cell.id == engineer_id:
             continue
         if _is_busy_agent(state, cell.id):
             active.add(cell.id)
@@ -197,7 +197,7 @@ async def _maybe_auto_resume_stream(state: MatrixState, handle_command,
     )
     if not stream_group:
         return None
-    settings = state.get_weaver_settings(stream_group)
+    settings = state.get_engineer_settings(stream_group)
     if not _stream_resume_allowed(
             settings,
             previous_stream=previous_stream,
@@ -338,15 +338,15 @@ async def _pump_auto_dispatch_queue(state: MatrixState, handle_command,
                 break
 
             payload = {"cmd": "dispatch_task", "id": task.id}
-            if entry.weaver_owner_id:
-                payload["_weaver_dispatch_group"] = group_name
-                payload["_weaver_dispatch_id"] = entry.weaver_owner_id
+            if entry.engineer_owner_id:
+                payload["_engineer_dispatch_group"] = group_name
+                payload["_engineer_dispatch_id"] = entry.engineer_owner_id
             if target_agent_id:
                 payload["agent_id"] = target_agent_id
             else:
                 payload["create_agent"] = True
-                if entry.weaver_owner_id:
-                    payload["_created_by_weaver_id"] = entry.weaver_owner_id
+                if entry.engineer_owner_id:
+                    payload["_created_by_engineer_id"] = entry.engineer_owner_id
             result = await handle_command(payload)
             if result and result.get("type") in {"error", "dispatch_action_missing"}:
                 state.auto_dispatch_queue_remove_task(task.id)

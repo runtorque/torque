@@ -6,7 +6,7 @@
 
 This assumes Stage 1–3 are already deployed and healthy, the Stage 4 UI is
 present, and at least one engineer already exists for routing/assignment (the
-default `Weaver` engineer is fine).
+default `Engineer` engineer is fine).
 
 ## Preflight
 
@@ -40,9 +40,9 @@ loom doctor --json | jq '{architects: .architects.total, engineers: .engineers.t
 Capture the default engineer id for later task routing:
 
 ```bash
-WEAVER_ID="$(sqlite3 "$DB" "SELECT id FROM agents WHERE kind='engineer' AND name='Weaver' LIMIT 1;")"
-echo "$WEAVER_ID"
-test -n "$WEAVER_ID"
+ENGINEER_ID="$(sqlite3 "$DB" "SELECT id FROM agents WHERE kind='engineer' AND name='Engineer' LIMIT 1;")"
+echo "$ENGINEER_ID"
+test -n "$ENGINEER_ID"
 ```
 
 ## Deploy and restart
@@ -153,12 +153,12 @@ In the productmind session, paste:
 
 ```text
 Call architect_task_create with:
-{"title":"Do the thing","group":"loom","assigned_engineer_id":"WEAVER_ID_VALUE","suggested_action":"feature/implement"}
-Replace WEAVER_ID_VALUE with the real engineer id before sending.
+{"title":"Do the thing","group":"loom","assigned_engineer_id":"ENGINEER_ID_VALUE","suggested_action":"feature/implement"}
+Replace ENGINEER_ID_VALUE with the real engineer id before sending.
 Return only the JSON result.
 ```
 
-Use the real `$WEAVER_ID` in the prompt above. Then capture the task id:
+Use the real `$ENGINEER_ID` in the prompt above. Then capture the task id:
 
 ```bash
 TASK_ID="$(sqlite3 "$DB" "SELECT id FROM board_tasks WHERE created_by_architect_id='$PRODUCTMIND_ID' AND task='Do the thing' ORDER BY rowid DESC LIMIT 1;")"
@@ -170,7 +170,7 @@ sqlite3 "$DB" "SELECT id, assigned_engineer_id, created_by_architect_id, suggest
 Expected:
 
 - the row exists
-- `assigned_engineer_id='$WEAVER_ID'`
+- `assigned_engineer_id='$ENGINEER_ID'`
 - `created_by_architect_id='$PRODUCTMIND_ID'`
 - `suggested_action='feature/implement'`
 

@@ -41,8 +41,8 @@ function connect() {
   ws.onclose = () => {
     _resyncPending = false;
     _awaitingFullState = false;
-    if (typeof _weaverResetSessionMapMeta === 'function') {
-      _weaverResetSessionMapMeta({ clearStale: false });
+    if (typeof _engineerResetSessionMapMeta === 'function') {
+      _engineerResetSessionMapMeta({ clearStale: false });
     }
     document.getElementById('conn-dot').classList.remove('ok');
     document.getElementById('conn-dot').title = 'Disconnected';
@@ -193,23 +193,23 @@ function connect() {
       if (typeof taskHistoryReceiveDetail === 'function') taskHistoryReceiveDetail(msg);
     } else if (msg.type === 'action') {
       handleAction(msg);
-    } else if (msg.type === 'weaver_session_map') {
-      _handleWeaverSessionMapMessage(msg);
+    } else if (msg.type === 'engineer_session_map') {
+      _handleEngineerSessionMapMessage(msg);
     }
   };
 }
 
-function _handleWeaverSessionMapMessage(msg) {
-  if (!state.weaver_session_maps) state.weaver_session_maps = {};
+function _handleEngineerSessionMapMessage(msg) {
+  if (!state.engineer_session_maps) state.engineer_session_maps = {};
   var group = (msg && msg.group) || '';
   if (!group) return;
-  state.weaver_session_maps[group] = (msg && msg.session_map) || {};
-  if (typeof _weaverReceiveSessionMap === 'function') {
-    _weaverReceiveSessionMap(msg);
+  state.engineer_session_maps[group] = (msg && msg.session_map) || {};
+  if (typeof _engineerReceiveSessionMap === 'function') {
+    _engineerReceiveSessionMap(msg);
     return;
   }
-  if (((typeof _panelAppVisible === 'function' && _panelAppVisible('weaver'))
-      || (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'weaver'))
+  if (((typeof _panelAppVisible === 'function' && _panelAppVisible('engineer'))
+      || (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'engineer'))
       && typeof renderAgentPanel === 'function') {
     var currentGroup = (typeof _currentGroup === 'function') ? _currentGroup() : '';
     if (!currentGroup || currentGroup === group) renderAgentPanel();
@@ -295,11 +295,11 @@ function _handleFullState(msg) {
   if (!state.agent_digest_settings) state.agent_digest_settings = {};
   if (!state.digest_buffer_stats) state.digest_buffer_stats = {};
   if (!state.digest_sent_events) state.digest_sent_events = {};
-  if (!state.weaver_buffer_stats) state.weaver_buffer_stats = {};
-  if (!state.weaver_sent_events) state.weaver_sent_events = {};
-  if (!state.weaver_worklog) state.weaver_worklog = {};
-  if (!state.weaver_streams) state.weaver_streams = {};
-  if (!state.weaver_session_maps) state.weaver_session_maps = {};
+  if (!state.engineer_buffer_stats) state.engineer_buffer_stats = {};
+  if (!state.engineer_sent_events) state.engineer_sent_events = {};
+  if (!state.engineer_worklog) state.engineer_worklog = {};
+  if (!state.engineer_streams) state.engineer_streams = {};
+  if (!state.engineer_session_maps) state.engineer_session_maps = {};
   if (typeof state.selected_principal_id !== 'string') {
     state.selected_principal_id = '';
   }
@@ -333,8 +333,8 @@ function _handleFullState(msg) {
       renderActivePanel();
     }
   }
-  if (typeof _weaverResetSessionMapMeta === 'function') {
-    _weaverResetSessionMapMeta({ refetchOpenMissing: true });
+  if (typeof _engineerResetSessionMapMeta === 'function') {
+    _engineerResetSessionMapMeta({ refetchOpenMissing: true });
   }
   // Restore board panel state on first load
   if (typeof _restorePanelState === 'function') _restorePanelState();
@@ -371,8 +371,8 @@ function _handleDelta(msg) {
     );
   }
   const sessionMapGroups = _collectSessionMapInvalidationGroups(msg.ops, opGroupHints);
-  if (sessionMapGroups.length && typeof _weaverMarkSessionMapStale === 'function') {
-    _weaverMarkSessionMapStale(sessionMapGroups);
+  if (sessionMapGroups.length && typeof _engineerMarkSessionMapStale === 'function') {
+    _engineerMarkSessionMapStale(sessionMapGroups);
   }
   const nextGroup = (typeof _currentGroup === 'function') ? _currentGroup() : '';
   const activeSurfaces = typeof _currentPanelSurfaces === 'function'
@@ -469,7 +469,7 @@ function _blankSurfaceInvalidations() {
     board: false,
     context: false,
     events: false,
-    weaver: false,
+    engineer: false,
     templates: false,
   };
 }
@@ -497,7 +497,7 @@ function _deltaSurfaceInvalidations(ops, hints) {
       case 'group_settings_update':
       case 'focus_update':
       case 'global_settings_update':
-        _markSurface(flags, 'main', 'context', 'weaver');
+        _markSurface(flags, 'main', 'context', 'engineer');
         break;
       case 'task_upsert':
       case 'task_remove':
@@ -509,31 +509,31 @@ function _deltaSurfaceInvalidations(ops, hints) {
         _markSurface(flags, 'board');
         break;
       case 'event_append':
-        _markSurface(flags, 'events', 'weaver');
+        _markSurface(flags, 'events', 'engineer');
         break;
       case 'journal_append':
       case 'journal_delete':
       case 'architect_journal_append':
       case 'digest_buffer_stats':
       case 'digest_sent_push':
-      case 'weaver_buffer_stats':
-      case 'weaver_sent_events':
-      case 'weaver_worklog_append':
-      case 'weaver_streams':
-      case 'weaver_streams_update':
-        _markSurface(flags, 'weaver');
+      case 'engineer_buffer_stats':
+      case 'engineer_sent_events':
+      case 'engineer_worklog_append':
+      case 'engineer_streams':
+      case 'engineer_streams_update':
+        _markSurface(flags, 'engineer');
         break;
-      case 'weaver_settings_update':
-        _markSurface(flags, 'main', 'weaver');
+      case 'engineer_settings_update':
+        _markSurface(flags, 'main', 'engineer');
         break;
       case 'agent_digest_update':
-        _markSurface(flags, 'main', 'weaver');
+        _markSurface(flags, 'main', 'engineer');
         break;
       case 'decision_upsert':
       case 'decision_remove':
       case 'pending_hire_upsert':
       case 'pending_hire_resolve':
-        _markSurface(flags, 'main', 'weaver');
+        _markSurface(flags, 'main', 'engineer');
         break;
       case 'ui_update':
         _applyUiSurfaceInvalidation(flags, op.key);
@@ -867,7 +867,7 @@ function _taskDeltaInvalidatesEvents(previous, next, op) {
   return false;
 }
 
-function _focusedWeaverAgent() {
+function _focusedEngineerAgent() {
   if (typeof _resolveFocusedAgent === 'function') return _resolveFocusedAgent();
   if (typeof focusedItemId !== 'undefined'
       && focusedItemId
@@ -879,24 +879,24 @@ function _focusedWeaverAgent() {
   return null;
 }
 
-function _focusedWeaverAgentKind(agent) {
+function _focusedEngineerAgentKind(agent) {
   if (typeof _agentPanelKind === 'function') return _agentPanelKind(agent);
   return String((agent && agent.kind) || 'worker');
 }
 
-function _focusedWeaverActiveTab(kind) {
+function _focusedEngineerActiveTab(kind) {
   if (typeof _agentPanelActiveTab === 'function') return _agentPanelActiveTab(kind);
   return '';
 }
 
-function _taskDeltaInvalidatesWeaver(previous, next, op) {
+function _taskDeltaInvalidatesEngineer(previous, next, op) {
   if (!_standaloneDeltaOptimizationsEnabled()) return true;
   const group = _currentSurfaceGroup();
   if (!_taskTouchesGroup(previous, next, group)) return false;
-  const focused = _focusedWeaverAgent();
+  const focused = _focusedEngineerAgent();
   if (!focused) return false;
-  const kind = _focusedWeaverAgentKind(focused);
-  const tab = _focusedWeaverActiveTab(kind);
+  const kind = _focusedEngineerAgentKind(focused);
+  const tab = _focusedEngineerActiveTab(kind);
   if (kind === 'worker') {
     if (tab && tab !== 'worklog') return false;
     const focusedId = String(focused.id || '');
@@ -920,7 +920,7 @@ function _taskDeltaInvalidatesWeaver(previous, next, op) {
 
 function _applyTaskSurfaceInvalidation(flags, op, hint) {
   if (!_standaloneDeltaOptimizationsEnabled()) {
-    _markSurface(flags, 'main', 'board', 'context', 'events', 'weaver');
+    _markSurface(flags, 'main', 'board', 'context', 'events', 'engineer');
     return;
   }
   const previous = hint && hint.task ? hint.task : null;
@@ -929,7 +929,7 @@ function _applyTaskSurfaceInvalidation(flags, op, hint) {
   if (_taskDeltaInvalidatesBoard(previous, next, op)) _markSurface(flags, 'board');
   if (_taskDeltaInvalidatesContext(previous, next, op)) _markSurface(flags, 'context');
   if (_taskDeltaInvalidatesEvents(previous, next, op)) _markSurface(flags, 'events');
-  if (_taskDeltaInvalidatesWeaver(previous, next, op)) _markSurface(flags, 'weaver');
+  if (_taskDeltaInvalidatesEngineer(previous, next, op)) _markSurface(flags, 'engineer');
 }
 
 function _agentHasAttention(agent) {
@@ -996,11 +996,11 @@ function _agentDeltaInvalidatesEvents(previous, next, op) {
   return false;
 }
 
-function _agentDeltaInvalidatesWeaver(previous, next, op) {
+function _agentDeltaInvalidatesEngineer(previous, next, op) {
   if (!_standaloneDeltaOptimizationsEnabled()) return true;
   const group = _currentSurfaceGroup();
   if (!_agentTouchesGroup(previous, next, group)) return false;
-  const focused = _focusedWeaverAgent();
+  const focused = _focusedEngineerAgent();
   const agentId = String((op && op.id) || (previous && previous.id) || (next && next.id) || '');
   if (focused && agentId && String(focused.id || '') === agentId) return true;
   return true;
@@ -1008,7 +1008,7 @@ function _agentDeltaInvalidatesWeaver(previous, next, op) {
 
 function _applyAgentSurfaceInvalidation(flags, op, hint) {
   if (!_standaloneDeltaOptimizationsEnabled()) {
-    _markSurface(flags, 'main', 'context', 'events', 'weaver');
+    _markSurface(flags, 'main', 'context', 'events', 'engineer');
     return;
   }
   const previous = hint && hint.agent ? hint.agent : null;
@@ -1016,12 +1016,12 @@ function _applyAgentSurfaceInvalidation(flags, op, hint) {
   _markSurface(flags, 'main');
   if (_agentDeltaInvalidatesContext(previous, next, op)) _markSurface(flags, 'context');
   if (_agentDeltaInvalidatesEvents(previous, next, op)) _markSurface(flags, 'events');
-  if (_agentDeltaInvalidatesWeaver(previous, next, op)) _markSurface(flags, 'weaver');
+  if (_agentDeltaInvalidatesEngineer(previous, next, op)) _markSurface(flags, 'engineer');
 }
 
 function _applyUiSurfaceInvalidation(flags, key) {
   if (key === 'standalone_panel_layout') {
-    _markSurface(flags, 'board', 'actions', 'context', 'events', 'weaver', 'templates');
+    _markSurface(flags, 'board', 'actions', 'context', 'events', 'engineer', 'templates');
   }
   if (key === 'events_dismissed_attention') {
     _markSurface(flags, 'events');
@@ -1050,7 +1050,7 @@ function _collectSessionMapInvalidationGroups(ops, hints) {
       case 'journal_append':
       case 'journal_delete':
       case 'agent_digest_update':
-      case 'weaver_settings_update':
+      case 'engineer_settings_update':
         group = op.group || '';
         break;
       case 'agent_remove':
@@ -1074,7 +1074,7 @@ function _surfaceUsesCurrentGroup(surface) {
   if (surface === 'events') {
     return typeof _eventsFilterByGroup === 'undefined' || !!_eventsFilterByGroup;
   }
-  return surface === 'context' || surface === 'weaver';
+  return surface === 'context' || surface === 'engineer';
 }
 
 function _captureDeltaGroupHints(ops) {
@@ -1157,12 +1157,12 @@ function _opTouchesGroup(op, group, hint) {
     case 'agent_digest_update':
     case 'digest_buffer_stats':
     case 'digest_sent_push':
-    case 'weaver_buffer_stats':
-    case 'weaver_sent_events':
-    case 'weaver_worklog_append':
-    case 'weaver_streams':
-    case 'weaver_streams_update':
-    case 'weaver_settings_update':
+    case 'engineer_buffer_stats':
+    case 'engineer_sent_events':
+    case 'engineer_worklog_append':
+    case 'engineer_streams':
+    case 'engineer_streams_update':
+    case 'engineer_settings_update':
       return (op.group || '') === group;
     default:
       return true;
@@ -1228,11 +1228,11 @@ function _applyDelta(ops) {
       case 'group_remove':
         delete state.groups[op.name];
         delete state.group_settings[op.name];
-        if (state.weaver_buffer_stats) delete state.weaver_buffer_stats[op.name];
-        if (state.weaver_sent_events) delete state.weaver_sent_events[op.name];
-        if (state.weaver_worklog) delete state.weaver_worklog[op.name];
-        if (state.weaver_streams) delete state.weaver_streams[op.name];
-        if (state.weaver_session_maps) delete state.weaver_session_maps[op.name];
+        if (state.engineer_buffer_stats) delete state.engineer_buffer_stats[op.name];
+        if (state.engineer_sent_events) delete state.engineer_sent_events[op.name];
+        if (state.engineer_worklog) delete state.engineer_worklog[op.name];
+        if (state.engineer_streams) delete state.engineer_streams[op.name];
+        if (state.engineer_session_maps) delete state.engineer_session_maps[op.name];
         break;
       case 'group_rename': {
         if (state.groups[op.old_name]) {
@@ -1243,25 +1243,25 @@ function _applyDelta(ops) {
           state.group_settings[op.new_name] = state.group_settings[op.old_name];
           delete state.group_settings[op.old_name];
         }
-        if (state.weaver_buffer_stats && state.weaver_buffer_stats[op.old_name]) {
-          state.weaver_buffer_stats[op.new_name] = state.weaver_buffer_stats[op.old_name];
-          delete state.weaver_buffer_stats[op.old_name];
+        if (state.engineer_buffer_stats && state.engineer_buffer_stats[op.old_name]) {
+          state.engineer_buffer_stats[op.new_name] = state.engineer_buffer_stats[op.old_name];
+          delete state.engineer_buffer_stats[op.old_name];
         }
-        if (state.weaver_sent_events && state.weaver_sent_events[op.old_name]) {
-          state.weaver_sent_events[op.new_name] = state.weaver_sent_events[op.old_name];
-          delete state.weaver_sent_events[op.old_name];
+        if (state.engineer_sent_events && state.engineer_sent_events[op.old_name]) {
+          state.engineer_sent_events[op.new_name] = state.engineer_sent_events[op.old_name];
+          delete state.engineer_sent_events[op.old_name];
         }
-        if (state.weaver_worklog && state.weaver_worklog[op.old_name]) {
-          state.weaver_worklog[op.new_name] = state.weaver_worklog[op.old_name];
-          delete state.weaver_worklog[op.old_name];
+        if (state.engineer_worklog && state.engineer_worklog[op.old_name]) {
+          state.engineer_worklog[op.new_name] = state.engineer_worklog[op.old_name];
+          delete state.engineer_worklog[op.old_name];
         }
-        if (state.weaver_streams && state.weaver_streams[op.old_name]) {
-          state.weaver_streams[op.new_name] = state.weaver_streams[op.old_name];
-          delete state.weaver_streams[op.old_name];
+        if (state.engineer_streams && state.engineer_streams[op.old_name]) {
+          state.engineer_streams[op.new_name] = state.engineer_streams[op.old_name];
+          delete state.engineer_streams[op.old_name];
         }
-        if (state.weaver_session_maps && state.weaver_session_maps[op.old_name]) {
-          state.weaver_session_maps[op.new_name] = state.weaver_session_maps[op.old_name];
-          delete state.weaver_session_maps[op.old_name];
+        if (state.engineer_session_maps && state.engineer_session_maps[op.old_name]) {
+          state.engineer_session_maps[op.new_name] = state.engineer_session_maps[op.old_name];
+          delete state.engineer_session_maps[op.old_name];
         }
         break;
       }
@@ -1391,24 +1391,24 @@ function _applyDelta(ops) {
         break;
 
       case 'journal_append': {
-        if (!state.weaver_journal) state.weaver_journal = {};
+        if (!state.engineer_journal) state.engineer_journal = {};
         var grp = op.group || '';
         if (grp) {
-          if (!state.weaver_journal[grp]) state.weaver_journal[grp] = [];
+          if (!state.engineer_journal[grp]) state.engineer_journal[grp] = [];
           var je = Object.assign({}, op);
           delete je.op;
-          state.weaver_journal[grp].push(je);
+          state.engineer_journal[grp].push(je);
           // Cap at 200 entries per group
-          if (state.weaver_journal[grp].length > 200)
-            state.weaver_journal[grp] = state.weaver_journal[grp].slice(-200);
+          if (state.engineer_journal[grp].length > 200)
+            state.engineer_journal[grp] = state.engineer_journal[grp].slice(-200);
         }
         break;
       }
 
       case 'journal_delete': {
         var grpd = op.group || '';
-        if (grpd && state.weaver_journal && state.weaver_journal[grpd]) {
-          state.weaver_journal[grpd] = state.weaver_journal[grpd].filter(
+        if (grpd && state.engineer_journal && state.engineer_journal[grpd]) {
+          state.engineer_journal[grpd] = state.engineer_journal[grpd].filter(
             function(e) { return e.id !== op.id; });
         }
         break;
@@ -1429,11 +1429,11 @@ function _applyDelta(ops) {
         break;
       }
 
-      case 'weaver_buffer_stats': {
-        if (!state.weaver_buffer_stats) state.weaver_buffer_stats = {};
+      case 'engineer_buffer_stats': {
+        if (!state.engineer_buffer_stats) state.engineer_buffer_stats = {};
         var bsg = op.group || '';
         if (bsg) {
-          state.weaver_buffer_stats[bsg] = {
+          state.engineer_buffer_stats[bsg] = {
             buffered_events: op.buffered_events || 0,
             next_push_in: op.next_push_in || 0,
             next_push_at: op.next_push_at || 0,
@@ -1444,11 +1444,11 @@ function _applyDelta(ops) {
         break;
       }
 
-      case 'weaver_sent_events': {
-        if (!state.weaver_sent_events) state.weaver_sent_events = {};
+      case 'engineer_sent_events': {
+        if (!state.engineer_sent_events) state.engineer_sent_events = {};
         var wsg = op.group || '';
         if (wsg) {
-          state.weaver_sent_events[wsg] = op.events || [];
+          state.engineer_sent_events[wsg] = op.events || [];
         }
         break;
       }
@@ -1479,43 +1479,43 @@ function _applyDelta(ops) {
         break;
       }
 
-      case 'weaver_worklog_append': {
-        if (!state.weaver_worklog) state.weaver_worklog = {};
+      case 'engineer_worklog_append': {
+        if (!state.engineer_worklog) state.engineer_worklog = {};
         var wlg = op.group || '';
         if (wlg) {
-          if (!state.weaver_worklog[wlg]) state.weaver_worklog[wlg] = [];
+          if (!state.engineer_worklog[wlg]) state.engineer_worklog[wlg] = [];
           var worklogEntry = Object.assign({}, op.entry || {});
-          state.weaver_worklog[wlg].unshift(worklogEntry);
-          if (state.weaver_worklog[wlg].length > 200) {
-            state.weaver_worklog[wlg] = state.weaver_worklog[wlg].slice(0, 200);
+          state.engineer_worklog[wlg].unshift(worklogEntry);
+          if (state.engineer_worklog[wlg].length > 200) {
+            state.engineer_worklog[wlg] = state.engineer_worklog[wlg].slice(0, 200);
           }
         }
         break;
       }
 
-      case 'weaver_streams':
-      case 'weaver_streams_update': {
-        if (!state.weaver_streams) state.weaver_streams = {};
+      case 'engineer_streams':
+      case 'engineer_streams_update': {
+        if (!state.engineer_streams) state.engineer_streams = {};
         var wstg = op.group || '';
         if (wstg) {
           if (Object.prototype.hasOwnProperty.call(op, 'streams')) {
-            state.weaver_streams[wstg] = op.streams;
+            state.engineer_streams[wstg] = op.streams;
           } else if (Array.isArray(op.items)) {
-            state.weaver_streams[wstg] = { items: op.items };
+            state.engineer_streams[wstg] = { items: op.items };
           } else {
-            state.weaver_streams[wstg] = [];
+            state.engineer_streams[wstg] = [];
           }
         }
         break;
       }
 
-      case 'weaver_settings_update': {
-        if (!state.weaver_settings) state.weaver_settings = {};
+      case 'engineer_settings_update': {
+        if (!state.engineer_settings) state.engineer_settings = {};
         var wg = op.group || '';
         if (wg) {
           var ws = Object.assign({}, op);
           delete ws.op;
-          state.weaver_settings[wg] = ws;
+          state.engineer_settings[wg] = ws;
         }
         break;
       }

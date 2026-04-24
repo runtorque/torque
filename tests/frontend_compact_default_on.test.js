@@ -4,7 +4,7 @@
  * Pins the behaviors that flipped in this phase:
  *   - default-ON: unset localStorage opts into compact, explicit sentinels opt
  *     out.
- *   - agent_panel weaver summaries no longer hydrate against eager fields.
+ *   - agent_panel engineer summaries no longer hydrate against eager fields.
  *   - _preservedMergeDiffForAgent narrows its hydrate scope via the now-eager
  *     worktree_boundary.
  *   - showTaskMessages uses the eager messages-preview count to skip
@@ -107,9 +107,9 @@ test('compact-v1 / 1 / yes still opt in explicitly', () => {
   }
 });
 
-/* -- agent_panel weaver summaries: no redundant hydrate in v2 ----------- */
+/* -- agent_panel engineer summaries: no redundant hydrate in v2 ----------- */
 
-function createWeaverSummaryHarness() {
+function createEngineerSummaryHarness() {
   const { context, sandbox } = createCompactSandbox({
     localStorage: { 'loom:snapshot_protocol': 'compact-v1' },
     state: {
@@ -138,31 +138,31 @@ function createWeaverSummaryHarness() {
   sandbox.render = function() { sandbox.renderCalls++; };
   sandbox.renderActivePanel = function() {};
   run(context, `
-    var _weaverHealthSeverity = { blocked: 3, stalled: 2, thrashing: 2, 'idle-risk': 1 };
-    var _weaverVerificationLabels = { pending: 'Pending', failed: 'Failed',
+    var _engineerHealthSeverity = { blocked: 3, stalled: 2, thrashing: 2, 'idle-risk': 1 };
+    var _engineerVerificationLabels = { pending: 'Pending', failed: 'Failed',
       attempted: 'Attempted', passed: 'Passed' };
   `);
   const source = loadFile('static/js/agent_panel.js');
   const healthFn = source.match(
-    /function _weaverTaskHealthSummary\(group\)\s*\{[\s\S]*?\n\}/m)[0];
+    /function _engineerTaskHealthSummary\(group\)\s*\{[\s\S]*?\n\}/m)[0];
   const verifyFn = source.match(
-    /function _weaverVerificationSummary\(group\)\s*\{[\s\S]*?\n\}/m)[0];
+    /function _engineerVerificationSummary\(group\)\s*\{[\s\S]*?\n\}/m)[0];
   vm.runInContext(healthFn + '\n' + verifyFn, context);
   return { context, sandbox };
 }
 
-test('_weaverTaskHealthSummary does not hydrate compact cards in v2', () => {
-  const { context, sandbox } = createWeaverSummaryHarness();
-  const summary = plain(run(context, `_weaverTaskHealthSummary('alpha')`));
+test('_engineerTaskHealthSummary does not hydrate compact cards in v2', () => {
+  const { context, sandbox } = createEngineerSummaryHarness();
+  const summary = plain(run(context, `_engineerTaskHealthSummary('alpha')`));
   assert.equal(summary.total, 1);
   assert.equal(summary.items[0].id, 'a');
   assert.equal(summary.items[0].health_state, 'stalled');
   eq(sandbox.sendCalls.map(function(c) { return c.cmd; }), []);
 });
 
-test('_weaverVerificationSummary does not hydrate compact cards in v2', () => {
-  const { context, sandbox } = createWeaverSummaryHarness();
-  const summary = plain(run(context, `_weaverVerificationSummary('alpha')`));
+test('_engineerVerificationSummary does not hydrate compact cards in v2', () => {
+  const { context, sandbox } = createEngineerSummaryHarness();
+  const summary = plain(run(context, `_engineerVerificationSummary('alpha')`));
   assert.equal(summary.total, 1);
   assert.equal(summary.items[0].id, 'a');
   assert.equal(summary.items[0].detail, 'needs smoke');

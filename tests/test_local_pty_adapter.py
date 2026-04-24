@@ -219,7 +219,7 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
         state = self.state_mod.MatrixState()
         state.add_group("Loom")
         cell = state.add_agent(
-            name="Weaver",
+            name="Engineer",
             group="Loom",
             terminal_backend="pty",
             command="claude",
@@ -257,7 +257,7 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
         state = self.state_mod.MatrixState()
         state.add_group("Loom")
         cell = state.add_agent(
-            name="Weaver",
+            name="Engineer",
             group="Loom",
             terminal_backend="pty",
             command="claude",
@@ -291,7 +291,7 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
         state = self.state_mod.MatrixState()
         state.add_group("Loom")
         cell = state.add_agent(
-            name="Weaver",
+            name="Engineer",
             group="Loom",
             terminal_backend="pty",
             command="codex",
@@ -333,7 +333,7 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
         state = self.state_mod.MatrixState()
         state.add_group("Loom")
         cell = state.add_agent(
-            name="Weaver",
+            name="Engineer",
             group="Loom",
             terminal_backend="pty",
             command="codex",
@@ -379,7 +379,7 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
         state = self.state_mod.MatrixState()
         state.add_group("Loom")
         cell = state.add_agent(
-            name="Weaver",
+            name="Engineer",
             group="Loom",
             terminal_backend="pty",
             command="codex",
@@ -448,7 +448,7 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
         state = self.state_mod.MatrixState()
         state.add_group("Loom")
         cell = state.add_agent(
-            name="Weaver",
+            name="Engineer",
             group="Loom",
             terminal_backend="pty",
             command="claude",
@@ -494,7 +494,7 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
         state.add_group("Loom")
         with tempfile.TemporaryDirectory() as tmpdir:
             cell = state.add_agent(
-                name="Weaver",
+                name="Engineer",
                 group="Loom",
                 terminal_backend="pty",
                 command="",

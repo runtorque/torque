@@ -1,6 +1,6 @@
-"""Weaver event buffer, digest delivery, and system prompt builder.
+"""Engineer event buffer, digest delivery, and system prompt builder.
 
-The weaver is a per-group orchestrator agent that receives event digests
+The engineer is a per-group orchestrator agent that receives event digests
 when idle.  This module manages buffering, delivery timing, and the
 system prompt assembly for ``--append-system-prompt-file``.
 """
@@ -19,17 +19,17 @@ from .digest_routing import (
 )
 from .state import (
     normalize_default_worker_concurrency,
-    normalize_weaver_autonomy_mode,
-    normalize_weaver_digest_verbosity,
-    normalize_weaver_escalation_style,
-    normalize_weaver_same_agent_follow_up_preference,
-    normalize_weaver_wave_size_preference,
+    normalize_engineer_autonomy_mode,
+    normalize_engineer_digest_verbosity,
+    normalize_engineer_escalation_style,
+    normalize_engineer_same_agent_follow_up_preference,
+    normalize_engineer_wave_size_preference,
     normalize_worktree_merge_cleanup,
 )
 from .task_health import HEALTH_SEVERITY
-from .weaver_hints import (
-    WEAVER_HINT_RESEND_COOLDOWN_SECS,
-    compute_weaver_hints,
+from .engineer_hints import (
+    ENGINEER_HINT_RESEND_COOLDOWN_SECS,
+    compute_engineer_hints,
 )
 
 log = logging.getLogger("loom")
@@ -133,7 +133,7 @@ _ARCHITECT_PIPELINE_ACTIVITY_EVENTS = ARCHITECT_COARSE_EVENTS.intersection({
 })
 
 # ---------------------------------------------------------------------------
-# Base system prompt (the weaver's "firmware")
+# Base system prompt (the engineer's "firmware")
 # ---------------------------------------------------------------------------
 
 _BASE_SYSTEM_PROMPT = """\
@@ -475,30 +475,30 @@ def _escalation_policy_lines(mode: str) -> list[str]:
     ]
 
 
-def _build_policy_section(weaver_settings=None, group_settings=None) -> str:
-    mode = normalize_weaver_autonomy_mode(
-        getattr(weaver_settings, "autonomy_mode", "")
+def _build_policy_section(engineer_settings=None, group_settings=None) -> str:
+    mode = normalize_engineer_autonomy_mode(
+        getattr(engineer_settings, "autonomy_mode", "")
     )
     concurrency = normalize_default_worker_concurrency(
-        getattr(weaver_settings, "default_worker_concurrency", 2)
+        getattr(engineer_settings, "default_worker_concurrency", 2)
     )
-    wave_size = normalize_weaver_wave_size_preference(
-        getattr(weaver_settings, "wave_size_preference", "small")
+    wave_size = normalize_engineer_wave_size_preference(
+        getattr(engineer_settings, "wave_size_preference", "small")
     )
-    same_agent = normalize_weaver_same_agent_follow_up_preference(
-        getattr(weaver_settings, "same_agent_follow_up_preference", "balanced")
+    same_agent = normalize_engineer_same_agent_follow_up_preference(
+        getattr(engineer_settings, "same_agent_follow_up_preference", "balanced")
     )
-    digest_verbosity = normalize_weaver_digest_verbosity(
-        getattr(weaver_settings, "digest_verbosity", "balanced")
+    digest_verbosity = normalize_engineer_digest_verbosity(
+        getattr(engineer_settings, "digest_verbosity", "balanced")
     )
-    escalation_style = normalize_weaver_escalation_style(
-        getattr(weaver_settings, "escalation_style", "note_then_ask")
+    escalation_style = normalize_engineer_escalation_style(
+        getattr(engineer_settings, "escalation_style", "note_then_ask")
     )
     cleanup_mode = normalize_worktree_merge_cleanup(
         getattr(group_settings, "worktree_merge_cleanup", "keep")
     )
     restrict_to_created_agents = bool(
-        getattr(weaver_settings, "restrict_to_created_agents", False)
+        getattr(engineer_settings, "restrict_to_created_agents", False)
     )
     lines = [
         "## Operating Policy",
@@ -539,10 +539,10 @@ def _build_policy_section(weaver_settings=None, group_settings=None) -> str:
     return "\n".join(lines)
 
 
-def build_weaver_system_prompt(group: str, weaver_settings=None,
-                               action_system_prompt: str = "",
-                               group_settings=None) -> str:
-    """Assemble the full system prompt for a weaver agent.
+def _build_engineer_base_system_prompt(group: str, engineer_settings=None,
+                                       action_system_prompt: str = "",
+                                       group_settings=None) -> str:
+    """Assemble the base system prompt for an engineer agent.
 
     Concatenates: base identity → action system_prompt → structured policy
     section → custom instructions.
@@ -552,11 +552,11 @@ def build_weaver_system_prompt(group: str, weaver_settings=None,
     if action_system_prompt:
         parts.append(action_system_prompt.rstrip())
 
-    if weaver_settings or group_settings:
-        parts.append(_build_policy_section(weaver_settings, group_settings))
+    if engineer_settings or group_settings:
+        parts.append(_build_policy_section(engineer_settings, group_settings))
 
-    if weaver_settings and weaver_settings.custom_instructions:
-        ci = weaver_settings.custom_instructions.strip()
+    if engineer_settings and engineer_settings.custom_instructions:
+        ci = engineer_settings.custom_instructions.strip()
         parts.append(
             "## Custom Instructions\n"
             f"{ci}"
@@ -565,13 +565,13 @@ def build_weaver_system_prompt(group: str, weaver_settings=None,
     return "\n\n".join(parts) + "\n"
 
 
-def build_engineer_system_prompt(group: str, weaver_settings=None,
+def build_engineer_system_prompt(group: str, engineer_settings=None,
                                  action_system_prompt: str = "",
                                  group_settings=None) -> str:
     """Assemble the engineer boot prompt with architect escalation guidance."""
-    prompt = build_weaver_system_prompt(
+    prompt = _build_engineer_base_system_prompt(
         group,
-        weaver_settings,
+        engineer_settings,
         action_system_prompt,
         group_settings=group_settings,
     ).rstrip()
@@ -584,7 +584,7 @@ def build_engineer_system_prompt(group: str, weaver_settings=None,
 # Event buffer and digest delivery
 # ---------------------------------------------------------------------------
 
-class WeaverEventBuffer:
+class EngineerEventBuffer:
     """Per-recipient event buffering with idle-gated digest delivery.
 
     Events are buffered per engineer/architect recipient. When the target
@@ -605,7 +605,7 @@ class WeaverEventBuffer:
         self._due_check_deadlines: dict[str, float] = {}  # agent_id → wall-clock deadline for due check
         self._pending_flush: dict[str, bool] = {}    # agent_id → flush task scheduled/running
         self._manual_flush_requested: dict[str, bool] = {}  # agent_id → operator requested immediate flush
-        self._was_idle_with_question: set[str] = set()  # groups where weaver went idle with pending_question
+        self._was_idle_with_question: set[str] = set()  # groups where engineer went idle with pending_question
         self._hint_delivery: dict[str, dict[str, float]] = {}  # group → fingerprint → last sent at
         self._timer_handle: asyncio.TimerHandle | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -771,9 +771,9 @@ class WeaverEventBuffer:
         recipient_or_group = str(recipient_or_group or "").strip()
         if recipient_or_group in self._state.agents:
             return recipient_or_group
-        legacy_weaver = self._state.get_weaver_for_group(recipient_or_group)
-        if legacy_weaver:
-            return legacy_weaver.id
+        legacy_engineer = self._state.get_engineer_for_group(recipient_or_group)
+        if legacy_engineer:
+            return legacy_engineer.id
         return recipient_or_group
 
     def _digest_recipient(self, agent_id: str):
@@ -929,7 +929,7 @@ class WeaverEventBuffer:
         if not target:
             return
         if not target.activity or target.activity == "waiting":
-            self._check_weaver_flush(target)
+            self._check_engineer_flush(target)
 
     def _emit_buffer_stats(self, agent_id: str):
         """Queue a buffer-stats delta for the UI."""
@@ -995,7 +995,7 @@ class WeaverEventBuffer:
                     self._recipient_is_running(target)
                     and (not target.activity or target.activity == "waiting")
             ):
-                self._check_weaver_flush(target)
+                self._check_engineer_flush(target)
 
     def on_delivery_resumed(self, recipient_or_group: str):
         """Re-check buffered events after pause/resume changes."""
@@ -1012,7 +1012,7 @@ class WeaverEventBuffer:
                 self._cancel_due_check(agent_id)
                 self._schedule_flush(agent_id)
             else:
-                self._check_weaver_flush(target)
+                self._check_engineer_flush(target)
 
     def on_delivery_paused(self, recipient_or_group: str):
         agent_id = self._resolve_recipient_id(recipient_or_group)
@@ -1022,10 +1022,10 @@ class WeaverEventBuffer:
 
     def on_agent_activity_change(self, cell):
         """Called when an agent's activity changes. Flush if a recipient goes idle."""
-        legacy_weaver = self._state.get_weaver_for_group(cell.group)
-        is_legacy_weaver = bool(legacy_weaver and legacy_weaver.id == cell.id)
+        legacy_engineer = self._state.get_engineer_for_group(cell.group)
+        is_legacy_engineer = bool(legacy_engineer and legacy_engineer.id == cell.id)
 
-        if is_legacy_weaver:
+        if is_legacy_engineer:
             group = cell.group
 
             def _owns_pending_question(ws) -> bool:
@@ -1033,23 +1033,23 @@ class WeaverEventBuffer:
                     getattr(ws, "pending_question_actor_id", "") or ""
                 ).strip()
                 # Back-compat: legacy pending questions created before actor
-                # persistence are owned by the group weaver.
+                # persistence are owned by the group engineer.
                 return not owner_id or owner_id == cell.id
 
-            # Track when the weaver goes idle while a question is pending.
-            # Only auto-clear pending_question when the weaver becomes
+            # Track when the engineer goes idle while a question is pending.
+            # Only auto-clear pending_question when the engineer becomes
             # active AFTER having been idle — this prevents clearing the
             # question during the same tool-call turn that set it.
             if not cell.activity or cell.activity == "waiting":
-                ws = self._state.get_weaver_settings(group)
+                ws = self._state.get_engineer_settings(group)
                 if ws.pending_question and _owns_pending_question(ws):
                     self._was_idle_with_question.add(group)
             elif cell.activity and cell.activity not in ("", "waiting"):
                 if group in self._was_idle_with_question:
                     self._was_idle_with_question.discard(group)
-                    ws = self._state.get_weaver_settings(group)
+                    ws = self._state.get_engineer_settings(group)
                     if ws.pending_question and _owns_pending_question(ws):
-                        self._state.update_weaver_settings(
+                        self._state.update_engineer_settings(
                             group, pending_question="",
                             paused=False,
                             _pending_question_actor_id=cell.id)
@@ -1058,7 +1058,7 @@ class WeaverEventBuffer:
                 self._digest_recipient(cell.id)
                 and (not cell.activity or cell.activity == "waiting")
         ):
-            self._check_weaver_flush(cell)
+            self._check_engineer_flush(cell)
 
     def request_manual_flush(self, recipient_or_group: str) -> tuple[bool, str]:
         agent_id = self._resolve_recipient_id(recipient_or_group)
@@ -1086,12 +1086,12 @@ class WeaverEventBuffer:
         self._emit_buffer_stats(agent_id)
 
         if not target.activity or target.activity == "waiting":
-            self._check_weaver_flush(target)
+            self._check_engineer_flush(target)
         return True, ""
 
     # -- Internal -------------------------------------------------------------
 
-    def _check_weaver_flush(self, cell):
+    def _check_engineer_flush(self, cell):
         """If *cell* is an eligible digest recipient with buffered events, flush."""
         cell = self._digest_recipient(getattr(cell, "id", ""))
         if not cell or not self._recipient_is_running(cell):
@@ -1114,7 +1114,7 @@ class WeaverEventBuffer:
             return
 
         self._cancel_due_check(agent_id)
-        if self._due_hints(group, weaver=cell):
+        if self._due_hints(group, engineer=cell):
             self._schedule_flush(agent_id)
             return
         is_overdue = self._is_heartbeat_due(agent_id, settings)
@@ -1159,7 +1159,7 @@ class WeaverEventBuffer:
             self._manual_flush_requested.pop(agent_id, None)
             events = self._buffers.pop(agent_id, [])
             buffer_started_at = self._buffer_started.pop(agent_id, None)
-            due_hints = self._due_hints(target.group, weaver=target)
+            due_hints = self._due_hints(target.group, engineer=target)
             board_summary = self._board_summary(target.group, recipient_id=agent_id)
             text = self._format_digest(
                 target.group,
@@ -1231,7 +1231,7 @@ class WeaverEventBuffer:
                 is_idle = not target.activity or target.activity == "waiting"
                 settings = self._state.get_agent_digest_settings(agent_id)
                 if is_idle and not settings.paused:
-                    self._check_weaver_flush(target)
+                    self._check_engineer_flush(target)
 
             if events:
                 self._emit_buffer_stats(agent_id)
@@ -1239,24 +1239,24 @@ class WeaverEventBuffer:
                     self._loop.create_task(self._state.broadcast())
 
     def _format_digest(self, group: str, events: list[dict], board_summary: str,
-                       weaver=None, hints: list[dict] | None = None) -> str:
-        recipient_id = str(getattr(weaver, "id", "") or "").strip()
+                       engineer=None, hints: list[dict] | None = None) -> str:
+        recipient_id = str(getattr(engineer, "id", "") or "").strip()
         settings = (
             self._state.get_agent_digest_settings(recipient_id)
-            if recipient_id else self._state.get_weaver_settings(group)
+            if recipient_id else self._state.get_engineer_settings(group)
         )
         if (
-                str(getattr(weaver, "kind", "") or "").strip() == "architect"
+                str(getattr(engineer, "kind", "") or "").strip() == "architect"
                 or bool(getattr(settings, "architect_digest", False))
         ):
             return self._format_architect_digest(
                 group,
                 events,
                 board_summary,
-                weaver,
+                engineer,
                 hints=hints,
             )
-        verbosity = normalize_weaver_digest_verbosity(
+        verbosity = normalize_engineer_digest_verbosity(
             getattr(settings, "digest_verbosity", "balanced")
         )
         event_limit = 5 if verbosity == "compact" else None
@@ -1311,8 +1311,8 @@ class WeaverEventBuffer:
             )
 
         # Context warning
-        if weaver:
-            ctx_warn = self._context_warning(weaver)
+        if engineer:
+            ctx_warn = self._context_warning(engineer)
             if ctx_warn:
                 lines.append(ctx_warn)
 
@@ -1493,7 +1493,7 @@ class WeaverEventBuffer:
             owner_id = str(
                 getattr(source, "owner_engineer_id", "") or ""
             ).strip() or str(
-                getattr(source, "created_by_weaver_id", "") or ""
+                getattr(source, "created_by_engineer_id", "") or ""
             ).strip()
             owner = self._state.agents.get(owner_id) if owner_id else None
             if str(getattr(owner, "kind", "") or "").strip() == "engineer":
@@ -1511,7 +1511,7 @@ class WeaverEventBuffer:
                 owner_id = str(
                     getattr(candidate, "owner_engineer_id", "") or ""
                 ).strip() or str(
-                    getattr(candidate, "created_by_weaver_id", "") or ""
+                    getattr(candidate, "created_by_engineer_id", "") or ""
                 ).strip()
                 owner = self._state.agents.get(owner_id) if owner_id else None
                 if str(getattr(owner, "kind", "") or "").strip() == "engineer":
@@ -1839,10 +1839,10 @@ class WeaverEventBuffer:
 
     def _board_summary(self, group: str, *, recipient_id: str = "") -> str:
         """Count tasks per lane for a group, including unhealthy rollups."""
-        verbosity = normalize_weaver_digest_verbosity(
+        verbosity = normalize_engineer_digest_verbosity(
             getattr(
                 self._state.get_agent_digest_settings(recipient_id)
-                if recipient_id else self._state.get_weaver_settings(group),
+                if recipient_id else self._state.get_engineer_settings(group),
                 "digest_verbosity",
                 "balanced",
             )
@@ -1890,9 +1890,9 @@ class WeaverEventBuffer:
             return text
         return text[:max(limit - 1, 0)] + "…"
 
-    def _context_warning(self, weaver) -> str:
-        """Return a warning string if weaver context is getting large."""
-        total = weaver.session_tokens_in + weaver.session_tokens_out
+    def _context_warning(self, engineer) -> str:
+        """Return a warning string if engineer context is getting large."""
+        total = engineer.session_tokens_in + engineer.session_tokens_out
         # Rough threshold: 800K tokens (~80% of 1M context)
         if total > 800_000:
             pct = min(99, int(total / 10_000))  # rough percentage of 1M
@@ -1900,23 +1900,23 @@ class WeaverEventBuffer:
                     f"Consider writing a checkpoint.")
         return ""
 
-    def _current_hints(self, group: str, *, weaver=None) -> list[dict]:
-        weaver_id = ""
-        if weaver and getattr(weaver, "id", ""):
-            weaver_id = weaver.id
+    def _current_hints(self, group: str, *, engineer=None) -> list[dict]:
+        engineer_id = ""
+        if engineer and getattr(engineer, "id", ""):
+            engineer_id = engineer.id
         else:
-            live_weaver = self._state.get_weaver_for_group(group)
-            if live_weaver:
-                weaver_id = live_weaver.id
-        return compute_weaver_hints(
+            live_engineer = self._state.get_engineer_for_group(group)
+            if live_engineer:
+                engineer_id = live_engineer.id
+        return compute_engineer_hints(
             self._state,
             group,
-            weaver_id=weaver_id,
+            engineer_id=engineer_id,
         )
 
-    def _due_hints(self, group: str, *, weaver=None,
+    def _due_hints(self, group: str, *, engineer=None,
                    now: float | None = None) -> list[dict]:
-        current = self._current_hints(group, weaver=weaver)
+        current = self._current_hints(group, engineer=engineer)
         current_fingerprints = {
             str(hint.get("fingerprint", "") or "").strip()
             for hint in current
@@ -1938,7 +1938,7 @@ class WeaverEventBuffer:
                 continue
             last_sent_at = delivery.get(fingerprint, 0.0)
             if last_sent_at and (
-                    sent_now - last_sent_at) < WEAVER_HINT_RESEND_COOLDOWN_SECS:
+                    sent_now - last_sent_at) < ENGINEER_HINT_RESEND_COOLDOWN_SECS:
                 continue
             due.append(hint)
         return due
@@ -1991,7 +1991,7 @@ class WeaverEventBuffer:
 
             is_idle = not recipient.activity or recipient.activity == "waiting"
             if is_idle:
-                self._check_weaver_flush(recipient)
+                self._check_engineer_flush(recipient)
 
         if stats_changed and self._loop:
             self._loop.create_task(self._state.broadcast())

@@ -69,7 +69,7 @@ Examples:
 
 - Add Events tab to the Agent panel
 - Add Worklog tab to the Agent panel
-- Keep Weaver Events countdown accurate
+- Keep Engineer Events countdown accurate
 - Add inline task description editing
 
 Product tasks answer:
@@ -105,7 +105,7 @@ A **visibility item** is communication or orchestration context that the user sh
 
 Examples:
 
-- a Weaver note to a worker
+- a Engineer note to a worker
 - a worker reply to the designated engineer
 - a queue-control message such as “pause the queued task and fix the blocker first”
 
@@ -324,8 +324,8 @@ Loom synthesizes stream state from existing data such as:
 
 - `loom/worktree_streams.py` — computed stream synthesis
 - `loom/server_dispatch.py` — stream auto-resume behavior
-- `loom/mcp_weaver.py` — Weaver stream tool exposure
-- `static/js/weaver.js` — Open Streams UI
+- `loom/mcp_engineer.py` — Engineer stream tool exposure
+- `static/js/engineer.js` — Open Streams UI
 
 ---
 
@@ -564,7 +564,7 @@ This is the first user-facing surface of the stream model.
 ┌──────────────────────────────────────────────────────────────────────┐
 │ Active Wave                                                         │
 ├──────────────────────────────────────────────────────────────────────┤
-│ Stream A  Weaver Events + Worklog                                   │
+│ Stream A  Engineer Events + Worklog                                   │
 │   state: fixing_blockers                                            │
 │   foreground: Fix self-dispatch priming regression                  │
 │   queue: Add Worklog tab (paused_by_blocker)                        │
@@ -585,20 +585,20 @@ This is the first user-facing surface of the stream model.
 
 ```text
 ┌───────────────────────────────────────────────────────────────┐
-│ Stream: Weaver Events + Worklog                               │
+│ Stream: Engineer Events + Worklog                               │
 ├───────────────────────────────────────────────────────────────┤
-│ Branch        loom/add-events-tab-to-the-weaver-p-837241c     │
+│ Branch        loom/add-events-tab-to-the-engineer-p-837241c     │
 │ State         Awaiting human validation                        │
 │ Code          Reviewed clean                                   │
 │ Validation    Pending manual smoke                             │
 │ Merge         Not ready                                        │
-│ Gate          Live/manual Weaver-panel smoke pending           │
+│ Gate          Live/manual Engineer-panel smoke pending           │
 │ Next action   Merge after validation                           │
 │ Latest commit fbcf26b                                          │
 │                                                               │
 │ Product       LOOM:333, LOOM:334, LOOM:342                    │
 │ Workflow      review + blocker-fix lineage                    │
-│ Context       Weaver reprioritized blocker fix                │
+│ Context       Engineer reprioritized blocker fix                │
 └───────────────────────────────────────────────────────────────┘
 ```
 
@@ -645,7 +645,7 @@ Action: Loom auto-dispatches LOOM:334 if policy allows
 
 - computed stream synthesis
 - product/workflow/visibility classification
-- stream exposure through Weaver MCP and board summary surfaces
+- stream exposure through Engineer MCP and board summary surfaces
 - Open Streams UI in the Agent panel
 - validation represented as a stream gate
 
@@ -669,7 +669,7 @@ Loom does not yet expose a first-class persisted wave object with dedicated hist
 
 Today, waves are still primarily:
 
-- a Weaver planning concept
+- a Engineer planning concept
 - a dispatch discipline
 - something reflected in journal/checkpoint text
 
@@ -732,7 +732,7 @@ Read it as:
 
 ## Related pages
 
-- [Weaver](weaver.md)
+- [Engineer](engineer.md)
 - [Task Lifecycle](task-lifecycle.md)
 - [Worktrees](worktrees.md)
 - [Concepts](concepts.md)

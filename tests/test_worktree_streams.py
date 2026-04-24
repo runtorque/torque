@@ -468,7 +468,7 @@ class WorktreeStreamTests(unittest.TestCase):
             "Add Events tab",
             verification_state="pending",
             verification_summary={
-                "human_validation_pending": "Live/manual Weaver-panel smoke pending",
+                "human_validation_pending": "Live/manual Engineer-panel smoke pending",
             },
             verification_updated_at="2026-04-07T11:45:00+00:00",
         )
@@ -504,7 +504,7 @@ class WorktreeStreamTests(unittest.TestCase):
         self.assertEqual(stream["validation_state"], "pending_human_validation")
         self.assertEqual(
             stream["gate_reason"],
-            "Live/manual Weaver-panel smoke pending",
+            "Live/manual Engineer-panel smoke pending",
         )
         self.assertEqual(stream["recommended_next_action"], "merge_after_validation")
 
@@ -517,7 +517,7 @@ class WorktreeStreamTests(unittest.TestCase):
             lane="Done",
             verification_state="pending",
             verification_summary={
-                "human_validation_pending": "Live/manual Weaver-panel smoke pending",
+                "human_validation_pending": "Live/manual Engineer-panel smoke pending",
             },
             verification_updated_at="2026-04-07T11:45:00+00:00",
         )
@@ -643,19 +643,19 @@ class WorktreeStreamTests(unittest.TestCase):
         )
         visibility = self._task(
             "LOOM:9",
-            "Weaver: reprioritize blocker fix",
+            "Engineer: reprioritize blocker fix",
             lane="Done",
             action_name="",
             reply_agent_id=worker.id,
-            labels=["loom:weaver-message"],
+            labels=["loom:engineer-message"],
             created_at="2026-04-07T11:10:00+00:00",
             updated_at="2026-04-07T11:12:00+00:00",
             messages=[
                 {
                     "timestamp": _ts("2026-04-07T11:11:00+00:00"),
-                    "action": "weaver_message",
+                    "action": "engineer_message",
                     "message": "Reprioritized blocker fix before queued work",
-                    "agent_name": "Weaver",
+                    "agent_name": "Engineer",
                 },
                 {
                     "timestamp": _ts("2026-04-07T11:12:00+00:00"),
@@ -680,7 +680,7 @@ class WorktreeStreamTests(unittest.TestCase):
         self.assertEqual(stream["queue_counts"], {})
         self.assertEqual(
             [item["kind"] for item in stream["recent_visibility_items"]],
-            ["agent_reply", "weaver_message"],
+            ["agent_reply", "engineer_message"],
         )
         self.assertEqual(
             stream["recent_visibility_items"][1]["summary"],
@@ -724,21 +724,21 @@ class WorktreeStreamTests(unittest.TestCase):
         )
         visibility_a = self._task(
             "LOOM:1:2",
-            "Weaver: branch A note",
+            "Engineer: branch A note",
             lane="Done",
             parent_task_id=root.id,
             pipeline_root_id=root.id,
             pipeline_depth=1,
             reply_agent_id=agent_a.id,
-            labels=["loom:weaver-message"],
+            labels=["loom:engineer-message"],
             created_at="2026-04-07T11:06:00+00:00",
             updated_at="2026-04-07T11:06:00+00:00",
             messages=[
                 {
                     "timestamp": _ts("2026-04-07T11:06:00+00:00"),
-                    "action": "weaver_message",
+                    "action": "engineer_message",
                     "message": "Branch A note",
-                    "agent_name": "Weaver",
+                    "agent_name": "Engineer",
                 }
             ],
         )
@@ -763,21 +763,21 @@ class WorktreeStreamTests(unittest.TestCase):
         )
         visibility_b = self._task(
             "LOOM:1:4",
-            "Weaver: branch B note",
+            "Engineer: branch B note",
             lane="Done",
             parent_task_id=root.id,
             pipeline_root_id=root.id,
             pipeline_depth=1,
             reply_agent_id=agent_b.id,
-            labels=["loom:weaver-message"],
+            labels=["loom:engineer-message"],
             created_at="2026-04-07T12:06:00+00:00",
             updated_at="2026-04-07T12:06:00+00:00",
             messages=[
                 {
                     "timestamp": _ts("2026-04-07T12:06:00+00:00"),
-                    "action": "weaver_message",
+                    "action": "engineer_message",
                     "message": "Branch B note",
-                    "agent_name": "Weaver",
+                    "agent_name": "Engineer",
                 }
             ],
         )

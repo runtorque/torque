@@ -10,10 +10,10 @@ except ModuleNotFoundError:
 
 class _FakeState:
     def __init__(self, *, agent_directory="", default_directory="",
-                 weaver_provider="", weaver_boot_command="",
-                 weaver_model="", weaver_reasoning_effort="",
-                 weaver_directory="", weaver_profile="",
-                 weaver_shell="", weaver_tab_color="",
+                 engineer_provider="", engineer_boot_command="",
+                 engineer_model="", engineer_reasoning_effort="",
+                 engineer_directory="", engineer_profile="",
+                 engineer_shell="", engineer_tab_color="",
                  agent_provider="", agent_boot_command="",
                  agent_model="", agent_reasoning_effort="",
                  default_command="claude", git_worktree=False):
@@ -43,23 +43,23 @@ class _FakeState:
             worktree_merge_squash=True,
             worktree_symlinks=[],
         )
-        self._weaver_settings = types.SimpleNamespace(
-            weaver_provider=weaver_provider,
-            weaver_boot_command=weaver_boot_command,
-            weaver_model=weaver_model,
-            weaver_reasoning_effort=weaver_reasoning_effort,
-            weaver_directory=weaver_directory,
-            weaver_profile=weaver_profile,
-            weaver_shell=weaver_shell,
-            weaver_tab_color=weaver_tab_color,
+        self._engineer_settings = types.SimpleNamespace(
+            engineer_provider=engineer_provider,
+            engineer_boot_command=engineer_boot_command,
+            engineer_model=engineer_model,
+            engineer_reasoning_effort=engineer_reasoning_effort,
+            engineer_directory=engineer_directory,
+            engineer_profile=engineer_profile,
+            engineer_shell=engineer_shell,
+            engineer_tab_color=engineer_tab_color,
         )
         self._default_command = default_command
 
     def get_group_settings(self, group):
         return self._settings
 
-    def get_weaver_settings(self, group):
-        return self._weaver_settings
+    def get_engineer_settings(self, group):
+        return self._engineer_settings
 
     def get_default_command(self):
         return self._default_command
@@ -154,11 +154,11 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(resolved, "")
 
-    def test_resolve_weaver_launch_config_prefers_weaver_specific_overrides(self):
+    def test_resolve_engineer_launch_config_prefers_engineer_specific_overrides(self):
         service = self.server_agent_mod.AgentLaunchService(
             state=_FakeState(
-                weaver_provider="codex",
-                weaver_boot_command="codex --model gpt-5.4",
+                engineer_provider="codex",
+                engineer_boot_command="codex --model gpt-5.4",
                 git_worktree=True,
             ),
             connection=None,
@@ -167,18 +167,18 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
             template_mgr=_FakeTemplateManager(),
         )
 
-        resolved = service.resolve_weaver_launch_config("backend")
+        resolved = service.resolve_engineer_launch_config("backend")
 
         self.assertEqual(resolved["provider"], "codex")
         self.assertEqual(resolved["command"], "codex --model gpt-5.4")
         self.assertFalse(resolved["worktree"])
 
-    def test_resolve_weaver_launch_config_applies_model_and_reasoning_defaults(self):
+    def test_resolve_engineer_launch_config_applies_model_and_reasoning_defaults(self):
         service = self.server_agent_mod.AgentLaunchService(
             state=_FakeState(
-                weaver_provider="codex",
-                weaver_model="gpt-5",
-                weaver_reasoning_effort="high",
+                engineer_provider="codex",
+                engineer_model="gpt-5",
+                engineer_reasoning_effort="high",
             ),
             connection=None,
             bridge=_FakeBridge(),
@@ -186,7 +186,7 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
             template_mgr=_FakeTemplateManager(),
         )
 
-        resolved = service.resolve_weaver_launch_config("backend")
+        resolved = service.resolve_engineer_launch_config("backend")
 
         self.assertEqual(resolved["agent_type"], "codex")
         self.assertEqual(
@@ -195,14 +195,14 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(resolved["worktree"])
 
-    def test_resolve_weaver_launch_config_applies_terminal_overrides(self):
+    def test_resolve_engineer_launch_config_applies_terminal_overrides(self):
         service = self.server_agent_mod.AgentLaunchService(
             state=_FakeState(
                 agent_directory="/repo",
-                weaver_directory="/repo/.loom/weaver",
-                weaver_profile="Ops",
-                weaver_shell="fish",
-                weaver_tab_color="none",
+                engineer_directory="/repo/.loom/engineer",
+                engineer_profile="Ops",
+                engineer_shell="fish",
+                engineer_tab_color="none",
             ),
             connection=None,
             bridge=_FakeBridge(),
@@ -210,9 +210,9 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
             template_mgr=_FakeTemplateManager(),
         )
 
-        resolved = service.resolve_weaver_launch_config("backend")
+        resolved = service.resolve_engineer_launch_config("backend")
 
-        self.assertEqual(resolved["directory"], "/repo/.loom/weaver")
+        self.assertEqual(resolved["directory"], "/repo/.loom/engineer")
         self.assertEqual(resolved["profile"], "Ops")
         self.assertEqual(resolved["shell"], "fish")
         self.assertEqual(resolved["tab_color"], "")
@@ -325,7 +325,7 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
 
-    async def test_create_agent_with_config_stamps_created_by_weaver_id(self):
+    async def test_create_agent_with_config_stamps_created_by_engineer_id(self):
         state = self.state_mod.MatrixState()
         state.add_group("backend")
         bridge = _CapturingBridge(current_path="/tmp/project")
@@ -350,11 +350,11 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
                 "shell": "zsh",
                 "system_prompt": "",
             },
-            created_by_weaver_id="weaver-1",
+            created_by_engineer_id="engineer-1",
         )
 
         self.assertIsNotNone(cell)
-        self.assertEqual(cell.created_by_weaver_id, "weaver-1")
+        self.assertEqual(cell.created_by_engineer_id, "engineer-1")
 
     async def test_create_agent_with_config_launches_in_inherited_worktree(self):
         state = self.state_mod.MatrixState()

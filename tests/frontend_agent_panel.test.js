@@ -29,12 +29,12 @@ function createHarness() {
       agents: {},
       board_tasks: {},
       groups: { alpha: [] },
-      weaver_settings: {},
-      weaver_buffer_stats: {},
-      weaver_sent_events: {},
-      weaver_worklog: {},
-      weaver_journal: {},
-      weaver_session_maps: {},
+      engineer_settings: {},
+      engineer_buffer_stats: {},
+      engineer_sent_events: {},
+      engineer_worklog: {},
+      engineer_journal: {},
+      engineer_session_maps: {},
       agent_digest_settings: {},
       digest_buffer_stats: {},
       digest_sent_events: {},
@@ -59,7 +59,7 @@ function createHarness() {
       restoreCalls.push({ root, snapshot, opts });
       if (opts && typeof opts.restore === 'function') opts.restore(root, snapshot);
     },
-    _weaverStopEventsCountdownTimer() {},
+    _engineerStopEventsCountdownTimer() {},
     _currentGroup() { return 'alpha'; },
     setInterval(fn, ms) { intervalCalls.push({ fn, ms }); return intervalCalls.length; },
     clearInterval(id) { clearIntervalCalls.push(id); },
@@ -281,10 +281,10 @@ test('_resolveFocusedAgent returns null when focusedItemId does not resolve', ()
 
 test('engineer panel renders journal, events, and worklog from the focused engineer group', () => {
   const { context, panel } = createHarness();
-  context.state.group_settings = { alpha: { weaver_agent_id: 'weaver-1' } };
-  context.state.agents['weaver-1'] = { id: 'weaver-1', name: 'Weaver', group: 'alpha' };
+  context.state.group_settings = { alpha: { engineer_agent_id: 'engineer-1' } };
+  context.state.agents['engineer-1'] = { id: 'engineer-1', name: 'Engineer', group: 'alpha' };
   context.state.agent_digest_settings['eng-1'] = { agent_id: 'eng-1', paused: false };
-  context.state.weaver_journal.alpha = [
+  context.state.engineer_journal.alpha = [
     { id: 2, type: 'decision', entry: 'Approved the refactor', timestamp: 50 },
   ];
   context.state.digest_buffer_stats['eng-1'] = {
@@ -300,7 +300,7 @@ test('engineer panel renders journal, events, and worklog from the focused engin
   context.state.digest_sent_events['eng-1'] = [
     { id: 2, kind: 'task_completed', message: 'Delivered digest item', timestamp: 35, delivered_at: 38 },
   ];
-  context.state.weaver_worklog.alpha = [
+  context.state.engineer_worklog.alpha = [
     {
       id: 9,
       task_id: 'LOOM:9',
@@ -656,7 +656,7 @@ test('architect Messages tab rerender routes through capture/restore so scroll +
     'capture must include .agent-panel-message-list so message-list scroll is anchored across rerenders');
 });
 
-test('focused architect decision interactions rerender the agent panel instead of the legacy weaver surface', () => {
+test('focused architect decision interactions rerender the agent panel instead of the legacy engineer surface', () => {
   const { context, panel } = createHarness();
   setFocusedAgent(context, {
     id: 'arch-1',
@@ -679,12 +679,12 @@ test('focused architect decision interactions rerender the agent panel instead o
   assert.match(panel.innerHTML, /Architect: Planner · Group: alpha/);
   assert.doesNotMatch(panel.innerHTML, /Architects &amp; Engineers/);
 
-  context.weaverToggleDecision('d1');
+  context.engineerToggleDecision('d1');
 
   assert.match(panel.innerHTML, /Architect: Planner · Group: alpha/);
   assert.doesNotMatch(panel.innerHTML, /Architects &amp; Engineers/);
   assert.match(panel.innerHTML, /architect-decision-body/);
-  assert.equal(vm.runInContext(`_weaverDecisionUiState('d1').expanded`, context), true);
+  assert.equal(vm.runInContext(`_engineerDecisionUiState('d1').expanded`, context), true);
 });
 
 test('focused architect decision rows render parseable click handlers and expanded details', () => {
@@ -720,12 +720,12 @@ test('focused architect decision rows render parseable click handlers and expand
 
   context.renderAgentPanel();
 
-  assert.match(panel.innerHTML, /onclick="weaverToggleDecision\(&quot;d1&quot;\)"/);
-  assert.match(panel.innerHTML, /onclick="event\.stopPropagation\(\);weaverStartDecisionEdit\(&quot;d1&quot;\)"/);
-  assert.doesNotMatch(panel.innerHTML, /onclick="weaverToggleDecision\("/);
-  assert.doesNotMatch(panel.innerHTML, /weaverStartDecisionEdit\("/);
+  assert.match(panel.innerHTML, /onclick="engineerToggleDecision\(&quot;d1&quot;\)"/);
+  assert.match(panel.innerHTML, /onclick="event\.stopPropagation\(\);engineerStartDecisionEdit\(&quot;d1&quot;\)"/);
+  assert.doesNotMatch(panel.innerHTML, /onclick="engineerToggleDecision\("/);
+  assert.doesNotMatch(panel.innerHTML, /engineerStartDecisionEdit\("/);
 
-  context.weaverToggleDecision('d1');
+  context.engineerToggleDecision('d1');
 
   assert.match(panel.innerHTML, /Show the operator why this direction was chosen\./);
   assert.match(panel.innerHTML, /Status/);
@@ -761,11 +761,11 @@ test('focused architect decision edit sends the existing update command', () => 
   };
 
   context.renderAgentPanel();
-  context.weaverStartDecisionEdit('d1');
-  context.weaverDecisionDraftInput('d1', 'title', 'Updated title');
-  context.weaverDecisionDraftInput('d1', 'rationale', 'Updated rationale');
-  context.weaverDecisionDraftInput('d1', 'status', 'accepted');
-  context.weaverSaveDecisionEdit('arch-1', 'd1');
+  context.engineerStartDecisionEdit('d1');
+  context.engineerDecisionDraftInput('d1', 'title', 'Updated title');
+  context.engineerDecisionDraftInput('d1', 'rationale', 'Updated rationale');
+  context.engineerDecisionDraftInput('d1', 'status', 'accepted');
+  context.engineerSaveDecisionEdit('arch-1', 'd1');
 
   assert.deepEqual(JSON.parse(JSON.stringify(sendCalls)), [
     {
@@ -913,7 +913,7 @@ test('worker worklog updates after task changes and preserves the current anchor
       return { top: 0, bottom: 120, left: 0, right: 200, width: 200, height: 120 };
     },
     querySelectorAll(selector) {
-      if (selector !== '[data-agent-panel-anchor]' && selector !== '[data-weaver-anchor]') return [];
+      if (selector !== '[data-agent-panel-anchor]' && selector !== '[data-engineer-anchor]') return [];
       return [
         {
           dataset: { agentPanelAnchor: 'worker-task-LOOM:2' },
@@ -942,7 +942,7 @@ test('worker worklog updates after task changes and preserves the current anchor
       return { top: 0, bottom: 120, left: 0, right: 200, width: 200, height: 120 };
     },
     querySelectorAll(selector) {
-      if (selector !== '[data-agent-panel-anchor]' && selector !== '[data-weaver-anchor]') return [];
+      if (selector !== '[data-agent-panel-anchor]' && selector !== '[data-engineer-anchor]') return [];
       return [
         {
           dataset: { agentPanelAnchor: 'worker-task-LOOM:3' },
@@ -1016,7 +1016,7 @@ test('worker worklog updates after task changes and preserves the current anchor
   assert.equal(newContent.scrollTop, 20);
 });
 
-test('_weaverReceiveSessionMap keeps the focused-agent panel rendered when agent panel support is loaded', () => {
+test('_engineerReceiveSessionMap keeps the focused-agent panel rendered when agent panel support is loaded', () => {
   const { context, panel } = createHarness();
   setFocusedAgent(context, {
     id: 'worker-1',
@@ -1029,7 +1029,7 @@ test('_weaverReceiveSessionMap keeps the focused-agent panel rendered when agent
   context.renderAgentPanel();
   assert.match(panel.innerHTML, /Worker: Worker Bee · Group: alpha/);
 
-  context._weaverReceiveSessionMap({
+  context._engineerReceiveSessionMap({
     group: 'alpha',
     session_map: { group: 'alpha', streams: { items: [] } },
   });
@@ -1273,11 +1273,11 @@ test('sent section pager grows to anchor around newly delivered events so prior 
 function _engineerPanelHarness(tab, agentId, agentName) {
   const harness = createHarness();
   harness.context.state.group_settings = {
-    alpha: { weaver_agent_id: 'weaver-1' },
+    alpha: { engineer_agent_id: 'engineer-1' },
   };
-  harness.context.state.agents['weaver-1'] = {
-    id: 'weaver-1',
-    name: 'Weaver',
+  harness.context.state.agents['engineer-1'] = {
+    id: 'engineer-1',
+    name: 'Engineer',
     group: 'alpha',
   };
   setFocusedAgent(harness.context, {
@@ -1306,12 +1306,12 @@ test('engineer journal caps at 20 entries and exposes a Load more button', () =>
       timestamp: 1000 + i,
     });
   }
-  context.state.weaver_journal.alpha = entries;
+  context.state.engineer_journal.alpha = entries;
 
   context.renderAgentPanel();
 
   const html = panel.innerHTML;
-  const itemCount = (html.match(/data-weaver-anchor="journal-/g) || []).length;
+  const itemCount = (html.match(/data-engineer-anchor="journal-/g) || []).length;
   assert.equal(itemCount, 20, 'Only 20 journal entries render initially');
   assert.match(html, /Load 5 older entries/);
   assert.match(html, /data-agent-panel-section="journal"/);
@@ -1329,12 +1329,12 @@ test('engineer journal Load more appends 20 more entries without a re-fetch', ()
       timestamp: 1000 + i,
     });
   }
-  context.state.weaver_journal.alpha = entries;
+  context.state.engineer_journal.alpha = entries;
 
   context.renderAgentPanel();
   const sendsBefore = sendCalls.length;
   assert.equal(
-    (panel.innerHTML.match(/data-weaver-anchor="journal-/g) || []).length,
+    (panel.innerHTML.match(/data-engineer-anchor="journal-/g) || []).length,
     20,
   );
 
@@ -1345,7 +1345,7 @@ test('engineer journal Load more appends 20 more entries without a re-fetch', ()
 
   const html = panel.innerHTML;
   assert.equal(
-    (html.match(/data-weaver-anchor="journal-/g) || []).length,
+    (html.match(/data-engineer-anchor="journal-/g) || []).length,
     40,
     'Load more extends the journal window to 40',
   );
@@ -1368,7 +1368,7 @@ test('engineer journal pager grows to anchor around newly arriving entries', () 
       timestamp: 1000 + i,
     });
   }
-  context.state.weaver_journal.alpha = existing.slice();
+  context.state.engineer_journal.alpha = existing.slice();
 
   context.renderAgentPanel();
   let html = panel.innerHTML;
@@ -1384,7 +1384,7 @@ test('engineer journal pager grows to anchor around newly arriving entries', () 
     { id: 3100, type: 'decision', entry: 'Fresh decision', timestamp: 9000 },
     { id: 3101, type: 'plan', entry: 'Fresh plan', timestamp: 9001 },
   ];
-  context.state.weaver_journal.alpha = fresh.concat(existing);
+  context.state.engineer_journal.alpha = fresh.concat(existing);
 
   context.renderAgentPanel();
   html = panel.innerHTML;
@@ -1408,12 +1408,12 @@ test('engineer worklog caps at 20 dispatched tasks and exposes a Load more butto
       started_at: 1000 + i,
     });
   }
-  context.state.weaver_worklog.alpha = entries;
+  context.state.engineer_worklog.alpha = entries;
 
   context.renderAgentPanel();
 
   const html = panel.innerHTML;
-  const itemCount = (html.match(/data-weaver-anchor="worklog-/g) || []).length;
+  const itemCount = (html.match(/data-engineer-anchor="worklog-/g) || []).length;
   assert.equal(itemCount, 20, 'Only 20 worklog entries render initially');
   assert.match(html, /Load 5 older tasks/);
   assert.match(html, /data-agent-panel-section="worklog-all"/);
@@ -1433,12 +1433,12 @@ test('engineer worklog Load more appends 20 more tasks without a re-fetch', () =
       started_at: 1000 + i,
     });
   }
-  context.state.weaver_worklog.alpha = entries;
+  context.state.engineer_worklog.alpha = entries;
 
   context.renderAgentPanel();
   const sendsBefore = sendCalls.length;
   assert.equal(
-    (panel.innerHTML.match(/data-weaver-anchor="worklog-/g) || []).length,
+    (panel.innerHTML.match(/data-engineer-anchor="worklog-/g) || []).length,
     20,
   );
 
@@ -1449,7 +1449,7 @@ test('engineer worklog Load more appends 20 more tasks without a re-fetch', () =
 
   const html = panel.innerHTML;
   assert.equal(
-    (html.match(/data-weaver-anchor="worklog-/g) || []).length,
+    (html.match(/data-engineer-anchor="worklog-/g) || []).length,
     40,
   );
   assert.match(html, /Load 5 older tasks/);
@@ -1473,7 +1473,7 @@ test('engineer worklog pager grows to anchor around newly dispatched tasks', () 
       started_at: 1000 + i,
     });
   }
-  context.state.weaver_worklog.alpha = existing.slice();
+  context.state.engineer_worklog.alpha = existing.slice();
 
   context.renderAgentPanel();
   let html = panel.innerHTML;
@@ -1503,7 +1503,7 @@ test('engineer worklog pager grows to anchor around newly dispatched tasks', () 
       started_at: 9001,
     },
   ];
-  context.state.weaver_worklog.alpha = fresh.concat(existing);
+  context.state.engineer_worklog.alpha = fresh.concat(existing);
 
   context.renderAgentPanel();
   html = panel.innerHTML;
@@ -1517,7 +1517,7 @@ test('engineer worklog pager grows to anchor around newly dispatched tasks', () 
   );
 });
 
-test('_weaverResetSessionMapMeta keeps the focused-agent panel rendered during reconnect resets', () => {
+test('_engineerResetSessionMapMeta keeps the focused-agent panel rendered during reconnect resets', () => {
   const { context, panel } = createHarness();
   setFocusedAgent(context, {
     id: 'worker-1',
@@ -1529,12 +1529,12 @@ test('_weaverResetSessionMapMeta keeps the focused-agent panel rendered during r
 
   context.renderAgentPanel();
   vm.runInContext(`
-    _weaverSessionMapMetaByGroup.alpha = { loading: true, stale: false };
+    _engineerSessionMapMetaByGroup.alpha = { loading: true, stale: false };
   `, context);
 
-  context._weaverResetSessionMapMeta({ clearStale: false });
+  context._engineerResetSessionMapMeta({ clearStale: false });
 
   assert.match(panel.innerHTML, /Worker: Worker Bee · Group: alpha/);
   assert.doesNotMatch(panel.innerHTML, /Architects &amp; Engineers/);
-  assert.equal(vm.runInContext(`_weaverSessionMapMetaByGroup.alpha.loading`, context), false);
+  assert.equal(vm.runInContext(`_engineerSessionMapMetaByGroup.alpha.loading`, context), false);
 });

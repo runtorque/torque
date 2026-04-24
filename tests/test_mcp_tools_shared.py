@@ -36,7 +36,7 @@ class MCPToolsSharedArchitectTests(unittest.TestCase):
             kind=kind,
             hired_by_architect_id=hired_by_architect_id,
             owner_engineer_id=owner_engineer_id,
-            created_by_weaver_id=owner_engineer_id,
+            created_by_engineer_id=owner_engineer_id,
             status="running",
         )
         state.agents[cell.id] = cell

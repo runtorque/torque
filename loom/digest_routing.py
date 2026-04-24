@@ -7,7 +7,7 @@ from .engineer_ask_events import (
     ENGINEER_ASK_RESOLVED,
     ENGINEER_AWAITING_HUMAN_INPUT,
 )
-from .state import AgentDigestSettings, WEAVER_MANDATORY_EVENTS
+from .state import AgentDigestSettings, ENGINEER_MANDATORY_EVENTS
 
 ARCHITECT_COARSE_EVENTS = frozenset({
     # Plan vocabulary.
@@ -56,7 +56,7 @@ def _effective_owner_engineer_id(cell) -> str:
     owner_id = str(getattr(cell, "owner_engineer_id", "") or "").strip()
     if owner_id:
         return owner_id
-    return str(getattr(cell, "created_by_weaver_id", "") or "").strip()
+    return str(getattr(cell, "created_by_engineer_id", "") or "").strip()
 
 
 def _task_routing_source(state, event: dict):
@@ -115,7 +115,7 @@ def _event_routing_source(state, event: dict):
     group = str(event.get("group", "") or "").strip()
     if not group:
         return None
-    return getattr(state, "get_weaver_for_group", lambda _group: None)(group)
+    return getattr(state, "get_engineer_for_group", lambda _group: None)(group)
 
 
 def candidate_digest_recipients(state, event: dict) -> list[str]:
@@ -205,7 +205,7 @@ def recipient_wants_digest_event(state, recipient_id: str, event: dict, *,
     if not ignore_pause and getattr(settings, "paused", False):
         return False
     kind = str(event.get("kind", "") or "").strip()
-    if kind not in WEAVER_MANDATORY_EVENTS:
+    if kind not in ENGINEER_MANDATORY_EVENTS:
         enabled = list(getattr(settings, "enabled_events", []) or [])
         if kind not in enabled:
             return False

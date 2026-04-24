@@ -73,7 +73,7 @@ function _workerOwnerEngineerId(agent, visibleById) {
   if (!agent) return '';
   const ownerId = String(
     agent.owner_engineer_id
-    || agent.created_by_weaver_id
+    || agent.created_by_engineer_id
     || ''
   ).trim();
   if (!ownerId) return '';
@@ -86,7 +86,7 @@ function _agentRawOwnerEngineerId(agent) {
   if (!agent) return '';
   return String(
     agent.owner_engineer_id
-    || agent.created_by_weaver_id
+    || agent.created_by_engineer_id
     || ''
   ).trim();
 }
@@ -387,7 +387,7 @@ function _surfacePanelApp(surface) {
   if (surface === 'actions') return 'actions';
   if (surface === 'context') return 'context';
   if (surface === 'events') return 'events';
-  if (surface === 'weaver') return 'weaver';
+  if (surface === 'engineer') return 'engineer';
   if (surface === 'templates') return 'templates';
   return '';
 }
@@ -413,14 +413,14 @@ function _renderSurface(surface) {
   if (surface === 'actions' && typeof renderTemplatesPanel === 'function') renderTemplatesPanel();
   if (surface === 'context' && typeof renderContextPanel === 'function') renderContextPanel();
   if (surface === 'events' && typeof renderEvents === 'function') renderEvents();
-  if (surface === 'weaver' && typeof renderAgentPanel === 'function') renderAgentPanel();
+  if (surface === 'engineer' && typeof renderAgentPanel === 'function') renderAgentPanel();
   if (surface === 'templates' && typeof renderAgentTemplatesPanel === 'function') renderAgentTemplatesPanel();
 }
 
 function renderActivePanel() {
   const surfaces = _currentPanelSurfaces();
   for (let i = 0; i < surfaces.length; i++) _renderSurface(surfaces[i]);
-  _updateWeaverTaskbarBadge();
+  _updateEngineerTaskbarBadge();
   if (typeof updateEventsAttentionBadge === 'function') updateEventsAttentionBadge();
 }
 
@@ -432,16 +432,16 @@ function renderInvalidatedSurfaces(flags) {
     const surface = surfaces[i];
     if (surface && flags[surface]) _renderSurface(surface);
   }
-  _updateWeaverTaskbarBadge();
+  _updateEngineerTaskbarBadge();
   if (typeof updateEventsAttentionBadge === 'function') updateEventsAttentionBadge();
 }
 
-function _updateWeaverTaskbarBadge() {
-  const btn = document.querySelector('.taskbar-app[data-app="weaver"]');
+function _updateEngineerTaskbarBadge() {
+  const btn = document.querySelector('.taskbar-app[data-app="engineer"]');
   if (!btn) return;
   let hasAsk = false;
-  for (const name in (state.weaver_settings || {})) {
-    if (state.weaver_settings[name].pending_question) {
+  for (const name in (state.engineer_settings || {})) {
+    if (state.engineer_settings[name].pending_question) {
       hasAsk = true;
       break;
     }
@@ -1362,11 +1362,11 @@ function render() {
   if (oldRects) _applyFlip(main, oldRects);
   _restoreSurfaceState(main, mainState);
   renderPendingHireBanner();
-  _updateWeaverTaskbarBadge();
+  _updateEngineerTaskbarBadge();
   if (typeof updateEventsAttentionBadge === 'function') updateEventsAttentionBadge();
   if (typeof renderAgentPanel === 'function') {
     const surfaces = _currentPanelSurfaces();
-    if (surfaces.includes('weaver')) renderAgentPanel();
+    if (surfaces.includes('engineer')) renderAgentPanel();
   }
   if (typeof renderTerminalWorkspace === 'function') renderTerminalWorkspace();
 }
@@ -2065,26 +2065,26 @@ function renderAgentCell(a, options) {
   if (a.id === focusedItemId) cls.push('focused');
   if (a.status === 'stopped') cls.push('stopped');
   const _isArchitect = (a.kind || '') === 'architect';
-  const _isEngineer = (a.kind || '') === 'engineer';
+  const _isEngineerKind = (a.kind || '') === 'engineer';
   const _isWorker = (a.kind || '') === 'worker';
   const _isDismissed = _isDismissedEngineer(a);
-  // Check if this agent is the weaver for its group
+  // Check if this agent is the engineer for its group
   const _gs = (state.group_settings || {})[a.group];
-  const _isWeaver = _gs && _gs.weaver_agent_id === a.id;
-  // Check if weaver is awaiting human input
-  const _weaverWs = _isWeaver && state.weaver_settings
-    ? state.weaver_settings[a.group] : null;
-  const _weaverPaused = !!(_weaverWs && _weaverWs.paused);
-  const _weaverAsking = _weaverWs && _weaverWs.pending_question;
-  const _isDigestRecipient = _isEngineer || _isArchitect;
+  const _isDesignatedEngineer = _gs && _gs.engineer_agent_id === a.id;
+  // Check if engineer is awaiting human input
+  const _engineerWs = _isDesignatedEngineer && state.engineer_settings
+    ? state.engineer_settings[a.group] : null;
+  const _engineerPaused = !!(_engineerWs && _engineerWs.paused);
+  const _engineerAsking = _engineerWs && _engineerWs.pending_question;
+  const _isDigestRecipient = _isEngineerKind || _isArchitect;
   const _agentDigestSettings = _isDigestRecipient && state.agent_digest_settings
     ? state.agent_digest_settings[String(a.id || '')] : null;
   let _digestPaused = !!(_agentDigestSettings && _agentDigestSettings.paused);
-  if (!_agentDigestSettings && _isDigestRecipient && _isWeaver) {
-    _digestPaused = _weaverPaused;
+  if (!_agentDigestSettings && _isDigestRecipient && _isDesignatedEngineer) {
+    _digestPaused = _engineerPaused;
   }
   if (_isArchitect) cls.push('architect');
-  if (_isEngineer) cls.push('engineer');
+  if (_isEngineerKind) cls.push('engineer');
   if (_isWorker) cls.push('worker');
   if (_isDismissed) cls.push('dismissed');
 
@@ -2118,24 +2118,24 @@ function renderAgentCell(a, options) {
   h += `<button class="cell-close" draggable="false" data-focus-key="agent-close:${esc(a.id)}" onclick="event.stopPropagation();removeAgent('${a.id}')" title="Remove">\u2715</button>`;
   if (_isDigestRecipient) {
     const digestAgentArg = encodeURIComponent(a.id || '');
-    h += `<button class="cell-weaver-toggle ${_digestPaused ? 'paused' : 'running'}" draggable="false" data-focus-key="agent-digest-toggle:${esc(a.id)}" onclick="event.stopPropagation();toggleDigestPauseForAgent(decodeURIComponent('${digestAgentArg}'))" title="${_digestPaused ? 'Resume event delivery' : 'Pause event delivery'}">${_digestPaused ? '&#x25B6;' : '&#x23F8;'}</button>`;
-  } else if (_isWeaver) {
-    const weaverGroupArg = encodeURIComponent(a.group || '');
-    h += `<button class="cell-weaver-toggle ${_weaverPaused ? 'paused' : 'running'}" draggable="false" data-focus-key="agent-weaver-toggle:${esc(a.id)}" onclick="event.stopPropagation();weaverTogglePauseForGroup(decodeURIComponent('${weaverGroupArg}'))" title="${_weaverPaused ? 'Resume Weaver event delivery' : 'Pause Weaver event delivery'}">${_weaverPaused ? '&#x25B6;' : '&#x23F8;'}</button>`;
+    h += `<button class="cell-engineer-toggle ${_digestPaused ? 'paused' : 'running'}" draggable="false" data-focus-key="agent-digest-toggle:${esc(a.id)}" onclick="event.stopPropagation();toggleDigestPauseForAgent(decodeURIComponent('${digestAgentArg}'))" title="${_digestPaused ? 'Resume event delivery' : 'Pause event delivery'}">${_digestPaused ? '&#x25B6;' : '&#x23F8;'}</button>`;
+  } else if (_isDesignatedEngineer) {
+    const engineerGroupArg = encodeURIComponent(a.group || '');
+    h += `<button class="cell-engineer-toggle ${_engineerPaused ? 'paused' : 'running'}" draggable="false" data-focus-key="agent-engineer-toggle:${esc(a.id)}" onclick="event.stopPropagation();engineerTogglePauseForGroup(decodeURIComponent('${engineerGroupArg}'))" title="${_engineerPaused ? 'Resume Engineer event delivery' : 'Pause Engineer event delivery'}">${_engineerPaused ? '&#x25B6;' : '&#x23F8;'}</button>`;
   }
   h += `</div>`;
   h += `<div class="cell-icon">${a.icon || agentIcon(a.name)}</div>`;
   h += `<div class="cell-name">${esc(a.name)}</div>`;
   if (_isArchitect) {
     h += `<div class="cell-architect-badge">architect</div>`;
-  } else if (_isEngineer) {
+  } else if (_isEngineerKind) {
     if (_isDismissed) h += `<div class="cell-dismissed-badge" title="Dismissed engineer">\u23F8 dismissed</div>`;
     else h += `<div class="cell-engineer-badge">engineer</div>`;
   } else if (_isWorker) {
     h += `<div class="cell-worker-badge">worker</div>`;
   }
-  if (_weaverAsking) {
-    h += `<div class="cell-weaver-ask" title="${esc(_weaverWs.pending_question)}">? awaiting input</div>`;
+  if (_engineerAsking) {
+    h += `<div class="cell-engineer-ask" title="${esc(_engineerWs.pending_question)}">? awaiting input</div>`;
   }
   const cellSubtitle = _agentCellSubtitle(a);
   if (cellSubtitle) {

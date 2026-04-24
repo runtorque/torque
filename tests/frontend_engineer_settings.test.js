@@ -12,7 +12,7 @@ function createSandbox() {
   const sandbox = {
     console,
     Date: { now: () => Date.now() },
-    state: { weaver_settings: {} },
+    state: { engineer_settings: {} },
     document: {
       activeElement: null,
       getElementById() { return null; },
@@ -43,7 +43,7 @@ function createSandbox() {
   return sandbox;
 }
 
-function loadWeaver(context) {
+function loadEngineer(context) {
   const filename = path.join(repoRoot, 'static/js/agent_panel.js');
   const source = fs.readFileSync(filename, 'utf8');
   vm.runInContext(source, context, { filename });
@@ -63,7 +63,7 @@ test('focused engineer panel shows Journal, Events, and Worklog tabs without set
     return id === 'panel-agent' ? panel : null;
   };
   const context = vm.createContext(sandbox);
-  loadWeaver(context);
+  loadEngineer(context);
 
   vm.runInContext('renderAgentPanel()', context);
 
@@ -75,9 +75,9 @@ test('focused engineer panel shows Journal, Events, and Worklog tabs without set
   assert.doesNotMatch(panel.innerHTML, />Settings</);
 });
 
-test('weaver Events tab renders queued and sent digest sections', () => {
+test('engineer Events tab renders queued and sent digest sections', () => {
   const sandbox = createSandbox();
-  sandbox.state.weaver_buffer_stats = {
+  sandbox.state.engineer_buffer_stats = {
     alpha: {
       buffered_events: 1,
       next_push_in: 45,
@@ -87,18 +87,18 @@ test('weaver Events tab renders queued and sent digest sections', () => {
       manual_flush_requested: false,
     },
   };
-  sandbox.state.weaver_sent_events = {
+  sandbox.state.engineer_sent_events = {
     alpha: [
       { id: 5, kind: 'task_completed', agent_name: 'Worker', message: 'Merged cleanly', timestamp: 5, delivered_at: 12 },
     ],
   };
   const context = vm.createContext(sandbox);
-  loadWeaver(context);
+  loadEngineer(context);
 
-  const html = vm.runInContext(`_agentPanelLegacyRenderEvents('alpha', state.weaver_settings.alpha || {}, null, state.weaver_buffer_stats.alpha)`, context);
+  const html = vm.runInContext(`_agentPanelLegacyRenderEvents('alpha', state.engineer_settings.alpha || {}, null, state.engineer_buffer_stats.alpha)`, context);
 
   assert.match(html, /Queued for next digest/);
-  assert.match(html, /Already sent to Weaver/);
+  assert.match(html, /Already sent to Engineer/);
   assert.match(html, /Waiting for review/);
   assert.match(html, /Merged cleanly/);
   assert.match(html, /Send queued now/);
@@ -150,7 +150,7 @@ test('focused engineer Events countdown updates in place without rerendering the
     return id === 'panel-agent' ? panel : null;
   };
   const context = vm.createContext(sandbox);
-  loadWeaver(context);
+  loadEngineer(context);
 
   vm.runInContext(`_agentPanelLastSelectedTabByKind.engineer = 'events'; renderAgentPanel()`, context);
 
@@ -173,10 +173,10 @@ test('focused engineer Events countdown updates in place without rerendering the
   assert.deepEqual(sandbox.clearedIntervals, [1]);
 });
 
-test('weaver Events tab disables send-now while paused', () => {
+test('engineer Events tab disables send-now while paused', () => {
   const sandbox = createSandbox();
-  sandbox.state.weaver_settings.alpha = { paused: true };
-  sandbox.state.weaver_buffer_stats = {
+  sandbox.state.engineer_settings.alpha = { paused: true };
+  sandbox.state.engineer_buffer_stats = {
     alpha: {
       buffered_events: 1,
       next_push_in: 0,
@@ -187,10 +187,10 @@ test('weaver Events tab disables send-now while paused', () => {
     },
   };
   const context = vm.createContext(sandbox);
-  loadWeaver(context);
+  loadEngineer(context);
 
   const html = vm.runInContext(
-    `_agentPanelLegacyRenderEvents("alpha", state.weaver_settings.alpha, null, state.weaver_buffer_stats.alpha)`,
+    `_agentPanelLegacyRenderEvents("alpha", state.engineer_settings.alpha, null, state.engineer_buffer_stats.alpha)`,
     context,
   );
 
@@ -199,9 +199,9 @@ test('weaver Events tab disables send-now while paused', () => {
   assert.match(html, /disabled/);
 });
 
-test('weaver Worklog tab renders dispatched tasks with live lane and status', () => {
+test('engineer Worklog tab renders dispatched tasks with live lane and status', () => {
   const sandbox = createSandbox();
-  sandbox.state.weaver_worklog = {
+  sandbox.state.engineer_worklog = {
     alpha: [
       {
         id: 4,
@@ -228,7 +228,7 @@ test('weaver Worklog tab renders dispatched tasks with live lane and status', ()
     'agent-1': { id: 'agent-1', name: 'Worker One' },
   };
   const context = vm.createContext(sandbox);
-  loadWeaver(context);
+  loadEngineer(context);
 
   const html = vm.runInContext(
     `_agentPanelLegacyRenderWorklog("alpha", {})`,
@@ -242,9 +242,9 @@ test('weaver Worklog tab renders dispatched tasks with live lane and status', ()
   assert.match(html, /Worker One/);
 });
 
-test('weaver Worklog tab hides non-owned rows when restrict_to_created_agents is enabled', () => {
+test('engineer Worklog tab hides non-owned rows when restrict_to_created_agents is enabled', () => {
   const sandbox = createSandbox();
-  sandbox.state.weaver_worklog = {
+  sandbox.state.engineer_worklog = {
     alpha: [
       {
         id: 2,
@@ -267,7 +267,7 @@ test('weaver Worklog tab hides non-owned rows when restrict_to_created_agents is
     ],
   };
   const context = vm.createContext(sandbox);
-  loadWeaver(context);
+  loadEngineer(context);
 
   const html = vm.runInContext(
     `_agentPanelLegacyRenderWorklog("alpha", { restrict_to_created_agents: true })`,
@@ -276,37 +276,37 @@ test('weaver Worklog tab hides non-owned rows when restrict_to_created_agents is
 
   assert.match(html, /Owned task/);
   assert.doesNotMatch(html, /Legacy task/);
-  assert.match(html, /Weaver-created agents/);
+  assert.match(html, /Engineer-created agents/);
 });
 
-test('weaver journal distinguishes blocking asks from non-blocking notes', () => {
+test('engineer journal distinguishes blocking asks from non-blocking notes', () => {
   const sandbox = createSandbox();
-  sandbox.state.weaver_settings.alpha = {
+  sandbox.state.engineer_settings.alpha = {
     pending_question: 'Need approval to merge?',
     pending_note: 'FYI: branch is ready for review',
     pending_note_kind: 'question',
   };
   const context = vm.createContext(sandbox);
-  loadWeaver(context);
+  loadEngineer(context);
 
   const html = vm.runInContext(`_agentPanelLegacyRenderJournal("alpha")`, context);
 
   assert.match(html, /class="agent-panel-ask-banner"/);
-  assert.match(html, /Weaver is asking:/);
+  assert.match(html, /Engineer is asking:/);
   assert.match(html, /class="agent-panel-note-banner"/);
-  assert.match(html, /Weaver asks \(non-blocking\):/);
-  assert.match(html, /weaverDismissNote/);
+  assert.match(html, /Engineer asks \(non-blocking\):/);
+  assert.match(html, /engineerDismissNote/);
 });
 
-test('weaver journal keeps chronology separate and shows a Session Map button', () => {
+test('engineer journal keeps chronology separate and shows a Session Map button', () => {
   const sandbox = createSandbox();
   sandbox.state.board_tasks = {
     'LOOM:333': { id: 'LOOM:333', task: 'Add Events tab' },
-    'LOOM:342': { id: 'LOOM:342', task: 'Keep Weaver Events next-dispatch timing accurate' },
+    'LOOM:342': { id: 'LOOM:342', task: 'Keep Engineer Events next-dispatch timing accurate' },
     'LOOM:333:4': { id: 'LOOM:333:4', task: 'Review Events stream' },
     'LOOM:342:1': { id: 'LOOM:342:1', task: 'Validate stream after smoke testing' },
   };
-  sandbox.state.weaver_streams = {
+  sandbox.state.engineer_streams = {
     alpha: {
       count: 1,
       by_state: { awaiting_human_validation: 1 },
@@ -314,7 +314,7 @@ test('weaver journal keeps chronology separate and shows a Session Map button', 
         {
           stream_id: 'stream:/repo::loom/events-panel',
           branch: 'loom/events-panel',
-          foreground_task_title: 'Keep Weaver Events next-dispatch timing accurate',
+          foreground_task_title: 'Keep Engineer Events next-dispatch timing accurate',
           state: 'awaiting_human_validation',
           code_state: 'reviewed_clean',
           validation_state: 'pending_human_validation',
@@ -328,14 +328,14 @@ test('weaver journal keeps chronology separate and shows a Session Map button', 
             {
               kind: 'agent_reply',
               task_id: 'LOOM:9',
-              task_title: 'Weaver: reprioritize blocker fix',
+              task_title: 'Engineer: reprioritize blocker fix',
               summary: 'Will handle blocker first',
               timestamp: '2026-04-07T11:12:00+00:00',
             },
             {
-              kind: 'weaver_message',
+              kind: 'engineer_message',
               task_id: 'LOOM:9',
-              task_title: 'Weaver: reprioritize blocker fix',
+              task_title: 'Engineer: reprioritize blocker fix',
               summary: 'Reprioritized blocker fix before queued work',
               timestamp: '2026-04-07T11:11:00+00:00',
             },
@@ -345,7 +345,7 @@ test('weaver journal keeps chronology separate and shows a Session Map button', 
     },
   };
   const context = vm.createContext(sandbox);
-  loadWeaver(context);
+  loadEngineer(context);
 
   const html = vm.runInContext(`_agentPanelLegacyRenderJournal("alpha")`, context);
 
@@ -356,9 +356,9 @@ test('weaver journal keeps chronology separate and shows a Session Map button', 
   assert.doesNotMatch(html, /agent-panel-stream-section-label-product/);
 });
 
-test('weaver session map renders deterministic stream and recovery sections', () => {
+test('engineer session map renders deterministic stream and recovery sections', () => {
   const sandbox = createSandbox();
-  sandbox.state.weaver_session_maps = {
+  sandbox.state.engineer_session_maps = {
     alpha: {
       group: 'alpha',
       overview: {
@@ -384,7 +384,7 @@ test('weaver session map renders deterministic stream and recovery sections', ()
             product_task_ids: ['LOOM:1'],
             workflow_task_ids: ['LOOM:1:1'],
             recent_visibility_items: [
-              { kind: 'weaver_message', summary: 'Paused queued work until validation clears' },
+              { kind: 'engineer_message', summary: 'Paused queued work until validation clears' },
             ],
           },
         ],
@@ -432,8 +432,8 @@ test('weaver session map renders deterministic stream and recovery sections', ()
     },
   };
   const context = vm.createContext(sandbox);
-  loadWeaver(context);
-  vm.runInContext(`_weaverJournalSubviewByGroup.alpha = 'session_map'`, context);
+  loadEngineer(context);
+  vm.runInContext(`_engineerJournalSubviewByGroup.alpha = 'session_map'`, context);
 
   const html = vm.runInContext(`_agentPanelLegacyRenderJournal("alpha")`, context);
 
@@ -453,59 +453,59 @@ test('weaver session map renders deterministic stream and recovery sections', ()
   assert.match(html, /Back to Journal/);
 });
 
-test('weaverOpenSessionMap requests the on-demand Session Map payload', () => {
+test('engineerOpenSessionMap requests the on-demand Session Map payload', () => {
   const sandbox = createSandbox();
   const context = vm.createContext(sandbox);
-  loadWeaver(context);
+  loadEngineer(context);
 
-  vm.runInContext(`weaverOpenSessionMap('alpha')`, context);
+  vm.runInContext(`engineerOpenSessionMap('alpha')`, context);
 
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
-    { cmd: 'weaver_session_map_read', group: 'alpha' },
+    { cmd: 'engineer_session_map_read', group: 'alpha' },
   ]);
-  assert.equal(vm.runInContext(`_weaverJournalSubviewByGroup.alpha`, context), 'session_map');
+  assert.equal(vm.runInContext(`_engineerJournalSubviewByGroup.alpha`, context), 'session_map');
 });
 
-test('weaverDismissNote clears the non-blocking banner without resuming', () => {
+test('engineerDismissNote clears the non-blocking banner without resuming', () => {
   const sandbox = createSandbox();
   const context = vm.createContext(sandbox);
-  loadWeaver(context);
+  loadEngineer(context);
 
-  vm.runInContext(`weaverDismissNote()`, context);
+  vm.runInContext(`engineerDismissNote()`, context);
 
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
     {
-      cmd: 'weaver_dismiss_note',
+      cmd: 'engineer_dismiss_note',
       group: 'alpha',
     },
   ]);
 });
 
-test('weaverTogglePauseForGroup reuses the normal pause and resume commands', () => {
+test('engineerTogglePauseForGroup reuses the normal pause and resume commands', () => {
   const sandbox = createSandbox();
-  sandbox.state.weaver_settings.alpha = { paused: false };
+  sandbox.state.engineer_settings.alpha = { paused: false };
   const context = vm.createContext(sandbox);
-  loadWeaver(context);
+  loadEngineer(context);
 
-  vm.runInContext(`weaverTogglePauseForGroup('alpha')`, context);
-  sandbox.state.weaver_settings.alpha.paused = true;
-  vm.runInContext(`weaverTogglePauseForGroup('alpha')`, context);
+  vm.runInContext(`engineerTogglePauseForGroup('alpha')`, context);
+  sandbox.state.engineer_settings.alpha.paused = true;
+  vm.runInContext(`engineerTogglePauseForGroup('alpha')`, context);
 
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
-    { cmd: 'weaver_pause', group: 'alpha' },
-    { cmd: 'weaver_resume', group: 'alpha' },
+    { cmd: 'engineer_pause', group: 'alpha' },
+    { cmd: 'engineer_resume', group: 'alpha' },
   ]);
 });
 
-test('weaverSendNow uses the explicit flush command', () => {
+test('engineerSendNow uses the explicit flush command', () => {
   const sandbox = createSandbox();
   const context = vm.createContext(sandbox);
-  loadWeaver(context);
+  loadEngineer(context);
 
-  vm.runInContext(`weaverSendNow()`, context);
+  vm.runInContext(`engineerSendNow()`, context);
 
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
-    { cmd: 'weaver_flush_now', group: 'alpha' },
+    { cmd: 'engineer_flush_now', group: 'alpha' },
   ]);
 });
 
@@ -525,14 +525,14 @@ test('focused engineer utilities use the focused agent group in multi-project wo
     return id === 'panel-agent' ? panel : null;
   };
   const context = vm.createContext(sandbox);
-  loadWeaver(context);
+  loadEngineer(context);
 
   vm.runInContext('renderAgentPanel()', context);
-  vm.runInContext('weaverSendNow()', context);
+  vm.runInContext('engineerSendNow()', context);
 
   assert.match(panel.innerHTML, /Engineer: Builder · Group: beta/);
   assert.equal(vm.runInContext(`_agentPanelCurrentGroup()`, context), 'beta');
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
-    { cmd: 'weaver_flush_now', group: 'beta' },
+    { cmd: 'engineer_flush_now', group: 'beta' },
   ]);
 });

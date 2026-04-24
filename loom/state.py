@@ -45,32 +45,32 @@ _RESERVED_LANES = ("Backlog", "To Do", "In Progress", "Done", ARCHIVED_LANE)
 _DEFAULT_LANES = list(_RESERVED_LANES)
 _VERIFICATION_MODES = {"", "deploy", "restart"}
 _VERIFICATION_STATES = {"", "pending", "attempted", "passed", "failed"}
-_WEAVER_AUTONOMY_MODES = {
+_ENGINEER_AUTONOMY_MODES = {
     "suggest_only",
     "dispatch_when_clear",
     "aggressive_auto_continue",
 }
-_DEFAULT_WEAVER_AUTONOMY_MODE = "dispatch_when_clear"
-_DEFAULT_WEAVER_DEFAULT_WORKER_CONCURRENCY = 2
-_WEAVER_WAVE_SIZE_PREFERENCES = {
+_DEFAULT_ENGINEER_AUTONOMY_MODE = "dispatch_when_clear"
+_DEFAULT_ENGINEER_DEFAULT_WORKER_CONCURRENCY = 2
+_ENGINEER_WAVE_SIZE_PREFERENCES = {
     "small",
     "balanced",
     "large",
 }
-_DEFAULT_WEAVER_WAVE_SIZE_PREFERENCE = "small"
-_WEAVER_SAME_AGENT_FOLLOW_UP_PREFERENCES = {
+_DEFAULT_ENGINEER_WAVE_SIZE_PREFERENCE = "small"
+_ENGINEER_SAME_AGENT_FOLLOW_UP_PREFERENCES = {
     "balanced",
     "prefer_same_agent",
     "prefer_fresh_agent",
 }
-_DEFAULT_WEAVER_SAME_AGENT_FOLLOW_UP_PREFERENCE = "balanced"
-_WEAVER_DIGEST_VERBOSITIES = {
+_DEFAULT_ENGINEER_SAME_AGENT_FOLLOW_UP_PREFERENCE = "balanced"
+_ENGINEER_DIGEST_VERBOSITIES = {
     "compact",
     "balanced",
     "detailed",
 }
-_DEFAULT_WEAVER_DIGEST_VERBOSITY = "balanced"
-_WEAVER_NOTIFICATION_PRESETS = {
+_DEFAULT_ENGINEER_DIGEST_VERBOSITY = "balanced"
+_ENGINEER_NOTIFICATION_PRESETS = {
     "quiet": {
         "digest_verbosity": "compact",
         "push_interval": 120,
@@ -128,12 +128,12 @@ _ARCHITECT_DIGEST_DEFAULT_ENABLED_EVENTS = [
     ENGINEER_AWAITING_HUMAN_INPUT,
     ENGINEER_ASK_RESOLVED,
 ]
-_WEAVER_ESCALATION_STYLES = {
+_ENGINEER_ESCALATION_STYLES = {
     "ask_early",
     "note_then_ask",
     "keep_moving",
 }
-_DEFAULT_WEAVER_ESCALATION_STYLE = "note_then_ask"
+_DEFAULT_ENGINEER_ESCALATION_STYLE = "note_then_ask"
 _WORKTREE_MERGE_CLEANUP_MODES = {
     "keep",
     "close",
@@ -141,10 +141,10 @@ _WORKTREE_MERGE_CLEANUP_MODES = {
     "close_remove",
 }
 _DEFAULT_WORKTREE_MERGE_CLEANUP = "keep"
-_WEAVER_WORKLOG_LIMIT = 200
-_WEAVER_STREAM_CARD_LIMIT = 10
-_WEAVER_STREAM_CONTEXT_LIMIT = 5
-_WEAVER_STREAM_DELTA_TRIGGER_OPS = {
+_ENGINEER_WORKLOG_LIMIT = 200
+_ENGINEER_STREAM_CARD_LIMIT = 10
+_ENGINEER_STREAM_CONTEXT_LIMIT = 5
+_ENGINEER_STREAM_DELTA_TRIGGER_OPS = {
     "agent_remove",
     "agent_upsert",
     "group_remove",
@@ -324,48 +324,48 @@ def normalize_xterm_scrollback(value, *, strict: bool = False) -> int:
     return value
 
 
-def normalize_weaver_autonomy_mode(value) -> str:
+def normalize_engineer_autonomy_mode(value) -> str:
     value = str(value or "").strip()
-    if value in _WEAVER_AUTONOMY_MODES:
+    if value in _ENGINEER_AUTONOMY_MODES:
         return value
-    return _DEFAULT_WEAVER_AUTONOMY_MODE
+    return _DEFAULT_ENGINEER_AUTONOMY_MODE
 
 
 def normalize_default_worker_concurrency(value) -> int:
     try:
         value = int(value)
     except (TypeError, ValueError):
-        return _DEFAULT_WEAVER_DEFAULT_WORKER_CONCURRENCY
+        return _DEFAULT_ENGINEER_DEFAULT_WORKER_CONCURRENCY
     return max(1, value)
 
 
-def normalize_weaver_wave_size_preference(value) -> str:
+def normalize_engineer_wave_size_preference(value) -> str:
     value = str(value or "").strip()
-    if value in _WEAVER_WAVE_SIZE_PREFERENCES:
+    if value in _ENGINEER_WAVE_SIZE_PREFERENCES:
         return value
-    return _DEFAULT_WEAVER_WAVE_SIZE_PREFERENCE
+    return _DEFAULT_ENGINEER_WAVE_SIZE_PREFERENCE
 
 
-def normalize_weaver_same_agent_follow_up_preference(value) -> str:
+def normalize_engineer_same_agent_follow_up_preference(value) -> str:
     value = str(value or "").strip()
-    if value in _WEAVER_SAME_AGENT_FOLLOW_UP_PREFERENCES:
+    if value in _ENGINEER_SAME_AGENT_FOLLOW_UP_PREFERENCES:
         return value
-    return _DEFAULT_WEAVER_SAME_AGENT_FOLLOW_UP_PREFERENCE
+    return _DEFAULT_ENGINEER_SAME_AGENT_FOLLOW_UP_PREFERENCE
 
 
-def normalize_weaver_digest_verbosity(value) -> str:
+def normalize_engineer_digest_verbosity(value) -> str:
     value = str(value or "").strip()
-    if value in _WEAVER_DIGEST_VERBOSITIES:
+    if value in _ENGINEER_DIGEST_VERBOSITIES:
         return value
-    return _DEFAULT_WEAVER_DIGEST_VERBOSITY
+    return _DEFAULT_ENGINEER_DIGEST_VERBOSITY
 
 
-def get_weaver_notification_preset(name) -> dict:
-    preset = _WEAVER_NOTIFICATION_PRESETS.get(
+def get_engineer_notification_preset(name) -> dict:
+    preset = _ENGINEER_NOTIFICATION_PRESETS.get(
         str(name or "").strip().lower()
     )
     if not preset:
-        raise ValueError(f"Unknown Weaver notification preset: {name}")
+        raise ValueError(f"Unknown Engineer notification preset: {name}")
     return {
         "digest_verbosity": preset["digest_verbosity"],
         "push_interval": preset["push_interval"],
@@ -375,11 +375,11 @@ def get_weaver_notification_preset(name) -> dict:
     }
 
 
-def normalize_weaver_escalation_style(value) -> str:
+def normalize_engineer_escalation_style(value) -> str:
     value = str(value or "").strip()
-    if value in _WEAVER_ESCALATION_STYLES:
+    if value in _ENGINEER_ESCALATION_STYLES:
         return value
-    return _DEFAULT_WEAVER_ESCALATION_STYLE
+    return _DEFAULT_ENGINEER_ESCALATION_STYLE
 
 
 def normalize_worktree_merge_cleanup(value) -> str:
@@ -506,7 +506,7 @@ class AutoDispatchQueueEntry:
     agent_group: str = ""
     max_concurrent: int = 1
     target_agent_id: str = ""
-    weaver_owner_id: str = ""
+    engineer_owner_id: str = ""
     enqueued_at: str = ""
 
 
@@ -562,7 +562,7 @@ class AgentCell:
     last_summary: str = ""  # last assistant message on Stop (for checkpoint msgs)
     # Context preservation (dispatch history)
     tasks_dispatched: int = 0  # number of tasks sent to this agent (persisted)
-    created_by_weaver_id: str = ""  # immutable Weaver provenance (persisted)
+    created_by_engineer_id: str = ""  # immutable Engineer provenance (persisted)
     kind: str = ""  # "" | architect | engineer | worker | terminal
     role: str = ""  # worker-role slug mirrored from template during migration
     owner_engineer_id: str = ""  # owning engineer for worker/terminal agents
@@ -585,8 +585,8 @@ class AgentCell:
     mcp_messages: list = field(default_factory=list)  # [{action, message, timestamp}]
     # Checkpoint throttle (ephemeral)
     last_checkpoint_at: float = 0.0  # timestamp of last progress checkpoint
-    # Weaver message tracking (ephemeral)
-    pending_weaver_message: bool = False  # agent has unread message from weaver
+    # Engineer message tracking (ephemeral)
+    pending_engineer_message: bool = False  # agent has unread message from engineer
 
     def __post_init__(self):
         """Normalize legacy activity clocks loaded from older snapshots.
@@ -678,7 +678,7 @@ _EPHEMERAL_FIELDS = ("current_process", "current_path",
                      "worktree_changed_files",
                      "worktree_checkpoints", "last_checkpoint_at",
                      "mcp_messages",
-                     "pending_weaver_message")
+                     "pending_engineer_message")
 
 
 def _slugify(name: str, max_len: int = 40) -> str:
@@ -820,7 +820,7 @@ def task_suppresses_done_cascade(task: Optional[BoardTask]) -> bool:
     if not task:
         return False
     labels = set(task.labels or [])
-    return bool(labels.intersection({"loom:human", "loom:weaver-message"}))
+    return bool(labels.intersection({"loom:human", "loom:engineer-message"}))
 
 
 def _normalize_verification_fields(fields: dict) -> None:
@@ -943,13 +943,13 @@ class GroupSettings:
     board_default_labels: list[str] = field(default_factory=list)  # default labels for new tasks
     board_default_lane: str = ""  # default lane for new tasks (empty = first lane)
     board_default_action: str = ""  # default action for new tasks
-    # Weaver
-    weaver_agent_id: str = ""  # designated weaver agent for this group
+    # Engineer
+    engineer_agent_id: str = ""  # designated engineer agent for this group
 
 
 @dataclass
-class WeaverSettings:
-    """Per-group weaver configuration."""
+class EngineerSettings:
+    """Per-group engineer configuration."""
     group: str = ""
     push_interval: int = 60              # seconds between digest pushes (min: 10)
     max_interval: int = 300              # max seconds between normal digest pushes
@@ -961,24 +961,24 @@ class WeaverSettings:
     digest_verbosity: str = "balanced"   # compact | balanced | detailed
     escalation_style: str = "note_then_ask"  # ask_early | note_then_ask | keep_moving
     paused: bool = False                 # user paused event pushes
-    custom_instructions: str = ""        # user-defined instructions appended to weaver system prompt
-    restrict_to_created_agents: bool = False  # limit Weaver agent visibility/control to its own created agents
+    custom_instructions: str = ""        # user-defined instructions appended to engineer system prompt
+    restrict_to_created_agents: bool = False  # limit Engineer agent visibility/control to its own created agents
     pending_question: str = ""           # question awaiting human reply (non-empty = awaiting input)
     pending_question_set_at: float = 0.0  # unix timestamp when pending_question was set
     pending_question_actor_id: str = ""  # engineer who set pending_question
     pending_note: str = ""               # non-blocking note/question for the human
     pending_note_kind: str = ""          # "note" | "question" | ""
-    weaver_provider: str = ""            # adapter name override (empty = use group default)
-    weaver_boot_command: str = ""        # boot command override (empty = use provider default)
-    weaver_model: str = ""               # model override for the designated weaver
-    weaver_reasoning_effort: str = ""    # reasoning-effort override for the designated weaver
-    weaver_directory: str = ""           # directory override for the designated weaver
-    weaver_profile: str = ""             # iTerm profile override for the designated weaver
-    weaver_shell: str = ""               # shell override for the designated weaver
-    weaver_tab_color: str = ""           # tab color override for the designated weaver
+    engineer_provider: str = ""            # adapter name override (empty = use group default)
+    engineer_boot_command: str = ""        # boot command override (empty = use provider default)
+    engineer_model: str = ""               # model override for the designated engineer
+    engineer_reasoning_effort: str = ""    # reasoning-effort override for the designated engineer
+    engineer_directory: str = ""           # directory override for the designated engineer
+    engineer_profile: str = ""             # iTerm profile override for the designated engineer
+    engineer_shell: str = ""               # shell override for the designated engineer
+    engineer_tab_color: str = ""           # tab color override for the designated engineer
     enabled_events: list[str] = field(   # optional events (mandatory always on)
         default_factory=lambda: list(
-            _WEAVER_NOTIFICATION_PRESETS["normal"]["enabled_events"]
+            _ENGINEER_NOTIFICATION_PRESETS["normal"]["enabled_events"]
         )
     )
 
@@ -994,15 +994,15 @@ class AgentDigestSettings:
     digest_verbosity: str = "balanced"
     enabled_events: list[str] = field(
         default_factory=lambda: list(
-            _WEAVER_NOTIFICATION_PRESETS["normal"]["enabled_events"]
+            _ENGINEER_NOTIFICATION_PRESETS["normal"]["enabled_events"]
         )
     )
     architect_digest: bool = False
     wake_on_digest: bool = False
 
 
-# Mandatory events — always included in weaver digests regardless of enabled_events.
-WEAVER_MANDATORY_EVENTS = frozenset({
+# Mandatory events — always included in engineer digests regardless of enabled_events.
+ENGINEER_MANDATORY_EVENTS = frozenset({
     "task_completed", "agent_reply", "agent_error",
     "agent_blocked", "ask_created", "task_verification_updated",
 })
@@ -1088,27 +1088,27 @@ class MatrixState:
         self.board_lane_sorts_by_group: dict[str, dict] = {}
         self.board_card_density_by_group: dict[str, str] = {}
         self.panel_log = None  # PanelEventLog, set from server.py
-        # Weaver settings (per-group)
-        self.weaver_settings: dict[str, WeaverSettings] = {}
+        # Engineer settings (per-group)
+        self.engineer_settings: dict[str, EngineerSettings] = {}
         self.agent_digest_settings: dict[str, AgentDigestSettings] = {}
-        self.weaver_worklog: dict[str, list[dict]] = {}
+        self.engineer_worklog: dict[str, list[dict]] = {}
         # Delta broadcast accumulator
         self._delta_ops: list[dict] = []
         self._seq: int = 0
-        # Per-agent fingerprint of weaver-relevant fields. Lets
-        # `_collect_weaver_affected_groups` skip recomputing a group's
-        # weaver streams when an agent_upsert only changes ephemeral
+        # Per-agent fingerprint of engineer-relevant fields. Lets
+        # `_collect_engineer_affected_groups` skip recomputing a group's
+        # engineer streams when an agent_upsert only changes ephemeral
         # fields (activity, path, last_event_at, etc.).
-        self._agent_weaver_fingerprints: dict[str, tuple] = {}
+        self._agent_engineer_fingerprints: dict[str, tuple] = {}
         self._engineer_queue_empty_since: dict[str, float] = {}
-        # Deferred weaver-stream recompute. `broadcast()` queues affected
-        # groups into `_weaver_recompute_pending` and spawns a single
+        # Deferred engineer-stream recompute. `broadcast()` queues affected
+        # groups into `_engineer_recompute_pending` and spawns a single
         # worker task that prefills branch-existence, computes each
-        # group's stream payload, and emits a follow-up `weaver_streams`
+        # group's stream payload, and emits a follow-up `engineer_streams`
         # delta. Keeps the primary delta frame off the git-subprocess
         # hot path so UI mutations feel instant.
-        self._weaver_recompute_pending: set[str] = set()
-        self._weaver_recompute_task = None
+        self._engineer_recompute_pending: set[str] = set()
+        self._engineer_recompute_task = None
         self._critical_write_capture_var: contextvars.ContextVar[
             CriticalWriteCapture | None
         ] = contextvars.ContextVar(
@@ -1170,7 +1170,7 @@ class MatrixState:
         owner_id = str((payload or {}).get("owner_engineer_id", "") or "").strip()
         if not owner_id:
             owner_id = str(
-                (payload or {}).get("created_by_weaver_id", "") or ""
+                (payload or {}).get("created_by_engineer_id", "") or ""
             ).strip()
         self._clear_engineer_queue_empty_emitted(owner_id)
 
@@ -1404,10 +1404,10 @@ class MatrixState:
         return [self.board_tasks[tid] for tid in bucket
                 if tid in self.board_tasks]
 
-    def _weaver_stream_groups(self) -> list[str]:
+    def _engineer_stream_groups(self) -> list[str]:
         groups = set(self.groups)
         groups.update(self.group_settings)
-        groups.update(self.weaver_settings)
+        groups.update(self.engineer_settings)
         # Use the per-group task index instead of iterating all tasks.
         groups.update(self._tasks_by_group.keys())
         groups.update(
@@ -1417,7 +1417,7 @@ class MatrixState:
         groups.discard("")
         return sorted(groups)
 
-    def _weaver_stream_counts(self, streams: list[dict]) -> dict[str, int]:
+    def _engineer_stream_counts(self, streams: list[dict]) -> dict[str, int]:
         counts: dict[str, int] = {}
         for stream in streams:
             state_name = str(stream.get("state", "") or "").strip()
@@ -1426,18 +1426,18 @@ class MatrixState:
             counts[state_name] = counts.get(state_name, 0) + 1
         return counts
 
-    def _weaver_stream_payload(self, group: str) -> dict:
+    def _engineer_stream_payload(self, group: str) -> dict:
         from .worktree_streams import compute_worktree_streams
 
         try:
             streams = compute_worktree_streams(
                 self,
                 group=group,
-                visibility_limit=_WEAVER_STREAM_CONTEXT_LIMIT,
+                visibility_limit=_ENGINEER_STREAM_CONTEXT_LIMIT,
                 include_orphaned=False,
             )
         except Exception:
-            log.exception("Failed to compute weaver streams for %s", group)
+            log.exception("Failed to compute engineer streams for %s", group)
             streams = []
         streams = [
             stream for stream in streams
@@ -1445,21 +1445,21 @@ class MatrixState:
         ]
         return {
             "count": len(streams),
-            "by_state": self._weaver_stream_counts(streams),
-            "items": streams[:_WEAVER_STREAM_CARD_LIMIT],
-            "truncated": len(streams) > _WEAVER_STREAM_CARD_LIMIT,
+            "by_state": self._engineer_stream_counts(streams),
+            "items": streams[:_ENGINEER_STREAM_CARD_LIMIT],
+            "truncated": len(streams) > _ENGINEER_STREAM_CARD_LIMIT,
         }
 
-    def _weaver_streams_snapshot(self) -> dict[str, dict]:
+    def _engineer_streams_snapshot(self) -> dict[str, dict]:
         return {
-            group: self._weaver_stream_payload(group)
-            for group in self._weaver_stream_groups()
+            group: self._engineer_stream_payload(group)
+            for group in self._engineer_stream_groups()
         }
 
-    def _agent_weaver_fingerprint(self, op: dict) -> tuple:
-        """Fingerprint the weaver-relevant fields of an agent_upsert op.
+    def _agent_engineer_fingerprint(self, op: dict) -> tuple:
+        """Fingerprint the engineer-relevant fields of an agent_upsert op.
 
-        Weaver stream identity/gating only depends on group, worktree
+        Engineer stream identity/gating only depends on group, worktree
         identity, current task assignment, and whether the agent is
         busy. Everything else in the agent dict (activity, path, timers,
         summary text, tokens) is ephemeral and must not force a
@@ -1477,8 +1477,8 @@ class MatrixState:
             str(op.get("cell_type", "") or ""),
         )
 
-    def _collect_weaver_affected_groups(self, ops: list[dict]) -> set[str]:
-        """Return the set of groups whose weaver streams need recomputing.
+    def _collect_engineer_affected_groups(self, ops: list[dict]) -> set[str]:
+        """Return the set of groups whose engineer streams need recomputing.
 
         Scans ``ops`` for trigger ops (task/agent/group mutations) and,
         as a side effect, updates the per-agent fingerprint cache used
@@ -1490,7 +1490,7 @@ class MatrixState:
         affected_groups: set[str] = set()
         for op in ops:
             op_name = str((op or {}).get("op", "") or "")
-            if op_name not in _WEAVER_STREAM_DELTA_TRIGGER_OPS:
+            if op_name not in _ENGINEER_STREAM_DELTA_TRIGGER_OPS:
                 continue
             if op_name == "group_rename":
                 affected_groups.add(str(op.get("old_name", "") or "").strip())
@@ -1499,7 +1499,7 @@ class MatrixState:
             if op_name in {"group_update", "group_remove"}:
                 affected_groups.add(str(op.get("name", "") or "").strip())
                 continue
-            # Terminal cells don't participate in weaver streams; skip them
+            # Terminal cells don't participate in engineer streams; skip them
             # so a terminal upsert/remove doesn't force a group recompute.
             if op_name in {"agent_upsert", "agent_remove"}:
                 cell_type = str(op.get("cell_type", "agent") or "agent").strip()
@@ -1507,19 +1507,19 @@ class MatrixState:
                     continue
                 agent_id = str(op.get("id", "") or "")
                 if op_name == "agent_upsert" and agent_id:
-                    fingerprint = self._agent_weaver_fingerprint(op)
-                    if self._agent_weaver_fingerprints.get(
+                    fingerprint = self._agent_engineer_fingerprint(op)
+                    if self._agent_engineer_fingerprints.get(
                             agent_id) == fingerprint:
                         continue
-                    self._agent_weaver_fingerprints[agent_id] = fingerprint
+                    self._agent_engineer_fingerprints[agent_id] = fingerprint
                 elif op_name == "agent_remove" and agent_id:
-                    self._agent_weaver_fingerprints.pop(agent_id, None)
+                    self._agent_engineer_fingerprints.pop(agent_id, None)
             affected_groups.add(str(op.get("group", "") or "").strip())
         affected_groups.discard("")
         return affected_groups
 
-    def _emit_weaver_stream_ops(self, groups: set[str]) -> bool:
-        """Emit `weaver_streams` delta ops for each group in ``groups``.
+    def _emit_engineer_stream_ops(self, groups: set[str]) -> bool:
+        """Emit `engineer_streams` delta ops for each group in ``groups``.
 
         Returns True when at least one op was emitted. Safe to call when
         the per-repo branch-exists cache is cold, but in practice
@@ -1527,13 +1527,13 @@ class MatrixState:
         """
         if not groups:
             return False
-        known_groups = set(self._weaver_stream_groups())
+        known_groups = set(self._engineer_stream_groups())
         existing_groups = {
             str((op or {}).get("group", "") or "").strip()
             for op in self._delta_ops
             if str((op or {}).get("op", "") or "") in {
-                "weaver_streams",
-                "weaver_streams_update",
+                "engineer_streams",
+                "engineer_streams_update",
             }
         }
         emitted = False
@@ -1544,7 +1544,7 @@ class MatrixState:
                 # Group was just removed; emit an empty payload so clients
                 # clear it from their local state.
                 self._emit(
-                    "weaver_streams",
+                    "engineer_streams",
                     group=group,
                     streams={
                         "count": 0,
@@ -1556,13 +1556,13 @@ class MatrixState:
                 emitted = True
                 continue
             try:
-                payload = self._weaver_stream_payload(group)
+                payload = self._engineer_stream_payload(group)
             except Exception:
                 log.exception(
-                    "weaver stream payload failed for group '%s'", group
+                    "engineer stream payload failed for group '%s'", group
                 )
                 continue
-            self._emit("weaver_streams", group=group, streams=payload)
+            self._emit("engineer_streams", group=group, streams=payload)
             emitted = True
         return emitted
 
@@ -1625,22 +1625,22 @@ class MatrixState:
             "board_lane_sorts_by_group": self.board_lane_sorts_by_group,
             "board_card_density_by_group": self.board_card_density_by_group,
             "panel_events": self.panel_log.get_recent(50) if self.panel_log else [],
-            "weaver_settings": {
-                n: asdict(ws) for n, ws in self.weaver_settings.items()
+            "engineer_settings": {
+                n: asdict(ws) for n, ws in self.engineer_settings.items()
             },
             "agent_digest_settings": {
                 agent_id: asdict(settings)
                 for agent_id, settings in self.agent_digest_settings.items()
             },
-            "weaver_journal": {
+            "engineer_journal": {
                 g: self.journal_read(g, limit=50)
-                for g in self.weaver_settings
+                for g in self.engineer_settings
             },
-            "weaver_worklog": {
+            "engineer_worklog": {
                 g: [dict(entry) for entry in entries]
-                for g, entries in self.weaver_worklog.items()
+                for g, entries in self.engineer_worklog.items()
             },
-            "weaver_streams": self._weaver_streams_snapshot(),
+            "engineer_streams": self._engineer_streams_snapshot(),
             "decisions": decisions,
             "pending_hires": pending_hires,
         }
@@ -1669,7 +1669,7 @@ class MatrixState:
         """Return an opt-in compact snapshot for new lazy-loading clients.
 
         This intentionally does not call ``to_dict()``: the legacy snapshot
-        performs synchronous decision/pending-hire/journal/weaver-stream reads
+        performs synchronous decision/pending-hire/journal/engineer-stream reads
         and expands full BoardTask rows. Compact clients fetch those heavier
         slices with explicit lazy-load commands after the socket is ready.
         """
@@ -1711,8 +1711,8 @@ class MatrixState:
             "board_lane_sorts_by_group": self.board_lane_sorts_by_group,
             "board_card_density_by_group": self.board_card_density_by_group,
             "panel_events": self.panel_log.get_recent(50) if self.panel_log else [],
-            "weaver_settings": {
-                n: asdict(ws) for n, ws in self.weaver_settings.items()
+            "engineer_settings": {
+                n: asdict(ws) for n, ws in self.engineer_settings.items()
             },
             "agent_digest_settings": {
                 agent_id: asdict(settings)
@@ -2065,7 +2065,7 @@ class MatrixState:
                                 agent_group: str = "",
                                 max_concurrent: int = 1,
                                 target_agent_id: str = "",
-                                weaver_owner_id: str = ""):
+                                engineer_owner_id: str = ""):
         found_group, _idx, entry = self.auto_dispatch_queue_find(task_id)
         if entry:
             if found_group != group:
@@ -2079,7 +2079,7 @@ class MatrixState:
             agent_group=agent_group.strip(),
             max_concurrent=max(1, int(max_concurrent or 1)),
             target_agent_id=target_agent_id.strip(),
-            weaver_owner_id=str(weaver_owner_id or "").strip(),
+            engineer_owner_id=str(engineer_owner_id or "").strip(),
             enqueued_at=datetime.now(timezone.utc).isoformat(),
         )
         queue.append(entry)
@@ -2212,15 +2212,15 @@ class MatrixState:
             log.exception("Failed to update agent history %s", cell.id)
 
     def history_record_dispatch(self, cell: AgentCell, task: BoardTask, *,
-                                weaver_group: str = "",
-                                weaver_id: str = ""):
+                                engineer_group: str = "",
+                                engineer_id: str = ""):
         """Record a task dispatch in history."""
         import time
         ts = time.time()
         if cell.mark_progress(ts):
             self._emit_agent(cell)
-        weaver_group = str(weaver_group or "").strip()
-        weaver_id = str(weaver_id or "").strip()
+        engineer_group = str(engineer_group or "").strip()
+        engineer_id = str(engineer_id or "").strip()
         try:
             self._db_save_agent(cell)
             if self.db:
@@ -2234,30 +2234,30 @@ class MatrixState:
                     cell.id, total_tasks=(
                         self.db.load_agent_history_detail(cell.id) or {}
                     ).get("total_tasks", 0) + 1)
-            if weaver_group:
+            if engineer_group:
                 entry = {
-                    "group": weaver_group,
+                    "group": engineer_group,
                     "task_id": task.id,
                     "task_title": task.task,
                     "agent_id": cell.id,
                     "agent_name": cell.name,
                     "agent_slug": cell.slug,
                     "agent_owned": bool(
-                        weaver_id and cell.created_by_weaver_id == weaver_id
+                        engineer_id and cell.created_by_engineer_id == engineer_id
                     ),
                     "started_at": ts,
                 }
                 if self.db:
-                    entry["id"] = self.db.save_weaver_task_log_entry(entry)
-                    self.db.trim_weaver_task_log(
-                        weaver_group,
-                        limit=_WEAVER_WORKLOG_LIMIT,
+                    entry["id"] = self.db.save_engineer_task_log_entry(entry)
+                    self.db.trim_engineer_task_log(
+                        engineer_group,
+                        limit=_ENGINEER_WORKLOG_LIMIT,
                     )
                 else:
-                    entries = self.weaver_worklog.get(weaver_group, [])
+                    entries = self.engineer_worklog.get(engineer_group, [])
                     newest_id = entries[0]["id"] if entries else 0
                     entry["id"] = int(newest_id or 0) + 1
-                self._append_weaver_worklog_entry(weaver_group, entry)
+                self._append_engineer_worklog_entry(engineer_group, entry)
         except Exception:
             log.exception("Failed to record dispatch history %s → %s",
                           cell.id, task.id)
@@ -2440,8 +2440,8 @@ class MatrixState:
             self._clear_engineer_queue_empty_for_active_tasks()
             self.cleanup_stale_boundary_successors(emit=False)
             for aid, cell in self.agents.items():
-                cell.pending_weaver_message = bool(
-                    self.agent_pending_weaver_reply_tasks(aid)
+                cell.pending_engineer_message = bool(
+                    self.agent_pending_engineer_reply_tasks(aid)
                 )
             # panel_active: new key; backward compat from board_panel_open
             pa = data.get("panel_active", "")
@@ -2534,14 +2534,14 @@ class MatrixState:
             if slug_dirty:
                 self._db_save_groups()
                 log.info("Generated slugs for existing resources")
-            # Weaver settings
+            # Engineer settings
             if self.db:
-                ws_fields = set(WeaverSettings.__dataclass_fields__)
-                for gname, raw in self.db.load_all_weaver_settings().items():
+                ws_fields = set(EngineerSettings.__dataclass_fields__)
+                for gname, raw in self.db.load_all_engineer_settings().items():
                     filtered = {k: v for k, v in raw.items() if k in ws_fields}
                     if "autonomy_mode" in filtered:
                         filtered["autonomy_mode"] = (
-                            normalize_weaver_autonomy_mode(
+                            normalize_engineer_autonomy_mode(
                                 filtered["autonomy_mode"])
                         )
                     if "default_worker_concurrency" in filtered:
@@ -2551,25 +2551,25 @@ class MatrixState:
                         )
                     if "wave_size_preference" in filtered:
                         filtered["wave_size_preference"] = (
-                            normalize_weaver_wave_size_preference(
+                            normalize_engineer_wave_size_preference(
                                 filtered["wave_size_preference"])
                         )
                     if "same_agent_follow_up_preference" in filtered:
                         filtered["same_agent_follow_up_preference"] = (
-                            normalize_weaver_same_agent_follow_up_preference(
+                            normalize_engineer_same_agent_follow_up_preference(
                                 filtered["same_agent_follow_up_preference"])
                         )
                     if "digest_verbosity" in filtered:
                         filtered["digest_verbosity"] = (
-                            normalize_weaver_digest_verbosity(
+                            normalize_engineer_digest_verbosity(
                                 filtered["digest_verbosity"])
                         )
                     if "escalation_style" in filtered:
                         filtered["escalation_style"] = (
-                            normalize_weaver_escalation_style(
+                            normalize_engineer_escalation_style(
                                 filtered["escalation_style"])
                         )
-                    self.weaver_settings[gname] = WeaverSettings(**filtered)
+                    self.engineer_settings[gname] = EngineerSettings(**filtered)
                 ads_fields = set(AgentDigestSettings.__dataclass_fields__)
                 for agent_id, raw in self.db.load_all_agent_digest_settings().items():
                     if agent_id not in self.agents:
@@ -2579,7 +2579,7 @@ class MatrixState:
                     }
                     if "digest_verbosity" in filtered:
                         filtered["digest_verbosity"] = (
-                            normalize_weaver_digest_verbosity(
+                            normalize_engineer_digest_verbosity(
                                 filtered["digest_verbosity"]
                             )
                         )
@@ -2588,19 +2588,19 @@ class MatrixState:
                     )
                 self._backfill_architect_digest_defaults()
                 for gname in self.groups:
-                    entries = self.db.load_weaver_task_log(
+                    entries = self.db.load_engineer_task_log(
                         gname,
-                        limit=_WEAVER_WORKLOG_LIMIT,
+                        limit=_ENGINEER_WORKLOG_LIMIT,
                     )
                     if entries:
-                        self.weaver_worklog[gname] = entries
+                        self.engineer_worklog[gname] = entries
             cleaned = self.cleanup_orphaned_attention(emit=False)
             self.recompute_task_health(emit=False, persist=False)
-            if cleaned["asks"] or cleaned["weaver_questions"]:
+            if cleaned["asks"] or cleaned["engineer_questions"]:
                 log.info(
-                    "Expired %d orphaned ask(s) and cleared %d stale weaver question(s)",
+                    "Expired %d orphaned ask(s) and cleared %d stale engineer question(s)",
                     cleaned["asks"],
-                    cleaned["weaver_questions"],
+                    cleaned["engineer_questions"],
                 )
         except (TypeError, KeyError):
             log.exception("Failed to load state from SQLite")
@@ -2640,18 +2640,18 @@ class MatrixState:
         self._emit("group_settings_update", name=name, **asdict(gs))
         self._db_save_group_settings(name)
 
-    # -- Weaver settings & journal ------------------------------------------
+    # -- Engineer settings & journal ------------------------------------------
 
-    def get_weaver_for_group(self, group: str) -> Optional[AgentCell]:
-        """Return the weaver agent for a group, or None."""
+    def get_engineer_for_group(self, group: str) -> Optional[AgentCell]:
+        """Return the engineer agent for a group, or None."""
         gs = self.group_settings.get(group)
-        if not gs or not gs.weaver_agent_id:
+        if not gs or not gs.engineer_agent_id:
             return None
-        return self.agents.get(gs.weaver_agent_id)
+        return self.agents.get(gs.engineer_agent_id)
 
-    def get_weaver_settings(self, group: str) -> WeaverSettings:
-        """Return weaver settings for a group, creating defaults if needed."""
-        return self.weaver_settings.get(group, WeaverSettings(group=group))
+    def get_engineer_settings(self, group: str) -> EngineerSettings:
+        """Return engineer settings for a group, creating defaults if needed."""
+        return self.engineer_settings.get(group, EngineerSettings(group=group))
 
     def _default_agent_digest_settings(
         self,
@@ -2685,10 +2685,10 @@ class MatrixState:
             return AgentDigestSettings(agent_id=agent_id)
         if str(getattr(cell, "kind", "") or "").strip() == "architect":
             return self._default_agent_digest_settings(agent_id, cell)
-        legacy_weaver = self.get_weaver_for_group(cell.group)
-        if not legacy_weaver or legacy_weaver.id != agent_id:
+        legacy_engineer = self.get_engineer_for_group(cell.group)
+        if not legacy_engineer or legacy_engineer.id != agent_id:
             return self._default_agent_digest_settings(agent_id, cell)
-        ws = self.get_weaver_settings(cell.group)
+        ws = self.get_engineer_settings(cell.group)
         push_interval = getattr(ws, "push_interval", 60)
         if push_interval is None:
             push_interval = 60
@@ -2704,7 +2704,7 @@ class MatrixState:
             push_interval=int(push_interval),
             max_interval=int(max_interval),
             heartbeat_interval=int(heartbeat_interval),
-            digest_verbosity=normalize_weaver_digest_verbosity(
+            digest_verbosity=normalize_engineer_digest_verbosity(
                 getattr(ws, "digest_verbosity", "balanced")
             ),
             enabled_events=list(getattr(ws, "enabled_events", []) or []),
@@ -2767,7 +2767,7 @@ class MatrixState:
             if key not in valid:
                 continue
             if key == "digest_verbosity":
-                value = normalize_weaver_digest_verbosity(value)
+                value = normalize_engineer_digest_verbosity(value)
             elif key in {"paused", "architect_digest", "wake_on_digest"}:
                 value = bool(value)
             setattr(settings, key, value)
@@ -2790,19 +2790,19 @@ class MatrixState:
         self.update_agent_digest_settings(agent_id)
         return self.agent_digest_settings.get(agent_id)
 
-    def _normalize_weaver_settings_value(self, key: str, value):
+    def _normalize_engineer_settings_value(self, key: str, value):
         if key == "autonomy_mode":
-            return normalize_weaver_autonomy_mode(value)
+            return normalize_engineer_autonomy_mode(value)
         if key == "default_worker_concurrency":
             return normalize_default_worker_concurrency(value)
         if key == "wave_size_preference":
-            return normalize_weaver_wave_size_preference(value)
+            return normalize_engineer_wave_size_preference(value)
         if key == "same_agent_follow_up_preference":
-            return normalize_weaver_same_agent_follow_up_preference(value)
+            return normalize_engineer_same_agent_follow_up_preference(value)
         if key == "digest_verbosity":
-            return normalize_weaver_digest_verbosity(value)
+            return normalize_engineer_digest_verbosity(value)
         if key == "escalation_style":
-            return normalize_weaver_escalation_style(value)
+            return normalize_engineer_escalation_style(value)
         if key == "restrict_to_created_agents":
             return bool(value)
         if key == "pending_question_set_at":
@@ -2813,33 +2813,33 @@ class MatrixState:
         if key == "pending_question_actor_id":
             return str(value or "").strip()
         if key in {
-                "weaver_model", "weaver_reasoning_effort",
-                "weaver_directory", "weaver_profile",
-                "weaver_shell", "weaver_tab_color"}:
+                "engineer_model", "engineer_reasoning_effort",
+                "engineer_directory", "engineer_profile",
+                "engineer_shell", "engineer_tab_color"}:
             return str(value or "").strip()
         return value
 
-    def _apply_weaver_settings_fields(
-            self, group: str, fields: dict) -> tuple[WeaverSettings, dict]:
+    def _apply_engineer_settings_fields(
+            self, group: str, fields: dict) -> tuple[EngineerSettings, dict]:
         fields = dict(fields or {})
         pending_question_actor_id = str(
             fields.pop("_pending_question_actor_id", "") or ""
         ).strip()
-        ws = self.weaver_settings.get(group)
+        ws = self.engineer_settings.get(group)
         if ws is None:
-            ws = WeaverSettings(group=group)
-            self.weaver_settings[group] = ws
+            ws = EngineerSettings(group=group)
+            self.engineer_settings[group] = ws
         previous_pending_question = str(
             getattr(ws, "pending_question", "") or ""
         )
         previous_pending_actor_id = str(
             getattr(ws, "pending_question_actor_id", "") or ""
         ).strip()
-        valid = set(WeaverSettings.__dataclass_fields__)
+        valid = set(EngineerSettings.__dataclass_fields__)
         applied = {}
         for key, value in fields.items():
             if key in valid:
-                value = self._normalize_weaver_settings_value(key, value)
+                value = self._normalize_engineer_settings_value(key, value)
                 setattr(ws, key, value)
                 applied[key] = value
         if (
@@ -2877,7 +2877,7 @@ class MatrixState:
                 applied["pending_question_actor_id"] = ""
         d = asdict(ws)
         d.pop("group", None)
-        self._emit("weaver_settings_update", group=group, **d)
+        self._emit("engineer_settings_update", group=group, **d)
         if "pending_question" in applied:
             current_pending_question = str(
                 getattr(ws, "pending_question", "") or ""
@@ -2909,10 +2909,10 @@ class MatrixState:
                 )
         return ws, applied
 
-    def _sync_legacy_weaver_digest_settings(self, group: str,
+    def _sync_legacy_engineer_digest_settings(self, group: str,
                                             fields: dict) -> None:
-        legacy_weaver = self.get_weaver_for_group(group)
-        if legacy_weaver and legacy_weaver.id in self.agent_digest_settings:
+        legacy_engineer = self.get_engineer_for_group(group)
+        if legacy_engineer and legacy_engineer.id in self.agent_digest_settings:
             digest_fields = {
                 key: fields[key]
                 for key in (
@@ -2926,58 +2926,58 @@ class MatrixState:
                 if key in fields
             }
             if digest_fields:
-                self.update_agent_digest_settings(legacy_weaver.id, **digest_fields)
+                self.update_agent_digest_settings(legacy_engineer.id, **digest_fields)
 
-    def update_weaver_settings(self, group: str, **fields):
-        """Update weaver settings for a group."""
-        ws, applied = self._apply_weaver_settings_fields(group, fields)
+    def update_engineer_settings(self, group: str, **fields):
+        """Update engineer settings for a group."""
+        ws, applied = self._apply_engineer_settings_fields(group, fields)
         if self.db:
-            self.db.save_weaver_settings(group, asdict(ws))
-        self._sync_legacy_weaver_digest_settings(group, applied)
+            self.db.save_engineer_settings(group, asdict(ws))
+        self._sync_legacy_engineer_digest_settings(group, applied)
 
-    async def update_weaver_settings_async(self, group: str, **fields) -> bool:
-        """Update and await persistence for weaver settings for a group."""
-        ws, applied = self._apply_weaver_settings_fields(group, fields)
+    async def update_engineer_settings_async(self, group: str, **fields) -> bool:
+        """Update and await persistence for engineer settings for a group."""
+        ws, applied = self._apply_engineer_settings_fields(group, fields)
         if self.db:
-            await self.db.save_weaver_settings_async(group, asdict(ws))
-        self._sync_legacy_weaver_digest_settings(group, applied)
+            await self.db.save_engineer_settings_async(group, asdict(ws))
+        self._sync_legacy_engineer_digest_settings(group, applied)
         return True
 
-    def weaver_restricts_to_created_agents(self, group: str) -> bool:
-        """Return whether the group's Weaver is restricted to owned agents."""
+    def engineer_restricts_to_created_agents(self, group: str) -> bool:
+        """Return whether the group's Engineer is restricted to owned agents."""
         return bool(
-            self.get_weaver_settings(group).restrict_to_created_agents
+            self.get_engineer_settings(group).restrict_to_created_agents
         )
 
-    def agent_is_visible_to_weaver(self, weaver_id: str, agent_id: str) -> bool:
-        """Return whether ``agent_id`` is visible/controllable to ``weaver_id``.
+    def agent_is_visible_to_engineer(self, engineer_id: str, agent_id: str) -> bool:
+        """Return whether ``agent_id`` is visible/controllable to ``engineer_id``.
 
         Visibility is always limited to agent cells in the same group. When the
-        per-group restriction is enabled, only agents whose immutable Weaver
+        per-group restriction is enabled, only agents whose immutable Engineer
         provenance matches the caller are visible.
         """
-        weaver = self.agents.get(str(weaver_id or "").strip())
+        engineer = self.agents.get(str(engineer_id or "").strip())
         agent = self.agents.get(str(agent_id or "").strip())
-        if not weaver or weaver.cell_type != "agent":
+        if not engineer or engineer.cell_type != "agent":
             return False
         if not agent or agent.cell_type != "agent":
             return False
-        if not weaver.group or agent.group != weaver.group:
+        if not engineer.group or agent.group != engineer.group:
             return False
-        if not self.weaver_restricts_to_created_agents(weaver.group):
+        if not self.engineer_restricts_to_created_agents(engineer.group):
             return True
-        return bool(agent.created_by_weaver_id == weaver.id)
+        return bool(agent.created_by_engineer_id == engineer.id)
 
-    def _save_weaver_settings(self, group: str, emit: bool = True):
-        ws = self.weaver_settings.get(group)
+    def _save_engineer_settings(self, group: str, emit: bool = True):
+        ws = self.engineer_settings.get(group)
         if not ws:
             return
         d = asdict(ws)
         d.pop("group", None)
         if emit:
-            self._emit("weaver_settings_update", group=group, **d)
+            self._emit("engineer_settings_update", group=group, **d)
         if self.db:
-            self.db.save_weaver_settings(group, asdict(ws))
+            self.db.save_engineer_settings(group, asdict(ws))
 
     def delete_agent_digest_settings(self, agent_id: str):
         agent_id = str(agent_id or "").strip()
@@ -3110,24 +3110,24 @@ class MatrixState:
     def cleanup_orphaned_attention(
             self, emit: bool = True, *,
             allow_persisted_agent_fallback: bool = True) -> dict[str, int]:
-        """Expire asks and pending weaver questions whose source agent is gone."""
-        cleaned = {"asks": 0, "weaver_questions": 0}
+        """Expire asks and pending engineer questions whose source agent is gone."""
+        cleaned = {"asks": 0, "engineer_questions": 0}
         live_agents = set(self.agents)
 
-        for group, ws in self.weaver_settings.items():
+        for group, ws in self.engineer_settings.items():
             gs = self.group_settings.get(group)
-            weaver_id = gs.weaver_agent_id if gs else ""
+            engineer_id = gs.engineer_agent_id if gs else ""
             question_source_id = (
                 str(getattr(ws, "pending_question_actor_id", "") or "").strip()
-                or weaver_id
+                or engineer_id
             )
             question_source_available = self._attention_source_agent_available(
                 question_source_id,
                 live_agents,
                 allow_persisted_agent_fallback=allow_persisted_agent_fallback,
             )
-            weaver_available = self._attention_source_agent_available(
-                weaver_id,
+            engineer_available = self._attention_source_agent_available(
+                engineer_id,
                 live_agents,
                 allow_persisted_agent_fallback=allow_persisted_agent_fallback,
             )
@@ -3135,10 +3135,10 @@ class MatrixState:
                 stale_question = ws.pending_question
                 stale_actor_id = (
                     str(getattr(ws, "pending_question_actor_id", "") or "").strip()
-                    or weaver_id
+                    or engineer_id
                 )
                 log.warning(
-                    "Clearing stale weaver pending question for group=%s "
+                    "Clearing stale engineer pending question for group=%s "
                     "source_agent_id=%r in_memory=%s persisted=%s "
                     "pending_question_len=%d",
                     group,
@@ -3156,7 +3156,7 @@ class MatrixState:
                 ws.paused = False
                 ws.pending_note = ""
                 ws.pending_note_kind = ""
-                self._save_weaver_settings(group, emit=emit)
+                self._save_engineer_settings(group, emit=emit)
                 if emit:
                     emit_engineer_ask_resolved_event(
                         self,
@@ -3164,11 +3164,11 @@ class MatrixState:
                         question=stale_question,
                         engineer_id=stale_actor_id,
                     )
-                cleaned["weaver_questions"] += 1
-            elif ws.pending_note and not weaver_available:
+                cleaned["engineer_questions"] += 1
+            elif ws.pending_note and not engineer_available:
                 ws.pending_note = ""
                 ws.pending_note_kind = ""
-                self._save_weaver_settings(group, emit=emit)
+                self._save_engineer_settings(group, emit=emit)
 
         reason = "Ask expired because the source agent is no longer available."
         for task in list(self.board_tasks.values()):
@@ -3189,7 +3189,7 @@ class MatrixState:
 
     def journal_append(self, group: str, entry_type: str,
                        entry: str, author_cell_id: str = "") -> dict:
-        """Append an entry to the weaver journal. Returns the entry dict."""
+        """Append an entry to the engineer journal. Returns the entry dict."""
         import time
         ts = time.time()
         entry_id = 0
@@ -3529,21 +3529,21 @@ class MatrixState:
         entries.reverse()
         return entries
 
-    def _append_weaver_worklog_entry(self, group: str, entry: dict):
-        """Append a Weaver worklog entry to in-memory state and emit it."""
+    def _append_engineer_worklog_entry(self, group: str, entry: dict):
+        """Append a Engineer worklog entry to in-memory state and emit it."""
         if not group:
             return
         item = dict(entry or {})
         item["group"] = group
-        entries = self.weaver_worklog.setdefault(group, [])
+        entries = self.engineer_worklog.setdefault(group, [])
         entries.insert(0, item)
-        if len(entries) > _WEAVER_WORKLOG_LIMIT:
-            del entries[_WEAVER_WORKLOG_LIMIT:]
-        self._emit("weaver_worklog_append", group=group, entry=dict(item))
+        if len(entries) > _ENGINEER_WORKLOG_LIMIT:
+            del entries[_ENGINEER_WORKLOG_LIMIT:]
+        self._emit("engineer_worklog_append", group=group, entry=dict(item))
 
-    def weaver_worklog_read(self, group: str, limit: int = 50) -> list[dict]:
+    def engineer_worklog_read(self, group: str, limit: int = 50) -> list[dict]:
         """Return recent persisted/current designated-engineer worklog entries for a group."""
-        entries = self.weaver_worklog.get(group, [])
+        entries = self.engineer_worklog.get(group, [])
         if limit <= 0:
             return []
         return [dict(entry) for entry in entries[:limit]]
@@ -3867,12 +3867,12 @@ class MatrixState:
                 )
             self.auto_dispatch_queues.pop(name, None)
             self._db_delete_auto_dispatch_queue(name)
-            self.weaver_settings.pop(name, None)
-            self.weaver_worklog.pop(name, None)
+            self.engineer_settings.pop(name, None)
+            self.engineer_worklog.pop(name, None)
             for r in removed:
                 self.delete_agent_digest_settings(r.id)
             if self.db:
-                self.db.delete_weaver_settings(name)
+                self.db.delete_engineer_settings(name)
             self._emit("group_remove", name=name)
             self._emit("groups_reorder", groups=list(self.groups.keys()))
             for r in removed:
@@ -3889,9 +3889,9 @@ class MatrixState:
             self.group_slugs[new] = self._unique_group_slug(new)
             if old in self.group_settings:
                 self.group_settings[new] = self.group_settings.pop(old)
-            if old in self.weaver_worklog:
-                self.weaver_worklog[new] = self.weaver_worklog.pop(old)
-                for entry in self.weaver_worklog[new]:
+            if old in self.engineer_worklog:
+                self.engineer_worklog[new] = self.engineer_worklog.pop(old)
+                for entry in self.engineer_worklog[new]:
                     entry["group"] = new
             if old in self.board_filters_by_group:
                 self.board_filters_by_group[new] = \
@@ -3944,7 +3944,7 @@ class MatrixState:
             if new in self.group_settings:
                 self._db_save_group_settings(new)
             if self.db:
-                self.db.rename_weaver_task_log_group(old, new)
+                self.db.rename_engineer_task_log_group(old, new)
             for aid in self.groups[new]:
                 if aid in self.agents:
                     self._db_save_agent(self.agents[aid])
@@ -4094,10 +4094,10 @@ class MatrixState:
                 t.agent_id = ""
                 self._emit("task_upsert", **asdict(t))
                 self._db_save_task(t)
-        # Clear weaver designation if this agent was the weaver
+        # Clear engineer designation if this agent was the engineer
         gs = self.group_settings.get(cell.group)
-        if gs and gs.weaver_agent_id == aid:
-            gs.weaver_agent_id = ""
+        if gs and gs.engineer_agent_id == aid:
+            gs.engineer_agent_id = ""
             self._emit("group_settings_update", name=cell.group, **asdict(gs))
             self._db_save_group_settings(cell.group)
         for r in removed:
@@ -5097,8 +5097,8 @@ class MatrixState:
         tasks = self.agent_active_tasks(agent_id)
         return tasks[0] if tasks else None
 
-    def agent_pending_weaver_reply_tasks(self, agent_id: str) -> list[BoardTask]:
-        """Return open Weaver follow-up tasks awaiting ``agent_id`` replies."""
+    def agent_pending_engineer_reply_tasks(self, agent_id: str) -> list[BoardTask]:
+        """Return open Engineer follow-up tasks awaiting ``agent_id`` replies."""
         tasks = [
             task for task in self.board_tasks.values()
             if task.reply_agent_id == agent_id and not board_task_is_closed(task)
@@ -5247,20 +5247,20 @@ class MatrixState:
         where the _emit was called), this is a no-op — the delta was
         already queued by _emit().
 
-        Weaver-stream recompute + `git for-each-ref` prefill are deferred
-        to a background worker (`_weaver_recompute_worker`) so UI
+        Engineer-stream recompute + `git for-each-ref` prefill are deferred
+        to a background worker (`_engineer_recompute_worker`) so UI
         mutations don't wait on git. The worker fires a follow-up
-        broadcast with the computed `weaver_streams` ops; clients treat
+        broadcast with the computed `engineer_streams` ops; clients treat
         it as any other delta frame.
         """
         # Cheap pre-lock bail-out: if nothing has been emitted, skip.
         if not self._delta_ops:
             return
-        # Collect weaver-stream affected groups before draining ops so
+        # Collect engineer-stream affected groups before draining ops so
         # the background worker has something to chew on after the
         # primary frame goes out. Fingerprint cache is updated as a
         # side effect (dedupes ephemeral-only agent_upserts).
-        weaver_groups = self._collect_weaver_affected_groups(self._delta_ops)
+        engineer_groups = self._collect_engineer_affected_groups(self._delta_ops)
         async with self._ws_clients_lock:
             if not self._delta_ops:
                 return
@@ -5305,11 +5305,11 @@ class MatrixState:
                 )
             async with self._ws_clients_lock:
                 self._ws_clients -= dead
-        if weaver_groups:
-            self._schedule_weaver_recompute(weaver_groups)
+        if engineer_groups:
+            self._schedule_engineer_recompute(engineer_groups)
 
-    def _schedule_weaver_recompute(self, groups: set[str]) -> None:
-        """Queue a deferred weaver-stream recompute for ``groups``.
+    def _schedule_engineer_recompute(self, groups: set[str]) -> None:
+        """Queue a deferred engineer-stream recompute for ``groups``.
 
         Spawns a single worker task. If one is already running, merges
         the new groups into its pending set — the worker re-checks
@@ -5317,8 +5317,8 @@ class MatrixState:
         """
         if not groups:
             return
-        self._weaver_recompute_pending |= set(groups)
-        task = self._weaver_recompute_task
+        self._engineer_recompute_pending |= set(groups)
+        task = self._engineer_recompute_task
         if task is not None and not task.done():
             return
         try:
@@ -5327,26 +5327,26 @@ class MatrixState:
             # No event loop; caller is off the async path. Skip silently —
             # the next real broadcast will re-queue anything still dirty.
             return
-        self._weaver_recompute_task = loop.create_task(
-            self._weaver_recompute_worker()
+        self._engineer_recompute_task = loop.create_task(
+            self._engineer_recompute_worker()
         )
 
-    async def _weaver_recompute_worker(self) -> None:
-        """Drain `_weaver_recompute_pending`: prefill branch existence,
+    async def _engineer_recompute_worker(self) -> None:
+        """Drain `_engineer_recompute_pending`: prefill branch existence,
         compute stream payloads, broadcast a follow-up delta."""
         from .worktree_streams import prefill_branch_exists_for_state
         try:
-            while self._weaver_recompute_pending:
-                pending = self._weaver_recompute_pending
-                self._weaver_recompute_pending = set()
+            while self._engineer_recompute_pending:
+                pending = self._engineer_recompute_pending
+                self._engineer_recompute_pending = set()
                 try:
                     await prefill_branch_exists_for_state(self)
                 except Exception:
                     log.exception("Branch-exists prefill failed")
-                if self._emit_weaver_stream_ops(pending):
-                    # The follow-up broadcast's own _collect_weaver_*
-                    # call returns empty (weaver_streams isn't a trigger
+                if self._emit_engineer_stream_ops(pending):
+                    # The follow-up broadcast's own _collect_engineer_*
+                    # call returns empty (engineer_streams isn't a trigger
                     # op), so this does not recurse into another worker.
                     await self.broadcast()
         finally:
-            self._weaver_recompute_task = None
+            self._engineer_recompute_task = None

@@ -31,7 +31,7 @@ class LoomDoctorTests(unittest.TestCase):
         (home / ".loom" / "agents").mkdir(parents=True, exist_ok=True)
         return home
 
-    def _save_engineer(self, engineer_id="weaver-1", name="Weaver"):
+    def _save_engineer(self, engineer_id="engineer-1", name="Engineer"):
         self.db.save_agent(
             AgentCell(
                 id=engineer_id,
@@ -76,10 +76,10 @@ class LoomDoctorTests(unittest.TestCase):
             "ALTER TABLE agents ADD COLUMN template TEXT NOT NULL DEFAULT ''"
         )
         self.db._conn.execute(
-            "ALTER TABLE agents ADD COLUMN created_by_weaver_id TEXT NOT NULL DEFAULT ''"
+            "ALTER TABLE agents ADD COLUMN created_by_engineer_id TEXT NOT NULL DEFAULT ''"
         )
         self.db._conn.execute(
-            "ALTER TABLE board_tasks ADD COLUMN weaver_owner_id TEXT NOT NULL DEFAULT ''"
+            "ALTER TABLE board_tasks ADD COLUMN engineer_owner_id TEXT NOT NULL DEFAULT ''"
         )
 
     def test_build_doctor_report_flags_alias_missing_canonical_collision(self):
@@ -93,7 +93,7 @@ class LoomDoctorTests(unittest.TestCase):
                 group="loom",
                 lane="Archived",
                 archived_at="2026-04-07T00:00:00+00:00",
-                assigned_engineer_id="weaver-1",
+                assigned_engineer_id="engineer-1",
             )
         )
         self.db.save_task_id_alias("LOOM:51", "bcf3a475")
@@ -158,7 +158,7 @@ class LoomDoctorTests(unittest.TestCase):
         self.assertEqual(report["roles"]["roles_file_count"], 0)
         self.assertEqual(report["stage_6_cleanup"]["legacy_template_files_ignored"], 0)
         self.assertFalse(report["stage_6_cleanup"]["legacy_columns_present"])
-        self.assertFalse(report["stage_6_cleanup"]["weaver_tool_aliases_present"])
+        self.assertFalse(report["stage_6_cleanup"]["engineer_tool_aliases_present"])
         self.assertIn("Result: PASS (with warnings)", rendered)
         self.assertIn(
             "no engineer exists; create one from the Agent panel before using engineer MCP tools",
@@ -223,10 +223,10 @@ class LoomDoctorTests(unittest.TestCase):
 
         self.db.save_agent(
             AgentCell(
-                id="weaver-1",
-                name="Weaver",
+                id="engineer-1",
+                name="Engineer",
                 group="loom",
-                slug="weaver",
+                slug="engineer",
                 cell_type="agent",
                 kind="engineer",
                 persistent=True,
@@ -241,8 +241,8 @@ class LoomDoctorTests(unittest.TestCase):
                 cell_type="agent",
                 template="researcher",
                 role="researcher",
-                created_by_weaver_id="weaver-1",
-                owner_engineer_id="weaver-1",
+                created_by_engineer_id="engineer-1",
+                owner_engineer_id="engineer-1",
                 kind="worker",
             )
         )
@@ -252,12 +252,12 @@ class LoomDoctorTests(unittest.TestCase):
                 task="Assigned task",
                 slug="assigned-task",
                 group="g",
-                assigned_engineer_id="weaver-1",
+                assigned_engineer_id="engineer-1",
             )
         )
         self.db.save_group_settings(
             "g",
-            GroupSettings(weaver_agent_id="weaver-1"),
+            GroupSettings(engineer_agent_id="engineer-1"),
         )
 
         with mock.patch.dict(os.environ, {"HOME": str(home)}):
@@ -274,15 +274,15 @@ class LoomDoctorTests(unittest.TestCase):
         self.assertTrue(report["migration"]["backup_exists"])
         self.assertEqual(report["agents"]["total"], 2)
         self.assertEqual(report["agents"]["engineer"], 1)
-        self.assertEqual(report["agents"]["engineer_name"], "Weaver")
+        self.assertEqual(report["agents"]["engineer_name"], "Engineer")
         self.assertEqual(report["engineers"]["total"], 1)
         self.assertEqual(
             report["engineers"]["engineers"],
             [
                 {
-                    "id": "weaver-1",
-                    "name": "Weaver",
-                    "slug": "weaver",
+                    "id": "engineer-1",
+                    "name": "Engineer",
+                    "slug": "engineer",
                     "persistent": 1,
                     "worker_count": 1,
                     "task_count": 1,
@@ -302,21 +302,21 @@ class LoomDoctorTests(unittest.TestCase):
         )
         self.assertEqual(report["drift"]["agents_template_role"], 0)
         self.assertEqual(
-            report["drift"]["agents_created_by_weaver_owner_engineer"],
+            report["drift"]["agents_created_by_engineer_owner_engineer"],
             0,
         )
         self.assertEqual(report["warnings"], [])
         self.assertEqual(report["roles"]["roles_file_count"], 0)
         self.assertEqual(report["stage_6_cleanup"]["legacy_template_files_ignored"], 0)
         self.assertFalse(report["stage_6_cleanup"]["legacy_columns_present"])
-        self.assertFalse(report["stage_6_cleanup"]["weaver_tool_aliases_present"])
+        self.assertFalse(report["stage_6_cleanup"]["engineer_tool_aliases_present"])
         self.assertIn("Loom doctor — kinds refactor", rendered)
         self.assertIn("Result: PASS", rendered)
         self.assertIn("[engineers]", rendered)
         self.assertIn("[architects]", rendered)
         self.assertIn("[pending_hires]", rendered)
         self.assertIn("[stage_6_cleanup]", rendered)
-        self.assertNotIn("default (weaver_* routing)", rendered)
+        self.assertNotIn("default (engineer_* routing)", rendered)
 
     def test_build_doctor_report_includes_zero_architect_and_pending_hire_sections(self):
         home = self._home_dir()
@@ -650,10 +650,10 @@ class LoomDoctorTests(unittest.TestCase):
         home = self._home_dir()
         self.db.save_agent(
             AgentCell(
-                id="weaver-1",
-                name="Weaver",
+                id="engineer-1",
+                name="Engineer",
                 group="loom",
-                slug="weaver",
+                slug="engineer",
                 cell_type="agent",
                 kind="engineer",
                 persistent=True,
@@ -720,16 +720,16 @@ class LoomDoctorTests(unittest.TestCase):
         self.assertEqual(report["engineers"]["total"], 2)
         self.assertEqual(report["warnings"], [])
         self.assertIn("Result: PASS", rendered)
-        self.assertNotIn("default (weaver_* routing)", rendered)
+        self.assertNotIn("default (engineer_* routing)", rendered)
 
-    def test_build_doctor_report_passes_for_multiple_engineers_when_weaver_exists(self):
+    def test_build_doctor_report_passes_for_multiple_engineers_when_engineer_exists(self):
         home = self._home_dir()
         self.db.save_agent(
             AgentCell(
-                id="eng-weaver",
-                name="Weaver",
+                id="eng-engineer",
+                name="Engineer",
                 group="loom",
-                slug="weaver",
+                slug="engineer",
                 cell_type="agent",
                 kind="engineer",
                 persistent=True,
@@ -754,7 +754,7 @@ class LoomDoctorTests(unittest.TestCase):
         self.assertEqual(report["result"], "pass")
         self.assertEqual(report["warnings"], [])
         self.assertEqual(report["engineers"]["total"], 2)
-        self.assertNotIn("default (weaver_* routing)", rendered)
+        self.assertNotIn("default (engineer_* routing)", rendered)
 
     def test_build_doctor_report_flags_drift_and_unmigrated_rows(self):
         home = self._home_dir()
@@ -767,8 +767,8 @@ class LoomDoctorTests(unittest.TestCase):
                 cell_type="agent",
                 template="researcher",
                 role="researcher",
-                created_by_weaver_id="weaver-1",
-                owner_engineer_id="weaver-1",
+                created_by_engineer_id="engineer-1",
+                owner_engineer_id="engineer-1",
                 kind="worker",
             )
         )
@@ -778,17 +778,17 @@ class LoomDoctorTests(unittest.TestCase):
                 task="Owned task",
                 slug="owned-task",
                 group="g",
-                assigned_engineer_id="weaver-1",
+                assigned_engineer_id="engineer-1",
             )
         )
         self._add_legacy_kinds_columns()
         self.db._conn.execute(
-            "UPDATE agents SET template='researcher', created_by_weaver_id='weaver-1', "
+            "UPDATE agents SET template='researcher', created_by_engineer_id='engineer-1', "
             "kind='', role='', owner_engineer_id='other-engineer' "
             "WHERE id='worker-1'"
         )
         self.db._conn.execute(
-            "UPDATE board_tasks SET weaver_owner_id='weaver-1', "
+            "UPDATE board_tasks SET engineer_owner_id='engineer-1', "
             "assigned_engineer_id='other-engineer' WHERE id='task-1'"
         )
         self.db._conn.commit()
@@ -811,11 +811,11 @@ class LoomDoctorTests(unittest.TestCase):
         self.assertEqual(report["agents"]["unmigrated"], 1)
         self.assertEqual(report["drift"]["agents_template_role"], 1)
         self.assertEqual(
-            report["drift"]["agents_created_by_weaver_owner_engineer"],
+            report["drift"]["agents_created_by_engineer_owner_engineer"],
             1,
         )
         self.assertEqual(
-            report["drift"]["board_tasks_weaver_owner_assigned_engineer"],
+            report["drift"]["board_tasks_engineer_owner_assigned_engineer"],
             1,
         )
         self.assertTrue(report["drift"]["board_tasks_legacy_column_present"])
@@ -823,7 +823,7 @@ class LoomDoctorTests(unittest.TestCase):
         self.assertIn("unmigrated agent rows: 1", rendered)
         self.assertIn("agents.template ↔ role drift: 1", rendered)
         self.assertIn(
-            "board_tasks.weaver_owner_id ↔ assigned_engineer_id drift: 1",
+            "board_tasks.engineer_owner_id ↔ assigned_engineer_id drift: 1",
             rendered,
         )
         self.assertIn(

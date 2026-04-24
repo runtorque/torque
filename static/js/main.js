@@ -13,7 +13,7 @@ var _workspaceSidebarDefaultWidth = 340;
 var _workspaceSidebarStorageKey = 'loom.ide.sidebar_width';
 
 function _panelRootId(appName) {
-  if (appName === 'weaver') return 'panel-agent';
+  if (appName === 'engineer') return 'panel-agent';
   return 'panel-' + appName;
 }
 
@@ -151,7 +151,7 @@ function togglePanel(appName) {
     _loadPanelApp(appName);
     if (appName === 'context' && typeof renderContextPanel === 'function') renderContextPanel();
     if (appName === 'events' && typeof renderEvents === 'function') renderEvents();
-    if (appName === 'weaver' && typeof renderAgentPanel === 'function') renderAgentPanel();
+    if (appName === 'engineer' && typeof renderAgentPanel === 'function') renderAgentPanel();
   }
   // Persist panel state to server
   send({ cmd: 'board_set_panel', active: _activePanelApp || '' });
@@ -199,7 +199,7 @@ function _restorePanelState() {
     _loadPanelApp(active);
     if (active === 'context' && typeof renderContextPanel === 'function') renderContextPanel();
     if (active === 'events' && typeof renderEvents === 'function') renderEvents();
-    if (active === 'weaver' && typeof renderAgentPanel === 'function') renderAgentPanel();
+    if (active === 'engineer' && typeof renderAgentPanel === 'function') renderAgentPanel();
   }
 }
 
@@ -997,7 +997,7 @@ document.querySelectorAll('.overlay').forEach(o => {
 ['gs-directory', 'gs-agent-directory', 'gs-terminal-prefix',
  'gs-terminal-boot-cmd', 'gs-terminal-cmd-args',
  'gs-terminal-init-script', 'gs-terminal-directory',
- 'gs-weaver-boot-cmd', 'gs-weaver-custom-instructions'].forEach(id => {
+ 'gs-engineer-boot-cmd', 'gs-engineer-custom-instructions'].forEach(id => {
   document.getElementById(id).addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeModals();
   });

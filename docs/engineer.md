@@ -1,4 +1,4 @@
-# Weaver
+# Engineer
 
 Each group can designate an engineer to watch the board, receive event digests, dispatch work to agents, keep a persistent journal, and ask the human for guidance when needed.
 
@@ -25,9 +25,9 @@ The journal belongs to the group, not the individual agent. If you recreate that
 
 Use the target group's **+ New** dropdown and choose **Engineer**.
 
-After that engineer exists, open **Group Settings** for that group and switch to the **Weaver** tab to manage its operating-style presets, advanced digest settings, and expert overrides.
+After that engineer exists, open **Group Settings** for that group and switch to the **Engineer** tab to manage its operating-style presets, advanced digest settings, and expert overrides.
 
-The designated engineer still uses Loom's persistent Weaver launch/settings flow because Loom needs to boot it with a dedicated system prompt. You cannot retroactively convert an arbitrary existing agent into that orchestration endpoint.
+The designated engineer still uses Loom's persistent Engineer launch/settings flow because Loom needs to boot it with a dedicated system prompt. You cannot retroactively convert an arbitrary existing agent into that orchestration endpoint.
 
 ### Agent panel
 
@@ -46,9 +46,9 @@ In standalone mode, the **Board** remains the default lower workspace. Open **Ag
 
 When event delivery is paused, Loom keeps buffering matching events for that engineer instead of dropping them. Resuming delivery flushes the buffered events in order, so pausing is safe even during busy boards.
 
-### Group Settings → Weaver
+### Group Settings → Engineer
 
-The Weaver tab in group settings contains the editable designated-engineer configuration:
+The Engineer tab in group settings contains the editable designated-engineer configuration:
 
 - **Agent** section shows the current designated engineer for the group or the create button.
 - **Launch controls** let you set or relaunch the designated engineer's provider, boot command, model, reasoning effort, and custom instructions from the same modal flow.
@@ -296,7 +296,7 @@ In other words, `engineer_*` tools are group-scoped **and** designated-engineer-
 | `engineer_agent_close` | Close an agent session while leaving its worktree on disk |
 | `engineer_agent_relaunch` | Relaunch a stopped agent, reusing worktree and provider resume when available |
 
-### Weaver-to-worker follow-up tasks
+### Engineer-to-worker follow-up tasks
 
 `engineer_agent_message` is now audited on the board instead of being a purely ephemeral terminal nudge:
 
@@ -335,7 +335,7 @@ Batch dispatch:
 - can keep related tasks on the same agent with `agent_group`
 - refuses tasks that are already assigned, already done, already in progress, or blocked by dependencies
 
-If you omit `max_concurrent`, Loom uses the group's stored Weaver default worker concurrency.
+If you omit `max_concurrent`, Loom uses the group's stored Engineer default worker concurrency.
 
 ### Result states
 
@@ -453,13 +453,13 @@ When an agent is blocked or errors:
 
 ## CLI
 
-The main Weaver-facing CLI surface today is journal inspection plus reply flow from agent sessions:
+The main Engineer-facing CLI surface today is journal inspection plus reply flow from agent sessions:
 
 ```bash
-loom weaver journal
-loom weaver journal -n 50
-loom weaver journal -t checkpoint
-loom weaver journal --json
+loom engineer journal
+loom engineer journal -n 50
+loom engineer journal -t checkpoint
+loom engineer journal --json
 
 loom ai reply "your response"
 ```
