@@ -679,20 +679,42 @@ function _renderPrincipalArchitectCard(groupName, section, selectedPrincipalId) 
   const badgeHtml = isSelected ? '' : _renderPrincipalBadgeHtml(counts);
   const displayName = architect.name || architect.slug || id;
   const groupArg = _jsStringAttr(groupName);
-  return '<button type="button" class="' + esc(classes.filter(Boolean).join(' ')) + '"'
+  const idArg = _jsStringAttr(id);
+  const statusCls = typeof agentStatusClass === 'function' ? agentStatusClass(architect) : '';
+  const digestSettings = (state && state.agent_digest_settings)
+    ? state.agent_digest_settings[id] : null;
+  const digestPaused = !!(digestSettings && digestSettings.paused);
+  const pauseTitle = digestPaused ? 'Resume event delivery' : 'Pause event delivery';
+  const pauseIcon = digestPaused ? '▶' : '⏸';
+  /* Nested <button> inside <button> is invalid HTML; render the card as a
+     div with role="tab" so close/pause controls can be real buttons. */
+  return '<div class="' + esc(classes.filter(Boolean).join(' ')) + '"'
+    + ' role="tab" tabindex="0"'
     + ' data-principal-card="architect"'
     + ' data-principal-id="' + esc(id) + '"'
     + ' data-principal-group="' + esc(groupName) + '"'
     + ' data-nav-id="' + esc(navId) + '"'
     + ' data-focus-key="' + esc(navId) + '"'
-    + ' aria-pressed="' + (isSelected ? 'true' : 'false') + '"'
-    + ' onclick="event.stopPropagation();selectPrincipal(' + _jsStringAttr(id) + ',' + groupArg + ')"'
+    + ' aria-selected="' + (isSelected ? 'true' : 'false') + '"'
+    + ' onclick="event.stopPropagation();selectPrincipal(' + idArg + ',' + groupArg + ')"'
     + ' title="Architect ' + esc(displayName) + '">'
+    + '<div class="principal-card-controls">'
+    + '<button type="button" class="principal-card-close"'
+    + ' data-focus-key="principal-close:' + esc(id) + '"'
+    + ' onclick="event.stopPropagation();removeAgent(' + idArg + ')"'
+    + ' title="Remove architect">✕</button>'
+    + '<button type="button" class="principal-card-pause ' + (digestPaused ? 'paused' : 'running') + '"'
+    + ' data-focus-key="principal-pause:' + esc(id) + '"'
+    + ' onclick="event.stopPropagation();toggleDigestPauseForAgent(' + idArg + ')"'
+    + ' title="' + esc(pauseTitle) + '">' + pauseIcon + '</button>'
+    + '<span class="principal-card-status ' + esc(statusCls) + '"'
+    + ' aria-hidden="true"></span>'
+    + '</div>'
     + '<span class="principal-card-icon">△</span>'
     + '<span class="principal-card-name">' + esc(displayName) + '</span>'
     + '<span class="principal-card-kind">arch</span>'
     + badgeHtml
-    + '</button>';
+    + '</div>';
 }
 
 function _renderPrincipalNewArchitectGhost(groupName, disabled) {

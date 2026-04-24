@@ -242,7 +242,17 @@ body.runtime-embedded #standalone-float-layer {
   transition: grid-template-rows .2s ease-out;
 }
 .group.collapsed .group-body { grid-template-rows: 0fr; }
-.group-body-inner { overflow: hidden; }
+.group-body-inner {
+  overflow: hidden;
+  /* Hoisted from .agent-grid so .principals-row (sibling of .agent-grid)
+     can also resolve the architect column width. */
+  --agent-architect-column-width: 96px;
+  --agent-engineer-column-width: 96px;
+}
+body.runtime-embedded .group-body-inner {
+  --agent-architect-column-width: 132px;
+  --agent-engineer-column-width: 132px;
+}
 .group-btn {
   font-size: 12px; color: var(--text-dim);
   width: 22px; height: 22px;
@@ -917,6 +927,66 @@ body.runtime-embedded .terminal-empty {
 .principal-card-new {
   align-self: stretch;
 }
+.principal-card-controls {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.principal-card-close,
+.principal-card-pause {
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: 10px;
+  line-height: 1;
+  text-align: center;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-dim);
+  opacity: 0;
+  transition: opacity .15s, color .15s, background .15s, border-color .15s;
+  pointer-events: none;
+  cursor: pointer;
+}
+.principal-card:hover .principal-card-close,
+.principal-card:hover .principal-card-pause,
+.principal-card.focused .principal-card-close,
+.principal-card.focused .principal-card-pause,
+.principal-card.selected .principal-card-close,
+.principal-card.selected .principal-card-pause,
+.principal-card:focus-within .principal-card-close,
+.principal-card:focus-within .principal-card-pause {
+  opacity: 1;
+  pointer-events: auto;
+}
+.principal-card-close:hover { background: var(--red); color: #fff; }
+.principal-card-pause.running { color: var(--green); }
+.principal-card-pause.paused { color: var(--amber); }
+.principal-card-pause:hover,
+.principal-card-pause:focus-visible {
+  background: color-mix(in srgb, currentColor 14%, transparent);
+  border-color: color-mix(in srgb, currentColor 70%, transparent);
+  outline: none;
+}
+.principal-card-status {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--text-dim);
+  flex: 0 0 auto;
+  opacity: .75;
+}
+.principal-card-status.working { background: var(--green); }
+.principal-card-status.idle { background: var(--text-dim); }
+.principal-card-status.attention { background: var(--amber); }
+.principal-card-status.disconnected { background: var(--red); }
 @media (max-width: 400px) {
   .principals-row {
     gap: 5px;
