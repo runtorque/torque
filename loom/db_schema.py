@@ -506,6 +506,18 @@ CREATE TABLE IF NOT EXISTS failed_writes (
 CREATE INDEX IF NOT EXISTS idx_failed_writes_created
     ON failed_writes(created_at);
 
+CREATE TABLE IF NOT EXISTS command_receipts (
+    idempotency_key TEXT PRIMARY KEY,
+    surface         TEXT NOT NULL DEFAULT '',
+    command_name    TEXT NOT NULL DEFAULT '',
+    request_hash    TEXT NOT NULL DEFAULT '',
+    response_json   TEXT NOT NULL DEFAULT 'null',
+    created_at      REAL NOT NULL,
+    updated_at      REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_command_receipts_command
+    ON command_receipts(surface, command_name, updated_at DESC);
+
 CREATE TABLE IF NOT EXISTS mcp_health_events (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp  REAL NOT NULL,

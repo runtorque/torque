@@ -203,6 +203,18 @@ def api_request_hash(payload: dict) -> str:
     return hashlib.sha256(_json_dumps_canonical(clone).encode("utf-8")).hexdigest()
 
 
+def derive_idempotency_key(base_key: str, payload: Any) -> str:
+    """Derive a stable sub-key for an internal write inside one outer call."""
+    key = str(base_key or "").strip()
+    if not key:
+        return ""
+    clone = _strip_idempotency_from_value(payload)
+    digest = hashlib.sha256(
+        (key + "\0" + _json_dumps_canonical(clone)).encode("utf-8")
+    ).hexdigest()
+    return f"{key}:{digest[:16]}"
+
+
 def mcp_idempotency_key_from_arguments(arguments: dict | None) -> str:
     if not isinstance(arguments, dict):
         return ""

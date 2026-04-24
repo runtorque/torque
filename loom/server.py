@@ -2479,6 +2479,102 @@ def _handle_doctor_command(db: LoomDB) -> dict:
     return build_doctor_report(db._conn, db.db_path)
 
 
+_INTERNAL_FAILED_WRITE_PREFIX = "internal:"
+_NO_COMMAND_RECEIPT = object()
+_CRITICAL_BOARD_COMMANDS = {
+    "board_add_task",
+    "board_update_task",
+    "board_move_task",
+    "board_archive_task",
+    "board_unarchive_task",
+    "board_verify_task",
+    "board_remove_task",
+}
+_CRITICAL_AI_REPORT_ACTIONS = {
+    "done",
+    "blocked",
+    "error",
+    "ask",
+    "derive",
+    "ready",
+    "verify",
+    "name",
+    "reply",
+}
+
+
+def _internal_failed_write_key(idempotency_key: str) -> str:
+    key = str(idempotency_key or "").strip()
+    return f"{_INTERNAL_FAILED_WRITE_PREFIX}{key}" if key else ""
+
+
+def _critical_command_name(data: dict) -> str:
+    cmd = str((data or {}).get("cmd", "") or "").strip()
+    if cmd == "ai_report":
+        action = str((data or {}).get("action", "") or "").strip()
+        if action in _CRITICAL_AI_REPORT_ACTIONS:
+            return f"ai_report:{action}"
+        return ""
+    if cmd in _CRITICAL_BOARD_COMMANDS:
+        return cmd
+    if cmd == "architect_journal_append":
+        return cmd
+    return ""
+
+
+def _critical_command_needs_capture(data: dict) -> bool:
+    cmd = str((data or {}).get("cmd", "") or "").strip()
+    return cmd == "ai_report" or cmd in _CRITICAL_BOARD_COMMANDS
+
+
+def _critical_command_caller_id(data: dict) -> str:
+    for key in ("cell_id", "architect_id", "agent_id", "id"):
+        value = str((data or {}).get(key, "") or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _critical_command_conflict_result(command_name: str) -> dict:
+    return {
+        "type": "error",
+        "message": (
+            "idempotency key was reused for a different internal command "
+            f"({command_name or 'unknown'})"
+        ),
+    }
+
+
+def _load_internal_command_receipt(
+    db: LoomDB | None,
+    payload: dict,
+) -> tuple[object, str, str]:
+    key = str((payload or {}).get("idempotency_key", "") or "").strip()
+    command_name = _critical_command_name(payload)
+    if not db or not key or not command_name:
+        return _NO_COMMAND_RECEIPT, "", ""
+    request_hash = api_request_hash(payload)
+    existing = db.load_command_receipt(key)
+    if not existing:
+        return _NO_COMMAND_RECEIPT, key, request_hash
+    existing_hash = str(existing.get("request_hash", "") or "").strip()
+    if existing_hash and existing_hash != request_hash:
+        return _critical_command_conflict_result(command_name), key, request_hash
+    return existing.get("response"), key, request_hash
+
+
+async def replay_internal_failed_write_payload(
+    db: LoomDB,
+    payload: dict,
+    handle_command,
+):
+    """Replay one queued critical internal command using command receipts."""
+    cached, _key, _request_hash = _load_internal_command_receipt(db, payload)
+    if cached is not _NO_COMMAND_RECEIPT:
+        return cached
+    return await handle_command(payload)
+
+
 async def replay_api_failed_write_payload(
     db: LoomDB,
     payload: dict,
@@ -5468,6 +5564,41 @@ async def main(connection=None):
         cmd = data.get("cmd")
         log.info("CMD %s %s", cmd,
                  {k: v for k, v in data.items() if k != "cmd"})
+        critical_command_name = _critical_command_name(data)
+        critical_idempotency_key = str(
+            (data or {}).get("idempotency_key", "") or ""
+        ).strip()
+        critical_request_hash = ""
+        critical_failed_write_key = ""
+        critical_capture_active = False
+        if db and critical_command_name and critical_idempotency_key:
+            await state.flush_db_writes()
+            cached_result, critical_idempotency_key, critical_request_hash = (
+                _load_internal_command_receipt(db, data)
+            )
+            if cached_result is not _NO_COMMAND_RECEIPT:
+                return cached_result
+            critical_failed_write_key = _internal_failed_write_key(
+                critical_idempotency_key
+            )
+            db.enqueue_failed_write(
+                idempotency_key=critical_failed_write_key,
+                endpoint="/internal/cmd",
+                method="POST",
+                surface="internal",
+                tool_name=critical_command_name,
+                caller_id=_critical_command_caller_id(data),
+                payload=dict(data or {}),
+                attempts=0,
+                last_error="pending",
+            )
+            if _critical_command_needs_capture(data):
+                state.begin_critical_write_capture(
+                    command_name=critical_command_name,
+                    idempotency_key=critical_idempotency_key,
+                    request_hash=critical_request_hash,
+                )
+                critical_capture_active = True
 
         # get_config: respond directly, no state mutation
         if cmd == "get_config":
@@ -10217,6 +10348,51 @@ async def main(connection=None):
                         result = {"type": "error",
                                   "message": f"Failed to inject: {exc}"}
 
+            elif cmd == "architect_journal_append":
+                architect_id = str(
+                    data.get("architect_id")
+                    or data.get("cell_id")
+                    or ""
+                ).strip()
+                entry_type = str(data.get("entry_type", "") or "").strip()
+                entry_text = str(data.get("entry", "") or "")
+                if not architect_id:
+                    result = {
+                        "type": "error",
+                        "message": "architect_id is required",
+                    }
+                elif entry_type not in (
+                    "decision", "observation", "checkpoint", "plan"
+                ):
+                    result = {
+                        "type": "error",
+                        "message": (
+                            "entry_type must be one of: decision, "
+                            "observation, checkpoint, plan"
+                        ),
+                    }
+                elif not entry_text:
+                    result = {
+                        "type": "error",
+                        "message": "Entry text is required",
+                    }
+                else:
+                    try:
+                        result = state.architect_journal_append(
+                            architect_id,
+                            entry_type,
+                            entry_text,
+                            idempotency_key=str(
+                                data.get("idempotency_key", "") or ""
+                            ).strip(),
+                            request_hash=(
+                                critical_request_hash
+                                if critical_idempotency_key else ""
+                            ),
+                        )
+                    except ValueError as exc:
+                        result = {"type": "error", "message": str(exc)}
+
             elif cmd == "weaver_journal_append":
                 group = data.get("group", "")
                 entry_type = data.get("entry_type", "")
@@ -10415,6 +10591,33 @@ async def main(connection=None):
             log.exception("Command '%s' failed", cmd)
             result = {"type": "error", "message": str(exc)}
 
+        if db and critical_command_name and critical_idempotency_key:
+            try:
+                if critical_capture_active:
+                    state.finalize_critical_write_capture(
+                        result,
+                        delete_failed_write_key=critical_failed_write_key,
+                        surface="internal",
+                    )
+                else:
+                    db.save_command_receipt(
+                        idempotency_key=critical_idempotency_key,
+                        surface="internal",
+                        command_name=critical_command_name,
+                        request_hash=critical_request_hash or api_request_hash(data),
+                        response=result,
+                    )
+                    db.delete_failed_write_by_key(critical_failed_write_key)
+            except Exception as exc:
+                log.exception(
+                    "Failed to persist internal command receipt for %s",
+                    critical_command_name,
+                )
+                result = {"type": "error", "message": str(exc)}
+            finally:
+                if critical_capture_active:
+                    state.clear_critical_write_capture()
+
         await state.broadcast()
         return result
 
@@ -10574,6 +10777,12 @@ async def main(connection=None):
     async def _replay_failed_write(write: dict):
         endpoint = str(write.get("endpoint", "") or "")
         payload = dict(write.get("payload", {}) or {})
+        if endpoint == "/internal/cmd":
+            return await replay_internal_failed_write_payload(
+                db,
+                payload,
+                handle_command,
+            )
         if endpoint == "/mcp":
             response, _status = await dispatch_mcp_rpc_body(
                 payload,

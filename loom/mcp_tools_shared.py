@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from .config import log
 from .deploy_state import architect_deploy_state_payload
 from .digest_routing import resolve_digest_recipients
+from .mcp_retry import derive_idempotency_key
 from .mcp_weaver_tools.shared import (
     active_worker_ids as _active_worker_ids,
     blocked_dependency_titles as _blocked_dependency_titles,
@@ -1466,8 +1467,18 @@ def _deliver_architect_engineer_message(state, sender, recipient, *,
     )
     _append_cross_kind_message(sender, sender_entry)
     _append_cross_kind_message(recipient, recipient_entry)
-    state.history_record_message(sender.id, action, message_text)
-    state.history_record_message(recipient.id, action, message_text)
+    state.history_record_message(
+        sender.id,
+        action,
+        message_text,
+        mark_progress=False,
+    )
+    state.history_record_message(
+        recipient.id,
+        action,
+        message_text,
+        mark_progress=False,
+    )
     if str(getattr(recipient, "kind", "") or "").strip() == "engineer":
         recipient.pending_weaver_message = True
     if str(getattr(sender, "kind", "") or "").strip() == "engineer":
@@ -2103,7 +2114,8 @@ def _resolve_stream_payload(streams: list[dict], *, stream_ident: str = "",
 
 async def dispatch_scoped_tool(name, args, handle_command, state, *,
                                tool_prefix: str, caller_kind: str,
-                               caller_id: str):
+                               caller_id: str,
+                               idempotency_key: str = ""):
     """Execute a scoped orchestration tool call and return (text, is_error)."""
 
     _weaver_cell, _weaver_group, caller_kind, auth_error, auth_structured = authorize_caller(
@@ -2123,6 +2135,16 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
     real_state = state
     state = view_state
     tool_name = normalize_tool_name(name, tool_prefix)
+    _raw_handle_command = handle_command
+
+    async def handle_command(payload):
+        command_payload = dict(payload or {})
+        if idempotency_key and "idempotency_key" not in command_payload:
+            command_payload["idempotency_key"] = derive_idempotency_key(
+                idempotency_key,
+                command_payload,
+            )
+        return await _raw_handle_command(command_payload)
 
     # -- Read tools ---------------------------------------------------------
 
@@ -3745,11 +3767,21 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             entry = str(args.get("entry", "") or "")
             if not entry:
                 return "entry is required", True
-            return json.dumps(real_state.architect_journal_append(
-                caller_id,
-                entry_type,
-                entry,
-            )), False
+            if not idempotency_key:
+                return json.dumps(real_state.architect_journal_append(
+                    caller_id,
+                    entry_type,
+                    entry,
+                )), False
+            result = await handle_command({
+                "cmd": "architect_journal_append",
+                "architect_id": caller_id,
+                "entry_type": entry_type,
+                "entry": entry,
+            })
+            if result and result.get("type") == "error":
+                return result.get("message", "Unknown error"), True
+            return json.dumps(result), False
         result = await handle_command({
             "cmd": "weaver_journal_append",
             "group": _weaver_group,

@@ -543,6 +543,67 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         )
         self._conn.commit()
 
+    def load_command_receipt(self, idempotency_key: str) -> dict | None:
+        """Load one internal command receipt by idempotency key."""
+        key = str(idempotency_key or "").strip()
+        if not key:
+            return None
+        row = self._conn.execute(
+            "SELECT idempotency_key, surface, command_name, request_hash, "
+            "response_json, created_at, updated_at "
+            "FROM command_receipts WHERE idempotency_key=?",
+            (key,),
+        ).fetchone()
+        if not row:
+            return None
+        try:
+            response = json.loads(row[4] or "null")
+        except (json.JSONDecodeError, TypeError):
+            response = None
+        return {
+            "idempotency_key": row[0],
+            "surface": row[1],
+            "command_name": row[2],
+            "request_hash": row[3],
+            "response_json": row[4],
+            "response": response,
+            "created_at": row[5],
+            "updated_at": row[6],
+        }
+
+    def save_command_receipt(
+        self,
+        *,
+        idempotency_key: str,
+        surface: str,
+        command_name: str,
+        request_hash: str,
+        response,
+    ) -> None:
+        """Persist one internal command receipt."""
+        key = str(idempotency_key or "").strip()
+        if not key:
+            return
+        now = time.time()
+        existing = self.load_command_receipt(key)
+        created_at = float((existing or {}).get("created_at", 0) or now)
+        self._conn.execute(
+            "INSERT OR REPLACE INTO command_receipts "
+            "(idempotency_key, surface, command_name, request_hash, "
+            "response_json, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (
+                key,
+                str(surface or ""),
+                str(command_name or ""),
+                str(request_hash or ""),
+                json.dumps(response, separators=(",", ":")),
+                created_at,
+                now,
+            ),
+        )
+        self._conn.commit()
+
     def enqueue_failed_write(
         self,
         *,
@@ -624,6 +685,16 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         )
         self._conn.commit()
 
+    def delete_failed_write_by_key(self, idempotency_key: str) -> None:
+        key = str(idempotency_key or "").strip()
+        if not key:
+            return
+        self._conn.execute(
+            "DELETE FROM failed_writes WHERE idempotency_key=?",
+            (key,),
+        )
+        self._conn.commit()
+
     def mark_failed_write_attempt(self, failed_write_id, last_error: str) -> None:
         self._conn.execute(
             "UPDATE failed_writes SET attempts=attempts+1, updated_at=?, "
@@ -631,6 +702,108 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             (time.time(), str(last_error or ""), int(failed_write_id or 0)),
         )
         self._conn.commit()
+
+    def persist_command_capture(
+        self,
+        *,
+        agents: dict[str, object] | None = None,
+        deleted_agents: set[str] | None = None,
+        tasks: dict[str, object] | None = None,
+        deleted_tasks: set[str] | None = None,
+        task_id_counters: dict[str, int] | None = None,
+        pipeline_task_counters: dict[str, int] | None = None,
+        task_id_aliases: dict[str, str] | None = None,
+        idempotency_key: str,
+        surface: str,
+        command_name: str,
+        request_hash: str,
+        response,
+        delete_failed_write_key: str = "",
+    ) -> None:
+        """Persist one captured critical command snapshot atomically."""
+        key = str(idempotency_key or "").strip()
+        if not key:
+            raise ValueError("idempotency_key is required")
+        now = time.time()
+        cursor = self._conn.cursor()
+        try:
+            receipt_row = cursor.execute(
+                "SELECT created_at FROM command_receipts WHERE idempotency_key=?",
+                (key,),
+            ).fetchone()
+            created_at = float(receipt_row[0]) if receipt_row else now
+
+            for agent_id in sorted(deleted_agents or ()):
+                cursor.execute("DELETE FROM agents WHERE id=?", (agent_id,))
+                cursor.execute(
+                    "DELETE FROM group_members WHERE agent_id=?",
+                    (agent_id,),
+                )
+            for _agent_id, cell in sorted((agents or {}).items()):
+                self._insert_agent_row(cursor, cell)
+
+            for task_id in sorted(deleted_tasks or ()):
+                cursor.execute("DELETE FROM board_tasks WHERE id=?", (task_id,))
+            for _task_id, task in sorted((tasks or {}).items()):
+                self._insert_board_task_row(cursor, task)
+
+            for legacy_id, task_id in sorted((task_id_aliases or {}).items()):
+                if not legacy_id or not task_id:
+                    continue
+                cursor.execute(
+                    "INSERT OR REPLACE INTO task_id_aliases (legacy_id, task_id) "
+                    "VALUES (?, ?)",
+                    (legacy_id, task_id),
+                )
+
+            for group_prefix, next_root_number in sorted(
+                (task_id_counters or {}).items()
+            ):
+                cursor.execute(
+                    "INSERT OR REPLACE INTO task_id_counters "
+                    "(group_prefix, next_root_number) VALUES (?, ?)",
+                    (
+                        normalize_group_prefix(group_prefix),
+                        max(1, int(next_root_number or 1)),
+                    ),
+                )
+
+            for root_task_id, next_child_number in sorted(
+                (pipeline_task_counters or {}).items()
+            ):
+                if not root_task_id:
+                    continue
+                cursor.execute(
+                    "INSERT OR REPLACE INTO pipeline_task_counters "
+                    "(root_task_id, next_child_number) VALUES (?, ?)",
+                    (root_task_id, max(1, int(next_child_number or 1))),
+                )
+
+            cursor.execute(
+                "INSERT OR REPLACE INTO command_receipts "
+                "(idempotency_key, surface, command_name, request_hash, "
+                "response_json, created_at, updated_at) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (
+                    key,
+                    str(surface or ""),
+                    str(command_name or ""),
+                    str(request_hash or ""),
+                    json.dumps(response, separators=(",", ":")),
+                    created_at,
+                    now,
+                ),
+            )
+            delete_key = str(delete_failed_write_key or "").strip()
+            if delete_key:
+                cursor.execute(
+                    "DELETE FROM failed_writes WHERE idempotency_key=?",
+                    (delete_key,),
+                )
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
 
     def record_mcp_health_event(
         self,
