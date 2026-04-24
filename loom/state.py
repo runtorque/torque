@@ -2238,15 +2238,17 @@ class MatrixState:
                           cell.id, task.id)
 
     def history_record_message(self, cell_id: str, action: str,
-                               message: str, task_id: str = ""):
+                               message: str, task_id: str = "",
+                               *, mark_progress: bool = True):
         """Record an agent message (loom ai report) in history."""
         import time
         ts = time.time()
         cell = self.agents.get(cell_id)
         if cell:
-            if cell.mark_progress(ts):
+            if mark_progress and cell.mark_progress(ts):
                 self._emit_agent(cell)
-            self._db_save_agent(cell)
+            if mark_progress:
+                self._db_save_agent(cell)
         if not self.db:
             return
         try:

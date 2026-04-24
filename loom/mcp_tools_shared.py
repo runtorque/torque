@@ -1467,8 +1467,18 @@ def _deliver_architect_engineer_message(state, sender, recipient, *,
     )
     _append_cross_kind_message(sender, sender_entry)
     _append_cross_kind_message(recipient, recipient_entry)
-    state.history_record_message(sender.id, action, message_text)
-    state.history_record_message(recipient.id, action, message_text)
+    state.history_record_message(
+        sender.id,
+        action,
+        message_text,
+        mark_progress=False,
+    )
+    state.history_record_message(
+        recipient.id,
+        action,
+        message_text,
+        mark_progress=False,
+    )
     if str(getattr(recipient, "kind", "") or "").strip() == "engineer":
         recipient.pending_weaver_message = True
     if str(getattr(sender, "kind", "") or "").strip() == "engineer":
@@ -3757,6 +3767,12 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             entry = str(args.get("entry", "") or "")
             if not entry:
                 return "entry is required", True
+            if not idempotency_key:
+                return json.dumps(real_state.architect_journal_append(
+                    caller_id,
+                    entry_type,
+                    entry,
+                )), False
             result = await handle_command({
                 "cmd": "architect_journal_append",
                 "architect_id": caller_id,
