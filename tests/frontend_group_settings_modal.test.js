@@ -81,12 +81,12 @@ function createSandbox() {
     return elements.get(id);
   }
 
-  const gsTabs = ['group', 'agents', 'engineer'].map((name) => {
+  const gsTabs = ['group', 'agents', 'engineer', 'architect'].map((name) => {
     const el = new FakeElement(`tab-${name}`);
     el.dataset.tab = name;
     return el;
   });
-  const gsPanes = ['group', 'agents', 'engineer'].map((name) => {
+  const gsPanes = ['group', 'agents', 'engineer', 'architect'].map((name) => {
     const el = new FakeElement(`pane-${name}`);
     el.dataset.pane = name;
     return el;
@@ -204,6 +204,22 @@ test('group settings modal populates engineer fields and honors engineer tab dee
       heartbeat_interval: 60,
       enabled_events: ["agent_started", "agent_progress"]
     },
+    architect_settings: {
+      architect_provider: "codex",
+      architect_boot_command: "codex --architect",
+      architect_model: "gpt-5.1-architect",
+      architect_reasoning_effort: "high",
+      architect_custom_instructions: "Own scope crisply.",
+      architect_autonomy_mode: "ask_always",
+      architect_paused: true,
+      architect_digest_verbosity: "verbose",
+      architect_journal_checkpoint_frequency: "every_15_actions",
+      architect_review_gate_thresholds: {
+        ship_direct_max: 25,
+        review_default_above: 90,
+        self_review_bypass_allowed: true
+      }
+    },
     profiles: ["Default", "Ops"]
   })`, context);
 
@@ -241,6 +257,18 @@ test('group settings modal populates engineer fields and honors engineer tab dee
   assert.equal(ensure('gs-engineer-digest-section').open, false);
   assert.equal(ensure('gs-engineer-event-agent-started').checked, true);
   assert.equal(ensure('gs-engineer-event-agent-progress').checked, true);
+  assert.equal(ensure('gs-architect-provider').value, 'codex');
+  assert.equal(ensure('gs-architect-boot-cmd').value, 'codex --architect');
+  assert.equal(ensure('gs-architect-model').value, 'gpt-5.1-architect');
+  assert.equal(ensure('gs-architect-reasoning-effort').value, 'high');
+  assert.equal(ensure('gs-architect-custom-instructions').value, 'Own scope crisply.');
+  assert.equal(ensure('gs-architect-autonomy-mode').value, 'ask_always');
+  assert.equal(ensure('gs-architect-paused').checked, true);
+  assert.equal(ensure('gs-architect-digest-verbosity').value, 'verbose');
+  assert.equal(ensure('gs-architect-journal-checkpoint').value, 'every_15_actions');
+  assert.equal(ensure('gs-architect-review-ship-direct-max').value, 25);
+  assert.equal(ensure('gs-architect-review-default-above').value, 90);
+  assert.equal(ensure('gs-architect-review-bypass').checked, true);
   assert.equal(ensure('gs-engineer-provider').focused, true);
   assert.equal(ensure('modal-group-settings').classList.contains('visible'), true);
 });
@@ -264,10 +292,14 @@ test('group settings resets the Engineer section defaults when reopened', () => 
   assert.equal(ensure('gs-engineer-provider-section').open, true);
   assert.equal(ensure('gs-engineer-autonomy-section').open, true);
   assert.equal(ensure('gs-engineer-digest-section').open, false);
+  assert.equal(ensure('gs-architect-boot-section').open, true);
+  assert.equal(ensure('gs-architect-behavior-section').open, true);
+  assert.equal(ensure('gs-architect-custom-section').open, true);
+  assert.equal(ensure('gs-architect-deferred-section').open, true);
   assert.equal(ensure('gs-engineer-notification-preset').value, 'normal');
 });
 
-test('submitGroupSettings sends group and engineer updates separately', () => {
+test('submitGroupSettings sends group, engineer, and architect updates separately', () => {
   const { sandbox, ensure } = createSandbox();
   const context = vm.createContext(sandbox);
   loadModals(context);
@@ -303,10 +335,22 @@ test('submitGroupSettings sends group and engineer updates separately', () => {
   ensure('gs-engineer-heartbeat-interval').value = '60';
   ensure('gs-engineer-event-agent-started').checked = true;
   ensure('gs-engineer-event-agent-progress').checked = true;
+  ensure('gs-architect-provider').value = 'codex';
+  ensure('gs-architect-boot-cmd').value = 'codex --architect';
+  ensure('gs-architect-model').value = 'gpt-5.1-architect';
+  ensure('gs-architect-reasoning-effort').value = 'high';
+  ensure('gs-architect-custom-instructions').value = 'Own scope';
+  ensure('gs-architect-autonomy-mode').value = 'dispatch_freely';
+  ensure('gs-architect-paused').checked = true;
+  ensure('gs-architect-digest-verbosity').value = 'terse';
+  ensure('gs-architect-journal-checkpoint').value = 'every_20_minutes';
+  ensure('gs-architect-review-ship-direct-max').value = '30';
+  ensure('gs-architect-review-default-above').value = '80';
+  ensure('gs-architect-review-bypass').checked = true;
 
   vm.runInContext('submitGroupSettings()', context);
 
-  assert.equal(sandbox.sendCalls.length, 2);
+  assert.equal(sandbox.sendCalls.length, 3);
   assert.equal(sandbox.sendCalls[0].cmd, 'update_group_settings');
   assert.equal(sandbox.sendCalls[0].group, 'alpha');
   assert.equal(sandbox.sendCalls[0].settings.terminal_name_prefix, 'Shell');
@@ -338,6 +382,25 @@ test('submitGroupSettings sends group and engineer updates separately', () => {
   assert.equal(sandbox.sendCalls[1].digest_verbosity, 'compact');
   assert.equal(sandbox.sendCalls[1].escalation_style, 'ask_early');
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls[1].enabled_events)), ['agent_started', 'agent_progress']);
+  assert.equal(sandbox.sendCalls[2].cmd, 'update_architect_settings');
+  assert.equal(sandbox.sendCalls[2].group, 'alpha');
+  assert.equal(sandbox.sendCalls[2].settings.architect_provider, 'codex');
+  assert.equal(sandbox.sendCalls[2].settings.architect_boot_command, 'codex --architect');
+  assert.equal(sandbox.sendCalls[2].settings.architect_model, 'gpt-5.1-architect');
+  assert.equal(sandbox.sendCalls[2].settings.architect_reasoning_effort, 'high');
+  assert.equal(sandbox.sendCalls[2].settings.architect_custom_instructions, 'Own scope');
+  assert.equal(sandbox.sendCalls[2].settings.architect_autonomy_mode, 'dispatch_freely');
+  assert.equal(sandbox.sendCalls[2].settings.architect_paused, true);
+  assert.equal(sandbox.sendCalls[2].settings.architect_digest_verbosity, 'terse');
+  assert.equal(sandbox.sendCalls[2].settings.architect_journal_checkpoint_frequency, 'every_20_minutes');
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(sandbox.sendCalls[2].settings.architect_review_gate_thresholds)),
+    {
+      ship_direct_max: 30,
+      review_default_above: 80,
+      self_review_bypass_allowed: true,
+    },
+  );
 });
 
 test('group settings notification presets rewrite detailed controls before submit', () => {

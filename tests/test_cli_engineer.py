@@ -58,6 +58,23 @@ class CliEngineerTests(unittest.TestCase):
         self.assertEqual(rehire_args.engineer_cmd, "rehire")
         self.assertEqual(rehire_args.identifier, "alice")
 
+    def test_parser_accepts_architect_settings(self):
+        parser = self.cli.build_parser()
+        args = parser.parse_args([
+            "architect",
+            "settings",
+            "--group",
+            "loom",
+            "-s",
+            "architect_paused=true",
+            "--json",
+        ])
+        self.assertEqual(args.command, "architect")
+        self.assertEqual(args.architect_cmd, "settings")
+        self.assertEqual(args.group, "loom")
+        self.assertEqual(args.set, ["architect_paused=true"])
+        self.assertTrue(args.json)
+
     def test_cmd_engineer_dismiss_and_rehire_resolve_engineer_and_call_daemon(self):
         state = {
             "agents": {
@@ -111,6 +128,35 @@ class CliEngineerTests(unittest.TestCase):
             engineer_id="eng-alice",
         )
         self.assertIn('Rehired "Alice"', out.getvalue())
+
+    def test_cmd_architect_settings_updates_group(self):
+        state = {"groups": {"loom": []}, "group_slugs": {"loom": "loom"}}
+        args = SimpleNamespace(
+            port=18932,
+            group="loom",
+            set=["architect_paused=true", "architect_autonomy_mode=ask_always"],
+            json=False,
+        )
+        with mock.patch.object(self.cli, "get_state", return_value=state), \
+             mock.patch.object(
+                 self.cli,
+                 "api_call",
+                 return_value={"ok": True, "data": {}},
+             ) as api_call:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.cli.cmd_architect_settings(args)
+
+        api_call.assert_called_once_with(
+            "update_architect_settings",
+            port=18932,
+            group="loom",
+            settings={
+                "architect_paused": True,
+                "architect_autonomy_mode": "ask_always",
+            },
+        )
+        self.assertIn('Architect settings for "loom" updated', out.getvalue())
 
     def test_cmd_task_create_sets_assigned_engineer_id_from_slug(self):
         state = {

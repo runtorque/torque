@@ -2264,6 +2264,24 @@ body.runtime-embedded #modal-group .modal-summary {
 .gs-inline-card-main {
   min-width: 0;
 }
+.gs-deferred-section {
+  opacity: .72;
+}
+.gs-deferred-section summary {
+  color: var(--warning, #d29922);
+}
+.gs-threshold-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+.gs-threshold-grid .gs-checkbox {
+  grid-column: 1 / -1;
+}
+.gs-autogrow {
+  min-height: 110px;
+  resize: vertical;
+}
 .hint-btn {
   display: inline-flex; align-items: center; justify-content: center;
   width: 14px; height: 14px; border-radius: 50%;

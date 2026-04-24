@@ -70,6 +70,14 @@ function _engineerProviderForReasoning() {
   );
 }
 
+function _architectProviderForReasoning() {
+  return (
+    _getProviderValue('gs-architect-provider')
+    || _getProviderValue('gs-agent-provider')
+    || _runtimeDefaultProviderName()
+  );
+}
+
 function _populateProviderSelect(selectId, currentValue, includeGroupDefault) {
   const sel = document.getElementById(selectId);
   sel.innerHTML = '';
@@ -164,6 +172,9 @@ function onGsProviderChange() {
   if (!_getProviderValue('gs-engineer-provider')) {
     onGsEngineerProviderChange();
   }
+  if (!_getProviderValue('gs-architect-provider')) {
+    onGsArchitectProviderChange();
+  }
 }
 
 function onAddProviderChange() {
@@ -201,6 +212,22 @@ function onGsEngineerProviderChange() {
     'gs-engineer-reasoning-effort',
     _engineerProviderForReasoning(),
     document.getElementById('gs-engineer-reasoning-effort').value,
+    'Provider default',
+    'Not supported for this provider'
+  );
+}
+
+function onGsArchitectProviderChange() {
+  const input = document.getElementById('gs-architect-boot-cmd');
+  if (input) {
+    const effectiveProvider = _architectProviderForReasoning();
+    const meta = effectiveProvider ? _findProviderMeta(effectiveProvider) : null;
+    input.placeholder = (meta ? meta.command : _runtimeDefaultCommand()) + ' (default)';
+  }
+  _populateReasoningEffortSelect(
+    'gs-architect-reasoning-effort',
+    _architectProviderForReasoning(),
+    document.getElementById('gs-architect-reasoning-effort').value,
     'Provider default',
     'Not supported for this provider'
   );
@@ -727,6 +754,13 @@ function _setSelectValue(id, value, fallback) {
   el.value = value != null && value !== '' ? String(value) : String(fallback);
 }
 
+function _autoGrowTextArea(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = Math.max(el.scrollHeight || 0, 110) + 'px';
+}
+
 const _ENGINEER_NOTIFICATION_PRESETS = {
   quiet: {
     label: 'Quiet',
@@ -915,12 +949,46 @@ function _resetGsEngineerSections() {
   _setDetailsOpen('gs-engineer-digest-section', false);
 }
 
+function _defaultArchitectSettings() {
+  return {
+    architect_boot_command: '',
+    architect_provider: '',
+    architect_model: '',
+    architect_reasoning_effort: '',
+    architect_custom_instructions: '',
+    architect_autonomy_mode: 'dispatch_after_confirm',
+    architect_paused: false,
+    architect_digest_verbosity: 'balanced',
+    architect_journal_checkpoint_frequency: 'every_10_actions',
+    architect_review_gate_thresholds: {
+      ship_direct_max: 50,
+      review_default_above: 150,
+      self_review_bypass_allowed: false,
+    },
+  };
+}
+
+function _resetGsArchitectSections() {
+  _setDetailsOpen('gs-architect-boot-section', true);
+  _setDetailsOpen('gs-architect-behavior-section', true);
+  _setDetailsOpen('gs-architect-custom-section', true);
+  _setDetailsOpen('gs-architect-deferred-section', true);
+}
+
 function _showGroupSettings(group, data) {
   _settingsGroup = group;
   const s = data.settings;
   const ws = Object.assign(
     _defaultEngineerNotificationSettings(),
     data.engineer_settings || {}
+  );
+  const architectSettings = Object.assign(
+    _defaultArchitectSettings(),
+    data.architect_settings || {}
+  );
+  architectSettings.architect_review_gate_thresholds = Object.assign(
+    _defaultArchitectSettings().architect_review_gate_thresholds,
+    (data.architect_settings || {}).architect_review_gate_thresholds || {}
   );
   const engineer = s.engineer_agent_id && state.agents ? state.agents[s.engineer_agent_id] : null;
 
@@ -1050,6 +1118,38 @@ function _showGroupSettings(group, data) {
   _renderGsEngineerSummary(group, engineer, ws);
   _resetGsEngineerSections();
 
+  /* -- Architect tab -- */
+  _populateProviderSelect(
+    'gs-architect-provider',
+    architectSettings.architect_provider || '',
+    true
+  );
+  document.getElementById('gs-architect-boot-cmd').value = architectSettings.architect_boot_command || '';
+  document.getElementById('gs-architect-model').value = architectSettings.architect_model || '';
+  document.getElementById('gs-architect-reasoning-effort').value = architectSettings.architect_reasoning_effort || '';
+  document.getElementById('gs-architect-custom-instructions').value = architectSettings.architect_custom_instructions || '';
+  _autoGrowTextArea('gs-architect-custom-instructions');
+  _setSelectValue(
+    'gs-architect-autonomy-mode',
+    architectSettings.architect_autonomy_mode,
+    'dispatch_after_confirm'
+  );
+  document.getElementById('gs-architect-paused').checked = !!architectSettings.architect_paused;
+  _setSelectValue(
+    'gs-architect-digest-verbosity',
+    architectSettings.architect_digest_verbosity,
+    'balanced'
+  );
+  document.getElementById('gs-architect-journal-checkpoint').value = (
+    architectSettings.architect_journal_checkpoint_frequency || 'every_10_actions'
+  );
+  const thresholds = architectSettings.architect_review_gate_thresholds || {};
+  document.getElementById('gs-architect-review-ship-direct-max').value = thresholds.ship_direct_max != null ? thresholds.ship_direct_max : 50;
+  document.getElementById('gs-architect-review-default-above').value = thresholds.review_default_above != null ? thresholds.review_default_above : 150;
+  document.getElementById('gs-architect-review-bypass').checked = !!thresholds.self_review_bypass_allowed;
+  onGsArchitectProviderChange();
+  _resetGsArchitectSections();
+
   const initialTab = _gsInitialTab || 'group';
   const initialSubtab = _gsInitialSubtab || '';
   switchGsTab(initialTab);
@@ -1060,7 +1160,11 @@ function _showGroupSettings(group, data) {
   _gsInitialTab = 'group';
   _gsInitialSubtab = '';
   document.getElementById('modal-group-settings').classList.add('visible');
-  const focusId = initialTab === 'engineer' ? 'gs-engineer-provider' : 'gs-directory';
+  const focusId = initialTab === 'engineer'
+    ? 'gs-engineer-provider'
+    : initialTab === 'architect'
+      ? 'gs-architect-provider'
+      : 'gs-directory';
   const focusEl = document.getElementById(focusId);
   if (focusEl) focusEl.focus();
 }
@@ -1171,9 +1275,26 @@ function submitGroupSettings() {
     heartbeat_interval: parseInt(document.getElementById('gs-engineer-heartbeat-interval').value, 10),
     enabled_events: _getEngineerEnabledEvents(),
   };
+  const architectSettings = {
+    architect_provider: _getProviderValue('gs-architect-provider'),
+    architect_boot_command: document.getElementById('gs-architect-boot-cmd').value.trim(),
+    architect_model: document.getElementById('gs-architect-model').value.trim(),
+    architect_reasoning_effort: document.getElementById('gs-architect-reasoning-effort').value,
+    architect_custom_instructions: document.getElementById('gs-architect-custom-instructions').value,
+    architect_autonomy_mode: document.getElementById('gs-architect-autonomy-mode').value,
+    architect_paused: document.getElementById('gs-architect-paused').checked,
+    architect_digest_verbosity: document.getElementById('gs-architect-digest-verbosity').value,
+    architect_journal_checkpoint_frequency: document.getElementById('gs-architect-journal-checkpoint').value.trim() || 'every_10_actions',
+    architect_review_gate_thresholds: {
+      ship_direct_max: parseInt(document.getElementById('gs-architect-review-ship-direct-max').value, 10) || 0,
+      review_default_above: parseInt(document.getElementById('gs-architect-review-default-above').value, 10) || 0,
+      self_review_bypass_allowed: document.getElementById('gs-architect-review-bypass').checked,
+    },
+  };
 
   send({ cmd: 'update_group_settings', group: _settingsGroup, settings });
   send({ cmd: 'engineer_update_settings', group: _settingsGroup, ...engineerSettings });
+  send({ cmd: 'update_architect_settings', group: _settingsGroup, settings: architectSettings });
   _settingsGroup = null;
   closeModals();
 }

@@ -77,6 +77,55 @@ _ARCHITECT_TOOL_SPECS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "architect_get_architect_settings",
+        "description": "Read this group's persisted Architect settings.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "architect_update_architect_settings",
+        "description": (
+            "Update this group's persisted Architect settings. Deferred v1 "
+            "fields are stored but not wired to runtime behavior yet."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "architect_boot_command": {"type": "string"},
+                "architect_provider": {"type": "string"},
+                "architect_model": {"type": "string"},
+                "architect_reasoning_effort": {"type": "string"},
+                "architect_custom_instructions": {"type": "string"},
+                "architect_autonomy_mode": {
+                    "type": "string",
+                    "enum": [
+                        "dispatch_freely",
+                        "dispatch_after_confirm",
+                        "ask_always",
+                    ],
+                },
+                "architect_paused": {"type": "boolean"},
+                "architect_digest_verbosity": {
+                    "type": "string",
+                    "enum": ["terse", "balanced", "verbose"],
+                },
+                "architect_journal_checkpoint_frequency": {
+                    "type": "string",
+                    "description": (
+                        "manual_only, every_N_actions, or every_N_minutes."
+                    ),
+                },
+                "architect_review_gate_thresholds": {
+                    "type": "object",
+                    "properties": {
+                        "ship_direct_max": {"type": "integer"},
+                        "review_default_above": {"type": "integer"},
+                        "self_review_bypass_allowed": {"type": "boolean"},
+                    },
+                },
+            },
+        },
+    },
+    {
         "name": "architect_task_show",
         "description": (
             "Show full details for one task the architect can see."

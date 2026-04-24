@@ -70,6 +70,24 @@ _ENGINEER_DIGEST_VERBOSITIES = {
     "detailed",
 }
 _DEFAULT_ENGINEER_DIGEST_VERBOSITY = "balanced"
+_ARCHITECT_AUTONOMY_MODES = {
+    "dispatch_freely",
+    "dispatch_after_confirm",
+    "ask_always",
+}
+_DEFAULT_ARCHITECT_AUTONOMY_MODE = "dispatch_after_confirm"
+_ARCHITECT_DIGEST_VERBOSITIES = {
+    "terse",
+    "balanced",
+    "verbose",
+}
+_DEFAULT_ARCHITECT_DIGEST_VERBOSITY = "balanced"
+_DEFAULT_ARCHITECT_JOURNAL_CHECKPOINT_FREQUENCY = "every_10_actions"
+_DEFAULT_ARCHITECT_REVIEW_GATE_THRESHOLDS = {
+    "ship_direct_max": 50,
+    "review_default_above": 150,
+    "self_review_bypass_allowed": False,
+}
 _ENGINEER_NOTIFICATION_PRESETS = {
     "quiet": {
         "digest_verbosity": "compact",
@@ -380,6 +398,83 @@ def normalize_engineer_escalation_style(value) -> str:
     if value in _ENGINEER_ESCALATION_STYLES:
         return value
     return _DEFAULT_ENGINEER_ESCALATION_STYLE
+
+
+def normalize_architect_autonomy_mode(value, *, strict: bool = False) -> str:
+    value = str(value or "").strip()
+    if value in _ARCHITECT_AUTONOMY_MODES:
+        return value
+    if strict:
+        raise ValueError(
+            "architect_autonomy_mode must be one of: "
+            + ", ".join(sorted(_ARCHITECT_AUTONOMY_MODES))
+        )
+    return _DEFAULT_ARCHITECT_AUTONOMY_MODE
+
+
+def normalize_architect_digest_verbosity(value, *, strict: bool = False) -> str:
+    value = str(value or "").strip()
+    if value in _ARCHITECT_DIGEST_VERBOSITIES:
+        return value
+    if strict:
+        raise ValueError(
+            "architect_digest_verbosity must be one of: "
+            + ", ".join(sorted(_ARCHITECT_DIGEST_VERBOSITIES))
+        )
+    return _DEFAULT_ARCHITECT_DIGEST_VERBOSITY
+
+
+def normalize_architect_journal_checkpoint_frequency(
+        value, *, strict: bool = False) -> str:
+    value = str(value or "").strip()
+    if (
+            value == "manual_only"
+            or re.fullmatch(r"every_[1-9]\d*_actions", value)
+            or re.fullmatch(r"every_[1-9]\d*_minutes", value)):
+        return value
+    if strict:
+        raise ValueError(
+            "architect_journal_checkpoint_frequency must be manual_only, "
+            "every_N_actions, or every_N_minutes"
+        )
+    return _DEFAULT_ARCHITECT_JOURNAL_CHECKPOINT_FREQUENCY
+
+
+def normalize_architect_review_gate_thresholds(
+        value, *, strict: bool = False) -> dict:
+    defaults = dict(_DEFAULT_ARCHITECT_REVIEW_GATE_THRESHOLDS)
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            if strict:
+                raise ValueError(
+                    "architect_review_gate_thresholds must be a JSON object"
+                )
+            return defaults
+    if not isinstance(value, dict):
+        if strict:
+            raise ValueError("architect_review_gate_thresholds must be an object")
+        return defaults
+
+    result = defaults
+    for key in ("ship_direct_max", "review_default_above"):
+        if key not in value:
+            continue
+        try:
+            parsed = int(value.get(key))
+        except (TypeError, ValueError):
+            if strict:
+                raise ValueError(
+                    f"architect_review_gate_thresholds.{key} must be an integer"
+                )
+            continue
+        result[key] = max(0, parsed)
+    if "self_review_bypass_allowed" in value:
+        result["self_review_bypass_allowed"] = bool(
+            value.get("self_review_bypass_allowed")
+        )
+    return result
 
 
 def normalize_worktree_merge_cleanup(value) -> str:
@@ -946,6 +1041,41 @@ class GroupSettings:
     board_default_action: str = ""  # default action for new tasks
     # Engineer
     engineer_agent_id: str = ""  # designated engineer agent for this group
+    # Architect settings (persisted in group_settings)
+    architect_boot_command: str = ""
+    architect_provider: str = ""
+    architect_model: str = ""
+    architect_reasoning_effort: str = ""
+    architect_custom_instructions: str = ""
+    architect_autonomy_mode: str = _DEFAULT_ARCHITECT_AUTONOMY_MODE
+    architect_paused: bool = False
+    architect_digest_verbosity: str = _DEFAULT_ARCHITECT_DIGEST_VERBOSITY
+    architect_journal_checkpoint_frequency: str = (
+        _DEFAULT_ARCHITECT_JOURNAL_CHECKPOINT_FREQUENCY
+    )
+    architect_review_gate_thresholds: dict = field(
+        default_factory=lambda: dict(_DEFAULT_ARCHITECT_REVIEW_GATE_THRESHOLDS)
+    )
+
+
+@dataclass
+class ArchitectSettings:
+    """Per-group architect configuration."""
+    group: str = ""
+    architect_boot_command: str = ""
+    architect_provider: str = ""
+    architect_model: str = ""
+    architect_reasoning_effort: str = ""
+    architect_custom_instructions: str = ""
+    architect_autonomy_mode: str = _DEFAULT_ARCHITECT_AUTONOMY_MODE
+    architect_paused: bool = False
+    architect_digest_verbosity: str = _DEFAULT_ARCHITECT_DIGEST_VERBOSITY
+    architect_journal_checkpoint_frequency: str = (
+        _DEFAULT_ARCHITECT_JOURNAL_CHECKPOINT_FREQUENCY
+    )
+    architect_review_gate_thresholds: dict = field(
+        default_factory=lambda: dict(_DEFAULT_ARCHITECT_REVIEW_GATE_THRESHOLDS)
+    )
 
 
 @dataclass
@@ -1629,6 +1759,10 @@ class MatrixState:
             "engineer_settings": {
                 n: asdict(ws) for n, ws in self.engineer_settings.items()
             },
+            "architect_settings": {
+                n: asdict(self.get_architect_settings(n))
+                for n in self.groups
+            },
             "agent_digest_settings": {
                 agent_id: asdict(settings)
                 for agent_id, settings in self.agent_digest_settings.items()
@@ -1714,6 +1848,10 @@ class MatrixState:
             "panel_events": self.panel_log.get_recent(50) if self.panel_log else [],
             "engineer_settings": {
                 n: asdict(ws) for n, ws in self.engineer_settings.items()
+            },
+            "architect_settings": {
+                n: asdict(self.get_architect_settings(n))
+                for n in self.groups
             },
             "agent_digest_settings": {
                 agent_id: asdict(settings)
@@ -2359,6 +2497,10 @@ class MatrixState:
                             normalize_worktree_merge_cleanup(
                                 filtered["worktree_merge_cleanup"])
                         )
+                    self._normalize_architect_settings_mapping(
+                        filtered,
+                        strict=False,
+                    )
                     self.group_settings[gname] = GroupSettings(**filtered)
             # Promote orphaned children whose parent was deleted
             for aid, cell in self.agents.items():
@@ -2622,6 +2764,121 @@ class MatrixState:
         """Return group settings, creating defaults if group has none."""
         return self.group_settings.get(name, GroupSettings())
 
+    def _normalize_architect_settings_mapping(
+            self, fields: dict, *, strict: bool) -> dict:
+        if "architect_autonomy_mode" in fields:
+            fields["architect_autonomy_mode"] = normalize_architect_autonomy_mode(
+                fields["architect_autonomy_mode"],
+                strict=strict,
+            )
+        if "architect_digest_verbosity" in fields:
+            fields["architect_digest_verbosity"] = (
+                normalize_architect_digest_verbosity(
+                    fields["architect_digest_verbosity"],
+                    strict=strict,
+                )
+            )
+        if "architect_journal_checkpoint_frequency" in fields:
+            fields["architect_journal_checkpoint_frequency"] = (
+                normalize_architect_journal_checkpoint_frequency(
+                    fields["architect_journal_checkpoint_frequency"],
+                    strict=strict,
+                )
+            )
+        if "architect_review_gate_thresholds" in fields:
+            fields["architect_review_gate_thresholds"] = (
+                normalize_architect_review_gate_thresholds(
+                    fields["architect_review_gate_thresholds"],
+                    strict=strict,
+                )
+            )
+        if "architect_paused" in fields:
+            raw = fields["architect_paused"]
+            if isinstance(raw, str):
+                fields["architect_paused"] = (
+                    raw.strip().lower() in {"1", "true", "yes", "on"}
+                )
+            else:
+                fields["architect_paused"] = bool(raw)
+        for key in (
+                "architect_boot_command", "architect_provider",
+                "architect_model", "architect_reasoning_effort",
+                "architect_custom_instructions"):
+            if key in fields:
+                fields[key] = str(fields[key] or "").strip()
+        return fields
+
+    def get_architect_settings(self, group: str) -> ArchitectSettings:
+        """Return architect settings for a group, backed by group_settings."""
+        group = str(group or "").strip()
+        gs = self.get_group_settings(group)
+        values = {}
+        for key in ArchitectSettings.__dataclass_fields__:
+            if key == "group":
+                continue
+            if hasattr(gs, key):
+                value = getattr(gs, key)
+                if key == "architect_review_gate_thresholds":
+                    value = normalize_architect_review_gate_thresholds(value)
+                values[key] = value
+        self._normalize_architect_settings_mapping(values, strict=False)
+        return ArchitectSettings(group=group, **values)
+
+    def _architect_cells_for_group(self, group: str) -> list[AgentCell]:
+        group = str(group or "").strip()
+        return [
+            cell for cell in self.agents.values()
+            if cell.cell_type == "agent"
+            and str(getattr(cell, "kind", "") or "").strip() == "architect"
+            and str(getattr(cell, "group", "") or "").strip() == group
+        ]
+
+    def _sync_architect_digest_settings(self, group: str,
+                                        fields: dict) -> None:
+        if "architect_paused" not in fields:
+            return
+        paused = bool(fields.get("architect_paused", False))
+        for architect in self._architect_cells_for_group(group):
+            self.update_agent_digest_settings(architect.id, paused=paused)
+
+    def update_architect_settings(self, group: str, **fields) -> dict:
+        """Update architect settings for a group.
+
+        These settings are persisted in ``group_settings`` so read-only CLI
+        paths and group snapshots see one source of truth.
+        """
+        group = str(group or "").strip()
+        if group not in self.groups:
+            return {}
+        gs = self.group_settings.get(group)
+        if gs is None:
+            gs = GroupSettings()
+            self.group_settings[group] = gs
+        fields = dict(fields or {})
+        if "custom_instructions" in fields and "architect_custom_instructions" not in fields:
+            fields["architect_custom_instructions"] = fields.pop(
+                "custom_instructions"
+            )
+        valid = set(ArchitectSettings.__dataclass_fields__) - {"group"}
+        candidate = {
+            key: value for key, value in fields.items()
+            if key in valid
+        }
+        self._normalize_architect_settings_mapping(candidate, strict=True)
+        applied = {}
+        for key, value in candidate.items():
+            setattr(gs, key, value)
+            applied[key] = value
+        if not applied:
+            return {}
+        payload = asdict(self.get_architect_settings(group))
+        payload.pop("group", None)
+        self._emit("architect_settings_update", group=group, **payload)
+        self._emit("group_settings_update", name=group, **asdict(gs))
+        self._db_save_group_settings(group)
+        self._sync_architect_digest_settings(group, applied)
+        return applied
+
     def update_group_settings(self, name: str, **fields):
         """Update group settings. Creates GroupSettings entry if needed."""
         if name not in self.groups:
@@ -2637,9 +2894,23 @@ class MatrixState:
                     value = normalize_worktree_merge_cleanup(value)
                 elif key in {"agent_model", "agent_reasoning_effort"}:
                     value = str(value or "").strip()
+                elif key in (
+                        set(ArchitectSettings.__dataclass_fields__) - {"group"}):
+                    normalized = self._normalize_architect_settings_mapping(
+                        {key: value},
+                        strict=True,
+                    )
+                    value = normalized[key]
                 setattr(gs, key, value)
         self._emit("group_settings_update", name=name, **asdict(gs))
+        if any(
+                key in (set(ArchitectSettings.__dataclass_fields__) - {"group"})
+                for key in fields):
+            payload = asdict(self.get_architect_settings(name))
+            payload.pop("group", None)
+            self._emit("architect_settings_update", group=name, **payload)
         self._db_save_group_settings(name)
+        self._sync_architect_digest_settings(name, fields)
 
     # -- Engineer settings & journal ------------------------------------------
 
@@ -2670,6 +2941,11 @@ class MatrixState:
         if is_architect:
             kwargs["enabled_events"] = list(
                 _ARCHITECT_DIGEST_DEFAULT_ENABLED_EVENTS
+            )
+            kwargs["paused"] = bool(
+                self.get_architect_settings(
+                    getattr(cell, "group", "") or ""
+                ).architect_paused
             )
         return AgentDigestSettings(
             agent_id=agent_id,

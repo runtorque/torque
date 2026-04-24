@@ -456,6 +456,23 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(len(sent_prompts), 1)
 
+    async def test_architect_persistent_prompt_injects_custom_instructions(self):
+        state = self._make_state()
+        state.update_architect_settings(
+            "loom",
+            architect_custom_instructions="Prefer reversible scope cuts.",
+        )
+
+        prompt = self.server_mod._architect_persistent_prompt_text(
+            group="loom",
+            action_system_prompt="Action-specific context.",
+            state=state,
+        )
+
+        self.assertIn("Action-specific context.", prompt)
+        self.assertIn("## Custom Instructions", prompt)
+        self.assertIn("Prefer reversible scope cuts.", prompt)
+
     async def test_add_architect_worktree_default_and_knob(self):
         async def spawn(*, knob=False, launch_worktree=False, group_worktree=False):
             state = self._make_state()

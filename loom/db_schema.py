@@ -119,7 +119,17 @@ CREATE TABLE IF NOT EXISTS group_settings (
     board_default_labels        TEXT NOT NULL DEFAULT '[]',
     board_default_lane          TEXT NOT NULL DEFAULT '',
     board_default_action        TEXT NOT NULL DEFAULT '',
-    engineer_agent_id             TEXT NOT NULL DEFAULT ''
+    engineer_agent_id             TEXT NOT NULL DEFAULT '',
+    architect_boot_command        TEXT NOT NULL DEFAULT '',
+    architect_provider            TEXT NOT NULL DEFAULT '',
+    architect_model               TEXT NOT NULL DEFAULT '',
+    architect_reasoning_effort    TEXT NOT NULL DEFAULT '',
+    architect_custom_instructions TEXT NOT NULL DEFAULT '',
+    architect_autonomy_mode       TEXT NOT NULL DEFAULT 'dispatch_after_confirm',
+    architect_paused              INTEGER NOT NULL DEFAULT 0,
+    architect_digest_verbosity    TEXT NOT NULL DEFAULT 'balanced',
+    architect_journal_checkpoint_frequency TEXT NOT NULL DEFAULT 'every_10_actions',
+    architect_review_gate_thresholds TEXT NOT NULL DEFAULT '{"ship_direct_max":50,"review_default_above":150,"self_review_bypass_allowed":false}'
 );
 
 CREATE TABLE IF NOT EXISTS board_tasks (
@@ -1109,6 +1119,38 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
             "ALTER TABLE group_settings ADD COLUMN "
             "engineer_agent_id TEXT NOT NULL DEFAULT ''")
         conn.commit()
+    # Migrate: add architect settings columns to group_settings.
+    for col, col_type, default in (
+        ("architect_boot_command", "TEXT", "''"),
+        ("architect_provider", "TEXT", "''"),
+        ("architect_model", "TEXT", "''"),
+        ("architect_reasoning_effort", "TEXT", "''"),
+        ("architect_custom_instructions", "TEXT", "''"),
+        ("architect_autonomy_mode", "TEXT", "'dispatch_after_confirm'"),
+        ("architect_paused", "INTEGER", "0"),
+        ("architect_digest_verbosity", "TEXT", "'balanced'"),
+        (
+            "architect_journal_checkpoint_frequency",
+            "TEXT",
+            "'every_10_actions'",
+        ),
+        (
+            "architect_review_gate_thresholds",
+            "TEXT",
+            (
+                "'{\"ship_direct_max\":50,"
+                "\"review_default_above\":150,"
+                "\"self_review_bypass_allowed\":false}'"
+            ),
+        ),
+    ):
+        try:
+            conn.execute(f"SELECT {col} FROM group_settings LIMIT 0")
+        except sqlite3.OperationalError:
+            conn.execute(
+                f"ALTER TABLE group_settings ADD COLUMN {col} "
+                f"{col_type} NOT NULL DEFAULT {default}")
+            conn.commit()
     # Migrate: add checkpoint_on_progress to group_settings + agents
     for table in ("group_settings", "agents"):
         try:

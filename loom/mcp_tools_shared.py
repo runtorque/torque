@@ -2216,6 +2216,15 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             architect_deploy_state_payload(real_state, _engineer_group)
         ), False
 
+    if tool_name == "get_architect_settings" and caller_kind == "architect":
+        return json.dumps({
+            "type": "architect_settings",
+            "group": _engineer_group,
+            "settings": asdict(
+                real_state.get_architect_settings(_engineer_group)
+            ),
+        }), False
+
     if tool_name == "task_chain" and caller_kind == "architect":
         return _architect_task_chain_json(
             state,
@@ -3641,6 +3650,37 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             return result.get("message", "Unknown error"), True
         return json.dumps({"type": "ok", "settings": asdict(
             state.get_engineer_settings(_engineer_group))}), False
+
+    if tool_name == "update_architect_settings" and caller_kind == "architect":
+        allowed = {
+            "architect_boot_command",
+            "architect_provider",
+            "architect_model",
+            "architect_reasoning_effort",
+            "architect_custom_instructions",
+            "architect_autonomy_mode",
+            "architect_paused",
+            "architect_digest_verbosity",
+            "architect_journal_checkpoint_frequency",
+            "architect_review_gate_thresholds",
+        }
+        fields = {
+            key: args[key] for key in allowed
+            if key in args
+        }
+        result = await handle_command({
+            "cmd": "update_architect_settings",
+            "group": _engineer_group,
+            "settings": fields,
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps({
+            "type": "ok",
+            "settings": asdict(
+                real_state.get_architect_settings(_engineer_group)
+            ),
+        }), False
 
     if tool_name == "notifications":
         ws = state.get_engineer_settings(_engineer_group)
