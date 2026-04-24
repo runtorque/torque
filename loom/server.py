@@ -161,6 +161,14 @@ def _should_install_keybindings() -> bool:
     return not STANDALONE
 
 
+def _get_keybinding_defaults(keybindings_module) -> dict:
+    """Resolve keybinding defaults, empty in standalone mode when the
+    keybindings module was never imported (skipped on boot)."""
+    if keybindings_module is None:
+        return {}
+    return keybindings_module.get_default_bindings()
+
+
 def _resolve_task_id(state, identifier: str) -> str:
     """Resolve a task by canonical ID, legacy alias, or ID prefix.
 
@@ -5681,7 +5689,7 @@ async def main(connection=None):
             return {
                 "type": "global_settings",
                 "settings": asdict(state.global_settings),
-                "keybinding_defaults": keybindings.get_default_bindings(),
+                "keybinding_defaults": _get_keybinding_defaults(keybindings),
             }
 
         if cmd == "doctor":
