@@ -464,7 +464,8 @@ function _flushDeltaSurfaceRenderBatch() {
 
 function _queueDeltaSurfaceRender(flags) {
   if (!_surfaceInvalidationsAny(flags)) return;
-  if (typeof requestAnimationFrame !== 'function') {
+  if (!_standaloneDeltaOptimizationsEnabled()
+      || typeof requestAnimationFrame !== 'function') {
     _renderDeltaSurfaceInvalidations(flags);
     return;
   }
