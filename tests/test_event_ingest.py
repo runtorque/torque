@@ -30,12 +30,13 @@ from loom.events import (
     build_event_ingest_envelope,
 )
 try:
-    from helpers import install_aiohttp_stub
+    from helpers import FakeRequest, install_aiohttp_stub
 except ModuleNotFoundError:
-    from tests.helpers import install_aiohttp_stub
+    from tests.helpers import FakeRequest, install_aiohttp_stub
 
 install_aiohttp_stub(include_json_helpers=True)
 
+from loom.mcp import create_mcp_handler
 from loom.state import AgentCell, MatrixState
 from loom.server import (
     _configure_event_ingest_client,
@@ -518,6 +519,20 @@ class ApiAiReportMcpCaptureTests(unittest.IsolatedAsyncioTestCase):
             idempotency_key=base.get("idempotency_key", ""),
         )
 
+    async def _mirror_mcp(self, data, payload, *, tool_name="", idempotency_key=""):
+        async def ensure():
+            await _configure_event_ingest_client(self.client, self.state)
+
+        return await _mirror_api_ai_report_to_mcp_call_log(
+            data=data,
+            payload=payload,
+            state=self.state,
+            event_ingest_client=self.client,
+            ensure_event_ingest_configured=ensure,
+            idempotency_key=idempotency_key,
+            idempotency_scope=f"mcp:tools/call:{tool_name or 'loom'}",
+        )
+
     def _rows(self):
         return self.h.store.query(limit=50)
 
@@ -557,6 +572,68 @@ class ApiAiReportMcpCaptureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(op["call"]["tool_name"], "mcp__loom__loom_progress")
         self.assertEqual(self.cell.activity, "")
         self.assertEqual(self.cell.activity_detail, "secret worker note")
+
+    async def test_mcp_loom_tool_call_broadcasts_live_append_without_state_mutation(self):
+        self.cell.agent_type = "codex"
+        self.cell.status = "running"
+        self.cell.activity = ""
+        self.cell.activity_detail = "secret worker note"
+        ws = _FakeWsClient()
+        async with self.state._ws_clients_lock:
+            self.state._ws_clients.add(ws)
+        seen_payloads = []
+
+        async def handle_command(payload):
+            seen_payloads.append(dict(payload))
+            return {"type": "ok", "task_id": payload.get("task_id", "")}
+
+        handler = create_mcp_handler(
+            handle_command,
+            self.state,
+            ai_report_mirror=self._mirror_mcp,
+        )
+        response = await handler(FakeRequest(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "loom_progress",
+                    "arguments": {"message": "secret worker note"},
+                },
+            },
+            headers={"X-Loom-Cell-Id": self.cell.id},
+        ))
+
+        self.assertEqual(response.status, 200)
+        self.assertFalse(response.payload["result"]["isError"])
+        self.assertEqual(seen_payloads, [{
+            "cmd": "ai_report",
+            "cell_id": self.cell.id,
+            "action": "progress",
+            "message": "secret worker note",
+        }])
+        rows = self._rows()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["cell_id"], self.cell.id)
+        self.assertEqual(rows[0]["tool_name"], "mcp__loom__loom_progress")
+        self.assertEqual(rows[0]["hook_event_name"], "PostToolUse")
+        self.assertTrue(rows[0]["event"]["raw"]["loom_call_log_only"])
+        self.assertEqual(self.state._delta_ops, [])
+        self.assertEqual(len(ws.messages), 1)
+        op = ws.messages[0]["ops"][0]
+        self.assertEqual(op["op"], "mcp_call_append")
+        self.assertEqual(op["call"]["tool_name"], "mcp__loom__loom_progress")
+        self.assertEqual(op["call"]["cell_id"], self.cell.id)
+
+        event_log = EventLog()
+        bus = EventBus(self.state, event_log)
+        bus.start()
+        drainer = EventIngestDrainer(self.client, bus, self.state, batch_size=10)
+        self.assertEqual(await drainer.drain_once(), 1)
+        self.assertEqual(self.cell.activity, "")
+        self.assertEqual(self.cell.activity_detail, "secret worker note")
+        self.assertEqual(event_log.get(self.cell.id), [])
 
     async def test_ai_report_capture_redaction_modes_and_allowlist(self):
         await self._mirror(action="progress", idempotency_key="meta-progress")

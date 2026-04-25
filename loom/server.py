@@ -4422,6 +4422,7 @@ async def _mirror_api_ai_report_to_mcp_call_log(
     event_ingest_client,
     ensure_event_ingest_configured,
     idempotency_key: str = "",
+    idempotency_scope: str = "api:cmd:ai_report",
 ) -> dict | None:
     """Mirror successful /api/cmd ai_report writes into the MCP-call log."""
     try:
@@ -4452,7 +4453,7 @@ async def _mirror_api_ai_report_to_mcp_call_log(
             headers={"X-Loom-Cell-Id": cell_id},
         )
         mirror_key = (
-            f"api:cmd:ai_report:{cell_id}:"
+            f"{str(idempotency_scope or 'api:cmd:ai_report').strip()}:{cell_id}:"
             f"{str(idempotency_key or '').strip() or api_request_hash(data)}"
         )
         await ensure_event_ingest_configured()
@@ -11906,6 +11907,24 @@ async def main(connection=None):
             group=group, message=message, task_id=task_id)
         state._emit("event_append", **pe)
 
+    async def _mirror_mcp_ai_report_to_mcp_call_log(
+        data: dict,
+        payload: object,
+        *,
+        tool_name: str = "",
+        idempotency_key: str = "",
+    ) -> dict | None:
+        tool = str(tool_name or "").strip() or "loom"
+        return await _mirror_api_ai_report_to_mcp_call_log(
+            data=data,
+            payload=payload,
+            state=state,
+            event_ingest_client=event_ingest_client,
+            ensure_event_ingest_configured=_ensure_event_ingest_configured,
+            idempotency_key=idempotency_key,
+            idempotency_scope=f"mcp:tools/call:{tool}",
+        )
+
     async def _replay_failed_write(write: dict):
         endpoint = str(write.get("endpoint", "") or "")
         payload = dict(write.get("payload", {}) or {})
@@ -11921,6 +11940,7 @@ async def main(connection=None):
                 cell_id=str(write.get("caller_id", "") or ""),
                 handle_command=handle_command,
                 state=state,
+                ai_report_mirror=_mirror_mcp_ai_report_to_mcp_call_log,
             )
             if response.get("error"):
                 log.info(
@@ -12439,7 +12459,14 @@ async def main(connection=None):
             "/api/profile/synthetic_agents",
             handle_profile_synthetic_agents,
         )
-    app_server.router.add_post("/mcp", create_mcp_handler(handle_command, state))
+    app_server.router.add_post(
+        "/mcp",
+        create_mcp_handler(
+            handle_command,
+            state,
+            ai_report_mirror=_mirror_mcp_ai_report_to_mcp_call_log,
+        ),
+    )
     app_server.router.add_post("/api/upload", handle_upload)
     app_server.router.add_post("/api/upload/cleanup", handle_upload_cleanup)
     app_server.router.add_post("/api/attachment/upload", handle_attachment_upload)
