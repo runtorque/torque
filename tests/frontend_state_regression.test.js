@@ -13021,17 +13021,18 @@ test('hierarchical creation controls render shared quarter-height ghost-card cla
   assert.match(main.innerHTML, /class="ghost-card ghost-card--architect[\s\S]*\+ New Architect/);
 
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
-  assert.match(css, /--agent-grid-card-height:\s*100px;/);
+  assert.match(css, /--agent-grid-card-height:\s*126px;/);
+  assert.match(css, /--agent-grid-card-basis:\s*var\(--agent-engineer-column-width\);/);
   assert.match(css, /--agent-ghost-card-height:\s*calc\(var\(--agent-grid-card-height\) \/ 4\);/);
   assert.match(css, /\.ghost-card\s*\{[\s\S]*height:\s*var\(--agent-ghost-card-height\)/);
   assert.match(css, /\.ghost-card--architect\s*\{[\s\S]*width:\s*var\(--agent-architect-column-width\)/);
   assert.match(css, /\.ghost-card--engineer\s*\{[\s\S]*width:\s*var\(--agent-engineer-column-width\)/);
   assert.match(css, /\.ghost-card--worker\s*\{[\s\S]*flex:\s*0 1 var\(--agent-grid-card-basis\)/);
-  assert.match(css, /body\.runtime-embedded \.agent-grid\s*\{[\s\S]*--agent-grid-card-height:\s*112px;/);
-  assert.match(css, /\.agent-grid\s*\{[\s\S]*--agent-worker-card-height:\s*126px;/);
-  assert.match(css, /body\.runtime-embedded \.agent-grid\s*\{[\s\S]*--agent-worker-card-height:\s*132px;/);
+  assert.match(css, /body\.runtime-embedded \.agent-grid\s*\{[\s\S]*--agent-grid-card-height:\s*132px;/);
+  assert.match(css, /\.agent-grid\s*\{[\s\S]*--agent-worker-card-height:\s*var\(--agent-card-height\);/);
+  assert.match(css, /body\.runtime-embedded \.agent-grid\s*\{[\s\S]*--agent-worker-card-height:\s*var\(--agent-card-height\);/);
   assert.match(css, /body\.runtime-embedded \.cell\s*\{[^}]*padding:\s*13px 6px 12px;/);
-  assert.match(css, /body\.runtime-embedded \.cell\.worker\s*\{[^}]*min-height:\s*var\(--agent-worker-card-height,\s*132px\);/);
+  assert.match(css, /body\.runtime-embedded \.cell\.worker\s*\{[^}]*min-height:\s*var\(--agent-card-height,\s*132px\);/);
 });
 
 test('agents-grid v1.6 uses one-line metrics, action threshold labels, empty-row reclaim, and preserves scroll on rerender', () => {
@@ -13689,7 +13690,7 @@ test('main render anchors each architect once in a fixed left column with engine
     main.innerHTML,
     /principal-card--architect[\s\S]*Productmind/,
   );
-  assert.equal((sectionHtml.match(/class="engineer-row agent-grid-engineer-row"/g) || []).length, 3);
+  assert.equal((sectionHtml.match(/class="[^"]*\bengineer-row\b[^"]*\bagent-grid-engineer-row\b[^"]*"/g) || []).length, 3);
   assert.match(sectionHtml, /agent-section-body[\s\S]*Engineer One[\s\S]*Engineer Two[\s\S]*Engineer Three[\s\S]*\+ New Engineer/);
   assert.doesNotMatch(sectionHtml, /architect-header-row|agent-section-header-row/);
 });
@@ -14305,7 +14306,8 @@ test('task delta updates visible worker cycle state while preserving main-grid f
     });
   `);
 
-  assert.match(main.innerHTML, /task-1 · implementation/);
+  assert.match(main.innerHTML, /cell-worker-task">task-1/);
+  assert.match(main.innerHTML, /cell-worker-cycle">cycle: implementation/);
   assert.doesNotMatch(main.innerHTML, /task-1 · impl<\/div>/);
 
   currentButton.value = 'close draft';
@@ -14331,7 +14333,8 @@ test('task delta updates visible worker cycle state while preserving main-grid f
   `);
 
   assert.equal(renderCount, 2);
-  assert.match(main.innerHTML, /task-1 · review/);
+  assert.match(main.innerHTML, /cell-worker-task">task-1/);
+  assert.match(main.innerHTML, /cell-worker-cycle">cycle: review/);
   assert.doesNotMatch(main.innerHTML, /task-1 · impl<\/div>/);
   assert.equal(currentButton.focused, true);
   assert.equal(currentButton.value, 'close draft');

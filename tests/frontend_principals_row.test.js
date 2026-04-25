@@ -195,14 +195,25 @@ test('principal-card-new CSS preserves dimensions when wrapped (LOOM:209 regress
   assert.ok(newCardRule, '.principal-card-new rule exists in style.css');
   assert.match(newCardRule[0], /height:\s*auto/,
     '.principal-card-new overrides .ghost-card height with `height: auto`');
-  assert.match(newCardRule[0], /min-height:\s*var\(--agent-principal-card-height,\s*94px\)/,
-    '.principal-card-new sets min-height from the shared principal card height');
+  assert.match(newCardRule[0], /min-height:\s*var\(--agent-card-height,\s*126px\)/,
+    '.principal-card-new sets min-height from the shared non-user card height');
 });
 
 test('agent card density CSS uses taller narrower cards in classic and runtime-embedded modes', () => {
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
   const gridRule = css.match(/\.agent-grid\s*\{[^}]*\}/);
+  const workerFlexRule = css.match(/\.engineer-row-workers > \.cell,\s*\.loose-workers-strip > \.cell,\s*\.ghost-card--worker\s*\{[^}]*\}/);
+  const principalRule = css.match(/\.principal-card\s*\{[^}]*\}/);
+  const userPrincipalRule = css.match(/\.principal-card--user\s*\{[^}]*\}/);
   const cellRule = css.match(/^\.cell\s*\{[^}]*\}/m);
+  const architectCellRule = Array.from(
+    css.matchAll(/^\.cell\.architect\s*\{[^}]*\}/gm),
+    (match) => match[0],
+  ).find((rule) => /min-height:/.test(rule));
+  const engineerCellRule = Array.from(
+    css.matchAll(/^\.cell\.engineer\s*\{[^}]*\}/gm),
+    (match) => match[0],
+  ).find((rule) => /min-height:/.test(rule));
   const workerCellRule = css.match(/^\.cell\.worker\s*\{[^}]*\}/m);
   const workerRowRule = css.match(/^\.engineer-row-workers\s*\{[^}]*\}/m);
   const runtimeGridRule = css.match(/body\.runtime-embedded \.agent-grid\s*\{[^}]*\}/);
@@ -217,7 +228,12 @@ test('agent card density CSS uses taller narrower cards in classic and runtime-e
   const runtimeWorkerRowRule = css.match(/body\.runtime-embedded \.engineer-row-workers\s*\{[^}]*\}/);
 
   assert.ok(gridRule, '.agent-grid rule exists');
+  assert.ok(workerFlexRule, 'worker flex sizing rule exists');
+  assert.ok(principalRule, '.principal-card rule exists');
+  assert.ok(userPrincipalRule, '.principal-card--user rule exists');
   assert.ok(cellRule, '.cell rule exists');
+  assert.ok(architectCellRule, '.cell.architect rule exists');
+  assert.ok(engineerCellRule, '.cell.engineer rule exists');
   assert.ok(workerCellRule, '.cell.worker rule exists');
   assert.ok(workerRowRule, '.engineer-row-workers rule exists');
   assert.ok(runtimeGridRule, 'runtime-embedded .agent-grid rule exists');
@@ -228,22 +244,34 @@ test('agent card density CSS uses taller narrower cards in classic and runtime-e
 
   assert.match(gridRule[0], /--agent-architect-column-width:\s*77px;/);
   assert.match(gridRule[0], /--agent-engineer-column-width:\s*77px;/);
-  assert.match(gridRule[0], /--agent-grid-card-basis:\s*70px;/);
-  assert.match(gridRule[0], /--agent-principal-card-height:\s*94px;/);
-  assert.match(gridRule[0], /--agent-engineer-card-height:\s*106px;/);
-  assert.match(gridRule[0], /--agent-worker-card-height:\s*126px;/);
-  assert.match(cellRule[0], /min-height:\s*var\(--agent-principal-card-height,\s*94px\);/);
+  assert.match(gridRule[0], /--agent-grid-card-basis:\s*var\(--agent-engineer-column-width\);/);
+  assert.match(gridRule[0], /--agent-grid-card-height:\s*126px;/);
+  assert.match(gridRule[0], /--agent-card-height:\s*var\(--agent-grid-card-height\);/);
+  assert.match(gridRule[0], /--agent-user-card-height:\s*74px;/);
+  assert.match(gridRule[0], /--agent-principal-card-height:\s*var\(--agent-card-height\);/);
+  assert.match(gridRule[0], /--agent-engineer-card-height:\s*var\(--agent-card-height\);/);
+  assert.match(gridRule[0], /--agent-worker-card-height:\s*var\(--agent-card-height\);/);
+  assert.match(workerFlexRule[0], /flex:\s*0 1 var\(--agent-grid-card-basis\);/);
+  assert.match(workerFlexRule[0], /min-width:\s*var\(--agent-grid-card-min\);/);
+  assert.match(workerFlexRule[0], /max-width:\s*var\(--agent-grid-card-max\);/);
+  assert.match(principalRule[0], /width:\s*var\(--agent-architect-column-width\);/);
+  assert.match(principalRule[0], /min-height:\s*var\(--agent-principal-card-height,\s*126px\);/);
+  assert.match(userPrincipalRule[0], /min-height:\s*var\(--agent-user-card-height,\s*74px\);/);
+  assert.match(cellRule[0], /min-height:\s*var\(--agent-card-height,\s*126px\);/);
   assert.match(cellRule[0], /padding:\s*13px 6px 12px;/);
-  assert.match(workerCellRule[0], /min-height:\s*var\(--agent-worker-card-height,\s*126px\);/);
+  assert.match(architectCellRule, /min-height:\s*var\(--agent-card-height,\s*126px\);/);
+  assert.match(engineerCellRule, /min-height:\s*var\(--agent-card-height,\s*126px\);/);
+  assert.match(workerCellRule[0], /min-height:\s*var\(--agent-card-height,\s*126px\);/);
   assert.match(workerRowRule[0], /min-height:\s*var\(--agent-worker-card-height,\s*126px\);/);
   assert.match(runtimeGridRule[0], /--agent-architect-column-width:\s*106px;/);
   assert.match(runtimeGridRule[0], /--agent-engineer-column-width:\s*106px;/);
-  assert.match(runtimeGridRule[0], /--agent-grid-card-basis:\s*92px;/);
-  assert.match(runtimeGridRule[0], /--agent-worker-card-height:\s*132px;/);
-  assert.match(runtimeCellHeightRule[0], /min-height:\s*var\(--agent-principal-card-height,\s*100px\);/);
+  assert.match(runtimeGridRule[0], /--agent-grid-card-basis:\s*var\(--agent-engineer-column-width\);/);
+  assert.match(runtimeGridRule[0], /--agent-grid-card-height:\s*132px;/);
+  assert.match(runtimeGridRule[0], /--agent-user-card-height:\s*80px;/);
+  assert.match(runtimeCellHeightRule[0], /min-height:\s*var\(--agent-card-height,\s*132px\);/);
   assert.match(runtimeCellPaddingRule, /padding:\s*13px 6px 12px;/);
-  assert.match(runtimeWorkerCellRule[0], /min-height:\s*var\(--agent-worker-card-height,\s*132px\);/);
-  assert.match(runtimeWorkerRowRule[0], /min-height:\s*var\(--agent-worker-card-height,\s*132px\);/);
+  assert.match(runtimeWorkerCellRule[0], /min-height:\s*var\(--agent-card-height,\s*132px\);/);
+  assert.match(runtimeWorkerRowRule[0], /min-height:\s*var\(--agent-card-height,\s*132px\);/);
 
   assert.doesNotMatch(css, /--agent-architect-column-width:\s*96px;/);
   assert.doesNotMatch(css, /--agent-architect-column-width:\s*132px;/);
