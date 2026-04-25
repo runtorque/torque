@@ -708,6 +708,22 @@ function _agentCardTooltipHtml(text, maxChars, className, attrs) {
     + '</span>';
 }
 
+function _agentCardLatestMcpMessage(agent) {
+  const messages = agent && Array.isArray(agent.mcp_messages)
+    ? agent.mcp_messages : [];
+  let latest = null;
+  let latestTs = 0;
+  for (let i = 0; i < messages.length; i++) {
+    const entry = messages[i] || {};
+    const ts = _agentCardTimestampSeconds(entry.timestamp);
+    if (!latest || ts > latestTs || (ts === latestTs && i === 0)) {
+      latest = entry;
+      latestTs = ts;
+    }
+  }
+  return latest ? { entry: latest, timestamp: latestTs } : null;
+}
+
 function _agentProviderMeta(provider) {
   const key = String(provider || '').trim().toLowerCase();
   if (key === 'claude-code') {
@@ -754,11 +770,67 @@ function _agentDisplayName(agent) {
 
 function _agentCardLastActionValue(agent) {
   if (!agent) return 0;
-  return agent.last_activity_at
+  const latestMcp = _agentCardLatestMcpMessage(agent);
+  return agent.last_action_at
+    || (latestMcp && latestMcp.timestamp)
+    || agent.last_progress_at
     || agent.last_event_at
+    || agent.last_activity_at
     || agent.updated_at
     || agent.created_at
     || 0;
+}
+
+function _agentCardActionTextFromMcp(entry) {
+  if (!entry) return '';
+  const action = String(entry.action || '').trim();
+  const message = String(entry.message || '').trim();
+  if (action === 'progress' && message) return message;
+  if (action === 'derive') {
+    if (message) return message;
+    return 'derived follow-up';
+  }
+  if (action === 'verify') return message || 'verified';
+  if (action === 'ask') return message || 'asked for input';
+  if (action === 'blocked') return message || 'blocked';
+  if (action === 'error') return message || 'error';
+  if (action === 'done') return message && message !== 'Done' ? message : 'done';
+  if (action === 'ready') return message && message !== 'Ready' ? message : 'ready';
+  return message || action;
+}
+
+function _agentCardFallbackActionText(agent) {
+  if (!agent) return '—';
+  const activity = String(agent.activity || '').trim();
+  if (activity === 'tool_call') return 'working';
+  if (activity === 'waiting') return 'waiting';
+  if (activity === 'thinking' || activity === 'writing') return 'working';
+  const status = String(agent.status || '').trim();
+  if (status === 'running') return 'working';
+  if (agent.needs_attention) return 'needs attention';
+  return 'idle';
+}
+
+function _agentCardLastActionInfo(agent) {
+  const latestMcp = _agentCardLatestMcpMessage(agent);
+  const text = String(
+    (agent && agent.activity_detail)
+    || (latestMcp ? _agentCardActionTextFromMcp(latestMcp.entry) : '')
+    || (agent && agent.last_event_text)
+    || _agentCardFallbackActionText(agent)
+  ).trim() || '—';
+  return {
+    text,
+    timestamp: _agentCardTimestampSeconds(_agentCardLastActionValue(agent)),
+  };
+}
+
+function _agentCardCurrentOrLastActionLabel(agent) {
+  const info = _agentCardLastActionInfo(agent);
+  if (!info.timestamp) return 'Last action: ' + info.text;
+  const age = Math.max(0, Math.floor((Date.now() / 1000) - info.timestamp));
+  if (age < 60) return info.text;
+  return 'Last action: ' + info.text + ' ' + _agentCardCompactRelativeTime(info.timestamp);
 }
 
 function _agentTaskForCard(agent) {
@@ -1067,10 +1139,12 @@ function _renderPrincipalUserCard(groupName, section, selectedPrincipalId) {
     + '<span class="principal-card-status idle" aria-hidden="true"></span>'
     + '<div class="principal-card-body">'
     + '<span class="principal-card-name">User</span>'
-    + '<span class="principal-card-line principal-card-line--stats">'
-      + esc(stats.engineerCount + ' engineers · ' + stats.backlogCount + ' backlog')
+    + '<span class="principal-card-line principal-card-line--engineers">'
+      + esc(stats.engineerCount + ' engineers')
     + '</span>'
-    + '<span class="principal-card-line principal-card-line--empty">&nbsp;</span>'
+    + '<span class="principal-card-line principal-card-line--backlog">'
+      + esc(stats.backlogCount + ' backlog')
+    + '</span>'
     + '</div>'
     + '<span class="principal-card-kind principal-card-kind--owner">Owner</span>'
     + '</button>';
@@ -1091,6 +1165,7 @@ function _renderPrincipalArchitectCard(groupName, section, selectedPrincipalId) 
   const idArg = _jsStringAttr(id);
   const statusCls = typeof agentStatusClass === 'function' ? agentStatusClass(architect) : '';
   const stats = _architectStatsForCard(architect, section);
+  const actionLabel = _agentCardCurrentOrLastActionLabel(architect);
   const digestSettings = (state && state.agent_digest_settings)
     ? state.agent_digest_settings[id] : null;
   const digestPaused = !!(digestSettings && digestSettings.paused);
@@ -1122,10 +1197,12 @@ function _renderPrincipalArchitectCard(groupName, section, selectedPrincipalId) 
     + '<span class="principal-card-status ' + esc(statusCls) + '" aria-hidden="true"></span>'
     + '<div class="principal-card-body">'
     + '<span class="principal-card-name">' + esc(displayName) + '</span>'
-    + '<span class="principal-card-line principal-card-line--stats">'
-      + esc(stats.engineerCount + ' engineers · ' + stats.decisionCount + ' decisions')
+    + '<span class="principal-card-line principal-card-line--engineers">'
+      + esc(stats.engineerCount + ' engineers')
     + '</span>'
-    + '<span class="principal-card-line">' + esc(_architectLastDecisionLabel(stats)) + '</span>'
+    + '<span class="principal-card-line principal-card-line--action" title="' + esc(actionLabel) + '">'
+      + esc(actionLabel)
+    + '</span>'
     + '</div>'
     + _renderAgentProviderBadge(architect.agent_type, 'principal-card-provider')
     + '<span class="principal-card-kind principal-card-kind--architect">Architect</span>'
@@ -1541,12 +1618,15 @@ function _renderSectionControlsSlot(groupName, section, opts) {
 
 function _renderEngineerRow(row, renderCell) {
   if (!row || !row.engineer) return '';
-  let html = '<div class="engineer-row agent-grid-engineer-row"'
+  const workers = row.workers || [];
+  const rowClasses = ['engineer-row', 'agent-grid-engineer-row'];
+  if (!workers.length) rowClasses.push('engineer-row--empty-workers');
+  let html = '<div class="' + esc(rowClasses.join(' ')) + '"'
     + ' data-agent-row-shape="engineer-row"'
+    + ' data-worker-count="' + esc(String(workers.length)) + '"'
     + ' data-engineer-id="' + esc(row.engineer.id || '') + '">';
   html += '<div class="engineer-row-anchor">' + renderCell(row.engineer) + '</div>';
   html += '<div class="engineer-row-workers">';
-  const workers = row.workers || [];
   for (const worker of workers) html += renderCell(worker);
   html += '</div>';
   html += '</div>';
@@ -2495,17 +2575,20 @@ function _renderWorkerCardBody(a) {
   const cycle = _taskCycleState(task, a);
   const slug = a.slug || a.name || a.id || '';
   const branch = _workerBranchLabel(a);
-  const last = _agentCardCompactRelativeTime(_agentCardLastActionValue(a));
+  const actionLabel = _agentCardCurrentOrLastActionLabel(a);
   let html = '<div class="agent-card-body cell-body cell-body--worker">';
   html += _agentCardTooltipHtml(slug, 14, 'cell-name cell-worker-slug', 'data-worker-slug="' + esc(slug) + '"');
   html += '<div class="agent-card-line cell-task cell-worker-task">'
-    + esc((taskId || 'no task') + ' · ' + cycle)
+    + esc(taskId || 'no task')
+    + '</div>';
+  html += '<div class="agent-card-line cell-worker-cycle">'
+    + esc('cycle: ' + cycle)
     + '</div>';
   html += '<div class="agent-card-line cell-worker-diff">' + esc(_workerDiffLabel(a)) + '</div>';
   html += '<div class="agent-card-line cell-worker-branch">'
     + _agentCardTooltipHtml(branch, 18, 'cell-worker-branch-name', 'data-worktree-branch="' + esc(a.worktree_branch || a.current_branch || '') + '"')
     + '</div>';
-  html += '<div class="agent-card-line cell-worker-activity">' + esc('last action ' + last) + '</div>';
+  html += '<div class="agent-card-line cell-worker-activity" title="' + esc(actionLabel) + '">' + esc(actionLabel) + '</div>';
   html += '</div>';
   return html;
 }
@@ -2513,7 +2596,7 @@ function _renderWorkerCardBody(a) {
 function _renderEngineerCardBody(a, askingText) {
   const workers = _workersForEngineer(a.id);
   const queueDepth = _engineerQueueDepth(a.id);
-  const last = _agentCardCompactRelativeTime(_agentCardLastActionValue(a));
+  const actionLabel = _agentCardCurrentOrLastActionLabel(a);
   const workerLabel = workers.length === 1 ? 'worker' : 'workers';
   let html = '<div class="agent-card-body cell-body cell-body--engineer">';
   html += '<div class="agent-card-line cell-name">' + esc(_agentDisplayName(a)) + '</div>';
@@ -2522,7 +2605,10 @@ function _renderEngineerCardBody(a, askingText) {
     + '<span class="agent-card-state-count">' + esc(String(workers.length) + ' ' + workerLabel) + '</span>'
     + '</div>';
   html += '<div class="agent-card-line cell-engineer-queue">'
-    + esc('queue: ' + queueDepth + ' · last action ' + last)
+    + esc('queue: ' + queueDepth)
+    + '</div>';
+  html += '<div class="agent-card-line cell-engineer-activity" title="' + esc(actionLabel) + '">'
+    + esc(actionLabel)
     + '</div>';
   if (askingText) {
     html += '<div class="agent-card-line cell-engineer-ask" title="' + esc(askingText) + '">awaiting input</div>';
@@ -2533,12 +2619,13 @@ function _renderEngineerCardBody(a, askingText) {
 
 function _renderArchitectCellBody(a) {
   const stats = _architectStatsForCard(a, null);
+  const actionLabel = _agentCardCurrentOrLastActionLabel(a);
   let html = '<div class="agent-card-body cell-body cell-body--architect">';
   html += '<div class="agent-card-line cell-name">' + esc(_agentDisplayName(a)) + '</div>';
   html += '<div class="agent-card-line cell-architect-stats">'
-    + esc(stats.engineerCount + ' engineers · ' + stats.decisionCount + ' decisions')
+    + esc(stats.engineerCount + ' engineers')
     + '</div>';
-  html += '<div class="agent-card-line cell-architect-last">' + esc(_architectLastDecisionLabel(stats)) + '</div>';
+  html += '<div class="agent-card-line cell-architect-activity" title="' + esc(actionLabel) + '">' + esc(actionLabel) + '</div>';
   html += '</div>';
   return html;
 }
@@ -2552,7 +2639,8 @@ function _renderGenericAgentCardBody(a) {
   } else {
     html += '<div class="agent-card-line cell-task cell-task-empty">&nbsp;</div>';
   }
-  html += '<div class="agent-card-line cell-generic-activity">' + esc('last action ' + _agentCardCompactRelativeTime(_agentCardLastActionValue(a))) + '</div>';
+  const actionLabel = _agentCardCurrentOrLastActionLabel(a);
+  html += '<div class="agent-card-line cell-generic-activity" title="' + esc(actionLabel) + '">' + esc(actionLabel) + '</div>';
   html += '</div>';
   return html;
 }

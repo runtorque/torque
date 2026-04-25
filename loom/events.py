@@ -174,6 +174,11 @@ def check_engineer_queue_empty(state, event_bus: "EventBus",
         )
         state._emit("event_append", **pe)
         engineer.queue_empty_emitted = True
+        engineer.last_event_text = "queue_empty"
+        try:
+            engineer.mark_heartbeat(now)
+        except Exception:
+            log.exception("failed to mark queue-empty heartbeat for %s", engineer.id)
         state._db_save_agent(engineer)
         state._emit_agent(engineer)
         changed = True

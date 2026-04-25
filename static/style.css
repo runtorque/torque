@@ -246,12 +246,18 @@ body.runtime-embedded #standalone-float-layer {
   overflow: hidden;
   /* Hoisted from .agent-grid so .principals-row (sibling of .agent-grid)
      can also resolve the architect column width. */
-  --agent-architect-column-width: 96px;
-  --agent-engineer-column-width: 96px;
+  --agent-architect-column-width: 77px;
+  --agent-engineer-column-width: 77px;
+  --agent-principal-card-height: 94px;
+  --agent-engineer-card-height: 106px;
+  --agent-worker-card-height: 126px;
 }
 body.runtime-embedded .group-body-inner {
-  --agent-architect-column-width: 132px;
-  --agent-engineer-column-width: 132px;
+  --agent-architect-column-width: 106px;
+  --agent-engineer-column-width: 106px;
+  --agent-principal-card-height: 100px;
+  --agent-engineer-card-height: 112px;
+  --agent-worker-card-height: 132px;
 }
 .group-btn {
   font-size: 12px; color: var(--text-dim);
@@ -621,13 +627,15 @@ body.runtime-embedded .terminal-empty {
 /* Agent grid                                                          */
 /* ------------------------------------------------------------------ */
 .agent-grid {
-  --agent-architect-column-width: 96px;
-  --agent-engineer-column-width: 96px;
-  --agent-grid-card-basis: 86px;
-  --agent-grid-card-min: 72px;
-  --agent-grid-card-max: 112px;
-  --agent-grid-card-height: 90px;
-  --agent-worker-card-height: 96px;
+  --agent-architect-column-width: 77px;
+  --agent-engineer-column-width: 77px;
+  --agent-grid-card-basis: 70px;
+  --agent-grid-card-min: 62px;
+  --agent-grid-card-max: 96px;
+  --agent-grid-card-height: 100px;
+  --agent-principal-card-height: 94px;
+  --agent-engineer-card-height: 106px;
+  --agent-worker-card-height: 126px;
   --agent-ghost-card-height: calc(var(--agent-grid-card-height) / 4);
   display: flex;
   flex-direction: column;
@@ -669,12 +677,12 @@ body.runtime-embedded .terminal-empty {
 .agent-section-body {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 5px;
   min-width: 0;
 }
 .agent-grid .engineer-row {
   display: flex;
-  gap: 7px;
+  gap: 6px;
   align-items: start;
   min-width: 0;
 }
@@ -687,15 +695,24 @@ body.runtime-embedded .terminal-empty {
 }
 .agent-grid .engineer-row + .engineer-row {
   border-top: 1px solid color-mix(in srgb, var(--border) 62%, transparent);
-  padding-top: 7px;
+  padding-top: 5px;
 }
 .loose-workers-strip + .engineer-row {
   border-top: 1px solid color-mix(in srgb, var(--border) 62%, transparent);
-  padding-top: 7px;
+  padding-top: 5px;
 }
 .engineer-row-anchor {
   flex: 0 0 var(--agent-engineer-column-width);
   min-width: 0;
+}
+.agent-grid .engineer-row.engineer-row--empty-workers {
+  display: block;
+}
+.agent-grid .engineer-row.engineer-row--empty-workers .engineer-row-anchor {
+  width: 100%;
+}
+.agent-grid .engineer-row.engineer-row--empty-workers .engineer-row-workers {
+  display: none;
 }
 .engineer-row-workers,
 .loose-workers-strip {
@@ -709,7 +726,7 @@ body.runtime-embedded .terminal-empty {
 }
 .engineer-row-workers {
   flex: 1 1 auto;
-  min-height: var(--agent-worker-card-height, 96px);
+  min-height: var(--agent-worker-card-height, 126px);
 }
 .engineer-row-workers:empty {
   min-height: 0;
@@ -734,7 +751,7 @@ body.runtime-embedded .terminal-empty {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 64px;
+  min-height: var(--agent-principal-card-height, 94px);
   padding: 10px 4px 6px;
   box-sizing: border-box;
   background: color-mix(in srgb, var(--bg-cell) 68%, transparent);
@@ -850,7 +867,7 @@ body.runtime-embedded .terminal-empty {
   justify-content: center;
   gap: 1px;
   width: var(--agent-architect-column-width);
-  min-height: 74px;
+  min-height: var(--agent-principal-card-height, 94px);
   padding: 13px 6px 12px;
   box-sizing: border-box;
   background: color-mix(in srgb, var(--bg-cell) 68%, transparent);
@@ -912,14 +929,14 @@ body.runtime-embedded .terminal-empty {
   position: absolute;
   right: 3px;
   bottom: 2px;
-  padding: 0 5px;
+  padding: 0 4px;
   border: 1px solid color-mix(in srgb, var(--text-dim) 34%, transparent);
   border-radius: 999px;
   color: var(--text-dim);
-  font-size: 7px;
+  font-size: 6.5px;
   font-weight: 700;
   line-height: 1.4;
-  letter-spacing: .01em;
+  letter-spacing: 0;
   text-transform: none;
 }
 .principal-card--architect .principal-card-kind {
@@ -939,7 +956,7 @@ body.runtime-embedded .terminal-empty {
   border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
   border-radius: 999px;
   color: var(--text-dim);
-  font-size: 7px;
+  font-size: 6.5px;
   font-weight: 700;
   line-height: 1.4;
   letter-spacing: .03em;
@@ -955,11 +972,11 @@ body.runtime-embedded .terminal-empty {
      own row preserves the populated principal-card height instead of collapsing
      to the short ghost-card height. (LOOM:209) */
   height: auto;
-  min-height: 74px;
+  min-height: var(--agent-principal-card-height, 94px);
 }
 @media (max-width: 400px) {
   .principal-card-new {
-    min-height: 70px;
+    min-height: 90px;
   }
 }
 .principal-card-controls {
@@ -1031,7 +1048,7 @@ body.runtime-embedded .terminal-empty {
     padding: 3px 6px 5px;
   }
   .principal-card {
-    min-height: 70px;
+    min-height: 90px;
     padding: 12px 5px 11px;
   }
 }
@@ -1061,7 +1078,7 @@ body.runtime-embedded .terminal-empty {
   box-sizing: border-box;
   color: var(--text-dim);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  font-size: 7px;
+  font-size: 6.5px;
   font-weight: 500;
   line-height: 1.4;
   letter-spacing: .01em;
@@ -1180,7 +1197,7 @@ body.runtime-embedded .terminal-empty {
   border-radius: var(--radius);
   cursor: pointer;
   transition: background .15s, border-color .15s, box-shadow .15s;
-  min-height: 74px;
+  min-height: var(--agent-principal-card-height, 94px);
   box-sizing: border-box;
 }
 .cell:hover { background: var(--bg-hover); }
@@ -1214,11 +1231,13 @@ body.runtime-embedded .terminal-empty {
   color: var(--text-dim);
 }
 .cell.worker {
-  min-height: var(--agent-worker-card-height, 96px);
+  min-height: var(--agent-worker-card-height, 126px);
 }
-.cell.architect,
+.cell.architect {
+  min-height: var(--agent-principal-card-height, 94px);
+}
 .cell.engineer {
-  min-height: 74px;
+  min-height: var(--agent-engineer-card-height, 106px);
 }
 .cell-engineer-ask {
   font-size: 8px;
@@ -1428,11 +1447,13 @@ body.runtime-embedded .terminal-empty {
 }
 .cell-worker-diff,
 .cell-worker-branch,
+.cell-worker-cycle,
 .cell-worker-activity,
 .cell-engineer-workers,
 .cell-engineer-queue,
+.cell-engineer-activity,
 .cell-architect-stats,
-.cell-architect-last,
+.cell-architect-activity,
 .cell-generic-activity {
   color: var(--text-dim);
 }
@@ -1462,70 +1483,70 @@ body.runtime-embedded .terminal-empty {
   position: absolute;
   bottom: 2px;
   right: 3px;
-  font-size: 7px;
-  letter-spacing: .01em;
+  font-size: 6.5px;
+  letter-spacing: 0;
   font-weight: 700;
   color: var(--accent);
   background: rgba(88, 166, 255, 0.12);
   border: 1px solid rgba(88, 166, 255, 0.24);
   border-radius: 999px;
-  padding: 0 5px;
+  padding: 0 4px;
   line-height: 1.4;
 }
 .cell-architect-badge {
   position: absolute;
   bottom: 2px;
   right: 3px;
-  font-size: 7px;
-  letter-spacing: .01em;
+  font-size: 6.5px;
+  letter-spacing: 0;
   font-weight: 700;
   color: #1f1300;
   background: color-mix(in srgb, var(--amber) 82%, white);
   border: 1px solid color-mix(in srgb, var(--amber) 58%, transparent);
   border-radius: 999px;
-  padding: 0 5px;
+  padding: 0 4px;
   line-height: 1.4;
 }
 .cell-worker-badge {
   position: absolute;
   bottom: 2px;
   right: 3px;
-  font-size: 7px;
-  letter-spacing: .01em;
+  font-size: 6.5px;
+  letter-spacing: 0;
   font-weight: 700;
   color: var(--text-dim);
   background: color-mix(in srgb, var(--text-dim) 11%, transparent);
   border: 1px solid color-mix(in srgb, var(--text-dim) 22%, transparent);
   border-radius: 999px;
-  padding: 0 5px;
+  padding: 0 4px;
   line-height: 1.4;
 }
 .cell-agent-badge {
   position: absolute;
   bottom: 2px;
   right: 3px;
-  font-size: 7px;
-  letter-spacing: .01em;
+  font-size: 6.5px;
+  letter-spacing: 0;
   font-weight: 700;
   color: var(--text-dim);
   background: color-mix(in srgb, var(--text-dim) 10%, transparent);
   border: 1px solid color-mix(in srgb, var(--text-dim) 22%, transparent);
   border-radius: 999px;
-  padding: 0 5px;
+  padding: 0 4px;
   line-height: 1.4;
 }
 .cell-dismissed-badge {
   position: absolute;
   bottom: 2px;
   right: 3px;
-  font-size: 7px;
-  letter-spacing: .01em;
+  font-size: 6.5px;
+  letter-spacing: 0;
   font-weight: 700;
   color: var(--text-dim);
   background: color-mix(in srgb, var(--text-dim) 13%, transparent);
   border: 1px solid color-mix(in srgb, var(--text-dim) 24%, transparent);
   border-radius: 999px;
-  padding: 0 5px;
+  padding: 0 4px;
   line-height: 1.4;
 }
 .cell-term-count {
@@ -2040,12 +2061,14 @@ body.runtime-embedded .group-body-inner {
   padding-bottom: 2px;
 }
 body.runtime-embedded .agent-grid {
-  --agent-architect-column-width: 132px;
-  --agent-engineer-column-width: 132px;
-  --agent-grid-card-basis: 112px;
-  --agent-grid-card-max: 140px;
-  --agent-grid-card-height: 90px;
-  --agent-worker-card-height: 96px;
+  --agent-architect-column-width: 106px;
+  --agent-engineer-column-width: 106px;
+  --agent-grid-card-basis: 92px;
+  --agent-grid-card-max: 118px;
+  --agent-grid-card-height: 112px;
+  --agent-principal-card-height: 100px;
+  --agent-engineer-card-height: 112px;
+  --agent-worker-card-height: 132px;
   gap: 8px;
   padding: 9px 11px;
 }
@@ -2057,16 +2080,19 @@ body.runtime-embedded .ghost-card--worker {
 }
 body.runtime-embedded .agent-section-user-card,
 body.runtime-embedded .cell {
-  min-height: 74px;
+  min-height: var(--agent-principal-card-height, 100px);
 }
 body.runtime-embedded .engineer-row-workers {
-  min-height: var(--agent-worker-card-height, 96px);
+  min-height: var(--agent-worker-card-height, 132px);
 }
 body.runtime-embedded .cell {
   padding: 13px 6px 12px;
 }
 body.runtime-embedded .cell.worker {
-  min-height: var(--agent-worker-card-height, 96px);
+  min-height: var(--agent-worker-card-height, 132px);
+}
+body.runtime-embedded .cell.engineer {
+  min-height: var(--agent-engineer-card-height, 112px);
 }
 body.runtime-embedded .cell-task {
   display: block;
