@@ -195,14 +195,25 @@ test('principal-card-new CSS preserves dimensions when wrapped (LOOM:209 regress
   assert.ok(newCardRule, '.principal-card-new rule exists in style.css');
   assert.match(newCardRule[0], /height:\s*auto/,
     '.principal-card-new overrides .ghost-card height with `height: auto`');
-  assert.match(newCardRule[0], /min-height:\s*74px/,
-    '.principal-card-new sets min-height: 74px to match populated principal cards');
+  assert.match(newCardRule[0], /min-height:\s*var\(--agent-card-height,\s*126px\)/,
+    '.principal-card-new sets min-height from the shared non-user card height');
 });
 
-test('agent card density CSS stays tight in classic and runtime-embedded modes', () => {
+test('agent card density CSS uses taller narrower cards in classic and runtime-embedded modes', () => {
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
   const gridRule = css.match(/\.agent-grid\s*\{[^}]*\}/);
+  const workerFlexRule = css.match(/\.engineer-row-workers > \.cell,\s*\.loose-workers-strip > \.cell,\s*\.ghost-card--worker\s*\{[^}]*\}/);
+  const principalRule = css.match(/\.principal-card\s*\{[^}]*\}/);
+  const userPrincipalRule = css.match(/\.principal-card--user\s*\{[^}]*\}/);
   const cellRule = css.match(/^\.cell\s*\{[^}]*\}/m);
+  const architectCellRule = Array.from(
+    css.matchAll(/^\.cell\.architect\s*\{[^}]*\}/gm),
+    (match) => match[0],
+  ).find((rule) => /min-height:/.test(rule));
+  const engineerCellRule = Array.from(
+    css.matchAll(/^\.cell\.engineer\s*\{[^}]*\}/gm),
+    (match) => match[0],
+  ).find((rule) => /min-height:/.test(rule));
   const workerCellRule = css.match(/^\.cell\.worker\s*\{[^}]*\}/m);
   const workerRowRule = css.match(/^\.engineer-row-workers\s*\{[^}]*\}/m);
   const runtimeGridRule = css.match(/body\.runtime-embedded \.agent-grid\s*\{[^}]*\}/);
@@ -217,7 +228,12 @@ test('agent card density CSS stays tight in classic and runtime-embedded modes',
   const runtimeWorkerRowRule = css.match(/body\.runtime-embedded \.engineer-row-workers\s*\{[^}]*\}/);
 
   assert.ok(gridRule, '.agent-grid rule exists');
+  assert.ok(workerFlexRule, 'worker flex sizing rule exists');
+  assert.ok(principalRule, '.principal-card rule exists');
+  assert.ok(userPrincipalRule, '.principal-card--user rule exists');
   assert.ok(cellRule, '.cell rule exists');
+  assert.ok(architectCellRule, '.cell.architect rule exists');
+  assert.ok(engineerCellRule, '.cell.engineer rule exists');
   assert.ok(workerCellRule, '.cell.worker rule exists');
   assert.ok(workerRowRule, '.engineer-row-workers rule exists');
   assert.ok(runtimeGridRule, 'runtime-embedded .agent-grid rule exists');
@@ -226,19 +242,39 @@ test('agent card density CSS stays tight in classic and runtime-embedded modes',
   assert.ok(runtimeWorkerCellRule, 'runtime-embedded .cell.worker rule exists');
   assert.ok(runtimeWorkerRowRule, 'runtime-embedded .engineer-row-workers rule exists');
 
-  assert.match(gridRule[0], /--agent-worker-card-height:\s*96px;/);
-  assert.match(cellRule[0], /min-height:\s*74px;/);
+  assert.match(gridRule[0], /--agent-architect-column-width:\s*77px;/);
+  assert.match(gridRule[0], /--agent-engineer-column-width:\s*77px;/);
+  assert.match(gridRule[0], /--agent-grid-card-basis:\s*var\(--agent-engineer-column-width\);/);
+  assert.match(gridRule[0], /--agent-grid-card-height:\s*126px;/);
+  assert.match(gridRule[0], /--agent-card-height:\s*var\(--agent-grid-card-height\);/);
+  assert.match(gridRule[0], /--agent-user-card-height:\s*74px;/);
+  assert.match(gridRule[0], /--agent-principal-card-height:\s*var\(--agent-card-height\);/);
+  assert.match(gridRule[0], /--agent-engineer-card-height:\s*var\(--agent-card-height\);/);
+  assert.match(gridRule[0], /--agent-worker-card-height:\s*var\(--agent-card-height\);/);
+  assert.match(workerFlexRule[0], /flex:\s*0 1 var\(--agent-grid-card-basis\);/);
+  assert.match(workerFlexRule[0], /min-width:\s*var\(--agent-grid-card-min\);/);
+  assert.match(workerFlexRule[0], /max-width:\s*var\(--agent-grid-card-max\);/);
+  assert.match(principalRule[0], /width:\s*var\(--agent-architect-column-width\);/);
+  assert.match(principalRule[0], /min-height:\s*var\(--agent-principal-card-height,\s*126px\);/);
+  assert.match(userPrincipalRule[0], /min-height:\s*var\(--agent-user-card-height,\s*74px\);/);
+  assert.match(cellRule[0], /min-height:\s*var\(--agent-card-height,\s*126px\);/);
   assert.match(cellRule[0], /padding:\s*13px 6px 12px;/);
-  assert.match(workerCellRule[0], /min-height:\s*var\(--agent-worker-card-height,\s*96px\);/);
-  assert.match(workerRowRule[0], /min-height:\s*var\(--agent-worker-card-height,\s*96px\);/);
-  assert.match(runtimeGridRule[0], /--agent-worker-card-height:\s*96px;/);
-  assert.match(runtimeCellHeightRule[0], /min-height:\s*74px;/);
+  assert.match(architectCellRule, /min-height:\s*var\(--agent-card-height,\s*126px\);/);
+  assert.match(engineerCellRule, /min-height:\s*var\(--agent-card-height,\s*126px\);/);
+  assert.match(workerCellRule[0], /min-height:\s*var\(--agent-card-height,\s*126px\);/);
+  assert.match(workerRowRule[0], /min-height:\s*var\(--agent-worker-card-height,\s*126px\);/);
+  assert.match(runtimeGridRule[0], /--agent-architect-column-width:\s*106px;/);
+  assert.match(runtimeGridRule[0], /--agent-engineer-column-width:\s*106px;/);
+  assert.match(runtimeGridRule[0], /--agent-grid-card-basis:\s*var\(--agent-engineer-column-width\);/);
+  assert.match(runtimeGridRule[0], /--agent-grid-card-height:\s*132px;/);
+  assert.match(runtimeGridRule[0], /--agent-user-card-height:\s*80px;/);
+  assert.match(runtimeCellHeightRule[0], /min-height:\s*var\(--agent-card-height,\s*132px\);/);
   assert.match(runtimeCellPaddingRule, /padding:\s*13px 6px 12px;/);
-  assert.match(runtimeWorkerCellRule[0], /min-height:\s*var\(--agent-worker-card-height,\s*96px\);/);
-  assert.match(runtimeWorkerRowRule[0], /min-height:\s*var\(--agent-worker-card-height,\s*96px\);/);
+  assert.match(runtimeWorkerCellRule[0], /min-height:\s*var\(--agent-card-height,\s*132px\);/);
+  assert.match(runtimeWorkerRowRule[0], /min-height:\s*var\(--agent-card-height,\s*132px\);/);
 
-  assert.doesNotMatch(css, /body\.runtime-embedded \.cell\s*\{[^}]*min-height:\s*90px;/);
-  assert.doesNotMatch(css, /body\.runtime-embedded \.cell\.worker\s*\{[^}]*min-height:\s*116px;/);
+  assert.doesNotMatch(css, /--agent-architect-column-width:\s*96px;/);
+  assert.doesNotMatch(css, /--agent-architect-column-width:\s*132px;/);
 });
 
 test('default (empty) selected_principal_id filters grid to user-owned engineers', () => {
@@ -366,10 +402,68 @@ function extractPrincipalCardHtml(html, principalKind, principalId) {
   return null;
 }
 
-test('non-selected architect card shows at-a-glance architect stats', () => {
+test('agent card action label uses queue_empty event timestamp over stale progress sources', () => {
+  const { context, sandbox } = createHarness();
+  const now = Date.now() / 1000;
+  sandbox.agentForLabel = {
+    id: 'eng-empty',
+    kind: 'engineer',
+    status: 'idle',
+    activity_detail: 'old progress report',
+    last_progress_at: now - 3600,
+    last_event_at: now - 10,
+    last_activity_at: now - 10,
+    last_heartbeat_at: now - 10,
+    last_event_text: 'queue_empty',
+    mcp_messages: [
+      { action: 'progress', message: 'old progress report', timestamp: now - 3600 },
+    ],
+  };
+
+  assert.equal(
+    vm.runInContext('_agentCardCurrentOrLastActionLabel(agentForLabel)', context),
+    'queue_empty',
+  );
+
+  sandbox.agentForLabel.last_event_at = now - 75;
+  sandbox.agentForLabel.last_activity_at = now - 75;
+  sandbox.agentForLabel.last_heartbeat_at = now - 75;
+  assert.equal(
+    vm.runInContext('_agentCardCurrentOrLastActionLabel(agentForLabel)', context),
+    'Last action: queue_empty 1m',
+  );
+});
+
+test('agent card action label prefers fresh activity detail over stale MCP message', () => {
+  const { context, sandbox } = createHarness();
+  const now = Date.now() / 1000;
+  sandbox.agentForLabel = {
+    id: 'worker-a',
+    kind: 'worker',
+    status: 'running',
+    activity_detail: 'Running tests',
+    last_progress_at: now - 5,
+    last_event_at: now - 5,
+    last_activity_at: now - 5,
+    last_heartbeat_at: now - 5,
+    mcp_messages: [
+      { action: 'progress', message: 'old progress report', timestamp: now - 3600 },
+    ],
+  };
+
+  assert.equal(
+    vm.runInContext('_agentCardCurrentOrLastActionLabel(agentForLabel)', context),
+    'Running tests',
+  );
+});
+
+test('non-selected architect card shows engineer count and action, not decision stats', () => {
   const { context, sandbox, mainEl } = createHarness();
+  const now = Date.now() / 1000;
   sandbox.state.groups.loom = ['arch-a', 'eng-arch', 'worker-err'];
   sandbox.state.agents['arch-a'] = architect('arch-a', 'Productmind', 2);
+  sandbox.state.agents['arch-a'].last_progress_at = now - 120;
+  sandbox.state.agents['arch-a'].activity_detail = 'planning v1.6';
   sandbox.state.agents['eng-arch'] = engineer('eng-arch', 'ArchEng', 'arch-a', 3);
   sandbox.state.agents['worker-err'] = worker('worker-err', 'BadWorker', 'eng-arch', 4);
   sandbox.state.agents['worker-err'].needs_attention = true;
@@ -379,9 +473,10 @@ test('non-selected architect card shows at-a-glance architect stats', () => {
   const archBlock = extractPrincipalCardHtml(mainEl.innerHTML, 'architect', 'arch-a');
   assert.ok(archBlock, 'architect principal card rendered');
   assert.match(archBlock, /1 engineers/);
+  assert.match(archBlock, /Last action: planning v1\.6 2m/);
   assert.doesNotMatch(archBlock, /asks/);
-  assert.match(archBlock, /0 decisions/);
-  assert.match(archBlock, /last decision/);
+  assert.doesNotMatch(archBlock, /decisions/);
+  assert.doesNotMatch(archBlock, /last decision/);
 });
 
 test('user principal card shows user-owned engineer count and backlog count', () => {
@@ -415,7 +510,9 @@ test('user principal card shows user-owned engineer count and backlog count', ()
 
   const userBlock = extractPrincipalCardHtml(mainEl.innerHTML, 'user', '');
   assert.ok(userBlock, 'user principal card rendered');
-  assert.match(userBlock, /1 engineers · 1 backlog/);
+  assert.match(userBlock, /principal-card-line--engineers">1 engineers/);
+  assert.match(userBlock, /principal-card-line--backlog">1 backlog/);
+  assert.doesNotMatch(userBlock, /1 engineers · 1 backlog/);
   assert.doesNotMatch(userBlock, /asks/);
 });
 
@@ -585,7 +682,7 @@ test('User + architect principal cards share the same width variable (Bug 1)', (
   // The variable is defined at .group-body-inner so .principals-row inherits.
   assert.match(
     css,
-    /\.group-body-inner\s*\{[^}]*--agent-architect-column-width:\s*96px/s,
+    /\.group-body-inner\s*\{[^}]*--agent-architect-column-width:\s*77px/s,
     'architect column width must be hoisted to .group-body-inner',
   );
 });
@@ -683,19 +780,22 @@ function extractAgentCellHtml(html, agentId) {
   return null;
 }
 
-test('agents-grid v2 renders all kind shells with required corner badges and no body icons', () => {
+test('agents-grid v2 renders all kind shells with one-metric lines and required corner badges', () => {
   const { context, sandbox, mainEl } = createFullHarness();
+  const now = Date.now() / 1000;
   sandbox.state.groups.loom = ['arch-a', 'eng-a', 'worker-a'];
   sandbox.state.children = {};
   sandbox.state.agents['arch-a'] = {
     ...architect('arch-a', 'Loomer', 1),
     agent_type: 'claude-code',
-    last_activity_at: Date.now() / 1000 - 300,
+    last_progress_at: now - 300,
+    activity_detail: 'planning hierarchy',
   };
   sandbox.state.agents['eng-a'] = {
     ...engineer('eng-a', 'Panelsmith', 'arch-a', 2),
     agent_type: 'claude-code',
-    last_activity_at: Date.now() / 1000 - 60,
+    last_progress_at: now - 60,
+    activity_detail: 'reviewing :222:2',
   };
   sandbox.state.agents['worker-a'] = {
     ...worker('worker-a', 'Worker', 'eng-a', 3),
@@ -705,7 +805,8 @@ test('agents-grid v2 renders all kind shells with required corner badges and no 
     worktree_diff: { files: 3, insertions: 58, deletions: 3 },
     worktree_dirty: false,
     worktree_branch: 'loom/panelsmith/architect-card-click-focus-fix-746495a',
-    last_activity_at: Date.now() / 1000 - 30,
+    last_progress_at: now - 30,
+    activity_detail: 'editing cards',
   };
   sandbox.state.board_tasks = {
     'LOOM:216': {
@@ -749,16 +850,19 @@ test('agents-grid v2 renders all kind shells with required corner badges and no 
   assert.doesNotMatch(userBlock, /principal-card-controls|agent-card-provider/);
   assert.match(userBlock, /principal-card-status/);
   assert.match(userBlock, /principal-card-kind--owner">Owner/);
-  assert.match(userBlock, /0 engineers · 0 backlog/);
+  assert.match(userBlock, /principal-card-line--engineers">0 engineers/);
+  assert.match(userBlock, /principal-card-line--backlog">0 backlog/);
+  assert.doesNotMatch(userBlock, /0 engineers · 0 backlog/);
 
   assert.match(archBlock, /principal-card-controls/);
   assert.match(archBlock, /principal-card-status/);
   assert.match(archBlock, /agent-card-provider--claude-code[^>]*>Claude</);
   assert.match(archBlock, /principal-card-kind--architect">Architect/);
   assert.match(archBlock, /1 engineers/);
+  assert.match(archBlock, /Last action: planning hierarchy 5m/);
   assert.doesNotMatch(archBlock, /asks/);
-  assert.match(archBlock, /1 decisions/);
-  assert.match(archBlock, /last decision 5m/);
+  assert.doesNotMatch(archBlock, /decisions/);
+  assert.doesNotMatch(archBlock, /last decision/);
 
   assert.match(engineerBlock, /cell-header-controls/);
   assert.match(engineerBlock, /cell-status/);
@@ -766,7 +870,9 @@ test('agents-grid v2 renders all kind shells with required corner badges and no 
   assert.match(engineerBlock, /cell-engineer-badge">Engineer/);
   assert.match(engineerBlock, /Panelsmith/);
   assert.match(engineerBlock, /1 worker/);
-  assert.match(engineerBlock, /queue: 0 · last action/);
+  assert.match(engineerBlock, /queue: 0/);
+  assert.match(engineerBlock, /Last action: reviewing :222:2 1m/);
+  assert.doesNotMatch(engineerBlock, /queue: 0 · last action/);
 
   assert.match(workerBlock, /cell-header-controls/);
   assert.match(workerBlock, /cell-status/);
@@ -774,19 +880,24 @@ test('agents-grid v2 renders all kind shells with required corner badges and no 
   assert.match(workerBlock, /cell-worker-badge">Worker/);
   assert.match(workerBlock, /architect-car…/);
   assert.match(workerBlock, /data-tooltip="architect-card-click-focus-fix"/);
-  assert.match(workerBlock, /LOOM:216 · review/);
+  assert.match(workerBlock, /cell-worker-task">LOOM:216/);
+  assert.match(workerBlock, /cell-worker-cycle">cycle: review/);
+  assert.doesNotMatch(workerBlock, /LOOM:216 · review/);
   assert.match(workerBlock, /\+58\/-3 \(clean\)/);
   assert.match(workerBlock, /worktree: archite…/);
-  assert.match(workerBlock, /last action 30s/);
+  assert.match(workerBlock, /cell-worker-activity[^>]*>editing cards/);
+  assert.doesNotMatch(workerBlock, /last action 30s/);
 
   assert.doesNotMatch(userBlock + archBlock + engineerBlock + workerBlock, /principal-card-icon|cell-icon/);
 });
 
-test('architect last decision uses latest decision journal entry over stale decision rows', () => {
+test('architect card omits decision count and last-decision timer even when decisions exist', () => {
   const { context, sandbox, mainEl } = createFullHarness();
   const now = Date.now() / 1000;
   sandbox.state.groups.loom = ['arch-a'];
   sandbox.state.agents['arch-a'] = architect('arch-a', 'Loomer', now - 3600);
+  sandbox.state.agents['arch-a'].last_progress_at = now - 120;
+  sandbox.state.agents['arch-a'].activity_detail = 'coordinating engineers';
   sandbox.state.decisions = {
     'durable-old': {
       id: 'durable-old',
@@ -819,8 +930,10 @@ test('architect last decision uses latest decision journal entry over stale deci
 
   const archBlock = extractPrincipalCardHtml(mainEl.innerHTML, 'architect', 'arch-a');
   assert.ok(archBlock, 'architect card rendered');
-  assert.match(archBlock, /2 decisions/);
-  assert.match(archBlock, /last decision 2m/);
+  assert.match(archBlock, /0 engineers/);
+  assert.match(archBlock, /Last action: coordinating engineers 2m/);
+  assert.doesNotMatch(archBlock, /2 decisions/);
+  assert.doesNotMatch(archBlock, /last decision/);
   assert.doesNotMatch(archBlock, /last decision 15h/);
 });
 
@@ -928,8 +1041,10 @@ test('worker slug truncation uses immediate tooltip metadata, not title-only bro
     worktree_branch: 'loom/panelsmith/architect-card-click-focus-fix-746495a'
   })`, context);
   assert.match(html, /architect-car…/);
-  assert.match(html, /LOOM:216 · implementation/);
+  assert.match(html, /cell-worker-task">LOOM:216/);
+  assert.match(html, /cell-worker-cycle">cycle: implementation/);
   assert.match(html, /worktree: archite…/);
+  assert.doesNotMatch(html, /LOOM:216 · implementation/);
   assert.doesNotMatch(html, /LOOM:216 · impl<\/div>/);
   assert.doesNotMatch(html, /wkt:/);
   assert.match(

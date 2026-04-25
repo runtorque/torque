@@ -13021,17 +13021,141 @@ test('hierarchical creation controls render shared quarter-height ghost-card cla
   assert.match(main.innerHTML, /class="ghost-card ghost-card--architect[\s\S]*\+ New Architect/);
 
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
-  assert.match(css, /--agent-grid-card-height:\s*90px;/);
+  assert.match(css, /--agent-grid-card-height:\s*126px;/);
+  assert.match(css, /--agent-grid-card-basis:\s*var\(--agent-engineer-column-width\);/);
   assert.match(css, /--agent-ghost-card-height:\s*calc\(var\(--agent-grid-card-height\) \/ 4\);/);
   assert.match(css, /\.ghost-card\s*\{[\s\S]*height:\s*var\(--agent-ghost-card-height\)/);
   assert.match(css, /\.ghost-card--architect\s*\{[\s\S]*width:\s*var\(--agent-architect-column-width\)/);
   assert.match(css, /\.ghost-card--engineer\s*\{[\s\S]*width:\s*var\(--agent-engineer-column-width\)/);
   assert.match(css, /\.ghost-card--worker\s*\{[\s\S]*flex:\s*0 1 var\(--agent-grid-card-basis\)/);
-  assert.match(css, /body\.runtime-embedded \.agent-grid\s*\{[\s\S]*--agent-grid-card-height:\s*90px;/);
-  assert.match(css, /\.agent-grid\s*\{[\s\S]*--agent-worker-card-height:\s*96px;/);
-  assert.match(css, /body\.runtime-embedded \.agent-grid\s*\{[\s\S]*--agent-worker-card-height:\s*96px;/);
+  assert.match(css, /body\.runtime-embedded \.agent-grid\s*\{[\s\S]*--agent-grid-card-height:\s*132px;/);
+  assert.match(css, /\.agent-grid\s*\{[\s\S]*--agent-worker-card-height:\s*var\(--agent-card-height\);/);
+  assert.match(css, /body\.runtime-embedded \.agent-grid\s*\{[\s\S]*--agent-worker-card-height:\s*var\(--agent-card-height\);/);
   assert.match(css, /body\.runtime-embedded \.cell\s*\{[^}]*padding:\s*13px 6px 12px;/);
-  assert.match(css, /body\.runtime-embedded \.cell\.worker\s*\{[^}]*min-height:\s*var\(--agent-worker-card-height,\s*96px\);/);
+  assert.match(css, /body\.runtime-embedded \.cell\.worker\s*\{[^}]*min-height:\s*var\(--agent-card-height,\s*132px\);/);
+});
+
+test('agents-grid v1.6 uses one-line metrics, action threshold labels, empty-row reclaim, and preserves scroll on rerender', () => {
+  const { context, document, sandbox } = createMainRenderHarness();
+  const main = document.getElementById('main');
+  Object.defineProperty(main, 'innerHTML', {
+    configurable: true,
+    get() { return this._innerHTML || ''; },
+    set(value) {
+      this._innerHTML = value;
+      this.scrollTop = 0;
+    },
+  });
+
+  const now = Date.now() / 1000;
+  sandbox.state.groups = { loom: ['arch-a', 'eng-empty', 'eng-full', 'worker-a'] };
+  sandbox.state.group_settings = { loom: { collapsed_default: false } };
+  sandbox.state.children = {};
+  sandbox.state.selected_principal_id = 'arch-a';
+  sandbox.state.agents = {
+    'arch-a': {
+      id: 'arch-a',
+      name: 'Productmind',
+      kind: 'architect',
+      group: 'loom',
+      cell_type: 'agent',
+      status: 'running',
+      created_at: now - 600,
+      last_progress_at: now - 30,
+      activity_detail: 'dispatching :220',
+      agent_type: 'codex',
+    },
+    'eng-empty': {
+      id: 'eng-empty',
+      name: 'Empty Engineer',
+      kind: 'engineer',
+      hired_by_architect_id: 'arch-a',
+      group: 'loom',
+      cell_type: 'agent',
+      status: 'idle',
+      created_at: now - 500,
+      last_progress_at: now - 3600,
+      last_event_at: now - 75,
+      last_activity_at: now - 75,
+      last_heartbeat_at: now - 75,
+      last_event_text: 'queue_empty',
+      activity_detail: 'old progress report',
+      mcp_messages: [
+        { action: 'progress', message: 'old progress report', timestamp: now - 3600 },
+      ],
+    },
+    'eng-full': {
+      id: 'eng-full',
+      name: 'Panelsmith',
+      kind: 'engineer',
+      hired_by_architect_id: 'arch-a',
+      group: 'loom',
+      cell_type: 'agent',
+      status: 'running',
+      created_at: now - 400,
+      last_progress_at: now - 75,
+      activity_detail: 'reviewing :222:2',
+    },
+    'worker-a': {
+      id: 'worker-a',
+      name: 'Worker A',
+      slug: 'worker-polish-pass',
+      kind: 'worker',
+      owner_engineer_id: 'eng-full',
+      group: 'loom',
+      cell_type: 'agent',
+      status: 'running',
+      created_at: now - 300,
+      current_task_id: 'LOOM:216',
+      worktree_diff: { insertions: 4, deletions: 1 },
+      worktree_branch: 'loom/panelsmith/worker-polish-pass-abc123',
+      last_progress_at: now - 30,
+      activity_detail: 'writing tests',
+    },
+  };
+  sandbox.state.board_tasks = {
+    'LOOM:216': {
+      id: 'LOOM:216',
+      group: 'loom',
+      lane: 'In Progress',
+      action_name: 'feature/review',
+      agent_id: 'worker-a',
+    },
+    'backlog-user': {
+      id: 'backlog-user',
+      group: 'loom',
+      lane: 'Backlog',
+    },
+  };
+  sandbox.state.architect_decisions = {
+    'dec-1': { id: 'dec-1', architect_id: 'arch-a', created_at: now - 60 },
+  };
+
+  runInContext(context, `render();`);
+  main.scrollTop = 144;
+  sandbox.state.agents['worker-a'].activity_detail = 'running node tests';
+  runInContext(context, `render();`);
+
+  assert.equal(main.scrollTop, 144);
+  assert.match(main.innerHTML, /principal-card-line--engineers">0 engineers/);
+  assert.match(main.innerHTML, /principal-card-line--backlog">1 backlog/);
+  assert.match(main.innerHTML, /principal-card-line--engineers">2 engineers/);
+  assert.match(main.innerHTML, /principal-card-line--action"[^>]*>dispatching :220/);
+  assert.doesNotMatch(main.innerHTML, /decisions/);
+  assert.doesNotMatch(main.innerHTML, /last decision/);
+
+  assert.match(main.innerHTML, /engineer-row--empty-workers[^"]*"[^>]*data-worker-count="0"[^>]*data-engineer-id="eng-empty"/);
+  assert.match(main.innerHTML, /data-drag-id="eng-empty"[\s\S]*cell-engineer-workers[\s\S]*0 workers/);
+  assert.match(main.innerHTML, /data-drag-id="eng-empty"[\s\S]*cell-engineer-queue">queue: 0/);
+  assert.match(main.innerHTML, /data-drag-id="eng-empty"[\s\S]*cell-engineer-activity[^>]*>Last action: queue_empty 1m/);
+  assert.match(main.innerHTML, /data-drag-id="eng-full"[\s\S]*cell-engineer-workers[\s\S]*1 worker/);
+  assert.match(main.innerHTML, /data-drag-id="eng-full"[\s\S]*cell-engineer-queue">queue: 0/);
+  assert.match(main.innerHTML, /data-drag-id="eng-full"[\s\S]*cell-engineer-activity[^>]*>Last action: reviewing :222:2 1m/);
+
+  assert.match(main.innerHTML, /data-drag-id="worker-a"[\s\S]*cell-worker-task">LOOM:216/);
+  assert.match(main.innerHTML, /data-drag-id="worker-a"[\s\S]*cell-worker-cycle">cycle: review/);
+  assert.match(main.innerHTML, /data-drag-id="worker-a"[\s\S]*cell-worker-activity[^>]*>running node tests/);
+  assert.doesNotMatch(main.innerHTML, /engineers ·|queue: 0 ·|LOOM:216 ·|last action 30s/);
 });
 
 test('classic runtime keeps the shared left rail filtered to the current window', () => {
@@ -13573,7 +13697,7 @@ test('main render anchors each architect once in a fixed left column with engine
     main.innerHTML,
     /principal-card--architect[\s\S]*Productmind/,
   );
-  assert.equal((sectionHtml.match(/class="engineer-row agent-grid-engineer-row"/g) || []).length, 3);
+  assert.equal((sectionHtml.match(/class="[^"]*\bengineer-row\b[^"]*\bagent-grid-engineer-row\b[^"]*"/g) || []).length, 3);
   assert.match(sectionHtml, /agent-section-body[\s\S]*Engineer One[\s\S]*Engineer Two[\s\S]*Engineer Three[\s\S]*\+ New Engineer/);
   assert.doesNotMatch(sectionHtml, /architect-header-row|agent-section-header-row/);
 });
@@ -13639,9 +13763,10 @@ test('main render keeps wrapped workers inside their engineer row and fixes arch
   assert.doesNotMatch(firstRowHtml, /Engineer B/);
 
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
-  assert.match(css, /--agent-architect-column-width:\s*96px/);
+  assert.match(css, /--agent-architect-column-width:\s*77px/);
   assert.match(css, /\.agent-section\s*\{[^}]*grid-template-columns:\s*var\(--agent-architect-column-width\)\s+minmax\(0,\s*1fr\)/s);
   assert.match(css, /\.agent-grid \.engineer-row\s*\{[^}]*display:\s*flex/s);
+  assert.match(css, /\.agent-grid \.engineer-row\.engineer-row--empty-workers\s*\{[^}]*display:\s*block/s);
   assert.match(css, /\.engineer-row-workers,\s*\.loose-workers-strip\s*\{[^}]*flex-wrap:\s*wrap/s);
 });
 
@@ -14188,7 +14313,8 @@ test('task delta updates visible worker cycle state while preserving main-grid f
     });
   `);
 
-  assert.match(main.innerHTML, /task-1 · implementation/);
+  assert.match(main.innerHTML, /cell-worker-task">task-1/);
+  assert.match(main.innerHTML, /cell-worker-cycle">cycle: implementation/);
   assert.doesNotMatch(main.innerHTML, /task-1 · impl<\/div>/);
 
   currentButton.value = 'close draft';
@@ -14214,7 +14340,8 @@ test('task delta updates visible worker cycle state while preserving main-grid f
   `);
 
   assert.equal(renderCount, 2);
-  assert.match(main.innerHTML, /task-1 · review/);
+  assert.match(main.innerHTML, /cell-worker-task">task-1/);
+  assert.match(main.innerHTML, /cell-worker-cycle">cycle: review/);
   assert.doesNotMatch(main.innerHTML, /task-1 · impl<\/div>/);
   assert.equal(currentButton.focused, true);
   assert.equal(currentButton.value, 'close draft');
