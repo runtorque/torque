@@ -8980,6 +8980,103 @@ test('standalone agent_upsert deltas batch current-group engineer rendering', ()
   });
 });
 
+test('user press defers delta-driven DOM-replacing renders until after release', () => {
+  // P0 LOOM:235 regression: the worker MCP firehose (:224) was rerendering
+  // between pointerdown and pointerup, suppressing the synthetic click. The
+  // press-defer keeps the press's target element alive until the browser
+  // emits the click; the deferred batch flushes on the next frame after
+  // pointerup so the click target is delivered before any DOM swap.
+  const { context, sandbox, rafCallbacks, flushRaf, document } = createStandaloneDeltaBatchHarness(['engineer']);
+  // Press starts before any delta arrives.
+  document.listeners.pointerdown && document.listeners.pointerdown({});
+  // Burst of agent_upsert deltas during the press window (mirrors the
+  // mcp_call_append firehose users actually hit).
+  for (let i = 1; i <= 15; i++) {
+    context._handleDelta({
+      seq: i,
+      ops: [{
+        op: 'agent_upsert',
+        id: 'agent-1',
+        group: 'alpha',
+        name: 'Worker ' + i,
+        cell_type: 'agent',
+        kind: 'worker',
+        status: 'running',
+      }],
+    });
+  }
+  // No rAF should have been scheduled during the press, and the previously
+  // accumulated render flags must NOT have flushed yet.
+  assert.equal(rafCallbacks.length, 0);
+  assert.equal(sandbox.renderCalls.main, 0);
+  assert.equal(sandbox.renderCalls.engineer, 0);
+
+  // pointerup releases the press but must defer the flush until after the
+  // browser has had a chance to emit click on the original target.
+  document.listeners.pointerup && document.listeners.pointerup({});
+  assert.equal(sandbox.renderCalls.main, 0);
+  assert.equal(sandbox.renderCalls.engineer, 0);
+  assert.equal(rafCallbacks.length, 1);
+
+  flushRaf();
+  // After the deferred frame, exactly one merged render fires.
+  assert.equal(sandbox.renderCalls.main, 1);
+  assert.equal(sandbox.renderCalls.engineer, 1);
+});
+
+test('user press defers an already-scheduled delta render frame across the press window', () => {
+  // Closes the rAF-already-scheduled hole that broke the prior press-defer
+  // attempt: a frame queued before pointerdown must NOT swap the DOM during
+  // the press, and the batch must flush on the next frame after release.
+  const { context, sandbox, rafCallbacks, flushRaf, document } = createStandaloneDeltaBatchHarness(['engineer']);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'agent_upsert',
+      id: 'agent-1',
+      group: 'alpha',
+      name: 'Worker 1',
+      cell_type: 'agent',
+      kind: 'worker',
+      status: 'running',
+    }],
+  });
+  // A render frame was scheduled before the user pressed.
+  assert.equal(rafCallbacks.length, 1);
+
+  // User starts pressing — the already-scheduled frame must not flush.
+  document.listeners.pointerdown && document.listeners.pointerdown({});
+  flushRaf();
+  assert.equal(sandbox.renderCalls.engineer, 0);
+  assert.equal(sandbox.renderCalls.main, 0);
+
+  // Subsequent deltas during the press also stay queued.
+  context._handleDelta({
+    seq: 2,
+    ops: [{
+      op: 'agent_upsert',
+      id: 'agent-1',
+      group: 'alpha',
+      name: 'Worker 2',
+      cell_type: 'agent',
+      kind: 'worker',
+      status: 'running',
+    }],
+  });
+  assert.equal(rafCallbacks.length, 0);
+  assert.equal(sandbox.renderCalls.engineer, 0);
+
+  // Release press → schedule a deferred flush, fire it.
+  document.listeners.pointerup && document.listeners.pointerup({});
+  assert.equal(rafCallbacks.length, 1);
+  // Critical: render hasn't fired DURING pointerup capture phase, only on
+  // the deferred frame.
+  assert.equal(sandbox.renderCalls.engineer, 0);
+  flushRaf();
+  assert.equal(sandbox.renderCalls.engineer, 1);
+});
+
 test('new agent upserts without a focus_update preserve the active selection', () => {
   const { context } = createWsRenderHarness();
   runInContext(context, `
