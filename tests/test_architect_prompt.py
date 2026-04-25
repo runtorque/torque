@@ -66,3 +66,33 @@ class ArchitectPromptTests(unittest.TestCase):
         self.assertIn("Autonomy mode: Dispatch after confirm", prompt)
         self.assertIn("Proceed on clearly confirmed user direction", prompt)
         self.assertIn("Before widening scope", prompt)
+        self.assertIn("Journal checkpoint cadence: every_10_actions", prompt)
+        self.assertIn("10 non-checkpoint journal entries", prompt)
+
+    def test_prompt_includes_minutes_checkpoint_cadence_guidance(self):
+        prompt = self.architect_mod.build_architect_system_prompt(
+            "Loom",
+            SimpleNamespace(
+                architect_autonomy_mode="dispatch_after_confirm",
+                architect_journal_checkpoint_frequency="every_20_minutes",
+                architect_custom_instructions="",
+            ),
+        )
+
+        self.assertIn("Journal checkpoint cadence: every_20_minutes", prompt)
+        self.assertIn("after 20 minutes without a checkpoint", prompt)
+        self.assertIn("active engineers, open scope, pending hires", prompt)
+
+    def test_prompt_includes_manual_checkpoint_cadence_guidance(self):
+        prompt = self.architect_mod.build_architect_system_prompt(
+            "Loom",
+            SimpleNamespace(
+                architect_autonomy_mode="dispatch_after_confirm",
+                architect_journal_checkpoint_frequency="manual_only",
+                architect_custom_instructions="",
+            ),
+        )
+
+        self.assertIn("Journal checkpoint cadence: manual_only", prompt)
+        self.assertIn("will not add automatic checkpoint reminders", prompt)
+        self.assertIn("after major scope shifts", prompt)

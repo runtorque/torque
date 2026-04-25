@@ -10,7 +10,10 @@ surfaces stay structurally comparable.
 
 from __future__ import annotations
 
-from .state import normalize_architect_autonomy_mode
+from .state import (
+    normalize_architect_autonomy_mode,
+    normalize_architect_journal_checkpoint_frequency,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -216,6 +219,42 @@ def _autonomy_policy_lines(mode: str) -> list[str]:
     ]
 
 
+def _checkpoint_frequency_parts(frequency: str) -> tuple[str, int]:
+    frequency = normalize_architect_journal_checkpoint_frequency(frequency)
+    if frequency == "manual_only":
+        return "manual_only", 0
+    parts = frequency.split("_")
+    if len(parts) >= 3 and parts[0] == "every":
+        try:
+            return parts[2], max(1, int(parts[1]))
+        except (TypeError, ValueError):
+            pass
+    return "actions", 10
+
+
+def _checkpoint_policy_lines(frequency: str) -> list[str]:
+    frequency = normalize_architect_journal_checkpoint_frequency(frequency)
+    mode, count = _checkpoint_frequency_parts(frequency)
+    summary = (
+        "active engineers, open scope, pending hires, open decisions, "
+        "and planned next moves"
+    )
+    if frequency == "manual_only":
+        return [
+            "- Checkpoint reminder policy: Manual only — Loom will not add automatic checkpoint reminders to digests.",
+            f"- Still write `architect_journal(type=\"checkpoint\", entry=\"...\")` after major scope shifts; summarize {summary}.",
+        ]
+    if mode == "minutes":
+        return [
+            f"- Checkpoint reminder policy: Loom will remind you after {count} minute{'s' if count != 1 else ''} without a checkpoint while journal activity exists.",
+            f"- Checkpoints should use `architect_journal(type=\"checkpoint\", entry=\"...\")` and summarize {summary}.",
+        ]
+    return [
+        f"- Checkpoint reminder policy: Loom will remind you after {count} non-checkpoint journal entr{'ies' if count != 1 else 'y'} without a checkpoint.",
+        f"- Checkpoints should use `architect_journal(type=\"checkpoint\", entry=\"...\")` and summarize {summary}.",
+    ]
+
+
 def _build_policy_section(architect_settings=None, group_settings=None) -> str:
     """Render the architect-facing policy section.
 
@@ -227,12 +266,21 @@ def _build_policy_section(architect_settings=None, group_settings=None) -> str:
     mode = normalize_architect_autonomy_mode(
         getattr(architect_settings, "architect_autonomy_mode", "")
     )
+    checkpoint_frequency = normalize_architect_journal_checkpoint_frequency(
+        getattr(
+            architect_settings,
+            "architect_journal_checkpoint_frequency",
+            "",
+        )
+    )
     lines = [
         "## Operating Policy",
         f"Autonomy mode: {_autonomy_mode_label(mode)}",
+        f"Journal checkpoint cadence: {checkpoint_frequency}",
         "",
         "Apply this autonomy posture when deciding whether to route work, ask the user, or wait:",
         *_autonomy_policy_lines(mode),
+        *_checkpoint_policy_lines(checkpoint_frequency),
         (
             "- Tool-enforced gates still apply regardless of autonomy mode; "
             "`architect_engineer_hire` always queues a user approval request "

@@ -20,6 +20,7 @@ from .digest_routing import (
 from .state import (
     normalize_default_worker_concurrency,
     normalize_architect_digest_verbosity,
+    normalize_architect_journal_checkpoint_frequency,
     normalize_engineer_autonomy_mode,
     normalize_engineer_digest_verbosity,
     normalize_engineer_escalation_style,
@@ -1449,6 +1450,13 @@ class EngineerEventBuffer:
                     ))
 
         items.extend(self._architect_pipeline_activity_items(events))
+        checkpoint_reminder = self._architect_checkpoint_reminder(
+            group,
+            architect,
+        )
+        if checkpoint_reminder:
+            items.append(("", 0))
+            items.append((checkpoint_reminder, 0))
 
         if hints and not is_terse:
             hint_limit = 4 if is_verbose else 2
@@ -1489,6 +1497,100 @@ class EngineerEventBuffer:
         return normalize_architect_digest_verbosity(
             getattr(settings, "architect_digest_verbosity", "balanced")
         )
+
+    def _architect_checkpoint_frequency(self, group: str,
+                                        architect=None) -> str:
+        settings = None
+        group_name = str(
+            getattr(architect, "group", "") or group or ""
+        ).strip()
+        if group_name and hasattr(self._state, "get_architect_settings"):
+            try:
+                settings = self._state.get_architect_settings(group_name)
+            except Exception:
+                settings = None
+        return normalize_architect_journal_checkpoint_frequency(
+            getattr(
+                settings,
+                "architect_journal_checkpoint_frequency",
+                "every_10_actions",
+            )
+        )
+
+    @staticmethod
+    def _architect_checkpoint_frequency_parts(
+        frequency: str,
+    ) -> tuple[str, int]:
+        frequency = normalize_architect_journal_checkpoint_frequency(frequency)
+        if frequency == "manual_only":
+            return "manual_only", 0
+        match = re.fullmatch(r"every_([1-9]\d*)_(actions|minutes)", frequency)
+        if not match:
+            return "actions", 10
+        return match.group(2), max(1, int(match.group(1)))
+
+    def _architect_checkpoint_reminder(self, group: str,
+                                       architect=None) -> str:
+        architect_id = str(getattr(architect, "id", "") or "").strip()
+        if not architect_id:
+            return ""
+        frequency = self._architect_checkpoint_frequency(group, architect)
+        mode, target = self._architect_checkpoint_frequency_parts(frequency)
+        if mode == "manual_only" or target <= 0:
+            return ""
+        reader = getattr(self._state, "architect_journal_read", None)
+        if not callable(reader):
+            return ""
+        try:
+            entries = list(reader(architect_id, limit=1_000_000) or [])
+        except Exception:
+            log.exception(
+                "Failed to read architect journal for checkpoint reminder"
+            )
+            return ""
+        if not entries:
+            return ""
+        if mode == "actions":
+            count = 0
+            for entry in entries:
+                entry_type = str((entry or {}).get("type", "") or "").strip()
+                if entry_type == "checkpoint":
+                    break
+                count += 1
+            if count < target:
+                return ""
+            return (
+                f"Checkpoint reminder: {count} journal entries since your "
+                f"last checkpoint (target {frequency}). Write "
+                "architect_journal(type=\"checkpoint\", entry=\"...\") "
+                "summarizing active engineers, open scope, pending hires, "
+                "open decisions, and next moves."
+            )
+        if mode == "minutes":
+            latest_checkpoint = None
+            for entry in entries:
+                entry_type = str((entry or {}).get("type", "") or "").strip()
+                if entry_type == "checkpoint":
+                    latest_checkpoint = entry
+                    break
+            anchor = latest_checkpoint or entries[-1]
+            try:
+                anchor_ts = float((anchor or {}).get("timestamp", 0) or 0)
+            except (TypeError, ValueError):
+                anchor_ts = 0.0
+            if anchor_ts <= 0:
+                return ""
+            elapsed_minutes = max(0, int((time.time() - anchor_ts) // 60))
+            if elapsed_minutes < target:
+                return ""
+            return (
+                f"Checkpoint reminder: no checkpoint for {elapsed_minutes} "
+                f"minutes (target {frequency}). Write "
+                "architect_journal(type=\"checkpoint\", entry=\"...\") "
+                "summarizing active engineers, open scope, pending hires, "
+                "open decisions, and next moves."
+            )
+        return ""
 
     def _architect_digest_buckets(self, events: list[dict]) -> list[dict]:
         buckets: dict[str, dict] = {}
