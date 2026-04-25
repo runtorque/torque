@@ -7483,7 +7483,7 @@ test('embedded terminal compose renders only for standalone runtime and preserve
 });
 
 test('embedded terminal compose submits on Enter, allows Shift+Enter, and clears on Escape', () => {
-  const { context, document, sandbox } = createEmbeddedTerminalHarness({
+  const { context, document, sandbox, terminals } = createEmbeddedTerminalHarness({
     loadRenderHelpers: true,
   });
   const dom = attachTerminalWorkspaceDom(document);
