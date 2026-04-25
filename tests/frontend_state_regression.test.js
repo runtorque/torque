@@ -12654,12 +12654,23 @@ test('principals row renders User + architects + + New Architect anchor', () => 
     main.innerHTML,
     /principals-row[\s\S]*principal-card--user[\s\S]*principal-card--architect[\s\S]*\+ New Architect/
   );
+  assert.match(
+    main.innerHTML,
+    /principal-card--architect[\s\S]*class="principal-card-kind">Architect<\/span>/
+  );
+  assert.doesNotMatch(main.innerHTML, /class="principal-card-kind">arch<\/span>/i);
   // The principals row precedes the engineer grid.
   assert.ok(
     main.innerHTML.indexOf('class="principals-row"')
       < main.innerHTML.indexOf('class="agent-grid')
   );
   assert.doesNotMatch(main.innerHTML, /agent-grid-new-architect-row/);
+
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  assert.match(
+    css,
+    /\.principal-card--architect \.principal-card-kind\s*\{[^}]*var\(--amber\)/s
+  );
 });
 
 test('user-section + New Architect ghost opens the group-scoped architect modal', () => {
