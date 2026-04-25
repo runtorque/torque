@@ -474,11 +474,11 @@ class AgentTemplateAdapterTests(unittest.TestCase):
         )
         self.assertEqual(
             providers[0]["reasoning_efforts"],
-            ["low", "medium", "high"],
+            ["low", "medium", "high", "xhigh", "max"],
         )
         self.assertEqual(
             providers[1]["reasoning_efforts"],
-            ["low", "medium", "high"],
+            ["low", "medium", "high", "xhigh"],
         )
         self.assertEqual(providers[2]["reasoning_efforts"], [])
         self.assertEqual(get_default_command_for_provider("codex"), "codex")
