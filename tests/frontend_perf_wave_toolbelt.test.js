@@ -355,3 +355,73 @@ test('[toolbelt] _captureSurfaceState preserves agent-panel-event-list scroll ac
   assert.equal(eventList.scrollTop, 240, 'guardrail must restore scroll under toolbelt');
   assert.equal(sandbox._activePanelApp, 'engineer');
 });
+
+test('[toolbelt] _restoreSurfaceState preserves textarea scrollTop after value+selection set', () => {
+  // Models the terminal-compose-input bug: textarea has overflow-y:auto +
+  // max-height, user has scrolled to keep cursor in view, then a WS-driven
+  // rerender wipes innerHTML. The new textarea has scrollTop=0 — the surface
+  // helper must restore the focused element's own scrollTop, otherwise the
+  // compose box jumps to the top while the cursor stays at the end of the
+  // text.
+  const { context, sandbox } = createSurfaceStateHarness();
+
+  // Pre-rerender textarea with content that overflows the visible box.
+  const draft = 'line one\nline two\nline three\nline four\nline five\nline six';
+  const textareaId = 'terminal-compose-input-cell';
+  const oldTextarea = {
+    id: textareaId,
+    value: draft,
+    selectionStart: draft.length,
+    selectionEnd: draft.length,
+    scrollTop: 96,
+    scrollLeft: 0,
+    focus() { sandbox._focusCalls = (sandbox._focusCalls || 0) + 1; },
+  };
+  sandbox.document.activeElement = oldTextarea;
+  // Initially the lookup resolves to the old (focused) textarea — captured
+  // before the rerender swaps it.
+  let resolveTextarea = oldTextarea;
+  sandbox.document.getElementById = function(id) {
+    return id === textareaId ? resolveTextarea : null;
+  };
+
+  const root = {
+    querySelector() { return null; },
+    contains(el) { return el === resolveTextarea; },
+  };
+
+  const snapshot = vm.runInContext(
+    `(function(r) { return _captureSurfaceState(r); })`,
+    context,
+  )(root);
+
+  assert.ok(snapshot.focus, 'focus snapshot must be captured for the textarea');
+  assert.equal(snapshot.focus.scrollTop, 96, 'capture must record textarea scrollTop');
+  assert.equal(snapshot.focus.selectionEnd, draft.length);
+
+  // Simulate the rerender: innerHTML wipe replaces the textarea with a fresh
+  // node. The new node has the same id but scrollTop=0.
+  const postRenderTextarea = {
+    id: textareaId,
+    value: draft,
+    selectionStart: 0,
+    selectionEnd: 0,
+    scrollTop: 0,
+    scrollLeft: 0,
+    focus() { sandbox._focusCalls = (sandbox._focusCalls || 0) + 1; },
+  };
+  sandbox.document.activeElement = null;
+  resolveTextarea = postRenderTextarea;
+
+  vm.runInContext(
+    `(function(r, s) { _restoreSurfaceState(r, s); })`,
+    context,
+  )(root, snapshot);
+
+  assert.equal(postRenderTextarea.value, draft, 'value must be restored');
+  assert.equal(postRenderTextarea.selectionEnd, draft.length, 'cursor must be at end');
+  assert.equal(
+    postRenderTextarea.scrollTop, 96,
+    'textarea internal scroll must be restored after value/selection set',
+  );
+});
