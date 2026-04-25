@@ -626,7 +626,8 @@ body.runtime-embedded .terminal-empty {
   --agent-grid-card-basis: 86px;
   --agent-grid-card-min: 72px;
   --agent-grid-card-max: 112px;
-  --agent-grid-card-height: 64px;
+  --agent-grid-card-height: 90px;
+  --agent-worker-card-height: 116px;
   --agent-ghost-card-height: calc(var(--agent-grid-card-height) / 4);
   display: flex;
   flex-direction: column;
@@ -954,11 +955,11 @@ body.runtime-embedded .terminal-empty {
      own row preserves the populated principal-card height instead of collapsing
      to the short ghost-card height. (LOOM:209) */
   height: auto;
-  min-height: 64px;
+  min-height: 90px;
 }
 @media (max-width: 400px) {
   .principal-card-new {
-    min-height: 64px;
+    min-height: 86px;
   }
 }
 .principal-card-controls {
@@ -2045,6 +2046,7 @@ body.runtime-embedded .agent-grid {
   --agent-grid-card-basis: 112px;
   --agent-grid-card-max: 140px;
   --agent-grid-card-height: 90px;
+  --agent-worker-card-height: 116px;
   gap: 8px;
   padding: 9px 11px;
 }

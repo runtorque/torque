@@ -1040,10 +1040,11 @@ function _renderPrincipalArchitectCard(groupName, section, selectedPrincipalId) 
   const idArg = _jsStringAttr(id);
   const statusCls = typeof agentStatusClass === 'function' ? agentStatusClass(architect) : '';
   const stats = _architectStatsForCard(architect, section);
+  const askArg = _jsStringAttr(stats.firstAskId);
   const askHtml = stats.askCount > 0 && stats.firstAskId
     ? '<button type="button" class="principal-card-ask-link"'
       + ' data-focus-key="principal-ask:' + esc(id) + ':' + esc(stats.firstAskId) + '"'
-      + ' onclick="event.stopPropagation();if(typeof boardNavigateToTask===\'function\'){boardNavigateToTask(\'' + esc(stats.firstAskId) + '\');}"'
+      + ' onclick="event.stopPropagation();if(typeof boardNavigateToTask===\'function\'){boardNavigateToTask(' + askArg + ');}"'
       + ' aria-label="Jump to pending ask">' + esc(stats.askCount + 'asks') + '</button>'
     : '<span class="principal-card-ask-count">' + esc(stats.askCount + 'asks') + '</span>';
   const digestSettings = (state && state.agent_digest_settings)
@@ -2591,7 +2592,7 @@ function renderAgentCell(a, options) {
     });
   }
   if (_isWorker) h += _renderWorkerCardBody(a);
-  else if (_isEngineerKind) h += _renderEngineerCardBody(a, _engineerAsking ? _engineerWs.pending_question : '');
+  else if (_isEngineerKind || _isDesignatedEngineer) h += _renderEngineerCardBody(a, _engineerAsking ? _engineerWs.pending_question : '');
   else if (_isArchitect) h += _renderArchitectCellBody(a);
   else h += _renderGenericAgentCardBody(a);
   h += _renderAgentProviderBadge(a.agent_type, 'cell-provider');

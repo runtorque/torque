@@ -10536,20 +10536,21 @@ test('renderAgentCell shows per-engineer and architect digest pause controls wit
   assert.match(runningHtml, /class="cell-engineer-toggle running"/);
   assert.match(runningHtml, /Pause Engineer event delivery/);
   assert.match(engineerNamedEngineerHtml, /^<div class="cell engineer"/);
-  assert.doesNotMatch(workerHtml, /cell-engineer-toggle/);
-  assert.match(workerHtml, /class="cell-worker-badge">worker<\/div>/);
+  assert.match(workerHtml, /class="cell-engineer-toggle running"/);
+  assert.match(workerHtml, /Pause event delivery/);
+  assert.match(workerHtml, /class="agent-card-kind cell-worker-badge">W<\/div>/);
   assert.doesNotMatch(workerHtml, /cell-engineer-badge|cell-architect-badge/);
   assert.match(engineerHtml, /^<div class="cell engineer"/);
-  assert.match(engineerHtml, /class="cell-engineer-badge">engineer<\/div>/);
+  assert.match(engineerHtml, /class="agent-card-kind cell-engineer-badge">ENG<\/div>/);
   assert.match(engineerHtml, /class="cell-engineer-toggle running"/);
-  assert.match(engineerHtml, /toggleDigestPauseForAgent\(decodeURIComponent\('eng-1'\)\)/);
+  assert.match(engineerHtml, /toggleDigestPauseForAgent\(decodeURIComponent\(&#39;eng-1&#39;\)\)/);
   assert.match(engineerHtml, /Pause event delivery/);
   assert.doesNotMatch(engineerHtml, /Pause Engineer event delivery/);
   assert.match(architectHtml, /^<div class="cell architect"/);
   assert.doesNotMatch(architectHtml, /^<div class="[^"]*\bengineer(?:\b|-)/);
-  assert.match(architectHtml, /class="cell-architect-badge">architect<\/div>/);
+  assert.match(architectHtml, /class="agent-card-kind cell-architect-badge">ARCH<\/div>/);
   assert.match(architectHtml, /class="cell-engineer-toggle running"/);
-  assert.match(architectHtml, /toggleDigestPauseForAgent\(decodeURIComponent\('arch-1'\)\)/);
+  assert.match(architectHtml, /toggleDigestPauseForAgent\(decodeURIComponent\(&#39;arch-1&#39;\)\)/);
   assert.match(architectHtml, /Pause event delivery/);
   assert.doesNotMatch(architectHtml, /Pause Engineer event delivery/);
 
@@ -10618,7 +10619,7 @@ test('renderAgentCell shows per-engineer and architect digest pause controls wit
 
   assert.match(askingHtml, /^<div class="cell selected"/);
   assert.doesNotMatch(askingHtml, /^<div class="[^"]*\bengineer(?:\b|-)/);
-  assert.match(askingHtml, /\? awaiting input/);
+  assert.match(askingHtml, /awaiting input/);
 });
 
 test('renderAgentCell keeps done flourish timing stable across rerenders', () => {
@@ -10689,15 +10690,15 @@ test('engineer agent card toggle shares the close control reveal affordances and
   assert.match(css, /\.cell-engineer-toggle:hover,\s*\.cell-engineer-toggle:focus-visible,\s*\.cell-engineer-toggle:active\s*\{[^}]*outline:\s*none;/);
 });
 
-test('agent role badges render in the bottom-right opposite the agent type label', () => {
+test('agent kind badges render in the bottom-right opposite the provider badge', () => {
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
-  const typeRule = css.match(/\.cell-type\s*\{[^}]*\}/)[0];
+  const providerRule = css.match(/\.agent-card-provider\s*\{[^}]*\}/)[0];
   const engineerRule = css.match(/\.cell-engineer-badge\s*\{[^}]*\}/)[0];
   const architectRule = css.match(/\.cell-architect-badge\s*\{[^}]*\}/)[0];
   const workerRule = css.match(/\.cell-worker-badge\s*\{[^}]*\}/)[0];
 
-  assert.match(typeRule, /bottom:\s*2px;/);
-  assert.match(typeRule, /left:\s*3px;/);
+  assert.match(providerRule, /bottom:\s*2px;/);
+  assert.match(providerRule, /left:\s*3px;/);
   assert.match(engineerRule, /bottom:\s*2px;/);
   assert.match(engineerRule, /right:\s*3px;/);
   assert.doesNotMatch(engineerRule, /left:\s*3px;/);
@@ -10707,13 +10708,14 @@ test('agent role badges render in the bottom-right opposite the agent type label
   assert.match(workerRule, /bottom:\s*2px;/);
   assert.match(workerRule, /right:\s*3px;/);
   assert.doesNotMatch(workerRule, /left:\s*3px;/);
-  assert.match(workerRule, /color:\s*var\(--green\);/);
+  assert.match(workerRule, /color:\s*var\(--text-dim\);/);
 });
 
 test('agent cards do not define legacy engineer edge chrome', () => {
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
 
-  assert.match(css, /\.cell\.engineer\s*\{[^}]*border-left:\s*3px solid rgba\(88, 166, 255, 0\.72\);/);
+  assert.doesNotMatch(css, /\.cell\.engineer\s*\{[^}]*border-left:\s*3px solid rgba\(88, 166, 255, 0\.72\);/);
+  assert.doesNotMatch(css, /\.cell\.engineer\s*\{[^}]*box-shadow:\s*inset 3px 0 0/);
   assert.doesNotMatch(css, /\.cell\.engineer-asking(?:[\s.#:{]|$)/);
   assert.doesNotMatch(css, /--engineer-(?:chrome|edge-shadow|active-glow)/);
   assert.doesNotMatch(css, /engineer-pulse/);
@@ -12752,7 +12754,9 @@ test('standalone sidebar formats repo and home paths compactly', () => {
     render();
   `);
 
-  assert.match(main.innerHTML, /iterm2-loom\/docs/);
+  // Engineer summary cards no longer spend body space on paths; terminals
+  // still render compact home-relative paths and the formatter remains
+  // available for detail surfaces.
   assert.doesNotMatch(main.innerHTML, /\/Users\/aleks\/dev\/personal\/gh\/iterm2-loom\/docs/);
   assert.match(main.innerHTML, /~\/dev\/personal\/scratch/);
   assert.equal(
@@ -12901,9 +12905,9 @@ test('principals row renders User + architects + + New Architect anchor', () => 
   );
   assert.match(
     main.innerHTML,
-    /principal-card--architect[\s\S]*class="principal-card-kind">Architect<\/span>/
+    /principal-card--architect[\s\S]*class="principal-card-kind principal-card-kind--architect">ARCH<\/span>/
   );
-  assert.doesNotMatch(main.innerHTML, /class="principal-card-kind">arch<\/span>/i);
+  assert.doesNotMatch(main.innerHTML, /class="principal-card-kind[^"]*">arch<\/span>/);
   // The principals row precedes the engineer grid.
   assert.ok(
     main.innerHTML.indexOf('class="principals-row"')
@@ -12987,13 +12991,13 @@ test('hierarchical creation controls render shared quarter-height ghost-card cla
   assert.match(main.innerHTML, /class="ghost-card ghost-card--architect[\s\S]*\+ New Architect/);
 
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
-  assert.match(css, /--agent-grid-card-height:\s*64px;/);
+  assert.match(css, /--agent-grid-card-height:\s*90px;/);
   assert.match(css, /--agent-ghost-card-height:\s*calc\(var\(--agent-grid-card-height\) \/ 4\);/);
   assert.match(css, /\.ghost-card\s*\{[\s\S]*height:\s*var\(--agent-ghost-card-height\)/);
   assert.match(css, /\.ghost-card--architect\s*\{[\s\S]*width:\s*var\(--agent-architect-column-width\)/);
   assert.match(css, /\.ghost-card--engineer\s*\{[\s\S]*width:\s*var\(--agent-engineer-column-width\)/);
   assert.match(css, /\.ghost-card--worker\s*\{[\s\S]*flex:\s*0 1 var\(--agent-grid-card-basis\)/);
-  assert.match(css, /body\.runtime-embedded \.agent-grid\s*\{[\s\S]*--agent-grid-card-height:\s*80px;/);
+  assert.match(css, /body\.runtime-embedded \.agent-grid\s*\{[\s\S]*--agent-grid-card-height:\s*90px;/);
 });
 
 test('classic runtime keeps the shared left rail filtered to the current window', () => {
@@ -14065,7 +14069,7 @@ test('add engineer modal draft survives agent grid rerender during websocket del
 });
 
 
-test('task delta updates visible agent subtitle while preserving main-grid focus', () => {
+test('task delta updates visible worker cycle state while preserving main-grid focus', () => {
   const { sandbox, document } = createSandbox();
   const main = document.register('main');
   const context = vm.createContext(sandbox);
@@ -14083,13 +14087,13 @@ test('task delta updates visible agent subtitle while preserving main-grid focus
   let renderCount = 0;
   function installFocusedControl() {
     currentButton = new FakeElement('');
-    currentButton.dataset.focusKey = 'agent-close:agent-1';
+    currentButton.dataset.focusKey = 'agent-close:worker-1';
     currentButton.value = '';
     currentButton.selectionStart = 0;
     currentButton.selectionEnd = 0;
     currentButton.parentNode = main;
     main.children = [currentButton];
-    main.setQuerySelector('[data-focus-key="agent-close:agent-1"]', currentButton);
+    main.setQuerySelector('[data-focus-key="agent-close:worker-1"]', currentButton);
   }
 
   Object.defineProperty(main, 'innerHTML', {
@@ -14107,18 +14111,31 @@ test('task delta updates visible agent subtitle while preserving main-grid focus
   runInContext(context, `
     _handleFullState({
       seq: 1,
-      groups: { alpha: ['agent-1'] },
+      groups: { alpha: ['eng-1', 'worker-1'] },
       group_settings: { alpha: { collapsed_default: false } },
       agents: {
-        'agent-1': {
-          id: 'agent-1',
-          name: 'Worker',
+        'eng-1': {
+          id: 'eng-1',
+          name: 'Engineer',
           group: 'alpha',
           cell_type: 'agent',
           kind: 'engineer',
-          icon: 'W',
+          icon: 'E',
           status: 'running',
           created_at: 1
+        },
+        'worker-1': {
+          id: 'worker-1',
+          name: 'Worker',
+          slug: 'worker-cycle-card',
+          group: 'alpha',
+          cell_type: 'agent',
+          kind: 'worker',
+          owner_engineer_id: 'eng-1',
+          current_task_id: 'task-1',
+          icon: 'W',
+          status: 'running',
+          created_at: 2
         }
       },
       children: {},
@@ -14127,9 +14144,10 @@ test('task delta updates visible agent subtitle while preserving main-grid focus
         'task-1': {
           id: 'task-1',
           group: 'alpha',
-          task: 'Original subtitle',
+          task: 'Original task',
           lane: 'In Progress',
-          agent_id: 'agent-1'
+          action_name: 'feature/implement',
+          agent_id: 'worker-1'
         }
       },
       panel_events: []
@@ -14149,17 +14167,18 @@ test('task delta updates visible agent subtitle while preserving main-grid focus
           op: 'task_upsert',
           id: 'task-1',
           group: 'alpha',
-          task: 'Updated subtitle from task delta',
+          task: 'Updated task',
           lane: 'In Progress',
-          agent_id: 'agent-1'
+          action_name: 'feature/review',
+          agent_id: 'worker-1'
         }
       ]
     });
   `);
 
   assert.equal(renderCount, 2);
-  assert.match(main.innerHTML, /Updated subtitle from task delta/);
-  assert.doesNotMatch(main.innerHTML, /Original subtitle/);
+  assert.match(main.innerHTML, /task-1 · review/);
+  assert.doesNotMatch(main.innerHTML, /task-1 · impl/);
   assert.equal(currentButton.focused, true);
   assert.equal(currentButton.value, 'close draft');
   assert.equal(currentButton.selectionStart, 2);
