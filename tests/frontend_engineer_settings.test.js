@@ -494,6 +494,74 @@ test('focused engineer Session Map requests are scoped by engineer id', () => {
   );
 });
 
+test('group-level Session Map reads default-engineer scoped responses', () => {
+  const sandbox = createSandbox();
+  sandbox.state.engineer_session_maps = {};
+  sandbox.state.group_settings = {
+    alpha: { engineer_agent_id: 'eng-alpha' },
+  };
+  const context = vm.createContext(sandbox);
+  loadEngineer(context);
+
+  vm.runInContext(`engineerOpenSessionMap('alpha')`, context);
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
+    { cmd: 'engineer_session_map_read', group: 'alpha' },
+  ]);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(
+      vm.runInContext(`_engineerSessionMapMetaByGroup.alpha`, context)
+    )),
+    { loading: true, stale: false },
+  );
+
+  vm.runInContext(`
+    state.engineer_session_maps['alpha::eng-alpha'] = {
+      group: 'alpha',
+      overview: { tasks_total: 7 },
+      streams: { items: [] }
+    };
+    _engineerReceiveSessionMap({
+      type: 'engineer_session_map',
+      group: 'alpha',
+      engineer_id: 'eng-alpha',
+      session_map: state.engineer_session_maps['alpha::eng-alpha']
+    });
+  `, context);
+
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(vm.runInContext(`_engineerSessionMapData('alpha')`, context))),
+    {
+      group: 'alpha',
+      overview: { tasks_total: 7 },
+      streams: { items: [] },
+    },
+  );
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(
+      vm.runInContext(`_engineerSessionMapMetaByGroup.alpha`, context)
+    )),
+    { loading: false, stale: false },
+  );
+  assert.equal(
+    vm.runInContext(`_engineerSessionMapStatus('alpha', 'session_map')`, context),
+    '',
+  );
+});
+
+test('group-level Session Map ignores non-default scoped responses', () => {
+  const sandbox = createSandbox();
+  sandbox.state.engineer_session_maps = {
+    'alpha::eng-peer': { group: 'alpha', overview: { tasks_total: 99 } },
+  };
+  sandbox.state.group_settings = {
+    alpha: { engineer_agent_id: 'eng-alpha' },
+  };
+  const context = vm.createContext(sandbox);
+  loadEngineer(context);
+
+  assert.equal(vm.runInContext(`_engineerSessionMapData('alpha')`, context), null);
+});
+
 test('engineerDismissNote clears the non-blocking banner without resuming', () => {
   const sandbox = createSandbox();
   const context = vm.createContext(sandbox);

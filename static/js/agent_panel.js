@@ -3442,9 +3442,31 @@ function _engineerSessionMapKey(group, engineerId) {
   return engineerId ? (group + '::' + engineerId) : group;
 }
 
+function _engineerDefaultSessionMapAgentId(group) {
+  group = String(group || '').trim();
+  if (!group || !state || !state.group_settings) return '';
+  var settings = state.group_settings[group] || null;
+  return String((settings && settings.engineer_agent_id) || '').trim();
+}
+
 function _engineerSessionMapData(group) {
   if (!group || !state || !state.engineer_session_maps) return null;
-  return state.engineer_session_maps[_engineerSessionMapKey(group)] || null;
+  var store = state.engineer_session_maps;
+  var key = _engineerSessionMapKey(group);
+  if (store[key]) return store[key];
+
+  // Legacy/group-level Session Map requests do not include an engineer id, but
+  // the server may answer with the group's default engineer id for strict
+  // scoping. Fall back to that scoped cache entry so the group-level panel does
+  // not stay stuck on the bare group key forever.
+  if (!_engineerFocusedSessionMapAgentId()) {
+    var defaultEngineerId = _engineerDefaultSessionMapAgentId(group);
+    if (defaultEngineerId) {
+      var defaultKey = _engineerSessionMapKey(group, defaultEngineerId);
+      if (store[defaultKey]) return store[defaultKey];
+    }
+  }
+  return null;
 }
 
 function _engineerRequestSessionMap(group, force) {
@@ -3530,9 +3552,14 @@ function engineerRefreshSessionMap(group) {
 function _engineerReceiveSessionMap(msg) {
   var group = (msg && msg.group) || '';
   if (!group) return;
-  var meta = _engineerSessionMapMeta(group, (msg && msg.engineer_id) || '');
+  var engineerId = (msg && msg.engineer_id) || '';
+  var meta = _engineerSessionMapMeta(group, engineerId);
   meta.loading = false;
   meta.stale = false;
+  if (engineerId && _engineerSessionMapMetaByGroup[group]) {
+    _engineerSessionMapMetaByGroup[group].loading = false;
+    _engineerSessionMapMetaByGroup[group].stale = false;
+  }
   if (_engineerShouldRenderCurrentGroup(group)) {
     _agentPanelRefreshVisibleSurface();
   }
