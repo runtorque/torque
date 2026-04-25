@@ -269,6 +269,11 @@ function openNestedModal(id) {
   const el = document.getElementById(id);
   if (!el) return;
   el.classList.add('visible');
+  // Raise above the parent overlay regardless of DOM order. Without this
+  // class, two .visible overlays at the same z-index render in document
+  // order — a parent declared later in the DOM (e.g. Group Settings) would
+  // paint on top of an earlier-declared child like #modal-new-specialization.
+  el.classList.add('modal-nested');
   if (_modalStack.indexOf(id) === -1) _modalStack.push(id);
 }
 
@@ -280,7 +285,10 @@ function closeNestedModal(id) {
   }
   if (!target) return false;
   const el = document.getElementById(target);
-  if (el) el.classList.remove('visible');
+  if (el) {
+    el.classList.remove('visible');
+    el.classList.remove('modal-nested');
+  }
   const idx = _modalStack.lastIndexOf(target);
   if (idx >= 0) _modalStack.splice(idx, 1);
   return true;
@@ -292,7 +300,10 @@ function closeModals() {
   if (_modalStack.length > 0) {
     const topId = _modalStack.pop();
     const el = document.getElementById(topId);
-    if (el) el.classList.remove('visible');
+    if (el) {
+      el.classList.remove('visible');
+      el.classList.remove('modal-nested');
+    }
     return;
   }
   var taskModal = document.getElementById('modal-task');
@@ -306,7 +317,10 @@ function closeModals() {
       && typeof hideTaskHistory === 'function') {
     hideTaskHistory();
   }
-  document.querySelectorAll('.overlay').forEach(o => o.classList.remove('visible'));
+  document.querySelectorAll('.overlay').forEach(o => {
+    o.classList.remove('visible');
+    o.classList.remove('modal-nested');
+  });
   document.querySelectorAll('.hint-pop').forEach(p => p.remove());
   if (_confirmResolve) { _confirmResolve(false); _confirmResolve = null; }
   if (typeof _glsCapturing !== 'undefined' && _glsCapturing) _cancelCapture();

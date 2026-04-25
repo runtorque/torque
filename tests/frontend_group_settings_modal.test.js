@@ -162,6 +162,13 @@ function loadModals(context) {
   vm.runInContext(source, context, { filename });
 }
 
+function loadEngineerLaunchModals(context) {
+  loadModals(context);
+  const filename = path.join(repoRoot, 'static/js/modals/engineer-launch.js');
+  const source = fs.readFileSync(filename, 'utf8');
+  vm.runInContext(source, context, { filename });
+}
+
 function seedProviders(context, providers) {
   vm.runInContext(`_cachedProviders = ${JSON.stringify(providers)};`, context);
 }
@@ -561,4 +568,115 @@ test('gsEngineerAddSpecialization appends and gsEngineerRemoveSpecialization dro
   specs = JSON.parse(
     vm.runInContext('JSON.stringify(_gsEngineerSpecs)', context));
   assert.deepEqual(specs, ['react']);
+});
+
+test('GS Engineer + New specialization opens nested above parent (modal-nested z-order)', () => {
+  // Regression: #modal-new-specialization is declared earlier in the DOM
+  // than #modal-group-settings, so without an explicit z-index bump the
+  // parent overlay would paint on top of the nested dialog. The opener
+  // tags the nested overlay with `modal-nested`, which CSS lifts to a
+  // higher stacking layer.
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadEngineerLaunchModals(context);
+
+  vm.runInContext('_settingsGroup = "alpha";', context);
+  ensure('modal-group-settings').classList.add('visible');
+
+  vm.runInContext('openGsEngineerNewSpecializationDialog()', context);
+
+  assert.equal(
+    ensure('modal-new-specialization').classList.contains('visible'),
+    true,
+    'nested specialization modal should be visible',
+  );
+  assert.equal(
+    ensure('modal-new-specialization').classList.contains('modal-nested'),
+    true,
+    'nested specialization modal must carry modal-nested for z-order',
+  );
+  assert.equal(
+    ensure('modal-group-settings').classList.contains('visible'),
+    true,
+    'parent Group Settings overlay must remain visible underneath',
+  );
+});
+
+test('GS Engineer + New specialization submit closes nested only and pops the stack', () => {
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadEngineerLaunchModals(context);
+
+  vm.runInContext('_settingsGroup = "alpha";', context);
+  ensure('modal-group-settings').classList.add('visible');
+
+  vm.runInContext('openGsEngineerNewSpecializationDialog()', context);
+  ensure('new-specialization-name').value = 'rust-systems';
+  ensure('new-specialization-preamble').value = 'Rust focus.';
+  ensure('new-specialization-scope').value = 'project';
+
+  vm.runInContext('submitNewSpecializationDialog()', context);
+
+  // Server side fan-out: save_specialization + list_specializations.
+  const saveCall = sandbox.sendCalls.find(
+    (msg) => msg.cmd === 'save_specialization');
+  assert.ok(saveCall, 'save_specialization should be sent');
+  assert.equal(saveCall.group, 'alpha',
+    'group must come from _settingsGroup when launched from GS');
+  assert.equal(saveCall.scope, 'project');
+
+  // Nested overlay closed, stack popped, parent still visible.
+  assert.equal(
+    ensure('modal-new-specialization').classList.contains('visible'),
+    false,
+    'nested specialization overlay must close on submit',
+  );
+  assert.equal(
+    ensure('modal-new-specialization').classList.contains('modal-nested'),
+    false,
+    'modal-nested class must be cleared on submit',
+  );
+  assert.equal(
+    ensure('modal-group-settings').classList.contains('visible'),
+    true,
+    'parent Group Settings overlay must remain visible after nested submit',
+  );
+  const stackLen = vm.runInContext('_modalStack.length', context);
+  assert.equal(stackLen, 0, 'modal stack must be empty after nested submit');
+});
+
+test('GS Engineer + New specialization Escape pops nested only (closeModals)', () => {
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadEngineerLaunchModals(context);
+
+  vm.runInContext('_settingsGroup = "alpha";', context);
+  ensure('modal-group-settings').classList.add('visible');
+
+  vm.runInContext('openGsEngineerNewSpecializationDialog()', context);
+
+  // The stack-pop path is what protects the parent — first closeModals
+  // must consume the nested entry only.
+  const stackBefore = vm.runInContext('_modalStack.length', context);
+  assert.equal(stackBefore, 1, 'nested entry must be on the stack');
+
+  vm.runInContext('closeModals()', context);
+
+  assert.equal(
+    ensure('modal-new-specialization').classList.contains('visible'),
+    false,
+    'first closeModals must dismiss the nested overlay',
+  );
+  assert.equal(
+    ensure('modal-new-specialization').classList.contains('modal-nested'),
+    false,
+    'modal-nested class must be cleared on stack pop',
+  );
+  assert.equal(
+    ensure('modal-group-settings').classList.contains('visible'),
+    true,
+    'parent Group Settings overlay must remain visible',
+  );
+  const stackAfter = vm.runInContext('_modalStack.length', context);
+  assert.equal(stackAfter, 0, 'modal stack must be empty after pop');
 });

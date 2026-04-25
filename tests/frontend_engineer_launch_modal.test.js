@@ -436,6 +436,11 @@ test('nested-modal: closeModals pops new-specialization without dismissing paren
     true,
     'nested should be visible',
   );
+  assert.equal(
+    ensure('modal-new-specialization').classList.contains('modal-nested'),
+    true,
+    'nested overlay must carry modal-nested for z-order layering',
+  );
 
   // First closeModals() pops the nested overlay only.
   vm.runInContext('closeModals()', context);
