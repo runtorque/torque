@@ -1316,6 +1316,137 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(denied_error)
         self.assertEqual(denied_text, "engineer not found in scope")
 
+    async def test_architect_engineer_list_includes_specializations(self):
+        architect = self._add_architect("arch-1", "Architect")
+        alice = self._add_engineer(
+            "eng-alice", "Alice", hired_by_architect_id=architect.id
+        )
+        alice.engineer_specializations = ["ui-ux", "security-focus"]
+        self.state._db_save_agent(alice)
+        bob = self._add_engineer(
+            "eng-bob", "Bob", hired_by_architect_id=architect.id
+        )
+
+        text, is_error = await self._call(
+            "architect_engineer_list",
+            {},
+            architect.id,
+        )
+
+        self.assertFalse(is_error, text)
+        engineers = {
+            item["id"]: item for item in json.loads(text)["engineers"]
+        }
+        self.assertEqual(
+            engineers[alice.id]["specializations"],
+            ["ui-ux", "security-focus"],
+        )
+        self.assertEqual(engineers[bob.id]["specializations"], [])
+
+    async def test_architect_task_create_persists_specialization_and_warns_on_mismatch(self):
+        architect = self._add_architect("arch-1", "Architect")
+        alice = self._add_engineer(
+            "eng-alice", "Alice", hired_by_architect_id=architect.id
+        )
+        alice.engineer_specializations = ["ui-ux"]
+        self.state._db_save_agent(alice)
+        bob = self._add_engineer(
+            "eng-bob", "Bob", hired_by_architect_id=architect.id
+        )
+        bob.engineer_specializations = ["events"]
+        self.state._db_save_agent(bob)
+
+        ok_text, ok_error = await self._call(
+            "architect_task_create",
+            {
+                "title": "Polish task modal layout",
+                "group": "loom",
+                "assigned_engineer_id": alice.id,
+                "suggested_specialization": "ui-ux",
+            },
+            architect.id,
+        )
+        self.assertFalse(ok_error, ok_text)
+        ok_payload = json.loads(ok_text)
+        self.assertNotIn("suggested_specialization_warning", ok_payload)
+        ok_task = self.state.board_tasks[ok_payload["task_id"]]
+        self.assertEqual(ok_task.suggested_specialization, "ui-ux")
+
+        warn_text, warn_error = await self._call(
+            "architect_task_create",
+            {
+                "title": "UI polish for settings",
+                "group": "loom",
+                "assigned_engineer_id": bob.id,
+                "suggested_specialization": "ui-ux",
+            },
+            architect.id,
+        )
+        self.assertFalse(warn_error, warn_text)
+        warn_payload = json.loads(warn_text)
+        self.assertIn("suggested_specialization_warning", warn_payload)
+        self.assertIn("ui-ux", warn_payload["suggested_specialization_warning"])
+        warn_task = self.state.board_tasks[warn_payload["task_id"]]
+        self.assertEqual(warn_task.suggested_specialization, "ui-ux")
+
+    async def test_architect_board_summary_filters_by_specialization(self):
+        architect = self._add_architect("arch-1", "Architect")
+        alice = self._add_engineer(
+            "eng-alice", "Alice", hired_by_architect_id=architect.id
+        )
+        alice.engineer_specializations = ["ui-ux"]
+        self.state._db_save_agent(alice)
+
+        ui_task = self._add_task(
+            "task-ui",
+            "Polish header",
+            assigned_engineer_id=alice.id,
+            created_by_architect_id=architect.id,
+            suggested_specialization="ui-ux",
+        )
+        events_task = self._add_task(
+            "task-events",
+            "Add event digest",
+            assigned_engineer_id=alice.id,
+            created_by_architect_id=architect.id,
+            suggested_specialization="events",
+        )
+        untagged_task = self._add_task(
+            "task-untagged",
+            "General work",
+            assigned_engineer_id=alice.id,
+            created_by_architect_id=architect.id,
+        )
+
+        unfiltered_text, unfiltered_error = await self._call(
+            "architect_board_summary",
+            {},
+            architect.id,
+        )
+        self.assertFalse(unfiltered_error, unfiltered_text)
+        unfiltered = json.loads(unfiltered_text)
+        self.assertEqual(
+            {item["id"] for item in unfiltered["tasks"]["items"]},
+            {ui_task.id, events_task.id, untagged_task.id},
+        )
+        ui_item = next(
+            item for item in unfiltered["tasks"]["items"]
+            if item["id"] == ui_task.id
+        )
+        self.assertEqual(ui_item["suggested_specialization"], "ui-ux")
+
+        filtered_text, filtered_error = await self._call(
+            "architect_board_summary",
+            {"specialization_engineer_id": alice.id},
+            architect.id,
+        )
+        self.assertFalse(filtered_error, filtered_text)
+        filtered = json.loads(filtered_text)
+        self.assertEqual(
+            {item["id"] for item in filtered["tasks"]["items"]},
+            {ui_task.id},
+        )
+
     async def test_architect_ask_creates_visible_human_attention_task(self):
         architect = self._add_architect("arch-1", "Architect")
         self.state.get_group_settings("loom").board_default_action = "feature/implement"

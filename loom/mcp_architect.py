@@ -38,7 +38,20 @@ _ARCHITECT_TOOL_SPECS = [
             "including task creator attribution and a bounded lightweight "
             "task summary excerpt."
         ),
-        "inputSchema": {"type": "object", "properties": {}},
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "specialization_engineer_id": {
+                    "type": "string",
+                    "description": (
+                        "Optional engineer id/slug/name. When set, the task "
+                        "excerpt is filtered to tasks whose "
+                        "suggested_specialization matches one of that "
+                        "engineer's specializations."
+                    ),
+                },
+            },
+        },
     },
     {
         "name": "architect_events_recent",
@@ -181,6 +194,15 @@ _ARCHITECT_TOOL_SPECS = [
                 "suggested_action": {
                     "type": "string",
                     "description": "Optional non-binding action suggestion.",
+                },
+                "suggested_specialization": {
+                    "type": "string",
+                    "description": (
+                        "Optional non-binding routing hint: a specialization "
+                        "slug (e.g. 'ui-ux'). When set, the response includes "
+                        "a warning if the assigned engineer does not carry "
+                        "that specialization."
+                    ),
                 },
                 "action_vars": {
                     "type": "object",

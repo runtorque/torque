@@ -522,6 +522,7 @@ class BoardTask:
     created_by_architect_id: str = ""  # architect provenance
     created_by_engineer_id: str = ""  # engineer provenance
     suggested_action: str = ""  # non-binding architect action hint
+    suggested_specialization: str = ""  # non-binding routing hint: specialization slug
     reply_agent_id: str = ""    # worker expected to answer this follow-up
     labels: list[str] = field(default_factory=list)
     created_at: str = ""        # ISO 8601
