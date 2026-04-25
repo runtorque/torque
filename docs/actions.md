@@ -113,6 +113,7 @@ prompt: |
 | **review_required_above_loc** | integer | no | Non-test LOC threshold for auto-deriving `feature/review` on implementation-depth actions. Defaults to 150 when `implementation_depth` is true. |
 | **labels** | list | no | Labels applied to the task on the board. |
 | **transitions** | list | no | Valid next actions for pipeline chaining (see [Pipelines](#pipelines)). |
+| **transitions[].loc_gate** | object | no | Transition-local LOC review gate for `feature/review` handoffs (see [Transition LOC review gates](#transition-loc-review-gates)). |
 | **max_depth** | integer | no | Override the global `max_pipeline_depth` for this action. |
 
 ## Where actions live
@@ -508,6 +509,49 @@ Report your progress with these Loom MCP tools:
 ```
 
 The agent reads these instructions and calls the appropriate MCP tool when it's done. The server validates that the transition is allowed before dispatching. The dedicated [CLI reference](cli.md#ai) still documents the equivalent `loom ai ...` commands for manual workflows and debugging.
+
+### Transition LOC review gates
+
+A transition to `feature/review` can carry a `loc_gate` block to tune the automatic non-test LOC review gate for that specific action. The block supports the same threshold shape as the architect review gate:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ship_direct_max` | integer | Non-test LOC count at or below which direct completion may ship without review. |
+| `review_default_above` | integer | Non-test LOC count above which Loom should auto-derive `feature/review`. |
+| `self_review_bypass_allowed` | boolean | Whether an explicit self-review bypass request may skip this gate. When `false`, Loom ignores the bypass request and derives review. |
+
+The effective LOC threshold is the higher of `ship_direct_max` and `review_default_above`: diffs at or below that count may close directly; diffs above it trigger `feature/review`.
+
+```yaml
+name: feature/implement
+description: Implement a feature with a transition-local LOC gate
+
+implementation_depth: true
+worktree: true
+
+transitions:
+  - action: feature/review
+    when: implementation is complete or the LOC gate requires review
+    loc_gate:
+      ship_direct_max: 50
+      review_default_above: 150
+      self_review_bypass_allowed: false
+
+prompt: |
+  You are implementing a feature.
+
+  {{ TASK }}
+```
+
+When an implementation-depth task closes directly, Loom resolves the review policy in this order:
+
+1. `loc_gate` on the action's `feature/review` transition.
+2. The action-level `review_required_above_loc` threshold.
+3. The architect global `architect_review_gate_thresholds`.
+
+For legacy action-level thresholds, only the LOC threshold comes from `review_required_above_loc`; if architect settings are present, their `self_review_bypass_allowed` value still controls bypass requests. A transition-local `loc_gate` controls both the LOC threshold and bypass behavior.
+
+If none of those are set, the existing implementation-depth default still applies. Actions without a `feature/review` transition-local `loc_gate` — including actions with no `feature/review` transition at all — are otherwise unaffected; they continue to use the existing `implementation_depth` / `review_required_above_loc` gate behavior.
 
 ### The `ask` transition
 
