@@ -1003,7 +1003,7 @@ test('agent MCP tab fetches calls, filters, and expands redacted details', () =>
   context.renderAgentPanel();
 
   assert.match(panel.innerHTML, /id="agent-panel-tab-mcp" class="agent-panel-tab active"/);
-  assert.match(panel.innerHTML, /Args redacted by default/);
+  assert.doesNotMatch(panel.innerHTML, /agent-panel-mcp-banner/);
   assert.ok(sendCalls.some((call) => call.cmd === 'mcp_calls'
     && call.cell_id === 'worker-mcp'
     && call.limit === 50

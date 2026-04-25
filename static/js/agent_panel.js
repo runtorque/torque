@@ -1806,16 +1806,6 @@ function _agentPanelRenderMcpCall(call, agentId) {
   return html;
 }
 
-function _agentPanelMcpSettingsBanner() {
-  var mode = state && state.global_settings
-    ? String(state.global_settings.mcp_call_log_args_capture || 'metadata')
-    : 'metadata';
-  if (mode === 'full') return '';
-  return '<button type="button" class="agent-panel-mcp-banner" onclick="openGlobalSettings()">'
-    + 'Args redacted by default — change in Global Settings.'
-    + '</button>';
-}
-
 function _renderAgentMcpTab(agent) {
   _agentPanelRequestMcpCalls(agent);
   var agentId = String((agent && agent.id) || '');
@@ -1827,7 +1817,6 @@ function _renderAgentMcpTab(agent) {
   var visibleCalls = calls.slice(0, visibleLimit);
   var loading = !!_agentPanelMcpCallsLoadingByAgent[agentId];
   var html = '<div class="agent-panel-mcp-tab">';
-  html += _agentPanelMcpSettingsBanner();
   html += '<div class="agent-panel-mcp-filters">';
   html += '<input class="agent-panel-mcp-filter-tool" placeholder="Filter tool" value="'
     + _agentPanelAttr(filters.tool || '')
