@@ -457,8 +457,13 @@ function _restoreTerminalWorkspaceState(root, snapshot, cell) {
   const input = _terminalComposeTextarea(root);
   if (!input) return;
   const cellId = input.dataset ? (input.dataset.cellId || '') : '';
+  // Only re-assign value if the rendered textarea actually drifted from the
+  // in-memory draft. Re-assigning a textarea's value resets its scrollTop
+  // and would undo the cursor-into-view scroll that _restoreSurfaceState
+  // just performed.
   if (cell && cellId === String(cell.id || '')
-      && Object.prototype.hasOwnProperty.call(_terminalComposeDrafts, cellId)) {
+      && Object.prototype.hasOwnProperty.call(_terminalComposeDrafts, cellId)
+      && input.value !== _terminalComposeDrafts[cellId]) {
     input.value = _terminalComposeDrafts[cellId];
   }
   _terminalComposeAutoResize(input);

@@ -482,6 +482,8 @@ function _captureSurfaceState(root, opts) {
         checked: 'checked' in active ? !!active.checked : null,
         selectionStart: typeof active.selectionStart === 'number' ? active.selectionStart : null,
         selectionEnd: typeof active.selectionEnd === 'number' ? active.selectionEnd : null,
+        scrollTop: typeof active.scrollTop === 'number' ? active.scrollTop : null,
+        scrollLeft: typeof active.scrollLeft === 'number' ? active.scrollLeft : null,
       };
     }
   }
@@ -533,6 +535,15 @@ function _restoreSurfaceState(root, snapshot, opts) {
   }
   if (typeof snapshot.focus.selectionEnd === 'number' && 'selectionEnd' in el) {
     el.selectionEnd = snapshot.focus.selectionEnd;
+  }
+  // Restore the focused element's own scrollTop last — assigning value or
+  // selection on a textarea resets internal scroll, which would otherwise
+  // jump a multi-line compose box back to the top on every WS rerender.
+  if (typeof snapshot.focus.scrollTop === 'number' && typeof el.scrollTop === 'number') {
+    el.scrollTop = snapshot.focus.scrollTop;
+  }
+  if (typeof snapshot.focus.scrollLeft === 'number' && typeof el.scrollLeft === 'number') {
+    el.scrollLeft = snapshot.focus.scrollLeft;
   }
 }
 
