@@ -10624,7 +10624,7 @@ test('renderAgentPanel shows branch review-point summary in Session Map view', (
     },
   };
   context.state.engineer_session_maps = {
-    alpha: {
+    'alpha::agent-1': {
       branch_boundaries: {
         items: [
           {

@@ -1111,53 +1111,94 @@ class MatrixStateCleanupTests(unittest.TestCase):
             },
         )
 
-    def test_agent_visibility_to_engineer_respects_owned_agent_setting(self):
+    def test_agent_visibility_to_engineer_enforces_kind_scope(self):
         state = self.state_mod.MatrixState()
         engineer = self.state_mod.AgentCell(
             id="engineer-1",
             name="Engineer",
             group="g",
             cell_type="agent",
+            kind="engineer",
+        )
+        architect = self.state_mod.AgentCell(
+            id="architect-1",
+            name="Architect",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+        )
+        peer_engineer = self.state_mod.AgentCell(
+            id="engineer-2",
+            name="Peer engineer",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
         )
         owned = self.state_mod.AgentCell(
             id="agent-owned",
             name="Owned worker",
             group="g",
             cell_type="agent",
+            kind="worker",
+            owner_engineer_id=engineer.id,
             created_by_engineer_id=engineer.id,
         )
-        legacy = self.state_mod.AgentCell(
-            id="agent-legacy",
-            name="Legacy worker",
+        terminal = self.state_mod.AgentCell(
+            id="terminal-owned",
+            name="Owned terminal",
+            group="g",
+            cell_type="terminal",
+            kind="terminal",
+            parent_id=owned.id,
+        )
+        other_owned = self.state_mod.AgentCell(
+            id="agent-other-owned",
+            name="Other engineer worker",
             group="g",
             cell_type="agent",
+            kind="worker",
+            owner_engineer_id=peer_engineer.id,
         )
         other_group = self.state_mod.AgentCell(
             id="agent-other",
             name="Other group worker",
             group="other",
             cell_type="agent",
+            kind="worker",
             created_by_engineer_id=engineer.id,
         )
         state.agents = {
             engineer.id: engineer,
+            architect.id: architect,
+            peer_engineer.id: peer_engineer,
             owned.id: owned,
-            legacy.id: legacy,
+            terminal.id: terminal,
+            other_owned.id: other_owned,
             other_group.id: other_group,
         }
-        state.groups["g"] = [engineer.id, owned.id, legacy.id]
+        state.groups["g"] = [
+            engineer.id,
+            architect.id,
+            peer_engineer.id,
+            owned.id,
+            terminal.id,
+            other_owned.id,
+        ]
         state.groups["other"] = [other_group.id]
         state.group_settings["g"] = self.state_mod.GroupSettings(
             engineer_agent_id=engineer.id
         )
 
+        self.assertTrue(state.agent_is_visible_to_engineer(engineer.id, engineer.id))
+        self.assertTrue(state.agent_is_visible_to_engineer(engineer.id, architect.id))
         self.assertTrue(state.agent_is_visible_to_engineer(engineer.id, owned.id))
-        self.assertTrue(state.agent_is_visible_to_engineer(engineer.id, legacy.id))
-
-        state.update_engineer_settings("g", restrict_to_created_agents=True)
-
-        self.assertTrue(state.agent_is_visible_to_engineer(engineer.id, owned.id))
-        self.assertFalse(state.agent_is_visible_to_engineer(engineer.id, legacy.id))
+        self.assertTrue(state.agent_is_visible_to_engineer(engineer.id, terminal.id))
+        self.assertFalse(
+            state.agent_is_visible_to_engineer(engineer.id, peer_engineer.id)
+        )
+        self.assertFalse(
+            state.agent_is_visible_to_engineer(engineer.id, other_owned.id)
+        )
         self.assertFalse(
             state.agent_is_visible_to_engineer(engineer.id, other_group.id)
         )

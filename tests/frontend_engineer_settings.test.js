@@ -466,6 +466,34 @@ test('engineerOpenSessionMap requests the on-demand Session Map payload', () => 
   assert.equal(vm.runInContext(`_engineerJournalSubviewByGroup.alpha`, context), 'session_map');
 });
 
+test('focused engineer Session Map requests are scoped by engineer id', () => {
+  const sandbox = createSandbox();
+  sandbox.focusedItemId = 'eng-alpha';
+  sandbox.state.agents = {
+    'eng-alpha': {
+      id: 'eng-alpha',
+      group: 'alpha',
+      name: 'Builder',
+      kind: 'engineer',
+      cell_type: 'agent',
+    },
+  };
+  const context = vm.createContext(sandbox);
+  loadEngineer(context);
+
+  vm.runInContext(`engineerOpenSessionMap('alpha')`, context);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
+    { cmd: 'engineer_session_map_read', group: 'alpha', engineer_id: 'eng-alpha' },
+  ]);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(
+      vm.runInContext(`_engineerSessionMapMetaByGroup['alpha::eng-alpha']`, context)
+    )),
+    { loading: true, stale: false },
+  );
+});
+
 test('engineerDismissNote clears the non-blocking banner without resuming', () => {
   const sandbox = createSandbox();
   const context = vm.createContext(sandbox);

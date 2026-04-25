@@ -3415,40 +3415,64 @@ function _engineerJournalSubview(group) {
     : 'journal';
 }
 
-function _engineerSessionMapMeta(group) {
+function _engineerSessionMapMeta(group, engineerId) {
   if (!group) return { loading: false, stale: false };
-  if (!_engineerSessionMapMetaByGroup[group]) {
-    _engineerSessionMapMetaByGroup[group] = { loading: false, stale: false };
+  var key = _engineerSessionMapKey(group, engineerId);
+  if (!_engineerSessionMapMetaByGroup[key]) {
+    _engineerSessionMapMetaByGroup[key] = { loading: false, stale: false };
   }
-  return _engineerSessionMapMetaByGroup[group];
+  return _engineerSessionMapMetaByGroup[key];
+}
+
+function _engineerFocusedSessionMapAgentId() {
+  if (typeof _resolveFocusedAgent !== 'function'
+      || typeof _agentPanelKind !== 'function') return '';
+  var focused = _resolveFocusedAgent();
+  if (!focused || _agentPanelKind(focused) !== 'engineer') return '';
+  return String(focused.id || '').trim();
+}
+
+function _engineerSessionMapKey(group, engineerId) {
+  group = String(group || '').trim();
+  engineerId = String(
+    typeof engineerId === 'undefined'
+      ? _engineerFocusedSessionMapAgentId()
+      : engineerId
+  ).trim();
+  return engineerId ? (group + '::' + engineerId) : group;
 }
 
 function _engineerSessionMapData(group) {
   if (!group || !state || !state.engineer_session_maps) return null;
-  return state.engineer_session_maps[group] || null;
+  return state.engineer_session_maps[_engineerSessionMapKey(group)] || null;
 }
 
 function _engineerRequestSessionMap(group, force) {
   if (!group) return;
-  var meta = _engineerSessionMapMeta(group);
+  var engineerId = _engineerFocusedSessionMapAgentId();
+  var meta = _engineerSessionMapMeta(group, engineerId);
   var hasData = !!_engineerSessionMapData(group);
   if (meta.loading) return;
   if (!force && hasData && !meta.stale) return;
   meta.loading = true;
-  send({ cmd: 'engineer_session_map_read', group: group });
+  var payload = { cmd: 'engineer_session_map_read', group: group };
+  if (engineerId) payload.engineer_id = engineerId;
+  send(payload);
 }
 
 function _engineerResetSessionMapMeta(options) {
   options = options || {};
-  var groups = Object.keys(_engineerSessionMapMetaByGroup || {});
-  if (!groups.length) return;
+  var keys = Object.keys(_engineerSessionMapMetaByGroup || {});
+  if (!keys.length) return;
   var clearStale = options.clearStale !== false;
   var refetchOpenMissing = !!options.refetchOpenMissing;
   var shouldRender = false;
-  for (var i = 0; i < groups.length; i++) {
-    var group = groups[i];
+  for (var i = 0; i < keys.length; i++) {
+    var key = keys[i];
+    var group = String(key || '').split('::')[0];
     if (!group) continue;
-    var meta = _engineerSessionMapMeta(group);
+    var meta = _engineerSessionMapMetaByGroup[key];
+    if (!meta) continue;
     var wasLoading = !!meta.loading;
     meta.loading = false;
     if (clearStale) meta.stale = false;
@@ -3506,7 +3530,7 @@ function engineerRefreshSessionMap(group) {
 function _engineerReceiveSessionMap(msg) {
   var group = (msg && msg.group) || '';
   if (!group) return;
-  var meta = _engineerSessionMapMeta(group);
+  var meta = _engineerSessionMapMeta(group, (msg && msg.engineer_id) || '');
   meta.loading = false;
   meta.stale = false;
   if (_engineerShouldRenderCurrentGroup(group)) {
@@ -3520,8 +3544,15 @@ function _engineerMarkSessionMapStale(groups) {
   for (var i = 0; i < groups.length; i++) {
     var group = groups[i];
     if (!group) continue;
-    var meta = _engineerSessionMapMeta(group);
-    meta.stale = true;
+    var keys = Object.keys(_engineerSessionMapMetaByGroup || {}).filter(function(key) {
+      return key === group || key.indexOf(group + '::') === 0;
+    });
+    if (!keys.length) keys = [_engineerSessionMapKey(group)];
+    for (var j = 0; j < keys.length; j++) {
+      var meta = _engineerSessionMapMetaByGroup[keys[j]]
+        || _engineerSessionMapMeta(group);
+      meta.stale = true;
+    }
     if (_engineerIsSessionMapOpen(group)) {
       _engineerRequestSessionMap(group, false);
       if (_engineerShouldRenderCurrentGroup(group)) shouldRender = true;
@@ -5173,6 +5204,13 @@ function _engineerGroupHasConfiguredAgent(group) {
 
 function _engineerGroupStoreHasState(store, group) {
   if (!store || !group) return false;
+  if (_engineerGroupHasState(store[group])) return true;
+  var prefix = String(group || '') + '::';
+  for (var key in store) {
+    if (key.indexOf(prefix) === 0 && _engineerGroupHasState(store[key])) {
+      return true;
+    }
+  }
   return _engineerGroupHasState(store[group]);
 }
 

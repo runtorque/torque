@@ -1584,12 +1584,9 @@ def _visible_agent_ids_for_caller(state, caller_kind: str,
     visible = set()
     caller_id = str(caller_id or "").strip()
     for cell in state.agents.values():
-        if getattr(cell, "cell_type", "") != "agent":
-            continue
-        if str(getattr(cell, "id", "") or "").strip() == caller_id:
-            visible.add(cell.id)
-            continue
-        if _effective_owner_engineer_id(cell) == caller_id:
+        if state.agent_is_visible_to_engineer(
+                caller_id,
+                str(getattr(cell, "id", "") or "").strip()):
             visible.add(cell.id)
     return visible
 
@@ -1601,15 +1598,7 @@ def _filter_agents_for_caller(state, caller_kind: str,
     )
     filtered = {}
     for cell in state.agents.values():
-        if getattr(cell, "cell_type", "") == "agent":
-            if cell.id in visible_agent_ids:
-                filtered[cell.id] = cell
-            continue
-        parent_id = str(getattr(cell, "parent_id", "") or "").strip()
-        if (
-            _effective_owner_engineer_id(cell) == str(caller_id or "").strip()
-            or parent_id in visible_agent_ids
-        ):
+        if cell.id in visible_agent_ids:
             filtered[cell.id] = cell
     return filtered
 
