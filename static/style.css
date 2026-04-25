@@ -926,6 +926,16 @@ body.runtime-embedded .terminal-empty {
 }
 .principal-card-new {
   align-self: stretch;
+  /* Override .ghost-card height so the wrapped "+ New Architect" button on its
+     own row preserves the populated principal-card height instead of collapsing
+     to the short ghost-card height. (LOOM:209) */
+  height: auto;
+  min-height: 64px;
+}
+@media (max-width: 400px) {
+  .principal-card-new {
+    min-height: 56px;
+  }
 }
 .principal-card-controls {
   position: absolute;

@@ -175,6 +175,20 @@ test('principals row renders user + each architect + new architect ghost', () =>
   assert.match(mainEl.innerHTML, /principal-card-new[\s\S]*\+ New Architect/);
 });
 
+test('principal-card-new CSS preserves dimensions when wrapped (LOOM:209 regression)', () => {
+  // The "+ New Architect" ghost button uses .ghost-card height (~16-20px) by
+  // default, which makes it look squeezed when it wraps to its own row in a
+  // narrow panel. .principal-card-new must override height + min-height so the
+  // wrapped button matches the populated principal-card height (~64px+).
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const newCardRule = css.match(/\.principal-card-new\s*\{[^}]*\}/);
+  assert.ok(newCardRule, '.principal-card-new rule exists in style.css');
+  assert.match(newCardRule[0], /height:\s*auto/,
+    '.principal-card-new overrides .ghost-card height with `height: auto`');
+  assert.match(newCardRule[0], /min-height:\s*64px/,
+    '.principal-card-new sets min-height: 64px to match populated principal cards');
+});
+
 test('default (empty) selected_principal_id filters grid to user-owned engineers', () => {
   const { context, sandbox, mainEl } = createHarness();
   sandbox.state.groups.loom = ['arch-a', 'eng-user', 'eng-arch'];
