@@ -2763,9 +2763,13 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 [draggable="true"]:active { cursor: grabbing; }
 /* Agent grid cards are click-first (open agent panel) and drag-secondary;
    show pointer to match architect/user principal cards. The grabbing
-   cursor still appears on :active drag. */
-.agent-card[draggable="true"] { cursor: pointer; }
-.agent-card[draggable="true"]:active { cursor: grabbing; }
+   cursor still appears on :active drag. Engineer/worker/terminal cards
+   render with class `.cell` (see render.js renderAgentCell), and the
+   terminal-drawer rows render with `.term-row`. */
+.cell[draggable="true"],
+.term-row[draggable="true"] { cursor: pointer; }
+.cell[draggable="true"]:active,
+.term-row[draggable="true"]:active { cursor: grabbing; }
 .cell.dragging, .term-row.dragging, .group.dragging {
   opacity: 0.3; transition: opacity .15s;
   pointer-events: none;
