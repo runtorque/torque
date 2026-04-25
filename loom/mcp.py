@@ -716,7 +716,8 @@ def _visible_tools(state, cell_id: str):
 # ---------------------------------------------------------------------------
 
 async def _dispatch_tool(name, args, cell_id, handle_command, state, *,
-                         idempotency_key: str = ""):
+                         idempotency_key: str = "",
+                         ai_report_mirror=None):
     """Execute a tool call and return (content_text, is_error)."""
 
     if name == "loom_context":
@@ -885,6 +886,16 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state, *,
     result = await handle_command(payload)
     if result and result.get("type") == "error":
         return result.get("message", "Unknown error"), True
+    if ai_report_mirror:
+        try:
+            await ai_report_mirror(
+                payload,
+                result,
+                tool_name=name,
+                idempotency_key=str(payload.get("idempotency_key", "") or ""),
+            )
+        except Exception:
+            log.exception("Failed to mirror MCP ai_report into MCP call log")
 
     return json.dumps(result) if result else '{"type":"ok"}', False
 
@@ -924,6 +935,7 @@ async def dispatch_mcp_rpc_body(
     state,
     idempotency_header: str = "",
     mcp_session_id: str = "",
+    ai_report_mirror=None,
 ) -> tuple[dict, int]:
     """Dispatch one parsed MCP JSON-RPC body and return (payload, HTTP status).
 
@@ -1125,6 +1137,7 @@ async def dispatch_mcp_rpc_body(
                     tool_name, arguments, cell_id,
                     handle_command, state,
                     idempotency_key=idempotency_key,
+                    ai_report_mirror=ai_report_mirror,
                 )
                 result = {
                     "content": [{"type": "text", "text": text}],
@@ -1158,7 +1171,7 @@ async def dispatch_mcp_rpc_body(
     return _jsonrpc_error(req_id, -32601, f"Method not found: {method}"), 200
 
 
-def create_mcp_handler(handle_command, state):
+def create_mcp_handler(handle_command, state, *, ai_report_mirror=None):
     """Return an aiohttp POST handler for the /mcp endpoint."""
 
     async def handle_mcp(request):
@@ -1178,6 +1191,7 @@ def create_mcp_handler(handle_command, state):
             state=state,
             idempotency_header=request.headers.get(IDEMPOTENCY_HEADER, ""),
             mcp_session_id=request.headers.get(MCP_SESSION_HEADER, ""),
+            ai_report_mirror=ai_report_mirror,
         )
         if status == 202:
             return web.Response(status=202)
