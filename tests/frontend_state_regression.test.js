@@ -9418,6 +9418,107 @@ test('renderAgentPanel preserves the selected Events tab across rerenders', () =
   assert.match(panel.innerHTML, /Already sent to Engineer One/);
 });
 
+test('agent Events digest queue and countdown update from WebSocket deltas', () => {
+  const { context, document } = createEngineerWsHarness();
+  const panel = document.getElementById('panel-agent');
+  const countdownEl = new FakeElement('agent-panel-events-countdown');
+  let intervalFn = null;
+  let intervalMs = 0;
+  let clearedInterval = false;
+  const baseSec = 2000;
+  let nowMs = baseSec * 1000;
+
+  context.Date.now = () => nowMs;
+  context.setInterval = (fn, ms) => {
+    intervalFn = fn;
+    intervalMs = ms;
+    return 42;
+  };
+  context.clearInterval = () => {
+    clearedInterval = true;
+  };
+  panel.querySelector = function(selector) {
+    if (selector === '.agent-panel-events-countdown'
+        && /agent-panel-events-countdown/.test(this.innerHTML || '')) {
+      return countdownEl;
+    }
+    return null;
+  };
+
+  runInContext(context, `
+    state.agents = {
+      'eng-1': {
+        id: 'eng-1',
+        name: 'Engineer One',
+        group: 'alpha',
+        kind: 'engineer',
+        cell_type: 'agent',
+      },
+    };
+    state.agent_digest_settings = {
+      'eng-1': { agent_id: 'eng-1', paused: false },
+    };
+    state.digest_buffer_stats = {};
+    state.digest_sent_events = {};
+    focusedItemId = 'eng-1';
+    _agentPanelLastSelectedTabByKind.engineer = 'events';
+    _activePanelApp = 'engineer';
+    _expectedSeq = 1;
+  `);
+
+  context.renderAgentPanel();
+  assert.match(panel.innerHTML, /Queued for next digest/);
+  assert.match(panel.innerHTML, /No queued events\./);
+
+  runInContext(context, `_handleDelta(${JSON.stringify({
+    seq: 1,
+    ops: [{
+      op: 'digest_buffer_stats',
+      agent_id: 'eng-1',
+      group: 'alpha',
+      buffered_events: 1,
+      next_push_in: 30,
+      next_push_at: baseSec + 30,
+      queued_events: [
+        { id: 17, kind: 'task_completed', message: 'WS queued digest event', timestamp: 100 },
+      ],
+      manual_flush_requested: false,
+    }],
+  })})`);
+
+  assert.match(panel.innerHTML, /WS queued digest event/);
+  assert.match(panel.innerHTML, /agent-panel-event-item-queued/);
+  assert.equal(countdownEl.textContent, 'Next eligible send in 30s.');
+  assert.equal(intervalMs, 1000);
+  assert.equal(typeof intervalFn, 'function');
+
+  nowMs += 6000;
+  intervalFn();
+  assert.equal(countdownEl.textContent, 'Next eligible send in 24s.');
+
+  runInContext(context, `_handleDelta(${JSON.stringify({
+    seq: 2,
+    ops: [{
+      op: 'digest_buffer_stats',
+      agent_id: 'eng-1',
+      group: 'alpha',
+      buffered_events: 2,
+      next_push_in: 18,
+      next_push_at: baseSec + 24,
+      queued_events: [
+        { id: 18, kind: 'task_completed', message: 'Second queued digest event', timestamp: 106 },
+        { id: 17, kind: 'task_completed', message: 'WS queued digest event', timestamp: 100 },
+      ],
+      manual_flush_requested: false,
+    }],
+  })})`);
+
+  assert.equal(clearedInterval, true);
+  assert.match(panel.innerHTML, /Second queued digest event/);
+  assert.match(panel.innerHTML, /WS queued digest event/);
+  assert.equal(countdownEl.textContent, 'Next eligible send in 18s.');
+});
+
 test('agentPanelSelectTab rerenders only the active Agent tab body', () => {
   const { context, document } = createEngineerHarness();
   const panel = document.register('panel-agent');
