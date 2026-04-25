@@ -908,6 +908,53 @@ class ServerPromptQueueTests(unittest.IsolatedAsyncioTestCase):
         self.server_mod = importlib.import_module('loom.server')
         self.server_mod = importlib.reload(self.server_mod)
 
+    async def test_dismiss_engineer_note_archives_it_to_panel_events(self):
+        state = self.state_mod.MatrixState()
+        state.add_group('g')
+        engineer = self.state_mod.AgentCell(
+            id='engineer-1',
+            name='Engineer',
+            group='g',
+            cell_type='agent',
+            kind='engineer',
+        )
+        state.agents[engineer.id] = engineer
+        state.groups['g'].append(engineer.id)
+        state.group_settings['g'] = self.state_mod.GroupSettings(
+            engineer_agent_id=engineer.id,
+        )
+        state.update_engineer_settings(
+            'g',
+            pending_note='FYI: release branch is ready',
+            pending_note_kind='note',
+        )
+        events = []
+
+        def panel_event(kind, cell_id, agent_name, group, message, task_id=''):
+            events.append((kind, cell_id, agent_name, group, message, task_id))
+
+        result = await self.server_mod._handle_engineer_dismiss_note_command(
+            {'group': 'g'},
+            state,
+            panel_event,
+        )
+
+        self.assertEqual(result, {'type': 'ok'})
+        self.assertEqual(
+            events,
+            [(
+                'engineer_note_dismissed',
+                'engineer-1',
+                'Engineer',
+                'g',
+                'FYI: release branch is ready',
+                '',
+            )],
+        )
+        ws = state.get_engineer_settings('g')
+        self.assertEqual(ws.pending_note, '')
+        self.assertEqual(ws.pending_note_kind, '')
+
     async def test_queue_cell_prompt_send_does_not_wait_for_slow_background_delivery(self):
         cell = self.state_mod.AgentCell(
             id='agent-1',
