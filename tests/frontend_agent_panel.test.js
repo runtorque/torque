@@ -260,6 +260,127 @@ test('agent panel roster marks architect-owned and user-owned hierarchy rows dis
   assert.doesNotMatch(userRosterHtml, /architect-section-engineer-row|architect-section-worker-row/);
 });
 
+test('worker panel header shows clickable upward architect and engineer parent chain', () => {
+  const { context, panel, sendCalls, restoreCalls } = createHarness();
+  context.state.agents = {
+    'arch-1': {
+      id: 'arch-1',
+      name: 'Loomer',
+      kind: 'architect',
+      group: 'alpha',
+      cell_type: 'agent',
+    },
+    'eng-1': {
+      id: 'eng-1',
+      name: 'Panelsmith',
+      kind: 'engineer',
+      group: 'alpha',
+      hired_by_architect_id: 'arch-1',
+      cell_type: 'agent',
+    },
+    'worker-1': {
+      id: 'worker-1',
+      name: 'Hierarchy worker',
+      kind: 'worker',
+      group: 'alpha',
+      owner_engineer_id: 'eng-1',
+      cell_type: 'agent',
+    },
+  };
+  context.focusedItemId = 'worker-1';
+
+  context.renderAgentPanel();
+
+  assert.match(panel.innerHTML, /agent-panel-header-breadcrumb/);
+  assert.match(panel.innerHTML, /button type="button" class="agent-panel-hierarchy-crumb agent-panel-hierarchy-crumb-architect"/);
+  assert.match(panel.innerHTML, /button type="button" class="agent-panel-hierarchy-crumb agent-panel-hierarchy-crumb-engineer"/);
+  assert.match(panel.innerHTML, /span class="agent-panel-hierarchy-crumb agent-panel-hierarchy-crumb-worker current"/);
+  assert.match(panel.innerHTML, /ARCH[\s\S]*Loomer[\s\S]*ENGINEER[\s\S]*Panelsmith[\s\S]*WORKER[\s\S]*Hierarchy worker/);
+
+  const restoreCountBeforeClick = restoreCalls.length;
+  vm.runInContext(`agentPanelFocusHierarchyTarget("eng-1", "engineer", "alpha")`, context);
+
+  assert.equal(context.focusedItemId, 'eng-1');
+  assert.match(panel.innerHTML, /Engineer: Panelsmith · Group: alpha/);
+  assert.deepEqual(JSON.parse(JSON.stringify(sendCalls.at(-1))), {
+    cmd: 'focus_agent',
+    id: 'eng-1',
+  });
+  assert.ok(restoreCalls.length > restoreCountBeforeClick, 'breadcrumb focus rerender restores panel state');
+});
+
+test('engineer panel header shows architect or User parent chain with current self chip', () => {
+  const { context, panel } = createHarness();
+  context.state.agents = {
+    'arch-1': {
+      id: 'arch-1',
+      name: 'Loomer',
+      kind: 'architect',
+      group: 'alpha',
+      cell_type: 'agent',
+    },
+    'eng-hired': {
+      id: 'eng-hired',
+      name: 'Hired Engineer',
+      kind: 'engineer',
+      group: 'alpha',
+      hired_by_architect_id: 'arch-1',
+      cell_type: 'agent',
+    },
+    'eng-user': {
+      id: 'eng-user',
+      name: 'User Engineer',
+      kind: 'engineer',
+      group: 'alpha',
+      cell_type: 'agent',
+    },
+  };
+
+  context.focusedItemId = 'eng-hired';
+  context.renderAgentPanel();
+  assert.match(panel.innerHTML, /button type="button" class="agent-panel-hierarchy-crumb agent-panel-hierarchy-crumb-architect"/);
+  assert.match(panel.innerHTML, /span class="agent-panel-hierarchy-crumb agent-panel-hierarchy-crumb-engineer current"/);
+  assert.match(panel.innerHTML, /ARCH[\s\S]*Loomer[\s\S]*ENGINEER[\s\S]*Hired Engineer/);
+
+  context.focusedItemId = 'eng-user';
+  context.renderAgentPanel();
+  assert.match(panel.innerHTML, /button type="button" class="agent-panel-hierarchy-crumb agent-panel-hierarchy-crumb-user"/);
+  assert.match(panel.innerHTML, /span class="agent-panel-hierarchy-crumb agent-panel-hierarchy-crumb-engineer current"/);
+  assert.match(panel.innerHTML, /USER[\s\S]*User[\s\S]*ENGINEER[\s\S]*User Engineer/);
+});
+
+test('architect and user panel headers show only their current hierarchy chip', () => {
+  const { context, panel } = createHarness();
+  context.state.agents = {
+    'arch-1': {
+      id: 'arch-1',
+      name: 'Loomer',
+      kind: 'architect',
+      group: 'alpha',
+      cell_type: 'agent',
+    },
+    'eng-user': {
+      id: 'eng-user',
+      name: 'User Engineer',
+      kind: 'engineer',
+      group: 'alpha',
+      cell_type: 'agent',
+    },
+  };
+
+  context.focusedItemId = 'arch-1';
+  context.renderAgentPanel();
+  assert.match(panel.innerHTML, /span class="agent-panel-hierarchy-crumb agent-panel-hierarchy-crumb-architect current"/);
+  assert.match(panel.innerHTML, /ARCH[\s\S]*Loomer/);
+  assert.doesNotMatch(panel.innerHTML, /agentPanelFocusHierarchyTarget/);
+
+  vm.runInContext(`agentPanelFocusHierarchyTarget("", "user", "alpha")`, context);
+  assert.equal(context.focusedItemId, 'principal:alpha:user');
+  assert.match(panel.innerHTML, /User · Group: alpha/);
+  assert.match(panel.innerHTML, /span class="agent-panel-hierarchy-crumb agent-panel-hierarchy-crumb-user current"/);
+  assert.match(panel.innerHTML, /USER[\s\S]*User/);
+});
+
 test('agentPanelSelectTab remembers the last selected tab per kind', () => {
   const { context, panel } = createHarness();
   setFocusedAgent(context, {
@@ -307,7 +428,7 @@ test('_resolveFocusedAgent resolves architect principal nav ids by string fallba
   assert.equal(agent.id, 'arch-a');
 });
 
-test('_resolveFocusedAgent returns null for the user principal nav id', () => {
+test('_resolveFocusedAgent resolves the user principal nav id to a virtual user principal', () => {
   const { context } = createHarness();
   context.state.agents['arch-a'] = { id: 'arch-a', kind: 'architect', group: 'alpha', name: 'Arch' };
   context.focusedItemId = 'principal:alpha:user';
@@ -315,7 +436,11 @@ test('_resolveFocusedAgent returns null for the user principal nav id', () => {
     'principal:alpha:user': { type: 'principal', principalId: '', group: 'alpha' },
   };
 
-  assert.equal(vm.runInContext(`_resolveFocusedAgent()`, context), null);
+  const agent = vm.runInContext(`_resolveFocusedAgent()`, context);
+  assert.ok(agent, 'user principal nav id should resolve to a virtual user panel target');
+  assert.equal(agent.kind, 'user');
+  assert.equal(agent.group, 'alpha');
+  assert.equal(agent.id, 'principal:alpha:user');
 });
 
 test('engineer panel renders journal, events, and worklog from the focused engineer group', () => {

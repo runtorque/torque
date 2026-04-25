@@ -51,6 +51,7 @@ var _agentPanelTabSpecByKind = {
     { key: 'events', label: 'Events' },
     { key: 'worklog', label: 'Worklog' },
   ],
+  user: [],
   terminal: [],
 };
 
@@ -77,7 +78,7 @@ function _agentPanelKind(agent) {
   if (!agent) return '';
   if ((agent.cell_type || '') === 'terminal') return 'terminal';
   var kind = String(agent.kind || '').trim();
-  if (kind === 'architect' || kind === 'engineer' || kind === 'worker') return kind;
+  if (kind === 'architect' || kind === 'engineer' || kind === 'worker' || kind === 'user') return kind;
   return 'worker';
 }
 
@@ -94,6 +95,18 @@ function _agentPanelAgentDisplayName(agent, fallback) {
   return String((agent && (agent.name || agent.slug || agent.id)) || fallback || 'Unknown');
 }
 
+function _agentPanelVirtualUserPrincipal(group) {
+  group = String(group || '').trim();
+  return {
+    id: 'principal:' + group + ':user',
+    name: 'User',
+    slug: 'user',
+    kind: 'user',
+    group: group,
+    cell_type: 'principal',
+  };
+}
+
 function _resolveFocusedAgent() {
   if (typeof focusedItemId === 'undefined' || !focusedItemId) return null;
   if (!state || !state.agents) return null;
@@ -105,13 +118,18 @@ function _resolveFocusedAgent() {
   if (meta && meta.type === 'principal') {
     var pid = String(meta.principalId || '');
     if (pid && state.agents[pid]) return state.agents[pid];
-    return null;
+    if (pid) return null;
+    return _agentPanelVirtualUserPrincipal(meta.group || '');
   }
   if (typeof focusedItemId === 'string' && focusedItemId.indexOf('principal:') === 0) {
     var lastColon = focusedItemId.lastIndexOf(':');
     if (lastColon > 'principal:'.length - 1) {
       var tail = focusedItemId.slice(lastColon + 1);
       if (tail && tail !== 'user' && state.agents[tail]) return state.agents[tail];
+      if (tail === 'user') {
+        var group = focusedItemId.slice('principal:'.length, lastColon);
+        return _agentPanelVirtualUserPrincipal(group);
+      }
     }
     return null;
   }
@@ -843,13 +861,18 @@ function _agentPanelRenderTabs(kind, activeTab) {
   return html;
 }
 
-function _agentPanelShell(title, subtitle, kind, activeTab, bodyHtml, headerRightHtml, agentId) {
+function _agentPanelShell(title, subtitle, kind, activeTab, bodyHtml, headerRightHtml, agentId, headerBreadcrumbHtml) {
   var html = '<div class="agent-panel-panel"';
   if (kind) html += ' data-agent-panel-kind="' + _agentPanelEsc(kind) + '"';
   if (activeTab) html += ' data-agent-panel-tab="' + _agentPanelEsc(activeTab) + '"';
   if (agentId) html += ' data-agent-panel-agent-id="' + _agentPanelEsc(agentId) + '"';
   html += '>';
   html += '<div class="agent-panel-header">';
+  if (headerBreadcrumbHtml) {
+    html += '<div class="agent-panel-header-breadcrumb" data-agent-panel-header-breadcrumb>'
+      + headerBreadcrumbHtml
+      + '</div>';
+  }
   html += '<div class="agent-panel-header-copy">';
   html += '<span class="agent-panel-title">' + _agentPanelEsc(title || 'Agent') + '</span>';
   if (subtitle) {
@@ -1437,7 +1460,8 @@ function _renderEngineerPanel(agent) {
     activeTab,
     parts.bodyHtml,
     parts.headerRightHtml,
-    (agent && agent.id) || ''
+    (agent && agent.id) || '',
+    _agentPanelUpwardBreadcrumbHtml(agent)
   );
 }
 
@@ -1607,7 +1631,8 @@ function _renderWorkerPanel(agent) {
     activeTab,
     parts.bodyHtml,
     parts.headerRightHtml,
-    (agent && agent.id) || ''
+    (agent && agent.id) || '',
+    _agentPanelUpwardBreadcrumbHtml(agent)
   );
 }
 
@@ -1905,7 +1930,23 @@ function _renderArchitectPanel(agent) {
     activeTab,
     parts.bodyHtml,
     parts.headerRightHtml,
-    (agent && agent.id) || ''
+    (agent && agent.id) || '',
+    _agentPanelUpwardBreadcrumbHtml(agent)
+  );
+}
+
+function _renderUserPanel(agent) {
+  var group = String((agent && agent.group) || '');
+  var body = _agentPanelLegacyRenderEngineerRoster(group);
+  return _agentPanelShell(
+    'User' + (group ? ' · Group: ' + group : ''),
+    'User-owned engineers and workers.',
+    'user',
+    '',
+    body,
+    '',
+    (agent && agent.id) || 'user',
+    _agentPanelUpwardBreadcrumbHtml(agent)
   );
 }
 
@@ -2137,6 +2178,9 @@ function renderAgentPanel() {
         break;
       case 'engineer':
         html = _renderEngineerPanel(agent);
+        break;
+      case 'user':
+        html = _renderUserPanel(agent);
         break;
       case 'terminal':
         html = _renderTerminalPanel(agent);
@@ -2451,6 +2495,127 @@ function _agentPanelHierarchyWorkerCount(group, engineers) {
   return count;
 }
 
+function _agentPanelHierarchyRoleLabel(role) {
+  role = String(role || '').trim();
+  if (role === 'architect') return 'ARCH';
+  if (role === 'engineer') return 'ENGINEER';
+  if (role === 'worker') return 'WORKER';
+  if (role === 'user') return 'USER';
+  return role;
+}
+
+function _agentPanelHierarchyAgentItem(agent, role, current) {
+  role = String(role || _agentPanelKind(agent) || '').trim();
+  var item = {
+    role: role,
+    label: _agentPanelAgentDisplayName(agent, 'Unknown ' + role),
+    current: !!current,
+  };
+  if (agent && agent.id) item.agentId = String(agent.id);
+  if (agent && agent.group) item.group = String(agent.group);
+  return item;
+}
+
+function _agentPanelHierarchyUnknownItem(role) {
+  role = String(role || 'agent').trim();
+  return {
+    role: role,
+    label: 'Unknown ' + role,
+    current: false,
+    missing: true,
+  };
+}
+
+function _agentPanelHierarchyUserItem(group, current) {
+  group = String(group || '').trim();
+  return {
+    role: 'user',
+    label: 'User',
+    current: !!current,
+    group: group,
+    principal: 'user',
+  };
+}
+
+function _agentPanelUpwardChain(agent) {
+  var kind = _agentPanelKind(agent);
+  var group = String((agent && agent.group) || '');
+  if (kind === 'architect') {
+    return [_agentPanelHierarchyAgentItem(agent, 'architect', true)];
+  }
+  if (kind === 'user') {
+    return [_agentPanelHierarchyUserItem(group, true)];
+  }
+  if (kind === 'engineer') {
+    var architectId = String((agent && agent.hired_by_architect_id) || '').trim();
+    var items = [];
+    if (architectId) {
+      var architect = state && state.agents ? state.agents[architectId] : null;
+      items.push(architect
+        ? _agentPanelHierarchyAgentItem(architect, 'architect', false)
+        : _agentPanelHierarchyUnknownItem('architect'));
+    } else {
+      items.push(_agentPanelHierarchyUserItem(group, false));
+    }
+    items.push(_agentPanelHierarchyAgentItem(agent, 'engineer', true));
+    return items;
+  }
+  var ownerEngineerId = String(
+    (agent && (agent.owner_engineer_id || agent.created_by_engineer_id)) || ''
+  ).trim();
+  var engineer = ownerEngineerId && state && state.agents ? state.agents[ownerEngineerId] : null;
+  var chain = [];
+  if (engineer) {
+    var parentArchitectId = String(engineer.hired_by_architect_id || '').trim();
+    if (parentArchitectId) {
+      var parentArchitect = state && state.agents ? state.agents[parentArchitectId] : null;
+      chain.push(parentArchitect
+        ? _agentPanelHierarchyAgentItem(parentArchitect, 'architect', false)
+        : _agentPanelHierarchyUnknownItem('architect'));
+    } else {
+      chain.push(_agentPanelHierarchyUserItem(group || engineer.group || '', false));
+    }
+    chain.push(_agentPanelHierarchyAgentItem(engineer, 'engineer', false));
+  } else if (ownerEngineerId) {
+    chain.push(_agentPanelHierarchyUnknownItem('engineer'));
+  } else {
+    chain.push(_agentPanelHierarchyUserItem(group, false));
+  }
+  chain.push(_agentPanelHierarchyAgentItem(agent, 'worker', true));
+  return chain;
+}
+
+function _agentPanelUpwardBreadcrumbHtml(agent) {
+  return _agentPanelHierarchyBreadcrumb(_agentPanelUpwardChain(agent));
+}
+
+function agentPanelFocusHierarchyTarget(agentId, kind, group) {
+  kind = String(kind || '').trim();
+  group = String(group || '').trim();
+  if (kind === 'user') {
+    if (typeof selectPrincipal === 'function') {
+      selectPrincipal('', group);
+      if (typeof renderAgentPanel === 'function') renderAgentPanel();
+    } else {
+      focusedItemId = 'principal:' + group + ':user';
+      if (typeof renderAgentPanel === 'function') renderAgentPanel();
+      else if (typeof render === 'function') render();
+    }
+    return;
+  }
+
+  agentId = String(agentId || '').trim();
+  if (!agentId) return;
+  if (typeof focusAgent === 'function') {
+    focusAgent(agentId);
+  } else {
+    focusedItemId = agentId;
+    if (typeof send === 'function') send({ cmd: 'focus_agent', id: agentId });
+  }
+  if (typeof renderAgentPanel === 'function') renderAgentPanel();
+  else if (typeof render === 'function') render();
+}
+
 function _agentPanelHierarchyBreadcrumb(items) {
   items = Array.isArray(items) ? items : [];
   if (!items.length) return '';
@@ -2462,17 +2627,34 @@ function _agentPanelHierarchyBreadcrumb(items) {
     }
     var role = String(item.role || '').trim();
     var crumbClass = 'agent-panel-hierarchy-crumb';
-    if (role) crumbClass += ' agent-panel-hierarchy-crumb-' + _agentPanelEsc(role);
+    if (role) crumbClass += ' agent-panel-hierarchy-crumb-' + _agentPanelAttr(role);
     if (item.current) crumbClass += ' current';
-    html += '<span class="' + crumbClass + '">';
+    if (item.missing) crumbClass += ' missing';
+    var clickTarget = !item.current && !item.missing
+      && (String(item.agentId || '').trim() || String(item.principal || '').trim());
+    var tag = clickTarget ? 'button' : 'span';
+    html += '<' + tag + (clickTarget ? ' type="button"' : '') + ' class="' + crumbClass + '"';
+    if (clickTarget) {
+      var targetAgentId = String(item.agentId || '');
+      var targetKind = String(item.principal || role || '');
+      var targetGroup = String(item.group || '');
+      html += ' onclick="' + _agentPanelEventAttr(
+        'event.stopPropagation();agentPanelFocusHierarchyTarget('
+          + JSON.stringify(targetAgentId) + ','
+          + JSON.stringify(targetKind) + ','
+          + JSON.stringify(targetGroup)
+          + ')'
+      ) + '"';
+    }
+    html += '>';
     if (role) {
-      html += '<span class="agent-panel-hierarchy-role">' + _agentPanelEsc(role) + '</span>';
+      html += '<span class="agent-panel-hierarchy-role">' + _agentPanelEsc(_agentPanelHierarchyRoleLabel(role)) + '</span>';
     }
     html += '<span class="agent-panel-hierarchy-name">' + _agentPanelEsc(item.label || '') + '</span>';
     if (item.count !== '' && typeof item.count !== 'undefined' && item.count !== null) {
       html += '<span class="agent-panel-hierarchy-count">' + _agentPanelEsc(String(item.count)) + '</span>';
     }
-    html += '</span>';
+    html += '</' + tag + '>';
   }
   html += '</div>';
   return html;

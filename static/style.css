@@ -6121,6 +6121,14 @@ body.diff-view-open #ctx-menu {
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
+.agent-panel-header-breadcrumb {
+  flex: 1 0 100%;
+  min-width: 0;
+}
+.agent-panel-header-breadcrumb .agent-panel-hierarchy-breadcrumb {
+  padding: 4px 6px;
+  background: color-mix(in srgb, var(--bg-hover) 28%, transparent);
+}
 .agent-panel-header-copy {
   min-width: 0;
   flex: 1 1 180px;
@@ -6253,6 +6261,7 @@ body.diff-view-open #ctx-menu {
   background: color-mix(in srgb, var(--bg-hover) 44%, transparent);
 }
 .agent-panel-hierarchy-crumb {
+  appearance: none;
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -6263,11 +6272,27 @@ body.diff-view-open #ctx-menu {
   border-radius: 999px;
   background: color-mix(in srgb, var(--bg-cell) 82%, transparent);
   color: var(--text-dim);
+  font: inherit;
+  text-align: left;
+}
+button.agent-panel-hierarchy-crumb {
+  cursor: pointer;
+}
+button.agent-panel-hierarchy-crumb:hover,
+button.agent-panel-hierarchy-crumb:focus-visible {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 44%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-cell));
+  outline: none;
 }
 .agent-panel-hierarchy-crumb.current {
   color: var(--text);
   border-color: color-mix(in srgb, var(--amber) 42%, var(--border));
   background: color-mix(in srgb, var(--amber) 10%, var(--bg-cell));
+}
+.agent-panel-hierarchy-crumb.missing {
+  opacity: 0.68;
+  border-style: dashed;
 }
 .agent-panel-hierarchy-role {
   font-size: 8px;
