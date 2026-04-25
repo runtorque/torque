@@ -1598,13 +1598,29 @@ async def _maybe_apply_review_required_gate(
     act = action_mgr.load_action(task.action_name, base_dir)
     if not _action_is_implementation_depth(act):
         return None
-    gate_policy = _review_gate_transition_policy(act)
-    if not gate_policy:
-        gate_policy = _review_gate_policy_from_action_threshold(
-            _explicit_review_gate_threshold_from_action(act)
+    transition_policy = _review_gate_transition_policy(act)
+    action_policy = _review_gate_policy_from_action_threshold(
+        _explicit_review_gate_threshold_from_action(act)
+    )
+    architect_policy = _review_gate_architect_policy(state, task, cell)
+    gate_policy = transition_policy or action_policy
+    if (
+            gate_policy
+            and gate_policy.get("source") == "action"
+            and architect_policy):
+        # Action-level review_required_above_loc is a legacy threshold-only
+        # setting.  Preserve existing architect control over whether workers
+        # may self-review-bypass while still letting the action threshold win.
+        gate_policy = dict(gate_policy)
+        gate_policy["controls_self_review_bypass"] = True
+        gate_policy["self_review_bypass_allowed"] = bool(
+            architect_policy.get("self_review_bypass_allowed", False)
         )
+        gate_policy["bypass_source"] = "architect"
+        gate_policy["bypass_architect_id"] = architect_policy.get(
+            "architect_id", "")
     if not gate_policy:
-        gate_policy = _review_gate_architect_policy(state, task, cell)
+        gate_policy = architect_policy
     if not gate_policy:
         gate_policy = _review_gate_policy_from_action_threshold(
             _review_gate_threshold_from_action(act)
@@ -1638,9 +1654,13 @@ async def _maybe_apply_review_required_gate(
             and gate_policy.get("controls_self_review_bypass")
             and not gate_policy.get("self_review_bypass_allowed")):
         force_skip_review = False
+        bypass_source = (
+            gate_policy.get("bypass_source")
+            or gate_policy.get("source", "review-gate")
+        )
         skip_reason = (
             "self-review bypass disabled by "
-            f"{gate_policy.get('source', 'review-gate')} settings"
+            f"{bypass_source} settings"
         )
 
     if force_skip_review:
@@ -1723,6 +1743,8 @@ async def _maybe_apply_review_required_gate(
         )
         if skip_reason:
             context += f"- Skip request ignored: {skip_reason}\n"
+    elif skip_reason:
+        context += f"- Skip request ignored: {skip_reason}\n"
     derive_result = await handle_command({
         "cmd": "ai_report",
         "cell_id": cell.id,
