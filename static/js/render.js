@@ -913,10 +913,10 @@ function _agentCardCurrentOrLastActionLabel(agent) {
   // "idle" text in the action line. Returning empty leaves the line slot in
   // place (preserves uniform card height) but renders no content.
   if (info.text === 'idle') return '';
-  if (!info.timestamp) return 'Last action: ' + info.text;
+  if (!info.timestamp) return info.text;
   const age = Math.max(0, Math.floor((Date.now() / 1000) - info.timestamp));
   if (age < 60) return info.text;
-  return 'Last action: ' + info.text + ' ' + _agentCardCompactRelativeTime(info.timestamp);
+  return info.text + ' (' + _agentCardCompactRelativeTime(info.timestamp) + ')';
 }
 
 function _agentTaskForCard(agent) {
