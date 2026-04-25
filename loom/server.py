@@ -4479,6 +4479,7 @@ async def _mirror_api_ai_report_to_mcp_call_log(
                 group=rows[0].get("group", ""),
                 call=rows[0],
             )
+            await state.broadcast()
         return response
     except Exception:
         log.exception("Failed to mirror api/cmd ai_report into MCP call log")

@@ -92,6 +92,14 @@ class _Harness:
             self.tmp = None
 
 
+class _FakeWsClient:
+    def __init__(self):
+        self.messages = []
+
+    async def send_str(self, msg: str) -> None:
+        self.messages.append(json.loads(msg))
+
+
 class EventIngestStoreTests(unittest.TestCase):
     def _envelope(self, cell_id, tool_name, hook, *, tool_input=None,
                   tool_output=None, session_id="sess", received_at=0):
@@ -524,11 +532,31 @@ class ApiAiReportMcpCaptureTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(row["cell_id"], self.cell.id)
             self.assertEqual(row["hook_event_name"], "PostToolUse")
             self.assertTrue(row["event"]["raw"]["loom_call_log_only"])
-        self.assertTrue(any(
-            op["op"] == "mcp_call_append"
-            and op["call"]["tool_name"] == "mcp__loom__loom_done"
-            for op in self.state._delta_ops
-        ))
+        self.assertEqual(self.state._delta_ops, [])
+
+    async def test_ai_report_capture_broadcasts_live_append_without_state_mutation(self):
+        self.cell.agent_type = "codex"
+        self.cell.status = "running"
+        self.cell.activity = ""
+        self.cell.activity_detail = "secret worker note"
+        ws = _FakeWsClient()
+        async with self.state._ws_clients_lock:
+            self.state._ws_clients.add(ws)
+
+        await self._mirror(action="progress", idempotency_key="live-progress")
+
+        self.assertEqual(self.state._delta_ops, [])
+        self.assertEqual(len(ws.messages), 1)
+        message = ws.messages[0]
+        self.assertEqual(message["type"], "delta")
+        self.assertEqual(len(message["ops"]), 1)
+        op = message["ops"][0]
+        self.assertEqual(op["op"], "mcp_call_append")
+        self.assertEqual(op["group"], "g")
+        self.assertEqual(op["call"]["cell_id"], self.cell.id)
+        self.assertEqual(op["call"]["tool_name"], "mcp__loom__loom_progress")
+        self.assertEqual(self.cell.activity, "")
+        self.assertEqual(self.cell.activity_detail, "secret worker note")
 
     async def test_ai_report_capture_redaction_modes_and_allowlist(self):
         await self._mirror(action="progress", idempotency_key="meta-progress")
