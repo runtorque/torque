@@ -13422,6 +13422,7 @@ test('user principal Add Worker affordance survives delta rerenders and uses sta
   loadScript(context, 'static/js/render.js');
   loadModalScripts(context);
   runInContext(context, `
+    send = function(message) { sendCalls.push(message); };
     _cachedAgentTemplates = [];
     selectedTerminalId = null;
     focusedItemId = 'principal:loom:user';
@@ -14225,11 +14226,11 @@ test('main render uses containment primitives and retires cell hierarchy indenta
     hiredWorker[1],
     new RegExp('\\barchitect-' + 'owned-worker\\b|\\bengineer-' + 'owned-worker\\b'),
   );
-  assert.match(main.innerHTML, /data-drag-id="orphan"/);
+  assert.doesNotMatch(main.innerHTML, /data-drag-id="orphan"/);
   assert.match(main.innerHTML, /principals-row/);
   assert.match(main.innerHTML, /agent-section-body/);
   assert.doesNotMatch(main.innerHTML, /architect-header-row|agent-section-header-row/);
-  assert.match(main.innerHTML, /loose-workers-strip/);
+  assert.doesNotMatch(main.innerHTML, /loose-workers-strip/);
   assert.match(main.innerHTML, /engineer-row/);
 
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
@@ -15585,7 +15586,7 @@ test('main grid keyboard navigation traverses logical rows across sections', () 
   // selected principal (user).
   runInContext(context, `focusedItemId = 'eng-user-a'; render();`);
   runInContext(context, `moveFocusUp();`);
-  assert.equal(jsonValue(context, `focusedItemId`), 'loose-1');
+  assert.equal(jsonValue(context, `focusedItemId`), 'loose-2');
   runInContext(context, `moveFocusUp();`);
   assert.equal(jsonValue(context, `focusedItemId`), 'principal:loom:user');
 
