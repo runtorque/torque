@@ -24,9 +24,14 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from .event_ingest_db import DEFAULT_MAX_ROWS, EventIngestStore
+from .event_ingest_db import (
+    DEFAULT_ARGS_CAPTURE,
+    DEFAULT_MAX_AGE_DAYS,
+    DEFAULT_MAX_ROWS,
+    EventIngestStore,
+)
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 DEFAULT_SOCKET_NAME = "event_ingest.sock"
 DEFAULT_PID_FILE_NAME = "event_ingest.pid"
 DEFAULT_LOG_FILE_NAME = "event_ingest.log"
@@ -138,6 +143,10 @@ class EventIngestDaemon:
             await self._op_drain(msg, writer)
         elif op == "ack":
             await self._op_ack(msg, writer)
+        elif op == "query":
+            await self._op_query(msg, writer)
+        elif op == "configure":
+            await self._op_configure(msg, writer)
         elif op == "status":
             status = await asyncio.to_thread(self.store.status)
             await write_frame(writer, {"type": "status", **status})
@@ -191,6 +200,51 @@ class EventIngestDaemon:
         up_to = int(msg.get("up_to") or 0)
         result = await asyncio.to_thread(self.store.ack, up_to=up_to)
         await write_frame(writer, {"type": "ok", "op": "ack", **result})
+
+    async def _op_query(
+        self,
+        msg: dict,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        try:
+            since = msg.get("since")
+            since = float(since) if since is not None and since != "" else None
+        except (TypeError, ValueError):
+            since = None
+        try:
+            until = msg.get("until")
+            until = float(until) if until is not None and until != "" else None
+        except (TypeError, ValueError):
+            until = None
+        try:
+            limit = int(msg.get("limit") or 50)
+        except (TypeError, ValueError):
+            limit = 50
+        result = await asyncio.to_thread(
+            self.store.query,
+            cell_id=str(msg.get("cell_id") or "").strip() or None,
+            cell_ids=list(msg.get("cell_ids") or []),
+            tool_name_pattern=str(msg.get("tool_name_pattern") or "").strip() or None,
+            hook_event_name=str(msg.get("hook_event_name") or "").strip() or None,
+            since=since,
+            until=until,
+            limit=limit,
+        )
+        await write_frame(writer, {"type": "query", "events": result})
+
+    async def _op_configure(
+        self,
+        msg: dict,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        config = await asyncio.to_thread(
+            self.store.configure,
+            max_rows=msg.get("max_rows"),
+            max_age_days=msg.get("max_age_days"),
+            args_capture=msg.get("args_capture"),
+            full_capture_tools=list(msg.get("full_capture_tools") or []),
+        )
+        await write_frame(writer, {"type": "ok", "op": "configure", **config})
 
     async def shutdown(self) -> None:
         await asyncio.to_thread(self.store.close)
@@ -337,6 +391,15 @@ def spawn_detached(data_dir: Path, *, max_rows: int | None = None) -> int:
         ]
         if max_rows is not None:
             argv.extend(["--max-rows", str(max_rows)])
+        max_age_days = env.get("LOOM_EVENT_INGEST_MAX_AGE_DAYS", "")
+        if max_age_days:
+            argv.extend(["--max-age-days", str(max_age_days)])
+        args_capture = env.get("LOOM_MCP_CALL_LOG_ARGS_CAPTURE", "")
+        if args_capture:
+            argv.extend(["--args-capture", str(args_capture)])
+        full_capture_tools = env.get("LOOM_MCP_CALL_LOG_FULL_CAPTURE_TOOLS", "")
+        if full_capture_tools:
+            argv.extend(["--full-capture-tools", str(full_capture_tools)])
         proc = subprocess.Popen(
             argv,
             stdin=subprocess.DEVNULL,
@@ -356,6 +419,9 @@ def ensure_running(
     *,
     timeout: float = 3.0,
     max_rows: int | None = None,
+    max_age_days: int | float | None = None,
+    args_capture: str | None = None,
+    full_capture_tools: list[str] | tuple[str, ...] | None = None,
 ) -> Path:
     """Idempotently ensure event-ingest daemon is running."""
     data_dir = Path(data_dir)
@@ -366,6 +432,22 @@ def ensure_running(
     if pong and pong.get("version") == PROTOCOL_VERSION:
         log.info("Event-ingest daemon already running (pid=%s)", pong.get("pid"))
         return paths["socket"]
+    if pong:
+        old_version = pong.get("version")
+        pong_pid = None
+        try:
+            pong_pid = int(pong.get("pid") or 0)
+        except (TypeError, ValueError):
+            pong_pid = None
+        if pong_pid and _pid_alive(pong_pid):
+            log.info(
+                "Existing event-ingest pid=%s uses protocol version %r "
+                "(wanted %s) — terminating",
+                pong_pid,
+                old_version,
+                PROTOCOL_VERSION,
+            )
+            _terminate_pid(pong_pid)
 
     old_pid = _read_pid_file(paths["pid"])
     if old_pid and _pid_alive(old_pid):
@@ -376,7 +458,27 @@ def ensure_running(
         _terminate_pid(old_pid)
     _cleanup_stale(paths)
 
-    child_pid = spawn_detached(data_dir, max_rows=max_rows)
+    env_updates = {}
+    if max_age_days is not None:
+        env_updates["LOOM_EVENT_INGEST_MAX_AGE_DAYS"] = str(max_age_days)
+    if args_capture is not None:
+        env_updates["LOOM_MCP_CALL_LOG_ARGS_CAPTURE"] = str(args_capture)
+    if full_capture_tools is not None:
+        env_updates["LOOM_MCP_CALL_LOG_FULL_CAPTURE_TOOLS"] = "\n".join(
+            str(item or "").strip()
+            for item in list(full_capture_tools or [])
+            if str(item or "").strip()
+        )
+    old_env = {key: os.environ.get(key) for key in env_updates}
+    try:
+        os.environ.update(env_updates)
+        child_pid = spawn_detached(data_dir, max_rows=max_rows)
+    finally:
+        for key, value in old_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
     log.info("Spawned event-ingest daemon pid=%s", child_pid)
 
     deadline = time.monotonic() + timeout
@@ -395,9 +497,22 @@ def ensure_running(
 # -- Entry point for ``python -m loom.event_ingest_daemon`` ----------------
 
 
-async def _serve(data_dir: Path, *, max_rows: int = DEFAULT_MAX_ROWS) -> None:
+async def _serve(
+    data_dir: Path,
+    *,
+    max_rows: int = DEFAULT_MAX_ROWS,
+    max_age_days: int | float = DEFAULT_MAX_AGE_DAYS,
+    args_capture: str = DEFAULT_ARGS_CAPTURE,
+    full_capture_tools: list[str] | None = None,
+) -> None:
     paths = _paths(data_dir)
-    store = EventIngestStore(paths["db"], max_rows=max_rows).init()
+    store = EventIngestStore(
+        paths["db"],
+        max_rows=max_rows,
+        max_age_days=max_age_days,
+        args_capture=args_capture,
+        full_capture_tools=full_capture_tools or [],
+    ).init()
     daemon = EventIngestDaemon(store)
     stop_event = asyncio.Event()
     shutdown_task: asyncio.Task | None = None
@@ -469,10 +584,40 @@ def main(argv: Optional[list] = None) -> int:
         type=int,
         default=int(os.environ.get("LOOM_EVENT_INGEST_MAX_ROWS", DEFAULT_MAX_ROWS)),
     )
+    parser.add_argument(
+        "--max-age-days",
+        type=float,
+        default=float(os.environ.get(
+            "LOOM_EVENT_INGEST_MAX_AGE_DAYS",
+            DEFAULT_MAX_AGE_DAYS,
+        )),
+    )
+    parser.add_argument(
+        "--args-capture",
+        default=os.environ.get(
+            "LOOM_MCP_CALL_LOG_ARGS_CAPTURE",
+            DEFAULT_ARGS_CAPTURE,
+        ),
+    )
+    parser.add_argument(
+        "--full-capture-tools",
+        default=os.environ.get("LOOM_MCP_CALL_LOG_FULL_CAPTURE_TOOLS", ""),
+    )
     args = parser.parse_args(argv)
     _configure_logging(None)  # stdout/stderr already redirected by spawn
     try:
-        asyncio.run(_serve(args.data_dir, max_rows=args.max_rows))
+        full_capture_tools = [
+            item.strip()
+            for item in str(args.full_capture_tools or "").replace(",", "\n").splitlines()
+            if item.strip()
+        ]
+        asyncio.run(_serve(
+            args.data_dir,
+            max_rows=args.max_rows,
+            max_age_days=args.max_age_days,
+            args_capture=args.args_capture,
+            full_capture_tools=full_capture_tools,
+        ))
     except KeyboardInterrupt:
         pass
     return 0

@@ -364,6 +364,49 @@ def normalize_engineer_wave_size_preference(value) -> str:
     return _DEFAULT_ENGINEER_WAVE_SIZE_PREFERENCE
 
 
+def normalize_mcp_call_log_args_capture(value) -> str:
+    value = str(value or "metadata").strip().lower()
+    if value in {"off", "metadata", "full"}:
+        return value
+    return "metadata"
+
+
+def normalize_event_ingest_max_rows(value) -> int:
+    try:
+        rows = int(value)
+    except (TypeError, ValueError):
+        return 100_000
+    return max(1, rows)
+
+
+def normalize_event_ingest_max_days(value) -> int:
+    try:
+        days = int(value)
+    except (TypeError, ValueError):
+        return 14
+    return max(0, days)
+
+
+def normalize_mcp_call_log_full_capture_tools(value) -> list[str]:
+    if value in (None, ""):
+        return []
+    if isinstance(value, str):
+        raw_items = value.replace(",", "\n").splitlines()
+    elif isinstance(value, (list, tuple)):
+        raw_items = value
+    else:
+        return []
+    out = []
+    seen = set()
+    for item in raw_items:
+        text = str(item or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        out.append(text)
+    return out
+
+
 def normalize_engineer_same_agent_follow_up_preference(value) -> str:
     value = str(value or "").strip()
     if value in _ENGINEER_SAME_AGENT_FOLLOW_UP_PREFERENCES:
@@ -1158,10 +1201,28 @@ class GlobalSettings:
     max_pipeline_depth: int = 10  # 0 = unlimited
     # Events
     max_event_log: int = 500  # max persisted panel events
+    event_ingest_max_rows: int = 100_000
+    event_ingest_max_days: int = 14
+    mcp_call_log_args_capture: str = "metadata"  # off | metadata | full
+    mcp_call_log_full_capture_tools: list[str] = field(default_factory=list)
 
     def __post_init__(self):
         self.xterm_scrollback = normalize_xterm_scrollback(
             self.xterm_scrollback
+        )
+        self.event_ingest_max_rows = normalize_event_ingest_max_rows(
+            self.event_ingest_max_rows
+        )
+        self.event_ingest_max_days = normalize_event_ingest_max_days(
+            self.event_ingest_max_days
+        )
+        self.mcp_call_log_args_capture = normalize_mcp_call_log_args_capture(
+            self.mcp_call_log_args_capture
+        )
+        self.mcp_call_log_full_capture_tools = (
+            normalize_mcp_call_log_full_capture_tools(
+                self.mcp_call_log_full_capture_tools
+            )
         )
 
 
@@ -3889,6 +3950,14 @@ class MatrixState:
             if key in valid:
                 if key == "xterm_scrollback":
                     value = normalize_xterm_scrollback(value, strict=True)
+                elif key == "event_ingest_max_rows":
+                    value = normalize_event_ingest_max_rows(value)
+                elif key == "event_ingest_max_days":
+                    value = normalize_event_ingest_max_days(value)
+                elif key == "mcp_call_log_args_capture":
+                    value = normalize_mcp_call_log_args_capture(value)
+                elif key == "mcp_call_log_full_capture_tools":
+                    value = normalize_mcp_call_log_full_capture_tools(value)
                 updates[key] = value
         for key, value in updates.items():
             setattr(self.global_settings, key, value)

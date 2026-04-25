@@ -18,7 +18,7 @@ from .event_ingest_daemon import (
 
 log = logging.getLogger("loom.event_ingest_client")
 
-_RESPONSE_TYPES = {"ok", "error", "pong", "drain", "status"}
+_RESPONSE_TYPES = {"ok", "error", "pong", "drain", "status", "query"}
 
 
 def _record_trimmed_ack_counter(response: dict) -> None:
@@ -129,6 +129,55 @@ class EventIngestClient:
 
     async def status(self) -> dict:
         return await self._call_with_reconnect_retry("status")
+
+    async def query(
+        self,
+        *,
+        cell_id: str | None = None,
+        cell_ids: list[str] | tuple[str, ...] | None = None,
+        tool_name_pattern: str | None = None,
+        hook_event_name: str | None = None,
+        since: float | None = None,
+        until: float | None = None,
+        limit: int = 50,
+    ) -> dict:
+        payload = {
+            "cell_id": str(cell_id or "").strip(),
+            "cell_ids": list(cell_ids or []),
+            "tool_name_pattern": str(tool_name_pattern or "").strip(),
+            "hook_event_name": str(hook_event_name or "").strip(),
+            "limit": int(limit or 50),
+        }
+        if since is not None:
+            payload["since"] = float(since)
+        if until is not None:
+            payload["until"] = float(until)
+        return await self._call_with_reconnect_retry("query", **payload)
+
+    async def configure(
+        self,
+        *,
+        max_rows: int | None = None,
+        max_age_days: int | float | None = None,
+        args_capture: str | None = None,
+        full_capture_tools: list[str] | tuple[str, ...] | None = None,
+    ) -> dict:
+        payload = {}
+        if max_rows is not None:
+            payload["max_rows"] = int(max_rows)
+        if max_age_days is not None:
+            payload["max_age_days"] = float(max_age_days)
+        if args_capture is not None:
+            payload["args_capture"] = str(args_capture or "")
+        if full_capture_tools is not None:
+            payload["full_capture_tools"] = list(full_capture_tools or [])
+        response = await self._call_with_reconnect_retry("configure", **payload)
+        if response.get("type") != "ok" or response.get("op") != "configure":
+            raise EventIngestProtocolError(
+                "event-ingest configure failed: "
+                f"{response.get('message') or response!r}"
+            )
+        return response
 
     async def call(self, op: str, **payload) -> dict:
         """Serialize one request and return its response frame."""

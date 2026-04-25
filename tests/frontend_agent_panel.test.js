@@ -41,6 +41,10 @@ function createHarness() {
       panel_events: [],
       decisions: {},
       group_settings: {},
+      global_settings: {
+        mcp_call_log_args_capture: 'metadata',
+      },
+      mcp_calls: {},
     },
     focusedItemId: '',
     document: {
@@ -980,6 +984,166 @@ test('focused engineer events tab starts the live countdown timer', () => {
   assert.match(countdownEl.textContent, /Next eligible send in/);
   assert.equal(intervalCalls.length, 1);
   assert.equal(intervalCalls[0].ms, 1000);
+});
+
+test('agent MCP tab fetches calls, filters, and expands redacted details', () => {
+  const { context, panel, sendCalls } = createHarness();
+  const now = Math.floor(Date.now() / 1000);
+  setFocusedAgent(context, {
+    id: 'worker-mcp',
+    name: 'Worker MCP',
+    kind: 'worker',
+    group: 'alpha',
+    cell_type: 'agent',
+  });
+  context.state.global_settings.mcp_call_log_args_capture = 'metadata';
+  vm.runInContext(`_agentPanelLastSelectedTabByKind.worker = 'mcp';`, context);
+
+  context.renderAgentPanel();
+
+  assert.match(panel.innerHTML, /id="agent-panel-tab-mcp" class="agent-panel-tab active"/);
+  assert.match(panel.innerHTML, /Args redacted by default/);
+  assert.ok(sendCalls.some((call) => call.cmd === 'mcp_calls'
+    && call.cell_id === 'worker-mcp'
+    && call.limit === 50
+    && call.hook_event_name === 'PostToolUse'));
+
+  context.agentPanelReceiveMcpCalls({
+    type: 'mcp_calls',
+    cell_id: 'worker-mcp',
+    calls: [
+      {
+        cursor: 10,
+        cell_id: 'worker-mcp',
+        tool_name: 'mcp__loom__loom_progress',
+        hook_event_name: 'PostToolUse',
+        appended_at: now,
+        success: true,
+        duration_ms: 12,
+        args: { redacted: true, arg_keys: ['message'], byte_size: 42 },
+        args_redacted: true,
+        result: { redacted: true, byte_size: 2 },
+        result_redacted: true,
+      },
+    ],
+  });
+  assert.match(panel.innerHTML, /mcp__loom__loom_progress/);
+  assert.match(panel.innerHTML, /redacted keys: message/);
+
+  context.agentPanelToggleMcpCall('worker-mcp', '10');
+  assert.match(panel.innerHTML, /Args redacted at ingest\./);
+  assert.match(panel.innerHTML, /Result redacted at ingest\./);
+
+  const beforeFilterCalls = sendCalls.length;
+  context.agentPanelMcpFilterChange('tool', 'progress');
+  assert.ok(sendCalls.length > beforeFilterCalls);
+  assert.equal(sendCalls[sendCalls.length - 1].tool_name_pattern, '*progress*');
+});
+
+test('agent MCP tab hides settings banner in full capture mode and renders full args', () => {
+  const { context, panel } = createHarness();
+  const now = Math.floor(Date.now() / 1000);
+  setFocusedAgent(context, {
+    id: 'worker-full',
+    name: 'Worker Full',
+    kind: 'worker',
+    group: 'alpha',
+    cell_type: 'agent',
+  });
+  context.state.global_settings.mcp_call_log_args_capture = 'full';
+  context.state.mcp_calls['worker-full'] = [
+    {
+      cursor: 1,
+      cell_id: 'worker-full',
+      tool_name: 'mcp__loom__loom_done',
+      hook_event_name: 'PostToolUse',
+      appended_at: now,
+      success: true,
+      args: { message: 'shipped' },
+      args_redacted: false,
+      result: { ok: true },
+      result_redacted: false,
+    },
+  ];
+  vm.runInContext(`_agentPanelLastSelectedTabByKind.worker = 'mcp';`, context);
+
+  context.renderAgentPanel();
+  context.agentPanelToggleMcpCall('worker-full', '1');
+
+  assert.doesNotMatch(panel.innerHTML, /Args redacted by default/);
+  assert.match(panel.innerHTML, /&quot;message&quot;: &quot;shipped&quot;/);
+  assert.doesNotMatch(panel.innerHTML, /Args redacted at ingest\./);
+});
+
+test('agent MCP tab live update prepends without losing expanded row across rerender', () => {
+  const { context, panel, captureCalls, restoreCalls } = createHarness();
+  const now = Math.floor(Date.now() / 1000);
+  setFocusedAgent(context, {
+    id: 'worker-live',
+    name: 'Worker Live',
+    kind: 'worker',
+    group: 'alpha',
+    cell_type: 'agent',
+  });
+  context.state.mcp_calls['worker-live'] = [
+    {
+      cursor: 1,
+      cell_id: 'worker-live',
+      tool_name: 'mcp__loom__old',
+      hook_event_name: 'PostToolUse',
+      appended_at: now - 10,
+      success: true,
+      args: { old: true },
+      args_redacted: false,
+      result: {},
+      result_redacted: false,
+    },
+  ];
+  vm.runInContext(`_agentPanelLastSelectedTabByKind.worker = 'mcp';`, context);
+  context.renderAgentPanel();
+  context.agentPanelToggleMcpCall('worker-live', '1');
+  const captureBefore = captureCalls.length;
+  const restoreBefore = restoreCalls.length;
+
+  context.agentPanelReceiveMcpCallAppend({
+    cursor: 2,
+    cell_id: 'worker-live',
+    tool_name: 'mcp__loom__pre',
+    hook_event_name: 'PreToolUse',
+    appended_at: now,
+    success: true,
+    args: { task_id: 'LOOM:1' },
+    args_redacted: false,
+    result: null,
+    result_redacted: true,
+  });
+
+  assert.doesNotMatch(panel.innerHTML, /mcp__loom__pre/);
+  assert.equal(context.state.mcp_calls['worker-live'].some((call) => call.tool_name === 'mcp__loom__pre'), false);
+
+  context.agentPanelReceiveMcpCallAppend({
+    cursor: 3,
+    cell_id: 'worker-live',
+    tool_name: 'mcp__loom__new',
+    hook_event_name: 'PostToolUse',
+    appended_at: now,
+    success: false,
+    error: 'boom',
+    args: { redacted: true, arg_keys: ['task_id'] },
+    args_redacted: true,
+    result: null,
+    result_redacted: true,
+  });
+
+  const html = panel.innerHTML;
+  assert.ok(html.indexOf('mcp__loom__new') < html.indexOf('mcp__loom__old'));
+  assert.match(html, /&quot;old&quot;: true/);
+  assert.ok(captureCalls.length > captureBefore);
+  assert.ok(restoreCalls.length > restoreBefore);
+  const latestCapture = captureCalls[captureCalls.length - 1];
+  const scrollSelectors = JSON.parse(JSON.stringify(latestCapture.opts.scrollSelectors));
+  assert.ok(scrollSelectors.indexOf('.agent-panel-mcp-list') >= 0,
+    'MCP tab must register its list for rerender scroll preservation');
 });
 
 test('focused engineer pause toggle sends per-agent digest pause and resume commands', () => {

@@ -195,6 +195,8 @@ function connect() {
       if (typeof handleEventsPage === 'function') handleEventsPage(msg);
     } else if (msg.type === 'cell_events') {
       if (typeof agentPanelReceiveCellEvents === 'function') agentPanelReceiveCellEvents(msg);
+    } else if (msg.type === 'mcp_calls') {
+      if (typeof agentPanelReceiveMcpCalls === 'function') agentPanelReceiveMcpCalls(msg);
     } else if (msg.type === 'architect_journal_entries') {
       if (typeof agentPanelReceiveArchitectJournal === 'function') agentPanelReceiveArchitectJournal(msg);
     } else if (msg.type === 'agent_history_list') {
@@ -313,6 +315,7 @@ function _handleFullState(msg) {
   if (!state.engineer_worklog) state.engineer_worklog = {};
   if (!state.engineer_streams) state.engineer_streams = {};
   if (!state.engineer_session_maps) state.engineer_session_maps = {};
+  if (!state.mcp_calls) state.mcp_calls = {};
   if (typeof state.selected_principal_id !== 'string') {
     state.selected_principal_id = '';
   }
@@ -522,6 +525,7 @@ function _deltaSurfaceInvalidations(ops, hints) {
         _markSurface(flags, 'board');
         break;
       case 'event_append':
+      case 'mcp_call_append':
         _markSurface(flags, 'events', 'engineer');
         break;
       case 'journal_append':
@@ -1161,6 +1165,7 @@ function _opTouchesGroup(op, group, hint) {
     case 'agent_upsert':
     case 'task_upsert':
     case 'event_append':
+    case 'mcp_call_append':
       return (op.group || '') === group || (!!hintedGroup && hintedGroup === group);
     case 'agent_remove':
     case 'task_remove':
@@ -1369,6 +1374,25 @@ function _applyDelta(ops) {
         if (!replaced) state.panel_events.push(evt);
         if (state.panel_events.length > 500)
           state.panel_events = state.panel_events.slice(-500);
+        break;
+      }
+
+      case 'mcp_call_append': {
+        var call = op.call || {};
+        if (typeof agentPanelReceiveMcpCallAppend === 'function') {
+          agentPanelReceiveMcpCallAppend(call);
+        } else {
+          if (String(call.hook_event_name || '') !== 'PostToolUse') break;
+          if (!state.mcp_calls) state.mcp_calls = {};
+          var callCellId = String(call.cell_id || '');
+          if (callCellId) {
+            if (!state.mcp_calls[callCellId]) state.mcp_calls[callCellId] = [];
+            state.mcp_calls[callCellId].unshift(call);
+            if (state.mcp_calls[callCellId].length > 500) {
+              state.mcp_calls[callCellId].length = 500;
+            }
+          }
+        }
         break;
       }
 

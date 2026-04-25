@@ -82,6 +82,51 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
+        "name": "architect_mcp_calls",
+        "description": (
+            "Return recent MCP call history for this architect's group. "
+            "Defaults to mcp__loom__ tools; optionally filter by agent, "
+            "tool pattern, hook event name, time, and limit."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string",
+                    "description": "Optional agent id/slug/name in this architect's group.",
+                },
+                "cell_id": {
+                    "type": "string",
+                    "description": "Optional exact cell id; alias for agent_id.",
+                },
+                "tool_name_pattern": {
+                    "type": "string",
+                    "description": "Optional exact tool name or SQL LIKE/glob pattern.",
+                },
+                "tool_filter": {
+                    "type": "string",
+                    "description": "Alias for tool_name_pattern.",
+                },
+                "hook_event_name": {
+                    "type": "string",
+                    "description": "Optional hook filter such as PostToolUse.",
+                },
+                "since": {
+                    "type": "number",
+                    "description": "Optional unix timestamp lower bound.",
+                },
+                "until": {
+                    "type": "number",
+                    "description": "Optional unix timestamp upper bound.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum calls to return (default 50, max 500).",
+                },
+            },
+        },
+    },
+    {
         "name": "architect_deploy_state",
         "description": (
             "Return read-only daemon boot git state and pending mainline "

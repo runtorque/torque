@@ -2458,6 +2458,50 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(path.exists())
             self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
 
+    async def test_architect_mcp_calls_scopes_to_architect_group(self):
+        architect = self._add_architect("arch-1", "Architect")
+        worker = self._add_worker("worker-a", "Worker A", "")
+        other = self.state_mod.AgentCell(
+            id="other-group-worker",
+            name="Other Worker",
+            slug="other-worker",
+            group="other",
+            cell_type="agent",
+            kind="worker",
+        )
+        self.state.agents[other.id] = other
+        self.state.groups["other"] = [other.id]
+        self.state._db_save_agent(other)
+        self.state._db_save_groups()
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(payload)
+            self.assertEqual(payload["cmd"], "architect_mcp_calls")
+            self.assertEqual(payload["caller_id"], architect.id)
+            return {"type": "mcp_calls", "calls": [{"cell_id": payload["agent_id"]}]}
+
+        text, is_error = await self.mcp_architect_mod._dispatch_architect_tool(
+            "architect_mcp_calls",
+            {"agent_id": worker.id, "limit": 5},
+            fake_handle_command,
+            self.state,
+            caller_id=architect.id,
+        )
+        self.assertFalse(is_error, text)
+        self.assertEqual(json.loads(text)["calls"], [{"cell_id": worker.id}])
+        self.assertEqual(calls[-1]["limit"], 5)
+
+        hidden_text, hidden_error = await self.mcp_architect_mod._dispatch_architect_tool(
+            "architect_mcp_calls",
+            {"agent_id": other.id},
+            fake_handle_command,
+            self.state,
+            caller_id=architect.id,
+        )
+        self.assertTrue(hidden_error)
+        self.assertEqual(hidden_text, f"Agent not found: {other.id}")
+
     async def test_architect_engineer_journal_read_scopes_to_hired_engineers(self):
         architect = self._add_architect("arch-1", "Architect")
         other_architect = self._add_architect("arch-2", "Other Architect")

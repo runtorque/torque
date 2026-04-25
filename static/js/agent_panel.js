@@ -39,21 +39,32 @@ var _agentPanelArchitectJournalVisibleLimitById = {};
 var _agentPanelArchitectJournalRequestedLimitById = {};
 var _agentPanelArchitectJournalInFlightLimitById = {};
 var _agentPanelArchitectJournalExhaustedById = {};
+var _agentPanelMcpCallsByAgent = {};
+var _agentPanelMcpCallsLoadingByAgent = {};
+var _agentPanelMcpCallsRequestedKeyByAgent = {};
+var _agentPanelMcpCallsVisibleLimitByAgent = {};
+var _agentPanelMcpCallExpandedByAgent = {};
+var _agentPanelMcpFiltersByAgent = {};
+var _AGENT_PANEL_MCP_PAGE_SIZE = 50;
+var _AGENT_PANEL_MCP_DEFAULT_HOOK = 'PostToolUse';
 var _agentPanelTabSpecByKind = {
   architect: [
     { key: 'decisions', label: 'Decisions' },
     { key: 'journal', label: 'Journal' },
     { key: 'hired_engineers', label: 'Hired engineers' },
     { key: 'messages', label: 'Messages' },
+    { key: 'mcp', label: 'MCP' },
     { key: 'events', label: 'Events' },
   ],
   engineer: [
     { key: 'journal', label: 'Journal' },
+    { key: 'mcp', label: 'MCP' },
     { key: 'events', label: 'Events' },
     { key: 'worklog', label: 'Worklog' },
   ],
   worker: [
     { key: 'events', label: 'Events' },
+    { key: 'mcp', label: 'MCP' },
     { key: 'worklog', label: 'Worklog' },
   ],
   user: [],
@@ -1422,6 +1433,373 @@ function _agentPanelGroupWideNote(group) {
   return '<div class="agent-panel-worklog-note">' + _agentPanelEsc(label) + '</div>';
 }
 
+function _agentPanelMcpFilters(agentId) {
+  agentId = String(agentId || '');
+  if (!_agentPanelMcpFiltersByAgent[agentId]) {
+    _agentPanelMcpFiltersByAgent[agentId] = {
+      tool: '',
+      range: '24h',
+      outcome: 'all',
+      hook_event_name: _AGENT_PANEL_MCP_DEFAULT_HOOK,
+    };
+  }
+  return _agentPanelMcpFiltersByAgent[agentId];
+}
+
+function _agentPanelMcpVisibleLimit(agentId) {
+  agentId = String(agentId || '');
+  var value = Number(_agentPanelMcpCallsVisibleLimitByAgent[agentId] || 0);
+  if (value < _AGENT_PANEL_MCP_PAGE_SIZE) value = _AGENT_PANEL_MCP_PAGE_SIZE;
+  _agentPanelMcpCallsVisibleLimitByAgent[agentId] = value;
+  return value;
+}
+
+function _agentPanelMcpSinceForRange(range) {
+  var now = Date.now() / 1000;
+  range = String(range || '24h');
+  if (range === '1h') return now - 3600;
+  if (range === '6h') return now - (6 * 3600);
+  if (range === '24h') return now - (24 * 3600);
+  return null;
+}
+
+function _agentPanelMcpToolPattern(toolText) {
+  toolText = String(toolText || '').trim();
+  if (!toolText) return 'mcp__loom__%';
+  if (toolText.indexOf('%') >= 0 || toolText.indexOf('*') >= 0) return toolText;
+  return '*' + toolText + '*';
+}
+
+function _agentPanelMcpRequestKey(agentId, filters, limit) {
+  return [
+    agentId,
+    String(filters.tool || ''),
+    String(filters.range || ''),
+    String(filters.outcome || ''),
+    String(filters.hook_event_name || _AGENT_PANEL_MCP_DEFAULT_HOOK),
+    String(limit || 0),
+  ].join('|');
+}
+
+function _agentPanelRequestMcpCalls(agent, options) {
+  options = options || {};
+  if (!agent || typeof send !== 'function') return;
+  var agentId = String(agent.id || '');
+  if (!agentId) return;
+  if (_agentPanelMcpCallsLoadingByAgent[agentId]) return;
+  var filters = _agentPanelMcpFilters(agentId);
+  var limit = Math.max(_agentPanelMcpVisibleLimit(agentId), Number(options.limit || 0) || 0);
+  var key = _agentPanelMcpRequestKey(agentId, filters, limit);
+  var cached = Array.isArray(_agentPanelMcpCallsByAgent[agentId])
+    ? _agentPanelMcpCallsByAgent[agentId]
+    : null;
+  if (!options.force && cached && _agentPanelMcpCallsRequestedKeyByAgent[agentId] === key) {
+    return;
+  }
+  _agentPanelMcpCallsLoadingByAgent[agentId] = true;
+  _agentPanelMcpCallsRequestedKeyByAgent[agentId] = key;
+  send({
+    cmd: 'mcp_calls',
+    cell_id: agentId,
+    tool_name_pattern: _agentPanelMcpToolPattern(filters.tool),
+    hook_event_name: String(filters.hook_event_name || _AGENT_PANEL_MCP_DEFAULT_HOOK),
+    since: _agentPanelMcpSinceForRange(filters.range),
+    limit: limit,
+    success_filter: filters.outcome || 'all',
+  });
+}
+
+function _agentPanelMcpMergeCalls(current, incoming) {
+  var merged = [];
+  var seen = {};
+  function addAll(items) {
+    items = Array.isArray(items) ? items : [];
+    for (var i = 0; i < items.length; i++) {
+      var call = items[i] || {};
+      var key = String(call.cursor || call.idempotency_key || '');
+      if (!key) key = String(call.tool_name || '') + '-' + String(call.appended_at || '') + '-' + i;
+      if (seen[key]) continue;
+      seen[key] = true;
+      merged.push(call);
+    }
+  }
+  addAll(incoming);
+  addAll(current);
+  merged.sort(function(a, b) {
+    var at = Number((a && a.appended_at) || 0);
+    var bt = Number((b && b.appended_at) || 0);
+    if (at !== bt) return bt - at;
+    return Number((b && b.cursor) || 0) - Number((a && a.cursor) || 0);
+  });
+  if (merged.length > 500) merged.length = 500;
+  return merged;
+}
+
+function agentPanelReceiveMcpCalls(data) {
+  var agentId = String((data && (data.cell_id || data.agent_id)) || '').trim();
+  if (!agentId) return;
+  var calls = Array.isArray(data.calls) ? data.calls : (Array.isArray(data.events) ? data.events : []);
+  _agentPanelMcpCallsByAgent[agentId] = calls.slice();
+  _agentPanelMcpCallsLoadingByAgent[agentId] = false;
+  if (!state.mcp_calls) state.mcp_calls = {};
+  state.mcp_calls[agentId] = calls.slice();
+  var focused = _resolveFocusedAgent();
+  if (focused && String(focused.id || '') === agentId
+      && _agentPanelActiveTab(_agentPanelKind(focused)) === 'mcp') {
+    if (typeof _agentPanelRefreshCurrentTab === 'function'
+        && _agentPanelRefreshCurrentTab()) return;
+    if (typeof renderAgentPanel === 'function') renderAgentPanel();
+  }
+}
+
+function agentPanelReceiveMcpCallAppend(call) {
+  call = call || {};
+  var agentId = String(call.cell_id || '');
+  if (!agentId) return;
+  if (!_agentPanelMcpCallMatchesHook(call, _agentPanelMcpFilters(agentId))) return;
+  var current = _agentPanelMcpCallsByAgent[agentId]
+    || (state && state.mcp_calls && state.mcp_calls[agentId])
+    || [];
+  _agentPanelMcpCallsByAgent[agentId] = _agentPanelMcpMergeCalls(current, [call]);
+  if (!state.mcp_calls) state.mcp_calls = {};
+  state.mcp_calls[agentId] = _agentPanelMcpCallsByAgent[agentId].slice();
+  var focused = _resolveFocusedAgent();
+  if (focused && String(focused.id || '') === agentId
+      && _agentPanelActiveTab(_agentPanelKind(focused)) === 'mcp') {
+    if (typeof _agentPanelRefreshCurrentTab === 'function'
+        && _agentPanelRefreshCurrentTab()) return;
+    if (typeof renderAgentPanel === 'function') renderAgentPanel();
+  }
+}
+
+function agentPanelMcpFilterChange(field, value) {
+  var agent = _resolveFocusedAgent();
+  if (!agent) return;
+  var agentId = String(agent.id || '');
+  var filters = _agentPanelMcpFilters(agentId);
+  if (field === 'tool') filters.tool = String(value || '');
+  else if (field === 'range') filters.range = String(value || '24h');
+  else if (field === 'outcome') filters.outcome = String(value || 'all');
+  _agentPanelMcpCallsVisibleLimitByAgent[agentId] = _AGENT_PANEL_MCP_PAGE_SIZE;
+  _agentPanelMcpCallsRequestedKeyByAgent[agentId] = '';
+  _agentPanelRequestMcpCalls(agent, { force: true });
+  if (typeof _agentPanelRefreshCurrentTab === 'function'
+      && _agentPanelRefreshCurrentTab()) return;
+  if (typeof renderAgentPanel === 'function') renderAgentPanel();
+}
+
+function agentPanelLoadOlderMcpCalls(evt, agentId) {
+  if (evt && typeof evt.preventDefault === 'function') evt.preventDefault();
+  if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
+  agentId = String(agentId || '').trim();
+  var agent = (state && state.agents && agentId) ? state.agents[agentId] : null;
+  if (!agent) agent = _resolveFocusedAgent();
+  if (!agent) return;
+  agentId = String(agent.id || '');
+  _agentPanelMcpCallsVisibleLimitByAgent[agentId] =
+    _agentPanelMcpVisibleLimit(agentId) + _AGENT_PANEL_MCP_PAGE_SIZE;
+  _agentPanelRequestMcpCalls(agent, { force: true });
+  if (typeof _agentPanelRefreshCurrentTab === 'function'
+      && _agentPanelRefreshCurrentTab()) return;
+  if (typeof renderAgentPanel === 'function') renderAgentPanel();
+}
+
+function agentPanelToggleMcpCall(agentId, cursor) {
+  agentId = String(agentId || '').trim();
+  cursor = String(cursor || '').trim();
+  if (!agentId || !cursor) return;
+  if (!_agentPanelMcpCallExpandedByAgent[agentId]) {
+    _agentPanelMcpCallExpandedByAgent[agentId] = {};
+  }
+  _agentPanelMcpCallExpandedByAgent[agentId][cursor] =
+    !_agentPanelMcpCallExpandedByAgent[agentId][cursor];
+  if (typeof _agentPanelRefreshCurrentTab === 'function'
+      && _agentPanelRefreshCurrentTab()) return;
+  if (typeof renderAgentPanel === 'function') renderAgentPanel();
+}
+
+function _agentPanelMcpCallsForAgent(agent) {
+  var agentId = String((agent && agent.id) || '');
+  if (!agentId) return [];
+  if (Array.isArray(_agentPanelMcpCallsByAgent[agentId])) {
+    return _agentPanelMcpCallsByAgent[agentId].slice();
+  }
+  if (state && state.mcp_calls && Array.isArray(state.mcp_calls[agentId])) {
+    return state.mcp_calls[agentId].slice();
+  }
+  return [];
+}
+
+function _agentPanelMcpHookFilter(filters) {
+  filters = filters || {};
+  return String(filters.hook_event_name || _AGENT_PANEL_MCP_DEFAULT_HOOK || '').trim();
+}
+
+function _agentPanelMcpCallMatchesHook(call, filters) {
+  var hookFilter = _agentPanelMcpHookFilter(filters);
+  if (!hookFilter) return true;
+  return String((call && call.hook_event_name) || '') === hookFilter;
+}
+
+function _agentPanelMcpCallMatchesFilters(call, filters) {
+  filters = filters || {};
+  if (!_agentPanelMcpCallMatchesHook(call, filters)) return false;
+  var outcome = String(filters.outcome || 'all');
+  if (outcome === 'success' && !call.success) return false;
+  if (outcome === 'error' && call.success) return false;
+  var toolText = String(filters.tool || '').trim().toLowerCase();
+  if (toolText) {
+    var tool = String(call.tool_name || '').toLowerCase();
+    if (tool.indexOf(toolText.replace(/\*/g, '').replace(/%/g, '')) < 0) {
+      return false;
+    }
+  }
+  var since = _agentPanelMcpSinceForRange(filters.range);
+  if (since && Number(call.appended_at || 0) < since) return false;
+  return true;
+}
+
+function _agentPanelMcpSummary(value) {
+  if (value == null) return 'redacted';
+  if (typeof value === 'object' && value.redacted) {
+    var keys = Array.isArray(value.arg_keys) ? value.arg_keys : [];
+    if (keys.length) return 'redacted keys: ' + keys.join(', ');
+    return 'redacted · ' + (value.byte_size || 0) + ' bytes';
+  }
+  if (typeof value === 'object') {
+    try {
+      var json = JSON.stringify(value);
+      return json.length > 120 ? json.slice(0, 117) + '…' : json;
+    } catch (err) {
+      return '[object]';
+    }
+  }
+  var text = String(value);
+  return text.length > 120 ? text.slice(0, 117) + '…' : text;
+}
+
+function _agentPanelMcpPretty(value) {
+  if (value == null) return 'redacted';
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch (err) {
+      return String(value);
+    }
+  }
+  return String(value);
+}
+
+function _agentPanelRenderMcpCall(call, agentId) {
+  call = call || {};
+  var cursor = String(call.cursor || call.idempotency_key || '');
+  var expanded = !!(
+    _agentPanelMcpCallExpandedByAgent[agentId]
+    && _agentPanelMcpCallExpandedByAgent[agentId][cursor]
+  );
+  var status = call.success ? 'success' : 'error';
+  var duration = call.duration_ms != null ? (' · ' + call.duration_ms + 'ms') : '';
+  var argsRedacted = !!call.args_redacted;
+  var resultRedacted = !!call.result_redacted;
+  var html = '<div class="agent-panel-mcp-call agent-panel-mcp-' + status + '"'
+    + ' data-agent-panel-anchor="mcp-call-' + _agentPanelAttr(cursor) + '">';
+  html += '<button type="button" class="agent-panel-mcp-row" onclick="agentPanelToggleMcpCall(\''
+    + _agentPanelAttr(agentId) + '\', \'' + _agentPanelAttr(cursor) + '\')">';
+  html += '<span class="agent-panel-mcp-status">' + (call.success ? '✓' : '!') + '</span>';
+  html += '<span class="agent-panel-mcp-main">';
+  html += '<span class="agent-panel-mcp-tool">' + _agentPanelEsc(call.tool_name || 'unknown tool') + '</span>';
+  html += '<span class="agent-panel-mcp-args">' + _agentPanelEsc(_agentPanelMcpSummary(call.args)) + '</span>';
+  html += '</span>';
+  html += '<span class="agent-panel-mcp-meta">' + _agentPanelEsc(_agentPanelTimeAgo(call.appended_at))
+    + _agentPanelEsc(duration) + '</span>';
+  html += '</button>';
+  if (expanded) {
+    html += '<div class="agent-panel-mcp-detail">';
+    html += '<div class="agent-panel-mcp-detail-grid">';
+    html += '<div><div class="agent-panel-mcp-detail-label">Args</div>';
+    if (argsRedacted) html += '<div class="agent-panel-mcp-redacted">Args redacted at ingest.</div>';
+    html += '<pre>' + _agentPanelEsc(_agentPanelMcpPretty(call.args)) + '</pre></div>';
+    html += '<div><div class="agent-panel-mcp-detail-label">Result</div>';
+    if (resultRedacted) html += '<div class="agent-panel-mcp-redacted">Result redacted at ingest.</div>';
+    html += '<pre>' + _agentPanelEsc(_agentPanelMcpPretty(call.result)) + '</pre></div>';
+    html += '</div>';
+    if (call.error) {
+      html += '<div class="agent-panel-mcp-error-text">' + _agentPanelEsc(call.error) + '</div>';
+    }
+    html += '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function _agentPanelMcpSettingsBanner() {
+  var mode = state && state.global_settings
+    ? String(state.global_settings.mcp_call_log_args_capture || 'metadata')
+    : 'metadata';
+  if (mode === 'full') return '';
+  return '<button type="button" class="agent-panel-mcp-banner" onclick="openGlobalSettings()">'
+    + 'Args redacted by default — change in Global Settings.'
+    + '</button>';
+}
+
+function _renderAgentMcpTab(agent) {
+  _agentPanelRequestMcpCalls(agent);
+  var agentId = String((agent && agent.id) || '');
+  var filters = _agentPanelMcpFilters(agentId);
+  var calls = _agentPanelMcpCallsForAgent(agent).filter(function(call) {
+    return _agentPanelMcpCallMatchesFilters(call, filters);
+  });
+  var visibleLimit = _agentPanelMcpVisibleLimit(agentId);
+  var visibleCalls = calls.slice(0, visibleLimit);
+  var loading = !!_agentPanelMcpCallsLoadingByAgent[agentId];
+  var html = '<div class="agent-panel-mcp-tab">';
+  html += _agentPanelMcpSettingsBanner();
+  html += '<div class="agent-panel-mcp-filters">';
+  html += '<input class="agent-panel-mcp-filter-tool" placeholder="Filter tool" value="'
+    + _agentPanelAttr(filters.tool || '')
+    + '" oninput="agentPanelMcpFilterChange(\'tool\', this.value)">';
+  html += '<select onchange="agentPanelMcpFilterChange(\'range\', this.value)">';
+  [
+    ['1h', 'Last hour'],
+    ['6h', '6h'],
+    ['24h', '24h'],
+    ['all', 'All'],
+  ].forEach(function(opt) {
+    html += '<option value="' + opt[0] + '"' + (filters.range === opt[0] ? ' selected' : '')
+      + '>' + opt[1] + '</option>';
+  });
+  html += '</select>';
+  html += '<select onchange="agentPanelMcpFilterChange(\'outcome\', this.value)">';
+  [
+    ['all', 'All outcomes'],
+    ['success', 'Success only'],
+    ['error', 'Errors only'],
+  ].forEach(function(opt) {
+    html += '<option value="' + opt[0] + '"' + (filters.outcome === opt[0] ? ' selected' : '')
+      + '>' + opt[1] + '</option>';
+  });
+  html += '</select>';
+  html += '</div>';
+  if (loading && !calls.length) {
+    html += '<div class="agent-panel-event-empty">Loading MCP calls…</div>';
+  } else if (!calls.length) {
+    html += '<div class="agent-panel-event-empty">No MCP calls found.</div>';
+  } else {
+    if (loading) html += '<div class="agent-panel-worklog-note">Refreshing MCP calls…</div>';
+    html += '<div class="agent-panel-mcp-list">';
+    for (var i = 0; i < visibleCalls.length; i++) {
+      html += _agentPanelRenderMcpCall(visibleCalls[i], agentId);
+    }
+    html += '</div>';
+    if (calls.length >= visibleLimit) {
+      html += '<button type="button" class="agent-panel-event-load-more" onclick="agentPanelLoadOlderMcpCalls(event, \''
+        + _agentPanelAttr(agentId) + '\')">Load more</button>';
+    }
+  }
+  html += '</div>';
+  return html;
+}
+
 function _renderEngineerJournal(agent) {
   var group = String((agent && agent.group) || '');
   if (typeof _agentPanelLegacyRenderJournal === 'function') return _agentPanelLegacyRenderJournal(group);
@@ -1598,7 +1976,9 @@ function _agentPanelTabRenderParts(agent, kind, activeTab) {
   if (kind === 'engineer') {
     var engineerGroup = String((agent && agent.group) || '');
     parts.bodyHtml = _agentPanelGroupWideNote(engineerGroup);
-    if (activeTab === 'events') {
+    if (activeTab === 'mcp') {
+      parts.bodyHtml += _renderAgentMcpTab(agent);
+    } else if (activeTab === 'events') {
       parts.headerRightHtml = _agentPanelDigestHeaderRight(agent);
       parts.bodyHtml += _renderEngineerEvents(agent);
     } else if (activeTab === 'worklog') {
@@ -1609,7 +1989,9 @@ function _agentPanelTabRenderParts(agent, kind, activeTab) {
     return parts;
   }
   if (kind === 'worker') {
-    parts.bodyHtml = (activeTab === 'worklog')
+    parts.bodyHtml = (activeTab === 'mcp')
+      ? _renderAgentMcpTab(agent)
+      : (activeTab === 'worklog')
       ? _agentPanelWorkerWorklog(agent)
       : _agentPanelWorkerEvents(agent);
     return parts;
@@ -1622,6 +2004,8 @@ function _agentPanelTabRenderParts(agent, kind, activeTab) {
     } else if (activeTab === 'events') {
       parts.headerRightHtml = _agentPanelDigestHeaderRight(agent);
       parts.bodyHtml = _renderArchitectEvents(agent);
+    } else if (activeTab === 'mcp') {
+      parts.bodyHtml = _renderAgentMcpTab(agent);
     } else if (activeTab === 'journal') {
       parts.bodyHtml = _agentPanelArchitectJournalHtml(agent);
     } else {
@@ -2181,8 +2565,10 @@ function _renderTerminalPanel(agent) {
 
 function _agentPanelBuildPanelStateOptions(agent, activeTab, virtualMetas) {
   virtualMetas = virtualMetas || [];
+  var scrollSelectors = ['.agent-panel-content', '.agent-panel-message-list'];
+  if (activeTab === 'mcp') scrollSelectors.push('.agent-panel-mcp-list');
   var panelStateOptions = {
-    scrollSelectors: ['.agent-panel-content', '.agent-panel-message-list'],
+    scrollSelectors: scrollSelectors,
     capture: function(snapshot, root) {
       if (!snapshot || !root || typeof root.querySelector !== 'function') return;
       if (agent && _agentPanelActiveTab(_agentPanelKind(agent)) === 'events') {

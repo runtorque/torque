@@ -75,6 +75,79 @@ class CliEngineerTests(unittest.TestCase):
         self.assertEqual(args.set, ["architect_paused=true"])
         self.assertTrue(args.json)
 
+    def test_parser_accepts_mcp_log(self):
+        parser = self.cli.build_parser()
+        args = parser.parse_args([
+            "mcp-log",
+            "worker-a",
+            "--limit",
+            "5",
+            "--tool-filter",
+            "mcp__loom__%",
+            "--json",
+        ])
+        self.assertEqual(args.command, "mcp-log")
+        self.assertEqual(args.agent, "worker-a")
+        self.assertEqual(args.limit, 5)
+        self.assertTrue(args.json)
+        all_hooks = parser.parse_args(["mcp-log", "worker-a", "--hook", ""])
+        self.assertEqual(all_hooks.hook, "")
+
+    def test_cmd_mcp_log_resolves_agent_and_calls_daemon(self):
+        state = {
+            "agents": {
+                "worker-a": {
+                    "id": "worker-a",
+                    "name": "Worker A",
+                    "slug": "worker-a",
+                    "group": "loom",
+                    "kind": "worker",
+                    "cell_type": "agent",
+                }
+            }
+        }
+        args = SimpleNamespace(
+            port=18932,
+            agent="worker-a",
+            limit=3,
+            tool_filter="mcp__loom__%",
+            hook="PostToolUse",
+            since_seconds=0,
+            json=False,
+        )
+        with mock.patch.object(self.cli, "get_state", return_value=state), \
+             mock.patch.object(
+                 self.cli,
+                 "api_call",
+                 return_value={
+                     "ok": True,
+                     "data": {
+                         "calls": [{
+                             "tool_name": "mcp__loom__loom_progress",
+                             "hook_event_name": "PostToolUse",
+                             "appended_at": 1712345678,
+                             "success": True,
+                             "args": {"redacted": True, "arg_keys": ["message"]},
+                         }]
+                     },
+                 },
+             ) as api_call:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.cli.cmd_mcp_log(args)
+
+        api_call.assert_called_once_with(
+            "mcp_calls",
+            port=18932,
+            cell_id="worker-a",
+            tool_name_pattern="mcp__loom__%",
+            hook_event_name="PostToolUse",
+            since=None,
+            limit=3,
+        )
+        self.assertIn("mcp__loom__loom_progress", out.getvalue())
+        self.assertIn("args:redacted", out.getvalue())
+
     def test_cmd_engineer_dismiss_and_rehire_resolve_engineer_and_call_daemon(self):
         state = {
             "agents": {

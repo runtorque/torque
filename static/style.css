@@ -6372,6 +6372,12 @@ body.diff-view-open #ctx-menu {
   overflow: hidden;
   padding: 0;
 }
+.inline-fields {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
 .engineers-roster {
   display: flex;
   flex-direction: column;
@@ -6946,6 +6952,134 @@ button.agent-panel-hierarchy-crumb:focus-visible {
   margin-top: 4px;
   font-size: 9px;
   color: var(--text-dim);
+}
+
+.agent-panel-mcp-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.agent-panel-mcp-banner {
+  text-align: left;
+  border: 1px solid color-mix(in srgb, var(--amber) 45%, var(--border));
+  background: color-mix(in srgb, var(--amber) 10%, var(--bg-cell));
+  color: var(--text);
+  border-radius: var(--radius);
+  padding: 7px 8px;
+  font: 10px var(--font);
+  cursor: pointer;
+}
+.agent-panel-mcp-filters {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto auto;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-cell);
+}
+.agent-panel-mcp-filters input,
+.agent-panel-mcp-filters select {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font: 10px var(--font);
+  padding: 5px 6px;
+  min-width: 0;
+}
+.agent-panel-mcp-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.agent-panel-mcp-call {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-cell);
+  overflow: hidden;
+}
+.agent-panel-mcp-success { border-left: 2px solid var(--accent); }
+.agent-panel-mcp-error { border-left: 2px solid var(--red); }
+.agent-panel-mcp-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  padding: 7px 8px;
+  cursor: pointer;
+  text-align: left;
+  font: 10px var(--font);
+}
+.agent-panel-mcp-row:hover { background: var(--bg-hover); }
+.agent-panel-mcp-status {
+  font-weight: 700;
+  color: var(--accent);
+}
+.agent-panel-mcp-error .agent-panel-mcp-status { color: var(--red); }
+.agent-panel-mcp-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.agent-panel-mcp-tool {
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agent-panel-mcp-args,
+.agent-panel-mcp-meta {
+  color: var(--text-dim);
+  font-size: 9px;
+}
+.agent-panel-mcp-meta { white-space: nowrap; }
+.agent-panel-mcp-detail {
+  border-top: 1px solid var(--border);
+  padding: 8px;
+}
+.agent-panel-mcp-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+.agent-panel-mcp-detail-label {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+.agent-panel-mcp-detail pre {
+  margin: 0;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  color: var(--text);
+  font: 10px var(--font-mono, monospace);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow: auto;
+}
+.agent-panel-mcp-redacted {
+  color: var(--amber);
+  font-size: 9px;
+  margin-bottom: 4px;
+}
+.agent-panel-mcp-error-text {
+  color: var(--red);
+  font-size: 10px;
+  margin-top: 8px;
+  white-space: pre-wrap;
 }
 
 .agent-panel-worklog-tab {

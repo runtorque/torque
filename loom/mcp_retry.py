@@ -108,6 +108,9 @@ _API_READ_COMMANDS = {
     "memory_read",
     "engineer_journal_read",
     "architect_task_list",
+    "architect_mcp_calls",
+    "engineer_mcp_calls",
+    "mcp_calls",
     "architect_decision_list",
     "pending_hire_list",
 }

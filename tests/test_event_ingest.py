@@ -2,13 +2,16 @@
 
 import asyncio
 import contextlib
+import json
 import os
 import signal
+import sqlite3
 import tempfile
 import time
 import unittest
 import warnings
 from pathlib import Path
+from unittest import mock
 
 from loom import event_ingest_daemon, profiling
 from loom.event_ingest_db import EventIngestStore
@@ -18,7 +21,7 @@ from loom.event_ingest_daemon import (
     read_frame,
     write_frame,
 )
-from loom.event_ingest_client import EventIngestClient
+from loom.event_ingest_client import EventIngestClient, EventIngestProtocolError
 from loom.events import (
     EventBus,
     EventIngestDrainer,
@@ -86,6 +89,23 @@ class _Harness:
 
 
 class EventIngestStoreTests(unittest.TestCase):
+    def _envelope(self, cell_id, tool_name, hook, *, tool_input=None,
+                  tool_output=None, session_id="sess", received_at=0):
+        raw = {
+            "hook_event_name": hook,
+            "tool_name": tool_name,
+            "session_id": session_id,
+        }
+        if tool_input is not None:
+            raw["tool_input"] = tool_input
+        if tool_output is not None:
+            raw["tool_output"] = tool_output
+        return build_event_ingest_envelope(
+            raw,
+            headers={"X-Loom-Cell-Id": cell_id},
+            received_at=received_at,
+        )
+
     def test_append_drain_ack_and_idempotency(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = EventIngestStore(Path(tmp) / "ingest.db", max_rows=2).init()
@@ -123,6 +143,224 @@ class EventIngestStoreTests(unittest.TestCase):
             finally:
                 reopened.close()
 
+    def test_query_filters_and_orders_mcp_call_history(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = EventIngestStore(
+                Path(tmp) / "ingest.db",
+                args_capture="full",
+            ).init()
+            try:
+                store.append(
+                    self._envelope(
+                        "cell-a",
+                        "mcp__loom__loom_progress",
+                        "PreToolUse",
+                        received_at=10,
+                    ),
+                    "q1",
+                    now=10,
+                )
+                store.append(
+                    self._envelope(
+                        "cell-a",
+                        "mcp__loom__loom_progress",
+                        "PostToolUse",
+                        tool_input={"message": "done"},
+                        received_at=20,
+                    ),
+                    "q2",
+                    now=20,
+                )
+                store.append(
+                    self._envelope(
+                        "cell-b",
+                        "mcp__loom__loom_done",
+                        "PostToolUse",
+                        received_at=30,
+                    ),
+                    "q3",
+                    now=30,
+                )
+                store.append(
+                    self._envelope("cell-a", "Bash", "PostToolUse", received_at=40),
+                    "q4",
+                    now=40,
+                )
+
+                self.assertEqual(
+                    [r["cell_id"] for r in store.query(cell_id="cell-a", limit=10)],
+                    ["cell-a", "cell-a", "cell-a"],
+                )
+                self.assertEqual(
+                    [r["tool_name"] for r in store.query(
+                        tool_name_pattern="mcp__loom__loom_progress",
+                        limit=10,
+                    )],
+                    ["mcp__loom__loom_progress", "mcp__loom__loom_progress"],
+                )
+                self.assertEqual(
+                    [r["tool_name"] for r in store.query(
+                        tool_name_pattern="mcp__loom__%",
+                        limit=10,
+                    )],
+                    [
+                        "mcp__loom__loom_done",
+                        "mcp__loom__loom_progress",
+                        "mcp__loom__loom_progress",
+                    ],
+                )
+                self.assertEqual(
+                    [r["idempotency_key"] for r in store.query(
+                        cell_id="cell-a",
+                        hook_event_name="PostToolUse",
+                        since=15,
+                        until=35,
+                        tool_name_pattern="mcp__loom__%",
+                        limit=5,
+                    )],
+                    ["q2"],
+                )
+                self.assertEqual(
+                    [r["idempotency_key"] for r in store.query(limit=2)],
+                    ["q4", "q3"],
+                )
+            finally:
+                store.close()
+
+    def test_migration_backfills_normalized_columns(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "ingest.db"
+            conn = sqlite3.connect(str(db_path))
+            try:
+                conn.execute(
+                    "CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+                )
+                conn.execute(
+                    "INSERT INTO metadata(key, value) VALUES('ack_cursor', '0')"
+                )
+                conn.execute(
+                    "CREATE TABLE events ("
+                    "cursor INTEGER PRIMARY KEY AUTOINCREMENT, "
+                    "idempotency_key TEXT NOT NULL UNIQUE, "
+                    "event_json TEXT NOT NULL, "
+                    "appended_at REAL NOT NULL)"
+                )
+                event = self._envelope(
+                    "legacy-cell",
+                    "mcp__loom__loom_context",
+                    "PostToolUse",
+                    received_at=100,
+                )
+                conn.execute(
+                    "INSERT INTO events(idempotency_key, event_json, appended_at) "
+                    "VALUES (?, ?, ?)",
+                    ("legacy-key", json.dumps(event), 100.0),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            store = EventIngestStore(db_path).init()
+            try:
+                rows = store.query(cell_id="legacy-cell", limit=10)
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0]["tool_name"], "mcp__loom__loom_context")
+            finally:
+                store.close()
+
+    def test_redaction_modes_and_tool_allowlist(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            event = self._envelope(
+                "cell",
+                "mcp__loom__secret",
+                "PostToolUse",
+                tool_input={"token": "secret", "task_id": "LOOM:1"},
+                tool_output={"result": "secret"},
+            )
+            off = EventIngestStore(
+                Path(tmp) / "off.db",
+                args_capture="off",
+            ).init()
+            meta = EventIngestStore(
+                Path(tmp) / "meta.db",
+                args_capture="metadata",
+            ).init()
+            full = EventIngestStore(
+                Path(tmp) / "full.db",
+                args_capture="full",
+            ).init()
+            allow = EventIngestStore(
+                Path(tmp) / "allow.db",
+                args_capture="metadata",
+                full_capture_tools=["mcp__loom__secret"],
+            ).init()
+            try:
+                off.append(event, "off")
+                off_raw = off.query(limit=1)[0]["event"]["raw"]
+                self.assertNotIn("tool_input", off_raw)
+                self.assertNotIn("tool_output", off_raw)
+
+                meta.append(event, "meta")
+                meta_raw = meta.query(limit=1)[0]["event"]["raw"]
+                self.assertEqual(meta_raw["tool_input"]["arg_keys"], ["task_id", "token"])
+                self.assertTrue(meta_raw["tool_input"]["redacted"])
+                self.assertNotIn("secret", json.dumps(meta_raw["tool_input"]))
+                self.assertTrue(meta_raw["tool_output"]["redacted"])
+
+                full.append(event, "full")
+                self.assertEqual(
+                    full.query(limit=1)[0]["event"]["raw"]["tool_input"]["token"],
+                    "secret",
+                )
+
+                allow.append(event, "allow")
+                self.assertEqual(
+                    allow.query(limit=1)[0]["event"]["raw"]["tool_input"]["token"],
+                    "secret",
+                )
+            finally:
+                off.close()
+                meta.close()
+                full.close()
+                allow.close()
+
+    def test_retention_trims_by_row_count_and_age(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = EventIngestStore(
+                Path(tmp) / "ingest.db",
+                max_rows=3,
+                max_age_days=14,
+            ).init()
+            try:
+                for idx in range(5):
+                    store.append({"n": idx}, f"row-{idx}", now=100 + idx)
+                with mock.patch("loom.event_ingest_db.time.time", return_value=105):
+                    ack = store.ack(up_to=5)
+                self.assertEqual(ack["trimmed"], 2)
+                self.assertEqual([r["event"]["n"] for r in store.query(limit=10)], [4, 3, 2])
+            finally:
+                store.close()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            now = 100 + (15 * 86400)
+            store = EventIngestStore(
+                Path(tmp) / "ingest.db",
+                max_rows=10,
+                max_age_days=14,
+            ).init()
+            try:
+                store.append({"n": "old"}, "old", now=100)
+                store.append({"n": "new"}, "new", now=now)
+                with mock.patch(
+                    "loom.event_ingest_db.time.time",
+                    return_value=now,
+                ):
+                    ack = store.ack(up_to=2)
+                self.assertEqual(ack["trimmed"], 1)
+                self.assertEqual([r["event"]["n"] for r in store.query(limit=10)], ["new"])
+            finally:
+                store.close()
+
 
 class EventIngestClientCounterTests(unittest.IsolatedAsyncioTestCase):
     async def test_ack_records_trimmed_rows_counter(self):
@@ -159,6 +397,22 @@ class EventIngestClientCounterTests(unittest.IsolatedAsyncioTestCase):
                 os.environ["LOOM_PROFILE_ENABLED"] = old_profile_enabled
             profiling.reset()
 
+    async def test_configure_rejects_unknown_op_error_response(self):
+        client = EventIngestClient(Path("unused.sock"))
+
+        async def fake_call(op, **payload):
+            self.assertEqual(op, "configure")
+            self.assertEqual(payload["args_capture"], "metadata")
+            return {
+                "type": "error",
+                "code": "protocol_error",
+                "message": "unknown op: 'configure'",
+            }
+
+        client._call_with_reconnect_retry = fake_call
+        with self.assertRaises(EventIngestProtocolError):
+            await client.configure(args_capture="metadata")
+
 
 class EventIngestProtocolTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -167,6 +421,9 @@ class EventIngestProtocolTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self):
         await self.h.stop()
+
+    async def test_protocol_version_bumped_for_query_and_configure_ops(self):
+        self.assertGreaterEqual(PROTOCOL_VERSION, 2)
 
     async def test_ping_append_drain_ack_status(self):
         reader, writer = await _open_client(self.h.socket_path)
@@ -209,6 +466,42 @@ class EventIngestProtocolTests(unittest.IsolatedAsyncioTestCase):
 
 
 class EventIngestLifecycleTests(unittest.TestCase):
+    def test_ensure_running_replaces_protocol_mismatch_sidecar(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = Path(tmp)
+            old_pid = 12345
+            new_pid = 23456
+            ping_responses = [
+                {"type": "pong", "version": PROTOCOL_VERSION - 1, "pid": old_pid},
+                {"type": "pong", "version": PROTOCOL_VERSION, "pid": new_pid},
+            ]
+
+            def fake_ping(_socket_path):
+                if ping_responses:
+                    return ping_responses.pop(0)
+                return {"type": "pong", "version": PROTOCOL_VERSION, "pid": new_pid}
+
+            with mock.patch(
+                "loom.event_ingest_daemon._ping_socket",
+                side_effect=fake_ping,
+            ), mock.patch(
+                "loom.event_ingest_daemon._pid_alive",
+                return_value=True,
+            ), mock.patch(
+                "loom.event_ingest_daemon._terminate_pid",
+            ) as terminate_pid, mock.patch(
+                "loom.event_ingest_daemon._read_pid_file",
+                return_value=None,
+            ), mock.patch(
+                "loom.event_ingest_daemon.spawn_detached",
+                return_value=new_pid,
+            ) as spawn_detached:
+                sock_path = event_ingest_daemon.ensure_running(data_dir, timeout=1.0)
+
+            self.assertEqual(sock_path, data_dir / event_ingest_daemon.DEFAULT_SOCKET_NAME)
+            terminate_pid.assert_called_once_with(old_pid)
+            spawn_detached.assert_called_once()
+
     def test_detached_daemon_sigterm_exits_and_unlinks_runtime_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             data_dir = Path(tmp)

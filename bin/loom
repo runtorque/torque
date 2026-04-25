@@ -3196,6 +3196,55 @@ def cmd_logs(args):
         os.execvp("tail", ["tail", "-50", LOOM_LOG])
 
 
+def _format_mcp_call_line(call):
+    ts = float(call.get("appended_at") or call.get("received_at") or 0)
+    stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts)) if ts else "unknown-time"
+    tool = call.get("tool_name", "") or "<unknown-tool>"
+    hook = call.get("hook_event_name", "") or "hook"
+    status = "ok" if call.get("success", True) else "error"
+    duration = call.get("duration_ms")
+    duration_part = f" {duration}ms" if duration is not None else ""
+    args = call.get("args")
+    if isinstance(args, dict) and args.get("redacted"):
+        keys = ", ".join(args.get("arg_keys") or [])
+        arg_part = f" args:redacted keys=[{keys}]"
+    elif args is not None:
+        text = json.dumps(args, sort_keys=True)
+        if len(text) > 120:
+            text = text[:117] + "..."
+        arg_part = f" args:{text}"
+    else:
+        arg_part = " args:redacted"
+    return f"{stamp}  {status:<5} {hook:<16} {tool}{duration_part}{arg_part}"
+
+
+def cmd_mcp_log(args):
+    state_data = get_state(args.port)
+    cell = resolve_cell(state_data, args.agent)
+    since = None
+    if getattr(args, "since_seconds", None):
+        since = time.time() - int(args.since_seconds)
+    data = check_ok(api_call(
+        "mcp_calls",
+        port=args.port,
+        cell_id=cell["id"],
+        tool_name_pattern=args.tool_filter or "mcp__loom__%",
+        hook_event_name=args.hook,
+        since=since,
+        limit=args.limit,
+    ))
+    calls = data.get("calls") or data.get("events") or []
+    if args.json:
+        print(json.dumps(calls, indent=2))
+        return
+    print(f"MCP calls for {cell.get('name') or cell['id']} ({cell['id']}):")
+    if not calls:
+        print("  No calls found.")
+        return
+    for call in calls:
+        print("  " + _format_mcp_call_line(call))
+
+
 def cmd_doctor(args):
     report = get_doctor_local(args.port)
     if getattr(args, "mcp_health", False):
@@ -4466,6 +4515,21 @@ def build_parser():
     p.add_argument("--mcp-health", action="store_true",
                    help="Show recent MCP retry/drop/dedupe/replay counts")
     p.set_defaults(func=cmd_doctor)
+
+    # -- mcp-log ------------------------------------------------------------
+    p = sub.add_parser("mcp-log", help="Dump recent MCP calls for an agent")
+    p.add_argument("agent", help="Agent ID, slug, name, or ID prefix")
+    p.add_argument("--limit", type=int, default=50,
+                   help="Maximum calls to show")
+    p.add_argument("--tool-filter", default="mcp__loom__%",
+                   help="Exact tool name or LIKE/glob pattern")
+    p.add_argument("--hook", default="PostToolUse",
+                   help="Hook event filter (default: PostToolUse; empty for all)")
+    p.add_argument("--since-seconds", type=int, default=0,
+                   help="Only show calls newer than this many seconds")
+    p.add_argument("--json", action="store_true",
+                   help="Output JSON")
+    p.set_defaults(func=cmd_mcp_log)
 
     # -- desktop ------------------------------------------------------------
     p = sub.add_parser("desktop", help="Launch Loom in the native desktop shell")

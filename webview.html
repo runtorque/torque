@@ -889,6 +889,24 @@
             data-hint="How many lines of xterm.js terminal history to preserve in embedded standalone terminals. Applies immediately to open terminals.">?</span>
         </label>
         <input type="number" id="gls-xterm-scrollback" min="100" max="100000" value="2000" style="width:100px">
+        <label>MCP call args capture
+          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)"
+            data-hint="Controls future event-ingest storage for tool args/results. Metadata stores only arg keys and byte sizes; full stores values; off drops args/results.">?</span>
+        </label>
+        <select id="gls-mcp-call-log-args-capture">
+          <option value="off">Off</option>
+          <option value="metadata">Metadata</option>
+          <option value="full">Full</option>
+        </select>
+        <label>Full-capture tool allowlist <span class="label-hint">one glob/regex per line</span></label>
+        <textarea id="gls-mcp-call-log-full-capture-tools" rows="3" placeholder="mcp__loom__loom_context"></textarea>
+        <label>Event ingest retention</label>
+        <div class="inline-fields">
+          <input type="number" id="gls-event-ingest-max-rows" min="1" value="100000" style="width:110px">
+          <span class="label-hint">rows</span>
+          <input type="number" id="gls-event-ingest-max-days" min="0" value="14" style="width:70px">
+          <span class="label-hint">days</span>
+        </div>
       </div>
 
       <!-- Board sub-tab -->
