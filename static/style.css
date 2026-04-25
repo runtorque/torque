@@ -2264,12 +2264,6 @@ body.runtime-embedded #modal-group .modal-summary {
 .gs-inline-card-main {
   min-width: 0;
 }
-.gs-deferred-section {
-  opacity: .72;
-}
-.gs-deferred-section summary {
-  color: var(--warning, #d29922);
-}
 .gs-threshold-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);

@@ -42,6 +42,7 @@ from .state import (
     hot_json_dumps_async,
     hot_json_dumps_bytes_async,
     merge_cleanup_flags,
+    normalize_architect_review_gate_thresholds,
     normalize_default_worker_concurrency,
     task_counts_as_done,
     task_is_closed,
@@ -1214,6 +1215,80 @@ def _review_gate_threshold_from_action(act: dict | None) -> int | None:
     return threshold if threshold >= 0 else None
 
 
+def _review_gate_task_chain(state: MatrixState, task) -> list:
+    """Return the root→leaf-ish chain available for review-gate scoping."""
+    if not state or not task:
+        return []
+    task_id = str(getattr(task, "id", "") or "").strip()
+    if not task_id:
+        return [task]
+    try:
+        chain = list(state.board_get_chain(task_id) or [])
+    except Exception:
+        chain = []
+    if task not in chain:
+        chain.append(task)
+    return chain
+
+
+def _review_gate_architect_id(state: MatrixState, task, cell=None) -> str:
+    """Return the architect whose settings should shape this review gate."""
+    for chain_task in _review_gate_task_chain(state, task):
+        architect_id = str(
+            getattr(chain_task, "created_by_architect_id", "") or ""
+        ).strip()
+        if architect_id:
+            return architect_id
+
+    for chain_task in _review_gate_task_chain(state, task):
+        engineer_id = str(
+            getattr(chain_task, "assigned_engineer_id", "") or ""
+        ).strip()
+        engineer = state.agents.get(engineer_id) if engineer_id else None
+        architect_id = str(
+            getattr(engineer, "hired_by_architect_id", "") or ""
+        ).strip()
+        if architect_id:
+            return architect_id
+
+    owner_id = str(getattr(cell, "owner_engineer_id", "") or "").strip() or str(
+        getattr(cell, "created_by_engineer_id", "") or ""
+    ).strip()
+    owner = state.agents.get(owner_id) if owner_id else None
+    return str(getattr(owner, "hired_by_architect_id", "") or "").strip()
+
+
+def _review_gate_architect_policy(state: MatrixState, task, cell=None) -> dict | None:
+    """Return architect-configured review-gate thresholds for scoped work."""
+    architect_id = _review_gate_architect_id(state, task, cell)
+    if not architect_id:
+        return None
+    architect = state.agents.get(architect_id)
+    group = str(
+        getattr(architect, "group", "") or getattr(task, "group", "") or ""
+    ).strip()
+    if not group or not hasattr(state, "get_architect_settings"):
+        return None
+    settings = state.get_architect_settings(group)
+    thresholds = normalize_architect_review_gate_thresholds(
+        getattr(settings, "architect_review_gate_thresholds", {})
+    )
+    ship_direct_max = int(thresholds.get("ship_direct_max", 0) or 0)
+    review_default_above = int(
+        thresholds.get("review_default_above", DEFAULT_REVIEW_REQUIRED_ABOVE_LOC)
+        or 0
+    )
+    return {
+        "architect_id": architect_id,
+        "threshold": max(ship_direct_max, review_default_above),
+        "ship_direct_max": ship_direct_max,
+        "review_default_above": review_default_above,
+        "self_review_bypass_allowed": bool(
+            thresholds.get("self_review_bypass_allowed", False)
+        ),
+    }
+
+
 def _chain_has_shipped_review(state: MatrixState, task) -> bool:
     """Return whether this task chain already has a closed Ship review."""
     if not state or not task:
@@ -1286,6 +1361,9 @@ async def _maybe_apply_review_required_gate(
     threshold = _review_gate_threshold_from_action(act)
     if threshold is None:
         return None
+    architect_policy = _review_gate_architect_policy(state, task, cell)
+    if architect_policy:
+        threshold = architect_policy["threshold"]
 
     if _chain_has_shipped_review(state, task):
         return None
@@ -1304,6 +1382,15 @@ async def _maybe_apply_review_required_gate(
     diff_size = _review_gate_diff_size(diff_summary)
     if diff_size <= threshold:
         return None
+
+    if (
+            force_skip_review
+            and architect_policy
+            and not architect_policy["self_review_bypass_allowed"]):
+        force_skip_review = False
+        skip_reason = (
+            "self-review bypass disabled by architect review-gate settings"
+        )
 
     if force_skip_review:
         reason = str(skip_reason or "").strip() or "force-skip-review"
@@ -1363,6 +1450,17 @@ async def _maybe_apply_review_required_gate(
         f"{(diff_summary or {}).get('files', 0)} non-test files)\n"
         f"- Threshold: {threshold}\n"
     )
+    if architect_policy:
+        context += (
+            "- Architect review policy: "
+            f"architect={architect_policy['architect_id']}, "
+            f"ship_direct_max={architect_policy['ship_direct_max']}, "
+            f"review_default_above={architect_policy['review_default_above']}, "
+            "self_review_bypass_allowed="
+            f"{architect_policy['self_review_bypass_allowed']}\n"
+        )
+        if skip_reason:
+            context += f"- Skip request ignored: {skip_reason}\n"
     derive_result = await handle_command({
         "cmd": "ai_report",
         "cell_id": cell.id,

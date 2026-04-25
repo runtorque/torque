@@ -1112,6 +1112,247 @@ class EngineerEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Engineer One: workflow breach/escape clause skip", digest)
         self.assertIn("operator rebased after stale-base warning", digest)
 
+    def test_architect_digest_terse_keeps_counts_and_pipeline_without_hints(self):
+        state, group, _engineer = self._make_state()
+        architect, assigned, _other, worker = self._add_architect_digest_team(
+            state,
+            group,
+        )
+        state.group_settings[group].architect_digest_verbosity = "terse"
+        task = state.board_add_task(
+            "Terse digest task",
+            group,
+            id="task-1",
+            agent_id=worker.id,
+            assigned_engineer_id=assigned.id,
+        )
+        buffer = self.engineer_mod.EngineerEventBuffer(state, FakeBridge())
+
+        digest = buffer._format_digest(
+            group,
+            [{
+                "id": 1,
+                "group": group,
+                "cell_id": worker.id,
+                "agent_name": worker.name,
+                "kind": "task_completed",
+                "message": "A detailed completion note that should not appear",
+                "task_id": task.id,
+            }],
+            "1 task active",
+            engineer=architect,
+            hints=[{"message": "Dispatch a follow-up"}],
+        )
+
+        self.assertIn("1 worker event: done ×1", digest)
+        self.assertIn("### Pipeline activity", digest)
+        self.assertIn("task-1 — Terse digest task", digest)
+        self.assertNotIn("Worker Bee: done task-1", digest)
+        self.assertNotIn("detailed completion note", digest)
+        self.assertNotIn("Hints:", digest)
+
+    def test_architect_digest_verbose_expands_worker_details(self):
+        state, group, _engineer = self._make_state()
+        architect, assigned, _other, worker = self._add_architect_digest_team(
+            state,
+            group,
+        )
+        state.group_settings[group].architect_digest_verbosity = "verbose"
+        task = state.board_add_task(
+            "Verbose digest task",
+            group,
+            id="task-1",
+            agent_id=worker.id,
+            assigned_engineer_id=assigned.id,
+        )
+        long_message = (
+            "Completed implementation with a deliberately long explanation "
+            "that should survive the architect verbose digest expansion and "
+            "include extra diagnostic details for the architect recipient."
+        )
+        events = [
+            {
+                "id": idx,
+                "group": group,
+                "cell_id": worker.id,
+                "agent_name": worker.name,
+                "kind": "task_completed",
+                "message": f"{long_message} event {idx}",
+                "task_id": task.id,
+            }
+            for idx in range(4)
+        ]
+        buffer = self.engineer_mod.EngineerEventBuffer(state, FakeBridge())
+
+        digest = buffer._format_digest(
+            group,
+            events,
+            "1 task active",
+            engineer=architect,
+        )
+
+        self.assertIn("4 worker events: done ×4", digest)
+        self.assertIn("event 0", digest)
+        self.assertIn("event 3", digest)
+        self.assertNotIn("worker detail", digest)
+        self.assertIn("extra diagnostic details", digest)
+
+    def test_architect_digest_reminds_after_checkpoint_action_threshold(self):
+        state, group, _engineer = self._make_state()
+        architect, _assigned, _other, _worker = self._add_architect_digest_team(
+            state,
+            group,
+        )
+        state.group_settings[group].architect_journal_checkpoint_frequency = (
+            "every_10_actions"
+        )
+        entries = [
+            {
+                "id": f"entry-{idx}",
+                "architect_id": architect.id,
+                "timestamp": 1000.0 + idx,
+                "type": "observation",
+                "entry": f"Observation {idx}",
+            }
+            for idx in range(11)
+        ]
+        state.architect_journal_read = (
+            lambda architect_id, **_kwargs: entries
+            if architect_id == architect.id else []
+        )
+        buffer = self.engineer_mod.EngineerEventBuffer(state, FakeBridge())
+
+        digest = buffer._format_digest(
+            group,
+            [],
+            "1 task active",
+            engineer=architect,
+        )
+
+        self.assertIn(
+            "Checkpoint reminder: 11 journal entries since your last checkpoint",
+            digest,
+        )
+        self.assertIn("target every_10_actions", digest)
+        self.assertIn("active engineers, open scope, pending hires", digest)
+
+    def test_architect_digest_omits_checkpoint_reminder_below_threshold_or_manual(self):
+        state, group, _engineer = self._make_state()
+        architect, _assigned, _other, _worker = self._add_architect_digest_team(
+            state,
+            group,
+        )
+        entries = [
+            {
+                "id": f"entry-{idx}",
+                "architect_id": architect.id,
+                "timestamp": 1000.0 + idx,
+                "type": "observation",
+                "entry": f"Observation {idx}",
+            }
+            for idx in range(9)
+        ]
+        state.architect_journal_read = lambda _architect_id, **_kwargs: entries
+        buffer = self.engineer_mod.EngineerEventBuffer(state, FakeBridge())
+
+        state.group_settings[group].architect_journal_checkpoint_frequency = (
+            "every_10_actions"
+        )
+        below_threshold = buffer._format_digest(
+            group,
+            [],
+            "1 task active",
+            engineer=architect,
+        )
+        self.assertNotIn("Checkpoint reminder:", below_threshold)
+
+        state.group_settings[group].architect_journal_checkpoint_frequency = (
+            "manual_only"
+        )
+        manual_only = buffer._format_digest(
+            group,
+            [],
+            "1 task active",
+            engineer=architect,
+        )
+        self.assertNotIn("Checkpoint reminder:", manual_only)
+
+    def test_architect_digest_reminds_after_checkpoint_minute_threshold(self):
+        state, group, _engineer = self._make_state()
+        architect, _assigned, _other, _worker = self._add_architect_digest_team(
+            state,
+            group,
+        )
+        state.group_settings[group].architect_journal_checkpoint_frequency = (
+            "every_20_minutes"
+        )
+        entries = [
+            {
+                "id": "recent-observation",
+                "architect_id": architect.id,
+                "timestamp": 2100.0,
+                "type": "observation",
+                "entry": "Recent activity",
+            },
+            {
+                "id": "checkpoint",
+                "architect_id": architect.id,
+                "timestamp": 1000.0,
+                "type": "checkpoint",
+                "entry": "Last synthesis",
+            },
+        ]
+        state.architect_journal_read = lambda _architect_id, **_kwargs: entries
+        buffer = self.engineer_mod.EngineerEventBuffer(state, FakeBridge())
+
+        with mock.patch.object(self.engineer_mod.time, "time",
+                               return_value=1000.0 + 21 * 60):
+            digest = buffer._format_digest(
+                group,
+                [],
+                "1 task active",
+                engineer=architect,
+            )
+
+        self.assertIn(
+            "Checkpoint reminder: no checkpoint for 21 minutes",
+            digest,
+        )
+        self.assertIn("target every_20_minutes", digest)
+        self.assertIn("open decisions, and next moves", digest)
+
+        no_checkpoint_entries = [
+            {
+                "id": "recent-observation",
+                "architect_id": architect.id,
+                "timestamp": 2100.0,
+                "type": "observation",
+                "entry": "Recent activity",
+            },
+            {
+                "id": "oldest-observation",
+                "architect_id": architect.id,
+                "timestamp": 1000.0,
+                "type": "observation",
+                "entry": "First activity",
+            },
+        ]
+        state.architect_journal_read = (
+            lambda _architect_id, **_kwargs: no_checkpoint_entries
+        )
+        with mock.patch.object(self.engineer_mod.time, "time",
+                               return_value=1000.0 + 22 * 60):
+            digest = buffer._format_digest(
+                group,
+                [],
+                "1 task active",
+                engineer=architect,
+            )
+        self.assertIn(
+            "Checkpoint reminder: no checkpoint for 22 minutes",
+            digest,
+        )
+
     def test_architect_digest_formats_engineer_queue_empty_compactly(self):
         state, group, _engineer = self._make_state()
         architect = self.state_mod.AgentCell(

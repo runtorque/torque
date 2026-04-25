@@ -19,6 +19,8 @@ from .digest_routing import (
 )
 from .state import (
     normalize_default_worker_concurrency,
+    normalize_architect_digest_verbosity,
+    normalize_architect_journal_checkpoint_frequency,
     normalize_engineer_autonomy_mode,
     normalize_engineer_digest_verbosity,
     normalize_engineer_escalation_style,
@@ -396,6 +398,15 @@ def _digest_verbosity_label(mode: str) -> str:
         "compact": "Compact",
         "balanced": "Balanced",
         "detailed": "Detailed",
+    }
+    return labels.get(mode, "Balanced")
+
+
+def _architect_digest_verbosity_label(mode: str) -> str:
+    labels = {
+        "terse": "Terse",
+        "balanced": "Balanced",
+        "verbose": "Verbose",
     }
     return labels.get(mode, "Balanced")
 
@@ -1339,6 +1350,9 @@ class EngineerEventBuffer:
         hints: list[dict] | None = None,
     ) -> str:
         """Format an architect-facing digest with engineer-level rollups."""
+        verbosity = self._architect_digest_verbosity(group, architect)
+        is_terse = verbosity == "terse"
+        is_verbose = verbosity == "verbose"
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
         items: list[tuple[str, int]] = [
             (
@@ -1370,17 +1384,24 @@ class EngineerEventBuffer:
                     ),
                     len(worker_events),
                 ))
-                for evt in worker_events[:2]:
-                    items.append((
-                        "- " + self._format_architect_event_detail(evt),
-                        0,
-                    ))
-                if len(worker_events) > 2:
-                    items.append((
-                        f"- … {len(worker_events) - 2} worker detail"
-                        f"{'s' if len(worker_events) - 2 != 1 else ''} rolled up",
-                        0,
-                    ))
+                if not is_terse:
+                    worker_detail_limit = 6 if is_verbose else 2
+                    for evt in worker_events[:worker_detail_limit]:
+                        items.append((
+                            "- " + self._format_architect_event_detail(
+                                evt,
+                                verbosity="detailed" if is_verbose else "balanced",
+                                limit=360 if is_verbose else 180,
+                            ),
+                            0,
+                        ))
+                    if len(worker_events) > worker_detail_limit:
+                        items.append((
+                            f"- … {len(worker_events) - worker_detail_limit} "
+                            "worker detail"
+                            f"{'s' if len(worker_events) - worker_detail_limit != 1 else ''} rolled up",
+                            0,
+                        ))
 
             engineer_events = bucket["engineer_events"]
             workflow_breaches = [
@@ -1398,36 +1419,61 @@ class EngineerEventBuffer:
                     ),
                     len(workflow_breaches),
                 ))
-            direct_limit = 4
-            for evt in engineer_events[:direct_limit]:
+            if engineer_events and is_terse:
+                counts = self._architect_event_counts(engineer_events)
                 items.append((
-                    "- " + self._format_architect_event_detail(evt),
-                    1,
+                    "- "
+                    f"{len(engineer_events)} engineer event"
+                    f"{'s' if len(engineer_events) != 1 else ''}: "
+                    + ", ".join(
+                        f"{label} ×{count}" for label, count in counts
+                    ),
+                    len(engineer_events),
                 ))
-            hidden_direct = len(engineer_events) - direct_limit
-            if hidden_direct > 0:
-                items.append((
-                    f"- … {hidden_direct} engineer event"
-                    f"{'s' if hidden_direct != 1 else ''} rolled up",
-                    hidden_direct,
-                ))
+            elif engineer_events:
+                direct_limit = 8 if is_verbose else 4
+                for evt in engineer_events[:direct_limit]:
+                    items.append((
+                        "- " + self._format_architect_event_detail(
+                            evt,
+                            verbosity="detailed" if is_verbose else "balanced",
+                            limit=360 if is_verbose else 180,
+                        ),
+                        1,
+                    ))
+                hidden_direct = len(engineer_events) - direct_limit
+                if hidden_direct > 0:
+                    items.append((
+                        f"- … {hidden_direct} engineer event"
+                        f"{'s' if hidden_direct != 1 else ''} rolled up",
+                        hidden_direct,
+                    ))
 
         items.extend(self._architect_pipeline_activity_items(events))
+        checkpoint_reminder = self._architect_checkpoint_reminder(
+            group,
+            architect,
+        )
+        if checkpoint_reminder:
+            items.append(("", 0))
+            items.append((checkpoint_reminder, 0))
 
-        if hints:
+        if hints and not is_terse:
+            hint_limit = 4 if is_verbose else 2
+            hint_text_limit = 180 if is_verbose else 120
             hint_messages = [
                 self._truncate_digest_text(
                     str((hint or {}).get("message", "") or ""),
-                    limit=120,
+                    limit=hint_text_limit,
                 )
-                for hint in hints[:2]
+                for hint in hints[:hint_limit]
                 if str((hint or {}).get("message", "") or "").strip()
             ]
             if hint_messages:
                 items.append(("", 0))
                 items.append(("Hints: " + " · ".join(hint_messages), 0))
 
-        if architect:
+        if architect and not is_terse:
             ctx_warn = self._context_warning(architect)
             if ctx_warn:
                 items.append((ctx_warn, 0))
@@ -1437,6 +1483,114 @@ class EngineerEventBuffer:
             total_events=len(events),
             max_lines=_ARCHITECT_DIGEST_MAX_LINES,
         )
+
+    def _architect_digest_verbosity(self, group: str, architect=None) -> str:
+        settings = None
+        group_name = str(
+            getattr(architect, "group", "") or group or ""
+        ).strip()
+        if group_name and hasattr(self._state, "get_architect_settings"):
+            try:
+                settings = self._state.get_architect_settings(group_name)
+            except Exception:
+                settings = None
+        return normalize_architect_digest_verbosity(
+            getattr(settings, "architect_digest_verbosity", "balanced")
+        )
+
+    def _architect_checkpoint_frequency(self, group: str,
+                                        architect=None) -> str:
+        settings = None
+        group_name = str(
+            getattr(architect, "group", "") or group or ""
+        ).strip()
+        if group_name and hasattr(self._state, "get_architect_settings"):
+            try:
+                settings = self._state.get_architect_settings(group_name)
+            except Exception:
+                settings = None
+        return normalize_architect_journal_checkpoint_frequency(
+            getattr(
+                settings,
+                "architect_journal_checkpoint_frequency",
+                "every_10_actions",
+            )
+        )
+
+    @staticmethod
+    def _architect_checkpoint_frequency_parts(
+        frequency: str,
+    ) -> tuple[str, int]:
+        frequency = normalize_architect_journal_checkpoint_frequency(frequency)
+        if frequency == "manual_only":
+            return "manual_only", 0
+        match = re.fullmatch(r"every_([1-9]\d*)_(actions|minutes)", frequency)
+        if not match:
+            return "actions", 10
+        return match.group(2), max(1, int(match.group(1)))
+
+    def _architect_checkpoint_reminder(self, group: str,
+                                       architect=None) -> str:
+        architect_id = str(getattr(architect, "id", "") or "").strip()
+        if not architect_id:
+            return ""
+        frequency = self._architect_checkpoint_frequency(group, architect)
+        mode, target = self._architect_checkpoint_frequency_parts(frequency)
+        if mode == "manual_only" or target <= 0:
+            return ""
+        reader = getattr(self._state, "architect_journal_read", None)
+        if not callable(reader):
+            return ""
+        try:
+            entries = list(reader(architect_id, limit=1_000_000) or [])
+        except Exception:
+            log.exception(
+                "Failed to read architect journal for checkpoint reminder"
+            )
+            return ""
+        if not entries:
+            return ""
+        if mode == "actions":
+            count = 0
+            for entry in entries:
+                entry_type = str((entry or {}).get("type", "") or "").strip()
+                if entry_type == "checkpoint":
+                    break
+                count += 1
+            if count < target:
+                return ""
+            return (
+                f"Checkpoint reminder: {count} journal entries since your "
+                f"last checkpoint (target {frequency}). Write "
+                "architect_journal(type=\"checkpoint\", entry=\"...\") "
+                "summarizing active engineers, open scope, pending hires, "
+                "open decisions, and next moves."
+            )
+        if mode == "minutes":
+            latest_checkpoint = None
+            for entry in entries:
+                entry_type = str((entry or {}).get("type", "") or "").strip()
+                if entry_type == "checkpoint":
+                    latest_checkpoint = entry
+                    break
+            anchor = latest_checkpoint or entries[-1]
+            try:
+                anchor_ts = float((anchor or {}).get("timestamp", 0) or 0)
+            except (TypeError, ValueError):
+                anchor_ts = 0.0
+            if anchor_ts <= 0:
+                return ""
+            elapsed_minutes = max(0, int((time.time() - anchor_ts) // 60))
+            if elapsed_minutes < target:
+                return ""
+            return (
+                f"Checkpoint reminder: no checkpoint for {elapsed_minutes} "
+                f"minutes (target {frequency}). Write "
+                "architect_journal(type=\"checkpoint\", entry=\"...\") "
+                "summarizing active engineers, open scope, pending hires, "
+                "open decisions, and next moves."
+            )
+        return ""
 
     def _architect_digest_buckets(self, events: list[dict]) -> list[dict]:
         buckets: dict[str, dict] = {}
@@ -1575,7 +1729,13 @@ class EngineerEventBuffer:
                 )
         return label
 
-    def _format_architect_event_detail(self, evt: dict) -> str:
+    def _format_architect_event_detail(
+        self,
+        evt: dict,
+        *,
+        verbosity: str = "balanced",
+        limit: int = 180,
+    ) -> str:
         kind_label = self._architect_event_label_for_event(evt)
         source = self._state.agents.get(str(evt.get("cell_id", "") or ""))
         source_name = self._normalize_digest_text(
@@ -1587,14 +1747,14 @@ class EngineerEventBuffer:
         if not source_name:
             source_name = "Loom"
         task_id = str(evt.get("task_id", "") or "").strip()
-        message = self._format_digest_event_message(evt, verbosity="balanced")
+        message = self._format_digest_event_message(evt, verbosity=verbosity)
 
         detail = f"{source_name}: {kind_label}"
         if task_id:
             detail += f" {task_id}"
         if message:
             detail += " — " + message
-        return self._truncate_digest_text(detail, limit=180)
+        return self._truncate_digest_text(detail, limit=limit)
 
     def _architect_pipeline_activity_items(
         self,

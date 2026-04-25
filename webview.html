@@ -789,20 +789,20 @@
         </div>
       </details>
 
-      <details id="gs-architect-deferred-section" class="task-modal-section gs-deferred-section" open>
-        <summary>Deferred <span class="label-hint">(storage only — wiring in LOOM:196)</span></summary>
+      <details id="gs-architect-runtime-section" class="task-modal-section" open>
+        <summary>Runtime behavior</summary>
         <div class="task-modal-section-body">
-          <div class="label-hint task-modal-section-intro">⊘ These values are saved now, but do not change runtime behavior until LOOM:196 wires them.</div>
-          <label>⊘ Digest verbosity</label>
-          <select id="gs-architect-digest-verbosity" title="Stored only in v1; runtime wiring is deferred to LOOM:196.">
+          <div class="label-hint task-modal-section-intro">Configure architect digest shape, checkpoint policy, and review-gate defaults.</div>
+          <label>Digest verbosity</label>
+          <select id="gs-architect-digest-verbosity">
             <option value="terse">Terse</option>
             <option value="balanced">Balanced</option>
             <option value="verbose">Verbose</option>
           </select>
-          <label>⊘ Journal checkpoint</label>
-          <input id="gs-architect-journal-checkpoint" placeholder="every_10_actions" autocomplete="off" title="Stored only in v1; runtime wiring is deferred to LOOM:196.">
-          <label>⊘ Review-gate thresholds</label>
-          <div class="gs-threshold-grid" title="Stored only in v1; runtime wiring is deferred to LOOM:196.">
+          <label>Journal checkpoint</label>
+          <input id="gs-architect-journal-checkpoint" placeholder="every_10_actions" autocomplete="off">
+          <label>Review-gate thresholds</label>
+          <div class="gs-threshold-grid">
             <input id="gs-architect-review-ship-direct-max" type="number" min="0" placeholder="ship: 50">
             <input id="gs-architect-review-default-above" type="number" min="0" placeholder="review: 150">
             <label class="gs-checkbox"><input id="gs-architect-review-bypass" type="checkbox"> self-review bypass</label>

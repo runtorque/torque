@@ -972,7 +972,7 @@ function _resetGsArchitectSections() {
   _setDetailsOpen('gs-architect-boot-section', true);
   _setDetailsOpen('gs-architect-behavior-section', true);
   _setDetailsOpen('gs-architect-custom-section', true);
-  _setDetailsOpen('gs-architect-deferred-section', true);
+  _setDetailsOpen('gs-architect-runtime-section', true);
 }
 
 function _showGroupSettings(group, data) {
