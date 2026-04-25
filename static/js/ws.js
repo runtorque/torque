@@ -25,30 +25,6 @@ var _resyncPending = false;
 var _awaitingFullState = false;
 var _pendingDeltaSurfaceInvalidations = null;
 var _pendingDeltaSurfaceRenderFrame = 0;
-// Track whether a user mouse/pointer press is in progress. While pressing,
-// defer DOM-replacing delta renders so the press's target element survives
-// long enough for the browser to fire the synthetic click on mouseup.
-// Without this, a delta firehose (e.g. worker mcp_call_append) can rerender
-// between pointerdown and pointerup, swapping the target out and silently
-// suppressing the click.
-var _userPressing = false;
-if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
-  var _userPressEnd = function() {
-    var wasPressing = _userPressing;
-    _userPressing = false;
-    if (wasPressing && _pendingDeltaSurfaceInvalidations) {
-      _flushDeltaSurfaceRenderBatch();
-    }
-  };
-  document.addEventListener('pointerdown', function() { _userPressing = true; }, true);
-  document.addEventListener('pointerup', _userPressEnd, true);
-  document.addEventListener('pointercancel', _userPressEnd, true);
-  // Safety net: clear the flag on blur in case pointerup is missed (e.g.
-  // capture lost mid-press).
-  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
-    window.addEventListener('blur', _userPressEnd);
-  }
-}
 
 function connect() {
   _firstStateReceived = false;
@@ -489,13 +465,6 @@ function _flushDeltaSurfaceRenderBatch() {
 function _queueDeltaSurfaceRender(flags) {
   if (!_surfaceInvalidationsAny(flags)) return;
   if (typeof requestAnimationFrame !== 'function') {
-    if (_userPressing) {
-      _pendingDeltaSurfaceInvalidations = _mergeSurfaceInvalidations(
-        _pendingDeltaSurfaceInvalidations,
-        flags
-      );
-      return;
-    }
     _renderDeltaSurfaceInvalidations(flags);
     return;
   }
@@ -503,7 +472,6 @@ function _queueDeltaSurfaceRender(flags) {
     _pendingDeltaSurfaceInvalidations,
     flags
   );
-  if (_userPressing) return;
   if (_pendingDeltaSurfaceRenderFrame) return;
   _pendingDeltaSurfaceRenderFrame = requestAnimationFrame(function() {
     _flushDeltaSurfaceRenderBatch();
