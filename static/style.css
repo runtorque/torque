@@ -1040,8 +1040,10 @@ body.runtime-embedded .terminal-empty {
   cursor: pointer;
 }
 .principal-card-close:hover { background: var(--red); color: #fff; }
-.principal-card-pause.running { color: var(--green); }
-.principal-card-pause.paused { color: var(--amber); }
+.principal-card-pause.running:hover,
+.principal-card-pause.running:focus-visible { color: var(--green); }
+.principal-card-pause.paused:hover,
+.principal-card-pause.paused:focus-visible { color: var(--amber); }
 .principal-card-pause:hover,
 .principal-card-pause:focus-visible {
   background: color-mix(in srgb, currentColor 14%, transparent);
