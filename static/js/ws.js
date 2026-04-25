@@ -526,7 +526,6 @@ function _deltaSurfaceInvalidations(ops, hints) {
         break;
       case 'journal_append':
       case 'journal_delete':
-      case 'architect_journal_append':
       case 'digest_buffer_stats':
       case 'digest_sent_push':
       case 'engineer_buffer_stats':
@@ -535,6 +534,13 @@ function _deltaSurfaceInvalidations(ops, hints) {
       case 'engineer_streams':
       case 'engineer_streams_update':
         _markSurface(flags, 'engineer');
+        break;
+      case 'architect_journal_append':
+        if (String((op && op.type) || '').toLowerCase() === 'decision') {
+          _markSurface(flags, 'main', 'engineer');
+        } else {
+          _markSurface(flags, 'engineer');
+        }
         break;
       case 'engineer_settings_update':
         _markSurface(flags, 'main', 'engineer');
@@ -1443,7 +1449,9 @@ function _applyDelta(ops) {
 
       case 'architect_journal_append': {
         var archId = op.architect_id || '';
-        if (archId && state.architect_journals && state.architect_journals[archId]) {
+        if (archId) {
+          if (!state.architect_journals) state.architect_journals = {};
+          if (!state.architect_journals[archId]) state.architect_journals[archId] = [];
           var entry = Object.assign({}, op);
           delete entry.op;
           var bucket = state.architect_journals[archId];

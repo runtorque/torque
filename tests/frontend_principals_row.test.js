@@ -189,14 +189,14 @@ test('principal-card-new CSS preserves dimensions when wrapped (LOOM:209 regress
   // The "+ New Architect" ghost button uses .ghost-card height (~16-20px) by
   // default, which makes it look squeezed when it wraps to its own row in a
   // narrow panel. .principal-card-new must override height + min-height so the
-  // wrapped button matches the populated principal-card height (~90px).
+  // wrapped button matches the populated principal-card height.
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
   const newCardRule = css.match(/\.principal-card-new\s*\{[^}]*\}/);
   assert.ok(newCardRule, '.principal-card-new rule exists in style.css');
   assert.match(newCardRule[0], /height:\s*auto/,
     '.principal-card-new overrides .ghost-card height with `height: auto`');
-  assert.match(newCardRule[0], /min-height:\s*90px/,
-    '.principal-card-new sets min-height: 90px to match populated principal cards');
+  assert.match(newCardRule[0], /min-height:\s*74px/,
+    '.principal-card-new sets min-height: 74px to match populated principal cards');
 });
 
 test('default (empty) selected_principal_id filters grid to user-owned engineers', () => {
@@ -336,10 +336,45 @@ test('non-selected architect card shows at-a-glance architect stats', () => {
 
   const archBlock = extractPrincipalCardHtml(mainEl.innerHTML, 'architect', 'arch-a');
   assert.ok(archBlock, 'architect principal card rendered');
-  assert.match(archBlock, /1eng/);
-  assert.match(archBlock, /0asks/);
-  assert.match(archBlock, /0dec/);
-  assert.match(archBlock, /last dec/);
+  assert.match(archBlock, /1 engineers/);
+  assert.doesNotMatch(archBlock, /asks/);
+  assert.match(archBlock, /0 decisions/);
+  assert.match(archBlock, /last decision/);
+});
+
+test('user principal card shows user-owned engineer count and backlog count', () => {
+  const { context, sandbox, mainEl } = createHarness();
+  sandbox.state.groups.loom = ['eng-user', 'eng-arch', 'arch-a'];
+  sandbox.state.agents['eng-user'] = engineer('eng-user', 'UserEng', '', 2);
+  sandbox.state.agents['eng-arch'] = engineer('eng-arch', 'ArchEng', 'arch-a', 3);
+  sandbox.state.agents['arch-a'] = architect('arch-a', 'Productmind', 4);
+  sandbox.state.board_tasks = {
+    'user-backlog': {
+      id: 'user-backlog',
+      group: 'loom',
+      lane: 'Backlog',
+      assigned_engineer_id: 'eng-user',
+    },
+    'arch-backlog': {
+      id: 'arch-backlog',
+      group: 'loom',
+      lane: 'Backlog',
+      assigned_engineer_id: 'eng-arch',
+    },
+    'other-group-backlog': {
+      id: 'other-group-backlog',
+      group: 'other',
+      lane: 'Backlog',
+      assigned_engineer_id: 'eng-user',
+    },
+  };
+  sandbox.state.selected_principal_id = '';
+  vm.runInContext('render();', context);
+
+  const userBlock = extractPrincipalCardHtml(mainEl.innerHTML, 'user', '');
+  assert.ok(userBlock, 'user principal card rendered');
+  assert.match(userBlock, /1 engineers · 1 backlog/);
+  assert.doesNotMatch(userBlock, /asks/);
 });
 
 test('selected principal card does not render the status badge', () => {
@@ -671,36 +706,79 @@ test('agents-grid v2 renders all kind shells with required corner badges and no 
 
   assert.doesNotMatch(userBlock, /principal-card-controls|agent-card-provider/);
   assert.match(userBlock, /principal-card-status/);
-  assert.match(userBlock, /principal-card-kind--owner">OWNER/);
+  assert.match(userBlock, /principal-card-kind--owner">Owner/);
+  assert.match(userBlock, /0 engineers · 0 backlog/);
 
   assert.match(archBlock, /principal-card-controls/);
   assert.match(archBlock, /principal-card-status/);
-  assert.match(archBlock, /agent-card-provider--claude-code[^>]*>CC</);
-  assert.match(archBlock, /principal-card-kind--architect">ARCH/);
-  assert.match(archBlock, /1eng/);
-  assert.match(archBlock, /principal-card-ask-link[\s\S]*1asks/);
-  assert.match(archBlock, /1dec/);
+  assert.match(archBlock, /agent-card-provider--claude-code[^>]*>Claude</);
+  assert.match(archBlock, /principal-card-kind--architect">Architect/);
+  assert.match(archBlock, /1 engineers/);
+  assert.doesNotMatch(archBlock, /asks/);
+  assert.match(archBlock, /1 decisions/);
+  assert.match(archBlock, /last decision 5m/);
 
   assert.match(engineerBlock, /cell-header-controls/);
   assert.match(engineerBlock, /cell-status/);
-  assert.match(engineerBlock, /agent-card-provider--claude-code[^>]*>CC</);
-  assert.match(engineerBlock, /cell-engineer-badge">ENG/);
+  assert.match(engineerBlock, /agent-card-provider--claude-code[^>]*>Claude</);
+  assert.match(engineerBlock, /cell-engineer-badge">Engineer/);
   assert.match(engineerBlock, /Panelsmith/);
   assert.match(engineerBlock, /1 worker/);
-  assert.match(engineerBlock, /q:0 · last/);
+  assert.match(engineerBlock, /queue: 0 · last action/);
 
   assert.match(workerBlock, /cell-header-controls/);
   assert.match(workerBlock, /cell-status/);
-  assert.match(workerBlock, /agent-card-provider--codex[^>]*>CX</);
-  assert.match(workerBlock, /cell-worker-badge">W/);
+  assert.match(workerBlock, /agent-card-provider--codex[^>]*>Codex</);
+  assert.match(workerBlock, /cell-worker-badge">Worker/);
   assert.match(workerBlock, /architect-car…/);
   assert.match(workerBlock, /data-tooltip="architect-card-click-focus-fix"/);
   assert.match(workerBlock, /LOOM:216 · review/);
   assert.match(workerBlock, /\+58\/-3 \(clean\)/);
   assert.match(workerBlock, /wkt: architect-ca…/);
-  assert.match(workerBlock, /30s/);
+  assert.match(workerBlock, /last action 30s/);
 
   assert.doesNotMatch(userBlock + archBlock + engineerBlock + workerBlock, /principal-card-icon|cell-icon/);
+});
+
+test('architect last decision uses latest decision journal entry over stale decision rows', () => {
+  const { context, sandbox, mainEl } = createFullHarness();
+  const now = Date.now() / 1000;
+  sandbox.state.groups.loom = ['arch-a'];
+  sandbox.state.agents['arch-a'] = architect('arch-a', 'Loomer', now - 3600);
+  sandbox.state.decisions = {
+    'durable-old': {
+      id: 'durable-old',
+      architect_id: 'arch-a',
+      status: 'proposed',
+      created_at: now - 15 * 3600,
+      updated_at: now - 15 * 3600,
+    },
+  };
+  sandbox.state.architect_journals = {
+    'arch-a': [
+      {
+        id: 'journal-decision-new',
+        architect_id: 'arch-a',
+        type: 'decision',
+        entry: 'Newest ratified decision',
+        timestamp: now - 120,
+      },
+      {
+        id: 'journal-observation-newer',
+        architect_id: 'arch-a',
+        type: 'observation',
+        entry: 'Observation should not affect last decision',
+        timestamp: now - 30,
+      },
+    ],
+  };
+
+  vm.runInContext('render();', context);
+
+  const archBlock = extractPrincipalCardHtml(mainEl.innerHTML, 'architect', 'arch-a');
+  assert.ok(archBlock, 'architect card rendered');
+  assert.match(archBlock, /last decision 2m/);
+  assert.doesNotMatch(archBlock, /last decision 15h/);
 });
 
 test('worktree branch shortname strips loom engineer prefix and short id suffix', () => {
@@ -719,7 +797,7 @@ test('worktree branch shortname strips loom engineer prefix and short id suffix'
   );
 });
 
-test('architect pending ask counts ignore unscoped worker human asks and other architects', () => {
+test('architect principal card omits pending asks even when architect asks exist', () => {
   const { context, sandbox, mainEl } = createFullHarness();
   sandbox.state.groups.loom = ['arch-a', 'arch-b'];
   sandbox.state.agents['arch-a'] = architect('arch-a', 'Architect A', 1);
@@ -772,16 +850,18 @@ test('architect pending ask counts ignore unscoped worker human asks and other a
   assert.ok(archA, 'arch-a card rendered');
   assert.ok(archB, 'arch-b card rendered');
 
-  assert.match(archA, /principal-card-ask-link[\s\S]*1asks/);
-  assert.match(archA, /principal-ask:arch-a:arch-a-ask/);
-  assert.match(archA, /boardNavigateToTask\(&quot;arch-a-ask&quot;\)/);
+  assert.doesNotMatch(archA, /asks/);
+  assert.doesNotMatch(archA, /principal-card-ask-link/);
+  assert.doesNotMatch(archA, /principal-ask:arch-a:arch-a-ask/);
+  assert.doesNotMatch(archA, /boardNavigateToTask\(&quot;arch-a-ask&quot;\)/);
   assert.doesNotMatch(archA, /principal-ask:arch-a:worker-ask/);
   assert.doesNotMatch(archA, /principal-ask:arch-a:arch-b-ask/);
   assert.doesNotMatch(archA, /principal-ask:arch-a:arch-a-done-ask/);
 
-  assert.match(archB, /principal-card-ask-link[\s\S]*1asks/);
-  assert.match(archB, /principal-ask:arch-b:arch-b-ask/);
-  assert.match(archB, /boardNavigateToTask\(&quot;arch-b-ask&quot;\)/);
+  assert.doesNotMatch(archB, /asks/);
+  assert.doesNotMatch(archB, /principal-card-ask-link/);
+  assert.doesNotMatch(archB, /principal-ask:arch-b:arch-b-ask/);
+  assert.doesNotMatch(archB, /boardNavigateToTask\(&quot;arch-b-ask&quot;\)/);
   assert.doesNotMatch(archB, /principal-ask:arch-b:worker-ask/);
   assert.doesNotMatch(archB, /principal-ask:arch-b:arch-a-ask/);
 });
@@ -824,7 +904,7 @@ test('worker slug truncation uses immediate tooltip metadata, not title-only bro
     'inner truncation span still clips the visible worker slug text');
 });
 
-test('provider badges expose tint classes for claude-code and codex cards', () => {
+test('provider badges render full subdued provider names', () => {
   const { context, sandbox } = createFullHarness();
   sandbox.state.children = {};
   sandbox.state.group_settings = {};
@@ -846,8 +926,14 @@ test('provider badges expose tint classes for claude-code and codex cards', () =
     status: 'running',
     agent_type: 'codex'
   })`, context);
-  assert.match(claudeHtml, /agent-card-provider--claude-code[^>]*>CC</);
-  assert.match(codexHtml, /agent-card-provider--codex[^>]*>CX</);
+  assert.match(claudeHtml, /agent-card-provider--claude-code[^>]*>Claude</);
+  assert.match(codexHtml, /agent-card-provider--codex[^>]*>Codex</);
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const providerRule = css.match(/\.agent-card-provider\s*\{[^}]*\}/)[0];
+  assert.match(providerRule, /color:\s*var\(--text-dim\);/);
+  assert.match(providerRule, /font-weight:\s*500;/);
+  assert.doesNotMatch(providerRule, /background:/);
+  assert.doesNotMatch(providerRule, /border:/);
 });
 
 test('agents-grid v2 rerender preserves main scroll while card bodies update', () => {

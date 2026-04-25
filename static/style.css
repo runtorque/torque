@@ -848,10 +848,10 @@ body.runtime-embedded .terminal-empty {
   flex-direction: column;
   align-items: stretch;
   justify-content: center;
-  gap: 2px;
+  gap: 1px;
   width: var(--agent-architect-column-width);
-  min-height: 90px;
-  padding: 18px 7px 17px;
+  min-height: 74px;
+  padding: 13px 6px 12px;
   box-sizing: border-box;
   background: color-mix(in srgb, var(--bg-cell) 68%, transparent);
   border: 1px solid color-mix(in srgb, var(--border) 66%, transparent);
@@ -883,7 +883,7 @@ body.runtime-embedded .terminal-empty {
   flex-direction: column;
   align-items: stretch;
   justify-content: center;
-  gap: 2px;
+  gap: 1px;
   min-width: 0;
   min-height: 0;
 }
@@ -905,22 +905,22 @@ body.runtime-embedded .terminal-empty {
   white-space: nowrap;
   color: var(--text-dim);
   font-size: 8px;
-  line-height: 1.25;
+  line-height: 1.18;
   text-align: left;
 }
 .principal-card-kind {
   position: absolute;
   right: 3px;
   bottom: 2px;
-  padding: 0 4px;
+  padding: 0 5px;
   border: 1px solid color-mix(in srgb, var(--text-dim) 34%, transparent);
   border-radius: 999px;
   color: var(--text-dim);
   font-size: 7px;
   font-weight: 700;
   line-height: 1.4;
-  letter-spacing: .03em;
-  text-transform: uppercase;
+  letter-spacing: .01em;
+  text-transform: none;
 }
 .principal-card--architect .principal-card-kind {
   color: #1f1300;
@@ -955,11 +955,11 @@ body.runtime-embedded .terminal-empty {
      own row preserves the populated principal-card height instead of collapsing
      to the short ghost-card height. (LOOM:209) */
   height: auto;
-  min-height: 90px;
+  min-height: 74px;
 }
 @media (max-width: 400px) {
   .principal-card-new {
-    min-height: 86px;
+    min-height: 70px;
   }
 }
 .principal-card-controls {
@@ -1031,8 +1031,8 @@ body.runtime-embedded .terminal-empty {
     padding: 3px 6px 5px;
   }
   .principal-card {
-    min-height: 86px;
-    padding: 17px 5px 16px;
+    min-height: 70px;
+    padding: 12px 5px 11px;
   }
 }
 .principal-card-ask-link {
@@ -1056,29 +1056,23 @@ body.runtime-embedded .terminal-empty {
   position: absolute;
   left: 3px;
   bottom: 2px;
-  padding: 0 4px;
-  min-width: 14px;
+  padding: 0;
+  min-width: 0;
   box-sizing: border-box;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
   color: var(--text-dim);
-  background: color-mix(in srgb, var(--bg) 58%, transparent);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   font-size: 7px;
-  font-weight: 800;
+  font-weight: 500;
   line-height: 1.4;
-  letter-spacing: .03em;
-  text-align: center;
+  letter-spacing: .01em;
+  text-align: left;
+  opacity: .72;
 }
 .agent-card-provider--claude-code {
-  color: color-mix(in srgb, var(--accent) 82%, white);
-  background: color-mix(in srgb, var(--accent) 22%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 52%, transparent);
+  color: var(--text-dim);
 }
 .agent-card-provider--codex {
-  color: color-mix(in srgb, var(--amber) 82%, white);
-  background: color-mix(in srgb, var(--amber) 22%, transparent);
-  border-color: color-mix(in srgb, var(--amber) 52%, transparent);
+  color: var(--text-dim);
 }
 .agent-card-provider--unknown {
   color: var(--text-dim);
@@ -1180,13 +1174,13 @@ body.runtime-embedded .terminal-empty {
   flex-direction: column;
   align-items: stretch;
   justify-content: center;
-  padding: 18px 6px 17px;
+  padding: 13px 6px 12px;
   background: var(--bg-cell);
   border: 1px solid transparent;
   border-radius: var(--radius);
   cursor: pointer;
   transition: background .15s, border-color .15s, box-shadow .15s;
-  min-height: 90px;
+  min-height: 74px;
   box-sizing: border-box;
 }
 .cell:hover { background: var(--bg-hover); }
@@ -1220,11 +1214,11 @@ body.runtime-embedded .terminal-empty {
   color: var(--text-dim);
 }
 .cell.worker {
-  min-height: 116px;
+  min-height: 96px;
 }
 .cell.architect,
 .cell.engineer {
-  min-height: 90px;
+  min-height: 74px;
 }
 .cell-engineer-ask {
   font-size: 8px;
@@ -1250,7 +1244,7 @@ body.runtime-embedded .terminal-empty {
   white-space: nowrap;
   color: var(--text-dim);
   margin-top: 0;
-  line-height: 1.3;
+  line-height: 1.18;
 }
 .cell-status {
   position: absolute; top: 4px; right: 4px;
@@ -1469,14 +1463,13 @@ body.runtime-embedded .terminal-empty {
   bottom: 2px;
   right: 3px;
   font-size: 7px;
-  letter-spacing: .03em;
+  letter-spacing: .01em;
   font-weight: 700;
-  text-transform: uppercase;
   color: var(--accent);
   background: rgba(88, 166, 255, 0.12);
   border: 1px solid rgba(88, 166, 255, 0.24);
   border-radius: 999px;
-  padding: 0 4px;
+  padding: 0 5px;
   line-height: 1.4;
 }
 .cell-architect-badge {
@@ -1484,14 +1477,13 @@ body.runtime-embedded .terminal-empty {
   bottom: 2px;
   right: 3px;
   font-size: 7px;
-  letter-spacing: .03em;
+  letter-spacing: .01em;
   font-weight: 700;
-  text-transform: uppercase;
   color: #1f1300;
   background: color-mix(in srgb, var(--amber) 82%, white);
   border: 1px solid color-mix(in srgb, var(--amber) 58%, transparent);
   border-radius: 999px;
-  padding: 0 4px;
+  padding: 0 5px;
   line-height: 1.4;
 }
 .cell-worker-badge {
@@ -1499,14 +1491,13 @@ body.runtime-embedded .terminal-empty {
   bottom: 2px;
   right: 3px;
   font-size: 7px;
-  letter-spacing: .03em;
+  letter-spacing: .01em;
   font-weight: 700;
-  text-transform: uppercase;
   color: var(--text-dim);
   background: color-mix(in srgb, var(--text-dim) 11%, transparent);
   border: 1px solid color-mix(in srgb, var(--text-dim) 22%, transparent);
   border-radius: 999px;
-  padding: 0 4px;
+  padding: 0 5px;
   line-height: 1.4;
 }
 .cell-agent-badge {
@@ -1514,14 +1505,13 @@ body.runtime-embedded .terminal-empty {
   bottom: 2px;
   right: 3px;
   font-size: 7px;
-  letter-spacing: .03em;
+  letter-spacing: .01em;
   font-weight: 700;
-  text-transform: uppercase;
   color: var(--text-dim);
   background: color-mix(in srgb, var(--text-dim) 10%, transparent);
   border: 1px solid color-mix(in srgb, var(--text-dim) 22%, transparent);
   border-radius: 999px;
-  padding: 0 4px;
+  padding: 0 5px;
   line-height: 1.4;
 }
 .cell-dismissed-badge {
@@ -1529,14 +1519,13 @@ body.runtime-embedded .terminal-empty {
   bottom: 2px;
   right: 3px;
   font-size: 7px;
-  letter-spacing: .03em;
+  letter-spacing: .01em;
   font-weight: 700;
-  text-transform: uppercase;
   color: var(--text-dim);
   background: color-mix(in srgb, var(--text-dim) 13%, transparent);
   border: 1px solid color-mix(in srgb, var(--text-dim) 24%, transparent);
   border-radius: 999px;
-  padding: 0 4px;
+  padding: 0 5px;
   line-height: 1.4;
 }
 .cell-term-count {

@@ -415,6 +415,7 @@ def _architect_self_state(state, architect_id: str) -> dict:
         journal_entries = []
     journal_count = len(journal_entries or [])
     last_journal_ts = None
+    last_journal_decision_ts = None
     if journal_count:
         last_journal_ts = max(
             (
@@ -425,6 +426,16 @@ def _architect_self_state(state, architect_id: str) -> dict:
         )
         if last_journal_ts <= 0:
             last_journal_ts = None
+        decision_entry_timestamps = [
+            _workspace_parse_timestamp((entry or {}).get("timestamp", 0) or 0)
+            for entry in journal_entries
+            if str((entry or {}).get("type", "") or "").strip().lower()
+            == "decision"
+        ]
+        if decision_entry_timestamps:
+            last_journal_decision_ts = max(decision_entry_timestamps)
+            if last_journal_decision_ts <= 0:
+                last_journal_decision_ts = None
 
     try:
         decisions = state.load_decisions_for_architect(
@@ -442,13 +453,25 @@ def _architect_self_state(state, architect_id: str) -> dict:
     if decision_count:
         last_decision_ts = max(
             (
-                _workspace_parse_timestamp((decision or {}).get("created_at", 0) or 0)
+                max(
+                    _workspace_parse_timestamp(
+                        (decision or {}).get("created_at", 0) or 0
+                    ),
+                    _workspace_parse_timestamp(
+                        (decision or {}).get("updated_at", 0) or 0
+                    ),
+                )
                 for decision in decisions
             ),
             default=0.0,
         )
         if last_decision_ts <= 0:
             last_decision_ts = None
+    if last_journal_decision_ts is not None:
+        last_decision_ts = max(
+            last_decision_ts or 0.0,
+            last_journal_decision_ts,
+        )
 
     return {
         "last_journal_entry_at": last_journal_ts,
