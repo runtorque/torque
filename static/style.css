@@ -6121,6 +6121,14 @@ body.diff-view-open #ctx-menu {
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
+.agent-panel-header-breadcrumb {
+  flex: 1 0 100%;
+  min-width: 0;
+}
+.agent-panel-header-breadcrumb .agent-panel-hierarchy-breadcrumb {
+  padding: 4px 6px;
+  background: color-mix(in srgb, var(--bg-hover) 28%, transparent);
+}
 .agent-panel-header-copy {
   min-width: 0;
   flex: 1 1 180px;
@@ -6242,6 +6250,147 @@ body.diff-view-open #ctx-menu {
   flex-direction: column;
   gap: 6px;
 }
+.agent-panel-hierarchy-breadcrumb {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg-hover) 44%, transparent);
+}
+.agent-panel-hierarchy-crumb {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-cell) 82%, transparent);
+  color: var(--text-dim);
+  font: inherit;
+  text-align: left;
+}
+button.agent-panel-hierarchy-crumb {
+  cursor: pointer;
+}
+button.agent-panel-hierarchy-crumb:hover,
+button.agent-panel-hierarchy-crumb:focus-visible {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 44%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-cell));
+  outline: none;
+}
+.agent-panel-hierarchy-crumb.current {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--amber) 42%, var(--border));
+  background: color-mix(in srgb, var(--amber) 10%, var(--bg-cell));
+}
+.agent-panel-hierarchy-crumb.missing {
+  opacity: 0.68;
+  border-style: dashed;
+}
+.agent-panel-hierarchy-role {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.agent-panel-hierarchy-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  font-weight: 700;
+}
+.agent-panel-hierarchy-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--border) 58%, transparent);
+  font-size: 9px;
+  font-weight: 700;
+}
+.agent-panel-hierarchy-arrow {
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1;
+}
+.agent-panel-hierarchy-list {
+  --agent-panel-hierarchy-list-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  position: relative;
+  gap: 8px;
+}
+.agent-panel-hierarchy-list::before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 17px;
+  bottom: 17px;
+  width: 2px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    var(--agent-panel-hierarchy-list-color) 12px,
+    var(--agent-panel-hierarchy-list-color) calc(100% - 12px),
+    transparent
+  );
+  pointer-events: none;
+}
+.agent-panel-hierarchy-list-rooted::before {
+  top: 50px;
+}
+.agent-panel-hierarchy-list-architect {
+  --agent-panel-hierarchy-list-color: color-mix(in srgb, var(--amber) 68%, transparent);
+}
+.agent-panel-hierarchy-list-user {
+  --agent-panel-hierarchy-list-color: color-mix(in srgb, var(--accent) 62%, transparent);
+}
+.agent-panel-hierarchy-branch {
+  --agent-panel-hierarchy-branch-color: var(--agent-panel-hierarchy-list-color);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.agent-panel-hierarchy-branch-architect {
+  --agent-panel-hierarchy-branch-color: color-mix(in srgb, var(--amber) 66%, transparent);
+}
+.agent-panel-hierarchy-branch-user {
+  --agent-panel-hierarchy-branch-color: color-mix(in srgb, var(--accent) 58%, transparent);
+}
+.agent-panel-hierarchy-children {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.agent-panel-hierarchy-children::before {
+  content: "";
+  position: absolute;
+  left: 18px;
+  top: -6px;
+  bottom: 17px;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--agent-panel-hierarchy-branch-color);
+  pointer-events: none;
+}
+.agent-panel-hierarchy-row {
+  z-index: 1;
+}
 .architects-roster {
   margin-bottom: 12px;
 }
@@ -6299,11 +6448,12 @@ body.diff-view-open #ctx-menu {
   content: "";
   position: absolute;
   left: var(--agent-panel-hierarchy-left);
-  top: 6px;
-  bottom: 6px;
-  width: 2px;
+  top: 50%;
+  width: var(--agent-panel-hierarchy-tick-width);
+  height: 2px;
   background: var(--agent-panel-hierarchy-color);
   border-radius: 999px;
+  transform: translateY(-50%);
   pointer-events: none;
 }
 .architect-roster-level-1::after,
@@ -6312,13 +6462,14 @@ body.diff-view-open #ctx-menu {
 .engineer-roster-level-2::after {
   content: "";
   position: absolute;
-  left: var(--agent-panel-hierarchy-left);
-  top: 6px;
-  bottom: 6px;
-  width: var(--agent-panel-hierarchy-tick-width);
-  background:
-    linear-gradient(var(--agent-panel-hierarchy-color), var(--agent-panel-hierarchy-color)) top left / var(--agent-panel-hierarchy-tick-width) 2px no-repeat,
-    linear-gradient(var(--agent-panel-hierarchy-color), var(--agent-panel-hierarchy-color)) bottom left / var(--agent-panel-hierarchy-tick-width) 2px no-repeat;
+  left: calc(var(--agent-panel-hierarchy-left) - 3px);
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  border: 2px solid var(--agent-panel-hierarchy-color);
+  border-radius: 999px;
+  background: var(--bg-cell);
+  transform: translateY(-50%);
   pointer-events: none;
 }
 .engineer-row.architect-section-engineer-row,
