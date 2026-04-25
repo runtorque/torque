@@ -1030,7 +1030,6 @@ function _renderPrincipalArchitectCard(groupName, section, selectedPrincipalId) 
   const id = String(architect.id || '');
   const isSelected = String(selectedPrincipalId || '') === id;
   const navId = _principalCardNavId(groupName, id);
-  const counts = _principalStatusCounts(section);
   const classes = ['principal-card', 'principal-card--architect'];
   if (isSelected) classes.push('selected');
   else classes.push('dim');
@@ -2537,8 +2536,6 @@ function renderAgentCell(a, options) {
   const _engineerPaused = !!(_engineerWs && _engineerWs.paused);
   const _engineerAsking = _engineerWs && _engineerWs.pending_question;
   const _isDigestRecipient = _isEngineerKind || _isArchitect;
-  const _agentDigestSettings = _isDigestRecipient && state.agent_digest_settings
-    ? state.agent_digest_settings[String(a.id || '')] : null;
   const _cardDigestSettings = state.agent_digest_settings
     ? state.agent_digest_settings[String(a.id || '')] : null;
   let _digestPaused = !!(_cardDigestSettings && _cardDigestSettings.paused);
