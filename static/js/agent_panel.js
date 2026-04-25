@@ -21,6 +21,7 @@ var _agentPanelEventsPagerAgentId = '';
 var _agentPanelEventsVisibleLimit = _AGENT_PANEL_EVENTS_PAGE_SIZE;
 var _agentPanelEventsLastTotal = 0;
 var _agentPanelEventsPreRenderAtLiveTail = false;
+var _agentPanelEventsInnerTabByAgentId = {};
 // Per-(agentId, section) visible-limit pagers for the digest Queued / Sent
 // lists. Cell events keeps its own pager above because it also participates in
 // scroll-auto-grow; digest sections load-more on explicit click only.
@@ -185,6 +186,29 @@ function agentPanelSelectTab(tab) {
   _agentPanelLastSelectedTabByKind[kind] = String(tab || '');
   var activeTab = _agentPanelActiveTab(kind);
   if (_agentPanelRenderFocusedTabInPlace(agent, kind, previousTab, activeTab)) return;
+  renderAgentPanel();
+}
+
+function _agentPanelEventsInnerTab(agent) {
+  var agentId = String((agent && agent.id) || '');
+  var selected = agentId ? _agentPanelEventsInnerTabByAgentId[agentId] : '';
+  return selected === 'lifecycle' ? 'lifecycle' : 'inbox';
+}
+
+function _agentPanelCanUseEventInnerTabs(agent) {
+  var kind = _agentPanelKind(agent);
+  return kind === 'engineer' || kind === 'architect';
+}
+
+function agentPanelSelectEventsInnerTab(tab) {
+  var agent = _resolveFocusedAgent();
+  if (!agent || !_agentPanelCanUseEventInnerTabs(agent)) return;
+  if (_agentPanelActiveTab(_agentPanelKind(agent)) !== 'events') return;
+  var agentId = String(agent.id || '');
+  if (!agentId) return;
+  var next = String(tab || '') === 'lifecycle' ? 'lifecycle' : 'inbox';
+  if (_agentPanelEventsInnerTab(agent) === next) return;
+  _agentPanelEventsInnerTabByAgentId[agentId] = next;
   renderAgentPanel();
 }
 
@@ -747,6 +771,7 @@ function _agentPanelEventsNearOlderTail(container) {
 function _agentPanelAttachEventsScroll(root, agent) {
   if (!root || typeof root.querySelector !== 'function' || !agent) return;
   if (_agentPanelActiveTab(_agentPanelKind(agent)) !== 'events') return;
+  if (!_agentPanelShouldAutoLoadEvents(agent)) return;
   var container = root.querySelector('.agent-panel-content');
   if (!container || typeof container.addEventListener !== 'function') return;
   if (typeof container.removeEventListener === 'function') {
@@ -773,6 +798,7 @@ function agentPanelLoadMoreEvents(evt) {
   if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
   var agent = _resolveFocusedAgent();
   if (!agent || _agentPanelActiveTab(_agentPanelKind(agent)) !== 'events') return;
+  if (!_agentPanelShouldAutoLoadEvents(agent)) return;
   _agentPanelEventsEnsurePager(agent);
   var total = _agentPanelEventTotalForAgent(agent);
   if (_agentPanelEventsVisibleLimit >= total) return;
@@ -781,6 +807,15 @@ function agentPanelLoadMoreEvents(evt) {
     _agentPanelEventsVisibleLimit + _AGENT_PANEL_EVENTS_PAGE_SIZE
   );
   renderAgentPanel();
+}
+
+function _agentPanelShouldAutoLoadEvents(agent) {
+  if (!agent) return false;
+  if (_agentPanelKind(agent) === 'worker') return true;
+  if (_agentPanelUsesMergedCellEvents(agent)) {
+    return _agentPanelEventsInnerTab(agent) === 'lifecycle';
+  }
+  return false;
 }
 
 function _agentPanelSectionPagerKey(agentId, section) {
@@ -1035,7 +1070,7 @@ function _agentPanelRenderEventsTab(bstats, sentEvents, paused, recipient, sendN
   var queuedPage = _agentPanelSectionPage(recipientId, 'queued', queued);
   var sentPage = _agentPanelSectionPage(recipientId, 'sent', sent);
 
-  var html = '<div class="agent-panel-events-tab">';
+  var html = '<div class="agent-panel-events-inbox" data-agent-panel-events-panel="inbox">';
   html += '<div class="agent-panel-events-toolbar">';
   html += '<div class="agent-panel-events-countdown">' + _esc(statusText) + '</div>';
   html += '<button id="engineer-send-now-btn" class="agent-panel-send-now-btn"'
@@ -1054,6 +1089,45 @@ function _agentPanelRenderEventsTab(bstats, sentEvents, paused, recipient, sendN
     'sent',
     'No digested events yet.'
   );
+  html += '</div>';
+  return html;
+}
+
+function _agentPanelRenderEventsInnerTabs(agent) {
+  var active = _agentPanelEventsInnerTab(agent);
+  var tabs = [
+    { key: 'inbox', label: 'Inbox' },
+    { key: 'lifecycle', label: 'Lifecycle' },
+  ];
+  var html = '<div class="agent-panel-events-subtabs" role="tablist" aria-label="Events views">';
+  for (var i = 0; i < tabs.length; i++) {
+    var tab = tabs[i];
+    html += '<button type="button"'
+      + ' id="agent-panel-events-subtab-' + _agentPanelEsc(tab.key) + '"'
+      + ' class="agent-panel-events-subtab' + (active === tab.key ? ' active' : '') + '"'
+      + ' data-agent-panel-events-inner-tab="' + _agentPanelEsc(tab.key) + '"'
+      + ' role="tab"'
+      + ' aria-selected="' + (active === tab.key ? 'true' : 'false') + '"'
+      + ' onclick="agentPanelSelectEventsInnerTab(\'' + _agentPanelEsc(tab.key) + '\')">'
+      + _agentPanelEsc(tab.label)
+      + '</button>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function _renderAgentEventsWithInnerTabs(agent) {
+  var active = _agentPanelEventsInnerTab(agent);
+  var html = '<div class="agent-panel-events-tab" data-agent-panel-events-view="'
+    + _agentPanelEsc(active) + '">';
+  html += _agentPanelRenderEventsInnerTabs(agent);
+  if (active === 'lifecycle') {
+    html += '<div class="agent-panel-events-lifecycle" data-agent-panel-events-panel="lifecycle">'
+      + _renderPersistentCellEvents(agent)
+      + '</div>';
+  } else {
+    html += _renderAgentDigestEvents(agent);
+  }
   html += '</div>';
   return html;
 }
@@ -1834,7 +1908,7 @@ function _renderAgentDigestEvents(agent) {
     paused,
     agent,
     'agentPanelSendNow(\'' + _agentPanelEsc((agent && agent.id) || '') + '\')',
-    'Already sent to ' + _agentPanelEsc((agent && (agent.name || agent.id)) || 'engineer')
+    'Already digested to ' + _agentPanelEsc((agent && (agent.name || agent.id)) || 'engineer')
   );
 }
 
@@ -1954,14 +2028,11 @@ function _renderPersistentCellEvents(agent) {
 }
 
 function _renderEngineerEvents(agent) {
-  // Digest controls (Send queued now + Queued + Already sent) render above
-  // Cell events so the actionable items stay visible without scrolling past
-  // the potentially long per-cell event log.
-  return _renderAgentDigestEvents(agent) + _renderPersistentCellEvents(agent);
+  return _renderAgentEventsWithInnerTabs(agent);
 }
 
 function _renderArchitectEvents(agent) {
-  return _renderAgentDigestEvents(agent) + _renderPersistentCellEvents(agent);
+  return _renderAgentEventsWithInnerTabs(agent);
 }
 
 function _renderEngineerWorklog(agent) {

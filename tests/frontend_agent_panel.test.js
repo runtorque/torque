@@ -502,7 +502,7 @@ test('engineer panel renders journal, events, and worklog from the focused engin
   context.agentPanelSelectTab('events');
   assert.match(panel.innerHTML, /id="agent-panel-pause-btn"/);
   assert.match(panel.innerHTML, /Queued digest item/);
-  assert.match(panel.innerHTML, /Already sent to Builder/);
+  assert.match(panel.innerHTML, /Already digested to Builder/);
   assert.match(panel.innerHTML, /Delivered digest item/);
 
   context.agentPanelSelectTab('worklog');
@@ -548,6 +548,7 @@ test('focused engineer events tab renders server-merged cell events', () => {
     cell_type: 'agent',
   });
   vm.runInContext(`_agentPanelLastSelectedTabByKind.engineer = 'events';`, context);
+  vm.runInContext(`_agentPanelEventsInnerTabByAgentId['eng-1'] = 'lifecycle';`, context);
 
   context.renderAgentPanel();
 
@@ -1208,7 +1209,7 @@ test('focused architect Events tab renders digest data and pause control', () =>
   assert.match(panel.innerHTML, /id="agent-panel-tab-events" class="agent-panel-tab active"/);
   assert.match(panel.innerHTML, /id="agent-panel-pause-btn"/);
   assert.match(panel.innerHTML, /Architect queued item/);
-  assert.match(panel.innerHTML, /Already sent to Planner/);
+  assert.match(panel.innerHTML, /Already digested to Planner/);
   assert.match(panel.innerHTML, /Architect delivered item/);
 
   vm.runInContext(`agentPanelTogglePauseForAgent('arch-1')`, context);
@@ -1387,7 +1388,7 @@ function _eventsTabHarness(kind, agentId, agentName) {
   return harness;
 }
 
-test('engineer Events tab renders digest controls above Cell events', () => {
+test('engineer Events tab splits digest inbox from Cell events lifecycle', () => {
   const { context, panel } = _eventsTabHarness('engineer', 'eng-order', 'Builder');
   context.state.digest_buffer_stats['eng-order'] = {
     agent_id: 'eng-order',
@@ -1407,25 +1408,24 @@ test('engineer Events tab renders digest controls above Cell events', () => {
     ],
   });
 
-  const html = panel.innerHTML;
-  const sendNowIdx = html.indexOf('Send queued now');
-  const queuedIdx = html.indexOf('Queued for next digest');
-  const sentIdx = html.indexOf('Already sent to Builder');
-  const cellEventsIdx = html.indexOf('Cell events');
+  let html = panel.innerHTML;
+  assert.match(html, /agent-panel-events-subtabs/);
+  assert.match(html, /data-agent-panel-events-inner-tab="inbox"[^>]*aria-selected="true"/);
+  assert.match(html, /Send queued now/);
+  assert.match(html, /Queued for next digest/);
+  assert.match(html, /Already digested to Builder/);
+  assert.doesNotMatch(html, /Cell events/);
 
-  assert.ok(sendNowIdx >= 0, 'Send queued now button must render');
-  assert.ok(queuedIdx >= 0, 'Queued section must render');
-  assert.ok(sentIdx >= 0, 'Already sent section must render');
-  assert.ok(cellEventsIdx >= 0, 'Cell events section must render');
-  assert.ok(sendNowIdx < cellEventsIdx,
-    'Send queued now must render before Cell events');
-  assert.ok(queuedIdx < cellEventsIdx,
-    'Queued for next digest must render before Cell events');
-  assert.ok(sentIdx < cellEventsIdx,
-    'Already sent must render before Cell events');
+  vm.runInContext(`agentPanelSelectEventsInnerTab('lifecycle')`, context);
+  html = panel.innerHTML;
+  assert.match(html, /data-agent-panel-events-inner-tab="lifecycle"[^>]*aria-selected="true"/);
+  assert.match(html, /Cell events/);
+  assert.match(html, /Cell event row/);
+  assert.doesNotMatch(html, /Send queued now/);
+  assert.doesNotMatch(html, /Queued for next digest/);
 });
 
-test('architect Events tab renders digest controls above Cell events', () => {
+test('architect Events tab splits digest inbox from Cell events lifecycle', () => {
   const { context, panel } = _eventsTabHarness('architect', 'arch-order', 'Planner');
   context.state.digest_buffer_stats['arch-order'] = {
     agent_id: 'arch-order',
@@ -1449,16 +1449,48 @@ test('architect Events tab renders digest controls above Cell events', () => {
     ],
   });
 
-  const html = panel.innerHTML;
-  const sendNowIdx = html.indexOf('Send queued now');
-  const queuedIdx = html.indexOf('Queued for next digest');
-  const sentIdx = html.indexOf('Already sent to Planner');
-  const cellEventsIdx = html.indexOf('Cell events');
+  let html = panel.innerHTML;
+  assert.match(html, /agent-panel-events-subtabs/);
+  assert.match(html, /data-agent-panel-events-inner-tab="inbox"[^>]*aria-selected="true"/);
+  assert.match(html, /Send queued now/);
+  assert.match(html, /Queued for next digest/);
+  assert.match(html, /Already digested to Planner/);
+  assert.doesNotMatch(html, /Cell events/);
 
-  assert.ok(sendNowIdx >= 0 && queuedIdx >= 0 && sentIdx >= 0 && cellEventsIdx >= 0);
-  assert.ok(sendNowIdx < cellEventsIdx);
-  assert.ok(queuedIdx < cellEventsIdx);
-  assert.ok(sentIdx < cellEventsIdx);
+  vm.runInContext(`agentPanelSelectEventsInnerTab('lifecycle')`, context);
+  html = panel.innerHTML;
+  assert.match(html, /data-agent-panel-events-inner-tab="lifecycle"[^>]*aria-selected="true"/);
+  assert.match(html, /Cell events/);
+  assert.match(html, /Arch cell event/);
+  assert.doesNotMatch(html, /Send queued now/);
+});
+
+test('worker Events tab stays a single event list without inner subtabs', () => {
+  const { context, panel } = createHarness();
+  setFocusedAgent(context, {
+    id: 'worker-events',
+    name: 'Worker Bee',
+    kind: 'worker',
+    group: 'alpha',
+    cell_type: 'agent',
+  });
+  context.state.panel_events = [
+    {
+      id: 1,
+      cell_id: 'worker-events',
+      kind: 'agent_started',
+      message: 'Worker booted',
+      timestamp: 10,
+    },
+  ];
+  vm.runInContext(`_agentPanelLastSelectedTabByKind.worker = 'events';`, context);
+
+  context.renderAgentPanel();
+
+  assert.match(panel.innerHTML, /Worker events/);
+  assert.match(panel.innerHTML, /Worker booted/);
+  assert.doesNotMatch(panel.innerHTML, /agent-panel-events-subtabs/);
+  assert.doesNotMatch(panel.innerHTML, /data-agent-panel-events-inner-tab/);
 });
 
 test('Already sent section caps at 20 events and exposes a Load more button', () => {
@@ -1480,7 +1512,7 @@ test('Already sent section caps at 20 events and exposes a Load more button', ()
   const html = panel.innerHTML;
   const itemCount = (html.match(/agent-panel-event-item-sent/g) || []).length;
   assert.equal(itemCount, 20, 'Only 20 sent items render initially');
-  assert.match(html, /Already sent to Builder/);
+  assert.match(html, /Already digested to Builder/);
   assert.match(html, /data-agent-panel-section="sent"/);
   assert.match(html, /Load 10 older events/);
   assert.match(html, /20 \/ 30/);
