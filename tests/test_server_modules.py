@@ -97,6 +97,55 @@ class ServerModuleExtractionTests(unittest.TestCase):
 
         self.assertIn('implementation_depth: true', yaml_text)
 
+    def test_action_to_yaml_round_trips_transition_loc_gate(self):
+        yaml_text = self.server_actions._action_to_yaml('feature/implement', {
+            'description': 'Implement feature',
+            'implementation_depth': True,
+            'transitions': [{
+                'action': 'feature/review',
+                'when': 'ready for review',
+                'status': 'On Review',
+                'loc_gate': {
+                    'ship_direct_max': '25',
+                    'review_default_above': '75',
+                    'self_review_bypass_allowed': False,
+                },
+            }],
+            'prompt': '{{ TASK }}\n',
+        })
+        act = yaml.safe_load(yaml_text)
+
+        self.assertEqual(
+            act['transitions'][0]['loc_gate'],
+            {
+                'ship_direct_max': 25,
+                'review_default_above': 75,
+                'self_review_bypass_allowed': False,
+            },
+        )
+
+    def test_action_parser_preserves_transition_loc_gate(self):
+        actions_mod = importlib.import_module('loom.actions')
+        actions_mod = importlib.reload(actions_mod)
+        act = actions_mod.parse_yaml("""
+name: feature/implement
+implementation_depth: true
+transitions:
+  - action: feature/review
+    when: ready for review
+    loc_gate:
+      ship_direct_max: 25
+      review_default_above: 75
+      self_review_bypass_allowed: false
+prompt: |
+  {{ TASK }}
+""")
+
+        self.assertEqual(
+            act['transitions'][0]['loc_gate']['review_default_above'],
+            75,
+        )
+
     def test_action_to_yaml_preserves_implementation_depth_false_with_threshold(self):
         yaml_text = self.server_actions._action_to_yaml('feature/research', {
             'description': 'Research',

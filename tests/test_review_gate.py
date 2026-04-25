@@ -379,7 +379,65 @@ class ReviewGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result)
         self.assertEqual(calls, [])
 
-    async def test_architect_review_gate_threshold_overrides_action_threshold(self):
+    async def test_transition_loc_gate_overrides_action_and_architect_thresholds(self):
+        state, cell, task = self._state_cell_task()
+        architect = self.state_mod.AgentCell(
+            id="arch-1",
+            name="Architect",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+        )
+        state.agents[architect.id] = architect
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            architect_review_gate_thresholds={
+                "ship_direct_max": 250,
+                "review_default_above": 300,
+                "self_review_bypass_allowed": False,
+            },
+        )
+        task.created_by_architect_id = architect.id
+        action_mgr = FakeActionManager(
+            {
+                "implementation_depth": True,
+                "review_required_above_loc": 200,
+                "transitions": [{
+                    "action": "feature/review",
+                    "loc_gate": {
+                        "ship_direct_max": 25,
+                        "review_default_above": 75,
+                        "self_review_bypass_allowed": False,
+                    },
+                }],
+            },
+            [{"action": "feature/review"}],
+        )
+        worktree_mgr = FakeWorktreeManager(
+            {"files": 1, "insertions": 80, "deletions": 0},
+        )
+        calls = []
+
+        async def handle_command(payload):
+            calls.append(payload)
+            return {"type": "ok", "task_id": "task-review"}
+
+        result = await self.server_mod._maybe_apply_review_required_gate(
+            state,
+            action_mgr,
+            worktree_mgr,
+            handle_command,
+            lambda *args, **kwargs: None,
+            cell=cell,
+            task=task,
+        )
+
+        self.assertEqual(result["type"], "error")
+        self.assertIn("threshold: 75", result["message"])
+        self.assertEqual(calls[0]["action_name"], "feature/review")
+        self.assertIn("Transition LOC gate", calls[0]["description"])
+        self.assertIn("review_default_above=75", calls[0]["description"])
+
+    async def test_action_threshold_overrides_architect_fallback(self):
         state, cell, task = self._state_cell_task()
         architect = self.state_mod.AgentCell(
             id="arch-1",
@@ -420,9 +478,107 @@ class ReviewGateTests(unittest.IsolatedAsyncioTestCase):
             task=task,
         )
 
+        self.assertIsNone(result)
+        self.assertEqual(calls, [])
+
+    async def test_action_threshold_preserves_architect_self_review_bypass_policy(self):
+        state, cell, task = self._state_cell_task()
+        architect = self.state_mod.AgentCell(
+            id="arch-1",
+            name="Architect",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+        )
+        state.agents[architect.id] = architect
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            architect_review_gate_thresholds={
+                "ship_direct_max": 25,
+                "review_default_above": 75,
+                "self_review_bypass_allowed": False,
+            },
+        )
+        task.created_by_architect_id = architect.id
+        action_mgr = FakeActionManager(
+            {"implementation_depth": True, "review_required_above_loc": 100},
+            [{"action": "feature/review"}],
+        )
+        worktree_mgr = FakeWorktreeManager(
+            {"files": 1, "insertions": 120, "deletions": 0},
+        )
+        calls = []
+
+        async def handle_command(payload):
+            calls.append(payload)
+            return {"type": "ok", "task_id": "task-review"}
+
+        result = await self.server_mod._maybe_apply_review_required_gate(
+            state,
+            action_mgr,
+            worktree_mgr,
+            handle_command,
+            lambda *args, **kwargs: None,
+            cell=cell,
+            task=task,
+            force_skip_review=True,
+            skip_reason="self-reviewed locally",
+        )
+
+        self.assertEqual(result["type"], "error")
+        self.assertIn("threshold: 100", result["message"])
+        self.assertEqual(calls[0]["action_name"], "feature/review")
+        self.assertIn("Skip request ignored", calls[0]["description"])
+        self.assertIn("self-review bypass disabled by architect settings",
+                      calls[0]["description"])
+
+    async def test_architect_review_gate_used_when_no_transition_or_action_threshold(self):
+        state, cell, task = self._state_cell_task()
+        architect = self.state_mod.AgentCell(
+            id="arch-1",
+            name="Architect",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+        )
+        state.agents[architect.id] = architect
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            architect_review_gate_thresholds={
+                "ship_direct_max": 25,
+                "review_default_above": 75,
+                "self_review_bypass_allowed": False,
+            },
+        )
+        task.created_by_architect_id = architect.id
+        action_mgr = FakeActionManager(
+            {
+                "implementation_depth": True,
+                "transitions": [{"action": "feature/review"}],
+            },
+            [{"action": "feature/review"}],
+        )
+        worktree_mgr = FakeWorktreeManager(
+            {"files": 1, "insertions": 80, "deletions": 0},
+        )
+        calls = []
+
+        async def handle_command(payload):
+            calls.append(payload)
+            return {"type": "ok", "task_id": "task-review"}
+
+        result = await self.server_mod._maybe_apply_review_required_gate(
+            state,
+            action_mgr,
+            worktree_mgr,
+            handle_command,
+            lambda *args, **kwargs: None,
+            cell=cell,
+            task=task,
+        )
+
         self.assertEqual(result["type"], "error")
         self.assertIn("threshold: 75", result["message"])
         self.assertEqual(calls[0]["action_name"], "feature/review")
+        self.assertIn("Architect review policy", calls[0]["description"])
         self.assertIn("review_default_above=75", calls[0]["description"])
 
     async def test_architect_review_gate_ship_direct_max_is_direct_allowance(self):
@@ -444,7 +600,10 @@ class ReviewGateTests(unittest.IsolatedAsyncioTestCase):
         )
         task.created_by_architect_id = architect.id
         action_mgr = FakeActionManager(
-            {"implementation_depth": True, "review_required_above_loc": 50},
+            {
+                "implementation_depth": True,
+                "transitions": [{"action": "feature/review"}],
+            },
             [{"action": "feature/review"}],
         )
         worktree_mgr = FakeWorktreeManager(
@@ -488,7 +647,10 @@ class ReviewGateTests(unittest.IsolatedAsyncioTestCase):
         )
         task.created_by_architect_id = architect.id
         action_mgr = FakeActionManager(
-            {"implementation_depth": True, "review_required_above_loc": 100},
+            {
+                "implementation_depth": True,
+                "transitions": [{"action": "feature/review"}],
+            },
             [{"action": "feature/review"}],
         )
         worktree_mgr = FakeWorktreeManager(
@@ -536,7 +698,10 @@ class ReviewGateTests(unittest.IsolatedAsyncioTestCase):
         )
         task.created_by_architect_id = architect.id
         action_mgr = FakeActionManager(
-            {"implementation_depth": True, "review_required_above_loc": 100},
+            {
+                "implementation_depth": True,
+                "transitions": [{"action": "feature/review"}],
+            },
             [{"action": "feature/review"}],
         )
         worktree_mgr = FakeWorktreeManager(

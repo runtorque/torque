@@ -9,11 +9,13 @@ labels:
   - feature
 
 implementation_depth: true
-review_required_above_loc: 100
-
 transitions:
   - action: feature/review
     when: implementation is complete and ready for review
+    loc_gate:
+      ship_direct_max: 50
+      review_default_above: 100
+      self_review_bypass_allowed: false
     status: "On Review"
 
 prompt: |

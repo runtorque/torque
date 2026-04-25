@@ -360,6 +360,8 @@ test('group settings resets the Engineer section defaults when reopened', () => 
 test('architect runtime settings no longer show deferred warning copy', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   assert.match(html, /id="gs-architect-runtime-section"/);
+  assert.match(html, /fallback review-gate defaults for transitions without their own LOC gate/);
+  assert.match(html, /Fallback review-gate thresholds/);
   assert.doesNotMatch(html, /gs-architect-deferred-section/);
   assert.doesNotMatch(html, /storage only|wiring in LOOM:196|⊘/);
 });

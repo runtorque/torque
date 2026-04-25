@@ -5206,6 +5206,45 @@ body.runtime-embedded .board-empty-action:focus-visible {
   background: var(--bg); color: var(--text);
   border: 1px solid var(--border); border-radius: var(--radius);
 }
+.tpled-loc-gate-details {
+  margin-top: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0 6px 5px;
+  background: color-mix(in srgb, var(--bg-hover) 45%, transparent);
+}
+.tpled-loc-gate-details summary {
+  font-size: 8px;
+  font-weight: 600;
+  color: var(--text-dim);
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.35px;
+  padding: 4px 0;
+}
+.tpled-loc-gate-details summary:hover { color: var(--text); }
+.tpled-loc-enable-label,
+.tpled-loc-bypass-label {
+  font-size: 10px;
+  margin: 2px 0 5px;
+}
+.tpled-loc-gate-fields {
+  margin-left: 2px;
+}
+.tpled-loc-gate-fields input[type="number"] {
+  width: 86px;
+  box-sizing: border-box;
+  font-size: 10px;
+  padding: 4px 6px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.tpled-loc-gate-fields input:disabled,
+.tpled-loc-bypass:disabled {
+  opacity: 0.5;
+}
 .tpled-tr-remove {
   position: absolute; top: 2px; right: 2px;
   width: 16px; height: 16px;
