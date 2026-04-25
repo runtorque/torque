@@ -284,7 +284,7 @@ class ClaudeCodeAdapter(AgentAdapter):
         return f" --effort {shlex.quote(reasoning_effort)}"
 
     def get_reasoning_effort_options(self) -> list[str]:
-        return ["low", "medium", "high"]
+        return ["low", "medium", "high", "xhigh", "max"]
 
     def get_resume_command(self, boot_cmd: str, session_id: str) -> str | None:
         import shlex

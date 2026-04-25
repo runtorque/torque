@@ -173,6 +173,57 @@ function seedProviders(context, providers) {
   vm.runInContext(`_cachedProviders = ${JSON.stringify(providers)};`, context);
 }
 
+test('group settings refreshes reasoning effort options when provider changes', () => {
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+  seedProviders(context, [
+    {
+      name: 'codex',
+      display_name: 'Codex',
+      command: 'codex',
+      reasoning_efforts: ['low', 'medium', 'high', 'xhigh'],
+    },
+    {
+      name: 'claude-code',
+      display_name: 'Claude Code',
+      command: 'claude',
+      reasoning_efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+    },
+    {
+      name: 'gemini-cli',
+      display_name: 'Gemini CLI',
+      command: 'gemini',
+      reasoning_efforts: [],
+    },
+  ]);
+
+  ensure('gs-agent-provider').value = 'codex';
+  vm.runInContext('onGsProviderChange()', context);
+  assert.deepEqual(
+    ensure('gs-agent-reasoning-effort').children.map((child) => child.value),
+    ['', 'low', 'medium', 'high', 'xhigh'],
+  );
+
+  ensure('gs-agent-provider').value = 'claude-code';
+  vm.runInContext('onGsProviderChange()', context);
+  assert.deepEqual(
+    ensure('gs-agent-reasoning-effort').children.map((child) => child.value),
+    ['', 'low', 'medium', 'high', 'xhigh', 'max'],
+  );
+
+  ensure('gs-agent-provider').value = 'gemini-cli';
+  vm.runInContext('onGsProviderChange()', context);
+  assert.deepEqual(
+    ensure('gs-agent-reasoning-effort').children.map((child) => child.value),
+    [''],
+  );
+  assert.equal(
+    ensure('gs-agent-reasoning-effort').children[0].textContent,
+    'Not supported for this provider',
+  );
+});
+
 test('group settings modal populates engineer fields and honors engineer tab deep-link', () => {
   const { sandbox, ensure } = createSandbox();
   const context = vm.createContext(sandbox);
