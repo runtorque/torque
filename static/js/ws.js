@@ -1433,6 +1433,9 @@ function _applyDelta(ops) {
           var bucket = state.architect_journals[archId];
           bucket.unshift(entry);
           if (bucket.length > 500) bucket.length = 500;
+          if (typeof _agentPanelArchitectJournalDidPrepend === 'function') {
+            _agentPanelArchitectJournalDidPrepend(archId);
+          }
           if (typeof _agentPanelInvalidateArchitectJournalCache === 'function') {
             _agentPanelInvalidateArchitectJournalCache(archId);
           }

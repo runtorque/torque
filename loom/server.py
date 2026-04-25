@@ -4188,10 +4188,20 @@ def _handle_architect_journal_read_command(
     except (TypeError, ValueError):
         limit = 200
     limit = max(1, min(limit, 500))
-    entries = state.architect_journal_read(architect_id, limit=limit)
+    try:
+        since = float(data.get("since", 0) or 0)
+    except (TypeError, ValueError):
+        since = 0.0
+    entries = state.architect_journal_read(
+        architect_id,
+        since=since,
+        limit=limit,
+    )
     return {
         "type": "architect_journal_entries",
         "architect_id": architect_id,
+        "limit": limit,
+        "since": since,
         "entries": entries,
     }
 

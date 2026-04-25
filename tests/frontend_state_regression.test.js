@@ -8161,6 +8161,112 @@ test('ws architect_journal_append delta invalidates the engineer surface and rer
   assert.equal(jsonValue(context, 'renderCalls.engineer'), 1);
 });
 
+test('renderAgentPanel preserves Architect Journal scroll anchor when a journal delta inserts above', () => {
+  const { context, document } = createEngineerWsHarness();
+  const panel = document.getElementById('panel-agent');
+  const oldContent = new FakeElement('journal-content-old');
+  const newContent = new FakeElement('journal-content-new');
+  let currentContent = oldContent;
+
+  function makeAnchor(key, top, bottom) {
+    const el = new FakeElement();
+    el.setAttribute('data-agent-panel-anchor', key);
+    el.getBoundingClientRect = function() {
+      return { top, bottom, left: 0, right: 240, width: 240, height: bottom - top };
+    };
+    return el;
+  }
+
+  const entries = [];
+  for (let i = 0; i < 90; i++) {
+    entries.push({
+      id: `j-${i}`,
+      architect_id: 'arch-1',
+      type: i === 0 ? 'checkpoint' : 'observation',
+      entry: `journal entry ${i}`,
+      timestamp: 1712345600 - i,
+    });
+  }
+  runInContext(context, `
+    state.agents = {
+      'arch-1': {
+        id: 'arch-1',
+        name: 'Architect One',
+        group: 'alpha',
+        kind: 'architect',
+        cell_type: 'agent'
+      }
+    };
+    state.architect_journals = { 'arch-1': ${JSON.stringify(entries)} };
+    focusedItemId = 'arch-1';
+    _agentPanelLastSelectedTabByKind.architect = 'journal';
+  `);
+  context.renderAgentPanel();
+
+  oldContent.scrollTop = 120;
+  oldContent.getBoundingClientRect = function() {
+    return { top: 0, bottom: 140, left: 0, right: 240, width: 240, height: 140 };
+  };
+  oldContent.querySelectorAll = function(selector) {
+    if (selector === '[data-agent-panel-anchor]') {
+      return [
+        makeAnchor('architect-journal-j-20', 20, 45),
+        makeAnchor('architect-journal-j-21', 70, 95),
+      ];
+    }
+    return [];
+  };
+
+  const newRects = {
+    'architect-journal-j-new': [10, 35],
+    'architect-journal-j-20': [50, 75],
+    'architect-journal-j-21': [100, 125],
+  };
+  newContent.scrollTop = 0;
+  newContent.getBoundingClientRect = function() {
+    return { top: 0, bottom: 140, left: 0, right: 240, width: 240, height: 140 };
+  };
+  newContent.querySelectorAll = function(selector) {
+    if (selector !== '[data-agent-panel-anchor]') return [];
+    const html = panel.innerHTML || '';
+    return Object.keys(newRects)
+      .filter((key) => html.includes(`data-agent-panel-anchor="${key}"`))
+      .map((key) => makeAnchor(key, newRects[key][0], newRects[key][1]));
+  };
+
+  panel.querySelector = function(selector) {
+    if (selector === '.agent-panel-content') return currentContent;
+    return null;
+  };
+  Object.defineProperty(panel, 'innerHTML', {
+    configurable: true,
+    get() {
+      return this._innerHTML || '';
+    },
+    set(value) {
+      this._innerHTML = value;
+      currentContent = newContent;
+    },
+  });
+
+  runInContext(context, `_expectedSeq = 1;`);
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'architect_journal_append',
+      id: 'j-new',
+      architect_id: 'arch-1',
+      type: 'observation',
+      entry: 'new top journal entry',
+      timestamp: 1712345700,
+    }],
+  });
+
+  assert.equal(newContent.scrollTop, 150);
+  assert.match(panel.innerHTML, /architect-journal-j-20/);
+  assert.doesNotMatch(panel.innerHTML, /data-agent-panel-virtualized="true"/);
+});
+
 test('ws invalidation skips rerendering the active board for off-group task updates', () => {
   const { context, sandbox } = createWsRenderHarness();
   sandbox._activePanelApp = 'board';
