@@ -963,11 +963,20 @@ function _architectJournalEntriesForCard(architectId) {
   return Array.isArray(entries) ? entries : [];
 }
 
-function _architectLatestJournalDecisionTs(architectId) {
+function _architectJournalDecisionEntriesForCard(architectId) {
   const journals = _architectJournalEntriesForCard(architectId);
-  let latest = 0;
+  const decisions = [];
   for (const entry of journals) {
     if (String((entry && entry.type) || '').toLowerCase() !== 'decision') continue;
+    decisions.push(entry);
+  }
+  return decisions;
+}
+
+function _architectLatestJournalDecisionTs(architectId) {
+  const decisions = _architectJournalDecisionEntriesForCard(architectId);
+  let latest = 0;
+  for (const entry of decisions) {
     latest = Math.max(
       latest,
       _agentCardTimestampSeconds((entry && (entry.timestamp || entry.created_at || entry.updated_at)) || 0)
@@ -980,11 +989,11 @@ function _architectStatsForCard(architect, section) {
   const engineers = _architectEngineersForCard(architect && architect.id, section);
   const asks = _architectPendingAskTasks(architect);
   const decisions = _architectDecisionListForCard(architect && architect.id);
-  let openDecisions = 0;
+  const journalDecisions = _architectJournalDecisionEntriesForCard(architect && architect.id);
+  let decisionCount = 0;
   let latestDecisionTs = 0;
   for (const decision of decisions) {
-    const status = String((decision && decision.status) || 'proposed').toLowerCase();
-    if (!decision.archived && status !== 'accepted' && status !== 'rejected') openDecisions += 1;
+    if (!decision.archived) decisionCount += 1;
     latestDecisionTs = Math.max(
       latestDecisionTs,
       _agentCardTimestampSeconds((decision && (decision.updated_at || decision.created_at)) || 0)
@@ -999,7 +1008,7 @@ function _architectStatsForCard(architect, section) {
     asks,
     askCount: asks.length,
     firstAskId: asks.length ? String(asks[0].id || '') : '',
-    openDecisionCount: openDecisions,
+    decisionCount: decisionCount + journalDecisions.length,
     latestDecisionTs,
   };
 }
@@ -1114,7 +1123,7 @@ function _renderPrincipalArchitectCard(groupName, section, selectedPrincipalId) 
     + '<div class="principal-card-body">'
     + '<span class="principal-card-name">' + esc(displayName) + '</span>'
     + '<span class="principal-card-line principal-card-line--stats">'
-      + esc(stats.engineerCount + ' engineers · ' + stats.openDecisionCount + ' decisions')
+      + esc(stats.engineerCount + ' engineers · ' + stats.decisionCount + ' decisions')
     + '</span>'
     + '<span class="principal-card-line">' + esc(_architectLastDecisionLabel(stats)) + '</span>'
     + '</div>'
@@ -2527,7 +2536,7 @@ function _renderArchitectCellBody(a) {
   let html = '<div class="agent-card-body cell-body cell-body--architect">';
   html += '<div class="agent-card-line cell-name">' + esc(_agentDisplayName(a)) + '</div>';
   html += '<div class="agent-card-line cell-architect-stats">'
-    + esc(stats.engineerCount + ' engineers · ' + stats.openDecisionCount + ' decisions')
+    + esc(stats.engineerCount + ' engineers · ' + stats.decisionCount + ' decisions')
     + '</div>';
   html += '<div class="agent-card-line cell-architect-last">' + esc(_architectLastDecisionLabel(stats)) + '</div>';
   html += '</div>';

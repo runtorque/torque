@@ -777,6 +777,7 @@ test('architect last decision uses latest decision journal entry over stale deci
 
   const archBlock = extractPrincipalCardHtml(mainEl.innerHTML, 'architect', 'arch-a');
   assert.ok(archBlock, 'architect card rendered');
+  assert.match(archBlock, /2 decisions/);
   assert.match(archBlock, /last decision 2m/);
   assert.doesNotMatch(archBlock, /last decision 15h/);
 });
