@@ -730,6 +730,11 @@ function _disposeEmbeddedTerminal() {
   _embeddedTerminalPendingFocusKey = '';
 }
 
+function _deactivateEmbeddedTerminalWorkspace() {
+  _setActiveEmbeddedTerminalEntry(null);
+  _embeddedTerminalPendingFocusKey = '';
+}
+
 function _embeddedTerminalUrl(cell) {
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   return protocol + '//' + location.host + '/ws/terminal/' + encodeURIComponent(cell.id);
@@ -1045,7 +1050,22 @@ function _pruneEmbeddedTerminalSessions() {
   }
 }
 
+function _clearEmbeddedTerminalStagePlaceholders(stage) {
+  if (!stage || !stage.children) return;
+  const children = Array.prototype.slice.call(stage.children);
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i];
+    if (child && child.classList && child.classList.contains('terminal-surface')) continue;
+    if (child && typeof child.remove === 'function') {
+      child.remove();
+    } else if (stage && typeof stage.removeChild === 'function') {
+      stage.removeChild(child);
+    }
+  }
+}
+
 function _createEmbeddedTerminalSurface(stage, sessionKey) {
+  _clearEmbeddedTerminalStagePlaceholders(stage);
   let surface = stage && stage.querySelector ? stage.querySelector('.terminal-surface') : null;
   if (surface && surface.dataset && surface.dataset.loomSessionKey) surface = null;
   if (!surface) {
@@ -1064,6 +1084,7 @@ function _createEmbeddedTerminalSurface(stage, sessionKey) {
 }
 
 function _activateEmbeddedTerminalSurface(stage, sessionKey) {
+  _clearEmbeddedTerminalStagePlaceholders(stage);
   const entry = _embeddedTerminalSessions[sessionKey] || null;
   for (const key in _embeddedTerminalSessions) {
     const candidate = _embeddedTerminalSessions[key];
@@ -1130,7 +1151,7 @@ function renderTerminalWorkspace() {
       + '  <div class="terminal-empty-meta">The terminal will take focus automatically when it opens.</div>'
       + '</div>';
     dom.statusbar.textContent = 'Standalone PTY workspace';
-    _disposeEmbeddedTerminal();
+    _deactivateEmbeddedTerminalWorkspace();
     _restoreTerminalWorkspaceState(root, workspaceState, null);
     return;
   }
@@ -1146,7 +1167,8 @@ function renderTerminalWorkspace() {
       + '  <div class="terminal-empty-meta">When it comes back, Loom will focus the terminal automatically.</div>'
       + '</div>';
     dom.statusbar.textContent = _terminalStatusLabel(cell);
-    _disposeEmbeddedTerminal();
+    _disposeEmbeddedTerminalEntriesForCell(cell.id, '');
+    _deactivateEmbeddedTerminalWorkspace();
     _restoreTerminalWorkspaceState(root, workspaceState, cell);
     return;
   }

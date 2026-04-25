@@ -7823,6 +7823,93 @@ test('embedded terminal switch preserves cached xterm scrollback buffers', () =>
   assert.deepEqual(terminals[0].writes, ['a scrollback', '\na hidden output']);
 });
 
+test('embedded terminal clears stale empty placeholder before mounting a running session', () => {
+  const { context, document, sandbox, terminals } = createEmbeddedTerminalHarness({
+    loadRenderHelpers: true,
+  });
+  const dom = attachTerminalWorkspaceDom(document);
+  dom.stage._detachChildrenOnInnerHTMLClear = true;
+  sandbox.state.runtime = { embedded_terminal: true };
+  sandbox.state.groups = { alpha: ['term-a'] };
+  sandbox.state.group_settings = { alpha: {} };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'term-a': { id: 'term-a', name: 'A', group: 'alpha', cell_type: 'terminal', session_id: '' },
+  };
+
+  runInContext(context, `
+    selectedTerminalId = 'term-a';
+    renderTerminalWorkspace();
+  `);
+
+  const placeholder = new FakeElement('stale-placeholder');
+  placeholder.classList.add('terminal-empty');
+  dom.stage.appendChild(placeholder);
+  dom.stage.setQuerySelector('.terminal-surface', null);
+  sandbox.state.agents['term-a'].session_id = 'sess-a';
+
+  runInContext(context, `renderTerminalWorkspace();`);
+
+  assert.equal(placeholder.parentNode, null);
+  assert.equal(dom.stage.children.includes(placeholder), false);
+  assert.equal(terminals.length, 1);
+  assert.equal(terminals[0].surface.parentNode, dom.stage);
+});
+
+test('embedded terminal stopped tab keeps unrelated cached sessions alive', () => {
+  const { context, document, sandbox, sockets, terminals } = createEmbeddedTerminalHarness({
+    loadRenderHelpers: true,
+  });
+  const dom = attachTerminalWorkspaceDom(document);
+  dom.stage._detachChildrenOnInnerHTMLClear = true;
+  sandbox.state.runtime = { embedded_terminal: true };
+  sandbox.state.global_settings = { xterm_scrollback: 10000 };
+  sandbox.state.groups = { alpha: ['term-a', 'term-b', 'term-c'] };
+  sandbox.state.group_settings = { alpha: {} };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'term-a': { id: 'term-a', name: 'A', group: 'alpha', cell_type: 'terminal', session_id: 'sess-a' },
+    'term-b': { id: 'term-b', name: 'B', group: 'alpha', cell_type: 'terminal', session_id: 'sess-b' },
+    'term-c': { id: 'term-c', name: 'C', group: 'alpha', cell_type: 'terminal', session_id: '' },
+  };
+
+  runInContext(context, `
+    selectedTerminalId = 'term-a';
+    renderTerminalWorkspace();
+  `);
+  sockets[0].onmessage({
+    data: JSON.stringify({ type: 'snapshot', session_id: 'sess-a', data: 'a scrollback' }),
+  });
+  runInContext(context, `
+    selectedTerminalId = 'term-b';
+    renderTerminalWorkspace();
+  `);
+  sockets[1].onmessage({
+    data: JSON.stringify({ type: 'snapshot', session_id: 'sess-b', data: 'b scrollback' }),
+  });
+
+  runInContext(context, `
+    selectedTerminalId = 'term-c';
+    renderTerminalWorkspace();
+  `);
+
+  assert.equal(terminals[0].disposed, undefined);
+  assert.equal(terminals[1].disposed, undefined);
+  assert.equal(sockets[0].closeCalled, undefined);
+  assert.equal(sockets[1].closeCalled, undefined);
+
+  sockets[0].onmessage({
+    data: JSON.stringify({ type: 'output', session_id: 'sess-a', data: '\nstill streaming' }),
+  });
+  runInContext(context, `
+    selectedTerminalId = 'term-a';
+    renderTerminalWorkspace();
+  `);
+
+  assert.deepEqual(terminals[0].writes, ['a scrollback', '\nstill streaming']);
+  assert.equal(terminals[0].surface.parentNode, dom.stage);
+});
+
 test('embedded terminal auto-focuses new sessions when standalone mode is active', () => {
   const { context, sockets, terminals } = createEmbeddedTerminalHarness();
   const surface = new FakeElement('surface');
