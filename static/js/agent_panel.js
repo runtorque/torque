@@ -90,6 +90,10 @@ function _agentPanelKindBadge(kind) {
   return '<span class="' + cls + '">' + _agentPanelEsc(label) + '</span>';
 }
 
+function _agentPanelAgentDisplayName(agent, fallback) {
+  return String((agent && (agent.name || agent.slug || agent.id)) || fallback || 'Unknown');
+}
+
 function _resolveFocusedAgent() {
   if (typeof focusedItemId === 'undefined' || !focusedItemId) return null;
   if (!state || !state.agents) return null;
@@ -1624,18 +1628,39 @@ function _agentPanelArchitectHiredEngineers(agent) {
     var bName = String((b && (b.name || b.slug || b.id)) || '');
     return aName.localeCompare(bName);
   });
+  var workerCount = _agentPanelHierarchyWorkerCount(group, engineers);
 
   var html = '<div class="engineers-roster">';
   html += '<div class="engineers-roster-header">';
   html += '<span class="engineers-roster-title">Hired engineers</span>';
   html += '<span class="engineers-roster-count">' + engineers.length + '</span>';
   html += '</div>';
+  html += _agentPanelHierarchyBreadcrumb([
+    {
+      role: 'architect',
+      label: _agentPanelAgentDisplayName(agent, 'Architect'),
+      count: '',
+      current: true,
+    },
+    {
+      role: 'engineer',
+      label: 'Hired engineers',
+      count: engineers.length,
+      current: false,
+    },
+    {
+      role: 'worker',
+      label: 'Workers',
+      count: workerCount,
+      current: false,
+    },
+  ]);
   if (!engineers.length) {
     html += '<div class="engineers-roster-empty">No hired engineers yet.</div>';
     html += '</div>';
     return html;
   }
-  html += '<div class="engineers-roster-list">';
+  html += '<div class="engineers-roster-list agent-panel-hierarchy-list agent-panel-hierarchy-list-architect">';
   if (typeof _agentPanelLegacyRenderEngineerTreeRows === 'function') {
     html += _agentPanelLegacyRenderEngineerTreeRows(
       group,
@@ -2405,12 +2430,60 @@ function _engineerDecisionMetaRowHtml(label, valueHtml) {
     + '</div>';
 }
 
+function _agentPanelHierarchyThemeClass(levelClass, workerLevelClass) {
+  var classes = String(levelClass || '') + ' ' + String(workerLevelClass || '');
+  if (classes.indexOf('architect-') !== -1) return 'agent-panel-hierarchy-branch-architect';
+  if (classes.indexOf('user-') !== -1 || classes.indexOf('engineer-roster-') !== -1) {
+    return 'agent-panel-hierarchy-branch-user';
+  }
+  return 'agent-panel-hierarchy-branch-generic';
+}
+
+function _agentPanelHierarchyWorkerCount(group, engineers) {
+  var count = 0;
+  engineers = Array.isArray(engineers) ? engineers : [];
+  if (typeof _engineerWorkerAgents !== 'function') return count;
+  for (var i = 0; i < engineers.length; i++) {
+    var engineer = engineers[i];
+    if (!engineer) continue;
+    count += _engineerWorkerAgents(group, engineer.id).length;
+  }
+  return count;
+}
+
+function _agentPanelHierarchyBreadcrumb(items) {
+  items = Array.isArray(items) ? items : [];
+  if (!items.length) return '';
+  var html = '<div class="agent-panel-hierarchy-breadcrumb" aria-label="Agent hierarchy">';
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i] || {};
+    if (i > 0) {
+      html += '<span class="agent-panel-hierarchy-arrow" aria-hidden="true">\u203A</span>';
+    }
+    var role = String(item.role || '').trim();
+    var crumbClass = 'agent-panel-hierarchy-crumb';
+    if (role) crumbClass += ' agent-panel-hierarchy-crumb-' + _agentPanelEsc(role);
+    if (item.current) crumbClass += ' current';
+    html += '<span class="' + crumbClass + '">';
+    if (role) {
+      html += '<span class="agent-panel-hierarchy-role">' + _agentPanelEsc(role) + '</span>';
+    }
+    html += '<span class="agent-panel-hierarchy-name">' + _agentPanelEsc(item.label || '') + '</span>';
+    if (item.count !== '' && typeof item.count !== 'undefined' && item.count !== null) {
+      html += '<span class="agent-panel-hierarchy-count">' + _agentPanelEsc(String(item.count)) + '</span>';
+    }
+    html += '</span>';
+  }
+  html += '</div>';
+  return html;
+}
+
 function _agentPanelLegacyRenderWorkerRows(workers, levelClass) {
   if (!workers.length) return '';
   var html = '';
   for (var i = 0; i < workers.length; i++) {
     var worker = workers[i];
-    html += '<div class="engineer-row ' + levelClass + '">';
+    html += '<div class="engineer-row agent-panel-hierarchy-row agent-panel-hierarchy-row-worker ' + levelClass + '">';
     html += '<div class="engineer-row-main">';
     html += '<span class="engineer-row-name">' + _esc(worker.name || worker.id || '') + '</span>';
     html += _agentPanelKindBadge('worker');
@@ -2425,11 +2498,15 @@ function _agentPanelLegacyRenderWorkerRows(workers, levelClass) {
 
 function _agentPanelLegacyRenderEngineerTreeRows(group, engineers, levelClass, workerLevelClass) {
   var html = '';
+  var themeClass = _agentPanelHierarchyThemeClass(levelClass, workerLevelClass);
   for (var i = 0; i < engineers.length; i++) {
     var engineer = engineers[i];
     var status = _engineerEngineerStatusLabel(engineer);
     var workers = _engineerWorkerAgents(group, engineer.id);
-    html += '<div class="engineer-row ' + levelClass + '">';
+    html += '<div class="agent-panel-hierarchy-branch ' + themeClass
+      + (workers.length ? ' has-workers' : '')
+      + '" data-agent-panel-hierarchy-engineer-id="' + _agentPanelAttr(engineer.id || '') + '">';
+    html += '<div class="engineer-row agent-panel-hierarchy-row agent-panel-hierarchy-row-engineer ' + levelClass + '">';
     html += '<div class="engineer-row-main">';
     html += '<span class="engineer-row-name">' + _esc(engineer.name || engineer.id || '') + '</span>';
     html += _agentPanelKindBadge('engineer');
@@ -2438,7 +2515,12 @@ function _agentPanelLegacyRenderEngineerTreeRows(group, engineers, levelClass, w
     html += '<div class="engineer-row-meta">';
     html += '<span class="engineer-row-status engineer-row-status-' + _esc(status) + '">' + _esc(status) + '</span>';
     html += '</div></div>';
-    html += _agentPanelLegacyRenderWorkerRows(workers, workerLevelClass);
+    if (workers.length) {
+      html += '<div class="agent-panel-hierarchy-children">';
+      html += _agentPanelLegacyRenderWorkerRows(workers, workerLevelClass);
+      html += '</div>';
+    }
+    html += '</div>';
   }
   return html;
 }
@@ -2599,12 +2681,14 @@ function _agentPanelLegacyRenderArchitectRoster(group) {
       html += '<div class="architect-row-body">';
       html += '<div class="architect-roster-section-head"><span class="architect-roster-section-title">Hired engineers</span><span class="architect-roster-section-count">' + hiredEngineers.length + '</span></div>';
       if (hiredEngineers.length) {
+        html += '<div class="agent-panel-hierarchy-list agent-panel-hierarchy-list-architect architect-roster-subtree">';
         html += _agentPanelLegacyRenderEngineerTreeRows(
           group,
           hiredEngineers,
           'architect-roster-level-1 architect-section-engineer-row',
           'architect-roster-level-2 architect-section-worker-row'
         );
+        html += '</div>';
       } else {
         html += '<div class="engineers-roster-empty architect-roster-empty">No hired engineers yet.</div>';
       }
@@ -2648,7 +2732,7 @@ function _agentPanelLegacyRenderEngineerRoster(group) {
     html += '</section>';
     return html;
   }
-  html += '<div class="engineers-roster-list">';
+  html += '<div class="engineers-roster-list agent-panel-hierarchy-list agent-panel-hierarchy-list-user agent-panel-hierarchy-list-rooted">';
   html += '<div class="engineer-row engineer-row-virtual-parent"><div class="engineer-row-main"><span class="engineer-row-name">User</span><span class="engineer-row-kind">owner</span></div></div>';
   html += _agentPanelLegacyRenderEngineerTreeRows(
     group,
