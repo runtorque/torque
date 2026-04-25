@@ -711,13 +711,13 @@ function _agentCardTooltipHtml(text, maxChars, className, attrs) {
 function _agentProviderMeta(provider) {
   const key = String(provider || '').trim().toLowerCase();
   if (key === 'claude-code') {
-    return { key, label: 'CC', cls: 'agent-card-provider--claude-code' };
+    return { key, label: 'Claude', cls: 'agent-card-provider--claude-code' };
   }
   if (key === 'codex') {
-    return { key, label: 'CX', cls: 'agent-card-provider--codex' };
+    return { key, label: 'Codex', cls: 'agent-card-provider--codex' };
   }
   if (!key || key === 'generic') return null;
-  return { key, label: '??', cls: 'agent-card-provider--unknown' };
+  return { key, label: key.replace(/[-_]+/g, ' '), cls: 'agent-card-provider--unknown' };
 }
 
 function _renderAgentProviderBadge(provider, extraClass) {
@@ -732,11 +732,11 @@ function _renderAgentProviderBadge(provider, extraClass) {
 }
 
 function _agentKindBadgeLabel(kind, dismissed) {
-  if (dismissed) return 'dismissed';
-  if (kind === 'architect') return 'ARCH';
-  if (kind === 'engineer') return 'ENG';
-  if (kind === 'worker') return 'W';
-  return 'AGT';
+  if (dismissed) return 'Dismissed';
+  if (kind === 'architect') return 'Architect';
+  if (kind === 'engineer') return 'Engineer';
+  if (kind === 'worker') return 'Worker';
+  return 'Agent';
 }
 
 function _agentKindBadgeClass(kind, dismissed) {
@@ -777,17 +777,17 @@ function _taskCycleState(task, agent) {
   const status = String(task.status || '').trim().toLowerCase();
   const health = String(task.health_state || '').trim().toLowerCase();
   const action = String(task.action_name || task.suggested_action || '').trim().toLowerCase();
+  const actionTail = action.split('/').filter(Boolean).pop() || action;
   if (status.indexOf('block') >= 0 || health.indexOf('block') >= 0) return 'blocked';
   if (lane === 'done') return 'done';
   if (action.indexOf('review') >= 0) return 'review';
   if (action.indexOf('fix') >= 0) return 'fix';
-  if (action.indexOf('implement') >= 0 || action.indexOf('feature/') >= 0) return 'impl';
+  if (action.indexOf('implement') >= 0 || actionTail === 'impl') return 'implementation';
   if (action) {
-    const tail = action.split('/').filter(Boolean).pop() || action;
-    return _truncateCardText(tail, 10);
+    return actionTail.replace(/[-_]+/g, ' ');
   }
-  if (lane === 'in progress') return 'impl';
-  if (lane) return lane.replace(/\s+/g, '-');
+  if (lane === 'in progress') return 'in progress';
+  if (lane) return lane.replace(/[-_]+/g, ' ');
   return 'idle';
 }
 
@@ -814,8 +814,8 @@ function _worktreeBranchShortName(branch) {
 
 function _workerBranchLabel(agent) {
   const branch = String((agent && (agent.worktree_branch || agent.current_branch)) || '').trim();
-  if (!branch) return 'wkt: —';
-  return 'wkt: ' + _worktreeBranchShortName(branch);
+  if (!branch) return 'worktree: —';
+  return 'worktree: ' + _worktreeBranchShortName(branch);
 }
 
 function _agentStatusMixClass(agent) {
@@ -963,44 +963,87 @@ function _architectJournalEntriesForCard(architectId) {
   return Array.isArray(entries) ? entries : [];
 }
 
+function _architectJournalDecisionEntriesForCard(architectId) {
+  const journals = _architectJournalEntriesForCard(architectId);
+  const decisions = [];
+  for (const entry of journals) {
+    if (String((entry && entry.type) || '').toLowerCase() !== 'decision') continue;
+    decisions.push(entry);
+  }
+  return decisions;
+}
+
+function _architectLatestJournalDecisionTs(architectId) {
+  const decisions = _architectJournalDecisionEntriesForCard(architectId);
+  let latest = 0;
+  for (const entry of decisions) {
+    latest = Math.max(
+      latest,
+      _agentCardTimestampSeconds((entry && (entry.timestamp || entry.created_at || entry.updated_at)) || 0)
+    );
+  }
+  return latest;
+}
+
 function _architectStatsForCard(architect, section) {
   const engineers = _architectEngineersForCard(architect && architect.id, section);
   const asks = _architectPendingAskTasks(architect);
   const decisions = _architectDecisionListForCard(architect && architect.id);
-  let openDecisions = 0;
+  const journalDecisions = _architectJournalDecisionEntriesForCard(architect && architect.id);
+  let decisionCount = 0;
   let latestDecisionTs = 0;
   for (const decision of decisions) {
-    const status = String((decision && decision.status) || 'proposed').toLowerCase();
-    if (!decision.archived && status !== 'accepted' && status !== 'rejected') openDecisions += 1;
+    if (!decision.archived) decisionCount += 1;
     latestDecisionTs = Math.max(
       latestDecisionTs,
       _agentCardTimestampSeconds((decision && (decision.updated_at || decision.created_at)) || 0)
     );
   }
-  let latestJournalTs = 0;
-  const journals = _architectJournalEntriesForCard(architect && architect.id);
-  for (const entry of journals) {
-    latestJournalTs = Math.max(
-      latestJournalTs,
-      _agentCardTimestampSeconds((entry && (entry.timestamp || entry.created_at || entry.updated_at)) || 0)
-    );
-  }
+  latestDecisionTs = Math.max(
+    latestDecisionTs,
+    _architectLatestJournalDecisionTs(architect && architect.id)
+  );
   return {
     engineerCount: engineers.length,
     asks,
     askCount: asks.length,
     firstAskId: asks.length ? String(asks[0].id || '') : '',
-    openDecisionCount: openDecisions,
+    decisionCount: decisionCount + journalDecisions.length,
     latestDecisionTs,
-    latestJournalTs,
   };
 }
 
 function _architectLastDecisionLabel(stats) {
   stats = stats || {};
-  if (stats.latestDecisionTs) return 'last dec ' + _agentCardCompactRelativeTime(stats.latestDecisionTs);
-  if (stats.latestJournalTs) return 'last journal ' + _agentCardCompactRelativeTime(stats.latestJournalTs);
-  return 'last dec —';
+  if (stats.latestDecisionTs) return 'last decision ' + _agentCardCompactRelativeTime(stats.latestDecisionTs);
+  return 'last decision —';
+}
+
+function _userPrincipalStatsForCard(groupName, section) {
+  const rows = section && Array.isArray(section.rows) ? section.rows : [];
+  const engineerIds = {};
+  let engineerCount = 0;
+  for (const row of rows) {
+    const engineer = row && row.engineer;
+    const id = String((engineer && engineer.id) || '').trim();
+    if (!id || engineerIds[id]) continue;
+    engineerIds[id] = true;
+    engineerCount += 1;
+  }
+  let backlogCount = 0;
+  if (state && state.board_tasks) {
+    const group = String(groupName || '').trim();
+    for (const taskId in state.board_tasks) {
+      const task = state.board_tasks[taskId];
+      if (!task) continue;
+      if (group && String(task.group || '').trim() !== group) continue;
+      if (String(task.lane || '').trim().toLowerCase() !== 'backlog') continue;
+      const assignedEngineerId = String(task.assigned_engineer_id || '').trim();
+      if (assignedEngineerId && engineerCount && !engineerIds[assignedEngineerId]) continue;
+      backlogCount += 1;
+    }
+  }
+  return { engineerCount, backlogCount };
 }
 
 function _renderPrincipalUserCard(groupName, section, selectedPrincipalId) {
@@ -1011,6 +1054,7 @@ function _renderPrincipalUserCard(groupName, section, selectedPrincipalId) {
   else classes.push('dim');
   classes.push(_principalCardFocusedClass(navId).trim());
   const groupArg = _jsStringAttr(groupName);
+  const stats = _userPrincipalStatsForCard(groupName, section);
   return '<button type="button" class="' + esc(classes.filter(Boolean).join(' ')) + '"'
     + ' data-principal-card="user"'
     + ' data-principal-id=""'
@@ -1023,10 +1067,12 @@ function _renderPrincipalUserCard(groupName, section, selectedPrincipalId) {
     + '<span class="principal-card-status idle" aria-hidden="true"></span>'
     + '<div class="principal-card-body">'
     + '<span class="principal-card-name">User</span>'
-    + '<span class="principal-card-line principal-card-line--empty">&nbsp;</span>'
+    + '<span class="principal-card-line principal-card-line--stats">'
+      + esc(stats.engineerCount + ' engineers · ' + stats.backlogCount + ' backlog')
+    + '</span>'
     + '<span class="principal-card-line principal-card-line--empty">&nbsp;</span>'
     + '</div>'
-    + '<span class="principal-card-kind principal-card-kind--owner">OWNER</span>'
+    + '<span class="principal-card-kind principal-card-kind--owner">Owner</span>'
     + '</button>';
 }
 
@@ -1045,13 +1091,6 @@ function _renderPrincipalArchitectCard(groupName, section, selectedPrincipalId) 
   const idArg = _jsStringAttr(id);
   const statusCls = typeof agentStatusClass === 'function' ? agentStatusClass(architect) : '';
   const stats = _architectStatsForCard(architect, section);
-  const askArg = _jsStringAttr(stats.firstAskId);
-  const askHtml = stats.askCount > 0 && stats.firstAskId
-    ? '<button type="button" class="principal-card-ask-link"'
-      + ' data-focus-key="principal-ask:' + esc(id) + ':' + esc(stats.firstAskId) + '"'
-      + ' onclick="event.stopPropagation();if(typeof boardNavigateToTask===\'function\'){boardNavigateToTask(' + askArg + ');}"'
-      + ' aria-label="Jump to pending ask">' + esc(stats.askCount + 'asks') + '</button>'
-    : '<span class="principal-card-ask-count">' + esc(stats.askCount + 'asks') + '</span>';
   const digestSettings = (state && state.agent_digest_settings)
     ? state.agent_digest_settings[id] : null;
   const digestPaused = !!(digestSettings && digestSettings.paused);
@@ -1084,12 +1123,12 @@ function _renderPrincipalArchitectCard(groupName, section, selectedPrincipalId) 
     + '<div class="principal-card-body">'
     + '<span class="principal-card-name">' + esc(displayName) + '</span>'
     + '<span class="principal-card-line principal-card-line--stats">'
-      + esc(stats.engineerCount + 'eng · ') + askHtml + esc(' · ' + stats.openDecisionCount + 'dec')
+      + esc(stats.engineerCount + ' engineers · ' + stats.decisionCount + ' decisions')
     + '</span>'
     + '<span class="principal-card-line">' + esc(_architectLastDecisionLabel(stats)) + '</span>'
     + '</div>'
     + _renderAgentProviderBadge(architect.agent_type, 'principal-card-provider')
-    + '<span class="principal-card-kind principal-card-kind--architect">ARCH</span>'
+    + '<span class="principal-card-kind principal-card-kind--architect">Architect</span>'
     + '</div>';
 }
 
@@ -2466,7 +2505,7 @@ function _renderWorkerCardBody(a) {
   html += '<div class="agent-card-line cell-worker-branch">'
     + _agentCardTooltipHtml(branch, 18, 'cell-worker-branch-name', 'data-worktree-branch="' + esc(a.worktree_branch || a.current_branch || '') + '"')
     + '</div>';
-  html += '<div class="agent-card-line cell-worker-activity">' + esc(last) + '</div>';
+  html += '<div class="agent-card-line cell-worker-activity">' + esc('last action ' + last) + '</div>';
   html += '</div>';
   return html;
 }
@@ -2483,7 +2522,7 @@ function _renderEngineerCardBody(a, askingText) {
     + '<span class="agent-card-state-count">' + esc(String(workers.length) + ' ' + workerLabel) + '</span>'
     + '</div>';
   html += '<div class="agent-card-line cell-engineer-queue">'
-    + esc('q:' + queueDepth + ' · last ' + last)
+    + esc('queue: ' + queueDepth + ' · last action ' + last)
     + '</div>';
   if (askingText) {
     html += '<div class="agent-card-line cell-engineer-ask" title="' + esc(askingText) + '">awaiting input</div>';
@@ -2497,7 +2536,7 @@ function _renderArchitectCellBody(a) {
   let html = '<div class="agent-card-body cell-body cell-body--architect">';
   html += '<div class="agent-card-line cell-name">' + esc(_agentDisplayName(a)) + '</div>';
   html += '<div class="agent-card-line cell-architect-stats">'
-    + esc(stats.engineerCount + 'eng · ' + stats.askCount + 'asks · ' + stats.openDecisionCount + 'dec')
+    + esc(stats.engineerCount + ' engineers · ' + stats.decisionCount + ' decisions')
     + '</div>';
   html += '<div class="agent-card-line cell-architect-last">' + esc(_architectLastDecisionLabel(stats)) + '</div>';
   html += '</div>';
@@ -2513,7 +2552,7 @@ function _renderGenericAgentCardBody(a) {
   } else {
     html += '<div class="agent-card-line cell-task cell-task-empty">&nbsp;</div>';
   }
-  html += '<div class="agent-card-line cell-generic-activity">' + esc(_agentCardCompactRelativeTime(_agentCardLastActionValue(a))) + '</div>';
+  html += '<div class="agent-card-line cell-generic-activity">' + esc('last action ' + _agentCardCompactRelativeTime(_agentCardLastActionValue(a))) + '</div>';
   html += '</div>';
   return html;
 }

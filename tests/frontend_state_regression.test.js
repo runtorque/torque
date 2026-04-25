@@ -8183,7 +8183,32 @@ test('ws architect_journal_append delta invalidates the engineer surface and rer
     jsonValue(context, 'state.architect_journals["arch-1"][0].id'),
     'j-1'
   );
+  assert.equal(jsonValue(context, 'renderCalls.main'), 0);
   assert.equal(jsonValue(context, 'renderCalls.engineer'), 1);
+});
+
+test('ws architect decision journal append creates journal bucket and rerenders main cards', () => {
+  const { context } = createWsRenderHarness();
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'architect_journal_append',
+      id: 'j-decision',
+      architect_id: 'arch-1',
+      type: 'decision',
+      entry: 'Ratified card layout',
+      timestamp: 1712345800,
+    }],
+  });
+
+  assert.equal(jsonValue(context, 'state.architect_journals["arch-1"].length'), 1);
+  assert.equal(
+    jsonValue(context, 'state.architect_journals["arch-1"][0].id'),
+    'j-decision'
+  );
+  assert.equal(jsonValue(context, 'renderCalls.main'), 1);
+  assert.equal(jsonValue(context, 'renderCalls.engineer'), 0);
 });
 
 test('renderAgentPanel preserves Architect Journal scroll anchor when a journal delta inserts above', () => {
@@ -10538,17 +10563,17 @@ test('renderAgentCell shows per-engineer and architect digest pause controls wit
   assert.match(engineerNamedEngineerHtml, /^<div class="cell engineer"/);
   assert.match(workerHtml, /class="cell-engineer-toggle running"/);
   assert.match(workerHtml, /Pause event delivery/);
-  assert.match(workerHtml, /class="agent-card-kind cell-worker-badge">W<\/div>/);
+  assert.match(workerHtml, /class="agent-card-kind cell-worker-badge">Worker<\/div>/);
   assert.doesNotMatch(workerHtml, /cell-engineer-badge|cell-architect-badge/);
   assert.match(engineerHtml, /^<div class="cell engineer"/);
-  assert.match(engineerHtml, /class="agent-card-kind cell-engineer-badge">ENG<\/div>/);
+  assert.match(engineerHtml, /class="agent-card-kind cell-engineer-badge">Engineer<\/div>/);
   assert.match(engineerHtml, /class="cell-engineer-toggle running"/);
   assert.match(engineerHtml, /toggleDigestPauseForAgent\(decodeURIComponent\(&#39;eng-1&#39;\)\)/);
   assert.match(engineerHtml, /Pause event delivery/);
   assert.doesNotMatch(engineerHtml, /Pause Engineer event delivery/);
   assert.match(architectHtml, /^<div class="cell architect"/);
   assert.doesNotMatch(architectHtml, /^<div class="[^"]*\bengineer(?:\b|-)/);
-  assert.match(architectHtml, /class="agent-card-kind cell-architect-badge">ARCH<\/div>/);
+  assert.match(architectHtml, /class="agent-card-kind cell-architect-badge">Architect<\/div>/);
   assert.match(architectHtml, /class="cell-engineer-toggle running"/);
   assert.match(architectHtml, /toggleDigestPauseForAgent\(decodeURIComponent\(&#39;arch-1&#39;\)\)/);
   assert.match(architectHtml, /Pause event delivery/);
@@ -10699,9 +10724,14 @@ test('agent kind badges render in the bottom-right opposite the provider badge',
 
   assert.match(providerRule, /bottom:\s*2px;/);
   assert.match(providerRule, /left:\s*3px;/);
+  assert.match(providerRule, /color:\s*var\(--text-dim\);/);
+  assert.match(providerRule, /font-weight:\s*500;/);
+  assert.doesNotMatch(providerRule, /background:/);
+  assert.doesNotMatch(providerRule, /border:/);
   assert.match(engineerRule, /bottom:\s*2px;/);
   assert.match(engineerRule, /right:\s*3px;/);
   assert.doesNotMatch(engineerRule, /left:\s*3px;/);
+  assert.doesNotMatch(engineerRule, /text-transform:\s*uppercase/);
   assert.match(architectRule, /bottom:\s*2px;/);
   assert.match(architectRule, /right:\s*3px;/);
   assert.doesNotMatch(architectRule, /left:\s*3px;/);
@@ -12905,7 +12935,7 @@ test('principals row renders User + architects + + New Architect anchor', () => 
   );
   assert.match(
     main.innerHTML,
-    /principal-card--architect[\s\S]*class="principal-card-kind principal-card-kind--architect">ARCH<\/span>/
+    /principal-card--architect[\s\S]*class="principal-card-kind principal-card-kind--architect">Architect<\/span>/
   );
   assert.doesNotMatch(main.innerHTML, /class="principal-card-kind[^"]*">arch<\/span>/);
   // The principals row precedes the engineer grid.
@@ -12998,6 +13028,10 @@ test('hierarchical creation controls render shared quarter-height ghost-card cla
   assert.match(css, /\.ghost-card--engineer\s*\{[\s\S]*width:\s*var\(--agent-engineer-column-width\)/);
   assert.match(css, /\.ghost-card--worker\s*\{[\s\S]*flex:\s*0 1 var\(--agent-grid-card-basis\)/);
   assert.match(css, /body\.runtime-embedded \.agent-grid\s*\{[\s\S]*--agent-grid-card-height:\s*90px;/);
+  assert.match(css, /\.agent-grid\s*\{[\s\S]*--agent-worker-card-height:\s*96px;/);
+  assert.match(css, /body\.runtime-embedded \.agent-grid\s*\{[\s\S]*--agent-worker-card-height:\s*96px;/);
+  assert.match(css, /body\.runtime-embedded \.cell\s*\{[^}]*padding:\s*13px 6px 12px;/);
+  assert.match(css, /body\.runtime-embedded \.cell\.worker\s*\{[^}]*min-height:\s*var\(--agent-worker-card-height,\s*96px\);/);
 });
 
 test('classic runtime keeps the shared left rail filtered to the current window', () => {
@@ -14154,6 +14188,9 @@ test('task delta updates visible worker cycle state while preserving main-grid f
     });
   `);
 
+  assert.match(main.innerHTML, /task-1 · implementation/);
+  assert.doesNotMatch(main.innerHTML, /task-1 · impl<\/div>/);
+
   currentButton.value = 'close draft';
   currentButton.selectionStart = 2;
   currentButton.selectionEnd = 7;
@@ -14178,7 +14215,7 @@ test('task delta updates visible worker cycle state while preserving main-grid f
 
   assert.equal(renderCount, 2);
   assert.match(main.innerHTML, /task-1 · review/);
-  assert.doesNotMatch(main.innerHTML, /task-1 · impl/);
+  assert.doesNotMatch(main.innerHTML, /task-1 · impl<\/div>/);
   assert.equal(currentButton.focused, true);
   assert.equal(currentButton.value, 'close draft');
   assert.equal(currentButton.selectionStart, 2);

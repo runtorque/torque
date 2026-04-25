@@ -1244,12 +1244,18 @@ function agentPanelReceiveArchitectJournal(data) {
     state.architect_journals[architectId],
     incomingEntries
   );
+  var hasDecisionEntry = incomingEntries.some(function(entry) {
+    return String((entry && entry.type) || '').toLowerCase() === 'decision';
+  });
   _agentPanelArchitectJournalExhaustedById[architectId] =
     incomingEntries.length < responseLimit;
   _agentPanelArchitectJournalLoadingById[architectId] = false;
   delete _agentPanelArchitectJournalInFlightLimitById[architectId];
   _agentPanelArchitectJournalLastFetchById[architectId] = Date.now();
   _agentPanelInvalidateArchitectJournalCache(architectId);
+  if (hasDecisionEntry && typeof renderInvalidatedSurfaces === 'function') {
+    renderInvalidatedSurfaces({ main: true });
+  }
   var focused = _resolveFocusedAgent();
   if (focused && String(focused.id || '') === architectId
       && _agentPanelKind(focused) === 'architect'

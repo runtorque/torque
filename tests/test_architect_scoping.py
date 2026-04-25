@@ -2632,12 +2632,17 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         architect = self._add_architect("arch-1", "Architect")
         other_architect = self._add_architect("arch-2", "Other Architect")
         with mock.patch.object(self.state_mod, "DATA_DIR", Path(self.tmp.name)):
-            with mock.patch("time.time", side_effect=[100.0, 200.0, 300.0, 400.0]):
+            with mock.patch(
+                "time.time",
+                side_effect=[100.0, 200.0, 300.0, 400.0, 600.0, 700.0],
+            ):
                 for entry_type, entry in (
                     ("checkpoint", "Old checkpoint"),
                     ("decision", "Use the compact rollup"),
                     ("checkpoint", "New checkpoint"),
                     ("observation", "Not part of self-state"),
+                    ("decision", "Latest journal decision"),
+                    ("observation", "Newer observation, not a decision"),
                 ):
                     write_text, write_error = await self._call(
                         "architect_journal",
@@ -2660,7 +2665,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
                 "title": "New decision",
                 "rationale": "Latest recorded direction",
                 "created_at": 250,
-                "updated_at": 250,
+                "updated_at": 550,
             })
             self.state.save_decision({
                 "id": "decision-other",
@@ -2680,9 +2685,9 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 json.loads(text)["architect_self_state"],
                 {
-                    "last_journal_entry_at": 400.0,
-                    "last_decision_at": 250.0,
-                    "journal_entry_count": 4,
+                    "last_journal_entry_at": 700.0,
+                    "last_decision_at": 600.0,
+                    "journal_entry_count": 6,
                     "decision_count": 2,
                 },
             )
