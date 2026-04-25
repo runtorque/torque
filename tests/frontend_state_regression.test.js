@@ -9465,7 +9465,90 @@ test('renderAgentPanel preserves the selected Events tab across rerenders', () =
   context.renderAgentPanel();
 
   assert.match(panel.innerHTML, /id="agent-panel-tab-events" class="agent-panel-tab active"/);
-  assert.match(panel.innerHTML, /Already sent to Engineer One/);
+  assert.match(panel.innerHTML, /Already digested to Engineer One/);
+});
+
+test('engineer Events inner Lifecycle tab survives outer tab switches and rerenders', () => {
+  const { context, document } = createEngineerHarness();
+  const panel = document.register('panel-agent');
+  panel.querySelector = function() { return null; };
+  context.state.agents = {
+    'eng-1': {
+      id: 'eng-1',
+      name: 'Engineer One',
+      group: 'alpha',
+      kind: 'engineer',
+      cell_type: 'agent',
+    },
+  };
+  context.focusedItemId = 'eng-1';
+  context.state.agent_digest_settings = {
+    'eng-1': { agent_id: 'eng-1', paused: false },
+  };
+  context.state.digest_buffer_stats = {
+    'eng-1': {
+      agent_id: 'eng-1',
+      group: 'alpha',
+      buffered_events: 1,
+      next_push_in: 30,
+      queued_events: [
+        { id: 3, kind: 'task_completed', message: 'Queued event', timestamp: 10 },
+      ],
+      manual_flush_requested: false,
+    },
+  };
+  context.state.digest_sent_events = {
+    'eng-1': [
+      { id: 2, kind: 'task_completed', message: 'Sent event', timestamp: 5, delivered_at: 8 },
+    ],
+  };
+  context.state.panel_events = [
+    {
+      id: 42,
+      kind: 'status_changed',
+      cell_id: 'eng-1',
+      group: 'alpha',
+      message: 'Engineer lifecycle row',
+      timestamp: 20,
+    },
+  ];
+  runInContext(context, `_agentPanelLastSelectedTabByKind.engineer = 'events';`);
+
+  context.renderAgentPanel();
+  assert.match(panel.innerHTML, /class="agent-panel-events-subtabs" role="tablist"/);
+  assert.match(
+    panel.innerHTML,
+    /id="agent-panel-events-subtab-inbox" class="agent-panel-events-subtab active"[^>]*data-agent-panel-events-inner-tab="inbox"[^>]*aria-selected="true"/,
+  );
+  assert.ok(
+    panel.innerHTML.indexOf('agent-panel-events-subtabs') < panel.innerHTML.indexOf('agent-panel-events-toolbar'),
+    'inner Events subtabs render above the Inbox toolbar',
+  );
+  assert.match(panel.innerHTML, /Queued for next digest/);
+  assert.doesNotMatch(panel.innerHTML, /Engineer lifecycle row/);
+
+  runInContext(context, `agentPanelSelectEventsInnerTab('lifecycle')`);
+  assert.match(
+    panel.innerHTML,
+    /id="agent-panel-events-subtab-lifecycle" class="agent-panel-events-subtab active"[^>]*data-agent-panel-events-inner-tab="lifecycle"[^>]*aria-selected="true"/,
+  );
+  assert.match(panel.innerHTML, /Cell events/);
+  assert.match(panel.innerHTML, /Engineer lifecycle row/);
+  assert.doesNotMatch(panel.innerHTML, /Queued for next digest/);
+
+  runInContext(context, `agentPanelSelectTab('worklog')`);
+  assert.match(panel.innerHTML, /id="agent-panel-tab-worklog" class="agent-panel-tab active"/);
+  context.renderAgentPanel();
+  runInContext(context, `agentPanelSelectTab('events')`);
+  context.renderAgentPanel();
+
+  assert.match(panel.innerHTML, /id="agent-panel-tab-events" class="agent-panel-tab active"/);
+  assert.match(
+    panel.innerHTML,
+    /id="agent-panel-events-subtab-lifecycle" class="agent-panel-events-subtab active"[^>]*data-agent-panel-events-inner-tab="lifecycle"[^>]*aria-selected="true"/,
+  );
+  assert.match(panel.innerHTML, /Engineer lifecycle row/);
+  assert.doesNotMatch(panel.innerHTML, /Queued for next digest/);
 });
 
 test('agent Events digest queue and countdown update from WebSocket deltas', () => {
@@ -9943,7 +10026,10 @@ test('renderAgentPanel shows workflow breach events in engineer cell history', (
       timestamp: 10,
     },
   ];
-  runInContext(context, `_agentPanelLastSelectedTabByKind.engineer = 'events';`);
+  runInContext(context, `
+    _agentPanelLastSelectedTabByKind.engineer = 'events';
+    _agentPanelEventsInnerTabByAgentId['eng-1'] = 'lifecycle';
+  `);
 
   context.renderAgentPanel();
 
@@ -9996,7 +10082,7 @@ test('renderAgentPanel preserves the selected architect Events tab across rerend
   context.renderAgentPanel();
 
   assert.match(panel.innerHTML, /id="agent-panel-tab-events" class="agent-panel-tab active"/);
-  assert.match(panel.innerHTML, /Already sent to Architect One/);
+  assert.match(panel.innerHTML, /Already digested to Architect One/);
 });
 
 test('renderAgentPanel preserves the selected Worklog tab across rerenders', () => {
