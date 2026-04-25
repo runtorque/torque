@@ -13021,18 +13021,18 @@ test('hierarchical creation controls render shared quarter-height ghost-card cla
   assert.match(main.innerHTML, /class="ghost-card ghost-card--architect[\s\S]*\+ New Architect/);
 
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
-  assert.match(css, /--agent-grid-card-height:\s*126px;/);
+  assert.match(css, /--agent-grid-card-height:\s*96px;/);
   assert.match(css, /--agent-grid-card-basis:\s*var\(--agent-engineer-column-width\);/);
   assert.match(css, /--agent-ghost-card-height:\s*calc\(var\(--agent-grid-card-height\) \/ 4\);/);
   assert.match(css, /\.ghost-card\s*\{[\s\S]*height:\s*var\(--agent-ghost-card-height\)/);
   assert.match(css, /\.ghost-card--architect\s*\{[\s\S]*width:\s*var\(--agent-architect-column-width\)/);
   assert.match(css, /\.ghost-card--engineer\s*\{[\s\S]*width:\s*var\(--agent-engineer-column-width\)/);
   assert.match(css, /\.ghost-card--worker\s*\{[\s\S]*flex:\s*0 1 var\(--agent-grid-card-basis\)/);
-  assert.match(css, /body\.runtime-embedded \.agent-grid\s*\{[\s\S]*--agent-grid-card-height:\s*132px;/);
+  assert.match(css, /body\.runtime-embedded \.agent-grid\s*\{[\s\S]*--agent-grid-card-height:\s*108px;/);
   assert.match(css, /\.agent-grid\s*\{[\s\S]*--agent-worker-card-height:\s*var\(--agent-card-height\);/);
   assert.match(css, /body\.runtime-embedded \.agent-grid\s*\{[\s\S]*--agent-worker-card-height:\s*var\(--agent-card-height\);/);
-  assert.match(css, /body\.runtime-embedded \.cell\s*\{[^}]*padding:\s*13px 6px 12px;/);
-  assert.match(css, /body\.runtime-embedded \.cell\.worker\s*\{[^}]*min-height:\s*var\(--agent-card-height,\s*132px\);/);
+  assert.match(css, /body\.runtime-embedded \.cell\s*\{[^}]*padding:\s*22px 6px 10px;/);
+  assert.match(css, /body\.runtime-embedded \.cell\.worker\s*\{[^}]*min-height:\s*var\(--agent-card-height,\s*108px\);/);
 });
 
 test('agents-grid v1.6 uses one-line metrics, action threshold labels, empty-row reclaim, and preserves scroll on rerender', () => {

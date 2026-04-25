@@ -248,7 +248,7 @@ body.runtime-embedded #standalone-float-layer {
      can also resolve the architect column width. */
   --agent-architect-column-width: 77px;
   --agent-engineer-column-width: 77px;
-  --agent-card-height: 126px;
+  --agent-card-height: 96px;
   --agent-user-card-height: 74px;
   --agent-principal-card-height: var(--agent-card-height);
   --agent-engineer-card-height: var(--agent-card-height);
@@ -257,7 +257,7 @@ body.runtime-embedded #standalone-float-layer {
 body.runtime-embedded .group-body-inner {
   --agent-architect-column-width: 106px;
   --agent-engineer-column-width: 106px;
-  --agent-card-height: 132px;
+  --agent-card-height: 108px;
   --agent-user-card-height: 80px;
   --agent-principal-card-height: var(--agent-card-height);
   --agent-engineer-card-height: var(--agent-card-height);
@@ -636,7 +636,7 @@ body.runtime-embedded .terminal-empty {
   --agent-grid-card-basis: var(--agent-engineer-column-width);
   --agent-grid-card-min: var(--agent-engineer-column-width);
   --agent-grid-card-max: var(--agent-engineer-column-width);
-  --agent-grid-card-height: 126px;
+  --agent-grid-card-height: 96px;
   --agent-card-height: var(--agent-grid-card-height);
   --agent-user-card-height: 74px;
   --agent-principal-card-height: var(--agent-card-height);
@@ -743,7 +743,7 @@ body.runtime-embedded .terminal-empty {
 }
 .engineer-row-workers {
   flex: 1 1 auto;
-  min-height: var(--agent-worker-card-height, 126px);
+  min-height: var(--agent-worker-card-height, 96px);
 }
 .engineer-row-workers:empty {
   min-height: 0;
@@ -884,8 +884,10 @@ body.runtime-embedded .terminal-empty {
   justify-content: center;
   gap: 1px;
   width: var(--agent-architect-column-width);
-  min-height: var(--agent-principal-card-height, 126px);
-  padding: 13px 6px 12px;
+  min-height: var(--agent-principal-card-height, 96px);
+  /* Top padding clears the 16px-tall absolute-positioned controls (top:2 + 16
+     = y:18) so the name doesn't collide with the close + pause buttons. */
+  padding: 22px 6px 10px;
   box-sizing: border-box;
   background: color-mix(in srgb, var(--bg-cell) 68%, transparent);
   border: 1px solid color-mix(in srgb, var(--border) 66%, transparent);
@@ -899,6 +901,9 @@ body.runtime-embedded .terminal-empty {
 }
 .principal-card--user {
   min-height: var(--agent-user-card-height, 74px);
+  /* User card has no controls, so it doesn't need the controls-clearance
+     padding-top that the other principal cards use. */
+  padding-top: 10px;
 }
 .principal-card.dim:hover,
 .principal-card.dim:focus-visible {
@@ -919,8 +924,8 @@ body.runtime-embedded .terminal-empty {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  justify-content: space-between;
-  gap: 1px;
+  justify-content: flex-start;
+  gap: 4px;
   min-width: 0;
   min-height: 0;
   flex: 1 1 auto;
@@ -997,11 +1002,11 @@ body.runtime-embedded .terminal-empty {
      own row preserves the populated principal-card height instead of collapsing
      to the short ghost-card height. (LOOM:209) */
   height: auto;
-  min-height: var(--agent-card-height, 126px);
+  min-height: var(--agent-card-height, 96px);
 }
 @media (max-width: 400px) {
   .principal-card-new {
-    min-height: var(--agent-card-height, 126px);
+    min-height: var(--agent-card-height, 96px);
   }
 }
 .principal-card-controls {
@@ -1073,7 +1078,7 @@ body.runtime-embedded .terminal-empty {
     padding: 3px 6px 5px;
   }
   .principal-card {
-    min-height: var(--agent-card-height, 126px);
+    min-height: var(--agent-card-height, 96px);
     padding: 12px 5px 11px;
   }
   .principal-card--user {
@@ -1219,13 +1224,15 @@ body.runtime-embedded .terminal-empty {
   flex-direction: column;
   align-items: stretch;
   justify-content: center;
-  padding: 13px 6px 12px;
+  /* Top padding clears the absolute-positioned cell-header-controls (16px tall
+     at top:2 → y:18) so the name doesn't collide with close/pause buttons. */
+  padding: 22px 6px 10px;
   background: var(--bg-cell);
   border: 1px solid transparent;
   border-radius: var(--radius);
   cursor: pointer;
   transition: background .15s, border-color .15s, box-shadow .15s;
-  min-height: var(--agent-card-height, 126px);
+  min-height: var(--agent-card-height, 96px);
   box-sizing: border-box;
 }
 .cell:hover { background: var(--bg-hover); }
@@ -1259,13 +1266,13 @@ body.runtime-embedded .terminal-empty {
   color: var(--text-dim);
 }
 .cell.worker {
-  min-height: var(--agent-card-height, 126px);
+  min-height: var(--agent-card-height, 96px);
 }
 .cell.architect {
-  min-height: var(--agent-card-height, 126px);
+  min-height: var(--agent-card-height, 96px);
 }
 .cell.engineer {
-  min-height: var(--agent-card-height, 126px);
+  min-height: var(--agent-card-height, 96px);
 }
 .cell-engineer-ask {
   font-size: 8px;
@@ -2094,7 +2101,7 @@ body.runtime-embedded .agent-grid {
   --agent-grid-card-basis: var(--agent-engineer-column-width);
   --agent-grid-card-min: var(--agent-engineer-column-width);
   --agent-grid-card-max: var(--agent-engineer-column-width);
-  --agent-grid-card-height: 132px;
+  --agent-grid-card-height: 108px;
   --agent-card-height: var(--agent-grid-card-height);
   --agent-user-card-height: 80px;
   --agent-principal-card-height: var(--agent-card-height);
@@ -2111,19 +2118,20 @@ body.runtime-embedded .ghost-card--worker {
 }
 body.runtime-embedded .agent-section-user-card,
 body.runtime-embedded .cell {
-  min-height: var(--agent-card-height, 132px);
+  min-height: var(--agent-card-height, 108px);
 }
 body.runtime-embedded .engineer-row-workers {
-  min-height: var(--agent-card-height, 132px);
+  min-height: var(--agent-card-height, 108px);
 }
 body.runtime-embedded .cell {
-  padding: 13px 6px 12px;
+  /* Match toolbelt-mode .cell padding-top to clear controls. */
+  padding: 22px 6px 10px;
 }
 body.runtime-embedded .cell.worker {
-  min-height: var(--agent-card-height, 132px);
+  min-height: var(--agent-card-height, 108px);
 }
 body.runtime-embedded .cell.engineer {
-  min-height: var(--agent-card-height, 132px);
+  min-height: var(--agent-card-height, 108px);
 }
 body.runtime-embedded .principal-card--user,
 body.runtime-embedded .agent-section-user-card {

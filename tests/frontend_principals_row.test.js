@@ -195,7 +195,7 @@ test('principal-card-new CSS preserves dimensions when wrapped (LOOM:209 regress
   assert.ok(newCardRule, '.principal-card-new rule exists in style.css');
   assert.match(newCardRule[0], /height:\s*auto/,
     '.principal-card-new overrides .ghost-card height with `height: auto`');
-  assert.match(newCardRule[0], /min-height:\s*var\(--agent-card-height,\s*126px\)/,
+  assert.match(newCardRule[0], /min-height:\s*var\(--agent-card-height,\s*96px\)/,
     '.principal-card-new sets min-height from the shared non-user card height');
 });
 
@@ -223,7 +223,7 @@ test('agent card density CSS uses taller narrower cards in classic and runtime-e
   const runtimeCellPaddingRule = Array.from(
     css.matchAll(/^body\.runtime-embedded \.cell\s*\{[^}]*\}/gm),
     (match) => match[0],
-  ).find((rule) => /padding:\s*13px 6px 12px;/.test(rule));
+  ).find((rule) => /padding:\s*22px 6px 10px;/.test(rule));
   const runtimeWorkerCellRule = css.match(/body\.runtime-embedded \.cell\.worker\s*\{[^}]*\}/);
   const runtimeWorkerRowRule = css.match(/body\.runtime-embedded \.engineer-row-workers\s*\{[^}]*\}/);
 
@@ -245,7 +245,7 @@ test('agent card density CSS uses taller narrower cards in classic and runtime-e
   assert.match(gridRule[0], /--agent-architect-column-width:\s*77px;/);
   assert.match(gridRule[0], /--agent-engineer-column-width:\s*77px;/);
   assert.match(gridRule[0], /--agent-grid-card-basis:\s*var\(--agent-engineer-column-width\);/);
-  assert.match(gridRule[0], /--agent-grid-card-height:\s*126px;/);
+  assert.match(gridRule[0], /--agent-grid-card-height:\s*96px;/);
   assert.match(gridRule[0], /--agent-card-height:\s*var\(--agent-grid-card-height\);/);
   assert.match(gridRule[0], /--agent-user-card-height:\s*74px;/);
   assert.match(gridRule[0], /--agent-principal-card-height:\s*var\(--agent-card-height\);/);
@@ -255,26 +255,26 @@ test('agent card density CSS uses taller narrower cards in classic and runtime-e
   assert.match(workerFlexRule[0], /min-width:\s*var\(--agent-grid-card-min\);/);
   assert.match(workerFlexRule[0], /max-width:\s*var\(--agent-grid-card-max\);/);
   assert.match(principalRule[0], /width:\s*var\(--agent-architect-column-width\);/);
-  assert.match(principalRule[0], /min-height:\s*var\(--agent-principal-card-height,\s*126px\);/);
+  assert.match(principalRule[0], /min-height:\s*var\(--agent-principal-card-height,\s*96px\);/);
   assert.match(userPrincipalRule[0], /min-height:\s*var\(--agent-user-card-height,\s*74px\);/);
-  assert.match(cellRule[0], /min-height:\s*var\(--agent-card-height,\s*126px\);/);
-  assert.match(cellRule[0], /padding:\s*13px 6px 12px;/);
-  assert.match(architectCellRule, /min-height:\s*var\(--agent-card-height,\s*126px\);/);
-  assert.match(engineerCellRule, /min-height:\s*var\(--agent-card-height,\s*126px\);/);
-  assert.match(workerCellRule[0], /min-height:\s*var\(--agent-card-height,\s*126px\);/);
-  assert.match(workerRowRule[0], /min-height:\s*var\(--agent-worker-card-height,\s*126px\);/);
+  assert.match(cellRule[0], /min-height:\s*var\(--agent-card-height,\s*96px\);/);
+  assert.match(cellRule[0], /padding:\s*22px 6px 10px;/);
+  assert.match(architectCellRule, /min-height:\s*var\(--agent-card-height,\s*96px\);/);
+  assert.match(engineerCellRule, /min-height:\s*var\(--agent-card-height,\s*96px\);/);
+  assert.match(workerCellRule[0], /min-height:\s*var\(--agent-card-height,\s*96px\);/);
+  assert.match(workerRowRule[0], /min-height:\s*var\(--agent-worker-card-height,\s*96px\);/);
   assert.match(runtimeGridRule[0], /--agent-architect-column-width:\s*106px;/);
   assert.match(runtimeGridRule[0], /--agent-engineer-column-width:\s*106px;/);
   assert.match(runtimeGridRule[0], /--agent-grid-card-basis:\s*var\(--agent-engineer-column-width\);/);
-  assert.match(runtimeGridRule[0], /--agent-grid-card-height:\s*132px;/);
+  assert.match(runtimeGridRule[0], /--agent-grid-card-height:\s*108px;/);
   assert.match(runtimeGridRule[0], /--agent-user-card-height:\s*80px;/);
-  assert.match(runtimeCellHeightRule[0], /min-height:\s*var\(--agent-card-height,\s*132px\);/);
-  assert.match(runtimeCellPaddingRule, /padding:\s*13px 6px 12px;/);
-  assert.match(runtimeWorkerCellRule[0], /min-height:\s*var\(--agent-card-height,\s*132px\);/);
-  assert.match(runtimeWorkerRowRule[0], /min-height:\s*var\(--agent-card-height,\s*132px\);/);
+  assert.match(runtimeCellHeightRule[0], /min-height:\s*var\(--agent-card-height,\s*108px\);/);
+  assert.match(runtimeCellPaddingRule, /padding:\s*22px 6px 10px;/);
+  assert.match(runtimeWorkerCellRule[0], /min-height:\s*var\(--agent-card-height,\s*108px\);/);
+  assert.match(runtimeWorkerRowRule[0], /min-height:\s*var\(--agent-card-height,\s*108px\);/);
 
-  assert.doesNotMatch(css, /--agent-architect-column-width:\s*96px;/);
   assert.doesNotMatch(css, /--agent-architect-column-width:\s*132px;/);
+  assert.doesNotMatch(css, /--agent-architect-column-width:\s*96px;/);
 });
 
 test('default (empty) selected_principal_id filters grid to user-owned engineers', () => {
