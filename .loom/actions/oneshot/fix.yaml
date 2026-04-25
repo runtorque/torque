@@ -6,14 +6,6 @@ agent:
   tab_color: "#f85149"
 
 implementation_depth: true
-transitions:
-  - action: feature/review
-    when: fix diff exceeded review gate threshold
-    loc_gate:
-      ship_direct_max: 50
-      review_default_above: 150
-      self_review_bypass_allowed: false
-    status: "On Review"
 
 prompt: |
   {% if loom.context.is_clean %}
