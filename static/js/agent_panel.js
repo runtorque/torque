@@ -1193,7 +1193,7 @@ function _agentPanelRequestArchitectJournal(agent, options) {
   var lastFetch = Number(_agentPanelArchitectJournalLastFetchById[architectId] || 0);
   var hasCache = !!(state && state.architect_journals
     && Array.isArray(state.architect_journals[architectId]));
-  if (hasCache && lastFetch
+  if (!options.force && hasCache && lastFetch
       && (now - lastFetch) < _AGENT_PANEL_JOURNAL_REFRESH_MS) return;
   _agentPanelArchitectJournalLoadingById[architectId] = true;
   _agentPanelArchitectJournalRequestedLimitById[architectId] = requestedLimit;
