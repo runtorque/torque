@@ -377,7 +377,6 @@ function loadModalScripts(context) {
     'static/js/modals/add-cell.js',
     'static/js/modals/task-artifacts.js',
     'static/js/modals/task-modal.js',
-    'static/js/modals/action-picker.js',
   ].forEach((file) => loadScript(context, file));
 }
 
@@ -3365,20 +3364,20 @@ test('renderBoard requests action and template refs for dispatch eligibility bad
   ]);
 });
 
-test('ws ignores unsolicited action lists instead of reopening task-from-action modal', () => {
+test('ws ignores unsolicited action lists when no action picker requested them', () => {
   const { sandbox, document } = createSandbox({
     WebSocket: function FakeWebSocket() {
       this.readyState = 1;
       this.close = function() {};
     },
   });
-  sandbox._showActionListCalls = 0;
-  const actionModal = document.register('modal-action');
+  sandbox.tplEditorReceiveListCalls = 0;
   document.register('conn-dot');
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/ws.js');
   runInContext(context, `
-    _showActionList = function() { _showActionListCalls++; };
+    _activePanelApp = 'board';
+    tplEditorReceiveList = function() { tplEditorReceiveListCalls++; };
     connect();
   `);
 
@@ -3390,8 +3389,7 @@ test('ws ignores unsolicited action lists instead of reopening task-from-action 
     }) });
   `);
 
-  assert.equal(jsonValue(context, '_showActionListCalls'), 0);
-  assert.equal(actionModal.classList.contains('visible'), false);
+  assert.equal(jsonValue(context, 'tplEditorReceiveListCalls'), 0);
 });
 
 test('sequence gaps trigger only one resync until a full state arrives', () => {
@@ -6159,6 +6157,23 @@ test('renderBoard shows the inline add-task lane picker with Backlog as the defa
   assert.match(panel.innerHTML, />Backlog &#9662;<\/button>/);
 });
 
+test('renderBoard does not show the legacy From action button in the inline add-task composer', () => {
+  const { context, document } = createBoardHarness();
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+
+  context.state.board_lanes = ['Backlog'];
+  runInContext(context, `
+    _boardSelectedLane = 'Backlog';
+  `);
+
+  context.renderBoard();
+
+  assert.match(panel.innerHTML, /\+ Add task/);
+  assert.doesNotMatch(panel.innerHTML, /From action/);
+  assert.doesNotMatch(panel.innerHTML, /boardStartAddTaskActionForLane/);
+});
+
 test('renderBoard keeps the inline add-task composer in the shared wide strip', () => {
   const { context, document } = createBoardHarness();
   const panel = document.register('panel-board');
@@ -6235,7 +6250,6 @@ test('boardSubmitAddTask clears the inline textarea and keeps the form open for 
   runInContext(context, `
     _boardAddingTask = true;
     _boardAddingTaskDraft = 'foo';
-    _boardAddingTaskAction = 'oneshot/fix';
     _boardAddingTaskAgent = 'agent-1';
     _boardInlineDraftId = 'draft-1';
     _boardInlineAttachments = [{ url: '/u/1', filename: 'a.png' }];
@@ -6250,7 +6264,6 @@ test('boardSubmitAddTask clears the inline textarea and keeps the form open for 
   // draft from the pre-submit text.
   assert.equal(input.value, '', 'textarea value should be cleared in the DOM');
   assert.equal(runInContext(context, '_boardAddingTaskDraft'), '');
-  assert.equal(runInContext(context, '_boardAddingTaskAction'), '');
   assert.equal(runInContext(context, '_boardAddingTaskAgent'), '');
   assert.equal(runInContext(context, '_boardInlineDraftId'), '');
   assert.deepEqual(jsonValue(context, '_boardInlineAttachments'), []);
@@ -11740,8 +11753,8 @@ test('inline add-task toolbar wraps buttons instead of overflowing narrow card w
   // drop onto a second line when the card is narrow (prevents Submit from
   // clipping off the card edge).
   assert.match(css, /\.board-add-toolbar\s*\{[^}]*flex-wrap:\s*wrap;[^}]*row-gap:\s*4px;/);
-  // The right-side group (agent / action / lane / submit) must also wrap
-  // internally — the four pill buttons can themselves outgrow the row.
+  // The right-side group (agent / lane / submit) must also wrap
+  // internally — the pill buttons can themselves outgrow the row.
   assert.match(css, /\.board-add-toolbar-right\s*\{[^}]*flex-wrap:\s*wrap;[^}]*row-gap:\s*4px;/);
 });
 

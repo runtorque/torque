@@ -292,8 +292,8 @@ A short additional delay (~1s) after boot detection ensures the shell and boot c
 | `loom/actions.py` | Action loading, Jinja2 rendering, variable discovery, `render_action` returns structured fields, `load_action_raw` for editor, scope-aware `list_actions` with overridden detection |
 | `loom/server.py` | `add_agent_from_action` handler, `render_action` command for board integration, `save_action` / `delete_action` CRUD commands (scope-aware) |
 | `bin/loom` | `task dispatch`, `task create`, `action` subcommands, action loader |
-| `static/js/modals.js` | Task create/edit modal, `openTaskFromAction` → `render_action` → pre-fill flow |
-| `static/js/board.js` | "+ Add task" dropdown with "New task" and "From action" options |
+| `static/js/modals.js` | Task create/edit modal with action picker and prompt preview |
+| `static/js/board.js` | Inline "+ Add task" composer for quick task creation |
 | `static/js/actions.js` | **New** — Actions panel app (dropdown with Project/User optgroups, structured form editor, Jinja2 syntax highlighting, save/duplicate/delete, scope picker) |
 | `actions/oneshot/*.yaml` | Two standalone actions: feature, fix |
 | `actions/feature/*.yaml` | Three pipeline actions: implement, review, fix-review |

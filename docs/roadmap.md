@@ -144,7 +144,7 @@ criteria: |
 
 Actions support `task` (main description), `instructions`, `context`, `criteria` (acceptance criteria), `labels` (list), and `group` (override target group). Old actions with `prompt:` still work via backward compat.
 
-Loom searches two locations: project-local `.loom/actions/` (takes precedence) and user-global `~/.loom/actions/`. When both contain an action with the same name, the project one wins for dispatch; the user one is marked as "overridden" in the editor. The toolbelt has "From Action" options in both the agent creation dropdown and the board's "+ Add task" dropdown — the latter renders the action and pre-fills the task modal.
+Loom searches two locations: project-local `.loom/actions/` (takes precedence) and user-global `~/.loom/actions/`. When both contain an action with the same name, the project one wins for dispatch; the user one is marked as "overridden" in the editor. The task modal action picker is the UI path for creating action-based tasks with variables.
 
 An **Actions panel** in the taskbar provides a full editor for creating and managing actions without leaving iTerm2. It shows project and user actions in separate dropdown groups with directory paths, and includes a structured form with Jinja2 syntax highlighting (expressions, filters, strings, parentheses), auto-expanding textareas, scope picker (project vs user), and auto-discovered variable display.
 
@@ -216,8 +216,8 @@ Tasks are structured tickets with fields designed for agent orchestration:
 
 Cards show group badge, label badges, attachment counts, and linked agent name. Double-click opens the edit modal.
 
-- Create tasks via modal (New task or From action dropdown), edit, move, delete
-- "+ Add task" is a dropdown: **New task** opens the task modal, **From action** renders an action's fields and pre-fills the modal
+- Create tasks via inline composer or modal, edit, move, delete
+- Use the task modal action picker for action-based tasks
 - Drag cards to reorder or drop on lane tabs to move between lanes
 - Link/unlink agents (card dot reflects agent status, clicking focuses agent)
 - Resizable panel; open/closed state and height persist across restarts
