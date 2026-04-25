@@ -131,6 +131,16 @@ function createHarness() {
   return { context, sandbox, mainEl };
 }
 
+function createFullHarness() {
+  const { sandbox, mainEl } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/constants.js');
+  loadScript(context, 'static/js/render.js');
+  loadScript(context, 'static/js/commands.js');
+  loadScript(context, 'static/js/main.js');
+  return { context, sandbox, mainEl };
+}
+
 function architect(id, name, createdAt) {
   return {
     id, name, slug: id, kind: 'architect',
@@ -179,14 +189,14 @@ test('principal-card-new CSS preserves dimensions when wrapped (LOOM:209 regress
   // The "+ New Architect" ghost button uses .ghost-card height (~16-20px) by
   // default, which makes it look squeezed when it wraps to its own row in a
   // narrow panel. .principal-card-new must override height + min-height so the
-  // wrapped button matches the populated principal-card height (~64px+).
+  // wrapped button matches the populated principal-card height (~90px).
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
   const newCardRule = css.match(/\.principal-card-new\s*\{[^}]*\}/);
   assert.ok(newCardRule, '.principal-card-new rule exists in style.css');
   assert.match(newCardRule[0], /height:\s*auto/,
     '.principal-card-new overrides .ghost-card height with `height: auto`');
-  assert.match(newCardRule[0], /min-height:\s*64px/,
-    '.principal-card-new sets min-height: 64px to match populated principal cards');
+  assert.match(newCardRule[0], /min-height:\s*90px/,
+    '.principal-card-new sets min-height: 90px to match populated principal cards');
 });
 
 test('default (empty) selected_principal_id filters grid to user-owned engineers', () => {
@@ -314,7 +324,7 @@ function extractPrincipalCardHtml(html, principalKind, principalId) {
   return null;
 }
 
-test('non-selected architect card shows status badge with engineer counts', () => {
+test('non-selected architect card shows at-a-glance architect stats', () => {
   const { context, sandbox, mainEl } = createHarness();
   sandbox.state.groups.loom = ['arch-a', 'eng-arch', 'worker-err'];
   sandbox.state.agents['arch-a'] = architect('arch-a', 'Productmind', 2);
@@ -326,9 +336,10 @@ test('non-selected architect card shows status badge with engineer counts', () =
 
   const archBlock = extractPrincipalCardHtml(mainEl.innerHTML, 'architect', 'arch-a');
   assert.ok(archBlock, 'architect principal card rendered');
-  assert.match(archBlock, /principal-card-badge/);
-  assert.match(archBlock, /1 eng/);
-  assert.match(archBlock, /!1/);
+  assert.match(archBlock, /1eng/);
+  assert.match(archBlock, /0asks/);
+  assert.match(archBlock, /0dec/);
+  assert.match(archBlock, /last dec/);
 });
 
 test('selected principal card does not render the status badge', () => {
@@ -565,4 +576,311 @@ test('pause toggle on architect principal invokes toggleDigestPauseForAgent (Bug
   vm.runInContext('event = { stopPropagation: function() {} };', context);
   vm.runInContext('toggleDigestPauseForAgent("arch-a")', context);
   assert.equal(vm.runInContext('globalThis._pauseToggleCall', context), 'arch-a');
+});
+
+function extractAgentCellHtml(html, agentId) {
+  const needle = 'data-drag-id="' + agentId + '"';
+  const startAttr = html.indexOf(needle);
+  if (startAttr < 0) return null;
+  const openTagStart = html.lastIndexOf('<div', startAttr);
+  if (openTagStart < 0) return null;
+  let depth = 0;
+  let i = openTagStart;
+  const openRe = /<div\b/g;
+  const closeRe = /<\/div>/g;
+  while (i < html.length) {
+    openRe.lastIndex = i;
+    closeRe.lastIndex = i;
+    const nextOpen = openRe.exec(html);
+    const nextClose = closeRe.exec(html);
+    if (!nextClose) return null;
+    if (nextOpen && nextOpen.index < nextClose.index) {
+      depth += 1;
+      i = nextOpen.index + 1;
+    } else {
+      depth -= 1;
+      i = nextClose.index + nextClose[0].length;
+      if (depth === 0) return html.slice(openTagStart, i);
+    }
+  }
+  return null;
+}
+
+test('agents-grid v2 renders all kind shells with required corner badges and no body icons', () => {
+  const { context, sandbox, mainEl } = createFullHarness();
+  sandbox.state.groups.loom = ['arch-a', 'eng-a', 'worker-a'];
+  sandbox.state.children = {};
+  sandbox.state.agents['arch-a'] = {
+    ...architect('arch-a', 'Loomer', 1),
+    agent_type: 'claude-code',
+    last_activity_at: Date.now() / 1000 - 300,
+  };
+  sandbox.state.agents['eng-a'] = {
+    ...engineer('eng-a', 'Panelsmith', 'arch-a', 2),
+    agent_type: 'claude-code',
+    last_activity_at: Date.now() / 1000 - 60,
+  };
+  sandbox.state.agents['worker-a'] = {
+    ...worker('worker-a', 'Worker', 'eng-a', 3),
+    slug: 'architect-card-click-focus-fix',
+    agent_type: 'codex',
+    current_task_id: 'LOOM:216',
+    worktree_diff: { files: 3, insertions: 58, deletions: 3 },
+    worktree_dirty: false,
+    worktree_branch: 'loom/panelsmith/architect-card-click-focus-fix-746495a',
+    last_activity_at: Date.now() / 1000 - 30,
+  };
+  sandbox.state.board_tasks = {
+    'LOOM:216': {
+      id: 'LOOM:216',
+      group: 'loom',
+      task: 'Review worker cards',
+      lane: 'In Progress',
+      action_name: 'feature/review',
+      agent_id: 'worker-a',
+    },
+    'ask-1': {
+      id: 'ask-1',
+      group: 'loom',
+      task: 'Need user decision',
+      lane: 'To Do',
+      labels: ['loom:human', 'architect-ask'],
+      created_by_architect_id: 'arch-a',
+    },
+  };
+  sandbox.state.architect_decisions = {
+    'dec-1': {
+      id: 'dec-1',
+      architect_id: 'arch-a',
+      status: 'proposed',
+      created_at: Date.now() / 1000 - 300,
+    },
+  };
+  sandbox.state.selected_principal_id = 'arch-a';
+
+  vm.runInContext('render();', context);
+
+  const userBlock = extractPrincipalCardHtml(mainEl.innerHTML, 'user', '');
+  const archBlock = extractPrincipalCardHtml(mainEl.innerHTML, 'architect', 'arch-a');
+  const engineerBlock = extractAgentCellHtml(mainEl.innerHTML, 'eng-a');
+  const workerBlock = extractAgentCellHtml(mainEl.innerHTML, 'worker-a');
+  assert.ok(userBlock, 'user principal rendered');
+  assert.ok(archBlock, 'architect principal rendered');
+  assert.ok(engineerBlock, 'engineer card rendered');
+  assert.ok(workerBlock, 'worker card rendered');
+
+  assert.doesNotMatch(userBlock, /principal-card-controls|agent-card-provider/);
+  assert.match(userBlock, /principal-card-status/);
+  assert.match(userBlock, /principal-card-kind--owner">OWNER/);
+
+  assert.match(archBlock, /principal-card-controls/);
+  assert.match(archBlock, /principal-card-status/);
+  assert.match(archBlock, /agent-card-provider--claude-code[^>]*>CC</);
+  assert.match(archBlock, /principal-card-kind--architect">ARCH/);
+  assert.match(archBlock, /1eng/);
+  assert.match(archBlock, /principal-card-ask-link[\s\S]*1asks/);
+  assert.match(archBlock, /1dec/);
+
+  assert.match(engineerBlock, /cell-header-controls/);
+  assert.match(engineerBlock, /cell-status/);
+  assert.match(engineerBlock, /agent-card-provider--claude-code[^>]*>CC</);
+  assert.match(engineerBlock, /cell-engineer-badge">ENG/);
+  assert.match(engineerBlock, /Panelsmith/);
+  assert.match(engineerBlock, /1 worker/);
+  assert.match(engineerBlock, /q:0 · last/);
+
+  assert.match(workerBlock, /cell-header-controls/);
+  assert.match(workerBlock, /cell-status/);
+  assert.match(workerBlock, /agent-card-provider--codex[^>]*>CX</);
+  assert.match(workerBlock, /cell-worker-badge">W/);
+  assert.match(workerBlock, /architect-car…/);
+  assert.match(workerBlock, /data-tooltip="architect-card-click-focus-fix"/);
+  assert.match(workerBlock, /LOOM:216 · review/);
+  assert.match(workerBlock, /\+58\/-3 \(clean\)/);
+  assert.match(workerBlock, /wkt: architect-ca…/);
+  assert.match(workerBlock, /30s/);
+
+  assert.doesNotMatch(userBlock + archBlock + engineerBlock + workerBlock, /principal-card-icon|cell-icon/);
+});
+
+test('worktree branch shortname strips loom engineer prefix and short id suffix', () => {
+  const { context } = createFullHarness();
+  assert.equal(
+    vm.runInContext("_worktreeBranchShortName('loom/panelsmith/architect-card-click-focus-fix-746495a')", context),
+    'architect-card-click-focus-fix',
+  );
+  assert.equal(
+    vm.runInContext("_worktreeBranchShortName('loom/agents-grid-layout-v2-28c6725')", context),
+    'agents-grid-layout-v2',
+  );
+  assert.equal(
+    vm.runInContext("_worktreeBranchShortName('feature/plain-branch')", context),
+    'feature/plain-branch',
+  );
+});
+
+test('architect pending ask counts ignore unscoped worker human asks and other architects', () => {
+  const { context, sandbox, mainEl } = createFullHarness();
+  sandbox.state.groups.loom = ['arch-a', 'arch-b'];
+  sandbox.state.agents['arch-a'] = architect('arch-a', 'Architect A', 1);
+  sandbox.state.agents['arch-b'] = architect('arch-b', 'Architect B', 2);
+  sandbox.state.board_tasks = {
+    'worker-ask': {
+      id: 'worker-ask',
+      group: 'loom',
+      task: 'Worker needs input',
+      lane: 'To Do',
+      labels: ['loom:human', 'loom:derived'],
+      created_at: 1,
+    },
+    'arch-a-ask': {
+      id: 'arch-a-ask',
+      group: 'loom',
+      task: 'Architect A needs input',
+      lane: 'To Do',
+      labels: ['loom:human', 'architect-ask'],
+      created_by_architect_id: 'arch-a',
+      reply_agent_id: 'arch-a',
+      created_at: 2,
+    },
+    'arch-b-ask': {
+      id: 'arch-b-ask',
+      group: 'loom',
+      task: 'Architect B needs input',
+      lane: 'To Do',
+      labels: ['loom:human', 'architect-ask'],
+      created_by_architect_id: 'arch-b',
+      reply_agent_id: 'arch-b',
+      created_at: 3,
+    },
+    'arch-a-done-ask': {
+      id: 'arch-a-done-ask',
+      group: 'loom',
+      task: 'Done architect ask',
+      lane: 'Done',
+      labels: ['loom:human', 'architect-ask'],
+      created_by_architect_id: 'arch-a',
+      reply_agent_id: 'arch-a',
+      created_at: 4,
+    },
+  };
+
+  vm.runInContext('render();', context);
+
+  const archA = extractPrincipalCardHtml(mainEl.innerHTML, 'architect', 'arch-a');
+  const archB = extractPrincipalCardHtml(mainEl.innerHTML, 'architect', 'arch-b');
+  assert.ok(archA, 'arch-a card rendered');
+  assert.ok(archB, 'arch-b card rendered');
+
+  assert.match(archA, /principal-card-ask-link[\s\S]*1asks/);
+  assert.match(archA, /principal-ask:arch-a:arch-a-ask/);
+  assert.match(archA, /boardNavigateToTask\(&quot;arch-a-ask&quot;\)/);
+  assert.doesNotMatch(archA, /principal-ask:arch-a:worker-ask/);
+  assert.doesNotMatch(archA, /principal-ask:arch-a:arch-b-ask/);
+  assert.doesNotMatch(archA, /principal-ask:arch-a:arch-a-done-ask/);
+
+  assert.match(archB, /principal-card-ask-link[\s\S]*1asks/);
+  assert.match(archB, /principal-ask:arch-b:arch-b-ask/);
+  assert.match(archB, /boardNavigateToTask\(&quot;arch-b-ask&quot;\)/);
+  assert.doesNotMatch(archB, /principal-ask:arch-b:worker-ask/);
+  assert.doesNotMatch(archB, /principal-ask:arch-b:arch-a-ask/);
+});
+
+test('worker slug truncation uses immediate tooltip metadata, not title-only browser tooltip', () => {
+  const { context, sandbox } = createFullHarness();
+  sandbox.state.children = {};
+  sandbox.state.group_settings = {};
+  sandbox.state.board_tasks = {
+    'LOOM:216': { id: 'LOOM:216', lane: 'In Progress', action_name: 'feature/implement', agent_id: 'worker-a' },
+  };
+  const html = vm.runInContext(`renderAgentCell({
+    id: 'worker-a',
+    name: 'Worker',
+    slug: 'architect-card-click-focus-fix',
+    kind: 'worker',
+    group: 'loom',
+    cell_type: 'agent',
+    status: 'running',
+    current_task_id: 'LOOM:216',
+    worktree_branch: 'loom/panelsmith/architect-card-click-focus-fix-746495a'
+  })`, context);
+  assert.match(html, /architect-car…/);
+  assert.match(
+    html,
+    /<span class="agent-card-tooltip"[^>]*data-tooltip="architect-card-click-focus-fix"[^>]*><span class="agent-card-trunc cell-name cell-worker-slug">architect-car…<\/span><\/span>/,
+  );
+  assert.doesNotMatch(html, /class="[^"]*agent-card-tooltip[^"]*agent-card-trunc/);
+  assert.doesNotMatch(html, /class="[^"]*agent-card-tooltip[^"]*cell-worker-slug/);
+  assert.doesNotMatch(html, /cell-worker-slug[^>]*title=/);
+
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const tooltipRule = css.match(/\.agent-card-tooltip\s*\{[^}]*\}/);
+  const truncRule = css.match(/\.agent-card-trunc\s*\{[^}]*\}/);
+  assert.ok(tooltipRule, '.agent-card-tooltip rule exists');
+  assert.ok(truncRule, '.agent-card-trunc rule exists');
+  assert.match(tooltipRule[0], /overflow:\s*visible/,
+    'tooltip wrapper must not clip its immediate custom tooltip pseudo-element');
+  assert.match(truncRule[0], /overflow:\s*hidden/,
+    'inner truncation span still clips the visible worker slug text');
+});
+
+test('provider badges expose tint classes for claude-code and codex cards', () => {
+  const { context, sandbox } = createFullHarness();
+  sandbox.state.children = {};
+  sandbox.state.group_settings = {};
+  const claudeHtml = vm.runInContext(`renderAgentCell({
+    id: 'eng-a',
+    name: 'Panelsmith',
+    kind: 'engineer',
+    group: 'loom',
+    cell_type: 'agent',
+    status: 'running',
+    agent_type: 'claude-code'
+  })`, context);
+  const codexHtml = vm.runInContext(`renderAgentCell({
+    id: 'worker-a',
+    name: 'Worker',
+    kind: 'worker',
+    group: 'loom',
+    cell_type: 'agent',
+    status: 'running',
+    agent_type: 'codex'
+  })`, context);
+  assert.match(claudeHtml, /agent-card-provider--claude-code[^>]*>CC</);
+  assert.match(codexHtml, /agent-card-provider--codex[^>]*>CX</);
+});
+
+test('agents-grid v2 rerender preserves main scroll while card bodies update', () => {
+  const { context, sandbox, mainEl } = createFullHarness();
+  mainEl.scrollTop = 0;
+  Object.defineProperty(mainEl, 'innerHTML', {
+    configurable: true,
+    get() { return this._innerHTML || ''; },
+    set(value) {
+      this._innerHTML = value;
+      this.scrollTop = 0;
+    },
+  });
+  sandbox.state.groups.loom = ['arch-a', 'eng-a', 'worker-a'];
+  sandbox.state.children = {};
+  sandbox.state.agents['arch-a'] = architect('arch-a', 'Loomer', 1);
+  sandbox.state.agents['eng-a'] = engineer('eng-a', 'Panelsmith', 'arch-a', 2);
+  sandbox.state.agents['worker-a'] = {
+    ...worker('worker-a', 'Worker', 'eng-a', 3),
+    slug: 'worker-a',
+    current_task_id: 'LOOM:216',
+    worktree_diff: { insertions: 1, deletions: 0 },
+  };
+  sandbox.state.board_tasks = {
+    'LOOM:216': { id: 'LOOM:216', lane: 'In Progress', action_name: 'feature/implement', agent_id: 'worker-a' },
+  };
+  sandbox.state.selected_principal_id = 'arch-a';
+
+  vm.runInContext('render();', context);
+  mainEl.scrollTop = 123;
+  sandbox.state.agents['worker-a'].worktree_diff = { insertions: 2, deletions: 1 };
+  vm.runInContext('render();', context);
+
+  assert.equal(mainEl.scrollTop, 123);
+  assert.match(mainEl.innerHTML, /\+2\/-1 \(clean\)/);
 });
