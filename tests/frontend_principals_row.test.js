@@ -245,7 +245,7 @@ test('clicking the User principal sets filter but does not hijack selectedAgentI
     'select_agent NOT dispatched for User principal');
 });
 
-test('selectPrincipal is a no-op when principal AND selection already match', () => {
+test('selectPrincipal refocuses the architect terminal even when already selected', () => {
   const { context, sandbox } = createHarness();
   sandbox.state.groups.loom = ['arch-a'];
   sandbox.state.agents['arch-a'] = architect('arch-a', 'Productmind', 2);
@@ -254,7 +254,10 @@ test('selectPrincipal is a no-op when principal AND selection already match', ()
 
   vm.runInContext("selectPrincipal('arch-a');", context);
 
-  assert.deepEqual(sandbox.sendCalls, []);
+  // Clicking a principal is a deliberate "go here" act, so focus_agent is
+  // always dispatched — even when selection + filter already match.
+  const calls = JSON.parse(JSON.stringify(sandbox.sendCalls));
+  assert.deepEqual(calls, [{ cmd: 'focus_agent', id: 'arch-a' }]);
 });
 
 /* Extract a single principal card's HTML block (outer <button> for user,

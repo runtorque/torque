@@ -93,7 +93,25 @@ function _agentPanelKindBadge(kind) {
 function _resolveFocusedAgent() {
   if (typeof focusedItemId === 'undefined' || !focusedItemId) return null;
   if (!state || !state.agents) return null;
-  return state.agents[focusedItemId] || null;
+  if (state.agents[focusedItemId]) return state.agents[focusedItemId];
+  // Principal-row focus ids (`principal:<group>:<architect-id|user>`) aren't
+  // direct agent lookups — resolve them to the architect agent so the panel
+  // shows the architect's tabs instead of the empty state.
+  var meta = (typeof _navMeta === 'function') ? _navMeta(focusedItemId) : null;
+  if (meta && meta.type === 'principal') {
+    var pid = String(meta.principalId || '');
+    if (pid && state.agents[pid]) return state.agents[pid];
+    return null;
+  }
+  if (typeof focusedItemId === 'string' && focusedItemId.indexOf('principal:') === 0) {
+    var lastColon = focusedItemId.lastIndexOf(':');
+    if (lastColon > 'principal:'.length - 1) {
+      var tail = focusedItemId.slice(lastColon + 1);
+      if (tail && tail !== 'user' && state.agents[tail]) return state.agents[tail];
+    }
+    return null;
+  }
+  return null;
 }
 
 function _agentPanelSelectedTab(kind) {
