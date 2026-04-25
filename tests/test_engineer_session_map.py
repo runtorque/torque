@@ -125,6 +125,50 @@ class EngineerSessionMapScopingTests(unittest.TestCase):
         self.assertNotIn(cells["engineer_b"].id, agent_ids)
         self.assertNotIn(cells["worker_b"].id, agent_ids)
 
+    def test_verification_omits_checkpoints_for_merged_worktree_tasks(self):
+        state, cells = self._make_scoped_state()
+        BoardTask = self.state_mod.BoardTask
+        state.board_tasks["active"] = BoardTask(
+            id="active",
+            task="Active verification",
+            group="loom",
+            lane="In Progress",
+            verification_mode="restart",
+            verification_state="pending",
+            worktree_boundary={"status": "open"},
+        )
+        state.board_tasks["no-boundary"] = BoardTask(
+            id="no-boundary",
+            task="No boundary verification",
+            group="loom",
+            lane="In Progress",
+            verification_mode="restart",
+            verification_state="pending",
+        )
+        state.board_tasks["merged"] = BoardTask(
+            id="merged",
+            task="Merged verification",
+            group="loom",
+            lane="Done",
+            verification_mode="restart",
+            verification_state="pending",
+            worktree_boundary={"status": "merged"},
+        )
+
+        session_map = self.session_map_mod.build_engineer_session_map(
+            state,
+            "loom",
+            engineer_cell=cells["engineer_a"],
+            item_limit=20,
+        )
+
+        verification = session_map["verification"]
+        item_ids = {item["id"] for item in verification["items"]}
+        self.assertIn("active", item_ids)
+        self.assertIn("no-boundary", item_ids)
+        self.assertNotIn("merged", item_ids)
+        self.assertEqual(2, verification["counts"]["pending"])
+
 
 if __name__ == "__main__":
     unittest.main()

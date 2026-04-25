@@ -244,6 +244,8 @@ def _build_verification(tasks, *, limit: int) -> dict:
     }
     items = []
     for task in tasks:
+        if _verification_checkpoint_hidden_by_boundary(task):
+            continue
         verification_state = str(getattr(task, "verification_state", "") or "").strip()
         if verification_state not in counts:
             continue
@@ -277,6 +279,14 @@ def _build_verification(tasks, *, limit: int) -> dict:
         "items": items[:limit],
         "truncated": len(items) > limit,
     }
+
+
+def _verification_checkpoint_hidden_by_boundary(task) -> bool:
+    """Lazy Session Map filter; keep the persisted checkpoint for forensics."""
+    boundary = getattr(task, "worktree_boundary", {}) or {}
+    if not isinstance(boundary, dict):
+        return False
+    return str(boundary.get("status", "") or "").strip() == "merged"
 
 
 def _build_branch_boundaries(state, streams: list[dict], *, engineer_cell, limit: int) -> dict:
