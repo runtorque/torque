@@ -199,6 +199,48 @@ test('principal-card-new CSS preserves dimensions when wrapped (LOOM:209 regress
     '.principal-card-new sets min-height: 74px to match populated principal cards');
 });
 
+test('agent card density CSS stays tight in classic and runtime-embedded modes', () => {
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const gridRule = css.match(/\.agent-grid\s*\{[^}]*\}/);
+  const cellRule = css.match(/^\.cell\s*\{[^}]*\}/m);
+  const workerCellRule = css.match(/^\.cell\.worker\s*\{[^}]*\}/m);
+  const workerRowRule = css.match(/^\.engineer-row-workers\s*\{[^}]*\}/m);
+  const runtimeGridRule = css.match(/body\.runtime-embedded \.agent-grid\s*\{[^}]*\}/);
+  const runtimeCellHeightRule = css.match(
+    /body\.runtime-embedded \.agent-section-user-card,\s*body\.runtime-embedded \.cell\s*\{[^}]*\}/,
+  );
+  const runtimeCellPaddingRule = Array.from(
+    css.matchAll(/^body\.runtime-embedded \.cell\s*\{[^}]*\}/gm),
+    (match) => match[0],
+  ).find((rule) => /padding:\s*13px 6px 12px;/.test(rule));
+  const runtimeWorkerCellRule = css.match(/body\.runtime-embedded \.cell\.worker\s*\{[^}]*\}/);
+  const runtimeWorkerRowRule = css.match(/body\.runtime-embedded \.engineer-row-workers\s*\{[^}]*\}/);
+
+  assert.ok(gridRule, '.agent-grid rule exists');
+  assert.ok(cellRule, '.cell rule exists');
+  assert.ok(workerCellRule, '.cell.worker rule exists');
+  assert.ok(workerRowRule, '.engineer-row-workers rule exists');
+  assert.ok(runtimeGridRule, 'runtime-embedded .agent-grid rule exists');
+  assert.ok(runtimeCellHeightRule, 'runtime-embedded .cell min-height rule exists');
+  assert.ok(runtimeCellPaddingRule, 'runtime-embedded .cell padding rule exists');
+  assert.ok(runtimeWorkerCellRule, 'runtime-embedded .cell.worker rule exists');
+  assert.ok(runtimeWorkerRowRule, 'runtime-embedded .engineer-row-workers rule exists');
+
+  assert.match(gridRule[0], /--agent-worker-card-height:\s*96px;/);
+  assert.match(cellRule[0], /min-height:\s*74px;/);
+  assert.match(cellRule[0], /padding:\s*13px 6px 12px;/);
+  assert.match(workerCellRule[0], /min-height:\s*var\(--agent-worker-card-height,\s*96px\);/);
+  assert.match(workerRowRule[0], /min-height:\s*var\(--agent-worker-card-height,\s*96px\);/);
+  assert.match(runtimeGridRule[0], /--agent-worker-card-height:\s*96px;/);
+  assert.match(runtimeCellHeightRule[0], /min-height:\s*74px;/);
+  assert.match(runtimeCellPaddingRule, /padding:\s*13px 6px 12px;/);
+  assert.match(runtimeWorkerCellRule[0], /min-height:\s*var\(--agent-worker-card-height,\s*96px\);/);
+  assert.match(runtimeWorkerRowRule[0], /min-height:\s*var\(--agent-worker-card-height,\s*96px\);/);
+
+  assert.doesNotMatch(css, /body\.runtime-embedded \.cell\s*\{[^}]*min-height:\s*90px;/);
+  assert.doesNotMatch(css, /body\.runtime-embedded \.cell\.worker\s*\{[^}]*min-height:\s*116px;/);
+});
+
 test('default (empty) selected_principal_id filters grid to user-owned engineers', () => {
   const { context, sandbox, mainEl } = createHarness();
   sandbox.state.groups.loom = ['arch-a', 'eng-user', 'eng-arch'];
@@ -734,7 +776,7 @@ test('agents-grid v2 renders all kind shells with required corner badges and no 
   assert.match(workerBlock, /data-tooltip="architect-card-click-focus-fix"/);
   assert.match(workerBlock, /LOOM:216 · review/);
   assert.match(workerBlock, /\+58\/-3 \(clean\)/);
-  assert.match(workerBlock, /wkt: architect-ca…/);
+  assert.match(workerBlock, /worktree: archite…/);
   assert.match(workerBlock, /last action 30s/);
 
   assert.doesNotMatch(userBlock + archBlock + engineerBlock + workerBlock, /principal-card-icon|cell-icon/);
@@ -886,6 +928,10 @@ test('worker slug truncation uses immediate tooltip metadata, not title-only bro
     worktree_branch: 'loom/panelsmith/architect-card-click-focus-fix-746495a'
   })`, context);
   assert.match(html, /architect-car…/);
+  assert.match(html, /LOOM:216 · implementation/);
+  assert.match(html, /worktree: archite…/);
+  assert.doesNotMatch(html, /LOOM:216 · impl<\/div>/);
+  assert.doesNotMatch(html, /wkt:/);
   assert.match(
     html,
     /<span class="agent-card-tooltip"[^>]*data-tooltip="architect-card-click-focus-fix"[^>]*><span class="agent-card-trunc cell-name cell-worker-slug">architect-car…<\/span><\/span>/,

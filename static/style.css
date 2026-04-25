@@ -627,7 +627,7 @@ body.runtime-embedded .terminal-empty {
   --agent-grid-card-min: 72px;
   --agent-grid-card-max: 112px;
   --agent-grid-card-height: 90px;
-  --agent-worker-card-height: 116px;
+  --agent-worker-card-height: 96px;
   --agent-ghost-card-height: calc(var(--agent-grid-card-height) / 4);
   display: flex;
   flex-direction: column;
@@ -709,7 +709,7 @@ body.runtime-embedded .terminal-empty {
 }
 .engineer-row-workers {
   flex: 1 1 auto;
-  min-height: 116px;
+  min-height: var(--agent-worker-card-height, 96px);
 }
 .engineer-row-workers:empty {
   min-height: 0;
@@ -1214,7 +1214,7 @@ body.runtime-embedded .terminal-empty {
   color: var(--text-dim);
 }
 .cell.worker {
-  min-height: 96px;
+  min-height: var(--agent-worker-card-height, 96px);
 }
 .cell.architect,
 .cell.engineer {
@@ -2045,7 +2045,7 @@ body.runtime-embedded .agent-grid {
   --agent-grid-card-basis: 112px;
   --agent-grid-card-max: 140px;
   --agent-grid-card-height: 90px;
-  --agent-worker-card-height: 116px;
+  --agent-worker-card-height: 96px;
   gap: 8px;
   padding: 9px 11px;
 }
@@ -2056,15 +2056,17 @@ body.runtime-embedded .ghost-card--worker {
   max-width: var(--agent-grid-card-max);
 }
 body.runtime-embedded .agent-section-user-card,
+body.runtime-embedded .cell {
+  min-height: 74px;
+}
 body.runtime-embedded .engineer-row-workers {
-  min-height: 90px;
+  min-height: var(--agent-worker-card-height, 96px);
 }
 body.runtime-embedded .cell {
-  min-height: 90px;
-  padding: 18px 7px 17px;
+  padding: 13px 6px 12px;
 }
 body.runtime-embedded .cell.worker {
-  min-height: 116px;
+  min-height: var(--agent-worker-card-height, 96px);
 }
 body.runtime-embedded .cell-task {
   display: block;

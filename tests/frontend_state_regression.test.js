@@ -13028,6 +13028,10 @@ test('hierarchical creation controls render shared quarter-height ghost-card cla
   assert.match(css, /\.ghost-card--engineer\s*\{[\s\S]*width:\s*var\(--agent-engineer-column-width\)/);
   assert.match(css, /\.ghost-card--worker\s*\{[\s\S]*flex:\s*0 1 var\(--agent-grid-card-basis\)/);
   assert.match(css, /body\.runtime-embedded \.agent-grid\s*\{[\s\S]*--agent-grid-card-height:\s*90px;/);
+  assert.match(css, /\.agent-grid\s*\{[\s\S]*--agent-worker-card-height:\s*96px;/);
+  assert.match(css, /body\.runtime-embedded \.agent-grid\s*\{[\s\S]*--agent-worker-card-height:\s*96px;/);
+  assert.match(css, /body\.runtime-embedded \.cell\s*\{[^}]*padding:\s*13px 6px 12px;/);
+  assert.match(css, /body\.runtime-embedded \.cell\.worker\s*\{[^}]*min-height:\s*var\(--agent-worker-card-height,\s*96px\);/);
 });
 
 test('classic runtime keeps the shared left rail filtered to the current window', () => {
@@ -14184,6 +14188,9 @@ test('task delta updates visible worker cycle state while preserving main-grid f
     });
   `);
 
+  assert.match(main.innerHTML, /task-1 · implementation/);
+  assert.doesNotMatch(main.innerHTML, /task-1 · impl<\/div>/);
+
   currentButton.value = 'close draft';
   currentButton.selectionStart = 2;
   currentButton.selectionEnd = 7;
@@ -14208,7 +14215,7 @@ test('task delta updates visible worker cycle state while preserving main-grid f
 
   assert.equal(renderCount, 2);
   assert.match(main.innerHTML, /task-1 · review/);
-  assert.doesNotMatch(main.innerHTML, /task-1 · impl/);
+  assert.doesNotMatch(main.innerHTML, /task-1 · impl<\/div>/);
   assert.equal(currentButton.focused, true);
   assert.equal(currentButton.value, 'close draft');
   assert.equal(currentButton.selectionStart, 2);

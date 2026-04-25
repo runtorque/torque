@@ -777,17 +777,17 @@ function _taskCycleState(task, agent) {
   const status = String(task.status || '').trim().toLowerCase();
   const health = String(task.health_state || '').trim().toLowerCase();
   const action = String(task.action_name || task.suggested_action || '').trim().toLowerCase();
+  const actionTail = action.split('/').filter(Boolean).pop() || action;
   if (status.indexOf('block') >= 0 || health.indexOf('block') >= 0) return 'blocked';
   if (lane === 'done') return 'done';
   if (action.indexOf('review') >= 0) return 'review';
   if (action.indexOf('fix') >= 0) return 'fix';
-  if (action.indexOf('implement') >= 0 || action.indexOf('feature/') >= 0) return 'impl';
+  if (action.indexOf('implement') >= 0 || actionTail === 'impl') return 'implementation';
   if (action) {
-    const tail = action.split('/').filter(Boolean).pop() || action;
-    return _truncateCardText(tail, 10);
+    return actionTail.replace(/[-_]+/g, ' ');
   }
-  if (lane === 'in progress') return 'impl';
-  if (lane) return lane.replace(/\s+/g, '-');
+  if (lane === 'in progress') return 'in progress';
+  if (lane) return lane.replace(/[-_]+/g, ' ');
   return 'idle';
 }
 
@@ -814,8 +814,8 @@ function _worktreeBranchShortName(branch) {
 
 function _workerBranchLabel(agent) {
   const branch = String((agent && (agent.worktree_branch || agent.current_branch)) || '').trim();
-  if (!branch) return 'wkt: —';
-  return 'wkt: ' + _worktreeBranchShortName(branch);
+  if (!branch) return 'worktree: —';
+  return 'worktree: ' + _worktreeBranchShortName(branch);
 }
 
 function _agentStatusMixClass(agent) {
