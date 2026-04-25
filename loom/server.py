@@ -1250,6 +1250,79 @@ def _review_gate_threshold_from_action(act: dict | None) -> int | None:
     return threshold if threshold >= 0 else None
 
 
+def _explicit_review_gate_threshold_from_action(act: dict | None) -> int | None:
+    """Return only the explicitly configured action-level LOC threshold."""
+    if not _action_is_implementation_depth(act):
+        return None
+    if "review_required_above_loc" not in act:
+        return None
+    try:
+        threshold = int(act.get("review_required_above_loc"))
+    except (TypeError, ValueError):
+        return None
+    return threshold if threshold >= 0 else None
+
+
+def _review_gate_policy_from_loc_gate(loc_gate, *, source: str,
+                                      action: str = "") -> dict | None:
+    """Normalize a transition-local LOC gate block into a policy dict."""
+    if not isinstance(loc_gate, dict):
+        return None
+    thresholds = normalize_architect_review_gate_thresholds(loc_gate)
+    ship_direct_max = int(thresholds.get("ship_direct_max", 0) or 0)
+    review_default_above = int(
+        thresholds.get("review_default_above", DEFAULT_REVIEW_REQUIRED_ABOVE_LOC)
+        or 0
+    )
+    return {
+        "source": source,
+        "action": action,
+        "threshold": max(ship_direct_max, review_default_above),
+        "ship_direct_max": ship_direct_max,
+        "review_default_above": review_default_above,
+        "self_review_bypass_allowed": bool(
+            thresholds.get("self_review_bypass_allowed", False)
+        ),
+        "controls_self_review_bypass": True,
+    }
+
+
+def _review_gate_transition_policy(act: dict | None) -> dict | None:
+    """Return the first feature/review transition-local LOC gate policy."""
+    if not isinstance(act, dict):
+        return None
+    transitions = act.get("transitions") or []
+    if not isinstance(transitions, list):
+        return None
+    for transition in transitions:
+        if not isinstance(transition, dict):
+            continue
+        action = str(transition.get("action", "") or "").strip()
+        if action.lower() != _REVIEW_GATE_ACTION:
+            continue
+        if "loc_gate" not in transition:
+            continue
+        policy = _review_gate_policy_from_loc_gate(
+            transition.get("loc_gate"),
+            source="transition",
+            action=action,
+        )
+        if policy:
+            return policy
+    return None
+
+
+def _review_gate_policy_from_action_threshold(
+        threshold: int | None) -> dict | None:
+    if threshold is None:
+        return None
+    return {
+        "source": "action",
+        "threshold": threshold,
+        "controls_self_review_bypass": False,
+    }
+
+
 def _review_gate_task_chain(state: MatrixState, task) -> list:
     """Return the root→leaf-ish chain available for review-gate scoping."""
     if not state or not task:
@@ -1314,6 +1387,7 @@ def _review_gate_architect_policy(state: MatrixState, task, cell=None) -> dict |
         or 0
     )
     return {
+        "source": "architect",
         "architect_id": architect_id,
         "threshold": max(ship_direct_max, review_default_above),
         "ship_direct_max": ship_direct_max,
@@ -1321,6 +1395,7 @@ def _review_gate_architect_policy(state: MatrixState, task, cell=None) -> dict |
         "self_review_bypass_allowed": bool(
             thresholds.get("self_review_bypass_allowed", False)
         ),
+        "controls_self_review_bypass": True,
     }
 
 
@@ -1521,12 +1596,24 @@ async def _maybe_apply_review_required_gate(
         return None
 
     act = action_mgr.load_action(task.action_name, base_dir)
-    threshold = _review_gate_threshold_from_action(act)
-    if threshold is None:
+    if not _action_is_implementation_depth(act):
         return None
-    architect_policy = _review_gate_architect_policy(state, task, cell)
-    if architect_policy:
-        threshold = architect_policy["threshold"]
+    gate_policy = _review_gate_transition_policy(act)
+    if not gate_policy:
+        gate_policy = _review_gate_policy_from_action_threshold(
+            _explicit_review_gate_threshold_from_action(act)
+        )
+    if not gate_policy:
+        gate_policy = _review_gate_architect_policy(state, task, cell)
+    if not gate_policy:
+        gate_policy = _review_gate_policy_from_action_threshold(
+            _review_gate_threshold_from_action(act)
+        )
+        if gate_policy:
+            gate_policy["source"] = "default"
+    if not gate_policy:
+        return None
+    threshold = int(gate_policy.get("threshold", 0) or 0)
 
     if _chain_has_shipped_review(state, task):
         return None
@@ -1548,11 +1635,12 @@ async def _maybe_apply_review_required_gate(
 
     if (
             force_skip_review
-            and architect_policy
-            and not architect_policy["self_review_bypass_allowed"]):
+            and gate_policy.get("controls_self_review_bypass")
+            and not gate_policy.get("self_review_bypass_allowed")):
         force_skip_review = False
         skip_reason = (
-            "self-review bypass disabled by architect review-gate settings"
+            "self-review bypass disabled by "
+            f"{gate_policy.get('source', 'review-gate')} settings"
         )
 
     if force_skip_review:
@@ -1613,14 +1701,25 @@ async def _maybe_apply_review_required_gate(
         f"{(diff_summary or {}).get('files', 0)} non-test files)\n"
         f"- Threshold: {threshold}\n"
     )
-    if architect_policy:
+    if gate_policy.get("source") == "transition":
+        context += (
+            "- Transition LOC gate: "
+            f"action={gate_policy.get('action') or _REVIEW_GATE_ACTION}, "
+            f"ship_direct_max={gate_policy['ship_direct_max']}, "
+            f"review_default_above={gate_policy['review_default_above']}, "
+            "self_review_bypass_allowed="
+            f"{gate_policy['self_review_bypass_allowed']}\n"
+        )
+        if skip_reason:
+            context += f"- Skip request ignored: {skip_reason}\n"
+    elif gate_policy.get("source") == "architect":
         context += (
             "- Architect review policy: "
-            f"architect={architect_policy['architect_id']}, "
-            f"ship_direct_max={architect_policy['ship_direct_max']}, "
-            f"review_default_above={architect_policy['review_default_above']}, "
+            f"architect={gate_policy['architect_id']}, "
+            f"ship_direct_max={gate_policy['ship_direct_max']}, "
+            f"review_default_above={gate_policy['review_default_above']}, "
             "self_review_bypass_allowed="
-            f"{architect_policy['self_review_bypass_allowed']}\n"
+            f"{gate_policy['self_review_bypass_allowed']}\n"
         )
         if skip_reason:
             context += f"- Skip request ignored: {skip_reason}\n"

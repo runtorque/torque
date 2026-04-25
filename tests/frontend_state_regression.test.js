@@ -1737,6 +1737,184 @@ test('actions editor save payload preserves auto_close_on_done', () => {
   assert.deepEqual(jsonValue(context, 'sendCalls[0].action.transitions'), []);
 });
 
+test('actions editor save payload includes transition LOC gate overrides', () => {
+  const { sandbox, document } = createSandbox({
+    _showToast() {},
+    _cachedAgentTemplates: [],
+  });
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/actions.js');
+
+  document.register('tpled-name').value = 'feature/implement';
+  document.register('tpled-desc').value = 'Implement code';
+  document.register('tpled-agent-template').value = '';
+  document.register('tpled-agent-prefix').value = '';
+  document.register('tpled-agent-color').value = '';
+  document.register('tpled-agent-cmd').value = '';
+  document.register('tpled-agent-dir').value = '';
+  document.register('tpled-group').value = '';
+  document.register('tpled-worktree').checked = true;
+  document.register('tpled-auto-close-on-done').checked = false;
+  document.register('tpled-implementation-depth').checked = true;
+  document.register('tpled-review-required-above-loc').value = '';
+  document.register('tpled-disable-role-preamble').checked = false;
+  document.register('tpled-prompt').value = '{{ TASK }}';
+  document.register('tpled-labels').value = 'feature';
+  document.register('tpled-scope').value = 'project';
+
+  const row = new FakeElement();
+  const type = new FakeElement();
+  type.value = 'action';
+  const template = new FakeElement();
+  template.value = 'feature/review';
+  const when = new FakeElement();
+  when.value = 'implementation complete';
+  const target = new FakeElement();
+  target.value = '';
+  const status = new FakeElement();
+  status.value = 'On Review';
+  const enabled = new FakeElement();
+  enabled.checked = true;
+  const ship = new FakeElement();
+  ship.value = '25';
+  const review = new FakeElement();
+  review.value = '75';
+  const bypass = new FakeElement();
+  bypass.checked = false;
+  row.setQuerySelector('.tpled-tr-type', type);
+  row.setQuerySelector('.tpled-tr-template', template);
+  row.setQuerySelector('.tpled-tr-when', when);
+  row.setQuerySelector('.tpled-tr-target', target);
+  row.setQuerySelector('.tpled-tr-status', status);
+  row.setQuerySelector('.tpled-loc-gate-enabled', enabled);
+  row.setQuerySelector('.tpled-loc-ship-direct', ship);
+  row.setQuerySelector('.tpled-loc-review-above', review);
+  row.setQuerySelector('.tpled-loc-bypass', bypass);
+  const transitions = document.register('tpled-transitions');
+  transitions.setQuerySelectorAll('.tpled-transition-entry', [row]);
+
+  runInContext(context, `_tplEditorSelected = 'project:feature/implement';`);
+  runInContext(context, `_tplEditorScope = 'project';`);
+  runInContext(context, `_tplEditorSaveInner();`);
+
+  assert.deepEqual(
+    jsonValue(context, 'sendCalls[0].action.transitions[0].loc_gate'),
+    {
+      ship_direct_max: 25,
+      review_default_above: 75,
+      self_review_bypass_allowed: false,
+    },
+  );
+});
+
+test('actions editor transition LOC gate sub-form preserves drafts across rerenders', () => {
+  const { sandbox, document } = createSandbox({
+    _showToast() {},
+    _cachedAgentTemplates: [],
+    toggleHint() {},
+  });
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/actions.js');
+
+  const editor = document.register('tpled-editor');
+  let current = null;
+  function installLocGateDom() {
+    const row = new FakeElement();
+    row.classList.add('tpled-transition-entry');
+    row.setAttribute('data-idx', '0');
+    const details = new FakeElement();
+    details.classList.add('tpled-loc-gate-details');
+    details.open = false;
+    const enabled = document.register('tpled-tr-0-loc-enabled', new FakeElement('tpled-tr-0-loc-enabled'));
+    enabled.classList.add('tpled-loc-gate-enabled');
+    enabled.checked = true;
+    const ship = document.register('tpled-tr-0-loc-ship-direct', new FakeElement('tpled-tr-0-loc-ship-direct'));
+    ship.classList.add('tpled-loc-ship-direct');
+    ship.value = '50';
+    const review = document.register('tpled-tr-0-loc-review-above', new FakeElement('tpled-tr-0-loc-review-above'));
+    review.classList.add('tpled-loc-review-above');
+    review.value = '100';
+    const bypass = document.register('tpled-tr-0-loc-bypass', new FakeElement('tpled-tr-0-loc-bypass'));
+    bypass.classList.add('tpled-loc-bypass');
+    bypass.checked = false;
+    row.setQuerySelector('.tpled-loc-gate-details', details);
+    row.setQuerySelector('.tpled-loc-gate-enabled', enabled);
+    row.setQuerySelector('.tpled-loc-ship-direct', ship);
+    row.setQuerySelector('.tpled-loc-review-above', review);
+    row.setQuerySelector('.tpled-loc-bypass', bypass);
+    row.setQuerySelectorAll('.tpled-loc-gate-fields input', [ship, review, bypass]);
+    editor.setQuerySelectorAll('.tpled-transition-entry', [row]);
+    editor.setQuerySelector('.tpled-transition-entry[data-idx="0"]', row);
+    editor.setQuerySelector('[data-focus-key="transition:0:loc-review-above"]', review);
+    editor.setQuerySelectorAll('textarea', []);
+    row.parentNode = editor;
+    details.parentNode = row;
+    enabled.parentNode = row;
+    ship.parentNode = row;
+    review.parentNode = row;
+    bypass.parentNode = row;
+    row.children = [details, enabled, ship, review, bypass];
+    editor.children = [row];
+    current = { row, details, enabled, ship, review, bypass };
+  }
+  Object.defineProperty(editor, 'innerHTML', {
+    configurable: true,
+    get() {
+      return this._innerHTML || '';
+    },
+    set(value) {
+      this._innerHTML = value;
+      installLocGateDom();
+    },
+  });
+
+  runInContext(context, `
+    _tplEditorData = {
+      name: 'feature/implement',
+      implementation_depth: true,
+      prompt: '{{ TASK }}',
+      transitions: [{
+        action: 'feature/review',
+        when: 'implementation complete',
+        loc_gate: {
+          ship_direct_max: 50,
+          review_default_above: 100,
+          self_review_bypass_allowed: false,
+        },
+      }],
+    };
+    _tplEditorNew = false;
+    _tplEditorSelected = 'project:feature/implement';
+    renderTemplatesEditor();
+  `);
+
+  current.details.open = true;
+  current.enabled.checked = true;
+  current.review.value = '222';
+  current.review.selectionStart = 1;
+  current.review.selectionEnd = 2;
+  document.activeElement = current.review;
+
+  context.renderTemplatesEditor();
+
+  assert.equal(current.details.open, true);
+  assert.equal(current.enabled.checked, true);
+  assert.equal(current.review.value, '222');
+  assert.equal(current.review.focused, true);
+  assert.equal(current.review.selectionStart, 1);
+  assert.equal(current.review.selectionEnd, 2);
+
+  current.details.open = false;
+  current.ship.value = '33';
+  document.activeElement = null;
+
+  context.renderTemplatesEditor();
+
+  assert.equal(current.details.open, false);
+  assert.equal(current.ship.value, '33');
+  assert.equal(current.enabled.checked, true);
+});
+
 test('actions panel ensure-loaded fetches once per group until refresh', () => {
   const { sandbox } = createSandbox({
     _cachedAgentTemplates: [],

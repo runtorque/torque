@@ -46,6 +46,14 @@ def _yaml_parse_value(raw):
     return raw
 
 
+def _yaml_strip_inline_comment(rest):
+    if rest and rest[0] not in ('"', "'", "|", ">"):
+        comment_pos = rest.find(" #")
+        if comment_pos >= 0:
+            rest = rest[:comment_pos].strip()
+    return rest
+
+
 def parse_yaml(text):
     lines = text.split("\n")
     return _yaml_parse_block(lines, 0, 0)[0]
@@ -80,10 +88,7 @@ def _yaml_parse_block(lines, idx, base_indent):
             continue
         key = stripped[:colon_pos].strip()
         rest = stripped[colon_pos + 1:].strip()
-        if rest and rest[0] not in ('"', "'", "|", ">"):
-            comment_pos = rest.find(" #")
-            if comment_pos >= 0:
-                rest = rest[:comment_pos].strip()
+        rest = _yaml_strip_inline_comment(rest)
         if rest == "|":
             val, idx = _yaml_parse_block_scalar(lines, idx + 1, indent)
             result[key] = val
@@ -131,9 +136,37 @@ def _yaml_parse_list(lines, idx, base_indent):
         if colon_pos > 0:
             item = {}
             key = item_str[:colon_pos].strip()
-            rest = item_str[colon_pos + 1:].strip()
-            item[key] = _yaml_parse_value(rest) if rest else None
+            rest = _yaml_strip_inline_comment(
+                item_str[colon_pos + 1:].strip()
+            )
             idx += 1
+
+            if rest == "|":
+                val, idx = _yaml_parse_block_scalar(lines, idx, indent)
+                item[key] = val
+            elif rest == "":
+                child_idx = idx
+                while child_idx < len(lines):
+                    peek = lines[child_idx].lstrip()
+                    if peek and not peek.startswith("#"):
+                        break
+                    child_idx += 1
+                if child_idx < len(lines):
+                    child_indent = (
+                        len(lines[child_idx])
+                        - len(lines[child_idx].lstrip())
+                    )
+                    if child_indent > base_indent:
+                        val, idx = _yaml_parse_block(lines, idx, indent + 1)
+                        item[key] = val
+                    else:
+                        item[key] = None
+                else:
+                    item[key] = None
+            else:
+                item[key] = _yaml_parse_value(rest)
+
+            child_base_indent = None
             while idx < len(lines):
                 cline = lines[idx]
                 cstripped = cline.lstrip()
@@ -143,12 +176,48 @@ def _yaml_parse_list(lines, idx, base_indent):
                 cindent = len(cline) - len(cstripped)
                 if cindent <= base_indent:
                     break
+                if child_base_indent is None:
+                    child_base_indent = cindent
+                if cindent > child_base_indent:
+                    idx += 1
+                    continue
+                if cindent < child_base_indent:
+                    break
                 cp = cstripped.find(":")
                 if cp > 0:
                     ck = cstripped[:cp].strip()
-                    cv = cstripped[cp + 1:].strip()
-                    item[ck] = _yaml_parse_value(cv) if cv else None
-                idx += 1
+                    cv = _yaml_strip_inline_comment(
+                        cstripped[cp + 1:].strip()
+                    )
+                    idx += 1
+                    if cv == "|":
+                        val, idx = _yaml_parse_block_scalar(
+                            lines, idx, cindent)
+                        item[ck] = val
+                    elif cv == "":
+                        child_idx = idx
+                        while child_idx < len(lines):
+                            peek = lines[child_idx].lstrip()
+                            if peek and not peek.startswith("#"):
+                                break
+                            child_idx += 1
+                        if child_idx < len(lines):
+                            nested_indent = (
+                                len(lines[child_idx])
+                                - len(lines[child_idx].lstrip())
+                            )
+                            if nested_indent > cindent:
+                                val, idx = _yaml_parse_block(
+                                    lines, idx, cindent + 1)
+                                item[ck] = val
+                            else:
+                                item[ck] = None
+                        else:
+                            item[ck] = None
+                    else:
+                        item[ck] = _yaml_parse_value(cv)
+                else:
+                    idx += 1
             result.append(item)
         else:
             result.append(_yaml_parse_value(item_str))
@@ -609,6 +678,8 @@ class ActionManager:
                         target = "self"
                     if target:
                         entry["target"] = target
+                    if isinstance(tr.get("loc_gate"), dict):
+                        entry["loc_gate"] = tr["loc_gate"]
                     result.append(entry)
                 elif tr.get("ask"):
                     result.append({"ask": True,

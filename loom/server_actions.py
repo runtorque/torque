@@ -40,6 +40,31 @@ def _coerce_bool(value) -> bool:
     return False
 
 
+def _coerce_nonnegative_int(value):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 else None
+
+
+def _clean_loc_gate(value):
+    if not isinstance(value, dict):
+        return None
+    clean = {}
+    for key in ("ship_direct_max", "review_default_above"):
+        if key not in value:
+            continue
+        parsed = _coerce_nonnegative_int(value.get(key))
+        if parsed is not None:
+            clean[key] = parsed
+    if "self_review_bypass_allowed" in value:
+        clean["self_review_bypass_allowed"] = _coerce_bool(
+            value.get("self_review_bypass_allowed")
+        )
+    return clean or None
+
+
 def _action_to_yaml(name: str, data: dict) -> str:
     """Convert an action data dict to YAML text."""
     doc = {"name": name}
@@ -115,6 +140,9 @@ def _action_to_yaml(name: str, data: dict) -> str:
                         entry["status"] = transition["status"]
                     if transition.get("target"):
                         entry["target"] = transition["target"]
+                    loc_gate = _clean_loc_gate(transition.get("loc_gate"))
+                    if loc_gate:
+                        entry["loc_gate"] = loc_gate
                     clean.append(entry)
         if clean:
             doc["transitions"] = clean

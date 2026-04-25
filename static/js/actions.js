@@ -174,6 +174,7 @@ function tplEditorOnSelect(key) {
 function renderTemplatesEditor() {
   var el = document.getElementById('tpled-editor');
   if (!el) return;
+  var restoreState = _tplCaptureEditorUiState(el);
 
   if (!_tplEditorData && !_tplEditorNew) {
     if (_tplEditorList.length === 0) {
@@ -250,8 +251,8 @@ function renderTemplatesEditor() {
   html += '<label class="gs-checkbox"><input id="tpled-worktree" type="checkbox"' + (d.worktree ? ' checked' : '') + ' onchange="tplEditorMarkDirty()"> Git worktree per agent</label>';
   html += '<label class="gs-checkbox"><input id="tpled-auto-close-on-done" type="checkbox"' + (d.auto_close_on_done ? ' checked' : '') + ' onchange="tplEditorMarkDirty()"> Auto-close agent after root task is done</label>';
   html += '<label class="gs-checkbox"><input id="tpled-implementation-depth" type="checkbox"' + (d.implementation_depth ? ' checked' : '') + ' onchange="tplEditorMarkDirty()"> Implementation-depth action (code-mutating; review gate eligible)</label>';
-  html += '<label>Review gate LOC threshold</label>';
-  html += '<input id="tpled-review-required-above-loc" type="number" min="0" value="' + (d.review_required_above_loc != null ? esc(String(d.review_required_above_loc)) : '') + '" placeholder="Default 150 for implementation-depth actions" autocomplete="off" onchange="tplEditorMarkDirty()">';
+  html += '<label>Action fallback review gate LOC threshold</label>';
+  html += '<input id="tpled-review-required-above-loc" type="number" min="0" value="' + (d.review_required_above_loc != null ? esc(String(d.review_required_above_loc)) : '') + '" placeholder="Used when a transition has no LOC gate" autocomplete="off" onchange="tplEditorMarkDirty()">';
   html += '</details>';
 
   // Prompt field (coalesce old format on load)
@@ -311,8 +312,93 @@ function renderTemplatesEditor() {
   html += '</div>';
   el.innerHTML = html;
 
+  _tplRestoreEditorUiState(el, restoreState);
+
   // Auto-resize all textareas to fit content
   el.querySelectorAll('textarea').forEach(_tplAutoResize);
+}
+
+function _tplCaptureEditorUiState(root) {
+  var snapshot = { focus: null, locGates: {} };
+  if (!root) return snapshot;
+  var active = document.activeElement;
+  if (active && typeof root.contains === 'function' && root.contains(active)) {
+    var focusKey = active.id || (active.dataset ? active.dataset.focusKey : '');
+    if (focusKey) {
+      snapshot.focus = {
+        key: focusKey,
+        byId: !!active.id,
+        value: ('value' in active) ? active.value : null,
+        checked: ('checked' in active) ? !!active.checked : null,
+        selectionStart: typeof active.selectionStart === 'number' ? active.selectionStart : null,
+        selectionEnd: typeof active.selectionEnd === 'number' ? active.selectionEnd : null,
+      };
+    }
+  }
+  if (typeof root.querySelectorAll === 'function') {
+    root.querySelectorAll('.tpled-transition-entry').forEach(function(row) {
+      var idx = row.getAttribute ? row.getAttribute('data-idx') : (row.dataset ? row.dataset.idx : '');
+      if (idx == null || idx === '') return;
+      var details = row.querySelector('.tpled-loc-gate-details');
+      var enabled = row.querySelector('.tpled-loc-gate-enabled');
+      var ship = row.querySelector('.tpled-loc-ship-direct');
+      var review = row.querySelector('.tpled-loc-review-above');
+      var bypass = row.querySelector('.tpled-loc-bypass');
+      snapshot.locGates[idx] = {
+        open: details ? !!details.open : false,
+        enabled: enabled ? !!enabled.checked : false,
+        ship_direct_max: ship ? ship.value : '',
+        review_default_above: review ? review.value : '',
+        self_review_bypass_allowed: bypass ? !!bypass.checked : false,
+      };
+    });
+  }
+  return snapshot;
+}
+
+function _tplRestoreEditorUiState(root, snapshot) {
+  if (!root || !snapshot) return;
+  var locGates = snapshot.locGates || {};
+  Object.keys(locGates).forEach(function(idx) {
+    var row = root.querySelector
+      ? root.querySelector('.tpled-transition-entry[data-idx="' + idx + '"]')
+      : null;
+    if (!row) return;
+    var saved = locGates[idx] || {};
+    var details = row.querySelector('.tpled-loc-gate-details');
+    var enabled = row.querySelector('.tpled-loc-gate-enabled');
+    var ship = row.querySelector('.tpled-loc-ship-direct');
+    var review = row.querySelector('.tpled-loc-review-above');
+    var bypass = row.querySelector('.tpled-loc-bypass');
+    if (details) details.open = !!saved.open;
+    if (enabled) enabled.checked = !!saved.enabled;
+    if (ship) ship.value = saved.ship_direct_max || '';
+    if (review) review.value = saved.review_default_above || '';
+    if (bypass) bypass.checked = !!saved.self_review_bypass_allowed;
+    _tplSyncLocGateRow(row);
+  });
+  if (!snapshot.focus) return;
+  var focus = snapshot.focus;
+  var focusEl = null;
+  if (focus.byId && document.getElementById) {
+    focusEl = document.getElementById(focus.key);
+  }
+  if (!focusEl && root.querySelector) {
+    focusEl = root.querySelector('[data-focus-key="' + focus.key + '"]');
+  }
+  if (!focusEl) return;
+  if (focus.value != null && 'value' in focusEl) focusEl.value = focus.value;
+  if (focus.checked != null && 'checked' in focusEl) focusEl.checked = focus.checked;
+  if (typeof focusEl.focus === 'function') {
+    try { focusEl.focus({ preventScroll: true }); }
+    catch (_e) { focusEl.focus(); }
+  }
+  if (typeof focus.selectionStart === 'number' && 'selectionStart' in focusEl) {
+    focusEl.selectionStart = focus.selectionStart;
+  }
+  if (typeof focus.selectionEnd === 'number' && 'selectionEnd' in focusEl) {
+    focusEl.selectionEnd = focus.selectionEnd;
+  }
 }
 
 function _tplAutoResize(el) {
@@ -432,6 +518,12 @@ function _tplTransitionRow(idx, tr) {
   var when = (tr && tr.when) || '';
   var target = (tr && tr.target) || '';
   var status = (tr && tr.status) || '';
+  var locGate = (tr && tr.loc_gate && typeof tr.loc_gate === 'object') ? tr.loc_gate : null;
+  var locEnabled = !!locGate;
+  var locShip = locGate && locGate.ship_direct_max != null ? String(locGate.ship_direct_max) : '';
+  var locReview = locGate && locGate.review_default_above != null ? String(locGate.review_default_above) : '';
+  var locBypass = !!(locGate && locGate.self_review_bypass_allowed);
+  var locDisabled = locEnabled ? '' : ' disabled';
   var html = '<div class="tpled-transition-entry" data-idx="' + idx + '">';
   html += '<button class="tpled-tr-remove" onclick="tplRemoveTransition(' + idx + ')" title="Remove transition">\u2715</button>';
   html += '<div class="tpled-transition-body">';
@@ -498,6 +590,24 @@ function _tplTransitionRow(idx, tr) {
   html += '<label class="tpled-tr-when-label">When <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)"'
     + ' data-hint="Describes when the agent should pick this transition. This text is included in the dispatch prompt so the agent knows which option to choose.">?</span></label>';
   html += '<textarea class="tpled-tr-when" placeholder="e.g. Implementation is complete and ready for review" rows="1" onchange="tplEditorMarkDirty()" oninput="this.style.height=\'auto\';this.style.height=this.scrollHeight+\'px\'">' + esc(when) + '</textarea>';
+  html += '<details class="tpled-loc-gate-details tpled-tr-action-field"' + (locEnabled ? ' open' : '') + hideIfAsk + ' ontoggle="tplLocGateToggled(this)">';
+  html += '<summary>LOC gate <span class="hint-btn" onclick="event.preventDefault();event.stopPropagation();toggleHint(this)"'
+    + ' data-hint="Optional transition-local review gate. When enabled, this transition overrides the action-level threshold and architect fallback defaults.">?</span></summary>';
+  html += '<label class="gs-checkbox tpled-loc-enable-label"><input id="tpled-tr-' + idx + '-loc-enabled" data-focus-key="transition:' + idx + ':loc-enabled" class="tpled-loc-gate-enabled" type="checkbox"' + (locEnabled ? ' checked' : '') + ' onchange="tplLocGateEnabledChanged(this)"> Override LOC gate for this transition</label>';
+  html += '<div class="tpled-loc-gate-fields">';
+  html += '<div class="tpled-transition-row">';
+  html += '<div class="tpled-tr-field">';
+  html += '<label class="tpled-tr-label">Ship direct ≤</label>';
+  html += '<input id="tpled-tr-' + idx + '-loc-ship-direct" data-focus-key="transition:' + idx + ':loc-ship-direct" class="tpled-loc-ship-direct" type="number" min="0" value="' + esc(locShip) + '" placeholder="50" onchange="tplEditorMarkDirty()"' + locDisabled + '>';
+  html += '</div>';
+  html += '<div class="tpled-tr-field">';
+  html += '<label class="tpled-tr-label">Review above</label>';
+  html += '<input id="tpled-tr-' + idx + '-loc-review-above" data-focus-key="transition:' + idx + ':loc-review-above" class="tpled-loc-review-above" type="number" min="0" value="' + esc(locReview) + '" placeholder="150" onchange="tplEditorMarkDirty()"' + locDisabled + '>';
+  html += '</div>';
+  html += '</div>';
+  html += '<label class="gs-checkbox tpled-loc-bypass-label"><input id="tpled-tr-' + idx + '-loc-bypass" data-focus-key="transition:' + idx + ':loc-bypass" class="tpled-loc-bypass" type="checkbox"' + (locBypass ? ' checked' : '') + locDisabled + ' onchange="tplEditorMarkDirty()"> allow self-review bypass</label>';
+  html += '</div>';
+  html += '</details>';
   html += '</div>';
   html += '</div>';
   return html;
@@ -515,11 +625,45 @@ function tplTransitionTypeChanged(selectEl) {
     var tpl = row.querySelector('.tpled-tr-template');
     var tgt = row.querySelector('.tpled-tr-target');
     var st = row.querySelector('.tpled-tr-status');
+    var locEnabled = row.querySelector('.tpled-loc-gate-enabled');
     if (tpl) tpl.value = '';
     if (tgt) tgt.value = '';
     if (st) st.value = '';
+    if (locEnabled) locEnabled.checked = false;
   }
+  _tplSyncLocGateRow(row);
   tplEditorMarkDirty();
+}
+
+function tplLocGateToggled(detailsEl) {
+  if (!detailsEl) return;
+  var row = detailsEl.closest ? detailsEl.closest('.tpled-transition-entry') : null;
+  if (row) _tplSyncLocGateRow(row);
+}
+
+function tplLocGateEnabledChanged(inputEl) {
+  var row = inputEl && inputEl.closest ? inputEl.closest('.tpled-transition-entry') : null;
+  if (!row) return;
+  if (inputEl.checked) {
+    var ship = row.querySelector('.tpled-loc-ship-direct');
+    var review = row.querySelector('.tpled-loc-review-above');
+    if (ship && !ship.value) ship.value = '50';
+    if (review && !review.value) review.value = '150';
+  }
+  _tplSyncLocGateRow(row);
+  tplEditorMarkDirty();
+}
+
+function _tplSyncLocGateRow(row) {
+  if (!row || !row.querySelectorAll) return;
+  var enabled = row.querySelector('.tpled-loc-gate-enabled');
+  var isAsk = false;
+  var typeEl = row.querySelector('.tpled-tr-type');
+  if (typeEl) isAsk = typeEl.value === 'ask';
+  var on = !!(enabled && enabled.checked && !isAsk);
+  row.querySelectorAll('.tpled-loc-gate-fields input').forEach(function(el) {
+    el.disabled = !on;
+  });
 }
 
 function tplAddTransition() {
@@ -558,10 +702,37 @@ function _tplReadTransitions() {
       if (when) entry.when = when;
       if (target) entry.target = target;
       if (status) entry.status = status;
+      var locGate = _tplReadTransitionLocGate(entries[i]);
+      if (locGate) entry.loc_gate = locGate;
       result.push(entry);
     }
   }
   return result;
+}
+
+function _tplReadTransitionLocGate(row) {
+  if (!row) return null;
+  var enabled = row.querySelector('.tpled-loc-gate-enabled');
+  if (!enabled || !enabled.checked) return null;
+  function readInt(selector, fallback, label) {
+    var el = row.querySelector(selector);
+    var raw = el ? String(el.value || '').trim() : '';
+    if (raw === '') return fallback;
+    var parsed = parseInt(raw, 10);
+    if (isNaN(parsed) || parsed < 0) {
+      if (el) {
+        try { el.focus(); } catch (_e) {}
+        if (el.classList) el.classList.add('input-error');
+      }
+      throw new Error(label + ' must be a non-negative number');
+    }
+    return parsed;
+  }
+  return {
+    ship_direct_max: readInt('.tpled-loc-ship-direct', 50, 'LOC gate ship direct'),
+    review_default_above: readInt('.tpled-loc-review-above', 150, 'LOC gate review threshold'),
+    self_review_bypass_allowed: !!(row.querySelector('.tpled-loc-bypass') || {}).checked,
+  };
 }
 
 function tplEditorMarkDirty() {
