@@ -1086,11 +1086,21 @@ body.runtime-embedded .terminal-empty {
 .agent-card-tooltip {
   position: relative;
   display: block;
+  max-width: 100%;
+  min-width: 0;
+  overflow: visible;
 }
 .agent-card-trunc {
+  display: block;
+  max-width: 100%;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.agent-card-tooltip:hover,
+.agent-card-tooltip:focus-visible {
+  z-index: 80;
 }
 .agent-card-tooltip:hover::after,
 .agent-card-tooltip:focus-visible::after {

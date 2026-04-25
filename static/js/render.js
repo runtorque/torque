@@ -695,14 +695,16 @@ function _truncateCardText(text, maxChars) {
 function _agentCardTooltipHtml(text, maxChars, className, attrs) {
   const raw = String(text || '').trim();
   const visible = _truncateCardText(raw, maxChars);
-  const classes = ['agent-card-tooltip', 'agent-card-trunc'];
-  if (className) classes.push(className);
+  const contentClasses = ['agent-card-trunc'];
+  if (className) contentClasses.push(className);
   const extraAttrs = attrs ? ' ' + attrs : '';
-  return '<span class="' + esc(classes.join(' ')) + '"'
+  return '<span class="agent-card-tooltip"'
     + ' data-tooltip="' + esc(raw) + '"'
     + ' aria-label="' + esc(raw) + '"'
     + extraAttrs + '>'
+    + '<span class="' + esc(contentClasses.join(' ')) + '">'
     + esc(visible)
+    + '</span>'
     + '</span>';
 }
 
@@ -888,6 +890,7 @@ function _architectEngineersForCard(architectId, section) {
 function _architectPendingAskTasks(architect) {
   if (!architect || !state || !state.board_tasks) return [];
   const architectId = String(architect.id || '').trim();
+  if (!architectId) return [];
   const group = String(architect.group || '').trim();
   const asks = [];
   for (const taskId in state.board_tasks) {
@@ -900,12 +903,15 @@ function _architectPendingAskTasks(architect) {
     const creatorId = String(task.created_by_architect_id || '').trim();
     const taskGroup = String(task.group || '').trim();
     const architectAsk = labels.indexOf('architect-ask') >= 0;
-    if (replyId && replyId !== architectId) continue;
-    if (!replyId && creatorId && creatorId !== architectId) continue;
-    if (!replyId && !creatorId && group && taskGroup && taskGroup !== group) continue;
-    if (replyId === architectId || creatorId === architectId || architectAsk || !replyId) {
+    const replyMatches = replyId === architectId;
+    const creatorMatches = creatorId === architectId;
+    if (replyMatches || creatorMatches) {
       asks.push(task);
+      continue;
     }
+    if (replyId || creatorId || !architectAsk) continue;
+    if (group && taskGroup && taskGroup !== group) continue;
+    asks.push(task);
   }
   asks.sort(function(a, b) {
     const av = _agentCardTimestampSeconds((a && (a.created_at || a.updated_at)) || 0);

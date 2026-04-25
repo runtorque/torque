@@ -719,6 +719,73 @@ test('worktree branch shortname strips loom engineer prefix and short id suffix'
   );
 });
 
+test('architect pending ask counts ignore unscoped worker human asks and other architects', () => {
+  const { context, sandbox, mainEl } = createFullHarness();
+  sandbox.state.groups.loom = ['arch-a', 'arch-b'];
+  sandbox.state.agents['arch-a'] = architect('arch-a', 'Architect A', 1);
+  sandbox.state.agents['arch-b'] = architect('arch-b', 'Architect B', 2);
+  sandbox.state.board_tasks = {
+    'worker-ask': {
+      id: 'worker-ask',
+      group: 'loom',
+      task: 'Worker needs input',
+      lane: 'To Do',
+      labels: ['loom:human', 'loom:derived'],
+      created_at: 1,
+    },
+    'arch-a-ask': {
+      id: 'arch-a-ask',
+      group: 'loom',
+      task: 'Architect A needs input',
+      lane: 'To Do',
+      labels: ['loom:human', 'architect-ask'],
+      created_by_architect_id: 'arch-a',
+      reply_agent_id: 'arch-a',
+      created_at: 2,
+    },
+    'arch-b-ask': {
+      id: 'arch-b-ask',
+      group: 'loom',
+      task: 'Architect B needs input',
+      lane: 'To Do',
+      labels: ['loom:human', 'architect-ask'],
+      created_by_architect_id: 'arch-b',
+      reply_agent_id: 'arch-b',
+      created_at: 3,
+    },
+    'arch-a-done-ask': {
+      id: 'arch-a-done-ask',
+      group: 'loom',
+      task: 'Done architect ask',
+      lane: 'Done',
+      labels: ['loom:human', 'architect-ask'],
+      created_by_architect_id: 'arch-a',
+      reply_agent_id: 'arch-a',
+      created_at: 4,
+    },
+  };
+
+  vm.runInContext('render();', context);
+
+  const archA = extractPrincipalCardHtml(mainEl.innerHTML, 'architect', 'arch-a');
+  const archB = extractPrincipalCardHtml(mainEl.innerHTML, 'architect', 'arch-b');
+  assert.ok(archA, 'arch-a card rendered');
+  assert.ok(archB, 'arch-b card rendered');
+
+  assert.match(archA, /principal-card-ask-link[\s\S]*1asks/);
+  assert.match(archA, /principal-ask:arch-a:arch-a-ask/);
+  assert.match(archA, /boardNavigateToTask\(&quot;arch-a-ask&quot;\)/);
+  assert.doesNotMatch(archA, /principal-ask:arch-a:worker-ask/);
+  assert.doesNotMatch(archA, /principal-ask:arch-a:arch-b-ask/);
+  assert.doesNotMatch(archA, /principal-ask:arch-a:arch-a-done-ask/);
+
+  assert.match(archB, /principal-card-ask-link[\s\S]*1asks/);
+  assert.match(archB, /principal-ask:arch-b:arch-b-ask/);
+  assert.match(archB, /boardNavigateToTask\(&quot;arch-b-ask&quot;\)/);
+  assert.doesNotMatch(archB, /principal-ask:arch-b:worker-ask/);
+  assert.doesNotMatch(archB, /principal-ask:arch-b:arch-a-ask/);
+});
+
 test('worker slug truncation uses immediate tooltip metadata, not title-only browser tooltip', () => {
   const { context, sandbox } = createFullHarness();
   sandbox.state.children = {};
@@ -738,9 +805,23 @@ test('worker slug truncation uses immediate tooltip metadata, not title-only bro
     worktree_branch: 'loom/panelsmith/architect-card-click-focus-fix-746495a'
   })`, context);
   assert.match(html, /architect-car…/);
-  assert.match(html, /class="[^"]*agent-card-tooltip[^"]*cell-worker-slug/);
-  assert.match(html, /data-tooltip="architect-card-click-focus-fix"/);
+  assert.match(
+    html,
+    /<span class="agent-card-tooltip"[^>]*data-tooltip="architect-card-click-focus-fix"[^>]*><span class="agent-card-trunc cell-name cell-worker-slug">architect-car…<\/span><\/span>/,
+  );
+  assert.doesNotMatch(html, /class="[^"]*agent-card-tooltip[^"]*agent-card-trunc/);
+  assert.doesNotMatch(html, /class="[^"]*agent-card-tooltip[^"]*cell-worker-slug/);
   assert.doesNotMatch(html, /cell-worker-slug[^>]*title=/);
+
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const tooltipRule = css.match(/\.agent-card-tooltip\s*\{[^}]*\}/);
+  const truncRule = css.match(/\.agent-card-trunc\s*\{[^}]*\}/);
+  assert.ok(tooltipRule, '.agent-card-tooltip rule exists');
+  assert.ok(truncRule, '.agent-card-trunc rule exists');
+  assert.match(tooltipRule[0], /overflow:\s*visible/,
+    'tooltip wrapper must not clip its immediate custom tooltip pseudo-element');
+  assert.match(truncRule[0], /overflow:\s*hidden/,
+    'inner truncation span still clips the visible worker slug text');
 });
 
 test('provider badges expose tint classes for claude-code and codex cards', () => {
