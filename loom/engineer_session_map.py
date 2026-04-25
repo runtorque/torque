@@ -33,6 +33,7 @@ def build_engineer_session_map(state, group: str, *, engineer_cell=None,
     group = str(group or "").strip()
     if not group:
         return {}
+    engineer_cell = _resolve_engineer_cell(state, group, engineer_cell)
 
     tasks = [
         task for task in state.board_tasks.values()
@@ -352,11 +353,6 @@ def _build_branch_boundaries(state, streams: list[dict], *, engineer_cell, limit
 
 
 def _build_agents(state, group: str, *, engineer_cell, limit: int) -> dict:
-    engineer_id = (
-        getattr(engineer_cell, "id", "") or ""
-        if engineer_cell and getattr(engineer_cell, "group", "") == group
-        else state.get_group_settings(group).engineer_agent_id or ""
-    )
     counts = {
         "idle": 0,
         "running": 0,
@@ -367,11 +363,9 @@ def _build_agents(state, group: str, *, engineer_cell, limit: int) -> dict:
     total = 0
     needs_attention = 0
     for cell in state.agents.values():
-        if getattr(cell, "cell_type", "") != "agent":
+        if getattr(cell, "cell_type", "") not in {"agent", "terminal"}:
             continue
         if getattr(cell, "group", "") != group:
-            continue
-        if engineer_id and getattr(cell, "id", "") == engineer_id:
             continue
         if not _agent_visible(state, engineer_cell, getattr(cell, "id", "")):
             continue
@@ -391,6 +385,11 @@ def _build_agents(state, group: str, *, engineer_cell, limit: int) -> dict:
             "name": cell.name,
             "slug": cell.slug,
             "status": status,
+            "kind": (
+                "terminal"
+                if getattr(cell, "cell_type", "") == "terminal"
+                else getattr(cell, "kind", "") or "worker"
+            ),
             "type": getattr(cell, "agent_type", "") or "",
             "needs_attention": bool(getattr(cell, "needs_attention", False)),
             "current_task_id": getattr(current_task, "id", "") if current_task else "",
@@ -543,8 +542,35 @@ def _agent_visible(state, engineer_cell, agent_id: str) -> bool:
     if not agent_id:
         return False
     if not engineer_cell:
-        return True
+        return False
     return state.agent_is_visible_to_engineer(getattr(engineer_cell, "id", ""), agent_id)
+
+
+def _resolve_engineer_cell(state, group: str, engineer_cell):
+    if (
+            engineer_cell
+            and getattr(engineer_cell, "cell_type", "") == "agent"
+            and str(getattr(engineer_cell, "kind", "") or "").strip() == "engineer"
+            and str(getattr(engineer_cell, "group", "") or "").strip() == group
+    ):
+        return engineer_cell
+    getter = getattr(state, "get_engineer_for_group", None)
+    if callable(getter):
+        candidate = getter(group)
+    else:
+        engineer_id = str(
+            getattr(state.get_group_settings(group), "engineer_agent_id", "")
+            or ""
+        ).strip()
+        candidate = state.agents.get(engineer_id)
+    if (
+            candidate
+            and getattr(candidate, "cell_type", "") == "agent"
+            and str(getattr(candidate, "kind", "") or "").strip() == "engineer"
+            and str(getattr(candidate, "group", "") or "").strip() == group
+    ):
+        return candidate
+    return None
 
 
 def _hidden_agent_marker(state, engineer_cell) -> bool:

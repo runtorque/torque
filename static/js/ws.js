@@ -214,7 +214,9 @@ function _handleEngineerSessionMapMessage(msg) {
   if (!state.engineer_session_maps) state.engineer_session_maps = {};
   var group = (msg && msg.group) || '';
   if (!group) return;
-  state.engineer_session_maps[group] = (msg && msg.session_map) || {};
+  var engineerId = String((msg && msg.engineer_id) || '').trim();
+  var key = engineerId ? (group + '::' + engineerId) : group;
+  state.engineer_session_maps[key] = (msg && msg.session_map) || {};
   if (typeof _engineerReceiveSessionMap === 'function') {
     _engineerReceiveSessionMap(msg);
     return;
@@ -1243,7 +1245,13 @@ function _applyDelta(ops) {
         if (state.engineer_sent_events) delete state.engineer_sent_events[op.name];
         if (state.engineer_worklog) delete state.engineer_worklog[op.name];
         if (state.engineer_streams) delete state.engineer_streams[op.name];
-        if (state.engineer_session_maps) delete state.engineer_session_maps[op.name];
+        if (state.engineer_session_maps) {
+          Object.keys(state.engineer_session_maps).forEach(function(key) {
+            if (key === op.name || key.indexOf(op.name + '::') === 0) {
+              delete state.engineer_session_maps[key];
+            }
+          });
+        }
         break;
       case 'group_rename': {
         if (state.groups[op.old_name]) {
@@ -1270,9 +1278,17 @@ function _applyDelta(ops) {
           state.engineer_streams[op.new_name] = state.engineer_streams[op.old_name];
           delete state.engineer_streams[op.old_name];
         }
-        if (state.engineer_session_maps && state.engineer_session_maps[op.old_name]) {
-          state.engineer_session_maps[op.new_name] = state.engineer_session_maps[op.old_name];
-          delete state.engineer_session_maps[op.old_name];
+        if (state.engineer_session_maps) {
+          Object.keys(state.engineer_session_maps).forEach(function(key) {
+            if (key === op.old_name) {
+              state.engineer_session_maps[op.new_name] = state.engineer_session_maps[key];
+              delete state.engineer_session_maps[key];
+            } else if (key.indexOf(op.old_name + '::') === 0) {
+              var nextKey = op.new_name + key.slice(String(op.old_name).length);
+              state.engineer_session_maps[nextKey] = state.engineer_session_maps[key];
+              delete state.engineer_session_maps[key];
+            }
+          });
         }
         break;
       }

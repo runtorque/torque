@@ -3231,21 +3231,66 @@ class MatrixState:
     def agent_is_visible_to_engineer(self, engineer_id: str, agent_id: str) -> bool:
         """Return whether ``agent_id`` is visible/controllable to ``engineer_id``.
 
-        Visibility is always limited to agent cells in the same group. When the
-        per-group restriction is enabled, only agents whose immutable Engineer
-        provenance matches the caller are visible.
+        Visibility is always limited to cells in the same group. Engineer scope
+        is strict across the agent-kind hierarchy: an engineer sees itself,
+        architects/user-level principals for scope-up coordination, and only
+        workers/terminals owned by that engineer.
         """
         engineer = self.agents.get(str(engineer_id or "").strip())
         agent = self.agents.get(str(agent_id or "").strip())
         if not engineer or engineer.cell_type != "agent":
             return False
-        if not agent or agent.cell_type != "agent":
+        if str(getattr(engineer, "kind", "") or "").strip() != "engineer":
+            return False
+        if not agent or agent.cell_type not in {"agent", "terminal"}:
             return False
         if not engineer.group or agent.group != engineer.group:
             return False
-        if not self.engineer_restricts_to_created_agents(engineer.group):
+
+        engineer_id = str(getattr(engineer, "id", "") or "").strip()
+        if not engineer_id:
+            return False
+        if str(getattr(agent, "id", "") or "").strip() == engineer_id:
             return True
-        return bool(agent.created_by_engineer_id == engineer.id)
+
+        kind = str(getattr(agent, "kind", "") or "").strip()
+        if kind in {"architect", "user", "human"}:
+            return True
+        if kind == "engineer":
+            return False
+
+        owner_id = str(getattr(agent, "owner_engineer_id", "") or "").strip()
+        created_by_id = str(
+            getattr(agent, "created_by_engineer_id", "") or ""
+        ).strip()
+        if owner_id == engineer_id or created_by_id == engineer_id:
+            return True
+
+        if agent.cell_type == "terminal":
+            parent_id = str(getattr(agent, "parent_id", "") or "").strip()
+            if parent_id == engineer_id:
+                return True
+            parent = self.agents.get(parent_id)
+            if (
+                    parent
+                    and str(getattr(parent, "group", "") or "").strip()
+                    == engineer.group
+            ):
+                parent_owner_id = str(
+                    getattr(parent, "owner_engineer_id", "") or ""
+                ).strip()
+                parent_created_by_id = str(
+                    getattr(parent, "created_by_engineer_id", "") or ""
+                ).strip()
+                if (
+                        str(getattr(parent, "id", "") or "").strip()
+                        == engineer_id
+                        or parent_owner_id == engineer_id
+                        or parent_created_by_id == engineer_id
+                ):
+                    return True
+
+        return False
 
     def _save_engineer_settings(self, group: str, emit: bool = True):
         ws = self.engineer_settings.get(group)

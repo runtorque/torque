@@ -10998,10 +10998,36 @@ async def main(connection=None):
                         "message": "Group is required",
                     }
                 else:
+                    engineer_id = str(
+                        data.get("engineer_id")
+                        or data.get("agent_id")
+                        or state.get_group_settings(group).engineer_agent_id
+                        or ""
+                    ).strip()
+                    engineer_cell = state.agents.get(engineer_id)
+                    if (
+                            not engineer_cell
+                            or getattr(engineer_cell, "cell_type", "") != "agent"
+                            or str(
+                                getattr(engineer_cell, "kind", "") or ""
+                            ).strip() != "engineer"
+                            or str(
+                                getattr(engineer_cell, "group", "") or ""
+                            ).strip() != group
+                    ):
+                        engineer_cell = None
                     result = {
                         "type": "engineer_session_map",
                         "group": group,
-                        "session_map": build_engineer_session_map(state, group),
+                        "engineer_id": (
+                            getattr(engineer_cell, "id", "")
+                            if engineer_cell else ""
+                        ),
+                        "session_map": build_engineer_session_map(
+                            state,
+                            group,
+                            engineer_cell=engineer_cell,
+                        ),
                     }
 
             elif cmd == "engineer_journal_delete":
