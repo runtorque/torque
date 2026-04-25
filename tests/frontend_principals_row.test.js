@@ -430,7 +430,7 @@ test('agent card action label uses queue_empty event timestamp over stale progre
   sandbox.agentForLabel.last_heartbeat_at = now - 75;
   assert.equal(
     vm.runInContext('_agentCardCurrentOrLastActionLabel(agentForLabel)', context),
-    'Last action: queue_empty 1m',
+    'queue_empty (1m)',
   );
 });
 
@@ -473,7 +473,7 @@ test('non-selected architect card shows engineer count and action, not decision 
   const archBlock = extractPrincipalCardHtml(mainEl.innerHTML, 'architect', 'arch-a');
   assert.ok(archBlock, 'architect principal card rendered');
   assert.match(archBlock, /1 engineers/);
-  assert.match(archBlock, /Last action: planning v1\.6 2m/);
+  assert.match(archBlock, /planning v1\.6 \(2m\)/);
   assert.doesNotMatch(archBlock, /asks/);
   assert.doesNotMatch(archBlock, /decisions/);
   assert.doesNotMatch(archBlock, /last decision/);
@@ -859,7 +859,7 @@ test('agents-grid v2 renders all kind shells with one-metric lines and required 
   assert.match(archBlock, /agent-card-provider--claude-code[^>]*>Claude</);
   assert.match(archBlock, /principal-card-kind--architect">Architect/);
   assert.match(archBlock, /1 engineers/);
-  assert.match(archBlock, /Last action: planning hierarchy 5m/);
+  assert.match(archBlock, /planning hierarchy \(5m\)/);
   assert.doesNotMatch(archBlock, /asks/);
   assert.doesNotMatch(archBlock, /decisions/);
   assert.doesNotMatch(archBlock, /last decision/);
@@ -871,7 +871,7 @@ test('agents-grid v2 renders all kind shells with one-metric lines and required 
   assert.match(engineerBlock, /Panelsmith/);
   assert.match(engineerBlock, /1 worker/);
   assert.match(engineerBlock, /queue: 0/);
-  assert.match(engineerBlock, /Last action: reviewing :222:2 1m/);
+  assert.match(engineerBlock, /reviewing :222:2 \(1m\)/);
   assert.doesNotMatch(engineerBlock, /queue: 0 · last action/);
 
   assert.match(workerBlock, /cell-header-controls/);
@@ -931,7 +931,7 @@ test('architect card omits decision count and last-decision timer even when deci
   const archBlock = extractPrincipalCardHtml(mainEl.innerHTML, 'architect', 'arch-a');
   assert.ok(archBlock, 'architect card rendered');
   assert.match(archBlock, /0 engineers/);
-  assert.match(archBlock, /Last action: coordinating engineers 2m/);
+  assert.match(archBlock, /coordinating engineers \(2m\)/);
   assert.doesNotMatch(archBlock, /2 decisions/);
   assert.doesNotMatch(archBlock, /last decision/);
   assert.doesNotMatch(archBlock, /last decision 15h/);

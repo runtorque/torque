@@ -13365,15 +13365,35 @@ test('agents-grid v1.6 uses one-line metrics, action threshold labels, empty-row
   assert.match(main.innerHTML, /engineer-row--empty-workers[^"]*"[^>]*data-worker-count="0"[^>]*data-engineer-id="eng-empty"/);
   assert.match(main.innerHTML, /data-drag-id="eng-empty"[\s\S]*cell-engineer-workers[\s\S]*0 workers/);
   assert.match(main.innerHTML, /data-drag-id="eng-empty"[\s\S]*cell-engineer-queue">queue: 0/);
-  assert.match(main.innerHTML, /data-drag-id="eng-empty"[\s\S]*cell-engineer-activity[^>]*>Last action: queue_empty 1m/);
+  assert.match(main.innerHTML, /data-drag-id="eng-empty"[\s\S]*cell-engineer-activity[^>]*>queue_empty \(1m\)/);
   assert.match(main.innerHTML, /data-drag-id="eng-full"[\s\S]*cell-engineer-workers[\s\S]*1 worker/);
   assert.match(main.innerHTML, /data-drag-id="eng-full"[\s\S]*cell-engineer-queue">queue: 0/);
-  assert.match(main.innerHTML, /data-drag-id="eng-full"[\s\S]*cell-engineer-activity[^>]*>Last action: reviewing :222:2 1m/);
+  assert.match(main.innerHTML, /data-drag-id="eng-full"[\s\S]*cell-engineer-activity[^>]*>reviewing :222:2 \(1m\)/);
 
   assert.match(main.innerHTML, /data-drag-id="worker-a"[\s\S]*cell-worker-task cell-worker-task--clickable[^"]*"[^>]*>LOOM:216/);
   assert.match(main.innerHTML, /data-drag-id="worker-a"[\s\S]*cell-worker-cycle">cycle: review/);
   assert.match(main.innerHTML, /data-drag-id="worker-a"[\s\S]*cell-worker-activity[^>]*>running node tests/);
   assert.doesNotMatch(main.innerHTML, /engineers ·|queue: 0 ·|LOOM:216 ·|last action 30s/);
+});
+
+test('agent card action line renders no-timestamp action without old prefix in real card markup', () => {
+  const { context, sandbox } = createMainRenderHarness();
+  sandbox.state.children = {};
+  sandbox.state.board_tasks = {};
+  sandbox.noTimestampWorker = {
+    id: 'worker-no-ts',
+    name: 'No Timestamp Worker',
+    kind: 'worker',
+    group: 'loom',
+    cell_type: 'agent',
+    status: 'running',
+    activity_detail: 'Session Ended',
+  };
+
+  const noTimestampHtml = vm.runInContext('renderAgentCell(noTimestampWorker)', context);
+
+  assert.match(noTimestampHtml, /cell-worker-activity" title="Session Ended">Session Ended<\/div>/);
+  assert.doesNotMatch(noTimestampHtml, /Last action:/);
 });
 
 test('classic runtime keeps the shared left rail filtered to the current window', () => {
