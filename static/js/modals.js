@@ -451,6 +451,12 @@ function openAddEngineerForSection(group, architectId) {
   });
 }
 
+function openAddWorkerForSection(group) {
+  if (typeof openAddWorkerModal === 'function') {
+    openAddWorkerModal(group);
+  }
+}
+
 function openAddEngineerModal(options, architectId) {
   const modal = document.getElementById('modal-engineer');
   if (!modal) return;

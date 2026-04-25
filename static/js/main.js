@@ -787,6 +787,9 @@ function activateFocused() {
     if (meta.controlType === 'section-new-engineer'
         && typeof openAddEngineerForSection === 'function') {
       openAddEngineerForSection(meta.group || '', meta.architectId || '');
+    } else if (meta.controlType === 'section-new-worker'
+        && typeof openAddWorkerForSection === 'function') {
+      openAddWorkerForSection(meta.group || '');
     } else if (meta.controlType === 'agent-new-architect'
         && typeof openAddArchitectForGroup === 'function') {
       openAddArchitectForGroup(meta.group || '');
