@@ -295,8 +295,15 @@ test('group settings resets the Engineer section defaults when reopened', () => 
   assert.equal(ensure('gs-architect-boot-section').open, true);
   assert.equal(ensure('gs-architect-behavior-section').open, true);
   assert.equal(ensure('gs-architect-custom-section').open, true);
-  assert.equal(ensure('gs-architect-deferred-section').open, true);
+  assert.equal(ensure('gs-architect-runtime-section').open, true);
   assert.equal(ensure('gs-engineer-notification-preset').value, 'normal');
+});
+
+test('architect runtime settings no longer show deferred warning copy', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  assert.match(html, /id="gs-architect-runtime-section"/);
+  assert.doesNotMatch(html, /gs-architect-deferred-section/);
+  assert.doesNotMatch(html, /storage only|wiring in LOOM:196|⊘/);
 });
 
 test('submitGroupSettings sends group, engineer, and architect updates separately', () => {

@@ -379,6 +379,192 @@ class ReviewGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result)
         self.assertEqual(calls, [])
 
+    async def test_architect_review_gate_threshold_overrides_action_threshold(self):
+        state, cell, task = self._state_cell_task()
+        architect = self.state_mod.AgentCell(
+            id="arch-1",
+            name="Architect",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+        )
+        state.agents[architect.id] = architect
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            architect_review_gate_thresholds={
+                "ship_direct_max": 25,
+                "review_default_above": 75,
+                "self_review_bypass_allowed": False,
+            },
+        )
+        task.created_by_architect_id = architect.id
+        action_mgr = FakeActionManager(
+            {"implementation_depth": True, "review_required_above_loc": 100},
+            [{"action": "feature/review"}],
+        )
+        worktree_mgr = FakeWorktreeManager(
+            {"files": 1, "insertions": 80, "deletions": 0},
+        )
+        calls = []
+
+        async def handle_command(payload):
+            calls.append(payload)
+            return {"type": "ok", "task_id": "task-review"}
+
+        result = await self.server_mod._maybe_apply_review_required_gate(
+            state,
+            action_mgr,
+            worktree_mgr,
+            handle_command,
+            lambda *args, **kwargs: None,
+            cell=cell,
+            task=task,
+        )
+
+        self.assertEqual(result["type"], "error")
+        self.assertIn("threshold: 75", result["message"])
+        self.assertEqual(calls[0]["action_name"], "feature/review")
+        self.assertIn("review_default_above=75", calls[0]["description"])
+
+    async def test_architect_review_gate_ship_direct_max_is_direct_allowance(self):
+        state, cell, task = self._state_cell_task()
+        architect = self.state_mod.AgentCell(
+            id="arch-1",
+            name="Architect",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+        )
+        state.agents[architect.id] = architect
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            architect_review_gate_thresholds={
+                "ship_direct_max": 90,
+                "review_default_above": 75,
+                "self_review_bypass_allowed": False,
+            },
+        )
+        task.created_by_architect_id = architect.id
+        action_mgr = FakeActionManager(
+            {"implementation_depth": True, "review_required_above_loc": 50},
+            [{"action": "feature/review"}],
+        )
+        worktree_mgr = FakeWorktreeManager(
+            {"files": 1, "insertions": 80, "deletions": 0},
+        )
+        calls = []
+
+        async def handle_command(payload):
+            calls.append(payload)
+            return {"type": "ok", "task_id": "task-review"}
+
+        result = await self.server_mod._maybe_apply_review_required_gate(
+            state,
+            action_mgr,
+            worktree_mgr,
+            handle_command,
+            lambda *args, **kwargs: None,
+            cell=cell,
+            task=task,
+        )
+
+        self.assertIsNone(result)
+        self.assertEqual(calls, [])
+
+    async def test_architect_review_gate_can_disallow_self_review_bypass(self):
+        state, cell, task = self._state_cell_task()
+        architect = self.state_mod.AgentCell(
+            id="arch-1",
+            name="Architect",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+        )
+        state.agents[architect.id] = architect
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            architect_review_gate_thresholds={
+                "ship_direct_max": 25,
+                "review_default_above": 75,
+                "self_review_bypass_allowed": False,
+            },
+        )
+        task.created_by_architect_id = architect.id
+        action_mgr = FakeActionManager(
+            {"implementation_depth": True, "review_required_above_loc": 100},
+            [{"action": "feature/review"}],
+        )
+        worktree_mgr = FakeWorktreeManager(
+            {"files": 1, "insertions": 80, "deletions": 0},
+        )
+        calls = []
+
+        async def handle_command(payload):
+            calls.append(payload)
+            return {"type": "ok", "task_id": "task-review"}
+
+        result = await self.server_mod._maybe_apply_review_required_gate(
+            state,
+            action_mgr,
+            worktree_mgr,
+            handle_command,
+            lambda *args, **kwargs: None,
+            cell=cell,
+            task=task,
+            force_skip_review=True,
+            skip_reason="self-reviewed locally",
+        )
+
+        self.assertEqual(result["type"], "error")
+        self.assertEqual(calls[0]["action_name"], "feature/review")
+        self.assertIn("Skip request ignored", calls[0]["description"])
+        self.assertIn("self-review bypass disabled", calls[0]["description"])
+
+    async def test_architect_review_gate_can_allow_self_review_bypass(self):
+        state, cell, task = self._state_cell_task()
+        architect = self.state_mod.AgentCell(
+            id="arch-1",
+            name="Architect",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+        )
+        state.agents[architect.id] = architect
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            architect_review_gate_thresholds={
+                "ship_direct_max": 25,
+                "review_default_above": 75,
+                "self_review_bypass_allowed": True,
+            },
+        )
+        task.created_by_architect_id = architect.id
+        action_mgr = FakeActionManager(
+            {"implementation_depth": True, "review_required_above_loc": 100},
+            [{"action": "feature/review"}],
+        )
+        worktree_mgr = FakeWorktreeManager(
+            {"files": 1, "insertions": 80, "deletions": 0},
+        )
+        calls = []
+
+        async def handle_command(payload):
+            calls.append(payload)
+            return {"type": "ok", "task_id": "task-review"}
+
+        result = await self.server_mod._maybe_apply_review_required_gate(
+            state,
+            action_mgr,
+            worktree_mgr,
+            handle_command,
+            lambda *args, **kwargs: None,
+            cell=cell,
+            task=task,
+            force_skip_review=True,
+            skip_reason="self-reviewed locally",
+        )
+
+        self.assertIsNone(result)
+        self.assertEqual(calls, [])
+        self.assertEqual(task.messages[-1]["action"], "review_gate_skipped")
+        self.assertIn("self-reviewed locally", task.messages[-1]["message"])
+
     async def test_force_skip_review_bypasses_gate_and_records_audit(self):
         state, cell, task = self._state_cell_task()
         action_mgr = FakeActionManager(

@@ -1112,6 +1112,91 @@ class EngineerEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Engineer One: workflow breach/escape clause skip", digest)
         self.assertIn("operator rebased after stale-base warning", digest)
 
+    def test_architect_digest_terse_keeps_counts_and_pipeline_without_hints(self):
+        state, group, _engineer = self._make_state()
+        architect, assigned, _other, worker = self._add_architect_digest_team(
+            state,
+            group,
+        )
+        state.group_settings[group].architect_digest_verbosity = "terse"
+        task = state.board_add_task(
+            "Terse digest task",
+            group,
+            id="task-1",
+            agent_id=worker.id,
+            assigned_engineer_id=assigned.id,
+        )
+        buffer = self.engineer_mod.EngineerEventBuffer(state, FakeBridge())
+
+        digest = buffer._format_digest(
+            group,
+            [{
+                "id": 1,
+                "group": group,
+                "cell_id": worker.id,
+                "agent_name": worker.name,
+                "kind": "task_completed",
+                "message": "A detailed completion note that should not appear",
+                "task_id": task.id,
+            }],
+            "1 task active",
+            engineer=architect,
+            hints=[{"message": "Dispatch a follow-up"}],
+        )
+
+        self.assertIn("1 worker event: done ×1", digest)
+        self.assertIn("### Pipeline activity", digest)
+        self.assertIn("task-1 — Terse digest task", digest)
+        self.assertNotIn("Worker Bee: done task-1", digest)
+        self.assertNotIn("detailed completion note", digest)
+        self.assertNotIn("Hints:", digest)
+
+    def test_architect_digest_verbose_expands_worker_details(self):
+        state, group, _engineer = self._make_state()
+        architect, assigned, _other, worker = self._add_architect_digest_team(
+            state,
+            group,
+        )
+        state.group_settings[group].architect_digest_verbosity = "verbose"
+        task = state.board_add_task(
+            "Verbose digest task",
+            group,
+            id="task-1",
+            agent_id=worker.id,
+            assigned_engineer_id=assigned.id,
+        )
+        long_message = (
+            "Completed implementation with a deliberately long explanation "
+            "that should survive the architect verbose digest expansion and "
+            "include extra diagnostic details for the architect recipient."
+        )
+        events = [
+            {
+                "id": idx,
+                "group": group,
+                "cell_id": worker.id,
+                "agent_name": worker.name,
+                "kind": "task_completed",
+                "message": f"{long_message} event {idx}",
+                "task_id": task.id,
+            }
+            for idx in range(4)
+        ]
+        buffer = self.engineer_mod.EngineerEventBuffer(state, FakeBridge())
+
+        digest = buffer._format_digest(
+            group,
+            events,
+            "1 task active",
+            engineer=architect,
+        )
+
+        self.assertIn("4 worker events: done ×4", digest)
+        self.assertIn("event 0", digest)
+        self.assertIn("event 3", digest)
+        self.assertNotIn("worker detail", digest)
+        self.assertIn("extra diagnostic details", digest)
+
     def test_architect_digest_formats_engineer_queue_empty_compactly(self):
         state, group, _engineer = self._make_state()
         architect = self.state_mod.AgentCell(

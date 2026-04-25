@@ -10,6 +10,8 @@ surfaces stay structurally comparable.
 
 from __future__ import annotations
 
+from .state import normalize_architect_autonomy_mode
+
 
 # ---------------------------------------------------------------------------
 # Base system prompt (the architect's "firmware")
@@ -182,19 +184,62 @@ decisions, or request a hire.
 
 
 # ---------------------------------------------------------------------------
-# Policy section (placeholder — to be populated when architects gain
-# per-group settings analogous to EngineerSettings).
+# Policy section
 # ---------------------------------------------------------------------------
+
+def _autonomy_mode_label(mode: str) -> str:
+    labels = {
+        "dispatch_freely": "Dispatch freely",
+        "dispatch_after_confirm": "Dispatch after confirm",
+        "ask_always": "Ask always",
+    }
+    return labels.get(mode, "Dispatch after confirm")
+
+
+def _autonomy_policy_lines(mode: str) -> list[str]:
+    if mode == "dispatch_freely":
+        return [
+            "- Treat explicit user priorities and accepted decisions as permission to route work, reassign scope, and message engineers without asking for routine confirmation.",
+            "- Keep scope changes legible in the journal or decision log, but do not block on the user for low-risk routing choices.",
+            "- Still use `architect_ask` for true product decisions, priority conflicts, approvals, or irreversible scope trade-offs.",
+        ]
+    if mode == "ask_always":
+        return [
+            "- Ask before creating or reassigning tasks, moving priorities, queueing hires, or otherwise changing scope unless the user explicitly requested that exact action in the current turn.",
+            "- You may read state, journal observations, and answer direct engineer questions that do not change scope.",
+            "- Prefer `architect_ask` with concrete options and a recommendation over silently choosing between plausible directions.",
+        ]
+    return [
+        "- Proceed on clearly confirmed user direction and on follow-through that is already implied by accepted decisions or active tasks.",
+        "- Before widening scope, queueing a hire, or rerouting work in a way the user has not already confirmed, ask or surface the proposed plan first.",
+        "- Use journal entries for non-blocking context; reserve `architect_ask` for decisions where user confirmation should pause progress.",
+    ]
+
 
 def _build_policy_section(architect_settings=None, group_settings=None) -> str:
     """Render the architect-facing policy section.
 
-    Intentionally a stub until architects have their own settings
-    surface. When ``architect_settings`` and ``group_settings`` gain
-    fields (autonomy posture, hiring posture, digest verbosity), this
-    helper should mirror ``engineer._build_policy_section``.
+    The settings are intentionally prompt-level guardrails. The daemon still
+    enforces hard workflow/tool constraints such as user approval for hires.
     """
-    return ""
+    if architect_settings is None and group_settings is None:
+        return ""
+    mode = normalize_architect_autonomy_mode(
+        getattr(architect_settings, "architect_autonomy_mode", "")
+    )
+    lines = [
+        "## Operating Policy",
+        f"Autonomy mode: {_autonomy_mode_label(mode)}",
+        "",
+        "Apply this autonomy posture when deciding whether to route work, ask the user, or wait:",
+        *_autonomy_policy_lines(mode),
+        (
+            "- Tool-enforced gates still apply regardless of autonomy mode; "
+            "`architect_engineer_hire` always queues a user approval request "
+            "before the engineer becomes live."
+        ),
+    ]
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
