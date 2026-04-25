@@ -16,6 +16,7 @@ var _AGENT_PANEL_MESSAGE_ROW_HEIGHT = 92;
 var _AGENT_PANEL_DECISION_ROW_HEIGHT = 116;
 var _AGENT_PANEL_JOURNAL_ROW_HEIGHT = 96;
 var _AGENT_PANEL_JOURNAL_REFRESH_MS = 1500;
+var _AGENT_PANEL_JOURNAL_PAGE_SIZE = 50;
 var _agentPanelEventsPagerAgentId = '';
 var _agentPanelEventsVisibleLimit = _AGENT_PANEL_EVENTS_PAGE_SIZE;
 var _agentPanelEventsLastTotal = 0;
@@ -34,6 +35,10 @@ var _agentPanelMessageListCacheByArchitect = {};
 var _agentPanelArchitectJournalByArchitect = {};
 var _agentPanelArchitectJournalLoadingById = {};
 var _agentPanelArchitectJournalLastFetchById = {};
+var _agentPanelArchitectJournalVisibleLimitById = {};
+var _agentPanelArchitectJournalRequestedLimitById = {};
+var _agentPanelArchitectJournalInFlightLimitById = {};
+var _agentPanelArchitectJournalExhaustedById = {};
 var _agentPanelTabSpecByKind = {
   architect: [
     { key: 'decisions', label: 'Decisions' },
@@ -373,10 +378,11 @@ function _agentPanelVirtualMetasForSurface(agent, activeTab) {
     }];
   }
   if (kind === 'architect' && activeTab === 'journal') {
-    return [{
-      key: _agentPanelFocusedSurfaceKey(agent, activeTab, 'journal'),
-      scrollSelector: '.agent-panel-content',
-    }];
+    // The architect journal is paged with concrete DOM rows instead of the
+    // fixed-row-height virtual list. Journal entries can be arbitrarily tall;
+    // virtual scroll's estimated max height could clamp scrollTop and snap
+    // the operator away from older entries during frequent journal refreshes.
+    return [];
   }
   return [];
 }
@@ -1095,6 +1101,28 @@ function _agentPanelInvalidateArchitectJournalCache(architectId) {
   delete _agentPanelArchitectJournalByArchitect[key];
 }
 
+function _agentPanelArchitectJournalVisibleLimit(architectId) {
+  architectId = String(architectId || '').trim();
+  if (!architectId) return _AGENT_PANEL_JOURNAL_PAGE_SIZE;
+  var visible = Number(_agentPanelArchitectJournalVisibleLimitById[architectId] || 0);
+  if (!visible || visible < _AGENT_PANEL_JOURNAL_PAGE_SIZE) {
+    visible = _AGENT_PANEL_JOURNAL_PAGE_SIZE;
+    _agentPanelArchitectJournalVisibleLimitById[architectId] = visible;
+  }
+  return visible;
+}
+
+function _agentPanelSetArchitectJournalVisibleLimit(architectId, limit) {
+  architectId = String(architectId || '').trim();
+  if (!architectId) return _AGENT_PANEL_JOURNAL_PAGE_SIZE;
+  var value = Math.max(
+    _AGENT_PANEL_JOURNAL_PAGE_SIZE,
+    Number(limit || 0) || _AGENT_PANEL_JOURNAL_PAGE_SIZE
+  );
+  _agentPanelArchitectJournalVisibleLimitById[architectId] = value;
+  return value;
+}
+
 function _agentPanelArchitectJournalEntries(agent) {
   var architectId = String((agent && agent.id) || '').trim();
   if (!architectId) return [];
@@ -1114,11 +1142,53 @@ function _agentPanelArchitectJournalLatestCheckpoint(entries) {
   return null;
 }
 
-function _agentPanelRequestArchitectJournal(agent) {
+function _agentPanelArchitectJournalMergeEntries(current, incoming) {
+  var merged = [];
+  var seen = {};
+  function keyFor(entry, index) {
+    entry = entry || {};
+    var id = String(entry.id || '').trim();
+    if (id) return 'id:' + id;
+    return 'fallback:' + String(entry.timestamp || '') + ':'
+      + String(entry.type || '') + ':' + String(entry.entry || '') + ':' + index;
+  }
+  function addAll(entries) {
+    entries = Array.isArray(entries) ? entries : [];
+    for (var i = 0; i < entries.length; i++) {
+      var entry = entries[i];
+      if (!entry) continue;
+      var key = keyFor(entry, i);
+      if (seen[key]) continue;
+      seen[key] = true;
+      merged.push(entry);
+    }
+  }
+  addAll(incoming);
+  addAll(current);
+  merged.sort(function(a, b) {
+    var tsDiff = Number((b && b.timestamp) || 0) - Number((a && a.timestamp) || 0);
+    if (tsDiff) return tsDiff;
+    return String((b && b.id) || '').localeCompare(String((a && a.id) || ''));
+  });
+  return merged;
+}
+
+function _agentPanelRequestArchitectJournal(agent, options) {
+  options = options || {};
   var architectId = String((agent && agent.id) || '').trim();
   if (!architectId) return;
   if (typeof send !== 'function') return;
   if (_agentPanelArchitectJournalLoadingById[architectId]) return;
+  var currentEntries = _agentPanelArchitectJournalEntries(agent);
+  var visibleLimit = _agentPanelArchitectJournalVisibleLimit(architectId);
+  var requestedLimit = Math.max(
+    _AGENT_PANEL_JOURNAL_PAGE_SIZE,
+    visibleLimit,
+    Number(options.limit || 0) || 0,
+    Number(_agentPanelArchitectJournalRequestedLimitById[architectId] || 0) || 0
+  );
+  if (!options.force && currentEntries.length >= requestedLimit) return;
+  if (!options.force && _agentPanelArchitectJournalExhaustedById[architectId]) return;
   var now = Date.now();
   var lastFetch = Number(_agentPanelArchitectJournalLastFetchById[architectId] || 0);
   var hasCache = !!(state && state.architect_journals
@@ -1126,18 +1196,40 @@ function _agentPanelRequestArchitectJournal(agent) {
   if (hasCache && lastFetch
       && (now - lastFetch) < _AGENT_PANEL_JOURNAL_REFRESH_MS) return;
   _agentPanelArchitectJournalLoadingById[architectId] = true;
+  _agentPanelArchitectJournalRequestedLimitById[architectId] = requestedLimit;
+  _agentPanelArchitectJournalInFlightLimitById[architectId] = requestedLimit;
   _agentPanelArchitectJournalLastFetchById[architectId] = now;
-  send({ cmd: 'architect_journal_read', architect_id: architectId, limit: 200 });
+  send({
+    cmd: 'architect_journal_read',
+    architect_id: architectId,
+    limit: requestedLimit,
+  });
 }
 
 function agentPanelReceiveArchitectJournal(data) {
   var architectId = String((data && data.architect_id) || '').trim();
   if (!architectId) return;
   if (!state.architect_journals) state.architect_journals = {};
-  state.architect_journals[architectId] = Array.isArray(data.entries)
+  var incomingEntries = Array.isArray(data.entries)
     ? data.entries.slice()
     : [];
+  var responseLimit = Number((data && data.limit) || 0)
+    || Number(_agentPanelArchitectJournalInFlightLimitById[architectId] || 0)
+    || Number(_agentPanelArchitectJournalRequestedLimitById[architectId] || 0)
+    || _AGENT_PANEL_JOURNAL_PAGE_SIZE;
+  _agentPanelArchitectJournalRequestedLimitById[architectId] = Math.max(
+    _AGENT_PANEL_JOURNAL_PAGE_SIZE,
+    Number(_agentPanelArchitectJournalRequestedLimitById[architectId] || 0) || 0,
+    responseLimit
+  );
+  state.architect_journals[architectId] = _agentPanelArchitectJournalMergeEntries(
+    state.architect_journals[architectId],
+    incomingEntries
+  );
+  _agentPanelArchitectJournalExhaustedById[architectId] =
+    incomingEntries.length < responseLimit;
   _agentPanelArchitectJournalLoadingById[architectId] = false;
+  delete _agentPanelArchitectJournalInFlightLimitById[architectId];
   _agentPanelArchitectJournalLastFetchById[architectId] = Date.now();
   _agentPanelInvalidateArchitectJournalCache(architectId);
   var focused = _resolveFocusedAgent();
@@ -1148,6 +1240,73 @@ function agentPanelReceiveArchitectJournal(data) {
         && _agentPanelRefreshCurrentTab()) return;
     if (typeof renderAgentPanel === 'function') renderAgentPanel();
   }
+}
+
+function _agentPanelArchitectJournalCanLoadOlder(architectId, entries, visibleLimit) {
+  architectId = String(architectId || '').trim();
+  entries = Array.isArray(entries) ? entries : [];
+  visibleLimit = Math.max(
+    _AGENT_PANEL_JOURNAL_PAGE_SIZE,
+    Number(visibleLimit || 0) || _AGENT_PANEL_JOURNAL_PAGE_SIZE
+  );
+  if (visibleLimit < entries.length) return true;
+  if (_agentPanelArchitectJournalLoadingById[architectId]) return false;
+  if (_agentPanelArchitectJournalExhaustedById[architectId]) return false;
+  var requestedLimit = Number(_agentPanelArchitectJournalRequestedLimitById[architectId] || 0);
+  if (!requestedLimit) return false;
+  return entries.length >= requestedLimit;
+}
+
+function _agentPanelArchitectJournalDidPrepend(architectId) {
+  architectId = String(architectId || '').trim();
+  if (!architectId) return;
+  var visible = _agentPanelArchitectJournalVisibleLimit(architectId);
+  var nextVisible = _agentPanelSetArchitectJournalVisibleLimit(
+    architectId,
+    visible + 1
+  );
+  _agentPanelArchitectJournalRequestedLimitById[architectId] = Math.max(
+    Number(_agentPanelArchitectJournalRequestedLimitById[architectId] || 0) || 0,
+    nextVisible
+  );
+}
+
+function _agentPanelArchitectJournalLoadMoreLabel(entries, visibleLimit) {
+  entries = Array.isArray(entries) ? entries : [];
+  visibleLimit = Math.max(
+    _AGENT_PANEL_JOURNAL_PAGE_SIZE,
+    Number(visibleLimit || 0) || _AGENT_PANEL_JOURNAL_PAGE_SIZE
+  );
+  var hiddenLoaded = Math.max(0, entries.length - visibleLimit);
+  var count = hiddenLoaded
+    ? Math.min(_AGENT_PANEL_JOURNAL_PAGE_SIZE, hiddenLoaded)
+    : _AGENT_PANEL_JOURNAL_PAGE_SIZE;
+  return 'Load ' + count + ' older entr' + (count === 1 ? 'y' : 'ies');
+}
+
+function agentPanelLoadOlderArchitectJournal(evt, architectId) {
+  if (evt && typeof evt.preventDefault === 'function') evt.preventDefault();
+  if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
+  var resolvedId = String(architectId || '').trim();
+  var agent = null;
+  if (resolvedId && state && state.agents) agent = state.agents[resolvedId] || null;
+  if (!agent) {
+    agent = _resolveFocusedAgent();
+    resolvedId = String((agent && agent.id) || resolvedId || '').trim();
+  }
+  if (!resolvedId || !agent) return;
+  var entries = _agentPanelArchitectJournalEntries(agent);
+  var currentVisible = _agentPanelArchitectJournalVisibleLimit(resolvedId);
+  var nextVisible = _agentPanelSetArchitectJournalVisibleLimit(
+    resolvedId,
+    currentVisible + _AGENT_PANEL_JOURNAL_PAGE_SIZE
+  );
+  if (entries.length < nextVisible && !_agentPanelArchitectJournalExhaustedById[resolvedId]) {
+    _agentPanelRequestArchitectJournal(agent, { force: true, limit: nextVisible });
+  }
+  if (typeof _agentPanelRefreshCurrentTab === 'function'
+      && _agentPanelRefreshCurrentTab()) return;
+  if (typeof renderAgentPanel === 'function') renderAgentPanel();
 }
 
 function _agentPanelMessageCompareDesc(a, b) {
@@ -1865,15 +2024,21 @@ function _agentPanelArchitectJournalHtml(agent) {
   _agentPanelRequestArchitectJournal(agent);
   var architectId = String((agent && agent.id) || '');
   var entries = _agentPanelArchitectJournalEntries(agent);
+  var visibleLimit = _agentPanelArchitectJournalVisibleLimit(architectId);
+  var visibleEntries = entries.slice(0, Math.min(entries.length, visibleLimit));
   var decisionCount = _agentPanelArchitectDecisionList(architectId).length;
   var loading = !!_agentPanelArchitectJournalLoadingById[architectId];
   var latestCheckpoint = _agentPanelArchitectJournalLatestCheckpoint(entries);
+  var countText = String(visibleEntries.length);
+  if (visibleEntries.length < entries.length) {
+    countText += ' / ' + entries.length;
+  }
 
   var html = '<div class="agent-panel-worklog-tab">';
   html += '<div class="agent-panel-worklog-header">';
   html += '<span class="agent-panel-worklog-title">Journal</span>';
   html += '<span class="agent-panel-worklog-count" data-agent-panel-journal-count>'
-    + entries.length + '</span>';
+    + _agentPanelEsc(countText) + '</span>';
   html += '<span class="agent-panel-worklog-note"> · '
     + _agentPanelEsc(decisionCount + ' decision' + (decisionCount === 1 ? '' : 's'))
     + '</span>';
@@ -1905,16 +2070,21 @@ function _agentPanelArchitectJournalHtml(agent) {
     return html;
   }
 
-  html += _agentPanelRenderVirtualList({
-    key: _agentPanelFocusedSurfaceKey(agent, 'journal', 'journal'),
-    total: entries.length,
-    rowHeight: _AGENT_PANEL_JOURNAL_ROW_HEIGHT,
-    listClass: 'agent-panel-journal',
-    scrollSelector: '.agent-panel-content',
-    renderItem: function(index) {
-      return _agentPanelArchitectJournalEntryHtml(entries[index], index);
-    },
-  });
+  html += '<div class="agent-panel-journal">';
+  for (var i = 0; i < visibleEntries.length; i++) {
+    html += _agentPanelArchitectJournalEntryHtml(visibleEntries[i], i);
+  }
+  html += '</div>';
+  if (loading && visibleEntries.length) {
+    html += '<div class="agent-panel-worklog-note">Loading older journal entries…</div>';
+  }
+  if (_agentPanelArchitectJournalCanLoadOlder(architectId, entries, visibleLimit)) {
+    html += '<button type="button" class="agent-panel-event-load-more"'
+      + ' onclick="agentPanelLoadOlderArchitectJournal(event, \''
+      + _agentPanelEsc(architectId) + '\')">'
+      + _agentPanelEsc(_agentPanelArchitectJournalLoadMoreLabel(entries, visibleLimit))
+      + '</button>';
+  }
   html += '</div>';
   return html;
 }

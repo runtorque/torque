@@ -235,6 +235,7 @@ test('focused architect journal tab requests entries and renders them', () => {
     return call && call.cmd === 'architect_journal_read' && call.architect_id === 'arch-1';
   });
   assert.ok(journalFetch, 'journal fetch should be dispatched on tab open');
+  assert.equal(journalFetch.limit, 50);
   assert.match(panel.innerHTML, /Loading architect journal/);
 
   vm.runInContext(
@@ -299,7 +300,7 @@ test('focused architect journal shows decision count in header', () => {
   assert.match(panel.innerHTML, /Observed regression/);
 });
 
-test('focused architect journal virtualizes long entry lists', () => {
+test('focused architect journal renders a bounded window with Load older pagination', () => {
   const { context, panel, sandbox } = createArchitectHarness();
   sandbox.state.agents['arch-1'] = architect('arch-1', 'Productmind', 10);
   const entries = [];
@@ -317,8 +318,48 @@ test('focused architect journal virtualizes long entry lists', () => {
 
   context.agentPanelSelectTab('journal');
 
-  assert.match(panel.innerHTML, /data-agent-panel-virtualized="true"/);
   const rendered = (panel.innerHTML.match(/architect-journal-j-\d+/g) || []).length;
-  assert.ok(rendered > 0 && rendered < entries.length,
-    `expected virtualization to render a subset, saw ${rendered}`);
+  assert.equal(rendered, 50);
+  assert.doesNotMatch(panel.innerHTML, /data-agent-panel-virtualized="true"/);
+  assert.match(panel.innerHTML, /Load 50 older entries/);
+  assert.match(panel.innerHTML, /Entry #49/);
+  assert.doesNotMatch(panel.innerHTML, /Entry #50/);
+
+  vm.runInContext(`agentPanelLoadOlderArchitectJournal(null, 'arch-1')`, context);
+
+  const renderedAfterLoad = (panel.innerHTML.match(/architect-journal-j-\d+/g) || []).length;
+  assert.equal(renderedAfterLoad, 100);
+  assert.match(panel.innerHTML, /Entry #99/);
+  assert.doesNotMatch(panel.innerHTML, /Entry #100/);
+});
+
+test('focused architect journal Load older fetches the next bounded window', () => {
+  const { context, panel, sandbox } = createArchitectHarness();
+  sandbox.state.agents['arch-1'] = architect('arch-1', 'Productmind', 10);
+  sandbox.focusedItemId = 'arch-1';
+  context.agentPanelSelectTab('journal');
+
+  const entries = [];
+  for (let i = 0; i < 50; i++) {
+    entries.push({
+      id: 'j-' + i,
+      architect_id: 'arch-1',
+      type: 'observation',
+      entry: 'Entry #' + i,
+      timestamp: 1712345600 + i,
+    });
+  }
+
+  vm.runInContext(
+    `agentPanelReceiveArchitectJournal({architect_id:'arch-1', limit:50, entries:${JSON.stringify(entries)}})`,
+    context
+  );
+  sandbox.sendCalls.length = 0;
+
+  vm.runInContext(`agentPanelLoadOlderArchitectJournal(null, 'arch-1')`, context);
+
+  assert.match(panel.innerHTML, /Loading older journal entries/);
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
+    { cmd: 'architect_journal_read', architect_id: 'arch-1', limit: 100 },
+  ]);
 });
