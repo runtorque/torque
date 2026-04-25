@@ -228,6 +228,16 @@ def _architect_task_creator_filter_matches(task, creator_filter: str
     )
 
 
+def _validate_architect_task_creator_filter(creator_filter: str) -> str:
+    if not str(creator_filter or "").strip():
+        return ""
+    _matches, error = _architect_task_creator_filter_matches(
+        None,
+        creator_filter,
+    )
+    return error
+
+
 def _architect_task_list_sort_key(state, item: dict) -> tuple[int, int, str, str]:
     lane_order = {lane: idx for idx, lane in enumerate(state.board_lanes)}
     task = state.board_tasks.get(item.get("id", ""))
@@ -2814,6 +2824,11 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             args.get("assigned_engineer_id_filter", "") or ""
         ).strip()
         creator_filter = str(args.get("creator_filter", "") or "").strip()
+        creator_filter_error = _validate_architect_task_creator_filter(
+            creator_filter,
+        )
+        if creator_filter_error:
+            return creator_filter_error, True
 
         task_items = []
         for task in state.board_tasks.values():

@@ -54,6 +54,7 @@ _SCOPED_WRITE_SUFFIXES = {
     "engineer_dismiss",
     "engineer_rehire",
     "task_create",
+    "task_update",
     "task_reassign",
     "task_edit",
     "task_upload_artifact",
@@ -106,6 +107,7 @@ _API_READ_COMMANDS = {
     "memory_list",
     "memory_read",
     "engineer_journal_read",
+    "architect_task_list",
     "architect_decision_list",
     "pending_hire_list",
 }

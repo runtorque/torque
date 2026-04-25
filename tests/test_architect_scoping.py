@@ -1629,6 +1629,21 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(payload["truncated"])
         self.assertLessEqual(len(payload["tasks"]), 2)
 
+    async def test_architect_task_list_validates_creator_filter_before_scanning(self):
+        architect = self._add_architect("arch-1", "Architect")
+
+        text, is_error = await self._call(
+            "architect_task_list",
+            {"label_filter": "no-matching-label", "creator_filter": "bogus"},
+            architect.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertEqual(
+            text,
+            "creator_filter must be one of: user, architect, engineer:<id>, system",
+        )
+
     async def test_architect_task_update_edits_own_task_fields_and_labels(self):
         architect = self._add_architect("arch-1", "Architect")
         task = self._add_task(
