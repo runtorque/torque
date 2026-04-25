@@ -2497,6 +2497,41 @@ def _handle_engineer_flush_now_command(engineer_buffer, data: dict) -> dict:
     return {"type": "error", "message": message or "Unable to send queued events"}
 
 
+async def _handle_engineer_dismiss_note_command(
+    data: dict,
+    state: MatrixState,
+    panel_event,
+) -> dict:
+    """Clear the live engineer note after archiving it to panel events."""
+    group = data.get("group", "")
+    ws = state.get_engineer_settings(group)
+    pending_note = str(getattr(ws, "pending_note", "") or "")
+    note_kind = str(getattr(ws, "pending_note_kind", "") or "note").strip()
+    if note_kind not in {"note", "question"}:
+        note_kind = "note"
+
+    if pending_note and panel_event:
+        engineer = state.get_engineer_for_group(group)
+        event_kind = (
+            "engineer_question_dismissed"
+            if note_kind == "question"
+            else "engineer_note_dismissed"
+        )
+        panel_event(
+            event_kind,
+            str(getattr(engineer, "id", "") or ""),
+            str(getattr(engineer, "name", "") or "Engineer"),
+            group,
+            pending_note,
+        )
+
+    await state.update_engineer_settings_async(
+        group,
+        pending_note="",
+        pending_note_kind="")
+    return {"type": "ok"}
+
+
 def _handle_digest_pause_resume_command(
     state: MatrixState,
     engineer_buffer,
@@ -11127,12 +11162,11 @@ async def main(connection=None):
                     result = {"type": "ok"}
 
             elif cmd == "engineer_dismiss_note":
-                group = data.get("group", "")
-                await state.update_engineer_settings_async(
-                    group,
-                    pending_note="",
-                    pending_note_kind="")
-                result = {"type": "ok"}
+                result = await _handle_engineer_dismiss_note_command(
+                    data,
+                    state,
+                    _panel_event,
+                )
 
             elif cmd == "engineer_reply":
                 group = data.get("group", "")

@@ -6570,6 +6570,31 @@ test('events entries preserve expansion state by event id across rerenders', () 
   assert.match(html, /eventsToggleEntry\('7'\)/);
 });
 
+test('dismissed engineer note events render with a dismissed badge', () => {
+  const { context } = createEventsHarness({ stubRenderers: false });
+
+  const noteHtml = context._renderEventEntry({
+    id: 9,
+    kind: 'engineer_note_dismissed',
+    agent_name: 'Engineer',
+    message: 'FYI: release branch is ready',
+    timestamp: 1,
+  }, 0);
+  const questionHtml = context._renderEventEntry({
+    id: 10,
+    kind: 'engineer_question_dismissed',
+    agent_name: 'Engineer',
+    message: 'Should we start the next wave?',
+    timestamp: 2,
+  }, 1);
+
+  assert.match(noteHtml, /events-kind-dismissed-note/);
+  assert.match(noteHtml, /events-entry-dismissed-badge/);
+  assert.match(noteHtml, />dismissed</);
+  assert.match(noteHtml, /FYI: release branch is ready/);
+  assert.match(questionHtml, />dismissed question</);
+});
+
 test('events log virtualizes large histories to the visible window', () => {
   const { context, document } = createEventsHarness({ stubRenderers: false });
   const panel = document.register('panel-events');

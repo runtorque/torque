@@ -5402,6 +5402,20 @@ body.runtime-embedded .board-empty-action:focus-visible {
   max-width: 100px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.events-entry-badge {
+  flex-shrink: 0;
+  padding: 0 4px;
+  border-radius: 999px;
+  font-size: 8px;
+  line-height: 13px;
+  text-transform: uppercase;
+  letter-spacing: .02em;
+}
+.events-entry-dismissed-badge {
+  color: var(--text-dim);
+  border: 1px solid rgba(139,148,158,.35);
+  background: rgba(139,148,158,.12);
+}
 .events-entry-text {
   color: var(--text-dim);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -5411,6 +5425,11 @@ body.runtime-embedded .board-empty-action:focus-visible {
 .events-kind-blocked .events-entry-icon { color: #d29922; }
 .events-kind-ask .events-entry-icon { color: var(--status-orange); }
 .events-kind-done .events-entry-icon { color: var(--status-green, #3fb950); }
+.events-kind-dismissed-note .events-entry-icon { color: var(--text-dim); }
+.events-kind-dismissed-note .events-entry-text {
+  color: var(--text-muted, var(--text-dim));
+  font-style: italic;
+}
 .events-date-separator {
   font-size: 9px; color: var(--text-dim);
   text-align: center; padding: 6px 10px 2px;
