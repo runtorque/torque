@@ -8555,6 +8555,52 @@ test('new agent upserts without a focus_update preserve the active selection', (
   assert.equal(jsonValue(context, 'focusedItemId'), 'agent-2');
 });
 
+test('focus_update on an architect agent focuses the principal card, not the agent id', () => {
+  const { context } = createWsRenderHarness();
+  runInContext(context, `
+    state.agents = {
+      'arch-1': {
+        id: 'arch-1',
+        name: 'Productmind',
+        group: 'loom',
+        kind: 'architect',
+        cell_type: 'agent',
+        session_id: 'sess-arch',
+        status: 'running',
+      },
+      'eng-1': {
+        id: 'eng-1',
+        name: 'Eng',
+        group: 'loom',
+        kind: 'engineer',
+        cell_type: 'agent',
+        session_id: 'sess-eng',
+        status: 'running',
+      },
+    };
+    state.groups = { loom: ['arch-1', 'eng-1'] };
+    state.active_session_id = 'sess-eng';
+    selectedAgentId = 'eng-1';
+    selectedTerminalId = 'eng-1';
+    focusedItemId = 'eng-1';
+  `);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'focus_update',
+      active_session_id: 'sess-arch',
+    }],
+  });
+
+  assert.equal(jsonValue(context, 'selectedAgentId'), 'arch-1');
+  assert.equal(jsonValue(context, 'selectedTerminalId'), 'arch-1');
+  // Architects render as principal cards, so focusedItemId must use the
+  // principal-row nav id — using the bare agent id falls through
+  // _resolveFocusedItemForGridRender to the first engineer.
+  assert.equal(jsonValue(context, 'focusedItemId'), 'principal:loom:arch-1');
+});
+
 test('standalone task invalidation is scoped by group and active context selection', () => {
   const { context, sandbox, flushRaf } = createStandaloneDeltaBatchHarness(['board', 'context', 'events', 'engineer']);
   runInContext(context, `

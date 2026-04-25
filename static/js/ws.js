@@ -1638,7 +1638,14 @@ function _syncSelectionToActiveSession() {
     selectedTerminalId = id;
     if (cell.cell_type === 'agent') {
       selectedAgentId = id;
-      focusedItemId = id;
+      // Architects are rendered as principal cards, not as grid agent cells,
+      // so their agent id is not a valid nav item — focusing it would land
+      // on the first engineer after the next grid render.
+      if ((cell.kind || '') === 'architect') {
+        focusedItemId = 'principal:' + (cell.group || '') + ':' + id;
+      } else {
+        focusedItemId = id;
+      }
     } else if (cell.parent_id) {
       selectedAgentId = cell.parent_id;
       focusedItemId = id;
