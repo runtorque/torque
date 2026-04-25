@@ -31,7 +31,7 @@ from .event_ingest_db import (
     EventIngestStore,
 )
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 DEFAULT_SOCKET_NAME = "event_ingest.sock"
 DEFAULT_PID_FILE_NAME = "event_ingest.pid"
 DEFAULT_LOG_FILE_NAME = "event_ingest.log"
@@ -432,6 +432,22 @@ def ensure_running(
     if pong and pong.get("version") == PROTOCOL_VERSION:
         log.info("Event-ingest daemon already running (pid=%s)", pong.get("pid"))
         return paths["socket"]
+    if pong:
+        old_version = pong.get("version")
+        pong_pid = None
+        try:
+            pong_pid = int(pong.get("pid") or 0)
+        except (TypeError, ValueError):
+            pong_pid = None
+        if pong_pid and _pid_alive(pong_pid):
+            log.info(
+                "Existing event-ingest pid=%s uses protocol version %r "
+                "(wanted %s) — terminating",
+                pong_pid,
+                old_version,
+                PROTOCOL_VERSION,
+            )
+            _terminate_pid(pong_pid)
 
     old_pid = _read_pid_file(paths["pid"])
     if old_pid and _pid_alive(old_pid):

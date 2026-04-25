@@ -21,7 +21,7 @@ from loom.event_ingest_daemon import (
     read_frame,
     write_frame,
 )
-from loom.event_ingest_client import EventIngestClient
+from loom.event_ingest_client import EventIngestClient, EventIngestProtocolError
 from loom.events import (
     EventBus,
     EventIngestDrainer,
@@ -397,6 +397,22 @@ class EventIngestClientCounterTests(unittest.IsolatedAsyncioTestCase):
                 os.environ["LOOM_PROFILE_ENABLED"] = old_profile_enabled
             profiling.reset()
 
+    async def test_configure_rejects_unknown_op_error_response(self):
+        client = EventIngestClient(Path("unused.sock"))
+
+        async def fake_call(op, **payload):
+            self.assertEqual(op, "configure")
+            self.assertEqual(payload["args_capture"], "metadata")
+            return {
+                "type": "error",
+                "code": "protocol_error",
+                "message": "unknown op: 'configure'",
+            }
+
+        client._call_with_reconnect_retry = fake_call
+        with self.assertRaises(EventIngestProtocolError):
+            await client.configure(args_capture="metadata")
+
 
 class EventIngestProtocolTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -405,6 +421,9 @@ class EventIngestProtocolTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self):
         await self.h.stop()
+
+    async def test_protocol_version_bumped_for_query_and_configure_ops(self):
+        self.assertGreaterEqual(PROTOCOL_VERSION, 2)
 
     async def test_ping_append_drain_ack_status(self):
         reader, writer = await _open_client(self.h.socket_path)
@@ -447,6 +466,42 @@ class EventIngestProtocolTests(unittest.IsolatedAsyncioTestCase):
 
 
 class EventIngestLifecycleTests(unittest.TestCase):
+    def test_ensure_running_replaces_protocol_mismatch_sidecar(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = Path(tmp)
+            old_pid = 12345
+            new_pid = 23456
+            ping_responses = [
+                {"type": "pong", "version": PROTOCOL_VERSION - 1, "pid": old_pid},
+                {"type": "pong", "version": PROTOCOL_VERSION, "pid": new_pid},
+            ]
+
+            def fake_ping(_socket_path):
+                if ping_responses:
+                    return ping_responses.pop(0)
+                return {"type": "pong", "version": PROTOCOL_VERSION, "pid": new_pid}
+
+            with mock.patch(
+                "loom.event_ingest_daemon._ping_socket",
+                side_effect=fake_ping,
+            ), mock.patch(
+                "loom.event_ingest_daemon._pid_alive",
+                return_value=True,
+            ), mock.patch(
+                "loom.event_ingest_daemon._terminate_pid",
+            ) as terminate_pid, mock.patch(
+                "loom.event_ingest_daemon._read_pid_file",
+                return_value=None,
+            ), mock.patch(
+                "loom.event_ingest_daemon.spawn_detached",
+                return_value=new_pid,
+            ) as spawn_detached:
+                sock_path = event_ingest_daemon.ensure_running(data_dir, timeout=1.0)
+
+            self.assertEqual(sock_path, data_dir / event_ingest_daemon.DEFAULT_SOCKET_NAME)
+            terminate_pid.assert_called_once_with(old_pid)
+            spawn_detached.assert_called_once()
+
     def test_detached_daemon_sigterm_exits_and_unlinks_runtime_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             data_dir = Path(tmp)

@@ -3229,7 +3229,7 @@ def cmd_mcp_log(args):
         port=args.port,
         cell_id=cell["id"],
         tool_name_pattern=args.tool_filter or "mcp__loom__%",
-        hook_event_name=args.hook or "PostToolUse",
+        hook_event_name=args.hook,
         since=since,
         limit=args.limit,
     ))

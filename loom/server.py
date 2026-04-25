@@ -4260,7 +4260,12 @@ def _event_ingest_config_payload(state: MatrixState) -> dict:
 async def _configure_event_ingest_client(event_ingest_client, state: MatrixState) -> None:
     if not event_ingest_client:
         return
-    await event_ingest_client.configure(**_event_ingest_config_payload(state))
+    response = await event_ingest_client.configure(**_event_ingest_config_payload(state))
+    if response.get("type") != "ok" or response.get("op") != "configure":
+        raise RuntimeError(
+            "event-ingest configure failed: "
+            f"{response.get('message') or response!r}"
+        )
 
 
 def _mcp_call_rows_for_ui(state: MatrixState, records: list[dict]) -> list[dict]:
@@ -11651,7 +11656,12 @@ async def main(connection=None):
             )
         try:
             raw_tool = str(raw.get("tool_name") or raw.get("name") or "")
-            if raw_tool.startswith("mcp__") and not bool(response.get("duplicate")):
+            raw_hook = str(raw.get("hook_event_name") or raw.get("type") or "")
+            if (
+                raw_tool.startswith("mcp__")
+                and raw_hook == "PostToolUse"
+                and not bool(response.get("duplicate"))
+            ):
                 redacted_envelope = redact_event_for_mcp_call_log(
                     envelope,
                     args_capture=state.global_settings.mcp_call_log_args_capture,

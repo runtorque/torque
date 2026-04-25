@@ -1108,6 +1108,22 @@ test('agent MCP tab live update prepends without losing expanded row across rere
   context.agentPanelReceiveMcpCallAppend({
     cursor: 2,
     cell_id: 'worker-live',
+    tool_name: 'mcp__loom__pre',
+    hook_event_name: 'PreToolUse',
+    appended_at: now,
+    success: true,
+    args: { task_id: 'LOOM:1' },
+    args_redacted: false,
+    result: null,
+    result_redacted: true,
+  });
+
+  assert.doesNotMatch(panel.innerHTML, /mcp__loom__pre/);
+  assert.equal(context.state.mcp_calls['worker-live'].some((call) => call.tool_name === 'mcp__loom__pre'), false);
+
+  context.agentPanelReceiveMcpCallAppend({
+    cursor: 3,
+    cell_id: 'worker-live',
     tool_name: 'mcp__loom__new',
     hook_event_name: 'PostToolUse',
     appended_at: now,

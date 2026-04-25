@@ -46,6 +46,7 @@ var _agentPanelMcpCallsVisibleLimitByAgent = {};
 var _agentPanelMcpCallExpandedByAgent = {};
 var _agentPanelMcpFiltersByAgent = {};
 var _AGENT_PANEL_MCP_PAGE_SIZE = 50;
+var _AGENT_PANEL_MCP_DEFAULT_HOOK = 'PostToolUse';
 var _agentPanelTabSpecByKind = {
   architect: [
     { key: 'decisions', label: 'Decisions' },
@@ -1439,6 +1440,7 @@ function _agentPanelMcpFilters(agentId) {
       tool: '',
       range: '24h',
       outcome: 'all',
+      hook_event_name: _AGENT_PANEL_MCP_DEFAULT_HOOK,
     };
   }
   return _agentPanelMcpFiltersByAgent[agentId];
@@ -1474,6 +1476,7 @@ function _agentPanelMcpRequestKey(agentId, filters, limit) {
     String(filters.tool || ''),
     String(filters.range || ''),
     String(filters.outcome || ''),
+    String(filters.hook_event_name || _AGENT_PANEL_MCP_DEFAULT_HOOK),
     String(limit || 0),
   ].join('|');
 }
@@ -1499,7 +1502,7 @@ function _agentPanelRequestMcpCalls(agent, options) {
     cmd: 'mcp_calls',
     cell_id: agentId,
     tool_name_pattern: _agentPanelMcpToolPattern(filters.tool),
-    hook_event_name: 'PostToolUse',
+    hook_event_name: String(filters.hook_event_name || _AGENT_PANEL_MCP_DEFAULT_HOOK),
     since: _agentPanelMcpSinceForRange(filters.range),
     limit: limit,
     success_filter: filters.outcome || 'all',
@@ -1553,6 +1556,7 @@ function agentPanelReceiveMcpCallAppend(call) {
   call = call || {};
   var agentId = String(call.cell_id || '');
   if (!agentId) return;
+  if (!_agentPanelMcpCallMatchesHook(call, _agentPanelMcpFilters(agentId))) return;
   var current = _agentPanelMcpCallsByAgent[agentId]
     || (state && state.mcp_calls && state.mcp_calls[agentId])
     || [];
@@ -1626,8 +1630,20 @@ function _agentPanelMcpCallsForAgent(agent) {
   return [];
 }
 
+function _agentPanelMcpHookFilter(filters) {
+  filters = filters || {};
+  return String(filters.hook_event_name || _AGENT_PANEL_MCP_DEFAULT_HOOK || '').trim();
+}
+
+function _agentPanelMcpCallMatchesHook(call, filters) {
+  var hookFilter = _agentPanelMcpHookFilter(filters);
+  if (!hookFilter) return true;
+  return String((call && call.hook_event_name) || '') === hookFilter;
+}
+
 function _agentPanelMcpCallMatchesFilters(call, filters) {
   filters = filters || {};
+  if (!_agentPanelMcpCallMatchesHook(call, filters)) return false;
   var outcome = String(filters.outcome || 'all');
   if (outcome === 'success' && !call.success) return false;
   if (outcome === 'error' && call.success) return false;

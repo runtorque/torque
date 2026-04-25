@@ -1382,6 +1382,7 @@ function _applyDelta(ops) {
         if (typeof agentPanelReceiveMcpCallAppend === 'function') {
           agentPanelReceiveMcpCallAppend(call);
         } else {
+          if (String(call.hook_event_name || '') !== 'PostToolUse') break;
           if (!state.mcp_calls) state.mcp_calls = {};
           var callCellId = String(call.cell_id || '');
           if (callCellId) {

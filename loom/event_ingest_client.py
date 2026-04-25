@@ -171,7 +171,13 @@ class EventIngestClient:
             payload["args_capture"] = str(args_capture or "")
         if full_capture_tools is not None:
             payload["full_capture_tools"] = list(full_capture_tools or [])
-        return await self._call_with_reconnect_retry("configure", **payload)
+        response = await self._call_with_reconnect_retry("configure", **payload)
+        if response.get("type") != "ok" or response.get("op") != "configure":
+            raise EventIngestProtocolError(
+                "event-ingest configure failed: "
+                f"{response.get('message') or response!r}"
+            )
+        return response
 
     async def call(self, op: str, **payload) -> dict:
         """Serialize one request and return its response frame."""

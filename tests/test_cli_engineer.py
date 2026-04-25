@@ -90,6 +90,8 @@ class CliEngineerTests(unittest.TestCase):
         self.assertEqual(args.agent, "worker-a")
         self.assertEqual(args.limit, 5)
         self.assertTrue(args.json)
+        all_hooks = parser.parse_args(["mcp-log", "worker-a", "--hook", ""])
+        self.assertEqual(all_hooks.hook, "")
 
     def test_cmd_mcp_log_resolves_agent_and_calls_daemon(self):
         state = {
