@@ -25,6 +25,55 @@ var _resyncPending = false;
 var _awaitingFullState = false;
 var _pendingDeltaSurfaceInvalidations = null;
 var _pendingDeltaSurfaceRenderFrame = 0;
+// Track whether a user mouse/pointer press is in progress. While pressing,
+// defer DOM-replacing delta renders so the press's target element survives
+// long enough for the browser to fire the synthetic click on mouseup.
+// Without this, a delta firehose (e.g. worker mcp_call_append from :224)
+// rerenders between pointerdown and pointerup, swapping the target out and
+// silently suppressing the click.
+//
+// Critical: the post-press flush must NOT run inside pointerup capture phase,
+// because replacing DOM there changes pointerup's target before the browser
+// emits click — same suppression by a different path. We schedule the flush
+// in a microtask / rAF after pointerup so click fires on the original target
+// first, then the deferred renders apply.
+var _userPressing = false;
+var _postPressFlushScheduled = false;
+function _flushAfterPress() {
+  _postPressFlushScheduled = false;
+  if (_userPressing) return;
+  if (_pendingDeltaSurfaceInvalidations) _flushDeltaSurfaceRenderBatch();
+}
+function _schedulePostPressFlush() {
+  if (_postPressFlushScheduled) return;
+  _postPressFlushScheduled = true;
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(_flushAfterPress);
+  } else if (typeof setTimeout === 'function') {
+    setTimeout(_flushAfterPress, 0);
+  } else {
+    _flushAfterPress();
+  }
+}
+if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+  var _userPressEnd = function() {
+    var wasPressing = _userPressing;
+    _userPressing = false;
+    if (wasPressing && _pendingDeltaSurfaceInvalidations) {
+      // Defer flush so the browser delivers the synthetic click on the
+      // original target before we swap DOM.
+      _schedulePostPressFlush();
+    }
+  };
+  document.addEventListener('pointerdown', function() { _userPressing = true; }, true);
+  document.addEventListener('pointerup', _userPressEnd, true);
+  document.addEventListener('pointercancel', _userPressEnd, true);
+  // Safety net: clear the flag on blur in case pointerup is missed (e.g.
+  // capture lost mid-press).
+  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    window.addEventListener('blur', _userPressEnd);
+  }
+}
 
 function connect() {
   _firstStateReceived = false;
@@ -456,6 +505,13 @@ function _cancelPendingDeltaSurfaceRender() {
 
 function _flushDeltaSurfaceRenderBatch() {
   if (!_pendingDeltaSurfaceInvalidations) return;
+  // If a press is in progress (e.g. an rAF was scheduled before the user
+  // pressed), keep the batch queued and re-arm the rAF after release.
+  // Otherwise the rAF would replace the DOM mid-press and suppress click.
+  if (_userPressing) {
+    _pendingDeltaSurfaceRenderFrame = 0;
+    return;
+  }
   const flags = _pendingDeltaSurfaceInvalidations;
   _pendingDeltaSurfaceInvalidations = null;
   _pendingDeltaSurfaceRenderFrame = 0;
@@ -464,8 +520,19 @@ function _flushDeltaSurfaceRenderBatch() {
 
 function _queueDeltaSurfaceRender(flags) {
   if (!_surfaceInvalidationsAny(flags)) return;
-  if (!_standaloneDeltaOptimizationsEnabled()
-      || typeof requestAnimationFrame !== 'function') {
+  // Always coalesce when rAF is available — toolbelt mode used to bypass
+  // this path and render synchronously per delta, which made the
+  // worker-MCP firehose (:224) freely interleave DOM swaps with user
+  // presses. The ~16 ms of latency is invisible compared to losing every
+  // click.
+  if (typeof requestAnimationFrame !== 'function') {
+    if (_userPressing) {
+      _pendingDeltaSurfaceInvalidations = _mergeSurfaceInvalidations(
+        _pendingDeltaSurfaceInvalidations,
+        flags
+      );
+      return;
+    }
     _renderDeltaSurfaceInvalidations(flags);
     return;
   }
@@ -473,6 +540,7 @@ function _queueDeltaSurfaceRender(flags) {
     _pendingDeltaSurfaceInvalidations,
     flags
   );
+  if (_userPressing) return;
   if (_pendingDeltaSurfaceRenderFrame) return;
   _pendingDeltaSurfaceRenderFrame = requestAnimationFrame(function() {
     _flushDeltaSurfaceRenderBatch();
