@@ -13168,8 +13168,7 @@ test('embedded runtime reuses the shared group, cell, and terminal UI', () => {
   assert.match(main.innerHTML, /Shell Root/);
   assert.match(main.innerHTML, /class="cell[^"]*selected/);
   assert.match(main.innerHTML, /class="term-row/);
-  // + New Worker (standalone) retired as part of the principals-row refactor.
-  assert.doesNotMatch(main.innerHTML, /openAddWorkerModal/);
+  assert.match(main.innerHTML, /ghost-card ghost-card--worker[\s\S]*openAddWorkerForSection\(&quot;alpha&quot;\)/);
   assert.match(main.innerHTML, /ghost-card ghost-card--engineer[\s\S]*openAddEngineerForSection\(&quot;alpha&quot;,&quot;&quot;\)/);
   assert.match(main.innerHTML, /ghost-card ghost-card--architect[\s\S]*openAddArchitectForGroup\(&quot;alpha&quot;\)/);
   assert.doesNotMatch(main.innerHTML, /quickAddAgent\('alpha'\)/);
@@ -13235,8 +13234,7 @@ test('main agent grid omits the retired legacy creation dropdown', () => {
   assert.doesNotMatch(main.innerHTML, /cell-add-drop/);
   assert.doesNotMatch(main.innerHTML, /agent-grid-global-add-row/);
   assert.doesNotMatch(main.innerHTML, /agent-add-menu/);
-  // + New Worker was retired in the principals-row refactor (MVP scope cut).
-  assert.doesNotMatch(main.innerHTML, /\+ New Worker/);
+  assert.match(main.innerHTML, /ghost-card ghost-card--worker[\s\S]*\+ Add Worker/);
   assert.match(main.innerHTML, /ghost-card ghost-card--engineer[\s\S]*\+ New Engineer/);
   assert.match(main.innerHTML, /ghost-card ghost-card--architect[\s\S]*\+ New Architect/);
 });
@@ -13402,6 +13400,128 @@ test('user section + New Engineer ghost submits a user-hired engineer without ar
   assert.equal(Object.prototype.hasOwnProperty.call(sendCalls[0], 'hired_by_architect_id'), false);
 });
 
+test('user principal Add Worker affordance survives delta rerenders and uses standalone worker flow', () => {
+  const { sandbox, document } = createSandbox({
+    _currentGroup() { return 'loom'; },
+    renderTerminalWorkspace() {},
+    updateEventsAttentionBadge() {},
+  });
+  const main = document.register('main');
+  Object.defineProperty(main, 'innerHTML', {
+    configurable: true,
+    get() { return this._innerHTML || ''; },
+    set(value) {
+      this._innerHTML = value;
+      this.scrollTop = 0;
+    },
+  });
+  registerAddCellModalElements(document);
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/constants.js');
+  loadScript(context, 'static/js/ws.js');
+  loadScript(context, 'static/js/render.js');
+  loadModalScripts(context);
+  runInContext(context, `
+    send = function(message) { sendCalls.push(message); };
+    _cachedAgentTemplates = [];
+    selectedTerminalId = null;
+    focusedItemId = 'principal:loom:user';
+    getFilterByWindow = function() { return false; };
+    _handleFullState({
+      seq: 1,
+      groups: { loom: ['eng-a'] },
+      group_settings: { loom: { collapsed_default: false } },
+      agents: {
+        'eng-a': { id: 'eng-a', name: 'Engineer A', kind: 'engineer', group: 'loom', cell_type: 'agent', status: 'running', created_at: 1 }
+      },
+      children: {},
+      board_lanes: [],
+      board_tasks: {},
+      panel_events: [],
+      selected_principal_id: ''
+    });
+  `);
+
+  assert.match(main.innerHTML, /principal-card--user[^"]*selected/);
+  assert.match(main.innerHTML, /class="ghost-card ghost-card--engineer[\s\S]*\+ New Engineer/);
+  assert.match(main.innerHTML, /class="ghost-card ghost-card--worker[\s\S]*\+ Add Worker/);
+  main.scrollTop = 37;
+
+  runInContext(context, `
+    _handleDelta({
+      seq: 2,
+      ops: [
+        { op: 'agent_upsert', id: 'eng-a', group: 'loom', activity_detail: 'still running' },
+        { op: 'group_update', name: 'loom', agents: ['eng-a'] }
+      ]
+    });
+  `);
+
+  assert.match(main.innerHTML, /class="ghost-card ghost-card--engineer[\s\S]*\+ New Engineer/);
+  assert.match(main.innerHTML, /class="ghost-card ghost-card--worker[\s\S]*\+ Add Worker/);
+  assert.equal(jsonValue(context, `focusedItemId`), 'principal:loom:user');
+  assert.equal(jsonValue(context, `state.selected_principal_id`), '');
+  assert.equal(main.scrollTop, 37);
+
+  runInContext(context, `openAddWorkerForSection('loom');`);
+  assert.deepEqual(jsonValue(context, `sendCalls`), [{ cmd: 'get_config', group: 'loom' }]);
+  runInContext(context, `
+    _showAddModal('worker', 'loom', {
+      current_path: '/repo',
+      group_cells: [],
+      group_settings: {},
+      resolved_agent_defaults: {},
+      profiles: ['Default'],
+      current_profile: ''
+    });
+  `);
+  assert.equal(document.getElementById('modal-add').classList.contains('visible'), true);
+  assert.equal(document.getElementById('modal-add-title').textContent, 'New Detached Worker');
+  assert.equal(document.getElementById('add-submit-btn').textContent, 'Create Worker');
+  assert.match(
+    document.getElementById('modal-add-summary').textContent,
+    /user-owned detached worker/,
+  );
+  document.getElementById('add-name-input').value = 'Standalone Worker';
+  document.getElementById('add-group-select').value = 'loom';
+  document.getElementById('add-profile-select').value = 'Default';
+
+  runInContext(context, `submitAdd();`);
+
+  const createPayload = jsonValue(context, `sendCalls[sendCalls.length - 1]`);
+  assert.deepEqual(createPayload, {
+    cmd: 'add_worker',
+    name: 'Standalone Worker',
+    group: 'loom',
+    profile: 'Default',
+    worktree: false,
+  });
+  assert.equal(Object.prototype.hasOwnProperty.call(createPayload, 'owner_engineer_id'), false);
+
+  runInContext(context, `
+    _handleDelta({
+      seq: 3,
+      ops: [
+        {
+          op: 'agent_upsert',
+          id: 'worker-standalone',
+          name: 'Standalone Worker',
+          kind: 'worker',
+          group: 'loom',
+          cell_type: 'agent',
+          status: 'running',
+          created_at: 2
+        },
+        { op: 'group_update', name: 'loom', agents: ['eng-a', 'worker-standalone'] }
+      ]
+    });
+  `);
+
+  assert.match(main.innerHTML, /loose-workers-strip[\s\S]*Standalone Worker/);
+  assert.match(main.innerHTML, /class="ghost-card ghost-card--engineer[\s\S]*\+ New Engineer/);
+  assert.match(main.innerHTML, /class="ghost-card ghost-card--worker[\s\S]*\+ Add Worker/);
+});
+
 test('principals row renders User + architects + + New Architect anchor', () => {
   const { context, document, sandbox } = createMainRenderHarness();
   const main = document.getElementById('main');
@@ -13513,8 +13633,7 @@ test('hierarchical creation controls render shared quarter-height ghost-card cla
 
   runInContext(context, `render();`);
 
-  // + New Worker (standalone) has been retired as part of the MVP scope cut.
-  assert.doesNotMatch(main.innerHTML, /\+ New Worker/);
+  assert.match(main.innerHTML, /class="ghost-card ghost-card--worker[\s\S]*\+ Add Worker/);
   assert.match(main.innerHTML, /class="ghost-card ghost-card--engineer[\s\S]*\+ New Engineer/);
   assert.match(main.innerHTML, /class="ghost-card ghost-card--architect[\s\S]*\+ New Architect/);
 
@@ -13801,18 +13920,18 @@ test('main render renders engineer rows under the user principal and exposes row
 
   runInContext(context, `render();`);
 
-  // Loose (user-owned) workers are no longer rendered — workers are engineer-owned only.
   assert.deepEqual(jsonValue(context, `window._navAgents`), [
+    'agent-user',
     'eng-a',
     'worker-a',
     'eng-b',
     'worker-b',
   ]);
-  assert.match(main.innerHTML, /Alice[\s\S]*Worker A[\s\S]*Bob[\s\S]*Worker B/);
+  assert.match(main.innerHTML, /User Worker[\s\S]*Alice[\s\S]*Worker A[\s\S]*Bob[\s\S]*Worker B/);
   assert.match(main.innerHTML, /principals-row/);
   assert.match(main.innerHTML, /agent-section-body/);
   assert.doesNotMatch(main.innerHTML, /architect-header-row|agent-section-header-row/);
-  assert.doesNotMatch(main.innerHTML, /loose-workers-strip/);
+  assert.match(main.innerHTML, /loose-workers-strip/);
   assert.match(main.innerHTML, /engineer-row/);
   assert.match(main.innerHTML, /cell-engineer-badge/);
   assert.doesNotMatch(
@@ -13911,8 +14030,8 @@ test('main render falls back to state.groups ordering within hierarchy buckets w
 
   runInContext(context, `render();`);
 
-  // Loose (user-owned) workers are no longer rendered; user view shows engineers + their workers.
   assert.deepEqual(jsonValue(context, `window._navAgents`), [
+    'agent-user',
     'eng-b',
     'worker-b-2',
     'worker-b-1',
@@ -13920,7 +14039,7 @@ test('main render falls back to state.groups ordering within hierarchy buckets w
     'worker-a-2',
     'worker-a-1',
   ]);
-  assert.match(main.innerHTML, /Bob[\s\S]*Worker B2[\s\S]*Worker B1[\s\S]*Alice[\s\S]*Worker A2[\s\S]*Worker A1/);
+  assert.match(main.innerHTML, /User Worker[\s\S]*Bob[\s\S]*Worker B2[\s\S]*Worker B1[\s\S]*Alice[\s\S]*Worker A2[\s\S]*Worker A1/);
 });
 
 test('main render orders sections user-first then architect creation order', () => {
@@ -14031,13 +14150,14 @@ test('main render orders sections user-first then architect creation order', () 
 
   runInContext(context, `render();`);
 
-  // Default filter = user principal; only user-section engineers + workers render.
-  // Loose (user-owned) workers are no longer rendered per MVP scope cut.
+  // Default filter = user principal; standalone workers render before
+  // user-section engineers + workers.
   assert.deepEqual(jsonValue(context, `window._navAgents`), [
+    'worker-user',
     'eng-user',
     'worker-user-owned',
   ]);
-  assert.match(main.innerHTML, /Bob[\s\S]*Worker B/);
+  assert.match(main.innerHTML, /Loose[\s\S]*Bob[\s\S]*Worker B/);
   // Principals row renders all architects alongside the user principal card.
   assert.match(main.innerHTML, /principals-row[\s\S]*Architect B[\s\S]*Architect A/);
 });
@@ -14106,7 +14226,6 @@ test('main render uses containment primitives and retires cell hierarchy indenta
     hiredWorker[1],
     new RegExp('\\barchitect-' + 'owned-worker\\b|\\bengineer-' + 'owned-worker\\b'),
   );
-  // Loose (orphan) workers are no longer rendered per MVP scope cut.
   assert.doesNotMatch(main.innerHTML, /data-drag-id="orphan"/);
   assert.match(main.innerHTML, /principals-row/);
   assert.match(main.innerHTML, /agent-section-body/);
@@ -14868,8 +14987,8 @@ test('task delta updates visible worker cycle state while preserving main-grid f
 });
 
 test('main hierarchy preserves focused ghost-card state across websocket delta rerenders', () => {
-  // Loose-new-worker ghost retired as part of the principals-row refactor.
   const cases = [
+    { label: 'worker ghost', focusKey: 'section-new-worker:loom:user', principal: '' },
     { label: 'engineer ghost', focusKey: 'section-new-engineer:loom:architect:arch-a', principal: 'arch-a' },
     { label: 'architect ghost', focusKey: 'agent-new-architect:loom', principal: '' },
   ];
@@ -15013,14 +15132,15 @@ test('main hierarchy ordering is stable when multiple agent deltas arrive in one
     });
   `);
 
-  // Default filter = user principal. Only user-section engineers + workers render.
-  // Loose (user-owned) workers are no longer rendered per MVP scope cut.
+  // Default filter = user principal. User-owned standalone workers render before
+  // user-section engineers + workers.
   assert.deepEqual(jsonValue(context, `window._navAgents`), [
+    'loose',
     'eng-user',
     'worker-user',
   ]);
   const mainHtml = document.getElementById('main').innerHTML;
-  assert.match(mainHtml, /User Engineer[\s\S]*User Worker/);
+  assert.match(mainHtml, /Loose[\s\S]*User Engineer[\s\S]*User Worker/);
   // Principals row renders user + both architects.
   assert.match(mainHtml, /principals-row[\s\S]*Architect B[\s\S]*Architect A/);
 });
@@ -15442,13 +15562,15 @@ test('main grid keyboard navigation traverses logical rows across sections', () 
   runInContext(context, `focusedItemId = 'eng-user-a'; render();`);
 
   // Default filter = user principal. Principals row (user + arch-a + arch-b +
-  // + New Architect) is row 0; then user-section engineer rows; then + New
-  // Engineer control. Architects' engineers are hidden unless filtered in.
+  // + New Architect) is row 0; then standalone workers, user-section engineer
+  // rows, then + New Engineer/+ Add Worker controls. Architects' engineers are
+  // hidden unless filtered in.
   assert.deepEqual(jsonValue(context, `window._navGridRows.map(function(row) { return { type: row.rowType, items: row.items.map(function(item) { return item.id; }) }; })`), [
     { type: 'principals-row', items: ['principal:loom:user', 'principal:loom:arch-a', 'principal:loom:arch-b', 'grid-control:agent-new-architect:loom'] },
+    { type: 'standalone-workers-row', items: ['loose-1', 'loose-2'] },
     { type: 'engineer-row', items: ['eng-user-a', 'worker-user-a1', 'worker-user-a2'] },
     { type: 'engineer-row', items: ['eng-user-b', 'worker-user-b1'] },
-    { type: 'section-creation-row', items: ['grid-control:section-new-engineer:loom:user'] },
+    { type: 'section-creation-row', items: ['grid-control:section-new-engineer:loom:user', 'grid-control:section-new-worker:loom:user'] },
   ]);
 
   runInContext(context, `moveFocusHorizontal(1);`);
@@ -15458,10 +15580,13 @@ test('main grid keyboard navigation traverses logical rows across sections', () 
   runInContext(context, `moveFocusDown();`);
   assert.equal(jsonValue(context, `focusedItemId`), 'worker-user-b1');
   runInContext(context, `moveFocusDown();`);
-  assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:section-new-engineer:loom:user');
+  assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:section-new-worker:loom:user');
 
-  // Arrow-up from first engineer lands on the selected principal (user).
+  // Arrow-up from first engineer lands on standalone workers, then the
+  // selected principal (user).
   runInContext(context, `focusedItemId = 'eng-user-a'; render();`);
+  runInContext(context, `moveFocusUp();`);
+  assert.equal(jsonValue(context, `focusedItemId`), 'loose-2');
   runInContext(context, `moveFocusUp();`);
   assert.equal(jsonValue(context, `focusedItemId`), 'principal:loom:user');
 
@@ -15589,9 +15714,8 @@ test('main grid focus falls forward across websocket delta removals', () => {
       ]
     });
   `);
-  // loose-1 is a loose (user-owned) worker — no longer rendered in the grid.
-  // Focus falls forward to the first creation control in the principals row.
-  assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:agent-new-architect:loom');
+  // loose-1 is a user-owned standalone worker and remains focusable.
+  assert.equal(jsonValue(context, `focusedItemId`), 'loose-1');
 });
 
 
@@ -15620,7 +15744,7 @@ test('main grid Enter activates focused creation ghost cards with scoped context
     openAddEngineerForSection = function(group, architectId) {
       engineerGhostCalls.push({ group: group, architectId: architectId || '' });
     };
-    openAddWorkerModal = function(group) {
+    openAddWorkerForSection = function(group) {
       workerGhostCalls.push({ group: group });
     };
     openAddArchitectForGroup = function(group) {
@@ -15639,15 +15763,15 @@ test('main grid Enter activates focused creation ghost cards with scoped context
     assert.equal(event.defaultPrevented, true);
   }
 
-  // loose-new-worker has been retired. Enter on the + New Engineer and + New
-  // Architect ghosts continues to invoke the scoped modals.
+  // Enter on creation ghosts invokes the scoped modals.
   pressEnter('grid-control:section-new-engineer:loom:user');
+  pressEnter('grid-control:section-new-worker:loom:user');
   // Switch the principal to arch-a so its + New Engineer control is rendered.
   runInContext(context, `state.selected_principal_id = 'arch-a'; render();`);
   pressEnter('grid-control:section-new-engineer:loom:architect:arch-a');
   pressEnter('grid-control:agent-new-architect:loom');
 
-  assert.deepEqual(jsonValue(context, `workerGhostCalls`), []);
+  assert.deepEqual(jsonValue(context, `workerGhostCalls`), [{ group: 'loom' }]);
   assert.deepEqual(jsonValue(context, `engineerGhostCalls`), [
     { group: 'loom', architectId: '' },
     { group: 'loom', architectId: 'arch-a' },

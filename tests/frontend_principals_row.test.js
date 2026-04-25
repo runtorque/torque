@@ -539,13 +539,14 @@ test('ui_select_principal delta op updates state.selected_principal_id on the cl
   assert.equal(value, 'arch-a');
 });
 
-test('no standalone + New Worker affordance in the user view', () => {
+test('user view shows standalone Add Worker affordance', () => {
   const { context, sandbox, mainEl } = createHarness();
   sandbox.state.groups.loom = [];
   sandbox.state.selected_principal_id = '';
   vm.runInContext('render();', context);
 
-  assert.doesNotMatch(mainEl.innerHTML, /\+ New Worker/);
+  assert.match(mainEl.innerHTML, /\+ Add Worker/);
+  assert.match(mainEl.innerHTML, /openAddWorkerForSection\(&quot;loom&quot;\)/);
   assert.doesNotMatch(mainEl.innerHTML, /loose-workers-strip/);
 });
 

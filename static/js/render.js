@@ -1341,6 +1341,9 @@ function _gridNavControlFocusKey(controlType, groupName, sectionKey) {
   if (controlType === 'section-new-engineer') {
     return 'section-new-engineer:' + String(groupName || '') + ':' + String(sectionKey || '');
   }
+  if (controlType === 'section-new-worker') {
+    return 'section-new-worker:' + String(groupName || '') + ':' + String(sectionKey || '');
+  }
   if (controlType === 'agent-new-architect') {
     return 'agent-new-architect:' + String(groupName || '');
   }
@@ -1526,6 +1529,23 @@ function _buildAgentGridNavigationModel(groupContexts) {
       for (const section of ctx.agentLayout.sections) {
         if (!_principalSectionMatches(section, selectedPrincipalId)) continue;
         const sectionKey = _agentGridSectionKey(section);
+        const looseWorkerItems = section.type === 'user'
+          ? (section.looseWorkers || []).map(worker => ({
+            id: worker.id,
+            type: 'agent',
+            agentKind: 'worker',
+          }))
+          : [];
+
+        if (looseWorkerItems.length) {
+          addRow({
+            group: ctx.gname,
+            sectionKey,
+            rowKey: sectionKey + ':standalone-workers',
+            rowType: 'standalone-workers-row',
+            items: looseWorkerItems,
+          });
+        }
 
         for (let sectionRowIndex = 0; sectionRowIndex < section.rows.length; sectionRowIndex++) {
           const row = section.rows[sectionRowIndex];
@@ -1552,27 +1572,41 @@ function _buildAgentGridNavigationModel(groupContexts) {
         }
 
         if (!ctx.atAgentCap) {
-          const controlId = _gridNavControlId('section-new-engineer', ctx.gname, sectionKey);
-          const control = {
-            id: controlId,
+          const engineerControlId = _gridNavControlId('section-new-engineer', ctx.gname, sectionKey);
+          const controls = [{
+            id: engineerControlId,
             type: 'control',
             controlType: 'section-new-engineer',
             group: ctx.gname,
             sectionKey,
             architectId: section.architect ? (section.architect.id || '') : '',
             focusKey: _gridNavControlFocusKey('section-new-engineer', ctx.gname, sectionKey),
-          };
+          }];
+          if (section.type === 'user') {
+            const workerControlId = _gridNavControlId('section-new-worker', ctx.gname, sectionKey);
+            controls.push({
+              id: workerControlId,
+              type: 'control',
+              controlType: 'section-new-worker',
+              group: ctx.gname,
+              sectionKey,
+              architectId: '',
+              focusKey: _gridNavControlFocusKey('section-new-worker', ctx.gname, sectionKey),
+            });
+          }
           addRow({
             group: ctx.gname,
             sectionKey,
             rowKey: sectionKey + ':section-new-engineer',
             rowType: 'section-creation-row',
-            architectId: control.architectId,
-            items: [control],
+            architectId: section.architect ? (section.architect.id || '') : '',
+            items: controls,
           });
-          addCreationControl(Object.assign({}, control, {
-            sort: model.itemMeta[controlId] ? model.itemMeta[controlId].sort : sortOrder++,
-          }));
+          for (const control of controls) {
+            addCreationControl(Object.assign({}, control, {
+              sort: model.itemMeta[control.id] ? model.itemMeta[control.id].sort : sortOrder++,
+            }));
+          }
         }
       }
 
@@ -1699,7 +1733,25 @@ function _renderSectionControlsSlot(groupName, section, opts) {
     + (disabled ? ' disabled aria-disabled="true" title="Agent limit reached"' : ' title="Create an engineer in this section"')
     + (disabled ? '' : ' onclick="event.stopPropagation();openAddEngineerForSection(' + groupArg + ',' + architectArg + ')"')
     + '>+ New Engineer</button>'
+    + (section && section.type === 'user'
+      ? '<button type="button" class="ghost-card ghost-card--worker' + _gridNavFocusedClass(_gridNavControlId('section-new-worker', groupName, sectionKey)) + '"'
+        + ' data-action="new-worker"'
+        + ' data-nav-id="' + esc(_gridNavControlId('section-new-worker', groupName, sectionKey)) + '"'
+        + ' data-group="' + esc(groupName) + '"'
+        + ' data-focus-key="' + esc(_gridNavControlFocusKey('section-new-worker', groupName, sectionKey)) + '"'
+        + (disabled ? ' disabled aria-disabled="true" title="Agent limit reached"' : ' title="Create a user-owned standalone worker"')
+        + (disabled ? '' : ' onclick="event.stopPropagation();openAddWorkerForSection(' + groupArg + ')"')
+        + '>+ Add Worker</button>'
+      : '')
     + '</div>';
+}
+
+function _renderStandaloneWorkersStrip(section, renderCell) {
+  if (!section || section.type !== 'user' || !section.looseWorkers || !section.looseWorkers.length) return '';
+  let html = '<div class="loose-workers-strip" data-agent-row-shape="standalone-workers-row">';
+  for (const worker of section.looseWorkers) html += renderCell(worker);
+  html += '</div>';
+  return html;
 }
 
 function _renderEngineerRow(row, renderCell) {
@@ -1851,9 +1903,13 @@ function render() {
       html += '<div class="agent-section-body"'
         + ' data-agent-section-column="body"'
         + ' data-section-key="' + esc(sectionKey) + '">';
-      if (!section.rows || section.rows.length === 0) {
+      const hasStandaloneWorkers = section.type === 'user'
+        && section.looseWorkers
+        && section.looseWorkers.length > 0;
+      if ((!section.rows || section.rows.length === 0) && !hasStandaloneWorkers) {
         html += '<div class="agent-section-empty-msg">No engineers yet.</div>';
       } else {
+        html += _renderStandaloneWorkersStrip(section, renderCellForGrid);
         for (const row of section.rows) html += _renderEngineerRow(row, renderCellForGrid);
       }
       html += _renderSectionControlsSlot(gname, section, { disabled: ctx.atAgentCap });
