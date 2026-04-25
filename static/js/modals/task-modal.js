@@ -374,6 +374,48 @@ function _renderTaskLabelChips() {
     }
   }
   container.innerHTML = html;
+  _renderTaskSpecializationHint();
+}
+
+function _taskSpecializationBestMatch(labels) {
+  if (!state || !state.agents) return null;
+  var labelSet = {};
+  (labels || []).forEach(function(l) {
+    var k = (l || '').toLowerCase();
+    if (k) labelSet[k] = true;
+  });
+  if (!Object.keys(labelSet).length) return null;
+  var best = null;
+  var bestScore = 0;
+  for (var id in state.agents) {
+    var c = state.agents[id];
+    if (!c || c.kind !== 'engineer') continue;
+    var specs = c.engineer_specializations || [];
+    if (!specs.length) continue;
+    var score = 0;
+    for (var i = 0; i < specs.length; i++) {
+      if (labelSet[(specs[i] || '').toLowerCase()]) score++;
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      best = c;
+    }
+  }
+  return best;
+}
+
+function _renderTaskSpecializationHint() {
+  var hintEl = document.getElementById('task-specialization-hint');
+  if (!hintEl) return;
+  var allLabels = _taskLabels.concat(_taskSystemLabels);
+  var match = _taskSpecializationBestMatch(allLabels);
+  if (!match) {
+    hintEl.style.display = 'none';
+    hintEl.textContent = '';
+    return;
+  }
+  hintEl.style.display = '';
+  hintEl.textContent = 'best-match: ' + (match.name || match.slug || match.id);
 }
 
 function _setTaskLabels(labels) {

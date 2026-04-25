@@ -7731,6 +7731,8 @@ async def main(connection=None):
                     scheduled_at=data.get("scheduled_at", ""),
                     assigned_engineer_id=data.get("assigned_engineer_id", ""),
                     created_by_engineer_id=data.get("created_by_engineer_id", ""),
+                    suggested_specialization=data.get(
+                        "suggested_specialization", ""),
                     verification_mode=data.get("verification_mode", ""),
                     verification_state=data.get("verification_state", ""),
                     verification_notes=data.get("verification_notes", ""),

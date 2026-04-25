@@ -474,6 +474,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self._migrate_kinds_schema_if_needed()
         self._ensure_agent_dismissed_at_column()
         self._ensure_agent_engineer_specializations_column()
+        self._ensure_board_task_suggested_specialization_column()
         self._backfill_kinds_if_needed()
         self._fixup_kinds_task_assignments_if_needed()
         self._cleanup_kinds_legacy_columns_if_needed()
@@ -511,6 +512,18 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             self._conn.execute(
                 "ALTER TABLE agents ADD COLUMN engineer_specializations "
                 "TEXT NOT NULL DEFAULT '[]'"
+            )
+            self._conn.commit()
+
+    def _ensure_board_task_suggested_specialization_column(self):
+        try:
+            self._conn.execute(
+                "SELECT suggested_specialization FROM board_tasks LIMIT 0"
+            )
+        except sqlite3.OperationalError:
+            self._conn.execute(
+                "ALTER TABLE board_tasks ADD COLUMN suggested_specialization "
+                "TEXT NOT NULL DEFAULT ''"
             )
             self._conn.commit()
 

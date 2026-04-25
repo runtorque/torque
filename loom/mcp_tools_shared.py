@@ -145,7 +145,7 @@ def _summary_task_title(task) -> str:
 
 
 def _architect_board_summary_task_item(task, *, created_by: str) -> dict:
-    return {
+    item = {
         "id": task.id,
         "slug": task.slug,
         "title": _summary_task_title(task),
@@ -157,6 +157,12 @@ def _architect_board_summary_task_item(task, *, created_by: str) -> dict:
         "health_state": getattr(task, "health_state", "healthy") or "healthy",
         "updated_at": getattr(task, "updated_at", "") or "",
     }
+    suggested_specialization = str(
+        getattr(task, "suggested_specialization", "") or ""
+    ).strip()
+    if suggested_specialization:
+        item["suggested_specialization"] = suggested_specialization
+    return item
 
 
 def _compact_json(payload) -> str:
@@ -2283,15 +2289,44 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         verification_items = []
         include_created_by = caller_kind == "architect"
         architect_task_items = []
+        specialization_filter = set()
+        specialization_filter_engineer_id = ""
+        if include_created_by:
+            spec_ident = str(
+                args.get("specialization_engineer_id", "") or ""
+            ).strip()
+            if spec_ident:
+                resolved_engineer_id, _engineer_error = _resolve_visible_agent(
+                    real_state, caller_kind, caller_id, spec_ident
+                )
+                if resolved_engineer_id:
+                    specialization_filter_engineer_id = resolved_engineer_id
+                    spec_cell = real_state.agents.get(resolved_engineer_id)
+                    specialization_filter = {
+                        str(s or "").strip()
+                        for s in (
+                            getattr(
+                                spec_cell, "engineer_specializations", []
+                            ) or []
+                        )
+                        if str(s or "").strip()
+                    }
         for task in visible_tasks:
             created_by = _task_created_by_classifier(task) if include_created_by else ""
             if include_created_by:
-                architect_task_items.append(
-                    _architect_board_summary_task_item(
-                        task,
-                        created_by=created_by,
+                task_spec = str(
+                    getattr(task, "suggested_specialization", "") or ""
+                ).strip()
+                if (
+                    not specialization_filter_engineer_id
+                    or (task_spec and task_spec in specialization_filter)
+                ):
+                    architect_task_items.append(
+                        _architect_board_summary_task_item(
+                            task,
+                            created_by=created_by,
+                        )
                     )
-                )
             if task.lane in lane_counts:
                 lane_counts[task.lane] += 1
             else:
@@ -2719,6 +2754,9 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 "current_task": current_task.task if current_task else "",
                 "activity": cell.activity,
                 "activity_detail": cell.activity_detail,
+                "specializations": list(
+                    getattr(cell, "engineer_specializations", []) or []
+                ),
             })
         engineers.sort(
             key=lambda item: (
@@ -3078,6 +3116,10 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             if not isinstance(action_vars, dict):
                 return "action_vars must be an object", True
 
+            suggested_specialization = str(
+                args.get("suggested_specialization", "") or ""
+            ).strip()
+
             create_result = await handle_command({
                 "cmd": "board_add_task",
                 "task": title,
@@ -3100,15 +3142,25 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                     "suggested_action": str(
                         args.get("suggested_action", "") or ""
                     ).strip(),
+                    "suggested_specialization": suggested_specialization,
                     "action_name": "",
                     "action_vars": action_vars,
                 })
                 if update_result and update_result.get("type") == "error":
                     return update_result.get("message", "Unknown error"), True
-            return (
-                json.dumps(create_result)
-                if create_result else '{"type":"ok"}'
-            ), False
+
+            response = dict(create_result) if create_result else {"type": "ok"}
+            if suggested_specialization:
+                engineer_specs = set(
+                    getattr(assigned_engineer, "engineer_specializations", [])
+                    or []
+                )
+                if suggested_specialization not in engineer_specs:
+                    response["suggested_specialization_warning"] = (
+                        f"assigned engineer does not carry specialization "
+                        f"'{suggested_specialization}'"
+                    )
+            return json.dumps(response), False
 
         payload = {
             "cmd": "board_add_task",
