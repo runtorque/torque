@@ -7779,6 +7779,50 @@ test('embedded terminal ignores stale websocket output after a relaunch session 
   assert.deepEqual(currentTerminal.writes, ['clean prompt', '\nready']);
 });
 
+test('embedded terminal switch preserves cached xterm scrollback buffers', () => {
+  const { context, document, sandbox, sockets, terminals } = createEmbeddedTerminalHarness({
+    loadRenderHelpers: true,
+  });
+  attachTerminalWorkspaceDom(document);
+  sandbox.state.runtime = { embedded_terminal: true };
+  sandbox.state.global_settings = { xterm_scrollback: 10000 };
+  sandbox.state.groups = { alpha: ['term-a', 'term-b'] };
+  sandbox.state.group_settings = { alpha: {} };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'term-a': { id: 'term-a', name: 'A', group: 'alpha', cell_type: 'terminal', session_id: 'sess-a' },
+    'term-b': { id: 'term-b', name: 'B', group: 'alpha', cell_type: 'terminal', session_id: 'sess-b' },
+  };
+
+  runInContext(context, `
+    selectedTerminalId = 'term-a';
+    renderTerminalWorkspace();
+  `);
+  sockets[0].onmessage({
+    data: JSON.stringify({ type: 'snapshot', session_id: 'sess-a', data: 'a scrollback' }),
+  });
+
+  runInContext(context, `
+    selectedTerminalId = 'term-b';
+    renderTerminalWorkspace();
+  `);
+  assert.equal(terminals.length, 2);
+  assert.equal(terminals[0].disposed, undefined);
+  assert.equal(sockets[0].closeCalled, undefined);
+
+  sockets[0].onmessage({
+    data: JSON.stringify({ type: 'output', session_id: 'sess-a', data: '\na hidden output' }),
+  });
+  runInContext(context, `
+    selectedTerminalId = 'term-a';
+    renderTerminalWorkspace();
+  `);
+
+  assert.equal(terminals.length, 2);
+  assert.equal(terminals[0].options.scrollback, 10000);
+  assert.deepEqual(terminals[0].writes, ['a scrollback', '\na hidden output']);
+});
+
 test('embedded terminal auto-focuses new sessions when standalone mode is active', () => {
   const { context, sockets, terminals } = createEmbeddedTerminalHarness();
   const surface = new FakeElement('surface');

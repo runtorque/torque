@@ -3,6 +3,7 @@ let _embeddedTerminal = null;
 let _embeddedTerminalFit = null;
 let _embeddedTerminalWs = null;
 let _embeddedTerminalSessionKey = '';
+let _embeddedTerminalSessions = Object.create(null);
 let _embeddedTerminalResizeObserver = null;
 let _embeddedTerminalDataHandler = null;
 let _embeddedTerminalPendingFocusKey = '';
@@ -42,8 +43,18 @@ function _currentXtermScrollback() {
 }
 
 function _applyEmbeddedTerminalScrollbackFromSettings() {
-  if (!_embeddedTerminal || !_embeddedTerminal.options) return;
-  _embeddedTerminal.options.scrollback = _currentXtermScrollback();
+  const scrollback = _currentXtermScrollback();
+  let applied = false;
+  for (const key in _embeddedTerminalSessions) {
+    const entry = _embeddedTerminalSessions[key];
+    if (entry && entry.terminal && entry.terminal.options) {
+      entry.terminal.options.scrollback = scrollback;
+      applied = true;
+    }
+  }
+  if (!applied && _embeddedTerminal && _embeddedTerminal.options) {
+    _embeddedTerminal.options.scrollback = scrollback;
+  }
 }
 
 function isEmbeddedTerminalMode() {
@@ -634,40 +645,87 @@ async function terminalComposeDrop(evt, cellId) {
   return false;
 }
 
-function _disposeEmbeddedTerminal() {
-  if (_embeddedTerminalDropSurface && _embeddedTerminalDropHandlers) {
-    if (typeof _embeddedTerminalDropSurface.removeEventListener === 'function') {
-      _embeddedTerminalDropSurface.removeEventListener('dragenter', _embeddedTerminalDropHandlers.dragenter, true);
-      _embeddedTerminalDropSurface.removeEventListener('dragover', _embeddedTerminalDropHandlers.dragover, true);
-      _embeddedTerminalDropSurface.removeEventListener('dragleave', _embeddedTerminalDropHandlers.dragleave, true);
-      _embeddedTerminalDropSurface.removeEventListener('drop', _embeddedTerminalDropHandlers.drop, true);
+function _setActiveEmbeddedTerminalEntry(entry) {
+  _embeddedTerminal = entry ? entry.terminal : null;
+  _embeddedTerminalFit = entry ? entry.fit : null;
+  _embeddedTerminalWs = entry ? entry.ws : null;
+  _embeddedTerminalSessionKey = entry ? entry.sessionKey : '';
+  _embeddedTerminalResizeObserver = entry ? entry.resizeObserver : null;
+  _embeddedTerminalDataHandler = entry ? entry.dataHandler : null;
+  _embeddedTerminalDropSurface = entry ? entry.dropSurface : null;
+  _embeddedTerminalDropHandlers = entry ? entry.dropHandlers : null;
+  _embeddedTerminalDropDepth = entry ? (entry.dropDepth || 0) : 0;
+}
+
+function _isEmbeddedTerminalEntryActive(entry) {
+  return !!(entry
+    && _embeddedTerminalSessionKey === entry.sessionKey
+    && _embeddedTerminalSessions[entry.sessionKey] === entry);
+}
+
+function _disposeEmbeddedTerminalEntry(entry) {
+  if (!entry) return;
+  if (_embeddedTerminalSessions[entry.sessionKey] === entry) {
+    delete _embeddedTerminalSessions[entry.sessionKey];
+  }
+  if (entry.dropSurface && entry.dropHandlers
+      && typeof entry.dropSurface.removeEventListener === 'function') {
+    entry.dropSurface.removeEventListener('dragenter', entry.dropHandlers.dragenter, true);
+    entry.dropSurface.removeEventListener('dragover', entry.dropHandlers.dragover, true);
+    entry.dropSurface.removeEventListener('dragleave', entry.dropHandlers.dragleave, true);
+    entry.dropSurface.removeEventListener('drop', entry.dropHandlers.drop, true);
+    _setEmbeddedTerminalDropTarget(entry.dropSurface, false);
+  }
+  if (entry.resizeObserver) entry.resizeObserver.disconnect();
+  if (entry.ws) {
+    entry.ws.onopen = null;
+    entry.ws.onmessage = null;
+    entry.ws.onerror = null;
+    entry.ws.onclose = null;
+    entry.ws.close();
+  }
+  if (entry.dataHandler && typeof entry.dataHandler.dispose === 'function') {
+    entry.dataHandler.dispose();
+  }
+  if (entry.terminal) entry.terminal.dispose();
+  if (entry.surface && typeof entry.surface.remove === 'function') entry.surface.remove();
+  if (_embeddedTerminalSessionKey === entry.sessionKey) _setActiveEmbeddedTerminalEntry(null);
+}
+
+function _disposeEmbeddedTerminalEntriesForCell(cellId, keepSessionKey) {
+  for (const key of Object.keys(_embeddedTerminalSessions)) {
+    const entry = _embeddedTerminalSessions[key];
+    if (entry && entry.cellId === cellId && key !== keepSessionKey) {
+      _disposeEmbeddedTerminalEntry(entry);
     }
+  }
+}
+
+function _disposeEmbeddedTerminal() {
+  for (const key of Object.keys(_embeddedTerminalSessions)) {
+    _disposeEmbeddedTerminalEntry(_embeddedTerminalSessions[key]);
+  }
+  if (_embeddedTerminalDropSurface && _embeddedTerminalDropHandlers
+      && typeof _embeddedTerminalDropSurface.removeEventListener === 'function') {
+    _embeddedTerminalDropSurface.removeEventListener('dragenter', _embeddedTerminalDropHandlers.dragenter, true);
+    _embeddedTerminalDropSurface.removeEventListener('dragover', _embeddedTerminalDropHandlers.dragover, true);
+    _embeddedTerminalDropSurface.removeEventListener('dragleave', _embeddedTerminalDropHandlers.dragleave, true);
+    _embeddedTerminalDropSurface.removeEventListener('drop', _embeddedTerminalDropHandlers.drop, true);
     _setEmbeddedTerminalDropTarget(_embeddedTerminalDropSurface, false);
   }
-  _embeddedTerminalDropSurface = null;
-  _embeddedTerminalDropHandlers = null;
-  _embeddedTerminalDropDepth = 0;
-  if (_embeddedTerminalResizeObserver) {
-    _embeddedTerminalResizeObserver.disconnect();
-    _embeddedTerminalResizeObserver = null;
-  }
+  if (_embeddedTerminalResizeObserver) _embeddedTerminalResizeObserver.disconnect();
   if (_embeddedTerminalWs) {
     _embeddedTerminalWs.onopen = null;
     _embeddedTerminalWs.onmessage = null;
     _embeddedTerminalWs.onerror = null;
     _embeddedTerminalWs.onclose = null;
     _embeddedTerminalWs.close();
-    _embeddedTerminalWs = null;
   }
-  if (_embeddedTerminal) {
-    if (_embeddedTerminalDataHandler && typeof _embeddedTerminalDataHandler.dispose === 'function') {
-      _embeddedTerminalDataHandler.dispose();
-    }
-    _embeddedTerminal.dispose();
-    _embeddedTerminal = null;
-    _embeddedTerminalFit = null;
-    _embeddedTerminalDataHandler = null;
+  if (_embeddedTerminalDataHandler && typeof _embeddedTerminalDataHandler.dispose === 'function') {
+    _embeddedTerminalDataHandler.dispose();
   }
+  if (_embeddedTerminal) _embeddedTerminal.dispose();
+  _setActiveEmbeddedTerminalEntry(null);
   _embeddedTerminalSessionKey = '';
   _embeddedTerminalPendingFocusKey = '';
 }
@@ -757,14 +815,14 @@ async function _uploadEmbeddedTerminalImages(cell, files) {
   }, []);
 }
 
-function _attachEmbeddedTerminalDropHandlers(cell, surface) {
+function _attachEmbeddedTerminalDropHandlers(cell, surface, entry) {
   if (!surface || typeof surface.addEventListener !== 'function') return;
-  _embeddedTerminalDropSurface = surface;
-  _embeddedTerminalDropDepth = 0;
-  _embeddedTerminalDropHandlers = {
+  entry.dropSurface = surface;
+  entry.dropDepth = 0;
+  entry.dropHandlers = {
     dragenter: function(e) {
       if (!_embeddedTerminalHasDraggedFiles(e && e.dataTransfer)) return;
-      _embeddedTerminalDropDepth += 1;
+      entry.dropDepth += 1;
       _setEmbeddedTerminalDropTarget(
         surface, _embeddedTerminalDraggedImagesVisible(e.dataTransfer));
     },
@@ -777,8 +835,8 @@ function _attachEmbeddedTerminalDropHandlers(cell, surface) {
     },
     dragleave: function(e) {
       if (!_embeddedTerminalHasDraggedFiles(e && e.dataTransfer)) return;
-      _embeddedTerminalDropDepth = Math.max(0, _embeddedTerminalDropDepth - 1);
-      if (_embeddedTerminalDropDepth > 0) return;
+      entry.dropDepth = Math.max(0, entry.dropDepth - 1);
+      if (entry.dropDepth > 0) return;
       if (e.relatedTarget && typeof surface.contains === 'function' && surface.contains(e.relatedTarget)) {
         return;
       }
@@ -788,49 +846,52 @@ function _attachEmbeddedTerminalDropHandlers(cell, surface) {
       var files = _embeddedTerminalDroppedFiles(e && e.dataTransfer);
       if (!files.length) return;
       e.preventDefault();
-      _embeddedTerminalDropDepth = 0;
+      entry.dropDepth = 0;
       _setEmbeddedTerminalDropTarget(surface, false);
-      var sessionKey = _embeddedTerminalSessionKey;
+      var sessionKey = entry.sessionKey;
       var images = _embeddedTerminalDroppedImages(e.dataTransfer);
       if (!images.length) {
-        if (_embeddedTerminalSessionKey === sessionKey) {
-          _embeddedTerminalPendingFocusKey = _embeddedTerminalSessionKey;
+        if (_isEmbeddedTerminalEntryActive(entry)) {
+          _embeddedTerminalPendingFocusKey = sessionKey;
           focusEmbeddedTerminalWorkspace(false);
         }
         return;
       }
       var paths = await _uploadEmbeddedTerminalImages(cell, images);
-      if (_embeddedTerminalSessionKey !== sessionKey) return;
-      if (paths.length && _embeddedTerminalWs && _embeddedTerminalWs.readyState === WebSocket.OPEN) {
-        _embeddedTerminalWs.send(JSON.stringify({
+      if (!_isEmbeddedTerminalEntryActive(entry)) return;
+      if (paths.length && entry.ws && entry.ws.readyState === WebSocket.OPEN) {
+        entry.ws.send(JSON.stringify({
           type: 'input',
           data: paths.map(_shellQuoteTerminalPath).join(' ') + ' ',
         }));
       }
-      _embeddedTerminalPendingFocusKey = _embeddedTerminalSessionKey;
+      _embeddedTerminalPendingFocusKey = sessionKey;
       focusEmbeddedTerminalWorkspace(false);
     },
   };
   // Capture-phase listeners ensure the workspace still sees file drags
   // before xterm's helper textarea can swallow them.
-  surface.addEventListener('dragenter', _embeddedTerminalDropHandlers.dragenter, true);
-  surface.addEventListener('dragover', _embeddedTerminalDropHandlers.dragover, true);
-  surface.addEventListener('dragleave', _embeddedTerminalDropHandlers.dragleave, true);
-  surface.addEventListener('drop', _embeddedTerminalDropHandlers.drop, true);
+  surface.addEventListener('dragenter', entry.dropHandlers.dragenter, true);
+  surface.addEventListener('dragover', entry.dropHandlers.dragover, true);
+  surface.addEventListener('dragleave', entry.dropHandlers.dragleave, true);
+  surface.addEventListener('drop', entry.dropHandlers.drop, true);
+  if (_isEmbeddedTerminalEntryActive(entry)) _setActiveEmbeddedTerminalEntry(entry);
 }
 
-function _scheduleEmbeddedTerminalFit() {
-  if (!_embeddedTerminal || !_embeddedTerminalFit) return;
+function _scheduleEmbeddedTerminalFit(entry) {
+  entry = entry || _embeddedTerminalSessions[_embeddedTerminalSessionKey];
+  if (!entry || !_isEmbeddedTerminalEntryActive(entry)
+      || !entry.terminal || !entry.fit) return;
   requestAnimationFrame(function() {
-    if (!_embeddedTerminal || !_embeddedTerminalFit) return;
-    _embeddedTerminalFit.fit();
-    if (_embeddedTerminalWs && _embeddedTerminalWs.readyState === WebSocket.OPEN) {
-      _embeddedTerminalWs.send(JSON.stringify({
+    if (!_isEmbeddedTerminalEntryActive(entry) || !entry.terminal || !entry.fit) return;
+    entry.fit.fit();
+    if (entry.ws && entry.ws.readyState === WebSocket.OPEN) {
+      entry.ws.send(JSON.stringify({
         type: 'resize',
-        cols: _embeddedTerminal.cols,
-        rows: _embeddedTerminal.rows,
+        cols: entry.terminal.cols,
+        rows: entry.terminal.rows,
       }));
-      _embeddedTerminalWs.send(JSON.stringify({ type: 'focus' }));
+      entry.ws.send(JSON.stringify({ type: 'focus' }));
     }
   });
 }
@@ -842,12 +903,21 @@ var _EMBEDDED_TERMINAL_RETRY_MS = 1000;
 var _EMBEDDED_TERMINAL_MAX_RETRIES = 15;
 
 function _connectEmbeddedTerminal(cell, surface) {
-  _disposeEmbeddedTerminal();
   var expectedSessionId = cell.session_id || '';
   var sessionKey = cell.id + ':' + expectedSessionId;
-  _embeddedTerminalSessionKey = sessionKey;
+  _disposeEmbeddedTerminalEntriesForCell(cell.id, sessionKey);
+  if (_embeddedTerminalSessions[sessionKey]) {
+    _disposeEmbeddedTerminalEntry(_embeddedTerminalSessions[sessionKey]);
+  }
+  var entry = {
+    sessionKey: sessionKey,
+    cellId: cell.id,
+    sessionId: expectedSessionId,
+    surface: surface,
+  };
+  _embeddedTerminalSessions[sessionKey] = entry;
   _embeddedTerminalPendingFocusKey = sessionKey;
-  _embeddedTerminal = new Terminal({
+  entry.terminal = new Terminal({
     allowProposedApi: true,
     allowTransparency: false,
     convertEol: false,
@@ -864,46 +934,49 @@ function _connectEmbeddedTerminal(cell, surface) {
       selectionBackground: 'rgba(88,166,255,0.28)',
     },
   });
-  _embeddedTerminalFit = new FitAddon.FitAddon();
-  _embeddedTerminal.loadAddon(_embeddedTerminalFit);
-  _embeddedTerminal.open(surface);
-  _attachEmbeddedTerminalDropHandlers(cell, surface);
-  try { _embeddedTerminalFit.fit(); } catch (e) { /* container not measurable yet */ }
+  entry.fit = new FitAddon.FitAddon();
+  entry.terminal.loadAddon(entry.fit);
+  entry.terminal.open(surface);
+  _setActiveEmbeddedTerminalEntry(entry);
+  _attachEmbeddedTerminalDropHandlers(cell, surface, entry);
+  try { entry.fit.fit(); } catch (e) { /* container not measurable yet */ }
   // Shift+Enter → send ESC+CR so TUIs like Claude Code treat it as a
   // soft newline instead of submitting. xterm.js default maps Shift+Enter
   // to plain `\r` (same as Enter), which submits prematurely.
-  if (typeof _embeddedTerminal.attachCustomKeyEventHandler === 'function') {
-    _embeddedTerminal.attachCustomKeyEventHandler(function(e) {
+  if (typeof entry.terminal.attachCustomKeyEventHandler === 'function') {
+    entry.terminal.attachCustomKeyEventHandler(function(e) {
       if (e.type !== 'keydown') return true;
       if (e.key === 'Enter' && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (_embeddedTerminalWs && _embeddedTerminalWs.readyState === WebSocket.OPEN) {
-          _embeddedTerminalWs.send(JSON.stringify({ type: 'input', data: '\x1b\r' }));
+        if (entry.ws && entry.ws.readyState === WebSocket.OPEN) {
+          entry.ws.send(JSON.stringify({ type: 'input', data: '\x1b\r' }));
         }
         return false;
       }
       return true;
     });
   }
-  _embeddedTerminalDataHandler = _embeddedTerminal.onData(function(data) {
-    if (_embeddedTerminalWs && _embeddedTerminalWs.readyState === WebSocket.OPEN) {
-      _embeddedTerminalWs.send(JSON.stringify({ type: 'input', data: data }));
+  entry.dataHandler = entry.terminal.onData(function(data) {
+    if (entry.ws && entry.ws.readyState === WebSocket.OPEN) {
+      entry.ws.send(JSON.stringify({ type: 'input', data: data }));
     }
   });
-  _embeddedTerminalResizeObserver = new ResizeObserver(function() {
-    _scheduleEmbeddedTerminalFit();
+  entry.resizeObserver = new ResizeObserver(function() {
+    _scheduleEmbeddedTerminalFit(entry);
   });
-  _embeddedTerminalResizeObserver.observe(surface);
-  _openEmbeddedTerminalSocket(cell, sessionKey, expectedSessionId, 0);
-  _scheduleEmbeddedTerminalFit();
+  entry.resizeObserver.observe(surface);
+  _setActiveEmbeddedTerminalEntry(entry);
+  _openEmbeddedTerminalSocket(cell, sessionKey, expectedSessionId, 0, entry);
+  _scheduleEmbeddedTerminalFit(entry);
 }
 
-function _openEmbeddedTerminalSocket(cell, sessionKey, expectedSessionId, attempt) {
-  if (_embeddedTerminalSessionKey !== sessionKey) return;
+function _openEmbeddedTerminalSocket(cell, sessionKey, expectedSessionId, attempt, entry) {
+  if (_embeddedTerminalSessions[sessionKey] !== entry) return;
   var socket = new WebSocket(_embeddedTerminalUrl(cell));
-  _embeddedTerminalWs = socket;
+  entry.ws = socket;
+  if (_isEmbeddedTerminalEntryActive(entry)) _embeddedTerminalWs = socket;
   function isCurrentSessionMessage(msg) {
-    if (_embeddedTerminalSessionKey !== sessionKey) return false;
-    if (_embeddedTerminalWs !== socket) return false;
+    if (_embeddedTerminalSessions[sessionKey] !== entry) return false;
+    if (entry.ws !== socket) return false;
     if (msg && typeof msg.session_id === 'string' && msg.session_id !== expectedSessionId) {
       return false;
     }
@@ -911,31 +984,37 @@ function _openEmbeddedTerminalSocket(cell, sessionKey, expectedSessionId, attemp
   }
   socket.onopen = function() {
     if (!isCurrentSessionMessage()) return;
-    var status = document.querySelector('#terminal-workspace .terminal-statusbar');
-    if (status && typeof status.removeAttribute === 'function') {
-      status.removeAttribute('data-closed');
+    if (_isEmbeddedTerminalEntryActive(entry)) {
+      var status = document.querySelector('#terminal-workspace .terminal-statusbar');
+      if (status && typeof status.removeAttribute === 'function') {
+        status.removeAttribute('data-closed');
+      }
+      _scheduleEmbeddedTerminalFit(entry);
+      focusEmbeddedTerminalWorkspace(false);
     }
-    _scheduleEmbeddedTerminalFit();
-    focusEmbeddedTerminalWorkspace(false);
   };
   socket.onmessage = function(event) {
     var msg;
     try { msg = JSON.parse(event.data); } catch (e) { return; }
     if (!isCurrentSessionMessage(msg)) return;
     if (msg.type === 'snapshot') {
-      _embeddedTerminal.reset();
-      if (msg.data) _embeddedTerminal.write(msg.data);
-      _scheduleEmbeddedTerminalFit();
-      focusEmbeddedTerminalWorkspace(false);
+      entry.terminal.reset();
+      if (msg.data) entry.terminal.write(msg.data);
+      if (_isEmbeddedTerminalEntryActive(entry)) {
+        _scheduleEmbeddedTerminalFit(entry);
+        focusEmbeddedTerminalWorkspace(false);
+      }
     } else if (msg.type === 'output' && msg.data) {
-      _embeddedTerminal.write(msg.data);
+      entry.terminal.write(msg.data);
     }
   };
   socket.onclose = function() {
-    if (_embeddedTerminalSessionKey !== sessionKey) return;
-    if (_embeddedTerminalWs !== socket) return;
-    var status = document.querySelector('#terminal-workspace .terminal-statusbar');
-    if (status) status.setAttribute('data-closed', '1');
+    if (_embeddedTerminalSessions[sessionKey] !== entry) return;
+    if (entry.ws !== socket) return;
+    if (_isEmbeddedTerminalEntryActive(entry)) {
+      var status = document.querySelector('#terminal-workspace .terminal-statusbar');
+      if (status) status.setAttribute('data-closed', '1');
+    }
     // The main `/ws` socket delivers state updates out-of-band; check
     // whether the session is still the one the current cell points to.
     // If the cell's session_id changed (stopped, relaunched to a new id),
@@ -948,11 +1027,58 @@ function _openEmbeddedTerminalSocket(cell, sessionKey, expectedSessionId, attemp
     }
     if (attempt >= _EMBEDDED_TERMINAL_MAX_RETRIES) return;
     setTimeout(function() {
-      if (_embeddedTerminalSessionKey !== sessionKey) return;
-      _openEmbeddedTerminalSocket(cell, sessionKey, expectedSessionId, attempt + 1);
+      if (_embeddedTerminalSessions[sessionKey] !== entry) return;
+      _openEmbeddedTerminalSocket(cell, sessionKey, expectedSessionId, attempt + 1, entry);
     }, _EMBEDDED_TERMINAL_RETRY_MS);
   };
   socket.onerror = function() { /* close will fire after */ };
+}
+
+function _pruneEmbeddedTerminalSessions() {
+  if (!state || !state.agents) return;
+  for (const key of Object.keys(_embeddedTerminalSessions)) {
+    const entry = _embeddedTerminalSessions[key];
+    const cell = entry && state.agents[entry.cellId];
+    if (!cell || !cell.session_id || key !== (cell.id + ':' + cell.session_id)) {
+      _disposeEmbeddedTerminalEntry(entry);
+    }
+  }
+}
+
+function _createEmbeddedTerminalSurface(stage, sessionKey) {
+  let surface = stage && stage.querySelector ? stage.querySelector('.terminal-surface') : null;
+  if (surface && surface.dataset && surface.dataset.loomSessionKey) surface = null;
+  if (!surface) {
+    surface = document.createElement('div');
+    if (stage && typeof stage.appendChild === 'function') stage.appendChild(surface);
+  }
+  surface.className = 'terminal-surface';
+  if (surface.classList && typeof surface.classList.add === 'function') {
+    surface.classList.add('terminal-surface');
+  }
+  if (surface.dataset) surface.dataset.loomSessionKey = sessionKey;
+  if (typeof surface.setAttribute === 'function') {
+    surface.setAttribute('data-loom-session-key', sessionKey);
+  }
+  return surface;
+}
+
+function _activateEmbeddedTerminalSurface(stage, sessionKey) {
+  const entry = _embeddedTerminalSessions[sessionKey] || null;
+  for (const key in _embeddedTerminalSessions) {
+    const candidate = _embeddedTerminalSessions[key];
+    if (!candidate || !candidate.surface) continue;
+    const active = key === sessionKey;
+    if (active && stage && candidate.surface.parentNode !== stage
+        && typeof stage.appendChild === 'function') {
+      stage.appendChild(candidate.surface);
+    }
+    candidate.surface.hidden = !active;
+    if (candidate.surface.style) candidate.surface.style.display = active ? '' : 'none';
+  }
+  _setActiveEmbeddedTerminalEntry(entry);
+  if (entry) _scheduleEmbeddedTerminalFit(entry);
+  return entry;
 }
 
 function renderTerminalWorkspace() {
@@ -966,6 +1092,7 @@ function renderTerminalWorkspace() {
     return;
   }
   root.classList.add('active');
+  _pruneEmbeddedTerminalSessions();
   const group = _terminalCurrentGroupName();
   const groupLabel = group || '';
   const cells = _terminalGroupCells(group);
@@ -1024,12 +1151,15 @@ function renderTerminalWorkspace() {
     return;
   }
 
-  if (_embeddedTerminalSessionKey !== sessionKey || !dom.stage.querySelector('.terminal-surface')) {
-    dom.stage.innerHTML = '<div class="terminal-surface"></div>';
-    _connectEmbeddedTerminal(cell, dom.stage.querySelector('.terminal-surface'));
+  let entry = _embeddedTerminalSessions[sessionKey] || null;
+  if (!entry) {
+    const surface = _createEmbeddedTerminalSurface(dom.stage, sessionKey);
+    _connectEmbeddedTerminal(cell, surface);
+    entry = _embeddedTerminalSessions[sessionKey] || null;
   } else {
     _applyEmbeddedTerminalScrollbackFromSettings();
   }
+  _activateEmbeddedTerminalSurface(dom.stage, sessionKey);
 
   _renderTerminalCompose(dom.compose, cell);
   dom.statusbar.textContent = (displayPath || 'No directory') + '  |  ' + _terminalStatusLabel(cell);
