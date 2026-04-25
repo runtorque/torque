@@ -34,9 +34,13 @@ try:
 except ModuleNotFoundError:
     from tests.helpers import install_aiohttp_stub
 
-install_aiohttp_stub()
+install_aiohttp_stub(include_json_helpers=True)
 
 from loom.state import AgentCell, MatrixState
+from loom.server import (
+    _configure_event_ingest_client,
+    _mirror_api_ai_report_to_mcp_call_log,
+)
 
 
 async def _open_client(path: Path):
@@ -463,6 +467,112 @@ class EventIngestProtocolTests(unittest.IsolatedAsyncioTestCase):
         finally:
             writer.close()
             await writer.wait_closed()
+
+
+class ApiAiReportMcpCaptureTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.h = _Harness()
+        await self.h.start()
+        self.client = EventIngestClient(self.h.socket_path, reconnect_delay=0.05)
+        await self.client.connect()
+        self.state = MatrixState()
+        self.state.groups["g"] = ["worker-1"]
+        self.cell = AgentCell(
+            id="worker-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            kind="worker",
+        )
+        self.state.agents[self.cell.id] = self.cell
+
+    async def asyncTearDown(self):
+        await self.client.aclose()
+        await self.h.stop()
+
+    async def _mirror(self, payload=None, **data):
+        async def ensure():
+            await _configure_event_ingest_client(self.client, self.state)
+
+        base = {
+            "cmd": "ai_report",
+            "cell_id": self.cell.id,
+            "task_id": "LOOM:1",
+            "message": "secret worker note",
+        }
+        base.update(data)
+        return await _mirror_api_ai_report_to_mcp_call_log(
+            data=base,
+            payload=payload or {"type": "ok", "task_id": base.get("task_id", "")},
+            state=self.state,
+            event_ingest_client=self.client,
+            ensure_event_ingest_configured=ensure,
+            idempotency_key=base.get("idempotency_key", ""),
+        )
+
+    def _rows(self):
+        return self.h.store.query(limit=50)
+
+    async def test_worker_ai_report_actions_append_mcp_rows(self):
+        for action in ("done", "progress", "derive", "blocked", "error", "ready", "ask"):
+            with self.subTest(action=action):
+                await self._mirror(action=action, idempotency_key=f"idem-{action}")
+
+        rows = {row["tool_name"]: row for row in self._rows()}
+        for action in ("done", "progress", "derive", "blocked", "error", "ready", "ask"):
+            row = rows[f"mcp__loom__loom_{action}"]
+            self.assertEqual(row["cell_id"], self.cell.id)
+            self.assertEqual(row["hook_event_name"], "PostToolUse")
+        self.assertTrue(any(
+            op["op"] == "mcp_call_append"
+            and op["call"]["tool_name"] == "mcp__loom__loom_done"
+            for op in self.state._delta_ops
+        ))
+
+    async def test_ai_report_capture_redaction_modes_and_allowlist(self):
+        await self._mirror(action="progress", idempotency_key="meta-progress")
+        meta_raw = self._rows()[0]["event"]["raw"]
+        self.assertTrue(meta_raw["tool_input"]["redacted"])
+        self.assertIn("message", meta_raw["tool_input"]["arg_keys"])
+        self.assertNotIn("secret worker note", json.dumps(meta_raw["tool_input"]))
+
+        self.state.global_settings.mcp_call_log_args_capture = "full"
+        await self._mirror(action="progress", idempotency_key="full-progress")
+        full_raw = self._rows()[0]["event"]["raw"]
+        self.assertEqual(full_raw["tool_input"]["message"], "secret worker note")
+
+        self.state.global_settings.mcp_call_log_args_capture = "metadata"
+        self.state.global_settings.mcp_call_log_full_capture_tools = [
+            "mcp__loom__loom_done"
+        ]
+        await self._mirror(action="done", idempotency_key="allow-done")
+        await self._mirror(action="blocked", idempotency_key="allow-blocked")
+        by_tool = {row["tool_name"]: row["event"]["raw"] for row in self._rows()}
+        self.assertEqual(
+            by_tool["mcp__loom__loom_done"]["tool_input"]["message"],
+            "secret worker note",
+        )
+        self.assertTrue(by_tool["mcp__loom__loom_blocked"]["tool_input"]["redacted"])
+
+    async def test_ai_report_capture_idempotency_and_negative_filters(self):
+        await self._mirror(action="done", idempotency_key="same-cli-key")
+        await self._mirror(action="done", idempotency_key="same-cli-key")
+        self.assertEqual(len(self._rows()), 1)
+
+        await self._mirror(cmd="add_agent", action="done", idempotency_key="admin")
+        self.assertEqual(len(self._rows()), 1)
+
+    async def test_hook_event_path_remains_single_event(self):
+        event = build_event_ingest_envelope(
+            {"hook_event_name": "PostToolUse", "tool_name": "mcp__loom__loom_done"},
+            headers={"X-Loom-Cell-Id": self.cell.id},
+        )
+        await self.client.append(event, idempotency_key="events:worker-1:evt-1")
+        await self.client.append(event, idempotency_key="events:worker-1:evt-1")
+        rows = self._rows()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["tool_name"], "mcp__loom__loom_done")
+        self.assertEqual(rows[0]["idempotency_key"], "events:worker-1:evt-1")
 
 
 class EventIngestLifecycleTests(unittest.TestCase):
