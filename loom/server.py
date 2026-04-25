@@ -1203,6 +1203,11 @@ def _review_task_has_ship_verdict(task) -> bool:
         verdict = _review_verdict_from_message(entry.get("message", ""))
         if verdict:
             return verdict == "ship"
+    status_verdict = _review_verdict_from_message(
+        getattr(task, "status", "") or ""
+    )
+    if status_verdict:
+        return status_verdict == "ship"
     return False
 
 
@@ -1330,6 +1335,134 @@ def _chain_has_shipped_review(state: MatrixState, task) -> bool:
         if _review_task_has_ship_verdict(chain_task):
             return True
     return False
+
+
+def _feature_review_transition_is_mandatory(transition) -> bool:
+    if not isinstance(transition, dict):
+        return str(transition or "").strip().lower() == _REVIEW_GATE_ACTION
+    action = str(transition.get("action", "") or "").strip().lower()
+    if action != _REVIEW_GATE_ACTION:
+        return False
+    # oneshot/* actions use a feature/review transition for the optional
+    # diff-size review gate.  That is not the mandatory feature pipeline
+    # closeout contract this guard enforces.
+    when = str(transition.get("when", "") or "").strip().lower()
+    if "review gate threshold" in when or "diff exceeded" in when:
+        return False
+    return True
+
+
+def _action_requires_mandatory_feature_review(
+        action_mgr: ActionManager | None,
+        action_name: str,
+        base_dir: str = "") -> bool:
+    action_name = str(action_name or "").strip()
+    if not action_name:
+        return False
+    if action_name.lower() == "feature/implement":
+        return True
+    if not action_mgr:
+        return False
+    try:
+        transitions = action_mgr.get_transitions(action_name, base_dir) or []
+    except Exception:
+        return False
+    return any(
+        _feature_review_transition_is_mandatory(transition)
+        for transition in transitions
+    )
+
+
+def _task_is_pipeline_descendant(
+        state: MatrixState,
+        task,
+        candidate) -> bool:
+    if not state or not task or not candidate:
+        return False
+    task_id = str(getattr(task, "id", "") or "").strip()
+    candidate_id = str(getattr(candidate, "id", "") or "").strip()
+    if not task_id or not candidate_id or candidate_id == task_id:
+        return False
+
+    task_root_id = str(
+        getattr(task, "pipeline_root_id", "") or task_id
+    ).strip()
+    candidate_root_id = str(
+        getattr(candidate, "pipeline_root_id", "") or candidate_id
+    ).strip()
+    if task_root_id and candidate_root_id and task_root_id != candidate_root_id:
+        return False
+
+    if not str(getattr(task, "parent_task_id", "") or "").strip():
+        return candidate_root_id == task_id
+
+    seen = set()
+    parent_id = str(getattr(candidate, "parent_task_id", "") or "").strip()
+    while parent_id and parent_id not in seen:
+        if parent_id == task_id:
+            return True
+        seen.add(parent_id)
+        parent = state.board_tasks.get(parent_id)
+        if not parent:
+            break
+        parent_id = str(getattr(parent, "parent_task_id", "") or "").strip()
+    return False
+
+
+def _task_has_shipped_review_descendant(state: MatrixState, task) -> bool:
+    """Return whether ``task`` has a closed descendant Ship review."""
+    if not state or not task:
+        return False
+    for chain_task in state.board_get_chain(task.id):
+        if not _task_is_pipeline_descendant(state, task, chain_task):
+            continue
+        if not task_counts_as_done(chain_task):
+            continue
+        if not _is_feature_review_task(chain_task):
+            continue
+        if _review_task_has_ship_verdict(chain_task):
+            return True
+    return False
+
+
+def _mandatory_review_done_error(task, action_name: str) -> str:
+    title = str(getattr(task, "task", "") or "").strip()
+    if not title:
+        title = str(getattr(task, "id", "") or "task").strip()
+    title = title.replace("\\", "\\\\").replace('"', '\\"')
+    action_name = str(action_name or "").strip() or "unknown"
+    return (
+        "This is a mandatory-review task "
+        f"(action={action_name}). Direct `loom ai done` is blocked — "
+        "derive `feature/review` first, then the reviewer's Ship verdict "
+        "triggers cascade-done. Use:\n\n"
+        f"  loom ai derive --action feature/review \"Review {title}\""
+    )
+
+
+def _reject_mandatory_review_done_without_ship(
+        state: MatrixState,
+        action_mgr: ActionManager | None,
+        cell,
+        task,
+        *,
+        base_dir: str = "") -> dict | None:
+    """Reject worker direct-done on mandatory review-pipeline tasks."""
+    if not state or not cell or not task:
+        return None
+    if agent_kind_for_identity(cell) != "worker":
+        return None
+
+    action_name = str(getattr(task, "action_name", "") or "").strip()
+    if not _action_requires_mandatory_feature_review(
+            action_mgr, action_name, base_dir):
+        return None
+    if _task_has_shipped_review_descendant(state, task):
+        return None
+    return {
+        "type": "error",
+        "message": _mandatory_review_done_error(task, action_name),
+    }
 
 
 def _review_gate_diff_size(summary: dict) -> int:
@@ -9527,65 +9660,80 @@ async def main(connection=None):
                         not (result and result.get("type") == "error")
                         and action == "done"
                     ):
-                        rejected = _reject_completion_with_open_descendants(
-                            state, task, "done")
-                        if rejected:
-                            result = rejected
-                        else:
-                            async def _checkpoint_for_review_gate():
-                                if not (
-                                    cell.worktree_path
-                                    and cell.cell_type == "agent"
-                                    and cell.worktree_auto_checkpoint
-                                ):
-                                    return
-                                try:
-                                    n = cell.worktree_checkpoints + 1
-                                    cp_msg = (
-                                        f"loom: checkpoint {n} — {cell.name}"
-                                    )
-                                    if message:
-                                        cp_msg = f"{cp_msg}\n\n{message}"
-                                    elif cell.last_summary:
-                                        cp_msg = (
-                                            f"{cp_msg}\n\n"
-                                            f"{cell.last_summary.strip()}"
-                                        )
-                                    sha = await worktree_mgr.checkpoint(
-                                        cell,
-                                        message=cp_msg,
-                                    )
-                                    if sha:
-                                        state._db_save_agent(cell)
-                                except Exception:
-                                    log.exception(
-                                        "review gate checkpoint failed for"
-                                        " '%s'", cell.name)
-
-                            base_dir = cell.worktree_repo_root \
-                                or cell.directory \
-                                or await _resolve_base_dir(
-                                    task.group if task else cell.group)
-                            gate_result = await _maybe_apply_review_required_gate(
+                        base_dir = cell.worktree_repo_root \
+                            or cell.directory \
+                            or await _resolve_base_dir(
+                                task.group if task else cell.group)
+                        mandatory_review_rejection = (
+                            _reject_mandatory_review_done_without_ship(
                                 state,
                                 action_mgr,
-                                worktree_mgr,
-                                handle_command,
-                                _panel_event,
-                                cell=cell,
-                                task=task,
+                                cell,
+                                task,
                                 base_dir=base_dir,
-                                force_skip_review=bool(
-                                    data.get("force_skip_review")),
-                                skip_reason=data.get(
-                                    "review_skip_reason", ""),
-                                checkpoint_for_gate=
-                                    _checkpoint_for_review_gate,
-                                append_task_msg=_append_task_msg,
-                                record_history_msg=_record_history_msg,
                             )
-                            if gate_result:
-                                result = gate_result
+                        )
+                        if mandatory_review_rejection:
+                            result = mandatory_review_rejection
+                        else:
+                            rejected = (
+                                _reject_completion_with_open_descendants(
+                                    state, task, "done")
+                            )
+                            if rejected:
+                                result = rejected
+                            elif not result:
+                                async def _checkpoint_for_review_gate():
+                                    if not (
+                                        cell.worktree_path
+                                        and cell.cell_type == "agent"
+                                        and cell.worktree_auto_checkpoint
+                                    ):
+                                        return
+                                    try:
+                                        n = cell.worktree_checkpoints + 1
+                                        cp_msg = (
+                                            f"loom: checkpoint {n} — "
+                                            f"{cell.name}"
+                                        )
+                                        if message:
+                                            cp_msg = f"{cp_msg}\n\n{message}"
+                                        elif cell.last_summary:
+                                            cp_msg = (
+                                                f"{cp_msg}\n\n"
+                                                f"{cell.last_summary.strip()}"
+                                            )
+                                        sha = await worktree_mgr.checkpoint(
+                                            cell,
+                                            message=cp_msg,
+                                        )
+                                        if sha:
+                                            state._db_save_agent(cell)
+                                    except Exception:
+                                        log.exception(
+                                            "review gate checkpoint failed for"
+                                            " '%s'", cell.name)
+
+                                gate_result = await _maybe_apply_review_required_gate(
+                                    state,
+                                    action_mgr,
+                                    worktree_mgr,
+                                    handle_command,
+                                    _panel_event,
+                                    cell=cell,
+                                    task=task,
+                                    base_dir=base_dir,
+                                    force_skip_review=bool(
+                                        data.get("force_skip_review")),
+                                    skip_reason=data.get(
+                                        "review_skip_reason", ""),
+                                    checkpoint_for_gate=
+                                        _checkpoint_for_review_gate,
+                                    append_task_msg=_append_task_msg,
+                                    record_history_msg=_record_history_msg,
+                                )
+                                if gate_result:
+                                    result = gate_result
 
                     if result and result.get("type") == "error":
                         pass
