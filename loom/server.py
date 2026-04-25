@@ -4436,6 +4436,7 @@ async def _mirror_api_ai_report_to_mcp_call_log(
         raw = {
             "hook_event_name": "PostToolUse",
             "tool_name": f"mcp__loom__loom_{action}",
+            "loom_call_log_only": True,
             "cell_id": cell_id,
             "session_id": "",
             "success": True,

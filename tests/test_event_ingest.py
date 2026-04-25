@@ -523,6 +523,7 @@ class ApiAiReportMcpCaptureTests(unittest.IsolatedAsyncioTestCase):
             row = rows[f"mcp__loom__loom_{action}"]
             self.assertEqual(row["cell_id"], self.cell.id)
             self.assertEqual(row["hook_event_name"], "PostToolUse")
+            self.assertTrue(row["event"]["raw"]["loom_call_log_only"])
         self.assertTrue(any(
             op["op"] == "mcp_call_append"
             and op["call"]["tool_name"] == "mcp__loom__loom_done"
@@ -573,6 +574,25 @@ class ApiAiReportMcpCaptureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["tool_name"], "mcp__loom__loom_done")
         self.assertEqual(rows[0]["idempotency_key"], "events:worker-1:evt-1")
+
+    async def test_mirrored_ai_report_rows_are_not_replayed_as_provider_events(self):
+        self.cell.agent_type = "codex"
+        self.cell.status = "running"
+        self.cell.activity = ""
+        self.cell.activity_detail = "secret worker note"
+        event_log = EventLog()
+        bus = EventBus(self.state, event_log)
+        bus.start()
+
+        await self._mirror(action="progress", idempotency_key="call-log-only")
+        drainer = EventIngestDrainer(self.client, bus, self.state, batch_size=10)
+        processed = await drainer.drain_once()
+
+        self.assertEqual(processed, 1)
+        self.assertEqual(self.cell.activity, "")
+        self.assertEqual(self.cell.activity_detail, "secret worker note")
+        self.assertEqual(event_log.get(self.cell.id), [])
+        self.assertEqual((await self.client.status()).get("pending_rows"), 0)
 
 
 class EventIngestLifecycleTests(unittest.TestCase):
