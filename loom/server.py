@@ -1048,6 +1048,27 @@ def _nearest_ancestor_agent_for_action_stage(state: MatrixState, task,
     return None
 
 
+def _prior_live_reviewer_agent_for_chain(state: MatrixState, task):
+    """Find the most recent live feature/review agent in ``task``'s chain."""
+    if not state or not task:
+        return None
+    for prior in reversed(state.board_get_chain(task.id)):
+        if prior.id == task.id:
+            continue
+        action_name = str(
+            getattr(prior, "action_name", "") or ""
+        ).strip().lower()
+        if action_name != _REVIEW_GATE_ACTION:
+            continue
+        agent_id = str(getattr(prior, "agent_id", "") or "").strip()
+        if not agent_id:
+            continue
+        agent = state.agents.get(agent_id)
+        if _agent_can_receive_dispatch(agent):
+            return agent
+    return None
+
+
 def _looks_like_review_task(task) -> bool:
     if not task:
         return False
@@ -10484,7 +10505,22 @@ async def main(connection=None):
                         act_vars = data.get("action_vars", {})
                         derive_group = data.get("group", "")
                         reuse_self = data.get("reuse_self", False)
-                        target_agent = data.get("target_agent", "")
+                        target_agent = (
+                            data.get("target_agent", "") or ""
+                        ).strip()
+                        if (
+                            task
+                            and not target_agent
+                            and str(act_name or "").strip().lower()
+                            == _REVIEW_GATE_ACTION
+                        ):
+                            prior_reviewer = \
+                                _prior_live_reviewer_agent_for_chain(
+                                    state,
+                                    task,
+                                )
+                            if prior_reviewer:
+                                target_agent = prior_reviewer.id
                         is_auto_review_gate = bool(
                             data.get("_review_gate")
                         ) and act_name == _REVIEW_GATE_ACTION
@@ -10734,19 +10770,20 @@ async def main(connection=None):
                                             # re-review). Otherwise keep the
                                             # normal fresh-agent behavior.
                                             reuse_self = False
-                                            ancestor_agent = \
-                                                _nearest_ancestor_agent_for_action_stage(
-                                                    state,
-                                                    task,
-                                                    act_name,
-                                                )
-                                            if ancestor_agent:
-                                                target_agent = (
-                                                    ancestor_agent.slug
-                                                    or ancestor_agent.name
-                                                )
-                                            else:
-                                                target_agent = ""
+                                            if not target_agent:
+                                                ancestor_agent = \
+                                                    _nearest_ancestor_agent_for_action_stage(
+                                                        state,
+                                                        task,
+                                                        act_name,
+                                                    )
+                                                if ancestor_agent:
+                                                    target_agent = (
+                                                        ancestor_agent.slug
+                                                        or ancestor_agent.name
+                                                    )
+                                                else:
+                                                    target_agent = ""
                                         target_id = None
                                         if reuse_self:
                                             target_id = cell.id
