@@ -2768,6 +2768,7 @@ def _handle_doctor_command(db: LoomDB) -> dict:
 _INTERNAL_FAILED_WRITE_PREFIX = "internal:"
 _NO_COMMAND_RECEIPT = object()
 _CRITICAL_BOARD_COMMANDS = {
+    "architect_task_update",
     "board_add_task",
     "board_update_task",
     "board_move_task",
@@ -6050,6 +6051,9 @@ async def main(connection=None):
         if cmd == "architect_journal_read":
             return _handle_architect_journal_read_command(data, state)
 
+        if cmd == "architect_task_list":
+            return await _dispatch_architect_ui_tool(cmd, data, state)
+
         if cmd == "get_cell_events":
             cell_id = str(data.get("cell_id", "") or "")
             limit = min(int(data.get("limit", 200)), 200)
@@ -6682,6 +6686,7 @@ async def main(connection=None):
                     "architect_decision_update",
                     "architect_decision_link",
                     "architect_decision_list",
+                    "architect_task_update",
             }:
                 result = await _dispatch_architect_ui_tool(
                     cmd,

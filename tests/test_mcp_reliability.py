@@ -18,6 +18,9 @@ from loom.doctor import build_doctor_report, format_mcp_health_report
 from loom.mcp_retry import (
     IDEMPOTENCY_ARG,
     api_request_hash,
+    ensure_mcp_payload_idempotency,
+    is_api_write_command,
+    is_mcp_write_tool,
     replay_failed_writes,
     retry_async,
 )
@@ -53,6 +56,35 @@ class MCPRetryHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(attempts, [1, 2, 3, 4])
         self.assertEqual(retries, [(1, "TimeoutError"), (2, "TimeoutError"), (3, "TimeoutError")])
         self.assertEqual(sleeps, [0.5, 1.5, 3.0])
+
+    def test_architect_task_update_is_scoped_write_tool(self):
+        self.assertTrue(is_mcp_write_tool("architect_task_update"))
+        self.assertFalse(is_mcp_write_tool("architect_task_list"))
+        self.assertFalse(is_api_write_command("architect_task_list"))
+
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "architect_task_update",
+                "arguments": {
+                    "task": "LOOM:217",
+                    "title": "Updated title",
+                },
+            },
+        }
+
+        updated, idempotency_key, tool_name = ensure_mcp_payload_idempotency(
+            payload,
+        )
+
+        self.assertEqual(tool_name, "architect_task_update")
+        self.assertTrue(idempotency_key)
+        self.assertEqual(
+            updated["params"]["arguments"][IDEMPOTENCY_ARG],
+            idempotency_key,
+        )
 
 
 class MCPIdempotencyTests(unittest.IsolatedAsyncioTestCase):
