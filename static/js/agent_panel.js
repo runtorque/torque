@@ -959,6 +959,24 @@ function _agentPanelDigestSentEvents(agent) {
   return [];
 }
 
+function _agentPanelDigestQueuedEvents(bstats) {
+  if (!bstats) return [];
+  if (Array.isArray(bstats.queued_events)) return bstats.queued_events.slice();
+  // Older/local snapshots used a couple of transitional names while the
+  // per-recipient digest state was split out of the legacy engineer settings.
+  // Normalize them here so the Events tab can render a real queue whenever the
+  // backend has published one, instead of showing an empty card next to a
+  // non-zero buffered count.
+  if (Array.isArray(bstats.events)) return bstats.events.slice();
+  if (Array.isArray(bstats.buffered_event_list)) return bstats.buffered_event_list.slice();
+  if (bstats.queued_events && typeof bstats.queued_events === 'object') {
+    return Object.keys(bstats.queued_events).map(function(key) {
+      return bstats.queued_events[key];
+    }).filter(Boolean);
+  }
+  return [];
+}
+
 function _agentPanelDigestPauseButton(agent) {
   var agentId = String((agent && agent.id) || '');
   if (!agentId) return '';
@@ -987,7 +1005,7 @@ function _agentPanelDigestHeaderRight(agent) {
 }
 
 function _agentPanelRenderEventsTab(bstats, sentEvents, paused, recipient, sendNowExpr, sentTitle) {
-  var queued = (bstats && bstats.queued_events) ? bstats.queued_events.slice() : [];
+  var queued = _agentPanelDigestQueuedEvents(bstats);
   var sent = Array.isArray(sentEvents) ? sentEvents.slice() : [];
   var sendDisabled = paused || !queued.length;
   var statusText = _engineerEventsStatusText(bstats, paused, recipient);
@@ -3295,7 +3313,9 @@ function renderLegacyGroupPanel() {
   var panelState = _captureSurfaceState(el, panelStateOptions);
 
   var engineer = group ? _engineerGetAgent(group) : null;
-  var bstats = (state.engineer_buffer_stats && state.engineer_buffer_stats[group]) || null;
+  var bstats = engineer
+    ? _agentPanelDigestBufferStats(engineer)
+    : ((state.engineer_buffer_stats && state.engineer_buffer_stats[group]) || null);
   var paused = engineer
     ? !!(_agentPanelDigestSettings(engineer) && _agentPanelDigestSettings(engineer).paused)
     : !!(ws && ws.paused);
@@ -3608,12 +3628,15 @@ function _agentPanelLegacyRenderEvents(group, ws, engineer, bstats) {
   if (!group) {
     return '<div class="agent-panel-empty">No engineer configured for any group.</div>';
   }
-  var paused = !!(ws && ws.paused);
-  var sent = (state.engineer_sent_events && state.engineer_sent_events[group])
-    ? state.engineer_sent_events[group].slice()
-    : [];
+  var digestSettings = engineer ? _agentPanelDigestSettings(engineer) : null;
+  var paused = engineer ? !!(digestSettings && digestSettings.paused) : !!(ws && ws.paused);
+  var stats = bstats || (engineer ? _agentPanelDigestBufferStats(engineer) : null);
+  var sent = engineer ? _agentPanelDigestSentEvents(engineer) : [];
+  if (!sent.length && state.engineer_sent_events && state.engineer_sent_events[group]) {
+    sent = state.engineer_sent_events[group].slice();
+  }
   return _agentPanelRenderEventsTab(
-    bstats,
+    stats,
     sent,
     paused,
     engineer,
