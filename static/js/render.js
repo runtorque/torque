@@ -519,7 +519,15 @@ function _restoreSurfaceState(root, snapshot, opts) {
   if (!el) return;
   if (snapshot.focus.value != null && 'value' in el) el.value = snapshot.focus.value;
   if (snapshot.focus.checked != null && 'checked' in el) el.checked = snapshot.focus.checked;
-  if (typeof el.focus === 'function') el.focus();
+  // Use preventScroll so re-render-driven focus restoration doesn't override
+  // explicit scroll restoration via snapshot.scrolls / panel-level scroll
+  // bookkeeping. Otherwise an inline-render that re-focuses an offscreen
+  // input (e.g. an empty board "Add task" textarea) drags the page back to
+  // the input via the browser's default scroll-into-view-on-focus behavior.
+  if (typeof el.focus === 'function') {
+    try { el.focus({ preventScroll: true }); }
+    catch (_e) { el.focus(); }
+  }
   if (typeof snapshot.focus.selectionStart === 'number' && 'selectionStart' in el) {
     el.selectionStart = snapshot.focus.selectionStart;
   }
