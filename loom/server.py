@@ -5,6 +5,7 @@ import contextlib
 import json
 import mimetypes
 import os
+import re
 import shutil
 import sys
 import time
@@ -4387,6 +4388,65 @@ async def _configure_event_ingest_client(event_ingest_client, state: MatrixState
             "event-ingest configure failed: "
             f"{response.get('message') or response!r}"
         )
+
+
+# Worker `loom ai *` subcommands (see `bin/loom`). Whitelisted so that
+# unrelated bash commands that happen to contain the substring `loom ai`
+# don't get reclassified as MCP tool calls.
+_LOOM_AI_SUBCMDS = (
+    "progress", "done", "blocked", "error", "derive", "ask",
+    "ready", "context", "name",
+)
+# Match a `loom ai <subcmd>` invocation inside a bash command string.
+# Anchored to command-start positions only — beginning of string or
+# after a shell command separator (;, &&, ||, |, newline, backtick).
+# This rejects `echo loom ai progress` and similar where `loom ai`
+# appears as an argument rather than as the invoked binary. Allows
+# env-var prefixes (`LOOM_CELL_ID=abc loom ai progress`) by treating
+# `VAR=value ` as part of the command-start whitespace.
+_LOOM_AI_RE = re.compile(
+    r"(?:^|[;&|`\n])\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*(?:[^\s;&|`]*/)?loom\s+ai\s+("
+    + "|".join(_LOOM_AI_SUBCMDS)
+    + r")\b"
+)
+
+
+def _maybe_loom_ai_mcp_tool_name(raw: dict) -> Optional[str]:
+    """Bridge `loom ai <subcmd>` Bash PostToolUse events into the MCP
+    tool-call surface used by engineers and architects.
+
+    Returns the synthetic MCP tool name (`mcp__loom__loom_<subcmd>`) when
+    `raw` is a Bash PostToolUse hook envelope whose command is a worker
+    `loom ai *` invocation. Returns None otherwise.
+
+    Engineers and architects reach the MCP tab via Claude Code's natural
+    MCP hook flow: their PostToolUse fires with `tool_name` already
+    prefixed `mcp__`, so `handle_events` records the call and emits one
+    `mcp_call_append` delta. Workers using the `loom ai` CLI fire
+    PostToolUse for the `Bash` tool instead, so without this rewrite
+    their reports don't reach the MCP surface. Rewriting `tool_name`
+    upstream of the envelope construction lets the worker share the
+    exact same capture path with no new persistence layer or extra
+    broadcast.
+    """
+    if not isinstance(raw, dict):
+        return None
+    tool = str(raw.get("tool_name") or raw.get("name") or "").strip().lower()
+    if tool not in ("bash", "shell", "command"):
+        return None
+    hook = str(raw.get("hook_event_name") or raw.get("type") or "").strip()
+    if hook != "PostToolUse":
+        return None
+    inp = raw.get("tool_input") or raw.get("input") or {}
+    if not isinstance(inp, dict):
+        return None
+    cmd = str(inp.get("command") or inp.get("cmd") or "").strip()
+    if not cmd:
+        return None
+    match = _LOOM_AI_RE.search(cmd)
+    if not match:
+        return None
+    return "mcp__loom__loom_" + match.group(1)
 
 
 def _mcp_call_rows_for_ui(state: MatrixState, records: list[dict]) -> list[dict]:
@@ -11725,6 +11785,16 @@ async def main(connection=None):
         headers = {
             "X-Loom-Cell-Id": request.headers.get("X-Loom-Cell-Id", ""),
         }
+        # Bridge worker `loom ai <subcmd>` Bash PostToolUse events into
+        # the MCP tool-call surface used by engineers/architects. The
+        # rewrite happens before envelope construction so the persisted
+        # row, the existing capture clause below, and the on-demand
+        # `cmd=mcp_calls` query (which filters `tool_name LIKE
+        # 'mcp__loom__%'`) all see the synthetic name.
+        synthetic_loom_ai_tool = _maybe_loom_ai_mcp_tool_name(raw)
+        if synthetic_loom_ai_tool:
+            raw = dict(raw)
+            raw["tool_name"] = synthetic_loom_ai_tool
         envelope = build_event_ingest_envelope(raw, headers=headers)
         idempotency_key = None
         explicit_event_id = raw.get("event_id")

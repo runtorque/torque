@@ -2152,5 +2152,102 @@ class ResolvePendingEngineerSpecializationsTests(unittest.TestCase):
         self.assertEqual(result, ["ui-frontend"])
 
 
+class LoomAiMcpToolNameBridgeTests(unittest.TestCase):
+    """Worker `loom ai *` Bash PostToolUse rewrites into the engineer/architect
+    MCP capture surface (LOOM:236 follow-up to the rolled-back :224 mirror).
+    """
+
+    def setUp(self):
+        install_aiohttp_stub()
+        self.server_mod = importlib.import_module('loom.server')
+        self.server_mod = importlib.reload(self.server_mod)
+
+    def _bash_post(self, command, **overrides):
+        raw = {
+            "tool_name": "Bash",
+            "hook_event_name": "PostToolUse",
+            "tool_input": {"command": command},
+            "session_id": "sess-1",
+        }
+        raw.update(overrides)
+        return raw
+
+    def test_rewrites_loom_ai_progress_into_synthetic_mcp_tool_name(self):
+        raw = self._bash_post('loom ai progress "investigating"')
+        self.assertEqual(
+            self.server_mod._maybe_loom_ai_mcp_tool_name(raw),
+            "mcp__loom__loom_progress",
+        )
+
+    def test_rewrites_each_whitelisted_subcommand(self):
+        for sub in (
+            "progress", "done", "blocked", "error", "derive",
+            "ask", "ready", "context", "name",
+        ):
+            raw = self._bash_post(f'loom ai {sub}')
+            self.assertEqual(
+                self.server_mod._maybe_loom_ai_mcp_tool_name(raw),
+                f"mcp__loom__loom_{sub}",
+                f"failed for subcommand: {sub}",
+            )
+
+    def test_handles_env_var_prefix_and_chained_commands(self):
+        # env-var prefix ("LOOM_CELL_ID=abc loom ai done")
+        raw = self._bash_post('LOOM_CELL_ID=abc loom ai done')
+        self.assertEqual(
+            self.server_mod._maybe_loom_ai_mcp_tool_name(raw),
+            "mcp__loom__loom_done",
+        )
+        # chained command ("cd /tmp && loom ai progress ...")
+        raw = self._bash_post('cd /tmp && loom ai progress "..."')
+        self.assertEqual(
+            self.server_mod._maybe_loom_ai_mcp_tool_name(raw),
+            "mcp__loom__loom_progress",
+        )
+        # path-prefixed binary ("./bin/loom ai blocked ...")
+        raw = self._bash_post('./bin/loom ai blocked "deps missing"')
+        self.assertEqual(
+            self.server_mod._maybe_loom_ai_mcp_tool_name(raw),
+            "mcp__loom__loom_blocked",
+        )
+
+    def test_ignores_pretooluse_so_only_completed_calls_are_captured(self):
+        raw = self._bash_post('loom ai done', hook_event_name="PreToolUse")
+        self.assertIsNone(self.server_mod._maybe_loom_ai_mcp_tool_name(raw))
+
+    def test_ignores_non_bash_tools(self):
+        raw = {
+            "tool_name": "Edit",
+            "hook_event_name": "PostToolUse",
+            "tool_input": {"file_path": "loom ai progress"},
+        }
+        self.assertIsNone(self.server_mod._maybe_loom_ai_mcp_tool_name(raw))
+
+    def test_ignores_unrelated_bash_commands(self):
+        for cmd in (
+            "ls -la",
+            "echo loom ai progress",  # subcmd in echo arg, but not the binary
+            "git commit -m 'loom ai progress'",  # inside quoted msg
+            "loom task list",  # different loom subcommand
+            "loom ai unknown",  # not a whitelisted subcmd
+            "",
+        ):
+            raw = self._bash_post(cmd)
+            self.assertIsNone(
+                self.server_mod._maybe_loom_ai_mcp_tool_name(raw),
+                f"should not match: {cmd!r}",
+            )
+
+    def test_handles_real_mcp_tools_unchanged(self):
+        # Engineer/architect path: tool_name is already mcp__... and the
+        # bridge must not interfere.
+        raw = {
+            "tool_name": "mcp__loom__engineer_task_create",
+            "hook_event_name": "PostToolUse",
+            "tool_input": {"title": "..."},
+        }
+        self.assertIsNone(self.server_mod._maybe_loom_ai_mcp_tool_name(raw))
+
+
 if __name__ == '__main__':
     unittest.main()
