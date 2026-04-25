@@ -4452,10 +4452,10 @@ async def _mirror_api_ai_report_to_mcp_call_log(
             raw,
             headers={"X-Loom-Cell-Id": cell_id},
         )
-        mirror_key = (
-            f"{str(idempotency_scope or 'api:cmd:ai_report').strip()}:{cell_id}:"
-            f"{str(idempotency_key or '').strip() or api_request_hash(data)}"
-        )
+        scope = str(idempotency_scope or "api:cmd:ai_report").strip()
+        explicit_key = str(idempotency_key or "").strip()
+        mirror_suffix = explicit_key or f"no-key:{uuid.uuid4().hex}"
+        mirror_key = f"{scope}:{cell_id}:{mirror_suffix}"
         await ensure_event_ingest_configured()
         response = await event_ingest_client.append(
             envelope,

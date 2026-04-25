@@ -635,6 +635,56 @@ class ApiAiReportMcpCaptureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.cell.activity_detail, "secret worker note")
         self.assertEqual(event_log.get(self.cell.id), [])
 
+    async def test_mcp_loom_tool_repeated_no_key_calls_append_distinct_rows(self):
+        ws = _FakeWsClient()
+        async with self.state._ws_clients_lock:
+            self.state._ws_clients.add(ws)
+        seen_payloads = []
+
+        async def handle_command(payload):
+            seen_payloads.append(dict(payload))
+            return {"type": "ok"}
+
+        handler = create_mcp_handler(
+            handle_command,
+            self.state,
+            ai_report_mirror=self._mirror_mcp,
+        )
+        body = {
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {
+                "name": "loom_progress",
+                "arguments": {"message": "same update"},
+            },
+        }
+        for req_id in (1, 2):
+            response = await handler(FakeRequest(
+                {**body, "id": req_id},
+                headers={"X-Loom-Cell-Id": self.cell.id},
+            ))
+            self.assertEqual(response.status, 200)
+            self.assertFalse(response.payload["result"]["isError"])
+
+        self.assertEqual(len(seen_payloads), 2)
+        self.assertEqual(seen_payloads[0], seen_payloads[1])
+        rows = self._rows()
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(
+            [row["tool_name"] for row in rows],
+            ["mcp__loom__loom_progress", "mcp__loom__loom_progress"],
+        )
+        self.assertEqual(len({row["idempotency_key"] for row in rows}), 2)
+        self.assertTrue(all(
+            ":no-key:" in row["idempotency_key"] for row in rows
+        ))
+        self.assertEqual(len(ws.messages), 2)
+        self.assertTrue(all(
+            msg["ops"][0]["op"] == "mcp_call_append"
+            and msg["ops"][0]["call"]["tool_name"] == "mcp__loom__loom_progress"
+            for msg in ws.messages
+        ))
+
     async def test_ai_report_capture_redaction_modes_and_allowlist(self):
         await self._mirror(action="progress", idempotency_key="meta-progress")
         meta_raw = self._rows()[0]["event"]["raw"]
