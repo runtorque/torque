@@ -1761,7 +1761,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             created_by_architect_id=architect.id,
         )
 
-        for task in (user_task, engineer_task, system_task, other_arch_task):
+        for task in (engineer_task, system_task, other_arch_task):
             with self.subTest(task=task.id):
                 text, is_error = await self._call(
                     "architect_task_update",
@@ -1774,6 +1774,30 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
                     self.state.board_tasks[task.id].task,
                     "Should not update",
                 )
+
+        user_text, user_error = await self._call(
+            "architect_task_update",
+            {
+                "task": user_task.id,
+                "title": "Architect-edited user task",
+                "description": "Filled in by architect",
+                "labels": ["bug", "post-wave-12"],
+            },
+            architect.id,
+        )
+        self.assertFalse(user_error, user_text)
+        self.assertEqual(
+            self.state.board_tasks[user_task.id].task,
+            "Architect-edited user task",
+        )
+        self.assertEqual(
+            self.state.board_tasks[user_task.id].description,
+            "Filled in by architect",
+        )
+        self.assertEqual(
+            self.state.board_tasks[user_task.id].labels,
+            ["bug", "post-wave-12"],
+        )
 
         cross_text, cross_error = await self._call(
             "architect_task_update",

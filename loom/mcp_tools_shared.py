@@ -3403,7 +3403,11 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         if not task or str(getattr(task, "group", "") or "").strip() != _engineer_group:
             return "Task not found", True
         caller_id_str = str(caller_id or "").strip()
-        if str(getattr(task, "created_by_architect_id", "") or "").strip() != caller_id_str:
+        creator_class = _task_created_by_classifier(task)
+        creator_architect_id = str(
+            getattr(task, "created_by_architect_id", "") or ""
+        ).strip()
+        if creator_class != "user" and creator_architect_id != caller_id_str:
             return "Task was not created by this architect", True
 
         patch = {}

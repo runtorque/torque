@@ -323,9 +323,12 @@ _ARCHITECT_TOOL_SPECS = [
     {
         "name": "architect_task_update",
         "description": (
-            "Update title, description, and/or labels for a task created by "
-            "this architect in this architect's group. Omitted fields are "
-            "left unchanged; labels use replace semantics."
+            "Update title, description, and/or labels for a task in this "
+            "architect's group, provided the task was created by this "
+            "architect or by the user. Tasks created by other architects, "
+            "engineers, or system-derived (parent/pipeline) tasks remain "
+            "off-limits. Omitted fields are left unchanged; labels use "
+            "replace semantics."
         ),
         "inputSchema": {
             "type": "object",
