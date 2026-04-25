@@ -6,6 +6,12 @@ function _engineerLaunchSpecializationsFor(cell) {
   return Array.isArray(raw) ? raw.slice() : [];
 }
 
+function _engineerLaunchGroupDefaultSpecs(group) {
+  const gs = (state.group_settings || {})[group] || {};
+  const raw = gs.default_engineer_specializations;
+  return Array.isArray(raw) ? raw.slice() : [];
+}
+
 function renderEngineerLaunchSpecializations() {
   if (!_engineerLaunchContext) return;
   const selectedEl = document.getElementById('engineer-launch-specializations-selected');
@@ -71,6 +77,20 @@ function renderEngineerLaunchSpecializations() {
     }
     availableEl.appendChild(opt);
   });
+
+  const resetBtn = document.getElementById('engineer-launch-specializations-reset');
+  if (resetBtn) {
+    const def = _engineerLaunchGroupDefaultSpecs(_engineerLaunchContext.group);
+    const sameAsDefault = def.length === selected.length
+      && def.every(function (n, i) { return n === selected[i]; });
+    resetBtn.disabled = sameAsDefault;
+    if (def.length === 0) {
+      resetBtn.title = 'No group-level default is set for this group.';
+    } else {
+      resetBtn.title = 'Replace the current list with the group-level default ('
+        + def.join(', ') + ').';
+    }
+  }
 }
 
 function engineerLaunchAddSpecialization() {
@@ -110,6 +130,14 @@ function engineerLaunchMoveSpecialization(idx, delta) {
   renderEngineerLaunchSpecializations();
 }
 
+function engineerLaunchResetSpecializationsToGroupDefault() {
+  if (!_engineerLaunchContext) return;
+  const def = _engineerLaunchGroupDefaultSpecs(_engineerLaunchContext.group);
+  _engineerLaunchContext.specializations = def;
+  _engineerLaunchContext.specializations_touched = true;
+  renderEngineerLaunchSpecializations();
+}
+
 function openNewSpecializationDialog() {
   const modal = document.getElementById('modal-new-specialization');
   if (!modal) return;
@@ -118,7 +146,11 @@ function openNewSpecializationDialog() {
   document.getElementById('new-specialization-preamble').value = '';
   document.getElementById('new-specialization-priorities').value = '';
   document.getElementById('new-specialization-scope').value = 'project';
-  modal.classList.add('visible');
+  if (typeof openNestedModal === 'function') {
+    openNestedModal('modal-new-specialization');
+  } else {
+    modal.classList.add('visible');
+  }
   document.getElementById('new-specialization-name').focus();
 }
 
@@ -140,7 +172,8 @@ function submitNewSpecializationDialog() {
   if (preamble) data.preamble = preamble;
   if (priorities.length) data.priorities = priorities;
 
-  const group = _engineerLaunchContext ? _engineerLaunchContext.group : '';
+  const group = (_engineerLaunchContext && _engineerLaunchContext.group)
+    || (typeof _settingsGroup !== 'undefined' ? (_settingsGroup || '') : '');
   send({
     cmd: 'save_specialization',
     name: name,
@@ -149,7 +182,14 @@ function submitNewSpecializationDialog() {
     group: group,
   });
   send({ cmd: 'list_specializations', group: group });
-  document.getElementById('modal-new-specialization').classList.remove('visible');
+  // Clear the GS-source flag if it was set so subsequent dialogs reset.
+  const modal = document.getElementById('modal-new-specialization');
+  if (modal && modal.dataset) delete modal.dataset.gsEngineerSource;
+  if (typeof closeNestedModal === 'function') {
+    closeNestedModal('modal-new-specialization');
+  } else {
+    document.getElementById('modal-new-specialization').classList.remove('visible');
+  }
 }
 
 function _defaultEngineerLaunchSettings() {
@@ -212,11 +252,17 @@ function openEngineerLaunchDialog(group, agentId) {
   if (!group) return;
   const cell = agentId && state.agents ? state.agents[agentId] : null;
   const ws = _getEngineerLaunchSettings(group);
+  // In create mode, preview the group-level default specializations so the
+  // operator sees what will be applied. The server still falls back to the
+  // group default when the payload omits specializations entirely.
+  const initialSpecs = cell
+    ? _engineerLaunchSpecializationsFor(cell)
+    : _engineerLaunchGroupDefaultSpecs(group);
   _engineerLaunchContext = {
     group: group,
     agent_id: cell ? cell.id : '',
     mode: cell ? 'relaunch' : 'create',
-    specializations: _engineerLaunchSpecializationsFor(cell),
+    specializations: initialSpecs,
     notification_settings: {
       push_interval: ws.push_interval,
       max_interval: ws.max_interval,
@@ -309,9 +355,11 @@ function submitEngineerLaunchDialog() {
       group: group,
       is_engineer: true,
     };
-    if (specializations.length > 0) {
-      payload.specializations = specializations;
-    }
+    // Always include specializations so an explicit empty pick doesn't
+    // get re-populated from the group default on the server. If the user
+    // never touched the picker, this still sends the previewed group
+    // default verbatim — same outcome as the server-side fallback.
+    payload.specializations = specializations;
     send(payload);
   } else if (engineerId) {
     if (_engineerLaunchContext.specializations_touched) {

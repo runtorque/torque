@@ -162,6 +162,13 @@ function loadModals(context) {
   vm.runInContext(source, context, { filename });
 }
 
+function loadEngineerLaunchModals(context) {
+  loadModals(context);
+  const filename = path.join(repoRoot, 'static/js/modals/engineer-launch.js');
+  const source = fs.readFileSync(filename, 'utf8');
+  vm.runInContext(source, context, { filename });
+}
+
 function seedProviders(context, providers) {
   vm.runInContext(`_cachedProviders = ${JSON.stringify(providers)};`, context);
 }
@@ -446,7 +453,12 @@ test('group settings describes absent Engineer state without legacy creation cop
 
   assert.equal(ensure('gs-engineer-agent-name').textContent, 'No engineer agent');
   assert.equal(ensure('gs-engineer-agent-meta').textContent, 'No designated Engineer is configured for this group.');
-  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), []);
+  // _showGroupSettings fetches specializations to populate the
+  // default-specializations picker; ignore that side request here.
+  const callsWithoutSpecFetch = sandbox.sendCalls.filter(
+    (msg) => msg.cmd !== 'list_specializations',
+  );
+  assert.deepEqual(JSON.parse(JSON.stringify(callsWithoutSpecFetch)), []);
 });
 
 test('_addWtSymlink trims outer slashes while preserving glob syntax', () => {
@@ -462,4 +474,209 @@ test('_addWtSymlink trims outer slashes while preserving glob syntax', () => {
     ['etl/**/node_modules'],
   );
   assert.equal(ensure('gs-wt-symlink-input').value, '');
+});
+
+test('GS Engineer tab loads default_engineer_specializations from settings', () => {
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+
+  vm.runInContext(`_showGroupSettings("alpha", {
+    settings: { default_engineer_specializations: ["ui-frontend", "react"] },
+    engineer_settings: {},
+    profiles: ["Default"]
+  })`, context);
+
+  const specs = JSON.parse(
+    vm.runInContext('JSON.stringify(_gsEngineerSpecs)', context));
+  assert.deepEqual(specs, ['ui-frontend', 'react']);
+});
+
+test('submitGroupSettings includes default_engineer_specializations in settings payload', () => {
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+  seedProviders(context, sandbox._cachedProviders);
+
+  vm.runInContext(
+    '_settingsGroup = "alpha"; _gsWtSymlinks = []; '
+    + '_gsEngineerSpecs = ["rust-systems", "backend-python"];',
+    context);
+
+  vm.runInContext('submitGroupSettings()', context);
+
+  const groupCall = sandbox.sendCalls.find(
+    (msg) => msg.cmd === 'update_group_settings');
+  assert.ok(groupCall, 'update_group_settings should be sent');
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(
+      groupCall.settings.default_engineer_specializations)),
+    ['rust-systems', 'backend-python'],
+  );
+});
+
+test('GS Engineer specializations picker rerender survives WS update', () => {
+  // Rerender-regression: a `specializations` WS frame must not wipe the
+  // currently-selected list (state lives in module-level _gsEngineerSpecs,
+  // not in DOM). The picker re-paints from the same source.
+  const { sandbox, ensure } = createSandbox();
+  sandbox.state.specializations = [
+    { name: 'ui-frontend', preamble: 'UI', priorities: [] },
+    { name: 'react', preamble: 'React', priorities: [] },
+  ];
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+
+  vm.runInContext(`_showGroupSettings("alpha", {
+    settings: { default_engineer_specializations: ["ui-frontend"] },
+    engineer_settings: {},
+    profiles: ["Default"]
+  })`, context);
+
+  const before = JSON.parse(
+    vm.runInContext('JSON.stringify(_gsEngineerSpecs)', context));
+  assert.deepEqual(before, ['ui-frontend']);
+
+  // Simulate a WS rerender by directly invoking renderGsEngineerSpecializations
+  // — the selection must remain.
+  vm.runInContext('renderGsEngineerSpecializations()', context);
+  const after = JSON.parse(
+    vm.runInContext('JSON.stringify(_gsEngineerSpecs)', context));
+  assert.deepEqual(after, ['ui-frontend']);
+});
+
+test('gsEngineerAddSpecialization appends and gsEngineerRemoveSpecialization drops', () => {
+  const { sandbox, ensure } = createSandbox();
+  sandbox.state.specializations = [
+    { name: 'rust', preamble: 'Rust', priorities: [] },
+    { name: 'react', preamble: 'React', priorities: [] },
+  ];
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+
+  vm.runInContext('_gsEngineerSpecs = []; renderGsEngineerSpecializations();', context);
+  ensure('gs-engineer-specializations-available').value = 'rust';
+  vm.runInContext('gsEngineerAddSpecialization()', context);
+  ensure('gs-engineer-specializations-available').value = 'react';
+  vm.runInContext('gsEngineerAddSpecialization()', context);
+
+  let specs = JSON.parse(
+    vm.runInContext('JSON.stringify(_gsEngineerSpecs)', context));
+  assert.deepEqual(specs, ['rust', 'react']);
+
+  vm.runInContext('gsEngineerRemoveSpecialization(0)', context);
+  specs = JSON.parse(
+    vm.runInContext('JSON.stringify(_gsEngineerSpecs)', context));
+  assert.deepEqual(specs, ['react']);
+});
+
+test('GS Engineer + New specialization opens nested above parent (modal-nested z-order)', () => {
+  // Regression: #modal-new-specialization is declared earlier in the DOM
+  // than #modal-group-settings, so without an explicit z-index bump the
+  // parent overlay would paint on top of the nested dialog. The opener
+  // tags the nested overlay with `modal-nested`, which CSS lifts to a
+  // higher stacking layer.
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadEngineerLaunchModals(context);
+
+  vm.runInContext('_settingsGroup = "alpha";', context);
+  ensure('modal-group-settings').classList.add('visible');
+
+  vm.runInContext('openGsEngineerNewSpecializationDialog()', context);
+
+  assert.equal(
+    ensure('modal-new-specialization').classList.contains('visible'),
+    true,
+    'nested specialization modal should be visible',
+  );
+  assert.equal(
+    ensure('modal-new-specialization').classList.contains('modal-nested'),
+    true,
+    'nested specialization modal must carry modal-nested for z-order',
+  );
+  assert.equal(
+    ensure('modal-group-settings').classList.contains('visible'),
+    true,
+    'parent Group Settings overlay must remain visible underneath',
+  );
+});
+
+test('GS Engineer + New specialization submit closes nested only and pops the stack', () => {
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadEngineerLaunchModals(context);
+
+  vm.runInContext('_settingsGroup = "alpha";', context);
+  ensure('modal-group-settings').classList.add('visible');
+
+  vm.runInContext('openGsEngineerNewSpecializationDialog()', context);
+  ensure('new-specialization-name').value = 'rust-systems';
+  ensure('new-specialization-preamble').value = 'Rust focus.';
+  ensure('new-specialization-scope').value = 'project';
+
+  vm.runInContext('submitNewSpecializationDialog()', context);
+
+  // Server side fan-out: save_specialization + list_specializations.
+  const saveCall = sandbox.sendCalls.find(
+    (msg) => msg.cmd === 'save_specialization');
+  assert.ok(saveCall, 'save_specialization should be sent');
+  assert.equal(saveCall.group, 'alpha',
+    'group must come from _settingsGroup when launched from GS');
+  assert.equal(saveCall.scope, 'project');
+
+  // Nested overlay closed, stack popped, parent still visible.
+  assert.equal(
+    ensure('modal-new-specialization').classList.contains('visible'),
+    false,
+    'nested specialization overlay must close on submit',
+  );
+  assert.equal(
+    ensure('modal-new-specialization').classList.contains('modal-nested'),
+    false,
+    'modal-nested class must be cleared on submit',
+  );
+  assert.equal(
+    ensure('modal-group-settings').classList.contains('visible'),
+    true,
+    'parent Group Settings overlay must remain visible after nested submit',
+  );
+  const stackLen = vm.runInContext('_modalStack.length', context);
+  assert.equal(stackLen, 0, 'modal stack must be empty after nested submit');
+});
+
+test('GS Engineer + New specialization Escape pops nested only (closeModals)', () => {
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadEngineerLaunchModals(context);
+
+  vm.runInContext('_settingsGroup = "alpha";', context);
+  ensure('modal-group-settings').classList.add('visible');
+
+  vm.runInContext('openGsEngineerNewSpecializationDialog()', context);
+
+  // The stack-pop path is what protects the parent — first closeModals
+  // must consume the nested entry only.
+  const stackBefore = vm.runInContext('_modalStack.length', context);
+  assert.equal(stackBefore, 1, 'nested entry must be on the stack');
+
+  vm.runInContext('closeModals()', context);
+
+  assert.equal(
+    ensure('modal-new-specialization').classList.contains('visible'),
+    false,
+    'first closeModals must dismiss the nested overlay',
+  );
+  assert.equal(
+    ensure('modal-new-specialization').classList.contains('modal-nested'),
+    false,
+    'modal-nested class must be cleared on stack pop',
+  );
+  assert.equal(
+    ensure('modal-group-settings').classList.contains('visible'),
+    true,
+    'parent Group Settings overlay must remain visible',
+  );
+  const stackAfter = vm.runInContext('_modalStack.length', context);
+  assert.equal(stackAfter, 0, 'modal stack must be empty after pop');
 });

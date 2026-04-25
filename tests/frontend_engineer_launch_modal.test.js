@@ -217,6 +217,7 @@ test('submitEngineerLaunchDialog persists settings then creates a Engineer', () 
       name: 'Engineer',
       group: 'alpha',
       is_engineer: true,
+      specializations: [],
     },
   ]);
 });
@@ -308,4 +309,157 @@ test('submitEngineerLaunchDialog persists settings then relaunches the designate
       id: 'engineer-1',
     },
   ]);
+});
+
+test('create-mode previews group default specializations from group_settings', () => {
+  const { sandbox, ensure } = createSandbox();
+  sandbox.state.group_settings = {
+    alpha: { default_engineer_specializations: ['ui-frontend', 'react'] },
+  };
+  sandbox.state.specializations = [
+    { name: 'ui-frontend', preamble: 'UI', priorities: [] },
+    { name: 'react', preamble: 'React', priorities: [] },
+    { name: 'rust', preamble: 'Rust', priorities: [] },
+  ];
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/modals.js');
+  loadScript(context, 'static/js/modals/engineer-launch.js');
+
+  vm.runInContext(`openEngineerLaunchDialog('alpha')`, context);
+  // Submit without touching the picker — JS should send the previewed
+  // group default verbatim, not an empty list.
+  vm.runInContext('submitEngineerLaunchDialog()', context);
+
+  const addCall = sandbox.sendCalls.find((msg) => msg.cmd === 'add_agent');
+  assert.ok(addCall, 'add_agent should be sent');
+  assert.deepEqual(addCall.specializations, ['ui-frontend', 'react']);
+});
+
+test('create-mode explicit empty pick is preserved (not refilled by group default)', () => {
+  const { sandbox, ensure } = createSandbox();
+  sandbox.state.group_settings = {
+    alpha: { default_engineer_specializations: ['ui-frontend'] },
+  };
+  sandbox.state.specializations = [
+    { name: 'ui-frontend', preamble: 'UI', priorities: [] },
+  ];
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/modals.js');
+  loadScript(context, 'static/js/modals/engineer-launch.js');
+
+  vm.runInContext(`openEngineerLaunchDialog('alpha')`, context);
+  // User clears the picker.
+  vm.runInContext('engineerLaunchRemoveSpecialization(0)', context);
+  vm.runInContext('submitEngineerLaunchDialog()', context);
+
+  const addCall = sandbox.sendCalls.find((msg) => msg.cmd === 'add_agent');
+  assert.ok(addCall, 'add_agent should be sent');
+  assert.deepEqual(addCall.specializations, []);
+});
+
+test('relaunch-mode Reset to group default repopulates from group settings', () => {
+  const { sandbox, ensure } = createSandbox();
+  sandbox.state.group_settings = {
+    alpha: { default_engineer_specializations: ['ui-frontend', 'react'] },
+  };
+  sandbox.state.specializations = [
+    { name: 'ui-frontend', preamble: 'UI', priorities: [] },
+    { name: 'react', preamble: 'React', priorities: [] },
+    { name: 'rust', preamble: 'Rust', priorities: [] },
+  ];
+  sandbox.state.agents['engineer-1'].engineer_specializations = ['rust'];
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/modals.js');
+  loadScript(context, 'static/js/modals/engineer-launch.js');
+
+  vm.runInContext(`openEngineerLaunchDialog('alpha', 'engineer-1')`, context);
+  vm.runInContext('engineerLaunchResetSpecializationsToGroupDefault()', context);
+  vm.runInContext('submitEngineerLaunchDialog()', context);
+
+  const setCall = sandbox.sendCalls.find(
+    (msg) => msg.cmd === 'set_engineer_specializations',
+  );
+  assert.ok(setCall, 'set_engineer_specializations should be sent');
+  assert.deepEqual(setCall.specializations, ['ui-frontend', 'react']);
+});
+
+test('Reset button is disabled when current selection equals group default', () => {
+  const { sandbox, ensure } = createSandbox();
+  sandbox.state.group_settings = {
+    alpha: { default_engineer_specializations: ['ui-frontend', 'react'] },
+  };
+  sandbox.state.specializations = [
+    { name: 'ui-frontend', preamble: 'UI', priorities: [] },
+    { name: 'react', preamble: 'React', priorities: [] },
+  ];
+  sandbox.state.agents['engineer-1'].engineer_specializations = [
+    'ui-frontend', 'react'
+  ];
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/modals.js');
+  loadScript(context, 'static/js/modals/engineer-launch.js');
+
+  vm.runInContext(`openEngineerLaunchDialog('alpha', 'engineer-1')`, context);
+
+  assert.equal(
+    ensure('engineer-launch-specializations-reset').disabled,
+    true,
+    'Reset button should be disabled when current matches group default',
+  );
+
+  // Now diverge from the default — Reset becomes enabled.
+  vm.runInContext('engineerLaunchRemoveSpecialization(0)', context);
+  assert.equal(
+    ensure('engineer-launch-specializations-reset').disabled,
+    false,
+    'Reset button should be enabled when current diverges from group default',
+  );
+});
+
+test('nested-modal: closeModals pops new-specialization without dismissing parent', () => {
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/modals.js');
+  loadScript(context, 'static/js/modals/engineer-launch.js');
+
+  vm.runInContext(`openEngineerLaunchDialog('alpha')`, context);
+  // Parent modal is now visible.
+  assert.equal(
+    ensure('modal-engineer-launch').classList.contains('visible'),
+    true,
+    'parent should be visible',
+  );
+
+  vm.runInContext('openNewSpecializationDialog()', context);
+  assert.equal(
+    ensure('modal-new-specialization').classList.contains('visible'),
+    true,
+    'nested should be visible',
+  );
+  assert.equal(
+    ensure('modal-new-specialization').classList.contains('modal-nested'),
+    true,
+    'nested overlay must carry modal-nested for z-order layering',
+  );
+
+  // First closeModals() pops the nested overlay only.
+  vm.runInContext('closeModals()', context);
+  assert.equal(
+    ensure('modal-new-specialization').classList.contains('visible'),
+    false,
+    'nested should be closed',
+  );
+  assert.equal(
+    ensure('modal-engineer-launch').classList.contains('visible'),
+    true,
+    'parent must remain visible after popping nested',
+  );
+
+  // Second closeModals() falls through to the close-all path.
+  vm.runInContext('closeModals()', context);
+  assert.equal(
+    ensure('modal-engineer-launch').classList.contains('visible'),
+    false,
+    'parent should close on second invocation',
+  );
 });

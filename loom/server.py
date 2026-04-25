@@ -172,6 +172,35 @@ def _get_keybinding_defaults(keybindings_module) -> dict:
     return keybindings_module.get_default_bindings()
 
 
+def _resolve_pending_engineer_specializations(
+        data: dict, state, group: str, is_engineer: bool) -> list:
+    """Resolve the specializations list applied to a new engineer.
+
+    Honors an explicit ``specializations`` field in ``data`` (including an
+    explicit empty list, which means "no specs"). When the field is absent,
+    falls back to the group-level default
+    (``GroupSettings.default_engineer_specializations``).
+
+    Returns ``[]`` for non-engineer agents.
+    """
+    if not is_engineer:
+        return []
+    if "specializations" in data:
+        return [
+            str(item or "").strip()
+            for item in (data.get("specializations") or [])
+            if str(item or "").strip()
+        ]
+    gs_default = state.get_group_settings(group)
+    return [
+        str(item or "").strip()
+        for item in (
+            getattr(gs_default, "default_engineer_specializations", None) or []
+        )
+        if str(item or "").strip()
+    ]
+
+
 def _resolve_task_id(state, identifier: str) -> str:
     """Resolve a task by canonical ID, legacy alias, or ID prefix.
 
@@ -6553,11 +6582,10 @@ async def main(connection=None):
                     )
 
                     persistent_prompt_text = ""
-                    pending_specializations = [
-                        str(item or "").strip()
-                        for item in (data.get("specializations", []) or [])
-                        if str(item or "").strip()
-                    ] if is_engineer else []
+                    pending_specializations = (
+                        _resolve_pending_engineer_specializations(
+                            data, state, group, is_engineer)
+                    )
                     # Engineer: build persistent prompt and skip worktree
                     if is_engineer:
                         from .engineer import build_engineer_system_prompt

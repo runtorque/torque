@@ -1920,6 +1920,11 @@ body.runtime-embedded .term-row.term-add {
   padding: 16px;
 }
 .overlay.visible { display: flex; }
+/* Nested overlays sit above their parent regardless of DOM order so
+ * a sub-dialog opened from another modal (e.g. + New specialization
+ * inside Group Settings) is not occluded by the parent overlay. The
+ * stack manager in static/js/modals.js toggles this class. */
+.overlay.modal-nested { z-index: 110; }
 .modal {
   background: var(--bg-surface);
   border: 1px solid var(--border);
@@ -1993,7 +1998,19 @@ body.runtime-embedded .term-row.term-add {
   display: flex; gap: 6px; align-items: center;
 }
 .specializations-controls select { flex: 1; }
-.specializations-footer { font-size: 11px; }
+.specializations-footer {
+  font-size: 11px;
+  display: flex; align-items: center; gap: 8px;
+}
+.specializations-footer .btn-link { flex: 0 0 auto; }
+.specializations-footer .specializations-reset {
+  margin-left: auto;
+  padding: 3px 8px;
+  font-size: 11px;
+}
+.specializations-footer .specializations-reset:disabled {
+  opacity: 0.5; cursor: not-allowed;
+}
 .btn-link {
   background: transparent; border: none; color: var(--accent);
   cursor: pointer; padding: 0; font-size: 11px; font-weight: 600;

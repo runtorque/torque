@@ -187,6 +187,61 @@ class LoomDBTests(unittest.TestCase):
         }
         self.assertIn("engineer_specializations", columns)
 
+    def test_default_engineer_specializations_round_trip(self):
+        self.db.save_groups({"g": []}, {"g": "g"})
+        self.db.save_group_settings(
+            "g",
+            GroupSettings(
+                default_engineer_specializations=["ui-frontend", "react"],
+            ),
+        )
+
+        loaded = self.db.load_all()
+        self.assertEqual(
+            loaded["group_settings"]["g"]["default_engineer_specializations"],
+            ["ui-frontend", "react"],
+        )
+
+    def test_default_engineer_specializations_defaults_to_empty(self):
+        self.db.save_groups({"g": []}, {"g": "g"})
+        self.db.save_group_settings("g", GroupSettings())
+
+        loaded = self.db.load_all()
+        self.assertEqual(
+            loaded["group_settings"]["g"]["default_engineer_specializations"],
+            [],
+        )
+
+    def test_default_engineer_specializations_migration_adds_column(self):
+        # Simulate an older DB by dropping the column then re-running init.
+        legacy_path = Path(self.tmp.name) / "legacy-default-specs.db"
+        legacy = LoomDB(legacy_path)
+        legacy.init()
+        legacy._conn.execute(
+            "CREATE TABLE legacy_gs AS SELECT * FROM group_settings"
+        )
+        # Drop and recreate without the column to mimic pre-migration state.
+        legacy._conn.execute("DROP TABLE group_settings")
+        legacy._conn.execute(
+            "CREATE TABLE group_settings ("
+            "group_name TEXT PRIMARY KEY, "
+            "engineer_agent_id TEXT NOT NULL DEFAULT '')"
+        )
+        legacy._conn.commit()
+        legacy.close()
+
+        # Re-open and run init() again — migration should add the column.
+        migrated = LoomDB(legacy_path)
+        self.addCleanup(migrated.close)
+        migrated.init()
+        columns = {
+            row[1]
+            for row in migrated._conn.execute(
+                "PRAGMA table_info(group_settings)"
+            )
+        }
+        self.assertIn("default_engineer_specializations", columns)
+
     def test_load_all_roundtrips_json_and_boolean_fields(self):
         cell = AgentCell(
             id="agent-1",

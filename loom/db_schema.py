@@ -120,6 +120,7 @@ CREATE TABLE IF NOT EXISTS group_settings (
     board_default_lane          TEXT NOT NULL DEFAULT '',
     board_default_action        TEXT NOT NULL DEFAULT '',
     engineer_agent_id             TEXT NOT NULL DEFAULT '',
+    default_engineer_specializations TEXT NOT NULL DEFAULT '[]',
     architect_boot_command        TEXT NOT NULL DEFAULT '',
     architect_provider            TEXT NOT NULL DEFAULT '',
     architect_model               TEXT NOT NULL DEFAULT '',
@@ -1118,6 +1119,15 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
         conn.execute(
             "ALTER TABLE group_settings ADD COLUMN "
             "engineer_agent_id TEXT NOT NULL DEFAULT ''")
+        conn.commit()
+    # Migrate: add default_engineer_specializations column to group_settings
+    try:
+        conn.execute(
+            "SELECT default_engineer_specializations FROM group_settings LIMIT 0")
+    except sqlite3.OperationalError:
+        conn.execute(
+            "ALTER TABLE group_settings ADD COLUMN "
+            "default_engineer_specializations TEXT NOT NULL DEFAULT '[]'")
         conn.commit()
     # Migrate: add architect settings columns to group_settings.
     for col, col_type, default in (

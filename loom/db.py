@@ -99,11 +99,12 @@ _AGENT_INSERT_SQL = """
     VALUES ({placeholders})
 """
 
-# GroupSettings fields that store dicts — persisted as JSON text.
+# GroupSettings fields that store dicts/lists — persisted as JSON text.
 _GS_JSON_FIELDS = {
     "env_vars", "agent_env_vars", "terminal_env_vars",
     "board_default_labels", "worktree_symlinks",
     "architect_review_gate_thresholds",
+    "default_engineer_specializations",
 }
 
 # GroupSettings fields that are booleans — stored as INTEGER 0/1.
@@ -3562,7 +3563,8 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                             d[k] = json.loads(d[k])
                         except (json.JSONDecodeError, TypeError):
                             d[k] = [] if k in {"board_default_labels",
-                                                "worktree_symlinks"} else {}
+                                                "worktree_symlinks",
+                                                "default_engineer_specializations"} else {}
                 # Decode booleans
                 for k in _GS_BOOL_FIELDS:
                     if k in d:

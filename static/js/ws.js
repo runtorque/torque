@@ -147,6 +147,9 @@ function connect() {
       if (typeof renderEngineerLaunchSpecializations === 'function') {
         renderEngineerLaunchSpecializations();
       }
+      if (typeof renderGsEngineerSpecializations === 'function') {
+        renderGsEngineerSpecializations();
+      }
     } else if (msg.type === 'specialization_detail') {
       state.specialization_detail = msg.specialization || null;
     } else if (msg.type === 'engineer_specializations') {
