@@ -39,7 +39,7 @@ A task is a unit of work with a description, optional action, optional agent tem
 
 1. Click **+ Add task** at the top of any lane
 2. Type the task description and press ++enter++
-3. For action-based tasks, click **From action** to open the action picker
+3. For action-based tasks, open the full task modal and use its action picker
 
 **From the CLI:**
 
@@ -268,7 +268,7 @@ The board supports inline task creation directly in each lane:
 4. Press ++shift+enter++ for a newline within the description
 5. Press ++escape++ to cancel (draft text is preserved if you blur and return)
 
-Click **From action** to open an action picker overlay. Selecting an action opens the full task creation modal with the action pre-selected and its variable fields ready to fill in.
+Inline creation is intentionally optimized for quick plain tasks. Use the full task modal when a task needs an action, action variables, dependencies, or richer metadata.
 
 ## Filtering and viewing
 

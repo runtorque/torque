@@ -924,28 +924,6 @@
   </div>
 </div>
 
-<!-- Action modal -->
-<div class="overlay" id="modal-action">
-  <div class="modal modal-tall">
-    <h2 id="tpl-title">From Action</h2>
-    <div id="tpl-list-pane">
-      <div id="tpl-list" class="tpl-list"></div>
-      <div class="tpl-empty hidden" id="tpl-empty">
-        No actions found.<br>Add <code>.yaml</code> files to <code>.loom/actions/</code> in your project.
-      </div>
-    </div>
-    <div id="tpl-vars-pane" class="hidden">
-      <div id="tpl-description" class="tpl-description"></div>
-      <div id="tpl-var-fields" class="modal-fields"></div>
-    </div>
-    <div class="modal-actions">
-      <button class="btn-cancel" onclick="closeModals()">Cancel</button>
-      <button class="btn-cancel hidden" id="tpl-back-btn" onclick="_tplBack()">Back</button>
-      <button class="btn-primary hidden" id="tpl-submit-btn" onclick="_tplSubmit()">Create</button>
-    </div>
-  </div>
-</div>
-
 <!-- Add/Edit Task modal -->
 <div class="overlay" id="modal-task">
   <div class="modal modal-tall">
@@ -1311,7 +1289,6 @@
 <script src="/static/js/modals/add-cell.js"></script>
 <script src="/static/js/modals/task-artifacts.js"></script>
 <script src="/static/js/modals/task-modal.js"></script>
-<script src="/static/js/modals/action-picker.js"></script>
 <script src="/static/js/board.js"></script>
 <script src="/static/js/board/view-state.js"></script>
 <script src="/static/js/board/card-rendering.js"></script>

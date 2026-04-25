@@ -95,9 +95,7 @@ function connect() {
       if (typeof _boardCacheDispatchActionList === 'function') {
         _boardCacheDispatchActionList(msg);
       }
-      if (typeof _boardActDropdownWaiting !== 'undefined' && _boardActDropdownWaiting) {
-        _boardShowActionList(msg);
-      } else if (typeof _boardBatchActionWaiting !== 'undefined' && _boardBatchActionWaiting) {
+      if (typeof _boardBatchActionWaiting !== 'undefined' && _boardBatchActionWaiting) {
         _handleBoardBatchActionList(msg);
       } else if (typeof _schedModalWaiting !== 'undefined' && _schedModalWaiting) {
         _handleScheduleActionList(msg);
@@ -111,8 +109,7 @@ function connect() {
           || (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'actions')) {
         tplEditorReceiveList(msg);
       } else {
-        // Ignore unsolicited action lists instead of reopening the
-        // "Task from Action" modal after reconnect/startup.
+        // Ignore unsolicited action lists after reconnect/startup.
       }
     } else if (msg.type === 'roles' || msg.type === 'templates') {
       _cachedAgentTemplates = _wsRoleList(msg);
@@ -166,11 +163,7 @@ function connect() {
       if ((typeof _panelAppVisible === 'function' && _panelAppVisible('actions'))
           || (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'actions')) {
         tplEditorReceiveDetail(msg);
-      } else {
-        _showActionVarForm(msg);
       }
-    } else if (msg.type === 'action_rendered') {
-      _handleActionRendered(msg);
     } else if (msg.type === 'prompt_preview') {
       _showPromptPreview(msg);
     } else if (msg.type === 'dispatch_action_missing') {
