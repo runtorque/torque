@@ -122,6 +122,50 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
             [alice.id, alice_worker.id],
         )
 
+    async def test_engineer_mcp_calls_dispatches_scoped_query(self):
+        state = self._make_state()
+        alice = self._add_engineer(state, "eng-alice", "Alice")
+        worker = self._add_worker(state, "worker-a", "Alice Worker", alice.id)
+        bob = self._add_engineer(state, "eng-bob", "Bob")
+        bob_worker = self._add_worker(state, "worker-b", "Bob Worker", bob.id)
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(payload)
+            self.assertEqual(payload["cmd"], "engineer_mcp_calls")
+            self.assertEqual(payload["caller_id"], alice.id)
+            return {"type": "mcp_calls", "calls": [{"cell_id": worker.id}]}
+
+        text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_mcp_calls",
+            {
+                "agent_id": worker.id,
+                "tool_name_pattern": "mcp__loom__%",
+                "since": 123,
+                "limit": 7,
+            },
+            fake_handle_command,
+            state,
+            caller_id=alice.id,
+        )
+
+        self.assertFalse(is_error, text)
+        self.assertEqual(json.loads(text)["calls"], [{"cell_id": worker.id}])
+        self.assertEqual(calls[-1]["agent_id"], worker.id)
+        self.assertEqual(calls[-1]["tool_name_pattern"], "mcp__loom__%")
+        self.assertEqual(calls[-1]["since"], 123)
+        self.assertEqual(calls[-1]["limit"], 7)
+
+        hidden_text, hidden_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_mcp_calls",
+            {"agent_id": bob_worker.id},
+            fake_handle_command,
+            state,
+            caller_id=alice.id,
+        )
+        self.assertTrue(hidden_error)
+        self.assertEqual(hidden_text, "agent not found in scope")
+
     async def test_engineer_agents_list_scopes_between_two_engineers(self):
         state = self._make_state()
         alice = self._add_engineer(state, "eng-alice", "Alice")

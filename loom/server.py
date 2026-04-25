@@ -56,6 +56,7 @@ from .events import (
     get_cell_event_stream,
     health_check,
 )
+from .event_ingest_db import event_call_row_from_record, redact_event_for_mcp_call_log
 from .adapters import get_adapter, get_providers
 from .notifications import NotificationManager
 from .worktree import WorktreeManager, format_stale_base_warning
@@ -4242,6 +4243,171 @@ def _handle_architect_journal_read_command(
     }
 
 
+def _event_ingest_config_payload(state: MatrixState) -> dict:
+    gs = state.global_settings
+    return {
+        "max_rows": int(getattr(gs, "event_ingest_max_rows", 100_000) or 100_000),
+        "max_age_days": int(getattr(gs, "event_ingest_max_days", 14) or 0),
+        "args_capture": str(
+            getattr(gs, "mcp_call_log_args_capture", "metadata") or "metadata"
+        ),
+        "full_capture_tools": list(
+            getattr(gs, "mcp_call_log_full_capture_tools", []) or []
+        ),
+    }
+
+
+async def _configure_event_ingest_client(event_ingest_client, state: MatrixState) -> None:
+    if not event_ingest_client:
+        return
+    await event_ingest_client.configure(**_event_ingest_config_payload(state))
+
+
+def _mcp_call_rows_for_ui(state: MatrixState, records: list[dict]) -> list[dict]:
+    rows = []
+    for record in records:
+        row = event_call_row_from_record(record)
+        cell = state.agents.get(row.get("cell_id", ""))
+        if cell:
+            row["agent_name"] = cell.name
+            row["agent_slug"] = cell.slug
+            row["agent_kind"] = getattr(cell, "kind", "")
+            row["group"] = getattr(cell, "group", "")
+        rows.append(row)
+    return rows
+
+
+def _engineer_mcp_visible_cell_ids(state: MatrixState, engineer_id: str) -> set[str]:
+    engineer_id = str(engineer_id or "").strip()
+    engineer = state.agents.get(engineer_id)
+    if not engineer:
+        return set()
+    group = str(getattr(engineer, "group", "") or "").strip()
+    visible = {engineer_id}
+    for cell in state.agents.values():
+        if getattr(cell, "cell_type", "") != "agent":
+            continue
+        if group and str(getattr(cell, "group", "") or "").strip() != group:
+            continue
+        owner = str(getattr(cell, "owner_engineer_id", "") or "").strip()
+        creator = str(getattr(cell, "created_by_engineer_id", "") or "").strip()
+        if owner == engineer_id or creator == engineer_id:
+            visible.add(cell.id)
+    return visible
+
+
+def _architect_mcp_visible_cell_ids(state: MatrixState, architect_id: str) -> set[str]:
+    architect_id = str(architect_id or "").strip()
+    architect = state.agents.get(architect_id)
+    if not architect:
+        return set()
+    group = str(getattr(architect, "group", "") or "").strip()
+    return {
+        cell.id for cell in state.agents.values()
+        if getattr(cell, "cell_type", "") == "agent"
+        and str(getattr(cell, "group", "") or "").strip() == group
+    }
+
+
+def _parse_mcp_call_query_params(data: dict) -> dict:
+    try:
+        limit = int(data.get("limit") or 50)
+    except (TypeError, ValueError):
+        limit = 50
+    limit = max(1, min(limit, 500))
+    def _maybe_float(name):
+        value = data.get(name)
+        if value in (None, ""):
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+    tool_pattern = (
+        data.get("tool_name_pattern")
+        or data.get("tool_filter")
+        or "mcp__loom__%"
+    )
+    hook = str(data.get("hook_event_name") or data.get("hook") or "").strip()
+    return {
+        "tool_name_pattern": str(tool_pattern or "").strip(),
+        "hook_event_name": hook,
+        "since": _maybe_float("since"),
+        "until": _maybe_float("until"),
+        "limit": limit,
+    }
+
+
+async def _handle_mcp_calls_command(
+    data: dict,
+    state: MatrixState,
+    event_ingest_client,
+    *,
+    scope: str = "trusted",
+) -> dict:
+    params = _parse_mcp_call_query_params(data)
+    agent_ident = str(
+        data.get("agent_id")
+        or data.get("cell_id")
+        or data.get("agent")
+        or ""
+    ).strip()
+    requested_cell_id = _resolve_agent_id(state, agent_ident) if agent_ident else ""
+    allowed_cell_ids: set[str] | None = None
+    caller_id = str(data.get("caller_id") or data.get("_caller_id") or "").strip()
+    if scope == "architect":
+        allowed_cell_ids = _architect_mcp_visible_cell_ids(state, caller_id)
+        if not allowed_cell_ids:
+            return {"type": "error", "message": "architect not found"}
+    elif scope == "engineer":
+        allowed_cell_ids = _engineer_mcp_visible_cell_ids(state, caller_id)
+        if not allowed_cell_ids:
+            return {"type": "error", "message": "engineer not found"}
+
+    query_cell_id = requested_cell_id
+    query_cell_ids: list[str] | None = None
+    if allowed_cell_ids is not None:
+        if requested_cell_id:
+            if requested_cell_id not in allowed_cell_ids:
+                return {"type": "mcp_calls", "calls": [], "events": [], "limit": params["limit"]}
+            query_cell_id = requested_cell_id
+        else:
+            query_cell_id = ""
+            query_cell_ids = sorted(allowed_cell_ids)
+    elif not query_cell_id and agent_ident:
+        return {"type": "error", "message": f"Agent not found: {agent_ident}"}
+
+    try:
+        response = await event_ingest_client.query(
+            cell_id=query_cell_id or None,
+            cell_ids=query_cell_ids,
+            **params,
+        )
+    except Exception as exc:
+        log.exception("Failed to query event ingest MCP calls")
+        return {"type": "error", "message": str(exc) or "event ingest unavailable"}
+    if response.get("type") == "error":
+        return {"type": "error", "message": response.get("message") or "query failed"}
+    records = list(response.get("events") or [])
+    rows = _mcp_call_rows_for_ui(state, records)
+    return {
+        "type": "mcp_calls",
+        "cell_id": requested_cell_id or query_cell_id,
+        "agent_id": requested_cell_id or query_cell_id,
+        "scope": scope,
+        "tool_name_pattern": params["tool_name_pattern"],
+        "hook_event_name": params["hook_event_name"],
+        "since": params["since"],
+        "until": params["until"],
+        "limit": params["limit"],
+        "calls": rows,
+        "events": rows,
+        "settings": {
+            "mcp_call_log_args_capture": state.global_settings.mcp_call_log_args_capture,
+        },
+    }
+
+
 async def _handle_engineer_dismiss_command(
         data: dict,
         state: MatrixState, *,
@@ -4932,8 +5098,11 @@ async def main(connection=None):
     from .event_ingest_client import EventIngestClient
 
     event_ingest_client = EventIngestClient(data_dir=DATA_DIR)
+    event_ingest_configured = [False]
     try:
         await event_ingest_client.connect()
+        await _configure_event_ingest_client(event_ingest_client, state)
+        event_ingest_configured[0] = True
         log.info("Event ingest daemon connected at %s",
                  event_ingest_client.socket_path)
     except Exception:
@@ -4948,6 +5117,12 @@ async def main(connection=None):
     )
     log.info("Event bus, event-ingest client, health monitor, "
              "and notifications initialized")
+
+    async def _ensure_event_ingest_configured():
+        if event_ingest_configured[0]:
+            return
+        await _configure_event_ingest_client(event_ingest_client, state)
+        event_ingest_configured[0] = True
 
     supervisor_banner: dict | None = None
     if STANDALONE:
@@ -6086,6 +6261,30 @@ async def main(connection=None):
         if cmd == "architect_journal_read":
             return _handle_architect_journal_read_command(data, state)
 
+        if cmd == "mcp_calls":
+            return await _handle_mcp_calls_command(
+                data,
+                state,
+                event_ingest_client,
+                scope="trusted",
+            )
+
+        if cmd == "architect_mcp_calls":
+            return await _handle_mcp_calls_command(
+                data,
+                state,
+                event_ingest_client,
+                scope="architect",
+            )
+
+        if cmd == "engineer_mcp_calls":
+            return await _handle_mcp_calls_command(
+                data,
+                state,
+                event_ingest_client,
+                scope="engineer",
+            )
+
         if cmd == "architect_task_list":
             return await _dispatch_architect_ui_tool(cmd, data, state)
 
@@ -6580,6 +6779,12 @@ async def main(connection=None):
                         panel_log._events, maxlen=new_max)
                     if panel_log._db:
                         panel_log._db.trim_panel_events(new_max)
+                try:
+                    await _configure_event_ingest_client(event_ingest_client, state)
+                    event_ingest_configured[0] = True
+                except Exception:
+                    event_ingest_configured[0] = False
+                    log.exception("Failed to reconfigure event ingest daemon")
 
             elif cmd == "suspend_keybindings" and _should_install_keybindings() and keybindings:
                 await keybindings.remove(connection, _displaced[0])
@@ -11399,6 +11604,7 @@ async def main(connection=None):
             )
 
         try:
+            await _ensure_event_ingest_configured()
             response = await event_ingest_client.append(
                 envelope,
                 idempotency_key=idempotency_key,
@@ -11437,6 +11643,31 @@ async def main(connection=None):
                 surface="events",
                 event="dedupe",
             )
+        try:
+            raw_tool = str(raw.get("tool_name") or raw.get("name") or "")
+            if raw_tool.startswith("mcp__") and not bool(response.get("duplicate")):
+                redacted_envelope = redact_event_for_mcp_call_log(
+                    envelope,
+                    args_capture=state.global_settings.mcp_call_log_args_capture,
+                    full_capture_tools=(
+                        state.global_settings.mcp_call_log_full_capture_tools
+                    ),
+                )
+                record = {
+                    "cursor": int(response.get("cursor") or 0),
+                    "idempotency_key": idempotency_key or "",
+                    "event": redacted_envelope,
+                    "appended_at": time.time(),
+                }
+                rows = _mcp_call_rows_for_ui(state, [record])
+                if rows:
+                    state._emit(
+                        "mcp_call_append",
+                        group=rows[0].get("group", ""),
+                        call=rows[0],
+                    )
+        except Exception:
+            log.exception("Failed to emit MCP call live delta")
         profiling.recorder().incr("events_enqueued")
 
         profiling.recorder().observe_ms(

@@ -2306,6 +2306,43 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             args,
         )
 
+    if tool_name == "mcp_calls":
+        target_agent = str(args.get("agent_id", "") or args.get("cell_id", "") or "").strip()
+        if target_agent:
+            resolved_agent_id, resolve_error = _resolve_visible_agent(
+                real_state,
+                caller_kind,
+                caller_id,
+                target_agent,
+            )
+            if not resolved_agent_id:
+                return resolve_error, True
+            target_agent = resolved_agent_id
+        cmd_name = (
+            "architect_mcp_calls"
+            if caller_kind == "architect"
+            else "engineer_mcp_calls"
+        )
+        payload = {
+            "cmd": cmd_name,
+            "caller_id": caller_id,
+            "agent_id": target_agent,
+            "cell_id": target_agent,
+            "tool_name_pattern": (
+                args.get("tool_name_pattern")
+                or args.get("tool_filter")
+                or "mcp__loom__%"
+            ),
+            "hook_event_name": args.get("hook_event_name", ""),
+            "since": args.get("since", None),
+            "until": args.get("until", None),
+            "limit": args.get("limit", 50),
+        }
+        result = await handle_command(payload)
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps(result or {"type": "mcp_calls", "calls": []}), False
+
     if tool_name == "engineer_pending_question" and caller_kind == "architect":
         return _architect_engineer_pending_question_json(
             real_state,

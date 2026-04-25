@@ -1678,6 +1678,23 @@ function _showGlobalSettingsModal(data) {
   document.getElementById('gls-xterm-scrollback').value =
     s.xterm_scrollback !== undefined ? s.xterm_scrollback
       : _glsXtermScrollbackDefault();
+  var argsCapture = s.mcp_call_log_args_capture || 'metadata';
+  var argsCaptureEl = document.getElementById('gls-mcp-call-log-args-capture');
+  if (argsCaptureEl) argsCaptureEl.value = argsCapture;
+  var fullCaptureEl = document.getElementById('gls-mcp-call-log-full-capture-tools');
+  if (fullCaptureEl) {
+    fullCaptureEl.value = (s.mcp_call_log_full_capture_tools || []).join('\n');
+  }
+  var maxRowsEl = document.getElementById('gls-event-ingest-max-rows');
+  if (maxRowsEl) {
+    maxRowsEl.value = s.event_ingest_max_rows !== undefined
+      ? s.event_ingest_max_rows : 100000;
+  }
+  var maxDaysEl = document.getElementById('gls-event-ingest-max-days');
+  if (maxDaysEl) {
+    maxDaysEl.value = s.event_ingest_max_days !== undefined
+      ? s.event_ingest_max_days : 14;
+  }
 
   // General > Board
   document.getElementById('gls-default-lanes').value =
@@ -1842,6 +1859,19 @@ function submitGlobalSettings() {
     max_pipeline_depth: parseInt(document.getElementById('gls-max-pipeline-depth').value) || 0,
     max_event_log: parseInt(document.getElementById('gls-max-event-log').value) || 500,
   };
+  var argsCaptureEl = document.getElementById('gls-mcp-call-log-args-capture');
+  if (argsCaptureEl) settings.mcp_call_log_args_capture = argsCaptureEl.value || 'metadata';
+  var fullCaptureEl = document.getElementById('gls-mcp-call-log-full-capture-tools');
+  if (fullCaptureEl) {
+    settings.mcp_call_log_full_capture_tools = fullCaptureEl.value
+      .split(/\n|,/)
+      .map(function(item) { return item.trim(); })
+      .filter(Boolean);
+  }
+  var maxRowsEl = document.getElementById('gls-event-ingest-max-rows');
+  if (maxRowsEl) settings.event_ingest_max_rows = parseInt(maxRowsEl.value) || 100000;
+  var maxDaysEl = document.getElementById('gls-event-ingest-max-days');
+  if (maxDaysEl) settings.event_ingest_max_days = parseInt(maxDaysEl.value) || 0;
   send({ cmd: 'update_global_settings', settings: settings });
   closeModals();
 }
