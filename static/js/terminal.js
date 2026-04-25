@@ -542,6 +542,15 @@ function terminalComposeClear(cellId) {
   _terminalComposeSetButtonState(input);
 }
 
+function _terminalComposeScrollToBottom(cellId) {
+  const id = String(cellId || '');
+  for (const key in _embeddedTerminalSessions) {
+    const entry = _embeddedTerminalSessions[key];
+    const term = entry && entry.cellId === id ? entry.terminal : null;
+    if (term && typeof term.scrollToBottom === 'function') term.scrollToBottom();
+  }
+}
+
 function terminalComposeSubmit(evt, cellId) {
   if (evt && typeof evt.preventDefault === 'function') evt.preventDefault();
   if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
@@ -560,6 +569,7 @@ function terminalComposeSubmit(evt, cellId) {
     return false;
   }
   send({ cmd: 'send_user_message', cell_id: id, text: text });
+  _terminalComposeScrollToBottom(id);
   terminalComposeClear(id);
   return false;
 }

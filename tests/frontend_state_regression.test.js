@@ -437,6 +437,10 @@ function createEmbeddedTerminalHarness(overrides = {}) {
     focus() {
       this.focusCount = (this.focusCount || 0) + 1;
     }
+
+    scrollToBottom() {
+      this.scrollToBottomCount = (this.scrollToBottomCount || 0) + 1;
+    }
   }
 
   class FakeFitAddon {
@@ -7479,7 +7483,7 @@ test('embedded terminal compose renders only for standalone runtime and preserve
 });
 
 test('embedded terminal compose submits on Enter, allows Shift+Enter, and clears on Escape', () => {
-  const { context, document, sandbox } = createEmbeddedTerminalHarness({
+  const { context, document, sandbox, terminals } = createEmbeddedTerminalHarness({
     loadRenderHelpers: true,
   });
   const dom = attachTerminalWorkspaceDom(document);
@@ -7538,6 +7542,7 @@ test('embedded terminal compose submits on Enter, allows Shift+Enter, and clears
   assert.equal(enterEvt.stopPropagationCalled, true);
   assert.equal(input.value, '');
   assert.equal(button.disabled, true);
+  assert.equal(terminals[0].scrollToBottomCount, 1);
 
   input.value = 'line one';
   runInContext(context, `terminalComposeInput(document.getElementById('terminal-compose-input-agent-1'));`);
