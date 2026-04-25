@@ -4403,90 +4403,6 @@ def _mcp_call_rows_for_ui(state: MatrixState, records: list[dict]) -> list[dict]
     return rows
 
 
-def _api_ai_report_result_summary(payload: object) -> dict:
-    summary = {"ok": True}
-    if isinstance(payload, dict):
-        for key in ("type", "task_id", "agent_id", "message", "slug"):
-            if key in payload:
-                summary[key] = payload.get(key)
-    elif payload is not None:
-        summary["result_type"] = type(payload).__name__
-    return summary
-
-
-async def _mirror_api_ai_report_to_mcp_call_log(
-    *,
-    data: dict,
-    payload: object,
-    state: MatrixState,
-    event_ingest_client,
-    ensure_event_ingest_configured,
-    idempotency_key: str = "",
-    idempotency_scope: str = "api:cmd:ai_report",
-) -> dict | None:
-    """Mirror successful /api/cmd ai_report writes into the MCP-call log."""
-    try:
-        if data.get("cmd") != "ai_report":
-            return None
-        if isinstance(payload, dict) and payload.get("type") == "error":
-            return None
-        action = str(data.get("action") or "").strip()
-        if not action:
-            return None
-        cell_id = str(data.get("cell_id") or "")
-        raw = {
-            "hook_event_name": "PostToolUse",
-            "tool_name": f"mcp__loom__loom_{action}",
-            "loom_call_log_only": True,
-            "cell_id": cell_id,
-            "session_id": "",
-            "success": True,
-            "tool_input": {
-                "action": action,
-                "task_id": str(data.get("task_id") or ""),
-                "message": str(data.get("message") or ""),
-            },
-            "tool_output": _api_ai_report_result_summary(payload),
-        }
-        envelope = build_event_ingest_envelope(
-            raw,
-            headers={"X-Loom-Cell-Id": cell_id},
-        )
-        scope = str(idempotency_scope or "api:cmd:ai_report").strip()
-        explicit_key = str(idempotency_key or "").strip()
-        mirror_suffix = explicit_key or f"no-key:{uuid.uuid4().hex}"
-        mirror_key = f"{scope}:{cell_id}:{mirror_suffix}"
-        await ensure_event_ingest_configured()
-        response = await event_ingest_client.append(
-            envelope,
-            idempotency_key=mirror_key,
-        )
-        if response.get("type") == "error" or bool(response.get("duplicate")):
-            return response
-        redacted_envelope = redact_event_for_mcp_call_log(
-            envelope,
-            args_capture=state.global_settings.mcp_call_log_args_capture,
-            full_capture_tools=state.global_settings.mcp_call_log_full_capture_tools,
-        )
-        rows = _mcp_call_rows_for_ui(state, [{
-            "cursor": int(response.get("cursor") or 0),
-            "idempotency_key": mirror_key,
-            "event": redacted_envelope,
-            "appended_at": time.time(),
-        }])
-        if rows:
-            state._emit(
-                "mcp_call_append",
-                group=rows[0].get("group", ""),
-                call=rows[0],
-            )
-            await state.broadcast()
-        return response
-    except Exception:
-        log.exception("Failed to mirror api/cmd ai_report into MCP call log")
-        return None
-
-
 def _engineer_mcp_visible_cell_ids(state: MatrixState, engineer_id: str) -> set[str]:
     engineer_id = str(engineer_id or "").strip()
     engineer = state.agents.get(engineer_id)
@@ -11907,24 +11823,6 @@ async def main(connection=None):
             group=group, message=message, task_id=task_id)
         state._emit("event_append", **pe)
 
-    async def _mirror_mcp_ai_report_to_mcp_call_log(
-        data: dict,
-        payload: object,
-        *,
-        tool_name: str = "",
-        idempotency_key: str = "",
-    ) -> dict | None:
-        tool = str(tool_name or "").strip() or "loom"
-        return await _mirror_api_ai_report_to_mcp_call_log(
-            data=data,
-            payload=payload,
-            state=state,
-            event_ingest_client=event_ingest_client,
-            ensure_event_ingest_configured=_ensure_event_ingest_configured,
-            idempotency_key=idempotency_key,
-            idempotency_scope=f"mcp:tools/call:{tool}",
-        )
-
     async def _replay_failed_write(write: dict):
         endpoint = str(write.get("endpoint", "") or "")
         payload = dict(write.get("payload", {}) or {})
@@ -11940,7 +11838,6 @@ async def main(connection=None):
                 cell_id=str(write.get("caller_id", "") or ""),
                 handle_command=handle_command,
                 state=state,
-                ai_report_mirror=_mirror_mcp_ai_report_to_mcp_call_log,
             )
             if response.get("error"):
                 log.info(
@@ -12158,14 +12055,6 @@ async def main(connection=None):
                 request_hash=request_hash or api_request_hash(data),
                 response=response_payload,
             )
-        await _mirror_api_ai_report_to_mcp_call_log(
-            data=data,
-            payload=payload,
-            state=state,
-            event_ingest_client=event_ingest_client,
-            ensure_event_ingest_configured=_ensure_event_ingest_configured,
-            idempotency_key=idempotency_key,
-        )
         if isinstance(payload, dict) and payload.get("type") == "state":
             return await _hot_json_response(response_payload)
         return web.json_response(response_payload)
@@ -12459,14 +12348,7 @@ async def main(connection=None):
             "/api/profile/synthetic_agents",
             handle_profile_synthetic_agents,
         )
-    app_server.router.add_post(
-        "/mcp",
-        create_mcp_handler(
-            handle_command,
-            state,
-            ai_report_mirror=_mirror_mcp_ai_report_to_mcp_call_log,
-        ),
-    )
+    app_server.router.add_post("/mcp", create_mcp_handler(handle_command, state))
     app_server.router.add_post("/api/upload", handle_upload)
     app_server.router.add_post("/api/upload/cleanup", handle_upload_cleanup)
     app_server.router.add_post("/api/attachment/upload", handle_attachment_upload)

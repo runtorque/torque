@@ -918,13 +918,6 @@ def agent_event_from_ingest_envelope(state, envelope: dict) -> AgentEvent | None
     raw = dict((envelope or {}).get("raw") or {})
     headers = dict((envelope or {}).get("headers") or {})
 
-    if (
-        raw.get("loom_call_log_only")
-        or (envelope or {}).get("loom_call_log_only")
-    ):
-        profiling.recorder().incr("events_skipped_call_log_only")
-        return None
-
     cell_id = headers.get("X-Loom-Cell-Id", "")
     cell = state.agents.get(cell_id) if cell_id else None
 
