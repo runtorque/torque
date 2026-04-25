@@ -658,15 +658,352 @@ function _renderPrincipalBadgeHtml(counts) {
     + '</span>';
 }
 
+function _agentCardTimestampSeconds(value) {
+  if (value === null || value === undefined || value === '') return 0;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || value <= 0) return 0;
+    return value > 100000000000 ? value / 1000 : value;
+  }
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && String(value).trim() !== '') {
+    if (numeric <= 0) return 0;
+    return numeric > 100000000000 ? numeric / 1000 : numeric;
+  }
+  const parsed = Date.parse(String(value));
+  if (Number.isFinite(parsed)) return parsed / 1000;
+  return 0;
+}
+
+function _agentCardCompactRelativeTime(value) {
+  const ts = _agentCardTimestampSeconds(value);
+  if (!ts) return '—';
+  const diff = Math.max(0, Math.floor((Date.now() / 1000) - ts));
+  if (diff < 60) return String(diff || 0) + 's';
+  if (diff < 3600) return Math.floor(diff / 60) + 'm';
+  if (diff < 86400) return Math.floor(diff / 3600) + 'h';
+  return Math.floor(diff / 86400) + 'd';
+}
+
+function _truncateCardText(text, maxChars) {
+  const raw = String(text || '').trim();
+  const max = Math.max(1, Number(maxChars || 0) || 14);
+  if (raw.length <= max) return raw;
+  if (max <= 1) return '…';
+  return raw.slice(0, max - 1) + '…';
+}
+
+function _agentCardTooltipHtml(text, maxChars, className, attrs) {
+  const raw = String(text || '').trim();
+  const visible = _truncateCardText(raw, maxChars);
+  const classes = ['agent-card-tooltip', 'agent-card-trunc'];
+  if (className) classes.push(className);
+  const extraAttrs = attrs ? ' ' + attrs : '';
+  return '<span class="' + esc(classes.join(' ')) + '"'
+    + ' data-tooltip="' + esc(raw) + '"'
+    + ' aria-label="' + esc(raw) + '"'
+    + extraAttrs + '>'
+    + esc(visible)
+    + '</span>';
+}
+
+function _agentProviderMeta(provider) {
+  const key = String(provider || '').trim().toLowerCase();
+  if (key === 'claude-code') {
+    return { key, label: 'CC', cls: 'agent-card-provider--claude-code' };
+  }
+  if (key === 'codex') {
+    return { key, label: 'CX', cls: 'agent-card-provider--codex' };
+  }
+  if (!key || key === 'generic') return null;
+  return { key, label: '??', cls: 'agent-card-provider--unknown' };
+}
+
+function _renderAgentProviderBadge(provider, extraClass) {
+  const meta = _agentProviderMeta(provider);
+  if (!meta) return '';
+  const classes = ['agent-card-provider', meta.cls];
+  if (extraClass) classes.push(extraClass);
+  return '<span class="' + esc(classes.join(' ')) + '"'
+    + ' data-provider="' + esc(meta.key) + '">'
+    + esc(meta.label)
+    + '</span>';
+}
+
+function _agentKindBadgeLabel(kind, dismissed) {
+  if (dismissed) return 'dismissed';
+  if (kind === 'architect') return 'ARCH';
+  if (kind === 'engineer') return 'ENG';
+  if (kind === 'worker') return 'W';
+  return 'AGT';
+}
+
+function _agentKindBadgeClass(kind, dismissed) {
+  if (dismissed) return 'cell-dismissed-badge';
+  if (kind === 'architect') return 'cell-architect-badge';
+  if (kind === 'engineer') return 'cell-engineer-badge';
+  if (kind === 'worker') return 'cell-worker-badge';
+  return 'cell-agent-badge';
+}
+
+function _agentDisplayName(agent) {
+  if (!agent) return '';
+  return agent.name || agent.slug || agent.id || '';
+}
+
+function _agentCardLastActionValue(agent) {
+  if (!agent) return 0;
+  return agent.last_activity_at
+    || agent.last_event_at
+    || agent.updated_at
+    || agent.created_at
+    || 0;
+}
+
+function _agentTaskForCard(agent) {
+  if (!agent) return null;
+  const currentTaskId = String(agent.current_task_id || '').trim();
+  if (currentTaskId && state && state.board_tasks && state.board_tasks[currentTaskId]) {
+    return state.board_tasks[currentTaskId];
+  }
+  return _getAgentTask(agent.id);
+}
+
+function _taskCycleState(task, agent) {
+  if (agent && (agent.needs_attention || agent.error_message)) return 'blocked';
+  if (!task) return 'idle';
+  const lane = String(task.lane || '').trim().toLowerCase();
+  const status = String(task.status || '').trim().toLowerCase();
+  const health = String(task.health_state || '').trim().toLowerCase();
+  const action = String(task.action_name || task.suggested_action || '').trim().toLowerCase();
+  if (status.indexOf('block') >= 0 || health.indexOf('block') >= 0) return 'blocked';
+  if (lane === 'done') return 'done';
+  if (action.indexOf('review') >= 0) return 'review';
+  if (action.indexOf('fix') >= 0) return 'fix';
+  if (action.indexOf('implement') >= 0 || action.indexOf('feature/') >= 0) return 'impl';
+  if (action) {
+    const tail = action.split('/').filter(Boolean).pop() || action;
+    return _truncateCardText(tail, 10);
+  }
+  if (lane === 'in progress') return 'impl';
+  if (lane) return lane.replace(/\s+/g, '-');
+  return 'idle';
+}
+
+function _workerDiffLabel(agent) {
+  const diff = (agent && agent.worktree_diff) || {};
+  const insertions = Number(diff.insertions || 0) || 0;
+  const deletions = Number(diff.deletions || 0) || 0;
+  const cleanState = agent && agent.worktree_dirty ? 'dirty' : 'clean';
+  return '+' + insertions + '/-' + deletions + ' (' + cleanState + ')';
+}
+
+function _worktreeBranchShortName(branch) {
+  const raw = String(branch || '').trim();
+  if (!raw) return '';
+  let text = raw;
+  const parts = raw.split('/').filter(Boolean);
+  if (parts[0] === 'loom') {
+    if (parts.length >= 3) text = parts.slice(2).join('/');
+    else if (parts.length >= 2) text = parts.slice(1).join('/');
+  }
+  text = text.replace(/-[0-9a-f]{6,12}$/i, '');
+  return text || raw;
+}
+
+function _workerBranchLabel(agent) {
+  const branch = String((agent && (agent.worktree_branch || agent.current_branch)) || '').trim();
+  if (!branch) return 'wkt: —';
+  return 'wkt: ' + _worktreeBranchShortName(branch);
+}
+
+function _agentStatusMixClass(agent) {
+  const cls = typeof agentStatusClass === 'function' ? agentStatusClass(agent) : '';
+  if (cls === 'attention' || cls === 'disconnected') return 'error';
+  if (cls === 'working') return 'running';
+  return 'idle';
+}
+
+function _agentStatusMixDots(agents) {
+  const list = Array.isArray(agents) ? agents : [];
+  if (!list.length) {
+    return '<span class="agent-card-state-dot agent-card-state-dot--empty"></span>';
+  }
+  const shown = list.slice(0, 3);
+  let html = '';
+  for (const agent of shown) {
+    const mix = _agentStatusMixClass(agent);
+    html += '<span class="agent-card-state-dot agent-card-state-dot--' + esc(mix) + '"></span>';
+  }
+  if (list.length > shown.length) {
+    html += '<span class="agent-card-state-more">+' + esc(list.length - shown.length) + '</span>';
+  }
+  return html;
+}
+
+function _workersForEngineer(engineerId) {
+  const id = String(engineerId || '').trim();
+  if (!id || !state || !state.agents) return [];
+  const workers = [];
+  for (const agentId in state.agents) {
+    const agent = state.agents[agentId];
+    if (!agent || agent.cell_type !== 'agent') continue;
+    if (!_isWorkerLikeAgent(agent)) continue;
+    const owner = String(agent.owner_engineer_id || agent.created_by_engineer_id || '').trim();
+    if (owner === id) workers.push(agent);
+  }
+  return workers.sort(function(a, b) {
+    return String(a.id || '').localeCompare(String(b.id || ''));
+  });
+}
+
+function _engineerQueueDepth(engineerId) {
+  const id = String(engineerId || '').trim();
+  if (!id || !state || !state.board_tasks) return 0;
+  let count = 0;
+  for (const taskId in state.board_tasks) {
+    const task = state.board_tasks[taskId];
+    if (!task) continue;
+    if (String(task.assigned_engineer_id || '').trim() !== id) continue;
+    const lane = String(task.lane || '').trim();
+    if (lane === 'Backlog' || lane === 'To Do') count += 1;
+  }
+  return count;
+}
+
+function _architectEngineersForCard(architectId, section) {
+  if (section && Array.isArray(section.rows)) {
+    return section.rows.map(function(row) { return row && row.engineer; }).filter(Boolean);
+  }
+  const id = String(architectId || '').trim();
+  if (!id || !state || !state.agents) return [];
+  const engineers = [];
+  for (const agentId in state.agents) {
+    const agent = state.agents[agentId];
+    if (!agent || agent.cell_type !== 'agent' || (agent.kind || '') !== 'engineer') continue;
+    if (String(agent.hired_by_architect_id || '').trim() === id) engineers.push(agent);
+  }
+  return engineers;
+}
+
+function _architectPendingAskTasks(architect) {
+  if (!architect || !state || !state.board_tasks) return [];
+  const architectId = String(architect.id || '').trim();
+  const group = String(architect.group || '').trim();
+  const asks = [];
+  for (const taskId in state.board_tasks) {
+    const task = state.board_tasks[taskId];
+    if (!task) continue;
+    const labels = Array.isArray(task.labels) ? task.labels : [];
+    if (labels.indexOf('loom:human') < 0) continue;
+    if (String(task.lane || '') === 'Done') continue;
+    const replyId = String(task.reply_agent_id || '').trim();
+    const creatorId = String(task.created_by_architect_id || '').trim();
+    const taskGroup = String(task.group || '').trim();
+    const architectAsk = labels.indexOf('architect-ask') >= 0;
+    if (replyId && replyId !== architectId) continue;
+    if (!replyId && creatorId && creatorId !== architectId) continue;
+    if (!replyId && !creatorId && group && taskGroup && taskGroup !== group) continue;
+    if (replyId === architectId || creatorId === architectId || architectAsk || !replyId) {
+      asks.push(task);
+    }
+  }
+  asks.sort(function(a, b) {
+    const av = _agentCardTimestampSeconds((a && (a.created_at || a.updated_at)) || 0);
+    const bv = _agentCardTimestampSeconds((b && (b.created_at || b.updated_at)) || 0);
+    if (av !== bv) return av - bv;
+    return String((a && a.id) || '').localeCompare(String((b && b.id) || ''));
+  });
+  return asks;
+}
+
+function _architectDecisionListForCard(architectId) {
+  const id = String(architectId || '').trim();
+  if (!id || !state) return [];
+  const stores = [];
+  if (state.decisions) stores.push(state.decisions);
+  if (state.architect_decisions && state.architect_decisions !== state.decisions) {
+    stores.push(state.architect_decisions);
+  }
+  const seen = {};
+  const results = [];
+  for (let i = 0; i < stores.length; i++) {
+    const store = stores[i] || {};
+    const values = Array.isArray(store)
+      ? store
+      : Object.keys(store).map(function(key) { return store[key]; });
+    for (let j = 0; j < values.length; j++) {
+      const decision = values[j];
+      if (!decision) continue;
+      const decisionId = String(decision.id || '').trim();
+      if (decisionId && seen[decisionId]) continue;
+      if (String(decision.architect_id || '').trim() !== id) continue;
+      if (decisionId) seen[decisionId] = true;
+      results.push(decision);
+    }
+  }
+  results.sort(function(a, b) {
+    const av = _agentCardTimestampSeconds((a && (a.updated_at || a.created_at)) || 0);
+    const bv = _agentCardTimestampSeconds((b && (b.updated_at || b.created_at)) || 0);
+    if (av !== bv) return bv - av;
+    return String((a && a.id) || '').localeCompare(String((b && b.id) || ''));
+  });
+  return results;
+}
+
+function _architectJournalEntriesForCard(architectId) {
+  const id = String(architectId || '').trim();
+  if (!id || !state || !state.architect_journals) return [];
+  const entries = state.architect_journals[id];
+  return Array.isArray(entries) ? entries : [];
+}
+
+function _architectStatsForCard(architect, section) {
+  const engineers = _architectEngineersForCard(architect && architect.id, section);
+  const asks = _architectPendingAskTasks(architect);
+  const decisions = _architectDecisionListForCard(architect && architect.id);
+  let openDecisions = 0;
+  let latestDecisionTs = 0;
+  for (const decision of decisions) {
+    const status = String((decision && decision.status) || 'proposed').toLowerCase();
+    if (!decision.archived && status !== 'accepted' && status !== 'rejected') openDecisions += 1;
+    latestDecisionTs = Math.max(
+      latestDecisionTs,
+      _agentCardTimestampSeconds((decision && (decision.updated_at || decision.created_at)) || 0)
+    );
+  }
+  let latestJournalTs = 0;
+  const journals = _architectJournalEntriesForCard(architect && architect.id);
+  for (const entry of journals) {
+    latestJournalTs = Math.max(
+      latestJournalTs,
+      _agentCardTimestampSeconds((entry && (entry.timestamp || entry.created_at || entry.updated_at)) || 0)
+    );
+  }
+  return {
+    engineerCount: engineers.length,
+    asks,
+    askCount: asks.length,
+    firstAskId: asks.length ? String(asks[0].id || '') : '',
+    openDecisionCount: openDecisions,
+    latestDecisionTs,
+    latestJournalTs,
+  };
+}
+
+function _architectLastDecisionLabel(stats) {
+  stats = stats || {};
+  if (stats.latestDecisionTs) return 'last dec ' + _agentCardCompactRelativeTime(stats.latestDecisionTs);
+  if (stats.latestJournalTs) return 'last journal ' + _agentCardCompactRelativeTime(stats.latestJournalTs);
+  return 'last dec —';
+}
+
 function _renderPrincipalUserCard(groupName, section, selectedPrincipalId) {
   const isSelected = !selectedPrincipalId;
   const navId = _principalCardNavId(groupName, '');
-  const counts = _principalStatusCounts(section);
   const classes = ['principal-card', 'principal-card--user'];
   if (isSelected) classes.push('selected');
   else classes.push('dim');
   classes.push(_principalCardFocusedClass(navId).trim());
-  const badgeHtml = isSelected ? '' : _renderPrincipalBadgeHtml(counts);
   const groupArg = _jsStringAttr(groupName);
   return '<button type="button" class="' + esc(classes.filter(Boolean).join(' ')) + '"'
     + ' data-principal-card="user"'
@@ -677,10 +1014,13 @@ function _renderPrincipalUserCard(groupName, section, selectedPrincipalId) {
     + ' aria-pressed="' + (isSelected ? 'true' : 'false') + '"'
     + ' onclick="event.stopPropagation();selectPrincipal(\'\',' + groupArg + ')"'
     + ' title="User-owned engineers">'
-    + '<span class="principal-card-icon">●</span>'
+    + '<span class="principal-card-status idle" aria-hidden="true"></span>'
+    + '<div class="principal-card-body">'
     + '<span class="principal-card-name">User</span>'
-    + '<span class="principal-card-kind">owner</span>'
-    + badgeHtml
+    + '<span class="principal-card-line principal-card-line--empty">&nbsp;</span>'
+    + '<span class="principal-card-line principal-card-line--empty">&nbsp;</span>'
+    + '</div>'
+    + '<span class="principal-card-kind principal-card-kind--owner">OWNER</span>'
     + '</button>';
 }
 
@@ -695,11 +1035,17 @@ function _renderPrincipalArchitectCard(groupName, section, selectedPrincipalId) 
   if (isSelected) classes.push('selected');
   else classes.push('dim');
   classes.push(_principalCardFocusedClass(navId).trim());
-  const badgeHtml = isSelected ? '' : _renderPrincipalBadgeHtml(counts);
   const displayName = architect.name || architect.slug || id;
   const groupArg = _jsStringAttr(groupName);
   const idArg = _jsStringAttr(id);
   const statusCls = typeof agentStatusClass === 'function' ? agentStatusClass(architect) : '';
+  const stats = _architectStatsForCard(architect, section);
+  const askHtml = stats.askCount > 0 && stats.firstAskId
+    ? '<button type="button" class="principal-card-ask-link"'
+      + ' data-focus-key="principal-ask:' + esc(id) + ':' + esc(stats.firstAskId) + '"'
+      + ' onclick="event.stopPropagation();if(typeof boardNavigateToTask===\'function\'){boardNavigateToTask(\'' + esc(stats.firstAskId) + '\');}"'
+      + ' aria-label="Jump to pending ask">' + esc(stats.askCount + 'asks') + '</button>'
+    : '<span class="principal-card-ask-count">' + esc(stats.askCount + 'asks') + '</span>';
   const digestSettings = (state && state.agent_digest_settings)
     ? state.agent_digest_settings[id] : null;
   const digestPaused = !!(digestSettings && digestSettings.paused);
@@ -727,13 +1073,17 @@ function _renderPrincipalArchitectCard(groupName, section, selectedPrincipalId) 
     + ' data-focus-key="principal-pause:' + esc(id) + '"'
     + ' onclick="event.stopPropagation();toggleDigestPauseForAgent(' + idArg + ')"'
     + ' title="' + esc(pauseTitle) + '">' + pauseIcon + '</button>'
-    + '<span class="principal-card-status ' + esc(statusCls) + '"'
-    + ' aria-hidden="true"></span>'
     + '</div>'
-    + '<span class="principal-card-icon">△</span>'
+    + '<span class="principal-card-status ' + esc(statusCls) + '" aria-hidden="true"></span>'
+    + '<div class="principal-card-body">'
     + '<span class="principal-card-name">' + esc(displayName) + '</span>'
-    + '<span class="principal-card-kind">Architect</span>'
-    + badgeHtml
+    + '<span class="principal-card-line principal-card-line--stats">'
+      + esc(stats.engineerCount + 'eng · ') + askHtml + esc(' · ' + stats.openDecisionCount + 'dec')
+    + '</span>'
+    + '<span class="principal-card-line">' + esc(_architectLastDecisionLabel(stats)) + '</span>'
+    + '</div>'
+    + _renderAgentProviderBadge(architect.agent_type, 'principal-card-provider')
+    + '<span class="principal-card-kind principal-card-kind--architect">ARCH</span>'
     + '</div>';
 }
 
@@ -2073,6 +2423,95 @@ function _agentCellSubtitle(a) {
     || '';
 }
 
+function _renderAgentCardControls(a, opts) {
+  opts = opts || {};
+  const id = String((a && a.id) || '');
+  const closeTitle = opts.dismissed ? 'Remove dismissed engineer' : 'Remove';
+  const paused = !!opts.paused;
+  const pauseTitle = opts.pauseTitle || (paused ? 'Resume event delivery' : 'Pause event delivery');
+  const pauseIcon = paused ? '&#x25B6;' : '&#x23F8;';
+  let html = '<div class="cell-header-controls">';
+  html += '<button class="cell-close" draggable="false"'
+    + ' data-focus-key="agent-close:' + esc(id) + '"'
+    + ' onclick="event.stopPropagation();removeAgent(\'' + esc(id) + '\')"'
+    + ' title="' + esc(closeTitle) + '">\u2715</button>';
+  html += '<button class="cell-engineer-toggle ' + (paused ? 'paused' : 'running') + '"'
+    + ' draggable="false"'
+    + ' data-focus-key="agent-digest-toggle:' + esc(id) + '"'
+    + ' onclick="' + esc(opts.pauseOnclick || '') + '"'
+    + ' title="' + esc(pauseTitle) + '">' + pauseIcon + '</button>';
+  html += '</div>';
+  return html;
+}
+
+function _renderWorkerCardBody(a) {
+  const task = _agentTaskForCard(a);
+  const taskId = String((task && task.id) || a.current_task_id || '').trim();
+  const cycle = _taskCycleState(task, a);
+  const slug = a.slug || a.name || a.id || '';
+  const branch = _workerBranchLabel(a);
+  const last = _agentCardCompactRelativeTime(_agentCardLastActionValue(a));
+  let html = '<div class="agent-card-body cell-body cell-body--worker">';
+  html += _agentCardTooltipHtml(slug, 14, 'cell-name cell-worker-slug', 'data-worker-slug="' + esc(slug) + '"');
+  html += '<div class="agent-card-line cell-task cell-worker-task">'
+    + esc((taskId || 'no task') + ' · ' + cycle)
+    + '</div>';
+  html += '<div class="agent-card-line cell-worker-diff">' + esc(_workerDiffLabel(a)) + '</div>';
+  html += '<div class="agent-card-line cell-worker-branch">'
+    + _agentCardTooltipHtml(branch, 18, 'cell-worker-branch-name', 'data-worktree-branch="' + esc(a.worktree_branch || a.current_branch || '') + '"')
+    + '</div>';
+  html += '<div class="agent-card-line cell-worker-activity">' + esc(last) + '</div>';
+  html += '</div>';
+  return html;
+}
+
+function _renderEngineerCardBody(a, askingText) {
+  const workers = _workersForEngineer(a.id);
+  const queueDepth = _engineerQueueDepth(a.id);
+  const last = _agentCardCompactRelativeTime(_agentCardLastActionValue(a));
+  const workerLabel = workers.length === 1 ? 'worker' : 'workers';
+  let html = '<div class="agent-card-body cell-body cell-body--engineer">';
+  html += '<div class="agent-card-line cell-name">' + esc(_agentDisplayName(a)) + '</div>';
+  html += '<div class="agent-card-line cell-engineer-workers">'
+    + '<span class="agent-card-state-mix">' + _agentStatusMixDots(workers) + '</span>'
+    + '<span class="agent-card-state-count">' + esc(String(workers.length) + ' ' + workerLabel) + '</span>'
+    + '</div>';
+  html += '<div class="agent-card-line cell-engineer-queue">'
+    + esc('q:' + queueDepth + ' · last ' + last)
+    + '</div>';
+  if (askingText) {
+    html += '<div class="agent-card-line cell-engineer-ask" title="' + esc(askingText) + '">awaiting input</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function _renderArchitectCellBody(a) {
+  const stats = _architectStatsForCard(a, null);
+  let html = '<div class="agent-card-body cell-body cell-body--architect">';
+  html += '<div class="agent-card-line cell-name">' + esc(_agentDisplayName(a)) + '</div>';
+  html += '<div class="agent-card-line cell-architect-stats">'
+    + esc(stats.engineerCount + 'eng · ' + stats.askCount + 'asks · ' + stats.openDecisionCount + 'dec')
+    + '</div>';
+  html += '<div class="agent-card-line cell-architect-last">' + esc(_architectLastDecisionLabel(stats)) + '</div>';
+  html += '</div>';
+  return html;
+}
+
+function _renderGenericAgentCardBody(a) {
+  const subtitle = _agentCellSubtitle(a);
+  let html = '<div class="agent-card-body cell-body cell-body--generic">';
+  html += '<div class="agent-card-line cell-name">' + esc(_agentDisplayName(a)) + '</div>';
+  if (subtitle) {
+    html += '<div class="agent-card-line cell-task" title="' + esc(subtitle) + '">' + formatCode(subtitle) + '</div>';
+  } else {
+    html += '<div class="agent-card-line cell-task cell-task-empty">&nbsp;</div>';
+  }
+  html += '<div class="agent-card-line cell-generic-activity">' + esc(_agentCardCompactRelativeTime(_agentCardLastActionValue(a))) + '</div>';
+  html += '</div>';
+  return html;
+}
+
 function renderAgentCell(a, options) {
   options = options || {};
   const active = a.session_id && a.session_id === state.active_session_id;
@@ -2099,10 +2538,10 @@ function renderAgentCell(a, options) {
   const _isDigestRecipient = _isEngineerKind || _isArchitect;
   const _agentDigestSettings = _isDigestRecipient && state.agent_digest_settings
     ? state.agent_digest_settings[String(a.id || '')] : null;
-  let _digestPaused = !!(_agentDigestSettings && _agentDigestSettings.paused);
-  if (!_agentDigestSettings && _isDigestRecipient && _isDesignatedEngineer) {
-    _digestPaused = _engineerPaused;
-  }
+  const _cardDigestSettings = state.agent_digest_settings
+    ? state.agent_digest_settings[String(a.id || '')] : null;
+  let _digestPaused = !!(_cardDigestSettings && _cardDigestSettings.paused);
+  if (!_cardDigestSettings && _isDigestRecipient && _isDesignatedEngineer) _digestPaused = _engineerPaused;
   if (_isArchitect) cls.push('architect');
   if (_isEngineerKind) cls.push('engineer');
   if (_isWorker) cls.push('worker');
@@ -2134,40 +2573,33 @@ function renderAgentCell(a, options) {
   else if (statusCls === 'attention') h += '!';
   else if (showDoneFlourish) h += `<span class="cell-status-flourish-label">${esc(doneFlourish.label)}</span>`;
   h += `</div>`;
-  h += `<div class="cell-header-controls">`;
-  h += `<button class="cell-close" draggable="false" data-focus-key="agent-close:${esc(a.id)}" onclick="event.stopPropagation();removeAgent('${a.id}')" title="Remove">\u2715</button>`;
-  if (_isDigestRecipient) {
-    const digestAgentArg = encodeURIComponent(a.id || '');
-    h += `<button class="cell-engineer-toggle ${_digestPaused ? 'paused' : 'running'}" draggable="false" data-focus-key="agent-digest-toggle:${esc(a.id)}" onclick="event.stopPropagation();toggleDigestPauseForAgent(decodeURIComponent('${digestAgentArg}'))" title="${_digestPaused ? 'Resume event delivery' : 'Pause event delivery'}">${_digestPaused ? '&#x25B6;' : '&#x23F8;'}</button>`;
-  } else if (_isDesignatedEngineer) {
+  if (_isDesignatedEngineer && !_isDigestRecipient && !_isWorker) {
     const engineerGroupArg = encodeURIComponent(a.group || '');
-    h += `<button class="cell-engineer-toggle ${_engineerPaused ? 'paused' : 'running'}" draggable="false" data-focus-key="agent-engineer-toggle:${esc(a.id)}" onclick="event.stopPropagation();engineerTogglePauseForGroup(decodeURIComponent('${engineerGroupArg}'))" title="${_engineerPaused ? 'Resume Engineer event delivery' : 'Pause Engineer event delivery'}">${_engineerPaused ? '&#x25B6;' : '&#x23F8;'}</button>`;
+    h += _renderAgentCardControls(a, {
+      dismissed: _isDismissed,
+      paused: _engineerPaused,
+      pauseTitle: _engineerPaused ? 'Resume Engineer event delivery' : 'Pause Engineer event delivery',
+      pauseOnclick: `event.stopPropagation();engineerTogglePauseForGroup(decodeURIComponent('${engineerGroupArg}'))`,
+    });
+  } else {
+    const digestAgentArg = encodeURIComponent(a.id || '');
+    h += _renderAgentCardControls(a, {
+      dismissed: _isDismissed,
+      paused: _digestPaused,
+      pauseTitle: _digestPaused ? 'Resume event delivery' : 'Pause event delivery',
+      pauseOnclick: `event.stopPropagation();toggleDigestPauseForAgent(decodeURIComponent('${digestAgentArg}'))`,
+    });
   }
-  h += `</div>`;
-  h += `<div class="cell-icon">${a.icon || agentIcon(a.name)}</div>`;
-  h += `<div class="cell-name">${esc(a.name)}</div>`;
-  if (_isArchitect) {
-    h += `<div class="cell-architect-badge">architect</div>`;
-  } else if (_isEngineerKind) {
-    if (_isDismissed) h += `<div class="cell-dismissed-badge" title="Dismissed engineer">\u23F8 dismissed</div>`;
-    else h += `<div class="cell-engineer-badge">engineer</div>`;
-  } else if (_isWorker) {
-    h += `<div class="cell-worker-badge">worker</div>`;
-  }
-  if (_engineerAsking) {
-    h += `<div class="cell-engineer-ask" title="${esc(_engineerWs.pending_question)}">? awaiting input</div>`;
-  }
-  const cellSubtitle = _agentCellSubtitle(a);
-  if (cellSubtitle) {
-    h += `<div class="cell-task" title="${esc(cellSubtitle)}">${formatCode(cellSubtitle)}</div>`;
-  }
-  /* Agent type badge */
-  if (a.agent_type) {
-    const typeInfo = AGENT_TYPE_LABELS[a.agent_type] || { short: a.agent_type.slice(0, 2).toUpperCase() };
-    if (typeInfo.short) {
-      h += `<div class="cell-type">${typeInfo.short}</div>`;
-    }
-  }
+  if (_isWorker) h += _renderWorkerCardBody(a);
+  else if (_isEngineerKind) h += _renderEngineerCardBody(a, _engineerAsking ? _engineerWs.pending_question : '');
+  else if (_isArchitect) h += _renderArchitectCellBody(a);
+  else h += _renderGenericAgentCardBody(a);
+  h += _renderAgentProviderBadge(a.agent_type, 'cell-provider');
+  const badgeLabel = _agentKindBadgeLabel(a.kind || '', _isDismissed);
+  const badgeClass = _agentKindBadgeClass(a.kind || '', _isDismissed);
+  h += '<div class="agent-card-kind ' + esc(badgeClass) + '"'
+    + (_isDismissed ? ' title="Dismissed engineer"' : '')
+    + '>' + esc(badgeLabel) + '</div>';
   if (childCount > 0) {
     h += `<div class="cell-term-count">${childCount}</div>`;
   }
