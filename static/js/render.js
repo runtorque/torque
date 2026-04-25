@@ -771,14 +771,16 @@ function _agentDisplayName(agent) {
 function _agentCardLastActionValue(agent) {
   if (!agent) return 0;
   const latestMcp = _agentCardLatestMcpMessage(agent);
-  return agent.last_action_at
-    || (latestMcp && latestMcp.timestamp)
-    || agent.last_progress_at
-    || agent.last_event_at
-    || agent.last_activity_at
-    || agent.updated_at
-    || agent.created_at
-    || 0;
+  return Math.max(
+    _agentCardTimestampSeconds(agent.last_action_at),
+    latestMcp ? latestMcp.timestamp : 0,
+    _agentCardTimestampSeconds(agent.last_progress_at),
+    _agentCardTimestampSeconds(agent.last_event_at),
+    _agentCardTimestampSeconds(agent.last_activity_at),
+    _agentCardTimestampSeconds(agent.last_heartbeat_at),
+    _agentCardTimestampSeconds(agent.updated_at),
+    _agentCardTimestampSeconds(agent.created_at),
+  );
 }
 
 function _agentCardActionTextFromMcp(entry) {
@@ -811,16 +813,96 @@ function _agentCardFallbackActionText(agent) {
   return 'idle';
 }
 
+function _agentCardActionCandidate(text, timestamp, priority) {
+  const value = String(text || '').trim();
+  if (!value) return null;
+  return {
+    text: value,
+    timestamp: _agentCardTimestampSeconds(timestamp),
+    priority: Number(priority || 0) || 0,
+  };
+}
+
+function _agentCardEventTimestamp(agent) {
+  if (!agent) return 0;
+  return Math.max(
+    _agentCardTimestampSeconds(agent.last_event_at),
+    _agentCardTimestampSeconds(agent.last_activity_at),
+    _agentCardTimestampSeconds(agent.last_heartbeat_at),
+  );
+}
+
+function _agentCardActivityDetailTimestamp(agent) {
+  if (!agent) return 0;
+  const activityDetail = String(agent.activity_detail || '').trim();
+  if (!activityDetail) return 0;
+  const eventText = String(agent.last_event_text || '').trim();
+  let timestamp = Math.max(
+    _agentCardTimestampSeconds(agent.last_action_at),
+    _agentCardTimestampSeconds(agent.last_progress_at),
+  );
+  /* activity_detail is advanced by progress reports, while last_event_text
+     can be advanced independently by heartbeat-style events such as
+     queue_empty. Only borrow the event clock when the event text is the same
+     detail (or when there is no competing event text); otherwise an old
+     activity_detail would hide a newer queue_empty display. */
+  if (!eventText || eventText === activityDetail) {
+    timestamp = Math.max(timestamp, _agentCardEventTimestamp(agent));
+  }
+  return timestamp;
+}
+
+function _agentCardFallbackActionTimestamp(agent, latestMcp) {
+  if (!agent) return 0;
+  return Math.max(
+    _agentCardTimestampSeconds(agent.last_action_at),
+    latestMcp ? latestMcp.timestamp : 0,
+    _agentCardTimestampSeconds(agent.last_progress_at),
+    _agentCardEventTimestamp(agent),
+  );
+}
+
+function _agentCardNewestActionCandidate(candidates) {
+  const list = (Array.isArray(candidates) ? candidates : []).filter(Boolean);
+  if (!list.length) return null;
+  list.sort((a, b) => {
+    const aTs = _agentCardTimestampSeconds(a.timestamp);
+    const bTs = _agentCardTimestampSeconds(b.timestamp);
+    if (aTs !== bTs) return bTs - aTs;
+    return (Number(b.priority || 0) || 0) - (Number(a.priority || 0) || 0);
+  });
+  return list[0];
+}
+
 function _agentCardLastActionInfo(agent) {
   const latestMcp = _agentCardLatestMcpMessage(agent);
-  const text = String(
-    (agent && agent.activity_detail)
-    || (latestMcp ? _agentCardActionTextFromMcp(latestMcp.entry) : '')
-    || (agent && agent.last_event_text)
-    || _agentCardFallbackActionText(agent)
-  ).trim() || '—';
-  return {
-    text,
+  const candidates = [];
+  if (agent) {
+    candidates.push(_agentCardActionCandidate(
+      agent.activity_detail,
+      _agentCardActivityDetailTimestamp(agent),
+      30,
+    ));
+    if (latestMcp) {
+      candidates.push(_agentCardActionCandidate(
+        _agentCardActionTextFromMcp(latestMcp.entry),
+        latestMcp.timestamp,
+        20,
+      ));
+    }
+    candidates.push(_agentCardActionCandidate(
+      agent.last_event_text,
+      _agentCardEventTimestamp(agent),
+      10,
+    ));
+    candidates.push(_agentCardActionCandidate(
+      _agentCardFallbackActionText(agent),
+      _agentCardFallbackActionTimestamp(agent, latestMcp),
+      0,
+    ));
+  }
+  return _agentCardNewestActionCandidate(candidates) || {
+    text: _agentCardFallbackActionText(agent),
     timestamp: _agentCardTimestampSeconds(_agentCardLastActionValue(agent)),
   };
 }

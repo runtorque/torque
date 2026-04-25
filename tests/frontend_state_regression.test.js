@@ -13074,8 +13074,15 @@ test('agents-grid v1.6 uses one-line metrics, action threshold labels, empty-row
       cell_type: 'agent',
       status: 'idle',
       created_at: now - 500,
-      last_progress_at: now - 75,
-      activity_detail: 'queue_empty',
+      last_progress_at: now - 3600,
+      last_event_at: now - 75,
+      last_activity_at: now - 75,
+      last_heartbeat_at: now - 75,
+      last_event_text: 'queue_empty',
+      activity_detail: 'old progress report',
+      mcp_messages: [
+        { action: 'progress', message: 'old progress report', timestamp: now - 3600 },
+      ],
     },
     'eng-full': {
       id: 'eng-full',

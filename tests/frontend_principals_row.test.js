@@ -402,6 +402,61 @@ function extractPrincipalCardHtml(html, principalKind, principalId) {
   return null;
 }
 
+test('agent card action label uses queue_empty event timestamp over stale progress sources', () => {
+  const { context, sandbox } = createHarness();
+  const now = Date.now() / 1000;
+  sandbox.agentForLabel = {
+    id: 'eng-empty',
+    kind: 'engineer',
+    status: 'idle',
+    activity_detail: 'old progress report',
+    last_progress_at: now - 3600,
+    last_event_at: now - 10,
+    last_activity_at: now - 10,
+    last_heartbeat_at: now - 10,
+    last_event_text: 'queue_empty',
+    mcp_messages: [
+      { action: 'progress', message: 'old progress report', timestamp: now - 3600 },
+    ],
+  };
+
+  assert.equal(
+    vm.runInContext('_agentCardCurrentOrLastActionLabel(agentForLabel)', context),
+    'queue_empty',
+  );
+
+  sandbox.agentForLabel.last_event_at = now - 75;
+  sandbox.agentForLabel.last_activity_at = now - 75;
+  sandbox.agentForLabel.last_heartbeat_at = now - 75;
+  assert.equal(
+    vm.runInContext('_agentCardCurrentOrLastActionLabel(agentForLabel)', context),
+    'Last action: queue_empty 1m',
+  );
+});
+
+test('agent card action label prefers fresh activity detail over stale MCP message', () => {
+  const { context, sandbox } = createHarness();
+  const now = Date.now() / 1000;
+  sandbox.agentForLabel = {
+    id: 'worker-a',
+    kind: 'worker',
+    status: 'running',
+    activity_detail: 'Running tests',
+    last_progress_at: now - 5,
+    last_event_at: now - 5,
+    last_activity_at: now - 5,
+    last_heartbeat_at: now - 5,
+    mcp_messages: [
+      { action: 'progress', message: 'old progress report', timestamp: now - 3600 },
+    ],
+  };
+
+  assert.equal(
+    vm.runInContext('_agentCardCurrentOrLastActionLabel(agentForLabel)', context),
+    'Running tests',
+  );
+});
+
 test('non-selected architect card shows engineer count and action, not decision stats', () => {
   const { context, sandbox, mainEl } = createHarness();
   const now = Date.now() / 1000;
