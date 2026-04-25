@@ -446,7 +446,12 @@ test('group settings describes absent Engineer state without legacy creation cop
 
   assert.equal(ensure('gs-engineer-agent-name').textContent, 'No engineer agent');
   assert.equal(ensure('gs-engineer-agent-meta').textContent, 'No designated Engineer is configured for this group.');
-  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), []);
+  // _showGroupSettings fetches specializations to populate the
+  // default-specializations picker; ignore that side request here.
+  const callsWithoutSpecFetch = sandbox.sendCalls.filter(
+    (msg) => msg.cmd !== 'list_specializations',
+  );
+  assert.deepEqual(JSON.parse(JSON.stringify(callsWithoutSpecFetch)), []);
 });
 
 test('_addWtSymlink trims outer slashes while preserving glob syntax', () => {
@@ -462,4 +467,98 @@ test('_addWtSymlink trims outer slashes while preserving glob syntax', () => {
     ['etl/**/node_modules'],
   );
   assert.equal(ensure('gs-wt-symlink-input').value, '');
+});
+
+test('GS Engineer tab loads default_engineer_specializations from settings', () => {
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+
+  vm.runInContext(`_showGroupSettings("alpha", {
+    settings: { default_engineer_specializations: ["ui-frontend", "react"] },
+    engineer_settings: {},
+    profiles: ["Default"]
+  })`, context);
+
+  const specs = JSON.parse(
+    vm.runInContext('JSON.stringify(_gsEngineerSpecs)', context));
+  assert.deepEqual(specs, ['ui-frontend', 'react']);
+});
+
+test('submitGroupSettings includes default_engineer_specializations in settings payload', () => {
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+  seedProviders(context, sandbox._cachedProviders);
+
+  vm.runInContext(
+    '_settingsGroup = "alpha"; _gsWtSymlinks = []; '
+    + '_gsEngineerSpecs = ["rust-systems", "backend-python"];',
+    context);
+
+  vm.runInContext('submitGroupSettings()', context);
+
+  const groupCall = sandbox.sendCalls.find(
+    (msg) => msg.cmd === 'update_group_settings');
+  assert.ok(groupCall, 'update_group_settings should be sent');
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(
+      groupCall.settings.default_engineer_specializations)),
+    ['rust-systems', 'backend-python'],
+  );
+});
+
+test('GS Engineer specializations picker rerender survives WS update', () => {
+  // Rerender-regression: a `specializations` WS frame must not wipe the
+  // currently-selected list (state lives in module-level _gsEngineerSpecs,
+  // not in DOM). The picker re-paints from the same source.
+  const { sandbox, ensure } = createSandbox();
+  sandbox.state.specializations = [
+    { name: 'ui-frontend', preamble: 'UI', priorities: [] },
+    { name: 'react', preamble: 'React', priorities: [] },
+  ];
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+
+  vm.runInContext(`_showGroupSettings("alpha", {
+    settings: { default_engineer_specializations: ["ui-frontend"] },
+    engineer_settings: {},
+    profiles: ["Default"]
+  })`, context);
+
+  const before = JSON.parse(
+    vm.runInContext('JSON.stringify(_gsEngineerSpecs)', context));
+  assert.deepEqual(before, ['ui-frontend']);
+
+  // Simulate a WS rerender by directly invoking renderGsEngineerSpecializations
+  // — the selection must remain.
+  vm.runInContext('renderGsEngineerSpecializations()', context);
+  const after = JSON.parse(
+    vm.runInContext('JSON.stringify(_gsEngineerSpecs)', context));
+  assert.deepEqual(after, ['ui-frontend']);
+});
+
+test('gsEngineerAddSpecialization appends and gsEngineerRemoveSpecialization drops', () => {
+  const { sandbox, ensure } = createSandbox();
+  sandbox.state.specializations = [
+    { name: 'rust', preamble: 'Rust', priorities: [] },
+    { name: 'react', preamble: 'React', priorities: [] },
+  ];
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+
+  vm.runInContext('_gsEngineerSpecs = []; renderGsEngineerSpecializations();', context);
+  ensure('gs-engineer-specializations-available').value = 'rust';
+  vm.runInContext('gsEngineerAddSpecialization()', context);
+  ensure('gs-engineer-specializations-available').value = 'react';
+  vm.runInContext('gsEngineerAddSpecialization()', context);
+
+  let specs = JSON.parse(
+    vm.runInContext('JSON.stringify(_gsEngineerSpecs)', context));
+  assert.deepEqual(specs, ['rust', 'react']);
+
+  vm.runInContext('gsEngineerRemoveSpecialization(0)', context);
+  specs = JSON.parse(
+    vm.runInContext('JSON.stringify(_gsEngineerSpecs)', context));
+  assert.deepEqual(specs, ['react']);
 });

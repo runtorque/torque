@@ -2242,6 +2242,32 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
             [later],
         )
 
+    def test_default_engineer_specializations_persist_via_update(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+
+        state.update_group_settings(
+            "g",
+            default_engineer_specializations=["ui-frontend", "react"],
+        )
+
+        gs = state.group_settings["g"]
+        self.assertEqual(
+            gs.default_engineer_specializations, ["ui-frontend", "react"])
+
+    def test_default_engineer_specializations_can_be_cleared(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        state.update_group_settings(
+            "g",
+            default_engineer_specializations=["ui-frontend"],
+        )
+
+        state.update_group_settings("g", default_engineer_specializations=[])
+
+        gs = state.group_settings["g"]
+        self.assertEqual(gs.default_engineer_specializations, [])
+
 
 class MatrixStateEngineerStreamTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):

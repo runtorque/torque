@@ -259,7 +259,42 @@ let _confirmResolve = null;
 let _addEngineerGroup = '';
 let _addEngineerArchitectId = '';
 
+// Modal stack for nested modals. When a nested modal is opened on top of
+// another (e.g. "New specialization" inside the engineer-launch dialog),
+// the opener pushes onto this stack via openNestedModal(), and Cancel/
+// Escape pops only the topmost entry instead of dismissing the parent.
+let _modalStack = [];
+
+function openNestedModal(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.add('visible');
+  if (_modalStack.indexOf(id) === -1) _modalStack.push(id);
+}
+
+function closeNestedModal(id) {
+  // If id omitted, pop the topmost. Otherwise remove the matching entry.
+  let target = id;
+  if (!target) {
+    target = _modalStack.length ? _modalStack[_modalStack.length - 1] : '';
+  }
+  if (!target) return false;
+  const el = document.getElementById(target);
+  if (el) el.classList.remove('visible');
+  const idx = _modalStack.lastIndexOf(target);
+  if (idx >= 0) _modalStack.splice(idx, 1);
+  return true;
+}
+
 function closeModals() {
+  // Nested-modal stack: pop only the topmost when one is active so Cancel/
+  // Escape doesn't dismiss the parent dialog underneath.
+  if (_modalStack.length > 0) {
+    const topId = _modalStack.pop();
+    const el = document.getElementById(topId);
+    if (el) el.classList.remove('visible');
+    return;
+  }
   var taskModal = document.getElementById('modal-task');
   if (taskModal && taskModal.classList.contains('visible') && typeof _taskClearDraft === 'function') {
     _taskClearDraft(_taskEditId, _taskDraftScope);
@@ -275,6 +310,7 @@ function closeModals() {
   document.querySelectorAll('.hint-pop').forEach(p => p.remove());
   if (_confirmResolve) { _confirmResolve(false); _confirmResolve = null; }
   if (typeof _glsCapturing !== 'undefined' && _glsCapturing) _cancelCapture();
+  _modalStack = [];
   _addEngineerGroup = '';
   _addEngineerArchitectId = '';
   _addArchitectGroup = '';
@@ -945,8 +981,112 @@ function _setDetailsOpen(id, open) {
 
 function _resetGsEngineerSections() {
   _setDetailsOpen('gs-engineer-provider-section', true);
+  _setDetailsOpen('gs-engineer-specializations-section', true);
   _setDetailsOpen('gs-engineer-autonomy-section', true);
   _setDetailsOpen('gs-engineer-digest-section', false);
+}
+
+/* -- Group Settings: Engineer-tab default specializations picker -------- */
+let _gsEngineerSpecs = [];
+
+function _gsEngineerAvailableSpecs() {
+  return (state.specializations || [])
+    .map(function (s) { return s && s.name; })
+    .filter(Boolean);
+}
+
+function renderGsEngineerSpecializations() {
+  const selectedEl = document.getElementById('gs-engineer-specializations-selected');
+  const availableEl = document.getElementById('gs-engineer-specializations-available');
+  if (!selectedEl || !availableEl) return;
+  const selected = _gsEngineerSpecs;
+  selectedEl.innerHTML = '';
+  selected.forEach(function (name, idx) {
+    const li = document.createElement('li');
+    li.className = 'specialization-entry';
+    const tag = idx === 0 ? ' (primary)' : '';
+    const label = document.createElement('span');
+    label.textContent = name + tag;
+    li.appendChild(label);
+    const controls = document.createElement('span');
+    controls.className = 'specialization-controls-row';
+    if (idx > 0) {
+      const up = document.createElement('button');
+      up.type = 'button'; up.textContent = '↑'; up.title = 'Move up';
+      up.onclick = function () { gsEngineerMoveSpecialization(idx, -1); };
+      controls.appendChild(up);
+    }
+    if (idx < selected.length - 1) {
+      const down = document.createElement('button');
+      down.type = 'button'; down.textContent = '↓'; down.title = 'Move down';
+      down.onclick = function () { gsEngineerMoveSpecialization(idx, 1); };
+      controls.appendChild(down);
+    }
+    const remove = document.createElement('button');
+    remove.type = 'button'; remove.textContent = '×'; remove.title = 'Remove';
+    remove.onclick = function () { gsEngineerRemoveSpecialization(idx); };
+    controls.appendChild(remove);
+    li.appendChild(controls);
+    selectedEl.appendChild(li);
+  });
+
+  const available = _gsEngineerAvailableSpecs();
+  availableEl.innerHTML = '';
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = available.length ? 'Pick a specialization...' : 'No specializations available';
+  availableEl.appendChild(placeholder);
+  available.forEach(function (name) {
+    if (selected.indexOf(name) >= 0) return;
+    const opt = document.createElement('option');
+    opt.value = name; opt.textContent = name;
+    const meta = (state.specializations || []).find(function (s) {
+      return s && s.name === name;
+    });
+    if (meta && meta.preamble) opt.title = String(meta.preamble).slice(0, 200);
+    availableEl.appendChild(opt);
+  });
+}
+
+function gsEngineerAddSpecialization() {
+  const availableEl = document.getElementById('gs-engineer-specializations-available');
+  if (!availableEl) return;
+  const name = availableEl.value;
+  if (!name) return;
+  if (_gsEngineerSpecs.indexOf(name) < 0) _gsEngineerSpecs.push(name);
+  renderGsEngineerSpecializations();
+}
+
+function gsEngineerRemoveSpecialization(idx) {
+  if (idx < 0 || idx >= _gsEngineerSpecs.length) return;
+  _gsEngineerSpecs.splice(idx, 1);
+  renderGsEngineerSpecializations();
+}
+
+function gsEngineerMoveSpecialization(idx, delta) {
+  const newIdx = idx + delta;
+  if (newIdx < 0 || newIdx >= _gsEngineerSpecs.length) return;
+  const moved = _gsEngineerSpecs.splice(idx, 1)[0];
+  _gsEngineerSpecs.splice(newIdx, 0, moved);
+  renderGsEngineerSpecializations();
+}
+
+function openGsEngineerNewSpecializationDialog() {
+  const modal = document.getElementById('modal-new-specialization');
+  if (!modal) return;
+  document.getElementById('new-specialization-name').value = '';
+  document.getElementById('new-specialization-description').value = '';
+  document.getElementById('new-specialization-preamble').value = '';
+  document.getElementById('new-specialization-priorities').value = '';
+  document.getElementById('new-specialization-scope').value = 'project';
+  // Stash a flag so the submit handler knows to refresh the GS picker too.
+  modal.dataset.gsEngineerSource = '1';
+  if (typeof openNestedModal === 'function') {
+    openNestedModal('modal-new-specialization');
+  } else {
+    modal.classList.add('visible');
+  }
+  document.getElementById('new-specialization-name').focus();
 }
 
 function _defaultArchitectSettings() {
@@ -1079,6 +1219,13 @@ function _showGroupSettings(group, data) {
     true
   );
   onGsEngineerProviderChange();
+  // Default specializations picker state — primed from the group setting,
+  // refreshed in place when state.specializations updates over WS.
+  _gsEngineerSpecs = Array.isArray(s.default_engineer_specializations)
+    ? s.default_engineer_specializations.slice()
+    : [];
+  send({ cmd: 'list_specializations', group: group });
+  renderGsEngineerSpecializations();
   document.getElementById('gs-engineer-restrict-to-created-agents').checked = !!ws.restrict_to_created_agents;
   _setSelectValue('gs-engineer-autonomy-mode', ws.autonomy_mode, 'dispatch_when_clear');
   _setSelectValue(
@@ -1252,6 +1399,7 @@ function submitGroupSettings() {
     terminal_env_file: document.getElementById('gs-terminal-env-file').value.trim(),
     terminal_always_custom_dialog: document.getElementById('gs-terminal-always-custom').checked,
     terminal_close_on_disconnect: document.getElementById('gs-terminal-close-on-disconnect').checked,
+    default_engineer_specializations: (_gsEngineerSpecs || []).slice(),
   };
   const engineerSettings = {
     engineer_provider: _getProviderValue('gs-engineer-provider'),

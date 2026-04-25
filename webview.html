@@ -274,6 +274,10 @@
           </div>
           <div class="specializations-footer">
             <button type="button" class="btn-link" onclick="openNewSpecializationDialog()">+ New specialization</button>
+            <button type="button" class="btn-secondary specializations-reset"
+                    id="engineer-launch-specializations-reset"
+                    onclick="engineerLaunchResetSpecializationsToGroupDefault()"
+                    title="Replace the current list with the group-level default.">Reset to group default</button>
           </div>
         </div>
       </div>
@@ -643,6 +647,25 @@
           <div class="color-swatches" id="gs-engineer-color-swatches"></div>
           <label>Custom instructions <span class="label-hint">expert override</span></label>
           <textarea id="gs-engineer-custom-instructions" rows="5" placeholder="Instructions appended after Loom's built-in Engineer policy..."></textarea>
+        </div>
+      </details>
+
+      <details id="gs-engineer-specializations-section" class="task-modal-section" open>
+        <summary>Default Specializations
+          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Ordered list of specialization YAMLs applied to new engineers at creation. Each engineer can override this default after creation.">?</span>
+        </summary>
+        <div class="task-modal-section-body">
+          <div class="label-hint task-modal-section-intro">Applied to new engineers at creation.</div>
+          <div id="gs-engineer-specializations-picker" class="specializations-picker">
+            <ul id="gs-engineer-specializations-selected" class="specializations-selected"></ul>
+            <div class="specializations-controls">
+              <select id="gs-engineer-specializations-available"></select>
+              <button type="button" class="btn-secondary" onclick="gsEngineerAddSpecialization()">+ Add</button>
+            </div>
+            <div class="specializations-footer">
+              <button type="button" class="btn-link" onclick="openGsEngineerNewSpecializationDialog()">+ New specialization</button>
+            </div>
+          </div>
         </div>
       </details>
 

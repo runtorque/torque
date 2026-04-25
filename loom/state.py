@@ -1041,6 +1041,7 @@ class GroupSettings:
     board_default_action: str = ""  # default action for new tasks
     # Engineer
     engineer_agent_id: str = ""  # designated engineer agent for this group
+    default_engineer_specializations: list[str] = field(default_factory=list)  # ordered, applied at engineer creation
     # Architect settings (persisted in group_settings)
     architect_boot_command: str = ""
     architect_provider: str = ""

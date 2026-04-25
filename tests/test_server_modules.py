@@ -1986,5 +1986,75 @@ class ServerWorktreeMergeDiffTests(unittest.IsolatedAsyncioTestCase):
         )
 
 
+class ResolvePendingEngineerSpecializationsTests(unittest.TestCase):
+    """Cover the apply-at-creation logic for engineer specializations."""
+
+    def setUp(self):
+        install_aiohttp_stub()
+        self.state_mod = importlib.reload(
+            importlib.import_module('loom.state'))
+        self.server_mod = importlib.reload(
+            importlib.import_module('loom.server'))
+
+    def _make_state(self, group: str = "loom",
+                    default_specs=None) -> object:
+        state = self.state_mod.MatrixState()
+        state.add_group(group)
+        if default_specs is not None:
+            state.update_group_settings(
+                group,
+                default_engineer_specializations=list(default_specs),
+            )
+        return state
+
+    def test_returns_empty_for_non_engineer(self):
+        state = self._make_state(default_specs=["ui-frontend"])
+        result = self.server_mod._resolve_pending_engineer_specializations(
+            {}, state, "loom", is_engineer=False)
+        self.assertEqual(result, [])
+
+    def test_falls_back_to_group_default_when_specs_absent(self):
+        state = self._make_state(default_specs=["ui-frontend", "react"])
+        result = self.server_mod._resolve_pending_engineer_specializations(
+            {}, state, "loom", is_engineer=True)
+        self.assertEqual(result, ["ui-frontend", "react"])
+
+    def test_explicit_pick_overrides_group_default(self):
+        # Explicit user choice replaces the group default verbatim — no merge.
+        state = self._make_state(default_specs=["ui-frontend", "react"])
+        result = self.server_mod._resolve_pending_engineer_specializations(
+            {"specializations": ["rust-systems"]},
+            state, "loom", is_engineer=True)
+        self.assertEqual(result, ["rust-systems"])
+
+    def test_explicit_empty_list_is_intentional_clear(self):
+        # An explicit empty list means "no specs" — must not be repopulated
+        # from the group default.
+        state = self._make_state(default_specs=["ui-frontend"])
+        result = self.server_mod._resolve_pending_engineer_specializations(
+            {"specializations": []},
+            state, "loom", is_engineer=True)
+        self.assertEqual(result, [])
+
+    def test_no_default_and_no_explicit_returns_empty(self):
+        state = self._make_state(default_specs=None)
+        result = self.server_mod._resolve_pending_engineer_specializations(
+            {}, state, "loom", is_engineer=True)
+        self.assertEqual(result, [])
+
+    def test_strips_whitespace_and_drops_blanks(self):
+        state = self._make_state(default_specs=None)
+        result = self.server_mod._resolve_pending_engineer_specializations(
+            {"specializations": ["  rust  ", "", "  ", "react"]},
+            state, "loom", is_engineer=True)
+        self.assertEqual(result, ["rust", "react"])
+
+    def test_default_with_blanks_is_cleaned(self):
+        state = self._make_state(default_specs=["", " ui-frontend ", ""])
+        result = self.server_mod._resolve_pending_engineer_specializations(
+            {}, state, "loom", is_engineer=True)
+        self.assertEqual(result, ["ui-frontend"])
+
+
 if __name__ == '__main__':
     unittest.main()
