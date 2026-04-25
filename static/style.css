@@ -906,6 +906,11 @@ body.runtime-embedded .terminal-empty {
   letter-spacing: .03em;
   text-transform: uppercase;
 }
+.principal-card--architect .principal-card-kind {
+  color: #1f1300;
+  background: color-mix(in srgb, var(--amber) 82%, white);
+  border-color: color-mix(in srgb, var(--amber) 58%, transparent);
+}
 .principal-card-badge {
   position: absolute;
   left: 3px;

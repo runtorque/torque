@@ -732,7 +732,7 @@ function _renderPrincipalArchitectCard(groupName, section, selectedPrincipalId) 
     + '</div>'
     + '<span class="principal-card-icon">△</span>'
     + '<span class="principal-card-name">' + esc(displayName) + '</span>'
-    + '<span class="principal-card-kind">arch</span>'
+    + '<span class="principal-card-kind">Architect</span>'
     + badgeHtml
     + '</div>';
 }
