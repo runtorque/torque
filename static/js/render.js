@@ -697,6 +697,7 @@ function _renderPrincipalArchitectCard(groupName, section, selectedPrincipalId) 
     + ' data-focus-key="' + esc(navId) + '"'
     + ' aria-selected="' + (isSelected ? 'true' : 'false') + '"'
     + ' onclick="event.stopPropagation();selectPrincipal(' + idArg + ',' + groupArg + ')"'
+    + ' oncontextmenu="onCellContextMenu(event,' + idArg + ')"'
     + ' title="Architect ' + esc(displayName) + '">'
     + '<div class="principal-card-controls">'
     + '<button type="button" class="principal-card-close"'

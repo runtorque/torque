@@ -788,26 +788,32 @@ function selectPrincipal(principalId, groupName) {
   focusedItemId = _principalRowFocusId(group, id);
   const prevSelectedId = typeof selectedAgentId !== 'undefined' ? selectedAgentId : null;
   /* Architect principal: also make the architect the focused agent so the
-     detail view (renderAgentDetails) surfaces in the panel body. User
-     principal is not an agent — leave selectedAgentId alone. */
+     detail view (renderAgentDetails) surfaces in the panel body, AND focus
+     its terminal — clicking a principal is a deliberate "go here" act, not
+     a passive scan, so we always focus on click (not just on second click).
+     User principal is not an agent — leave selectedAgentId alone. */
+  const isArchitect = !!(id && state && state.agents && state.agents[id]);
   let selectionChanged = false;
-  if (id && state && state.agents && state.agents[id]) {
+  if (isArchitect) {
     if (selectedAgentId !== id) {
       selectedAgentId = id;
       selectionChanged = true;
       send({ cmd: 'select_agent', id: id });
     }
+    selectedTerminalId = id;
+    send({ cmd: 'focus_agent', id: id });
   }
-  if (id === current) {
-    if (selectionChanged && typeof _syncPanelsAfterSelectionChange === 'function') {
-      _syncPanelsAfterSelectionChange(prevSelectedId);
-    }
-    render();
-    return;
+  if (id !== current) {
+    state.selected_principal_id = id;
+    send({ cmd: 'ui_select_principal', principal_id: id });
   }
-  state.selected_principal_id = id;
-  send({ cmd: 'ui_select_principal', principal_id: id });
   render();
+  if (isArchitect
+      && typeof isEmbeddedTerminalMode === 'function'
+      && isEmbeddedTerminalMode()
+      && typeof focusEmbeddedTerminalWorkspace === 'function') {
+    focusEmbeddedTerminalWorkspace(true);
+  }
   if (selectionChanged && typeof _syncPanelsAfterSelectionChange === 'function') {
     _syncPanelsAfterSelectionChange(prevSelectedId);
   }
