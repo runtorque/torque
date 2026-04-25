@@ -342,6 +342,7 @@ class EventIngestStoreTests(unittest.TestCase):
                 store.close()
 
         with tempfile.TemporaryDirectory() as tmp:
+            now = 100 + (15 * 86400)
             store = EventIngestStore(
                 Path(tmp) / "ingest.db",
                 max_rows=10,
@@ -349,10 +350,10 @@ class EventIngestStoreTests(unittest.TestCase):
             ).init()
             try:
                 store.append({"n": "old"}, "old", now=100)
-                store.append({"n": "new"}, "new", now=200)
+                store.append({"n": "new"}, "new", now=now)
                 with mock.patch(
                     "loom.event_ingest_db.time.time",
-                    return_value=100 + (15 * 86400),
+                    return_value=now,
                 ):
                     ack = store.ack(up_to=2)
                 self.assertEqual(ack["trimmed"], 1)

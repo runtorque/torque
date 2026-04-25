@@ -5124,6 +5124,12 @@ async def main(connection=None):
         await _configure_event_ingest_client(event_ingest_client, state)
         event_ingest_configured[0] = True
 
+    async def _on_event_ingest_reconnect(_info):
+        event_ingest_configured[0] = False
+        await _ensure_event_ingest_configured()
+
+    event_ingest_client.on_reconnect = _on_event_ingest_reconnect
+
     supervisor_banner: dict | None = None
     if STANDALONE:
         from .local_pty import LocalPtyAdapter, SupervisedPtyAdapter

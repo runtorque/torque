@@ -2309,12 +2309,24 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
     if tool_name == "mcp_calls":
         target_agent = str(args.get("agent_id", "") or args.get("cell_id", "") or "").strip()
         if target_agent:
-            resolved_agent_id, resolve_error = _resolve_visible_agent(
-                real_state,
-                caller_kind,
-                caller_id,
-                target_agent,
-            )
+            if caller_kind == "architect":
+                resolved_agent_id = _resolve_agent(real_state, target_agent)
+                target_cell = real_state.agents.get(resolved_agent_id or "")
+                if (
+                    not resolved_agent_id
+                    or not target_cell
+                    or str(getattr(target_cell, "group", "") or "").strip() != _engineer_group
+                ):
+                    resolved_agent_id, resolve_error = None, f"Agent not found: {target_agent}"
+                else:
+                    resolve_error = ""
+            else:
+                resolved_agent_id, resolve_error = _resolve_visible_agent(
+                    real_state,
+                    caller_kind,
+                    caller_id,
+                    target_agent,
+                )
             if not resolved_agent_id:
                 return resolve_error, True
             target_agent = resolved_agent_id

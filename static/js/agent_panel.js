@@ -62,8 +62,8 @@ var _agentPanelTabSpecByKind = {
     { key: 'worklog', label: 'Worklog' },
   ],
   worker: [
-    { key: 'mcp', label: 'MCP' },
     { key: 'events', label: 'Events' },
+    { key: 'mcp', label: 'MCP' },
     { key: 'worklog', label: 'Worklog' },
   ],
   user: [],
@@ -2549,12 +2549,10 @@ function _renderTerminalPanel(agent) {
 
 function _agentPanelBuildPanelStateOptions(agent, activeTab, virtualMetas) {
   virtualMetas = virtualMetas || [];
+  var scrollSelectors = ['.agent-panel-content', '.agent-panel-message-list'];
+  if (activeTab === 'mcp') scrollSelectors.push('.agent-panel-mcp-list');
   var panelStateOptions = {
-    scrollSelectors: [
-      '.agent-panel-content',
-      '.agent-panel-message-list',
-      '.agent-panel-mcp-list',
-    ],
+    scrollSelectors: scrollSelectors,
     capture: function(snapshot, root) {
       if (!snapshot || !root || typeof root.querySelector !== 'function') return;
       if (agent && _agentPanelActiveTab(_agentPanelKind(agent)) === 'events') {

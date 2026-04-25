@@ -988,6 +988,7 @@ test('focused engineer events tab starts the live countdown timer', () => {
 
 test('agent MCP tab fetches calls, filters, and expands redacted details', () => {
   const { context, panel, sendCalls } = createHarness();
+  const now = Math.floor(Date.now() / 1000);
   setFocusedAgent(context, {
     id: 'worker-mcp',
     name: 'Worker MCP',
@@ -1016,7 +1017,7 @@ test('agent MCP tab fetches calls, filters, and expands redacted details', () =>
         cell_id: 'worker-mcp',
         tool_name: 'mcp__loom__loom_progress',
         hook_event_name: 'PostToolUse',
-        appended_at: 200,
+        appended_at: now,
         success: true,
         duration_ms: 12,
         args: { redacted: true, arg_keys: ['message'], byte_size: 42 },
@@ -1041,6 +1042,7 @@ test('agent MCP tab fetches calls, filters, and expands redacted details', () =>
 
 test('agent MCP tab hides settings banner in full capture mode and renders full args', () => {
   const { context, panel } = createHarness();
+  const now = Math.floor(Date.now() / 1000);
   setFocusedAgent(context, {
     id: 'worker-full',
     name: 'Worker Full',
@@ -1055,7 +1057,7 @@ test('agent MCP tab hides settings banner in full capture mode and renders full 
       cell_id: 'worker-full',
       tool_name: 'mcp__loom__loom_done',
       hook_event_name: 'PostToolUse',
-      appended_at: 100,
+      appended_at: now,
       success: true,
       args: { message: 'shipped' },
       args_redacted: false,
@@ -1069,12 +1071,13 @@ test('agent MCP tab hides settings banner in full capture mode and renders full 
   context.agentPanelToggleMcpCall('worker-full', '1');
 
   assert.doesNotMatch(panel.innerHTML, /Args redacted by default/);
-  assert.match(panel.innerHTML, /"message": "shipped"/);
+  assert.match(panel.innerHTML, /&quot;message&quot;: &quot;shipped&quot;/);
   assert.doesNotMatch(panel.innerHTML, /Args redacted at ingest\./);
 });
 
 test('agent MCP tab live update prepends without losing expanded row across rerender', () => {
   const { context, panel, captureCalls, restoreCalls } = createHarness();
+  const now = Math.floor(Date.now() / 1000);
   setFocusedAgent(context, {
     id: 'worker-live',
     name: 'Worker Live',
@@ -1088,7 +1091,7 @@ test('agent MCP tab live update prepends without losing expanded row across rere
       cell_id: 'worker-live',
       tool_name: 'mcp__loom__old',
       hook_event_name: 'PostToolUse',
-      appended_at: 100,
+      appended_at: now - 10,
       success: true,
       args: { old: true },
       args_redacted: false,
@@ -1107,7 +1110,7 @@ test('agent MCP tab live update prepends without losing expanded row across rere
     cell_id: 'worker-live',
     tool_name: 'mcp__loom__new',
     hook_event_name: 'PostToolUse',
-    appended_at: 200,
+    appended_at: now,
     success: false,
     error: 'boom',
     args: { redacted: true, arg_keys: ['task_id'] },
@@ -1118,7 +1121,7 @@ test('agent MCP tab live update prepends without losing expanded row across rere
 
   const html = panel.innerHTML;
   assert.ok(html.indexOf('mcp__loom__new') < html.indexOf('mcp__loom__old'));
-  assert.match(html, /"old": true/);
+  assert.match(html, /&quot;old&quot;: true/);
   assert.ok(captureCalls.length > captureBefore);
   assert.ok(restoreCalls.length > restoreBefore);
   const latestCapture = captureCalls[captureCalls.length - 1];
