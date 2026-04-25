@@ -1,5 +1,27 @@
 /* Commands — actions sent to the daemon */
 
+/* Open a board task in the Board panel — used by clickable task IDs on
+   worker / engineer / agent cards. Activates the board panel if needed
+   then scrolls the matching card into view + adds a brief highlight.
+   No-op if the task id is missing or the board fails to open. */
+function openTaskInBoard(taskId) {
+  var id = String(taskId || '').trim();
+  if (!id) return;
+  if (typeof _activePanelApp === 'undefined' || _activePanelApp !== 'board') {
+    if (typeof togglePanel === 'function') togglePanel('board');
+  }
+  // Defer scroll/highlight one tick so the panel + board render finishes.
+  setTimeout(function() {
+    var card = document.querySelector('.board-card[data-task-id="' + id.replace(/"/g, '\\"') + '"]');
+    if (!card) return;
+    if (typeof card.scrollIntoView === 'function') {
+      card.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+    }
+    card.classList.add('board-card--external-focus');
+    setTimeout(function() { card.classList.remove('board-card--external-focus'); }, 1500);
+  }, 80);
+}
+
 function _showToast(message, level) {
   const el = document.createElement('div');
   el.className = 'toast toast-' + (level || 'info');

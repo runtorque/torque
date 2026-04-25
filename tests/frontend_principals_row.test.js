@@ -880,7 +880,7 @@ test('agents-grid v2 renders all kind shells with one-metric lines and required 
   assert.match(workerBlock, /cell-worker-badge">Worker/);
   assert.match(workerBlock, /architect-car…/);
   assert.match(workerBlock, /data-tooltip="architect-card-click-focus-fix"/);
-  assert.match(workerBlock, /cell-worker-task">LOOM:216/);
+  assert.match(workerBlock, /cell-worker-task cell-worker-task--clickable[^"]*"[^>]*>LOOM:216/);
   assert.match(workerBlock, /cell-worker-cycle">cycle: review/);
   assert.doesNotMatch(workerBlock, /LOOM:216 · review/);
   assert.match(workerBlock, /\+58\/-3 \(clean\)/);
@@ -1041,7 +1041,7 @@ test('worker slug truncation uses immediate tooltip metadata, not title-only bro
     worktree_branch: 'loom/panelsmith/architect-card-click-focus-fix-746495a'
   })`, context);
   assert.match(html, /architect-car…/);
-  assert.match(html, /cell-worker-task">LOOM:216/);
+  assert.match(html, /cell-worker-task cell-worker-task--clickable[^"]*"[^>]*>LOOM:216/);
   assert.match(html, /cell-worker-cycle">cycle: implementation/);
   assert.match(html, /worktree: archite…/);
   assert.doesNotMatch(html, /LOOM:216 · implementation/);

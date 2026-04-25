@@ -1032,21 +1032,12 @@ body.runtime-embedded .terminal-empty {
   border: 1px solid transparent;
   background: transparent;
   color: var(--text-dim);
-  opacity: 0;
-  transition: opacity .15s, color .15s, background .15s, border-color .15s;
-  pointer-events: none;
-  cursor: pointer;
-}
-.principal-card:hover .principal-card-close,
-.principal-card:hover .principal-card-pause,
-.principal-card.focused .principal-card-close,
-.principal-card.focused .principal-card-pause,
-.principal-card.selected .principal-card-close,
-.principal-card.selected .principal-card-pause,
-.principal-card:focus-within .principal-card-close,
-.principal-card:focus-within .principal-card-pause {
+  /* Always show the close + pause symbols. Backgrounds appear only on
+     hover (see :hover rules below). */
   opacity: 1;
+  transition: color .15s, background .15s, border-color .15s;
   pointer-events: auto;
+  cursor: pointer;
 }
 .principal-card-close:hover { background: var(--red); color: #fff; }
 .principal-card-pause.running { color: var(--green); }
@@ -1421,17 +1412,13 @@ body.runtime-embedded .terminal-empty {
   padding: 0;
   font-size: 10px; line-height: 1; text-align: center;
   border-radius: 3px; color: var(--text-dim);
-  opacity: 0; transition: opacity .15s, color .15s, background .15s;
-  pointer-events: none;
+  /* Always show the close + pause symbols. Backgrounds appear only on
+     hover (see :hover rules below). */
+  opacity: 1; transition: color .15s, background .15s;
+  pointer-events: auto;
 }
-.cell:hover .cell-close,
-.cell:hover .cell-engineer-toggle,
 .cell:hover .cell-relaunch,
-.cell.focused .cell-close,
-.cell.focused .cell-engineer-toggle,
 .cell.focused .cell-relaunch,
-.cell:focus-within .cell-close,
-.cell:focus-within .cell-engineer-toggle,
 .cell:focus-within .cell-relaunch {
   opacity: 1;
   pointer-events: auto;
@@ -1446,9 +1433,10 @@ body.runtime-embedded .terminal-empty {
   color: var(--text-dim);
   border: 1px solid transparent;
   background: transparent;
-  opacity: 0;
-  transition: opacity .15s, color .15s, border-color .15s, background .15s;
-  pointer-events: none;
+  /* Always-visible (matches .cell-close + .principal-card-pause). */
+  opacity: 1;
+  transition: color .15s, border-color .15s, background .15s;
+  pointer-events: auto;
 }
 .cell-engineer-toggle.running {
   color: var(--green);
@@ -1549,9 +1537,9 @@ body.runtime-embedded .terminal-empty {
   font-size: 6.5px;
   letter-spacing: 0;
   font-weight: 700;
-  color: var(--text-dim);
-  background: color-mix(in srgb, var(--text-dim) 11%, transparent);
-  border: 1px solid color-mix(in srgb, var(--text-dim) 22%, transparent);
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--green) 32%, transparent);
   border-radius: 999px;
   padding: 0 4px;
   line-height: 1.4;
@@ -3459,6 +3447,23 @@ body.runtime-embedded #panel-board .board-wide-lane-body {
 }
 .board-card:hover,
 .board-card.board-card-hovered { background: var(--bg-hover); }
+/* Brief highlight when a board task is opened externally via the
+   clickable LOOM:XXX label on a worker card. */
+.board-card.board-card--external-focus {
+  border-color: color-mix(in srgb, var(--accent) 78%, var(--border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
+  transition: border-color .25s, box-shadow .25s;
+}
+/* Worker card: clickable LOOM:XXX label (opens the task in the Board panel). */
+.cell-worker-task--clickable {
+  cursor: pointer;
+  color: var(--accent);
+  text-decoration: none;
+}
+.cell-worker-task--clickable:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
 .board-density-compact .board-card {
   gap: 6px;
   padding: 4px 6px;

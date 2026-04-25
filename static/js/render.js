@@ -909,6 +909,10 @@ function _agentCardLastActionInfo(agent) {
 
 function _agentCardCurrentOrLastActionLabel(agent) {
   const info = _agentCardLastActionInfo(agent);
+  // The status dot already conveys idle state — don't surface the literal
+  // "idle" text in the action line. Returning empty leaves the line slot in
+  // place (preserves uniform card height) but renders no content.
+  if (info.text === 'idle') return '';
   if (!info.timestamp) return 'Last action: ' + info.text;
   const age = Math.max(0, Math.floor((Date.now() / 1000) - info.timestamp));
   if (age < 60) return info.text;
@@ -2660,9 +2664,15 @@ function _renderWorkerCardBody(a) {
   const actionLabel = _agentCardCurrentOrLastActionLabel(a);
   let html = '<div class="agent-card-body cell-body cell-body--worker">';
   html += _agentCardTooltipHtml(slug, 14, 'cell-name cell-worker-slug', 'data-worker-slug="' + esc(slug) + '"');
-  html += '<div class="agent-card-line cell-task cell-worker-task">'
-    + esc(taskId || 'no task')
-    + '</div>';
+  if (taskId) {
+    html += '<div class="agent-card-line cell-task cell-worker-task cell-worker-task--clickable"'
+      + ' onclick="event.stopPropagation(); openTaskInBoard(\'' + esc(taskId) + '\');"'
+      + ' title="' + esc(taskId) + ' — open in board">'
+      + esc(taskId)
+      + '</div>';
+  } else {
+    html += '<div class="agent-card-line cell-task cell-worker-task cell-worker-task--empty">no task</div>';
+  }
   html += '<div class="agent-card-line cell-worker-cycle">'
     + esc('cycle: ' + cycle)
     + '</div>';

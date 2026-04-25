@@ -10706,9 +10706,10 @@ test('engineer agent card toggle shares the close control reveal affordances and
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
 
   assert.match(css, /\.cell-header-controls\s*\{[^}]*position:\s*absolute;[^}]*display:\s*flex;[^}]*align-items:\s*center;/);
-  assert.match(css, /\.cell-engineer-toggle\s*\{[^}]*opacity:\s*0;[^}]*pointer-events:\s*none;/);
+  // Controls are now always visible (opacity:1 + pointer-events:auto by default).
+  // Backgrounds appear only on hover/focus-visible/active.
+  assert.match(css, /\.cell-engineer-toggle\s*\{[^}]*opacity:\s*1;[^}]*pointer-events:\s*auto;/);
   assert.match(css, /\.cell-engineer-toggle\s*\{[^}]*border:\s*1px solid transparent;[^}]*background:\s*transparent;/);
-  assert.match(css, /\.cell:hover \.cell-close,\s*\.cell:hover \.cell-engineer-toggle,\s*\.cell:hover \.cell-relaunch,\s*\.cell.focused \.cell-close,\s*\.cell.focused \.cell-engineer-toggle,\s*\.cell.focused \.cell-relaunch,\s*\.cell:focus-within \.cell-close,\s*\.cell:focus-within \.cell-engineer-toggle,\s*\.cell:focus-within \.cell-relaunch\s*\{[^}]*opacity:\s*1;[^}]*pointer-events:\s*auto;/);
   assert.match(css, /\.cell-engineer-toggle:hover,\s*\.cell-engineer-toggle:focus-visible,\s*\.cell-engineer-toggle:active\s*\{/);
   assert.match(css, /\.cell-engineer-toggle:hover,\s*\.cell-engineer-toggle:focus-visible,\s*\.cell-engineer-toggle:active\s*\{[^}]*background:/);
   assert.match(css, /\.cell-engineer-toggle:hover,\s*\.cell-engineer-toggle:focus-visible,\s*\.cell-engineer-toggle:active\s*\{[^}]*border-color:/);
@@ -10738,7 +10739,7 @@ test('agent kind badges render in the bottom-right opposite the provider badge',
   assert.match(workerRule, /bottom:\s*2px;/);
   assert.match(workerRule, /right:\s*3px;/);
   assert.doesNotMatch(workerRule, /left:\s*3px;/);
-  assert.match(workerRule, /color:\s*var\(--text-dim\);/);
+  assert.match(workerRule, /color:\s*var\(--green\);/);
 });
 
 test('agent cards do not define legacy engineer edge chrome', () => {
@@ -13152,7 +13153,7 @@ test('agents-grid v1.6 uses one-line metrics, action threshold labels, empty-row
   assert.match(main.innerHTML, /data-drag-id="eng-full"[\s\S]*cell-engineer-queue">queue: 0/);
   assert.match(main.innerHTML, /data-drag-id="eng-full"[\s\S]*cell-engineer-activity[^>]*>Last action: reviewing :222:2 1m/);
 
-  assert.match(main.innerHTML, /data-drag-id="worker-a"[\s\S]*cell-worker-task">LOOM:216/);
+  assert.match(main.innerHTML, /data-drag-id="worker-a"[\s\S]*cell-worker-task cell-worker-task--clickable[^"]*"[^>]*>LOOM:216/);
   assert.match(main.innerHTML, /data-drag-id="worker-a"[\s\S]*cell-worker-cycle">cycle: review/);
   assert.match(main.innerHTML, /data-drag-id="worker-a"[\s\S]*cell-worker-activity[^>]*>running node tests/);
   assert.doesNotMatch(main.innerHTML, /engineers ·|queue: 0 ·|LOOM:216 ·|last action 30s/);
@@ -14313,7 +14314,7 @@ test('task delta updates visible worker cycle state while preserving main-grid f
     });
   `);
 
-  assert.match(main.innerHTML, /cell-worker-task">task-1/);
+  assert.match(main.innerHTML, /cell-worker-task cell-worker-task--clickable[^"]*"[^>]*>task-1/);
   assert.match(main.innerHTML, /cell-worker-cycle">cycle: implementation/);
   assert.doesNotMatch(main.innerHTML, /task-1 · impl<\/div>/);
 
@@ -14340,7 +14341,7 @@ test('task delta updates visible worker cycle state while preserving main-grid f
   `);
 
   assert.equal(renderCount, 2);
-  assert.match(main.innerHTML, /cell-worker-task">task-1/);
+  assert.match(main.innerHTML, /cell-worker-task cell-worker-task--clickable[^"]*"[^>]*>task-1/);
   assert.match(main.innerHTML, /cell-worker-cycle">cycle: review/);
   assert.doesNotMatch(main.innerHTML, /task-1 · impl<\/div>/);
   assert.equal(currentButton.focused, true);
