@@ -155,6 +155,55 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
+        "name": "architect_task_list",
+        "description": (
+            "List tasks in this architect's group with optional backlog "
+            "filters for labels, lane, assigned engineer, creator, and "
+            "archived state. Label filters use AND semantics."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "label_filter": {
+                    "oneOf": [
+                        {"type": "string"},
+                        {"type": "array", "items": {"type": "string"}},
+                    ],
+                    "description": (
+                        "Optional label or labels. When multiple labels are "
+                        "provided, tasks must have all labels."
+                    ),
+                },
+                "lane_filter": {
+                    "type": "string",
+                    "description": "Optional exact board lane name.",
+                },
+                "assigned_engineer_id_filter": {
+                    "type": "string",
+                    "description": "Optional exact assigned engineer id.",
+                },
+                "creator_filter": {
+                    "type": "string",
+                    "description": (
+                        "Optional creator filter: user, architect, "
+                        "engineer:<id>, or system."
+                    ),
+                },
+                "archived": {
+                    "type": "boolean",
+                    "description": (
+                        "When false/default, exclude archived tasks. When "
+                        "true, include archived tasks only."
+                    ),
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum tasks to return (default 100).",
+                },
+            },
+        },
+    },
+    {
         "name": "architect_task_chain",
         "description": (
             "Show the full derived-task tree for one visible pipeline, rooted at "
@@ -224,6 +273,33 @@ _ARCHITECT_TOOL_SPECS = [
                 },
             },
             "required": ["title", "group", "assigned_engineer_id"],
+        },
+    },
+    {
+        "name": "architect_task_update",
+        "description": (
+            "Update title, description, and/or labels for a task created by "
+            "this architect in this architect's group. Omitted fields are "
+            "left unchanged; labels use replace semantics."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "task": {"type": "string", "description": "Task ID or alias."},
+                "title": {"type": "string", "description": "Replacement title."},
+                "description": {
+                    "type": "string",
+                    "description": "Replacement description.",
+                },
+                "labels": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Replacement label list. Provide [] to clear labels."
+                    ),
+                },
+            },
+            "required": ["task"],
         },
     },
     {

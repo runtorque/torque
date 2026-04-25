@@ -78,6 +78,7 @@ _ARCHITECT_EVENTS_RECENT_LOAD_LIMIT = 500
 _ARCHITECT_EVENTS_RECENT_MESSAGE_LIMIT = 120
 _ARCHITECT_EVENTS_RECENT_RESPONSE_LIMIT = 10_000
 _ARCHITECT_TASK_CHAIN_NODE_LIMIT = 50
+_ARCHITECT_TASK_LIST_DEFAULT_LIMIT = 100
 
 # ---------------------------------------------------------------------------
 # Shared scoping helpers
@@ -163,6 +164,79 @@ def _architect_board_summary_task_item(task, *, created_by: str) -> dict:
     if suggested_specialization:
         item["suggested_specialization"] = suggested_specialization
     return item
+
+
+def _normalize_architect_task_list_label_filter(value) -> tuple[list[str], str]:
+    if value in (None, ""):
+        return [], ""
+    if isinstance(value, str):
+        raw_values = [value]
+    elif isinstance(value, list):
+        raw_values = value
+    else:
+        return [], "label_filter must be a string or list of strings"
+
+    labels = []
+    seen = set()
+    for item in raw_values:
+        if not isinstance(item, str):
+            return [], "label_filter entries must be strings"
+        label = item.strip()
+        if not label or label in seen:
+            continue
+        labels.append(label)
+        seen.add(label)
+    return labels, ""
+
+
+def _normalize_architect_task_list_limit(value) -> tuple[int, str]:
+    if value in (None, ""):
+        return _ARCHITECT_TASK_LIST_DEFAULT_LIMIT, ""
+    try:
+        limit = int(value)
+    except (TypeError, ValueError):
+        return 0, "limit must be an integer"
+    if limit < 0:
+        return 0, "limit must be at least 0"
+    return limit, ""
+
+
+def _architect_task_creator_filter_matches(task, creator_filter: str
+                                           ) -> tuple[bool, str]:
+    creator_filter = str(creator_filter or "").strip()
+    if not creator_filter:
+        return True, ""
+    lower = creator_filter.lower()
+    created_by = _task_created_by_classifier(task)
+    if lower == "user":
+        return created_by == "user", ""
+    if lower == "architect":
+        return created_by.startswith("architect:"), ""
+    if lower == "system":
+        return created_by == "system", ""
+    if lower.startswith("engineer:"):
+        engineer_id = creator_filter.split(":", 1)[1].strip()
+        if not engineer_id:
+            return False, "creator_filter engineer:<id> requires an id"
+        created_by_engineer_id = str(
+            getattr(task, "created_by_engineer_id", "") or ""
+        ).strip()
+        return created_by_engineer_id == engineer_id, ""
+    return (
+        False,
+        "creator_filter must be one of: user, architect, engineer:<id>, system",
+    )
+
+
+def _architect_task_list_sort_key(state, item: dict) -> tuple[int, int, str, str]:
+    lane_order = {lane: idx for idx, lane in enumerate(state.board_lanes)}
+    task = state.board_tasks.get(item.get("id", ""))
+    return (
+        lane_order.get(item.get("lane", ""), len(lane_order)),
+        getattr(task, "position", 0) if task else 0,
+        str(item.get("title", "") or "").lower(),
+        str(item.get("id", "") or ""),
+    )
 
 
 def _compact_json(payload) -> str:
@@ -2720,6 +2794,68 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 d["pipeline_chain"].append(item)
         return json.dumps(d), False
 
+    if tool_name == "task_list" and caller_kind == "architect":
+        label_filter, label_error = _normalize_architect_task_list_label_filter(
+            args.get("label_filter", "")
+        )
+        if label_error:
+            return label_error, True
+        limit, limit_error = _normalize_architect_task_list_limit(
+            args.get("limit", None)
+        )
+        if limit_error:
+            return limit_error, True
+        archived, archived_error = _optional_bool_arg(args, "archived", False)
+        if archived_error:
+            return archived_error, True
+
+        lane_filter = str(args.get("lane_filter", "") or "").strip()
+        assigned_engineer_filter = str(
+            args.get("assigned_engineer_id_filter", "") or ""
+        ).strip()
+        creator_filter = str(args.get("creator_filter", "") or "").strip()
+
+        task_items = []
+        for task in state.board_tasks.values():
+            if str(getattr(task, "group", "") or "").strip() != _engineer_group:
+                continue
+            task_archived = bool(
+                str(getattr(task, "archived_at", "") or "").strip()
+            )
+            if task_archived != archived:
+                continue
+            task_labels = set(getattr(task, "labels", []) or [])
+            if label_filter and not all(label in task_labels for label in label_filter):
+                continue
+            if lane_filter and str(getattr(task, "lane", "") or "") != lane_filter:
+                continue
+            if (
+                assigned_engineer_filter
+                and _effective_assigned_engineer_id(task) != assigned_engineer_filter
+            ):
+                continue
+            creator_matches, creator_error = _architect_task_creator_filter_matches(
+                task,
+                creator_filter,
+            )
+            if creator_error:
+                return creator_error, True
+            if not creator_matches:
+                continue
+            task_items.append(_architect_board_summary_task_item(
+                task,
+                created_by=_task_created_by_classifier(task),
+            ))
+
+        task_items.sort(key=lambda item: _architect_task_list_sort_key(state, item))
+        total = len(task_items)
+        return _compact_json({
+            "type": "task_list",
+            "tasks": task_items[:limit],
+            "total": total,
+            "truncated": total > limit,
+        }), False
+
     if tool_name == "engineer_list" and caller_kind == "architect":
         visible_task_ids = set(
             _filter_tasks_for_caller(real_state, caller_kind, caller_id)
@@ -3171,6 +3307,57 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
         return json.dumps(result) if result else '{"type":"ok"}', False
+
+    if tool_name == "task_update" and caller_kind == "architect":
+        tid = _resolve_task(state, args.get("task", ""))
+        if not tid:
+            return "Task not found", True
+        task = state.board_tasks.get(tid)
+        if not task or str(getattr(task, "group", "") or "").strip() != _engineer_group:
+            return "Task not found", True
+        caller_id_str = str(caller_id or "").strip()
+        if str(getattr(task, "created_by_architect_id", "") or "").strip() != caller_id_str:
+            return "Task was not created by this architect", True
+
+        patch = {}
+        updated_fields = []
+        if "title" in args:
+            title = str(args.get("title", "") or "").strip()
+            if not title:
+                return "title is required", True
+            patch["task"] = title
+            updated_fields.append("title")
+        if "description" in args:
+            description = str(args.get("description", "") or "")
+            if not description.strip():
+                return "description is required", True
+            patch["description"] = description
+            updated_fields.append("description")
+        if "labels" in args:
+            labels = args.get("labels")
+            if not isinstance(labels, list):
+                return "labels must be a list", True
+            normalized_labels = []
+            seen_labels = set()
+            for item in labels:
+                if not isinstance(item, str):
+                    return "labels entries must be strings", True
+                label = item.strip()
+                if not label or label in seen_labels:
+                    continue
+                normalized_labels.append(label)
+                seen_labels.add(label)
+            patch["labels"] = normalized_labels
+            updated_fields.append("labels")
+        if not updated_fields:
+            return "At least one editable field is required", True
+
+        real_state.board_update_task(tid, **patch)
+        return json.dumps({
+            "type": "ok",
+            "task_id": tid,
+            "updated_fields": updated_fields,
+        }), False
 
     if tool_name == "task_reassign":
         task_state = state

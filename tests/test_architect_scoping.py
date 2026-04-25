@@ -1447,6 +1447,363 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             {ui_task.id},
         )
 
+    async def test_architect_task_list_filters_and_scopes_to_architect_group(self):
+        architect = self._add_architect("arch-1", "Architect")
+        other_architect = self._add_architect("arch-2", "Other Architect")
+        alice = self._add_engineer(
+            "eng-alice", "Alice", hired_by_architect_id=architect.id
+        )
+        bob = self._add_engineer(
+            "eng-bob", "Bob", hired_by_architect_id=architect.id
+        )
+        self.state.groups["other"] = []
+        self.state._db_save_groups()
+
+        own_triage_p3 = self._add_task(
+            "task-own-triage-p3",
+            "Own triage P3",
+            labels=["triage", "P3"],
+            assigned_engineer_id=alice.id,
+            created_by_architect_id=architect.id,
+        )
+        own_triage_p2_todo = self._add_task(
+            "task-own-triage-p2",
+            "Own triage P2",
+            lane="To Do",
+            labels=["triage", "P2"],
+            assigned_engineer_id=alice.id,
+            created_by_architect_id=architect.id,
+        )
+        own_p3_only_bob = self._add_task(
+            "task-own-p3",
+            "Own P3 only",
+            labels=["P3"],
+            assigned_engineer_id=bob.id,
+            created_by_architect_id=architect.id,
+        )
+        engineer_created = self._add_task(
+            "task-engineer",
+            "Engineer-created triage P3",
+            lane="To Do",
+            labels=["triage", "P3"],
+            assigned_engineer_id=bob.id,
+            created_by_engineer_id=alice.id,
+        )
+        user_created = self._add_task(
+            "task-user",
+            "User-created triage",
+            labels=["triage"],
+            assigned_engineer_id=alice.id,
+        )
+        system_created = self._add_task(
+            "task-system",
+            "System-created triage",
+            labels=["triage"],
+            parent_task_id=own_triage_p3.id,
+            pipeline_root_id=own_triage_p3.id,
+        )
+        other_arch_created = self._add_task(
+            "task-other-architect",
+            "Other architect triage",
+            labels=["triage"],
+            assigned_engineer_id=bob.id,
+            created_by_architect_id=other_architect.id,
+        )
+        archived = self._add_task(
+            "task-archived",
+            "Archived triage",
+            labels=["triage"],
+            archived_at="2026-04-01T00:00:00+00:00",
+            created_by_architect_id=architect.id,
+        )
+        cross_group = self._add_task(
+            "task-cross-group",
+            "Cross-group triage must stay hidden",
+            group="other",
+            labels=["triage"],
+            created_by_architect_id=architect.id,
+        )
+
+        async def listed_ids(args):
+            text, is_error = await self._call(
+                "architect_task_list",
+                args,
+                architect.id,
+            )
+            self.assertFalse(is_error, text)
+            payload = json.loads(text)
+            return payload, {item["id"] for item in payload["tasks"]}
+
+        payload, ids = await listed_ids({"label_filter": "triage"})
+        self.assertEqual(payload["type"], "task_list")
+        self.assertFalse(payload["truncated"])
+        self.assertEqual(
+            ids,
+            {
+                own_triage_p3.id,
+                own_triage_p2_todo.id,
+                engineer_created.id,
+                user_created.id,
+                system_created.id,
+                other_arch_created.id,
+            },
+        )
+        self.assertNotIn(archived.id, ids)
+        self.assertNotIn(cross_group.id, ids)
+        self.assertEqual(payload["total"], len(ids))
+        sample_item = payload["tasks"][0]
+        self.assertTrue({
+            "id",
+            "title",
+            "lane",
+            "labels",
+            "assigned_engineer_id",
+            "created_by",
+            "status",
+            "updated_at",
+        }.issubset(sample_item))
+
+        _payload, ids = await listed_ids({"label_filter": ["triage", "P3"]})
+        self.assertEqual(ids, {own_triage_p3.id, engineer_created.id})
+
+        _payload, ids = await listed_ids({"lane_filter": "To Do"})
+        self.assertEqual(ids, {own_triage_p2_todo.id, engineer_created.id})
+
+        _payload, ids = await listed_ids({
+            "assigned_engineer_id_filter": bob.id,
+        })
+        self.assertEqual(
+            ids,
+            {own_p3_only_bob.id, engineer_created.id, other_arch_created.id},
+        )
+
+        _payload, ids = await listed_ids({"creator_filter": "user"})
+        self.assertEqual(ids, {user_created.id})
+
+        _payload, ids = await listed_ids({"creator_filter": "architect"})
+        self.assertEqual(
+            ids,
+            {
+                own_triage_p3.id,
+                own_triage_p2_todo.id,
+                own_p3_only_bob.id,
+                other_arch_created.id,
+            },
+        )
+
+        _payload, ids = await listed_ids({"creator_filter": f"engineer:{alice.id}"})
+        self.assertEqual(ids, {engineer_created.id})
+
+        _payload, ids = await listed_ids({"creator_filter": "system"})
+        self.assertEqual(ids, {system_created.id})
+
+        _payload, ids = await listed_ids({
+            "label_filter": "triage",
+            "lane_filter": "To Do",
+        })
+        self.assertEqual(ids, {own_triage_p2_todo.id, engineer_created.id})
+
+        _payload, ids = await listed_ids({"archived": True})
+        self.assertEqual(ids, {archived.id})
+
+    async def test_architect_task_list_truncates_with_total_count(self):
+        architect = self._add_architect("arch-1", "Architect")
+        for idx in range(5):
+            self._add_task(
+                f"task-bulk-{idx}",
+                f"Bulk task {idx}",
+                labels=["bulk"],
+                created_by_architect_id=architect.id,
+            )
+
+        text, is_error = await self._call(
+            "architect_task_list",
+            {"label_filter": "bulk", "limit": 2},
+            architect.id,
+        )
+
+        self.assertFalse(is_error, text)
+        payload = json.loads(text)
+        self.assertEqual(payload["type"], "task_list")
+        self.assertEqual(payload["total"], 5)
+        self.assertTrue(payload["truncated"])
+        self.assertLessEqual(len(payload["tasks"]), 2)
+
+    async def test_architect_task_update_edits_own_task_fields_and_labels(self):
+        architect = self._add_architect("arch-1", "Architect")
+        task = self._add_task(
+            "task-update-own",
+            "Original title",
+            description="Original description",
+            labels=["old", "keep"],
+            created_by_architect_id=architect.id,
+        )
+        task.updated_at = "2000-01-01T00:00:00+00:00"
+        self.state._db_save_task(task)
+
+        title_text, title_error = await self._call(
+            "architect_task_update",
+            {"task": task.id, "title": "Updated title"},
+            architect.id,
+        )
+        self.assertFalse(title_error, title_text)
+        title_payload = json.loads(title_text)
+        self.assertEqual(title_payload["type"], "ok")
+        self.assertEqual(title_payload["task_id"], task.id)
+        self.assertEqual(title_payload["updated_fields"], ["title"])
+        updated = self.state.board_tasks[task.id]
+        self.assertEqual(updated.task, "Updated title")
+        self.assertEqual(updated.description, "Original description")
+        self.assertEqual(updated.labels, ["old", "keep"])
+        self.assertNotEqual(updated.updated_at, "2000-01-01T00:00:00+00:00")
+
+        desc_text, desc_error = await self._call(
+            "architect_task_update",
+            {"task": task.id, "description": "Updated description"},
+            architect.id,
+        )
+        self.assertFalse(desc_error, desc_text)
+        self.assertEqual(json.loads(desc_text)["updated_fields"], ["description"])
+        updated = self.state.board_tasks[task.id]
+        self.assertEqual(updated.task, "Updated title")
+        self.assertEqual(updated.description, "Updated description")
+        self.assertEqual(updated.labels, ["old", "keep"])
+
+        labels_text, labels_error = await self._call(
+            "architect_task_update",
+            {"task": task.id, "labels": ["new", "triage"]},
+            architect.id,
+        )
+        self.assertFalse(labels_error, labels_text)
+        self.assertEqual(json.loads(labels_text)["updated_fields"], ["labels"])
+        updated = self.state.board_tasks[task.id]
+        self.assertEqual(updated.task, "Updated title")
+        self.assertEqual(updated.description, "Updated description")
+        self.assertEqual(updated.labels, ["new", "triage"])
+
+        clear_text, clear_error = await self._call(
+            "architect_task_update",
+            {"task": task.id, "labels": []},
+            architect.id,
+        )
+        self.assertFalse(clear_error, clear_text)
+        self.assertEqual(self.state.board_tasks[task.id].labels, [])
+
+        all_text, all_error = await self._call(
+            "architect_task_update",
+            {
+                "task": task.id,
+                "title": "Final title",
+                "description": "Final description",
+                "labels": ["final"],
+            },
+            architect.id,
+        )
+        self.assertFalse(all_error, all_text)
+        self.assertEqual(
+            json.loads(all_text)["updated_fields"],
+            ["title", "description", "labels"],
+        )
+        updated = self.state.board_tasks[task.id]
+        self.assertEqual(updated.task, "Final title")
+        self.assertEqual(updated.description, "Final description")
+        self.assertEqual(updated.labels, ["final"])
+
+    async def test_architect_task_update_enforces_creator_and_group_scope(self):
+        architect = self._add_architect("arch-1", "Architect")
+        other_architect = self._add_architect("arch-2", "Other Architect")
+        engineer = self._add_engineer(
+            "eng-alice", "Alice", hired_by_architect_id=architect.id
+        )
+        own_task = self._add_task(
+            "task-own",
+            "Own task",
+            created_by_architect_id=architect.id,
+        )
+        user_task = self._add_task("task-user-update", "User task")
+        engineer_task = self._add_task(
+            "task-engineer-update",
+            "Engineer task",
+            created_by_engineer_id=engineer.id,
+        )
+        system_task = self._add_task(
+            "task-system-update",
+            "System task",
+            parent_task_id=own_task.id,
+            pipeline_root_id=own_task.id,
+        )
+        other_arch_task = self._add_task(
+            "task-other-architect-update",
+            "Other architect task",
+            created_by_architect_id=other_architect.id,
+        )
+        self.state.groups["other"] = []
+        self.state._db_save_groups()
+        cross_group = self._add_task(
+            "task-cross-group-update",
+            "Cross-group task",
+            group="other",
+            created_by_architect_id=architect.id,
+        )
+
+        for task in (user_task, engineer_task, system_task, other_arch_task):
+            with self.subTest(task=task.id):
+                text, is_error = await self._call(
+                    "architect_task_update",
+                    {"task": task.id, "title": "Should not update"},
+                    architect.id,
+                )
+                self.assertTrue(is_error)
+                self.assertEqual(text, "Task was not created by this architect")
+                self.assertNotEqual(
+                    self.state.board_tasks[task.id].task,
+                    "Should not update",
+                )
+
+        cross_text, cross_error = await self._call(
+            "architect_task_update",
+            {"task": cross_group.id, "title": "Should not update"},
+            architect.id,
+        )
+        self.assertTrue(cross_error)
+        self.assertEqual(cross_text, "Task not found")
+        self.assertEqual(
+            self.state.board_tasks[cross_group.id].task,
+            "Cross-group task",
+        )
+
+    async def test_architect_task_update_rejects_empty_fields_and_bad_labels(self):
+        architect = self._add_architect("arch-1", "Architect")
+        task = self._add_task(
+            "task-update-invalid",
+            "Original",
+            description="Original description",
+            labels=["keep"],
+            created_by_architect_id=architect.id,
+        )
+
+        for args, expected in (
+            ({"title": ""}, "title is required"),
+            ({"description": "   "}, "description is required"),
+            ({"labels": "triage"}, "labels must be a list"),
+            ({}, "At least one editable field is required"),
+        ):
+            with self.subTest(args=args):
+                text, is_error = await self._call(
+                    "architect_task_update",
+                    {"task": task.id, **args},
+                    architect.id,
+                )
+                self.assertTrue(is_error)
+                self.assertEqual(text, expected)
+
+        self.assertEqual(self.state.board_tasks[task.id].task, "Original")
+        self.assertEqual(
+            self.state.board_tasks[task.id].description,
+            "Original description",
+        )
+        self.assertEqual(self.state.board_tasks[task.id].labels, ["keep"])
+
     async def test_architect_ask_creates_visible_human_attention_task(self):
         architect = self._add_architect("arch-1", "Architect")
         self.state.get_group_settings("loom").board_default_action = "feature/implement"
