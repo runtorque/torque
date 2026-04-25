@@ -279,6 +279,40 @@ test('_resolveFocusedAgent returns null when focusedItemId does not resolve', ()
   assert.equal(vm.runInContext(`_resolveFocusedAgent()`, context), null);
 });
 
+test('_resolveFocusedAgent resolves architect principal nav ids to the architect agent', () => {
+  const { context } = createHarness();
+  context.state.agents['arch-a'] = { id: 'arch-a', kind: 'architect', group: 'alpha', name: 'Arch' };
+  context.focusedItemId = 'principal:alpha:arch-a';
+  context.window._navGridItemMeta = {
+    'principal:alpha:arch-a': { type: 'principal', principalId: 'arch-a', group: 'alpha' },
+  };
+
+  const agent = vm.runInContext(`_resolveFocusedAgent()`, context);
+  assert.ok(agent, 'architect principal nav id should resolve to the architect agent');
+  assert.equal(agent.id, 'arch-a');
+});
+
+test('_resolveFocusedAgent resolves architect principal nav ids by string fallback when nav meta is missing', () => {
+  const { context } = createHarness();
+  context.state.agents['arch-a'] = { id: 'arch-a', kind: 'architect', group: 'alpha', name: 'Arch' };
+  context.focusedItemId = 'principal:alpha:arch-a';
+
+  const agent = vm.runInContext(`_resolveFocusedAgent()`, context);
+  assert.ok(agent, 'string fallback should resolve architect principal nav id');
+  assert.equal(agent.id, 'arch-a');
+});
+
+test('_resolveFocusedAgent returns null for the user principal nav id', () => {
+  const { context } = createHarness();
+  context.state.agents['arch-a'] = { id: 'arch-a', kind: 'architect', group: 'alpha', name: 'Arch' };
+  context.focusedItemId = 'principal:alpha:user';
+  context.window._navGridItemMeta = {
+    'principal:alpha:user': { type: 'principal', principalId: '', group: 'alpha' },
+  };
+
+  assert.equal(vm.runInContext(`_resolveFocusedAgent()`, context), null);
+});
+
 test('engineer panel renders journal, events, and worklog from the focused engineer group', () => {
   const { context, panel } = createHarness();
   context.state.group_settings = { alpha: { engineer_agent_id: 'engineer-1' } };
