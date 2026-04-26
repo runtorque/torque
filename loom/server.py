@@ -12076,26 +12076,33 @@ async def main(connection=None):
         cell_id = request.match_info.get("cell_id", "")
         terminal_clients.setdefault(cell_id, set()).add(ws)
         try:
+            # Initial sends use `_send_ui_ws_json` so client disconnects
+            # mid-handshake (browser tab closed before WS upgrade settles
+            # — common during reload) are swallowed cleanly instead of
+            # raising `ClientConnectionResetError` to the request handler.
             if not bridge.capabilities.supports_embedded_terminal:
-                await ws.send_str(json.dumps({
+                if not await _send_ui_ws_json(ws, {
                     "type": "error",
                     "message": "Embedded terminals are unavailable in this runtime.",
-                }))
+                }):
+                    return ws
             cell = state.agents.get(cell_id)
             if cell and cell.session_id:
-                await ws.send_str(json.dumps({
+                if not await _send_ui_ws_json(ws, {
                     "type": "snapshot",
                     "cell_id": cell_id,
                     "session_id": cell.session_id,
                     "data": bridge.get_terminal_buffer(cell.session_id),
-                }))
+                }):
+                    return ws
             else:
-                await ws.send_str(json.dumps({
+                if not await _send_ui_ws_json(ws, {
                     "type": "snapshot",
                     "cell_id": cell_id,
                     "session_id": "",
                     "data": "",
-                }))
+                }):
+                    return ws
             async for msg in ws:
                 if msg.type != aiohttp.WSMsgType.TEXT:
                     continue
