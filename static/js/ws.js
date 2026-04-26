@@ -25,19 +25,34 @@ var _resyncPending = false;
 var _awaitingFullState = false;
 var _pendingDeltaSurfaceInvalidations = null;
 var _pendingDeltaSurfaceRenderFrame = 0;
-// Track whether a user mouse/pointer press is in progress. While pressing,
-// defer DOM-replacing delta renders so the press's target element survives
-// long enough for the browser to fire the synthetic click on mouseup.
-// Without this, a delta firehose (e.g. worker mcp_call_append from :224)
-// rerenders between pointerdown and pointerup, swapping the target out and
-// silently suppressing the click.
+// Track whether the user is actively interacting with the DOM in a way
+// that a delta-driven rerender would interrupt. Two distinct interaction
+// modes share one flag:
 //
-// Critical: the post-press flush must NOT run inside pointerup capture phase,
-// because replacing DOM there changes pointerup's target before the browser
-// emits click — same suppression by a different path. We schedule the flush
-// in a microtask / rAF after pointerup so click fires on the original target
-// first, then the deferred renders apply.
-var _userPressing = false;
+// (a) Pointer press: pointerdown..pointerup window. While pressing, defer
+//     DOM-replacing renders so the press target survives long enough for
+//     the browser to fire the synthetic click on mouseup. Without this,
+//     a delta firehose (e.g. worker mcp_call_append from :224)
+//     rerenders between pointerdown and pointerup, swapping the target
+//     out and silently suppressing the click.
+//
+// (b) Text input typing / IME composition: keydown..keyup window inside
+//     a text field, plus compositionstart..compositionend for IME. The
+//     panel renderer captures `selectionStart`/`selectionEnd` BEFORE the
+//     innerHTML rebuild and restores them AFTER, but the value captured
+//     reflects state BEFORE the keystroke that's still in flight; if the
+//     browser is mid-keystroke when the rebuild runs, the new node is
+//     reattached but the in-flight char/composition is lost. Deferring
+//     renders during the keystroke window avoids the race entirely.
+//
+// Critical: the post-interaction flush must NOT run inside the capture
+// phase of the closing event (pointerup, keyup, compositionend), because
+// replacing DOM there changes the event's target before the browser
+// emits the synthetic follow-up (click for pointer, input for keystroke)
+// — same suppression by a different path. We schedule the flush in a
+// microtask / rAF after the closing event so the browser delivers the
+// follow-up on the original target first, then deferred renders apply.
+var _userPressing = false;  // legacy name; covers pointer + keyboard interaction now
 var _postPressFlushScheduled = false;
 function _flushAfterPress() {
   _postPressFlushScheduled = false;
@@ -55,21 +70,51 @@ function _schedulePostPressFlush() {
     _flushAfterPress();
   }
 }
+// True when the current event target is a text input / textarea /
+// contenteditable surface. We only want to gate renders on keydown when
+// the user is actively editing a text field — global hotkeys (e.g. Cmd+B,
+// Tab) should still allow renders to proceed.
+function _isTextEditingTarget(target) {
+  if (!target || typeof target !== 'object') return false;
+  var tag = String(target.tagName || '').toLowerCase();
+  if (tag === 'textarea') return true;
+  if (tag === 'input') {
+    var type = String(target.type || 'text').toLowerCase();
+    // Treat any non-button-like input as text-editing.
+    return type !== 'button' && type !== 'submit' && type !== 'reset'
+      && type !== 'checkbox' && type !== 'radio'
+      && type !== 'file' && type !== 'image';
+  }
+  return !!target.isContentEditable;
+}
 if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
   var _userPressEnd = function() {
     var wasPressing = _userPressing;
     _userPressing = false;
     if (wasPressing && _pendingDeltaSurfaceInvalidations) {
-      // Defer flush so the browser delivers the synthetic click on the
-      // original target before we swap DOM.
+      // Defer flush so the browser delivers the synthetic follow-up
+      // (click for pointer, input for keystroke) on the original target
+      // before we swap DOM.
       _schedulePostPressFlush();
     }
   };
   document.addEventListener('pointerdown', function() { _userPressing = true; }, true);
   document.addEventListener('pointerup', _userPressEnd, true);
   document.addEventListener('pointercancel', _userPressEnd, true);
-  // Safety net: clear the flag on blur in case pointerup is missed (e.g.
-  // capture lost mid-press).
+  // Keyboard typing in text fields: gate renders for the keystroke
+  // window so the in-flight character isn't dropped by an innerHTML
+  // rebuild between keydown and the corresponding `input` event.
+  document.addEventListener('keydown', function(ev) {
+    if (_isTextEditingTarget(ev && ev.target)) _userPressing = true;
+  }, true);
+  document.addEventListener('keyup', _userPressEnd, true);
+  // IME composition: composition events span multiple keystrokes for
+  // CJK / accented input. The renderer must not swap DOM mid-composition
+  // (composer state lives on the editing element and dies with the node).
+  document.addEventListener('compositionstart', function() { _userPressing = true; }, true);
+  document.addEventListener('compositionend', _userPressEnd, true);
+  // Safety net: clear the flag on blur in case the closing event is
+  // missed (e.g. capture lost mid-press, focus stolen mid-composition).
   if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
     window.addEventListener('blur', _userPressEnd);
   }

@@ -4418,6 +4418,18 @@ _LOOM_AI_SUBCMDS = (
     "progress", "done", "blocked", "error", "derive", "ask",
     "ready", "context", "name",
 )
+# Subset of `loom ai *` subcommands that hit `/api/cmd cmd=ai_report`
+# (i.e. produce live agent-state mutations). The ai_report handler emits
+# a synthetic `mcp_call_append` delta for these on the same broadcast
+# that carries the event_append + agent_upsert (see `_append_mcp`
+# wrapper in `handle_command`). The `/events` bridge then suppresses
+# its own duplicate broadcast for the matching PostToolUse so the
+# frontend sees one delta-bundle per call instead of two ~30-100ms
+# apart.
+_LOOM_AI_MCP_REPORT_ACTIONS = frozenset({
+    "progress", "done", "blocked", "error",
+    "ask", "derive", "ready", "verify", "name",
+})
 # Match a `loom ai <subcmd>` invocation inside a bash command string.
 # Anchored to command-start positions only — beginning of string or
 # after a shell command separator (;, &&, ||, |, newline, backtick).
@@ -10081,6 +10093,64 @@ async def main(connection=None):
 
                     def _append_mcp(c, act, msg=""):
                         _append_mcp_message(c, act, msg)
+                        # Emit a live `mcp_call_append` delta for the
+                        # synthetic `loom ai <act>` tool call on the
+                        # SAME broadcast that carries this report's
+                        # event_append + agent_upsert. Without this,
+                        # the only mcp_call_append for worker `loom ai *`
+                        # comes from the /events bridge (PostToolUse) —
+                        # a separate `state.broadcast()` ~30-100ms after
+                        # this one. That second broadcast misses rAF
+                        # coalesce in the frontend and produces a
+                        # second full DOM rebuild of the engineer panel
+                        # per `loom ai *` call (visible flicker, mid-
+                        # type selection loss, scroll-anchor churn).
+                        # The /events bridge still persists the row for
+                        # the on-demand mcp_calls fetch but skips its
+                        # own broadcast (see `_synthetic_loom_ai_tool`
+                        # branch in `handle_events` capture clause
+                        # below). Codex workers (no PostToolUse hooks)
+                        # continue to lack the persistent record but
+                        # now get the live delta from this path.
+                        if act in _LOOM_AI_MCP_REPORT_ACTIONS:
+                            try:
+                                _now = time.time()
+                                row = {
+                                    "cursor": 0,
+                                    "idempotency_key": "",
+                                    "cell_id": c.id,
+                                    "tool_name": "mcp__loom__loom_" + act,
+                                    "hook_event_name": "PostToolUse",
+                                    "session_id": getattr(
+                                        c, "session_id", "") or "",
+                                    "appended_at": _now,
+                                    "received_at": _now,
+                                    "duration_ms": None,
+                                    "success": act != "error",
+                                    "error": (msg if act == "error" else ""),
+                                    "args": {
+                                        "command": "loom ai " + act + (
+                                            ' "' + str(msg) + '"' if msg else ""
+                                        )
+                                    },
+                                    "args_redacted": False,
+                                    "result": None,
+                                    "result_redacted": True,
+                                    "agent_name": c.name,
+                                    "agent_slug": getattr(c, "slug", ""),
+                                    "agent_kind": getattr(c, "kind", ""),
+                                    "group": getattr(c, "group", ""),
+                                }
+                                state._emit(
+                                    "mcp_call_append",
+                                    group=row["group"],
+                                    call=row,
+                                )
+                            except Exception:
+                                log.exception(
+                                    "Failed to emit synthetic "
+                                    "mcp_call_append for ai_report"
+                                )
 
                     def _append_task_msg(t, act, msg, agent_name):
                         """Append to the task's persisted activity log."""
@@ -11885,10 +11955,20 @@ async def main(connection=None):
         try:
             raw_tool = str(raw.get("tool_name") or raw.get("name") or "")
             raw_hook = str(raw.get("hook_event_name") or raw.get("type") or "")
+            # When the bridge synthesized this tool name from a worker
+            # `loom ai *` Bash PostToolUse, the live `mcp_call_append`
+            # delta has already been emitted by the ai_report handler
+            # on the same broadcast as the report's event_append +
+            # agent_upsert. Suppress the duplicate broadcast here so the
+            # frontend sees ONE delta-bundle per call (rAF-coalesced),
+            # not two ~30-100ms apart. The persistent record is still
+            # written above, so on-demand `cmd=mcp_calls` fetches still
+            # resolve the row by cursor.
             if (
                 raw_tool.startswith("mcp__")
                 and raw_hook == "PostToolUse"
                 and not bool(response.get("duplicate"))
+                and not synthetic_loom_ai_tool
             ):
                 redacted_envelope = redact_event_for_mcp_call_log(
                     envelope,

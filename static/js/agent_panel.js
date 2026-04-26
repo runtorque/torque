@@ -3388,11 +3388,13 @@ function _agentPanelLegacyRenderDecisionRow(architectId, decision) {
     html += '<div class="architect-decision-body">';
     if (ui.editing) {
       html += '<input class="detail-inline-description-input architect-decision-input"'
+        + ' id="' + _esc(titleFocusKey) + '"'
         + ' data-focus-key="' + _esc(titleFocusKey) + '"'
         + ' value="' + _esc(ui.draft.title || '') + '"'
         + ' oninput="' + _agentPanelEventAttr('engineerDecisionDraftInput(' + decisionIdJs + ',\'title\',this.value)') + '"'
         + ' placeholder="Decision title">';
       html += '<textarea class="detail-inline-description-input architect-decision-textarea" rows="4"'
+        + ' id="' + _esc(rationaleFocusKey) + '"'
         + ' data-focus-key="' + _esc(rationaleFocusKey) + '"'
         + ' oninput="' + _agentPanelEventAttr('engineerDecisionDraftInput(' + decisionIdJs + ',\'rationale\',this.value)') + '"'
         + ' placeholder="Decision rationale...">' + _esc(ui.draft.rationale || '') + '</textarea>';
