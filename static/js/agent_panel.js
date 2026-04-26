@@ -2719,6 +2719,14 @@ function _agentPanelHeaderRight(root) {
 }
 
 function _agentPanelRenderFocusedTabInPlace(agent, kind, previousTab, activeTab) {
+  // LOOM:236 v8 instrumentation: enable with `window.__loomDebugRender = true;`
+  if (typeof window !== 'undefined' && window.__loomDebugRender) {
+    try {
+      console.log('[loom render] inPlace @' + Date.now()
+        + ' kind=' + kind + ' tab=' + activeTab
+        + ' agent=' + ((agent && agent.id) || ''));
+    } catch (_e) {}
+  }
   var el = document.getElementById('panel-agent');
   if (!el || !agent || kind === 'terminal') return false;
   if (typeof _engineerStopEventsCountdownTimer === 'function') {
@@ -2784,6 +2792,17 @@ function _agentPanelRefreshCurrentTab() {
 }
 
 function renderAgentPanel() {
+  // LOOM:236 v8 instrumentation: enable in browser devtools console
+  // with `window.__loomDebugRender = true;` to log every full panel
+  // rebuild + the calling stack. Use to identify residual firehose
+  // sources after the v4-v7 invalidation gates.
+  if (typeof window !== 'undefined' && window.__loomDebugRender) {
+    try {
+      var stk = (new Error()).stack || '';
+      console.warn('[loom render] renderAgentPanel @' + Date.now()
+        + ' caller:\n' + stk.split('\n').slice(2, 8).join('\n'));
+    } catch (_e) {}
+  }
   if (typeof _engineerStopEventsCountdownTimer === 'function') {
     _engineerStopEventsCountdownTimer();
   }
