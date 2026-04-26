@@ -666,9 +666,23 @@ function _deltaSurfaceInvalidations(ops, hints) {
       case 'engineer_sent_events':
       case 'engineer_worklog_append':
       case 'engineer_streams':
-      case 'engineer_streams_update':
-        _markSurface(flags, 'engineer');
+      case 'engineer_streams_update': {
+        // These ops are scoped to a specific engineer's group. The
+        // engineer panel only displays the focused engineer's stream /
+        // worklog / digest data, so a delta for engineer A's group
+        // shouldn't clobber engineer B's panel — high-frequency stream
+        // updates were the residual firehose surviving v4 + v5.
+        const _engOpGroup = String((op && op.group) || '');
+        if (!_engOpGroup) {
+          _markSurface(flags, 'engineer');
+          break;
+        }
+        const _engFocused = _focusedEngineerAgent();
+        if (_engFocused && String(_engFocused.group || '') === _engOpGroup) {
+          _markSurface(flags, 'engineer');
+        }
         break;
+      }
       case 'architect_journal_append':
         if (String((op && op.type) || '').toLowerCase() === 'decision') {
           _markSurface(flags, 'main', 'engineer');

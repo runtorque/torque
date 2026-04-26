@@ -9354,6 +9354,32 @@ test('event_append for non-focused agent does NOT invalidate engineer panel (LOO
     'event_append for non-focused agent should not refresh engineer panel');
 });
 
+test('engineer_streams_update for cross-group engineer does NOT invalidate focused engineer panel (LOOM:236 v7)', () => {
+  // P0 LOOM:236 v7 regression: high-frequency stream/digest/stats deltas
+  // for engineers in OTHER groups used to clobber the focused engineer
+  // panel via _markSurface(flags, 'engineer'). With multiple groups +
+  // active engineers, this fired several times per second per group.
+  const { context, sandbox, rafCallbacks, flushRaf } = createStandaloneDeltaBatchHarness(['engineer']);
+  // User has focused the alpha engineer; beta engineer's streams should not refresh alpha's panel.
+  runInContext(context, `
+    selectedAgentId = 'eng-alpha';
+    focusedItemId = 'eng-alpha';
+    if (!state.agents) state.agents = {};
+    state.agents['eng-alpha'] = { id: 'eng-alpha', group: 'alpha', kind: 'engineer', cell_type: 'agent' };
+  `);
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'engineer_streams_update',
+      group: 'beta',
+      streams: { count: 1, by_state: {}, items: [] },
+    }],
+  });
+  flushRaf();
+  assert.equal(sandbox.renderCalls.engineer, 0,
+    'engineer_streams_update for cross-group engineer should not refresh focused panel');
+});
+
 test('agent_upsert for non-focused agent does NOT invalidate engineer panel (LOOM:236 v5)', () => {
   // P0 LOOM:236 v5 regression: every worker activity pulse used to
   // invalidate the engineer panel system-wide via the dead-code
@@ -11996,6 +12022,14 @@ test('agent digest deltas rerender the main grid for engineer card pause state u
 test('engineer sent-event deltas rerender only the active agent panel surface', () => {
   const { context, sandbox } = createWsRenderHarness();
   sandbox._activePanelApp = 'engineer';
+  // LOOM:236 v7: focus an engineer in the same group so engineer-stream
+  // ops invalidate the panel (they're scoped to the focused engineer's group).
+  runInContext(context, `
+    selectedAgentId = 'eng-alpha';
+    focusedItemId = 'eng-alpha';
+    if (!state.agents) state.agents = {};
+    state.agents['eng-alpha'] = { id: 'eng-alpha', group: 'alpha', kind: 'engineer', cell_type: 'agent' };
+  `);
 
   context._handleDelta({
     seq: 1,
@@ -12052,6 +12086,13 @@ test('togglePanel renders the agent slot through renderAgentPanel only', () => {
 test('engineer worklog deltas rerender only the active agent panel surface', () => {
   const { context, sandbox } = createWsRenderHarness();
   sandbox._activePanelApp = 'engineer';
+  // LOOM:236 v7: focus an engineer in the same group.
+  runInContext(context, `
+    selectedAgentId = 'eng-alpha';
+    focusedItemId = 'eng-alpha';
+    if (!state.agents) state.agents = {};
+    state.agents['eng-alpha'] = { id: 'eng-alpha', group: 'alpha', kind: 'engineer', cell_type: 'agent' };
+  `);
 
   context._handleDelta({
     seq: 1,
@@ -12097,6 +12138,13 @@ test('engineer worklog deltas rerender only the active agent panel surface', () 
 test('engineer stream deltas rerender only the active agent panel surface', () => {
   const { context, sandbox } = createWsRenderHarness();
   sandbox._activePanelApp = 'engineer';
+  // LOOM:236 v7: focus an engineer in the same group.
+  runInContext(context, `
+    selectedAgentId = 'eng-alpha';
+    focusedItemId = 'eng-alpha';
+    if (!state.agents) state.agents = {};
+    state.agents['eng-alpha'] = { id: 'eng-alpha', group: 'alpha', kind: 'engineer', cell_type: 'agent' };
+  `);
 
   context._handleDelta({
     seq: 1,
