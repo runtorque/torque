@@ -2719,12 +2719,16 @@ function _agentPanelHeaderRight(root) {
 }
 
 function _agentPanelRenderFocusedTabInPlace(agent, kind, previousTab, activeTab) {
-  // LOOM:236 v8 instrumentation: enable with `window.__loomDebugRender = true;`
+  // LOOM:236 v8/v11 instrumentation: enable with `window.__loomDebugRender = true;`
+  // v11 adds caller stack so the user can identify which path is still
+  // firing in-place refreshes after v10's render-path skip.
   if (typeof window !== 'undefined' && window.__loomDebugRender) {
     try {
+      var stk = (new Error()).stack || '';
       console.log('[loom render] inPlace @' + Date.now()
         + ' kind=' + kind + ' tab=' + activeTab
-        + ' agent=' + ((agent && agent.id) || ''));
+        + ' agent=' + ((agent && agent.id) || '')
+        + '\n' + stk.split('\n').slice(2, 8).join('\n'));
     } catch (_e) {}
   }
   var el = document.getElementById('panel-agent');
