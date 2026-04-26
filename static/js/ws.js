@@ -630,9 +630,22 @@ function _deltaSurfaceInvalidations(ops, hints) {
       case 'group_rename':
       case 'groups_reorder':
       case 'group_settings_update':
-      case 'focus_update':
       case 'global_settings_update':
         _markSurface(flags, 'main', 'context', 'engineer');
+        break;
+      case 'focus_update':
+        // LOOM:236 v14: focus_update carries iTerm2 session/window focus
+        // (`active_session_id` / `current_window_id`), NOT agent panel
+        // selection state. The engineer panel renders from
+        // `focusedItemId` / `selectedAgentId` (client-side); the only
+        // consumer of `active_session_id` is a deep fallback in
+        // `_agentPanelCurrentGroup()` that never fires when an agent is
+        // focused. iTerm2's FocusMonitor emits this op every time the
+        // active terminal session changes — high-frequency on user
+        // interaction. Mark only the surfaces that actually display
+        // active-terminal state (main grid for the active-terminal
+        // indicator, context panel for terminal-related views).
+        _markSurface(flags, 'main', 'context');
         break;
       case 'task_upsert':
       case 'task_remove':
