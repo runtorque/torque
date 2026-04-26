@@ -683,25 +683,76 @@ function _deltaSurfaceInvalidations(ops, hints) {
         }
         break;
       }
-      case 'architect_journal_append':
+      case 'architect_journal_append': {
+        // Decisions still affect the main grid (decision count badges
+        // etc.). Engineer-panel refresh is only needed when the focused
+        // agent is the architect this entry belongs to — otherwise the
+        // panel doesn't display this data. (Frequent: architects journal
+        // dozens of entries per debug session.)
         if (String((op && op.type) || '').toLowerCase() === 'decision') {
-          _markSurface(flags, 'main', 'engineer');
-        } else {
+          _markSurface(flags, 'main');
+        }
+        const _ajFocused = _focusedEngineerAgent();
+        const _ajArchId = String((op && op.architect_id) || '');
+        if (_ajFocused && _ajArchId
+            && String(_ajFocused.id || '') === _ajArchId) {
           _markSurface(flags, 'engineer');
         }
         break;
-      case 'engineer_settings_update':
-        _markSurface(flags, 'main', 'engineer');
+      }
+      case 'engineer_settings_update': {
+        _markSurface(flags, 'main');
+        const _esFocused = _focusedEngineerAgent();
+        const _esGroup = String((op && op.group) || '');
+        if (_esFocused && _esGroup
+            && String(_esFocused.group || '') === _esGroup) {
+          _markSurface(flags, 'engineer');
+        }
         break;
-      case 'agent_digest_update':
-        _markSurface(flags, 'main', 'engineer');
+      }
+      case 'agent_digest_update': {
+        _markSurface(flags, 'main');
+        const _adFocused = _contextFocusedAgentBeforeDelta();
+        const _adCellId = String((op && op.cell_id) || '');
+        if (_adFocused && _adCellId && _adFocused === _adCellId) {
+          _markSurface(flags, 'engineer');
+        }
         break;
+      }
       case 'decision_upsert':
       case 'decision_remove':
       case 'pending_hire_upsert':
-      case 'pending_hire_resolve':
-        _markSurface(flags, 'main', 'engineer');
+      case 'pending_hire_resolve': {
+        _markSurface(flags, 'main');
+        const _dpFocused = _focusedEngineerAgent();
+        let _dpArchId = String((op && op.architect_id) || '');
+        // _remove / _resolve ops carry only the record id; resolve the
+        // architect via the cached record so the focused-architect gate
+        // still works.
+        if (!_dpArchId && op && op.id) {
+          const _opOpName = String(op.op || '');
+          let _existing = null;
+          if (_opOpName === 'decision_remove'
+              && state && state.decisions) {
+            _existing = state.decisions[op.id] || null;
+          } else if (_opOpName === 'pending_hire_resolve'
+              && state && state.pending_hires) {
+            _existing = state.pending_hires[op.id] || null;
+          }
+          if (_existing && _existing.architect_id) {
+            _dpArchId = String(_existing.architect_id || '');
+          }
+        }
+        if (_dpFocused && _dpArchId
+            && String(_dpFocused.id || '') === _dpArchId) {
+          _markSurface(flags, 'engineer');
+        } else if (!_dpArchId) {
+          // No way to tell which architect this belongs to — be safe and
+          // refresh. (Preserves legacy behavior for ops missing the field.)
+          _markSurface(flags, 'engineer');
+        }
         break;
+      }
       case 'ui_update':
         _applyUiSurfaceInvalidation(flags, op.key);
         break;

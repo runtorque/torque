@@ -4399,7 +4399,16 @@ test('decision and pending-hire deltas invalidate the main surface', () => {
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/ws.js');
 
-  runInContext(context, `_expectedSeq = 1;`);
+  // LOOM:236 v12: focus the architect that owns the decision/hire so
+  // the engineer-surface gate fires. Cross-architect decisions skip
+  // engineer (covered by a separate test below).
+  runInContext(context, `
+    _expectedSeq = 1;
+    selectedAgentId = 'arch-1';
+    focusedItemId = 'arch-1';
+    if (!state.agents) state.agents = {};
+    state.agents['arch-1'] = { id: 'arch-1', group: 'loom', kind: 'architect', cell_type: 'agent' };
+  `);
   context._handleDelta({
     seq: 1,
     ops: [
@@ -8471,7 +8480,12 @@ test('ws global settings delta live-applies xterm scrollback hook', () => {
 test('ws architect_journal_append delta invalidates the engineer surface and rerenders agent panel', () => {
   const { context, sandbox } = createWsRenderHarness();
   sandbox._activePanelApp = 'engineer';
+  // LOOM:236 v12: focus the architect that owns this journal so the gate fires.
   runInContext(context, `
+    selectedAgentId = 'arch-1';
+    focusedItemId = 'arch-1';
+    if (!state.agents) state.agents = {};
+    state.agents['arch-1'] = { id: 'arch-1', group: 'loom', kind: 'architect', cell_type: 'agent' };
     state.architect_journals = {
       'arch-1': [
         { id: 'j-0', architect_id: 'arch-1', type: 'observation',
@@ -9352,6 +9366,36 @@ test('event_append for non-focused agent does NOT invalidate engineer panel (LOO
   flushRaf();
   assert.equal(sandbox.renderCalls.engineer, 0,
     'event_append for non-focused agent should not refresh engineer panel');
+});
+
+test('architect_journal_append for non-focused architect does NOT invalidate engineer panel (LOOM:236 v12)', () => {
+  // P0 LOOM:236 v12 regression: every architect journal entry used to
+  // refresh the focused engineer panel via _markSurface(flags, 'main',
+  // 'engineer') regardless of which architect's journal it belonged to.
+  // Architects journal dozens of entries per debug session, so this was
+  // the residual firehose surviving v9 + v10.
+  const { context, sandbox, rafCallbacks, flushRaf } = createStandaloneDeltaBatchHarness(['engineer']);
+  // User has focused Panelsmith (engineer); a different architect journals.
+  runInContext(context, `
+    selectedAgentId = 'eng-1';
+    focusedItemId = 'eng-1';
+    if (!state.agents) state.agents = {};
+    state.agents['eng-1'] = { id: 'eng-1', group: 'loom', kind: 'engineer', cell_type: 'agent' };
+  `);
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'architect_journal_append',
+      id: 'j-1',
+      architect_id: 'arch-other',
+      type: 'observation',
+      entry: 'Routine note',
+      timestamp: 1,
+    }],
+  });
+  flushRaf();
+  assert.equal(sandbox.renderCalls.engineer, 0,
+    'architect_journal_append for non-focused architect should not refresh engineer panel');
 });
 
 test('engineer_streams_update for cross-group engineer does NOT invalidate focused engineer panel (LOOM:236 v7)', () => {
