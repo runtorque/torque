@@ -618,18 +618,23 @@ function _agentPanelCaptureScrollAnchor(container) {
   var items = _agentPanelAnchorItems(container);
   if (!items.length) return null;
   var containerRect = container.getBoundingClientRect();
+  // Pick the first item that overlaps the viewport. Items entirely above or
+  // entirely below the container are rejected so we never anchor to something
+  // the user can't see — a virtualized list can leave the rendered window
+  // outside the viewport (e.g. wheel-scrolled into a before/after spacer with
+  // a stale virtual record), and falling back to such an item produces a
+  // bogus capture offset that drives scrollTop toward 0 on the next rerender.
   var best = null;
   for (var i = 0; i < items.length; i++) {
     var item = items[i];
     if (!item || typeof item.getBoundingClientRect !== 'function') continue;
     var rect = item.getBoundingClientRect();
-    if (rect.bottom >= containerRect.top) {
+    if (rect.bottom >= containerRect.top && rect.top <= containerRect.bottom) {
       best = item;
       break;
     }
   }
-  if (!best) best = items[0];
-  if (!best || typeof best.getBoundingClientRect !== 'function') return null;
+  if (!best) return null;
   var anchorRect = best.getBoundingClientRect();
   return {
     key: _agentPanelAnchorKey(best),

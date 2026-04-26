@@ -8739,6 +8739,233 @@ test('renderAgentPanel preserves Decisions scroll anchor when a decision delta i
   assert.match(panel.innerHTML, /data-agent-panel-virtualized="true"/);
 });
 
+test('renderAgentPanel does not yank Decisions scroll to top when the viewport is in a virtual spacer', () => {
+  // Wheel-scrolling a virtualized Decisions list briefly leaves the viewport
+  // inside the before/after spacer (no rendered rows visible) when the
+  // virtual record is stale relative to scrollTop. The pre-fix anchor capture
+  // accepted any row whose bottom was at or below the container top — which
+  // included rows far BELOW the viewport — producing a huge positive offset
+  // (~1200px) that turned into a large negative anchor adjustment on the
+  // next rerender, clamping scrollTop to 0.
+  const { context, document } = createEngineerWsHarness();
+  const panel = document.getElementById('panel-agent');
+  const oldContent = new FakeElement('decisions-content-old');
+  const newContent = new FakeElement('decisions-content-new');
+  let currentContent = oldContent;
+
+  function makeAnchor(key, top, bottom) {
+    const el = new FakeElement();
+    el.setAttribute('data-agent-panel-anchor', key);
+    el.getBoundingClientRect = function() {
+      return { top, bottom, left: 0, right: 240, width: 240, height: bottom - top };
+    };
+    return el;
+  }
+
+  const decisions = {};
+  for (let i = 0; i < 90; i++) {
+    decisions[`d-${i}`] = {
+      id: `d-${i}`,
+      architect_id: 'arch-1',
+      title: `decision ${i}`,
+      rationale: `rationale ${i}`,
+      status: 'proposed',
+      updated_at: 1712345600 - i,
+    };
+  }
+  runInContext(context, `
+    state.agents = {
+      'arch-1': {
+        id: 'arch-1',
+        name: 'Architect One',
+        group: 'alpha',
+        kind: 'architect',
+        cell_type: 'agent'
+      }
+    };
+    state.decisions = ${JSON.stringify(decisions)};
+    focusedItemId = 'arch-1';
+    _agentPanelLastSelectedTabByKind.architect = 'decisions';
+  `);
+  context.renderAgentPanel();
+
+  // Viewport is at scrollTop=100 (user wheel-scrolled toward top) but the
+  // virtualization record is stale, so the rendered window is still at the
+  // mid-list range. Every rendered row sits FAR BELOW the viewport — pre-fix
+  // the capture would accept the first one (rect.bottom >= container.top)
+  // and store its huge positive offset.
+  oldContent.scrollTop = 100;
+  oldContent.getBoundingClientRect = function() {
+    return { top: 0, bottom: 140, left: 0, right: 240, width: 240, height: 140 };
+  };
+  oldContent.querySelectorAll = function(selector) {
+    if (selector === '[data-agent-panel-anchor]') {
+      return [
+        makeAnchor('decision-d-21', 1300, 1345),
+        makeAnchor('decision-d-22', 1350, 1395),
+        makeAnchor('decision-d-23', 1400, 1445),
+      ];
+    }
+    return [];
+  };
+
+  // After the rerender the new range catches up to scrollTop=100 — the same
+  // anchor key now sits in the visible band at a much smaller offset. Pre-fix
+  // this produces a large negative anchor adjustment (50 - 1300 = -1250) on
+  // top of the just-restored scrollTop=100, clamping scrollTop to 0.
+  const newRects = {
+    'decision-d-21': [50, 75],
+    'decision-d-22': [100, 125],
+    'decision-d-23': [150, 175],
+  };
+  newContent.scrollTop = 0;
+  newContent.getBoundingClientRect = function() {
+    return { top: 0, bottom: 140, left: 0, right: 240, width: 240, height: 140 };
+  };
+  newContent.querySelectorAll = function(selector) {
+    if (selector !== '[data-agent-panel-anchor]') return [];
+    return Object.keys(newRects).map((key) => makeAnchor(key, newRects[key][0], newRects[key][1]));
+  };
+
+  panel.querySelector = function(selector) {
+    if (selector === '.agent-panel-content') return currentContent;
+    return null;
+  };
+  Object.defineProperty(panel, 'innerHTML', {
+    configurable: true,
+    get() {
+      return this._innerHTML || '';
+    },
+    set(value) {
+      this._innerHTML = value;
+      currentContent = newContent;
+    },
+  });
+
+  runInContext(context, `_expectedSeq = 1;`);
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'decision_upsert',
+      id: 'd-new',
+      architect_id: 'arch-1',
+      title: 'new top decision',
+      rationale: 'new decision above the viewport',
+      status: 'proposed',
+      updated_at: 1712345700,
+    }],
+  });
+
+  // Scroll position should be preserved — no anchor adjustment should fire
+  // because no rendered row overlaps the viewport at capture time.
+  assert.equal(newContent.scrollTop, 100);
+});
+
+test('renderAgentPanel does not yank Journal scroll to top when the viewport is in a spacer-like dead zone', () => {
+  // Companion case for the architect Journal tab: if all currently rendered
+  // entries report screen positions far above the viewport (e.g. mid-render
+  // refresh while the user is wheel-scrolling), the pre-fix anchor capture
+  // would fall back to the first item and produce a wildly wrong offset.
+  const { context, document } = createEngineerWsHarness();
+  const panel = document.getElementById('panel-agent');
+  const oldContent = new FakeElement('journal-content-old');
+  const newContent = new FakeElement('journal-content-new');
+  let currentContent = oldContent;
+
+  function makeAnchor(key, top, bottom) {
+    const el = new FakeElement();
+    el.setAttribute('data-agent-panel-anchor', key);
+    el.getBoundingClientRect = function() {
+      return { top, bottom, left: 0, right: 240, width: 240, height: bottom - top };
+    };
+    return el;
+  }
+
+  const entries = [];
+  for (let i = 0; i < 90; i++) {
+    entries.push({
+      id: `j-${i}`,
+      architect_id: 'arch-1',
+      type: i === 0 ? 'checkpoint' : 'observation',
+      entry: `journal entry ${i}`,
+      timestamp: 1712345600 - i,
+    });
+  }
+  runInContext(context, `
+    state.agents = {
+      'arch-1': {
+        id: 'arch-1',
+        name: 'Architect One',
+        group: 'alpha',
+        kind: 'architect',
+        cell_type: 'agent'
+      }
+    };
+    state.architect_journals = { 'arch-1': ${JSON.stringify(entries)} };
+    focusedItemId = 'arch-1';
+    _agentPanelLastSelectedTabByKind.architect = 'journal';
+  `);
+  context.renderAgentPanel();
+
+  oldContent.scrollTop = 200;
+  oldContent.getBoundingClientRect = function() {
+    return { top: 0, bottom: 140, left: 0, right: 240, width: 240, height: 140 };
+  };
+  oldContent.querySelectorAll = function(selector) {
+    if (selector === '[data-agent-panel-anchor]') {
+      return [
+        makeAnchor('architect-journal-j-0', 900, 945),
+        makeAnchor('architect-journal-j-1', 950, 995),
+      ];
+    }
+    return [];
+  };
+
+  const newRects = {
+    'architect-journal-j-new': [10, 35],
+    'architect-journal-j-0': [50, 75],
+    'architect-journal-j-1': [100, 125],
+  };
+  newContent.scrollTop = 0;
+  newContent.getBoundingClientRect = function() {
+    return { top: 0, bottom: 140, left: 0, right: 240, width: 240, height: 140 };
+  };
+  newContent.querySelectorAll = function(selector) {
+    if (selector !== '[data-agent-panel-anchor]') return [];
+    return Object.keys(newRects).map((key) => makeAnchor(key, newRects[key][0], newRects[key][1]));
+  };
+
+  panel.querySelector = function(selector) {
+    if (selector === '.agent-panel-content') return currentContent;
+    return null;
+  };
+  Object.defineProperty(panel, 'innerHTML', {
+    configurable: true,
+    get() {
+      return this._innerHTML || '';
+    },
+    set(value) {
+      this._innerHTML = value;
+      currentContent = newContent;
+    },
+  });
+
+  runInContext(context, `_expectedSeq = 1;`);
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'architect_journal_append',
+      id: 'j-new',
+      architect_id: 'arch-1',
+      type: 'observation',
+      entry: 'new top journal entry',
+      timestamp: 1712345700,
+    }],
+  });
+
+  assert.equal(newContent.scrollTop, 200);
+});
+
 test('ws invalidation skips rerendering the active board for off-group task updates', () => {
   const { context, sandbox } = createWsRenderHarness();
   sandbox._activePanelApp = 'board';
