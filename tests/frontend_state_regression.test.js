@@ -9412,6 +9412,107 @@ test('user press defers an already-scheduled delta render frame across the press
   assert.equal(sandbox.renderCalls.engineer, 1);
 });
 
+test('keydown on a textarea defers delta-driven renders until keyup (LOOM:236 v3)', () => {
+  // P0 LOOM:236 v3 regression: even at moderate delta rate, an
+  // innerHTML rebuild during a keystroke replaces the focused textbox
+  // before the browser can dispatch the synthetic `input` event,
+  // dropping the in-flight character + breaking selection. The
+  // press-defer machinery from :235 is generalized to keydown..keyup
+  // for text-editing targets so the render is deferred until after
+  // the keystroke commits.
+  const { context, sandbox, rafCallbacks, flushRaf, document } =
+    createStandaloneDeltaBatchHarness(['engineer']);
+  // User starts typing in a textarea (e.g. architect-decision-textarea
+  // or engineer-reply-input). keydown event with a TEXTAREA target.
+  document.listeners.keydown && document.listeners.keydown({
+    target: { tagName: 'TEXTAREA' },
+  });
+  // Burst of deltas during the keystroke window.
+  for (let i = 1; i <= 5; i++) {
+    context._handleDelta({
+      seq: i,
+      ops: [{
+        op: 'agent_upsert',
+        id: 'agent-1',
+        group: 'alpha',
+        name: 'Worker ' + i,
+        cell_type: 'agent',
+        kind: 'worker',
+        status: 'running',
+      }],
+    });
+  }
+  // No rAF scheduled and no render fired: the keystroke is in flight.
+  assert.equal(rafCallbacks.length, 0);
+  assert.equal(sandbox.renderCalls.engineer, 0);
+
+  // keyup releases the gate; deferred flush runs on the next frame so
+  // the browser delivers `input` on the original target first.
+  document.listeners.keyup && document.listeners.keyup({});
+  assert.equal(sandbox.renderCalls.engineer, 0);
+  assert.equal(rafCallbacks.length, 1);
+  flushRaf();
+  assert.equal(sandbox.renderCalls.engineer, 1);
+});
+
+test('keydown outside text-editing targets does NOT defer renders (LOOM:236 v3)', () => {
+  // Global hotkeys (Cmd+B, Tab, etc.) fire keydown on document.body or
+  // a button — those should pass through to renders normally so
+  // navigation/shortcuts don't queue up while the user is browsing.
+  const { context, sandbox, rafCallbacks, flushRaf, document } =
+    createStandaloneDeltaBatchHarness(['engineer']);
+  // keydown on a non-editing target (e.g. button).
+  document.listeners.keydown && document.listeners.keydown({
+    target: { tagName: 'BUTTON' },
+  });
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'agent_upsert',
+      id: 'agent-1',
+      group: 'alpha',
+      name: 'Worker',
+      cell_type: 'agent',
+      kind: 'worker',
+      status: 'running',
+    }],
+  });
+  // rAF should be scheduled normally; render fires on flush.
+  assert.equal(rafCallbacks.length, 1);
+  flushRaf();
+  assert.equal(sandbox.renderCalls.engineer, 1);
+});
+
+test('IME compositionstart..compositionend defers delta-driven renders (LOOM:236 v3)', () => {
+  // CJK / accented input via IME spans multiple keystrokes joined by
+  // composition events. The composer state lives on the editing
+  // element and is destroyed if innerHTML rebuild swaps the node
+  // mid-composition. Defer renders for the full composition window.
+  const { context, sandbox, rafCallbacks, flushRaf, document } =
+    createStandaloneDeltaBatchHarness(['engineer']);
+  document.listeners.compositionstart && document.listeners.compositionstart({});
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'agent_upsert',
+      id: 'agent-1',
+      group: 'alpha',
+      name: 'Worker',
+      cell_type: 'agent',
+      kind: 'worker',
+      status: 'running',
+    }],
+  });
+  // Composition in progress — no render.
+  assert.equal(rafCallbacks.length, 0);
+  assert.equal(sandbox.renderCalls.engineer, 0);
+
+  document.listeners.compositionend && document.listeners.compositionend({});
+  assert.equal(rafCallbacks.length, 1);
+  flushRaf();
+  assert.equal(sandbox.renderCalls.engineer, 1);
+});
+
 test('new agent upserts without a focus_update preserve the active selection', () => {
   const { context } = createWsRenderHarness();
   runInContext(context, `
