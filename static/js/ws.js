@@ -611,9 +611,15 @@ function _markSurface(flags) {
 
 function _deltaSurfaceInvalidations(ops, hints) {
   const flags = _blankSurfaceInvalidations();
+  // LOOM:236 v13 instrumentation: when window.__loomDebugRender is true,
+  // record which delta op type flipped flags.engineer to true so the
+  // user's reproduction shows what's slipping through the gates.
+  const _debug = (typeof window !== 'undefined' && window.__loomDebugRender);
+  let _engBefore = false;
   for (let i = 0; i < ops.length; i++) {
     const op = ops[i];
     const hint = hints && hints[i] ? hints[i] : {};
+    if (_debug) _engBefore = !!flags.engineer;
     switch (op.op) {
       case 'agent_upsert':
       case 'agent_remove':
@@ -756,6 +762,19 @@ function _deltaSurfaceInvalidations(ops, hints) {
       case 'ui_update':
         _applyUiSurfaceInvalidation(flags, op.key);
         break;
+    }
+    if (_debug && !_engBefore && flags.engineer) {
+      try {
+        const _opSummary = {
+          op: op.op,
+          id: op.id || '',
+          group: op.group || '',
+          cell_id: op.cell_id || (op.call && op.call.cell_id) || '',
+          architect_id: op.architect_id || '',
+        };
+        console.warn('[loom render] engineer-flag set by op:',
+          JSON.stringify(_opSummary));
+      } catch (_e) {}
     }
   }
   return flags;
