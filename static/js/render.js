@@ -413,7 +413,19 @@ function _renderSurface(surface) {
   if (surface === 'actions' && typeof renderTemplatesPanel === 'function') renderTemplatesPanel();
   if (surface === 'context' && typeof renderContextPanel === 'function') renderContextPanel();
   if (surface === 'events' && typeof renderEvents === 'function') renderEvents();
-  if (surface === 'engineer' && typeof renderAgentPanel === 'function') renderAgentPanel();
+  if (surface === 'engineer' && typeof renderAgentPanel === 'function') {
+    // Prefer the surgical in-place tab refresh — clobbers only
+    // `.agent-panel-content` (with focus/selection capture+restore around
+    // it) instead of the full `#panel-agent` shell. Falls back to the
+    // full rebuild if the in-place renderer can't satisfy the request
+    // (e.g. shell mismatch / first paint / no focused agent).
+    if (typeof _agentPanelRefreshCurrentTab === 'function'
+        && _agentPanelRefreshCurrentTab()) {
+      // Surgical path handled it.
+    } else {
+      renderAgentPanel();
+    }
+  }
   if (surface === 'templates' && typeof renderAgentTemplatesPanel === 'function') renderAgentTemplatesPanel();
 }
 
