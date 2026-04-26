@@ -2015,7 +2015,19 @@ function render() {
   if (typeof updateEventsAttentionBadge === 'function') updateEventsAttentionBadge();
   if (typeof renderAgentPanel === 'function') {
     const surfaces = _currentPanelSurfaces();
-    if (surfaces.includes('engineer')) renderAgentPanel();
+    if (surfaces.includes('engineer')) {
+      // LOOM:236 v9: route through surgical-first instead of full
+      // `renderAgentPanel()` clobber. `render()` fires on EVERY `main`
+      // surface invalidation (which is unconditionally set on every
+      // agent_upsert), so a full rebuild here was the dominant
+      // firehose surviving v4-v7 — confirmed via v8 instrumentation.
+      if (typeof _agentPanelRefreshCurrentTab === 'function'
+          && _agentPanelRefreshCurrentTab()) {
+        // Surgical path handled it.
+      } else {
+        renderAgentPanel();
+      }
+    }
   }
   if (typeof renderTerminalWorkspace === 'function') renderTerminalWorkspace();
 }
