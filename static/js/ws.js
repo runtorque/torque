@@ -638,9 +638,26 @@ function _deltaSurfaceInvalidations(ops, hints) {
         _markSurface(flags, 'board');
         break;
       case 'event_append':
-      case 'mcp_call_append':
-        _markSurface(flags, 'events', 'engineer');
+      case 'mcp_call_append': {
+        _markSurface(flags, 'events');
+        // Engineer panel only needs a full re-render when the append
+        // belongs to the focused agent. Cross-agent traffic (e.g. another
+        // worker firing loom_progress while the user is reading a
+        // different agent's panel) used to clobber the focused panel's
+        // DOM — destroying any in-progress textarea selection / scroll
+        // anchor — even though nothing the panel displayed had changed.
+        // Same-agent traffic still refreshes (the user is watching that
+        // agent's events / MCP feed and expects updates).
+        const _appendFocusedId = _contextFocusedAgentBeforeDelta();
+        const _appendCellId = (op.op === 'mcp_call_append')
+          ? String((op.call && op.call.cell_id) || '')
+          : String(op.cell_id || '');
+        if (_appendFocusedId && _appendCellId
+            && _appendFocusedId === _appendCellId) {
+          _markSurface(flags, 'engineer');
+        }
         break;
+      }
       case 'journal_append':
       case 'journal_delete':
       case 'digest_buffer_stats':

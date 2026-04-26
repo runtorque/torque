@@ -9283,6 +9283,77 @@ test('standalone event_append deltas batch events rendering and keep log state i
   });
 });
 
+test('mcp_call_append for non-focused agent does NOT invalidate engineer panel (LOOM:236 v4)', () => {
+  // P0 LOOM:236 final fix: cross-agent MCP traffic used to clobber the
+  // focused engineer panel via _renderSurface('engineer') -> renderAgentPanel(),
+  // destroying the textarea node + scroll anchor on every worker MCP call,
+  // even though nothing the panel displayed had changed. The fix gates
+  // engineer-surface invalidation on `cell_id === focused agent id`.
+  const { context, sandbox, rafCallbacks, flushRaf } = createStandaloneDeltaBatchHarness(['engineer']);
+  // User has focused agent-1; another worker (agent-2) fires an MCP call.
+  runInContext(context, `selectedAgentId = 'agent-1';`);
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'mcp_call_append',
+      group: 'alpha',
+      call: {
+        cell_id: 'agent-2',
+        tool_name: 'mcp__loom__loom_progress',
+        hook_event_name: 'PostToolUse',
+        cursor: 1,
+      },
+    }],
+  });
+  flushRaf();
+  // Engineer panel must NOT have re-rendered for cross-agent MCP traffic.
+  assert.equal(sandbox.renderCalls.engineer, 0,
+    'mcp_call_append for non-focused agent should not refresh engineer panel');
+});
+
+test('mcp_call_append for focused agent DOES invalidate engineer panel (LOOM:236 v4)', () => {
+  // Same-agent traffic still refreshes — the user is watching that agent's
+  // MCP feed and expects updates.
+  const { context, sandbox, rafCallbacks, flushRaf } = createStandaloneDeltaBatchHarness(['engineer']);
+  runInContext(context, `selectedAgentId = 'agent-1';`);
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'mcp_call_append',
+      group: 'alpha',
+      call: {
+        cell_id: 'agent-1',
+        tool_name: 'mcp__loom__loom_progress',
+        hook_event_name: 'PostToolUse',
+        cursor: 1,
+      },
+    }],
+  });
+  flushRaf();
+  assert.equal(sandbox.renderCalls.engineer, 1,
+    'mcp_call_append for focused agent should refresh engineer panel');
+});
+
+test('event_append for non-focused agent does NOT invalidate engineer panel (LOOM:236 v4)', () => {
+  const { context, sandbox, rafCallbacks, flushRaf } = createStandaloneDeltaBatchHarness(['engineer']);
+  runInContext(context, `selectedAgentId = 'agent-1';`);
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'event_append',
+      id: 'evt-1',
+      group: 'alpha',
+      cell_id: 'agent-2',
+      kind: 'agent_progress',
+      message: 'Cross-agent progress',
+      timestamp: 1,
+    }],
+  });
+  flushRaf();
+  assert.equal(sandbox.renderCalls.engineer, 0,
+    'event_append for non-focused agent should not refresh engineer panel');
+});
+
 test('standalone agent_upsert deltas batch current-group engineer rendering', () => {
   const { context, sandbox, rafCallbacks, flushRaf } = createStandaloneDeltaBatchHarness(['engineer']);
 
