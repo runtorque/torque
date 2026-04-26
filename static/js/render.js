@@ -438,7 +438,13 @@ function renderActivePanel() {
 
 function renderInvalidatedSurfaces(flags) {
   if (!flags) return;
-  if (flags.main) render();
+  // LOOM:236 v10: when the main flag fires, skip render()'s trailing
+  // agent-panel refresh — the surfaces loop below already dispatches
+  // `_renderSurface('engineer')` if the engineer flag is independently
+  // set. This eliminates the redundant in-place panel refresh that
+  // hundreds of agent_upsert pulses per second produced (cheap post-v9
+  // but still wasteful + masks any future capture/restore regression).
+  if (flags.main) render({ skipPanelRefresh: true });
   const surfaces = _currentPanelSurfaces();
   for (let i = 0; i < surfaces.length; i++) {
     const surface = surfaces[i];
@@ -1783,8 +1789,16 @@ function _renderEngineerRow(row, renderCell) {
   return html;
 }
 
-function render() {
+function render(opts) {
   const main = document.getElementById('main');
+  // LOOM:236 v10: when render() is invoked from a delta-driven invalidation
+  // and only the main surface was flagged (not engineer), skip the trailing
+  // agent-panel refresh — the surfaces dispatch loop already calls
+  // `_renderSurface('engineer')` independently when the engineer flag is
+  // set. Without this hint, every main-surface delta caused a redundant
+  // `_agentPanelRefreshCurrentTab()` even when nothing the panel displays
+  // had changed (still surgical post-v9, but wasteful CPU + future-fragile).
+  const _skipPanelRefresh = !!(opts && opts.skipPanelRefresh);
   const groupNames = Object.keys(state.groups);
   const embeddedMode = _embeddedRuntimeEnabled();
   _pruneAgentDoneFlourishes((state && state.agents) || {});
@@ -2013,14 +2027,11 @@ function render() {
   renderPendingHireBanner();
   _updateEngineerTaskbarBadge();
   if (typeof updateEventsAttentionBadge === 'function') updateEventsAttentionBadge();
-  if (typeof renderAgentPanel === 'function') {
+  if (!_skipPanelRefresh && typeof renderAgentPanel === 'function') {
     const surfaces = _currentPanelSurfaces();
     if (surfaces.includes('engineer')) {
       // LOOM:236 v9: route through surgical-first instead of full
-      // `renderAgentPanel()` clobber. `render()` fires on EVERY `main`
-      // surface invalidation (which is unconditionally set on every
-      // agent_upsert), so a full rebuild here was the dominant
-      // firehose surviving v4-v7 — confirmed via v8 instrumentation.
+      // `renderAgentPanel()` clobber.
       if (typeof _agentPanelRefreshCurrentTab === 'function'
           && _agentPanelRefreshCurrentTab()) {
         // Surgical path handled it.
