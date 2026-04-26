@@ -9354,8 +9354,82 @@ test('event_append for non-focused agent does NOT invalidate engineer panel (LOO
     'event_append for non-focused agent should not refresh engineer panel');
 });
 
+test('agent_upsert for non-focused agent does NOT invalidate engineer panel (LOOM:236 v5)', () => {
+  // P0 LOOM:236 v5 regression: every worker activity pulse used to
+  // invalidate the engineer panel system-wide via the dead-code
+  // fallthrough `return true` in `_agentDeltaInvalidatesEngineer`. With
+  // workers churning agent_upsert per progress event, this clobbered the
+  // focused panel's textarea + scroll several times per second.
+  const { context, sandbox, rafCallbacks, flushRaf } = createStandaloneDeltaBatchHarness(['engineer']);
+  // User has focused agent-1; agent-2 (unrelated worker) churns activity.
+  runInContext(context, `
+    selectedAgentId = 'agent-1';
+    focusedItemId = 'agent-1';
+    if (!state.agents) state.agents = {};
+    state.agents['agent-1'] = { id: 'agent-1', group: 'alpha', kind: 'worker', cell_type: 'agent' };
+  `);
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'agent_upsert',
+      id: 'agent-2',
+      group: 'alpha',
+      name: 'Other Worker',
+      cell_type: 'agent',
+      kind: 'worker',
+      status: 'running',
+      activity_detail: 'pulse 1',
+    }],
+  });
+  flushRaf();
+  // Engineer panel must NOT have re-rendered for unrelated worker churn.
+  assert.equal(sandbox.renderCalls.engineer, 0,
+    'agent_upsert for unrelated agent should not refresh engineer panel');
+});
+
+test('agent_upsert for engineer-owned worker DOES invalidate focused engineer panel (LOOM:236 v5)', () => {
+  // Workers owned by the focused engineer must still refresh — workers list
+  // / worklog views in the engineer panel read those workers' status.
+  const { context, sandbox, rafCallbacks, flushRaf } = createStandaloneDeltaBatchHarness(['engineer']);
+  runInContext(context, `
+    selectedAgentId = 'engineer-1';
+    focusedItemId = 'engineer-1';
+    if (!state.agents) state.agents = {};
+    state.agents['engineer-1'] = {
+      id: 'engineer-1',
+      group: 'alpha',
+      kind: 'engineer',
+      cell_type: 'agent',
+    };
+  `);
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'agent_upsert',
+      id: 'worker-of-engineer-1',
+      group: 'alpha',
+      name: 'Worker',
+      cell_type: 'agent',
+      kind: 'worker',
+      status: 'running',
+      owner_engineer_id: 'engineer-1',
+    }],
+  });
+  flushRaf();
+  assert.equal(sandbox.renderCalls.engineer, 1,
+    'agent_upsert for worker owned by focused engineer should refresh panel');
+});
+
 test('standalone agent_upsert deltas batch current-group engineer rendering', () => {
   const { context, sandbox, rafCallbacks, flushRaf } = createStandaloneDeltaBatchHarness(['engineer']);
+  // LOOM:236 v5: engineer-surface invalidation is now gated on focused-agent
+  // relevance, so the test must focus the agent receiving the upserts.
+  runInContext(context, `
+    selectedAgentId = 'agent-1';
+    focusedItemId = 'agent-1';
+    if (!state.agents) state.agents = {};
+    state.agents['agent-1'] = { id: 'agent-1', group: 'alpha', kind: 'worker', cell_type: 'agent' };
+  `);
 
   for (let i = 1; i <= 20; i++) {
     context._handleDelta({
@@ -9393,6 +9467,14 @@ test('user press defers delta-driven DOM-replacing renders until after release',
   // emits the click; the deferred batch flushes on the next frame after
   // pointerup so the click target is delivered before any DOM swap.
   const { context, sandbox, rafCallbacks, flushRaf, document } = createStandaloneDeltaBatchHarness(['engineer']);
+  // LOOM:236 v5: focus the agent receiving deltas so engineer surface invalidates.
+  runInContext(context, `
+    selectedAgentId = 'agent-1';
+    focusedItemId = 'agent-1';
+    if (!state.agents) state.agents = {};
+    state.agents['agent-1'] = state.agents['agent-1']
+      || { id: 'agent-1', group: 'alpha', kind: 'worker', cell_type: 'agent' };
+  `);
   // Press starts before any delta arrives.
   document.listeners.pointerdown && document.listeners.pointerdown({});
   // Burst of agent_upsert deltas during the press window (mirrors the
@@ -9435,6 +9517,14 @@ test('user press defers an already-scheduled delta render frame across the press
   // attempt: a frame queued before pointerdown must NOT swap the DOM during
   // the press, and the batch must flush on the next frame after release.
   const { context, sandbox, rafCallbacks, flushRaf, document } = createStandaloneDeltaBatchHarness(['engineer']);
+  // LOOM:236 v5: focus the agent receiving deltas so engineer surface invalidates.
+  runInContext(context, `
+    selectedAgentId = 'agent-1';
+    focusedItemId = 'agent-1';
+    if (!state.agents) state.agents = {};
+    state.agents['agent-1'] = state.agents['agent-1']
+      || { id: 'agent-1', group: 'alpha', kind: 'worker', cell_type: 'agent' };
+  `);
 
   context._handleDelta({
     seq: 1,
@@ -9493,6 +9583,14 @@ test('keydown on a textarea defers delta-driven renders until keyup (LOOM:236 v3
   // the keystroke commits.
   const { context, sandbox, rafCallbacks, flushRaf, document } =
     createStandaloneDeltaBatchHarness(['engineer']);
+  // LOOM:236 v5: focus the agent receiving deltas so engineer surface invalidates.
+  runInContext(context, `
+    selectedAgentId = 'agent-1';
+    focusedItemId = 'agent-1';
+    if (!state.agents) state.agents = {};
+    state.agents['agent-1'] = state.agents['agent-1']
+      || { id: 'agent-1', group: 'alpha', kind: 'worker', cell_type: 'agent' };
+  `);
   // User starts typing in a textarea (e.g. architect-decision-textarea
   // or engineer-reply-input). keydown event with a TEXTAREA target.
   document.listeners.keydown && document.listeners.keydown({
@@ -9532,6 +9630,14 @@ test('keydown outside text-editing targets does NOT defer renders (LOOM:236 v3)'
   // navigation/shortcuts don't queue up while the user is browsing.
   const { context, sandbox, rafCallbacks, flushRaf, document } =
     createStandaloneDeltaBatchHarness(['engineer']);
+  // LOOM:236 v5: focus the agent receiving deltas so engineer surface invalidates.
+  runInContext(context, `
+    selectedAgentId = 'agent-1';
+    focusedItemId = 'agent-1';
+    if (!state.agents) state.agents = {};
+    state.agents['agent-1'] = state.agents['agent-1']
+      || { id: 'agent-1', group: 'alpha', kind: 'worker', cell_type: 'agent' };
+  `);
   // keydown on a non-editing target (e.g. button).
   document.listeners.keydown && document.listeners.keydown({
     target: { tagName: 'BUTTON' },
@@ -9561,6 +9667,14 @@ test('IME compositionstart..compositionend defers delta-driven renders (LOOM:236
   // mid-composition. Defer renders for the full composition window.
   const { context, sandbox, rafCallbacks, flushRaf, document } =
     createStandaloneDeltaBatchHarness(['engineer']);
+  // LOOM:236 v5: focus the agent receiving deltas so engineer surface invalidates.
+  runInContext(context, `
+    selectedAgentId = 'agent-1';
+    focusedItemId = 'agent-1';
+    if (!state.agents) state.agents = {};
+    state.agents['agent-1'] = state.agents['agent-1']
+      || { id: 'agent-1', group: 'alpha', kind: 'worker', cell_type: 'agent' };
+  `);
   document.listeners.compositionstart && document.listeners.compositionstart({});
   context._handleDelta({
     seq: 1,

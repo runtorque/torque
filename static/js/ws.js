@@ -1154,9 +1154,25 @@ function _agentDeltaInvalidatesEngineer(previous, next, op) {
   const group = _currentSurfaceGroup();
   if (!_agentTouchesGroup(previous, next, group)) return false;
   const focused = _focusedEngineerAgent();
+  if (!focused) return false;
   const agentId = String((op && op.id) || (previous && previous.id) || (next && next.id) || '');
-  if (focused && agentId && String(focused.id || '') === agentId) return true;
-  return true;
+  const focusedId = String(focused.id || '');
+  if (agentId && focusedId && agentId === focusedId) return true;
+  // Engineer-kind focus: workers list / worklog views read related workers.
+  // For now, only refresh on agents the focused engineer owns. Cross-engineer
+  // / cross-owner traffic in the same group used to refresh unconditionally
+  // (the trailing `return true` here), which clobbered the focused panel's
+  // textarea + scroll on every worker activity pulse — the dominant firehose
+  // surviving the LOOM:236 v4 mcp/event surface gate.
+  const focusedKind = _focusedEngineerAgentKind(focused);
+  if (focusedKind === 'engineer' || focusedKind === 'architect') {
+    const ownerPrev = previous ? String(previous.owner_engineer_id || '') : '';
+    const ownerNext = next ? String(next.owner_engineer_id || '') : '';
+    if (focusedId && (ownerPrev === focusedId || ownerNext === focusedId)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function _applyAgentSurfaceInvalidation(flags, op, hint) {
