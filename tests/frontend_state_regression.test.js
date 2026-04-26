@@ -8631,6 +8631,114 @@ test('renderAgentPanel preserves Architect Journal scroll anchor when a journal 
   assert.doesNotMatch(panel.innerHTML, /data-agent-panel-virtualized="true"/);
 });
 
+test('renderAgentPanel preserves Decisions scroll anchor when a decision delta inserts above', () => {
+  const { context, document } = createEngineerWsHarness();
+  const panel = document.getElementById('panel-agent');
+  const oldContent = new FakeElement('decisions-content-old');
+  const newContent = new FakeElement('decisions-content-new');
+  let currentContent = oldContent;
+
+  function makeAnchor(key, top, bottom) {
+    const el = new FakeElement();
+    el.setAttribute('data-agent-panel-anchor', key);
+    el.getBoundingClientRect = function() {
+      return { top, bottom, left: 0, right: 240, width: 240, height: bottom - top };
+    };
+    return el;
+  }
+
+  const decisions = {};
+  for (let i = 0; i < 90; i++) {
+    decisions[`d-${i}`] = {
+      id: `d-${i}`,
+      architect_id: 'arch-1',
+      title: `decision ${i}`,
+      rationale: `rationale ${i}`,
+      status: 'proposed',
+      updated_at: 1712345600 - i,
+    };
+  }
+  runInContext(context, `
+    state.agents = {
+      'arch-1': {
+        id: 'arch-1',
+        name: 'Architect One',
+        group: 'alpha',
+        kind: 'architect',
+        cell_type: 'agent'
+      }
+    };
+    state.decisions = ${JSON.stringify(decisions)};
+    focusedItemId = 'arch-1';
+    _agentPanelLastSelectedTabByKind.architect = 'decisions';
+  `);
+  context.renderAgentPanel();
+
+  oldContent.scrollTop = 2320;
+  oldContent.getBoundingClientRect = function() {
+    return { top: 0, bottom: 140, left: 0, right: 240, width: 240, height: 140 };
+  };
+  oldContent.querySelectorAll = function(selector) {
+    if (selector === '[data-agent-panel-anchor]') {
+      return [
+        makeAnchor('decision-d-20', 20, 45),
+        makeAnchor('decision-d-21', 70, 95),
+      ];
+    }
+    return [];
+  };
+
+  const newRects = {
+    'decision-d-new': [10, 35],
+    'decision-d-20': [50, 75],
+    'decision-d-21': [100, 125],
+  };
+  newContent.scrollTop = 0;
+  newContent.getBoundingClientRect = function() {
+    return { top: 0, bottom: 140, left: 0, right: 240, width: 240, height: 140 };
+  };
+  newContent.querySelectorAll = function(selector) {
+    if (selector !== '[data-agent-panel-anchor]') return [];
+    const html = panel.innerHTML || '';
+    return Object.keys(newRects)
+      .filter((key) => html.includes(`data-agent-panel-anchor="${key}"`))
+      .map((key) => makeAnchor(key, newRects[key][0], newRects[key][1]));
+  };
+
+  panel.querySelector = function(selector) {
+    if (selector === '.agent-panel-content') return currentContent;
+    return null;
+  };
+  Object.defineProperty(panel, 'innerHTML', {
+    configurable: true,
+    get() {
+      return this._innerHTML || '';
+    },
+    set(value) {
+      this._innerHTML = value;
+      currentContent = newContent;
+    },
+  });
+
+  runInContext(context, `_expectedSeq = 1;`);
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'decision_upsert',
+      id: 'd-new',
+      architect_id: 'arch-1',
+      title: 'new top decision',
+      rationale: 'new decision above the viewport',
+      status: 'proposed',
+      updated_at: 1712345700,
+    }],
+  });
+
+  assert.equal(newContent.scrollTop, 2350);
+  assert.match(panel.innerHTML, /decision-d-20/);
+  assert.match(panel.innerHTML, /data-agent-panel-virtualized="true"/);
+});
+
 test('ws invalidation skips rerendering the active board for off-group task updates', () => {
   const { context, sandbox } = createWsRenderHarness();
   sandbox._activePanelApp = 'board';
