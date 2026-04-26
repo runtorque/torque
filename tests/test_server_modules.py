@@ -2152,9 +2152,12 @@ class ResolvePendingEngineerSpecializationsTests(unittest.TestCase):
         self.assertEqual(result, ["ui-frontend"])
 
 
-class LoomAiMcpToolNameBridgeTests(unittest.TestCase):
-    """Worker `loom ai *` Bash PostToolUse rewrites into the engineer/architect
-    MCP capture surface (LOOM:236 follow-up to the rolled-back :224 mirror).
+class LoomAiMcpReportToolNamesTests(unittest.TestCase):
+    """LOOM:238 cutover: workers report exclusively via
+    `mcp__loom__loom_*` MCP tools (no Bash CLI rewrite bridge). The
+    `_LOOM_AI_MCP_REPORT_TOOL_NAMES` set drives the `/events` capture
+    clause's broadcast-suppression for those specific tool names so
+    the ai_report `_append_mcp` synthesis isn't double-emitted.
     """
 
     def setUp(self):
@@ -2162,91 +2165,61 @@ class LoomAiMcpToolNameBridgeTests(unittest.TestCase):
         self.server_mod = importlib.import_module('loom.server')
         self.server_mod = importlib.reload(self.server_mod)
 
-    def _bash_post(self, command, **overrides):
-        raw = {
-            "tool_name": "Bash",
-            "hook_event_name": "PostToolUse",
-            "tool_input": {"command": command},
-            "session_id": "sess-1",
-        }
-        raw.update(overrides)
-        return raw
-
-    def test_rewrites_loom_ai_progress_into_synthetic_mcp_tool_name(self):
-        raw = self._bash_post('loom ai progress "investigating"')
+    def test_report_tool_names_match_actions(self):
+        actions = self.server_mod._LOOM_AI_MCP_REPORT_ACTIONS
+        tool_names = self.server_mod._LOOM_AI_MCP_REPORT_TOOL_NAMES
+        # Every whitelisted action must have a corresponding fully-
+        # qualified MCP tool name in the suppression set.
         self.assertEqual(
-            self.server_mod._maybe_loom_ai_mcp_tool_name(raw),
-            "mcp__loom__loom_progress",
+            tool_names,
+            frozenset("mcp__loom__loom_" + a for a in actions),
         )
 
-    def test_rewrites_each_whitelisted_subcommand(self):
-        for sub in (
-            "progress", "done", "blocked", "error", "derive",
-            "ask", "ready", "context", "name",
+    def test_covers_all_nine_worker_reporting_actions(self):
+        # The cutover whitelist must cover every action the MCP server
+        # in `loom/mcp.py` routes to `cmd=ai_report`. If a new worker
+        # action is added there, it MUST also be added here or the
+        # `/events` PostToolUse for that tool will fire a duplicate
+        # `mcp_call_append` broadcast (re-introducing the LOOM:236
+        # firehose pattern).
+        expected = {
+            "progress", "done", "blocked", "error",
+            "ask", "derive", "ready", "verify", "name",
+        }
+        self.assertEqual(
+            set(self.server_mod._LOOM_AI_MCP_REPORT_ACTIONS),
+            expected,
+        )
+
+    def test_engineer_architect_tool_names_NOT_in_suppression_set(self):
+        # Engineer/architect MCP tools (e.g. `mcp__loom__engineer_*`,
+        # `mcp__loom__architect_*`) MUST NOT appear in the suppression
+        # set — they don't go through `_append_mcp`, so suppressing
+        # the `/events` capture clause for them would lose the live
+        # delta entirely.
+        suppressed = self.server_mod._LOOM_AI_MCP_REPORT_TOOL_NAMES
+        for tool in (
+            "mcp__loom__engineer_task_create",
+            "mcp__loom__engineer_task_dispatch",
+            "mcp__loom__architect_message_engineer",
+            "mcp__loom__architect_journal",
+            "mcp__loom__loom_reply",  # `reply` is not a worker reporting action
         ):
-            raw = self._bash_post(f'loom ai {sub}')
-            self.assertEqual(
-                self.server_mod._maybe_loom_ai_mcp_tool_name(raw),
-                f"mcp__loom__loom_{sub}",
-                f"failed for subcommand: {sub}",
+            self.assertNotIn(
+                tool, suppressed,
+                f"{tool} must not be in the report-tool-name suppression set",
             )
 
-    def test_handles_env_var_prefix_and_chained_commands(self):
-        # env-var prefix ("LOOM_CELL_ID=abc loom ai done")
-        raw = self._bash_post('LOOM_CELL_ID=abc loom ai done')
-        self.assertEqual(
-            self.server_mod._maybe_loom_ai_mcp_tool_name(raw),
-            "mcp__loom__loom_done",
+    def test_bridge_function_removed(self):
+        # The `_maybe_loom_ai_mcp_tool_name` bridge from `:236` v1-v3
+        # is gone — workers no longer use the Bash CLI, so the Bash
+        # PostToolUse rewriting path is no longer needed. If this
+        # symbol comes back, it likely means a regression that
+        # re-introduces the dual-broadcast firehose.
+        self.assertFalse(
+            hasattr(self.server_mod, "_maybe_loom_ai_mcp_tool_name"),
+            "_maybe_loom_ai_mcp_tool_name should be removed in LOOM:238",
         )
-        # chained command ("cd /tmp && loom ai progress ...")
-        raw = self._bash_post('cd /tmp && loom ai progress "..."')
-        self.assertEqual(
-            self.server_mod._maybe_loom_ai_mcp_tool_name(raw),
-            "mcp__loom__loom_progress",
-        )
-        # path-prefixed binary ("./bin/loom ai blocked ...")
-        raw = self._bash_post('./bin/loom ai blocked "deps missing"')
-        self.assertEqual(
-            self.server_mod._maybe_loom_ai_mcp_tool_name(raw),
-            "mcp__loom__loom_blocked",
-        )
-
-    def test_ignores_pretooluse_so_only_completed_calls_are_captured(self):
-        raw = self._bash_post('loom ai done', hook_event_name="PreToolUse")
-        self.assertIsNone(self.server_mod._maybe_loom_ai_mcp_tool_name(raw))
-
-    def test_ignores_non_bash_tools(self):
-        raw = {
-            "tool_name": "Edit",
-            "hook_event_name": "PostToolUse",
-            "tool_input": {"file_path": "loom ai progress"},
-        }
-        self.assertIsNone(self.server_mod._maybe_loom_ai_mcp_tool_name(raw))
-
-    def test_ignores_unrelated_bash_commands(self):
-        for cmd in (
-            "ls -la",
-            "echo loom ai progress",  # subcmd in echo arg, but not the binary
-            "git commit -m 'loom ai progress'",  # inside quoted msg
-            "loom task list",  # different loom subcommand
-            "loom ai unknown",  # not a whitelisted subcmd
-            "",
-        ):
-            raw = self._bash_post(cmd)
-            self.assertIsNone(
-                self.server_mod._maybe_loom_ai_mcp_tool_name(raw),
-                f"should not match: {cmd!r}",
-            )
-
-    def test_handles_real_mcp_tools_unchanged(self):
-        # Engineer/architect path: tool_name is already mcp__... and the
-        # bridge must not interfere.
-        raw = {
-            "tool_name": "mcp__loom__engineer_task_create",
-            "hook_event_name": "PostToolUse",
-            "tool_input": {"title": "..."},
-        }
-        self.assertIsNone(self.server_mod._maybe_loom_ai_mcp_tool_name(raw))
 
 
 if __name__ == '__main__':

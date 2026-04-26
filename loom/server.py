@@ -5,7 +5,6 @@ import contextlib
 import json
 import mimetypes
 import os
-import re
 import shutil
 import sys
 import time
@@ -1531,10 +1530,10 @@ def _mandatory_review_done_error(task, action_name: str) -> str:
     action_name = str(action_name or "").strip() or "unknown"
     return (
         "This is a mandatory-review task "
-        f"(action={action_name}). Direct `loom ai done` is blocked — "
+        f"(action={action_name}). Direct `loom_done(...)` is blocked — "
         "derive `feature/review` first, then the reviewer's Ship verdict "
         "triggers cascade-done. Use:\n\n"
-        f"  loom ai derive --action feature/review \"Review {title}\""
+        f"  loom_derive(description=\"Review {title}\", action=\"feature/review\")"
     )
 
 
@@ -1810,7 +1809,7 @@ async def _maybe_apply_review_required_gate(
             "Cannot close directly — `feature/review` auto-derived at "
             f"{review_task_label} per action gate (diff: {diff_size} LOC, "
             f"threshold: {threshold}). Wait for reviewer's Ship verdict "
-            "before calling `loom ai done` again."
+            "before calling `loom_done(...)` again."
         ),
         "task_id": review_task_id,
         "review_gate": {
@@ -4411,75 +4410,26 @@ async def _configure_event_ingest_client(event_ingest_client, state: MatrixState
         )
 
 
-# Worker `loom ai *` subcommands (see `bin/loom`). Whitelisted so that
-# unrelated bash commands that happen to contain the substring `loom ai`
-# don't get reclassified as MCP tool calls.
-_LOOM_AI_SUBCMDS = (
-    "progress", "done", "blocked", "error", "derive", "ask",
-    "ready", "context", "name",
-)
-# Subset of `loom ai *` subcommands that hit `/api/cmd cmd=ai_report`
-# (i.e. produce live agent-state mutations). The ai_report handler emits
-# a synthetic `mcp_call_append` delta for these on the same broadcast
-# that carries the event_append + agent_upsert (see `_append_mcp`
-# wrapper in `handle_command`). The `/events` bridge then suppresses
-# its own duplicate broadcast for the matching PostToolUse so the
-# frontend sees one delta-bundle per call instead of two ~30-100ms
-# apart.
+# Worker actions that route through the `cmd=ai_report` server logic.
+# A worker invokes one of these via the corresponding MCP tool
+# (`mcp__loom__loom_<action>`). The MCP server in `loom/mcp.py` maps the
+# tool to `cmd=ai_report` and calls `handle_command` directly (see the
+# `action_map` there), so the same code path runs for every entry
+# point. The set is also used to gate `_append_mcp`'s synthetic
+# `mcp_call_append` delta below.
 _LOOM_AI_MCP_REPORT_ACTIONS = frozenset({
     "progress", "done", "blocked", "error",
     "ask", "derive", "ready", "verify", "name",
 })
-# Match a `loom ai <subcmd>` invocation inside a bash command string.
-# Anchored to command-start positions only — beginning of string or
-# after a shell command separator (;, &&, ||, |, newline, backtick).
-# This rejects `echo loom ai progress` and similar where `loom ai`
-# appears as an argument rather than as the invoked binary. Allows
-# env-var prefixes (`LOOM_CELL_ID=abc loom ai progress`) by treating
-# `VAR=value ` as part of the command-start whitespace.
-_LOOM_AI_RE = re.compile(
-    r"(?:^|[;&|`\n])\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*(?:[^\s;&|`]*/)?loom\s+ai\s+("
-    + "|".join(_LOOM_AI_SUBCMDS)
-    + r")\b"
+# Fully-qualified MCP tool names for the worker reporting surface,
+# matching what Claude Code emits in its PostToolUse hook envelopes.
+# Kept in sync with `_LOOM_AI_MCP_REPORT_ACTIONS` so the `/events`
+# capture clause can tell whether a given MCP tool's
+# `mcp_call_append` was already emitted upstream by the ai_report
+# handler (avoiding a duplicate live broadcast).
+_LOOM_AI_MCP_REPORT_TOOL_NAMES = frozenset(
+    "mcp__loom__loom_" + action for action in _LOOM_AI_MCP_REPORT_ACTIONS
 )
-
-
-def _maybe_loom_ai_mcp_tool_name(raw: dict) -> Optional[str]:
-    """Bridge `loom ai <subcmd>` Bash PostToolUse events into the MCP
-    tool-call surface used by engineers and architects.
-
-    Returns the synthetic MCP tool name (`mcp__loom__loom_<subcmd>`) when
-    `raw` is a Bash PostToolUse hook envelope whose command is a worker
-    `loom ai *` invocation. Returns None otherwise.
-
-    Engineers and architects reach the MCP tab via Claude Code's natural
-    MCP hook flow: their PostToolUse fires with `tool_name` already
-    prefixed `mcp__`, so `handle_events` records the call and emits one
-    `mcp_call_append` delta. Workers using the `loom ai` CLI fire
-    PostToolUse for the `Bash` tool instead, so without this rewrite
-    their reports don't reach the MCP surface. Rewriting `tool_name`
-    upstream of the envelope construction lets the worker share the
-    exact same capture path with no new persistence layer or extra
-    broadcast.
-    """
-    if not isinstance(raw, dict):
-        return None
-    tool = str(raw.get("tool_name") or raw.get("name") or "").strip().lower()
-    if tool not in ("bash", "shell", "command"):
-        return None
-    hook = str(raw.get("hook_event_name") or raw.get("type") or "").strip()
-    if hook != "PostToolUse":
-        return None
-    inp = raw.get("tool_input") or raw.get("input") or {}
-    if not isinstance(inp, dict):
-        return None
-    cmd = str(inp.get("command") or inp.get("cmd") or "").strip()
-    if not cmd:
-        return None
-    match = _LOOM_AI_RE.search(cmd)
-    if not match:
-        return None
-    return "mcp__loom__loom_" + match.group(1)
 
 
 def _mcp_call_rows_for_ui(state: MatrixState, records: list[dict]) -> list[dict]:
@@ -10094,24 +10044,26 @@ async def main(connection=None):
                     def _append_mcp(c, act, msg=""):
                         _append_mcp_message(c, act, msg)
                         # Emit a live `mcp_call_append` delta for the
-                        # synthetic `loom ai <act>` tool call on the
-                        # SAME broadcast that carries this report's
-                        # event_append + agent_upsert. Without this,
-                        # the only mcp_call_append for worker `loom ai *`
-                        # comes from the /events bridge (PostToolUse) —
-                        # a separate `state.broadcast()` ~30-100ms after
-                        # this one. That second broadcast misses rAF
-                        # coalesce in the frontend and produces a
-                        # second full DOM rebuild of the engineer panel
-                        # per `loom ai *` call (visible flicker, mid-
-                        # type selection loss, scroll-anchor churn).
-                        # The /events bridge still persists the row for
-                        # the on-demand mcp_calls fetch but skips its
-                        # own broadcast (see `_synthetic_loom_ai_tool`
-                        # branch in `handle_events` capture clause
-                        # below). Codex workers (no PostToolUse hooks)
-                        # continue to lack the persistent record but
-                        # now get the live delta from this path.
+                        # `mcp__loom__loom_<act>` tool call on the SAME
+                        # broadcast that carries this report's
+                        # event_append + agent_upsert. Without this, the
+                        # only `mcp_call_append` for worker reports
+                        # would come from the `/events` PostToolUse hook
+                        # — a separate `state.broadcast()` ~30-100ms
+                        # later (Claude Code dispatches the hook after
+                        # the MCP tool returns). That second broadcast
+                        # misses rAF coalesce in the frontend and
+                        # produces a second full DOM rebuild of the
+                        # engineer panel per call (visible flicker,
+                        # mid-type selection loss, scroll-anchor
+                        # churn). The `/events` capture clause
+                        # downstream suppresses its own emission for
+                        # tool names in `_LOOM_AI_MCP_REPORT_TOOL_NAMES`
+                        # so we don't double-emit; persistence still
+                        # writes, so the on-demand `cmd=mcp_calls`
+                        # fetch keeps working and codex workers (no
+                        # PostToolUse hooks) keep getting the live
+                        # delta from this path.
                         if act in _LOOM_AI_MCP_REPORT_ACTIONS:
                             try:
                                 _now = time.time()
@@ -10128,11 +10080,7 @@ async def main(connection=None):
                                     "duration_ms": None,
                                     "success": act != "error",
                                     "error": (msg if act == "error" else ""),
-                                    "args": {
-                                        "command": "loom ai " + act + (
-                                            ' "' + str(msg) + '"' if msg else ""
-                                        )
-                                    },
+                                    "args": {"message": str(msg)} if msg else {},
                                     "args_redacted": False,
                                     "result": None,
                                     "result_redacted": True,
@@ -11892,16 +11840,11 @@ async def main(connection=None):
         headers = {
             "X-Loom-Cell-Id": request.headers.get("X-Loom-Cell-Id", ""),
         }
-        # Bridge worker `loom ai <subcmd>` Bash PostToolUse events into
-        # the MCP tool-call surface used by engineers/architects. The
-        # rewrite happens before envelope construction so the persisted
-        # row, the existing capture clause below, and the on-demand
-        # `cmd=mcp_calls` query (which filters `tool_name LIKE
-        # 'mcp__loom__%'`) all see the synthetic name.
-        synthetic_loom_ai_tool = _maybe_loom_ai_mcp_tool_name(raw)
-        if synthetic_loom_ai_tool:
-            raw = dict(raw)
-            raw["tool_name"] = synthetic_loom_ai_tool
+        # LOOM:238 cutover: workers now report exclusively via
+        # `mcp__loom__loom_*` MCP tools (no Bash CLI rewrite bridge).
+        # Claude Code already emits PostToolUse hooks with the real
+        # mcp__ tool name, so persistence + on-demand fetch +
+        # capture clause all see the right shape directly.
         envelope = build_event_ingest_envelope(raw, headers=headers)
         idempotency_key = None
         explicit_event_id = raw.get("event_id")
@@ -11955,20 +11898,27 @@ async def main(connection=None):
         try:
             raw_tool = str(raw.get("tool_name") or raw.get("name") or "")
             raw_hook = str(raw.get("hook_event_name") or raw.get("type") or "")
-            # When the bridge synthesized this tool name from a worker
-            # `loom ai *` Bash PostToolUse, the live `mcp_call_append`
-            # delta has already been emitted by the ai_report handler
-            # on the same broadcast as the report's event_append +
-            # agent_upsert. Suppress the duplicate broadcast here so the
-            # frontend sees ONE delta-bundle per call (rAF-coalesced),
-            # not two ~30-100ms apart. The persistent record is still
+            # LOOM:238: when this PostToolUse came from a worker calling
+            # one of the `mcp__loom__loom_*` reporting tools, the live
+            # `mcp_call_append` delta was already emitted by the
+            # ai_report handler on the same broadcast as the report's
+            # event_append + agent_upsert (see `_append_mcp` wrapper).
+            # Suppress the duplicate emission here so the frontend sees
+            # ONE delta-bundle per call (rAF-coalesced), not two
+            # ~30-100ms apart. The persistent ingest row is still
             # written above, so on-demand `cmd=mcp_calls` fetches still
-            # resolve the row by cursor.
+            # resolve the row by cursor — same shape as engineer/
+            # architect MCP calls, except those don't go through
+            # ai_report so their mcp_call_append fires from this clause
+            # alone.
+            already_emitted_via_ai_report = (
+                raw_tool in _LOOM_AI_MCP_REPORT_TOOL_NAMES
+            )
             if (
                 raw_tool.startswith("mcp__")
                 and raw_hook == "PostToolUse"
                 and not bool(response.get("duplicate"))
-                and not synthetic_loom_ai_tool
+                and not already_emitted_via_ai_report
             ):
                 redacted_envelope = redact_event_for_mcp_call_log(
                     envelope,

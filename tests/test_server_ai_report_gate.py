@@ -209,7 +209,7 @@ class ServerAiReportMandatoryReviewGateTests(unittest.IsolatedAsyncioTestCase):
             result["message"],
         )
         self.assertIn(
-            'loom ai derive --action feature/review "Review Implement mandatory gate"',
+            'loom_derive(description="Review Implement mandatory gate", action="feature/review")',
             result["message"],
         )
         self.assertEqual(task.lane, "In Progress")
@@ -232,7 +232,7 @@ class ServerAiReportMandatoryReviewGateTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["type"], "error")
         self.assertIn(
-            'loom ai derive --action feature/review "Review Implement mandatory gate"',
+            'loom_derive(description="Review Implement mandatory gate", action="feature/review")',
             result["message"],
         )
         self.assertEqual(task.lane, "In Progress")
