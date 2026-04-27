@@ -156,6 +156,7 @@ from .server_worktrees import (
 from .server_prompts import (
     build_dispatch_postscript,
     build_loom_system_prompt,
+    deliverable_word,
 )
 from .engineer_session_map import build_engineer_session_map
 
@@ -1590,13 +1591,14 @@ def _reject_missing_deliverable(task, action_label: str) -> dict | None:
         str(getattr(task, "deliverable_type", "") or "").strip()
         or "generated_doc"
     )
+    word = deliverable_word(getattr(task, "deliverable_type", ""))
     return {
         "type": "deliverable_missing",
         "message": (
             f"Cannot mark task {action_label}: deliverable required "
             f"(type={type_label}) but no matching artifact attached. "
-            "Call `loom_task_upload_artifact(content_text=\"<your full "
-            f"report>\", artifact_type=\"{artifact_type}\", "
+            f"Call `loom_task_upload_artifact(content_text=\"<your full "
+            f"{word}>\", artifact_type=\"{artifact_type}\", "
             f"title=\"{title_default}\")` first, then retry "
             f"loom_{action_label}."
         ),
