@@ -12348,6 +12348,22 @@ async def main(connection=None):
         if result and result.get("type") == "error":
             return web.json_response(
                 {"ok": False, "error": result.get("message", "")})
+        if result and result.get("type") == "deliverable_missing":
+            # Hard-gate refusal: surface as a CLI/REST failure so the
+            # documented `loom ai done`/`ready` paths see the same outcome
+            # workers see via MCP. Skip idempotency caching so a retry
+            # after the artifact is uploaded actually re-runs the gate.
+            return web.json_response(
+                {
+                    "ok": False,
+                    "error": result.get(
+                        "message",
+                        "Deliverable artifact required before completion.",
+                    ),
+                    "type": "deliverable_missing",
+                },
+                status=409,
+            )
 
         payload = result if result else await _state_payload()
         response_payload = {"ok": True, "data": payload}

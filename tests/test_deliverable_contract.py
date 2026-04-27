@@ -346,5 +346,114 @@ class DeliverableBoardTaskRoundTripTests(unittest.TestCase):
         self.assertEqual(loaded["deliverable_artifact_title"], "")
 
 
+class DeliverableCliFailureSurfaceTests(unittest.TestCase):
+    """The documented `loom ai done` / `loom ai ready` paths must exit
+    with a non-zero status when the server refuses with
+    ``deliverable_missing``. Without this, workers using the CLI would
+    see a fake "Done" message even though the gate refused completion.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+        from importlib.machinery import SourceFileLoader
+
+        path = (
+            Path(__file__).resolve().parents[1] / "bin" / "loom"
+        )
+        loader = SourceFileLoader("loom_cli_deliverable", str(path))
+        spec = importlib.util.spec_from_loader(
+            "loom_cli_deliverable", loader)
+        mod = importlib.util.module_from_spec(spec)
+        loader.exec_module(mod)
+        cls.cli = mod
+
+    def _setup_self_resolution(self):
+        self.cli._resolve_self_and_task = lambda _args, **_kwargs: (
+            {"id": "agent-1"},
+            {"id": "task-1", "slug": "task-1"},
+        )
+
+    def _refusal_response(self):
+        return {
+            "ok": False,
+            "type": "deliverable_missing",
+            "error": (
+                "Cannot mark task done: deliverable required "
+                "(type=report) but no matching artifact attached. "
+                "Call `loom_task_upload_artifact(...)` first, then "
+                "retry loom_done."
+            ),
+        }
+
+    def test_cli_done_exits_when_server_refuses_with_deliverable_missing(self):
+        from types import SimpleNamespace
+        import contextlib, io
+
+        self._setup_self_resolution()
+        captured_calls = []
+
+        def fake_api_call(cmd, port=0, **kwargs):
+            captured_calls.append((cmd, kwargs))
+            return self._refusal_response()
+
+        self.cli.api_call = fake_api_call
+        args = SimpleNamespace(
+            port=18932,
+            message="Done!",
+            post_external=False,
+            force_skip_review=False,
+            review_skip_reason="",
+        )
+        stderr = io.StringIO()
+        stdout = io.StringIO()
+        with contextlib.redirect_stderr(stderr), \
+                contextlib.redirect_stdout(stdout):
+            with self.assertRaises(SystemExit) as ctx:
+                self.cli.cmd_ai_done(args)
+        # die() exits with 1
+        self.assertEqual(ctx.exception.code, 1)
+        # Operator-facing error text propagates
+        self.assertIn("deliverable required", stderr.getvalue())
+        # stdout did NOT show a fake "Done" line
+        self.assertNotIn("Done", stdout.getvalue())
+        # The call still went out (so we know the test exercises the
+        # right code path)
+        self.assertEqual(captured_calls[0][0], "ai_report")
+        self.assertEqual(captured_calls[0][1]["action"], "done")
+
+    def test_cli_ready_exits_when_server_refuses_with_deliverable_missing(self):
+        from types import SimpleNamespace
+        import contextlib, io
+
+        self._setup_self_resolution()
+        captured_calls = []
+
+        def fake_api_call(cmd, port=0, **kwargs):
+            captured_calls.append((cmd, kwargs))
+            return {
+                "ok": False,
+                "type": "deliverable_missing",
+                "error": (
+                    "Cannot mark task ready: deliverable required "
+                    "(type=report) but no matching artifact attached."
+                ),
+            }
+
+        self.cli.api_call = fake_api_call
+        args = SimpleNamespace(port=18932)
+        stderr = io.StringIO()
+        stdout = io.StringIO()
+        with contextlib.redirect_stderr(stderr), \
+                contextlib.redirect_stdout(stdout):
+            with self.assertRaises(SystemExit) as ctx:
+                self.cli.cmd_ai_ready(args)
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn("deliverable required", stderr.getvalue())
+        # stdout did NOT show a fake "Ready for next task" line
+        self.assertNotIn("Ready for next task", stdout.getvalue())
+        self.assertEqual(captured_calls[0][1]["action"], "ready")
+
+
 if __name__ == "__main__":
     unittest.main()
