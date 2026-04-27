@@ -129,6 +129,11 @@ CREATE TABLE IF NOT EXISTS group_settings (
     architect_autonomy_mode       TEXT NOT NULL DEFAULT 'dispatch_after_confirm',
     architect_paused              INTEGER NOT NULL DEFAULT 0,
     architect_digest_verbosity    TEXT NOT NULL DEFAULT 'balanced',
+    architect_push_interval       INTEGER NOT NULL DEFAULT 300,
+    architect_max_interval        INTEGER NOT NULL DEFAULT 600,
+    architect_heartbeat_interval  INTEGER NOT NULL DEFAULT 0,
+    architect_suppress_empty_digests INTEGER NOT NULL DEFAULT 1,
+    architect_enabled_events      TEXT NOT NULL DEFAULT '',
     architect_journal_checkpoint_frequency TEXT NOT NULL DEFAULT 'every_10_actions',
     architect_review_gate_thresholds TEXT NOT NULL DEFAULT '{"ship_direct_max":50,"review_default_above":150,"self_review_bypass_allowed":false}'
 );
@@ -322,7 +327,8 @@ CREATE TABLE IF NOT EXISTS agent_digest_settings (
     digest_verbosity   TEXT NOT NULL DEFAULT 'balanced',
     enabled_events     TEXT NOT NULL DEFAULT '["agent_started","task_dispatched","task_derived","task_health_alert"]',
     architect_digest   INTEGER NOT NULL DEFAULT 0,
-    wake_on_digest     INTEGER NOT NULL DEFAULT 0
+    wake_on_digest     INTEGER NOT NULL DEFAULT 0,
+    suppress_empty     INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS digest_queued_events (
@@ -1333,6 +1339,7 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
     for col, default in (
         ("architect_digest", "0"),
         ("wake_on_digest", "0"),
+        ("suppress_empty", "0"),
     ):
         try:
             conn.execute(
@@ -1342,6 +1349,27 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
                 conn.execute(
                     f"ALTER TABLE agent_digest_settings ADD COLUMN "
                     f"{col} INTEGER NOT NULL DEFAULT {default}")
+                conn.commit()
+            except sqlite3.OperationalError:
+                pass
+    # Migrate: add architect digest tuning columns to group_settings.
+    # ``architect_enabled_events`` defaults to '' (empty string), which is
+    # treated as "use the kind-aware defaults" by the runtime — preserving
+    # backwards-compat for groups that existed before this migration.
+    for col, col_type, default in (
+        ("architect_push_interval", "INTEGER", "300"),
+        ("architect_max_interval", "INTEGER", "600"),
+        ("architect_heartbeat_interval", "INTEGER", "0"),
+        ("architect_suppress_empty_digests", "INTEGER", "1"),
+        ("architect_enabled_events", "TEXT", "''"),
+    ):
+        try:
+            conn.execute(f"SELECT {col} FROM group_settings LIMIT 0")
+        except sqlite3.OperationalError:
+            try:
+                conn.execute(
+                    f"ALTER TABLE group_settings ADD COLUMN {col} "
+                    f"{col_type} NOT NULL DEFAULT {default}")
                 conn.commit()
             except sqlite3.OperationalError:
                 pass

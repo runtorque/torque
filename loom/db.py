@@ -104,6 +104,7 @@ _GS_JSON_FIELDS = {
     "env_vars", "agent_env_vars", "terminal_env_vars",
     "board_default_labels", "worktree_symlinks",
     "architect_review_gate_thresholds",
+    "architect_enabled_events",
     "default_engineer_specializations",
 }
 
@@ -117,6 +118,7 @@ _GS_BOOL_FIELDS = {
     "notifications", "notify_on_finish", "notify_on_error",
     "notify_on_attention", "terminal_always_custom_dialog",
     "terminal_close_on_disconnect", "architect_paused",
+    "architect_suppress_empty_digests",
 }
 
 def _serialize_agent_cell(cell):
@@ -2301,8 +2303,8 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             INSERT OR REPLACE INTO agent_digest_settings
                 (agent_id, paused, push_interval, max_interval,
                  heartbeat_interval, digest_verbosity, enabled_events,
-                 architect_digest, wake_on_digest)
-            VALUES (?,?,?,?,?,?,?,?,?)
+                 architect_digest, wake_on_digest, suppress_empty)
+            VALUES (?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 agent_id,
@@ -2317,6 +2319,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 enabled_events,
                 1 if settings.get("architect_digest", False) else 0,
                 1 if settings.get("wake_on_digest", False) else 0,
+                1 if settings.get("suppress_empty", False) else 0,
             ),
         )
         self._conn.commit()
@@ -2512,7 +2515,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         rows = self._conn.execute(
             "SELECT agent_id, paused, push_interval, max_interval, "
             "heartbeat_interval, digest_verbosity, enabled_events, "
-            "architect_digest, wake_on_digest "
+            "architect_digest, wake_on_digest, suppress_empty "
             "FROM agent_digest_settings"
         ).fetchall()
         result = {}
@@ -2540,6 +2543,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 "enabled_events": enabled,
                 "architect_digest": bool(row[7]) if len(row) > 7 else False,
                 "wake_on_digest": bool(row[8]) if len(row) > 8 else False,
+                "suppress_empty": bool(row[9]) if len(row) > 9 else False,
             }
         return result
 
@@ -3577,7 +3581,8 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                         except (json.JSONDecodeError, TypeError):
                             d[k] = [] if k in {"board_default_labels",
                                                 "worktree_symlinks",
-                                                "default_engineer_specializations"} else {}
+                                                "default_engineer_specializations",
+                                                "architect_enabled_events"} else {}
                 # Decode booleans
                 for k in _GS_BOOL_FIELDS:
                     if k in d:

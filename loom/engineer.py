@@ -1182,6 +1182,20 @@ class EngineerEventBuffer:
             events = self._buffers.pop(agent_id, [])
             buffer_started_at = self._buffer_started.pop(agent_id, None)
             due_hints = self._due_hints(target.group, engineer=target)
+            if (
+                not events
+                and not due_hints
+                and bool(getattr(settings, "suppress_empty", False))
+            ):
+                # Advance the heartbeat clock so the next overdue check waits a
+                # full interval before re-firing on this empty window.
+                self._last_push[agent_id] = time.time()
+                log.debug(
+                    "Digest suppressed (empty window) for '%s'",
+                    target.name,
+                )
+                events = None
+                return
             board_summary = self._board_summary(target.group, recipient_id=agent_id)
             text = self._format_digest(
                 target.group,
