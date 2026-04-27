@@ -1156,3 +1156,345 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         # value when it's empty — but here launch_cfg provides temp_dir
         # so the assertion is that the engineer's directory matches.
         self.assertEqual(engineer.directory, temp_dir)
+
+    async def test_relaunch_fresh_session_codex_engineer_fires_kickoff_sequence(self):
+        """Codex relaunch into a fresh session must re-seat the persistent
+        system prompt as the first chat turn — the codex CLI has no
+        --append-system-prompt-file equivalent, so skipping the kickoff
+        leaves the engineer with no system prompt at all."""
+        state = self._make_state()
+        engineer = self._add_engineer_cell(state, "eng-alice", "Alice")
+        engineer.status = "stopped"
+        engineer.agent_type = "codex"
+        # Fresh session: no prior provider session id to resume into.
+        engineer.agent_session_id = ""
+        bridge = _CapturingBridge()
+        sent_prompts = []
+
+        async def fake_resolve_base_dir(group):
+            del group
+            return temp_dir
+
+        def fake_resolve_engineer_launch_config(group, *, base_dir="",
+                                              explicit_template="",
+                                              overrides=None):
+            del group, base_dir, explicit_template, overrides
+            cfg = self._launch_config(temp_dir)
+            cfg["initial_prompt"] = "Engineer: get started on your queue."
+            return cfg
+
+        def fake_build_cell_persistent_prompt(cell, launch_cfg):
+            del launch_cfg
+            return f"You are the engineer for {cell.group}."
+
+        async def fake_send_agent_prompt(cell, prompt, **kwargs):
+            sent_prompts.append((cell.id, prompt, kwargs))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            engineer.directory = temp_dir
+            result = await self.server_mod._handle_relaunch_agent_command(
+                {"id": engineer.id},
+                state,
+                bridge=bridge,
+                worktree_mgr=_FakeWorktreeManager(),
+                resolve_base_dir=fake_resolve_base_dir,
+                resolve_agent_launch_config=lambda *a, **k: {},
+                resolve_engineer_launch_config=fake_resolve_engineer_launch_config,
+                apply_persistent_prompt=lambda *a, **k: None,
+                build_cell_persistent_prompt=fake_build_cell_persistent_prompt,
+                persistent_prompt_filename=lambda cell: f"{cell.id}.md",
+                is_designated_engineer=lambda cell: False,
+                send_agent_prompt=fake_send_agent_prompt,
+            )
+
+        self.assertIsNone(result)
+        prompts = [p for (_, p, _) in sent_prompts]
+        # codex returns the persistent prompt as the first interactive turn.
+        self.assertTrue(
+            any(f"You are the engineer for {engineer.group}." in p
+                for p in prompts),
+            f"codex persistent prompt missing from sent prompts: {prompts}",
+        )
+        # Role-defined initial_prompt fires too.
+        self.assertTrue(
+            any("Engineer: get started on your queue." in p for p in prompts),
+            f"initial_prompt missing from sent prompts: {prompts}",
+        )
+
+    async def test_relaunch_fresh_session_claude_code_engineer_fires_initial_prompt_only(self):
+        """claude-code relaunch into a fresh session must deliver the role
+        initial_prompt (kickoff text) but NOT the persistent prompt as a
+        chat turn — claude-code seats the persistent prompt via
+        --append-system-prompt-file, so re-sending it would duplicate it
+        verbatim into the conversation."""
+        state = self._make_state()
+        engineer = self._add_engineer_cell(state, "eng-bob", "Bob")
+        engineer.status = "stopped"
+        engineer.agent_type = "claude-code"
+        engineer.agent_session_id = ""
+        bridge = _CapturingBridge()
+        sent_prompts = []
+
+        async def fake_resolve_base_dir(group):
+            del group
+            return temp_dir
+
+        def fake_resolve_engineer_launch_config(group, *, base_dir="",
+                                              explicit_template="",
+                                              overrides=None):
+            del group, base_dir, explicit_template, overrides
+            cfg = self._launch_config(temp_dir)
+            cfg["agent_type"] = "claude-code"
+            cfg["initial_prompt"] = "Read engineer_journal_read first."
+            return cfg
+
+        def fake_build_cell_persistent_prompt(cell, launch_cfg):
+            del cell, launch_cfg
+            return "Persistent system prompt body (file-injected)."
+
+        async def fake_send_agent_prompt(cell, prompt, **kwargs):
+            sent_prompts.append((cell.id, prompt, kwargs))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            engineer.directory = temp_dir
+            await self.server_mod._handle_relaunch_agent_command(
+                {"id": engineer.id},
+                state,
+                bridge=bridge,
+                worktree_mgr=_FakeWorktreeManager(),
+                resolve_base_dir=fake_resolve_base_dir,
+                resolve_agent_launch_config=lambda *a, **k: {},
+                resolve_engineer_launch_config=fake_resolve_engineer_launch_config,
+                apply_persistent_prompt=lambda *a, **k: None,
+                build_cell_persistent_prompt=fake_build_cell_persistent_prompt,
+                persistent_prompt_filename=lambda cell: f"{cell.id}.md",
+                is_designated_engineer=lambda cell: False,
+                send_agent_prompt=fake_send_agent_prompt,
+            )
+
+        prompts = [p for (_, p, _) in sent_prompts]
+        # claude-code's persistent prompt must NOT be re-delivered as a
+        # chat turn — it ships via --append-system-prompt-file.
+        self.assertFalse(
+            any("Persistent system prompt body" in p for p in prompts),
+            f"claude-code persistent prompt leaked into chat: {prompts}",
+        )
+        # initial_prompt still fires.
+        self.assertTrue(
+            any("Read engineer_journal_read first." in p for p in prompts),
+            f"claude-code initial_prompt missing from sent prompts: {prompts}",
+        )
+
+    async def test_relaunch_resume_viable_skips_kickoff(self):
+        """When session_resume is true AND a prior agent_session_id exists,
+        the new launch will resume that conversation. The kickoff sequence
+        must be skipped to avoid duplicating the system prompt onto the
+        resumed turn."""
+        state = self._make_state()
+        engineer = self._add_engineer_cell(state, "eng-alice", "Alice")
+        engineer.status = "stopped"
+        engineer.agent_type = "codex"
+        # Resume-viable: prior provider session id present, resume enabled.
+        engineer.agent_session_id = "prior-session"
+        bridge = _CapturingBridge()
+        sent_prompts = []
+
+        async def fake_resolve_base_dir(group):
+            del group
+            return temp_dir
+
+        def fake_resolve_engineer_launch_config(group, *, base_dir="",
+                                              explicit_template="",
+                                              overrides=None):
+            del group, base_dir, explicit_template, overrides
+            cfg = self._launch_config(temp_dir)
+            cfg["initial_prompt"] = "Should not fire on resume."
+            cfg["session_resume"] = True
+            return cfg
+
+        async def fake_send_agent_prompt(cell, prompt, **kwargs):
+            sent_prompts.append((cell.id, prompt, kwargs))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            engineer.directory = temp_dir
+            await self.server_mod._handle_relaunch_agent_command(
+                {"id": engineer.id},
+                state,
+                bridge=bridge,
+                worktree_mgr=_FakeWorktreeManager(),
+                resolve_base_dir=fake_resolve_base_dir,
+                resolve_agent_launch_config=lambda *a, **k: {},
+                resolve_engineer_launch_config=fake_resolve_engineer_launch_config,
+                apply_persistent_prompt=lambda *a, **k: None,
+                build_cell_persistent_prompt=lambda *a, **k: "system prompt",
+                persistent_prompt_filename=lambda cell: f"{cell.id}.md",
+                is_designated_engineer=lambda cell: False,
+                send_agent_prompt=fake_send_agent_prompt,
+            )
+
+        self.assertEqual(
+            sent_prompts, [],
+            f"resume-viable relaunch must skip kickoff but sent: {sent_prompts}",
+        )
+
+    async def test_relaunch_session_resume_disabled_fires_kickoff_even_with_session_id(self):
+        """When session_resume is explicitly false, the new launch starts a
+        fresh provider conversation regardless of any prior agent_session_id.
+        Kickoff must fire."""
+        state = self._make_state()
+        engineer = self._add_engineer_cell(state, "eng-alice", "Alice")
+        engineer.status = "stopped"
+        engineer.agent_type = "codex"
+        # Prior session id exists, but resume is disabled — fresh conversation.
+        engineer.agent_session_id = "stale-but-irrelevant"
+        bridge = _CapturingBridge()
+        sent_prompts = []
+
+        async def fake_resolve_base_dir(group):
+            del group
+            return temp_dir
+
+        def fake_resolve_engineer_launch_config(group, *, base_dir="",
+                                              explicit_template="",
+                                              overrides=None):
+            del group, base_dir, explicit_template, overrides
+            cfg = self._launch_config(temp_dir)
+            cfg["initial_prompt"] = "Re-seat the engineer."
+            cfg["session_resume"] = False
+            return cfg
+
+        async def fake_send_agent_prompt(cell, prompt, **kwargs):
+            sent_prompts.append((cell.id, prompt, kwargs))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            engineer.directory = temp_dir
+            await self.server_mod._handle_relaunch_agent_command(
+                {"id": engineer.id},
+                state,
+                bridge=bridge,
+                worktree_mgr=_FakeWorktreeManager(),
+                resolve_base_dir=fake_resolve_base_dir,
+                resolve_agent_launch_config=lambda *a, **k: {},
+                resolve_engineer_launch_config=fake_resolve_engineer_launch_config,
+                apply_persistent_prompt=lambda *a, **k: None,
+                build_cell_persistent_prompt=lambda *a, **k: "engineer system",
+                persistent_prompt_filename=lambda cell: f"{cell.id}.md",
+                is_designated_engineer=lambda cell: False,
+                send_agent_prompt=fake_send_agent_prompt,
+            )
+
+        prompts = [p for (_, p, _) in sent_prompts]
+        self.assertTrue(
+            any("Re-seat the engineer." in p for p in prompts),
+            f"session_resume=False relaunch must fire kickoff: {prompts}",
+        )
+
+    async def test_relaunch_fresh_session_architect_fires_kickoff_sequence(self):
+        """Architects share the relaunch handler; fresh-session architect
+        relaunch must fire the kickoff sequence too."""
+        state = self._make_state()
+        architect = self._add_architect_cell(state, "arch-1", "Loomer")
+        architect.status = "stopped"
+        architect.agent_type = "codex"
+        architect.agent_session_id = ""
+        bridge = _CapturingBridge()
+        sent_prompts = []
+
+        async def fake_resolve_base_dir(group):
+            del group
+            return temp_dir
+
+        def fake_resolve_engineer_launch_config(group, *, base_dir="",
+                                              explicit_template="",
+                                              overrides=None):
+            del group, base_dir, explicit_template, overrides
+            cfg = self._launch_config(temp_dir)
+            cfg["worktree"] = False
+            cfg["initial_prompt"] = "Architect: review the board."
+            return cfg
+
+        def fake_build_cell_persistent_prompt(cell, launch_cfg):
+            del launch_cfg
+            return f"You are the architect for {cell.group}."
+
+        async def fake_send_agent_prompt(cell, prompt, **kwargs):
+            sent_prompts.append((cell.id, prompt, kwargs))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            architect.directory = temp_dir
+            await self.server_mod._handle_relaunch_agent_command(
+                {"id": architect.id},
+                state,
+                bridge=bridge,
+                worktree_mgr=_FakeWorktreeManager(),
+                resolve_base_dir=fake_resolve_base_dir,
+                resolve_agent_launch_config=lambda *a, **k: {},
+                resolve_engineer_launch_config=fake_resolve_engineer_launch_config,
+                apply_persistent_prompt=lambda *a, **k: None,
+                build_cell_persistent_prompt=fake_build_cell_persistent_prompt,
+                persistent_prompt_filename=lambda cell: f"{cell.id}.md",
+                is_designated_engineer=lambda cell: False,
+                send_agent_prompt=fake_send_agent_prompt,
+            )
+
+        prompts = [p for (_, p, _) in sent_prompts]
+        self.assertTrue(
+            any(f"You are the architect for {architect.group}." in p
+                for p in prompts),
+            f"architect persistent prompt missing: {prompts}",
+        )
+        self.assertTrue(
+            any("Architect: review the board." in p for p in prompts),
+            f"architect initial_prompt missing: {prompts}",
+        )
+
+    async def test_relaunch_terminal_does_not_fire_kickoff_sequence(self):
+        """Terminals route through the same handler but are not agents and
+        have no role prompts. The kickoff gate must skip them entirely."""
+        state = self._make_state()
+        state.add_group("loom")
+        terminal = state.add_terminal(
+            name="Shell",
+            group="loom",
+            terminal_backend="iterm2",
+            profile="Default",
+            command="",
+            directory="/tmp/project",
+            tab_color="",
+        )
+        terminal.status = "stopped"
+        bridge = _CapturingBridge()
+        sent_prompts = []
+
+        async def fake_resolve_base_dir(group):
+            del group
+            return "/tmp/project"
+
+        def fake_resolve_agent_launch_config(group, *, base_dir="",
+                                            explicit_template="",
+                                            overrides=None):
+            del group, base_dir, explicit_template, overrides
+            return self._launch_config("/tmp/project")
+
+        async def fake_send_agent_prompt(cell, prompt, **kwargs):
+            sent_prompts.append((cell.id, prompt, kwargs))
+
+        await self.server_mod._handle_relaunch_agent_command(
+            {"id": terminal.id},
+            state,
+            bridge=bridge,
+            worktree_mgr=_FakeWorktreeManager(),
+            resolve_base_dir=fake_resolve_base_dir,
+            resolve_agent_launch_config=fake_resolve_agent_launch_config,
+            resolve_engineer_launch_config=lambda *a, **k: {},
+            apply_persistent_prompt=lambda *a, **k: None,
+            build_cell_persistent_prompt=lambda *a, **k: "",
+            persistent_prompt_filename=lambda cell: f"{cell.id}.md",
+            is_designated_engineer=lambda cell: False,
+            send_agent_prompt=fake_send_agent_prompt,
+        )
+
+        self.assertEqual(
+            sent_prompts, [],
+            f"terminal relaunch must not invoke send_agent_prompt: {sent_prompts}",
+        )

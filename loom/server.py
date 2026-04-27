@@ -4755,6 +4755,7 @@ async def _handle_engineer_rehire_command(
         build_cell_persistent_prompt,
         persistent_prompt_filename,
         is_designated_engineer,
+        send_agent_prompt=None,
         panel_event=None) -> dict:
     """Resume a dismissed engineer with the same id/slug and launch config."""
     engineer = _resolve_engineer_cell(
@@ -4835,6 +4836,7 @@ async def _handle_engineer_rehire_command(
             build_cell_persistent_prompt=build_cell_persistent_prompt,
             persistent_prompt_filename=persistent_prompt_filename,
             is_designated_engineer=is_designated_engineer,
+            send_agent_prompt=send_agent_prompt,
         )
     except Exception as exc:
         log.exception("Failed to rehire engineer '%s'", engineer.name)
@@ -5057,8 +5059,18 @@ async def _handle_relaunch_agent_command(
         apply_persistent_prompt,
         build_cell_persistent_prompt,
         persistent_prompt_filename,
-        is_designated_engineer) -> dict | None:
-    """Relaunch a stopped agent or terminal using current launch settings."""
+        is_designated_engineer,
+        send_agent_prompt=None) -> dict | None:
+    """Relaunch a stopped agent or terminal using current launch settings.
+
+    When the new session is opened against a fresh provider conversation
+    (no ``agent_session_id`` to resume into, or ``session_resume`` disabled),
+    the role's startup + initial prompts are re-delivered via
+    ``_new_agent_prompt_sequence`` so codex engineers/architects get their
+    persistent prompt seated as the first turn and any role kickoff text
+    fires. When both signals indicate a viable resume, the kickoff is
+    skipped — the resumed conversation already carries that context.
+    """
     cell = state.agents.get(data.get("id", ""))
     if not cell:
         return {"type": "error", "message": "Agent not found"}
@@ -5176,9 +5188,8 @@ async def _handle_relaunch_agent_command(
                 os.path.expanduser(prev_directory),
                 persistent_prompt_filename(cell),
             )
-    apply_persistent_prompt(
-        cell, launch_cfg,
-        build_cell_persistent_prompt(cell, launch_cfg))
+    persistent_prompt_text = build_cell_persistent_prompt(cell, launch_cfg)
+    apply_persistent_prompt(cell, launch_cfg, persistent_prompt_text)
     state._emit_agent(cell)
     state._db_save_agent(cell)
     await bridge.create_session(
@@ -5190,6 +5201,28 @@ async def _handle_relaunch_agent_command(
         system_prompt=launch_cfg.get("system_prompt", ""),
         mcp_entrypoint=mcp_entrypoint_for_cell(cell),
     )
+
+    # Fresh-session kickoff: when the new session has no prior provider
+    # conversation to resume into (no agent_session_id, or session_resume
+    # disabled), re-deliver the startup + initial prompts. This restores
+    # codex's persistent system prompt as the first turn (codex has no
+    # file-injection equivalent of claude-code's --append-system-prompt-file)
+    # and fires any role-defined initial_prompt for both providers. When
+    # both signals indicate a viable resume, the kickoff is skipped to
+    # avoid duplicating the system prompt onto the resumed conversation.
+    if (
+            send_agent_prompt
+            and cell.cell_type == "agent"
+            and cell.session_id
+            and (not cell.agent_session_id or not cell.session_resume)
+    ):
+        startup_prompt = _startup_prompt_for_new_agent(
+            agent_type=launch_cfg.get("agent_type", ""),
+            persistent_prompt_text=persistent_prompt_text,
+        )
+        for prompt_text, send_kwargs in _new_agent_prompt_sequence(
+                launch_cfg, startup_prompt=startup_prompt, cell=cell):
+            await send_agent_prompt(cell, prompt_text, **send_kwargs)
     return None
 
 
@@ -7207,6 +7240,7 @@ async def main(connection=None):
                     build_cell_persistent_prompt=_build_cell_persistent_prompt,
                     persistent_prompt_filename=_persistent_prompt_filename,
                     is_designated_engineer=_is_designated_engineer,
+                    send_agent_prompt=_send_agent_prompt,
                     panel_event=_panel_event,
                 )
 
@@ -7490,6 +7524,7 @@ async def main(connection=None):
                     build_cell_persistent_prompt=_build_cell_persistent_prompt,
                     persistent_prompt_filename=_persistent_prompt_filename,
                     is_designated_engineer=_is_designated_engineer,
+                    send_agent_prompt=_send_agent_prompt,
                 )
 
             elif cmd == "restart_agent":
