@@ -12,6 +12,7 @@ graph enforcement lives in these MCP tool surfaces.
 
 import copy
 import json
+import re
 import time
 import uuid
 from dataclasses import asdict, replace
@@ -33,6 +34,7 @@ from .mcp_engineer_tools.shared import (
     is_busy_agent as _is_busy_agent,
 )
 from .server_artifacts import serialize_task_for_mcp
+from .server_prompts import build_engineer_deliverable_awareness
 from .identity import prepend_agent_identity_anchor
 from .state import (
     ARCHIVED_LANE,
@@ -981,6 +983,38 @@ def _optional_bool_arg(args: dict, key: str, default: bool = False
     return bool(default), f"{key} must be a boolean"
 
 
+_TASK_ID_REFERENCE_RE = re.compile(
+    r"\b[A-Z][A-Z0-9_]*:[1-9][0-9]*(?::[1-9][0-9]*)?\b"
+)
+
+
+def _deliverable_awareness_for_referenced_tasks(state, message_text: str) -> str:
+    """Return awareness blocks for any deliverable tasks referenced in text.
+
+    Scans ``message_text`` for canonical task IDs (e.g. ``LOOM:241``),
+    resolves them via the board (including legacy alias lookups) and
+    concatenates an awareness block for each task that carries a
+    deliverable contract. Returns ``""`` when nothing matches.
+    """
+    if not message_text:
+        return ""
+    seen: set[str] = set()
+    blocks: list[str] = []
+    aliases = getattr(state, "task_id_aliases", {}) or {}
+    for raw in _TASK_ID_REFERENCE_RE.findall(message_text):
+        tid = str(aliases.get(raw, raw) or "").strip()
+        if not tid or tid in seen:
+            continue
+        seen.add(tid)
+        task = state.board_tasks.get(tid)
+        if not task:
+            continue
+        block = build_engineer_deliverable_awareness(task)
+        if block:
+            blocks.append(block)
+    return "\n\n".join(blocks)
+
+
 def _deliver_architect_engineer_message(state, sender, recipient, *,
                                         action: str, message: str,
                                         reply_to_id: str = "",
@@ -1019,8 +1053,14 @@ def _deliver_architect_engineer_message(state, sender, recipient, *,
         str(getattr(sender, "kind", "") or "").strip() == "architect"
         and str(getattr(recipient, "kind", "") or "").strip() == "engineer"
     ):
+        body = message_text
+        awareness = _deliverable_awareness_for_referenced_tasks(
+            state, message_text
+        )
+        if awareness:
+            body = f"{message_text}\n\n{awareness}"
         recipient_entry["message"] = prepend_agent_identity_anchor(
-            message_text,
+            body,
             recipient,
         )
     recipient_entry.update({
@@ -2234,6 +2274,9 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         d.update(_task_health_payload_for_response(state, task))
         d["title"] = task.task
         d["action"] = task.action_name
+        awareness_block = build_engineer_deliverable_awareness(task)
+        if awareness_block:
+            d["deliverable_awareness"] = awareness_block
         if caller_kind == "architect":
             d["created_by"] = _task_created_by_classifier(task)
         if task.agent_id and not _agent_visible_to_engineer(
@@ -2785,6 +2828,13 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                         f"assigned engineer does not carry specialization "
                         f"'{suggested_specialization}'"
                     )
+            if task_id:
+                created_task = real_state.board_tasks.get(task_id)
+                awareness_block = build_engineer_deliverable_awareness(
+                    created_task
+                )
+                if awareness_block:
+                    response["deliverable_awareness"] = awareness_block
             return json.dumps(response), False
 
         payload = {
