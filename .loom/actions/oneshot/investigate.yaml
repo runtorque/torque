@@ -1,0 +1,42 @@
+name: oneshot/investigate
+description: Investigate an open question, codebase area, or symptom; produce a report
+agent:
+  name_prefix: investigate
+  tab_color: '#a371f7'
+worktree: false
+deliverable:
+  required: true
+  type: report
+  format: markdown
+  artifact_title: "Investigation report"
+prompt: |
+  You are investigating a question and producing a written report. Do NOT make code changes.
+
+  ## Task
+
+  {{ loom.task.title }}
+
+  {% if loom.task.description %}
+  ## Context
+
+  {{ loom.task.description }}
+  {% endif %}
+
+  ## Investigation
+
+  - Read the relevant code, docs, and history.
+  - Test or reproduce as needed (read-only).
+  - Identify findings, risks, open questions, and concrete recommendations.
+
+  ## Report shape
+
+  Your report should cover (as applicable):
+  - Findings — what you discovered, with file:line references.
+  - Recommendations — proposed actions with rationale.
+  - Risks / open questions — what you couldn't resolve.
+  - Estimates — rough scope of any follow-up work.
+
+  Submit the report as the deliverable artifact (see Deliverable contract below). Do NOT inline the report in `loom_done.message` — the gate will refuse it.
+labels:
+- investigation
+transitions: []
