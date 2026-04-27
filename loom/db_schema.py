@@ -171,7 +171,11 @@ CREATE TABLE IF NOT EXISTS board_tasks (
     worktree_boundary TEXT NOT NULL DEFAULT '{}',
     resume_after_boundary_task_id TEXT NOT NULL DEFAULT '',
     archived_at    TEXT NOT NULL DEFAULT '',
-    archived_from_lane TEXT NOT NULL DEFAULT ''
+    archived_from_lane TEXT NOT NULL DEFAULT '',
+    deliverable_required INTEGER NOT NULL DEFAULT 0,
+    deliverable_type TEXT NOT NULL DEFAULT '',
+    deliverable_format TEXT NOT NULL DEFAULT '',
+    deliverable_artifact_title TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS schedules (
@@ -1025,6 +1029,20 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
             conn.execute(
                 f"ALTER TABLE board_tasks ADD COLUMN {col} "
                 f"TEXT NOT NULL DEFAULT {default}")
+            conn.commit()
+    # Migrate: add deliverable contract columns to board_tasks
+    for col, col_type, default in [
+        ("deliverable_required", "INTEGER", "0"),
+        ("deliverable_type", "TEXT", "''"),
+        ("deliverable_format", "TEXT", "''"),
+        ("deliverable_artifact_title", "TEXT", "''"),
+    ]:
+        try:
+            conn.execute(f"SELECT {col} FROM board_tasks LIMIT 0")
+        except sqlite3.OperationalError:
+            conn.execute(
+                f"ALTER TABLE board_tasks ADD COLUMN {col} "
+                f"{col_type} NOT NULL DEFAULT {default}")
             conn.commit()
     # Migrate: drop assignee column from board_tasks
     try:

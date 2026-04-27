@@ -885,6 +885,23 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state, *,
     result = await handle_command(payload)
     if result and result.get("type") == "error":
         return result.get("message", "Unknown error"), True
+    if result and result.get("type") == "deliverable_missing":
+        # Hard gate: surface to the worker as a tool failure so the
+        # MCP client treats the response as an error and the worker
+        # can react (upload artifact, then retry). Return a 3-tuple so
+        # the MCP cache layer in dispatch_mcp_rpc_body knows NOT to
+        # save this refusal as a successful idempotency response —
+        # otherwise a same-key retry after the artifact is uploaded
+        # would replay the cached refusal instead of re-running the
+        # gate. Same vector as the /api/cmd and replay paths.
+        return (
+            result.get(
+                "message",
+                "Deliverable artifact required before completion.",
+            ),
+            True,
+            False,  # no_cache
+        )
 
     return json.dumps(result) if result else '{"type":"ok"}', False
 
@@ -1040,6 +1057,11 @@ async def dispatch_mcp_rpc_body(
                 200,
             )
 
+        # Default: cache successful responses (and most errors) on the
+        # idempotency key. Set to False by a dispatcher when the response
+        # is a recoverable refusal (e.g. deliverable_missing) that the
+        # worker can flip to passing by retrying after side-effects.
+        cacheable = True
         if tool_name.startswith("engineer_"):
             if not cell_id:
                 result = {
@@ -1121,17 +1143,28 @@ async def dispatch_mcp_rpc_body(
                     "isError": True,
                 }
             else:
-                text, is_error = await _dispatch_tool(
+                _ret = await _dispatch_tool(
                     tool_name, arguments, cell_id,
                     handle_command, state,
                     idempotency_key=idempotency_key,
                 )
+                # _dispatch_tool may return a 2-tuple (text, is_error) or
+                # a 3-tuple (text, is_error, cacheable). The deliverable
+                # gate returns the 3-tuple with cacheable=False so this
+                # refusal is NOT saved as an idempotency response —
+                # otherwise a same-key retry after the worker uploads
+                # the artifact would replay the cached refusal instead
+                # of re-running the gate.
+                text = _ret[0]
+                is_error = _ret[1]
+                if len(_ret) > 2 and _ret[2] is False:
+                    cacheable = False
                 result = {
                     "content": [{"type": "text", "text": text}],
                     "isError": is_error,
                 }
 
-        if write_tool and idempotency_key and db:
+        if write_tool and idempotency_key and db and cacheable:
             try:
                 db.save_mcp_idempotency(
                     idempotency_key=idempotency_key,

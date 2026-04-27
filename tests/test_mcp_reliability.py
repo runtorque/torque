@@ -404,6 +404,99 @@ class MCPFailedWriteReplayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls, [])
         self.assertEqual(self.db.load_failed_writes(), [])
 
+    async def test_api_replay_does_not_cache_deliverable_missing_refusal(self):
+        """A queued /api/cmd `ai_report` write that replays while the
+        deliverable is still missing must NOT be persisted as a successful
+        idempotency response. Same masking-failure mode as the round-1
+        bug, just on the durable failed-write replay path.
+
+        After the fix, the replay returns an error envelope and the
+        idempotency table stays empty so that a same-key retry — after
+        the worker uploads an artifact — re-runs the gate cleanly
+        instead of replaying the cached refusal.
+        """
+        from loom.server import replay_api_failed_write_payload
+
+        payload = {
+            "cmd": "ai_report",
+            "cell_id": "agent-1",
+            "action": "done",
+            "task_id": "TASK:1",
+            "message": "Done!",
+            "idempotency_key": "api-deliv-idem",
+        }
+
+        async def handle_command(_payload):
+            return {
+                "type": "deliverable_missing",
+                "message": (
+                    "Cannot mark task done: deliverable required "
+                    "(type=report) but no matching artifact attached. "
+                    "Call `loom_task_upload_artifact(...)` first, "
+                    "then retry loom_done."
+                ),
+            }
+
+        result = await replay_api_failed_write_payload(
+            self.db,
+            payload,
+            handle_command,
+        )
+
+        # Replay surfaces the refusal as a structured error envelope —
+        # NOT as a successful {ok:true, data:{type:"deliverable_missing"}}.
+        self.assertFalse(result.get("ok"))
+        self.assertEqual(result.get("type"), "deliverable_missing")
+        self.assertIn("deliverable required", result.get("error", ""))
+
+        # And critically: NO idempotency row was saved, so a same-key
+        # retry after the worker uploads will re-run the gate.
+        cached = self.db.load_mcp_idempotency("api-deliv-idem")
+        self.assertIsNone(cached)
+
+    async def test_internal_replay_does_not_cache_deliverable_missing_refusal(self):
+        """The internal-command replay path (used for ai_report critical
+        writes) must not cache a deliverable_missing refusal as a command
+        receipt either. The normal `handle_command` codepath skips the
+        receipt write for this result type; the replay wrapper surfaces
+        it as a semantic failure envelope so the caller does not treat
+        the refusal as completion.
+        """
+        from loom.server import replay_internal_failed_write_payload
+
+        payload = {
+            "cmd": "ai_report",
+            "cell_id": "agent-1",
+            "action": "ready",
+            "task_id": "TASK:1",
+            "idempotency_key": "internal-deliv-idem",
+        }
+
+        async def handle_command(_payload):
+            return {
+                "type": "deliverable_missing",
+                "message": (
+                    "Cannot mark task ready: deliverable required "
+                    "(type=report) but no matching artifact attached."
+                ),
+            }
+
+        result = await replay_internal_failed_write_payload(
+            self.db,
+            payload,
+            handle_command,
+        )
+
+        self.assertFalse(result.get("ok"))
+        self.assertEqual(result.get("type"), "deliverable_missing")
+        self.assertIn("deliverable required", result.get("error", ""))
+
+        # The replay wrapper should not have written a command receipt
+        # for the refusal — confirm the receipt table stays empty so a
+        # retry after artifact upload re-runs the gate.
+        receipt = self.db.load_command_receipt("internal-deliv-idem")
+        self.assertIsNone(receipt)
+
     def test_architect_journal_replay_recovers_existing_jsonl_entry_without_duplicate(self):
         state = MatrixState(db=self.db)
         state_mod = importlib.import_module("loom.state")

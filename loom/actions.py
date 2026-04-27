@@ -270,6 +270,23 @@ def _coerce_bool(value) -> bool:
     return False
 
 
+def normalize_deliverable(raw) -> dict:
+    """Coerce an action ``deliverable`` block into a contract dict.
+
+    Always returns the same shape with string defaults so downstream
+    code can treat the absence of the block as a no-op contract.
+    """
+    if not isinstance(raw, dict):
+        return {"required": False, "type": "", "format": "",
+                "artifact_title": ""}
+    return {
+        "required": _coerce_bool(raw.get("required", False)),
+        "type": str(raw.get("type", "") or "").strip(),
+        "format": str(raw.get("format", "") or "").strip(),
+        "artifact_title": str(raw.get("artifact_title", "") or ""),
+    }
+
+
 # Stub loom context for preview renders (no real agent/task).
 # Templates referencing loom.* get safe defaults instead of StrictUndefined errors.
 LOOM_CONTEXT_STUB = {
@@ -611,7 +628,21 @@ class ActionManager:
             "max_depth": act.get("max_depth", None),
             "review_required_above_loc": act.get(
                 "review_required_above_loc", None),
+            "deliverable": normalize_deliverable(act.get("deliverable")),
         }
+
+    def get_deliverable(self, action_name: str,
+                        base_dir: str = "") -> dict:
+        """Return the normalized ``deliverable`` contract for an action.
+
+        Returns a contract dict (see ``normalize_deliverable``); the
+        ``required`` flag is False when the action has no block or
+        cannot be loaded.
+        """
+        act = self.load_action(action_name, base_dir)
+        if not isinstance(act, dict):
+            return normalize_deliverable(None)
+        return normalize_deliverable(act.get("deliverable"))
 
     def get_auto_close_on_done(self, action_name: str,
                                base_dir: str = "") -> bool:

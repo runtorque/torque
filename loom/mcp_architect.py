@@ -316,6 +316,21 @@ _ARCHITECT_TOOL_SPECS = [
                     "type": "string",
                     "description": "Optional lane override.",
                 },
+                "deliverable": {
+                    "type": "object",
+                    "description": (
+                        "Optional deliverable contract. When `required: true` "
+                        "is set, the worker must upload a matching artifact "
+                        "via `loom_task_upload_artifact` before "
+                        "`loom_done`/`loom_ready` will be accepted."
+                    ),
+                    "properties": {
+                        "required": {"type": "boolean"},
+                        "type": {"type": "string"},
+                        "format": {"type": "string"},
+                        "artifact_title": {"type": "string"},
+                    },
+                },
             },
             "required": ["title", "group", "assigned_engineer_id"],
         },

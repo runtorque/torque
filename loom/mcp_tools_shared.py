@@ -3332,7 +3332,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 args.get("suggested_specialization", "") or ""
             ).strip()
 
-            create_result = await handle_command({
+            architect_create_payload = {
                 "cmd": "board_add_task",
                 "task": title,
                 "description": args.get("description", ""),
@@ -3340,7 +3340,11 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 "lane": args.get("lane", ""),
                 "labels": args.get("labels", []),
                 "assigned_engineer_id": assigned_engineer_id,
-            })
+            }
+            architect_deliverable = args.get("deliverable")
+            if isinstance(architect_deliverable, dict):
+                architect_create_payload["deliverable"] = architect_deliverable
+            create_result = await handle_command(architect_create_payload)
             if create_result and create_result.get("type") == "error":
                 return create_result.get("message", "Unknown error"), True
 
@@ -3390,6 +3394,9 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             "assigned_engineer_id": str(caller_id or "").strip(),
             "created_by_engineer_id": str(caller_id or "").strip(),
         }
+        engineer_deliverable = args.get("deliverable")
+        if isinstance(engineer_deliverable, dict):
+            payload["deliverable"] = engineer_deliverable
         result = await handle_command(payload)
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True

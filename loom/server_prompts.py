@@ -84,11 +84,61 @@ def _normalize_optional_block(text: str) -> str:
     return str(text or "").strip("\n")
 
 
+def _build_deliverable_block(*,
+                             deliverable_required: bool,
+                             deliverable_type: str,
+                             deliverable_format: str,
+                             deliverable_artifact_title: str,
+                             task_title: str = "") -> list[str]:
+    """Render the Deliverable contract block as a list of lines.
+
+    Returns ``[]`` when no deliverable is required so callers can splice
+    the result into their normal lines list without conditionals.
+    """
+    if not deliverable_required:
+        return []
+    type_label = (deliverable_type or "any artifact").strip() or "any artifact"
+    format_label = (deliverable_format or "").strip()
+    title_default = (
+        deliverable_artifact_title.strip()
+        or task_title.strip()
+        or "deliverable"
+    )
+    descriptor = type_label
+    if format_label:
+        descriptor = f"{type_label}, {format_label}"
+    upload_call = (
+        'loom_task_upload_artifact(content_text="<your full report>", '
+        f'artifact_type="{deliverable_type or "generated_doc"}", '
+        f'title="{title_default}")'
+    )
+    return [
+        "**Deliverable contract**",
+        "",
+        (f"This task requires a deliverable artifact ({descriptor}). "
+         "Before calling `loom_done(...)` (or `loom_ready(...)`) you MUST "
+         "attach your report to the task via:"),
+        "",
+        f"  {upload_call}",
+        "",
+        ("Inline prose in `loom_done.message` or terminal output will NOT "
+         "be persisted as the deliverable — the artifact is what the "
+         "requester reads. `loom_done()` and `loom_ready()` will refuse "
+         "until a matching artifact is attached."),
+        "",
+    ]
+
+
 def build_dispatch_postscript(*,
                               transitions: list[dict] | None = None,
                               is_clean: bool = True,
                               commit_hint: str = "",
-                              pipeline_context: str = "") -> str:
+                              pipeline_context: str = "",
+                              deliverable_required: bool = False,
+                              deliverable_type: str = "",
+                              deliverable_format: str = "",
+                              deliverable_artifact_title: str = "",
+                              task_title: str = "") -> str:
     """Build the task-local Loom MCP completion guidance block."""
     transitions = transitions or []
     has_transitions = any(
@@ -104,6 +154,16 @@ def build_dispatch_postscript(*,
     if has_transitions or has_ask:
         lines.append(_POSTSCRIPT_MANDATE)
         lines.append("")
+
+    deliverable_block = _build_deliverable_block(
+        deliverable_required=deliverable_required,
+        deliverable_type=deliverable_type,
+        deliverable_format=deliverable_format,
+        deliverable_artifact_title=deliverable_artifact_title,
+        task_title=task_title,
+    )
+    if deliverable_block:
+        lines.extend(deliverable_block)
 
     lines.append("Available completion paths for this task:")
     for tr in transitions:
