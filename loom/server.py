@@ -3103,7 +3103,23 @@ async def replay_internal_failed_write_payload(
     cached, _key, _request_hash = _load_internal_command_receipt(db, payload)
     if cached is not _NO_COMMAND_RECEIPT:
         return cached
-    return await handle_command(payload)
+    result = await handle_command(payload)
+    # Mirror handle_command's deliverable_missing semantics: surface as a
+    # semantic failure so the replay caller doesn't treat the refusal as
+    # success. The receipt-save path inside handle_command already
+    # avoids persisting a command receipt for this result type, so a
+    # subsequent retry after the worker uploads an artifact will re-run
+    # the gate cleanly.
+    if isinstance(result, dict) and result.get("type") == "deliverable_missing":
+        return {
+            "ok": False,
+            "type": "deliverable_missing",
+            "error": result.get(
+                "message",
+                "Deliverable artifact required before completion.",
+            ),
+        }
+    return result
 
 
 async def replay_api_failed_write_payload(
@@ -3146,6 +3162,21 @@ async def replay_api_failed_write_payload(
             return cached
 
     result = await handle_command(payload)
+    # Mirror the direct /api/cmd hard-gate semantics: a deliverable_missing
+    # refusal is a semantic failure, not a successful write. Surface it as
+    # an error envelope and DO NOT save it as an idempotency response —
+    # otherwise a later same-key retry (after the artifact is uploaded)
+    # would be deduped to the cached refusal instead of re-running the
+    # gate. Same shape as handle_api_cmd's deliverable_missing branch.
+    if result and result.get("type") == "deliverable_missing":
+        return {
+            "ok": False,
+            "type": "deliverable_missing",
+            "error": result.get(
+                "message",
+                "Deliverable artifact required before completion.",
+            ),
+        }
     if idempotency_key and is_api_write_command(cmd):
         db.save_mcp_idempotency(
             idempotency_key=idempotency_key,
@@ -11863,7 +11894,20 @@ async def main(connection=None):
 
         if db and critical_command_name and critical_idempotency_key:
             try:
-                if critical_capture_active:
+                # A deliverable_missing refusal is a recoverable hard-gate
+                # failure: the worker can flip it to passing by uploading
+                # an artifact and retrying. Persist NEITHER the command
+                # receipt nor the captured state so a same-key retry
+                # re-runs the gate cleanly. We still clean up the
+                # failed-write queue entry — there is no value in
+                # replaying the same refusal.
+                is_deliverable_missing = (
+                    isinstance(result, dict)
+                    and result.get("type") == "deliverable_missing"
+                )
+                if is_deliverable_missing:
+                    db.delete_failed_write_by_key(critical_failed_write_key)
+                elif critical_capture_active:
                     state.finalize_critical_write_capture(
                         result,
                         delete_failed_write_key=critical_failed_write_key,
