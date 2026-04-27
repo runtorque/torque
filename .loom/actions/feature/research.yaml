@@ -4,6 +4,11 @@ agent:
   name_prefix: research
   tab_color: '#58a6ff'
 worktree: true
+deliverable:
+  required: true
+  type: plan
+  format: markdown
+  artifact_title: "Implementation plan"
 prompt: |
   You are researching a task and writing an implementation plan. Your goal is to deeply understand the problem, explore the relevant code, and produce a concrete plan that another agent will execute.
 
