@@ -34,6 +34,26 @@ ENGINEER_DEFERRED_TOOL_NAMES = {
     "engineer_mcp_calls",
 }
 
+ENGINEER_ARCHITECT_CHAIN_TOOL_NAMES = {
+    "engineer_message_architect",
+    "engineer_reply",
+}
+
+
+def engineer_has_hiring_architect(cell) -> bool:
+    return bool(str(getattr(cell, "hired_by_architect_id", "") or "").strip())
+
+
+def engineer_tools_for_cell(cell) -> list[dict]:
+    if engineer_has_hiring_architect(cell):
+        return list(ENGINEER_TOOLS)
+    return [
+        tool for tool in ENGINEER_TOOLS
+        if str(tool.get("name", "") or "").strip()
+        not in ENGINEER_ARCHITECT_CHAIN_TOOL_NAMES
+    ]
+
+
 ENGINEER_TOOLS = [deepcopy(tool) for tool in ENGINEER_ORCHESTRATION_TOOLS]
 for _tool in ENGINEER_TOOLS:
     if str(_tool.get("name", "") or "").strip() in ENGINEER_DEFERRED_TOOL_NAMES:
@@ -221,6 +241,12 @@ async def _dispatch_engineer_tool(name, args, handle_command, state,
     caller_id = str(caller_id or "").strip() or bound_engineer_id_from_env()
     if str(name or "").strip() not in _ENGINEER_TOOL_NAMES:
         return f"Unknown engineer tool: {name}", True
+    caller_cell = state.agents.get(caller_id) if caller_id else None
+    if (
+        str(name or "").strip() in ENGINEER_ARCHITECT_CHAIN_TOOL_NAMES
+        and not engineer_has_hiring_architect(caller_cell)
+    ):
+        return f"Unknown engineer tool: {name}", True
     if str(name or "").strip() == "engineer_tool_search":
         _cell, _group, _kind, error_text, is_error = authorize_caller(
             state,
@@ -229,7 +255,7 @@ async def _dispatch_engineer_tool(name, args, handle_command, state,
         )
         if is_error:
             return error_text, True
-        return tool_search_response(ENGINEER_TOOLS, args), False
+        return tool_search_response(engineer_tools_for_cell(_cell), args), False
     return await dispatch_scoped_tool(
         name,
         args,
