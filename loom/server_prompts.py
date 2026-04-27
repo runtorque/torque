@@ -146,6 +146,65 @@ def _build_deliverable_block(*,
     ]
 
 
+def build_engineer_deliverable_awareness(task) -> str:
+    """Render the engineer-facing deliverable awareness block for a task.
+
+    Mirrors the worker dispatch postscript's deliverable contract block
+    but engineer-flavored: surfaces the engineer-side
+    ``engineer_task_upload_artifact`` tool (with a lazy-load hint, since
+    that tool is deferred per ``ENGINEER_DEFERRED_TOOL_NAMES``) and notes
+    that workers see their own contract block via ``loom_task_upload_artifact``.
+
+    Returns ``""`` when the task carries no deliverable contract so callers
+    can splice the result into a response without conditionals.
+    """
+    if not task or not bool(getattr(task, "deliverable_required", False)):
+        return ""
+    deliverable_type = str(getattr(task, "deliverable_type", "") or "")
+    deliverable_format = str(getattr(task, "deliverable_format", "") or "")
+    title_default = (
+        str(getattr(task, "deliverable_artifact_title", "") or "").strip()
+        or str(getattr(task, "task", "") or "").strip()
+        or "deliverable"
+    )
+    task_id = str(getattr(task, "id", "") or "").strip()
+    type_label = deliverable_type.strip() or "any artifact"
+    descriptor = type_label
+    if deliverable_format.strip():
+        descriptor = f"{type_label}, {deliverable_format.strip()}"
+    word = deliverable_word(deliverable_type)
+    upload_call = (
+        f'engineer_task_upload_artifact(task_id="{task_id}", '
+        f'content_text="<your full {word}>", '
+        f'artifact_type="{deliverable_type or "generated_doc"}", '
+        f'title="{title_default}")'
+    )
+    lines = [
+        "**Deliverable contract on this task**",
+        "",
+        f"Type: {type_label}"
+        + (f" ({deliverable_format.strip()})" if deliverable_format.strip() else ""),
+        f"Title: {title_default}",
+        "",
+        f"This task requires a deliverable artifact ({descriptor}). "
+        "To attach the deliverable yourself:",
+        "",
+        f"  {upload_call}",
+        "",
+        "If the tool isn't visible, run "
+        '`engineer_tool_search("select:engineer_task_upload_artifact")` '
+        "to load the schema.",
+        "",
+        "When dispatching a worker, the worker's postscript will contain "
+        "its own contract block — they will see the same contract via "
+        "their own `loom_task_upload_artifact` tool.",
+        "",
+        "The `loom_done` / `engineer_task_resolve` gate refuses task "
+        "closure until a matching artifact attaches.",
+    ]
+    return "\n".join(lines)
+
+
 def build_dispatch_postscript(*,
                               transitions: list[dict] | None = None,
                               is_clean: bool = True,
