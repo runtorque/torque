@@ -19,7 +19,12 @@ from aiohttp import web
 
 from . import __version__
 from .mcp_architect import ARCHITECT_TOOLS, _dispatch_architect_tool
-from .mcp_engineer import ENGINEER_TOOLS, _dispatch_engineer_tool
+from .mcp_engineer import (
+    ENGINEER_ARCHITECT_CHAIN_TOOL_NAMES,
+    ENGINEER_TOOLS,
+    _dispatch_engineer_tool,
+    engineer_tools_for_cell,
+)
 from .mcp_tool_search import deferred_tool_specs, eager_tool_specs
 from .mcp_retry import (
     IDEMPOTENCY_HEADER,
@@ -706,7 +711,7 @@ def _visible_tools(state, cell_id: str):
     cell = state.agents.get(str(cell_id or "").strip()) if cell_id else None
     caller_kind = str(getattr(cell, "kind", "") or "").strip() if cell else ""
     if caller_kind == "engineer":
-        tools.extend(eager_tool_specs(ENGINEER_TOOLS))
+        tools.extend(eager_tool_specs(engineer_tools_for_cell(cell)))
     elif caller_kind == "architect":
         tools.extend(eager_tool_specs(ARCHITECT_TOOLS))
     return tools
@@ -717,10 +722,20 @@ def _deferred_tools_for_caller(state, cell_id: str):
     cell = state.agents.get(str(cell_id or "").strip()) if cell_id else None
     caller_kind = str(getattr(cell, "kind", "") or "").strip() if cell else ""
     if caller_kind == "engineer":
-        return deferred_tool_specs(ENGINEER_TOOLS)
+        return deferred_tool_specs(engineer_tools_for_cell(cell))
     if caller_kind == "architect":
         return deferred_tool_specs(ARCHITECT_TOOLS)
     return []
+
+
+def _tool_hidden_for_caller(tool_name: str, caller_kind: str, caller_cell) -> bool:
+    """Return True when a known tool is intentionally scoped out."""
+    name = str(tool_name or "").strip()
+    if caller_kind == "engineer" and name in ENGINEER_ARCHITECT_CHAIN_TOOL_NAMES:
+        return not bool(
+            str(getattr(caller_cell, "hired_by_architect_id", "") or "").strip()
+        )
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -1006,6 +1021,18 @@ async def dispatch_mcp_rpc_body(
             caller_kind in {"architect", "engineer"}
             and _claim_session_wake(cell_id, mcp_session_id)
         )
+        if _tool_hidden_for_caller(tool_name, caller_kind, caller_cell):
+            if session_wake_pending:
+                _queue_session_wake_entry(
+                    state,
+                    cell_id=cell_id,
+                    caller_kind=caller_kind,
+                    first_tool_call_ts=first_tool_call_ts,
+                )
+            return (
+                _jsonrpc_error(req_id, -32602, f"Unknown tool: {tool_name}"),
+                200,
+            )
         write_tool = is_mcp_write_tool(tool_name)
         idempotency_key = ""
         request_hash = ""

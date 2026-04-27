@@ -372,6 +372,14 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             cell_type="agent",
             kind="engineer",
         )
+        hired_engineer = self.state_mod.AgentCell(
+            id="engineer-hired",
+            name="Hired Engineer",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+            hired_by_architect_id=architect.id,
+        )
         worker = self.state_mod.AgentCell(
             id="agent-1",
             name="Worker",
@@ -381,8 +389,15 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         state.agents[engineer.id] = engineer
         state.agents[architect.id] = architect
         state.agents[engineer.id] = engineer
+        state.agents[hired_engineer.id] = hired_engineer
         state.agents[worker.id] = worker
-        state.groups["g"] = [engineer.id, architect.id, engineer.id, worker.id]
+        state.groups["g"] = [
+            engineer.id,
+            architect.id,
+            engineer.id,
+            hired_engineer.id,
+            worker.id,
+        ]
         state.group_settings["g"] = self.state_mod.GroupSettings(
             engineer_agent_id=engineer.id
         )
@@ -473,8 +488,8 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("engineer_tool_search", engineer_tool_names)
         self.assertIn("engineer_board_summary", engineer_tool_names)
         self.assertIn("engineer_task_verify", engineer_tool_names)
-        self.assertIn("engineer_message_architect", engineer_tool_names)
-        self.assertIn("engineer_reply", engineer_tool_names)
+        self.assertNotIn("engineer_message_architect", engineer_tool_names)
+        self.assertNotIn("engineer_reply", engineer_tool_names)
         self.assertNotIn("engineer_task_reassign", engineer_tool_names)
         self.assertNotIn("engineer_task_upload_artifact", engineer_tool_names)
         self.assertNotIn("engineer_launch_settings", engineer_tool_names)
@@ -482,6 +497,19 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("engineer_mcp_calls", engineer_tool_names)
         self.assertNotIn("architect_workspace_overview", engineer_tool_names)
         self.assertNotIn("architect_board_summary", engineer_tool_names)
+
+        listed_hired_engineer = await handler(
+            FakeRequest(
+                {"jsonrpc": "2.0", "id": 122, "method": "tools/list"},
+                headers={"X-Loom-Cell-Id": hired_engineer.id},
+            )
+        )
+        hired_engineer_tool_names = [
+            tool["name"]
+            for tool in listed_hired_engineer.payload["result"]["tools"]
+        ]
+        self.assertIn("engineer_message_architect", hired_engineer_tool_names)
+        self.assertIn("engineer_reply", hired_engineer_tool_names)
 
         missing_header = await handler(
             FakeRequest(
@@ -553,6 +581,109 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(text.endswith("</functions>"), text)
         inner = text[len("<functions>"):-len("</functions>")]
         return json.loads(inner)
+
+    async def test_engineer_architect_message_tools_require_hiring_architect(self):
+        state = self.state_mod.MatrixState()
+        architect = self.state_mod.AgentCell(
+            id="architect-1",
+            name="Architect",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+        )
+        user_owned_engineer = self.state_mod.AgentCell(
+            id="engineer-user",
+            name="User Engineer",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+        )
+        hired_engineer = self.state_mod.AgentCell(
+            id="engineer-hired",
+            name="Hired Engineer",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+            hired_by_architect_id=architect.id,
+        )
+        legacy_empty_engineer = self.state_mod.AgentCell(
+            id="engineer-empty",
+            name="Legacy Empty Engineer",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+            hired_by_architect_id="",
+        )
+        for cell in (
+            architect,
+            user_owned_engineer,
+            hired_engineer,
+            legacy_empty_engineer,
+        ):
+            state.agents[cell.id] = cell
+        state.groups["g"] = [
+            architect.id,
+            user_owned_engineer.id,
+            hired_engineer.id,
+            legacy_empty_engineer.id,
+        ]
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        handler = self.mcp_mod.create_mcp_handler(fake_handle_command, state)
+
+        async def listed_names(cell_id):
+            response = await handler(
+                FakeRequest(
+                    {"jsonrpc": "2.0", "id": cell_id, "method": "tools/list"},
+                    headers={"X-Loom-Cell-Id": cell_id},
+                )
+            )
+            return {tool["name"] for tool in response.payload["result"]["tools"]}
+
+        for cell in (user_owned_engineer, legacy_empty_engineer):
+            names = await listed_names(cell.id)
+            self.assertNotIn("engineer_message_architect", names)
+            self.assertNotIn("engineer_reply", names)
+
+            search = await handler(
+                FakeRequest(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": f"search-{cell.id}",
+                        "method": "tools/call",
+                        "params": {
+                            "name": "engineer_tool_search",
+                            "arguments": {"query": "engineer_message_architect"},
+                        },
+                    },
+                    headers={"X-Loom-Cell-Id": cell.id},
+                )
+            )
+            payload = self._parse_functions_block(
+                search.payload["result"]["content"][0]["text"]
+            )
+            self.assertEqual(payload["tools"], [])
+
+            for tool_name in ("engineer_message_architect", "engineer_reply"):
+                response = await handler(
+                    FakeRequest(
+                        {
+                            "jsonrpc": "2.0",
+                            "id": f"{cell.id}-{tool_name}",
+                            "method": "tools/call",
+                            "params": {"name": tool_name, "arguments": {}},
+                        },
+                        headers={"X-Loom-Cell-Id": cell.id},
+                    )
+                )
+                self.assertIn("error", response.payload)
+                self.assertIn("Unknown tool", response.payload["error"]["message"])
+
+        hired_names = await listed_names(hired_engineer.id)
+        self.assertIn("engineer_message_architect", hired_names)
+        self.assertIn("engineer_reply", hired_names)
 
     async def test_tool_search_select_and_keyword_return_functions_block(self):
         state = self.state_mod.MatrixState()
