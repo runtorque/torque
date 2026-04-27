@@ -1447,6 +1447,14 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             (key, str(value)))
         self._conn.commit()
 
+    def load_ui_state_value(self, key: str) -> str | None:
+        """Return one ui_state value, or None when the key is unset."""
+        row = self._conn.execute(
+            "SELECT value FROM ui_state WHERE key=?",
+            (key,),
+        ).fetchone()
+        return row[0] if row else None
+
     def save_global_settings(self, gs):
         """Persist global settings as key-value pairs."""
         d = asdict(gs)

@@ -2826,6 +2826,7 @@ class MatrixState:
                         AgentDigestSettings(**filtered)
                     )
                 self._backfill_architect_digest_defaults()
+                self._backfill_architect_suppress_empty_once()
                 for gname in self.groups:
                     entries = self.db.load_engineer_task_log(
                         gname,
@@ -3187,6 +3188,42 @@ class MatrixState:
         if self.db:
             for agent_id, settings in changed:
                 self.db.save_agent_digest_settings(agent_id, asdict(settings))
+
+    def _backfill_architect_suppress_empty_once(self) -> None:
+        """One-time: flip ``suppress_empty=True`` on pre-existing architect rows.
+
+        The ``suppress_empty`` column was added with default 0 to keep the
+        migration trivial. Without this backfill, architects whose digest
+        settings row predates the new column keep emitting empty heartbeat
+        digests — which is exactly the user complaint that motivated the
+        new flag. We run this exactly once (gated by a ``ui_state``
+        marker) so a user who later explicitly sets the flag back to
+        False is not overwritten on subsequent boots.
+        """
+        marker_key = "architect_digest_suppress_empty_backfilled"
+        if not self.db:
+            return
+        try:
+            already = self.db.load_ui_state_value(marker_key)
+        except Exception:
+            log.exception("Failed to read backfill marker %s", marker_key)
+            return
+        if already:
+            return
+        changed = []
+        for agent_id, settings in self.agent_digest_settings.items():
+            cell = self.agents.get(agent_id)
+            if str(getattr(cell, "kind", "") or "").strip() != "architect":
+                continue
+            if bool(getattr(settings, "suppress_empty", False)):
+                continue
+            settings.suppress_empty = True
+            changed.append((agent_id, settings))
+        for agent_id, settings in changed:
+            self.db.save_agent_digest_settings(agent_id, asdict(settings))
+        self.db.defer_write(
+            "ui_state", "save_ui_state", marker_key, "1",
+        )
 
     def update_agent_digest_settings(self, agent_id: str, **fields):
         """Update digest settings for one engineer/architect recipient."""

@@ -1201,6 +1201,105 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertIn("task_done", defaults.enabled_events)
         self.assertIn("task_completed", defaults.enabled_events)
 
+    def test_load_backfills_suppress_empty_for_legacy_architect_rows(self):
+        """Pre-existing architect digest rows should pick up suppress_empty."""
+        from loom.db import LoomDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = LoomDB(Path(tmp.name) / "loom.db")
+        db.init()
+        self.addCleanup(db.close)
+        db.save_groups({"g": ["arch-1"]}, {"g": "g"})
+        db.save_group_members("g", ["arch-1"])
+        db.save_agent(
+            self.state_mod.AgentCell(
+                id="arch-1",
+                name="Architect",
+                group="g",
+                cell_type="agent",
+                kind="architect",
+                persistent=True,
+            )
+        )
+        # Simulate an architect digest row that predates the new column —
+        # heartbeat=300, suppress_empty=False (column default).
+        db.save_agent_digest_settings(
+            "arch-1",
+            {
+                "agent_id": "arch-1",
+                "heartbeat_interval": 300,
+                "architect_digest": True,
+                "suppress_empty": False,
+            },
+        )
+
+        state = self.state_mod.MatrixState(db=db)
+        state.load()
+
+        backfilled = state.get_agent_digest_settings("arch-1")
+        self.assertTrue(backfilled.suppress_empty)
+        # Persisted, not just in-memory.
+        persisted = db.load_all_agent_digest_settings()["arch-1"]
+        self.assertTrue(persisted["suppress_empty"])
+        # Marker was written so we don't fight a user who later turns it off.
+        self.assertEqual(
+            db.load_ui_state_value(
+                "architect_digest_suppress_empty_backfilled"
+            ),
+            "1",
+        )
+
+    def test_backfill_runs_only_once_respects_user_override(self):
+        """Once the marker is set, a user-set False is preserved across reloads."""
+        from loom.db import LoomDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = LoomDB(Path(tmp.name) / "loom.db")
+        db.init()
+        self.addCleanup(db.close)
+        db.save_groups({"g": ["arch-1"]}, {"g": "g"})
+        db.save_group_members("g", ["arch-1"])
+        db.save_agent(
+            self.state_mod.AgentCell(
+                id="arch-1",
+                name="Architect",
+                group="g",
+                cell_type="agent",
+                kind="architect",
+                persistent=True,
+            )
+        )
+        db.save_agent_digest_settings(
+            "arch-1",
+            {
+                "agent_id": "arch-1",
+                "architect_digest": True,
+                "suppress_empty": False,
+            },
+        )
+
+        state = self.state_mod.MatrixState(db=db)
+        state.load()
+        # First load backfills.
+        self.assertTrue(
+            state.get_agent_digest_settings("arch-1").suppress_empty
+        )
+
+        # User explicitly turns it back off.
+        state.update_agent_digest_settings("arch-1", suppress_empty=False)
+        self.assertFalse(
+            state.get_agent_digest_settings("arch-1").suppress_empty
+        )
+
+        # Reload — the marker means we do NOT re-flip the user's choice.
+        state2 = self.state_mod.MatrixState(db=db)
+        state2.load()
+        self.assertFalse(
+            state2.get_agent_digest_settings("arch-1").suppress_empty
+        )
+
     def test_sync_architect_digest_settings_propagates_new_knobs(self):
         state = self.state_mod.MatrixState()
         state.groups["g"] = []
