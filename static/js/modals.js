@@ -1109,6 +1109,28 @@ function openGsEngineerNewSpecializationDialog() {
   document.getElementById('new-specialization-name').focus();
 }
 
+const _ARCHITECT_DIGEST_DEFAULT_EVENTS = [
+  'task_done',
+  'task_blocked',
+  'task_error',
+  'task_ask',
+  'task_derive',
+  'task_completed',
+  'agent_blocked',
+  'agent_error',
+  'ask_created',
+  'task_derived',
+  'pipeline_complete',
+  'engineer_hired',
+  'engineer_fired',
+  'engineer_dismissed',
+  'engineer_rehired',
+  'workflow_breach',
+  'engineer_queue_empty',
+  'engineer_awaiting_human_input',
+  'engineer_ask_resolved',
+];
+
 function _defaultArchitectSettings() {
   return {
     architect_boot_command: '',
@@ -1119,6 +1141,11 @@ function _defaultArchitectSettings() {
     architect_autonomy_mode: 'dispatch_after_confirm',
     architect_paused: false,
     architect_digest_verbosity: 'balanced',
+    architect_push_interval: 300,
+    architect_max_interval: 600,
+    architect_heartbeat_interval: 0,
+    architect_suppress_empty_digests: true,
+    architect_enabled_events: _ARCHITECT_DIGEST_DEFAULT_EVENTS.slice(),
     architect_journal_checkpoint_frequency: 'every_10_actions',
     architect_review_gate_thresholds: {
       ship_direct_max: 50,
@@ -1128,11 +1155,45 @@ function _defaultArchitectSettings() {
   };
 }
 
+function _renderArchitectEventCheckboxes(enabled) {
+  const grid = document.getElementById('gs-architect-events-grid');
+  if (!grid) return;
+  const set = new Set((enabled || []).map((value) => String(value || '')));
+  grid.innerHTML = '';
+  _ARCHITECT_DIGEST_DEFAULT_EVENTS.forEach((kind) => {
+    const label = document.createElement('label');
+    label.className = 'gs-checkbox';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.dataset.eventKind = kind;
+    input.id = `gs-architect-event-${kind.replace(/_/g, '-')}`;
+    input.checked = set.has(kind);
+    const text = document.createElement('span');
+    text.textContent = ' ' + kind;
+    label.appendChild(input);
+    label.appendChild(text);
+    grid.appendChild(label);
+  });
+}
+
+function _getArchitectEnabledEvents() {
+  const grid = document.getElementById('gs-architect-events-grid');
+  if (!grid) return _ARCHITECT_DIGEST_DEFAULT_EVENTS.slice();
+  const out = [];
+  grid.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+    if (cb.checked && cb.dataset.eventKind) {
+      out.push(cb.dataset.eventKind);
+    }
+  });
+  return out;
+}
+
 function _resetGsArchitectSections() {
   _setDetailsOpen('gs-architect-boot-section', true);
   _setDetailsOpen('gs-architect-behavior-section', true);
   _setDetailsOpen('gs-architect-custom-section', true);
   _setDetailsOpen('gs-architect-runtime-section', true);
+  _setDetailsOpen('gs-architect-digest-section', false);
 }
 
 function _showGroupSettings(group, data) {
@@ -1307,6 +1368,31 @@ function _showGroupSettings(group, data) {
     architectSettings.architect_digest_verbosity,
     'balanced'
   );
+  _setSelectValue(
+    'gs-architect-push-interval',
+    architectSettings.architect_push_interval,
+    300
+  );
+  _setSelectValue(
+    'gs-architect-max-interval',
+    architectSettings.architect_max_interval,
+    600
+  );
+  _setSelectValue(
+    'gs-architect-heartbeat-interval',
+    architectSettings.architect_heartbeat_interval,
+    0
+  );
+  document.getElementById('gs-architect-suppress-empty').checked = (
+    architectSettings.architect_suppress_empty_digests !== false
+  );
+  const archEvents = (
+    Array.isArray(architectSettings.architect_enabled_events)
+    && architectSettings.architect_enabled_events.length
+  )
+    ? architectSettings.architect_enabled_events
+    : _ARCHITECT_DIGEST_DEFAULT_EVENTS.slice();
+  _renderArchitectEventCheckboxes(archEvents);
   document.getElementById('gs-architect-journal-checkpoint').value = (
     architectSettings.architect_journal_checkpoint_frequency || 'every_10_actions'
   );
@@ -1452,6 +1538,11 @@ function submitGroupSettings() {
     architect_autonomy_mode: document.getElementById('gs-architect-autonomy-mode').value,
     architect_paused: document.getElementById('gs-architect-paused').checked,
     architect_digest_verbosity: document.getElementById('gs-architect-digest-verbosity').value,
+    architect_push_interval: parseInt(document.getElementById('gs-architect-push-interval').value, 10) || 300,
+    architect_max_interval: parseInt(document.getElementById('gs-architect-max-interval').value, 10) || 600,
+    architect_heartbeat_interval: parseInt(document.getElementById('gs-architect-heartbeat-interval').value, 10) || 0,
+    architect_suppress_empty_digests: document.getElementById('gs-architect-suppress-empty').checked,
+    architect_enabled_events: _getArchitectEnabledEvents(),
     architect_journal_checkpoint_frequency: document.getElementById('gs-architect-journal-checkpoint').value.trim() || 'every_10_actions',
     architect_review_gate_thresholds: {
       ship_direct_max: parseInt(document.getElementById('gs-architect-review-ship-direct-max').value, 10) || 0,

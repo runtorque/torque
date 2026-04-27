@@ -815,7 +815,7 @@
       <details id="gs-architect-runtime-section" class="task-modal-section" open>
         <summary>Runtime behavior</summary>
         <div class="task-modal-section-body">
-          <div class="label-hint task-modal-section-intro">Configure architect digest shape, checkpoint policy, and fallback review-gate defaults for transitions without their own LOC gate.</div>
+          <div class="label-hint task-modal-section-intro">Configure architect digest verbosity, checkpoint policy, and fallback review-gate defaults for transitions without their own LOC gate.</div>
           <label>Digest verbosity</label>
           <select id="gs-architect-digest-verbosity">
             <option value="terse">Terse</option>
@@ -830,6 +830,43 @@
             <input id="gs-architect-review-default-above" type="number" min="0" placeholder="fallback review: 150">
             <label class="gs-checkbox"><input id="gs-architect-review-bypass" type="checkbox"> self-review bypass</label>
           </div>
+        </div>
+      </details>
+
+      <details id="gs-architect-digest-section" class="task-modal-section">
+        <summary>Digest details</summary>
+        <div class="task-modal-section-body">
+          <div class="label-hint task-modal-section-intro">Throttle digest delivery to architect agents in this group. Defaults are tuned to suppress empty-window heartbeats.</div>
+          <label>Push interval</label>
+          <select id="gs-architect-push-interval">
+            <option value="60">60s</option>
+            <option value="120">120s</option>
+            <option value="300">300s</option>
+            <option value="600">600s</option>
+            <option value="900">900s</option>
+          </select>
+          <label>Max interval</label>
+          <select id="gs-architect-max-interval">
+            <option value="120">120s</option>
+            <option value="300">300s</option>
+            <option value="600">600s</option>
+            <option value="1200">1200s</option>
+            <option value="1800">1800s</option>
+          </select>
+          <label>Idle heartbeat</label>
+          <select id="gs-architect-heartbeat-interval">
+            <option value="0">Off</option>
+            <option value="300">5 min</option>
+            <option value="600">10 min</option>
+            <option value="1200">20 min</option>
+            <option value="1800">30 min</option>
+          </select>
+          <label class="gs-checkbox">
+            <input id="gs-architect-suppress-empty" type="checkbox"> Suppress empty-window digests
+            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="When checked, the architect heartbeat is silently advanced when no events accrued in the window — no digest is sent. Recommended on to avoid empty notifications.">?</span>
+          </label>
+          <label>Events</label>
+          <div class="task-modal-check-grid" id="gs-architect-events-grid"></div>
         </div>
       </details>
     </div>

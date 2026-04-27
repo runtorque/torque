@@ -556,6 +556,82 @@ class EngineerEventBufferTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(bridge.sent, [])
 
+    async def test_suppress_empty_skips_heartbeat_digest_with_zero_events(self):
+        """Architect with suppress_empty=True must not emit empty heartbeats."""
+        state, group, engineer = self._make_state()
+        state.update_agent_digest_settings(
+            engineer.id,
+            heartbeat_interval=60,
+            suppress_empty=True,
+        )
+        bridge = FakeBridge()
+        buffer = self.engineer_mod.EngineerEventBuffer(state, bridge)
+        buffer._loop = asyncio.get_running_loop()
+        buffer._last_push[engineer.id] = time.time() - 600
+
+        buffer._timer_tick()
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(bridge.sent, [])
+        # Heartbeat clock advanced — re-firing immediately would deliver again
+        # without suppression.
+        self.assertGreater(buffer._last_push[engineer.id], time.time() - 5)
+
+    async def test_suppress_empty_still_emits_when_events_arrive(self):
+        """suppress_empty does not affect digests with real events."""
+        state, group, engineer = self._make_state()
+        state.update_agent_digest_settings(
+            engineer.id,
+            heartbeat_interval=60,
+            suppress_empty=True,
+        )
+        bridge = FakeBridge()
+        buffer = self.engineer_mod.EngineerEventBuffer(state, bridge)
+        buffer._loop = asyncio.get_running_loop()
+        buffer._last_push[engineer.id] = time.time() - 600
+
+        buffer.on_panel_event({
+            "group": group,
+            "kind": "task_completed",
+            "message": "shipped",
+        })
+        buffer._timer_tick()
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(len(bridge.sent), 1)
+        self.assertIn("shipped", bridge.sent[0])
+
+    async def test_architect_default_suppress_empty_skips_empty_heartbeat(self):
+        """Default ArchitectSettings should silence empty-window heartbeats."""
+        state, group, _ = self._make_state()
+        architect = self.state_mod.AgentCell(
+            id="arch-1",
+            name="Planner",
+            slug="planner",
+            group=group,
+            cell_type="agent",
+            session_id="session-arch",
+            status="running",
+            kind="architect",
+            persistent=True,
+        )
+        state.agents[architect.id] = architect
+        state.groups[group].append(architect.id)
+        # Force a positive heartbeat interval so the heartbeat path can fire.
+        state.update_architect_settings(
+            group, architect_heartbeat_interval=60,
+        )
+
+        bridge = FakeBridge()
+        buffer = self.engineer_mod.EngineerEventBuffer(state, bridge)
+        buffer._loop = asyncio.get_running_loop()
+        buffer._last_push[architect.id] = time.time() - 600
+
+        buffer._timer_tick()
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(bridge.sent, [])
+
     async def test_idle_heartbeat_does_not_duplicate_regular_event_pushes(self):
         state, group, engineer = self._make_state()
         bridge = FakeBridge()

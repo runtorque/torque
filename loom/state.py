@@ -82,6 +82,10 @@ _ARCHITECT_DIGEST_VERBOSITIES = {
     "verbose",
 }
 _DEFAULT_ARCHITECT_DIGEST_VERBOSITY = "balanced"
+_DEFAULT_ARCHITECT_PUSH_INTERVAL = 300
+_DEFAULT_ARCHITECT_MAX_INTERVAL = 600
+_DEFAULT_ARCHITECT_HEARTBEAT_INTERVAL = 0
+_DEFAULT_ARCHITECT_SUPPRESS_EMPTY_DIGESTS = True
 _DEFAULT_ARCHITECT_JOURNAL_CHECKPOINT_FREQUENCY = "every_10_actions"
 _DEFAULT_ARCHITECT_REVIEW_GATE_THRESHOLDS = {
     "ship_direct_max": 50,
@@ -1105,6 +1109,15 @@ class GroupSettings:
     architect_autonomy_mode: str = _DEFAULT_ARCHITECT_AUTONOMY_MODE
     architect_paused: bool = False
     architect_digest_verbosity: str = _DEFAULT_ARCHITECT_DIGEST_VERBOSITY
+    architect_push_interval: int = _DEFAULT_ARCHITECT_PUSH_INTERVAL
+    architect_max_interval: int = _DEFAULT_ARCHITECT_MAX_INTERVAL
+    architect_heartbeat_interval: int = _DEFAULT_ARCHITECT_HEARTBEAT_INTERVAL
+    architect_suppress_empty_digests: bool = (
+        _DEFAULT_ARCHITECT_SUPPRESS_EMPTY_DIGESTS
+    )
+    architect_enabled_events: list[str] = field(
+        default_factory=lambda: list(_ARCHITECT_DIGEST_DEFAULT_ENABLED_EVENTS)
+    )
     architect_journal_checkpoint_frequency: str = (
         _DEFAULT_ARCHITECT_JOURNAL_CHECKPOINT_FREQUENCY
     )
@@ -1125,6 +1138,15 @@ class ArchitectSettings:
     architect_autonomy_mode: str = _DEFAULT_ARCHITECT_AUTONOMY_MODE
     architect_paused: bool = False
     architect_digest_verbosity: str = _DEFAULT_ARCHITECT_DIGEST_VERBOSITY
+    architect_push_interval: int = _DEFAULT_ARCHITECT_PUSH_INTERVAL
+    architect_max_interval: int = _DEFAULT_ARCHITECT_MAX_INTERVAL
+    architect_heartbeat_interval: int = _DEFAULT_ARCHITECT_HEARTBEAT_INTERVAL
+    architect_suppress_empty_digests: bool = (
+        _DEFAULT_ARCHITECT_SUPPRESS_EMPTY_DIGESTS
+    )
+    architect_enabled_events: list[str] = field(
+        default_factory=lambda: list(_ARCHITECT_DIGEST_DEFAULT_ENABLED_EVENTS)
+    )
     architect_journal_checkpoint_frequency: str = (
         _DEFAULT_ARCHITECT_JOURNAL_CHECKPOINT_FREQUENCY
     )
@@ -1185,6 +1207,7 @@ class AgentDigestSettings:
     )
     architect_digest: bool = False
     wake_on_digest: bool = False
+    suppress_empty: bool = False
 
 
 # Mandatory events — always included in engineer digests regardless of enabled_events.
@@ -2803,6 +2826,7 @@ class MatrixState:
                         AgentDigestSettings(**filtered)
                     )
                 self._backfill_architect_digest_defaults()
+                self._backfill_architect_suppress_empty_once()
                 for gname in self.groups:
                     entries = self.db.load_engineer_task_log(
                         gname,
@@ -2865,14 +2889,39 @@ class MatrixState:
                     strict=strict,
                 )
             )
-        if "architect_paused" in fields:
-            raw = fields["architect_paused"]
+        for bool_key in ("architect_paused", "architect_suppress_empty_digests"):
+            if bool_key in fields:
+                raw = fields[bool_key]
+                if isinstance(raw, str):
+                    fields[bool_key] = (
+                        raw.strip().lower() in {"1", "true", "yes", "on"}
+                    )
+                else:
+                    fields[bool_key] = bool(raw)
+        for int_key, default_val, min_val in (
+                ("architect_push_interval",
+                    _DEFAULT_ARCHITECT_PUSH_INTERVAL, 0),
+                ("architect_max_interval",
+                    _DEFAULT_ARCHITECT_MAX_INTERVAL, 0),
+                ("architect_heartbeat_interval",
+                    _DEFAULT_ARCHITECT_HEARTBEAT_INTERVAL, 0)):
+            if int_key in fields:
+                raw = fields[int_key]
+                try:
+                    parsed = int(raw)
+                except (TypeError, ValueError):
+                    parsed = default_val
+                if parsed < min_val:
+                    parsed = min_val
+                fields[int_key] = parsed
+        if "architect_enabled_events" in fields:
+            raw = fields["architect_enabled_events"]
             if isinstance(raw, str):
-                fields["architect_paused"] = (
-                    raw.strip().lower() in {"1", "true", "yes", "on"}
-                )
-            else:
-                fields["architect_paused"] = bool(raw)
+                raw = [token.strip() for token in raw.split(",")]
+            fields["architect_enabled_events"] = [
+                str(item).strip() for item in (raw or [])
+                if str(item).strip()
+            ]
         for key in (
                 "architect_boot_command", "architect_provider",
                 "architect_model", "architect_reasoning_effort",
@@ -2908,11 +2957,24 @@ class MatrixState:
 
     def _sync_architect_digest_settings(self, group: str,
                                         fields: dict) -> None:
-        if "architect_paused" not in fields:
+        digest_field_map = {
+            "architect_paused": "paused",
+            "architect_push_interval": "push_interval",
+            "architect_max_interval": "max_interval",
+            "architect_heartbeat_interval": "heartbeat_interval",
+            "architect_digest_verbosity": "digest_verbosity",
+            "architect_suppress_empty_digests": "suppress_empty",
+            "architect_enabled_events": "enabled_events",
+        }
+        digest_updates = {
+            digest_field_map[key]: fields[key]
+            for key in digest_field_map
+            if key in fields
+        }
+        if not digest_updates:
             return
-        paused = bool(fields.get("architect_paused", False))
         for architect in self._architect_cells_for_group(group):
-            self.update_agent_digest_settings(architect.id, paused=paused)
+            self.update_agent_digest_settings(architect.id, **digest_updates)
 
     def update_architect_settings(self, group: str, **fields) -> dict:
         """Update architect settings for a group.
@@ -3012,18 +3074,45 @@ class MatrixState:
         )
         kwargs = {}
         if is_architect:
-            kwargs["enabled_events"] = list(
-                _ARCHITECT_DIGEST_DEFAULT_ENABLED_EVENTS
+            arch = self.get_architect_settings(
+                getattr(cell, "group", "") or ""
             )
-            kwargs["paused"] = bool(
-                self.get_architect_settings(
-                    getattr(cell, "group", "") or ""
-                ).architect_paused
+            enabled = list(arch.architect_enabled_events or [])
+            if not enabled:
+                enabled = list(_ARCHITECT_DIGEST_DEFAULT_ENABLED_EVENTS)
+            kwargs["enabled_events"] = enabled
+            kwargs["paused"] = bool(arch.architect_paused)
+            kwargs["push_interval"] = int(
+                arch.architect_push_interval
+                if arch.architect_push_interval is not None
+                else _DEFAULT_ARCHITECT_PUSH_INTERVAL
+            )
+            kwargs["max_interval"] = int(
+                arch.architect_max_interval
+                if arch.architect_max_interval is not None
+                else _DEFAULT_ARCHITECT_MAX_INTERVAL
+            )
+            kwargs["heartbeat_interval"] = int(
+                arch.architect_heartbeat_interval
+                if arch.architect_heartbeat_interval is not None
+                else _DEFAULT_ARCHITECT_HEARTBEAT_INTERVAL
+            )
+            kwargs["digest_verbosity"] = normalize_architect_digest_verbosity(
+                arch.architect_digest_verbosity
+            )
+            kwargs["suppress_empty"] = bool(
+                arch.architect_suppress_empty_digests
+            )
+            return AgentDigestSettings(
+                agent_id=agent_id,
+                architect_digest=True,
+                wake_on_digest=False,
+                **kwargs,
             )
         return AgentDigestSettings(
             agent_id=agent_id,
-            push_interval=300 if is_architect else 60,
-            architect_digest=is_architect,
+            push_interval=60,
+            architect_digest=False,
             wake_on_digest=False,
             **kwargs,
         )
@@ -3100,6 +3189,42 @@ class MatrixState:
             for agent_id, settings in changed:
                 self.db.save_agent_digest_settings(agent_id, asdict(settings))
 
+    def _backfill_architect_suppress_empty_once(self) -> None:
+        """One-time: flip ``suppress_empty=True`` on pre-existing architect rows.
+
+        The ``suppress_empty`` column was added with default 0 to keep the
+        migration trivial. Without this backfill, architects whose digest
+        settings row predates the new column keep emitting empty heartbeat
+        digests — which is exactly the user complaint that motivated the
+        new flag. We run this exactly once (gated by a ``ui_state``
+        marker) so a user who later explicitly sets the flag back to
+        False is not overwritten on subsequent boots.
+        """
+        marker_key = "architect_digest_suppress_empty_backfilled"
+        if not self.db:
+            return
+        try:
+            already = self.db.load_ui_state_value(marker_key)
+        except Exception:
+            log.exception("Failed to read backfill marker %s", marker_key)
+            return
+        if already:
+            return
+        changed = []
+        for agent_id, settings in self.agent_digest_settings.items():
+            cell = self.agents.get(agent_id)
+            if str(getattr(cell, "kind", "") or "").strip() != "architect":
+                continue
+            if bool(getattr(settings, "suppress_empty", False)):
+                continue
+            settings.suppress_empty = True
+            changed.append((agent_id, settings))
+        for agent_id, settings in changed:
+            self.db.save_agent_digest_settings(agent_id, asdict(settings))
+        self.db.defer_write(
+            "ui_state", "save_ui_state", marker_key, "1",
+        )
+
     def update_agent_digest_settings(self, agent_id: str, **fields):
         """Update digest settings for one engineer/architect recipient."""
         agent_id = str(agent_id or "").strip()
@@ -3118,7 +3243,8 @@ class MatrixState:
                 continue
             if key == "digest_verbosity":
                 value = normalize_engineer_digest_verbosity(value)
-            elif key in {"paused", "architect_digest", "wake_on_digest"}:
+            elif key in {"paused", "architect_digest", "wake_on_digest",
+                         "suppress_empty"}:
                 value = bool(value)
             setattr(settings, key, value)
         payload = asdict(settings)

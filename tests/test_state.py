@@ -1111,6 +1111,222 @@ class MatrixStateCleanupTests(unittest.TestCase):
             },
         )
 
+    def test_architect_digest_settings_have_user_pain_aware_defaults(self):
+        """Architect ArchitectSettings ship with empty-window digest suppression."""
+        settings = self.state_mod.ArchitectSettings(group="g")
+        self.assertEqual(settings.architect_push_interval, 300)
+        self.assertEqual(settings.architect_max_interval, 600)
+        self.assertEqual(settings.architect_heartbeat_interval, 0)
+        self.assertTrue(settings.architect_suppress_empty_digests)
+        self.assertIn("task_done", settings.architect_enabled_events)
+
+    def test_architect_digest_knobs_round_trip_through_group_settings(self):
+        from loom.db import LoomDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = LoomDB(Path(tmp.name) / "loom.db")
+        db.init()
+        self.addCleanup(db.close)
+        db.save_groups({"g": []}, {"g": "g"})
+        db.save_group_settings(
+            "g",
+            self.state_mod.GroupSettings(
+                architect_push_interval=120,
+                architect_max_interval=240,
+                architect_heartbeat_interval=600,
+                architect_suppress_empty_digests=False,
+                architect_enabled_events=["task_done", "task_blocked"],
+            ),
+        )
+
+        state = self.state_mod.MatrixState(db=db)
+        state.load()
+
+        settings = state.get_architect_settings("g")
+        self.assertEqual(settings.architect_push_interval, 120)
+        self.assertEqual(settings.architect_max_interval, 240)
+        self.assertEqual(settings.architect_heartbeat_interval, 600)
+        self.assertFalse(settings.architect_suppress_empty_digests)
+        self.assertEqual(
+            settings.architect_enabled_events,
+            ["task_done", "task_blocked"],
+        )
+
+    def test_default_agent_digest_settings_inherits_architect_knobs(self):
+        state = self.state_mod.MatrixState()
+        state.groups["g"] = []
+        state.update_architect_settings(
+            "g",
+            architect_push_interval=180,
+            architect_max_interval=360,
+            architect_heartbeat_interval=900,
+            architect_suppress_empty_digests=False,
+            architect_enabled_events=["task_done"],
+        )
+        architect = self.state_mod.AgentCell(
+            id="arch-1",
+            name="Architect",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+        )
+        state.agents[architect.id] = architect
+        state.groups["g"].append(architect.id)
+
+        defaults = state._default_agent_digest_settings(architect.id, architect)
+        self.assertEqual(defaults.push_interval, 180)
+        self.assertEqual(defaults.max_interval, 360)
+        self.assertEqual(defaults.heartbeat_interval, 900)
+        self.assertFalse(defaults.suppress_empty)
+        self.assertEqual(defaults.enabled_events, ["task_done"])
+        self.assertTrue(defaults.architect_digest)
+
+    def test_default_agent_digest_settings_falls_back_to_default_events(self):
+        """Empty architect_enabled_events means 'use default catalog'."""
+        state = self.state_mod.MatrixState()
+        state.groups["g"] = []
+        state.update_architect_settings("g", architect_enabled_events=[])
+        architect = self.state_mod.AgentCell(
+            id="arch-1",
+            name="Architect",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+        )
+        state.agents[architect.id] = architect
+        state.groups["g"].append(architect.id)
+
+        defaults = state._default_agent_digest_settings(architect.id, architect)
+        self.assertIn("task_done", defaults.enabled_events)
+        self.assertIn("task_completed", defaults.enabled_events)
+
+    def test_load_backfills_suppress_empty_for_legacy_architect_rows(self):
+        """Pre-existing architect digest rows should pick up suppress_empty."""
+        from loom.db import LoomDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = LoomDB(Path(tmp.name) / "loom.db")
+        db.init()
+        self.addCleanup(db.close)
+        db.save_groups({"g": ["arch-1"]}, {"g": "g"})
+        db.save_group_members("g", ["arch-1"])
+        db.save_agent(
+            self.state_mod.AgentCell(
+                id="arch-1",
+                name="Architect",
+                group="g",
+                cell_type="agent",
+                kind="architect",
+                persistent=True,
+            )
+        )
+        # Simulate an architect digest row that predates the new column —
+        # heartbeat=300, suppress_empty=False (column default).
+        db.save_agent_digest_settings(
+            "arch-1",
+            {
+                "agent_id": "arch-1",
+                "heartbeat_interval": 300,
+                "architect_digest": True,
+                "suppress_empty": False,
+            },
+        )
+
+        state = self.state_mod.MatrixState(db=db)
+        state.load()
+
+        backfilled = state.get_agent_digest_settings("arch-1")
+        self.assertTrue(backfilled.suppress_empty)
+        # Persisted, not just in-memory.
+        persisted = db.load_all_agent_digest_settings()["arch-1"]
+        self.assertTrue(persisted["suppress_empty"])
+        # Marker was written so we don't fight a user who later turns it off.
+        self.assertEqual(
+            db.load_ui_state_value(
+                "architect_digest_suppress_empty_backfilled"
+            ),
+            "1",
+        )
+
+    def test_backfill_runs_only_once_respects_user_override(self):
+        """Once the marker is set, a user-set False is preserved across reloads."""
+        from loom.db import LoomDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = LoomDB(Path(tmp.name) / "loom.db")
+        db.init()
+        self.addCleanup(db.close)
+        db.save_groups({"g": ["arch-1"]}, {"g": "g"})
+        db.save_group_members("g", ["arch-1"])
+        db.save_agent(
+            self.state_mod.AgentCell(
+                id="arch-1",
+                name="Architect",
+                group="g",
+                cell_type="agent",
+                kind="architect",
+                persistent=True,
+            )
+        )
+        db.save_agent_digest_settings(
+            "arch-1",
+            {
+                "agent_id": "arch-1",
+                "architect_digest": True,
+                "suppress_empty": False,
+            },
+        )
+
+        state = self.state_mod.MatrixState(db=db)
+        state.load()
+        # First load backfills.
+        self.assertTrue(
+            state.get_agent_digest_settings("arch-1").suppress_empty
+        )
+
+        # User explicitly turns it back off.
+        state.update_agent_digest_settings("arch-1", suppress_empty=False)
+        self.assertFalse(
+            state.get_agent_digest_settings("arch-1").suppress_empty
+        )
+
+        # Reload — the marker means we do NOT re-flip the user's choice.
+        state2 = self.state_mod.MatrixState(db=db)
+        state2.load()
+        self.assertFalse(
+            state2.get_agent_digest_settings("arch-1").suppress_empty
+        )
+
+    def test_sync_architect_digest_settings_propagates_new_knobs(self):
+        state = self.state_mod.MatrixState()
+        state.groups["g"] = []
+        architect = self.state_mod.AgentCell(
+            id="arch-1",
+            name="Architect",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+        )
+        state.agents[architect.id] = architect
+        state.groups["g"].append(architect.id)
+        # Materialize a per-agent digest row.
+        state.update_agent_digest_settings(architect.id)
+
+        state.update_architect_settings(
+            "g",
+            architect_push_interval=240,
+            architect_heartbeat_interval=1200,
+            architect_suppress_empty_digests=False,
+        )
+
+        per_agent = state.get_agent_digest_settings(architect.id)
+        self.assertEqual(per_agent.push_interval, 240)
+        self.assertEqual(per_agent.heartbeat_interval, 1200)
+        self.assertFalse(per_agent.suppress_empty)
+
     def test_agent_visibility_to_engineer_enforces_kind_scope(self):
         state = self.state_mod.MatrixState()
         engineer = self.state_mod.AgentCell(
