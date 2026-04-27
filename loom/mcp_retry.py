@@ -80,6 +80,8 @@ _SCOPED_WRITE_SUFFIXES = {
     "create_pr",
     "worktree_remove",
     "worktree_checkpoint",
+    "specialization_save",
+    "specialization_delete",
 }
 
 _API_READ_COMMANDS = {

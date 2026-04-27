@@ -412,7 +412,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("engineer_board_summary", tool_names)
         self.assertNotIn("engineer_board_summary", tool_names)
         self.assertNotIn("architect_board_summary", tool_names)
-        self.assertNotIn("architect_workspace_overview", tool_names)
+        self.assertNotIn("architect_tool_search", tool_names)
 
         listed_worker = await handler(
             FakeRequest(
@@ -427,7 +427,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("engineer_board_summary", worker_tool_names)
         self.assertNotIn("engineer_board_summary", worker_tool_names)
         self.assertNotIn("architect_board_summary", worker_tool_names)
-        self.assertNotIn("architect_workspace_overview", worker_tool_names)
+        self.assertNotIn("architect_tool_search", worker_tool_names)
 
         listed_architect = await handler(
             FakeRequest(
@@ -438,10 +438,16 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         architect_tool_names = [
             tool["name"] for tool in listed_architect.payload["result"]["tools"]
         ]
-        self.assertIn("architect_workspace_overview", architect_tool_names)
+        self.assertIn("architect_tool_search", architect_tool_names)
         self.assertIn("architect_board_summary", architect_tool_names)
         self.assertIn("architect_events_recent", architect_tool_names)
         self.assertIn("architect_deploy_state", architect_tool_names)
+        self.assertNotIn("architect_get_architect_settings", architect_tool_names)
+        self.assertNotIn("architect_mcp_calls", architect_tool_names)
+        self.assertNotIn("architect_engineer_dismiss", architect_tool_names)
+        self.assertNotIn("architect_engineer_rehire", architect_tool_names)
+        self.assertNotIn("architect_update_architect_settings", architect_tool_names)
+        self.assertNotIn("architect_workspace_overview", architect_tool_names)
         self.assertIn("architect_task_list", architect_tool_names)
         self.assertIn("architect_task_chain", architect_tool_names)
         self.assertIn("architect_task_update", architect_tool_names)
@@ -464,11 +470,16 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         engineer_tool_names = [
             tool["name"] for tool in listed_engineer.payload["result"]["tools"]
         ]
+        self.assertIn("engineer_tool_search", engineer_tool_names)
         self.assertIn("engineer_board_summary", engineer_tool_names)
-        self.assertIn("engineer_task_reassign", engineer_tool_names)
         self.assertIn("engineer_task_verify", engineer_tool_names)
         self.assertIn("engineer_message_architect", engineer_tool_names)
         self.assertIn("engineer_reply", engineer_tool_names)
+        self.assertNotIn("engineer_task_reassign", engineer_tool_names)
+        self.assertNotIn("engineer_task_upload_artifact", engineer_tool_names)
+        self.assertNotIn("engineer_launch_settings", engineer_tool_names)
+        self.assertNotIn("engineer_specializations_list", engineer_tool_names)
+        self.assertNotIn("engineer_mcp_calls", engineer_tool_names)
         self.assertNotIn("architect_workspace_overview", engineer_tool_names)
         self.assertNotIn("architect_board_summary", engineer_tool_names)
 
@@ -536,6 +547,234 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         parsed = json.loads(summary.payload["result"]["content"][0]["text"])
         self.assertEqual(parsed["group"], "g")
         self.assertEqual(calls, [])
+
+    def _parse_functions_block(self, text):
+        self.assertTrue(text.startswith("<functions>"), text)
+        self.assertTrue(text.endswith("</functions>"), text)
+        inner = text[len("<functions>"):-len("</functions>")]
+        return json.loads(inner)
+
+    async def test_tool_search_select_and_keyword_return_functions_block(self):
+        state = self.state_mod.MatrixState()
+        engineer = self.state_mod.AgentCell(
+            id="engineer-1",
+            name="Engineer",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+        )
+        architect = self.state_mod.AgentCell(
+            id="architect-1",
+            name="Architect",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+        )
+        state.agents[engineer.id] = engineer
+        state.agents[architect.id] = architect
+        state.groups["g"] = [engineer.id, architect.id]
+
+        async def fake_handle_command(payload):
+            if payload.get("cmd") == "list_specializations":
+                return {"type": "specializations", "items": []}
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        handler = self.mcp_mod.create_mcp_handler(fake_handle_command, state)
+
+        exact = await handler(
+            FakeRequest(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "engineer_tool_search",
+                        "arguments": {
+                            "query": "select:engineer_task_upload_artifact",
+                        },
+                    },
+                },
+                headers={"X-Loom-Cell-Id": engineer.id},
+            )
+        )
+        self.assertFalse(exact.payload["result"]["isError"])
+        exact_payload = self._parse_functions_block(
+            exact.payload["result"]["content"][0]["text"]
+        )
+        self.assertEqual(
+            [tool["name"] for tool in exact_payload["tools"]],
+            ["engineer_task_upload_artifact"],
+        )
+        self.assertNotIn("deferred", exact_payload["tools"][0])
+
+        keyword = await handler(
+            FakeRequest(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "engineer_tool_search",
+                        "arguments": {
+                            "query": "artifact upload",
+                            "max_results": 3,
+                        },
+                    },
+                },
+                headers={"X-Loom-Cell-Id": engineer.id},
+            )
+        )
+        keyword_payload = self._parse_functions_block(
+            keyword.payload["result"]["content"][0]["text"]
+        )
+        self.assertIn(
+            "engineer_task_upload_artifact",
+            [tool["name"] for tool in keyword_payload["tools"]],
+        )
+
+        architect_exact = await handler(
+            FakeRequest(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "architect_tool_search",
+                        "arguments": {
+                            "query": "select:architect_mcp_calls",
+                        },
+                    },
+                },
+                headers={"X-Loom-Cell-Id": architect.id},
+            )
+        )
+        architect_payload = self._parse_functions_block(
+            architect_exact.payload["result"]["content"][0]["text"]
+        )
+        self.assertEqual(
+            [tool["name"] for tool in architect_payload["tools"]],
+            ["architect_mcp_calls"],
+        )
+
+    async def test_deferred_tools_remain_callable_after_lazy_registration(self):
+        state = self.state_mod.MatrixState()
+        engineer = self.state_mod.AgentCell(
+            id="engineer-1",
+            name="Engineer",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+        )
+        architect = self.state_mod.AgentCell(
+            id="architect-1",
+            name="Architect",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+        )
+        state.agents[engineer.id] = engineer
+        state.agents[architect.id] = architect
+        state.groups["g"] = [engineer.id, architect.id]
+        state.update_architect_settings("g", architect_provider="codex")
+
+        async def fake_handle_command(payload):
+            if payload.get("cmd") == "list_specializations":
+                return {"type": "specializations", "items": []}
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        handler = self.mcp_mod.create_mcp_handler(fake_handle_command, state)
+        architect_settings = await handler(
+            FakeRequest(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "architect_get_architect_settings",
+                        "arguments": {},
+                    },
+                },
+                headers={"X-Loom-Cell-Id": architect.id},
+            )
+        )
+        self.assertFalse(architect_settings.payload["result"]["isError"])
+        settings_payload = json.loads(
+            architect_settings.payload["result"]["content"][0]["text"]
+        )
+        self.assertEqual(settings_payload["settings"]["architect_provider"], "codex")
+
+        engineer_show = await handler(
+            FakeRequest(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "engineer_specializations_list",
+                        "arguments": {},
+                    },
+                },
+                headers={"X-Loom-Cell-Id": engineer.id},
+            )
+        )
+        self.assertFalse(engineer_show.payload["result"]["isError"])
+
+    async def test_removed_architect_tools_are_not_registered_or_callable(self):
+        state = self.state_mod.MatrixState()
+        architect = self.state_mod.AgentCell(
+            id="architect-1",
+            name="Architect",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+        )
+        state.agents[architect.id] = architect
+        state.groups["g"] = [architect.id]
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        handler = self.mcp_mod.create_mcp_handler(fake_handle_command, state)
+        listed = await handler(
+            FakeRequest(
+                {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+                headers={"X-Loom-Cell-Id": architect.id},
+            )
+        )
+        tool_names = {
+            tool["name"] for tool in listed.payload["result"]["tools"]
+        }
+        removed_names = [
+            "architect_" + "update_architect_settings",
+            "architect_" + "workspace_overview",
+        ]
+        for tool_name in removed_names:
+            self.assertNotIn(tool_name, tool_names)
+            response = await handler(
+                FakeRequest(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": tool_name,
+                        "method": "tools/call",
+                        "params": {"name": tool_name, "arguments": {}},
+                    },
+                    headers={"X-Loom-Cell-Id": architect.id},
+                )
+            )
+            self.assertIn("error", response.payload)
+            self.assertIn("Unknown tool", response.payload["error"]["message"])
+
+    def test_removed_architect_mcp_tools_have_no_application_callers(self):
+        removed_names = [
+            "architect_" + "update_architect_settings",
+            "architect_" + "workspace_overview",
+        ]
+        root = Path(__file__).resolve().parents[1]
+        paths = list((root / "loom").glob("*.py")) + [root / "bin" / "loom"]
+        for path in paths:
+            text = path.read_text()
+            for tool_name in removed_names:
+                self.assertNotIn(tool_name, text, str(path))
 
     def test_loom_ask_tool_description_marks_it_as_blocking(self):
         ask_tool = next(

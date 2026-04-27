@@ -15,22 +15,21 @@ from copy import deepcopy
 from .config import DB_FILE
 from .db import LoomDB
 from .mcp_stdio_proxy import serve_http_proxy
-from .mcp_tools_shared import dispatch_scoped_tool
+from .mcp_tools_shared import authorize_caller, dispatch_scoped_tool
+from .mcp_tool_search import make_tool_search_spec, tool_search_response
 
 _ENV_VAR = "LOOM_ARCHITECT_ID"
 
+ARCHITECT_DEFERRED_TOOL_NAMES = {
+    "architect_get_architect_settings",
+    "architect_engineer_dismiss",
+    "architect_engineer_rehire",
+    "architect_mcp_calls",
+}
+
 
 _ARCHITECT_TOOL_SPECS = [
-    {
-        "name": "architect_workspace_overview",
-        "description": (
-            "Return a compact, architect-scoped rollup of visible engineers, "
-            "their current task queues/workers/worktree streams, this "
-            "architect's open tasks, pending hires, unread messages, and "
-            "minimal journal self-state."
-        ),
-        "inputSchema": {"type": "object", "properties": {}},
-    },
+    make_tool_search_spec("architect_tool_search", "architect"),
     {
         "name": "architect_board_summary",
         "description": (
@@ -83,6 +82,7 @@ _ARCHITECT_TOOL_SPECS = [
     },
     {
         "name": "architect_mcp_calls",
+        "deferred": True,
         "description": (
             "Return recent MCP call history for this architect's group. "
             "Defaults to mcp__loom__ tools; optionally filter by agent, "
@@ -136,52 +136,9 @@ _ARCHITECT_TOOL_SPECS = [
     },
     {
         "name": "architect_get_architect_settings",
+        "deferred": True,
         "description": "Read this group's persisted Architect settings.",
         "inputSchema": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "architect_update_architect_settings",
-        "description": (
-            "Update this group's persisted Architect settings. Deferred v1 "
-            "fields are stored but not wired to runtime behavior yet."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "architect_boot_command": {"type": "string"},
-                "architect_provider": {"type": "string"},
-                "architect_model": {"type": "string"},
-                "architect_reasoning_effort": {"type": "string"},
-                "architect_custom_instructions": {"type": "string"},
-                "architect_autonomy_mode": {
-                    "type": "string",
-                    "enum": [
-                        "dispatch_freely",
-                        "dispatch_after_confirm",
-                        "ask_always",
-                    ],
-                },
-                "architect_paused": {"type": "boolean"},
-                "architect_digest_verbosity": {
-                    "type": "string",
-                    "enum": ["terse", "balanced", "verbose"],
-                },
-                "architect_journal_checkpoint_frequency": {
-                    "type": "string",
-                    "description": (
-                        "manual_only, every_N_actions, or every_N_minutes."
-                    ),
-                },
-                "architect_review_gate_thresholds": {
-                    "type": "object",
-                    "properties": {
-                        "ship_direct_max": {"type": "integer"},
-                        "review_default_above": {"type": "integer"},
-                        "self_review_bypass_allowed": {"type": "boolean"},
-                    },
-                },
-            },
-        },
     },
     {
         "name": "architect_task_show",
@@ -766,7 +723,10 @@ _ARCHITECT_TOOL_SPECS = [
 
 
 def _copy_tool_spec(tool: dict) -> dict:
-    return deepcopy(tool)
+    copied = deepcopy(tool)
+    if str(copied.get("name", "") or "").strip() in ARCHITECT_DEFERRED_TOOL_NAMES:
+        copied["deferred"] = True
+    return copied
 
 
 ARCHITECT_TOOLS = [_copy_tool_spec(tool) for tool in _ARCHITECT_TOOL_SPECS]
@@ -861,6 +821,15 @@ async def _dispatch_architect_tool(name, args, handle_command, state,
     caller_id = str(caller_id or "").strip() or bound_architect_id_from_env()
     if str(name or "").strip() not in _ARCHITECT_TOOL_NAMES:
         return f"Unknown architect tool: {name}", True
+    if str(name or "").strip() == "architect_tool_search":
+        _cell, _group, _kind, error_text, is_error = authorize_caller(
+            state,
+            caller_kind="architect",
+            caller_id=caller_id,
+        )
+        if is_error:
+            return error_text, True
+        return tool_search_response(ARCHITECT_TOOLS, args), False
     return await dispatch_scoped_tool(
         name,
         args,

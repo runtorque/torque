@@ -2852,20 +2852,11 @@ def _parse_key_value_settings(items):
 
 
 def cmd_architect_settings(args):
-    """Show or update per-group Architect settings."""
+    """Show per-group Architect settings."""
     state_data = get_state(args.port)
     group = resolve_group(state_data, args.group)
-    if args.set:
-        updates = _parse_key_value_settings(args.set)
-        resp = api_call(
-            "update_architect_settings",
-            port=args.port,
-            group=group,
-            settings=updates,
-        )
-        check_ok(resp)
-        print(f"Architect settings for \"{group}\" updated")
-        return
+    if getattr(args, "set", None):
+        die("Updating architect settings from the CLI has been removed.")
 
     resp = api_call("get_architect_settings", port=args.port, group=group)
     data = check_ok(resp)
@@ -4655,11 +4646,9 @@ def build_parser():
     arch_sub = arch.add_subparsers(dest="architect_cmd")
 
     p = arch_sub.add_parser("settings",
-                            help="Show or update architect settings")
+                            help="Show architect settings")
     p.add_argument("-g", "--group", default="loom",
                    help="Group name (default: loom)")
-    p.add_argument("-s", "--set", action="append", metavar="KEY=VALUE",
-                   help="Update settings (e.g., -s architect_paused=true)")
     p.add_argument("--json", action="store_true",
                    help="Output raw JSON")
     p.set_defaults(func=cmd_architect_settings)

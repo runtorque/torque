@@ -20,6 +20,7 @@ from aiohttp import web
 from . import __version__
 from .mcp_architect import ARCHITECT_TOOLS, _dispatch_architect_tool
 from .mcp_engineer import ENGINEER_TOOLS, _dispatch_engineer_tool
+from .mcp_tool_search import deferred_tool_specs, eager_tool_specs
 from .mcp_retry import (
     IDEMPOTENCY_HEADER,
     derive_idempotency_key,
@@ -705,10 +706,21 @@ def _visible_tools(state, cell_id: str):
     cell = state.agents.get(str(cell_id or "").strip()) if cell_id else None
     caller_kind = str(getattr(cell, "kind", "") or "").strip() if cell else ""
     if caller_kind == "engineer":
-        tools.extend(ENGINEER_TOOLS)
+        tools.extend(eager_tool_specs(ENGINEER_TOOLS))
     elif caller_kind == "architect":
-        tools.extend(ARCHITECT_TOOLS)
+        tools.extend(eager_tool_specs(ARCHITECT_TOOLS))
     return tools
+
+
+def _deferred_tools_for_caller(state, cell_id: str):
+    """Return deferred MCP tool schemas available to the caller."""
+    cell = state.agents.get(str(cell_id or "").strip()) if cell_id else None
+    caller_kind = str(getattr(cell, "kind", "") or "").strip() if cell else ""
+    if caller_kind == "engineer":
+        return deferred_tool_specs(ENGINEER_TOOLS)
+    if caller_kind == "architect":
+        return deferred_tool_specs(ARCHITECT_TOOLS)
+    return []
 
 
 # ---------------------------------------------------------------------------

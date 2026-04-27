@@ -86,6 +86,93 @@ class MCPRetryHelperTests(unittest.IsolatedAsyncioTestCase):
             idempotency_key,
         )
 
+    def test_all_registered_write_tools_classify_independent_of_lazy_partition(self):
+        mcp_mod = importlib.reload(importlib.import_module("loom.mcp"))
+        write_tools = {
+            "loom_task_upload_artifact",
+            "loom_done",
+            "loom_blocked",
+            "loom_error",
+            "loom_progress",
+            "loom_verify",
+            "loom_ready",
+            "loom_name",
+            "loom_derive",
+            "loom_ask",
+            "loom_reply",
+            "loom_memory_publish",
+            "loom_memory_pin",
+            "loom_memory_link",
+            "loom_memory_unpin",
+            "engineer_launch_settings",
+            "engineer_notifications",
+            "engineer_resume",
+            "engineer_task_create",
+            "engineer_task_edit",
+            "engineer_task_upload_artifact",
+            "engineer_task_verify",
+            "engineer_task_move",
+            "engineer_task_dispatch",
+            "engineer_batch_dispatch",
+            "engineer_task_resolve",
+            "engineer_journal",
+            "engineer_agent_message",
+            "engineer_ask",
+            "engineer_note",
+            "engineer_agent_close",
+            "engineer_agent_relaunch",
+            "engineer_merge",
+            "engineer_rebase",
+            "engineer_create_pr",
+            "engineer_worktree_remove",
+            "engineer_worktree_checkpoint",
+            "engineer_specialization_save",
+            "engineer_specialization_delete",
+            "engineer_task_reassign",
+            "engineer_message_architect",
+            "engineer_reply",
+            "architect_engineer_hire",
+            "architect_engineer_dismiss",
+            "architect_engineer_rehire",
+            "architect_task_create",
+            "architect_task_update",
+            "architect_task_reassign",
+            "architect_task_move",
+            "architect_ask",
+            "architect_engineer_message",
+            "architect_reply",
+            "architect_decision_create",
+            "architect_decision_update",
+            "architect_decision_link",
+            "architect_journal",
+        }
+        registered_names = {tool["name"] for tool in mcp_mod.ALL_TOOLS}
+
+        self.assertTrue(write_tools <= registered_names)
+        for tool_name in write_tools:
+            self.assertTrue(is_mcp_write_tool(tool_name), tool_name)
+
+        lazy_names = {
+            tool["name"]
+            for tool in mcp_mod.ENGINEER_TOOLS + mcp_mod.ARCHITECT_TOOLS
+            if tool.get("deferred")
+        }
+        lazy_write_tools = write_tools & lazy_names
+        self.assertEqual(
+            lazy_write_tools,
+            {
+                "engineer_task_upload_artifact",
+                "engineer_launch_settings",
+                "engineer_task_reassign",
+                "engineer_specialization_save",
+                "engineer_specialization_delete",
+                "architect_engineer_dismiss",
+                "architect_engineer_rehire",
+            },
+        )
+        for tool_name in lazy_write_tools:
+            self.assertTrue(is_mcp_write_tool(tool_name), tool_name)
+
 
 class MCPIdempotencyTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):

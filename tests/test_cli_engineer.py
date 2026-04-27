@@ -65,14 +65,11 @@ class CliEngineerTests(unittest.TestCase):
             "settings",
             "--group",
             "loom",
-            "-s",
-            "architect_paused=true",
             "--json",
         ])
         self.assertEqual(args.command, "architect")
         self.assertEqual(args.architect_cmd, "settings")
         self.assertEqual(args.group, "loom")
-        self.assertEqual(args.set, ["architect_paused=true"])
         self.assertTrue(args.json)
 
     def test_parser_accepts_mcp_log(self):
@@ -202,7 +199,7 @@ class CliEngineerTests(unittest.TestCase):
         )
         self.assertIn('Rehired "Alice"', out.getvalue())
 
-    def test_cmd_architect_settings_updates_group(self):
+    def test_cmd_architect_settings_rejects_updates(self):
         state = {"groups": {"loom": []}, "group_slugs": {"loom": "loom"}}
         args = SimpleNamespace(
             port=18932,
@@ -216,20 +213,15 @@ class CliEngineerTests(unittest.TestCase):
                  "api_call",
                  return_value={"ok": True, "data": {}},
              ) as api_call:
-            out = io.StringIO()
-            with contextlib.redirect_stdout(out):
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
                 self.cli.cmd_architect_settings(args)
 
-        api_call.assert_called_once_with(
-            "update_architect_settings",
-            port=18932,
-            group="loom",
-            settings={
-                "architect_paused": True,
-                "architect_autonomy_mode": "ask_always",
-            },
+        api_call.assert_not_called()
+        self.assertIn(
+            "Updating architect settings from the CLI has been removed",
+            err.getvalue(),
         )
-        self.assertIn('Architect settings for "loom" updated', out.getvalue())
 
     def test_cmd_task_create_sets_assigned_engineer_id_from_slug(self):
         state = {
