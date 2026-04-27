@@ -678,6 +678,8 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         state.update_architect_settings("g", architect_provider="codex")
 
         async def fake_handle_command(payload):
+            if payload.get("cmd") == "list_specializations":
+                return {"type": "specializations", "items": []}
             self.fail(f"Unexpected handle_command call: {payload}")
 
         handler = self.mcp_mod.create_mcp_handler(fake_handle_command, state)

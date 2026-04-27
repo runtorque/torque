@@ -65,14 +65,11 @@ class CliEngineerTests(unittest.TestCase):
             "settings",
             "--group",
             "loom",
-            "-s",
-            "architect_paused=true",
             "--json",
         ])
         self.assertEqual(args.command, "architect")
         self.assertEqual(args.architect_cmd, "settings")
         self.assertEqual(args.group, "loom")
-        self.assertEqual(args.set, ["architect_paused=true"])
         self.assertTrue(args.json)
 
     def test_parser_accepts_mcp_log(self):

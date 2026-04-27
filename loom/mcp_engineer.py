@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from copy import deepcopy
 
 from .mcp_stdio_proxy import serve_http_proxy
 from .mcp_tools_shared import authorize_caller, dispatch_scoped_tool
@@ -33,7 +34,7 @@ ENGINEER_DEFERRED_TOOL_NAMES = {
     "engineer_mcp_calls",
 }
 
-ENGINEER_TOOLS = list(ENGINEER_ORCHESTRATION_TOOLS)
+ENGINEER_TOOLS = [deepcopy(tool) for tool in ENGINEER_ORCHESTRATION_TOOLS]
 for _tool in ENGINEER_TOOLS:
     if str(_tool.get("name", "") or "").strip() in ENGINEER_DEFERRED_TOOL_NAMES:
         _tool["deferred"] = True
