@@ -84,6 +84,22 @@ def _normalize_optional_block(text: str) -> str:
     return str(text or "").strip("\n")
 
 
+def deliverable_word(deliverable_type: str) -> str:
+    """Return the user-facing noun for a deliverable contract type.
+
+    Empty or ``"other"`` collapse to the generic ``"deliverable"``; any
+    other value (canonical like ``"report"`` / ``"plan"`` or free-form
+    like ``"diagnostic_log"``) is returned verbatim after stripping
+    whitespace. The result feeds natural-language copy in the dispatch
+    postscript and the gate error message so the worker sees wording
+    that matches the contract instead of a hardcoded "report".
+    """
+    raw = str(deliverable_type or "").strip()
+    if not raw or raw.lower() == "other":
+        return "deliverable"
+    return raw
+
+
 def _build_deliverable_block(*,
                              deliverable_required: bool,
                              deliverable_type: str,
@@ -107,8 +123,9 @@ def _build_deliverable_block(*,
     descriptor = type_label
     if format_label:
         descriptor = f"{type_label}, {format_label}"
+    word = deliverable_word(deliverable_type)
     upload_call = (
-        'loom_task_upload_artifact(content_text="<your full report>", '
+        f'loom_task_upload_artifact(content_text="<your full {word}>", '
         f'artifact_type="{deliverable_type or "generated_doc"}", '
         f'title="{title_default}")'
     )
@@ -117,7 +134,7 @@ def _build_deliverable_block(*,
         "",
         (f"This task requires a deliverable artifact ({descriptor}). "
          "Before calling `loom_done(...)` (or `loom_ready(...)`) you MUST "
-         "attach your report to the task via:"),
+         f"attach your {word} to the task via:"),
         "",
         f"  {upload_call}",
         "",

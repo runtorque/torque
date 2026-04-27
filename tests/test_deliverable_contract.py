@@ -28,7 +28,7 @@ from loom.db_board import (
     _serialize_board_task,
     decode_board_task_row,
 )
-from loom.server_prompts import build_dispatch_postscript
+from loom.server_prompts import build_dispatch_postscript, deliverable_word
 from loom.state import BoardTask
 
 
@@ -222,6 +222,85 @@ class DeliverablePostscriptTests(unittest.TestCase):
         self.assertIn('title="Audit MCP surface"', ps)
 
 
+class DeliverableWordTests(unittest.TestCase):
+    """``deliverable_word`` derives the user-facing noun from contract type."""
+
+    def test_canonical_types_returned_verbatim(self):
+        for t in ("report", "plan", "inventory", "spec"):
+            self.assertEqual(deliverable_word(t), t)
+
+    def test_other_collapses_to_generic(self):
+        self.assertEqual(deliverable_word("other"), "deliverable")
+
+    def test_empty_collapses_to_generic(self):
+        self.assertEqual(deliverable_word(""), "deliverable")
+        self.assertEqual(deliverable_word("   "), "deliverable")
+        self.assertEqual(deliverable_word(None), "deliverable")
+
+    def test_other_is_case_insensitive(self):
+        self.assertEqual(deliverable_word("Other"), "deliverable")
+        self.assertEqual(deliverable_word("OTHER"), "deliverable")
+
+    def test_freeform_type_returned_verbatim(self):
+        self.assertEqual(
+            deliverable_word("diagnostic_log"), "diagnostic_log")
+
+    def test_strips_surrounding_whitespace(self):
+        self.assertEqual(deliverable_word("  plan  "), "plan")
+
+
+class DeliverablePostscriptTypeAwareCopyTests(unittest.TestCase):
+    """Postscript natural-language copy must reflect the contract's type."""
+
+    def _ps(self, deliverable_type: str) -> str:
+        return build_dispatch_postscript(
+            transitions=[],
+            is_clean=True,
+            deliverable_required=True,
+            deliverable_type=deliverable_type,
+            deliverable_format="markdown",
+            deliverable_artifact_title="The thing",
+            task_title="Some task",
+        )
+
+    def test_canonical_types_render_their_noun(self):
+        cases = {
+            "report": "report",
+            "plan": "plan",
+            "inventory": "inventory",
+            "spec": "spec",
+        }
+        for type_, noun in cases.items():
+            ps = self._ps(type_)
+            self.assertIn(
+                f"attach your {noun} to the task",
+                ps,
+                msg=f"type={type_!r}",
+            )
+            self.assertIn(
+                f'<your full {noun}>',
+                ps,
+                msg=f"type={type_!r}",
+            )
+
+    def test_other_falls_back_to_generic(self):
+        ps = self._ps("other")
+        self.assertIn("attach your deliverable to the task", ps)
+        self.assertIn('<your full deliverable>', ps)
+        self.assertNotIn("attach your other", ps)
+        self.assertNotIn("<your full other>", ps)
+
+    def test_empty_type_falls_back_to_generic(self):
+        ps = self._ps("")
+        self.assertIn("attach your deliverable to the task", ps)
+        self.assertIn('<your full deliverable>', ps)
+
+    def test_freeform_type_renders_verbatim(self):
+        ps = self._ps("diagnostic_log")
+        self.assertIn("attach your diagnostic_log to the task", ps)
+        self.assertIn('<your full diagnostic_log>', ps)
+
+
 class DeliverableArtifactMatchTests(unittest.TestCase):
     """Unit tests for the gate's artifact-matching predicate."""
 
@@ -302,6 +381,66 @@ class DeliverableArtifactMatchTests(unittest.TestCase):
             attachments=[{"artifact_type": "report"}],
         )
         self.assertTrue(self._has_match(task))
+
+
+class DeliverableGateErrorTypeAwareCopyTests(unittest.TestCase):
+    """Gate error message must use the contract's deliverable noun."""
+
+    def setUp(self):
+        from loom.server import _reject_missing_deliverable
+
+        self._reject = _reject_missing_deliverable
+
+    def _task(self, **kwargs):
+        return BoardTask(id="t", task="T", group="g", **kwargs)
+
+    def test_canonical_types_render_their_noun_in_message(self):
+        for noun in ("report", "plan", "inventory", "spec"):
+            task = self._task(
+                deliverable_required=True,
+                deliverable_type=noun,
+            )
+            msg = self._reject(task, "done")["message"]
+            self.assertIn(f"<your full {noun}>", msg, msg=f"type={noun!r}")
+            self.assertIn(f"type={noun}", msg, msg=f"type={noun!r}")
+
+    def test_other_falls_back_to_generic_noun(self):
+        task = self._task(
+            deliverable_required=True,
+            deliverable_type="other",
+        )
+        msg = self._reject(task, "done")["message"]
+        self.assertIn("<your full deliverable>", msg)
+        self.assertNotIn("<your full other>", msg)
+        self.assertNotIn("<your full report>", msg)
+
+    def test_empty_type_falls_back_to_generic_noun(self):
+        # Empty type means "any artifact" satisfies — but if none is
+        # attached the gate still fires (legacy required-without-type
+        # surface) and the natural-language noun should be generic.
+        task = self._task(deliverable_required=True)
+        msg = self._reject(task, "done")["message"]
+        self.assertIn("<your full deliverable>", msg)
+        self.assertNotIn("<your full report>", msg)
+
+    def test_freeform_type_renders_verbatim(self):
+        task = self._task(
+            deliverable_required=True,
+            deliverable_type="diagnostic_log",
+        )
+        msg = self._reject(task, "done")["message"]
+        self.assertIn("<your full diagnostic_log>", msg)
+        self.assertIn("type=diagnostic_log", msg)
+
+    def test_no_legacy_hardcoded_report_noun_remains(self):
+        # Regression guard: the old hardcoded "<your full report>" must
+        # not leak through for non-report contracts.
+        task = self._task(
+            deliverable_required=True,
+            deliverable_type="plan",
+        )
+        msg = self._reject(task, "done")["message"]
+        self.assertNotIn("<your full report>", msg)
 
 
 class DeliverableBoardTaskRoundTripTests(unittest.TestCase):
