@@ -3696,8 +3696,19 @@ async def _relaunch_agent_after_worktree_removal(
         resolve_architect_launch_config=None,
         is_designated_engineer=None,
         apply_persistent_prompt,
-        build_cell_persistent_prompt):
-    """Reset an agent session after its worktree is removed."""
+        build_cell_persistent_prompt,
+        send_agent_prompt=None):
+    """Reset an agent session after its worktree is removed.
+
+    This sibling restart path always opens a fresh provider conversation
+    (``agent_session_id`` is cleared above), so when ``send_agent_prompt``
+    is supplied the role's startup + initial prompts are re-delivered via
+    ``_new_agent_prompt_sequence``. Mirrors the ``:259`` fix in
+    ``_handle_relaunch_agent_command``: codex agents get their persistent
+    prompt seated as the first chat turn, claude-code agents get any role
+    ``initial_prompt`` (kickoff text) without duplicating the file-injected
+    system prompt.
+    """
     if cell.cell_type != "agent":
         return
     if cell.session_id:
@@ -3724,9 +3735,8 @@ async def _relaunch_agent_after_worktree_removal(
         explicit_template=cell.template,
         overrides={},
     )
-    apply_persistent_prompt(
-        cell, launch_cfg,
-        build_cell_persistent_prompt(cell, launch_cfg))
+    persistent_prompt_text = build_cell_persistent_prompt(cell, launch_cfg)
+    apply_persistent_prompt(cell, launch_cfg, persistent_prompt_text)
     state._emit_agent(cell)
     state._db_save_agent(cell)
     await bridge.create_session(
@@ -3737,6 +3747,25 @@ async def _relaunch_agent_after_worktree_removal(
         system_prompt=launch_cfg.get("system_prompt", ""),
         mcp_entrypoint=mcp_entrypoint_for_cell(cell),
     )
+
+    # Fresh-session kickoff: agent_session_id was cleared above to force a
+    # fresh provider conversation, so the same kickoff conditions as
+    # ``_handle_relaunch_agent_command`` always fire here when
+    # ``send_agent_prompt`` is supplied. Without this, any role
+    # ``initial_prompt`` is silently dropped on worktree-removal relaunch
+    # and codex agents lose their persistent system prompt entirely.
+    if (
+            send_agent_prompt
+            and cell.session_id
+            and (not cell.agent_session_id or not cell.session_resume)
+    ):
+        startup_prompt = _startup_prompt_for_new_agent(
+            agent_type=launch_cfg.get("agent_type", ""),
+            persistent_prompt_text=persistent_prompt_text,
+        )
+        for prompt_text, send_kwargs in _new_agent_prompt_sequence(
+                launch_cfg, startup_prompt=startup_prompt, cell=cell):
+            await send_agent_prompt(cell, prompt_text, **send_kwargs)
 
 
 def _resolve_engineer_group(state: MatrixState) -> str:
@@ -5583,6 +5612,7 @@ async def main(connection=None):
                 is_designated_engineer=_is_designated_engineer,
                 apply_persistent_prompt=_apply_persistent_prompt,
                 build_cell_persistent_prompt=_build_cell_persistent_prompt,
+                send_agent_prompt=_send_agent_prompt,
             )
         else:
             state._emit_agent(cell)
@@ -7662,6 +7692,7 @@ async def main(connection=None):
                             is_designated_engineer=_is_designated_engineer,
                             apply_persistent_prompt=_apply_persistent_prompt,
                             build_cell_persistent_prompt=_build_cell_persistent_prompt,
+                            send_agent_prompt=_send_agent_prompt,
                         )
                     else:
                         state._emit_agent(cell)

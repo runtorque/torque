@@ -1498,3 +1498,117 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             sent_prompts, [],
             f"terminal relaunch must not invoke send_agent_prompt: {sent_prompts}",
         )
+
+    async def test_relaunch_after_worktree_removal_fires_kickoff_sequence(self):
+        """Sibling restart path: worktree-removal relaunch always opens a
+        fresh provider conversation (agent_session_id is cleared inside the
+        helper). Without the kickoff threading, codex agents lose their
+        persistent system prompt and any role initial_prompt is silently
+        dropped — the same shape as the pre-:259 _handle_relaunch_agent_command
+        bug, in a sibling code path.
+        """
+        state = self._make_state()
+        engineer = self._add_engineer_cell(state, "eng-alice", "Alice")
+        engineer.agent_type = "codex"
+        engineer.session_id = "old-session"
+        engineer.agent_session_id = "prior-session"
+        bridge = _CapturingBridge()
+        sent_prompts = []
+
+        async def fake_resolve_base_dir(group):
+            del group
+            return temp_dir
+
+        def fake_resolve_engineer_launch_config(group, *, base_dir="",
+                                              explicit_template="",
+                                              overrides=None):
+            del group, base_dir, explicit_template, overrides
+            cfg = self._launch_config(temp_dir)
+            cfg["initial_prompt"] = "Engineer: get back to work."
+            return cfg
+
+        def fake_build_cell_persistent_prompt(cell, launch_cfg):
+            del launch_cfg
+            return f"You are the engineer for {cell.group}."
+
+        async def fake_send_agent_prompt(cell, prompt, **kwargs):
+            sent_prompts.append((cell.id, prompt, kwargs))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            engineer.directory = temp_dir
+            await self.server_mod._relaunch_agent_after_worktree_removal(
+                engineer,
+                bridge=bridge,
+                state=state,
+                resolve_base_dir=fake_resolve_base_dir,
+                resolve_agent_launch_config=lambda *a, **k: {},
+                resolve_engineer_launch_config=fake_resolve_engineer_launch_config,
+                is_designated_engineer=lambda cell: False,
+                apply_persistent_prompt=lambda *a, **k: None,
+                build_cell_persistent_prompt=fake_build_cell_persistent_prompt,
+                send_agent_prompt=fake_send_agent_prompt,
+            )
+
+        # Helper clears agent_session_id and the old session is closed.
+        self.assertEqual(engineer.agent_session_id, "")
+        self.assertEqual(bridge.closed_sessions, ["old-session"])
+        self.assertEqual(len(bridge.create_session_calls), 1)
+
+        prompts = [p for (_, p, _) in sent_prompts]
+        # codex returns the persistent prompt as the first interactive turn.
+        self.assertTrue(
+            any(f"You are the engineer for {engineer.group}." in p
+                for p in prompts),
+            f"codex persistent prompt missing from sent prompts: {prompts}",
+        )
+        # Role-defined initial_prompt fires too.
+        self.assertTrue(
+            any("Engineer: get back to work." in p for p in prompts),
+            f"initial_prompt missing from sent prompts: {prompts}",
+        )
+
+    async def test_relaunch_after_worktree_removal_skips_kickoff_for_terminals(self):
+        """Terminals share the helper but are short-circuited at the top
+        (cell_type != "agent" returns early). The kickoff must not fire and
+        the bridge must not be touched."""
+        state = self._make_state()
+        state.add_group("loom")
+        terminal = state.add_terminal(
+            name="Shell",
+            group="loom",
+            terminal_backend="iterm2",
+            profile="Default",
+            command="",
+            directory="/tmp/project",
+            tab_color="",
+        )
+        terminal.session_id = "old-terminal-session"
+        bridge = _CapturingBridge()
+        sent_prompts = []
+
+        async def fake_resolve_base_dir(group):
+            del group
+            return "/tmp/project"
+
+        async def fake_send_agent_prompt(cell, prompt, **kwargs):
+            sent_prompts.append((cell.id, prompt, kwargs))
+
+        await self.server_mod._relaunch_agent_after_worktree_removal(
+            terminal,
+            bridge=bridge,
+            state=state,
+            resolve_base_dir=fake_resolve_base_dir,
+            resolve_agent_launch_config=lambda *a, **k: {},
+            resolve_engineer_launch_config=lambda *a, **k: {},
+            is_designated_engineer=lambda cell: False,
+            apply_persistent_prompt=lambda *a, **k: None,
+            build_cell_persistent_prompt=lambda *a, **k: "",
+            send_agent_prompt=fake_send_agent_prompt,
+        )
+
+        self.assertEqual(
+            sent_prompts, [],
+            f"terminal worktree-removal relaunch must not send prompts: {sent_prompts}",
+        )
+        self.assertEqual(bridge.closed_sessions, [])
+        self.assertEqual(bridge.create_session_calls, [])
