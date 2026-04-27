@@ -230,6 +230,26 @@ def _resolve_task_id(state, identifier: str) -> str:
     return ident
 
 
+def _promote_suggested_action(state, task):
+    """Promote ``suggested_action`` -> ``action_name`` when empty.
+
+    Architects set ``suggested_action`` as a non-binding hint. Workers
+    only inherit the action's deliverable contract / template / transitions
+    once ``action_name`` is recorded on the task. If the dispatch flow
+    skips this promotion, contract enforcement is silently bypassed
+    (LOOM:262). Returns the (possibly refreshed) task.
+    """
+    if not task:
+        return task
+    if str(getattr(task, "action_name", "") or "").strip():
+        return task
+    suggested = str(getattr(task, "suggested_action", "") or "").strip()
+    if not suggested:
+        return task
+    state.board_update_task(task.id, action_name=suggested)
+    return state.board_tasks.get(task.id) or task
+
+
 def _resolve_agent_id(state, identifier: str) -> str:
     """Resolve an agent by exact ID, slug, name, or ID prefix."""
     ident = str(identifier or "").strip()
@@ -9046,6 +9066,7 @@ async def main(connection=None):
                     else:
                         cell = None
                         base_dir = await _resolve_base_dir(group)
+                        task = _promote_suggested_action(state, task)
                         act_meta = action_mgr.load_action(
                             task.action_name, base_dir) \
                             if task.action_name else None
