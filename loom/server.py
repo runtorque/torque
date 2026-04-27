@@ -3913,7 +3913,6 @@ async def _handle_add_engineer_command(
     startup_prompt = _startup_prompt_for_new_agent(
         agent_type=launch_cfg.get("agent_type", ""),
         persistent_prompt_text=persistent_prompt_text,
-        is_engineer=True,
     )
 
     cell = await create_agent_with_config(
@@ -3997,7 +3996,6 @@ async def _handle_add_architect_command(
     startup_prompt = _startup_prompt_for_new_agent(
         agent_type=launch_cfg.get("agent_type", ""),
         persistent_prompt_text=persistent_prompt_text,
-        is_engineer=True,
     )
 
     cell = await create_agent_with_config(
@@ -5221,7 +5219,6 @@ async def _handle_restart_agent_command(
     startup_prompt = _startup_prompt_for_new_agent(
         agent_type=launch_cfg.get("agent_type", ""),
         persistent_prompt_text=persistent_prompt_text,
-        is_engineer=use_engineer_launch,
     )
 
     await bridge.create_session(
@@ -7175,7 +7172,6 @@ async def main(connection=None):
                     startup_prompt = _startup_prompt_for_new_agent(
                         agent_type=launch_cfg.get("agent_type", ""),
                         persistent_prompt_text=persistent_prompt_text,
-                        is_engineer=is_engineer,
                     )
 
                     name = (data.get("name", "") or "").strip()

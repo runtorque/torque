@@ -516,6 +516,30 @@ class ServerSelfDispatchTests(unittest.TestCase):
             "",
         )
 
+    def test_startup_prompt_for_new_claude_engineer_does_not_duplicate_persistent_prompt(self):
+        # Engineers/architects on claude-code receive their persistent prompt
+        # via --append-system-prompt-file in the boot command. Sending it
+        # again as the first chat turn duplicates the entire system prompt
+        # into the conversation transcript.
+        self.assertEqual(
+            self.server_mod._startup_prompt_for_new_agent(
+                agent_type="claude-code",
+                persistent_prompt_text="Engineer system prompt",
+            ),
+            "",
+        )
+
+    def test_startup_prompt_for_new_codex_engineer_still_uses_persistent_prompt(self):
+        # Codex's file-based path historically required the persistent prompt
+        # to be sent as the first chat turn — preserve that behavior.
+        self.assertEqual(
+            self.server_mod._startup_prompt_for_new_agent(
+                agent_type="codex",
+                persistent_prompt_text="Engineer system prompt",
+            ),
+            "Engineer system prompt",
+        )
+
     def test_self_dispatch_bypasses_busy_agent_queue(self):
         active = self.state_mod.BoardTask(
             id="task-1",

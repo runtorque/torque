@@ -65,13 +65,19 @@ def _build_self_dispatch_prompt(shared_context_block: str = "") -> str:
 
 
 def _startup_prompt_for_new_agent(*, agent_type: str = "",
-                                  persistent_prompt_text: str = "",
-                                  is_engineer: bool = False) -> str:
-    """Return the first interactive prompt for a newly created agent."""
+                                  persistent_prompt_text: str = "") -> str:
+    """Return the first interactive prompt for a newly created agent.
+
+    Always defers to the adapter's ``startup_prompt_from_persistent_prompt``.
+    For claude-code this is ``""`` because the persistent prompt is delivered
+    via ``--append-system-prompt-file`` (see ``ClaudeCodeAdapter
+    .inject_persistent_prompt``) — sending it as the first chat turn would
+    duplicate the prompt verbatim into the conversation. Codex still returns
+    the text here because its file-based path historically required a first
+    interactive turn to seat the instructions.
+    """
     if not persistent_prompt_text:
         return ""
-    if is_engineer:
-        return persistent_prompt_text
     adapter = get_adapter(agent_type) if agent_type else None
     if not adapter:
         return ""
