@@ -209,6 +209,8 @@ COMPACT_BOARD_TASK_FIELDS = (
     "lane_entered_at",
     "worktree_boundary",
     "resume_after_boundary_task_id",
+    "deliverable_required",
+    "deliverable_type",
 )
 
 
@@ -608,6 +610,14 @@ class BoardTask:
     # their original lane and archive timestamp for restoration/reporting.
     archived_at: str = ""
     archived_from_lane: str = ""
+    # Deliverable contract. Opt-in via the action's ``deliverable`` block
+    # or an explicit kwarg on task-create. When ``deliverable_required``
+    # is true, ``loom_done`` / ``loom_ready`` refuse until the worker
+    # uploads a matching artifact via ``loom_task_upload_artifact``.
+    deliverable_required: bool = False
+    deliverable_type: str = ""           # advisory: report | plan | inventory | ...
+    deliverable_format: str = ""         # advisory: markdown | json | yaml | ...
+    deliverable_artifact_title: str = ""  # default upload title for the worker
 
 
 @dataclass

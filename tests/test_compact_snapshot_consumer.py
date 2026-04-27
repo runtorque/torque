@@ -57,6 +57,8 @@ COMPACT_CARD_FIELDS = {
     "lane_entered_at",
     "worktree_boundary",
     "resume_after_boundary_task_id",
+    "deliverable_required",
+    "deliverable_type",
 }
 
 HEAVY_TASK_FIELDS = {

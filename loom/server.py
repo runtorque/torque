@@ -1537,6 +1537,72 @@ def _mandatory_review_done_error(task, action_name: str) -> str:
     )
 
 
+def _task_has_matching_deliverable_artifact(task) -> bool:
+    """Return True if ``task`` already has a matching artifact attached.
+
+    The match rule is intentionally lenient: when ``deliverable_type`` is
+    empty or ``other``, ANY artifact/attachment satisfies the gate;
+    otherwise the artifact's ``type`` (or ``artifact_type``) must equal
+    ``deliverable_type``.
+    """
+    if not task:
+        return False
+    expected = str(getattr(task, "deliverable_type", "") or "").strip().lower()
+    accept_any = expected in ("", "other")
+    candidates = []
+    candidates.extend(getattr(task, "artifacts", None) or [])
+    candidates.extend(getattr(task, "attachments", None) or [])
+    for entry in candidates:
+        if not isinstance(entry, dict):
+            return True if accept_any else False
+        atype = str(
+            entry.get("type", "")
+            or entry.get("artifact_type", "")
+            or ""
+        ).strip().lower()
+        if accept_any:
+            return True
+        if atype == expected:
+            return True
+    return False
+
+
+def _reject_missing_deliverable(task, action_label: str) -> dict | None:
+    """Reject ``loom_done`` / ``loom_ready`` when the deliverable is missing.
+
+    ``action_label`` is the verb shown in the error message (``done`` or
+    ``ready``).
+    """
+    if not task or not getattr(task, "deliverable_required", False):
+        return None
+    if _task_has_matching_deliverable_artifact(task):
+        return None
+    type_label = (
+        str(getattr(task, "deliverable_type", "") or "").strip()
+        or "any"
+    )
+    title_default = (
+        str(getattr(task, "deliverable_artifact_title", "") or "").strip()
+        or str(getattr(task, "task", "") or "").strip()
+        or "deliverable"
+    )
+    artifact_type = (
+        str(getattr(task, "deliverable_type", "") or "").strip()
+        or "generated_doc"
+    )
+    return {
+        "type": "deliverable_missing",
+        "message": (
+            f"Cannot mark task {action_label}: deliverable required "
+            f"(type={type_label}) but no matching artifact attached. "
+            "Call `loom_task_upload_artifact(content_text=\"<your full "
+            f"report>\", artifact_type=\"{artifact_type}\", "
+            f"title=\"{title_default}\")` first, then retry "
+            f"loom_{action_label}."
+        ),
+    }
+
+
 def _reject_mandatory_review_done_without_ship(
         state: MatrixState,
         action_mgr: ActionManager | None,
@@ -5699,6 +5765,36 @@ async def main(connection=None):
     async def _resolve_base_dir(group: str = "") -> str:
         return await agent_launch.resolve_base_dir(group)
 
+    def _resolve_deliverable_for_create(
+        action_name: str,
+        base_dir: str,
+        explicit: dict | None,
+    ) -> dict:
+        """Resolve a task's deliverable contract at create time.
+
+        Explicit kwargs (from the MCP/HTTP caller) win over the action's
+        ``deliverable`` block. Returns the normalized contract dict.
+        """
+        from .actions import normalize_deliverable
+        contract = {"required": False, "type": "", "format": "",
+                    "artifact_title": ""}
+        if action_name:
+            try:
+                contract = action_mgr.get_deliverable(action_name, base_dir)
+            except Exception:
+                log.exception(
+                    "Failed to load action deliverable for '%s'", action_name)
+        if isinstance(explicit, dict) and explicit:
+            override = normalize_deliverable(explicit)
+            for key in ("required", "type", "format", "artifact_title"):
+                ev = override.get(key)
+                if key == "required":
+                    if "required" in explicit:
+                        contract["required"] = bool(ev)
+                elif ev:
+                    contract[key] = ev
+        return contract
+
     def _resolve_provider_command(
         provider: str, boot_command: str, default_command: str,
     ) -> tuple[str, str]:
@@ -6272,6 +6368,15 @@ async def main(connection=None):
             is_clean=is_clean,
             commit_hint=commit_hint,
             pipeline_context=pipeline_context,
+            deliverable_required=bool(
+                getattr(task, "deliverable_required", False)),
+            deliverable_type=str(
+                getattr(task, "deliverable_type", "") or ""),
+            deliverable_format=str(
+                getattr(task, "deliverable_format", "") or ""),
+            deliverable_artifact_title=str(
+                getattr(task, "deliverable_artifact_title", "") or ""),
+            task_title=str(getattr(task, "task", "") or ""),
         )
 
     # -- Command handler ----------------------------------------------------
@@ -8302,6 +8407,24 @@ async def main(connection=None):
                     verification_summary=data.get(
                         "verification_summary", {}),
                 )
+                # Resolve deliverable contract from action + explicit kwarg
+                deliverable_explicit = data.get("deliverable")
+                if (action_name or isinstance(deliverable_explicit, dict)
+                        and deliverable_explicit):
+                    deliverable_base_dir = await _resolve_base_dir(group)
+                    deliverable_contract = _resolve_deliverable_for_create(
+                        action_name,
+                        deliverable_base_dir,
+                        deliverable_explicit
+                        if isinstance(deliverable_explicit, dict) else None,
+                    )
+                    add_kwargs["deliverable_required"] = bool(
+                        deliverable_contract["required"])
+                    add_kwargs["deliverable_type"] = deliverable_contract["type"]
+                    add_kwargs["deliverable_format"] = (
+                        deliverable_contract["format"])
+                    add_kwargs["deliverable_artifact_title"] = (
+                        deliverable_contract["artifact_title"])
                 # Pass client-provided ID (for pre-uploaded attachments)
                 draft_upload_id = ""
                 incoming_id = str(data.get("id", "") or "").strip()
@@ -8827,6 +8950,28 @@ async def main(connection=None):
                         act_meta = action_mgr.load_action(
                             task.action_name, base_dir) \
                             if task.action_name else None
+                        # Late-bind deliverable contract from the action if
+                        # the task didn't already carry one (e.g. action_name
+                        # was set after creation, or task pre-dates the
+                        # deliverable feature).
+                        if (task.action_name and not task.deliverable_required
+                                and not task.deliverable_type):
+                            try:
+                                _act_deliv = action_mgr.get_deliverable(
+                                    task.action_name, base_dir)
+                            except Exception:
+                                _act_deliv = None
+                            if _act_deliv and _act_deliv.get("required"):
+                                state.board_update_task(
+                                    tid,
+                                    deliverable_required=bool(
+                                        _act_deliv["required"]),
+                                    deliverable_type=_act_deliv["type"],
+                                    deliverable_format=_act_deliv["format"],
+                                    deliverable_artifact_title=
+                                    _act_deliv["artifact_title"],
+                                )
+                                task = state.board_tasks.get(tid) or task
                         action_template = ""
                         if isinstance(act_meta, dict):
                             raw_agent = act_meta.get("agent", "")
@@ -10142,6 +10287,18 @@ async def main(connection=None):
                         not (result and result.get("type") == "error")
                         and action == "done"
                     ):
+                        deliverable_rejection = (
+                            _reject_missing_deliverable(task, "done")
+                        )
+                        if deliverable_rejection:
+                            result = deliverable_rejection
+                    if (
+                        not (result and result.get("type") == "error")
+                        and not (result
+                                 and result.get("type")
+                                 == "deliverable_missing")
+                        and action == "done"
+                    ):
                         base_dir = cell.worktree_repo_root \
                             or cell.directory \
                             or await _resolve_base_dir(
@@ -10217,7 +10374,8 @@ async def main(connection=None):
                                 if gate_result:
                                     result = gate_result
 
-                    if result and result.get("type") == "error":
+                    if result and result.get("type") in (
+                            "error", "deliverable_missing"):
                         pass
 
                     elif action == "done":
@@ -10456,8 +10614,14 @@ async def main(connection=None):
                             )
 
                     elif action == "ready":
-                        rejected = _reject_completion_with_open_descendants(
-                            state, task, "ready")
+                        deliverable_rejection = (
+                            _reject_missing_deliverable(task, "ready")
+                        )
+                        rejected = (
+                            deliverable_rejection
+                            or _reject_completion_with_open_descendants(
+                                state, task, "ready")
+                        )
                         if rejected:
                             result = rejected
                         else:

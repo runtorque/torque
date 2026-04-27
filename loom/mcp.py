@@ -885,6 +885,14 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state, *,
     result = await handle_command(payload)
     if result and result.get("type") == "error":
         return result.get("message", "Unknown error"), True
+    if result and result.get("type") == "deliverable_missing":
+        # Hard gate: surface to the worker as a tool failure so the
+        # MCP client treats the response as an error and the worker
+        # can react (upload artifact, then retry).
+        return result.get(
+            "message",
+            "Deliverable artifact required before completion.",
+        ), True
 
     return json.dumps(result) if result else '{"type":"ok"}', False
 

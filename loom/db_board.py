@@ -54,6 +54,10 @@ _BOARD_TASK_COLUMNS = (
     "resume_after_boundary_task_id",
     "archived_at",
     "archived_from_lane",
+    "deliverable_required",
+    "deliverable_type",
+    "deliverable_format",
+    "deliverable_artifact_title",
 )
 
 _BOARD_TASK_INSERT_SQL = """
@@ -136,6 +140,10 @@ def _serialize_board_task(task):
         d.get("resume_after_boundary_task_id", ""),
         d.get("archived_at", ""),
         d.get("archived_from_lane", ""),
+        1 if d.get("deliverable_required", False) else 0,
+        d.get("deliverable_type", "") or "",
+        d.get("deliverable_format", "") or "",
+        d.get("deliverable_artifact_title", "") or "",
     )
 
 
@@ -169,6 +177,8 @@ def decode_board_task_row(row, cols):
         "engineer_owner_id",
         str(d.get("assigned_engineer_id", "") or ""),
     )
+    if "deliverable_required" in d:
+        d["deliverable_required"] = bool(d["deliverable_required"])
     return d
 
 

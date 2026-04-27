@@ -314,6 +314,22 @@ ENGINEER_TOOLS = [
                     "type": "object",
                     "description": "Optional structured verification summary.",
                 },
+                "deliverable": {
+                    "type": "object",
+                    "description": (
+                        "Optional deliverable contract. When `required: true` "
+                        "is set, the worker must upload a matching artifact "
+                        "via `loom_task_upload_artifact` before "
+                        "`loom_done`/`loom_ready` will be accepted. Overrides "
+                        "any contract carried by the action template."
+                    ),
+                    "properties": {
+                        "required": {"type": "boolean"},
+                        "type": {"type": "string"},
+                        "format": {"type": "string"},
+                        "artifact_title": {"type": "string"},
+                    },
+                },
             },
             "required": ["title"],
         },
