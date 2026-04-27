@@ -146,7 +146,7 @@ class MCPToolsSharedArchitectTests(unittest.TestCase):
         self.assertEqual(effective_kind, "architect")
         self.assertEqual(error_text, "")
 
-    def test_architect_settings_tools_read_update_and_validate_enums(self):
+    def test_architect_settings_tool_reads_existing_settings(self):
         state = self._make_state()
         architect = self._add_agent(
             state,
@@ -154,39 +154,14 @@ class MCPToolsSharedArchitectTests(unittest.TestCase):
             "Architect",
             kind="architect",
         )
-        calls = []
+        state.update_architect_settings(
+            "loom",
+            architect_provider="codex",
+            architect_autonomy_mode="dispatch_freely",
+        )
 
         async def handle_command(payload):
-            calls.append(dict(payload))
-            try:
-                state.update_architect_settings(
-                    payload.get("group", ""),
-                    **(payload.get("settings", {}) or {}),
-                )
-            except ValueError as exc:
-                return {"type": "error", "message": str(exc)}
-            return {"type": "ok"}
-
-        text, is_error = asyncio.run(self.shared_mod.dispatch_scoped_tool(
-            "architect_update_architect_settings",
-            {
-                "architect_provider": "codex",
-                "architect_autonomy_mode": "dispatch_freely",
-            },
-            handle_command,
-            state,
-            tool_prefix="architect_",
-            caller_kind="architect",
-            caller_id=architect.id,
-        ))
-
-        self.assertFalse(is_error)
-        self.assertEqual(json.loads(text)["settings"]["architect_provider"], "codex")
-        self.assertEqual(
-            state.get_architect_settings("loom").architect_autonomy_mode,
-            "dispatch_freely",
-        )
-        self.assertEqual(calls[0]["cmd"], "update_architect_settings")
+            self.fail(f"Unexpected handle_command call: {payload}")
 
         text, is_error = asyncio.run(self.shared_mod.dispatch_scoped_tool(
             "architect_get_architect_settings",
@@ -204,9 +179,21 @@ class MCPToolsSharedArchitectTests(unittest.TestCase):
             "codex",
         )
 
+    def test_removed_architect_settings_update_tool_is_unknown(self):
+        state = self._make_state()
+        architect = self._add_agent(
+            state,
+            "arch-1",
+            "Architect",
+            kind="architect",
+        )
+
+        async def handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
         text, is_error = asyncio.run(self.shared_mod.dispatch_scoped_tool(
             "architect_update_architect_settings",
-            {"architect_autonomy_mode": "bad_mode"},
+            {"architect_autonomy_mode": "ask_always"},
             handle_command,
             state,
             tool_prefix="architect_",
@@ -215,7 +202,10 @@ class MCPToolsSharedArchitectTests(unittest.TestCase):
         ))
 
         self.assertTrue(is_error)
-        self.assertIn("architect_autonomy_mode", text)
+        self.assertEqual(
+            text,
+            "Unknown architect tool: architect_update_architect_settings",
+        )
 
     def test_architect_board_summary_json_trims_tasks_to_response_budget(self):
         summary = {

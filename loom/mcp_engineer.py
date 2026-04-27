@@ -14,6 +14,7 @@ import sys
 
 from .mcp_stdio_proxy import serve_http_proxy
 from .mcp_tools_shared import authorize_caller, dispatch_scoped_tool
+from .mcp_tool_search import make_tool_search_spec, tool_search_response
 from .mcp_engineer_tools.tool_specs import (
     ENGINEER_TOOLS as ENGINEER_ORCHESTRATION_TOOLS,
 )
@@ -21,10 +22,26 @@ from .mcp_engineer_tools.tool_specs import (
 
 _ENV_VAR = "LOOM_ENGINEER_ID"
 
+ENGINEER_DEFERRED_TOOL_NAMES = {
+    "engineer_task_upload_artifact",
+    "engineer_specializations_list",
+    "engineer_specialization_show",
+    "engineer_specialization_save",
+    "engineer_specialization_delete",
+    "engineer_launch_settings",
+    "engineer_task_reassign",
+    "engineer_mcp_calls",
+}
+
 ENGINEER_TOOLS = list(ENGINEER_ORCHESTRATION_TOOLS)
+for _tool in ENGINEER_TOOLS:
+    if str(_tool.get("name", "") or "").strip() in ENGINEER_DEFERRED_TOOL_NAMES:
+        _tool["deferred"] = True
 ENGINEER_TOOLS.extend([
+    make_tool_search_spec("engineer_tool_search", "engineer"),
     {
         "name": "engineer_mcp_calls",
+        "deferred": True,
         "description": (
             "Return recent MCP call history for this engineer and owned "
             "workers. Defaults to mcp__loom__ tools; optionally filter by "
@@ -70,6 +87,7 @@ ENGINEER_TOOLS.extend([
     },
     {
         "name": "engineer_task_reassign",
+        "deferred": True,
         "description": (
             "Reassign a task you currently own or originally created to "
             "another engineer in your group."
@@ -202,6 +220,15 @@ async def _dispatch_engineer_tool(name, args, handle_command, state,
     caller_id = str(caller_id or "").strip() or bound_engineer_id_from_env()
     if str(name or "").strip() not in _ENGINEER_TOOL_NAMES:
         return f"Unknown engineer tool: {name}", True
+    if str(name or "").strip() == "engineer_tool_search":
+        _cell, _group, _kind, error_text, is_error = authorize_caller(
+            state,
+            caller_kind="engineer",
+            caller_id=caller_id,
+        )
+        if is_error:
+            return error_text, True
+        return tool_search_response(ENGINEER_TOOLS, args), False
     return await dispatch_scoped_tool(
         name,
         args,
