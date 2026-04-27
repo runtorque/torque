@@ -241,12 +241,16 @@ async def _dispatch_engineer_tool(name, args, handle_command, state,
     caller_id = str(caller_id or "").strip() or bound_engineer_id_from_env()
     if str(name or "").strip() not in _ENGINEER_TOOL_NAMES:
         return f"Unknown engineer tool: {name}", True
-    caller_cell = state.agents.get(caller_id) if caller_id else None
-    if (
-        str(name or "").strip() in ENGINEER_ARCHITECT_CHAIN_TOOL_NAMES
-        and not engineer_has_hiring_architect(caller_cell)
-    ):
-        return f"Unknown engineer tool: {name}", True
+    if str(name or "").strip() in ENGINEER_ARCHITECT_CHAIN_TOOL_NAMES:
+        _cell, _group, _kind, error_text, is_error = authorize_caller(
+            state,
+            caller_kind="engineer",
+            caller_id=caller_id,
+        )
+        if is_error:
+            return error_text, True
+        if not engineer_has_hiring_architect(_cell):
+            return f"Unknown engineer tool: {name}", True
     if str(name or "").strip() == "engineer_tool_search":
         _cell, _group, _kind, error_text, is_error = authorize_caller(
             state,
