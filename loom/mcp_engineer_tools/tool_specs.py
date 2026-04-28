@@ -254,30 +254,27 @@ ENGINEER_TOOLS = [
     {
         "name": "engineer_task_create",
         "description": (
-            "Create a new task on the board. Specify a title and "
-            "optionally attach an action, group, lane, labels, and "
-            "verification metadata."
+            "Create a board task. Required: title. Optional: group, lane, "
+            "action/action_vars, labels, verification fields, deliverable."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "title": {
                     "type": "string",
-                    "description": "Short task title.",
+                    "description": "Task title.",
                 },
                 "description": {
                     "type": "string",
-                    "description": "Longer description or context.",
+                    "description": "Task context.",
                 },
                 "group": {
                     "type": "string",
-                    "description": "Target group for the task.",
+                    "description": "Task group.",
                 },
                 "lane": {
                     "type": "string",
-                    "description": (
-                        "Lane to place the task in (default: Backlog)."
-                    ),
+                    "description": "Destination lane (default: Backlog).",
                 },
                 "action": {
                     "type": "string",
@@ -287,14 +284,13 @@ ENGINEER_TOOLS = [
                 },
                 "action_vars": {
                     "type": "object",
-                    "description":
-                        "Action variable values as key-value pairs.",
+                    "description": "Action variable values.",
                     "additionalProperties": {"type": "string"},
                 },
                 "labels": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Labels to attach to the task.",
+                    "description": "Task labels.",
                 },
                 "verification_mode": {
                     "type": "string",
@@ -317,11 +313,10 @@ ENGINEER_TOOLS = [
                 "deliverable": {
                     "type": "object",
                     "description": (
-                        "Optional deliverable contract. When `required: true` "
-                        "is set, the worker must upload a matching artifact "
-                        "via `loom_task_upload_artifact` before "
-                        "`loom_done`/`loom_ready` will be accepted. Overrides "
-                        "any contract carried by the action template."
+                        "Deliverable contract. If `required: true`, worker "
+                        "must upload a matching artifact with "
+                        "`loom_task_upload_artifact` before "
+                        "`loom_done`/`loom_ready`; overrides action template."
                     ),
                     "properties": {
                         "required": {"type": "boolean"},
@@ -337,15 +332,14 @@ ENGINEER_TOOLS = [
     {
         "name": "engineer_task_edit",
         "description": (
-            "Edit fields on an existing task. Only the fields you "
-            "provide will be updated — omitted fields are unchanged."
+            "Patch task fields; omitted fields stay unchanged."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "task": {
                     "type": "string",
-                    "description": "Task ID or legacy alias to edit.",
+                    "description": "Task ID or alias.",
                 },
                 "title": {
                     "type": "string",
@@ -458,21 +452,20 @@ ENGINEER_TOOLS = [
     {
         "name": "engineer_task_verify",
         "description": (
-            "Record a deploy/restart verification checkpoint for a task. "
-            "Use this for explicit attempt, smoke pass/fail, and notes "
-            "without routing through a generic task edit."
+            "Record a task verification checkpoint for deploy/restart "
+            "attempts, smoke results, and notes."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "task": {
                     "type": "string",
-                    "description": "Task ID or legacy alias to update.",
+                    "description": "Task ID or alias.",
                 },
                 "mode": {
                     "type": "string",
                     "enum": ["deploy", "restart"],
-                    "description": "Whether the checkpoint is for deploy or restart.",
+                    "description": "Verification mode.",
                 },
                 "state": {
                     "type": "string",
@@ -485,7 +478,7 @@ ENGINEER_TOOLS = [
                 },
                 "tests_run": {
                     "type": "string",
-                    "description": "Short summary of tests that were run.",
+                    "description": "Tests run.",
                 },
                 "human_validation_pending": {
                     "type": "string",
@@ -502,7 +495,7 @@ ENGINEER_TOOLS = [
                 "smoke": {
                     "type": "string",
                     "enum": ["passed", "failed", "clear"],
-                    "description": "Record a smoke result, or clear smoke completion with `clear`.",
+                    "description": "Record smoke result, or clear completion.",
                 },
             },
             "required": ["task"],
@@ -529,18 +522,16 @@ ENGINEER_TOOLS = [
     {
         "name": "engineer_task_dispatch",
         "description": (
-            "Dispatch a task to an agent. Creates a new agent by "
-            "default, or dispatches to an existing agent if specified. "
-            "The task moves to In Progress and the agent receives "
-            "the rendered prompt. When owned-agent restriction is enabled, "
-            "existing-agent dispatch can only target agents created by this Engineer."
+            "Dispatch task; create an agent unless `agent` is set. Moves "
+            "task to In Progress and sends rendered prompt. Existing-agent "
+            "targets must be owned when ownership restriction is on."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "task": {
                     "type": "string",
-                    "description": "Task ID or legacy alias to dispatch.",
+                    "description": "Task ID or alias.",
                 },
                 "agent": {
                     "type": "string",
@@ -593,12 +584,9 @@ ENGINEER_TOOLS = [
     {
         "name": "engineer_batch_dispatch",
         "description": (
-            "Dispatch a planned batch of tasks with an explicit "
-            "or default concurrency cap. Tasks are processed in request order. "
-            "When capacity is full, remaining tasks are queued "
-            "persistently and auto-dispatched later as slots open. "
-            "Tasks that share an agent_group are routed to the same "
-            "agent so later tasks can queue behind earlier ones."
+            "Dispatch tasks in order with a concurrency cap; excess entries "
+            "persistently queue and auto-dispatch as slots open. Same "
+            "`agent_group` values share one agent."
         ),
         "inputSchema": {
             "type": "object",
@@ -617,7 +605,7 @@ ENGINEER_TOOLS = [
                         "properties": {
                             "task": {
                                 "type": "string",
-                                "description": "Task ID or legacy alias.",
+                                "description": "Task ID or alias.",
                             },
                             "agent_group": {
                                 "type": "string",
@@ -741,11 +729,9 @@ ENGINEER_TOOLS = [
     {
         "name": "engineer_notifications",
         "description": (
-            "Configure digest noise. Use a quiet, normal, or noisy preset "
-            "for fast tuning, or override digest verbosity, event types, "
-            "and intervals directly. Mandatory events "
+            "Set digest preset or overrides. Mandatory events "
             "(task_completed, agent_error, agent_reply, agent_blocked, "
-            "ask_created) are always included."
+            "ask_created) stay enabled."
         ),
         "inputSchema": {
             "type": "object",
@@ -1019,19 +1005,16 @@ ENGINEER_TOOLS = [
     {
         "name": "engineer_merge",
         "description": (
-            "Merge an agent's worktree branch into the base branch "
-            "(usually main). Uses server-side merge — no interactive "
-            "resolution. If there are conflicts, use engineer_rebase "
-            "to replay the branch onto base before retrying the merge. "
-            "When owned-agent restriction is enabled, only agents created "
-            "by this Engineer can be targeted."
+            "Merge agent worktree branch into base. Non-interactive; on "
+            "conflicts, run engineer_rebase then retry. Targets must be "
+            "owned when ownership restriction is on."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "agent": {
                     "type": "string",
-                    "description": "Agent ID or name with a worktree.",
+                    "description": "Agent ID/name with worktree.",
                 },
                 "message": {
                     "type": "string",
@@ -1137,46 +1120,33 @@ ENGINEER_TOOLS = [
     {
         "name": "engineer_diff",
         "description": (
-            "Get the diff of an agent's worktree branch against "
-            "its base branch. Can return a structured summary, "
-            "diffstat, or full diff output, optionally limited to "
-            "specific files. Useful for reviewing changes before "
-            "merge or PR. Reviewer workers may share the implementer's "
-            "worktree, so targeting a reviewer reports that shared branch. "
-            "When owned-agent restriction is enabled, only agents created "
-            "by this Engineer can be targeted."
+            "Return agent worktree diff against base as full diff, diffstat, "
+            "or structured summary; optional path filter. Reviewer agents may "
+            "share implementer branch. Targets must be owned when restriction "
+            "is on."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "agent": {
                     "type": "string",
-                    "description": "Agent ID or name with a worktree.",
+                    "description": "Agent ID/name with worktree.",
                 },
                 "stat_only": {
                     "type": "boolean",
-                    "description": (
-                        "If true, return only the diffstat summary "
-                        "(files changed, insertions, deletions) "
-                        "instead of the full diff. Default: false."
-                    ),
+                    "description": "Return only diffstat. Default false.",
                 },
                 "summary_only": {
                     "type": "boolean",
                     "description": (
-                        "If true, return a machine-readable diff "
-                        "summary with changed files and lightweight "
-                        "review signals instead of raw diff text. "
-                        "Default: false."
+                        "Return structured changed-file summary and review "
+                        "signals. Default false."
                     ),
                 },
                 "paths": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": (
-                        "Limit diff to specific file paths. "
-                        "If omitted, shows all changes."
-                    ),
+                    "description": "Limit diff to file paths; omit for all.",
                 },
             },
             "required": ["agent"],
