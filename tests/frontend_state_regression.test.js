@@ -7964,11 +7964,11 @@ test('embedded terminal rekeys the xterm cache and ignores stale websocket outpu
       type: 'snapshot',
       cell_id: 'term-1',
       session_id: 'session-new',
-      data: 'clean prompt',
+      data: '\x1bc\x1b[2J\x1b[3Jclean prompt',
     }),
   });
   assert.equal(currentTerminal.resetCount, 1);
-  assert.deepEqual(currentTerminal.writes.map(String).filter((line) => !line.includes('Loom session restarted')), [
+  assert.deepEqual(currentTerminal.writes.map(String).filter((line) => !line.includes('Loom session restarted') && line.trim() !== ''), [
     'old scrollback',
     'clean prompt',
   ]);
@@ -7981,7 +7981,7 @@ test('embedded terminal rekeys the xterm cache and ignores stale websocket outpu
       data: 'autoload -Uz add-zsh-hook',
     }),
   });
-  assert.deepEqual(currentTerminal.writes.map(String).filter((line) => !line.includes('Loom session restarted')), [
+  assert.deepEqual(currentTerminal.writes.map(String).filter((line) => !line.includes('Loom session restarted') && line.trim() !== ''), [
     'old scrollback',
     'clean prompt',
   ]);
@@ -7994,7 +7994,7 @@ test('embedded terminal rekeys the xterm cache and ignores stale websocket outpu
       data: '\nready',
     }),
   });
-  assert.deepEqual(currentTerminal.writes.map(String).filter((line) => !line.includes('Loom session restarted')), [
+  assert.deepEqual(currentTerminal.writes.map(String).filter((line) => !line.includes('Loom session restarted') && line.trim() !== ''), [
     'old scrollback',
     'clean prompt',
     '\nready',
@@ -8074,7 +8074,8 @@ test('embedded terminal stop then relaunch preserves same-cell scrollback buffer
   assert.equal(terminals.length, 1);
   assert.equal(terminals[0].disposed, undefined);
   assert.deepEqual(terminals[0].writes, ['A_MARK_before_stop']);
-  assert.equal(dom.stage.children.some((child) => child.classList.contains('terminal-empty')), true);
+  assert.equal(dom.stage.children.some((child) => child.classList.contains('terminal-empty')), false);
+  assert.equal(terminals[0].surface.style.display, '');
 
   sandbox.state.agents['term-a'].session_id = 'sess-new';
   sandbox.state.agents['term-a'].status = 'running';
@@ -8095,7 +8096,7 @@ test('embedded terminal stop then relaunch preserves same-cell scrollback buffer
   });
 
   assert.equal(terminals[0].resetCount, 1);
-  assert.deepEqual(terminals[0].writes.map(String).filter((line) => !line.includes('Loom session restarted')), [
+  assert.deepEqual(terminals[0].writes.map(String).filter((line) => !line.includes('Loom session restarted') && line.trim() !== ''), [
     'A_MARK_before_stop',
     'A_MARK_after_relaunch',
   ]);
@@ -8143,7 +8144,7 @@ test('embedded terminal running agent restart preserves same-cell scrollback buf
   });
 
   assert.equal(terminals[0].resetCount, 1);
-  assert.deepEqual(terminals[0].writes.map(String).filter((line) => !line.includes('Loom session restarted')), [
+  assert.deepEqual(terminals[0].writes.map(String).filter((line) => !line.includes('Loom session restarted') && line.trim() !== ''), [
     'AGENT_MARK_before_restart',
     'AGENT_MARK_after_restart',
     '\nAGENT_MARK_live_after_restart',
@@ -8198,7 +8199,8 @@ test('embedded terminal stop while viewing another cell preserves stopped cell s
 
   assert.equal(terminals[0].disposed, undefined);
   assert.deepEqual(terminals[0].writes, ['A_MARK_before_stop_elsewhere']);
-  assert.equal(dom.stage.children.some((child) => child.classList.contains('terminal-empty')), true);
+  assert.equal(dom.stage.children.some((child) => child.classList.contains('terminal-empty')), false);
+  assert.equal(terminals[0].surface.style.display, '');
 });
 
 test('embedded terminal firehose rerenders with stable sessions do not prune cached buffers', () => {

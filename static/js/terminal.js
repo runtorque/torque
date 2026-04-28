@@ -978,6 +978,20 @@ function _writeEmbeddedTerminalSessionRestartedSeparator(entry) {
   } else if (typeof term.write === 'function') {
     term.write('\r\n' + line + '\r\n');
   }
+  if (typeof term.write === 'function') {
+    const rows = Math.max(1, Math.min(200, Number(term.rows) || 24));
+    term.write(new Array(rows + 1).join('\r\n'));
+  }
+}
+
+function _sanitizeEmbeddedTerminalRekeySnapshot(data) {
+  return String(data || '')
+    // TUIs often start a fresh session with a hard reset and display-clear
+    // sequence. During a same-cell re-key those clears would erase the
+    // preserved scrollback we intentionally kept, so suppress them only for
+    // the first snapshot after the session swap.
+    .replace(/\x1bc/g, '')
+    .replace(/\x1b\[[0-?]*[ -/]*J/g, '');
 }
 
 function _scheduleEmbeddedTerminalFit(entry) {
@@ -1123,6 +1137,7 @@ function _openEmbeddedTerminalSocket(cell, sessionKey, expectedSessionId, attemp
     if (msg.type === 'snapshot') {
       if (entry.appendNextSnapshot) {
         entry.appendNextSnapshot = false;
+        if (msg.data) msg.data = _sanitizeEmbeddedTerminalRekeySnapshot(msg.data);
       } else {
         entry.terminal.reset();
       }
@@ -1259,7 +1274,11 @@ function renderTerminalWorkspace() {
   const cell = _resolveTerminalWorkspaceCell();
   const agentTarget = _terminalTargetAgent(cell);
   const primaryAction = _terminalPrimaryAction(groupLabel, agentTarget);
-  const topbarAction = cell && cell.session_id ? primaryAction : null;
+  const relaunchAction = cell && !cell.session_id ? {
+    label: 'Relaunch',
+    onclick: 'relaunchAgent(\'' + esc(cell.id) + '\')',
+  } : null;
+  const topbarAction = cell ? (cell.session_id ? primaryAction : relaunchAction) : null;
   const showTabs = cells.length > 1;
   const displayPath = _terminalDisplayPath(cell);
   const dom = _ensureTerminalWorkspaceDom(root);
@@ -1322,13 +1341,19 @@ function renderTerminalWorkspace() {
       + '  <div class="terminal-empty-body">Relaunch this session to put it back in the workspace and return keyboard focus to the shell.</div>'
       + '  <button class="terminal-empty-btn" onclick="relaunchAgent(\'' + esc(cell.id) + '\')">Relaunch</button>'
       + '  <div class="terminal-empty-meta">When it comes back, Loom will focus the terminal automatically.</div>';
-    _activateEmbeddedTerminalSurface(dom.stage, sessionKey);
-    _renderEmbeddedTerminalStagePlaceholder(dom.stage, stoppedHtml);
+    const stoppedEntry = _findEmbeddedTerminalEntryForCell(cell.id);
+    if (stoppedEntry) {
+      _activateEmbeddedTerminalSurface(dom.stage, stoppedEntry.sessionKey);
+      dom.stage._loomLastHtml = null;
+    } else {
+      _activateEmbeddedTerminalSurface(dom.stage, sessionKey);
+      _renderEmbeddedTerminalStagePlaceholder(dom.stage, stoppedHtml);
+    }
     const statusLabel = _terminalStatusLabel(cell);
     if (dom.statusbar.textContent !== statusLabel) {
       dom.statusbar.textContent = statusLabel;
     }
-    _deactivateEmbeddedTerminalWorkspace();
+    if (!stoppedEntry) _deactivateEmbeddedTerminalWorkspace();
     _restoreTerminalWorkspaceState(root, workspaceState, cell);
     return;
   }
