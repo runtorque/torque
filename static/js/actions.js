@@ -244,15 +244,13 @@ function renderTemplatesEditor() {
   html += '</details>';
 
   // Settings
-  html += '<details class="tpled-section"' + (d.group || d.worktree || d.auto_close_on_done || d.implementation_depth || d.review_required_above_loc != null ? ' open' : '') + '>';
+  html += '<details class="tpled-section"' + (d.group || d.worktree || d.auto_close_on_done || d.implementation_depth ? ' open' : '') + '>';
   html += '<summary>Settings</summary>';
   html += '<label>Group</label>';
   html += '<input id="tpled-group" value="' + esc(d.group || '') + '" placeholder="Override target group" autocomplete="off" onchange="tplEditorMarkDirty()">';
   html += '<label class="gs-checkbox"><input id="tpled-worktree" type="checkbox"' + (d.worktree ? ' checked' : '') + ' onchange="tplEditorMarkDirty()"> Git worktree per agent</label>';
   html += '<label class="gs-checkbox"><input id="tpled-auto-close-on-done" type="checkbox"' + (d.auto_close_on_done ? ' checked' : '') + ' onchange="tplEditorMarkDirty()"> Auto-close agent after root task is done</label>';
   html += '<label class="gs-checkbox"><input id="tpled-implementation-depth" type="checkbox"' + (d.implementation_depth ? ' checked' : '') + ' onchange="tplEditorMarkDirty()"> Implementation-depth action (code-mutating; review gate eligible)</label>';
-  html += '<label>Action fallback review gate LOC threshold</label>';
-  html += '<input id="tpled-review-required-above-loc" type="number" min="0" value="' + (d.review_required_above_loc != null ? esc(String(d.review_required_above_loc)) : '') + '" placeholder="Used when a transition has no LOC gate" autocomplete="off" onchange="tplEditorMarkDirty()">';
   html += '</details>';
 
   // Prompt field (coalesce old format on load)
@@ -591,9 +589,9 @@ function _tplTransitionRow(idx, tr) {
     + ' data-hint="Describes when the agent should pick this transition. This text is included in the dispatch prompt so the agent knows which option to choose.">?</span></label>';
   html += '<textarea class="tpled-tr-when" placeholder="e.g. Implementation is complete and ready for review" rows="1" onchange="tplEditorMarkDirty()" oninput="this.style.height=\'auto\';this.style.height=this.scrollHeight+\'px\'">' + esc(when) + '</textarea>';
   html += '<details class="tpled-loc-gate-details tpled-tr-action-field"' + (locEnabled ? ' open' : '') + hideIfAsk + ' ontoggle="tplLocGateToggled(this)">';
-  html += '<summary>LOC gate <span class="hint-btn" onclick="event.preventDefault();event.stopPropagation();toggleHint(this)"'
-    + ' data-hint="Optional transition-local review gate. When enabled, this transition overrides the action-level threshold and architect fallback defaults.">?</span></summary>';
-  html += '<label class="gs-checkbox tpled-loc-enable-label"><input id="tpled-tr-' + idx + '-loc-enabled" data-focus-key="transition:' + idx + ':loc-enabled" class="tpled-loc-gate-enabled" type="checkbox"' + (locEnabled ? ' checked' : '') + ' onchange="tplLocGateEnabledChanged(this)"> Override LOC gate for this transition</label>';
+  html += '<summary>Mandatory transition threshold (LOC) <span class="hint-btn" onclick="event.preventDefault();event.stopPropagation();toggleHint(this)"'
+    + ' data-hint="Optional transition-local threshold. When enabled, this transition must be triggered above the configured LOC threshold.">?</span></summary>';
+  html += '<label class="gs-checkbox tpled-loc-enable-label"><input id="tpled-tr-' + idx + '-loc-enabled" data-focus-key="transition:' + idx + ':loc-enabled" class="tpled-loc-gate-enabled" type="checkbox"' + (locEnabled ? ' checked' : '') + ' onchange="tplLocGateEnabledChanged(this)"> Require this transition above N LOC</label>';
   html += '<div class="tpled-loc-gate-fields">';
   html += '<div class="tpled-transition-row">';
   html += '<div class="tpled-tr-field">';
@@ -778,7 +776,6 @@ function _tplEditorSaveInner() {
 
   var transitions = _tplReadTransitions();
   var agentTemplate = (document.getElementById('tpled-agent-template').value || '').trim();
-  var reviewGateLocRaw = (document.getElementById('tpled-review-required-above-loc').value || '').trim();
   var legacyAgent = {
     name_prefix: (document.getElementById('tpled-agent-prefix').value || '').trim(),
     tab_color: (document.getElementById('tpled-agent-color').value || '').trim(),
@@ -797,16 +794,6 @@ function _tplEditorSaveInner() {
     labels: labels,
     transitions: transitions,
   };
-  if (reviewGateLocRaw !== '') {
-    var reviewGateLoc = parseInt(reviewGateLocRaw, 10);
-    if (isNaN(reviewGateLoc) || reviewGateLoc < 0) {
-      var reviewGateEl = document.getElementById('tpled-review-required-above-loc');
-      if (reviewGateEl) { reviewGateEl.focus(); reviewGateEl.classList.add('input-error'); }
-      _showToast('Review gate LOC threshold must be a non-negative number', 'error');
-      return;
-    }
-    actData.review_required_above_loc = reviewGateLoc;
-  }
   if (agentTemplate) {
     actData.agent = agentTemplate;
   } else if (legacyAgent.name_prefix || legacyAgent.tab_color
@@ -861,9 +848,6 @@ function tplEditorDuplicate() {
 
 function _tplEditorReadForm() {
   var labelsRaw = (document.getElementById('tpled-labels').value || '').trim();
-  var reviewGateLocRaw = (document.getElementById('tpled-review-required-above-loc').value || '').trim();
-  var reviewGateLoc = reviewGateLocRaw !== '' ? parseInt(reviewGateLocRaw, 10) : null;
-  if (isNaN(reviewGateLoc)) reviewGateLoc = null;
   return {
     name: (document.getElementById('tpled-name').value || '').trim(),
     description: (document.getElementById('tpled-desc').value || '').trim(),
@@ -878,7 +862,6 @@ function _tplEditorReadForm() {
     auto_close_on_done: document.getElementById('tpled-auto-close-on-done').checked,
     disable_role_preamble: document.getElementById('tpled-disable-role-preamble').checked,
     implementation_depth: document.getElementById('tpled-implementation-depth').checked,
-    review_required_above_loc: reviewGateLoc,
     prompt: document.getElementById('tpled-prompt').value || '',
     labels: labelsRaw ? labelsRaw.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [],
     transitions: _tplReadTransitions(),
