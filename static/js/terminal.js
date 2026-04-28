@@ -735,6 +735,29 @@ function _disposeEmbeddedTerminalEntry(entry) {
   if (_embeddedTerminalSessionKey === entry.sessionKey) _setActiveEmbeddedTerminalEntry(null);
 }
 
+function _closeEmbeddedTerminalEntrySocket(entry) {
+  if (!entry || !entry.ws) return;
+  const socket = entry.ws;
+  socket.onopen = null;
+  socket.onmessage = null;
+  socket.onerror = null;
+  socket.onclose = null;
+  socket.close();
+  if (entry.ws === socket) entry.ws = null;
+  if (_embeddedTerminalWs === socket) _embeddedTerminalWs = null;
+}
+
+function _findEmbeddedTerminalEntryForCell(cellId) {
+  let fallback = null;
+  for (const key of Object.keys(_embeddedTerminalSessions)) {
+    const entry = _embeddedTerminalSessions[key];
+    if (!entry || entry.cellId !== cellId) continue;
+    if (_embeddedTerminalSessionKey === entry.sessionKey) return entry;
+    if (!fallback) fallback = entry;
+  }
+  return fallback;
+}
+
 function _disposeEmbeddedTerminalEntriesForCell(cellId, keepSessionKey) {
   for (const key of Object.keys(_embeddedTerminalSessions)) {
     const entry = _embeddedTerminalSessions[key];
@@ -865,6 +888,7 @@ async function _uploadEmbeddedTerminalImages(cell, files) {
 
 function _attachEmbeddedTerminalDropHandlers(cell, surface, entry) {
   if (!surface || typeof surface.addEventListener !== 'function') return;
+  entry.cell = cell;
   entry.dropSurface = surface;
   entry.dropDepth = 0;
   entry.dropHandlers = {
@@ -905,7 +929,7 @@ function _attachEmbeddedTerminalDropHandlers(cell, surface, entry) {
         }
         return;
       }
-      var paths = await _uploadEmbeddedTerminalImages(cell, images);
+      var paths = await _uploadEmbeddedTerminalImages(entry.cell || cell, images);
       if (!_isEmbeddedTerminalEntryActive(entry)) return;
       if (paths.length && entry.ws && entry.ws.readyState === WebSocket.OPEN) {
         entry.ws.send(JSON.stringify({
@@ -924,6 +948,36 @@ function _attachEmbeddedTerminalDropHandlers(cell, surface, entry) {
   surface.addEventListener('dragleave', entry.dropHandlers.dragleave, true);
   surface.addEventListener('drop', entry.dropHandlers.drop, true);
   if (_isEmbeddedTerminalEntryActive(entry)) _setActiveEmbeddedTerminalEntry(entry);
+}
+
+function _updateEmbeddedTerminalEntrySession(entry, cell, sessionKey, sessionId) {
+  const oldSessionKey = entry.sessionKey || '';
+  if (oldSessionKey && oldSessionKey !== sessionKey
+      && _embeddedTerminalSessions[oldSessionKey] === entry) {
+    delete _embeddedTerminalSessions[oldSessionKey];
+  }
+  entry.sessionKey = sessionKey;
+  entry.cellId = cell.id;
+  entry.cell = cell;
+  entry.sessionId = sessionId;
+  _embeddedTerminalSessions[sessionKey] = entry;
+  if (entry.surface) {
+    if (entry.surface.dataset) entry.surface.dataset.loomSessionKey = sessionKey;
+    if (typeof entry.surface.setAttribute === 'function') {
+      entry.surface.setAttribute('data-loom-session-key', sessionKey);
+    }
+  }
+}
+
+function _writeEmbeddedTerminalSessionRestartedSeparator(entry) {
+  const term = entry && entry.terminal;
+  if (!term) return;
+  const line = '──── Loom session restarted ────';
+  if (typeof term.writeln === 'function') {
+    term.writeln(line);
+  } else if (typeof term.write === 'function') {
+    term.write('\r\n' + line + '\r\n');
+  }
 }
 
 function _scheduleEmbeddedTerminalFit(entry) {
@@ -953,9 +1007,30 @@ var _EMBEDDED_TERMINAL_MAX_RETRIES = 15;
 function _connectEmbeddedTerminal(cell, surface) {
   var expectedSessionId = cell.session_id || '';
   var sessionKey = cell.id + ':' + expectedSessionId;
-  _disposeEmbeddedTerminalEntriesForCell(cell.id, sessionKey);
-  if (_embeddedTerminalSessions[sessionKey]) {
-    _disposeEmbeddedTerminalEntry(_embeddedTerminalSessions[sessionKey]);
+  var existingEntry = _embeddedTerminalSessions[sessionKey]
+    || _findEmbeddedTerminalEntryForCell(cell.id);
+  if (existingEntry) {
+    var oldSessionKey = existingEntry.sessionKey || '';
+    var sessionChanged = oldSessionKey !== sessionKey
+      || (existingEntry.sessionId || '') !== expectedSessionId;
+    _closeEmbeddedTerminalEntrySocket(existingEntry);
+    _updateEmbeddedTerminalEntrySession(existingEntry, cell, sessionKey, expectedSessionId);
+    _disposeEmbeddedTerminalEntriesForCell(cell.id, sessionKey);
+    if (surface && existingEntry.surface && surface !== existingEntry.surface
+        && typeof surface.remove === 'function') {
+      surface.remove();
+    }
+    if (sessionChanged) {
+      _writeEmbeddedTerminalSessionRestartedSeparator(existingEntry);
+      existingEntry.appendNextSnapshot = true;
+    } else {
+      existingEntry.appendNextSnapshot = false;
+    }
+    _embeddedTerminalPendingFocusKey = sessionKey;
+    _setActiveEmbeddedTerminalEntry(existingEntry);
+    _openEmbeddedTerminalSocket(cell, sessionKey, expectedSessionId, 0, existingEntry);
+    _scheduleEmbeddedTerminalFit(existingEntry);
+    return;
   }
   var entry = {
     sessionKey: sessionKey,
@@ -1046,7 +1121,11 @@ function _openEmbeddedTerminalSocket(cell, sessionKey, expectedSessionId, attemp
     try { msg = JSON.parse(event.data); } catch (e) { return; }
     if (!isCurrentSessionMessage(msg)) return;
     if (msg.type === 'snapshot') {
-      entry.terminal.reset();
+      if (entry.appendNextSnapshot) {
+        entry.appendNextSnapshot = false;
+      } else {
+        entry.terminal.reset();
+      }
       if (msg.data) entry.terminal.write(msg.data);
       if (_isEmbeddedTerminalEntryActive(entry)) {
         _scheduleEmbeddedTerminalFit(entry);
@@ -1087,7 +1166,7 @@ function _pruneEmbeddedTerminalSessions() {
   for (const key of Object.keys(_embeddedTerminalSessions)) {
     const entry = _embeddedTerminalSessions[key];
     const cell = entry && state.agents[entry.cellId];
-    if (!cell || !cell.session_id || key !== (cell.id + ':' + cell.session_id)) {
+    if (!cell) {
       _disposeEmbeddedTerminalEntry(entry);
     }
   }
@@ -1143,6 +1222,23 @@ function _activateEmbeddedTerminalSurface(stage, sessionKey) {
   _setActiveEmbeddedTerminalEntry(entry);
   if (entry) _scheduleEmbeddedTerminalFit(entry);
   return entry;
+}
+
+function _renderEmbeddedTerminalStagePlaceholder(stage, html) {
+  if (!stage) return;
+  const hasPlaceholder = !!(stage.children && Array.prototype.some.call(stage.children, function(child) {
+    return !(child && child.classList && child.classList.contains('terminal-surface'));
+  }));
+  if (stage._loomLastHtml === html && hasPlaceholder) return;
+  _clearEmbeddedTerminalStagePlaceholders(stage);
+  const placeholder = document.createElement('div');
+  placeholder.className = 'terminal-empty';
+  if (placeholder.classList && typeof placeholder.classList.add === 'function') {
+    placeholder.classList.add('terminal-empty');
+  }
+  placeholder.innerHTML = html;
+  if (typeof stage.appendChild === 'function') stage.appendChild(placeholder);
+  stage._loomLastHtml = html;
 }
 
 function renderTerminalWorkspace() {
@@ -1222,21 +1318,16 @@ function renderTerminalWorkspace() {
   if (!cell.session_id) {
     _renderTerminalCompose(dom.compose, null);
     const stoppedHtml = ''
-      + '<div class="terminal-empty">'
       + '  <div class="terminal-empty-title">' + esc(cell.name) + ' is stopped</div>'
       + '  <div class="terminal-empty-body">Relaunch this session to put it back in the workspace and return keyboard focus to the shell.</div>'
       + '  <button class="terminal-empty-btn" onclick="relaunchAgent(\'' + esc(cell.id) + '\')">Relaunch</button>'
-      + '  <div class="terminal-empty-meta">When it comes back, Loom will focus the terminal automatically.</div>'
-      + '</div>';
-    if (dom.stage._loomLastHtml !== stoppedHtml) {
-      dom.stage.innerHTML = stoppedHtml;
-      dom.stage._loomLastHtml = stoppedHtml;
-    }
+      + '  <div class="terminal-empty-meta">When it comes back, Loom will focus the terminal automatically.</div>';
+    _activateEmbeddedTerminalSurface(dom.stage, sessionKey);
+    _renderEmbeddedTerminalStagePlaceholder(dom.stage, stoppedHtml);
     const statusLabel = _terminalStatusLabel(cell);
     if (dom.statusbar.textContent !== statusLabel) {
       dom.statusbar.textContent = statusLabel;
     }
-    _disposeEmbeddedTerminalEntriesForCell(cell.id, '');
     _deactivateEmbeddedTerminalWorkspace();
     _restoreTerminalWorkspaceState(root, workspaceState, cell);
     return;
@@ -1244,7 +1335,10 @@ function renderTerminalWorkspace() {
 
   let entry = _embeddedTerminalSessions[sessionKey] || null;
   if (!entry) {
-    const surface = _createEmbeddedTerminalSurface(dom.stage, sessionKey);
+    const reusableEntry = _findEmbeddedTerminalEntryForCell(cell.id);
+    const surface = reusableEntry && reusableEntry.surface
+      ? reusableEntry.surface
+      : _createEmbeddedTerminalSurface(dom.stage, sessionKey);
     _connectEmbeddedTerminal(cell, surface);
     entry = _embeddedTerminalSessions[sessionKey] || null;
   } else {
