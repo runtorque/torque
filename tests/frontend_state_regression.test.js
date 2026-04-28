@@ -8994,6 +8994,76 @@ test('ws architect decision journal append creates journal bucket and rerenders 
   assert.equal(jsonValue(context, 'renderCalls.engineer'), 0);
 });
 
+test('Architect Journal long entries and pinned checkpoint collapse locally by default', () => {
+  const { context, document } = createEngineerWsHarness();
+  const panel = document.getElementById('panel-agent');
+  const checkpointText = ['checkpoint one', 'checkpoint two', 'checkpoint three', 'checkpoint four', 'checkpoint five', 'checkpoint six'].join('\n');
+  const longText = ['journal one', 'journal two', 'journal three', 'journal four', 'journal five', 'journal six'].join('\n');
+  const shortText = ['short one', 'short two', 'short three', 'short four', 'short five'].join('\n');
+
+  runInContext(context, `
+    state.agents = {
+      'arch-1': {
+        id: 'arch-1',
+        name: 'Architect One',
+        group: 'alpha',
+        kind: 'architect',
+        cell_type: 'agent'
+      }
+    };
+    state.architect_journals = { 'arch-1': [
+      { id: 'checkpoint-1', architect_id: 'arch-1', type: 'checkpoint', entry: ${JSON.stringify(checkpointText)}, timestamp: 1712345700 },
+      { id: 'entry-long', architect_id: 'arch-1', type: 'observation', entry: ${JSON.stringify(longText)}, timestamp: 1712345600 },
+      { id: 'entry-short', architect_id: 'arch-1', type: 'observation', entry: ${JSON.stringify(shortText)}, timestamp: 1712345500 }
+    ] };
+    focusedItemId = 'arch-1';
+    _agentPanelLastSelectedTabByKind.architect = 'journal';
+  `);
+
+  context.renderAgentPanel();
+  const html = panel.innerHTML;
+  assert.match(html, /Current architect state/);
+  assert.match(html, /agent-panel-checkpoint-card agent-panel-journal-collapsible/);
+  assert.match(html, /data-agent-panel-anchor="architect-journal-entry-long"/);
+  assert.match(html, /agent-panel-journal-clipped/);
+  assert.equal((html.match(/agent-panel-journal-toggle/g) || []).length, 3);
+  assert.equal((html.match(/aria-expanded="false"/g) || []).length, 3);
+  assert.match(html, /checkpoint six/);
+  assert.match(html, /journal six/);
+  assert.match(html, /short five/);
+
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  assert.match(css, /\.agent-panel-journal-clipped\s*\{[^}]*max-height:\s*calc\(1\.45em \* 5\);[^}]*overflow:\s*hidden;/);
+
+  const card = new FakeElement('journal-card');
+  card.classList.add('agent-panel-journal-collapsible');
+  const button = new FakeElement('journal-toggle');
+  button.textContent = 'Show more';
+  button.parentNode = card;
+  const event = {
+    prevented: false,
+    stopped: false,
+    preventDefault() { this.prevented = true; },
+    stopPropagation() { this.stopped = true; },
+  };
+  context.__journalToggleButton = button;
+  context.__journalToggleEvent = event;
+  runInContext(context, `
+    renderAgentPanel = function() { throw new Error('unexpected full rerender'); };
+    agentPanelToggleJournalEntry(__journalToggleEvent, __journalToggleButton);
+  `);
+  assert.equal(event.prevented, true);
+  assert.equal(event.stopped, true);
+  assert.equal(card.classList.contains('agent-panel-journal-expanded'), true);
+  assert.equal(button.textContent, 'Show less');
+  assert.equal(button.attributes['aria-expanded'], 'true');
+
+  runInContext(context, `agentPanelToggleJournalEntry(__journalToggleEvent, __journalToggleButton);`);
+  assert.equal(card.classList.contains('agent-panel-journal-expanded'), false);
+  assert.equal(button.textContent, 'Show more');
+  assert.equal(button.attributes['aria-expanded'], 'false');
+});
+
 test('renderAgentPanel preserves Architect Journal scroll anchor when a journal delta inserts above', () => {
   const { context, document } = createEngineerWsHarness();
   const panel = document.getElementById('panel-agent');

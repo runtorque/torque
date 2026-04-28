@@ -7609,6 +7609,27 @@ button.agent-panel-hierarchy-crumb:focus-visible {
   white-space: pre-wrap;
   word-break: break-word;
 }
+.agent-panel-journal-clipped {
+  line-height: 1.45;
+  max-height: calc(1.45em * 5);
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.agent-panel-journal-expanded .agent-panel-journal-clipped {
+  max-height: none;
+  overflow: visible;
+}
+.agent-panel-journal-toggle {
+  margin-top: 5px;
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 0;
+}
+.agent-panel-journal-toggle:hover {
+  text-decoration: underline;
+}
 
 .agent-panel-streams-summary {
   background: var(--bg-cell);

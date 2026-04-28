@@ -2479,7 +2479,10 @@ function _agentPanelArchitectJournalEntryHtml(entry, index) {
   var anchorKey = 'architect-journal-' + String(entry.id || index);
   var entryType = String(entry.type || 'observation');
   var typeClass = 'agent-panel-badge-' + entryType.replace(/[^a-z0-9_-]/gi, '').toLowerCase();
-  var html = '<div class="agent-panel-entry" data-agent-panel-anchor="'
+  var canExpand = _agentPanelJournalTextExpandable(entry.entry);
+  var html = '<div class="agent-panel-entry'
+    + (canExpand ? ' agent-panel-journal-collapsible' : '')
+    + '" data-agent-panel-anchor="'
     + _agentPanelEsc(anchorKey) + '">';
   html += '<div class="agent-panel-entry-header">';
   html += '<span class="agent-panel-badge ' + _agentPanelEsc(typeClass) + '">'
@@ -2487,10 +2490,43 @@ function _agentPanelArchitectJournalEntryHtml(entry, index) {
   html += '<span class="agent-panel-entry-time">'
     + _agentPanelEsc(_agentPanelTimestamp(entry.timestamp)) + '</span>';
   html += '</div>';
-  html += '<div class="agent-panel-entry-text">'
-    + _agentPanelEsc(entry.entry || '') + '</div>';
+  html += _agentPanelJournalBodyHtml(entry.entry, 'agent-panel-entry-text');
   html += '</div>';
   return html;
+}
+
+function _agentPanelJournalTextExpandable(text) {
+  return String(text || '').split(/\r\n|\r|\n/).length > 5;
+}
+
+function _agentPanelJournalBodyHtml(text, className) {
+  var expandable = _agentPanelJournalTextExpandable(text);
+  var html = '<div class="' + _agentPanelEsc(className || '')
+    + (expandable ? ' agent-panel-journal-clipped' : '') + '">'
+    + _agentPanelEsc(text || '') + '</div>';
+  if (expandable) {
+    html += '<button type="button" class="agent-panel-journal-toggle"'
+      + ' aria-expanded="false" onclick="agentPanelToggleJournalEntry(event,this)">'
+      + 'Show more</button>';
+  }
+  return html;
+}
+
+function agentPanelToggleJournalEntry(event, button) {
+  if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+  if (!button) return false;
+  var card = typeof button.closest === 'function'
+    ? button.closest('.agent-panel-journal-collapsible')
+    : null;
+  if (!card || !card.classList) return false;
+  var expanded = !card.classList.contains('agent-panel-journal-expanded');
+  card.classList.toggle('agent-panel-journal-expanded', expanded);
+  button.textContent = expanded ? 'Show less' : 'Show more';
+  if (typeof button.setAttribute === 'function') {
+    button.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+  }
+  return false;
 }
 
 function _agentPanelArchitectJournalHtml(agent) {
@@ -2518,7 +2554,10 @@ function _agentPanelArchitectJournalHtml(agent) {
   html += '</div>';
 
   if (latestCheckpoint) {
-    html += '<div class="detail-section-card agent-panel-checkpoint-card" '
+    var checkpointCanExpand = _agentPanelJournalTextExpandable(latestCheckpoint.entry);
+    html += '<div class="detail-section-card agent-panel-checkpoint-card'
+      + (checkpointCanExpand ? ' agent-panel-journal-collapsible' : '')
+      + '" '
       + 'data-agent-panel-anchor="architect-journal-checkpoint">';
     html += '<div class="detail-section-card-head">';
     html += '<span class="detail-section-primary">Current architect state</span>';
@@ -2526,9 +2565,7 @@ function _agentPanelArchitectJournalHtml(agent) {
       + _agentPanelEsc(_agentPanelTimestamp(latestCheckpoint.timestamp))
       + '</span>';
     html += '</div>';
-    html += '<div class="detail-section-card-body">'
-      + _agentPanelEsc(latestCheckpoint.entry || '')
-      + '</div>';
+    html += _agentPanelJournalBodyHtml(latestCheckpoint.entry, 'detail-section-card-body');
     html += '</div>';
   }
 
