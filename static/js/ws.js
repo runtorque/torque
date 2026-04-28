@@ -53,10 +53,25 @@ var _pendingDeltaSurfaceRenderFrame = 0;
 // microtask / rAF after the closing event so the browser delivers the
 // follow-up on the original target first, then deferred renders apply.
 var _userPressing = false;  // legacy name; covers pointer + keyboard interaction now
+// LOOM:264 follow-up: hover-defer for agent-card tooltips. Agent cards expose
+// their full status / activity / branch text via a CSS `:hover::after`
+// pseudo-element on `.agent-card-tooltip` (style.css:1142). When the user
+// hovers an active card and the worker fires events at firehose rate, the
+// surface invalidation pipeline blasts `main.innerHTML` and destroys the
+// hovered card mid-`:hover`; the tooltip vanishes, the new card appears, the
+// pointer re-enters, the tooltip reappears — visible flicker. Defer
+// DOM-replacing renders while the user is hovering an agent-card tooltip so
+// the card DOM survives and the pseudo-element stays painted. Released on
+// pointerout when the pointer leaves the tooltip subtree, with the same
+// post-release flush schedule as pointerup / keyup.
+var _userHovering = false;
+function _userInteracting() {
+  return !!(_userPressing || _userHovering);
+}
 var _postPressFlushScheduled = false;
 function _flushAfterPress() {
   _postPressFlushScheduled = false;
-  if (_userPressing) return;
+  if (_userInteracting()) return;
   if (_pendingDeltaSurfaceInvalidations) _flushDeltaSurfaceRenderBatch();
 }
 function _schedulePostPressFlush() {
@@ -69,6 +84,30 @@ function _schedulePostPressFlush() {
   } else {
     _flushAfterPress();
   }
+}
+// Selector for surfaces whose DOM identity we want to preserve while the
+// user's pointer is over them. Currently the agent-card tooltip is the only
+// CSS-pseudo-element-keyed surface in the grid; extend this list rather
+// than adding new flags if more `:hover`-driven surfaces appear.
+var _LOOM_HOVER_DEFER_SELECTOR = '.agent-card-tooltip';
+function _eventTargetInHoverSurface(target) {
+  if (!target || typeof target.closest !== 'function') return false;
+  return !!target.closest(_LOOM_HOVER_DEFER_SELECTOR);
+}
+function _hoverEdgeIsBetweenTooltips(ev) {
+  // pointerover / pointerout fire on every descendant transition. We only
+  // care about the boundary where the pointer enters / leaves the
+  // tooltip element itself — moving between two children of the same
+  // tooltip must not toggle the flag (would thrash defer on/off mid-hover).
+  if (!ev || !ev.target || typeof ev.target.closest !== 'function') return false;
+  var fromTooltip = ev.target.closest(_LOOM_HOVER_DEFER_SELECTOR);
+  if (!fromTooltip) return false;
+  var related = ev.relatedTarget || null;
+  if (related && typeof related.closest === 'function') {
+    var toTooltip = related.closest(_LOOM_HOVER_DEFER_SELECTOR);
+    if (toTooltip === fromTooltip) return false;
+  }
+  return true;
 }
 // True when the current event target is a text input / textarea /
 // contenteditable surface. We only want to gate renders on keydown when
@@ -89,12 +128,19 @@ function _isTextEditingTarget(target) {
 }
 if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
   var _userPressEnd = function() {
-    var wasPressing = _userPressing;
+    var wasInteracting = _userInteracting();
     _userPressing = false;
-    if (wasPressing && _pendingDeltaSurfaceInvalidations) {
+    if (wasInteracting && !_userInteracting() && _pendingDeltaSurfaceInvalidations) {
       // Defer flush so the browser delivers the synthetic follow-up
       // (click for pointer, input for keystroke) on the original target
       // before we swap DOM.
+      _schedulePostPressFlush();
+    }
+  };
+  var _userHoverEnd = function() {
+    var wasInteracting = _userInteracting();
+    _userHovering = false;
+    if (wasInteracting && !_userInteracting() && _pendingDeltaSurfaceInvalidations) {
       _schedulePostPressFlush();
     }
   };
@@ -113,10 +159,28 @@ if (typeof document !== 'undefined' && typeof document.addEventListener === 'fun
   // (composer state lives on the editing element and dies with the node).
   document.addEventListener('compositionstart', function() { _userPressing = true; }, true);
   document.addEventListener('compositionend', _userPressEnd, true);
+  // Hover defer: pointerover fires when the pointer enters the tooltip
+  // subtree (relatedTarget is outside it); pointerout fires when it leaves
+  // (relatedTarget is outside). Inner-descendant transitions are filtered
+  // by `_hoverEdgeIsBetweenTooltips` so the flag doesn't thrash.
+  document.addEventListener('pointerover', function(ev) {
+    if (!_hoverEdgeIsBetweenTooltips(ev)) return;
+    if (_eventTargetInHoverSurface(ev.target)) _userHovering = true;
+  }, true);
+  document.addEventListener('pointerout', function(ev) {
+    if (!_hoverEdgeIsBetweenTooltips(ev)) return;
+    // The edge is "outbound" when the new target is not inside the same
+    // tooltip — defined by `_hoverEdgeIsBetweenTooltips` returning true
+    // only on real boundary crossings. Release the flag.
+    _userHoverEnd();
+  }, true);
   // Safety net: clear the flag on blur in case the closing event is
   // missed (e.g. capture lost mid-press, focus stolen mid-composition).
   if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
-    window.addEventListener('blur', _userPressEnd);
+    window.addEventListener('blur', function() {
+      _userPressEnd();
+      _userHoverEnd();
+    });
   }
 }
 
@@ -553,7 +617,9 @@ function _flushDeltaSurfaceRenderBatch() {
   // If a press is in progress (e.g. an rAF was scheduled before the user
   // pressed), keep the batch queued and re-arm the rAF after release.
   // Otherwise the rAF would replace the DOM mid-press and suppress click.
-  if (_userPressing) {
+  // LOOM:264 follow-up: same gate also applies to active hover on
+  // tooltip-keyed surfaces (see `_userHovering`).
+  if (_userInteracting()) {
     _pendingDeltaSurfaceRenderFrame = 0;
     return;
   }
@@ -571,7 +637,7 @@ function _queueDeltaSurfaceRender(flags) {
   // presses. The ~16 ms of latency is invisible compared to losing every
   // click.
   if (typeof requestAnimationFrame !== 'function') {
-    if (_userPressing) {
+    if (_userInteracting()) {
       _pendingDeltaSurfaceInvalidations = _mergeSurfaceInvalidations(
         _pendingDeltaSurfaceInvalidations,
         flags
@@ -585,7 +651,7 @@ function _queueDeltaSurfaceRender(flags) {
     _pendingDeltaSurfaceInvalidations,
     flags
   );
-  if (_userPressing) return;
+  if (_userInteracting()) return;
   if (_pendingDeltaSurfaceRenderFrame) return;
   _pendingDeltaSurfaceRenderFrame = requestAnimationFrame(function() {
     _flushDeltaSurfaceRenderBatch();
