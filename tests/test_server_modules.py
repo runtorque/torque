@@ -258,6 +258,27 @@ prompt: |
             'compact': True,
         }))
 
+    def test_api_cmd_lifecycle_guard_rejects_worker_context_unless_forced(self):
+        for cmd in ("restart", "stop", "deploy"):
+            with self.subTest(cmd=cmd):
+                with self.assertLogs(self.server_mod.log, level="WARNING"):
+                    result = self.server_mod._api_worker_context_guard(
+                        {"cmd": cmd}, {"LOOM_CELL_ID": "worker-1"}, "127.0.0.1")
+
+                self.assertEqual(result["status"], 403)
+                self.assertIn("force=true", result["message"])
+                self.assertIsNone(self.server_mod._api_worker_context_guard(
+                    {"cmd": cmd, "force": True},
+                    {"LOOM_CELL_ID": "worker-1"},
+                    "127.0.0.1"))
+        result = self.server_mod._api_worker_context_guard(
+            {"cmd": "restart", "loom_cell_id": "worker-2"},
+            {},
+            "127.0.0.1",
+        )
+        self.assertEqual(result["status"], 403)
+        self.assertIn("worker-2", result["message"])
+
     def test_task_detail_command_returns_full_task_shape(self):
         state = self.state_mod.MatrixState()
         state.groups['g'] = []

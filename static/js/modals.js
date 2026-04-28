@@ -1147,11 +1147,6 @@ function _defaultArchitectSettings() {
     architect_suppress_empty_digests: true,
     architect_enabled_events: _ARCHITECT_DIGEST_DEFAULT_EVENTS.slice(),
     architect_journal_checkpoint_frequency: 'every_10_actions',
-    architect_review_gate_thresholds: {
-      ship_direct_max: 50,
-      review_default_above: 150,
-      self_review_bypass_allowed: false,
-    },
   };
 }
 
@@ -1206,10 +1201,6 @@ function _showGroupSettings(group, data) {
   const architectSettings = Object.assign(
     _defaultArchitectSettings(),
     data.architect_settings || {}
-  );
-  architectSettings.architect_review_gate_thresholds = Object.assign(
-    _defaultArchitectSettings().architect_review_gate_thresholds,
-    (data.architect_settings || {}).architect_review_gate_thresholds || {}
   );
   const engineer = s.engineer_agent_id && state.agents ? state.agents[s.engineer_agent_id] : null;
 
@@ -1396,10 +1387,6 @@ function _showGroupSettings(group, data) {
   document.getElementById('gs-architect-journal-checkpoint').value = (
     architectSettings.architect_journal_checkpoint_frequency || 'every_10_actions'
   );
-  const thresholds = architectSettings.architect_review_gate_thresholds || {};
-  document.getElementById('gs-architect-review-ship-direct-max').value = thresholds.ship_direct_max != null ? thresholds.ship_direct_max : 50;
-  document.getElementById('gs-architect-review-default-above').value = thresholds.review_default_above != null ? thresholds.review_default_above : 150;
-  document.getElementById('gs-architect-review-bypass').checked = !!thresholds.self_review_bypass_allowed;
   onGsArchitectProviderChange();
   _resetGsArchitectSections();
 
@@ -1544,11 +1531,6 @@ function submitGroupSettings() {
     architect_suppress_empty_digests: document.getElementById('gs-architect-suppress-empty').checked,
     architect_enabled_events: _getArchitectEnabledEvents(),
     architect_journal_checkpoint_frequency: document.getElementById('gs-architect-journal-checkpoint').value.trim() || 'every_10_actions',
-    architect_review_gate_thresholds: {
-      ship_direct_max: parseInt(document.getElementById('gs-architect-review-ship-direct-max').value, 10) || 0,
-      review_default_above: parseInt(document.getElementById('gs-architect-review-default-above').value, 10) || 0,
-      self_review_bypass_allowed: document.getElementById('gs-architect-review-bypass').checked,
-    },
   };
 
   send({ cmd: 'update_group_settings', group: _settingsGroup, settings });

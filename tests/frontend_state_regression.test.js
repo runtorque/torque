@@ -1709,7 +1709,6 @@ test('actions editor save payload preserves auto_close_on_done', () => {
   document.register('tpled-worktree').checked = false;
   document.register('tpled-auto-close-on-done').checked = true;
   document.register('tpled-implementation-depth').checked = true;
-  document.register('tpled-review-required-above-loc').value = '125';
   document.register('tpled-disable-role-preamble').checked = true;
   document.register('tpled-prompt').value = '{{ TASK }}';
   document.register('tpled-labels').value = 'review';
@@ -1735,10 +1734,19 @@ test('actions editor save payload preserves auto_close_on_done', () => {
     true,
   );
   assert.equal(
-    jsonValue(context, 'sendCalls[0].action.review_required_above_loc'),
-    125,
+    jsonValue(context, 'Object.prototype.hasOwnProperty.call(sendCalls[0].action, "review_required_above_loc")'),
+    false,
   );
   assert.deepEqual(jsonValue(context, 'sendCalls[0].action.transitions'), []);
+});
+
+test('actions editor removes fallback threshold copy and renames transition LOC control', () => {
+  const source = fs.readFileSync(path.join(repoRoot, 'static/js/actions.js'), 'utf8');
+
+  assert.doesNotMatch(source, /Action fallback review gate LOC threshold/);
+  assert.doesNotMatch(source, /Override LOC gate for this transition/);
+  assert.match(source, /Mandatory transition threshold \(LOC\)/);
+  assert.match(source, /Require this transition above N LOC/);
 });
 
 test('actions editor save payload includes transition LOC gate overrides', () => {
@@ -1760,7 +1768,6 @@ test('actions editor save payload includes transition LOC gate overrides', () =>
   document.register('tpled-worktree').checked = true;
   document.register('tpled-auto-close-on-done').checked = false;
   document.register('tpled-implementation-depth').checked = true;
-  document.register('tpled-review-required-above-loc').value = '';
   document.register('tpled-disable-role-preamble').checked = false;
   document.register('tpled-prompt').value = '{{ TASK }}';
   document.register('tpled-labels').value = 'feature';

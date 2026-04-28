@@ -815,7 +815,7 @@
       <details id="gs-architect-runtime-section" class="task-modal-section" open>
         <summary>Runtime behavior</summary>
         <div class="task-modal-section-body">
-          <div class="label-hint task-modal-section-intro">Configure architect digest verbosity, checkpoint policy, and fallback review-gate defaults for transitions without their own LOC gate.</div>
+          <div class="label-hint task-modal-section-intro">Configure architect digest verbosity and checkpoint policy.</div>
           <label>Digest verbosity</label>
           <select id="gs-architect-digest-verbosity">
             <option value="terse">Terse</option>
@@ -824,12 +824,6 @@
           </select>
           <label>Journal checkpoint</label>
           <input id="gs-architect-journal-checkpoint" placeholder="every_10_actions" autocomplete="off">
-          <label>Fallback review-gate thresholds</label>
-          <div class="gs-threshold-grid">
-            <input id="gs-architect-review-ship-direct-max" type="number" min="0" placeholder="fallback ship: 50">
-            <input id="gs-architect-review-default-above" type="number" min="0" placeholder="fallback review: 150">
-            <label class="gs-checkbox"><input id="gs-architect-review-bypass" type="checkbox"> self-review bypass</label>
-          </div>
         </div>
       </details>
 
