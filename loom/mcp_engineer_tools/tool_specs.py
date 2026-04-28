@@ -628,6 +628,15 @@ ENGINEER_TOOLS = [
                         "default."
                     ),
                 },
+                "provider": {
+                    "type": "string",
+                    "description": (
+                        "Provider/backend override for new worker agents "
+                        "created by this batch (for example 'codex' or "
+                        "'claude-code'). If omitted, Loom uses the group's "
+                        "default worker provider."
+                    ),
+                },
             },
             "required": ["tasks"],
         },

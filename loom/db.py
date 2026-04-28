@@ -1488,8 +1488,9 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             self._conn.execute(
                 "INSERT INTO auto_dispatch_queue "
                 "(group_name, position, task_id, agent_group, "
-                "max_concurrent, target_agent_id, engineer_owner_id, enqueued_at) "
-                "VALUES (?,?,?,?,?,?,?,?)",
+                "max_concurrent, target_agent_id, engineer_owner_id, "
+                "provider, enqueued_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
                 (
                     group_name,
                     pos,
@@ -1498,6 +1499,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                     int(item.get("max_concurrent", 1) or 1),
                     item.get("target_agent_id", ""),
                     item.get("engineer_owner_id", ""),
+                    item.get("provider", ""),
                     item.get("enqueued_at", ""),
                 ),
             )
@@ -2260,8 +2262,9 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                  engineer_directory, engineer_profile,
                  engineer_shell, engineer_tab_color,
                  pending_question_set_at,
-                 pending_question_actor_id)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 pending_question_actor_id,
+                 engineer_can_override_worker_provider)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             group_name,
             settings.get("push_interval", 60),
@@ -2291,6 +2294,8 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             settings.get("engineer_tab_color", ""),
             float(settings.get("pending_question_set_at", 0) or 0),
             settings.get("pending_question_actor_id", ""),
+            1 if settings.get(
+                "engineer_can_override_worker_provider", True) else 0,
         ))
         self._conn.commit()
 
@@ -2356,7 +2361,8 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "engineer_directory, engineer_profile, "
             "engineer_shell, engineer_tab_color, "
             "pending_question_set_at, "
-            "pending_question_actor_id "
+            "pending_question_actor_id, "
+            "engineer_can_override_worker_provider "
             "FROM engineer_settings "
             "WHERE group_name=?", (group_name,)).fetchone()
         if not row:
@@ -2404,6 +2410,9 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "engineer_tab_color": row[24] if len(row) > 24 else "",
             "pending_question_set_at": row[25] if len(row) > 25 else 0.0,
             "pending_question_actor_id": row[26] if len(row) > 26 else "",
+            "engineer_can_override_worker_provider": (
+                bool(row[27]) if len(row) > 27 else True
+            ),
         }
 
     def load_agent_digest_settings(self, agent_id: str) -> dict | None:
@@ -2478,7 +2487,8 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "engineer_directory, engineer_profile, "
             "engineer_shell, engineer_tab_color, "
             "pending_question_set_at, "
-            "pending_question_actor_id "
+            "pending_question_actor_id, "
+            "engineer_can_override_worker_provider "
             "FROM engineer_settings"
         ).fetchall()
         result = {}
@@ -2526,6 +2536,9 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 "engineer_tab_color": row[24] if len(row) > 24 else "",
                 "pending_question_set_at": row[25] if len(row) > 25 else 0.0,
                 "pending_question_actor_id": row[26] if len(row) > 26 else "",
+                "engineer_can_override_worker_provider": (
+                    bool(row[27]) if len(row) > 27 else True
+                ),
             }
         return result
 
@@ -3430,8 +3443,8 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                         INSERT INTO auto_dispatch_queue
                             (group_name, position, task_id, agent_group,
                              max_concurrent, target_agent_id,
-                             engineer_owner_id, enqueued_at)
-                        VALUES (?,?,?,?,?,?,?,?)
+                             engineer_owner_id, provider, enqueued_at)
+                        VALUES (?,?,?,?,?,?,?,?,?)
                     """, (
                         gname,
                         pos,
@@ -3440,6 +3453,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                         int(item.get("max_concurrent", 1) or 1),
                         item.get("target_agent_id", ""),
                         item.get("engineer_owner_id", ""),
+                        item.get("provider", ""),
                         item.get("enqueued_at", ""),
                     ))
 
@@ -3696,7 +3710,8 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         try:
             rows = c.execute(
                 "SELECT group_name, position, task_id, agent_group, "
-                "max_concurrent, target_agent_id, engineer_owner_id, enqueued_at "
+                "max_concurrent, target_agent_id, engineer_owner_id, "
+                "provider, enqueued_at "
                 "FROM auto_dispatch_queue ORDER BY group_name, position"
             ).fetchall()
             auto_dispatch_queues = decode_auto_dispatch_queue_rows(rows)

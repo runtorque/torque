@@ -251,6 +251,7 @@ test('group settings modal populates engineer fields and honors engineer tab dee
       engineer_tab_color: "none",
       custom_instructions: "Watch for regressions.",
       restrict_to_created_agents: true,
+      engineer_can_override_worker_provider: false,
       autonomy_mode: "aggressive_auto_continue",
       default_worker_concurrency: 4,
       wave_size_preference: "large",
@@ -300,6 +301,7 @@ test('group settings modal populates engineer fields and honors engineer tab dee
   );
   assert.equal(ensure('gs-engineer-custom-instructions').value, 'Watch for regressions.');
   assert.equal(ensure('gs-engineer-restrict-to-created-agents').checked, true);
+  assert.equal(ensure('gs-engineer-can-override-worker-provider').checked, false);
   assert.equal(ensure('gs-engineer-autonomy-mode').value, 'aggressive_auto_continue');
   assert.equal(ensure('gs-engineer-default-worker-concurrency').value, '4');
   assert.equal(ensure('gs-engineer-wave-size-preference').value, 'large');
@@ -352,6 +354,7 @@ test('group settings resets the Engineer section defaults when reopened', () => 
   assert.equal(ensure('gs-architect-custom-section').open, true);
   assert.equal(ensure('gs-architect-runtime-section').open, true);
   assert.equal(ensure('gs-engineer-notification-preset').value, 'normal');
+  assert.equal(ensure('gs-engineer-can-override-worker-provider').checked, true);
 });
 
 test('architect runtime settings no longer show fallback review-gate controls', () => {
@@ -390,6 +393,7 @@ test('submitGroupSettings sends group, engineer, and architect updates separatel
   vm.runInContext(`_gsEngineerColor = 'none';`, context);
   ensure('gs-engineer-custom-instructions').value = 'Stay focused';
   ensure('gs-engineer-restrict-to-created-agents').checked = true;
+  ensure('gs-engineer-can-override-worker-provider').checked = false;
   ensure('gs-engineer-autonomy-mode').value = 'suggest_only';
   ensure('gs-engineer-default-worker-concurrency').value = '3';
   ensure('gs-engineer-wave-size-preference').value = 'small';
@@ -438,6 +442,7 @@ test('submitGroupSettings sends group, engineer, and architect updates separatel
   assert.equal(sandbox.sendCalls[1].engineer_tab_color, 'none');
   assert.equal(sandbox.sendCalls[1].custom_instructions, 'Stay focused');
   assert.equal(sandbox.sendCalls[1].restrict_to_created_agents, true);
+  assert.equal(sandbox.sendCalls[1].engineer_can_override_worker_provider, false);
   assert.equal(sandbox.sendCalls[1].autonomy_mode, 'suggest_only');
   assert.equal(sandbox.sendCalls[1].default_worker_concurrency, 3);
   assert.equal(sandbox.sendCalls[1].wave_size_preference, 'small');

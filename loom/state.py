@@ -675,6 +675,7 @@ class AutoDispatchQueueEntry:
     max_concurrent: int = 1
     target_agent_id: str = ""
     engineer_owner_id: str = ""
+    provider: str = ""
     enqueued_at: str = ""
 
 
@@ -1186,6 +1187,7 @@ class EngineerSettings:
     paused: bool = False                 # user paused event pushes
     custom_instructions: str = ""        # user-defined instructions appended to engineer system prompt
     restrict_to_created_agents: bool = False  # limit Engineer agent visibility/control to its own created agents
+    engineer_can_override_worker_provider: bool = True  # expose worker provider override in Engineer dispatch tools
     pending_question: str = ""           # question awaiting human reply (non-empty = awaiting input)
     pending_question_set_at: float = 0.0  # unix timestamp when pending_question was set
     pending_question_actor_id: str = ""  # engineer who set pending_question
@@ -2467,7 +2469,8 @@ class MatrixState:
                                 agent_group: str = "",
                                 max_concurrent: int = 1,
                                 target_agent_id: str = "",
-                                engineer_owner_id: str = ""):
+                                engineer_owner_id: str = "",
+                                provider: str = ""):
         found_group, _idx, entry = self.auto_dispatch_queue_find(task_id)
         if entry:
             if found_group != group:
@@ -2482,6 +2485,7 @@ class MatrixState:
             max_concurrent=max(1, int(max_concurrent or 1)),
             target_agent_id=target_agent_id.strip(),
             engineer_owner_id=str(engineer_owner_id or "").strip(),
+            provider=str(provider or "").strip(),
             enqueued_at=datetime.now(timezone.utc).isoformat(),
         )
         queue.append(entry)
@@ -3456,7 +3460,9 @@ class MatrixState:
             return normalize_engineer_digest_verbosity(value)
         if key == "escalation_style":
             return normalize_engineer_escalation_style(value)
-        if key == "restrict_to_created_agents":
+        if key in {
+                "restrict_to_created_agents",
+                "engineer_can_override_worker_provider"}:
             return bool(value)
         if key == "pending_question_set_at":
             try:

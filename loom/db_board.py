@@ -207,8 +207,9 @@ def replace_auto_dispatch_queue(executor, group_name, entries):
         executor.execute(
             "INSERT INTO auto_dispatch_queue "
             "(group_name, position, task_id, agent_group, "
-            "max_concurrent, target_agent_id, engineer_owner_id, enqueued_at) "
-            "VALUES (?,?,?,?,?,?,?,?)",
+            "max_concurrent, target_agent_id, engineer_owner_id, "
+            "provider, enqueued_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
             (
                 group_name,
                 pos,
@@ -217,6 +218,7 @@ def replace_auto_dispatch_queue(executor, group_name, entries):
                 int(item.get("max_concurrent", 1) or 1),
                 item.get("target_agent_id", ""),
                 item.get("engineer_owner_id", ""),
+                item.get("provider", ""),
                 item.get("enqueued_at", ""),
             ),
         )
@@ -225,16 +227,14 @@ def replace_auto_dispatch_queue(executor, group_name, entries):
 def decode_auto_dispatch_queue_rows(rows):
     queues = {}
     for row in rows:
-        (
-            group_name,
-            _pos,
-            task_id,
-            agent_group,
-            max_concurrent,
-            target_agent_id,
-            engineer_owner_id,
-            enqueued_at,
-        ) = row
+        group_name = row[0]
+        task_id = row[2]
+        agent_group = row[3]
+        max_concurrent = row[4]
+        target_agent_id = row[5]
+        engineer_owner_id = row[6]
+        provider = row[7] if len(row) > 8 else ""
+        enqueued_at = row[8] if len(row) > 8 else row[7]
         queues.setdefault(group_name, []).append(
             {
                 "task_id": task_id,
@@ -242,6 +242,7 @@ def decode_auto_dispatch_queue_rows(rows):
                 "max_concurrent": int(max_concurrent or 1),
                 "target_agent_id": target_agent_id or "",
                 "engineer_owner_id": engineer_owner_id or "",
+                "provider": provider or "",
                 "enqueued_at": enqueued_at or "",
             }
         )

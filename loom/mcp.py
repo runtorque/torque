@@ -711,7 +711,7 @@ def _visible_tools(state, cell_id: str):
     cell = state.agents.get(str(cell_id or "").strip()) if cell_id else None
     caller_kind = str(getattr(cell, "kind", "") or "").strip() if cell else ""
     if caller_kind == "engineer":
-        tools.extend(eager_tool_specs(engineer_tools_for_cell(cell)))
+        tools.extend(eager_tool_specs(engineer_tools_for_cell(cell, state)))
     elif caller_kind == "architect":
         tools.extend(eager_tool_specs(ARCHITECT_TOOLS))
     return tools
@@ -722,7 +722,7 @@ def _deferred_tools_for_caller(state, cell_id: str):
     cell = state.agents.get(str(cell_id or "").strip()) if cell_id else None
     caller_kind = str(getattr(cell, "kind", "") or "").strip() if cell else ""
     if caller_kind == "engineer":
-        return deferred_tool_specs(engineer_tools_for_cell(cell))
+        return deferred_tool_specs(engineer_tools_for_cell(cell, state))
     if caller_kind == "architect":
         return deferred_tool_specs(ARCHITECT_TOOLS)
     return []

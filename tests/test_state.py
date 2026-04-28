@@ -928,6 +928,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
                 "max_concurrent": 1,
                 "target_agent_id": "agent-1",
                 "engineer_owner_id": "engineer-1",
+                "provider": "codex",
                 "enqueued_at": "2026-04-07T10:00:00+00:00",
             }
         ])
@@ -951,6 +952,10 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertEqual(
             state.auto_dispatch_queues["g"][0].engineer_owner_id,
             "engineer-1",
+        )
+        self.assertEqual(
+            state.auto_dispatch_queues["g"][0].provider,
+            "codex",
         )
 
     def test_load_restores_kinds_fields_on_agents_and_tasks(self):

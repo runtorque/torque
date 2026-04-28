@@ -44,14 +44,47 @@ def engineer_has_hiring_architect(cell) -> bool:
     return bool(str(getattr(cell, "hired_by_architect_id", "") or "").strip())
 
 
-def engineer_tools_for_cell(cell) -> list[dict]:
+def engineer_can_override_worker_provider(cell, state=None) -> bool:
+    if state is None or cell is None:
+        return True
+    group = str(getattr(cell, "group", "") or "").strip()
+    if not group:
+        return True
+    settings = state.get_engineer_settings(group)
+    return bool(
+        getattr(settings, "engineer_can_override_worker_provider", True)
+    )
+
+
+def _without_worker_provider_override_params(tools: list[dict]) -> list[dict]:
+    filtered = []
+    for tool in tools:
+        spec = deepcopy(tool)
+        name = str(spec.get("name", "") or "").strip()
+        properties = (
+            spec.get("inputSchema", {})
+            .get("properties", {})
+        )
+        if name == "engineer_task_dispatch":
+            properties.pop("agent_type", None)
+        elif name == "engineer_batch_dispatch":
+            properties.pop("provider", None)
+        filtered.append(spec)
+    return filtered
+
+
+def engineer_tools_for_cell(cell, state=None) -> list[dict]:
     if engineer_has_hiring_architect(cell):
-        return list(ENGINEER_TOOLS)
-    return [
-        tool for tool in ENGINEER_TOOLS
-        if str(tool.get("name", "") or "").strip()
-        not in ENGINEER_ARCHITECT_CHAIN_TOOL_NAMES
-    ]
+        tools = list(ENGINEER_TOOLS)
+    else:
+        tools = [
+            tool for tool in ENGINEER_TOOLS
+            if str(tool.get("name", "") or "").strip()
+            not in ENGINEER_ARCHITECT_CHAIN_TOOL_NAMES
+        ]
+    if not engineer_can_override_worker_provider(cell, state):
+        return _without_worker_provider_override_params(tools)
+    return tools
 
 
 ENGINEER_TOOLS = [deepcopy(tool) for tool in ENGINEER_ORCHESTRATION_TOOLS]
@@ -259,7 +292,10 @@ async def _dispatch_engineer_tool(name, args, handle_command, state,
         )
         if is_error:
             return error_text, True
-        return tool_search_response(engineer_tools_for_cell(_cell), args), False
+        return tool_search_response(
+            engineer_tools_for_cell(_cell, state),
+            args,
+        ), False
     return await dispatch_scoped_tool(
         name,
         args,

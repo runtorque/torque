@@ -861,6 +861,7 @@ const _ENGINEER_NOTIFICATION_PRESETS = {
 function _defaultEngineerNotificationSettings() {
   const preset = _ENGINEER_NOTIFICATION_PRESETS.normal;
   return {
+    engineer_can_override_worker_provider: true,
     digest_verbosity: preset.digest_verbosity,
     push_interval: preset.push_interval,
     max_interval: preset.max_interval,
@@ -1299,6 +1300,7 @@ function _showGroupSettings(group, data) {
   send({ cmd: 'list_specializations', group: group });
   renderGsEngineerSpecializations();
   document.getElementById('gs-engineer-restrict-to-created-agents').checked = !!ws.restrict_to_created_agents;
+  document.getElementById('gs-engineer-can-override-worker-provider').checked = ws.engineer_can_override_worker_provider !== false;
   _setSelectValue('gs-engineer-autonomy-mode', ws.autonomy_mode, 'dispatch_when_clear');
   _setSelectValue(
     'gs-engineer-default-worker-concurrency',
@@ -1505,6 +1507,7 @@ function submitGroupSettings() {
     engineer_tab_color: _gsEngineerColor,
     custom_instructions: document.getElementById('gs-engineer-custom-instructions').value,
     restrict_to_created_agents: document.getElementById('gs-engineer-restrict-to-created-agents').checked,
+    engineer_can_override_worker_provider: document.getElementById('gs-engineer-can-override-worker-provider').checked,
     autonomy_mode: document.getElementById('gs-engineer-autonomy-mode').value,
     default_worker_concurrency: parseInt(document.getElementById('gs-engineer-default-worker-concurrency').value, 10) || 2,
     wave_size_preference: document.getElementById('gs-engineer-wave-size-preference').value,
