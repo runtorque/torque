@@ -13751,11 +13751,25 @@ test('submitTask includes structured artifacts alongside attachments when editin
   });
 });
 
-test('openTaskArtifactById opens a preserved artifact directly when a file URL is available', () => {
-  const opened = [];
-  const { sandbox } = createSandbox({
-    window: {
-      open(url) { opened.push(url); },
+function artifactPreviewOverlay(document) {
+  return document.body.children.find((child) => child.id === 'modal-artifact-preview') || null;
+}
+
+function flushArtifactPreview() {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+test('openTaskArtifactById previews a text artifact in an in-app popup', async () => {
+  const fetched = [];
+  const { sandbox, document } = createSandbox({
+    fetch(url) {
+      fetched.push(url);
+      return Promise.resolve({
+        ok: true,
+        text() {
+          return Promise.resolve('# Markdown report\nFull artifact contents');
+        },
+      });
     },
   });
   const context = vm.createContext(sandbox);
@@ -13764,27 +13778,58 @@ test('openTaskArtifactById opens a preserved artifact directly when a file URL i
   context.state.board_tasks = {
     'task-1': {
       id: 'task-1',
-      task: 'Review merge diff',
+      task: 'Review markdown artifact',
       artifacts: [{
         id: 'artifact-1',
-        type: 'diff',
-        filename: 'worker-pre-merge.patch',
-        path: '/tmp/worker-pre-merge.patch',
-        storage: { kind: 'path', path: '/tmp/worker-pre-merge.patch', content: '' },
+        type: 'generated_doc',
+        title: 'Markdown report',
+        filename: 'report.md',
+        path: '/tmp/report.md',
+        mime_type: 'text/markdown',
+        storage: { kind: 'path', path: '/tmp/report.md', content: '' },
         prompt: { mode: 'summary' },
       }],
     },
   };
 
+  const html = runInContext(context, `_renderArtifactCard(state.board_tasks["task-1"].artifacts[0], { taskId: 'task-1' })`);
+  assert.match(html, /openTaskArtifactPreview\(this\.dataset\.artifactPreviewKey\)/);
+  assert.doesNotMatch(html, /window\.open/);
+
   assert.equal(runInContext(context, `openTaskArtifactById('task-1', 'artifact-1')`), true);
-  assert.deepEqual(opened, ['/attachments/task-1/worker-pre-merge.patch']);
+  assert.deepEqual(fetched, ['/attachments/task-1/report.md']);
+  await flushArtifactPreview();
+
+  const overlay = artifactPreviewOverlay(document);
+  assert.ok(overlay);
+  assert.match(overlay.innerHTML, /artifact-preview-pre/);
+  assert.match(overlay.innerHTML, /# Markdown report/);
+  assert.match(overlay.innerHTML, /Full artifact contents/);
+
+  const escapeEvent = {
+    key: 'Escape',
+    prevented: false,
+    stopped: false,
+    preventDefault() { this.prevented = true; },
+    stopPropagation() { this.stopped = true; },
+  };
+  document.listeners.keydown(escapeEvent);
+  assert.equal(escapeEvent.prevented, true);
+  assert.equal(escapeEvent.stopped, true);
+  assert.equal(overlay.parentNode, null);
 });
 
-test('openTaskArtifactById prefers filename and path when artifact ids are duplicated', () => {
-  const opened = [];
-  const { sandbox } = createSandbox({
-    window: {
-      open(url) { opened.push(url); },
+test('openTaskArtifactById prefers filename and path when artifact ids are duplicated', async () => {
+  const fetched = [];
+  const { sandbox, document } = createSandbox({
+    fetch(url) {
+      fetched.push(url);
+      return Promise.resolve({
+        ok: true,
+        text() {
+          return Promise.resolve('diff --git a/file b/file');
+        },
+      });
     },
   });
   const context = vm.createContext(sandbox);
@@ -13822,7 +13867,67 @@ test('openTaskArtifactById prefers filename and path when artifact ids are dupli
     ),
     true
   );
-  assert.deepEqual(opened, ['/attachments/boundary/worker-pre-merge.patch']);
+  assert.deepEqual(fetched, ['/attachments/boundary/worker-pre-merge.patch']);
+  await flushArtifactPreview();
+  const overlay = artifactPreviewOverlay(document);
+  assert.ok(overlay);
+  assert.match(overlay.innerHTML, /worker-pre-merge\.patch/);
+  assert.match(overlay.innerHTML, /diff --git/);
+});
+
+test('artifact preview popup renders png and svg images and click-outside closes it', () => {
+  const fetched = [];
+  const { sandbox, document } = createSandbox({
+    fetch(url) {
+      fetched.push(url);
+      return Promise.resolve({ ok: true });
+    },
+  });
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/modals/task-artifacts.js');
+
+  context.state.board_tasks = {
+    'task-images': {
+      id: 'task-images',
+      task: 'Image artifacts',
+      artifacts: [
+        {
+          id: 'png-artifact',
+          type: 'image',
+          filename: 'screenshot.png',
+          path: '/tmp/screenshot.png',
+          mime_type: 'image/png',
+          storage: { kind: 'path', path: '/tmp/screenshot.png', content: '' },
+          prompt: { mode: 'path' },
+        },
+        {
+          id: 'svg-artifact',
+          type: 'image',
+          filename: 'diagram.svg',
+          path: '/tmp/diagram.svg',
+          mime_type: 'image/svg+xml',
+          storage: { kind: 'path', path: '/tmp/diagram.svg', content: '' },
+          prompt: { mode: 'path' },
+        },
+      ],
+    },
+  };
+
+  assert.equal(runInContext(context, `openTaskArtifactById('task-images', 'png-artifact')`), true);
+  let overlay = artifactPreviewOverlay(document);
+  assert.ok(overlay);
+  assert.match(overlay.innerHTML, /artifact-preview-image/);
+  assert.match(overlay.innerHTML, /\/attachments\/task-images\/screenshot\.png/);
+  assert.deepEqual(fetched, []);
+
+  overlay.listeners.click({ target: overlay });
+  assert.equal(overlay.parentNode, null);
+
+  assert.equal(runInContext(context, `openTaskArtifactById('task-images', 'svg-artifact')`), true);
+  overlay = artifactPreviewOverlay(document);
+  assert.ok(overlay);
+  assert.match(overlay.innerHTML, /artifact-preview-image/);
+  assert.match(overlay.innerHTML, /\/attachments\/task-images\/diagram\.svg/);
 });
 
 test('diff review surfaces related task artifacts next to the synthesized diff artifact', () => {

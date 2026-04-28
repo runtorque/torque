@@ -6368,6 +6368,88 @@ body.diff-view-open #ctx-menu {
   max-height: 240px;
   margin: 0 auto;
 }
+.artifact-preview-overlay {
+  z-index: 210;
+}
+.artifact-preview-modal {
+  max-width: min(1100px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+}
+.artifact-preview-head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.artifact-preview-title-wrap {
+  min-width: 0;
+}
+.artifact-preview-title-wrap h2 {
+  margin-bottom: 4px;
+  word-break: break-word;
+}
+.artifact-preview-meta {
+  font-size: 10px;
+  color: var(--text-dim);
+  word-break: break-word;
+}
+.artifact-preview-close {
+  color: var(--text-dim);
+  font-size: 18px;
+  line-height: 1;
+  padding: 0 4px;
+}
+.artifact-preview-close:hover {
+  color: var(--text);
+}
+.artifact-preview-body {
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #11161d;
+  max-height: calc(100vh - 170px);
+}
+.artifact-preview-pre {
+  margin: 0;
+  padding: 12px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #d2d6dc;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+.artifact-preview-image-wrap {
+  max-width: calc(100vw - 80px);
+  max-height: calc(100vh - 170px);
+  overflow: auto;
+}
+.artifact-preview-image {
+  display: block;
+  max-width: none;
+  max-height: none;
+}
+.artifact-preview-loading,
+.artifact-preview-unsupported {
+  padding: 18px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.artifact-preview-download {
+  color: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 5px 10px;
+  font-size: 11px;
+  text-decoration: none;
+}
+.artifact-preview-download:hover {
+  border-color: var(--accent);
+}
 .task-artifacts-modal-summary {
   font-size: 11px;
   color: var(--text-dim);
