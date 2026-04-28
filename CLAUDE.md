@@ -23,7 +23,7 @@ If you are a Loom worker or engineer running **inside the live daemon's Python r
 
 **Symptom if you ignore this:** every subsequent worker dispatch goes DOA. `codex` workers boot but receive no prompt (0 tokens, 0 worktree diff, 1 boot-event then silence). `claude-code` workers boot but every mutating tool auto-denies. `engineer_agent_message` wakes a DOA worker for one sub-call then it re-sticks. Only a user-initiated full restart recovers — observed class-bug, 6 workers across 2 engineers + 2 providers (perf wave 2026-04-22→23, LOOM:165/:166).
 
-**Enforcement:** the Makefile refuses `make stop` / `make deploy` / `make restart` when `LOOM_CELL_ID` is set OR pwd is under `.loom/worktrees/`. Override with `FORCE=1 make <target>` only when you have a specific reason and accept the runtime-corruption risk.
+**Enforcement:** the Makefile refuses `make stop` / `make deploy` / `make restart` when `LOOM_CELL_ID` is set OR pwd is under `.loom/worktrees/`. The HTTP `/api/cmd` lifecycle path also rejects `restart` / `stop` / `deploy` from worker-context requests carrying `LOOM_CELL_ID` unless `force=true` is set. Override with `FORCE=1 make <target>` or HTTP `force=true` only when you have a specific reason and accept the runtime-corruption risk.
 
 **Alternatives:**
 - (a) Commit your change to main (engineer_merge or git merge), then ask the user to `make deploy` + restart from their own shell.

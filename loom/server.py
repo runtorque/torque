@@ -2886,6 +2886,45 @@ def _request_wants_compact_snapshot(request) -> bool:
     )
 
 
+_API_DAEMON_LIFECYCLE_COMMANDS = {"restart", "stop", "deploy"}
+
+
+def _api_worker_context_guard(data: dict | None, headers=None,
+                              remote: str = "") -> dict | None:
+    data = data or {}
+    cmd = str(data.get("cmd", "") or "").strip().lower()
+    force = data.get("force")
+    if (
+            cmd not in _API_DAEMON_LIFECYCLE_COMMANDS
+            or force is True
+            or str(force or "").strip().lower() in {"1", "true", "yes", "on"}):
+        return None
+    headers = headers or {}
+    cell_id = next((str(value).strip() for value in (
+        headers.get("LOOM_CELL_ID"),
+        headers.get("X-Loom-Cell-Id"),
+        data.get("LOOM_CELL_ID"),
+        data.get("loom_cell_id"),
+        data.get("cell_id"),
+    ) if str(value or "").strip()), "")
+    if not cell_id:
+        return None
+    message = (
+        f"Refusing HTTP /api/cmd {cmd} from Loom worker context "
+        f"(LOOM_CELL_ID={cell_id}). Restarting/stopping/deploying Loom "
+        "from inside a live worker can corrupt dispatch state. If this is "
+        "intentional, retry with force=true."
+    )
+    log.warning(
+        "Rejected worker HTTP /api/cmd lifecycle request: cmd=%s "
+        "cell_id=%s source=%s",
+        cmd,
+        cell_id,
+        str(remote or "unknown").strip() or "unknown",
+    )
+    return {"message": message, "status": 403}
+
+
 async def _send_ui_ws_json(ws, payload: dict) -> bool:
     if not ws or getattr(ws, "closed", False):
         return False
@@ -12594,6 +12633,17 @@ async def main(connection=None):
         if not cmd:
             return web.json_response(
                 {"ok": False, "error": "missing 'cmd'"}, status=400)
+
+        guard = _api_worker_context_guard(
+            data,
+            request.headers,
+            getattr(request, "remote", "") or "",
+        )
+        if guard:
+            return web.json_response(
+                {"ok": False, "error": guard["message"],
+                 "type": "worker_lifecycle_guard"},
+                status=guard["status"])
 
         idempotency_key = str(data.get("idempotency_key", "") or "").strip()
         request_hash = ""
