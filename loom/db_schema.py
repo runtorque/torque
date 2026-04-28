@@ -180,7 +180,9 @@ CREATE TABLE IF NOT EXISTS board_tasks (
     deliverable_required INTEGER NOT NULL DEFAULT 0,
     deliverable_type TEXT NOT NULL DEFAULT '',
     deliverable_format TEXT NOT NULL DEFAULT '',
-    deliverable_artifact_title TEXT NOT NULL DEFAULT ''
+    deliverable_artifact_title TEXT NOT NULL DEFAULT '',
+    requires_review INTEGER NOT NULL DEFAULT 0,
+    pre_approved_by TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS schedules (
@@ -1042,6 +1044,18 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
         ("deliverable_type", "TEXT", "''"),
         ("deliverable_format", "TEXT", "''"),
         ("deliverable_artifact_title", "TEXT", "''"),
+    ]:
+        try:
+            conn.execute(f"SELECT {col} FROM board_tasks LIMIT 0")
+        except sqlite3.OperationalError:
+            conn.execute(
+                f"ALTER TABLE board_tasks ADD COLUMN {col} "
+                f"{col_type} NOT NULL DEFAULT {default}")
+            conn.commit()
+    # Migrate: add mandatory-review contract columns to board_tasks (LOOM:256)
+    for col, col_type, default in [
+        ("requires_review", "INTEGER", "0"),
+        ("pre_approved_by", "TEXT", "''"),
     ]:
         try:
             conn.execute(f"SELECT {col} FROM board_tasks LIMIT 0")

@@ -1,0 +1,48 @@
+name: feature/implement-preapproved
+description: Implement a small follow-up fix that the reviewer pre-approved (no re-review required)
+
+agent:
+  name_prefix: impl-pre
+  tab_color: "#3fb950"
+
+labels:
+  - feature
+  - pre-approved
+
+# Pre-approved fixes intentionally opt OUT of implementation_depth so the
+# LOC-based review gate doesn't fire (the reviewer already determined
+# the change is small enough to ship direct). They also do NOT declare
+# any `required: true` transition, so `requires_review` is NOT stamped
+# at dispatch time.
+implementation_depth: false
+
+# Optional escape hatch: if the worker discovers the fix is bigger than
+# the reviewer thought, they can still derive a review explicitly.
+transitions:
+  - action: feature/review
+    when: scope expanded beyond reviewer's pre-approval; needs full re-review
+    status: "On Review"
+
+prompt: |
+  You are implementing a small follow-up fix that the reviewer pre-approved. The reviewer determined this change is small enough (cosmetic / mechanical / docs-only) to ship without a second review. Focus on a tight, surgical implementation.
+
+  ## Task
+
+  {{ loom.task.title }}
+
+  {% if loom.task.description %}
+  ## Context (from reviewer)
+
+  {{ loom.task.description }}
+  {% endif %}
+
+  ## Approach
+
+  - Follow the reviewer's specific guidance — do not re-scope or add unrelated changes
+  - Keep the diff minimal; if it grows beyond the reviewer's pre-approval, derive `feature/review` instead of shipping
+  - Run the narrowest relevant tests; full suite if reasonably fast
+  - Commit with a clear message
+
+  When the small fix is in and tests pass, call `loom_done(message="brief summary")` directly. No re-review derivation is required for this task — the reviewer's `pre_approved: true` transition is the structural bypass.
+
+  Do NOT deploy, run `make deploy`, or restart services. Only write code and commit.

@@ -929,6 +929,19 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state, *,
             True,
             False,  # no_cache
         )
+    if result and result.get("type") == "review_required":
+        # Mandatory-review hard gate (LOOM:256). Same recoverable-
+        # refusal shape as deliverable_missing — surface to the worker
+        # as an MCP tool error and signal no_cache so a retry after the
+        # worker derives the review re-runs the gate.
+        return (
+            result.get(
+                "message",
+                "Review required by action contract before completion.",
+            ),
+            True,
+            False,  # no_cache
+        )
 
     return json.dumps(result) if result else '{"type":"ok"}', False
 

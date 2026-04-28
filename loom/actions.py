@@ -711,6 +711,14 @@ class ActionManager:
                         entry["target"] = target
                     if isinstance(tr.get("loc_gate"), dict):
                         entry["loc_gate"] = tr["loc_gate"]
+                    # Mandatory-review contract (LOOM:256). ``required``
+                    # marks a transition the worker MUST take before
+                    # ``loom_done``; ``pre_approved`` marks a reviewer-issued
+                    # bypass that the derived task carries forward.
+                    if _coerce_bool(tr.get("required", False)):
+                        entry["required"] = True
+                    if _coerce_bool(tr.get("pre_approved", False)):
+                        entry["pre_approved"] = True
                     result.append(entry)
                 elif tr.get("ask"):
                     result.append({"ask": True,
@@ -718,6 +726,32 @@ class ActionManager:
             else:
                 result.append(tr)
         return result
+
+    def has_required_transition(self, action_name: str,
+                                base_dir: str = "") -> bool:
+        """Return True if the action declares any ``required: true`` transition.
+
+        When true, a task dispatched with this action carries
+        ``requires_review=True`` and ``loom_done`` / ``loom_ready`` refuse
+        until the worker either derives the required transition or carries
+        a non-empty ``pre_approved_by`` set by a reviewer.
+        """
+        for tr in self.get_transitions(action_name, base_dir):
+            if isinstance(tr, dict) and tr.get("required"):
+                return True
+        return False
+
+    def find_transition(self, action_name: str, target_action: str,
+                        base_dir: str = "") -> dict | None:
+        """Return the first transition entry from ``action_name`` to
+        ``target_action``, or None.
+        """
+        if not target_action:
+            return None
+        for tr in self.get_transitions(action_name, base_dir):
+            if isinstance(tr, dict) and tr.get("action") == target_action:
+                return tr
+        return None
 
     def discover_pipelines(self, base_dir: str = "") -> list[dict]:
         """Scan all actions and discover pipelines from transitions.
