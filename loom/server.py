@@ -1625,6 +1625,43 @@ def _reject_missing_deliverable(task, action_label: str) -> dict | None:
     }
 
 
+def _reject_pending_review(task, action_label: str) -> dict | None:
+    """Reject ``loom_done`` / ``loom_ready`` when a structural review is
+    required and no reviewer-issued bypass is set (LOOM:256).
+
+    Workers cannot self-grant the bypass: ``pre_approved_by`` is set only
+    when a reviewer derives a fix transition that declares
+    ``pre_approved: true``. Workers must derive the required transition
+    (e.g. ``feature/review``) and let cascade-done close the parent task.
+
+    ``action_label`` is the verb shown in the error message (``done`` or
+    ``ready``).
+    """
+    if not task or not getattr(task, "requires_review", False):
+        return None
+    if str(getattr(task, "pre_approved_by", "") or "").strip():
+        return None
+    title = str(getattr(task, "task", "") or "").strip()
+    if not title:
+        title = str(getattr(task, "id", "") or "task").strip()
+    title = title.replace("\\", "\\\\").replace('"', '\\"')
+    return {
+        "type": "review_required",
+        "message": (
+            f"Cannot mark task {action_label}: review required by action "
+            "contract. This task carries requires_review=true (declared by "
+            "its action's transitions[required: true]). Derive the review "
+            f"transition before calling loom_{action_label}; the reviewer's "
+            "Ship verdict will cascade-close the parent. If this is a fix "
+            "to a previously-reviewed change, the reviewer must derive via "
+            "a `pre_approved: true` transition to grant a structural "
+            "bypass — workers cannot self-grant it.\n\n"
+            f"  loom_derive(description=\"Review {title}\", "
+            "action=\"feature/review\")"
+        ),
+    }
+
+
 def _reject_mandatory_review_done_without_ship(
         state: MatrixState,
         action_mgr: ActionManager | None,
@@ -3141,6 +3178,17 @@ async def replay_internal_failed_write_payload(
                 "Deliverable artifact required before completion.",
             ),
         }
+    if isinstance(result, dict) and result.get("type") == "review_required":
+        # Mirror deliverable_missing replay semantics for the
+        # mandatory-review gate (LOOM:256). Don't cache the refusal.
+        return {
+            "ok": False,
+            "type": "review_required",
+            "error": result.get(
+                "message",
+                "Review required by action contract before completion.",
+            ),
+        }
     return result
 
 
@@ -3197,6 +3245,19 @@ async def replay_api_failed_write_payload(
             "error": result.get(
                 "message",
                 "Deliverable artifact required before completion.",
+            ),
+        }
+    if result and result.get("type") == "review_required":
+        # Mirror deliverable_missing semantics: review_required is a
+        # recoverable refusal — don't cache it as an idempotency response,
+        # so a same-key retry after the worker derives the review re-runs
+        # the gate (LOOM:256).
+        return {
+            "ok": False,
+            "type": "review_required",
+            "error": result.get(
+                "message",
+                "Review required by action contract before completion.",
             ),
         }
     if idempotency_key and is_api_write_command(cmd):
@@ -6493,6 +6554,10 @@ async def main(connection=None):
             deliverable_artifact_title=str(
                 getattr(task, "deliverable_artifact_title", "") or ""),
             task_title=str(getattr(task, "task", "") or ""),
+            requires_review=bool(
+                getattr(task, "requires_review", False)),
+            pre_approved_by=str(
+                getattr(task, "pre_approved_by", "") or ""),
         )
 
     # -- Command handler ----------------------------------------------------
@@ -9092,6 +9157,24 @@ async def main(connection=None):
                                     _act_deliv["artifact_title"],
                                 )
                                 task = state.board_tasks.get(tid) or task
+                        # Mandatory-review contract (LOOM:256). When an
+                        # action declares a ``required: true`` transition,
+                        # stamp ``requires_review`` on the task so
+                        # ``loom_done`` / ``loom_ready`` refuse until the
+                        # transition is taken or a reviewer-issued
+                        # ``pre_approved_by`` is set on the derived task.
+                        if task.action_name and not task.requires_review:
+                            try:
+                                _has_required = action_mgr.has_required_transition(
+                                    task.action_name, base_dir)
+                            except Exception:
+                                _has_required = False
+                            if _has_required:
+                                state.board_update_task(
+                                    tid,
+                                    requires_review=True,
+                                )
+                                task = state.board_tasks.get(tid) or task
                         action_template = ""
                         if isinstance(act_meta, dict):
                             raw_agent = act_meta.get("agent", "")
@@ -10413,10 +10496,21 @@ async def main(connection=None):
                         if deliverable_rejection:
                             result = deliverable_rejection
                     if (
+                        not (result and result.get("type") in (
+                            "error", "deliverable_missing"))
+                        and action == "done"
+                    ):
+                        review_rejection = (
+                            _reject_pending_review(task, "done")
+                        )
+                        if review_rejection:
+                            result = review_rejection
+                    if (
                         not (result and result.get("type") == "error")
                         and not (result
                                  and result.get("type")
-                                 == "deliverable_missing")
+                                 in ("deliverable_missing",
+                                     "review_required"))
                         and action == "done"
                     ):
                         base_dir = cell.worktree_repo_root \
@@ -10495,7 +10589,8 @@ async def main(connection=None):
                                     result = gate_result
 
                     if result and result.get("type") in (
-                            "error", "deliverable_missing"):
+                            "error", "deliverable_missing",
+                            "review_required"):
                         pass
 
                     elif action == "done":
@@ -10737,8 +10832,13 @@ async def main(connection=None):
                         deliverable_rejection = (
                             _reject_missing_deliverable(task, "ready")
                         )
+                        review_rejection = (
+                            None if deliverable_rejection
+                            else _reject_pending_review(task, "ready")
+                        )
                         rejected = (
                             deliverable_rejection
+                            or review_rejection
                             or _reject_completion_with_open_descendants(
                                 state, task, "ready")
                         )
@@ -10942,6 +11042,21 @@ async def main(connection=None):
                                         act_name,
                                     )
                                     reused_existing_task = reusable_task is not None
+                                    # Mandatory-review pre-approval bypass
+                                    # (LOOM:256). When a reviewer derives a
+                                    # fix via a ``pre_approved: true``
+                                    # transition, stamp the derived task with
+                                    # the reviewer's task id so its
+                                    # ``loom_done`` gate resolves clean.
+                                    derive_pre_approved_by = ""
+                                    if cur_transitions and act_name:
+                                        for tr in cur_transitions:
+                                            if isinstance(tr, dict) \
+                                                    and tr.get("action") \
+                                                    == act_name \
+                                                    and tr.get("pre_approved"):
+                                                derive_pre_approved_by = task.id
+                                                break
                                     new_task = reusable_task
                                     if not new_task:
                                         new_task = state.board_add_task(
@@ -10956,6 +11071,7 @@ async def main(connection=None):
                                             pipeline_root_id=root_id,
                                             description=derive_desc,
                                             assigned_engineer_id=assigned_engineer_id,
+                                            pre_approved_by=derive_pre_approved_by,
                                         )
                                     elif reused_existing_task:
                                         _refresh_reused_derived_task(
@@ -10968,6 +11084,14 @@ async def main(connection=None):
                                             derive_parent_task_id
                                         )
                                         new_task.pipeline_root_id = root_id
+                                        # Reuse path also propagates
+                                        # pre-approval so a reviewer
+                                        # re-deriving onto the same fix
+                                        # task keeps the bypass intact.
+                                        if derive_pre_approved_by:
+                                            new_task.pre_approved_by = (
+                                                derive_pre_approved_by
+                                            )
                                         _inherit_assigned_engineer_for_derived_task(
                                             task,
                                             new_task,
@@ -11994,7 +12118,15 @@ async def main(connection=None):
                     isinstance(result, dict)
                     and result.get("type") == "deliverable_missing"
                 )
-                if is_deliverable_missing:
+                # Same recoverable-refusal semantics for the
+                # mandatory-review gate (LOOM:256): don't cache the
+                # receipt, drop the queued failed-write so a retry after
+                # the worker derives the review re-runs the gate cleanly.
+                is_review_required = (
+                    isinstance(result, dict)
+                    and result.get("type") == "review_required"
+                )
+                if is_deliverable_missing or is_review_required:
                     db.delete_failed_write_by_key(critical_failed_write_key)
                 elif critical_capture_active:
                     state.finalize_critical_write_capture(
@@ -12494,6 +12626,21 @@ async def main(connection=None):
                         "Deliverable artifact required before completion.",
                     ),
                     "type": "deliverable_missing",
+                },
+                status=409,
+            )
+        if result and result.get("type") == "review_required":
+            # Mandatory-review hard-gate refusal (LOOM:256). Same shape as
+            # deliverable_missing — non-2xx, no idempotency cache, so a
+            # retry after the worker derives the review re-runs the gate.
+            return web.json_response(
+                {
+                    "ok": False,
+                    "error": result.get(
+                        "message",
+                        "Review required by action contract before completion.",
+                    ),
+                    "type": "review_required",
                 },
                 status=409,
             )

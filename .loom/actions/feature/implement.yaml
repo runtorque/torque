@@ -12,6 +12,7 @@ implementation_depth: true
 transitions:
   - action: feature/review
     when: implementation is complete and ready for review
+    required: true
     loc_gate:
       ship_direct_max: 50
       review_default_above: 100

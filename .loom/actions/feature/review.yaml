@@ -12,9 +12,14 @@ auto_close_on_done: true
 
 transitions:
   - action: feature/implement
-    when: issues were found that need to be fixed
-    status: "Fixing"
+    when: blocking issues found, implementer must fix and re-review
+    status: "Fixing blockers"
     target: parent
+  - action: feature/implement
+    when: ship verdict but a small follow-up fix is needed and no re-review is required (reviewer judgment, e.g. cosmetic / mechanical / docs-only)
+    status: "Pre-approved fix"
+    target: parent
+    pre_approved: true
 
 prompt: |
   A previous agent (`{{ loom.task.parent_agent_name or loom.task.parent_agent_slug }}`) implemented changes and your job is to check whether the work is correct, complete, and safe to merge.

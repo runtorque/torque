@@ -205,6 +205,54 @@ def build_engineer_deliverable_awareness(task) -> str:
     return "\n".join(lines)
 
 
+def _build_review_required_block(*,
+                                  requires_review: bool,
+                                  pre_approved_by: str = "",
+                                  transitions: list[dict] | None = None,
+                                  ) -> list[str]:
+    """Render the mandatory-review awareness block (LOOM:256).
+
+    Returns ``[]`` when no review contract applies so callers can splice
+    the result without conditionals.
+    """
+    if not requires_review:
+        return []
+    pre_approved_by = str(pre_approved_by or "").strip()
+    if pre_approved_by:
+        return [
+            "**Review pre-approved**",
+            "",
+            (f"This task is pre-approved by review `{pre_approved_by}`. "
+             "You may call `loom_done(...)` directly when complete; no "
+             "review derivation is required for this task. The reviewer "
+             "determined this fix is small enough to ship without "
+             "re-review."),
+            "",
+        ]
+    # Find the required transition's target action (first wins) so the
+    # awareness block names the action by name.
+    required_target = ""
+    for tr in (transitions or []):
+        if isinstance(tr, dict) and tr.get("required") and tr.get("action"):
+            required_target = str(tr.get("action") or "").strip()
+            break
+    target_label = required_target or "feature/review"
+    return [
+        "**Review required**",
+        "",
+        (f"This task must derive the `{target_label}` transition before "
+         "`loom_done` will succeed. Do NOT call `loom_done(...)` "
+         "directly. The MCP gate will refuse with a structured "
+         "`review_required` error and the task will stay In Progress. "
+         "After you derive the review, the reviewer's Ship verdict "
+         "cascades the parent to Done — you do not need to call "
+         "`loom_done()` again on this parent task. If you believe a "
+         "review is unnecessary, use `loom_ask(...)` to request a human "
+         "decision; do NOT self-skip."),
+        "",
+    ]
+
+
 def build_dispatch_postscript(*,
                               transitions: list[dict] | None = None,
                               is_clean: bool = True,
@@ -214,7 +262,9 @@ def build_dispatch_postscript(*,
                               deliverable_type: str = "",
                               deliverable_format: str = "",
                               deliverable_artifact_title: str = "",
-                              task_title: str = "") -> str:
+                              task_title: str = "",
+                              requires_review: bool = False,
+                              pre_approved_by: str = "") -> str:
     """Build the task-local Loom MCP completion guidance block."""
     transitions = transitions or []
     has_transitions = any(
@@ -240,6 +290,14 @@ def build_dispatch_postscript(*,
     )
     if deliverable_block:
         lines.extend(deliverable_block)
+
+    review_block = _build_review_required_block(
+        requires_review=requires_review,
+        pre_approved_by=pre_approved_by,
+        transitions=transitions,
+    )
+    if review_block:
+        lines.extend(review_block)
 
     lines.append("Available completion paths for this task:")
     for tr in transitions:
