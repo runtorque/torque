@@ -48,7 +48,11 @@ var _boardSavingView = false;    // inline saved-view naming control visibility
 var _boardSavingViewName = '';   // draft name for inline saved-view creation
 var _boardSaveViewFocus = false; // focus the inline saved-view input after render
 var _boardRevealFocusOnRender = false; // scroll the focused card into view after navigation
-var _boardRenderLimit = 50;      // virtual scroll: render this many root tasks initially
+var _boardDefaultRenderLimit = 50;
+var _boardDoneInitialRenderLimit = 30;
+var _boardDoneRenderBatch = 30;
+var _boardRenderLimit = _boardDefaultRenderLimit; // virtual scroll: non-Done card cap
+var _boardDoneRenderLimit = _boardDoneInitialRenderLimit; // Done starts smaller for large history
 var _boardSelectedTasks = {};    // task_id → true for multi-select
 var _boardLastSelectedTask = ''; // last clicked task for shift-range select
 var _boardQuickEditTask = '';    // task_id with open inline quick editor
@@ -424,6 +428,25 @@ function _boardTasksInLaneFromMap(lane, tasks) {
   var arr = [];
   for (var id in (tasks || {})) {
     if (tasks[id].lane === lane) arr.push(tasks[id]);
+  }
+  var sortMode = _boardLaneSortMode(lane);
+  if (lane === 'Done' && (sortMode === 'manual' || sortMode === 'newest')) {
+    var doneSortKeys = {};
+    function doneSortKey(task) {
+      var key = (task && task.id) || '';
+      if (doneSortKeys[key]) return doneSortKeys[key];
+      var time = _boardTimestamp(task.done_at || task.lane_entered_at || task.updated_at || task.created_at);
+      doneSortKeys[key] = { time: time, valid: !Number.isNaN(time) };
+      return doneSortKeys[key];
+    }
+    arr.sort(function(a, b) {
+      var ak = doneSortKey(a);
+      var bk = doneSortKey(b);
+      if (ak.valid && bk.valid && ak.time !== bk.time) return bk.time - ak.time;
+      if (ak.valid !== bk.valid) return ak.valid ? -1 : 1;
+      return _boardRecentlyTouchedCompare(a, b);
+    });
+    return arr;
   }
   arr.sort(function(a, b) { return _boardCompareLaneTasks(a, b, lane); });
   return arr;
@@ -946,6 +969,32 @@ function _boardCollectRenderedLaneTasks(rootTasks, childrenOf, renderLimit, mode
   return out;
 }
 
+function _boardDefaultRenderLimitForLane(lane) {
+  return lane === 'Done' ? _boardDoneInitialRenderLimit : _boardDefaultRenderLimit;
+}
+
+function _boardRenderLimitValue(lane) {
+  if (lane === 'Done') {
+    return Math.max(0, _boardDoneRenderLimit || _boardDoneInitialRenderLimit);
+  }
+  return Math.max(0, _boardRenderLimit || _boardDefaultRenderLimit);
+}
+
+function _boardSetRenderLimitForLane(lane, value) {
+  var next = Math.max(0, value || _boardDefaultRenderLimitForLane(lane));
+  if (lane === 'Done') _boardDoneRenderLimit = next;
+  else _boardRenderLimit = next;
+}
+
+function _boardResetRenderLimits() {
+  _boardRenderLimit = _boardDefaultRenderLimit;
+  _boardDoneRenderLimit = _boardDoneInitialRenderLimit;
+}
+
+function _boardLoadMoreBatchForLane(lane) {
+  return lane === 'Done' ? _boardDoneRenderBatch : _boardDefaultRenderLimit;
+}
+
 function _boardLanePoolSignature(lane, model) {
   var pool = _boardLanePoolTasks(lane, model);
   var parts = [];
@@ -970,7 +1019,7 @@ function _boardLanePoolSignature(lane, model) {
 function _boardLaneRenderContextKey(lane, model, filtersActive, skipAddTask, wideColumn) {
   var rootTasks = _boardRootTasksForLane(lane, model ? model.visibleTasks : null, model);
   var childrenOf = (model && model.childrenOf) || {};
-  var renderLimit = _boardRenderLimitValue();
+  var renderLimit = _boardRenderLimitValue(lane);
   var totalCards = _boardRenderableCardCountForRoots(rootTasks, childrenOf);
   var rendered = _boardCollectRenderedLaneTasks(rootTasks, childrenOf, renderLimit, model);
   var staleDoneIds = lane === 'Done' ? _boardStaleDoneTaskIds(model) : [];
@@ -1010,7 +1059,7 @@ function _boardRememberLaneRender(lane, model, filtersActive, skipAddTask, wideC
     renderedCards: section.renderedCards || 0,
     totalCards: section.totalCards || 0,
     rootTasks: section.rootTasks || [],
-    renderLimit: section.renderLimit || _boardRenderLimitValue(),
+    renderLimit: section.renderLimit || _boardRenderLimitValue(lane),
   };
 }
 
@@ -1072,7 +1121,7 @@ function _boardPatchWideLaneBody(panel, lane, model, filtersActive) {
     return {
       patched: false,
       rootTasks: cached.rootTasks || [],
-      renderLimit: cached.renderLimit || _boardRenderLimitValue(),
+      renderLimit: cached.renderLimit || _boardRenderLimitValue(lane),
     };
   }
   var body = _boardFindWideLaneBody(panel, lane);
@@ -1090,7 +1139,7 @@ function _boardPatchWideLaneBody(panel, lane, model, filtersActive) {
   return {
     patched: true,
     rootTasks: section.rootTasks || [],
-    renderLimit: section.renderLimit || _boardRenderLimitValue(),
+    renderLimit: section.renderLimit || _boardRenderLimitValue(lane),
   };
 }
 
@@ -1103,7 +1152,7 @@ function _boardPatchNarrowLaneBody(panel, lane, model, filtersActive) {
     return {
       patched: false,
       rootTasks: cached.rootTasks || [],
-      renderLimit: cached.renderLimit || _boardRenderLimitValue(),
+      renderLimit: cached.renderLimit || _boardRenderLimitValue(lane),
     };
   }
   var section = _boardRenderLaneSection(lane, model, filtersActive, false);
@@ -1114,7 +1163,7 @@ function _boardPatchNarrowLaneBody(panel, lane, model, filtersActive) {
   return {
     patched: true,
     rootTasks: section.rootTasks || [],
-    renderLimit: section.renderLimit || _boardRenderLimitValue(),
+    renderLimit: section.renderLimit || _boardRenderLimitValue(lane),
   };
 }
 
@@ -1161,7 +1210,7 @@ function _boardTryPatchTaskDeltas(panel, deltaBatch, lanes, filtersActive, wideL
       var wideDelay = _boardVisibleLaneEntryRefreshDelay(
         refreshEntry.rootTasks || [],
         childrenOf,
-        refreshEntry.renderLimit || _boardRenderLimitValue(),
+        refreshEntry.renderLimit || _boardRenderLimitValue(refreshLane),
       );
       if (wideDelay > 0 && (!nextLaneEntryDelay || wideDelay < nextLaneEntryDelay)) {
         nextLaneEntryDelay = wideDelay;
@@ -1331,7 +1380,7 @@ function _boardRestoreRenderedState() {
       _boardSyncActiveViewState(cardsEl);
       // Load more when within 100px of the bottom
       if (cardsEl.scrollTop + cardsEl.clientHeight >= cardsEl.scrollHeight - 100) {
-        boardLoadMore();
+        boardLoadMore(_boardSelectedLane);
       }
     });
     // Click on empty space clears selection
@@ -1369,7 +1418,7 @@ function _boardBindWideLaneBodyScroll(body) {
   body.addEventListener('scroll', function() {
     _boardWideLaneScrollTops[lane] = body.scrollTop;
     if (body.scrollTop + body.clientHeight >= body.scrollHeight - 100) {
-      boardLoadMore();
+      boardLoadMore(lane);
     }
   });
 }
@@ -1494,11 +1543,12 @@ function _boardRenderWideAddTaskSection() {
   return html;
 }
 
-function _boardRenderLaneCards(rootTasks, childrenOf, renderLimit) {
+function _boardRenderLaneCards(rootTasks, childrenOf, renderLimit, renderOffset) {
   var renderState = {
     remaining: Math.max(0, renderLimit || 0),
     rendered: 0,
     limitHit: false,
+    skip: Math.max(0, renderOffset || 0),
   };
   var html = '';
   for (var j = 0; j < rootTasks.length; j++) {
@@ -1512,6 +1562,7 @@ function _boardRenderLaneCards(rootTasks, childrenOf, renderLimit) {
     html: html,
     renderedCards: renderState.rendered,
     limitHit: renderState.limitHit,
+    skippedCards: Math.max(0, (renderOffset || 0) - renderState.skip),
   };
 }
 
@@ -1534,8 +1585,12 @@ function _boardRenderableCardCountForRoots(rootTasks, childrenOf) {
   return count;
 }
 
-function _boardRenderLimitValue() {
-  return Math.max(0, _boardRenderLimit || 50);
+function _boardLoadMoreHtml(lane, remaining) {
+  var escLane = esc(lane).replace(/'/g, "\\'");
+  return '<div class="board-load-more" data-board-load-more-lane="' + esc(lane) + '"'
+    + ' onclick="boardLoadMore(\'' + escLane + '\')">'
+    + remaining + ' more card' + (remaining === 1 ? '' : 's')
+    + ' — click or scroll to load</div>';
 }
 
 function _boardRenderLaneSection(lane, model, filtersActive, skipAddTask) {
@@ -1543,7 +1598,7 @@ function _boardRenderLaneSection(lane, model, filtersActive, skipAddTask) {
   var childrenOf = (model && model.childrenOf) || {};
   var rootTasks = _boardRootTasksForLane(lane, model ? model.visibleTasks : null, model);
   var totalCards = _boardRenderableCardCountForRoots(rootTasks, childrenOf);
-  var renderLimit = _boardRenderLimitValue();
+  var renderLimit = _boardRenderLimitValue(lane);
 
   if (!skipAddTask) {
     html += _boardRenderAddTaskSection(lane);
@@ -1573,8 +1628,7 @@ function _boardRenderLaneSection(lane, model, filtersActive, skipAddTask) {
   html += rendered.html;
   if (totalCards > rendered.renderedCards) {
     var remaining = totalCards - rendered.renderedCards;
-    html += '<div class="board-load-more" onclick="boardLoadMore()">'
-      + remaining + ' more card' + (remaining === 1 ? '' : 's') + ' — click or scroll to load</div>';
+    html += _boardLoadMoreHtml(lane, remaining);
   }
 
   return {
@@ -1734,7 +1788,8 @@ function renderBoard() {
       quickEditRefocusKind)) {
     return;
   }
-  var renderModel = _boardBuildRenderModel(lanes);
+  var renderLanes = wideLayout ? lanes : [_boardSelectedLane];
+  var renderModel = _boardBuildRenderModel(renderLanes);
   _boardEnsureDispatchEligibilityRefs(_currentGroup(), renderModel);
 
   // Search & filter toolbar
@@ -1910,6 +1965,11 @@ function renderBoard() {
         }
       }
     }
+    if (!wideLayout && renderLanes[0] !== _boardSelectedLane) {
+      renderLanes = [_boardSelectedLane];
+      renderModel = _boardBuildRenderModel(renderLanes);
+      _boardEnsureDispatchEligibilityRefs(_currentGroup(), renderModel);
+    }
   }
 
   _boardActivateViewState(_boardCurrentViewKey());
@@ -2041,22 +2101,53 @@ function renderBoard() {
 
 /* ---- Virtual scroll ------------------------------------------------- */
 
-function boardLoadMore() {
-  var lanes = _boardWideLayoutActive(document.getElementById('panel-board'))
-    ? _boardVisibleLanes()
-    : [_boardSelectedLane || _boardVisibleLanes()[0] || ''];
+function _boardPatchLaneAfterLoadMore(panel, lane, model, filtersActive, wideLayout) {
+  if (!panel || lane !== 'Done') return false;
+  var result = wideLayout
+    ? _boardPatchWideLaneBody(panel, lane, model, filtersActive)
+    : (lane === _boardSelectedLane
+      ? _boardPatchNarrowLaneBody(panel, lane, model, filtersActive)
+      : null);
+  if (!result) return false;
+  var delay = _boardVisibleLaneEntryRefreshDelay(
+    result.rootTasks || [],
+    (model && model.childrenOf) || {},
+    result.renderLimit || _boardRenderLimitValue(lane),
+  );
+  _boardScheduleLaneEntryRefresh(delay);
+  _boardAfterRenderLayout();
+  return true;
+}
+
+function boardLoadMore(lane) {
+  var panel = document.getElementById('panel-board');
+  var wideLayout = _boardWideLayoutActive(panel);
+  var lanes = lane
+    ? [lane]
+    : (wideLayout
+      ? _boardVisibleLanes()
+      : [_boardSelectedLane || _boardVisibleLanes()[0] || '']);
   var model = _boardBuildRenderModel(lanes);
-  var cardCount = 0;
+  var loadedLane = '';
   for (var i = 0; i < lanes.length; i++) {
+    var laneName = lanes[i];
     var laneCards = _boardRenderableCardCountForRoots(
-      _boardRootTasksForLane(lanes[i], model.visibleTasks, model),
+      _boardRootTasksForLane(laneName, model.visibleTasks, model),
       model.childrenOf
     );
-    if (laneCards > cardCount) cardCount = laneCards;
+    var currentLimit = _boardRenderLimitValue(laneName);
+    if (currentLimit >= laneCards) continue;
+    _boardSetRenderLimitForLane(
+      laneName,
+      Math.min(laneCards, currentLimit + _boardLoadMoreBatchForLane(laneName)),
+    );
+    loadedLane = laneName;
   }
-  if (_boardRenderLimit >= cardCount) return;
-  _boardRenderLimit += 50;
+  if (!loadedLane) return;
   _boardSyncActiveViewState();
+  if (lane && _boardPatchLaneAfterLoadMore(panel, lane, model, _boardHasActiveFilters(), wideLayout)) {
+    return;
+  }
   renderBoard();
 }
 
@@ -2096,9 +2187,9 @@ function boardSetLaneSort(mode) {
   } else {
     delete _boardLaneSortsByGroup[group];
   }
-  _boardViewStates[_boardCurrentViewKey()] = { scroll_top: 0, render_limit: 50 };
+  _boardViewStates[_boardCurrentViewKey()] = { scroll_top: 0, render_limit: _boardDefaultRenderLimit, done_render_limit: _boardDoneInitialRenderLimit };
   _boardCardsScrollTop = 0;
-  _boardRenderLimit = 50;
+  _boardResetRenderLimits();
   _boardPersistLaneSorts();
   renderBoard();
 }
@@ -3269,7 +3360,7 @@ function boardToggleArchived() {
   _boardCloseViewMenu();
   _boardShowArchived = !_boardShowArchived;
   _boardCardsScrollTop = 0;
-  _boardRenderLimit = 50;
+  _boardResetRenderLimits();
   if (_boardShowArchived && typeof lazyLoadArchivedTasks === 'function') {
     lazyLoadArchivedTasks(_currentGroup ? _currentGroup() : '');
   }
@@ -3461,7 +3552,7 @@ function boardUpdateSearch(query) {
     _boardPrepareViewChange(true);
     _boardSearchQuery = query;
     _boardCardsScrollTop = 0;
-    _boardRenderLimit = 50;
+    _boardResetRenderLimits();
     renderBoard();
     _boardPersistFilterState();
     // Restore focus and cursor to search input
@@ -3479,7 +3570,7 @@ function boardToggleLabel(label) {
     _boardFilterLabels.push(label);
   }
   _boardCardsScrollTop = 0;
-  _boardRenderLimit = 50;
+  _boardResetRenderLimits();
   renderBoard();
   _boardPersistFilterState();
 }
@@ -3493,7 +3584,7 @@ function boardToggleAction(action) {
     _boardFilterActions.push(action);
   }
   _boardCardsScrollTop = 0;
-  _boardRenderLimit = 50;
+  _boardResetRenderLimits();
   renderBoard();
   _boardPersistFilterState();
 }
@@ -3504,7 +3595,7 @@ function boardRemoveFilterLabel(label) {
     _boardPrepareViewChange(true);
     _boardFilterLabels.splice(idx, 1);
     _boardCardsScrollTop = 0;
-    _boardRenderLimit = 50;
+    _boardResetRenderLimits();
     renderBoard();
     _boardPersistFilterState();
   }
@@ -3516,7 +3607,7 @@ function boardRemoveFilterAction(action) {
     _boardPrepareViewChange(true);
     _boardFilterActions.splice(idx, 1);
     _boardCardsScrollTop = 0;
-    _boardRenderLimit = 50;
+    _boardResetRenderLimits();
     renderBoard();
     _boardPersistFilterState();
   }
@@ -3531,7 +3622,7 @@ function boardToggleAgent(agentId) {
     _boardFilterAgents.push(agentId);
   }
   _boardCardsScrollTop = 0;
-  _boardRenderLimit = 50;
+  _boardResetRenderLimits();
   renderBoard();
   _boardPersistFilterState();
 }
@@ -3542,7 +3633,7 @@ function boardRemoveFilterAgent(agentId) {
     _boardPrepareViewChange(true);
     _boardFilterAgents.splice(idx, 1);
     _boardCardsScrollTop = 0;
-    _boardRenderLimit = 50;
+    _boardResetRenderLimits();
     renderBoard();
     _boardPersistFilterState();
   }
@@ -3557,7 +3648,7 @@ function boardToggleHealth(stateName) {
     _boardFilterHealth.push(stateName);
   }
   _boardCardsScrollTop = 0;
-  _boardRenderLimit = 50;
+  _boardResetRenderLimits();
   renderBoard();
   _boardPersistFilterState();
 }
@@ -3568,7 +3659,7 @@ function boardRemoveFilterHealth(stateName) {
     _boardPrepareViewChange(true);
     _boardFilterHealth.splice(idx, 1);
     _boardCardsScrollTop = 0;
-    _boardRenderLimit = 50;
+    _boardResetRenderLimits();
     renderBoard();
     _boardPersistFilterState();
   }
@@ -3584,7 +3675,7 @@ function boardClearFilters() {
   _boardFilterHealth = [];
   _boardCloseFilterDropdown();
   _boardCardsScrollTop = 0;
-  _boardRenderLimit = 50;
+  _boardResetRenderLimits();
   if (_boardPreFilterLane) {
     _boardSelectedLane = _boardPreFilterLane;
     _boardPreFilterLane = '';
@@ -3665,7 +3756,7 @@ function boardApplyQuickView(mode) {
   _boardQuickView = (_boardQuickView === mode) ? '' : mode;
   _boardPreFilterLane = '';
   _boardCardsScrollTop = 0;
-  _boardRenderLimit = 50;
+  _boardResetRenderLimits();
   renderBoard();
   _boardPersistFilterState();
 }
@@ -3683,7 +3774,7 @@ function boardApplySavedView(name) {
     _boardFilterHealth = (views[i].filter_health || []).slice();
     _boardPreFilterLane = '';
     _boardCardsScrollTop = 0;
-    _boardRenderLimit = 50;
+    _boardResetRenderLimits();
     renderBoard();
     _boardPersistFilterState();
     return;

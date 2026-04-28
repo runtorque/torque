@@ -329,12 +329,14 @@ function _boardActivateViewState(key) {
   _boardNextViewDefault = null;
   if (saved) {
     _boardCardsScrollTop = saved.scroll_top || 0;
-    _boardRenderLimit = saved.render_limit || 50;
+    _boardRenderLimit = saved.render_limit || _boardDefaultRenderLimit || 50;
+    _boardDoneRenderLimit = saved.done_render_limit || _boardDoneInitialRenderLimit || 30;
     return;
   }
   if (fallback) {
     _boardCardsScrollTop = fallback.scroll_top || 0;
-    _boardRenderLimit = fallback.render_limit || 50;
+    _boardRenderLimit = fallback.render_limit || _boardDefaultRenderLimit || 50;
+    _boardDoneRenderLimit = fallback.done_render_limit || _boardDoneInitialRenderLimit || 30;
   }
 }
 
@@ -342,7 +344,8 @@ function _boardSyncActiveViewState(cardsEl) {
   if (!_boardActiveViewKey) return;
   var saved = _boardViewStates[_boardActiveViewKey] || {
     scroll_top: 0,
-    render_limit: 50,
+    render_limit: _boardDefaultRenderLimit || 50,
+    done_render_limit: _boardDoneInitialRenderLimit || 30,
   };
   if (cardsEl) {
     saved.scroll_top = cardsEl.scrollTop;
@@ -350,7 +353,8 @@ function _boardSyncActiveViewState(cardsEl) {
   } else {
     saved.scroll_top = _boardCardsScrollTop || 0;
   }
-  saved.render_limit = _boardRenderLimit || 50;
+  saved.render_limit = _boardRenderLimit || _boardDefaultRenderLimit || 50;
+  saved.done_render_limit = _boardDoneRenderLimit || _boardDoneInitialRenderLimit || 30;
   _boardViewStates[_boardActiveViewKey] = saved;
 }
 
@@ -362,7 +366,11 @@ function _boardPrepareViewChange(resetNextView) {
   _boardSyncActiveViewState(cardsEl);
   _boardSkipViewCaptureOnce = true;
   if (resetNextView) {
-    _boardNextViewDefault = { scroll_top: 0, render_limit: 50 };
+    _boardNextViewDefault = {
+      scroll_top: 0,
+      render_limit: _boardDefaultRenderLimit || 50,
+      done_render_limit: _boardDoneInitialRenderLimit || 30,
+    };
   }
 }
 
@@ -405,6 +413,16 @@ function _boardRecentlyTouchedCompare(a, b) {
   return _boardNewestCompare(a, b);
 }
 
+function _boardDoneNewestCompare(a, b) {
+  var aTime = _boardTimestamp(a.done_at || a.lane_entered_at || a.updated_at || a.created_at);
+  var bTime = _boardTimestamp(b.done_at || b.lane_entered_at || b.updated_at || b.created_at);
+  var aValid = !Number.isNaN(aTime);
+  var bValid = !Number.isNaN(bTime);
+  if (aValid && bValid && aTime !== bTime) return bTime - aTime;
+  if (aValid !== bValid) return aValid ? -1 : 1;
+  return _boardRecentlyTouchedCompare(a, b);
+}
+
 function _boardOldestCompare(a, b) {
   var aTime = _boardTimestamp(a.created_at);
   var bTime = _boardTimestamp(b.created_at);
@@ -429,6 +447,9 @@ function _boardCompareLaneTasks(a, b, lane) {
   if (_boardQuickView === 'recent') return _boardNewestCompare(a, b);
   if (_boardQuickView === 'touched') return _boardRecentlyTouchedCompare(a, b);
   var mode = _boardLaneSortMode(lane);
+  if (lane === 'Done' && (mode === 'manual' || mode === 'newest')) {
+    return _boardDoneNewestCompare(a, b);
+  }
   if (mode === 'newest') return _boardNewestCompare(a, b);
   if (mode === 'oldest') return _boardOldestCompare(a, b);
   if (mode === 'due') return _boardDueSoonestCompare(a, b);
