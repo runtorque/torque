@@ -133,8 +133,8 @@ function _boardRenderCardMenu(taskId) {
 
   if (_boardIsArchived(task)) {
     html += '<button onclick="event.stopPropagation();boardRestoreTask(\'' + taskId + '\')">Restore</button>';
-  } else if (task.lane === 'Done') {
-    html += '<button onclick="event.stopPropagation();boardArchiveTask(\'' + taskId + '\')">Archive</button>';
+  } else {
+    html += '<button onclick="event.stopPropagation();boardArchiveTask(\'' + taskId + '\')">Archive task</button>';
   }
   if (_boardCanMarkTaskVerified(task)) {
     html += '<button onclick="event.stopPropagation();boardMarkTaskVerified(\'' + taskId + '\')">Mark verified</button>';

@@ -182,6 +182,68 @@ function _boardPersistLaneSorts() {
   }
 }
 
+var _boardHiddenWideLanesStorageKey = 'loom.board.hidden_wide_lanes_by_group';
+
+function _boardHydrateHiddenWideLanes() {
+  if (_boardHiddenWideLanesByGroup) return;
+  _boardHiddenWideLanesByGroup = {};
+  if (typeof localStorage === 'undefined') return;
+  try {
+    var raw = localStorage.getItem(_boardHiddenWideLanesStorageKey);
+    var parsed = raw ? JSON.parse(raw) : {};
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      _boardHiddenWideLanesByGroup = parsed;
+    }
+  } catch (e) {
+    _boardHiddenWideLanesByGroup = {};
+  }
+}
+
+function _boardCurrentGroupHiddenWideLanes() {
+  _boardHydrateHiddenWideLanes();
+  var group = _currentGroup();
+  if (!group) return {};
+  return _boardHiddenWideLanesByGroup[group] || {};
+}
+
+function _boardHiddenWideLanesSignature() {
+  var lanes = _boardCurrentGroupHiddenWideLanes();
+  var keys = Object.keys(lanes).filter(function(lane) { return !!lanes[lane]; });
+  keys.sort();
+  return keys;
+}
+
+function _boardIsWideLaneCollapsed(lane) {
+  if (!lane) return false;
+  return !!_boardCurrentGroupHiddenWideLanes()[lane];
+}
+
+function _boardPersistHiddenWideLanes() {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    if (Object.keys(_boardHiddenWideLanesByGroup).length) {
+      return localStorage.setItem(_boardHiddenWideLanesStorageKey, JSON.stringify(_boardHiddenWideLanesByGroup));
+    }
+    localStorage.removeItem(_boardHiddenWideLanesStorageKey);
+  } catch (e) {}
+}
+
+function boardToggleWideLane(evt, lane) {
+  if (evt && typeof evt.preventDefault === 'function') evt.preventDefault();
+  if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
+  _boardHydrateHiddenWideLanes();
+  var group = _currentGroup();
+  if (!group || !lane) return;
+  var groupLanes = _boardHiddenWideLanesByGroup[group] || {};
+  if (groupLanes[lane]) delete groupLanes[lane];
+  else groupLanes[lane] = true;
+  if (Object.keys(groupLanes).length) _boardHiddenWideLanesByGroup[group] = groupLanes;
+  else delete _boardHiddenWideLanesByGroup[group];
+  _boardPersistHiddenWideLanes();
+  _boardLaneRenderCache = {};
+  renderBoard();
+}
+
 function _boardCurrentViewState() {
   var filters = _boardCurrentFilterState();
   return {

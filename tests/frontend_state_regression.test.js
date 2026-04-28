@@ -2163,6 +2163,54 @@ test('renderBoard uses a wide multi-lane layout only for embedded wide panels', 
   assert.doesNotMatch(panel.innerHTML, /board-wide-grid/);
 });
 
+test('wide embedded board lanes can be collapsed and persist locally', () => {
+  const { context, document } = createBoardHarness();
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+
+  context.state.board_lanes = ['Backlog', 'To Do', 'In Progress', 'Done'];
+  context.state.board_tasks = {
+    backlog: { id: 'backlog', group: 'alpha', task: 'Backlog card', lane: 'Backlog', position: 4 },
+    done: { id: 'done', group: 'alpha', task: 'Completed card', lane: 'Done', position: 1 },
+  };
+  runInContext(context, `_boardSelectedLane = 'Backlog';`);
+
+  document.body.classList.add('runtime-embedded');
+  panel.clientWidth = 1200;
+  context.renderBoard();
+
+  assert.match(panel.innerHTML, /board-wide-grid/);
+  assert.match(panel.innerHTML, /<div class="board-card">done<\/div>/);
+  assert.doesNotMatch(panel.innerHTML, /board-wide-lane-collapsed" data-lane="Done"/);
+
+  context.boardToggleWideLane({
+    preventDefault() {},
+    stopPropagation() {},
+  }, 'Done');
+
+  assert.match(panel.innerHTML, /board-wide-lane-collapsed" data-lane="Done"/);
+  assert.match(panel.innerHTML, /grid-template-columns:minmax\(220px, 1fr\) minmax\(220px, 1fr\) minmax\(220px, 1fr\) 32px/);
+  assert.match(panel.innerHTML, /Show Done lane/);
+  assert.doesNotMatch(panel.innerHTML, /<div class="board-card">done<\/div>/);
+  assert.deepEqual(
+    JSON.parse(context.localStorage.getItem('loom.board.hidden_wide_lanes_by_group')),
+    { alpha: { Done: true } },
+  );
+
+  runInContext(context, `_boardHiddenWideLanesByGroup = null;`);
+  context.renderBoard();
+  assert.match(panel.innerHTML, /board-wide-lane-collapsed" data-lane="Done"/);
+
+  context.boardToggleWideLane(null, 'Done');
+  assert.match(panel.innerHTML, /<div class="board-card">done<\/div>/);
+  assert.equal(context.localStorage.getItem('loom.board.hidden_wide_lanes_by_group'), null);
+
+  panel.clientWidth = 820;
+  context.boardToggleWideLane(null, 'Backlog');
+  assert.doesNotMatch(panel.innerHTML, /board-wide-grid/);
+  assert.match(panel.innerHTML, /class="board-lane-tab board-lane-drop-target/);
+});
+
 test('renderBoard places recent, view, and schedules in the top toolbar for wide embedded layout', () => {
   const { context, document } = createBoardHarness();
   const panel = document.register('panel-board');
@@ -3883,6 +3931,79 @@ test('boardCardMenu offers mark verified only for completed tasks awaiting verif
     clientY: 32,
   }, 'passedDone');
   assert.doesNotMatch(menu.innerHTML, /Mark verified/);
+});
+
+test('boardCardMenu offers archive from any lane and confirms non-Done archives', async () => {
+  const { context, document } = createBoardHarness();
+  const menu = document.register('ctx-menu');
+  context.state.board_lanes = ['Backlog', 'To Do', 'In Progress', 'Done'];
+  context.state.board_tasks = {
+    backlogTask: {
+      id: 'backlogTask',
+      task: 'Stale backlog work',
+      lane: 'Backlog',
+      group: 'alpha',
+    },
+    todoTask: {
+      id: 'todoTask',
+      task: 'Stale queued work',
+      lane: 'To Do',
+      group: 'alpha',
+    },
+    progressTask: {
+      id: 'progressTask',
+      task: 'Stale active work',
+      lane: 'In Progress',
+      group: 'alpha',
+    },
+    doneTask: {
+      id: 'doneTask',
+      task: 'Completed cleanup',
+      lane: 'Done',
+      group: 'alpha',
+    },
+  };
+
+  let confirmResult = false;
+  const confirmCalls = [];
+  context.showConfirm = function(message, opts) {
+    confirmCalls.push({ message, opts });
+    return Promise.resolve(confirmResult);
+  };
+
+  ['backlogTask', 'todoTask', 'progressTask', 'doneTask'].forEach((taskId) => {
+    context.boardCardMenu({
+      preventDefault() {},
+      clientX: 64,
+      clientY: 32,
+    }, taskId);
+    assert.match(menu.innerHTML, /Archive task/);
+  });
+
+  context.boardArchiveTask('backlogTask');
+  await Promise.resolve();
+  assert.equal(confirmCalls.length, 1);
+  assert.equal(confirmCalls[0].message, 'Archive this task in `Backlog`? It will be removed from the board.');
+  assert.equal(confirmCalls[0].opts.label, 'Archive');
+  assert.equal(confirmCalls[0].opts.variant, 'btn-danger');
+  assert.deepEqual(context.sendCalls, []);
+
+  confirmResult = true;
+  context.boardArchiveTask('backlogTask');
+  await Promise.resolve();
+  assert.deepEqual(jsonValue(context, 'sendCalls'), [{
+    cmd: 'board_archive_task',
+    id: 'backlogTask',
+  }]);
+
+  confirmCalls.length = 0;
+  context.boardArchiveTask('doneTask');
+  await Promise.resolve();
+  assert.deepEqual(confirmCalls, []);
+  assert.deepEqual(jsonValue(context, 'sendCalls[1]'), {
+    cmd: 'board_archive_task',
+    id: 'doneTask',
+  });
 });
 
 test('boardMarkTaskVerified uses the verification update flow', () => {
