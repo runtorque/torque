@@ -983,6 +983,28 @@ def _optional_bool_arg(args: dict, key: str, default: bool = False
     return bool(default), f"{key} must be a boolean"
 
 
+def _sanitize_mcp_worker_provider_override(
+    state,
+    group: str,
+    engineer_id: str,
+    provider: str,
+) -> str:
+    provider = str(provider or "").strip()
+    if not provider:
+        return ""
+    settings = state.get_engineer_settings(group)
+    if getattr(settings, "engineer_can_override_worker_provider", True):
+        return provider
+    log.warning(
+        "Engineer %s attempted worker provider override '%s' in group %s "
+        "while provider overrides are disabled; falling back to group default",
+        engineer_id,
+        provider,
+        group,
+    )
+    return ""
+
+
 _TASK_ID_REFERENCE_RE = re.compile(
     r"\b[A-Z][A-Z0-9_]*:[1-9][0-9]*(?::[1-9][0-9]*)?\b"
 )
@@ -3139,7 +3161,12 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                     payload["target_session_id"] = _engineer_cell.session_id
                 if _engineer_cell.window_id:
                     payload["target_window_id"] = _engineer_cell.window_id
-            agent_type = args.get("agent_type", "")
+            agent_type = _sanitize_mcp_worker_provider_override(
+                state,
+                _engineer_group,
+                _engineer_cell.id,
+                args.get("agent_type", ""),
+            )
             if agent_type:
                 payload["agent_type"] = agent_type
             command = args.get("command", "")
@@ -3175,6 +3202,12 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         else:
             max_concurrent = raw_max_concurrent
 
+        provider = _sanitize_mcp_worker_provider_override(
+            state,
+            _engineer_group,
+            _engineer_cell.id,
+            args.get("provider", ""),
+        )
         dispatch_lane = (
             state.get_group_settings(_engineer_group).dispatch_lane
             or "In Progress"
@@ -3281,6 +3314,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                     max_concurrent=max_concurrent,
                     target_agent_id=target_agent_id,
                     engineer_owner_id=_engineer_cell.id,
+                    provider=provider,
                 )
                 queue = state.auto_dispatch_queues.get(_engineer_group, [])
                 item = {
@@ -3314,6 +3348,8 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 payload["create_agent"] = True
                 payload["_created_by_engineer_id"] = _engineer_cell.id
                 payload["owner_engineer_id"] = str(caller_id or "").strip()
+                if provider:
+                    payload["agent_type"] = provider
 
             result = await handle_command(payload)
             task_after = state.board_tasks.get(tid)

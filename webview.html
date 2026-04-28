@@ -622,6 +622,11 @@
             Only show/manage agents launched by this Engineer
             <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="When enabled, this Engineer can only list, inspect, message, close, relaunch, or use worktree tools on worker agents it originally created. Human operators still see all agents on the board.">?</span>
           </label>
+          <label class="gs-checkbox">
+            <input id="gs-engineer-can-override-worker-provider" type="checkbox" checked>
+            Allow worker provider override on dispatch
+            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="When disabled, this Engineer's MCP dispatch tools omit the worker provider override field and stale override attempts fall back to the group's default worker provider.">?</span>
+          </label>
           <label>Provider</label>
           <select id="gs-engineer-provider" onchange="onGsEngineerProviderChange()"></select>
           <label>Command override</label>

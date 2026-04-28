@@ -3053,6 +3053,32 @@ def _pending_question_reply_target(state: MatrixState, group: str):
     return state.get_engineer_for_group(group), "Engineer"
 
 
+def _sanitize_engineer_worker_provider_override(
+    state: MatrixState,
+    group: str,
+    data: dict,
+    requested_provider: str,
+) -> str:
+    """Return allowed worker provider override or '' to use group defaults."""
+    requested_provider = str(requested_provider or "").strip()
+    if not requested_provider:
+        return ""
+    engineer_id = str(data.get("_engineer_dispatch_id", "") or "").strip()
+    if not engineer_id:
+        return requested_provider
+    settings = state.get_engineer_settings(group)
+    if getattr(settings, "engineer_can_override_worker_provider", True):
+        return requested_provider
+    log.warning(
+        "Engineer %s attempted worker provider override '%s' in group %s "
+        "while provider overrides are disabled; falling back to group default",
+        engineer_id,
+        requested_provider,
+        group,
+    )
+    return ""
+
+
 def _resolve_ai_report_task(state: MatrixState, cell, *,
                             task_id: str = "") -> Optional[BoardTask]:
     """Resolve the task an agent report should apply to.
@@ -9346,6 +9372,12 @@ async def main(connection=None):
                             launch_overrides = {}
                             agent_type = (data.get("agent_type", "")
                                           or "").strip()
+                            agent_type = _sanitize_engineer_worker_provider_override(
+                                state,
+                                group,
+                                data,
+                                agent_type,
+                            )
                             if agent_type:
                                 launch_overrides["provider"] = agent_type
                             command_override = (data.get("command", "")
@@ -12013,6 +12045,7 @@ async def main(connection=None):
                           "escalation_style",
                           "pending_note", "pending_note_kind",
                           "custom_instructions", "enabled_events",
+                          "engineer_can_override_worker_provider",
                           "paused", "engineer_provider",
                           "engineer_boot_command", "engineer_model",
                           "engineer_reasoning_effort",

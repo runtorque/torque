@@ -345,6 +345,8 @@ async def _pump_auto_dispatch_queue(state: MatrixState, handle_command,
                 payload["agent_id"] = target_agent_id
             else:
                 payload["create_agent"] = True
+                if entry.provider:
+                    payload["agent_type"] = entry.provider
                 if entry.engineer_owner_id:
                     payload["_created_by_engineer_id"] = entry.engineer_owner_id
             result = await handle_command(payload)

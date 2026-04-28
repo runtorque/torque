@@ -403,6 +403,7 @@ class LoomDBTests(unittest.TestCase):
                 "max_concurrent": 2,
                 "target_agent_id": "agent-1",
                 "engineer_owner_id": "engineer-1",
+                "provider": "codex",
                 "enqueued_at": "2026-04-07T09:00:00+00:00",
             }
         ])
@@ -543,6 +544,10 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(
             loaded["auto_dispatch_queues"]["g"][0]["engineer_owner_id"],
             "engineer-1",
+        )
+        self.assertEqual(
+            loaded["auto_dispatch_queues"]["g"][0]["provider"],
+            "codex",
         )
 
     def test_agent_activity_timestamp_migration_is_idempotent(self):
@@ -1302,6 +1307,7 @@ class LoomDBTests(unittest.TestCase):
                 "paused": True,
                 "custom_instructions": "Focus on regressions.",
                 "restrict_to_created_agents": True,
+                "engineer_can_override_worker_provider": False,
                 "pending_question": "Need approval",
                 "pending_question_set_at": 123.5,
                 "pending_question_actor_id": "eng-1",
@@ -1326,6 +1332,7 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(loaded["pending_question_set_at"], 123.5)
         self.assertEqual(loaded["pending_question_actor_id"], "eng-1")
         self.assertTrue(loaded["restrict_to_created_agents"])
+        self.assertFalse(loaded["engineer_can_override_worker_provider"])
         self.assertEqual(loaded["pending_note"], "FYI: release notes are ready")
         self.assertEqual(loaded["pending_note_kind"], "note")
         self.assertEqual(loaded["enabled_events"], ["task_completed"])
@@ -1656,6 +1663,50 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(loaded["engineer_profile"], "")
         self.assertEqual(loaded["engineer_shell"], "")
         self.assertEqual(loaded["engineer_tab_color"], "")
+        self.assertTrue(loaded["engineer_can_override_worker_provider"])
+
+    def test_engineer_settings_migration_defaults_worker_provider_override(self):
+        legacy_path = Path(self.tmp.name) / "legacy-engineer-provider-toggle.db"
+        conn = sqlite3.connect(str(legacy_path))
+        conn.execute(
+            """
+            CREATE TABLE engineer_settings (
+                group_name TEXT PRIMARY KEY,
+                push_interval INTEGER NOT NULL DEFAULT 60,
+                max_interval INTEGER NOT NULL DEFAULT 300,
+                paused INTEGER NOT NULL DEFAULT 0,
+                custom_instructions TEXT NOT NULL DEFAULT '',
+                enabled_events TEXT NOT NULL DEFAULT '[]'
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO engineer_settings (group_name) VALUES ('legacy')"
+        )
+        conn.commit()
+        conn.close()
+
+        migrated = LoomDB(legacy_path)
+        self.addCleanup(migrated.close)
+        migrated.init()
+
+        columns = {
+            row[1]
+            for row in migrated._conn.execute(
+                "PRAGMA table_info(engineer_settings)"
+            )
+        }
+        self.assertIn("engineer_can_override_worker_provider", columns)
+        row = migrated._conn.execute(
+            "SELECT engineer_can_override_worker_provider "
+            "FROM engineer_settings WHERE group_name='legacy'"
+        ).fetchone()
+        self.assertEqual(row[0], 1)
+        self.assertTrue(
+            migrated.load_engineer_settings("legacy")[
+                "engineer_can_override_worker_provider"
+            ]
+        )
 
     def test_agent_digest_settings_roundtrip(self):
         self.db.save_agent_digest_settings(

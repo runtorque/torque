@@ -582,6 +582,142 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         inner = text[len("<functions>"):-len("</functions>")]
         return json.loads(inner)
 
+    async def test_engineer_dispatch_provider_override_schema_tracks_setting(self):
+        state = self.state_mod.MatrixState()
+        engineer = self.state_mod.AgentCell(
+            id="engineer-1",
+            name="Engineer",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+        )
+        state.agents[engineer.id] = engineer
+        state.groups["g"] = [engineer.id]
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        handler = self.mcp_mod.create_mcp_handler(fake_handle_command, state)
+
+        async def props_for(tool_name):
+            listed = await handler(
+                FakeRequest(
+                    {"jsonrpc": "2.0", "id": tool_name, "method": "tools/list"},
+                    headers={"X-Loom-Cell-Id": engineer.id},
+                )
+            )
+            tools = listed.payload["result"]["tools"]
+            tool = next(t for t in tools if t["name"] == tool_name)
+            return tool["inputSchema"]["properties"]
+
+        self.assertIn("agent_type", await props_for("engineer_task_dispatch"))
+        self.assertIn("provider", await props_for("engineer_batch_dispatch"))
+
+        state.update_engineer_settings(
+            "g",
+            engineer_can_override_worker_provider=False,
+        )
+
+        self.assertNotIn("agent_type", await props_for("engineer_task_dispatch"))
+        self.assertNotIn("provider", await props_for("engineer_batch_dispatch"))
+
+        state.update_engineer_settings(
+            "g",
+            engineer_can_override_worker_provider=True,
+        )
+
+        self.assertIn("agent_type", await props_for("engineer_task_dispatch"))
+        self.assertIn("provider", await props_for("engineer_batch_dispatch"))
+
+    async def test_engineer_batch_dispatch_provider_reaches_dispatch_payload(self):
+        state = self.state_mod.MatrixState()
+        engineer = self.state_mod.AgentCell(
+            id="engineer-1",
+            name="Engineer",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+        )
+        state.agents[engineer.id] = engineer
+        state.groups["g"] = [engineer.id]
+        state.board_lanes = ["Backlog", "To Do", "In Progress", "Done"]
+        task = state.board_add_task("Batch provider worker", "g", lane="Backlog")
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            return {"type": "ok"}
+
+        handler = self.mcp_mod.create_mcp_handler(fake_handle_command, state)
+        response = await handler(
+            FakeRequest(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "engineer_batch_dispatch",
+                        "arguments": {
+                            "tasks": [{"task": task.id}],
+                            "provider": "claude-code",
+                            "max_concurrent": 1,
+                        },
+                    },
+                },
+                headers={"X-Loom-Cell-Id": engineer.id},
+            )
+        )
+
+        self.assertFalse(response.payload["result"]["isError"])
+        self.assertEqual(calls[0]["agent_type"], "claude-code")
+
+    async def test_engineer_task_dispatch_provider_override_falls_back_when_disabled(self):
+        state = self.state_mod.MatrixState()
+        engineer = self.state_mod.AgentCell(
+            id="engineer-1",
+            name="Engineer",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+        )
+        state.agents[engineer.id] = engineer
+        state.groups["g"] = [engineer.id]
+        state.board_lanes = ["Backlog", "To Do", "In Progress", "Done"]
+        state.update_engineer_settings(
+            "g",
+            engineer_can_override_worker_provider=False,
+        )
+        task = state.board_add_task("Stale provider override", "g", lane="Backlog")
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            return {"type": "ok"}
+
+        handler = self.mcp_mod.create_mcp_handler(fake_handle_command, state)
+        with self.assertLogs("loom", level="WARNING") as logs:
+            response = await handler(
+                FakeRequest(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "engineer_task_dispatch",
+                            "arguments": {
+                                "task": task.id,
+                                "agent_type": "claude-code",
+                            },
+                        },
+                    },
+                    headers={"X-Loom-Cell-Id": engineer.id},
+                )
+            )
+
+        self.assertFalse(response.payload["result"]["isError"])
+        self.assertNotIn("agent_type", calls[0])
+        self.assertIn("falling back to group default", "\n".join(logs.output))
+
     async def test_engineer_architect_message_tools_require_hiring_architect(self):
         state = self.state_mod.MatrixState()
         architect = self.state_mod.AgentCell(

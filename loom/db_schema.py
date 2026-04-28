@@ -305,6 +305,7 @@ CREATE TABLE IF NOT EXISTS engineer_settings (
     paused             INTEGER NOT NULL DEFAULT 0,
     custom_instructions TEXT NOT NULL DEFAULT '',
     restrict_to_created_agents INTEGER NOT NULL DEFAULT 0,
+    engineer_can_override_worker_provider INTEGER NOT NULL DEFAULT 1,
     pending_question   TEXT NOT NULL DEFAULT '',
     pending_note       TEXT NOT NULL DEFAULT '',
     pending_note_kind  TEXT NOT NULL DEFAULT '',
@@ -421,6 +422,7 @@ CREATE TABLE IF NOT EXISTS auto_dispatch_queue (
     max_concurrent   INTEGER NOT NULL DEFAULT 1,
     target_agent_id  TEXT NOT NULL DEFAULT '',
     engineer_owner_id  TEXT NOT NULL DEFAULT '',
+    provider         TEXT NOT NULL DEFAULT '',
     enqueued_at      TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (group_name, position)
 );
@@ -1290,6 +1292,19 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
             conn.commit()
         except sqlite3.OperationalError:
             pass
+    try:
+        conn.execute(
+            "SELECT engineer_can_override_worker_provider "
+            "FROM engineer_settings LIMIT 0")
+    except sqlite3.OperationalError:
+        try:
+            conn.execute(
+                "ALTER TABLE engineer_settings ADD COLUMN "
+                "engineer_can_override_worker_provider "
+                "INTEGER NOT NULL DEFAULT 1")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
     # Migrate: add engineer_provider and launch override columns
     for col in ("engineer_provider", "engineer_boot_command",
                 "engineer_model", "engineer_reasoning_effort",
@@ -1408,6 +1423,17 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
             conn.execute(
                 "ALTER TABLE auto_dispatch_queue ADD COLUMN "
                 "engineer_owner_id TEXT NOT NULL DEFAULT ''")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+    try:
+        conn.execute(
+            "SELECT provider FROM auto_dispatch_queue LIMIT 0")
+    except sqlite3.OperationalError:
+        try:
+            conn.execute(
+                "ALTER TABLE auto_dispatch_queue ADD COLUMN "
+                "provider TEXT NOT NULL DEFAULT ''")
             conn.commit()
         except sqlite3.OperationalError:
             pass

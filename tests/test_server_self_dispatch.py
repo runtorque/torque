@@ -117,6 +117,50 @@ class ServerSelfDispatchTests(unittest.TestCase):
         self.assertIn("From `Research auth patch` (task-parent)", prompt)
         self.assertIn("Canonical downstream handoff", prompt)
 
+    def test_engineer_worker_provider_override_sanitizer_falls_back_when_disabled(self):
+        state = self.state_mod.MatrixState()
+        state.update_engineer_settings(
+            "g",
+            engineer_can_override_worker_provider=False,
+        )
+
+        with self.assertLogs("loom", level="WARNING") as logs:
+            provider = self.server_mod._sanitize_engineer_worker_provider_override(
+                state,
+                "g",
+                {"_engineer_dispatch_id": "engineer-1"},
+                "claude-code",
+            )
+
+        self.assertEqual(provider, "")
+        self.assertIn("falling back to group default", "\n".join(logs.output))
+
+    def test_engineer_worker_provider_override_sanitizer_preserves_default_behavior(self):
+        state = self.state_mod.MatrixState()
+
+        self.assertEqual(
+            self.server_mod._sanitize_engineer_worker_provider_override(
+                state,
+                "g",
+                {"_engineer_dispatch_id": "engineer-1"},
+                "codex",
+            ),
+            "codex",
+        )
+        state.update_engineer_settings(
+            "g",
+            engineer_can_override_worker_provider=False,
+        )
+        self.assertEqual(
+            self.server_mod._sanitize_engineer_worker_provider_override(
+                state,
+                "g",
+                {},
+                "codex",
+            ),
+            "codex",
+        )
+
     def test_resolve_memory_cell_and_task_recovers_task_from_active_agent(self):
         state = self.state_mod.MatrixState()
         task = self.state_mod.BoardTask(
