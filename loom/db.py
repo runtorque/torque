@@ -1459,12 +1459,22 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         """Persist global settings as key-value pairs."""
         d = asdict(gs)
         xterm_scrollback = int(d.get("xterm_scrollback", 2000) or 2000)
+        pause_suppresses = (
+            1 if d.get("pause_suppresses_subagent_messages", True) else 0
+        )
         self._conn.execute("DELETE FROM global_settings")
         for key, value in d.items():
             self._conn.execute(
                 "INSERT INTO global_settings "
-                "(key, value, xterm_scrollback) VALUES (?,?,?)",
-                (key, json.dumps(value), xterm_scrollback))
+                "(key, value, xterm_scrollback, "
+                "pause_suppresses_subagent_messages) "
+                "VALUES (?,?,?,?)",
+                (
+                    key,
+                    json.dumps(value),
+                    xterm_scrollback,
+                    pause_suppresses,
+                ))
         self._conn.commit()
 
     def save_auto_dispatch_queue(self, group_name: str, entries: list):

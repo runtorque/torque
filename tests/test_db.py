@@ -48,6 +48,25 @@ class LoomDBTests(unittest.TestCase):
             4321,
         )
 
+    def test_global_settings_round_trips_pause_suppression(self):
+        self.db.save_global_settings(
+            GlobalSettings(pause_suppresses_subagent_messages=False)
+        )
+
+        snapshot = self.db.load_all()
+
+        self.assertFalse(
+            snapshot["global_settings"]["pause_suppresses_subagent_messages"]
+        )
+        self.assertEqual(
+            self.db._conn.execute(
+                "SELECT pause_suppresses_subagent_messages "
+                "FROM global_settings "
+                "WHERE key='pause_suppresses_subagent_messages'"
+            ).fetchone()[0],
+            0,
+        )
+
     def test_global_settings_schema_migrates_xterm_scrollback_column(self):
         legacy_path = Path(self.tmp.name) / "legacy-global-settings.db"
         conn = sqlite3.connect(str(legacy_path))
@@ -67,6 +86,7 @@ class LoomDBTests(unittest.TestCase):
             for row in migrated._conn.execute("PRAGMA table_info(global_settings)")
         }
         self.assertIn("xterm_scrollback", columns)
+        self.assertIn("pause_suppresses_subagent_messages", columns)
 
     def _seed_stage1a_db(
         self,
