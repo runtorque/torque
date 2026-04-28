@@ -15,7 +15,7 @@ transitions:
     when: blocking issues found, implementer must fix and re-review
     status: "Fixing blockers"
     target: parent
-  - action: feature/implement
+  - action: feature/implement-preapproved
     when: ship verdict but a small follow-up fix is needed and no re-review is required (reviewer judgment, e.g. cosmetic / mechanical / docs-only)
     status: "Pre-approved fix"
     target: parent

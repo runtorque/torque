@@ -11096,14 +11096,16 @@ async def main(connection=None):
                                             derive_parent_task_id
                                         )
                                         new_task.pipeline_root_id = root_id
-                                        # Reuse path also propagates
-                                        # pre-approval so a reviewer
-                                        # re-deriving onto the same fix
-                                        # task keeps the bypass intact.
-                                        if derive_pre_approved_by:
-                                            new_task.pre_approved_by = (
-                                                derive_pre_approved_by
-                                            )
+                                        # Reuse path: rewrite
+                                        # pre_approved_by from the
+                                        # selected transition so a
+                                        # blocking-fix re-derive onto a
+                                        # task that previously carried
+                                        # a pre-approval bypass clears
+                                        # it (and vice-versa).
+                                        new_task.pre_approved_by = (
+                                            derive_pre_approved_by
+                                        )
                                         _inherit_assigned_engineer_for_derived_task(
                                             task,
                                             new_task,
