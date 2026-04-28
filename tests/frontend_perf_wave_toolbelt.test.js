@@ -207,7 +207,7 @@ test('[toolbelt] _deltaSurfaceInvalidations skips board rerender for an events-o
   const plain = JSON.parse(JSON.stringify(flags));
   assert.equal(plain.board, false, 'board must stay un-invalidated under toolbelt');
   assert.equal(plain.events, true);
-  assert.equal(plain.engineer, true);
+  assert.equal(plain.engineer, false);
   assert.equal(plain.main, false);
   assert.equal(sandbox._activePanelApp, 'board');
 });
