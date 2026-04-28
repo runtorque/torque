@@ -1820,11 +1820,15 @@ function render(opts) {
   _pruneAgentDoneFlourishes((state && state.agents) || {});
 
   if (groupNames.length === 0) {
-    main.innerHTML = `
+    const emptyHtml = `
       <div class="empty">
         <div class="empty-icon">\u2B22</div>
         No groups yet.<br>Create one to get started.
       </div>`;
+    if (main._loomLastHtml !== emptyHtml) {
+      main.innerHTML = emptyHtml;
+      main._loomLastHtml = emptyHtml;
+    }
     window._navItems = [];
     window._navAgents = [];
     window._navByGroup = {};
@@ -2020,7 +2024,20 @@ function render(opts) {
     html += `</div>`;
   }
 
-  main.innerHTML = html;
+  // LOOM:264 follow-up: byte-equality memoize the agent grid clobber. Each
+  // delta op that flips `flags.main` (e.g. `agent_upsert` on every activity
+  // tick) calls render(); the unconditional `main.innerHTML = html` blast
+  // destroys + recreates every agent card on every tick, which kills the
+  // user-visible :hover state on `.agent-card-tooltip` pseudo-elements
+  // (style.css:1142) — produces fast tooltip flicker while a card is being
+  // hovered. Same `_loomLastHtml` pattern as the topbar/tabs cache from
+  // `06611b8`. When the html is unchanged the FLIP animation + surface
+  // restore are no-ops on identical DOM, so skip them too.
+  const mainHtmlChanged = main._loomLastHtml !== html;
+  if (mainHtmlChanged) {
+    main.innerHTML = html;
+    main._loomLastHtml = html;
+  }
 
   // Update navigable item lists after resolving focus so the rendered
   // `.focused` marker and the keyboard model describe the same grid.
@@ -2038,8 +2055,10 @@ function render(opts) {
     focusedItemId = null;
   }
 
-  if (oldRects) _applyFlip(main, oldRects);
-  _restoreSurfaceState(main, mainState);
+  if (mainHtmlChanged) {
+    if (oldRects) _applyFlip(main, oldRects);
+    _restoreSurfaceState(main, mainState);
+  }
   renderPendingHireBanner();
   _updateEngineerTaskbarBadge();
   if (typeof updateEventsAttentionBadge === 'function') updateEventsAttentionBadge();

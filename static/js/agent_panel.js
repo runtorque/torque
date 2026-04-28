@@ -2766,8 +2766,37 @@ function _agentPanelRenderFocusedTabInPlace(agent, kind, previousTab, activeTab)
   var parts = _agentPanelTabRenderParts(agent, kind, activeTab);
   _agentPanelSetShellTab(shell, activeTab);
   _agentPanelSetActiveTabChrome(el, activeTab);
-  headerRight.innerHTML = parts.headerRightHtml || '';
-  content.innerHTML = parts.bodyHtml || '';
+  // LOOM:264 follow-up: byte-equality memoize the innerHTML clobber. Under
+  // multi-agent firehose this function fires dozens of times/sec; when the
+  // rendered html is identical to the last paint the assignment still
+  // destroys + recreates every child node, killing :hover state on tooltip
+  // pseudo-elements and resetting textarea caret. Same `_loomLastHtml`
+  // pattern as `dom.topbar` / `dom.tabs` from `06611b8`.
+  var newHeaderHtml = parts.headerRightHtml || '';
+  var newBodyHtml = parts.bodyHtml || '';
+  var headerChanged = headerRight._loomLastHtml !== newHeaderHtml;
+  var bodyChanged = content._loomLastHtml !== newBodyHtml;
+  if (headerChanged) {
+    headerRight.innerHTML = newHeaderHtml;
+    headerRight._loomLastHtml = newHeaderHtml;
+  }
+  if (bodyChanged) {
+    content.innerHTML = newBodyHtml;
+    content._loomLastHtml = newBodyHtml;
+  }
+  // Invalidate the root `el._loomLastHtml` cache when this surgical path
+  // mutates a child. Otherwise a later `renderAgentPanel()` whose computed
+  // html happens to byte-equal the cache (e.g. matches the pre-mutation
+  // full render) skips its `el.innerHTML = html` write and leaves the
+  // surgical-overwritten children in the DOM — stale content visible to
+  // the user. Reviewer reproduced via Node harness:
+  //   1. full render writes htmlA, caches htmlA on el
+  //   2. in-place refresh writes htmlB into a child
+  //   3. state reverts; full render computes htmlA, gate skips, DOM stays
+  //      at htmlB.
+  if ((headerChanged || bodyChanged) && el._loomLastHtml !== undefined) {
+    el._loomLastHtml = null;
+  }
 
   if (!switchingTabs && typeof _restoreSurfaceState === 'function') {
     _restoreSurfaceState(el, panelState, panelStateOptions);
@@ -2860,7 +2889,12 @@ function renderAgentPanel() {
     }
   }
 
-  el.innerHTML = html;
+  // LOOM:264 follow-up: byte-equality memoize the full panel clobber. Same
+  // pattern as the in-place tab refresh above.
+  if (el._loomLastHtml !== html) {
+    el.innerHTML = html;
+    el._loomLastHtml = html;
+  }
   if (typeof _restoreSurfaceState === 'function') {
     _restoreSurfaceState(el, panelState, panelStateOptions);
   }
@@ -3846,7 +3880,11 @@ function renderLegacyGroupPanel() {
   }
   html += '</div>';
   html += '</div>';
-  el.innerHTML = html;
+  // LOOM:264 follow-up: memoize the legacy engineer panel clobber.
+  if (el._loomLastHtml !== html) {
+    el.innerHTML = html;
+    el._loomLastHtml = html;
+  }
   _restoreSurfaceState(el, panelState, panelStateOptions);
   _agentPanelAttachVirtualScrolls(el);
   _engineerSyncEventsCountdown(el, group, activeTab);
