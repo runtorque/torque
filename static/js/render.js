@@ -537,8 +537,24 @@ function _restoreSurfaceState(root, snapshot, opts) {
     el = opts.resolveFocus(root, snapshot.focus);
   }
   if (!el) return;
-  if (snapshot.focus.value != null && 'value' in el) el.value = snapshot.focus.value;
-  if (snapshot.focus.checked != null && 'checked' in el) el.checked = snapshot.focus.checked;
+  // Skip the value/checked re-assignment when the element already holds the
+  // captured value. Setting `el.value = ...` on a focused textarea resets the
+  // browser's caret / selection range and briefly kills the visible cursor;
+  // under firehose render rates (LOOM:264) this stops the cursor from
+  // rendering at all even though keystrokes still route to the element.
+  // Idempotent renders that preserve DOM identity hit this path repeatedly.
+  // We still re-assert focus + selection below — those are no-ops on
+  // already-focused elements but cheap enough to keep unconditional, and the
+  // tests rely on `.focus()` being called so the FakeElement `focused` flag
+  // gets set on first paint.
+  const valueDrifted = snapshot.focus.value != null
+    && 'value' in el
+    && el.value !== snapshot.focus.value;
+  const checkedDrifted = snapshot.focus.checked != null
+    && 'checked' in el
+    && el.checked !== !!snapshot.focus.checked;
+  if (valueDrifted) el.value = snapshot.focus.value;
+  if (checkedDrifted) el.checked = snapshot.focus.checked;
   // Use preventScroll so re-render-driven focus restoration doesn't override
   // explicit scroll restoration via snapshot.scrolls / panel-level scroll
   // bookkeeping. Otherwise an inline-render that re-focuses an offscreen
