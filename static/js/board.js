@@ -429,6 +429,25 @@ function _boardTasksInLaneFromMap(lane, tasks) {
   for (var id in (tasks || {})) {
     if (tasks[id].lane === lane) arr.push(tasks[id]);
   }
+  var sortMode = _boardLaneSortMode(lane);
+  if (lane === 'Done' && (sortMode === 'manual' || sortMode === 'newest')) {
+    var doneSortKeys = {};
+    function doneSortKey(task) {
+      var key = (task && task.id) || '';
+      if (doneSortKeys[key]) return doneSortKeys[key];
+      var time = _boardTimestamp(task.done_at || task.lane_entered_at || task.updated_at || task.created_at);
+      doneSortKeys[key] = { time: time, valid: !Number.isNaN(time) };
+      return doneSortKeys[key];
+    }
+    arr.sort(function(a, b) {
+      var ak = doneSortKey(a);
+      var bk = doneSortKey(b);
+      if (ak.valid && bk.valid && ak.time !== bk.time) return bk.time - ak.time;
+      if (ak.valid !== bk.valid) return ak.valid ? -1 : 1;
+      return _boardRecentlyTouchedCompare(a, b);
+    });
+    return arr;
+  }
   arr.sort(function(a, b) { return _boardCompareLaneTasks(a, b, lane); });
   return arr;
 }
@@ -1769,7 +1788,8 @@ function renderBoard() {
       quickEditRefocusKind)) {
     return;
   }
-  var renderModel = _boardBuildRenderModel(lanes);
+  var renderLanes = wideLayout ? lanes : [_boardSelectedLane];
+  var renderModel = _boardBuildRenderModel(renderLanes);
   _boardEnsureDispatchEligibilityRefs(_currentGroup(), renderModel);
 
   // Search & filter toolbar
