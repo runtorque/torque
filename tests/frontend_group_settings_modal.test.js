@@ -324,9 +324,6 @@ test('group settings modal populates engineer fields and honors engineer tab dee
   assert.equal(ensure('gs-architect-paused').checked, true);
   assert.equal(ensure('gs-architect-digest-verbosity').value, 'verbose');
   assert.equal(ensure('gs-architect-journal-checkpoint').value, 'every_15_actions');
-  assert.equal(ensure('gs-architect-review-ship-direct-max').value, 25);
-  assert.equal(ensure('gs-architect-review-default-above').value, 90);
-  assert.equal(ensure('gs-architect-review-bypass').checked, true);
   assert.equal(ensure('gs-engineer-provider').focused, true);
   assert.equal(ensure('modal-group-settings').classList.contains('visible'), true);
 });
@@ -357,11 +354,13 @@ test('group settings resets the Engineer section defaults when reopened', () => 
   assert.equal(ensure('gs-engineer-notification-preset').value, 'normal');
 });
 
-test('architect runtime settings no longer show deferred warning copy', () => {
+test('architect runtime settings no longer show fallback review-gate controls', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   assert.match(html, /id="gs-architect-runtime-section"/);
-  assert.match(html, /fallback review-gate defaults for transitions without their own LOC gate/);
-  assert.match(html, /Fallback review-gate thresholds/);
+  assert.match(html, /Configure architect digest verbosity and checkpoint policy\./);
+  assert.doesNotMatch(html, /fallback review-gate defaults for transitions without their own LOC gate/);
+  assert.doesNotMatch(html, /Fallback review-gate thresholds/);
+  assert.doesNotMatch(html, /gs-architect-review-/);
   assert.doesNotMatch(html, /gs-architect-deferred-section/);
   assert.doesNotMatch(html, /storage only|wiring in LOOM:196|⊘/);
 });
@@ -411,9 +410,6 @@ test('submitGroupSettings sends group, engineer, and architect updates separatel
   ensure('gs-architect-paused').checked = true;
   ensure('gs-architect-digest-verbosity').value = 'terse';
   ensure('gs-architect-journal-checkpoint').value = 'every_20_minutes';
-  ensure('gs-architect-review-ship-direct-max').value = '30';
-  ensure('gs-architect-review-default-above').value = '80';
-  ensure('gs-architect-review-bypass').checked = true;
 
   vm.runInContext('submitGroupSettings()', context);
 
@@ -460,13 +456,12 @@ test('submitGroupSettings sends group, engineer, and architect updates separatel
   assert.equal(sandbox.sendCalls[2].settings.architect_paused, true);
   assert.equal(sandbox.sendCalls[2].settings.architect_digest_verbosity, 'terse');
   assert.equal(sandbox.sendCalls[2].settings.architect_journal_checkpoint_frequency, 'every_20_minutes');
-  assert.deepEqual(
-    JSON.parse(JSON.stringify(sandbox.sendCalls[2].settings.architect_review_gate_thresholds)),
-    {
-      ship_direct_max: 30,
-      review_default_above: 80,
-      self_review_bypass_allowed: true,
-    },
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(
+      sandbox.sendCalls[2].settings,
+      'architect_review_gate_thresholds',
+    ),
+    false,
   );
 });
 
