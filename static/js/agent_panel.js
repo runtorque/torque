@@ -2774,13 +2774,28 @@ function _agentPanelRenderFocusedTabInPlace(agent, kind, previousTab, activeTab)
   // pattern as `dom.topbar` / `dom.tabs` from `06611b8`.
   var newHeaderHtml = parts.headerRightHtml || '';
   var newBodyHtml = parts.bodyHtml || '';
-  if (headerRight._loomLastHtml !== newHeaderHtml) {
+  var headerChanged = headerRight._loomLastHtml !== newHeaderHtml;
+  var bodyChanged = content._loomLastHtml !== newBodyHtml;
+  if (headerChanged) {
     headerRight.innerHTML = newHeaderHtml;
     headerRight._loomLastHtml = newHeaderHtml;
   }
-  if (content._loomLastHtml !== newBodyHtml) {
+  if (bodyChanged) {
     content.innerHTML = newBodyHtml;
     content._loomLastHtml = newBodyHtml;
+  }
+  // Invalidate the root `el._loomLastHtml` cache when this surgical path
+  // mutates a child. Otherwise a later `renderAgentPanel()` whose computed
+  // html happens to byte-equal the cache (e.g. matches the pre-mutation
+  // full render) skips its `el.innerHTML = html` write and leaves the
+  // surgical-overwritten children in the DOM — stale content visible to
+  // the user. Reviewer reproduced via Node harness:
+  //   1. full render writes htmlA, caches htmlA on el
+  //   2. in-place refresh writes htmlB into a child
+  //   3. state reverts; full render computes htmlA, gate skips, DOM stays
+  //      at htmlB.
+  if ((headerChanged || bodyChanged) && el._loomLastHtml !== undefined) {
+    el._loomLastHtml = null;
   }
 
   if (!switchingTabs && typeof _restoreSurfaceState === 'function') {

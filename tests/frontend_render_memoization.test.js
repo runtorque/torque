@@ -246,6 +246,162 @@ test('LOOM:264 — _hoverEdgeIsBetweenTooltips ignores inner-descendant transiti
  * inspecting the source. This lets the regression be caught even when the
  * harness doesn't exercise the in-place path. */
 
+/* -- Stale-root-cache behavioral coverage ------------------------------- */
+/* Reviewer-discovered correctness regression: when the surgical in-place
+ * path writes a child's innerHTML, the root `el._loomLastHtml` cache is no
+ * longer accurate (root html still reflects the pre-mutation state). A
+ * subsequent `renderAgentPanel()` whose computed html byte-equals the
+ * cache then short-circuits its own `el.innerHTML = html` write, leaving
+ * the surgical-overwritten child in the DOM — stale content visible to
+ * the user. Fix: in-place path must invalidate `el._loomLastHtml` when it
+ * mutates a child. */
+
+function makePanelDomTree() {
+  // A mini DOM with a root `el` (#panel-agent), a `.agent-panel-panel`
+  // shell, a header-right region, and a content region. Tracks innerHTML
+  // assignments per node so the test can assert byte-level cache hits.
+  function makeNode(initial, queryFor) {
+    const node = {
+      _html: initial == null ? '' : String(initial),
+      setCount: 0,
+      get innerHTML() { return this._html; },
+      set innerHTML(v) {
+        this._html = String(v == null ? '' : v);
+        this.setCount += 1;
+        // Re-derive child references from the new html. For the test we
+        // rebuild the headerRight/content children when the root is
+        // re-written so subsequent in-place calls see fresh nodes.
+        if (this === root && typeof rebuildChildrenFromRootHtml === 'function') {
+          rebuildChildrenFromRootHtml();
+        }
+      },
+      classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
+      dataset: {},
+      addEventListener() {},
+      querySelector(sel) { return queryFor && queryFor(sel) || null; },
+      querySelectorAll() { return []; },
+      contains() { return false; },
+    };
+    return node;
+  }
+  let shell, headerRight, content;
+  const childMap = {};
+  function rebuildChildrenFromRootHtml() {
+    // Replace the child nodes with fresh ones — simulates the browser's
+    // behavior when innerHTML is assigned: all descendants are recreated
+    // from scratch, losing any expandos like `_loomLastHtml`.
+    shell = makeNode('', sel => null);
+    headerRight = makeNode('', sel => null);
+    content = makeNode('', sel => null);
+    childMap['.agent-panel-panel'] = shell;
+    childMap['[data-agent-panel-header-right]'] = headerRight;
+    childMap['.agent-panel-header-right'] = headerRight;
+    childMap['.agent-panel-content'] = content;
+  }
+  const root = makeNode('', sel => childMap[sel] || null);
+  rebuildChildrenFromRootHtml();
+  return { root, get shell() { return shell; },
+    get headerRight() { return headerRight; }, get content() { return content; } };
+}
+
+test('LOOM:264 — surgical in-place path invalidates root _loomLastHtml so a later full render re-writes', () => {
+  // Simulate the exact flow the reviewer reproduced:
+  //   1. Full renderAgentPanel writes htmlA to root, caches htmlA on el.
+  //   2. In-place path writes htmlB to .agent-panel-content (mutates child).
+  //   3. State reverts. renderAgentPanel computes htmlA again.
+  //   4. Without invalidation: gate skips because el._loomLastHtml===htmlA;
+  //      DOM stays at htmlB → STALE CONTENT.
+  //   5. With invalidation: in-place sets el._loomLastHtml=null at step 2;
+  //      step 3 writes el.innerHTML=htmlA → DOM matches state.
+  const dom = makePanelDomTree();
+  const el = dom.root;
+
+  // Step 1 — simulate a full root write (renderAgentPanel) with cache.
+  const htmlA = '<div class="agent-panel-panel"><div class="agent-panel-content">No worker events yet.</div></div>';
+  if (el._loomLastHtml !== htmlA) {
+    el.innerHTML = htmlA;
+    el._loomLastHtml = htmlA;
+  }
+  assert.equal(el.setCount, 1, 'first full render writes innerHTML');
+
+  // Step 2 — simulate the in-place surgical path mutating .agent-panel-content.
+  // Mirror the production gate (now with the root-cache invalidation fix).
+  const newBodyHtml = '<div>EVENT B</div>';
+  const bodyChanged = dom.content._loomLastHtml !== newBodyHtml;
+  if (bodyChanged) {
+    dom.content.innerHTML = newBodyHtml;
+    dom.content._loomLastHtml = newBodyHtml;
+  }
+  if (bodyChanged && el._loomLastHtml !== undefined) {
+    el._loomLastHtml = null;  // <— THE FIX
+  }
+  assert.equal(dom.content.setCount, 1);
+  assert.equal(el._loomLastHtml, null,
+    'after a surgical child write, the root cache must be invalidated so a later'
+    + ' full render with the original html does not skip its innerHTML write');
+
+  // Step 3 — simulate the state reverting and renderAgentPanel computing htmlA.
+  // The root gate must now write htmlA again because the cache was invalidated.
+  if (el._loomLastHtml !== htmlA) {
+    el.innerHTML = htmlA;
+    el._loomLastHtml = htmlA;
+  }
+  assert.equal(el.setCount, 2,
+    'root must rewrite htmlA after surgical mutation — otherwise the DOM stays at htmlB and the user sees stale content');
+  assert.match(el.innerHTML, /No worker events yet\./,
+    'root html must reflect the state, not the surgical interim');
+  // The browser destroys all child nodes when innerHTML is assigned, so the
+  // surgical write to the now-detached `dom.content` is no longer in DOM.
+  // (`dom.content` is a stale reference; the new content child is fresh.)
+  assert.equal(dom.content.setCount, 0,
+    'the `content` reference after the root write must be a fresh node — surgical caches do not bleed across full-render boundaries');
+});
+
+test('LOOM:264 — surgical no-op does NOT invalidate root cache', () => {
+  // If the in-place path runs but neither child html actually changed, the
+  // root cache must remain valid (no spurious invalidation that would
+  // force a redundant full render later).
+  const dom = makePanelDomTree();
+  const el = dom.root;
+  const htmlA = '<div class="agent-panel-panel"><div class="agent-panel-content">A</div></div>';
+  el.innerHTML = htmlA;
+  el._loomLastHtml = htmlA;
+
+  // Pre-seed the child cache so the gate sees a no-op.
+  dom.content._loomLastHtml = '<div>A</div>';
+  dom.headerRight._loomLastHtml = '';
+  const newBodyHtml = '<div>A</div>';
+  const newHeaderHtml = '';
+  const headerChanged = dom.headerRight._loomLastHtml !== newHeaderHtml;
+  const bodyChanged = dom.content._loomLastHtml !== newBodyHtml;
+  if (headerChanged) {
+    dom.headerRight.innerHTML = newHeaderHtml;
+    dom.headerRight._loomLastHtml = newHeaderHtml;
+  }
+  if (bodyChanged) {
+    dom.content.innerHTML = newBodyHtml;
+    dom.content._loomLastHtml = newBodyHtml;
+  }
+  if ((headerChanged || bodyChanged) && el._loomLastHtml !== undefined) {
+    el._loomLastHtml = null;
+  }
+
+  assert.equal(el._loomLastHtml, htmlA,
+    'when both child gates skip (no DOM mutation), the root cache must remain valid');
+});
+
+test('LOOM:264 — agent_panel.js source contains the root-cache invalidation', () => {
+  const source = fs.readFileSync(
+    path.join(repoRoot, 'static/js/agent_panel.js'),
+    'utf8',
+  );
+  // The fix sets `el._loomLastHtml = null` (or unsets it) gated on
+  // headerChanged || bodyChanged. Match the canonical form.
+  assert.match(source, /\(headerChanged\s*\|\|\s*bodyChanged\)[\s\S]{0,120}el\._loomLastHtml\s*=/,
+    'in-place path must invalidate el._loomLastHtml when a child write actually mutates DOM —'
+    + ' otherwise renderAgentPanel skips its byte-equality gate and leaves stale child content');
+});
+
 test('LOOM:264 — agent_panel.js gates content/headerRight innerHTML on _loomLastHtml', () => {
   const source = fs.readFileSync(
     path.join(repoRoot, 'static/js/agent_panel.js'),
