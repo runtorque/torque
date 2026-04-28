@@ -1,5 +1,6 @@
 import importlib
 from pathlib import Path
+import types
 import unittest
 
 try:
@@ -9,14 +10,21 @@ except ModuleNotFoundError:
 
 
 class FakeActionManager:
-    def __init__(self, action=None, transitions=None):
+    def __init__(self, action=None, transitions=None, *,
+                 actions=None, transitions_by_name=None):
         self.action = action or {}
         self.transitions = transitions or []
+        self.actions = actions
+        self.transitions_by_name = transitions_by_name
 
-    def load_action(self, _name, _base_dir=""):
+    def load_action(self, name, _base_dir=""):
+        if self.actions is not None:
+            return dict(self.actions.get(name, self.action))
         return dict(self.action)
 
-    def get_transitions(self, _name, _base_dir=""):
+    def get_transitions(self, name, _base_dir=""):
+        if self.transitions_by_name is not None:
+            return list(self.transitions_by_name.get(name, []))
         return list(self.transitions)
 
 
@@ -61,6 +69,84 @@ class ReviewGateTests(unittest.IsolatedAsyncioTestCase):
             agent_id=cell.id,
         )
         return state, cell, task
+
+    @staticmethod
+    def _make_cell(value):
+        return (lambda x: lambda: x)(value).__closure__[0]
+
+    def _extract_handle_command(self, state, dispatch_handler, action_mgr):
+        main_code = self.server_mod.main.__code__
+        handle_code = next(
+            const
+            for const in main_code.co_consts
+            if isinstance(const, type(main_code))
+            and const.co_name == "handle_command"
+        )
+
+        async def resolve_base_dir(_group=""):
+            return "/repo"
+
+        closure_values = {
+            name: None
+            for name in handle_code.co_freevars
+        }
+        closure_values.update({
+            "_ownership_engineer_id_for_dispatch_source":
+                lambda _cell: "",
+            "_panel_event": lambda *args, **kwargs: None,
+            "_resolve_base_dir": resolve_base_dir,
+            "_runtime_payload": lambda: {},
+            "action_mgr": action_mgr,
+            "handle_command": dispatch_handler,
+            "state": state,
+            "template_mgr": types.SimpleNamespace(
+                resolve_agent_config=lambda *args, **kwargs: {},
+                list_templates=lambda *args, **kwargs: [],
+            ),
+        })
+        closure = tuple(
+            self._make_cell(closure_values[name])
+            for name in handle_code.co_freevars
+        )
+        return types.FunctionType(
+            handle_code,
+            self.server_mod.__dict__,
+            "handle_command",
+            None,
+            closure,
+        )
+
+    def _recording_dispatch(self, state):
+        calls = []
+
+        async def dispatch(payload):
+            calls.append(dict(payload))
+            self.assertEqual(payload["cmd"], "dispatch_task")
+            self.assertTrue(payload.get("create_agent"))
+            self.assertNotIn("agent_id", payload)
+            task = state.board_tasks[payload["id"]]
+            agent_id = f"fresh-reviewer-{len(calls)}"
+            agent = self.state_mod.AgentCell(
+                id=agent_id,
+                name=agent_id,
+                slug=agent_id,
+                group=task.group,
+                cell_type="agent",
+                status="idle",
+                session_id=f"{agent_id}-session",
+                directory="/repo",
+            )
+            state.agents[agent_id] = agent
+            state.groups.setdefault(task.group, []).append(agent_id)
+            task.agent_id = agent_id
+            task.lane = "In Progress"
+            return {
+                "type": "ok",
+                "task_id": task.id,
+                "agent_id": agent_id,
+            }
+
+        return calls, dispatch
 
     async def test_gate_fires_above_threshold_and_auto_derives_review(self):
         state, cell, task = self._state_cell_task()
@@ -241,6 +327,115 @@ class ReviewGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls[0]["action_name"], "feature/review")
         self.assertTrue(calls[0]["_review_gate"])
 
+    async def test_auto_gate_no_transition_derives_review_via_ai_report(self):
+        state, cell, task = self._state_cell_task(
+            action_name="oneshot/no-review-transition",
+        )
+        cell.slug = cell.id
+        cell.status = "running"
+        cell.session_id = "worker-session"
+        cell.current_task_id = task.id
+        cell.worktree_repo_root = "/repo"
+        ancestor = self.state_mod.AgentCell(
+            id="ancestor-1",
+            name="Ancestor",
+            slug="ancestor-1",
+            group="g",
+            cell_type="agent",
+            status="idle",
+            session_id="ancestor-session",
+        )
+        state.agents[ancestor.id] = ancestor
+        state.groups["g"].insert(0, ancestor.id)
+        root = state.board_add_task(
+            "Parent task",
+            "g",
+            lane="In Progress",
+            id="task-root",
+            action_name="feature/review",
+            agent_id=ancestor.id,
+        )
+        task.parent_task_id = root.id
+        task.pipeline_root_id = root.id
+        task.pipeline_depth = 1
+        action_mgr = FakeActionManager(
+            actions={
+                task.action_name: {
+                    "implementation_depth": True,
+                    "review_required_above_loc": 50,
+                },
+                "feature/review": {},
+            },
+            transitions_by_name={
+                task.action_name: [{"action": "feature/follow-up"}],
+            },
+        )
+        worktree_mgr = FakeWorktreeManager(
+            {"files": 1, "insertions": 51, "deletions": 0},
+        )
+        dispatch_calls, dispatch = self._recording_dispatch(state)
+        ai_report = self._extract_handle_command(state, dispatch, action_mgr)
+        prior_live = self.server_mod._prior_live_reviewer_agent_for_chain
+        self.server_mod._prior_live_reviewer_agent_for_chain = (
+            lambda _state, _task: None
+        )
+
+        try:
+            manual = await ai_report({
+                "cmd": "ai_report",
+                "cell_id": cell.id,
+                "action": "derive",
+                "task_id": task.id,
+                "action_name": "feature/review",
+                "message": "Manual review",
+            })
+            self.assertEqual(manual["type"], "error")
+            self.assertIn("cannot transition", manual["message"])
+            self.assertEqual(dispatch_calls, [])
+
+            derive_payloads = []
+            derive_results = []
+
+            async def handle_command(payload):
+                derive_payloads.append(dict(payload))
+                response = await ai_report(payload)
+                derive_results.append(response)
+                return response
+
+            result = await self.server_mod._maybe_apply_review_required_gate(
+                state,
+                action_mgr,
+                worktree_mgr,
+                handle_command,
+                lambda *args, **kwargs: None,
+                cell=cell,
+                task=task,
+            )
+        finally:
+            self.server_mod._prior_live_reviewer_agent_for_chain = prior_live
+
+        self.assertEqual(result["type"], "error")
+        self.assertIn("auto-derived at", result["message"])
+        self.assertEqual(derive_payloads[0]["cmd"], "ai_report")
+        self.assertEqual(derive_payloads[0]["action"], "derive")
+        self.assertEqual(derive_payloads[0]["action_name"], "feature/review")
+        self.assertTrue(derive_payloads[0]["_review_gate"])
+
+        self.assertEqual(derive_results[0]["type"], "ok")
+        review_task = state.board_tasks[derive_results[0]["task_id"]]
+        self.assertEqual(review_task.action_name, "feature/review")
+        self.assertEqual(task.status, "On Review")
+        self.assertEqual(root.status, "On Review")
+
+        dispatch_payload = dispatch_calls[0]
+        self.assertTrue(dispatch_payload.get("create_agent"))
+        self.assertNotIn("agent_id", dispatch_payload)
+        self.assertEqual(dispatch_payload["id"], review_task.id)
+        reviewer_id = derive_results[0]["agent_id"]
+        self.assertEqual(review_task.agent_id, reviewer_id)
+        self.assertNotIn(reviewer_id, {cell.id, ancestor.id})
+        self.assertTrue(worktree_mgr.non_test_only)
+
     async def test_gate_skips_when_implementation_depth_false(self):
         state, cell, task = self._state_cell_task(action_name="feature/research")
         action_mgr = FakeActionManager(
@@ -287,7 +482,7 @@ class ReviewGateTests(unittest.IsolatedAsyncioTestCase):
                     action_name=action_name,
                 )
                 worktree_mgr = FakeWorktreeManager(
-                    {"files": 1, "insertions": 151, "deletions": 0},
+                    {"files": 1, "insertions": 251, "deletions": 0},
                 )
                 calls = []
 
