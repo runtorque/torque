@@ -12,6 +12,7 @@ let _embeddedTerminalDropHandlers = null;
 let _embeddedTerminalDropDepth = 0;
 let _terminalComposeDrafts = Object.create(null);
 let _terminalComposeErrors = Object.create(null);
+let _lastAppliedXtermScrollback = null;
 
 var TERMINAL_COMPOSE_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
 var TERMINAL_COMPOSE_ATTACHMENT_MIME_TYPES = {
@@ -44,6 +45,7 @@ function _currentXtermScrollback() {
 
 function _applyEmbeddedTerminalScrollbackFromSettings() {
   const scrollback = _currentXtermScrollback();
+  if (_lastAppliedXtermScrollback === scrollback) return;
   let applied = false;
   for (const key in _embeddedTerminalSessions) {
     const entry = _embeddedTerminalSessions[key];
@@ -55,6 +57,7 @@ function _applyEmbeddedTerminalScrollbackFromSettings() {
   if (!applied && _embeddedTerminal && _embeddedTerminal.options) {
     _embeddedTerminal.options.scrollback = scrollback;
   }
+  _lastAppliedXtermScrollback = scrollback;
 }
 
 function isEmbeddedTerminalMode() {
@@ -484,7 +487,7 @@ function _restoreTerminalWorkspaceState(root, snapshot, cell) {
 function _renderTerminalCompose(root, cell) {
   if (!root) return;
   if (!cell || !cell.session_id) {
-    root.innerHTML = '';
+    if (root.innerHTML !== '') root.innerHTML = '';
     return;
   }
   const cellId = String(cell.id || '');
@@ -497,12 +500,42 @@ function _renderTerminalCompose(root, cell) {
     ? _terminalComposeErrors[cellId]
     : '';
   const disabled = !String(draft || '').trim();
+  const placeholder = 'Send a message to ' + (cell.name || 'terminal') + '\u2026';
+
+  // Idempotent path: if the form already exists for this cell, update only
+  // the dynamic bits (placeholder, error, button disabled, draft value if it
+  // drifted) without clobbering the textarea \u2014 clobbering destroys focus and
+  // produces the LOOM:264 textbox-border flicker under multi-agent activity.
+  const existingForm = root.querySelector ? root.querySelector('.terminal-compose') : null;
+  const existingCellId = existingForm && existingForm.dataset
+    ? String(existingForm.dataset.cellId || '')
+    : '';
+  if (existingForm && existingCellId === cellId) {
+    const input = _terminalComposeTextarea(root);
+    if (input) {
+      if (input.placeholder !== placeholder) input.placeholder = placeholder;
+      if (input.value !== draft) input.value = draft;
+      _terminalComposeAutoResize(input);
+      _terminalComposeSetButtonState(input);
+    }
+    const errorEl = existingForm.querySelector
+      ? existingForm.querySelector('.terminal-compose-error')
+      : null;
+    if (errorEl && errorEl.textContent !== error) errorEl.textContent = error;
+    const button = _terminalComposeButtonFor(input, cellId);
+    if (button) {
+      const shouldDisable = !!disabled;
+      if (button.disabled !== shouldDisable) button.disabled = shouldDisable;
+    }
+    return;
+  }
+
   root.innerHTML = ''
     + '<form class="terminal-compose" data-cell-id="' + esc(cellId) + '" onsubmit="return terminalComposeSubmit(event, \'' + esc(cellId) + '\')">'
     + '  <div class="terminal-compose-input-wrap">'
     + '  <textarea id="' + esc(inputId) + '" class="terminal-compose-input" rows="1"'
     + ' data-cell-id="' + esc(cellId) + '"'
-    + ' placeholder="Send a message to ' + esc(cell.name || 'terminal') + '\u2026"'
+    + ' placeholder="' + esc(placeholder) + '"'
     + ' oninput="terminalComposeInput(this)"'
     + ' onkeydown="terminalComposeKeydown(event, \'' + esc(cellId) + '\')"'
     + ' ondragenter="terminalComposeDragenter(event, \'' + esc(cellId) + '\')"'
@@ -1136,7 +1169,12 @@ function renderTerminalWorkspace() {
   const dom = _ensureTerminalWorkspaceDom(root);
   const workspaceState = _captureTerminalWorkspaceState(root, cell);
   const title = cell && cell.name ? cell.name : 'Terminal';
-  dom.topbar.innerHTML = ''
+  // Idempotent topbar/tabs: skip the innerHTML clobber when the rendered
+  // HTML hasn't changed. Under multi-agent activity `renderTerminalWorkspace`
+  // is called on every grid render (LOOM:264 firehose) — without this guard
+  // we rewrite the topbar + tabs DOM dozens of times per second even though
+  // nothing visible changed.
+  const topbarHtml = ''
     + '<div class="terminal-topbar-left">'
     + '  <span class="terminal-title">' + esc(title) + '</span>'
     + '  <span class="terminal-group-pill">' + esc(groupLabel || 'Standalone') + '</span>'
@@ -1146,12 +1184,20 @@ function renderTerminalWorkspace() {
       ? '  <button class="terminal-topbar-btn terminal-topbar-btn-primary" onclick="' + topbarAction.onclick + '">' + topbarAction.label + '</button>'
       : '')
     + '</div>';
+  if (dom.topbar._loomLastHtml !== topbarHtml) {
+    dom.topbar.innerHTML = topbarHtml;
+    dom.topbar._loomLastHtml = topbarHtml;
+  }
   dom.tabs.classList.toggle('terminal-tabs-hidden', !showTabs);
-  dom.tabs.innerHTML = showTabs ? _renderTerminalTabs(cells, cell ? cell.id : '') : '';
+  const tabsHtml = showTabs ? _renderTerminalTabs(cells, cell ? cell.id : '') : '';
+  if (dom.tabs._loomLastHtml !== tabsHtml) {
+    dom.tabs.innerHTML = tabsHtml;
+    dom.tabs._loomLastHtml = tabsHtml;
+  }
 
   if (!cell) {
     _renderTerminalCompose(dom.compose, null);
-    dom.stage.innerHTML = ''
+    const emptyHtml = ''
       + '<div class="terminal-empty">'
       + '  <div class="terminal-empty-title">Open a shell</div>'
       + '  <div class="terminal-empty-body">Start a standalone terminal for this workspace and Loom will drop you into it ready to type.</div>'
@@ -1160,7 +1206,13 @@ function renderTerminalWorkspace() {
         : '')
       + '  <div class="terminal-empty-meta">The terminal will take focus automatically when it opens.</div>'
       + '</div>';
-    dom.statusbar.textContent = 'Standalone PTY workspace';
+    if (dom.stage._loomLastHtml !== emptyHtml) {
+      dom.stage.innerHTML = emptyHtml;
+      dom.stage._loomLastHtml = emptyHtml;
+    }
+    if (dom.statusbar.textContent !== 'Standalone PTY workspace') {
+      dom.statusbar.textContent = 'Standalone PTY workspace';
+    }
     _deactivateEmbeddedTerminalWorkspace();
     _restoreTerminalWorkspaceState(root, workspaceState, null);
     return;
@@ -1169,14 +1221,21 @@ function renderTerminalWorkspace() {
   const sessionKey = cell.id + ':' + (cell.session_id || '');
   if (!cell.session_id) {
     _renderTerminalCompose(dom.compose, null);
-    dom.stage.innerHTML = ''
+    const stoppedHtml = ''
       + '<div class="terminal-empty">'
       + '  <div class="terminal-empty-title">' + esc(cell.name) + ' is stopped</div>'
       + '  <div class="terminal-empty-body">Relaunch this session to put it back in the workspace and return keyboard focus to the shell.</div>'
       + '  <button class="terminal-empty-btn" onclick="relaunchAgent(\'' + esc(cell.id) + '\')">Relaunch</button>'
       + '  <div class="terminal-empty-meta">When it comes back, Loom will focus the terminal automatically.</div>'
       + '</div>';
-    dom.statusbar.textContent = _terminalStatusLabel(cell);
+    if (dom.stage._loomLastHtml !== stoppedHtml) {
+      dom.stage.innerHTML = stoppedHtml;
+      dom.stage._loomLastHtml = stoppedHtml;
+    }
+    const statusLabel = _terminalStatusLabel(cell);
+    if (dom.statusbar.textContent !== statusLabel) {
+      dom.statusbar.textContent = statusLabel;
+    }
     _disposeEmbeddedTerminalEntriesForCell(cell.id, '');
     _deactivateEmbeddedTerminalWorkspace();
     _restoreTerminalWorkspaceState(root, workspaceState, cell);
@@ -1192,9 +1251,16 @@ function renderTerminalWorkspace() {
     _applyEmbeddedTerminalScrollbackFromSettings();
   }
   _activateEmbeddedTerminalSurface(dom.stage, sessionKey);
+  // The active branch attaches/toggles xterm surfaces directly on the stage
+  // rather than rewriting `dom.stage.innerHTML`. Invalidate the empty/stopped
+  // HTML cache so the next transition back to a no-cell / stopped-cell state
+  // re-renders the empty placeholder.
+  dom.stage._loomLastHtml = null;
 
   _renderTerminalCompose(dom.compose, cell);
-  dom.statusbar.textContent = (displayPath || 'No directory') + '  |  ' + _terminalStatusLabel(cell);
-  dom.statusbar.title = cell.current_path || cell.directory || '';
+  const statusText = (displayPath || 'No directory') + '  |  ' + _terminalStatusLabel(cell);
+  if (dom.statusbar.textContent !== statusText) dom.statusbar.textContent = statusText;
+  const statusTitle = cell.current_path || cell.directory || '';
+  if (dom.statusbar.title !== statusTitle) dom.statusbar.title = statusTitle;
   _restoreTerminalWorkspaceState(root, workspaceState, cell);
 }
