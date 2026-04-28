@@ -5473,7 +5473,7 @@ test('renderBoard surfaces a stale completed-task archive suggestion on the Done
 test('renderBoard Done lane limit counts expanded descendants as rendered cards', () => {
   const { context, document } = createBoardHarness({ stubCards: false });
   const panel = document.register('panel-board');
-  document.register('board-cards');
+  const cards = document.register('board-cards');
   document.register('board-lane-tabs');
 
   context.state.board_lanes = ['Done'];
@@ -5502,7 +5502,7 @@ test('renderBoard Done lane limit counts expanded descendants as rendered cards'
 
   runInContext(context, `
     _boardSelectedLane = 'Done';
-    _boardRenderLimit = 50;
+    _boardDoneRenderLimit = 50;
   `);
 
   context.renderBoard();
@@ -5511,11 +5511,11 @@ test('renderBoard Done lane limit counts expanded descendants as rendered cards'
   assert.match(panel.innerHTML, /11 more cards/);
   assert.doesNotMatch(panel.innerHTML, /child-50/);
 
-  context.boardLoadMore();
+  context.boardLoadMore('Done');
 
-  assert.equal(runInContext(context, '_boardRenderLimit'), 100);
-  assert.equal(boardCardDivCount(panel.innerHTML), 61);
-  assert.doesNotMatch(panel.innerHTML, /board-load-more/);
+  assert.equal(runInContext(context, '_boardDoneRenderLimit'), 61);
+  assert.equal(boardCardDivCount(cards.innerHTML), 61);
+  assert.doesNotMatch(cards.innerHTML, /board-load-more/);
 });
 
 test('renderBoard counts collapsed pipeline roots as one virtualized card', () => {
@@ -5542,7 +5542,7 @@ test('renderBoard counts collapsed pipeline roots as one virtualized card', () =
 
   runInContext(context, `
     _boardSelectedLane = 'Done';
-    _boardRenderLimit = 2;
+    _boardDoneRenderLimit = 2;
     _boardCollapsedTasks = { rootA: true };
   `);
 
@@ -5553,6 +5553,58 @@ test('renderBoard counts collapsed pipeline roots as one virtualized card', () =
   assert.match(panel.innerHTML, /rootB/);
   assert.doesNotMatch(panel.innerHTML, /childA/);
   assert.match(panel.innerHTML, /1 more card/);
+});
+
+test('renderBoard lazy loads Done lane in 30-card batches without full panel rebuild', () => {
+  const { context, document } = createBoardHarness({ stubCards: false });
+  const panel = document.register('panel-board');
+  const cards = document.register('board-cards');
+  document.register('board-lane-tabs');
+
+  context.state.board_lanes = ['Done'];
+  context.state.board_tasks = {};
+  for (let i = 0; i < 200; i++) {
+    const id = `done-${String(i).padStart(3, '0')}`;
+    context.state.board_tasks[id] = {
+      id,
+      group: 'alpha',
+      task: `Done task ${i}`,
+      lane: 'Done',
+      lane_entered_at: `2026-04-${String(28 - Math.floor(i / 24)).padStart(2, '0')}T${String(23 - (i % 24)).padStart(2, '0')}:00:00Z`,
+      position: i,
+    };
+  }
+
+  runInContext(context, `
+    _boardSelectedLane = 'Done';
+    _boardRenderLimit = 500;
+    _boardDoneRenderLimit = _boardDoneInitialRenderLimit;
+    var renderBoardCalls = 0;
+    var originalRenderBoard = renderBoard;
+    renderBoard = function() {
+      renderBoardCalls++;
+      return originalRenderBoard();
+    };
+  `);
+
+  context.renderBoard();
+
+  assert.equal(runInContext(context, 'renderBoardCalls'), 1);
+  assert.equal(boardCardDivCount(panel.innerHTML), 30);
+  assert.match(panel.innerHTML, /done-000/);
+  assert.doesNotMatch(panel.innerHTML, /done-030/);
+  assert.match(panel.innerHTML, /170 more cards/);
+  const panelHtml = panel.innerHTML;
+
+  context.boardLoadMore('Done');
+
+  assert.equal(runInContext(context, 'renderBoardCalls'), 1);
+  assert.equal(panel.innerHTML, panelHtml);
+  assert.equal(runInContext(context, '_boardDoneRenderLimit'), 60);
+  assert.equal(boardCardDivCount(cards.innerHTML), 60);
+  assert.match(cards.innerHTML, /done-059/);
+  assert.doesNotMatch(cards.innerHTML, /done-060/);
+  assert.match(cards.innerHTML, /140 more cards/);
 });
 
 test('renderBoard derives board task maps once per render', () => {
@@ -5814,7 +5866,7 @@ test('wide Done lane cache skips card rerender for offscreen task deltas', () =>
   `);
 
   context.renderBoard();
-  assert.equal(runInContext(context, 'cardRenderCalls'), 51);
+  assert.equal(runInContext(context, 'cardRenderCalls'), 31);
 
   const doneBody = new FakeElement();
   doneBody.dataset = { lane: 'Done' };

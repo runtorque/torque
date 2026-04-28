@@ -633,19 +633,34 @@ function _renderBoardArchiveSuggestion(lane, model) {
 /* ---- Card rendering ------------------------------------------------- */
 
 function _renderBoardCard(t, childrenOf, depth, renderState) {
-  if (renderState) {
-    if (renderState.remaining <= 0) {
-      renderState.limitHit = true;
-      return '';
-    }
-    renderState.remaining--;
-    renderState.rendered++;
-  }
   var isSubordinate = depth > 0;
   var indentLevel = _boardCardIndentLevel(depth);
   var hasChildren = childrenOf[t.id] && childrenOf[t.id].length > 0;
   var showExecutionState = isSubordinate || !hasChildren;
   var isCollapsed = _boardCollapsedTasks[t.id];
+  if (renderState) {
+    if (renderState.remaining <= 0) {
+      renderState.limitHit = true;
+      return '';
+    }
+    if (renderState.skip && renderState.skip > 0) {
+      renderState.skip--;
+      var skippedChildHtml = '';
+      if (hasChildren && !isCollapsed) {
+        var skippedChildren = childrenOf[t.id];
+        for (var si = 0; si < skippedChildren.length; si++) {
+          if (renderState.remaining <= 0) {
+            renderState.limitHit = true;
+            break;
+          }
+          skippedChildHtml += _renderBoardCard(skippedChildren[si], childrenOf, depth + 1, renderState);
+        }
+      }
+      return skippedChildHtml;
+    }
+    renderState.remaining--;
+    renderState.rendered++;
+  }
   var isDone = t.lane === 'Done';
   var dotClass = t.agent_id ? _boardAgentStatus(t.agent_id) : '';
   var focused = t.id === _boardFocusedTask ? ' focused' : '';
