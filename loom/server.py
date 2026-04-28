@@ -1674,6 +1674,13 @@ def _reject_mandatory_review_done_without_ship(
         return None
     if agent_kind_for_identity(cell) != "worker":
         return None
+    # Reviewer-issued pre-approval bypass (LOOM:256) — when the parent
+    # review derived this task via a ``pre_approved: true`` transition,
+    # the structural flag overrides this heuristic gate too. Workers
+    # cannot self-grant the bypass; ``pre_approved_by`` is set only by
+    # ``ai_report.derive`` when the chosen transition carries the flag.
+    if str(getattr(task, "pre_approved_by", "") or "").strip():
+        return None
 
     action_name = str(getattr(task, "action_name", "") or "").strip()
     if not _action_requires_mandatory_feature_review(
@@ -1739,6 +1746,11 @@ async def _maybe_apply_review_required_gate(
     so the caller can proceed with the normal closeout path.
     """
     if not state or not cell or not task or not task.action_name:
+        return None
+    # Reviewer-issued pre-approval bypass (LOOM:256) — a derived fix
+    # task carrying ``pre_approved_by`` skips the LOC gate too, since the
+    # reviewer already determined the change ships without re-review.
+    if str(getattr(task, "pre_approved_by", "") or "").strip():
         return None
 
     act = action_mgr.load_action(task.action_name, base_dir)

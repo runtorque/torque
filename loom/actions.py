@@ -737,7 +737,7 @@ class ActionManager:
         a non-empty ``pre_approved_by`` set by a reviewer.
         """
         for tr in self.get_transitions(action_name, base_dir):
-            if tr.get("required"):
+            if isinstance(tr, dict) and tr.get("required"):
                 return True
         return False
 
@@ -749,7 +749,7 @@ class ActionManager:
         if not target_action:
             return None
         for tr in self.get_transitions(action_name, base_dir):
-            if tr.get("action") == target_action:
+            if isinstance(tr, dict) and tr.get("action") == target_action:
                 return tr
         return None
 

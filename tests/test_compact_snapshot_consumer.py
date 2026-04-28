@@ -59,6 +59,8 @@ COMPACT_CARD_FIELDS = {
     "resume_after_boundary_task_id",
     "deliverable_required",
     "deliverable_type",
+    "requires_review",
+    "pre_approved_by",
 }
 
 HEAVY_TASK_FIELDS = {
