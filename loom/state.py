@@ -215,6 +215,8 @@ COMPACT_BOARD_TASK_FIELDS = (
     "resume_after_boundary_task_id",
     "deliverable_required",
     "deliverable_type",
+    "requires_review",
+    "pre_approved_by",
 )
 
 
@@ -622,6 +624,13 @@ class BoardTask:
     deliverable_type: str = ""           # advisory: report | plan | inventory | ...
     deliverable_format: str = ""         # advisory: markdown | json | yaml | ...
     deliverable_artifact_title: str = ""  # default upload title for the worker
+    # Mandatory-review contract (LOOM:256). When ``requires_review`` is true,
+    # ``loom_done`` / ``loom_ready`` refuse until the worker either derives the
+    # required transition (e.g. ``feature/review``) OR carries a non-empty
+    # ``pre_approved_by`` set by a reviewer-issued ``pre_approved: true``
+    # transition. Workers cannot self-grant the bypass.
+    requires_review: bool = False
+    pre_approved_by: str = ""
 
 
 @dataclass

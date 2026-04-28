@@ -58,6 +58,8 @@ _BOARD_TASK_COLUMNS = (
     "deliverable_type",
     "deliverable_format",
     "deliverable_artifact_title",
+    "requires_review",
+    "pre_approved_by",
 )
 
 _BOARD_TASK_INSERT_SQL = """
@@ -144,6 +146,8 @@ def _serialize_board_task(task):
         d.get("deliverable_type", "") or "",
         d.get("deliverable_format", "") or "",
         d.get("deliverable_artifact_title", "") or "",
+        1 if d.get("requires_review", False) else 0,
+        d.get("pre_approved_by", "") or "",
     )
 
 
@@ -179,6 +183,8 @@ def decode_board_task_row(row, cols):
     )
     if "deliverable_required" in d:
         d["deliverable_required"] = bool(d["deliverable_required"])
+    if "requires_review" in d:
+        d["requires_review"] = bool(d["requires_review"])
     return d
 
 
