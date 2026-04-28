@@ -2163,6 +2163,54 @@ test('renderBoard uses a wide multi-lane layout only for embedded wide panels', 
   assert.doesNotMatch(panel.innerHTML, /board-wide-grid/);
 });
 
+test('wide embedded board lanes can be collapsed and persist locally', () => {
+  const { context, document } = createBoardHarness();
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+
+  context.state.board_lanes = ['Backlog', 'To Do', 'In Progress', 'Done'];
+  context.state.board_tasks = {
+    backlog: { id: 'backlog', group: 'alpha', task: 'Backlog card', lane: 'Backlog', position: 4 },
+    done: { id: 'done', group: 'alpha', task: 'Completed card', lane: 'Done', position: 1 },
+  };
+  runInContext(context, `_boardSelectedLane = 'Backlog';`);
+
+  document.body.classList.add('runtime-embedded');
+  panel.clientWidth = 1200;
+  context.renderBoard();
+
+  assert.match(panel.innerHTML, /board-wide-grid/);
+  assert.match(panel.innerHTML, /<div class="board-card">done<\/div>/);
+  assert.doesNotMatch(panel.innerHTML, /board-wide-lane-collapsed" data-lane="Done"/);
+
+  context.boardToggleWideLane({
+    preventDefault() {},
+    stopPropagation() {},
+  }, 'Done');
+
+  assert.match(panel.innerHTML, /board-wide-lane-collapsed" data-lane="Done"/);
+  assert.match(panel.innerHTML, /grid-template-columns:minmax\(220px, 1fr\) minmax\(220px, 1fr\) minmax\(220px, 1fr\) 32px/);
+  assert.match(panel.innerHTML, /Show Done lane/);
+  assert.doesNotMatch(panel.innerHTML, /<div class="board-card">done<\/div>/);
+  assert.deepEqual(
+    JSON.parse(context.localStorage.getItem('loom.board.hidden_wide_lanes_by_group')),
+    { alpha: { Done: true } },
+  );
+
+  runInContext(context, `_boardHiddenWideLanesByGroup = null;`);
+  context.renderBoard();
+  assert.match(panel.innerHTML, /board-wide-lane-collapsed" data-lane="Done"/);
+
+  context.boardToggleWideLane(null, 'Done');
+  assert.match(panel.innerHTML, /<div class="board-card">done<\/div>/);
+  assert.equal(context.localStorage.getItem('loom.board.hidden_wide_lanes_by_group'), null);
+
+  panel.clientWidth = 820;
+  context.boardToggleWideLane(null, 'Backlog');
+  assert.doesNotMatch(panel.innerHTML, /board-wide-grid/);
+  assert.match(panel.innerHTML, /class="board-lane-tab board-lane-drop-target/);
+});
+
 test('renderBoard places recent, view, and schedules in the top toolbar for wide embedded layout', () => {
   const { context, document } = createBoardHarness();
   const panel = document.register('panel-board');

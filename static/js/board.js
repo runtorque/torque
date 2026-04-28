@@ -40,6 +40,7 @@ var _boardFiltersByGroup = null; // persisted filter state keyed by group
 var _boardSavedViewsByGroup = null; // saved view snapshots keyed by group
 var _boardLaneSortsByGroup = null; // persisted lane sort modes keyed by group
 var _boardCardDensityByGroup = null; // persisted card density keyed by group
+var _boardHiddenWideLanesByGroup = null; // local wide-layout lane collapse state keyed by group
 var _boardFilterStateGroup = '';
 var _boardShowSchedules = false; // true when "Schedules" tab is active
 var _boardShowArchived = false;  // include archived tasks in the active board view
@@ -695,6 +696,9 @@ function _boardRenderShellKey(lanes, wideShell, wideLayout) {
     show_schedules: !!_boardShowSchedules,
     wide_shell: !!wideShell,
     wide_layout: !!wideLayout,
+    hidden_wide_lanes: (typeof _boardHiddenWideLanesSignature === 'function')
+      ? _boardHiddenWideLanesSignature()
+      : [],
     search_query: _boardSearchQuery || '',
     quick_view: _boardQuickView || '',
     filter_labels: _boardSortedCopy(_boardFilterLabels),
@@ -1054,6 +1058,14 @@ function _boardPatchAllLaneCounts(panel, lanes, model) {
 }
 
 function _boardPatchWideLaneBody(panel, lane, model, filtersActive) {
+  if (typeof _boardIsWideLaneCollapsed === 'function' && _boardIsWideLaneCollapsed(lane)) {
+    _boardPatchLaneCountDom(panel, lane, _boardLaneCount(lane, model));
+    return {
+      patched: false,
+      rootTasks: [],
+      renderLimit: 0,
+    };
+  }
   var cached = _boardCachedLaneRender(lane, model, filtersActive, true, true);
   if (cached) {
     _boardPatchLaneCountDom(panel, lane, cached.laneCount);
@@ -1578,16 +1590,42 @@ function _boardRenderWideLaneColumn(lane, model, filtersActive) {
   var escLane = esc(lane).replace(/'/g, "\\'");
   var laneCount = _boardLaneCount(lane, model);
   var active = lane === _boardSelectedLane;
-  var section = _boardRenderLaneSection(lane, model, filtersActive, true);
-  var bodyHtml = section.html;
-  var html = '<section class="board-wide-lane' + (active ? ' active' : '') + '"'
+  var collapsed = typeof _boardIsWideLaneCollapsed === 'function'
+    && _boardIsWideLaneCollapsed(lane);
+  var section = collapsed
+    ? { html: '', bodyHtml: '', rootTasks: [], renderLimit: 0, renderedCards: 0, totalCards: 0 }
+    : _boardRenderLaneSection(lane, model, filtersActive, true);
+  var bodyHtml = section.html || '';
+  var html = '<section class="board-wide-lane' + (active ? ' active' : '')
+    + (collapsed ? ' board-wide-lane-collapsed' : '') + '"'
     + ' data-lane="' + esc(lane) + '" data-board-lane-column="1">';
   html += '<div class="board-wide-lane-head">';
+  if (collapsed) {
+    html += '<button class="board-wide-lane-collapsed-toggle"'
+      + ' onclick="boardToggleWideLane(event,\'' + escLane + '\')"'
+      + ' title="Show ' + esc(lane) + ' lane"'
+      + ' aria-label="Show ' + esc(lane) + ' lane">'
+      + '<span class="board-wide-lane-name">' + esc(lane) + '</span>'
+      + '<span class="board-wide-lane-count">' + laneCount + '</span>'
+      + '</button>';
+    html += '</div>';
+    html += '</section>';
+    section.bodyHtml = '';
+    section.columnHtml = html;
+    section.html = html;
+    return section;
+  }
+  html += '<div class="board-wide-lane-title-row">';
   html += '<button class="board-wide-lane-select" onclick="boardSelectLane(\'' + escLane + '\')">';
   html += '<span class="board-wide-lane-name">' + esc(lane) + '</span>';
   html += '<span class="board-wide-lane-count">' + laneCount + '</span>';
   if (active) html += '<span class="board-wide-lane-badge">Active</span>';
   html += '</button>';
+  html += '<button class="board-wide-lane-toggle"'
+    + ' onclick="boardToggleWideLane(event,\'' + escLane + '\')"'
+    + ' title="Hide ' + esc(lane) + ' lane"'
+    + ' aria-label="Hide ' + esc(lane) + ' lane">&#9712;</button>';
+  html += '</div>';
   if (filtersActive && active) {
     html += '<div class="board-wide-lane-summary">' + esc(_boardFilterSummaryText()) + '</div>';
   }
@@ -1604,6 +1642,17 @@ function _boardRenderWideLaneColumn(lane, model, filtersActive) {
   section.columnHtml = html;
   section.html = html;
   return section;
+}
+
+function _boardWideGridTemplate(lanes) {
+  var cols = [];
+  for (var i = 0; i < (lanes || []).length; i++) {
+    cols.push((typeof _boardIsWideLaneCollapsed === 'function'
+      && _boardIsWideLaneCollapsed(lanes[i]))
+      ? '32px'
+      : 'minmax(220px, 1fr)');
+  }
+  return cols.join(' ');
 }
 
 /* ---- Render --------------------------------------------------------- */
@@ -1909,8 +1958,11 @@ function renderBoard() {
   if (wideLayout) {
     html += _boardRenderWideAddTaskSection();
   }
+  var wideGridStyle = wideLayout
+    ? ' style="grid-template-columns:' + _boardWideGridTemplate(lanes) + '"'
+    : '';
   html += '<div class="board-cards board-density-' + _boardCardDensityMode()
-    + (wideLayout ? ' board-wide-grid' : '') + '" id="board-cards">';
+    + (wideLayout ? ' board-wide-grid' : '') + '" id="board-cards"' + wideGridStyle + '>';
   if (wideLayout) {
     for (var laneIdx = 0; laneIdx < lanes.length; laneIdx++) {
       var wideSection = _boardRenderWideLaneColumn(

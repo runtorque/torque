@@ -3301,16 +3301,29 @@ body.runtime-embedded #panel-board .board-wide-lane {
   gap: 4px;
   padding-top: 2px;
 }
+.board-wide-lane-title-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .board-wide-lane-select {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex: 1;
   min-width: 0;
   padding: 0;
   background: none;
   border: 0;
   color: inherit;
   text-align: left;
+}
+.board-wide-lane-toggle {
+  width: 22px; height: 22px; flex: 0 0 auto;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border); border-radius: 999px;
+  background: var(--bg-cell); color: var(--text-dim); cursor: pointer;
+}
+.board-wide-lane-toggle:hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--border) 62%);
+  background: var(--bg-hover);
 }
 .board-wide-lane-name {
   font-size: 11px;
@@ -3377,6 +3390,24 @@ body.runtime-embedded #panel-board .board-wide-lane-body {
     linear-gradient(180deg, rgba(255,255,255,.025), transparent 140px),
     color-mix(in srgb, var(--bg-hover) 78%, var(--accent) 22%);
 }
+.runtime-embedded #panel-board .board-wide-lane.board-wide-lane-collapsed { min-width: 32px; gap: 0; }
+.runtime-embedded #panel-board .board-wide-lane.board-wide-lane-collapsed .board-wide-lane-head {
+  position: static; top: auto; height: 100%; padding-top: 0;
+}
+.board-wide-lane-collapsed-toggle {
+  width: 100%; height: 100%; min-height: 160px;
+  display: flex; align-items: center; justify-content: flex-start; gap: 8px;
+  padding: 10px 4px; border: 1px solid var(--border); border-radius: calc(var(--radius) + 2px);
+  background: color-mix(in srgb, var(--bg-hover) 70%, var(--bg-surface) 30%);
+  color: var(--text-dim); cursor: pointer; writing-mode: vertical-rl; text-align: center;
+}
+.board-wide-lane-collapsed-toggle:hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border) 60%);
+  background: var(--bg-hover);
+}
+.board-wide-lane-collapsed-toggle .board-wide-lane-name { color: inherit; }
+.board-wide-lane-collapsed-toggle .board-wide-lane-count { writing-mode: horizontal-tb; }
 .runtime-embedded #panel-board .board-cards.board-wide-grid .board-load-more {
   margin-top: auto;
 }
