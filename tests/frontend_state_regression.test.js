@@ -425,6 +425,10 @@ function createEmbeddedTerminalHarness(overrides = {}) {
       this.writes.push(data);
     }
 
+    writeln(data) {
+      this.writes.push(String(data) + '\r\n');
+    }
+
     reset() {
       this.resetCount += 1;
       this.writes = [];
@@ -7917,7 +7921,7 @@ test('terminal compose oversized image drop is rejected without upload or draft 
   assert.equal(error.textContent, 'too-big.png is larger than 10 MB.');
 });
 
-test('embedded terminal ignores stale websocket output after a relaunch session swap', () => {
+test('embedded terminal rekeys the xterm cache and ignores stale websocket output after a relaunch session swap', () => {
   const { context, sockets, terminals } = createEmbeddedTerminalHarness();
   const firstSurface = new FakeElement('surface-1');
   const secondSurface = new FakeElement('surface-2');
@@ -7929,28 +7933,47 @@ test('embedded terminal ignores stale websocket output after a relaunch session 
     `_connectEmbeddedTerminal({ id: 'term-1', session_id: 'session-old' }, __surface1);`,
   );
   const oldSocket = sockets[0];
+  const currentTerminal = terminals[0];
+  oldSocket.onmessage({
+    data: JSON.stringify({
+      type: 'snapshot',
+      cell_id: 'term-1',
+      session_id: 'session-old',
+      data: 'old scrollback',
+    }),
+  });
 
   runInContext(
     context,
     `_connectEmbeddedTerminal({ id: 'term-1', session_id: 'session-new' }, __surface2);`,
   );
   const currentSocket = sockets[1];
-  const currentTerminal = terminals[1];
 
+  assert.equal(terminals.length, 1);
   assert.equal(oldSocket.closeCalled, true);
   assert.equal(oldSocket.onmessage, null);
+  assert.equal(secondSurface.removed, true);
+  assert.deepEqual(
+    jsonValue(context, 'Object.keys(_embeddedTerminalSessions)'),
+    ['term-1:session-new'],
+  );
+  assert.ok(currentTerminal.writes.some((line) => String(line).includes('Loom session restarted')));
 
   currentSocket.onmessage({
     data: JSON.stringify({
       type: 'snapshot',
       cell_id: 'term-1',
       session_id: 'session-new',
-      data: 'clean prompt',
+      data: '\x1bc\x1b[2J\x1b[3Jclean prompt',
     }),
   });
-  assert.deepEqual(currentTerminal.writes, ['clean prompt']);
+  assert.equal(currentTerminal.resetCount, 1);
+  assert.deepEqual(currentTerminal.writes.map(String).filter((line) => !line.includes('Loom session restarted') && line.trim() !== ''), [
+    'old scrollback',
+    'clean prompt',
+  ]);
 
-  currentSocket.onmessage({
+  oldSocket.onmessage && oldSocket.onmessage({
     data: JSON.stringify({
       type: 'output',
       cell_id: 'term-1',
@@ -7958,7 +7981,10 @@ test('embedded terminal ignores stale websocket output after a relaunch session 
       data: 'autoload -Uz add-zsh-hook',
     }),
   });
-  assert.deepEqual(currentTerminal.writes, ['clean prompt']);
+  assert.deepEqual(currentTerminal.writes.map(String).filter((line) => !line.includes('Loom session restarted') && line.trim() !== ''), [
+    'old scrollback',
+    'clean prompt',
+  ]);
 
   currentSocket.onmessage({
     data: JSON.stringify({
@@ -7968,7 +7994,11 @@ test('embedded terminal ignores stale websocket output after a relaunch session 
       data: '\nready',
     }),
   });
-  assert.deepEqual(currentTerminal.writes, ['clean prompt', '\nready']);
+  assert.deepEqual(currentTerminal.writes.map(String).filter((line) => !line.includes('Loom session restarted') && line.trim() !== ''), [
+    'old scrollback',
+    'clean prompt',
+    '\nready',
+  ]);
 });
 
 test('embedded terminal switch preserves cached xterm scrollback buffers', () => {
@@ -8013,6 +8043,296 @@ test('embedded terminal switch preserves cached xterm scrollback buffers', () =>
   assert.equal(terminals.length, 2);
   assert.equal(terminals[0].options.scrollback, 10000);
   assert.deepEqual(terminals[0].writes, ['a scrollback', '\na hidden output']);
+});
+
+test('embedded terminal stop then relaunch preserves same-cell scrollback buffer', () => {
+  const { context, document, sandbox, sockets, terminals } = createEmbeddedTerminalHarness({
+    loadRenderHelpers: true,
+  });
+  const dom = attachTerminalWorkspaceDom(document);
+  dom.stage._detachChildrenOnInnerHTMLClear = true;
+  sandbox.state.runtime = { embedded_terminal: true };
+  sandbox.state.groups = { alpha: ['term-a'] };
+  sandbox.state.group_settings = { alpha: {} };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'term-a': { id: 'term-a', name: 'A', group: 'alpha', cell_type: 'terminal', session_id: 'sess-old', status: 'running' },
+  };
+
+  runInContext(context, `
+    selectedTerminalId = 'term-a';
+    renderTerminalWorkspace();
+  `);
+  sockets[0].onmessage({
+    data: JSON.stringify({ type: 'snapshot', session_id: 'sess-old', data: 'A_MARK_before_stop' }),
+  });
+
+  sandbox.state.agents['term-a'].session_id = '';
+  sandbox.state.agents['term-a'].status = 'stopped';
+  runInContext(context, `renderTerminalWorkspace();`);
+
+  assert.equal(terminals.length, 1);
+  assert.equal(terminals[0].disposed, undefined);
+  assert.deepEqual(terminals[0].writes, ['A_MARK_before_stop']);
+  assert.equal(dom.stage.children.some((child) => child.classList.contains('terminal-empty')), false);
+  assert.equal(terminals[0].surface.style.display, '');
+
+  sandbox.state.agents['term-a'].session_id = 'sess-new';
+  sandbox.state.agents['term-a'].status = 'running';
+  runInContext(context, `renderTerminalWorkspace();`);
+
+  assert.equal(terminals.length, 1);
+  assert.equal(sockets[0].closeCalled, true);
+  assert.equal(sockets[0].onmessage, null);
+  assert.equal(sockets.length, 2);
+  assert.deepEqual(
+    jsonValue(context, 'Object.keys(_embeddedTerminalSessions)'),
+    ['term-a:sess-new'],
+  );
+  assert.ok(terminals[0].writes.some((line) => String(line).includes('Loom session restarted')));
+
+  sockets[1].onmessage({
+    data: JSON.stringify({ type: 'snapshot', session_id: 'sess-new', data: 'A_MARK_after_relaunch' }),
+  });
+
+  assert.equal(terminals[0].resetCount, 1);
+  assert.deepEqual(terminals[0].writes.map(String).filter((line) => !line.includes('Loom session restarted') && line.trim() !== ''), [
+    'A_MARK_before_stop',
+    'A_MARK_after_relaunch',
+  ]);
+});
+
+test('embedded terminal running agent restart preserves same-cell scrollback buffer', () => {
+  const { context, document, sandbox, sockets, terminals } = createEmbeddedTerminalHarness({
+    loadRenderHelpers: true,
+  });
+  attachTerminalWorkspaceDom(document);
+  sandbox.state.runtime = { embedded_terminal: true };
+  sandbox.state.groups = { alpha: ['agent-a'] };
+  sandbox.state.group_settings = { alpha: {} };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'agent-a': { id: 'agent-a', name: 'Agent A', group: 'alpha', cell_type: 'agent', session_id: 'agent-old', status: 'running' },
+  };
+
+  runInContext(context, `
+    selectedTerminalId = 'agent-a';
+    renderTerminalWorkspace();
+  `);
+  sockets[0].onmessage({
+    data: JSON.stringify({ type: 'snapshot', session_id: 'agent-old', data: 'AGENT_MARK_before_restart' }),
+  });
+
+  sandbox.state.agents['agent-a'].session_id = 'agent-new';
+  runInContext(context, `renderTerminalWorkspace();`);
+
+  assert.equal(terminals.length, 1);
+  assert.equal(terminals[0].disposed, undefined);
+  assert.equal(sockets[0].closeCalled, true);
+  assert.equal(sockets[0].onmessage, null);
+  assert.deepEqual(
+    jsonValue(context, 'Object.keys(_embeddedTerminalSessions)'),
+    ['agent-a:agent-new'],
+  );
+  assert.ok(terminals[0].writes.some((line) => String(line).includes('Loom session restarted')));
+
+  sockets[1].onmessage({
+    data: JSON.stringify({ type: 'snapshot', session_id: 'agent-new', data: 'AGENT_MARK_after_restart' }),
+  });
+  sockets[1].onmessage({
+    data: JSON.stringify({ type: 'output', session_id: 'agent-new', data: '\nAGENT_MARK_live_after_restart' }),
+  });
+
+  assert.equal(terminals[0].resetCount, 1);
+  assert.deepEqual(terminals[0].writes.map(String).filter((line) => !line.includes('Loom session restarted') && line.trim() !== ''), [
+    'AGENT_MARK_before_restart',
+    'AGENT_MARK_after_restart',
+    '\nAGENT_MARK_live_after_restart',
+  ]);
+});
+
+test('embedded terminal stop while viewing another cell preserves stopped cell scrollback cache', () => {
+  const { context, document, sandbox, sockets, terminals } = createEmbeddedTerminalHarness({
+    loadRenderHelpers: true,
+  });
+  const dom = attachTerminalWorkspaceDom(document);
+  dom.stage._detachChildrenOnInnerHTMLClear = true;
+  sandbox.state.runtime = { embedded_terminal: true };
+  sandbox.state.groups = { alpha: ['term-a', 'term-b'] };
+  sandbox.state.group_settings = { alpha: {} };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'term-a': { id: 'term-a', name: 'A', group: 'alpha', cell_type: 'terminal', session_id: 'sess-a', status: 'running' },
+    'term-b': { id: 'term-b', name: 'B', group: 'alpha', cell_type: 'terminal', session_id: 'sess-b', status: 'running' },
+  };
+
+  runInContext(context, `
+    selectedTerminalId = 'term-a';
+    renderTerminalWorkspace();
+  `);
+  sockets[0].onmessage({
+    data: JSON.stringify({ type: 'snapshot', session_id: 'sess-a', data: 'A_MARK_before_stop_elsewhere' }),
+  });
+  runInContext(context, `
+    selectedTerminalId = 'term-b';
+    renderTerminalWorkspace();
+  `);
+  sockets[1].onmessage({
+    data: JSON.stringify({ type: 'snapshot', session_id: 'sess-b', data: 'B_MARK_live' }),
+  });
+
+  sandbox.state.agents['term-a'].session_id = '';
+  sandbox.state.agents['term-a'].status = 'stopped';
+  runInContext(context, `renderTerminalWorkspace();`);
+
+  assert.equal(terminals[0].disposed, undefined);
+  assert.equal(sockets[0].closeCalled, undefined);
+  assert.deepEqual(
+    jsonValue(context, 'Object.keys(_embeddedTerminalSessions).sort()'),
+    ['term-a:sess-a', 'term-b:sess-b'],
+  );
+
+  runInContext(context, `
+    selectedTerminalId = 'term-a';
+    renderTerminalWorkspace();
+  `);
+
+  assert.equal(terminals[0].disposed, undefined);
+  assert.deepEqual(terminals[0].writes, ['A_MARK_before_stop_elsewhere']);
+  assert.equal(dom.stage.children.some((child) => child.classList.contains('terminal-empty')), false);
+  assert.equal(terminals[0].surface.style.display, '');
+});
+
+test('embedded terminal firehose rerenders with stable sessions do not prune cached buffers', () => {
+  const { context, document, sandbox, sockets, terminals } = createEmbeddedTerminalHarness({
+    loadRenderHelpers: true,
+  });
+  attachTerminalWorkspaceDom(document);
+  sandbox.state.runtime = { embedded_terminal: true };
+  sandbox.state.groups = { alpha: ['term-a', 'term-b'] };
+  sandbox.state.group_settings = { alpha: {} };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'term-a': { id: 'term-a', name: 'A', group: 'alpha', cell_type: 'terminal', session_id: 'sess-a', status: 'running' },
+    'term-b': { id: 'term-b', name: 'B', group: 'alpha', cell_type: 'terminal', session_id: 'sess-b', status: 'running' },
+  };
+
+  runInContext(context, `
+    selectedTerminalId = 'term-a';
+    renderTerminalWorkspace();
+  `);
+  sockets[0].onmessage({
+    data: JSON.stringify({ type: 'snapshot', session_id: 'sess-a', data: 'A_MARK_stable' }),
+  });
+  runInContext(context, `
+    selectedTerminalId = 'term-b';
+    renderTerminalWorkspace();
+  `);
+  sockets[1].onmessage({
+    data: JSON.stringify({ type: 'snapshot', session_id: 'sess-b', data: 'B_MARK_stable' }),
+  });
+  const keysBefore = jsonValue(context, 'Object.keys(_embeddedTerminalSessions).sort()');
+
+  for (let i = 0; i < 40; i++) {
+    sandbox.state.agents['term-a'].current_process = 'tick-' + i;
+    sandbox.state.agents['term-b'].last_event_at = i;
+    runInContext(context, `renderTerminalWorkspace();`);
+  }
+
+  assert.equal(terminals.length, 2);
+  assert.equal(terminals[0].disposed, undefined);
+  assert.equal(terminals[1].disposed, undefined);
+  assert.deepEqual(jsonValue(context, 'Object.keys(_embeddedTerminalSessions).sort()'), keysBefore);
+  assert.deepEqual(terminals[0].writes, ['A_MARK_stable']);
+  assert.deepEqual(terminals[1].writes, ['B_MARK_stable']);
+});
+
+test('embedded terminal prunes caches when cells are removed', () => {
+  const { context, document, sandbox, sockets, terminals } = createEmbeddedTerminalHarness({
+    loadRenderHelpers: true,
+  });
+  attachTerminalWorkspaceDom(document);
+  sandbox.state.runtime = { embedded_terminal: true };
+  sandbox.state.groups = { alpha: ['term-a', 'term-b'] };
+  sandbox.state.group_settings = { alpha: {} };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'term-a': { id: 'term-a', name: 'A', group: 'alpha', cell_type: 'terminal', session_id: 'sess-a' },
+    'term-b': { id: 'term-b', name: 'B', group: 'alpha', cell_type: 'terminal', session_id: 'sess-b' },
+  };
+
+  runInContext(context, `
+    selectedTerminalId = 'term-a';
+    renderTerminalWorkspace();
+  `);
+  runInContext(context, `
+    selectedTerminalId = 'term-b';
+    renderTerminalWorkspace();
+  `);
+
+  delete sandbox.state.agents['term-a'];
+  sandbox.state.groups.alpha = ['term-b'];
+  runInContext(context, `renderTerminalWorkspace();`);
+
+  assert.equal(terminals[0].disposed, true);
+  assert.equal(sockets[0].closeCalled, true);
+  assert.equal(terminals[1].disposed, undefined);
+  assert.deepEqual(jsonValue(context, 'Object.keys(_embeddedTerminalSessions)'), ['term-b:sess-b']);
+
+  delete sandbox.state.agents['term-b'];
+  delete sandbox.state.groups.alpha;
+  runInContext(context, `renderTerminalWorkspace();`);
+
+  assert.equal(terminals[1].disposed, true);
+  assert.equal(sockets[1].closeCalled, true);
+  assert.deepEqual(jsonValue(context, 'Object.keys(_embeddedTerminalSessions)'), []);
+});
+
+test('embedded terminal rekey closes old websocket before opening the replacement socket', () => {
+  const events = [];
+  const trackedSockets = [];
+  function TrackingWebSocket(url) {
+    this.url = url;
+    this.readyState = TrackingWebSocket.OPEN;
+    this.sent = [];
+    this.id = trackedSockets.length + 1;
+    events.push('new:' + this.id);
+    trackedSockets.push(this);
+  }
+  TrackingWebSocket.OPEN = 1;
+  TrackingWebSocket.prototype.send = function send(payload) {
+    this.sent.push(JSON.parse(payload));
+  };
+  TrackingWebSocket.prototype.close = function close() {
+    events.push('close:' + this.id);
+    this.closeCalled = true;
+    this.readyState = 3;
+  };
+
+  const { context, terminals } = createEmbeddedTerminalHarness({
+    WebSocket: TrackingWebSocket,
+  });
+  const surface = new FakeElement('surface');
+  context.__surface = surface;
+
+  runInContext(context, `
+    _connectEmbeddedTerminal({ id: 'term-1', session_id: 'old' }, __surface);
+  `);
+  runInContext(context, `
+    _connectEmbeddedTerminal({ id: 'term-1', session_id: 'new' }, __surface);
+  `);
+
+  assert.deepEqual(events, ['new:1', 'close:1', 'new:2']);
+  assert.equal(trackedSockets[0].onopen, null);
+  assert.equal(trackedSockets[0].onmessage, null);
+  assert.equal(trackedSockets[0].onclose, null);
+  assert.equal(trackedSockets[0].onerror, null);
+  assert.equal(trackedSockets[1].closeCalled, undefined);
+  assert.equal(terminals.length, 1);
+  assert.deepEqual(
+    jsonValue(context, 'Object.keys(_embeddedTerminalSessions)'),
+    ['term-1:new'],
+  );
 });
 
 test('embedded terminal clears stale empty placeholder before mounting a running session', () => {
