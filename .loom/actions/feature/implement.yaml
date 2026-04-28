@@ -15,7 +15,7 @@ transitions:
     required: true
     loc_gate:
       ship_direct_max: 50
-      review_default_above: 100
+      review_default_above: 200
       self_review_bypass_allowed: false
     status: "On Review"
 
