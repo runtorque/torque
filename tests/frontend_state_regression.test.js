@@ -3885,6 +3885,79 @@ test('boardCardMenu offers mark verified only for completed tasks awaiting verif
   assert.doesNotMatch(menu.innerHTML, /Mark verified/);
 });
 
+test('boardCardMenu offers archive from any lane and confirms non-Done archives', async () => {
+  const { context, document } = createBoardHarness();
+  const menu = document.register('ctx-menu');
+  context.state.board_lanes = ['Backlog', 'To Do', 'In Progress', 'Done'];
+  context.state.board_tasks = {
+    backlogTask: {
+      id: 'backlogTask',
+      task: 'Stale backlog work',
+      lane: 'Backlog',
+      group: 'alpha',
+    },
+    todoTask: {
+      id: 'todoTask',
+      task: 'Stale queued work',
+      lane: 'To Do',
+      group: 'alpha',
+    },
+    progressTask: {
+      id: 'progressTask',
+      task: 'Stale active work',
+      lane: 'In Progress',
+      group: 'alpha',
+    },
+    doneTask: {
+      id: 'doneTask',
+      task: 'Completed cleanup',
+      lane: 'Done',
+      group: 'alpha',
+    },
+  };
+
+  let confirmResult = false;
+  const confirmCalls = [];
+  context.showConfirm = function(message, opts) {
+    confirmCalls.push({ message, opts });
+    return Promise.resolve(confirmResult);
+  };
+
+  ['backlogTask', 'todoTask', 'progressTask', 'doneTask'].forEach((taskId) => {
+    context.boardCardMenu({
+      preventDefault() {},
+      clientX: 64,
+      clientY: 32,
+    }, taskId);
+    assert.match(menu.innerHTML, /Archive task/);
+  });
+
+  context.boardArchiveTask('backlogTask');
+  await Promise.resolve();
+  assert.equal(confirmCalls.length, 1);
+  assert.equal(confirmCalls[0].message, 'Archive this task in `Backlog`? It will be removed from the board.');
+  assert.equal(confirmCalls[0].opts.label, 'Archive');
+  assert.equal(confirmCalls[0].opts.variant, 'btn-danger');
+  assert.deepEqual(context.sendCalls, []);
+
+  confirmResult = true;
+  context.boardArchiveTask('backlogTask');
+  await Promise.resolve();
+  assert.deepEqual(jsonValue(context, 'sendCalls'), [{
+    cmd: 'board_archive_task',
+    id: 'backlogTask',
+  }]);
+
+  confirmCalls.length = 0;
+  context.boardArchiveTask('doneTask');
+  await Promise.resolve();
+  assert.deepEqual(confirmCalls, []);
+  assert.deepEqual(jsonValue(context, 'sendCalls[1]'), {
+    cmd: 'board_archive_task',
+    id: 'doneTask',
+  });
+});
+
 test('boardMarkTaskVerified uses the verification update flow', () => {
   const { context, document } = createBoardHarness();
   document.register('ctx-menu');

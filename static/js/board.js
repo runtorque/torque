@@ -3013,6 +3013,17 @@ function boardDeleteTask(taskId) {
 
 function boardArchiveTask(taskId) {
   _closeCtxMenu();
+  var task = _boardTasks()[taskId];
+  if (!task) return;
+  if (task.lane !== 'Done') {
+    return showConfirm('Archive this task in `' + (task.lane || 'this lane')
+      + '`? It will be removed from the board.', {
+      label: 'Archive',
+      variant: 'btn-danger',
+    }).then(function(ok) {
+      if (ok) _boardArchiveTaskIds([taskId], true);
+    });
+  }
   _boardArchiveTaskIds([taskId], true);
 }
 
