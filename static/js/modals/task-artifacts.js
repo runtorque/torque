@@ -171,6 +171,194 @@ function _artifactFileUrl(taskId, artifact) {
     + encodeURIComponent(filename);
 }
 
+var _artifactPreviewRegistry = {};
+var _artifactPreviewSequence = 0;
+var _artifactPreviewOverlay = null;
+var _artifactPreviewKeyHandler = null;
+var _artifactPreviewToken = 0;
+
+function _artifactPreviewRegister(taskId, artifact) {
+  var normalized = _artifactNormalizeClient(artifact, _artifactPreviewSequence);
+  normalized.taskId = normalized.taskId || taskId || '';
+  var rawKey = [
+    normalized.taskId || '',
+    normalized.id || '',
+    normalized.filename || '',
+    normalized.path || '',
+    normalized.title || '',
+  ].join('\u001f');
+  if (!rawKey.replace(/\u001f/g, '')) rawKey = 'artifact-preview-' + (++_artifactPreviewSequence);
+  var key = encodeURIComponent(rawKey);
+  if (_artifactPreviewRegistry[key]) key += '-' + (++_artifactPreviewSequence);
+  _artifactPreviewRegistry[key] = {
+    taskId: normalized.taskId || taskId || '',
+    artifact: normalized,
+  };
+  return key;
+}
+
+function _artifactPreviewKind(artifact) {
+  artifact = artifact || {};
+  var mime = String(artifact.mime_type || '').toLowerCase().split(';')[0].trim();
+  var name = String(artifact.filename || artifact.path || artifact.title || '').toLowerCase();
+  var type = String(artifact.type || '').toLowerCase();
+  if (mime.indexOf('image/') === 0 || type === 'image'
+      || /\.(png|jpe?g|gif|webp|svg)$/.test(name)) {
+    return 'image';
+  }
+  if (artifact.content || type === 'snippet' || type === 'log' || type === 'diff'
+      || type === 'test_report' || type === 'generated_doc'
+      || mime.indexOf('text/') === 0 || mime === 'application/json'
+      || mime.indexOf('json') >= 0 || /\.(md|markdown|txt|diff|patch|json|log|csv|ya?ml|xml|html?|js|css)$/.test(name)) {
+    return 'text';
+  }
+  return 'unsupported';
+}
+
+function _artifactPreviewDownloadHtml(url) {
+  if (!url) return '';
+  return '<a class="artifact-preview-download" href="' + esc(url)
+    + '" download>Download</a>';
+}
+
+function _artifactPreviewShellHtml(artifact, bodyHtml, url) {
+  var title = artifact.title || artifact.filename || 'Artifact preview';
+  var meta = [];
+  if (artifact.filename) meta.push(artifact.filename);
+  if (artifact.mime_type) meta.push(artifact.mime_type);
+  var metaHtml = meta.length
+    ? '<div class="artifact-preview-meta">' + esc(meta.join(' · ')) + '</div>'
+    : '';
+  return '<div class="modal modal-tall modal-wide artifact-preview-modal" role="dialog" aria-modal="true">'
+    + '<div class="artifact-preview-head">'
+    + '<div class="artifact-preview-title-wrap">'
+    + '<h2>' + esc(title) + '</h2>'
+    + metaHtml
+    + '</div>'
+    + '<button class="artifact-preview-close" type="button" onclick="closeTaskArtifactPreview()" aria-label="Close">&times;</button>'
+    + '</div>'
+    + '<div class="artifact-preview-body">' + bodyHtml + '</div>'
+    + '<div class="modal-actions">'
+    + _artifactPreviewDownloadHtml(url)
+    + '<button class="btn-cancel" type="button" onclick="closeTaskArtifactPreview()">Close</button>'
+    + '</div>'
+    + '</div>';
+}
+
+function _artifactPreviewRender(artifact, bodyHtml, url, token) {
+  if (token && token !== _artifactPreviewToken) return;
+  if (!_artifactPreviewOverlay) return;
+  _artifactPreviewOverlay.innerHTML = _artifactPreviewShellHtml(artifact, bodyHtml, url);
+}
+
+function closeTaskArtifactPreview() {
+  _artifactPreviewToken++;
+  if (_artifactPreviewKeyHandler) {
+    document.removeEventListener('keydown', _artifactPreviewKeyHandler, true);
+    _artifactPreviewKeyHandler = null;
+  }
+  if (_artifactPreviewOverlay) {
+    _artifactPreviewOverlay.remove();
+    _artifactPreviewOverlay = null;
+  }
+}
+
+function _artifactPreviewCreateOverlay() {
+  closeTaskArtifactPreview();
+  var overlay = document.createElement('div');
+  overlay.id = 'modal-artifact-preview';
+  overlay.className = 'overlay artifact-preview-overlay visible';
+  if (overlay.classList) overlay.classList.add('overlay', 'artifact-preview-overlay', 'visible');
+  overlay.addEventListener('click', function(e) {
+    if (e.target === overlay) closeTaskArtifactPreview();
+  });
+  _artifactPreviewKeyHandler = function(e) {
+    if (e.key !== 'Escape') return;
+    if (e.preventDefault) e.preventDefault();
+    if (e.stopPropagation) e.stopPropagation();
+    closeTaskArtifactPreview();
+  };
+  document.addEventListener('keydown', _artifactPreviewKeyHandler, true);
+  document.body.appendChild(overlay);
+  _artifactPreviewOverlay = overlay;
+  _artifactPreviewToken++;
+  return overlay;
+}
+
+function _artifactPreviewUnsupportedHtml(url) {
+  var download = _artifactPreviewDownloadHtml(url);
+  return '<div class="artifact-preview-unsupported">Unsupported preview type'
+    + (download ? ' — use the download link instead.' : '.')
+    + '</div>';
+}
+
+function _artifactOpenPreview(taskId, artifact) {
+  artifact = _artifactNormalizeClient(artifact || {}, 0);
+  artifact.taskId = artifact.taskId || taskId || '';
+  var url = _artifactFileUrl(taskId, artifact);
+  var kind = _artifactPreviewKind(artifact);
+  _artifactPreviewCreateOverlay();
+  var token = _artifactPreviewToken;
+  if (kind === 'image') {
+    if (!url) {
+      _artifactPreviewRender(artifact, _artifactPreviewUnsupportedHtml(url), url, token);
+      return true;
+    }
+    var imageHtml = '<div class="artifact-preview-image-wrap">'
+      + '<img class="artifact-preview-image" src="' + esc(url) + '" alt="'
+      + esc(artifact.title || artifact.filename || 'artifact image') + '">'
+      + '</div>';
+    _artifactPreviewRender(artifact, imageHtml, url, token);
+    return true;
+  }
+  if (kind === 'text') {
+    var fallbackText = String(artifact.content || artifact.summary || artifact.path || '');
+    var renderText = function(text) {
+      _artifactPreviewRender(
+        artifact,
+        '<pre class="artifact-preview-pre">' + esc(String(text || '')) + '</pre>',
+        url,
+        token
+      );
+    };
+    _artifactPreviewRender(artifact, '<div class="artifact-preview-loading">Loading preview...</div>', url, token);
+    if (url && typeof fetch === 'function') {
+      fetch(url)
+        .then(function(response) {
+          if (!response || !response.ok || typeof response.text !== 'function') {
+            throw new Error('preview fetch failed');
+          }
+          return response.text();
+        })
+        .then(renderText)
+        .catch(function() {
+          if (fallbackText) renderText(fallbackText);
+          else _artifactPreviewRender(
+            artifact,
+            '<div class="artifact-preview-unsupported">Could not load preview.</div>',
+            url,
+            token
+          );
+        });
+    } else {
+      renderText(fallbackText);
+    }
+    return true;
+  }
+  _artifactPreviewRender(artifact, _artifactPreviewUnsupportedHtml(url), url, token);
+  return true;
+}
+
+function openTaskArtifactPreview(previewKey) {
+  var entry = _artifactPreviewRegistry[previewKey];
+  if (!entry) return false;
+  return _artifactOpenPreview(entry.taskId, entry.artifact);
+}
+
+function _artifactHasOpenTarget(taskId, artifact) {
+  return !!(_artifactFileUrl(taskId, artifact) || artifact.content || artifact.summary);
+}
+
 function _artifactMetaHtml(artifact) {
   var bits = [];
   bits.push('<span class="artifact-chip artifact-chip-type">'
@@ -208,9 +396,10 @@ function _renderArtifactCard(artifact, opts) {
   html += '</div>';
   html += '<div class="artifact-card-actions">';
   var url = _artifactFileUrl(taskId, artifact);
-  if (url) {
-    html += '<a class="artifact-card-action" href="' + esc(url)
-      + '" onclick="event.stopPropagation();window.open(this.href);return false">Open</a>';
+  if (_artifactHasOpenTarget(taskId, artifact)) {
+    var previewKey = _artifactPreviewRegister(taskId, artifact);
+    html += '<button type="button" class="artifact-card-action" data-artifact-preview-key="' + esc(previewKey)
+      + '" onclick="event.stopPropagation();openTaskArtifactPreview(this.dataset.artifactPreviewKey)">Open</button>';
   }
   if (opts.onEdit) {
     html += '<button class="artifact-card-action" onclick="' + opts.onEdit + '">Edit</button>';
@@ -639,13 +828,7 @@ function openTaskArtifactById(taskId, artifactId, filename, artifactPath) {
   }
   var artifact = _findTaskArtifact(taskId, artifactId, filename, artifactPath);
   if (!artifact) return false;
-  var url = _artifactFileUrl(taskId, artifact);
-  if (url) {
-    window.open(url);
-    return true;
-  }
-  openTaskArtifactBrowser(taskId);
-  return true;
+  return _artifactOpenPreview(taskId, artifact);
 }
 
 /* -- Task modal: attachment helpers -------------------------------------- */

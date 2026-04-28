@@ -8994,6 +8994,76 @@ test('ws architect decision journal append creates journal bucket and rerenders 
   assert.equal(jsonValue(context, 'renderCalls.engineer'), 0);
 });
 
+test('Architect Journal long entries and pinned checkpoint collapse locally by default', () => {
+  const { context, document } = createEngineerWsHarness();
+  const panel = document.getElementById('panel-agent');
+  const checkpointText = ['checkpoint one', 'checkpoint two', 'checkpoint three', 'checkpoint four', 'checkpoint five', 'checkpoint six'].join('\n');
+  const longText = ['journal one', 'journal two', 'journal three', 'journal four', 'journal five', 'journal six'].join('\n');
+  const shortText = ['short one', 'short two', 'short three', 'short four', 'short five'].join('\n');
+
+  runInContext(context, `
+    state.agents = {
+      'arch-1': {
+        id: 'arch-1',
+        name: 'Architect One',
+        group: 'alpha',
+        kind: 'architect',
+        cell_type: 'agent'
+      }
+    };
+    state.architect_journals = { 'arch-1': [
+      { id: 'checkpoint-1', architect_id: 'arch-1', type: 'checkpoint', entry: ${JSON.stringify(checkpointText)}, timestamp: 1712345700 },
+      { id: 'entry-long', architect_id: 'arch-1', type: 'observation', entry: ${JSON.stringify(longText)}, timestamp: 1712345600 },
+      { id: 'entry-short', architect_id: 'arch-1', type: 'observation', entry: ${JSON.stringify(shortText)}, timestamp: 1712345500 }
+    ] };
+    focusedItemId = 'arch-1';
+    _agentPanelLastSelectedTabByKind.architect = 'journal';
+  `);
+
+  context.renderAgentPanel();
+  const html = panel.innerHTML;
+  assert.match(html, /Current architect state/);
+  assert.match(html, /agent-panel-checkpoint-card agent-panel-journal-collapsible/);
+  assert.match(html, /data-agent-panel-anchor="architect-journal-entry-long"/);
+  assert.match(html, /agent-panel-journal-clipped/);
+  assert.equal((html.match(/agent-panel-journal-toggle/g) || []).length, 3);
+  assert.equal((html.match(/aria-expanded="false"/g) || []).length, 3);
+  assert.match(html, /checkpoint six/);
+  assert.match(html, /journal six/);
+  assert.match(html, /short five/);
+
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  assert.match(css, /\.agent-panel-journal-clipped\s*\{[^}]*max-height:\s*calc\(1\.45em \* 5\);[^}]*overflow:\s*hidden;/);
+
+  const card = new FakeElement('journal-card');
+  card.classList.add('agent-panel-journal-collapsible');
+  const button = new FakeElement('journal-toggle');
+  button.textContent = 'Show more';
+  button.parentNode = card;
+  const event = {
+    prevented: false,
+    stopped: false,
+    preventDefault() { this.prevented = true; },
+    stopPropagation() { this.stopped = true; },
+  };
+  context.__journalToggleButton = button;
+  context.__journalToggleEvent = event;
+  runInContext(context, `
+    renderAgentPanel = function() { throw new Error('unexpected full rerender'); };
+    agentPanelToggleJournalEntry(__journalToggleEvent, __journalToggleButton);
+  `);
+  assert.equal(event.prevented, true);
+  assert.equal(event.stopped, true);
+  assert.equal(card.classList.contains('agent-panel-journal-expanded'), true);
+  assert.equal(button.textContent, 'Show less');
+  assert.equal(button.attributes['aria-expanded'], 'true');
+
+  runInContext(context, `agentPanelToggleJournalEntry(__journalToggleEvent, __journalToggleButton);`);
+  assert.equal(card.classList.contains('agent-panel-journal-expanded'), false);
+  assert.equal(button.textContent, 'Show more');
+  assert.equal(button.attributes['aria-expanded'], 'false');
+});
+
 test('renderAgentPanel preserves Architect Journal scroll anchor when a journal delta inserts above', () => {
   const { context, document } = createEngineerWsHarness();
   const panel = document.getElementById('panel-agent');
@@ -13751,11 +13821,25 @@ test('submitTask includes structured artifacts alongside attachments when editin
   });
 });
 
-test('openTaskArtifactById opens a preserved artifact directly when a file URL is available', () => {
-  const opened = [];
-  const { sandbox } = createSandbox({
-    window: {
-      open(url) { opened.push(url); },
+function artifactPreviewOverlay(document) {
+  return document.body.children.find((child) => child.id === 'modal-artifact-preview') || null;
+}
+
+function flushArtifactPreview() {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+test('openTaskArtifactById previews a text artifact in an in-app popup', async () => {
+  const fetched = [];
+  const { sandbox, document } = createSandbox({
+    fetch(url) {
+      fetched.push(url);
+      return Promise.resolve({
+        ok: true,
+        text() {
+          return Promise.resolve('# Markdown report\nFull artifact contents');
+        },
+      });
     },
   });
   const context = vm.createContext(sandbox);
@@ -13764,27 +13848,58 @@ test('openTaskArtifactById opens a preserved artifact directly when a file URL i
   context.state.board_tasks = {
     'task-1': {
       id: 'task-1',
-      task: 'Review merge diff',
+      task: 'Review markdown artifact',
       artifacts: [{
         id: 'artifact-1',
-        type: 'diff',
-        filename: 'worker-pre-merge.patch',
-        path: '/tmp/worker-pre-merge.patch',
-        storage: { kind: 'path', path: '/tmp/worker-pre-merge.patch', content: '' },
+        type: 'generated_doc',
+        title: 'Markdown report',
+        filename: 'report.md',
+        path: '/tmp/report.md',
+        mime_type: 'text/markdown',
+        storage: { kind: 'path', path: '/tmp/report.md', content: '' },
         prompt: { mode: 'summary' },
       }],
     },
   };
 
+  const html = runInContext(context, `_renderArtifactCard(state.board_tasks["task-1"].artifacts[0], { taskId: 'task-1' })`);
+  assert.match(html, /openTaskArtifactPreview\(this\.dataset\.artifactPreviewKey\)/);
+  assert.doesNotMatch(html, /window\.open/);
+
   assert.equal(runInContext(context, `openTaskArtifactById('task-1', 'artifact-1')`), true);
-  assert.deepEqual(opened, ['/attachments/task-1/worker-pre-merge.patch']);
+  assert.deepEqual(fetched, ['/attachments/task-1/report.md']);
+  await flushArtifactPreview();
+
+  const overlay = artifactPreviewOverlay(document);
+  assert.ok(overlay);
+  assert.match(overlay.innerHTML, /artifact-preview-pre/);
+  assert.match(overlay.innerHTML, /# Markdown report/);
+  assert.match(overlay.innerHTML, /Full artifact contents/);
+
+  const escapeEvent = {
+    key: 'Escape',
+    prevented: false,
+    stopped: false,
+    preventDefault() { this.prevented = true; },
+    stopPropagation() { this.stopped = true; },
+  };
+  document.listeners.keydown(escapeEvent);
+  assert.equal(escapeEvent.prevented, true);
+  assert.equal(escapeEvent.stopped, true);
+  assert.equal(overlay.parentNode, null);
 });
 
-test('openTaskArtifactById prefers filename and path when artifact ids are duplicated', () => {
-  const opened = [];
-  const { sandbox } = createSandbox({
-    window: {
-      open(url) { opened.push(url); },
+test('openTaskArtifactById prefers filename and path when artifact ids are duplicated', async () => {
+  const fetched = [];
+  const { sandbox, document } = createSandbox({
+    fetch(url) {
+      fetched.push(url);
+      return Promise.resolve({
+        ok: true,
+        text() {
+          return Promise.resolve('diff --git a/file b/file');
+        },
+      });
     },
   });
   const context = vm.createContext(sandbox);
@@ -13822,7 +13937,67 @@ test('openTaskArtifactById prefers filename and path when artifact ids are dupli
     ),
     true
   );
-  assert.deepEqual(opened, ['/attachments/boundary/worker-pre-merge.patch']);
+  assert.deepEqual(fetched, ['/attachments/boundary/worker-pre-merge.patch']);
+  await flushArtifactPreview();
+  const overlay = artifactPreviewOverlay(document);
+  assert.ok(overlay);
+  assert.match(overlay.innerHTML, /worker-pre-merge\.patch/);
+  assert.match(overlay.innerHTML, /diff --git/);
+});
+
+test('artifact preview popup renders png and svg images and click-outside closes it', () => {
+  const fetched = [];
+  const { sandbox, document } = createSandbox({
+    fetch(url) {
+      fetched.push(url);
+      return Promise.resolve({ ok: true });
+    },
+  });
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/modals/task-artifacts.js');
+
+  context.state.board_tasks = {
+    'task-images': {
+      id: 'task-images',
+      task: 'Image artifacts',
+      artifacts: [
+        {
+          id: 'png-artifact',
+          type: 'image',
+          filename: 'screenshot.png',
+          path: '/tmp/screenshot.png',
+          mime_type: 'image/png',
+          storage: { kind: 'path', path: '/tmp/screenshot.png', content: '' },
+          prompt: { mode: 'path' },
+        },
+        {
+          id: 'svg-artifact',
+          type: 'image',
+          filename: 'diagram.svg',
+          path: '/tmp/diagram.svg',
+          mime_type: 'image/svg+xml',
+          storage: { kind: 'path', path: '/tmp/diagram.svg', content: '' },
+          prompt: { mode: 'path' },
+        },
+      ],
+    },
+  };
+
+  assert.equal(runInContext(context, `openTaskArtifactById('task-images', 'png-artifact')`), true);
+  let overlay = artifactPreviewOverlay(document);
+  assert.ok(overlay);
+  assert.match(overlay.innerHTML, /artifact-preview-image/);
+  assert.match(overlay.innerHTML, /\/attachments\/task-images\/screenshot\.png/);
+  assert.deepEqual(fetched, []);
+
+  overlay.listeners.click({ target: overlay });
+  assert.equal(overlay.parentNode, null);
+
+  assert.equal(runInContext(context, `openTaskArtifactById('task-images', 'svg-artifact')`), true);
+  overlay = artifactPreviewOverlay(document);
+  assert.ok(overlay);
+  assert.match(overlay.innerHTML, /artifact-preview-image/);
+  assert.match(overlay.innerHTML, /\/attachments\/task-images\/diagram\.svg/);
 });
 
 test('diff review surfaces related task artifacts next to the synthesized diff artifact', () => {

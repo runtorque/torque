@@ -610,17 +610,10 @@
       <details id="gs-engineer-provider-section" class="task-modal-section" open>
         <summary>Provider</summary>
         <div class="task-modal-section-body">
-          <label>Agent</label>
-          <div id="gs-engineer-agent-summary" class="gs-inline-card">
-            <div class="gs-inline-card-main">
-              <div id="gs-engineer-agent-name">No engineer agent</div>
-              <div id="gs-engineer-agent-meta" class="label-hint">No designated Engineer is configured for this group.</div>
-            </div>
-          </div>
           <label class="gs-checkbox">
             <input id="gs-engineer-restrict-to-created-agents" type="checkbox">
-            Only show/manage agents launched by this Engineer
-            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="When enabled, this Engineer can only list, inspect, message, close, relaunch, or use worktree tools on worker agents it originally created. Human operators still see all agents on the board.">?</span>
+            Hide other engineers' workers from this engineer
+            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="When enabled, this engineer only sees and controls worker agents it created itself. Other engineers' workers stay invisible to it. Human operators still see all agents on the board.">?</span>
           </label>
           <label class="gs-checkbox">
             <input id="gs-engineer-can-override-worker-provider" type="checkbox" checked>

@@ -311,7 +311,6 @@ test('group settings modal populates engineer fields and honors engineer tab dee
   assert.equal(ensure('gs-engineer-escalation-style').value, 'keep_moving');
   assert.equal(ensure('gs-wt-merge-cleanup').value, 'close_remove');
   assert.equal(ensure('gs-wt-merge-preserve-diff').checked, true);
-  assert.equal(ensure('gs-engineer-agent-name').textContent, 'Engineer');
   assert.equal(ensure('gs-engineer-provider-section').open, true);
   assert.equal(ensure('gs-engineer-autonomy-section').open, true);
   assert.equal(ensure('gs-engineer-digest-section').open, false);
@@ -493,7 +492,7 @@ test('group settings notification presets rewrite detailed controls before submi
   assert.equal(ensure('gs-engineer-notification-preset').value, 'quiet');
 });
 
-test('group settings describes absent Engineer state without legacy creation copy', () => {
+test('group settings no longer renders the legacy no-engineer placeholder copy', () => {
   const { sandbox, ensure } = createSandbox();
   const context = vm.createContext(sandbox);
   loadModals(context);
@@ -504,8 +503,13 @@ test('group settings describes absent Engineer state without legacy creation cop
     profiles: ["Default"]
   })`, context);
 
-  assert.equal(ensure('gs-engineer-agent-name').textContent, 'No engineer agent');
-  assert.equal(ensure('gs-engineer-agent-meta').textContent, 'No designated Engineer is configured for this group.');
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  const modalJs = fs.readFileSync(path.join(repoRoot, 'static/js/modals.js'), 'utf8');
+  const legacyCopy = new RegExp('No engineer' + ' agent');
+  assert.doesNotMatch(html, legacyCopy);
+  assert.doesNotMatch(modalJs, legacyCopy);
+  assert.match(html, /Hide other engineers' workers from this engineer/);
+  assert.match(html, /Human operators still see all agents on the board/);
   // _showGroupSettings fetches specializations to populate the
   // default-specializations picker; ignore that side request here.
   const callsWithoutSpecFetch = sandbox.sendCalls.filter(

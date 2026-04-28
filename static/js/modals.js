@@ -979,22 +979,6 @@ function _getEngineerEnabledEvents() {
   return events;
 }
 
-function _renderGsEngineerSummary(group, engineer, ws) {
-  const nameEl = document.getElementById('gs-engineer-agent-name');
-  const metaEl = document.getElementById('gs-engineer-agent-meta');
-  if (!nameEl || !metaEl) return;
-  if (engineer) {
-    nameEl.textContent = engineer.name;
-    const parts = [];
-    if (engineer.status) parts.push(engineer.status);
-    if (ws && ws.paused) parts.push('event delivery paused');
-    metaEl.textContent = parts.length ? parts.join(' • ') : 'Engineer agent configured for this group.';
-  } else {
-    nameEl.textContent = 'No engineer agent';
-    metaEl.textContent = 'No designated Engineer is configured for this group.';
-  }
-}
-
 function _setDetailsOpen(id, open) {
   const el = document.getElementById(id);
   if (el) el.open = !!open;
@@ -1336,7 +1320,6 @@ function _showGroupSettings(group, data) {
   );
   _setEngineerEventCheckboxes(ws.enabled_events || []);
   syncGsEngineerNotificationPreset();
-  _renderGsEngineerSummary(group, engineer, ws);
   _resetGsEngineerSections();
 
   /* -- Architect tab -- */
