@@ -575,6 +575,66 @@ function terminalComposeClear(cellId) {
   _terminalComposeSetButtonState(input);
 }
 
+function _terminalComposeActiveSelection(input) {
+  if (!input) return 0;
+  if (input.selectionDirection === 'backward' && typeof input.selectionStart === 'number') {
+    return input.selectionStart;
+  }
+  return typeof input.selectionEnd === 'number' ? input.selectionEnd : 0;
+}
+
+function _terminalComposeSelectionAnchor(input) {
+  if (!input) return 0;
+  if (input.selectionDirection === 'backward' && typeof input.selectionEnd === 'number') {
+    return input.selectionEnd;
+  }
+  return typeof input.selectionStart === 'number' ? input.selectionStart : 0;
+}
+
+function _terminalComposeLineBoundary(value, caret, toEnd) {
+  if (toEnd) {
+    var lineEnd = value.indexOf('\n', caret);
+    return lineEnd >= 0 ? lineEnd : value.length;
+  }
+  var lineStart = value.lastIndexOf('\n', Math.max(caret - 1, 0));
+  return lineStart >= 0 ? lineStart + 1 : 0;
+}
+
+function _terminalComposeSetSelection(input, start, end, direction) {
+  if (!input) return;
+  var valueLength = typeof input.value === 'string' ? input.value.length : 0;
+  start = Math.max(0, Math.min(valueLength, start));
+  end = Math.max(0, Math.min(valueLength, end));
+  if (typeof input.setSelectionRange === 'function') {
+    input.setSelectionRange(start, end, direction || 'none');
+  } else {
+    input.selectionStart = start;
+    input.selectionEnd = end;
+    if ('selectionDirection' in input) input.selectionDirection = direction || 'none';
+  }
+}
+
+function _terminalComposeMoveCaret(input, evt, toEnd, wholeBuffer) {
+  if (!input || typeof input.value !== 'string') return false;
+  var active = _terminalComposeActiveSelection(input);
+  var anchor = _terminalComposeSelectionAnchor(input);
+  var target = wholeBuffer
+    ? (toEnd ? input.value.length : 0)
+    : _terminalComposeLineBoundary(input.value, active, toEnd);
+  if (typeof evt.preventDefault === 'function') evt.preventDefault();
+  if (evt.shiftKey) {
+    _terminalComposeSetSelection(
+      input,
+      Math.min(anchor, target),
+      Math.max(anchor, target),
+      target < anchor ? 'backward' : 'forward'
+    );
+  } else {
+    _terminalComposeSetSelection(input, target, target, 'none');
+  }
+  return true;
+}
+
 function _terminalComposeScrollToBottom(cellId) {
   const id = String(cellId || '');
   for (const key in _embeddedTerminalSessions) {
@@ -609,6 +669,14 @@ function terminalComposeSubmit(evt, cellId) {
 
 function terminalComposeKeydown(evt, cellId) {
   if (!evt) return;
+  if ((evt.key === 'Home' || evt.key === 'End') && !evt.altKey) {
+    const input = evt.target && typeof evt.target.value === 'string'
+      ? evt.target
+      : (document.getElementById ? document.getElementById(_terminalComposeInputId(cellId)) : null);
+    if (_terminalComposeMoveCaret(input, evt, evt.key === 'End', !!(evt.metaKey || evt.ctrlKey))) {
+      return;
+    }
+  }
   if (evt.key === 'Escape') {
     if (typeof evt.preventDefault === 'function') evt.preventDefault();
     if (typeof evt.stopPropagation === 'function') evt.stopPropagation();

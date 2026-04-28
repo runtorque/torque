@@ -7769,6 +7769,130 @@ test('embedded terminal compose submits on Enter, allows Shift+Enter, and clears
   assert.equal(button.disabled, true);
 });
 
+test('embedded terminal compose handles Home/End as textarea caret navigation', () => {
+  const { context, document } = createEmbeddedTerminalHarness();
+  const input = document.register('terminal-compose-input-agent-1');
+  input.classList.add('terminal-compose-input');
+  input.dataset.cellId = 'agent-1';
+  input.value = 'first line\nsecond line\nthird line';
+  const secondLineStart = input.value.indexOf('second');
+  const secondLineEnd = input.value.indexOf('\n', secondLineStart);
+  const midSecondLine = secondLineStart + 3;
+
+  function keyEvent(key, overrides = {}) {
+    return Object.assign({
+      key,
+      target: input,
+      shiftKey: false,
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      preventDefaultCalled: false,
+      preventDefault() { this.preventDefaultCalled = true; },
+      stopPropagationCalled: false,
+      stopPropagation() { this.stopPropagationCalled = true; },
+    }, overrides);
+  }
+
+  input.selectionStart = midSecondLine;
+  input.selectionEnd = midSecondLine;
+  input.selectionDirection = 'none';
+  const homeEvt = keyEvent('Home');
+  context.__homeEvt = homeEvt;
+  runInContext(context, `terminalComposeKeydown(__homeEvt, 'agent-1');`);
+  assert.equal(homeEvt.preventDefaultCalled, true);
+  assert.equal(homeEvt.stopPropagationCalled, false);
+  assert.equal(input.selectionStart, secondLineStart);
+  assert.equal(input.selectionEnd, secondLineStart);
+  assert.equal(input.selectionDirection, 'none');
+
+  input.selectionStart = midSecondLine;
+  input.selectionEnd = midSecondLine;
+  input.selectionDirection = 'none';
+  const endEvt = keyEvent('End');
+  context.__endEvt = endEvt;
+  runInContext(context, `terminalComposeKeydown(__endEvt, 'agent-1');`);
+  assert.equal(endEvt.preventDefaultCalled, true);
+  assert.equal(input.selectionStart, secondLineEnd);
+  assert.equal(input.selectionEnd, secondLineEnd);
+  assert.equal(input.selectionDirection, 'none');
+
+  input.selectionStart = midSecondLine;
+  input.selectionEnd = midSecondLine;
+  input.selectionDirection = 'none';
+  const shiftHomeEvt = keyEvent('Home', { shiftKey: true });
+  context.__shiftHomeEvt = shiftHomeEvt;
+  runInContext(context, `terminalComposeKeydown(__shiftHomeEvt, 'agent-1');`);
+  assert.equal(shiftHomeEvt.preventDefaultCalled, true);
+  assert.equal(input.selectionStart, secondLineStart);
+  assert.equal(input.selectionEnd, midSecondLine);
+  assert.equal(input.selectionDirection, 'backward');
+
+  input.selectionStart = midSecondLine;
+  input.selectionEnd = midSecondLine;
+  input.selectionDirection = 'none';
+  const shiftEndEvt = keyEvent('End', { shiftKey: true });
+  context.__shiftEndEvt = shiftEndEvt;
+  runInContext(context, `terminalComposeKeydown(__shiftEndEvt, 'agent-1');`);
+  assert.equal(shiftEndEvt.preventDefaultCalled, true);
+  assert.equal(input.selectionStart, midSecondLine);
+  assert.equal(input.selectionEnd, secondLineEnd);
+  assert.equal(input.selectionDirection, 'forward');
+});
+
+test('embedded terminal compose handles Cmd/Ctrl+Home/End as buffer navigation', () => {
+  const { context, document } = createEmbeddedTerminalHarness();
+  const input = document.register('terminal-compose-input-agent-1');
+  input.classList.add('terminal-compose-input');
+  input.dataset.cellId = 'agent-1';
+  input.value = 'first line\nsecond line\nthird line';
+  const midBuffer = input.value.indexOf('second') + 3;
+
+  function keyEvent(key, overrides = {}) {
+    return Object.assign({
+      key,
+      target: input,
+      shiftKey: false,
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      preventDefaultCalled: false,
+      preventDefault() { this.preventDefaultCalled = true; },
+    }, overrides);
+  }
+
+  input.selectionStart = midBuffer;
+  input.selectionEnd = midBuffer;
+  input.selectionDirection = 'none';
+  const cmdHomeEvt = keyEvent('Home', { metaKey: true });
+  context.__cmdHomeEvt = cmdHomeEvt;
+  runInContext(context, `terminalComposeKeydown(__cmdHomeEvt, 'agent-1');`);
+  assert.equal(cmdHomeEvt.preventDefaultCalled, true);
+  assert.equal(input.selectionStart, 0);
+  assert.equal(input.selectionEnd, 0);
+
+  input.selectionStart = midBuffer;
+  input.selectionEnd = midBuffer;
+  input.selectionDirection = 'none';
+  const ctrlEndEvt = keyEvent('End', { ctrlKey: true });
+  context.__ctrlEndEvt = ctrlEndEvt;
+  runInContext(context, `terminalComposeKeydown(__ctrlEndEvt, 'agent-1');`);
+  assert.equal(ctrlEndEvt.preventDefaultCalled, true);
+  assert.equal(input.selectionStart, input.value.length);
+  assert.equal(input.selectionEnd, input.value.length);
+
+  input.selectionStart = midBuffer;
+  input.selectionEnd = midBuffer;
+  input.selectionDirection = 'none';
+  const shiftCmdEndEvt = keyEvent('End', { metaKey: true, shiftKey: true });
+  context.__shiftCmdEndEvt = shiftCmdEndEvt;
+  runInContext(context, `terminalComposeKeydown(__shiftCmdEndEvt, 'agent-1');`);
+  assert.equal(shiftCmdEndEvt.preventDefaultCalled, true);
+  assert.equal(input.selectionStart, midBuffer);
+  assert.equal(input.selectionEnd, input.value.length);
+  assert.equal(input.selectionDirection, 'forward');
+});
+
 test('terminal compose validates dropped attachments before upload', () => {
   const { context } = createEmbeddedTerminalHarness();
   context.__files = [
