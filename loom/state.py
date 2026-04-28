@@ -21,7 +21,13 @@ try:
 except ImportError:  # pragma: no cover - dependency is installed by Makefile.
     orjson = None
 
-from .config import DATA_DIR, DEFAULT_COMMAND, log
+from .config import (
+    DATA_DIR,
+    DEFAULT_ARCHITECT_BOOT_NUDGE,
+    DEFAULT_COMMAND,
+    DEFAULT_ENGINEER_BOOT_NUDGE,
+    log,
+)
 from . import profiling
 from .artifacts import normalize_artifacts, normalize_attachments
 from .db import LoomDB
@@ -1247,6 +1253,12 @@ class GlobalSettings:
     event_ingest_max_days: int = 14
     mcp_call_log_args_capture: str = "metadata"  # off | metadata | full
     mcp_call_log_full_capture_tools: list[str] = field(default_factory=list)
+    # Boot nudges — fallback kickoff text used when an architect/engineer
+    # role has no initial_prompt configured. Workers/terminals are
+    # unaffected (they don't receive a default nudge). Empty string disables
+    # the nudge for that kind.
+    architect_default_boot_nudge: str = DEFAULT_ARCHITECT_BOOT_NUDGE
+    engineer_default_boot_nudge: str = DEFAULT_ENGINEER_BOOT_NUDGE
 
     def __post_init__(self):
         self.xterm_scrollback = normalize_xterm_scrollback(

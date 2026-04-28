@@ -8,6 +8,20 @@ from pathlib import Path
 WS_PORT = int(os.environ.get("LOOM_PORT", 18932))
 DEFAULT_COMMAND = os.environ.get("LOOM_DEFAULT_CMD", "claude")
 
+# Default boot nudges for long-running agents whose role config has no
+# initial_prompt. Architects/engineers boot into idle and need a kickoff to
+# run their wake protocol; workers receive their dispatch prompt instead and
+# do not fire these. Configurable via GlobalSettings — these are the
+# code-side defaults.
+DEFAULT_ARCHITECT_BOOT_NUDGE = (
+    "Wake. Run boot protocol — read journal, decisions, engineer list, "
+    "board summary, recent events."
+)
+DEFAULT_ENGINEER_BOOT_NUDGE = (
+    "Wake. Run engineer wake protocol — check assigned tasks, journal, "
+    "worker status."
+)
+
 # Seed knob for the future architect settings surface.  Architects are
 # planning/scoping sessions, so new architects run from the main checkout by
 # default instead of receiving a per-agent git worktree.

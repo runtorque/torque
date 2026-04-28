@@ -86,16 +86,50 @@ def _startup_prompt_for_new_agent(*, agent_type: str = "",
     )
 
 
+def resolve_default_boot_nudge(state, cell) -> str:
+    """Return the configured default boot nudge for an architect/engineer.
+
+    Returns ``""`` for any other kind (worker, terminal, unset), which
+    suppresses the fallback in ``_new_agent_prompt_sequence``. This is the
+    LOOM:263 fix — long-running architect/engineer agents need a kickoff
+    every boot to run their wake protocol, even when their role has no
+    ``initial_prompt`` configured. Workers receive their dispatch prompt
+    via the task-dispatch path and are not nudged on boot.
+    """
+    if not cell or not state:
+        return ""
+    kind = str(getattr(cell, "kind", "") or "").strip()
+    if kind not in ("architect", "engineer"):
+        return ""
+    gs = getattr(state, "global_settings", None)
+    if not gs:
+        return ""
+    if kind == "architect":
+        return str(getattr(gs, "architect_default_boot_nudge", "") or "")
+    return str(getattr(gs, "engineer_default_boot_nudge", "") or "")
+
+
 def _new_agent_prompt_sequence(launch_cfg: dict, *,
                                startup_prompt: str = "",
                                final_prompt: str = "",
-                               cell=None) -> list[tuple[str, dict]]:
-    """Return prompts to send to a brand-new agent in order."""
+                               cell=None,
+                               default_boot_nudge: str = "",
+                               ) -> list[tuple[str, dict]]:
+    """Return prompts to send to a brand-new agent in order.
+
+    When ``launch_cfg["initial_prompt"]`` is empty/whitespace and
+    ``default_boot_nudge`` is provided, the nudge is sent in its place. The
+    caller is responsible for restricting ``default_boot_nudge`` to agent
+    kinds that should actually be nudged (architect/engineer); use
+    :func:`resolve_default_boot_nudge` to derive it from state + cell.
+    """
     prompts = []
     if startup_prompt:
         startup_prompt = prepend_agent_identity_anchor(startup_prompt, cell)
         prompts.append((startup_prompt, {}))
-    initial_prompt = launch_cfg.get("initial_prompt", "")
+    initial_prompt = launch_cfg.get("initial_prompt", "") or ""
+    if not initial_prompt.strip() and default_boot_nudge:
+        initial_prompt = default_boot_nudge
     if initial_prompt:
         initial_prompt = prepend_agent_identity_anchor(initial_prompt, cell)
         prompts.append((initial_prompt, {}))
