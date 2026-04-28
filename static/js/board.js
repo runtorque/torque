@@ -1965,6 +1965,11 @@ function renderBoard() {
         }
       }
     }
+    if (!wideLayout && renderLanes[0] !== _boardSelectedLane) {
+      renderLanes = [_boardSelectedLane];
+      renderModel = _boardBuildRenderModel(renderLanes);
+      _boardEnsureDispatchEligibilityRefs(_currentGroup(), renderModel);
+    }
   }
 
   _boardActivateViewState(_boardCurrentViewKey());

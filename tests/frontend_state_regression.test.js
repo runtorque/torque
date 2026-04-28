@@ -2474,6 +2474,11 @@ test('renderBoard switches to the first lane with matches when filters empty the
   assert.equal(runInContext(context, '_boardSelectedLane'), 'In Progress');
   assert.equal(runInContext(context, `_boardLaneCount('Backlog')`), 0);
   assert.equal(runInContext(context, `_boardLaneCount('In Progress')`), 1);
+  assert.match(
+    document.getElementById('panel-board').innerHTML,
+    /<div class="board-card">progress<\/div>/,
+    'auto-selected lane should render its matching card immediately',
+  );
 });
 
 test('board filters restore per group and persist updates independently', () => {
