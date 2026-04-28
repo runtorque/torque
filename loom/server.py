@@ -134,6 +134,7 @@ from .server_agent import (
     _new_agent_prompt_sequence,
     _startup_prompt_for_new_agent,
     mcp_entrypoint_for_cell,
+    resolve_default_boot_nudge,
     runtime_env_vars_for_cell,
 )
 from .server_dispatch import (
@@ -3857,7 +3858,8 @@ async def _relaunch_agent_after_worktree_removal(
             persistent_prompt_text=persistent_prompt_text,
         )
         for prompt_text, send_kwargs in _new_agent_prompt_sequence(
-                launch_cfg, startup_prompt=startup_prompt, cell=cell):
+                launch_cfg, startup_prompt=startup_prompt, cell=cell,
+                default_boot_nudge=resolve_default_boot_nudge(state, cell)):
             await send_agent_prompt(cell, prompt_text, **send_kwargs)
 
 
@@ -4157,7 +4159,8 @@ async def _handle_add_engineer_command(
         for prompt_text, send_kwargs in _new_agent_prompt_sequence(
                 launch_cfg,
                 startup_prompt=startup_prompt,
-                cell=cell):
+                cell=cell,
+                default_boot_nudge=resolve_default_boot_nudge(state, cell)):
             await send_agent_prompt(cell, prompt_text, **send_kwargs)
     return {
         "id": cell.id,
@@ -4238,7 +4241,8 @@ async def _handle_add_architect_command(
         for prompt_text, send_kwargs in _new_agent_prompt_sequence(
                 launch_cfg,
                 startup_prompt=startup_prompt,
-                cell=cell):
+                cell=cell,
+                default_boot_nudge=resolve_default_boot_nudge(state, cell)):
             await send_agent_prompt(cell, prompt_text, **send_kwargs)
     return {
         "id": cell.id,
@@ -5343,7 +5347,8 @@ async def _handle_relaunch_agent_command(
             persistent_prompt_text=persistent_prompt_text,
         )
         for prompt_text, send_kwargs in _new_agent_prompt_sequence(
-                launch_cfg, startup_prompt=startup_prompt, cell=cell):
+                launch_cfg, startup_prompt=startup_prompt, cell=cell,
+                default_boot_nudge=resolve_default_boot_nudge(state, cell)):
             await send_agent_prompt(cell, prompt_text, **send_kwargs)
     return None
 
@@ -5488,7 +5493,8 @@ async def _handle_restart_agent_command(
         for prompt_text, send_kwargs in _new_agent_prompt_sequence(
                 launch_cfg,
                 startup_prompt=startup_prompt,
-                cell=cell):
+                cell=cell,
+                default_boot_nudge=resolve_default_boot_nudge(state, cell)):
             await send_agent_prompt(cell, prompt_text, **send_kwargs)
     return None
 
@@ -7519,7 +7525,10 @@ async def main(connection=None):
                                     _new_agent_prompt_sequence(
                                         launch_cfg,
                                         startup_prompt=startup_prompt,
-                                        cell=cell):
+                                        cell=cell,
+                                        default_boot_nudge=
+                                        resolve_default_boot_nudge(
+                                            state, cell)):
                                 await _send_agent_prompt(
                                     cell, prompt_text, **send_kwargs)
 

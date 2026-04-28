@@ -251,8 +251,17 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.server_agent_mod.mcp_entrypoint_for_cell(engineer),
             self.server_agent_mod.ENGINEER_MCP_ENTRYPOINT,
         )
-        self.assertEqual(len(sent_prompts), 1)
+        # LOOM:263 — empty role initial_prompt + engineer kind synthesizes
+        # the configured default boot nudge so the wake protocol fires.
+        # The codex startup_prompt is the persistent system prompt, then the
+        # default nudge follows.
+        self.assertEqual(len(sent_prompts), 2)
         self.assertEqual(sent_prompts[0]["cell_id"], engineer.id)
+        self.assertEqual(sent_prompts[1]["cell_id"], engineer.id)
+        self.assertIn(
+            state.global_settings.engineer_default_boot_nudge,
+            sent_prompts[1]["prompt"],
+        )
 
     async def test_add_engineer_rejects_duplicate_name(self):
         state = self._make_state()
@@ -454,7 +463,13 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             call["mcp_entrypoint"],
             self.server_agent_mod.ARCHITECT_MCP_ENTRYPOINT,
         )
-        self.assertEqual(len(sent_prompts), 1)
+        # LOOM:263 — empty role initial_prompt + architect kind synthesizes
+        # the configured default boot nudge so the wake protocol fires.
+        self.assertEqual(len(sent_prompts), 2)
+        self.assertIn(
+            state.global_settings.architect_default_boot_nudge,
+            sent_prompts[1]["prompt"],
+        )
 
     async def test_architect_persistent_prompt_injects_custom_instructions(self):
         state = self._make_state()

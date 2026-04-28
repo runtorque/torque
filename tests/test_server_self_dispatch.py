@@ -62,6 +62,8 @@ class ServerSelfDispatchTests(unittest.TestCase):
         self.state_mod = importlib.reload(self.state_mod)
         self.server_prompts_mod = importlib.import_module("loom.server_prompts")
         self.server_prompts_mod = importlib.reload(self.server_prompts_mod)
+        self.server_agent_mod = importlib.import_module("loom.server_agent")
+        self.server_agent_mod = importlib.reload(self.server_agent_mod)
         self.server_mod = importlib.import_module("loom.server")
         self.server_mod = importlib.reload(self.server_mod)
 
@@ -1814,6 +1816,8 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
         install_iterm2_stub()
         self.state_mod = importlib.import_module("loom.state")
         self.state_mod = importlib.reload(self.state_mod)
+        self.server_agent_mod = importlib.import_module("loom.server_agent")
+        self.server_agent_mod = importlib.reload(self.server_agent_mod)
         self.server_mod = importlib.import_module("loom.server")
         self.server_mod = importlib.reload(self.server_mod)
 
@@ -2205,6 +2209,152 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             prompts[2][0],
             "You are Panelsmith (worker, id=worker-1).\n\nDispatch task body",
+        )
+
+    async def test_new_agent_prompt_sequence_uses_default_nudge_when_initial_prompt_empty(self):
+        """LOOM:263 — empty initial_prompt + default_boot_nudge synthesizes the
+        default kickoff so architect/engineer agents don't sit idle on boot."""
+        cell = self.state_mod.AgentCell(
+            id="eng-1",
+            name="Alice",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+        )
+
+        prompts = self.server_mod._new_agent_prompt_sequence(
+            {"initial_prompt": ""},
+            cell=cell,
+            default_boot_nudge="Wake. Run engineer wake protocol.",
+        )
+
+        self.assertEqual(len(prompts), 1)
+        self.assertEqual(
+            prompts[0][0],
+            "You are Alice (engineer, id=eng-1).\n\n"
+            "Wake. Run engineer wake protocol.",
+        )
+
+    async def test_new_agent_prompt_sequence_uses_default_when_initial_prompt_whitespace(self):
+        """Whitespace-only initial_prompt is treated as empty for the fallback."""
+        cell = self.state_mod.AgentCell(
+            id="arch-1",
+            name="Sage",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+        )
+
+        prompts = self.server_mod._new_agent_prompt_sequence(
+            {"initial_prompt": "   \n  "},
+            cell=cell,
+            default_boot_nudge="Wake. Run boot protocol.",
+        )
+
+        self.assertEqual(len(prompts), 1)
+        self.assertIn("Wake. Run boot protocol.", prompts[0][0])
+
+    async def test_new_agent_prompt_sequence_initial_prompt_overrides_default(self):
+        """Configured initial_prompt must take precedence over default_boot_nudge.
+
+        Regression guard for LOOM:263 — the default must NOT fire when the role
+        config has set a real initial_prompt (LOOM:259/:261 must keep working).
+        """
+        cell = self.state_mod.AgentCell(
+            id="eng-1",
+            name="Alice",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+        )
+
+        prompts = self.server_mod._new_agent_prompt_sequence(
+            {"initial_prompt": "Custom kickoff."},
+            cell=cell,
+            default_boot_nudge="Wake. Run engineer wake protocol.",
+        )
+
+        self.assertEqual(len(prompts), 1)
+        self.assertIn("Custom kickoff.", prompts[0][0])
+        self.assertNotIn("Wake.", prompts[0][0])
+
+    async def test_new_agent_prompt_sequence_no_default_means_no_fallback(self):
+        """Empty initial_prompt + no default_boot_nudge -> no kickoff turn."""
+        prompts = self.server_mod._new_agent_prompt_sequence(
+            {"initial_prompt": ""},
+            startup_prompt="Persistent prompt",
+        )
+
+        self.assertEqual(prompts, [("Persistent prompt", {})])
+
+    def test_resolve_default_boot_nudge_for_kinds(self):
+        """Architect/engineer return their nudge; workers/terminals do not."""
+        state = self.state_mod.MatrixState()
+
+        architect = self.state_mod.AgentCell(
+            id="arch-1", name="Sage", group="g",
+            cell_type="agent", kind="architect",
+        )
+        engineer = self.state_mod.AgentCell(
+            id="eng-1", name="Alice", group="g",
+            cell_type="agent", kind="engineer",
+        )
+        worker = self.state_mod.AgentCell(
+            id="worker-1", name="Panelsmith", group="g",
+            cell_type="agent", kind="worker",
+        )
+        terminal = self.state_mod.AgentCell(
+            id="term-1", name="Term", group="g",
+            cell_type="terminal", kind="",
+        )
+
+        self.assertEqual(
+            self.server_agent_mod.resolve_default_boot_nudge(state, architect),
+            state.global_settings.architect_default_boot_nudge,
+        )
+        self.assertEqual(
+            self.server_agent_mod.resolve_default_boot_nudge(state, engineer),
+            state.global_settings.engineer_default_boot_nudge,
+        )
+        self.assertEqual(
+            self.server_agent_mod.resolve_default_boot_nudge(state, worker),
+            "",
+        )
+        self.assertEqual(
+            self.server_agent_mod.resolve_default_boot_nudge(state, terminal),
+            "",
+        )
+        self.assertEqual(
+            self.server_agent_mod.resolve_default_boot_nudge(state, None),
+            "",
+        )
+        self.assertEqual(
+            self.server_agent_mod.resolve_default_boot_nudge(None, engineer),
+            "",
+        )
+
+    def test_resolve_default_boot_nudge_respects_global_settings_override(self):
+        """User overrides in GlobalSettings flow through to resolution."""
+        state = self.state_mod.MatrixState()
+        state.global_settings.architect_default_boot_nudge = "Custom architect."
+        state.global_settings.engineer_default_boot_nudge = ""
+
+        architect = self.state_mod.AgentCell(
+            id="arch-1", name="Sage", group="g",
+            cell_type="agent", kind="architect",
+        )
+        engineer = self.state_mod.AgentCell(
+            id="eng-1", name="Alice", group="g",
+            cell_type="agent", kind="engineer",
+        )
+
+        self.assertEqual(
+            self.server_agent_mod.resolve_default_boot_nudge(state, architect),
+            "Custom architect.",
+        )
+        self.assertEqual(
+            self.server_agent_mod.resolve_default_boot_nudge(state, engineer),
+            "",
         )
 
     async def test_stream_auto_resume_dispatches_when_queue_head_becomes_ready(self):

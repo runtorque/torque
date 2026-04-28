@@ -192,7 +192,14 @@ class ArchitectHireFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("agent_upsert", op_names)
         self.assertIn("pending_hire_resolve", op_names)
         self.assertEqual(bridge.create_session_calls[0]["kwargs"]["env_vars"]["LOOM_ENGINEER_ID"], engineer.id)
-        self.assertEqual(len(sent_prompts), 1)
+        # LOOM:263 — empty role initial_prompt + engineer kind synthesizes
+        # the configured default boot nudge so the wake protocol fires on
+        # first launch via architect-pending-hire approval.
+        self.assertEqual(len(sent_prompts), 2)
+        self.assertIn(
+            self.state.global_settings.engineer_default_boot_nudge,
+            sent_prompts[1]["prompt"],
+        )
 
         second = await self.server_mod._handle_pending_hire_approve_command(
             {"id": pending_hire["id"]},
