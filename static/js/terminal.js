@@ -596,7 +596,7 @@ function _terminalComposeLineBoundary(value, caret, toEnd) {
     var lineEnd = value.indexOf('\n', caret);
     return lineEnd >= 0 ? lineEnd : value.length;
   }
-  var lineStart = value.lastIndexOf('\n', Math.max(caret - 1, 0));
+  var lineStart = value.lastIndexOf('\n', caret > 0 ? caret - 1 : -1);
   return lineStart >= 0 ? lineStart + 1 : 0;
 }
 
