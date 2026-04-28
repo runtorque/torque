@@ -1230,6 +1230,7 @@ ENGINEER_MANDATORY_EVENTS = frozenset({
     "task_completed", "agent_reply", "agent_error",
     "agent_blocked", "ask_created", "task_verification_updated",
 })
+PAUSED_SUBAGENT_DELTA_QUEUE_LIMIT = 100
 
 
 @dataclass
@@ -1243,6 +1244,7 @@ class GlobalSettings:
     xterm_scrollback: int = XTERM_SCROLLBACK_DEFAULT  # embedded xterm.js history lines
     # General > Board
     default_lanes: list[str] = field(default_factory=lambda: list(_DEFAULT_LANES))
+    pause_suppresses_subagent_messages: bool = True
     # Keybindings — action name → {modifiers, keycode, character} overrides
     keybindings: dict[str, dict] = field(default_factory=dict)
     # Pipeline
@@ -1342,6 +1344,7 @@ class MatrixState:
         self.engineer_worklog: dict[str, list[dict]] = {}
         # Delta broadcast accumulator
         self._delta_ops: list[dict] = []
+        self._paused_subagent_delta_ops: list[dict] = []
         self._seq: int = 0
         # Per-agent fingerprint of engineer-relevant fields. Lets
         # `_collect_engineer_affected_groups` skip recomputing a group's
@@ -1371,7 +1374,150 @@ class MatrixState:
         old_task_refs = self._sync_task_indexes_from_delta(op, kwargs)
         self._track_task_health_delta(op, kwargs, old_task_refs=old_task_refs)
         self._maybe_clear_engineer_queue_empty_from_delta(op, kwargs)
-        self._delta_ops.append({"op": op, **kwargs})
+        delta = {"op": op, **kwargs}
+        if self._should_queue_paused_subagent_delta(delta):
+            self._queue_paused_subagent_delta(delta)
+            return
+        self._delta_ops.append(delta)
+
+    def _queue_paused_subagent_delta(self, delta: dict) -> None:
+        queue = self._paused_subagent_delta_ops
+        overflow = len(queue) + 1 - PAUSED_SUBAGENT_DELTA_QUEUE_LIMIT
+        if overflow > 0:
+            del queue[:overflow]
+            log.warning(
+                "Paused subagent message queue exceeded %d ops; "
+                "dropped %d oldest delta op(s)",
+                PAUSED_SUBAGENT_DELTA_QUEUE_LIMIT,
+                overflow,
+            )
+        queue.append(delta)
+
+    def _flush_paused_subagent_delta_ops(self) -> int:
+        """Move paused subagent deltas that are no longer paused to live ops."""
+        if not self._paused_subagent_delta_ops:
+            return 0
+        remaining = []
+        releasable = []
+        for delta in self._paused_subagent_delta_ops:
+            if self._should_queue_paused_subagent_delta(delta):
+                remaining.append(delta)
+            else:
+                releasable.append(delta)
+        if releasable:
+            self._delta_ops.extend(releasable)
+        self._paused_subagent_delta_ops = remaining
+        return len(releasable)
+
+    def _subagent_source_for_delta(self, delta: dict) -> Optional[AgentCell]:
+        op = str((delta or {}).get("op", "") or "")
+        source_id = ""
+        if op == "agent_upsert":
+            source_id = str(delta.get("id", "") or "")
+        elif op == "event_append":
+            source_id = str(delta.get("cell_id", "") or "")
+        elif op == "mcp_call_append":
+            call = delta.get("call") if isinstance(delta.get("call"), dict) else {}
+            source_id = str(call.get("cell_id", "") or "")
+        elif op == "task_upsert":
+            source_id = str(delta.get("agent_id", "") or "")
+        elif op == "engineer_worklog_append":
+            entry = delta.get("entry") if isinstance(delta.get("entry"), dict) else {}
+            source_id = str(entry.get("agent_id", "") or "")
+        if not source_id:
+            return None
+        return self.agents.get(source_id)
+
+    def _cell_is_pause_scoped_subagent(self, cell: Optional[AgentCell]) -> bool:
+        if not cell:
+            return False
+        kind = str(getattr(cell, "kind", "") or "").strip()
+        if kind in {"architect", "engineer", "user", "human"}:
+            return False
+        return (
+            kind == "worker"
+            or bool(str(getattr(cell, "owner_engineer_id", "") or "").strip())
+            or bool(str(getattr(cell, "created_by_engineer_id", "") or "").strip())
+            or bool(str(getattr(cell, "hired_by_architect_id", "") or "").strip())
+        )
+
+    def _digest_recipient_paused(self, agent_id: str) -> bool:
+        agent_id = str(agent_id or "").strip()
+        if not agent_id:
+            return False
+        try:
+            if bool(getattr(self.get_agent_digest_settings(agent_id), "paused", False)):
+                return True
+        except Exception:
+            log.exception("Failed to read digest pause state for %s", agent_id)
+        cell = self.agents.get(agent_id)
+        if (
+                cell
+                and str(getattr(cell, "kind", "") or "").strip() == "architect"
+                and bool(self.get_architect_settings(cell.group).architect_paused)
+        ):
+            return True
+        return False
+
+    def _group_delivery_paused(self, group: str) -> bool:
+        group = str(group or "").strip()
+        if not group:
+            return False
+        ws = self.engineer_settings.get(group)
+        if ws and bool(getattr(ws, "paused", False)):
+            return True
+        try:
+            if bool(self.get_architect_settings(group).architect_paused):
+                return True
+        except Exception:
+            log.exception("Failed to read architect pause state for group %s", group)
+        return False
+
+    def _subagent_delivery_paused(self, cell: AgentCell) -> bool:
+        recipients = {
+            str(getattr(cell, "owner_engineer_id", "") or "").strip(),
+            str(getattr(cell, "created_by_engineer_id", "") or "").strip(),
+            str(getattr(cell, "hired_by_architect_id", "") or "").strip(),
+        }
+        group = str(getattr(cell, "group", "") or "").strip()
+        if group:
+            engineer = self.get_engineer_for_group(group)
+            if engineer:
+                recipients.add(str(getattr(engineer, "id", "") or "").strip())
+            for architect in self._architect_cells_for_group(group):
+                recipients.add(str(getattr(architect, "id", "") or "").strip())
+        recipients.discard("")
+        if any(self._digest_recipient_paused(agent_id) for agent_id in recipients):
+            return True
+        return self._group_delivery_paused(group)
+
+    def _should_queue_paused_subagent_delta(self, delta: dict) -> bool:
+        if not bool(
+                getattr(
+                    self.global_settings,
+                    "pause_suppresses_subagent_messages",
+                    True,
+                )
+        ):
+            return False
+        op = str((delta or {}).get("op", "") or "")
+        if op in {"digest_buffer_stats", "engineer_buffer_stats"}:
+            agent_id = str(delta.get("agent_id", "") or "").strip()
+            if agent_id:
+                return self._digest_recipient_paused(agent_id)
+            return self._group_delivery_paused(str(delta.get("group", "") or ""))
+        if op not in {
+                "agent_upsert",
+                "event_append",
+                "mcp_call_append",
+                "task_upsert",
+                "engineer_worklog_append",
+        }:
+            return False
+        cell = self._subagent_source_for_delta(delta)
+        if not self._cell_is_pause_scoped_subagent(cell):
+            return False
+        return self._subagent_delivery_paused(cell)
 
     def _emit_agent(self, cell: AgentCell):
         """Emit an agent_upsert delta with the full agent dict."""
@@ -3033,6 +3179,10 @@ class MatrixState:
         self._emit("group_settings_update", name=group, **asdict(gs))
         self._db_save_group_settings(group)
         self._sync_architect_digest_settings(group, applied)
+        if (
+                "architect_paused" in applied
+                and not bool(applied.get("architect_paused"))):
+            self._flush_paused_subagent_delta_ops()
         return applied
 
     def update_group_settings(self, name: str, **fields):
@@ -3067,6 +3217,10 @@ class MatrixState:
             self._emit("architect_settings_update", group=name, **payload)
         self._db_save_group_settings(name)
         self._sync_architect_digest_settings(name, fields)
+        if (
+                "architect_paused" in fields
+                and not bool(getattr(gs, "architect_paused", False))):
+            self._flush_paused_subagent_delta_ops()
 
     # -- Engineer settings & journal ------------------------------------------
 
@@ -3276,6 +3430,8 @@ class MatrixState:
         )
         if self.db:
             self.db.save_agent_digest_settings(agent_id, payload)
+        if "paused" in fields and not bool(getattr(settings, "paused", False)):
+            self._flush_paused_subagent_delta_ops()
 
     def ensure_agent_digest_settings(self, agent_id: str) -> AgentDigestSettings | None:
         """Persist a default digest-settings row when one does not exist yet."""
@@ -3431,6 +3587,8 @@ class MatrixState:
         if self.db:
             self.db.save_engineer_settings(group, asdict(ws))
         self._sync_legacy_engineer_digest_settings(group, applied)
+        if "paused" in applied and not bool(getattr(ws, "paused", False)):
+            self._flush_paused_subagent_delta_ops()
 
     async def update_engineer_settings_async(self, group: str, **fields) -> bool:
         """Update and await persistence for engineer settings for a group."""
@@ -3438,6 +3596,8 @@ class MatrixState:
         if self.db:
             await self.db.save_engineer_settings_async(group, asdict(ws))
         self._sync_legacy_engineer_digest_settings(group, applied)
+        if "paused" in applied and not bool(getattr(ws, "paused", False)):
+            self._flush_paused_subagent_delta_ops()
         return True
 
     def engineer_restricts_to_created_agents(self, group: str) -> bool:
@@ -4115,11 +4275,19 @@ class MatrixState:
                     value = normalize_mcp_call_log_args_capture(value)
                 elif key == "mcp_call_log_full_capture_tools":
                     value = normalize_mcp_call_log_full_capture_tools(value)
+                elif key == "pause_suppresses_subagent_messages":
+                    value = bool(value)
                 updates[key] = value
         for key, value in updates.items():
             setattr(self.global_settings, key, value)
         self._emit("global_settings_update",
                     **asdict(self.global_settings))
+        if (
+                "pause_suppresses_subagent_messages" in updates
+                and not bool(
+                    self.global_settings.pause_suppresses_subagent_messages
+                )):
+            self._flush_paused_subagent_delta_ops()
         self._db_save_global_settings()
 
     def next_cell_name(self, group: str, cell_type: str) -> str:

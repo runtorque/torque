@@ -234,6 +234,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
             "seq": state._seq,
             **state.to_dict(),
         })
+
         if self.state_mod.orjson is not None:
             self.assertNotIn(": ", raw)
 
@@ -1568,6 +1569,148 @@ class MatrixStateCleanupTests(unittest.TestCase):
             "Worker",
         )
 
+
+class MatrixStatePauseSuppressionTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        _install_aiohttp_stub()
+        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.reload(self.state_mod)
+
+    def _make_state(self, *, paused=True):
+        state = self.state_mod.MatrixState()
+        state.groups["g"] = ["eng-1", "worker-1"]
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            engineer_agent_id="eng-1"
+        )
+        state.agents["eng-1"] = self.state_mod.AgentCell(
+            id="eng-1",
+            name="Engineer",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+        )
+        state.agents["worker-1"] = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            kind="worker",
+            owner_engineer_id="eng-1",
+        )
+        state.update_agent_digest_settings("eng-1", paused=paused)
+        state._delta_ops.clear()
+        return state
+
+    async def test_paused_digest_queues_subagent_messages_until_resume(self):
+        class FakeWS:
+            def __init__(self):
+                self.messages = []
+
+            async def send_str(self, msg):
+                self.messages.append(json.loads(msg))
+
+        state = self._make_state(paused=True)
+        ws = FakeWS()
+        state._ws_clients.add(ws)
+
+        state._emit(
+            "event_append",
+            id=1,
+            timestamp=1,
+            kind="agent_progress",
+            group="g",
+            cell_id="worker-1",
+            agent_name="Worker",
+            message="first",
+            task_id="",
+        )
+        state._emit(
+            "mcp_call_append",
+            group="g",
+            call={
+                "cell_id": "worker-1",
+                "tool_name": "mcp__loom__loom_progress",
+                "hook_event_name": "PostToolUse",
+                "appended_at": 2,
+            },
+        )
+
+        self.assertEqual(state._delta_ops, [])
+        self.assertEqual(len(state._paused_subagent_delta_ops), 2)
+        await state.broadcast()
+        self.assertEqual(ws.messages, [])
+
+        state.update_agent_digest_settings("eng-1", paused=False)
+        await state.broadcast()
+
+        self.assertEqual(len(ws.messages), 1)
+        ops = ws.messages[0]["ops"]
+        self.assertEqual(
+            [op["op"] for op in ops],
+            ["agent_digest_update", "event_append", "mcp_call_append"],
+        )
+        self.assertEqual(ops[1]["id"], 1)
+        self.assertEqual(ops[2]["call"]["cell_id"], "worker-1")
+        self.assertEqual(state._paused_subagent_delta_ops, [])
+
+        await state.broadcast()
+        self.assertEqual(len(ws.messages), 1)
+
+    async def test_unpaused_digest_broadcasts_subagent_messages_normally(self):
+        class FakeWS:
+            def __init__(self):
+                self.messages = []
+
+            async def send_str(self, msg):
+                self.messages.append(json.loads(msg))
+
+        state = self._make_state(paused=False)
+        ws = FakeWS()
+        state._ws_clients.add(ws)
+
+        state._emit(
+            "event_append",
+            id=1,
+            timestamp=1,
+            kind="agent_progress",
+            group="g",
+            cell_id="worker-1",
+            agent_name="Worker",
+            message="first",
+            task_id="",
+        )
+        await state.broadcast()
+
+        self.assertEqual(len(ws.messages), 1)
+        self.assertEqual(
+            [op["op"] for op in ws.messages[0]["ops"]],
+            ["event_append"],
+        )
+
+    def test_paused_subagent_queue_cap_drops_oldest(self):
+        state = self._make_state(paused=True)
+        limit = self.state_mod.PAUSED_SUBAGENT_DELTA_QUEUE_LIMIT
+
+        with self.assertLogs("loom", level="WARNING") as logs:
+            for idx in range(limit + 5):
+                state._emit(
+                    "event_append",
+                    id=idx,
+                    timestamp=idx,
+                    kind="agent_progress",
+                    group="g",
+                    cell_id="worker-1",
+                    agent_name="Worker",
+                    message=str(idx),
+                    task_id="",
+                )
+
+        self.assertEqual(len(state._paused_subagent_delta_ops), limit)
+        self.assertEqual(state._paused_subagent_delta_ops[0]["id"], 5)
+        self.assertEqual(state._paused_subagent_delta_ops[-1]["id"], limit + 4)
+        self.assertTrue(
+            any("Paused subagent message queue exceeded" in line for line in logs.output)
+        )
 
 class MatrixStateBoardWorkflowTests(unittest.TestCase):
     def setUp(self):
