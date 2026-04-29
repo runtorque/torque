@@ -15069,6 +15069,200 @@ test('active group switch preserves per-group focus and inline board draft state
   assert.equal(jsonValue(context, `_boardFilterStateGroup`), '');
 });
 
+test('pending new-group materialization runs active-group state transition', () => {
+  const { context, sandbox } = createStandaloneWsSyncHarness();
+  loadScript(context, 'static/js/modals/task-modal.js');
+
+  runInContext(context, `
+    state.runtime = { mode: 'standalone', embedded_terminal: true };
+    state.standalone_panel_layout = {
+      version: 1,
+      bottom: { open: false, size: 240, tabs: [], active: '' },
+      right: { open: true, size: 320, tabs: ['actions'], active: 'actions' },
+      floats: {},
+      last_active: 'actions',
+    };
+    _restoreStandalonePanelState();
+    state.groups = { alpha: ['agent-a'] };
+    state.group_settings = {
+      alpha: { collapsed_default: false },
+      beta: { collapsed_default: false },
+    };
+    state.children = {};
+    state.agents = {
+      'agent-a': {
+        id: 'agent-a',
+        name: 'Alpha Agent',
+        group: 'alpha',
+        cell_type: 'agent',
+        status: 'idle',
+      },
+      'agent-b': {
+        id: 'agent-b',
+        name: 'Beta Agent',
+        group: 'beta',
+        cell_type: 'agent',
+        status: 'idle',
+      },
+    };
+    state.active_group = 'alpha';
+    _activePanelApp = 'actions';
+    var _boardSelectedLane = 'To Do';
+    var _boardFocusedTask = '';
+    var _boardAddingTask = true;
+    var _boardAddingTaskDraft = 'alpha pending draft';
+    var _boardAddingTaskAgent = '';
+    var _boardAddingTaskLane = 'To Do';
+    var _boardInlineDraftId = 'draft-alpha';
+    var _boardInlineAttachments = [];
+    var _boardShowSchedules = false;
+    var _boardShowArchived = false;
+    var _boardSelectedTasks = {};
+    var _boardLastSelectedTask = '';
+    var _boardQuickEditTask = '';
+    var _boardQuickEditKind = '';
+    var _boardCardsScrollTop = 33;
+    var _boardActiveViewKey = 'alpha-view';
+    selectedAgentId = 'agent-a';
+    selectedTerminalId = 'agent-a';
+    focusedItemId = 'agent-a';
+    setActiveGroup('beta', { allowPending: true });
+    var pendingState = {
+      active: state.active_group,
+      current: _currentGroup(),
+      draft: _boardAddingTaskDraft,
+    };
+    _handleDelta({
+      seq: 1,
+      ops: [
+        { op: 'group_update', name: 'beta', agents: ['agent-b'] },
+      ],
+    });
+  `);
+
+  assert.deepEqual(jsonValue(context, `pendingState`), {
+    active: 'alpha',
+    current: 'alpha',
+    draft: 'alpha pending draft',
+  });
+  assert.equal(jsonValue(context, `state.active_group`), 'beta');
+  assert.equal(jsonValue(context, `_currentGroup()`), 'beta');
+  assert.equal(jsonValue(context, `_boardAddingTask`), false);
+  assert.equal(jsonValue(context, `_boardAddingTaskDraft`), '');
+  assert.equal(jsonValue(context, `_boardAddingTaskLane`), '');
+  assert.equal(jsonValue(context, `selectedAgentId`), null);
+  assert.equal(jsonValue(context, `focusedItemId`), null);
+  assert.equal(
+    jsonValue(context, `_activeGroupSurfaceStateByGroup.alpha.board.addingTaskDraft`),
+    'alpha pending draft',
+  );
+  assert.equal(sandbox.tplEditorLoadCalls, 1);
+
+  runInContext(context, `
+    selectedAgentId = 'agent-b';
+    selectedTerminalId = 'agent-b';
+    focusedItemId = 'agent-b';
+    _boardAddingTask = true;
+    _boardAddingTaskDraft = 'beta draft';
+    _boardAddingTaskLane = 'Backlog';
+    setActiveGroup('alpha');
+  `);
+  assert.equal(jsonValue(context, `state.active_group`), 'alpha');
+  assert.equal(jsonValue(context, `_boardAddingTaskDraft`), 'alpha pending draft');
+  assert.equal(jsonValue(context, `_boardAddingTaskLane`), 'To Do');
+  assert.equal(jsonValue(context, `selectedAgentId`), 'agent-a');
+  assert.equal(jsonValue(context, `focusedItemId`), 'agent-a');
+});
+
+test('server-driven active group deletion restores fallback group UI state', () => {
+  const { context, sandbox } = createStandaloneWsSyncHarness();
+  loadScript(context, 'static/js/modals/task-modal.js');
+
+  runInContext(context, `
+    state.runtime = { mode: 'standalone', embedded_terminal: true };
+    state.standalone_panel_layout = {
+      version: 1,
+      bottom: { open: false, size: 240, tabs: [], active: '' },
+      right: { open: true, size: 320, tabs: ['templates'], active: 'templates' },
+      floats: {},
+      last_active: 'templates',
+    };
+    _restoreStandalonePanelState();
+    state.groups = { alpha: ['agent-a'], beta: ['agent-b'] };
+    state.group_settings = {
+      alpha: { collapsed_default: false },
+      beta: { collapsed_default: false },
+    };
+    state.children = {};
+    state.agents = {
+      'agent-a': {
+        id: 'agent-a',
+        name: 'Alpha Agent',
+        group: 'alpha',
+        cell_type: 'agent',
+        status: 'idle',
+      },
+      'agent-b': {
+        id: 'agent-b',
+        name: 'Beta Agent',
+        group: 'beta',
+        cell_type: 'agent',
+        status: 'idle',
+      },
+    };
+    state.active_group = 'alpha';
+    _activePanelApp = 'templates';
+    var _boardSelectedLane = 'To Do';
+    var _boardFocusedTask = '';
+    var _boardAddingTask = true;
+    var _boardAddingTaskDraft = 'alpha saved draft';
+    var _boardAddingTaskAgent = '';
+    var _boardAddingTaskLane = 'To Do';
+    var _boardInlineDraftId = 'draft-alpha';
+    var _boardInlineAttachments = [];
+    var _boardShowSchedules = false;
+    var _boardShowArchived = false;
+    var _boardSelectedTasks = {};
+    var _boardLastSelectedTask = '';
+    var _boardQuickEditTask = '';
+    var _boardQuickEditKind = '';
+    var _boardCardsScrollTop = 64;
+    var _boardActiveViewKey = 'alpha-view';
+    selectedAgentId = 'agent-a';
+    selectedTerminalId = 'agent-a';
+    focusedItemId = 'agent-a';
+    setActiveGroup('beta');
+    selectedAgentId = 'agent-b';
+    selectedTerminalId = 'agent-b';
+    focusedItemId = 'agent-b';
+    _boardAddingTask = true;
+    _boardAddingTaskDraft = 'beta deleted draft';
+    _boardAddingTaskLane = 'Done';
+    _boardCardsScrollTop = 9;
+    _expectedSeq = 1;
+    _handleDelta({
+      seq: 1,
+      ops: [
+        { op: 'group_remove', name: 'beta' },
+      ],
+    });
+  `);
+
+  assert.equal(jsonValue(context, `state.active_group`), 'alpha');
+  assert.equal(jsonValue(context, `_currentGroup()`), 'alpha');
+  assert.equal(jsonValue(context, `_boardAddingTaskDraft`), 'alpha saved draft');
+  assert.equal(jsonValue(context, `_boardAddingTaskLane`), 'To Do');
+  assert.equal(jsonValue(context, `_boardCardsScrollTop`), 64);
+  assert.equal(jsonValue(context, `selectedAgentId`), 'agent-a');
+  assert.equal(jsonValue(context, `selectedTerminalId`), 'agent-a');
+  assert.equal(jsonValue(context, `focusedItemId`), 'agent-a');
+  assert.equal(
+    jsonValue(context, `_activeGroupSurfaceStateByGroup.beta.board.addingTaskDraft`),
+    'beta deleted draft',
+  );
+  assert.equal(sandbox.agentTemplateEditorLoadCalls, 2);
+});
+
 test('header group switcher is hidden in toolbelt and switches active group in standalone', () => {
   const { context, document, sandbox } = createMainHarness({
     renderTerminalWorkspace() {},
@@ -15102,6 +15296,86 @@ test('header group switcher is hidden in toolbelt and switches active group in s
   `);
   assert.equal(jsonValue(context, `state.active_group`), 'gamma');
   assert.match(root.innerHTML, /<option value="gamma" selected>gamma<\/option>/);
+});
+
+test('active group changes reload visible group-scoped Actions and Roles panels', () => {
+  const { context, sandbox } = createMainHarness({
+    renderTerminalWorkspace() {},
+    tplEditorLoad() {
+      if (!sandbox.actionLoadGroups) sandbox.actionLoadGroups = [];
+      sandbox.actionLoadGroups.push(sandbox.state.active_group || '');
+    },
+    agentTemplateEditorLoad() {
+      if (!sandbox.roleLoadGroups) sandbox.roleLoadGroups = [];
+      sandbox.roleLoadGroups.push(sandbox.state.active_group || '');
+    },
+    renderTemplatesPanel() {},
+    renderAgentTemplatesPanel() {},
+  });
+  loadScript(context, 'static/js/render.js');
+  runInContext(context, `
+    var focusedItemId = null;
+    var selectedTerminalId = null;
+    state.runtime = { mode: 'standalone', embedded_terminal: true };
+    state.groups = { alpha: [], beta: [] };
+    state.group_settings = {
+      alpha: { collapsed_default: false },
+      beta: { collapsed_default: false },
+    };
+    state.children = {};
+    _activePanelApp = 'actions';
+    setActiveGroup('beta');
+    _activePanelApp = 'templates';
+    setActiveGroup('alpha');
+  `);
+
+  assert.deepEqual(sandbox.actionLoadGroups, ['beta']);
+  assert.deepEqual(sandbox.roleLoadGroups, ['alpha']);
+});
+
+test('Actions and Roles panels hide stale lists while loading the new active group', () => {
+  const { context, document, sandbox } = createMainHarness({
+    renderTerminalWorkspace() {},
+  });
+  loadScript(context, 'static/js/render.js');
+  loadScript(context, 'static/js/modals/task-modal.js');
+  loadScript(context, 'static/js/actions.js');
+  loadScript(context, 'static/js/templates.js');
+  const actionsEditor = document.register('tpled-editor');
+  const rolesEditor = document.register('agent-tpl-editor');
+
+  sandbox.state.runtime = { mode: 'standalone', embedded_terminal: true };
+  sandbox.state.groups = { alpha: [], beta: [] };
+  sandbox.state.group_settings = {
+    alpha: { collapsed_default: false },
+    beta: { collapsed_default: false },
+  };
+  sandbox.state.children = {};
+  sandbox.state.active_group = 'beta';
+
+  runInContext(context, `
+    _tplEditorLoadedGroup = 'alpha';
+    _tplEditorList = [{ name: 'AlphaAction', global: false, dir: '/alpha/.loom/actions' }];
+    _tplEditorSelected = 'project:AlphaAction';
+    _tplEditorData = { name: 'AlphaAction', prompt: 'alpha' };
+    renderTemplatesPanel();
+
+    _agentsPanelView = 'templates';
+    _agentTplLoadedGroup = 'alpha';
+    _agentTplList = [{ name: 'AlphaRole', display_name: 'Alpha Role', global: false }];
+    _agentTplSelected = 'project:AlphaRole';
+    _agentTplData = { name: 'AlphaRole', command: 'alpha' };
+    renderAgentTemplatesPanel();
+  `);
+
+  const actionsPanel = document.getElementById('panel-actions');
+  const rolesPanel = document.getElementById('panel-templates');
+  assert.match(actionsPanel.innerHTML, /Group: beta/);
+  assert.doesNotMatch(actionsPanel.innerHTML, /AlphaAction/);
+  assert.match(actionsEditor.innerHTML, /Loading actions/);
+  assert.match(rolesPanel.innerHTML, /Group: beta/);
+  assert.doesNotMatch(rolesPanel.innerHTML, /Alpha Role|AlphaRole/);
+  assert.match(rolesEditor.innerHTML, /Loading roles/);
 });
 
 

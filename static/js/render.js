@@ -145,15 +145,12 @@ function _normalizeActiveGroup(group, names) {
 function _activeGroup() {
   const names = Object.keys((state && state.groups) || {});
   if (!names.length) {
-    if (_pendingActiveGroup) {
-      if (state) state.active_group = _pendingActiveGroup;
-      return '';
-    }
     if (state) state.active_group = '';
     _writeStoredActiveGroup('');
     return '';
   }
-  const pending = String(_pendingActiveGroup || (state && state.active_group) || '').trim();
+  const current = String((state && state.active_group) || '').trim();
+  const pending = String(_pendingActiveGroup || current || '').trim();
   const stored = _readStoredActiveGroup();
   const desired = pending || stored;
   const pendingCreate = !!(
@@ -161,15 +158,69 @@ function _activeGroup() {
     && desired === _pendingActiveGroup
     && names.indexOf(_pendingActiveGroup) < 0
   );
-  const next = _normalizeActiveGroup(desired, names);
   if (pendingCreate) {
-    if (state) state.active_group = _pendingActiveGroup;
-    return next;
+    const visible = _normalizeActiveGroup(
+      current && current !== _pendingActiveGroup ? current : '',
+      names,
+    );
+    if (state) state.active_group = visible;
+    if (visible) _writeStoredActiveGroup(visible);
+    return visible;
   }
+  const next = _normalizeActiveGroup(desired, names);
   if (_pendingActiveGroup && next === _pendingActiveGroup) _pendingActiveGroup = '';
   if (state) state.active_group = next;
   if (next && stored !== next) _writeStoredActiveGroup(next);
   return next;
+}
+
+function _activeGroupTransition(prevGroup, nextGroup, opts) {
+  opts = opts || {};
+  if (!_singleGroupModeEnabled()) return { changed: false, saved: null };
+  const prev = String(prevGroup || '').trim();
+  const next = String(nextGroup || '').trim();
+  if (prev === next) return { changed: false, saved: null };
+
+  _abortActiveGroupDrag();
+  _captureActiveGroupUiState(prev);
+  if (state) state.active_group = next;
+  if (_pendingActiveGroup && _pendingActiveGroup === next) _pendingActiveGroup = '';
+  _writeStoredActiveGroup(next);
+  const saved = _applyActiveGroupUiState(next);
+
+  if (typeof _reloadVisibleGroupScopedPanelApps === 'function') {
+    _reloadVisibleGroupScopedPanelApps();
+  }
+
+  const result = { changed: true, saved };
+  if (opts.render === false) return result;
+
+  render({ skipPanelRefresh: true });
+  if (typeof renderActivePanel === 'function') renderActivePanel();
+  _restoreActiveGroupSurfaces(saved);
+  if (typeof renderGroupSwitcher === 'function') renderGroupSwitcher();
+  return result;
+}
+
+function _materializeActiveGroupAfterStateChange(prevGroup) {
+  if (!_singleGroupModeEnabled()) return { changed: false, saved: null };
+  const prev = String(prevGroup || '').trim();
+  const next = _activeGroup();
+  if (next === prev) {
+    if (typeof renderGroupSwitcher === 'function') renderGroupSwitcher();
+    return { changed: false, saved: null };
+  }
+  return _activeGroupTransition(prev, next);
+}
+
+function _prepareActiveGroupStateTransition(prevGroup, nextGroup) {
+  return _activeGroupTransition(prevGroup, nextGroup, { render: false });
+}
+
+function _finishActiveGroupStateTransition(result) {
+  if (!result || !result.changed) return;
+  _restoreActiveGroupSurfaces(result.saved);
+  if (typeof renderGroupSwitcher === 'function') renderGroupSwitcher();
 }
 
 function _activeGroupNamesForRender(names) {
@@ -399,8 +450,8 @@ function setActiveGroup(group, opts) {
   const names = Object.keys((state && state.groups) || {});
   if (opts.allowPending && requested && names.indexOf(requested) < 0) {
     _pendingActiveGroup = requested;
-    if (state) state.active_group = requested;
     _writeStoredActiveGroup(requested);
+    if (typeof renderGroupSwitcher === 'function') renderGroupSwitcher();
     return true;
   }
   const next = _normalizeActiveGroup(requested, names);
@@ -409,15 +460,7 @@ function setActiveGroup(group, opts) {
     if (typeof renderGroupSwitcher === 'function') renderGroupSwitcher();
     return true;
   }
-  _abortActiveGroupDrag();
-  _captureActiveGroupUiState(prev);
-  if (state) state.active_group = next;
-  _writeStoredActiveGroup(next);
-  const saved = _applyActiveGroupUiState(next);
-  render({ skipPanelRefresh: true });
-  if (typeof renderActivePanel === 'function') renderActivePanel();
-  _restoreActiveGroupSurfaces(saved);
-  if (typeof renderGroupSwitcher === 'function') renderGroupSwitcher();
+  _activeGroupTransition(prev, next);
   return true;
 }
 

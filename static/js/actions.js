@@ -27,6 +27,20 @@ function tplEditorEnsureLoaded() {
   tplEditorLoad();
 }
 
+function tplEditorBeginGroupSwitch() {
+  var group = _currentGroup() || '';
+  if (_tplEditorLoadedGroup !== group) {
+    _tplEditorList = [];
+    _tplEditorSelected = '';
+    _tplEditorData = null;
+    _tplEditorDirty = false;
+    _tplEditorNew = false;
+    _tplEditorLoadedGroup = null;
+  }
+  tplEditorLoad();
+  renderTemplatesPanel();
+}
+
 function _tplKey(t) {
   return (t.global ? 'user:' : 'project:') + t.name;
 }
@@ -38,8 +52,14 @@ function _tplSelectedName() {
 }
 
 function tplEditorReceiveList(msg) {
+  var msgGroup = (msg && msg.group != null) ? (msg.group || '') : (_currentGroup() || '');
+  var currentGroup = _currentGroup() || '';
+  if (msgGroup !== currentGroup) {
+    if (_tplEditorLoadingGroup === msgGroup) _tplEditorLoadingGroup = null;
+    return;
+  }
   _tplEditorLoadingGroup = null;
-  _tplEditorLoadedGroup = (msg && msg.group != null) ? (msg.group || '') : (_currentGroup() || '');
+  _tplEditorLoadedGroup = msgGroup;
   _tplEditorList = msg.actions || [];
 
   // If we just saved, select it with the right scope key
@@ -82,6 +102,10 @@ function renderTemplatesPanel() {
   var panel = document.getElementById('panel-actions');
   if (!panel) return;
   var scopeGroup = (typeof _currentGroup === 'function' ? _currentGroup() : '') || '';
+  var loadedForScope = _tplEditorLoadedGroup === scopeGroup
+    || (_tplEditorLoadedGroup == null && _tplEditorLoadingGroup !== scopeGroup);
+  var listForScope = loadedForScope ? _tplEditorList : [];
+  var selectedForScope = loadedForScope ? _tplEditorSelected : '';
 
   var html = '';
 
@@ -99,15 +123,15 @@ function renderTemplatesPanel() {
   html += '<option value="">Select\u2026</option>';
   var projectTpls = [];
   var userTpls = [];
-  for (var i = 0; i < _tplEditorList.length; i++) {
-    (_tplEditorList[i].global ? userTpls : projectTpls).push(_tplEditorList[i]);
+  for (var i = 0; i < listForScope.length; i++) {
+    (listForScope[i].global ? userTpls : projectTpls).push(listForScope[i]);
   }
   if (projectTpls.length) {
     var projectDir = _tplShortenPath(projectTpls[0].dir || '');
     html += '<optgroup label="Project \u2014 ' + esc(projectDir) + '">';
     for (var i = 0; i < projectTpls.length; i++) {
       var key = 'project:' + projectTpls[i].name;
-      var sel = key === _tplEditorSelected ? ' selected' : '';
+      var sel = key === selectedForScope ? ' selected' : '';
       html += '<option value="' + esc(key) + '"' + sel + '>' + esc(projectTpls[i].name) + '</option>';
     }
     html += '</optgroup>';
@@ -117,7 +141,7 @@ function renderTemplatesPanel() {
     html += '<optgroup label="User \u2014 ' + esc(userDir) + '">';
     for (var i = 0; i < userTpls.length; i++) {
       var key = 'user:' + userTpls[i].name;
-      var sel = key === _tplEditorSelected ? ' selected' : '';
+      var sel = key === selectedForScope ? ' selected' : '';
       var shadow = userTpls[i].shadowed ? ' (overridden)' : '';
       html += '<option value="' + esc(key) + '"' + sel + '>' + esc(userTpls[i].name) + shadow + '</option>';
     }
@@ -175,20 +199,31 @@ function renderTemplatesEditor() {
   var el = document.getElementById('tpled-editor');
   if (!el) return;
   var restoreState = _tplCaptureEditorUiState(el);
+  var scopeGroup = (typeof _currentGroup === 'function' ? _currentGroup() : '') || '';
+  var loadedForScope = _tplEditorLoadedGroup === scopeGroup
+    || (_tplEditorLoadedGroup == null && _tplEditorLoadingGroup !== scopeGroup);
+  var listForScope = loadedForScope ? _tplEditorList : [];
+  var dataForScope = loadedForScope ? _tplEditorData : null;
+  var newForScope = loadedForScope ? _tplEditorNew : false;
 
-  if (!_tplEditorData && !_tplEditorNew) {
-    if (_tplEditorList.length === 0) {
+  if (!loadedForScope) {
+    el.innerHTML = '<div class="tpled-empty">Loading actions\u2026</div>';
+    return;
+  }
+
+  if (!dataForScope && !newForScope) {
+    if (listForScope.length === 0) {
       el.innerHTML = '<div class="tpled-empty">No actions found.<br>Click <b>+</b> to create one,<br>or add <code>.yaml</code> files to <code>.loom/actions/</code>.</div>';
     } else {
       el.innerHTML = '<div class="tpled-empty">'
-        + '<b>' + _tplEditorList.length + '</b> action' + (_tplEditorList.length !== 1 ? 's' : '') + ' available.<br>'
+        + '<b>' + listForScope.length + '</b> action' + (listForScope.length !== 1 ? 's' : '') + ' available.<br>'
         + 'Pick one from the dropdown above to view or edit.'
         + '</div>';
     }
     return;
   }
 
-  var d = _tplEditorData || {};
+  var d = dataForScope || {};
   var agentTemplate = typeof d.agent === 'string' ? d.agent : '';
   var agent = typeof d.agent === 'string' ? {} : (d.agent || {});
   var agentUsesTemplate = !!agentTemplate;

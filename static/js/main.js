@@ -104,6 +104,49 @@ function _loadVisibleStandalonePanelApps() {
   });
 }
 
+function _visiblePanelAppsForGroupScopeReload() {
+  if (typeof _standaloneVisiblePanelApps === 'function'
+      && typeof _standalonePanelsEnabled === 'function'
+      && _standalonePanelsEnabled()) {
+    return _standaloneVisiblePanelApps();
+  }
+  return (typeof _activePanelApp !== 'undefined' && _activePanelApp)
+    ? [_activePanelApp]
+    : [];
+}
+
+function _reloadGroupScopedPanelApp(appName) {
+  if (appName === 'actions') {
+    if (typeof tplEditorBeginGroupSwitch === 'function') {
+      tplEditorBeginGroupSwitch();
+    } else if (typeof tplEditorLoad === 'function') {
+      tplEditorLoad();
+    } else {
+      _loadPanelApp(appName);
+    }
+  }
+  if (appName === 'templates') {
+    if (typeof _agentsPanelView !== 'undefined' && _agentsPanelView === 'history') {
+      if (typeof agentHistoryLoad === 'function') agentHistoryLoad();
+    } else if (typeof agentTemplateBeginGroupSwitch === 'function') {
+      agentTemplateBeginGroupSwitch();
+    } else if (typeof agentTemplateEditorLoad === 'function') {
+      agentTemplateEditorLoad();
+    } else {
+      _loadPanelApp(appName);
+    }
+  }
+}
+
+function _reloadVisibleGroupScopedPanelApps() {
+  var seen = {};
+  _visiblePanelAppsForGroupScopeReload().forEach(function(appName) {
+    if ((appName !== 'actions' && appName !== 'templates') || seen[appName]) return;
+    seen[appName] = true;
+    _reloadGroupScopedPanelApp(appName);
+  });
+}
+
 function _syncVisibleStandalonePanelApps(previousVisibleApps) {
   if (typeof _standaloneVisiblePanelApps !== 'function'
       || typeof _standalonePanelsEnabled !== 'function'

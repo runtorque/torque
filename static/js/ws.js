@@ -420,6 +420,7 @@ function _handleFullState(msg) {
   _cancelPendingDeltaSurfaceRender();
   const prevActive = state.active_session_id;
   const prevTasks = state.board_tasks || {};
+  const prevGroup = (typeof _activeGroup === 'function') ? _activeGroup() : '';
   const prevStandaloneVisibleApps = (typeof _standaloneVisiblePanelApps === 'function'
     && typeof _standalonePanelsEnabled === 'function'
     && _standalonePanelsEnabled())
@@ -488,6 +489,11 @@ function _handleFullState(msg) {
   if (typeof _pruneAgentDoneFlourishes === 'function') {
     _pruneAgentDoneFlourishes(state.agents || {});
   }
+  const nextGroup = (typeof _activeGroup === 'function') ? _activeGroup() : '';
+  const groupTransition = (prevGroup !== nextGroup
+      && typeof _prepareActiveGroupStateTransition === 'function')
+    ? _prepareActiveGroupStateTransition(prevGroup, nextGroup)
+    : null;
   _expectedSeq = (msg.seq || 0) + 1;
   // Reset pagination state on full snapshot
   if (typeof _eventsHasMore !== 'undefined') {
@@ -509,6 +515,9 @@ function _handleFullState(msg) {
     render();
     if (!shouldRestorePanel && typeof renderActivePanel === 'function') {
       renderActivePanel();
+    }
+    if (typeof _finishActiveGroupStateTransition === 'function') {
+      _finishActiveGroupStateTransition(groupTransition);
     }
   }
   if (typeof _engineerResetSessionMapMeta === 'function') {
@@ -556,6 +565,13 @@ function _handleDelta(msg) {
   const activeSurfaces = typeof _currentPanelSurfaces === 'function'
     ? _currentPanelSurfaces()
     : [];
+  if (prevGroup !== nextGroup
+      && typeof _singleGroupModeEnabled === 'function'
+      && _singleGroupModeEnabled()
+      && typeof _activeGroupTransition === 'function') {
+    const transition = _activeGroupTransition(prevGroup, nextGroup);
+    if (transition && transition.changed) return;
+  }
   if (prevGroup !== nextGroup) {
     activeSurfaces.forEach(function(surface) {
       if (surface) invalidations[surface] = true;
