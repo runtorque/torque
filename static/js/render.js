@@ -202,17 +202,6 @@ function _activeGroupTransition(prevGroup, nextGroup, opts) {
   return result;
 }
 
-function _materializeActiveGroupAfterStateChange(prevGroup) {
-  if (!_singleGroupModeEnabled()) return { changed: false, saved: null };
-  const prev = String(prevGroup || '').trim();
-  const next = _activeGroup();
-  if (next === prev) {
-    if (typeof renderGroupSwitcher === 'function') renderGroupSwitcher();
-    return { changed: false, saved: null };
-  }
-  return _activeGroupTransition(prev, next);
-}
-
 function _prepareActiveGroupStateTransition(prevGroup, nextGroup) {
   return _activeGroupTransition(prevGroup, nextGroup, { render: false });
 }
