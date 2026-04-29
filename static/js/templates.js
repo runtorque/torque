@@ -36,9 +36,29 @@ function agentTemplateEnsureLoaded() {
   agentTemplateEditorLoad();
 }
 
+function agentTemplateBeginGroupSwitch() {
+  var group = _currentGroup() || '';
+  if (_agentTplLoadedGroup !== group) {
+    _agentTplList = [];
+    _agentTplSelected = '';
+    _agentTplData = null;
+    _agentTplDirty = false;
+    _agentTplNew = false;
+    _agentTplLoadedGroup = null;
+  }
+  agentTemplateEditorLoad();
+  renderAgentTemplatesPanel();
+}
+
 function agentTemplateReceiveList(msg) {
+  var msgGroup = (msg && msg.group != null) ? (msg.group || '') : (_currentGroup() || '');
+  var currentGroup = _currentGroup() || '';
+  if (msgGroup !== currentGroup) {
+    if (_agentTplLoadingGroup === msgGroup) _agentTplLoadingGroup = null;
+    return;
+  }
   _agentTplLoadingGroup = null;
-  _agentTplLoadedGroup = (msg && msg.group != null) ? (msg.group || '') : (_currentGroup() || '');
+  _agentTplLoadedGroup = msgGroup;
   _agentTplList = msg.roles || msg.templates || [];
   if (msg.saved) {
     var match = _agentTplList.find(function(t) { return t.name === msg.saved; });
@@ -81,6 +101,10 @@ function renderAgentTemplatesPanel() {
   var panel = document.getElementById('panel-templates');
   if (!panel) return;
   var scopeGroup = (typeof _currentGroup === 'function' ? _currentGroup() : '') || '';
+  var loadedForScope = _agentTplLoadedGroup === scopeGroup
+    || (_agentTplLoadedGroup == null && _agentTplLoadingGroup !== scopeGroup);
+  var listForScope = loadedForScope ? _agentTplList : [];
+  var selectedForScope = loadedForScope ? _agentTplSelected : '';
 
   var html = '';
   html += '<div class="tpled-header">';
@@ -111,13 +135,13 @@ function renderAgentTemplatesPanel() {
   // Roles view
   html += '<select class="tpled-select" id="agent-tpl-select" onchange="agentTemplateSelect(this.value)">';
   html += '<option value="">Select\u2026</option>';
-  var project = _agentTplList.filter(function(t) { return !t.global; });
-  var user = _agentTplList.filter(function(t) { return t.global; });
+  var project = listForScope.filter(function(t) { return !t.global; });
+  var user = listForScope.filter(function(t) { return t.global; });
   if (project.length) {
     html += '<optgroup label="Project">';
     for (var i = 0; i < project.length; i++) {
       var key = _agentTplKey(project[i]);
-      html += '<option value="' + esc(key) + '"' + (key === _agentTplSelected ? ' selected' : '') + '>'
+      html += '<option value="' + esc(key) + '"' + (key === selectedForScope ? ' selected' : '') + '>'
         + esc(project[i].display_name || project[i].name) + '</option>';
     }
     html += '</optgroup>';
@@ -127,7 +151,7 @@ function renderAgentTemplatesPanel() {
     for (var j = 0; j < user.length; j++) {
       var ukey = _agentTplKey(user[j]);
       var suffix = user[j].shadowed ? ' (overridden)' : '';
-      html += '<option value="' + esc(ukey) + '"' + (ukey === _agentTplSelected ? ' selected' : '') + '>'
+      html += '<option value="' + esc(ukey) + '"' + (ukey === selectedForScope ? ' selected' : '') + '>'
         + esc(user[j].display_name || user[j].name) + suffix + '</option>';
     }
     html += '</optgroup>';
@@ -181,8 +205,18 @@ function agentTemplateNew() {
 function renderAgentTemplatesEditor() {
   var el = document.getElementById('agent-tpl-editor');
   if (!el) return;
-  if (!_agentTplData && !_agentTplNew) {
-    if (_agentTplList.length === 0) {
+  var scopeGroup = (typeof _currentGroup === 'function' ? _currentGroup() : '') || '';
+  var loadedForScope = _agentTplLoadedGroup === scopeGroup
+    || (_agentTplLoadedGroup == null && _agentTplLoadingGroup !== scopeGroup);
+  var listForScope = loadedForScope ? _agentTplList : [];
+  var dataForScope = loadedForScope ? _agentTplData : null;
+  var newForScope = loadedForScope ? _agentTplNew : false;
+  if (!loadedForScope) {
+    el.innerHTML = '<div class="tpled-empty">Loading roles\u2026</div>';
+    return;
+  }
+  if (!dataForScope && !newForScope) {
+    if (listForScope.length === 0) {
       el.innerHTML = '<div class="tpled-empty">No roles found.<br>Click <b>+</b> to save a launch preset,<br>or add <code>.yaml</code> files to <code>.loom/roles/</code>.</div>';
     } else {
       el.innerHTML = '<div class="tpled-empty">Pick a role from the library above.</div>';
@@ -190,7 +224,7 @@ function renderAgentTemplatesEditor() {
     return;
   }
 
-  var d = _agentTplData || {};
+  var d = dataForScope || {};
   var html = '<div class="tpled-form">';
   html += '<label>Name <span class="label-req">*</span></label>';
   html += '<input id="agent-template-name" value="' + esc(d.name || '') + '" onchange="agentTemplateMarkDirty()" autocomplete="off">';

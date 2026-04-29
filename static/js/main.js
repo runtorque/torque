@@ -12,6 +12,53 @@ var _defaultPanelMinHeight = 80;
 var _workspaceSidebarDefaultWidth = 340;
 var _workspaceSidebarStorageKey = 'loom.ide.sidebar_width';
 
+function renderGroupSwitcher() {
+  var root = document.getElementById('group-switcher');
+  if (!root) return;
+  if (typeof _singleGroupModeEnabled !== 'function'
+      || !_singleGroupModeEnabled()) {
+    root.hidden = true;
+    if (root._loomLastHtml !== '') {
+      root.innerHTML = '';
+      root._loomLastHtml = '';
+    }
+    return;
+  }
+  var groups = (typeof _groupNamesSorted === 'function')
+    ? _groupNamesSorted()
+    : Object.keys((state && state.groups) || {}).sort();
+  var active = (typeof _activeGroup === 'function') ? (_activeGroup() || '') : '';
+  root.hidden = false;
+  var html = '<label class="group-switcher-label" for="active-group-select">Group:</label>';
+  html += '<select id="active-group-select" class="group-switcher-select"'
+    + ' onchange="onActiveGroupSelect(this.value)">';
+  if (!groups.length) {
+    html += '<option value="" selected disabled>No groups</option>';
+  }
+  for (var i = 0; i < groups.length; i++) {
+    var group = groups[i];
+    html += '<option value="' + esc(group) + '"'
+      + (group === active ? ' selected' : '')
+      + '>' + esc(group) + '</option>';
+  }
+  html += '<option value="__new_group__">+ New group</option>';
+  html += '</select>';
+  if (root._loomLastHtml !== html) {
+    root.innerHTML = html;
+    root._loomLastHtml = html;
+  }
+}
+
+function onActiveGroupSelect(value) {
+  if (value === '__new_group__') {
+    var select = document.getElementById('active-group-select');
+    if (select && typeof _activeGroup === 'function') select.value = _activeGroup() || '';
+    if (typeof openAddGroup === 'function') openAddGroup();
+    return;
+  }
+  if (typeof setActiveGroup === 'function') setActiveGroup(value);
+}
+
 function _panelRootId(appName) {
   if (appName === 'engineer') return 'panel-agent';
   return 'panel-' + appName;
@@ -54,6 +101,49 @@ function _loadVisibleStandalonePanelApps() {
     if (!appName || seen[appName]) return;
     seen[appName] = true;
     _loadPanelApp(appName);
+  });
+}
+
+function _visiblePanelAppsForGroupScopeReload() {
+  if (typeof _standaloneVisiblePanelApps === 'function'
+      && typeof _standalonePanelsEnabled === 'function'
+      && _standalonePanelsEnabled()) {
+    return _standaloneVisiblePanelApps();
+  }
+  return (typeof _activePanelApp !== 'undefined' && _activePanelApp)
+    ? [_activePanelApp]
+    : [];
+}
+
+function _reloadGroupScopedPanelApp(appName) {
+  if (appName === 'actions') {
+    if (typeof tplEditorBeginGroupSwitch === 'function') {
+      tplEditorBeginGroupSwitch();
+    } else if (typeof tplEditorLoad === 'function') {
+      tplEditorLoad();
+    } else {
+      _loadPanelApp(appName);
+    }
+  }
+  if (appName === 'templates') {
+    if (typeof _agentsPanelView !== 'undefined' && _agentsPanelView === 'history') {
+      if (typeof agentHistoryLoad === 'function') agentHistoryLoad();
+    } else if (typeof agentTemplateBeginGroupSwitch === 'function') {
+      agentTemplateBeginGroupSwitch();
+    } else if (typeof agentTemplateEditorLoad === 'function') {
+      agentTemplateEditorLoad();
+    } else {
+      _loadPanelApp(appName);
+    }
+  }
+}
+
+function _reloadVisibleGroupScopedPanelApps() {
+  var seen = {};
+  _visiblePanelAppsForGroupScopeReload().forEach(function(appName) {
+    if ((appName !== 'actions' && appName !== 'templates') || seen[appName]) return;
+    seen[appName] = true;
+    _reloadGroupScopedPanelApp(appName);
   });
 }
 

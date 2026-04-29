@@ -25,12 +25,21 @@ var _CONTEXT_LIST_OVERSCAN = 5;
 var _CONTEXT_LIST_DEFAULT_VIEWPORT = 520;
 
 function _contextCurrentAgent() {
+  var activeGroup = '';
+  if (typeof _singleGroupModeEnabled === 'function'
+      && _singleGroupModeEnabled()
+      && typeof _activeGroup === 'function') {
+    activeGroup = _activeGroup() || '';
+  }
   if (selectedAgentId && state && state.agents && state.agents[selectedAgentId]) {
-    return state.agents[selectedAgentId];
+    if (!activeGroup || state.agents[selectedAgentId].group === activeGroup) {
+      return state.agents[selectedAgentId];
+    }
   }
   if (typeof focusedItemId !== 'undefined' && focusedItemId
       && state && state.agents && state.agents[focusedItemId]) {
     var focused = state.agents[focusedItemId];
+    if (activeGroup && focused.group !== activeGroup) return null;
     if (focused.cell_type === 'terminal' && focused.parent_id
         && state.agents[focused.parent_id]) {
       return state.agents[focused.parent_id];
