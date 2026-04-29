@@ -498,6 +498,11 @@ function _setTaskDeps(deps) {
 }
 
 function _currentGroup() {
+  if (typeof _singleGroupModeEnabled === 'function'
+      && _singleGroupModeEnabled()
+      && typeof _activeGroup === 'function') {
+    return _activeGroup() || '';
+  }
   if (typeof selectedTerminalId !== 'undefined'
       && selectedTerminalId
       && state && state.agents && state.agents[selectedTerminalId]) {

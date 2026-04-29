@@ -397,6 +397,11 @@ function submitGroup() {
   const directory = dirEl ? dirEl.value.trim() : '';
   const payload = { cmd: 'add_group', group: name };
   if (directory) payload.default_directory = directory;
+  if (typeof setActiveGroup === 'function'
+      && typeof _singleGroupModeEnabled === 'function'
+      && _singleGroupModeEnabled()) {
+    setActiveGroup(name, { allowPending: true });
+  }
   send(payload);
   const standalone = !!(state && state.runtime && state.runtime.embedded_terminal);
   closeModals();

@@ -5949,7 +5949,15 @@ async def main(connection=None):
     log.info("Durable event-ingest drainer started after EventBus callbacks")
 
     def _runtime_payload() -> dict:
+        runtime_mode = "toolbelt"
+        if STANDALONE:
+            runtime_mode = (
+                "desktop"
+                if os.environ.get("LOOM_DESKTOP_MODE", "").strip()
+                else "standalone"
+            )
         return {
+            "mode": runtime_mode,
             "standalone": STANDALONE,
             "embedded_terminal": bridge.capabilities.supports_embedded_terminal,
             "layout": "ide" if bridge.capabilities.supports_embedded_terminal else "classic",

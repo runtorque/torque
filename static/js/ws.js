@@ -392,6 +392,10 @@ function _handleEngineerSessionMapMessage(msg) {
 function _applyRuntimeMode() {
   const embedded = !!(state && state.runtime && state.runtime.embedded_terminal);
   document.body.classList.toggle('runtime-embedded', embedded);
+  if (document.body && document.body.dataset
+      && typeof _loomUiMode === 'function') {
+    document.body.dataset.loomMode = _loomUiMode();
+  }
 }
 
 function _maybeTriggerAgentDoneFlourish(previousTask, nextTask) {

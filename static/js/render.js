@@ -76,6 +76,351 @@ function _embeddedRuntimeEnabled() {
   return !!(state && state.runtime && state.runtime.embedded_terminal);
 }
 
+var _activeGroupSurfaceStateByGroup = {};
+var _activeGroupStoragePrefix = 'loom.active_group';
+var _pendingActiveGroup = '';
+
+function _loomUiMode() {
+  const runtime = (state && state.runtime) || {};
+  const explicit = String(runtime.mode || '').trim().toLowerCase();
+  if (explicit) return explicit;
+  if (runtime.standalone) return 'standalone';
+  if (runtime.embedded_terminal) return 'standalone';
+  return 'toolbelt';
+}
+
+function _singleGroupModeEnabled() {
+  const mode = _loomUiMode();
+  return mode === 'standalone' || mode === 'desktop';
+}
+
+function _groupNamesSorted(names) {
+  const list = Array.isArray(names)
+    ? names.slice()
+    : Object.keys((state && state.groups) || {});
+  list.sort(function(a, b) {
+    return String(a || '').localeCompare(String(b || ''), undefined, {
+      sensitivity: 'base',
+    });
+  });
+  return list;
+}
+
+function _activeGroupStorageKey() {
+  const runtime = (state && state.runtime) || {};
+  const parts = [
+    _activeGroupStoragePrefix,
+    runtime.profile || '',
+    runtime.port || ((typeof location !== 'undefined' && location.host) || ''),
+  ];
+  return parts.join(':');
+}
+
+function _readStoredActiveGroup() {
+  if (typeof sessionStorage === 'undefined') return '';
+  try {
+    return String(sessionStorage.getItem(_activeGroupStorageKey()) || '').trim();
+  } catch (_e) {
+    return '';
+  }
+}
+
+function _writeStoredActiveGroup(group) {
+  if (typeof sessionStorage === 'undefined') return;
+  try {
+    const key = _activeGroupStorageKey();
+    if (group) sessionStorage.setItem(key, group);
+    else sessionStorage.removeItem(key);
+  } catch (_e) {}
+}
+
+function _normalizeActiveGroup(group, names) {
+  const available = _groupNamesSorted(names);
+  if (!available.length) return '';
+  const wanted = String(group || '').trim();
+  if (wanted && available.indexOf(wanted) >= 0) return wanted;
+  return available[0];
+}
+
+function _activeGroup() {
+  const names = Object.keys((state && state.groups) || {});
+  if (!names.length) {
+    if (_pendingActiveGroup) {
+      if (state) state.active_group = _pendingActiveGroup;
+      return '';
+    }
+    if (state) state.active_group = '';
+    _writeStoredActiveGroup('');
+    return '';
+  }
+  const pending = String(_pendingActiveGroup || (state && state.active_group) || '').trim();
+  const stored = _readStoredActiveGroup();
+  const desired = pending || stored;
+  const pendingCreate = !!(
+    _pendingActiveGroup
+    && desired === _pendingActiveGroup
+    && names.indexOf(_pendingActiveGroup) < 0
+  );
+  const next = _normalizeActiveGroup(desired, names);
+  if (pendingCreate) {
+    if (state) state.active_group = _pendingActiveGroup;
+    return next;
+  }
+  if (_pendingActiveGroup && next === _pendingActiveGroup) _pendingActiveGroup = '';
+  if (state) state.active_group = next;
+  if (next && stored !== next) _writeStoredActiveGroup(next);
+  return next;
+}
+
+function _activeGroupNamesForRender(names) {
+  if (!_singleGroupModeEnabled()) return names;
+  const active = _activeGroup();
+  return active ? [active] : [];
+}
+
+function _agentBelongsToGroup(agentId, group) {
+  if (!agentId || !state || !state.agents || !state.agents[agentId]) return false;
+  return String(state.agents[agentId].group || '') === String(group || '');
+}
+
+function _focusedItemBelongsToGroup(focusId, group) {
+  const id = String(focusId || '');
+  const g = String(group || '');
+  if (!id || !g) return false;
+  if (_agentBelongsToGroup(id, g)) return true;
+  if (id.indexOf('principal:' + g + ':') === 0) return true;
+  if (id.indexOf('grid-control:') === 0 && id.indexOf(':' + g) >= 0) return true;
+  return false;
+}
+
+function _clonePlainObject(value) {
+  if (!value || typeof value !== 'object') return {};
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch (_e) {
+    return Object.assign({}, value);
+  }
+}
+
+function _captureBoardGroupUiState() {
+  if (typeof _boardSelectedLane === 'undefined') return null;
+  if (typeof _boardSyncActiveViewState === 'function') {
+    _boardSyncActiveViewState(document.getElementById('board-cards'));
+  }
+  if (typeof _boardAddingTask !== 'undefined' && _boardAddingTask) {
+    const input = document.getElementById('board-add-task-input');
+    if (input && 'value' in input) _boardAddingTaskDraft = input.value;
+  }
+  return {
+    selectedLane: _boardSelectedLane || '',
+    focusedTask: typeof _boardFocusedTask !== 'undefined' ? (_boardFocusedTask || '') : '',
+    addingTask: typeof _boardAddingTask !== 'undefined' ? !!_boardAddingTask : false,
+    addingTaskDraft: typeof _boardAddingTaskDraft !== 'undefined' ? (_boardAddingTaskDraft || '') : '',
+    addingTaskAgent: typeof _boardAddingTaskAgent !== 'undefined' ? (_boardAddingTaskAgent || '') : '',
+    addingTaskLane: typeof _boardAddingTaskLane !== 'undefined' ? (_boardAddingTaskLane || '') : '',
+    inlineDraftId: typeof _boardInlineDraftId !== 'undefined' ? (_boardInlineDraftId || '') : '',
+    inlineAttachments: typeof _boardInlineAttachments !== 'undefined' && Array.isArray(_boardInlineAttachments)
+      ? _boardInlineAttachments.slice()
+      : [],
+    showSchedules: typeof _boardShowSchedules !== 'undefined' ? !!_boardShowSchedules : false,
+    showArchived: typeof _boardShowArchived !== 'undefined' ? !!_boardShowArchived : false,
+    selectedTasks: typeof _boardSelectedTasks !== 'undefined' ? _clonePlainObject(_boardSelectedTasks) : {},
+    lastSelectedTask: typeof _boardLastSelectedTask !== 'undefined' ? (_boardLastSelectedTask || '') : '',
+    quickEditTask: typeof _boardQuickEditTask !== 'undefined' ? (_boardQuickEditTask || '') : '',
+    quickEditKind: typeof _boardQuickEditKind !== 'undefined' ? (_boardQuickEditKind || '') : '',
+    cardsScrollTop: typeof _boardCardsScrollTop !== 'undefined' ? (_boardCardsScrollTop || 0) : 0,
+    activeViewKey: typeof _boardActiveViewKey !== 'undefined' ? (_boardActiveViewKey || '') : '',
+  };
+}
+
+function _restoreBoardGroupUiState(saved) {
+  if (!saved || typeof _boardSelectedLane === 'undefined') return;
+  _boardSelectedLane = saved.selectedLane || _boardSelectedLane || '';
+  if (typeof _boardFocusedTask !== 'undefined') _boardFocusedTask = saved.focusedTask || '';
+  if (typeof _boardAddingTask !== 'undefined') _boardAddingTask = !!saved.addingTask;
+  if (typeof _boardAddingTaskDraft !== 'undefined') _boardAddingTaskDraft = saved.addingTaskDraft || '';
+  if (typeof _boardAddingTaskAgent !== 'undefined') _boardAddingTaskAgent = saved.addingTaskAgent || '';
+  if (typeof _boardAddingTaskLane !== 'undefined') _boardAddingTaskLane = saved.addingTaskLane || '';
+  if (typeof _boardInlineDraftId !== 'undefined') _boardInlineDraftId = saved.inlineDraftId || '';
+  if (typeof _boardInlineAttachments !== 'undefined') {
+    _boardInlineAttachments = Array.isArray(saved.inlineAttachments)
+      ? saved.inlineAttachments.slice()
+      : [];
+  }
+  if (typeof _boardShowSchedules !== 'undefined') _boardShowSchedules = !!saved.showSchedules;
+  if (typeof _boardShowArchived !== 'undefined') _boardShowArchived = !!saved.showArchived;
+  if (typeof _boardSelectedTasks !== 'undefined') _boardSelectedTasks = _clonePlainObject(saved.selectedTasks);
+  if (typeof _boardLastSelectedTask !== 'undefined') _boardLastSelectedTask = saved.lastSelectedTask || '';
+  if (typeof _boardQuickEditTask !== 'undefined') _boardQuickEditTask = saved.quickEditTask || '';
+  if (typeof _boardQuickEditKind !== 'undefined') _boardQuickEditKind = saved.quickEditKind || '';
+  if (typeof _boardCardsScrollTop !== 'undefined') _boardCardsScrollTop = saved.cardsScrollTop || 0;
+  if (typeof _boardActiveViewKey !== 'undefined') _boardActiveViewKey = saved.activeViewKey || '';
+  if (typeof _boardFilterStateGroup !== 'undefined') _boardFilterStateGroup = '';
+}
+
+function _resetBoardGroupUiStateForFreshGroup() {
+  if (typeof _boardSelectedLane === 'undefined') return;
+  _boardSelectedLane = '';
+  if (typeof _boardFocusedTask !== 'undefined') _boardFocusedTask = '';
+  if (typeof _boardAddingTask !== 'undefined') _boardAddingTask = false;
+  if (typeof _boardAddingTaskDraft !== 'undefined') _boardAddingTaskDraft = '';
+  if (typeof _boardAddingTaskAgent !== 'undefined') _boardAddingTaskAgent = '';
+  if (typeof _boardAddingTaskLane !== 'undefined') _boardAddingTaskLane = '';
+  if (typeof _boardInlineDraftId !== 'undefined') _boardInlineDraftId = '';
+  if (typeof _boardInlineAttachments !== 'undefined') _boardInlineAttachments = [];
+  if (typeof _boardShowSchedules !== 'undefined') _boardShowSchedules = false;
+  if (typeof _boardShowArchived !== 'undefined') _boardShowArchived = false;
+  if (typeof _boardSelectedTasks !== 'undefined') _boardSelectedTasks = {};
+  if (typeof _boardLastSelectedTask !== 'undefined') _boardLastSelectedTask = '';
+  if (typeof _boardQuickEditTask !== 'undefined') _boardQuickEditTask = '';
+  if (typeof _boardQuickEditKind !== 'undefined') _boardQuickEditKind = '';
+  if (typeof _boardCardsScrollTop !== 'undefined') _boardCardsScrollTop = 0;
+  if (typeof _boardActiveViewKey !== 'undefined') _boardActiveViewKey = '';
+  if (typeof _boardFilterStateGroup !== 'undefined') _boardFilterStateGroup = '';
+}
+
+function _captureActiveGroupUiState(group) {
+  const g = String(group || '').trim();
+  if (!g) return;
+  if (typeof _captureAgentDetailDrafts === 'function') _captureAgentDetailDrafts();
+  if (typeof _terminalComposePersistFromDom === 'function') {
+    const terminalRoot = document.getElementById('terminal-workspace');
+    if (terminalRoot) _terminalComposePersistFromDom(terminalRoot);
+  }
+  const main = document.getElementById('main');
+  const surfaces = {};
+  if (main && typeof _captureSurfaceState === 'function') {
+    surfaces.main = _captureSurfaceState(main, {
+      scrollSelectors: [
+        ':root',
+        '.mcp-log',
+        '.detail-decisions-log',
+        '.loose-workers-strip',
+      ],
+      captureFocusKey: typeof _captureMainFocusKey === 'function'
+        ? _captureMainFocusKey
+        : null,
+    });
+  }
+  const panelIds = [
+    'panel-board',
+    'panel-actions',
+    'panel-templates',
+    'panel-context',
+    'panel-events',
+    'panel-agent',
+  ];
+  for (let i = 0; i < panelIds.length; i++) {
+    const el = document.getElementById(panelIds[i]);
+    if (el && typeof _captureSurfaceState === 'function') {
+      surfaces[panelIds[i]] = _captureSurfaceState(el);
+    }
+  }
+  _activeGroupSurfaceStateByGroup[g] = {
+    selectedAgentId: typeof selectedAgentId !== 'undefined' ? (selectedAgentId || '') : '',
+    selectedTerminalId: typeof selectedTerminalId !== 'undefined' ? (selectedTerminalId || '') : '',
+    focusedItemId: typeof focusedItemId !== 'undefined' ? (focusedItemId || '') : '',
+    selectedPrincipalId: state ? String(state.selected_principal_id || '') : '',
+    board: _captureBoardGroupUiState(),
+    agentPanelTabs: typeof _agentPanelLastSelectedTabByKind !== 'undefined'
+      ? _clonePlainObject(_agentPanelLastSelectedTabByKind)
+      : null,
+    surfaces,
+  };
+}
+
+function _applyActiveGroupUiState(group) {
+  const g = String(group || '').trim();
+  const saved = g ? _activeGroupSurfaceStateByGroup[g] : null;
+  if (saved) {
+    selectedAgentId = _agentBelongsToGroup(saved.selectedAgentId, g)
+      ? saved.selectedAgentId
+      : null;
+    selectedTerminalId = _agentBelongsToGroup(saved.selectedTerminalId, g)
+      ? saved.selectedTerminalId
+      : null;
+    focusedItemId = _focusedItemBelongsToGroup(saved.focusedItemId, g)
+      ? saved.focusedItemId
+      : null;
+    if (state) state.selected_principal_id = saved.selectedPrincipalId || '';
+    _restoreBoardGroupUiState(saved.board);
+    if (saved.agentPanelTabs
+        && typeof _agentPanelLastSelectedTabByKind !== 'undefined') {
+      _agentPanelLastSelectedTabByKind = _clonePlainObject(saved.agentPanelTabs);
+    }
+    return saved;
+  }
+  if (typeof selectedAgentId !== 'undefined'
+      && !_agentBelongsToGroup(selectedAgentId, g)) selectedAgentId = null;
+  if (typeof selectedTerminalId !== 'undefined'
+      && !_agentBelongsToGroup(selectedTerminalId, g)) selectedTerminalId = null;
+  if (typeof focusedItemId !== 'undefined'
+      && !_focusedItemBelongsToGroup(focusedItemId, g)) focusedItemId = null;
+  if (state) state.selected_principal_id = '';
+  _resetBoardGroupUiStateForFreshGroup();
+  if (typeof _agentPanelLastSelectedTabByKind !== 'undefined') {
+    _agentPanelLastSelectedTabByKind = {};
+  }
+  if (typeof _boardFilterStateGroup !== 'undefined') _boardFilterStateGroup = '';
+  return null;
+}
+
+function _restoreActiveGroupSurfaces(saved) {
+  if (!saved || !saved.surfaces || typeof _restoreSurfaceState !== 'function') return;
+  if (saved.surfaces.main) {
+    _restoreSurfaceState(document.getElementById('main'), saved.surfaces.main);
+  }
+  for (const id in saved.surfaces) {
+    if (id === 'main') continue;
+    _restoreSurfaceState(document.getElementById(id), saved.surfaces[id]);
+  }
+}
+
+function _abortActiveGroupDrag() {
+  if (typeof dragInProgress !== 'undefined') dragInProgress = false;
+  if (typeof _dragId !== 'undefined') _dragId = null;
+  if (typeof _dragType !== 'undefined') _dragType = null;
+  if (typeof _boardDragId !== 'undefined') _boardDragId = '';
+  if (typeof document !== 'undefined' && document.querySelectorAll) {
+    document.querySelectorAll('.dragging, .drop-before, .drop-after, .drop-target')
+      .forEach(function(el) {
+        if (el && el.classList) {
+          el.classList.remove('dragging', 'drop-before', 'drop-after', 'drop-target');
+        }
+      });
+  }
+  if (typeof _clearDropIndicators === 'function') _clearDropIndicators();
+}
+
+function setActiveGroup(group, opts) {
+  opts = opts || {};
+  if (!_singleGroupModeEnabled()) return false;
+  const requested = String(group || '').trim();
+  const names = Object.keys((state && state.groups) || {});
+  if (opts.allowPending && requested && names.indexOf(requested) < 0) {
+    _pendingActiveGroup = requested;
+    if (state) state.active_group = requested;
+    _writeStoredActiveGroup(requested);
+    return true;
+  }
+  const next = _normalizeActiveGroup(requested, names);
+  const prev = _activeGroup();
+  if (next === prev) {
+    if (typeof renderGroupSwitcher === 'function') renderGroupSwitcher();
+    return true;
+  }
+  _abortActiveGroupDrag();
+  _captureActiveGroupUiState(prev);
+  if (state) state.active_group = next;
+  _writeStoredActiveGroup(next);
+  const saved = _applyActiveGroupUiState(next);
+  render({ skipPanelRefresh: true });
+  if (typeof renderActivePanel === 'function') renderActivePanel();
+  _restoreActiveGroupSurfaces(saved);
+  if (typeof renderGroupSwitcher === 'function') renderGroupSwitcher();
+  return true;
+}
+
 function _workerOwnerEngineerId(agent, visibleById) {
   if (!agent) return '';
   const ownerId = String(
@@ -1815,6 +2160,14 @@ function _renderEngineerRow(row, renderCell) {
 }
 
 function render(opts) {
+  if (typeof renderGroupSwitcher === 'function') renderGroupSwitcher();
+  if (_loomUiMode() === 'toolbelt') {
+    return _renderMainGrid(opts, { singleGroup: false });
+  }
+  return _renderMainGrid(opts, { singleGroup: _singleGroupModeEnabled() });
+}
+
+function _renderMainGrid(opts, renderMode) {
   const main = document.getElementById('main');
   // LOOM:236 v10: when render() is invoked from a delta-driven invalidation
   // and only the main surface was flagged (not engineer), skip the trailing
@@ -1824,15 +2177,22 @@ function render(opts) {
   // `_agentPanelRefreshCurrentTab()` even when nothing the panel displays
   // had changed (still surgical post-v9, but wasteful CPU + future-fragile).
   const _skipPanelRefresh = !!(opts && opts.skipPanelRefresh);
-  const groupNames = Object.keys(state.groups);
+  let groupNames = Object.keys(state.groups);
+  if (renderMode && renderMode.singleGroup) {
+    groupNames = _activeGroupNamesForRender(groupNames);
+  }
   const embeddedMode = _embeddedRuntimeEnabled();
   _pruneAgentDoneFlourishes((state && state.agents) || {});
 
   if (groupNames.length === 0) {
+    const action = _singleGroupModeEnabled()
+      ? '<br><button type="button" class="empty-action" onclick="openAddGroup()">+ New group</button>'
+      : '';
     const emptyHtml = `
       <div class="empty">
         <div class="empty-icon">\u2B22</div>
         No groups yet.<br>Create one to get started.
+        ${action}
       </div>`;
     if (main._loomLastHtml !== emptyHtml) {
       main.innerHTML = emptyHtml;

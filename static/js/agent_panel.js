@@ -124,28 +124,50 @@ function _agentPanelVirtualUserPrincipal(group) {
   };
 }
 
+function _agentPanelAgentVisibleInCurrentMode(agent) {
+  if (!agent) return null;
+  if (typeof _singleGroupModeEnabled !== 'function'
+      || !_singleGroupModeEnabled()
+      || typeof _activeGroup !== 'function') {
+    return agent;
+  }
+  var activeGroup = _activeGroup() || '';
+  if (!activeGroup) return agent;
+  return String(agent.group || '') === activeGroup ? agent : null;
+}
+
 function _resolveFocusedAgent() {
   if (typeof focusedItemId === 'undefined' || !focusedItemId) return null;
   if (!state || !state.agents) return null;
-  if (state.agents[focusedItemId]) return state.agents[focusedItemId];
+  if (state.agents[focusedItemId]) {
+    return _agentPanelAgentVisibleInCurrentMode(state.agents[focusedItemId]);
+  }
   // Principal-row focus ids (`principal:<group>:<architect-id|user>`) aren't
   // direct agent lookups — resolve them to the architect agent so the panel
   // shows the architect's tabs instead of the empty state.
   var meta = (typeof _navMeta === 'function') ? _navMeta(focusedItemId) : null;
   if (meta && meta.type === 'principal') {
     var pid = String(meta.principalId || '');
-    if (pid && state.agents[pid]) return state.agents[pid];
+    if (pid && state.agents[pid]) {
+      return _agentPanelAgentVisibleInCurrentMode(state.agents[pid]);
+    }
     if (pid) return null;
-    return _agentPanelVirtualUserPrincipal(meta.group || '');
+    return _agentPanelAgentVisibleInCurrentMode(
+      _agentPanelVirtualUserPrincipal(meta.group || '')
+    );
   }
   if (typeof focusedItemId === 'string' && focusedItemId.indexOf('principal:') === 0) {
     var lastColon = focusedItemId.lastIndexOf(':');
     if (lastColon > 'principal:'.length - 1) {
       var tail = focusedItemId.slice(lastColon + 1);
-      if (tail && tail !== 'user' && state.agents[tail]) return state.agents[tail];
+      if (tail && tail !== 'user' && state.agents[tail]) {
+        return _agentPanelAgentVisibleInCurrentMode(state.agents[tail]);
+      }
       if (tail === 'user') {
         var group = focusedItemId.slice('principal:'.length, lastColon);
-        return _agentPanelVirtualUserPrincipal(group);
+        return _agentPanelAgentVisibleInCurrentMode(
+          _agentPanelVirtualUserPrincipal(group)
+        );
       }
     }
     return null;
@@ -5829,6 +5851,11 @@ function _engineerGroupHasState(value) {
 }
 
 function _agentPanelCurrentGroup() {
+  if (typeof _singleGroupModeEnabled === 'function'
+      && _singleGroupModeEnabled()
+      && typeof _activeGroup === 'function') {
+    return _activeGroup() || '';
+  }
   if (typeof _resolveFocusedAgent === 'function') {
     var focusedAgent = _resolveFocusedAgent();
     if (focusedAgent && focusedAgent.group) return focusedAgent.group || '';

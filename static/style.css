@@ -66,6 +66,27 @@ header h1 {
   font-size: 11px; font-weight: 700;
   letter-spacing: .06em; flex: 1;
 }
+.group-switcher {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 0 1 220px;
+}
+.group-switcher:not([hidden]) { display: flex; }
+.group-switcher-label {
+  color: var(--text-dim);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.group-switcher-select {
+  min-width: 120px;
+  max-width: 220px;
+  width: 100%;
+  padding: 3px 7px;
+  font-size: 10px;
+  background: var(--bg);
+}
 .hdr-btn {
   font-size: 10px; padding: 3px 8px;
   border: 1px solid var(--border); border-radius: var(--radius);
@@ -204,6 +225,19 @@ body.runtime-embedded #standalone-float-layer {
   padding: 32px 12px; font-size: 11px; line-height: 1.6;
 }
 .empty-icon { font-size: 28px; margin-bottom: 8px; opacity: .5; }
+.empty-action {
+  display: inline-flex;
+  margin-top: 10px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  background: var(--bg-cell);
+}
+.empty-action:hover {
+  border-color: var(--text-dim);
+  background: var(--bg-hover);
+}
 
 /* ------------------------------------------------------------------ */
 /* Group card                                                          */

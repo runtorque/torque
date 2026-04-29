@@ -65,6 +65,11 @@ function isEmbeddedTerminalMode() {
 }
 
 function _terminalCurrentGroupName() {
+  if (typeof _singleGroupModeEnabled === 'function'
+      && _singleGroupModeEnabled()
+      && typeof _activeGroup === 'function') {
+    return _activeGroup() || '';
+  }
   if (selectedTerminalId && state.agents && state.agents[selectedTerminalId]) {
     return state.agents[selectedTerminalId].group || '';
   }
@@ -125,21 +130,31 @@ function _terminalGroupCells(group) {
 
 function _resolveTerminalWorkspaceCell() {
   if (!state || !state.agents) return null;
+  const activeGroup = (typeof _singleGroupModeEnabled === 'function'
+    && _singleGroupModeEnabled()
+    && typeof _activeGroup === 'function')
+    ? (_activeGroup() || '')
+    : '';
   if (selectedTerminalId && state.agents[selectedTerminalId]) {
-    return state.agents[selectedTerminalId];
+    const selected = state.agents[selectedTerminalId];
+    if (!activeGroup || selected.group === activeGroup) return selected;
   }
   if (state.active_session_id) {
     for (const id in state.agents) {
       const cell = state.agents[id];
       if (cell.session_id === state.active_session_id) {
+        if (activeGroup && cell.group !== activeGroup) continue;
         selectedTerminalId = id;
         return cell;
       }
     }
   }
   if (selectedAgentId && state.agents[selectedAgentId]) {
-    selectedTerminalId = selectedAgentId;
-    return state.agents[selectedAgentId];
+    const selectedAgent = state.agents[selectedAgentId];
+    if (!activeGroup || selectedAgent.group === activeGroup) {
+      selectedTerminalId = selectedAgentId;
+      return selectedAgent;
+    }
   }
   const group = _terminalCurrentGroupName();
   const cells = _terminalGroupCells(group);
@@ -147,7 +162,9 @@ function _resolveTerminalWorkspaceCell() {
     selectedTerminalId = cells[0].id;
     return cells[0];
   }
-  const ids = Object.keys(state.agents);
+  const ids = Object.keys(state.agents).filter(function(id) {
+    return !activeGroup || (state.agents[id] && state.agents[id].group === activeGroup);
+  });
   if (!ids.length) return null;
   selectedTerminalId = ids[0];
   return state.agents[ids[0]];
