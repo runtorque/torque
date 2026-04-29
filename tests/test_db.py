@@ -116,19 +116,26 @@ class LoomDBTests(unittest.TestCase):
 
     def test_board_task_messages_thread_schema_migration_is_idempotent(self):
         legacy_path = Path(self.tmp.name) / "legacy-messages-thread.db"
+        seeded = LoomDB(legacy_path)
+        seeded.init()
+        seeded.save_board_task(BoardTask(id="task-1", task="Legacy task", group="g"))
+        seeded.close()
+
         conn = sqlite3.connect(str(legacy_path))
+        columns = [
+            row[1]
+            for row in conn.execute("PRAGMA table_info(board_tasks)")
+            if row[1] != "messages_thread"
+        ]
+        quoted_columns = ", ".join(f'"{col}"' for col in columns)
         conn.execute(
-            "CREATE TABLE board_tasks ("
-            "id TEXT PRIMARY KEY, "
-            "task TEXT NOT NULL, "
-            "group_name TEXT NOT NULL DEFAULT '', "
-            "labels TEXT NOT NULL DEFAULT '[]', "
-            "messages TEXT NOT NULL DEFAULT '[]')"
+            f"CREATE TABLE board_tasks_without_messages_thread "
+            f"AS SELECT {quoted_columns} FROM board_tasks"
         )
+        conn.execute("DROP TABLE board_tasks")
         conn.execute(
-            "INSERT INTO board_tasks "
-            "(id, task, group_name, labels, messages) "
-            "VALUES ('task-1', 'Legacy task', 'g', '[]', '[]')"
+            "ALTER TABLE board_tasks_without_messages_thread "
+            "RENAME TO board_tasks"
         )
         conn.commit()
         conn.close()
@@ -148,7 +155,7 @@ class LoomDBTests(unittest.TestCase):
         ]
         self.assertEqual(columns.count("messages_thread"), 1)
         row = migrated_again._conn.execute(
-            "SELECT messages_thread FROM board_tasks WHERE id='task-1'"
+            "SELECT messages_thread FROM board_tasks LIMIT 1"
         ).fetchone()
         self.assertEqual(json.loads(row[0]), [])
 
