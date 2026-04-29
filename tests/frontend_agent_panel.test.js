@@ -694,6 +694,53 @@ test('architect Messages tab renders full-height message cards instead of the co
   assert.doesNotMatch(panel.innerHTML, /class="mcp-text"/);
 });
 
+test('worker Messages tab renders inline task thread entries', () => {
+  const { context, panel } = createHarness();
+  context.state.agents = {
+    'eng-1': {
+      id: 'eng-1',
+      name: 'Engineer',
+      kind: 'engineer',
+      group: 'alpha',
+      cell_type: 'agent',
+    },
+    'worker-1': {
+      id: 'worker-1',
+      name: 'Worker',
+      kind: 'worker',
+      group: 'alpha',
+      cell_type: 'agent',
+    },
+  };
+  context.state.board_tasks = {
+    'task-1': {
+      id: 'task-1',
+      task: 'Parent task',
+      group: 'alpha',
+      agent_id: 'worker-1',
+      messages_thread: [
+        {
+          timestamp: 1712345600,
+          sender_agent_id: 'eng-1',
+          recipient_agent_id: 'worker-1',
+          content: 'Use the smaller repro before continuing.',
+          reply_required: false,
+        },
+      ],
+    },
+  };
+  context.focusedItemId = 'worker-1';
+
+  context.agentPanelSelectTab('messages');
+
+  assert.match(panel.innerHTML, /agent-panel-messages-tab/);
+  assert.match(panel.innerHTML, /Use the smaller repro before continuing\./);
+  assert.match(panel.innerHTML, /Engineer/);
+  assert.match(panel.innerHTML, /In/);
+  assert.match(panel.innerHTML, /engineer message/);
+  assert.match(panel.innerHTML, /Inline Engineer messages stored/);
+});
+
 test('architect Messages tab renders newest-first regardless of source array order', () => {
   const { context, panel } = createHarness();
   context.state.agents = {

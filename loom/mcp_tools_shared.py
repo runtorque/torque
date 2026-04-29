@@ -3951,11 +3951,23 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         )
         if not agent_id:
             return agent_error, True
+        reply_required, reply_error = _optional_bool_arg(
+            args,
+            "reply_required",
+            True,
+        )
+        if reply_error:
+            return reply_error, True
 
         result = await handle_command({
             "cmd": "engineer_message",
             "agent_id": agent_id,
             "message": args.get("message", ""),
+            "reply_required": reply_required,
+            "sender_agent_id": (
+                str(getattr(_engineer_cell, "id", "") or "").strip()
+                or str(caller_id or "").strip()
+            ),
         })
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True

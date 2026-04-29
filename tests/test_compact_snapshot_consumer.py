@@ -54,6 +54,7 @@ COMPACT_CARD_FIELDS = {
     "verification_notes",
     "verification_summary",
     "messages",
+    "messages_thread",
     "lane_entered_at",
     "worktree_boundary",
     "resume_after_boundary_task_id",

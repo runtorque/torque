@@ -65,6 +65,7 @@ var _agentPanelTabSpecByKind = {
   ],
   worker: [
     { key: 'events', label: 'Events' },
+    { key: 'messages', label: 'Messages' },
     { key: 'mcp', label: 'MCP' },
     { key: 'worklog', label: 'Worklog' },
   ],
@@ -413,6 +414,12 @@ function _agentPanelVirtualMetasForSurface(agent, activeTab) {
     return [{
       key: _agentPanelFocusedSurfaceKey(agent, activeTab, 'worker-tasks'),
       scrollSelector: '.agent-panel-content',
+    }];
+  }
+  if (kind === 'worker' && activeTab === 'messages') {
+    return [{
+      key: _agentPanelFocusedSurfaceKey(agent, activeTab, 'messages'),
+      scrollSelector: '.agent-panel-message-list',
     }];
   }
   if (kind === 'engineer' && activeTab === 'worklog') {
@@ -1529,6 +1536,42 @@ function _agentPanelArchitectMessageList(agent) {
   return messages;
 }
 
+function _agentPanelInlineThreadMessageList(agent) {
+  var agentId = String((agent && agent.id) || '');
+  if (!agentId || !state || !state.board_tasks) return [];
+  var tasks = state.board_tasks || {};
+  var messages = [];
+  for (var taskId in tasks) {
+    var task = tasks[taskId] || {};
+    var thread = Array.isArray(task.messages_thread) ? task.messages_thread : [];
+    for (var i = 0; i < thread.length; i++) {
+      var entry = thread[i] || {};
+      var recipientId = String(entry.recipient_agent_id || '');
+      if (recipientId && recipientId !== agentId) continue;
+      if (!recipientId && String(task.agent_id || '') !== agentId) continue;
+      var ts = Number(entry.timestamp || 0);
+      messages.push({
+        id: 'inline-thread:' + taskId + ':' + i + ':' + ts,
+        action: 'engineer_message',
+        message: String(entry.content || ''),
+        timestamp: ts,
+        sender_id: String(entry.sender_agent_id || ''),
+        sender_kind: 'engineer',
+        peer_id: String(entry.sender_agent_id || ''),
+        direction: 'received',
+        task_id: taskId,
+        reply_required: !!entry.reply_required,
+      });
+    }
+  }
+  messages.sort(function(a, b) {
+    var diff = _agentPanelMessageCompareDesc(a, b);
+    if (diff) return diff;
+    return String(a.id || '').localeCompare(String(b.id || ''));
+  });
+  return messages;
+}
+
 function _agentPanelGroupWideNote(group) {
   var label = group ? ('Group: ' + group + ' (group-wide)') : 'Group-wide';
   return '<div class="agent-panel-worklog-note">' + _agentPanelEsc(label) + '</div>';
@@ -2080,6 +2123,8 @@ function _agentPanelTabRenderParts(agent, kind, activeTab) {
       ? _renderAgentMcpTab(agent)
       : (activeTab === 'worklog')
       ? _agentPanelWorkerWorklog(agent)
+      : (activeTab === 'messages')
+      ? _agentPanelWorkerMessages(agent)
       : _agentPanelWorkerEvents(agent);
     return parts;
   }
@@ -2445,15 +2490,17 @@ function _agentPanelArchitectDecisionsHtml(agent) {
   return html;
 }
 
-function _agentPanelArchitectMessages(agent) {
-  var messages = _agentPanelArchitectMessageList(agent);
+function _agentPanelMessagesHtml(agent, messages, note) {
+  messages = Array.isArray(messages) ? messages : [];
   var html = '<div class="agent-panel-messages-tab">';
   html += '<div class="agent-panel-message-header">';
   html += '<div class="agent-panel-message-heading">';
   html += '<span class="agent-panel-message-title">Messages</span>';
   html += '<span class="agent-panel-message-count">' + messages.length + '</span>';
   html += '</div>';
-  html += '<div class="agent-panel-message-note">Reply composer lands in a later task.</div>';
+  if (note) {
+    html += '<div class="agent-panel-message-note">' + _agentPanelEsc(note) + '</div>';
+  }
   html += '</div>';
   if (!messages.length) {
     html += '<div class="agent-panel-event-empty">No messages yet.</div>';
@@ -2494,6 +2541,22 @@ function _agentPanelArchitectMessages(agent) {
   });
   html += '</div>';
   return html;
+}
+
+function _agentPanelArchitectMessages(agent) {
+  return _agentPanelMessagesHtml(
+    agent,
+    _agentPanelArchitectMessageList(agent),
+    'Reply composer lands in a later task.'
+  );
+}
+
+function _agentPanelWorkerMessages(agent) {
+  return _agentPanelMessagesHtml(
+    agent,
+    _agentPanelInlineThreadMessageList(agent),
+    'Inline Engineer messages stored on this worker’s current tasks.'
+  );
 }
 
 function _agentPanelArchitectJournalEntryHtml(entry, index) {

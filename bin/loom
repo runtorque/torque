@@ -236,6 +236,11 @@ def db_read_board_tasks():
             except (json.JSONDecodeError, TypeError):
                 d["messages"] = []
             try:
+                d["messages_thread"] = json.loads(
+                    d.get("messages_thread", "[]"))
+            except (json.JSONDecodeError, TypeError):
+                d["messages_thread"] = []
+            try:
                 d["action_vars"] = json.loads(d.get("action_vars", "{}"))
             except (json.JSONDecodeError, TypeError):
                 d["action_vars"] = {}
@@ -334,6 +339,11 @@ def db_read_state():
                     d["messages"] = json.loads(d.get("messages", "[]"))
                 except (json.JSONDecodeError, TypeError):
                     d["messages"] = []
+                try:
+                    d["messages_thread"] = json.loads(
+                        d.get("messages_thread", "[]"))
+                except (json.JSONDecodeError, TypeError):
+                    d["messages_thread"] = []
                 try:
                     d["depends_on"] = json.loads(d.get("depends_on", "[]"))
                 except (json.JSONDecodeError, TypeError):
@@ -2475,6 +2485,19 @@ def cmd_task_show(args):
             act = m.get("action", "")
             txt = m.get("message", "")
             print(f"    [{hhmm}] {agent}: {txt}  {_dim('(' + act + ')')}")
+
+    thread = t.get("messages_thread") or []
+    if thread:
+        print()
+        print(f"  {_bold('Inline messages:')}")
+        for m in thread:
+            ts = m.get("timestamp", 0)
+            hhmm = time.strftime("%H:%M", time.localtime(ts)) if ts else "??:??"
+            sender = m.get("sender_agent_id", "?")
+            recipient = m.get("recipient_agent_id", "?")
+            txt = m.get("content", "")
+            flag = "reply required" if m.get("reply_required") else "no reply required"
+            print(f"    [{hhmm}] {sender} → {recipient}: {txt}  {_dim('(' + flag + ')')}")
 
     print()
     if t.get("created_at"):

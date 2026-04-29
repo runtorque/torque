@@ -6,6 +6,7 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import yaml
 
@@ -1617,6 +1618,147 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(follow_up.pipeline_depth, 0)
         self.assertEqual(follow_up.group, 'g')
         self.assertEqual(follow_up.labels, ['loom:engineer-message'])
+
+    async def test_send_engineer_message_reply_not_required_appends_inline_thread(self):
+        state = self._make_state()
+        parent = state.board_add_task(
+            'Implement feature',
+            'g',
+            lane='In Progress',
+            id='task-parent',
+            agent_id='agent-1',
+        )
+        engineer, worker = self._add_engineer_and_worker(
+            state,
+            current_task_id=parent.id,
+        )
+
+        sent = []
+        events = []
+
+        class FakeBridge:
+            def prime_input_ready(self, _session_id):
+                pass
+
+            async def send_text(self, session_id, text):
+                sent.append((session_id, text))
+
+        def panel_event(*args, **kwargs):
+            events.append((args, kwargs))
+
+        result = await self.server_mod._send_engineer_message_to_agent(
+            state,
+            FakeBridge(),
+            worker,
+            'FYI: switch to the smaller repro before continuing',
+            panel_event,
+            reply_required=False,
+        )
+
+        self.assertEqual(result['type'], 'ok')
+        self.assertFalse(result['reply_required'])
+        self.assertEqual(result['task_id'], '')
+        self.assertEqual(result['thread_task_id'], parent.id)
+        self.assertEqual(
+            [t.id for t in state.board_tasks.values()],
+            [parent.id],
+        )
+        self.assertEqual(len(state.board_tasks[parent.id].messages_thread), 1)
+        entry = state.board_tasks[parent.id].messages_thread[0]
+        self.assertEqual(entry['sender_agent_id'], engineer.id)
+        self.assertEqual(entry['recipient_agent_id'], worker.id)
+        self.assertEqual(
+            entry['content'],
+            'FYI: switch to the smaller repro before continuing',
+        )
+        self.assertFalse(entry['reply_required'])
+        self.assertFalse(worker.pending_engineer_message)
+        self.assertEqual(events, [])
+        self.assertNotIn('loom_reply', sent[0][1])
+        self.assertEqual(
+            self.db.load_agent_messages_by_task(parent.id)[0]['action'],
+            'engineer_message',
+        )
+
+    async def test_send_engineer_message_reply_not_required_requires_active_task(self):
+        state = self._make_state()
+        _engineer, worker = self._add_engineer_and_worker(state)
+
+        class FakeBridge:
+            async def send_text(self, _session_id, _text):
+                self.fail('message should not send without inline parent')
+
+        result = await self.server_mod._send_engineer_message_to_agent(
+            state,
+            FakeBridge(),
+            worker,
+            'FYI only',
+            lambda *args, **kwargs: None,
+            reply_required=False,
+        )
+
+        self.assertEqual(result['type'], 'error')
+        self.assertIn('active parent task', result['message'])
+        self.assertEqual(state.board_tasks, {})
+
+    async def test_reply_not_required_inline_thread_accumulates_chronologically(self):
+        state = self._make_state()
+        parent = state.board_add_task(
+            'Implement feature',
+            'g',
+            lane='In Progress',
+            id='task-parent',
+            agent_id='agent-1',
+        )
+        _engineer, worker = self._add_engineer_and_worker(
+            state,
+            current_task_id=parent.id,
+        )
+
+        class FakeBridge:
+            async def send_text(self, _session_id, _text):
+                return None
+
+        with mock.patch.object(
+            self.server_mod.time,
+            'time',
+            side_effect=[10.0, 10.5, 20.0, 20.5],
+        ):
+            await self.server_mod._send_engineer_message_to_agent(
+                state,
+                FakeBridge(),
+                worker,
+                'First inline update',
+                lambda *args, **kwargs: None,
+                reply_required=False,
+            )
+            await self.server_mod._send_engineer_message_to_agent(
+                state,
+                FakeBridge(),
+                worker,
+                'Second inline update',
+                lambda *args, **kwargs: None,
+                reply_required=False,
+            )
+
+        thread = state.board_tasks[parent.id].messages_thread
+        self.assertEqual(
+            [entry['content'] for entry in thread],
+            ['First inline update', 'Second inline update'],
+        )
+        self.assertEqual([entry['timestamp'] for entry in thread], [10.0, 20.0])
+        self.assertTrue(
+            all(
+                set(entry) == {
+                    'timestamp',
+                    'sender_agent_id',
+                    'recipient_agent_id',
+                    'content',
+                    'reply_required',
+                }
+                for entry in thread
+            )
+        )
 
     async def test_send_user_message_routes_directly_through_terminal_adapter(self):
         state = self._make_state()

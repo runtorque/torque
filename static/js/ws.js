@@ -1037,6 +1037,7 @@ function _taskDeltaInvalidatesMain(previous, next, op) {
       'action_name',
       'description',
       'messages',
+      'messages_thread',
       'created_at',
       'updated_at',
       'started_at',
@@ -1086,6 +1087,7 @@ function _taskDeltaInvalidatesBoard(previous, next, op) {
     'external_id',
     'external_url',
     'messages',
+    'messages_thread',
     'created_by',
     'created_by_architect_id',
     'created_by_engineer_id',
@@ -1200,6 +1202,10 @@ function _taskDeltaInvalidatesEvents(previous, next, op) {
       'group',
     ]);
   }
+  {
+    const changed = _taskDeltaChangedFields(previous, next, op);
+    if (_deltaHasChangedField(changed, ['messages_thread'])) return true;
+  }
   return false;
 }
 
@@ -1225,6 +1231,17 @@ function _focusedEngineerActiveTab(kind) {
   return '';
 }
 
+function _taskMessagesThreadTouchesAgent(task, agentId) {
+  if (!task || !agentId) return false;
+  const thread = Array.isArray(task.messages_thread) ? task.messages_thread : [];
+  for (let i = 0; i < thread.length; i++) {
+    const entry = thread[i] || {};
+    const recipientId = String(entry.recipient_agent_id || '');
+    if (recipientId && recipientId === agentId) return true;
+  }
+  return String(task.agent_id || '') === agentId && thread.length > 0;
+}
+
 function _taskDeltaInvalidatesEngineer(previous, next, op) {
   if (!_standaloneDeltaOptimizationsEnabled()) return true;
   const group = _currentSurfaceGroup();
@@ -1234,8 +1251,17 @@ function _taskDeltaInvalidatesEngineer(previous, next, op) {
   const kind = _focusedEngineerAgentKind(focused);
   const tab = _focusedEngineerActiveTab(kind);
   if (kind === 'worker') {
-    if (tab && tab !== 'worklog') return false;
+    if (tab && tab !== 'worklog' && tab !== 'messages') return false;
     const focusedId = String(focused.id || '');
+    if (tab === 'messages') {
+      const changed = _taskDeltaChangedFields(previous, next, op);
+      if (!_deltaHasChangedField(changed, ['messages_thread'])) return false;
+      return !!(
+        focusedId
+        && (_taskMessagesThreadTouchesAgent(previous, focusedId)
+          || _taskMessagesThreadTouchesAgent(next, focusedId))
+      );
+    }
     return !!(
       focusedId
       && ((previous && String(previous.agent_id || '') === focusedId)
