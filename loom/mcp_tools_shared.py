@@ -3964,6 +3964,10 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             "agent_id": agent_id,
             "message": args.get("message", ""),
             "reply_required": reply_required,
+            "sender_agent_id": (
+                str(getattr(_engineer_cell, "id", "") or "").strip()
+                or str(caller_id or "").strip()
+            ),
         })
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True

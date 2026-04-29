@@ -2482,14 +2482,15 @@ def _append_engineer_inline_thread_message(state: MatrixState,
                                            parent_task_id: str,
                                            message: str,
                                            *,
+                                           sender_agent_id: str = "",
                                            reply_required: bool = False
                                            ) -> Optional[BoardTask]:
     parent = state.board_tasks.get(parent_task_id)
     if not parent:
         return None
-    sender_agent_id = ""
+    sender_agent_id = str(sender_agent_id or "").strip()
     group_settings = state.get_group_settings(parent.group or target.group)
-    if group_settings:
+    if not sender_agent_id and group_settings:
         sender_agent_id = group_settings.engineer_agent_id or ""
     entry = {
         "timestamp": time.time(),
@@ -2572,6 +2573,7 @@ def _resolve_pending_engineer_reply_task(state: MatrixState, cell, *,
 async def _send_engineer_message_to_agent(state: MatrixState, bridge, target,
                                         message: str, panel_event,
                                         *,
+                                        sender_agent_id: str = "",
                                         reply_required: bool = True) -> dict:
     if not target or not target.session_id:
         return {"type": "error", "message": "Agent is not running"}
@@ -2620,6 +2622,7 @@ async def _send_engineer_message_to_agent(state: MatrixState, bridge, target,
             target,
             inline_parent.id,
             message,
+            sender_agent_id=sender_agent_id,
             reply_required=False,
         )
         if not updated_parent:
@@ -2651,11 +2654,14 @@ async def _send_engineer_message_to_agent(state: MatrixState, bridge, target,
         messages=list(follow_up.messages),
     )
     group_settings = state.get_group_settings(target.group)
+    effective_engineer_id = str(sender_agent_id or "").strip()
+    if not effective_engineer_id and group_settings:
+        effective_engineer_id = group_settings.engineer_agent_id or ""
     state.history_record_dispatch(
         target,
         follow_up,
         engineer_group=target.group,
-        engineer_id=group_settings.engineer_agent_id if group_settings else "",
+        engineer_id=effective_engineer_id,
     )
     state.history_record_message(
         target.id,
@@ -11959,6 +11965,9 @@ async def main(connection=None):
                         target,
                         msg_text,
                         _panel_event,
+                        sender_agent_id=str(
+                            data.get("sender_agent_id", "") or ""
+                        ).strip(),
                         reply_required=bool(reply_required),
                     )
 
