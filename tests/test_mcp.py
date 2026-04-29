@@ -612,6 +612,9 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("agent_type", await props_for("engineer_task_dispatch"))
         self.assertIn("provider", await props_for("engineer_batch_dispatch"))
+        agent_message_props = await props_for("engineer_agent_message")
+        self.assertIn("reply_required", agent_message_props)
+        self.assertTrue(agent_message_props["reply_required"]["default"])
 
         state.update_engineer_settings(
             "g",

@@ -252,3 +252,18 @@ class CommunicationGraphTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(agent_error, agent_text)
         self.assertEqual(self.handle_calls[-1]["cmd"], "engineer_message")
         self.assertEqual(self.handle_calls[-1]["agent_id"], worker.id)
+        self.assertTrue(self.handle_calls[-1]["reply_required"])
+
+        agent_text, agent_error = await self._call_engineer(
+            "engineer_agent_message",
+            {
+                "agent": worker.id,
+                "message": "Context only; no reply required.",
+                "reply_required": False,
+            },
+            engineer.id,
+        )
+        self.assertFalse(agent_error, agent_text)
+        self.assertEqual(self.handle_calls[-1]["cmd"], "engineer_message")
+        self.assertEqual(self.handle_calls[-1]["agent_id"], worker.id)
+        self.assertFalse(self.handle_calls[-1]["reply_required"])

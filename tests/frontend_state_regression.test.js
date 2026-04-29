@@ -6440,6 +6440,44 @@ test('event filtering respects the selected kind group and search query', () => 
   );
 });
 
+test('events board coalesces inline task message threads into event rows', () => {
+  const { context } = createEventsHarness({ stubRenderers: false });
+  context.state.agents = {
+    'worker-1': { id: 'worker-1', name: 'Worker One', group: 'alpha' },
+  };
+  context.state.board_tasks = {
+    'task-1': {
+      id: 'task-1',
+      task: 'Parent task',
+      group: 'alpha',
+      agent_id: 'worker-1',
+      messages_thread: [
+        {
+          timestamp: 1712345600,
+          sender_agent_id: 'eng-1',
+          recipient_agent_id: 'worker-1',
+          content: 'Inline context is visible in events.',
+          reply_required: false,
+        },
+      ],
+    },
+  };
+  context.state.panel_events = [];
+
+  const events = jsonValue(context, '_eventsCombinedEvents()');
+
+  assert.equal(events.length, 1);
+  assert.equal(events[0].kind, 'engineer_message');
+  assert.equal(events[0].inline_thread, true);
+  assert.equal(events[0].task_id, 'task-1');
+  assert.equal(events[0].agent_name, 'Worker One');
+  assert.equal(events[0].message, 'Inline context is visible in events.');
+  assert.match(
+    runInContext(context, `_renderEventEntry(_eventsCombinedEvents()[0], 0)`),
+    /Inline context is visible in events\./,
+  );
+});
+
 test('renderEvents preserves inline resolve drafts across panel rerenders', () => {
   const { context, document } = createEventsHarness();
   const panel = document.register('panel-events');

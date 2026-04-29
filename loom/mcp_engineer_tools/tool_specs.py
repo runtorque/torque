@@ -896,9 +896,13 @@ ENGINEER_TOOLS = [
         "name": "engineer_agent_message",
         "description": (
             "Send a message to any agent's terminal. The agent can "
-            "reply via loom_reply, which appears in the engineer's "
-            "next event digest. Loom also creates a visible follow-up "
-            "task for the exchange and returns its task id. Use for: "
+            "reply via loom_reply when reply_required is true, which "
+            "appears in the engineer's next event digest. By default "
+            "Loom creates a visible follow-up task for the exchange and "
+            "returns its task id. Set reply_required=false only for "
+            "routine context/redirect messages that do not need an "
+            "answer; Loom persists those on the worker's current task "
+            "inline thread instead of creating a board task. Use for: "
             "redirecting agents, providing context, answering questions. "
             "When owned-agent restriction is enabled, only agents "
             "created by this Engineer can be targeted."
@@ -914,6 +918,16 @@ ENGINEER_TOOLS = [
                     "type": "string",
                     "description":
                         "Message to send to the agent.",
+                },
+                "reply_required": {
+                    "type": "boolean",
+                    "description": (
+                        "Whether the agent must reply via loom_reply. "
+                        "Defaults true for backward compatibility; set "
+                        "false for informational redirects/context that "
+                        "should be stored inline on the parent task."
+                    ),
+                    "default": True,
                 },
             },
             "required": ["agent", "message"],

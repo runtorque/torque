@@ -88,6 +88,70 @@ class LoomDBTests(unittest.TestCase):
         self.assertIn("xterm_scrollback", columns)
         self.assertIn("pause_suppresses_subagent_messages", columns)
 
+    def test_board_task_messages_thread_round_trips(self):
+        task = BoardTask(
+            id="task-1",
+            task="Inline thread parent",
+            group="g",
+            messages_thread=[{
+                "timestamp": 123.0,
+                "sender_agent_id": "engineer-1",
+                "recipient_agent_id": "worker-1",
+                "content": "No reply needed; continue with context.",
+                "reply_required": False,
+            }],
+        )
+
+        self.db.save_board_task(task)
+        snapshot = self.db.load_all()
+
+        self.assertEqual(
+            snapshot["board_tasks"]["task-1"]["messages_thread"],
+            task.messages_thread,
+        )
+        row = self.db._conn.execute(
+            "SELECT messages_thread FROM board_tasks WHERE id='task-1'"
+        ).fetchone()
+        self.assertEqual(json.loads(row[0]), task.messages_thread)
+
+    def test_board_task_messages_thread_schema_migration_is_idempotent(self):
+        legacy_path = Path(self.tmp.name) / "legacy-messages-thread.db"
+        conn = sqlite3.connect(str(legacy_path))
+        conn.execute(
+            "CREATE TABLE board_tasks ("
+            "id TEXT PRIMARY KEY, "
+            "task TEXT NOT NULL, "
+            "group_name TEXT NOT NULL DEFAULT '', "
+            "labels TEXT NOT NULL DEFAULT '[]', "
+            "messages TEXT NOT NULL DEFAULT '[]')"
+        )
+        conn.execute(
+            "INSERT INTO board_tasks "
+            "(id, task, group_name, labels, messages) "
+            "VALUES ('task-1', 'Legacy task', 'g', '[]', '[]')"
+        )
+        conn.commit()
+        conn.close()
+
+        migrated = LoomDB(legacy_path)
+        migrated.init()
+        migrated.close()
+        migrated_again = LoomDB(legacy_path)
+        self.addCleanup(migrated_again.close)
+        migrated_again.init()
+
+        columns = [
+            row[1]
+            for row in migrated_again._conn.execute(
+                "PRAGMA table_info(board_tasks)"
+            )
+        ]
+        self.assertEqual(columns.count("messages_thread"), 1)
+        row = migrated_again._conn.execute(
+            "SELECT messages_thread FROM board_tasks WHERE id='task-1'"
+        ).fetchone()
+        self.assertEqual(json.loads(row[0]), [])
+
     def _seed_stage1a_db(
         self,
         filename: str,

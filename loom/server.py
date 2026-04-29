@@ -2251,7 +2251,8 @@ def _engineer_followup_task_title(message: str) -> str:
 def _format_mcp_message_prompt(message: str, *,
                                sender_name: str = "Engineer",
                                sender_kind: str = "engineer",
-                               task_id: str = "") -> str:
+                               task_id: str = "",
+                               reply_required: bool = True) -> str:
     # System-origin payloads (e.g. Loom digests) bring their own header
     # and trailing separator; wrapping them would double-up the chrome.
     if sender_kind == "system":
@@ -2263,7 +2264,7 @@ def _format_mcp_message_prompt(message: str, *,
     )
     if task_id:
         prompt += f"Task: {task_id}\n"
-    if task_id:
+    if task_id and reply_required:
         prompt += (
             f'Reply with: loom_reply(task="{task_id}", '
             'message="your response")\n'
@@ -2272,12 +2273,15 @@ def _format_mcp_message_prompt(message: str, *,
     return prompt
 
 
-def _format_engineer_message_prompt(message: str, task_id: str) -> str:
+def _format_engineer_message_prompt(message: str, task_id: str,
+                                    *,
+                                    reply_required: bool = True) -> str:
     return _format_mcp_message_prompt(
         message,
         sender_name="Engineer",
         sender_kind="engineer",
         task_id=task_id,
+        reply_required=reply_required,
     )
 
 
@@ -2466,8 +2470,46 @@ def _emit_task_artifact_uploaded_event(panel_event, task, actor, artifact) -> No
     )
 
 
-def _create_engineer_followup_task(state: MatrixState, target, message: str
+def _engineer_inline_thread_parent(state: MatrixState,
+                                   target) -> Optional[BoardTask]:
+    if not target:
+        return None
+    return state.agent_current_task(target.id)
+
+
+def _append_engineer_inline_thread_message(state: MatrixState,
+                                           target,
+                                           parent_task_id: str,
+                                           message: str,
+                                           *,
+                                           reply_required: bool = False
+                                           ) -> Optional[BoardTask]:
+    parent = state.board_tasks.get(parent_task_id)
+    if not parent:
+        return None
+    sender_agent_id = ""
+    group_settings = state.get_group_settings(parent.group or target.group)
+    if group_settings:
+        sender_agent_id = group_settings.engineer_agent_id or ""
+    entry = {
+        "timestamp": time.time(),
+        "sender_agent_id": sender_agent_id,
+        "recipient_agent_id": target.id,
+        "content": message,
+        "reply_required": bool(reply_required),
+    }
+    thread = list(getattr(parent, "messages_thread", []) or [])
+    thread.append(entry)
+    state.board_update_task(parent.id, messages_thread=thread)
+    return state.board_tasks.get(parent.id)
+
+
+def _create_engineer_followup_task(state: MatrixState, target, message: str,
+                                  *,
+                                  reply_required: bool = True
                                  ) -> Optional[BoardTask]:
+    if not reply_required:
+        return None
     if not target or not target.group:
         return None
     active_task = state.agent_current_task(target.id)
@@ -2528,28 +2570,74 @@ def _resolve_pending_engineer_reply_task(state: MatrixState, cell, *,
 
 
 async def _send_engineer_message_to_agent(state: MatrixState, bridge, target,
-                                        message: str, panel_event) -> dict:
+                                        message: str, panel_event,
+                                        *,
+                                        reply_required: bool = True) -> dict:
     if not target or not target.session_id:
         return {"type": "error", "message": "Agent is not running"}
-    follow_up = _create_engineer_followup_task(state, target, message)
-    if not follow_up:
-        return {
-            "type": "error",
-            "message": "Failed to create Engineer follow-up task",
-        }
+    reply_required = bool(reply_required)
+    follow_up = None
+    inline_parent = None
+    if reply_required:
+        follow_up = _create_engineer_followup_task(state, target, message)
+        if not follow_up:
+            return {
+                "type": "error",
+                "message": "Failed to create Engineer follow-up task",
+            }
+        prompt = _format_engineer_message_prompt(message, follow_up.id)
+    else:
+        inline_parent = _engineer_inline_thread_parent(state, target)
+        if not inline_parent:
+            return {
+                "type": "error",
+                "message": (
+                    "reply_required=false requires an active parent task "
+                    "for inline-thread persistence"
+                ),
+            }
+        prompt = _format_engineer_message_prompt(
+            message,
+            "",
+            reply_required=False,
+        )
     try:
         if hasattr(bridge, "prime_input_ready"):
             bridge.prime_input_ready(target.session_id)
-        await bridge.send_text(
-            target.session_id,
-            _format_engineer_message_prompt(message, follow_up.id),
-        )
+        await bridge.send_text(target.session_id, prompt)
     except Exception as exc:
         log.exception("Failed to send Engineer message to agent %s", target.id)
-        state.board_remove_task(follow_up.id)
+        if follow_up:
+            state.board_remove_task(follow_up.id)
         return {
             "type": "error",
             "message": f"Failed to send message: {exc}",
+        }
+
+    if not reply_required:
+        updated_parent = _append_engineer_inline_thread_message(
+            state,
+            target,
+            inline_parent.id,
+            message,
+            reply_required=False,
+        )
+        if not updated_parent:
+            return {
+                "type": "error",
+                "message": "Failed to append inline Engineer message",
+            }
+        state.history_record_message(
+            target.id,
+            "engineer_message",
+            message,
+            task_id=updated_parent.id,
+        )
+        return {
+            "type": "ok",
+            "reply_required": False,
+            "task_id": "",
+            "thread_task_id": updated_parent.id,
         }
 
     follow_up.messages.append({
@@ -2585,7 +2673,7 @@ async def _send_engineer_message_to_agent(state: MatrixState, bridge, target,
         message[:200],
         task_id=follow_up.id,
     )
-    return {"type": "ok", "task_id": follow_up.id}
+    return {"type": "ok", "reply_required": True, "task_id": follow_up.id}
 
 
 def _handle_engineer_reply(state: MatrixState, cell, *, message: str,
@@ -11859,12 +11947,19 @@ async def main(connection=None):
                               "message": "Message is required"}
                 else:
                     target = state.agents.get(agent_id)
+                    reply_required = data.get("reply_required", True)
+                    if isinstance(reply_required, str):
+                        reply_required = (
+                            reply_required.strip().lower()
+                            not in {"false", "0", "no", "off", ""}
+                        )
                     result = await _send_engineer_message_to_agent(
                         state,
                         bridge,
                         target,
                         msg_text,
                         _panel_event,
+                        reply_required=bool(reply_required),
                     )
 
             elif cmd == "inject_mcp_message":

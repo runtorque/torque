@@ -38,6 +38,7 @@ _BOARD_TASK_COLUMNS = (
     "status",
     "scheduled_at",
     "messages",
+    "messages_thread",
     "depends_on",
     "attachments",
     "health_state",
@@ -81,6 +82,7 @@ def _serialize_board_task(task):
     labels = json.dumps(d.pop("labels", []))
     action_vars = json.dumps(d.pop("action_vars", {}))
     messages = json.dumps(d.pop("messages", []))
+    messages_thread = json.dumps(d.pop("messages_thread", []))
     depends_on = json.dumps(d.pop("depends_on", []))
     attachments = json.dumps(d.pop("attachments", []))
     health_details = json.dumps(d.pop("health_details", {}))
@@ -126,6 +128,7 @@ def _serialize_board_task(task):
         d.get("status", ""),
         d.get("scheduled_at", ""),
         messages,
+        messages_thread,
         depends_on,
         attachments,
         d.get("health_state", "healthy"),
@@ -168,6 +171,7 @@ def decode_board_task_row(row, cols):
     d["labels"] = _json_loads(d.get("labels", "[]"), [])
     d["action_vars"] = _json_loads(d.get("action_vars", "{}"), {})
     d["messages"] = _json_loads(d.get("messages", "[]"), [])
+    d["messages_thread"] = _json_loads(d.get("messages_thread", "[]"), [])
     d["attachments"] = _json_loads(d.get("attachments", "[]"), [])
     d["artifacts"] = _json_loads(d.get("artifacts", "[]"), [])
     d["depends_on"] = _json_loads(d.get("depends_on", "[]"), [])

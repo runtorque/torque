@@ -163,6 +163,7 @@ CREATE TABLE IF NOT EXISTS board_tasks (
     external_url   TEXT NOT NULL DEFAULT '',
     status         TEXT NOT NULL DEFAULT '',
     attachments    TEXT NOT NULL DEFAULT '[]',
+    messages_thread TEXT NOT NULL DEFAULT '[]',
     health_state   TEXT NOT NULL DEFAULT 'healthy',
     health_since   TEXT NOT NULL DEFAULT '',
     health_details TEXT NOT NULL DEFAULT '{}',
@@ -979,6 +980,15 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
     except sqlite3.OperationalError:
         conn.execute(
             "ALTER TABLE board_tasks ADD COLUMN messages "
+            "TEXT NOT NULL DEFAULT '[]'")
+        conn.commit()
+    # Migrate: add inline engineer→agent thread column to board_tasks
+    board_task_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(board_tasks)")
+    }
+    if "messages_thread" not in board_task_columns:
+        conn.execute(
+            "ALTER TABLE board_tasks ADD COLUMN messages_thread "
             "TEXT NOT NULL DEFAULT '[]'")
         conn.commit()
     # Migrate: add scheduled_at column to board_tasks

@@ -182,6 +182,48 @@ function _eventsMatchesFilters(evt) {
   return true;
 }
 
+function _eventsInlineThreadEvents() {
+  var tasks = (state && state.board_tasks) || {};
+  var agents = (state && state.agents) || {};
+  var events = [];
+  for (var taskId in tasks) {
+    var task = tasks[taskId] || {};
+    var thread = Array.isArray(task.messages_thread) ? task.messages_thread : [];
+    for (var i = 0; i < thread.length; i++) {
+      var entry = thread[i] || {};
+      var recipientId = String(entry.recipient_agent_id || '');
+      var recipient = recipientId ? (agents[recipientId] || null) : null;
+      var ts = Number(entry.timestamp || 0);
+      events.push({
+        id: 'inline-thread:' + taskId + ':' + i + ':' + ts,
+        timestamp: ts,
+        kind: 'engineer_message',
+        cell_id: recipientId,
+        agent_name: recipient ? (recipient.name || recipient.id || '') : recipientId,
+        group: task.group || '',
+        message: String(entry.content || ''),
+        task_id: taskId,
+        inline_thread: true,
+        reply_required: !!entry.reply_required,
+      });
+    }
+  }
+  return events;
+}
+
+function _eventsCombinedEvents() {
+  var events = (state && state.panel_events ? state.panel_events.slice() : []);
+  var inlineEvents = _eventsInlineThreadEvents();
+  for (var i = 0; i < inlineEvents.length; i++) events.push(inlineEvents[i]);
+  events.sort(function(a, b) {
+    var at = Number((a && a.timestamp) || 0);
+    var bt = Number((b && b.timestamp) || 0);
+    if (at !== bt) return at - bt;
+    return String((a && a.id) || '').localeCompare(String((b && b.id) || ''));
+  });
+  return events;
+}
+
 function _eventsKindIcon(kind) {
   switch (kind) {
     case 'agent_started':  return '\u25B6';  // play
@@ -435,7 +477,7 @@ function _eventsRowHeight(row) {
 function _eventsBuildVirtualRows() {
   var rows = [];
   var grp = _eventsCurrentGroup();
-  var events = (state && state.panel_events) || [];
+  var events = _eventsCombinedEvents();
   var count = 0;
   var lastDateLabel = '';
   for (var j = events.length - 1; j >= 0; j--) {
@@ -926,7 +968,7 @@ function eventsDismiss(id) {
 }
 
 function eventsCopyMessage(entryKey) {
-  var events = (state && state.panel_events) || [];
+  var events = _eventsCombinedEvents();
   var evt = null;
   for (var i = 0; i < events.length; i++) {
     if (_eventsEntryKey(events[i], i) === String(entryKey || '')) {

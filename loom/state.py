@@ -217,6 +217,7 @@ COMPACT_BOARD_TASK_FIELDS = (
     "verification_notes",
     "verification_summary",
     "messages",
+    "messages_thread",
     "lane_entered_at",
     "worktree_boundary",
     "resume_after_boundary_task_id",
@@ -599,6 +600,9 @@ class BoardTask:
     scheduled_at: str = ""      # ISO 8601 — auto-dispatch when this time arrives
     # Activity log — persisted history of agent reports on this task
     messages: list = field(default_factory=list)  # [{timestamp, action, message, agent_name}]
+    # Inline engineer→agent messages that do not require a reply task.
+    # [{timestamp, sender_agent_id, recipient_agent_id, content, reply_required}]
+    messages_thread: list = field(default_factory=list)
     # Explicit dependencies — task IDs that must be Done before dispatch
     depends_on: list = field(default_factory=list)  # [task_id, ...]
     # Legacy image attachments — [{path, filename, mime_type}]
@@ -977,6 +981,33 @@ def _compact_task_messages_preview(messages) -> list[dict]:
     if action:
         preview["action"] = action
     return [preview]
+
+
+def _normalize_messages_thread(messages) -> list[dict]:
+    if not isinstance(messages, list):
+        return []
+    out: list[dict] = []
+    for entry in messages:
+        if not isinstance(entry, dict):
+            continue
+        content = entry.get("content", "")
+        if content is None:
+            content = ""
+        if not isinstance(content, str):
+            content = str(content)
+        out.append({
+            "timestamp": _safe_float(entry.get("timestamp")),
+            "sender_agent_id": str(
+                entry.get("sender_agent_id", "") or ""
+            ).strip(),
+            "recipient_agent_id": str(
+                entry.get("recipient_agent_id", "") or ""
+            ).strip(),
+            "content": content,
+            "reply_required": bool(entry.get("reply_required", False)),
+        })
+    out.sort(key=lambda item: _safe_float(item.get("timestamp")))
+    return out
 
 
 def task_is_closed(task: Optional[BoardTask]) -> bool:
@@ -2825,6 +2856,9 @@ class MatrixState:
                     labels = [label for label in labels
                               if label != "loom:archived"]
                 raw["labels"] = labels
+                raw["messages_thread"] = _normalize_messages_thread(
+                    raw.get("messages_thread", [])
+                )
                 _normalize_verification_fields(raw)
                 raw["worktree_boundary"] = _normalize_worktree_boundary(
                     raw.get("worktree_boundary", {})
@@ -5273,6 +5307,10 @@ class MatrixState:
                 kwargs["attachments"])
         if "artifacts" in kwargs:
             kwargs["artifacts"] = normalize_artifacts(kwargs["artifacts"])
+        if "messages_thread" in kwargs:
+            kwargs["messages_thread"] = _normalize_messages_thread(
+                kwargs["messages_thread"]
+            )
         _normalize_verification_fields(kwargs)
         bt = BoardTask(
             id=tid,
@@ -5340,6 +5378,10 @@ class MatrixState:
                 fields["attachments"])
         if "artifacts" in fields:
             fields["artifacts"] = normalize_artifacts(fields["artifacts"])
+        if "messages_thread" in fields:
+            fields["messages_thread"] = _normalize_messages_thread(
+                fields["messages_thread"]
+            )
         _normalize_verification_fields(fields)
         valid = set(BoardTask.__dataclass_fields__) - {"id", "slug", "created_at"}
         old_lane = task.lane
