@@ -198,6 +198,14 @@ _ARCHITECT_TOOL_SPECS = [
                         "true, include archived tasks only."
                     ),
                 },
+                "include_engineer_messages": {
+                    "type": "boolean",
+                    "description": (
+                        "Default false excludes loom:engineer-message "
+                        "follow-up tasks from actionable task lists; set true "
+                        "to audit those message follow-ups explicitly."
+                    ),
+                },
                 "limit": {
                     "type": "integer",
                     "description": "Maximum tasks to return (default 100).",

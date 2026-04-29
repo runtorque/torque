@@ -1,6 +1,10 @@
 /* System label helpers */
 function isSystemLabel(l) { return l.startsWith('loom:'); }
 function displayLabel(l) { return isSystemLabel(l) ? l.slice(5) : l; }
+function taskIsEngineerMessageFollowup(task) {
+  var labels = (task && Array.isArray(task.labels)) ? task.labels : [];
+  return labels.indexOf('loom:engineer-message') >= 0;
+}
 
 /* When true, only show agents/terminals belonging to the current window.
    Reads from global settings state; falls back to true before state loads. */

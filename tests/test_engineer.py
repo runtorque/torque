@@ -1569,6 +1569,30 @@ class EngineerEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("health 1 stalled", summary)
         self.assertIn("Investigate stalled dispatch (stalled)", summary)
 
+    async def test_board_summary_excludes_engineer_message_followups(self):
+        state, group, engineer = self._make_state()
+        real_task = state.board_add_task(
+            "Implement release checklist",
+            group,
+            lane="Backlog",
+            id="task-real",
+        )
+        followup = state.board_add_task(
+            "Engineer: Need status",
+            group,
+            lane="Backlog",
+            id="task-reply",
+            labels=["loom:engineer-message"],
+        )
+        self.assertIsNotNone(real_task)
+        self.assertIsNotNone(followup)
+
+        buffer = self.engineer_mod.EngineerEventBuffer(state, FakeBridge())
+        summary = buffer._board_summary(group)
+
+        self.assertIn("1 Backlog", summary)
+        self.assertNotIn("2 Backlog", summary)
+
     def test_build_engineer_system_prompt_contains_first_session_guidance(self):
         text = self.engineer_mod.build_engineer_system_prompt("g")
 

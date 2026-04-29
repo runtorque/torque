@@ -1,5 +1,12 @@
 /* Rendering — main UI, agent cells, terminal rows */
 
+if (typeof taskIsEngineerMessageFollowup !== 'function') {
+  var taskIsEngineerMessageFollowup = function(task) {
+    var labels = (task && Array.isArray(task.labels)) ? task.labels : [];
+    return labels.indexOf('loom:engineer-message') >= 0;
+  };
+}
+
 function agentIcon(name) {
   let h = 0;
   for (let i = 0; i < name.length; i++) h = ((h << 5) - h + name.charCodeAt(i)) | 0;
@@ -1057,6 +1064,7 @@ function _engineerQueueDepth(engineerId) {
   for (const taskId in state.board_tasks) {
     const task = state.board_tasks[taskId];
     if (!task) continue;
+    if (taskIsEngineerMessageFollowup(task)) continue;
     if (String(task.assigned_engineer_id || '').trim() !== id) continue;
     const lane = String(task.lane || '').trim();
     if (lane === 'Backlog' || lane === 'To Do') count += 1;
@@ -1229,6 +1237,7 @@ function _userPrincipalStatsForCard(groupName, section) {
       const task = state.board_tasks[taskId];
       if (!task) continue;
       if (group && String(task.group || '').trim() !== group) continue;
+      if (taskIsEngineerMessageFollowup(task)) continue;
       if (String(task.lane || '').trim().toLowerCase() !== 'backlog') continue;
       const assignedEngineerId = String(task.assigned_engineer_id || '').trim();
       if (assignedEngineerId && engineerCount && !engineerIds[assignedEngineerId]) continue;

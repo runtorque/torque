@@ -1988,6 +1988,56 @@ test('board lane counts ignore subordinate tasks in the same lane', () => {
   assert.equal(runInContext(context, `_boardLaneCount('Backlog')`), 1);
 });
 
+test('board lane tabs exclude engineer message followups from actionable counts', () => {
+  const { context, document } = createBoardHarness();
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+  context.state.board_lanes = ['Backlog', 'To Do', 'Done'];
+  context.state.board_tasks = {
+    real: {
+      id: 'real',
+      group: 'alpha',
+      task: 'Dispatchable backlog task',
+      lane: 'Backlog',
+      position: 1,
+      labels: [],
+    },
+    reply: {
+      id: 'reply',
+      group: 'alpha',
+      task: 'Engineer: Need status',
+      lane: 'Backlog',
+      position: 2,
+      labels: ['loom:engineer-message'],
+      status: 'Awaiting Reply',
+    },
+  };
+
+  runInContext(context, `
+    _boardSelectedLane = 'Backlog';
+    _boardSearchQuery = '';
+    _boardFilterLabels = [];
+    _boardFilterActions = [];
+    _boardFilterAgents = [];
+    _boardFilterHealth = [];
+  `);
+  context.renderBoard();
+
+  assert.equal(runInContext(context, `_boardLaneCount('Backlog')`), 1);
+  assert.equal(
+    runInContext(context, `_boardBuildRenderModel(['Backlog']).laneCounts.Backlog`),
+    1,
+  );
+  assert.match(
+    panel.innerHTML,
+    /data-lane="Backlog"[\s\S]*?<span class="lane-count">1<\/span>/,
+  );
+  assert.doesNotMatch(
+    panel.innerHTML,
+    /data-lane="Backlog"[\s\S]*?<span class="lane-count">2<\/span>/,
+  );
+});
+
 test('renderBoard preserves inline task drafts and restores the saved lane when filters clear', () => {
   const { context, document } = createBoardHarness();
   document.register('panel-board');

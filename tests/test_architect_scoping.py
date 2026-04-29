@@ -1000,6 +1000,67 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
                         "message must not leak",
                     )
 
+    async def test_architect_summaries_exclude_engineer_message_followups(self):
+        architect = self._add_architect("arch-1", "Architect")
+        real_task = self._add_task(
+            "task-real",
+            "Implement visible work",
+            created_by_architect_id=architect.id,
+        )
+        followup = self._add_task(
+            "task-reply",
+            "Engineer: Need status",
+            labels=["loom:engineer-message"],
+            status="Awaiting Reply",
+            reply_agent_id="worker-1",
+            created_by_engineer_id="eng-1",
+        )
+
+        text, is_error = await self._call(
+            "architect_board_summary",
+            {},
+            architect.id,
+        )
+
+        self.assertFalse(is_error, text)
+        summary = json.loads(text)
+        self.assertEqual(summary["tasks_total"], 1)
+        self.assertEqual(summary["lanes"]["Backlog"], 1)
+        self.assertEqual(summary["pending_message_followups"], 1)
+        self.assertEqual(
+            [item["id"] for item in summary["tasks"]["items"]],
+            [real_task.id],
+        )
+
+        list_text, list_error = await self._call(
+            "architect_task_list",
+            {"lane_filter": "Backlog"},
+            architect.id,
+        )
+        self.assertFalse(list_error, list_text)
+        task_list = json.loads(list_text)
+        self.assertEqual(task_list["total"], 1)
+        self.assertEqual(
+            [item["id"] for item in task_list["tasks"]],
+            [real_task.id],
+        )
+
+        include_text, include_error = await self._call(
+            "architect_task_list",
+            {
+                "lane_filter": "Backlog",
+                "include_engineer_messages": True,
+            },
+            architect.id,
+        )
+        self.assertFalse(include_error, include_text)
+        included = json.loads(include_text)
+        self.assertEqual(included["total"], 2)
+        self.assertEqual(
+            {item["id"] for item in included["tasks"]},
+            {real_task.id, followup.id},
+        )
+
     async def test_architect_board_summary_bounds_large_task_excerpt(self):
         architect = self._add_architect("arch-1", "Architect")
         alice = self._add_engineer(

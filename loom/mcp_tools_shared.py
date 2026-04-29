@@ -43,6 +43,7 @@ from .state import (
     normalize_default_worker_concurrency,
     normalize_engineer_digest_verbosity,
     task_counts_as_done,
+    task_is_engineer_message_followup,
 )
 from .task_health import HEALTH_SEVERITY
 from .engineer_hints import compute_engineer_hints
@@ -1877,8 +1878,19 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 t for t in archived_tasks
                 if _effective_assigned_engineer_id(t) == str(caller_id or "").strip()
             ]
+        pending_message_followups = [
+            t for t in visible_tasks
+            if task_is_engineer_message_followup(t)
+            and not board_task_is_closed(t)
+        ]
+        actionable_visible_tasks = [
+            t for t in visible_tasks
+            if not task_is_engineer_message_followup(t)
+        ]
         summary_state = copy.copy(state)
-        summary_state.board_tasks = {task.id: task for task in visible_tasks}
+        summary_state.board_tasks = {
+            task.id: task for task in actionable_visible_tasks
+        }
 
         lane_counts = {
             lane_name: 0 for lane_name in state.board_lanes
@@ -1927,7 +1939,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                         )
                         if str(s or "").strip()
                     }
-        for task in visible_tasks:
+        for task in actionable_visible_tasks:
             created_by = _task_created_by_classifier(task) if include_created_by else ""
             if include_created_by:
                 task_spec = str(
@@ -2098,8 +2110,9 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
 
         summary = {
             "group": _engineer_group,
-            "tasks_total": len(visible_tasks),
+            "tasks_total": len(actionable_visible_tasks),
             "archived_total": len(archived_tasks),
+            "pending_message_followups": len(pending_message_followups),
             "lanes": ordered_lanes,
             "labels": label_counts,
             "task_health": {
@@ -2364,6 +2377,13 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         archived, archived_error = _optional_bool_arg(args, "archived", False)
         if archived_error:
             return archived_error, True
+        include_engineer_messages, include_messages_error = _optional_bool_arg(
+            args,
+            "include_engineer_messages",
+            False,
+        )
+        if include_messages_error:
+            return include_messages_error, True
 
         lane_filter = str(args.get("lane_filter", "") or "").strip()
         assigned_engineer_filter = str(
@@ -2386,6 +2406,11 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             if task_archived != archived:
                 continue
             task_labels = set(getattr(task, "labels", []) or [])
+            if (
+                not include_engineer_messages
+                and task_is_engineer_message_followup(task)
+            ):
+                continue
             if label_filter and not all(label in task_labels for label in label_filter):
                 continue
             if lane_filter and str(getattr(task, "lane", "") or "") != lane_filter:

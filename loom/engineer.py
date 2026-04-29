@@ -27,6 +27,7 @@ from .state import (
     normalize_engineer_same_agent_follow_up_preference,
     normalize_engineer_wave_size_preference,
     normalize_worktree_merge_cleanup,
+    task_is_engineer_message_followup,
 )
 from .task_health import HEALTH_SEVERITY
 from .engineer_hints import (
@@ -2037,6 +2038,8 @@ class EngineerEventBuffer:
         unhealthy_items: list[tuple[str, str]] = []
         for t in self._state.board_tasks.values():
             if t.group != group:
+                continue
+            if task_is_engineer_message_followup(t):
                 continue
             counts[t.lane] = counts.get(t.lane, 0) + 1
             health_state = getattr(t, "health_state", "healthy") or "healthy"
