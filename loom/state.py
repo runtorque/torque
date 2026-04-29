@@ -10,7 +10,7 @@ import re
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -156,6 +156,7 @@ _ARCHITECT_DIGEST_DEFAULT_ENABLED_EVENTS = [
     ENGINEER_AWAITING_HUMAN_INPUT,
     ENGINEER_ASK_RESOLVED,
 ]
+_ENGINEER_MESSAGE_EXPIRY_NOTE = "Expired because parent task completed."
 _ENGINEER_ESCALATION_STYLES = {
     "ask_early",
     "note_then_ask",
@@ -2856,6 +2857,13 @@ class MatrixState:
             self._rebuild_task_indexes()
             self._clear_engineer_queue_empty_for_active_tasks()
             self.cleanup_stale_boundary_successors(emit=False)
+            historical_ghosts = self.cleanup_resolved_engineer_message_followups(
+                emit=False
+            )
+            log.info(
+                "Retroactive cleanup: %d historical ghosts expired.",
+                historical_ghosts,
+            )
             for aid, cell in self.agents.items():
                 cell.pending_engineer_message = bool(
                     self.agent_pending_engineer_reply_tasks(aid)
@@ -5428,6 +5436,130 @@ class MatrixState:
             self.board_cascade_done(tid, recompute=False)
         self.recompute_task_health()
 
+    def _append_engineer_message_expiry_note(self, task: BoardTask,
+                                             timestamp: float) -> bool:
+        if any(
+                message.get("action") == "system"
+                and message.get("message") == _ENGINEER_MESSAGE_EXPIRY_NOTE
+                for message in (task.messages or [])):
+            return False
+        task.messages.append({
+            "timestamp": timestamp,
+            "action": "system",
+            "message": _ENGINEER_MESSAGE_EXPIRY_NOTE,
+            "agent_name": "Loom",
+        })
+        return True
+
+    def _sync_pending_engineer_message_for_agent(
+            self, agent_id: str, *, emit: bool = True) -> bool:
+        agent_id = str(agent_id or "").strip()
+        if not agent_id:
+            return False
+        cell = self.agents.get(agent_id)
+        if not cell:
+            return False
+        pending = bool(self.agent_pending_engineer_reply_tasks(agent_id))
+        if cell.pending_engineer_message == pending:
+            return False
+        cell.pending_engineer_message = pending
+        if emit:
+            self._emit_agent(cell)
+        return True
+
+    def _expire_engineer_message_task(self, task: BoardTask, *,
+                                      emit: bool = True) -> bool:
+        if (
+                not task_is_engineer_message_followup(task)
+                or board_task_is_closed(task)
+        ):
+            return False
+        if "Done" not in self.board_lanes:
+            return False
+
+        now = datetime.now(timezone.utc)
+        changed = self._append_engineer_message_expiry_note(
+            task, now.timestamp()
+        )
+        if task.status:
+            task.status = ""
+            changed = True
+        if task.lane != "Done" or task.archived_at or task.archived_from_lane:
+            if emit:
+                self._board_apply_archive_state(
+                    task,
+                    lane="Done",
+                    archived_at="",
+                    archived_from_lane="",
+                    clear_attention=True,
+                )
+            else:
+                old_lane = task.lane
+                task.lane = "Done"
+                task.archived_at = ""
+                task.archived_from_lane = ""
+                task.position = self._board_next_lane_position(
+                    "Done", exclude_id=task.id
+                )
+                for label in ("loom:blocked", "loom:error"):
+                    if label in task.labels:
+                        task.labels.remove(label)
+                task.updated_at = now.isoformat()
+                if old_lane != "Done":
+                    task.lane_entered_at = task.updated_at
+                self._index_task(task)
+                self._db_save_task(task)
+            return True
+        if changed:
+            task.updated_at = now.isoformat()
+            if emit:
+                self._emit("task_upsert", **asdict(task))
+            else:
+                self._index_task(task)
+            self._db_save_task(task)
+            return True
+        return False
+
+    def expire_engineer_message_descendants(
+            self, parent_task_id: str, *, emit: bool = True) -> int:
+        """Expire open Engineer-message follow-ups under a resolved parent."""
+        expired = 0
+        reply_agent_ids: set[str] = set()
+        for descendant in self.task_open_descendants(parent_task_id):
+            if not task_is_engineer_message_followup(descendant):
+                continue
+            reply_agent_id = str(
+                getattr(descendant, "reply_agent_id", "") or ""
+            ).strip()
+            if self._expire_engineer_message_task(descendant, emit=emit):
+                expired += 1
+                if reply_agent_id:
+                    reply_agent_ids.add(reply_agent_id)
+
+        for agent_id in reply_agent_ids:
+            self._sync_pending_engineer_message_for_agent(agent_id, emit=emit)
+        return expired
+
+    def cleanup_resolved_engineer_message_followups(
+            self, *, emit: bool = True) -> int:
+        """Expire historical Engineer-message ghosts below resolved parents.
+
+        This is intentionally idempotent: already-Done/archived follow-ups are
+        not returned by ``task_open_descendants`` and therefore are not touched
+        on subsequent runs.
+        """
+        expired = 0
+        for task in sorted(
+                self.board_tasks.values(),
+                key=lambda task: (task.pipeline_depth, task.created_at, task.id),
+        ):
+            if task_counts_as_done(task):
+                expired += self.expire_engineer_message_descendants(
+                    task.id,
+                    emit=emit,
+                )
+        return expired
+
     def board_cascade_done(self, tid: str, *,
                            recompute: bool = True) -> list[str]:
         """Complete ancestors whose entire descendant tree is done.
@@ -5442,7 +5574,10 @@ class MatrixState:
         task = self.board_tasks.get(tid)
         if not task or not task_counts_as_done(task):
             return []
+        expired = self.expire_engineer_message_descendants(tid)
         if task_suppresses_done_cascade(task):
+            if expired and recompute:
+                self.recompute_task_health()
             return []
         if "Done" not in self.board_lanes:
             return []
@@ -5475,7 +5610,7 @@ class MatrixState:
             self._cascade_review_handoff_completions(parent, changed)
             pid = next_pid
 
-        if changed and recompute:
+        if (changed or expired) and recompute:
             self.recompute_task_health()
         return changed
 
@@ -5498,6 +5633,8 @@ class MatrixState:
             position=position,
             unlink_agent=True,
         )
+        if archived_from_lane == "Done":
+            self.expire_engineer_message_descendants(tid)
         parent = self.board_tasks.get(task.parent_task_id)
         self._clear_parent_awaiting_input(parent, exclude_task_id=task.id)
         self.recompute_task_health()

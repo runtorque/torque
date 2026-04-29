@@ -1728,6 +1728,33 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
         state.groups["g"] = []
         return state
 
+    def _add_engineer_followup(
+            self, state, parent, task_id, *, lane="Backlog",
+            depth=1, reply_agent_id="", status="Awaiting Reply",
+            messages=None):
+        return state.board_add_task(
+            f"Engineer: {task_id}",
+            "g",
+            lane=lane,
+            id=task_id,
+            parent_task_id=parent.id,
+            pipeline_root_id=parent.pipeline_root_id or parent.id,
+            pipeline_depth=depth,
+            reply_agent_id=reply_agent_id,
+            status=status,
+            labels=["loom:derived", "loom:engineer-message"],
+            messages=list(messages or []),
+        )
+
+    def _assert_engineer_followup_expired(self, state, task_id):
+        task = state.board_tasks[task_id]
+        self.assertEqual(task.lane, "Done")
+        self.assertEqual(task.status, "")
+        self.assertEqual(
+            [message.get("message") for message in task.messages],
+            [self.state_mod._ENGINEER_MESSAGE_EXPIRY_NOTE],
+        )
+
     def test_resolve_board_task_id_prefers_alias_over_archived_literal(self):
         state = self._make_state()
         archived = self.state_mod.BoardTask(
@@ -2049,6 +2076,66 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
             ["task-reply"],
         )
 
+    def test_load_retroactively_expires_historical_engineer_message_ghosts(self):
+        from loom.db import LoomDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = LoomDB(Path(tmp.name) / "loom.db")
+        db.init()
+        self.addCleanup(db.close)
+        db.save_groups({"g": ["agent-1"]}, {"g": "g"})
+        db.save_group_members("g", ["agent-1"])
+        db.save_agent(
+            self.state_mod.AgentCell(
+                id="agent-1",
+                name="Worker",
+                group="g",
+                cell_type="agent",
+            )
+        )
+        db.save_board_task(
+            self.state_mod.BoardTask(
+                id="task-parent",
+                task="Completed parent",
+                group="g",
+                lane="Done",
+            )
+        )
+        db.save_board_task(
+            self.state_mod.BoardTask(
+                id="task-reply",
+                task="Engineer: Check status",
+                group="g",
+                lane="Backlog",
+                parent_task_id="task-parent",
+                pipeline_root_id="task-parent",
+                pipeline_depth=1,
+                reply_agent_id="agent-1",
+                status="Awaiting Reply",
+                labels=["loom:engineer-message"],
+            )
+        )
+
+        state = self.state_mod.MatrixState(db=db)
+        state.load()
+
+        expired = state.board_tasks["task-reply"]
+        self.assertEqual(expired.lane, "Done")
+        self.assertEqual(expired.status, "")
+        self.assertEqual(
+            [message.get("message") for message in expired.messages],
+            [self.state_mod._ENGINEER_MESSAGE_EXPIRY_NOTE],
+        )
+        self.assertFalse(state.agents["agent-1"].pending_engineer_message)
+        reloaded = self.state_mod.MatrixState(db=db)
+        reloaded.load()
+        self.assertEqual(reloaded.board_tasks["task-reply"].lane, "Done")
+        self.assertEqual(
+            len(reloaded.board_tasks["task-reply"].messages),
+            1,
+        )
+
     def test_queued_follow_up_becomes_current_task_over_suspended_parent(self):
         state = self._make_state()
         parent = state.board_add_task(
@@ -2280,6 +2367,173 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
         self.assertEqual(state.board_tasks[follow_up.id].lane, "Done")
         self.assertEqual(state.board_tasks[parent.id].lane, "In Progress")
         self.assertEqual(state.board_tasks[parent.id].status, "Reviewing")
+
+    def test_parent_done_expires_open_engineer_message_child(self):
+        state = self._make_state()
+        worker = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            current_task_id="task-parent",
+            pending_engineer_message=True,
+        )
+        state.agents[worker.id] = worker
+        parent = state.board_add_task(
+            "Implement feature",
+            "g",
+            lane="In Progress",
+            id="task-parent",
+            agent_id=worker.id,
+        )
+        follow_up = self._add_engineer_followup(
+            state, parent, "task-reply", reply_agent_id=worker.id
+        )
+
+        state.board_move_task(parent.id, "Done")
+
+        self._assert_engineer_followup_expired(state, follow_up.id)
+        self.assertFalse(state.agents[worker.id].pending_engineer_message)
+        self.assertEqual(state.agent_pending_engineer_reply_tasks(worker.id), [])
+        self.assertFalse(state.agent_is_busy(worker.id))
+
+    def test_parent_done_does_not_double_close_answered_engineer_message_child(self):
+        state = self._make_state()
+        parent = state.board_add_task(
+            "Implement feature",
+            "g",
+            lane="In Progress",
+            id="task-parent",
+        )
+        follow_up = self._add_engineer_followup(
+            state,
+            parent,
+            "task-reply",
+            lane="Done",
+            status="",
+            messages=[{
+                "timestamp": 1,
+                "action": "reply",
+                "message": "Answered already",
+                "agent_name": "Worker",
+            }],
+        )
+
+        state.board_move_task(parent.id, "Done")
+
+        answered = state.board_tasks[follow_up.id]
+        self.assertEqual(answered.lane, "Done")
+        self.assertEqual(len(answered.messages), 1)
+        self.assertNotIn(
+            self.state_mod._ENGINEER_MESSAGE_EXPIRY_NOTE,
+            [message.get("message") for message in answered.messages],
+        )
+
+    def test_parent_done_expires_multi_level_engineer_message_descendants(self):
+        state = self._make_state()
+        parent = state.board_add_task(
+            "Implement feature",
+            "g",
+            lane="In Progress",
+            id="task-parent",
+        )
+        normal_child = state.board_add_task(
+            "Follow-up work",
+            "g",
+            lane="To Do",
+            id="task-child",
+            parent_task_id=parent.id,
+            pipeline_root_id=parent.id,
+            pipeline_depth=1,
+        )
+        direct_follow_up = self._add_engineer_followup(
+            state, parent, "task-direct-reply"
+        )
+        nested_follow_up = self._add_engineer_followup(
+            state, normal_child, "task-nested-reply", depth=2
+        )
+
+        state.board_move_task(parent.id, "Done")
+
+        self.assertEqual(state.board_tasks[normal_child.id].lane, "To Do")
+        for task_id in (direct_follow_up.id, nested_follow_up.id):
+            self._assert_engineer_followup_expired(state, task_id)
+
+    def test_archive_from_done_expires_open_engineer_message_descendants(self):
+        state = self._make_state()
+        parent = state.board_add_task(
+            "Completed parent",
+            "g",
+            lane="Done",
+            id="task-parent",
+        )
+        follow_up = self._add_engineer_followup(state, parent, "task-reply")
+
+        state.board_archive_task(parent.id)
+
+        self.assertEqual(state.board_tasks[parent.id].lane, "Archived")
+        self.assertEqual(state.board_tasks[parent.id].archived_from_lane, "Done")
+        self._assert_engineer_followup_expired(state, follow_up.id)
+
+    def test_retroactive_cleanup_expires_historical_engineer_message_ghosts(self):
+        state = self._make_state()
+        worker = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            pending_engineer_message=True,
+        )
+        state.agents[worker.id] = worker
+        done_one = state.board_add_task(
+            "Done parent one",
+            "g",
+            lane="Done",
+            id="task-done-one",
+        )
+        done_two = state.board_add_task(
+            "Done parent two",
+            "g",
+            lane="Done",
+            id="task-done-two",
+        )
+        archived = state.board_add_task(
+            "Archived done parent",
+            "g",
+            lane="Archived",
+            id="task-archived",
+            archived_from_lane="Done",
+            archived_at="2026-04-29T00:00:00+00:00",
+        )
+        open_parent = state.board_add_task(
+            "Still open parent",
+            "g",
+            lane="In Progress",
+            id="task-open",
+        )
+        ghost_ids = []
+        for idx, parent in enumerate((done_one, done_two, archived), start=1):
+            ghost = self._add_engineer_followup(
+                state, parent, f"task-ghost-{idx}", reply_agent_id=worker.id
+            )
+            ghost_ids.append(ghost.id)
+        live_follow_up = self._add_engineer_followup(
+            state, open_parent, "task-live-reply", reply_agent_id=worker.id
+        )
+
+        expired = state.cleanup_resolved_engineer_message_followups()
+        expired_again = state.cleanup_resolved_engineer_message_followups()
+
+        self.assertEqual(expired, 3)
+        self.assertEqual(expired_again, 0)
+        for task_id in ghost_ids:
+            self._assert_engineer_followup_expired(state, task_id)
+        self.assertEqual(state.board_tasks[live_follow_up.id].lane, "Backlog")
+        self.assertTrue(state.agents[worker.id].pending_engineer_message)
+        self.assertEqual(
+            [task.id for task in state.agent_pending_engineer_reply_tasks(worker.id)],
+            [live_follow_up.id],
+        )
 
     def test_engineer_message_followup_predicate_uses_system_label(self):
         task = self.state_mod.BoardTask(
