@@ -2281,6 +2281,32 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
         self.assertEqual(state.board_tasks[parent.id].lane, "In Progress")
         self.assertEqual(state.board_tasks[parent.id].status, "Reviewing")
 
+    def test_engineer_message_followup_predicate_uses_system_label(self):
+        task = self.state_mod.BoardTask(
+            id="task-reply",
+            task="Engineer: Need status",
+            group="g",
+            lane="Backlog",
+            labels=["loom:derived", "loom:engineer-message"],
+        )
+        normal = self.state_mod.BoardTask(
+            id="task-normal",
+            task="Implement feature",
+            group="g",
+            lane="Backlog",
+            labels=["loom:derived"],
+        )
+
+        self.assertTrue(
+            self.state_mod.task_is_engineer_message_followup(task)
+        )
+        self.assertFalse(
+            self.state_mod.task_is_engineer_message_followup(normal)
+        )
+        self.assertFalse(
+            self.state_mod.task_is_engineer_message_followup(None)
+        )
+
     def test_done_cascade_does_not_complete_engineer_follow_up_parent(self):
         state = self._make_state()
         parent = state.board_add_task(

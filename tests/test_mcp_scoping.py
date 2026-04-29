@@ -678,6 +678,41 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(data["tasks_total"], 1)
         self.assertEqual(data["lanes"]["Backlog"], 1)
 
+    async def test_engineer_board_summary_excludes_engineer_message_followups(self):
+        state = self._make_state()
+        alice = self._add_engineer(state, "eng-alice", "Alice")
+        self._add_task(
+            state,
+            "task-owned",
+            "Owned task",
+            assigned_engineer_id=alice.id,
+        )
+        self._add_task(
+            state,
+            "task-reply",
+            "Engineer: Need status",
+            assigned_engineer_id=alice.id,
+            labels=["loom:engineer-message"],
+            status="Awaiting Reply",
+        )
+
+        async def fake_handle_command(_payload):
+            self.fail("read tool should not call handle_command")
+
+        text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_board_summary",
+            {},
+            fake_handle_command,
+            state,
+            caller_id=alice.id,
+        )
+
+        self.assertFalse(is_error, text)
+        data = json.loads(text)
+        self.assertEqual(data["tasks_total"], 1)
+        self.assertEqual(data["lanes"]["Backlog"], 1)
+        self.assertEqual(data["pending_message_followups"], 1)
+
     async def test_engineer_task_show_refreshes_silence_secs_at_read_time(self):
         state = self._make_state()
         engineer, _worker, task, base_ts = self._attach_stale_health_fixture(state)

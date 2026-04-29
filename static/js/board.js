@@ -2,6 +2,13 @@
 /* Board panel app — Kanban board with lane tabs and task cards         */
 /* ------------------------------------------------------------------ */
 
+if (typeof taskIsEngineerMessageFollowup !== 'function') {
+  var taskIsEngineerMessageFollowup = function(task) {
+    var labels = (task && Array.isArray(task.labels)) ? task.labels : [];
+    return labels.indexOf('loom:engineer-message') >= 0;
+  };
+}
+
 // Client-side state
 var _boardSelectedLane = '';
 var _boardFocusedTask = '';
@@ -466,6 +473,7 @@ function _boardLaneCount(lane, model) {
   for (var id in tasks) {
     var t = tasks[id];
     if (t.lane !== lane) continue;
+    if (taskIsEngineerMessageFollowup(t)) continue;
     // Only count root tasks (same filter as lane body)
     if (t.parent_task_id && tasks[t.parent_task_id]) continue;
     n++;
@@ -1288,6 +1296,7 @@ function _boardBuildRenderModel(lanes) {
   for (var visibleTaskId in visibleTasks) {
     var visibleTask = visibleTasks[visibleTaskId];
     if (!visibleLaneSet[visibleTask.lane]) continue;
+    if (taskIsEngineerMessageFollowup(visibleTask)) continue;
     if (visibleTask.parent_task_id && visibleTasks[visibleTask.parent_task_id]) continue;
     model.laneCounts[visibleTask.lane] = (model.laneCounts[visibleTask.lane] || 0) + 1;
   }

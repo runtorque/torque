@@ -986,11 +986,18 @@ def task_counts_as_done(task: Optional[BoardTask]) -> bool:
     return board_task_counts_as_done(task)
 
 
+def task_is_engineer_message_followup(task: Optional[BoardTask]) -> bool:
+    if not task:
+        return False
+    labels = set(getattr(task, "labels", []) or [])
+    return "loom:engineer-message" in labels
+
+
 def task_suppresses_done_cascade(task: Optional[BoardTask]) -> bool:
     if not task:
         return False
     labels = set(task.labels or [])
-    return bool(labels.intersection({"loom:human", "loom:engineer-message"}))
+    return "loom:human" in labels or task_is_engineer_message_followup(task)
 
 
 def _normalize_verification_fields(fields: dict) -> None:
