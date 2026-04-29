@@ -2295,6 +2295,7 @@ function _renderMainGrid(opts, renderMode) {
   focusedItemId = _resolveFocusedItemForGridRender(focusedItemId, navModel);
 
   let html = '';
+  const renderGroupChrome = !(renderMode && renderMode.singleGroup);
   for (const ctx of groupContexts) {
     const gname = ctx.gname;
     const agents = ctx.agents;
@@ -2302,17 +2303,19 @@ function _renderMainGrid(opts, renderMode) {
     const wid = ctx.wid;
     const collapsed = ctx.collapsed;
 
-    html += `<div class="group${collapsed ? ' collapsed' : ''}" data-group-name="${esc(gname)}">`;
-    html += `<div class="group-hdr" draggable="true" data-drag-id="${esc(gname)}" data-drag-type="group" oncontextmenu="onGroupContextMenu(event,'${esc(gname)}')">`;
-    html += `  <button class="group-toggle" draggable="false" onclick="event.stopPropagation();toggleGroup('${esc(gname)}')">\u25BE</button>`;
-    html += `  <span class="group-name" title="${esc(gname)}">${esc(gname)}</span>`;
-    html += `  <span class="group-count">${agents.length}</span>`;
-    html += `  <button class="group-btn" draggable="false" title="Group settings" onclick="event.stopPropagation();openGroupSettings('${esc(gname)}')">\u2699</button>`;
-    html += `  <button class="group-btn" draggable="false" title="Broadcast to ${esc(gname)}" onclick="openBroadcast('${esc(gname)}')">\u2318</button>`;
-    html += `  <button class="group-btn" draggable="false" title="Remove group" onclick="removeGroup('${esc(gname)}')">\u2715</button>`;
-    html += `</div>`;
+    if (renderGroupChrome) {
+      html += `<div class="group${collapsed ? ' collapsed' : ''}" data-group-name="${esc(gname)}">`;
+      html += `<div class="group-hdr" draggable="true" data-drag-id="${esc(gname)}" data-drag-type="group" oncontextmenu="onGroupContextMenu(event,'${esc(gname)}')">`;
+      html += `  <button class="group-toggle" draggable="false" onclick="event.stopPropagation();toggleGroup('${esc(gname)}')">\u25BE</button>`;
+      html += `  <span class="group-name" title="${esc(gname)}">${esc(gname)}</span>`;
+      html += `  <span class="group-count">${agents.length}</span>`;
+      html += `  <button class="group-btn" draggable="false" title="Group settings" onclick="event.stopPropagation();openGroupSettings('${esc(gname)}')">\u2699</button>`;
+      html += `  <button class="group-btn" draggable="false" title="Broadcast to ${esc(gname)}" onclick="openBroadcast('${esc(gname)}')">\u2318</button>`;
+      html += `  <button class="group-btn" draggable="false" title="Remove group" onclick="removeGroup('${esc(gname)}')">\u2715</button>`;
+      html += `</div>`;
 
-    html += `<div class="group-body"><div class="group-body-inner">`;
+      html += `<div class="group-body"><div class="group-body-inner">`;
+    }
 
     /* Agent grid — hierarchical by kind/owner */
     const agentLayout = ctx.agentLayout;
@@ -2421,8 +2424,10 @@ function _renderMainGrid(opts, renderMode) {
       html += `</div>`;
     }
 
-    html += `</div></div>`;
-    html += `</div>`;
+    if (renderGroupChrome) {
+      html += `</div></div>`;
+      html += `</div>`;
+    }
   }
 
   // LOOM:264 follow-up: byte-equality memoize the agent grid clobber. Each

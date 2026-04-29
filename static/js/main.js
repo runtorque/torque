@@ -14,9 +14,12 @@ var _workspaceSidebarStorageKey = 'loom.ide.sidebar_width';
 
 function renderGroupSwitcher() {
   var root = document.getElementById('group-switcher');
+  var addGroupButton = document.getElementById('add-group-header-btn');
+  var singleGroupMode = typeof _singleGroupModeEnabled === 'function'
+    && _singleGroupModeEnabled();
+  if (addGroupButton) addGroupButton.hidden = singleGroupMode;
   if (!root) return;
-  if (typeof _singleGroupModeEnabled !== 'function'
-      || !_singleGroupModeEnabled()) {
+  if (!singleGroupMode) {
     root.hidden = true;
     if (root._loomLastHtml !== '') {
       root.innerHTML = '';
@@ -43,10 +46,34 @@ function renderGroupSwitcher() {
   }
   html += '<option value="__new_group__">+ New group</option>';
   html += '</select>';
+  html += '<button type="button" class="group-switcher-menu-btn"'
+    + (active ? '' : ' disabled')
+    + ' title="Group actions" onclick="openActiveGroupMenu(event)">&#8942;</button>';
   if (root._loomLastHtml !== html) {
     root.innerHTML = html;
     root._loomLastHtml = html;
   }
+}
+
+function openActiveGroupMenu(event) {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  var group = (typeof _activeGroup === 'function') ? (_activeGroup() || '') : '';
+  if (!group || typeof showContextMenu !== 'function') return;
+  var x = event && event.clientX;
+  var y = event && event.clientY;
+  if ((!x || !y) && event && event.currentTarget && event.currentTarget.getBoundingClientRect) {
+    var rect = event.currentTarget.getBoundingClientRect();
+    x = rect.left;
+    y = rect.bottom + 4;
+  }
+  showContextMenu(x || 0, y || 0, [
+    { label: 'Group settings…', action: `openGroupSettings('${esc(group)}')` },
+    { label: `Broadcast to ${group}…`, action: `openBroadcast('${esc(group)}')` },
+    { label: 'Remove group', action: `removeGroup('${esc(group)}')`, danger: true },
+  ]);
 }
 
 function onActiveGroupSelect(value) {

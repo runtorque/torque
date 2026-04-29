@@ -908,6 +908,7 @@ function createMainHarness(overrides = {}) {
     'standalone-rail-resize-handle',
     'main',
     'group-switcher',
+    'add-group-header-btn',
     'bottom-panel',
     'panel-resize-handle',
     'panel-board',
@@ -14702,6 +14703,7 @@ test('embedded runtime reuses the shared group, cell, and terminal UI', () => {
   const main = document.getElementById('main');
 
   sandbox._cachedAgentTemplates = [{ name: 'fixer', display_name: 'Fixer', shadowed: false }];
+  sandbox.state.runtime = { mode: 'standalone', embedded_terminal: true };
   sandbox.state.groups = { alpha: ['agent-1', 'term-root'] };
   sandbox.state.group_settings = { alpha: { collapsed_default: false } };
   sandbox.state.children = { 'agent-1': ['term-child'] };
@@ -14747,7 +14749,8 @@ test('embedded runtime reuses the shared group, cell, and terminal UI', () => {
     render();
   `);
 
-  assert.match(main.innerHTML, /class="group/);
+  assert.doesNotMatch(main.innerHTML, /class="group(?:\s|")/);
+  assert.doesNotMatch(main.innerHTML, /group-hdr|group-toggle|group-body-inner/);
   assert.doesNotMatch(main.innerHTML, /sidebar-group/);
   assert.match(main.innerHTML, /Runner/);
   assert.match(main.innerHTML, /Reviewing patch/);
@@ -14930,6 +14933,10 @@ test('toolbelt mode keeps the stacked multi-group render path', () => {
   assert.equal(jsonValue(context, `_loomUiMode()`), 'toolbelt');
   assert.match(main.innerHTML, /data-group-name="alpha"/);
   assert.match(main.innerHTML, /data-group-name="beta"/);
+  assert.match(main.innerHTML, /class="group-hdr"/);
+  assert.match(main.innerHTML, /class="group-toggle"/);
+  assert.match(main.innerHTML, /class="group-body"><div class="group-body-inner"/);
+  assert.match(main.innerHTML, /title="Group settings"/);
   assert.match(main.innerHTML, /Alpha Agent/);
   assert.match(main.innerHTML, /Beta Agent/);
 });
@@ -14971,12 +14978,16 @@ test('standalone mode renders only the active group and currentGroup follows it'
   runInContext(context, `render();`);
   assert.equal(jsonValue(context, `_activeGroup()`), 'alpha');
   assert.equal(jsonValue(context, `_currentGroup()`), 'alpha');
+  assert.doesNotMatch(main.innerHTML, /class="group(?:\s|")/);
+  assert.doesNotMatch(main.innerHTML, /group-hdr|group-toggle|group-body-inner/);
   assert.match(main.innerHTML, /Alpha Agent/);
   assert.doesNotMatch(main.innerHTML, /Beta Agent/);
 
   runInContext(context, `setActiveGroup('beta');`);
   assert.equal(jsonValue(context, `_activeGroup()`), 'beta');
   assert.equal(jsonValue(context, `_currentGroup()`), 'beta');
+  assert.doesNotMatch(main.innerHTML, /class="group(?:\s|")/);
+  assert.doesNotMatch(main.innerHTML, /group-hdr|group-toggle|group-body-inner/);
   assert.match(main.innerHTML, /Beta Agent/);
   assert.doesNotMatch(main.innerHTML, /Alpha Agent/);
 });
@@ -15268,6 +15279,7 @@ test('header group switcher is hidden in toolbelt and switches active group in s
     renderTerminalWorkspace() {},
   });
   const root = document.getElementById('group-switcher');
+  const addGroupHeaderButton = document.getElementById('add-group-header-btn');
   loadScript(context, 'static/js/render.js');
   runInContext(context, `
     var focusedItemId = null;
@@ -15278,13 +15290,32 @@ test('header group switcher is hidden in toolbelt and switches active group in s
   sandbox.state.groups = { alpha: [], beta: [] };
   runInContext(context, `renderGroupSwitcher();`);
   assert.equal(root.hidden, true);
+  assert.equal(addGroupHeaderButton.hidden, false);
 
   sandbox.state.runtime = { mode: 'standalone', embedded_terminal: true };
   runInContext(context, `renderGroupSwitcher();`);
   assert.equal(root.hidden, false);
+  assert.equal(addGroupHeaderButton.hidden, true);
   assert.match(root.innerHTML, /Group:/);
   assert.match(root.innerHTML, /<option value="alpha" selected>alpha<\/option>[\s\S]*<option value="beta"/);
   assert.match(root.innerHTML, /\+ New group/);
+  assert.match(root.innerHTML, /openActiveGroupMenu\(event\)/);
+
+  sandbox.showContextMenu = function(x, y, items) {
+    sandbox.activeGroupMenu = { x, y, items };
+  };
+  runInContext(context, `
+    openActiveGroupMenu({
+      preventDefault() {},
+      stopPropagation() {},
+      currentTarget: { getBoundingClientRect() { return { left: 12, bottom: 34 }; } },
+    });
+  `);
+  assert.deepEqual(Array.from(sandbox.activeGroupMenu.items, (item) => item.label), [
+    'Group settings…',
+    'Broadcast to alpha…',
+    'Remove group',
+  ]);
 
   runInContext(context, `onActiveGroupSelect('beta');`);
   assert.equal(jsonValue(context, `state.active_group`), 'beta');

@@ -87,6 +87,15 @@ header h1 {
   font-size: 10px;
   background: var(--bg);
 }
+.group-switcher-menu-btn {
+  flex: 0 0 auto;
+  width: 22px; height: 22px;
+  color: var(--text-dim);
+  border-radius: 4px;
+}
+.group-switcher-menu-btn:hover { background: var(--bg-hover); color: var(--text); }
+.group-switcher-menu-btn:disabled { opacity: .4; cursor: default; }
+.group-switcher-menu-btn:disabled:hover { background: none; color: var(--text-dim); }
 .hdr-btn {
   font-size: 10px; padding: 3px 8px;
   border: 1px solid var(--border); border-radius: var(--radius);
@@ -116,7 +125,16 @@ header h1 {
   min-width: 0;
   min-height: 0;
 }
-main { padding: 8px; overflow-y: auto; flex: 1; min-height: 0; min-width: 0; }
+main {
+  padding: 8px; overflow-y: auto; flex: 1; min-height: 0; min-width: 0;
+  --agent-architect-column-width: 77px;
+  --agent-engineer-column-width: 77px;
+  --agent-card-height: 96px;
+  --agent-user-card-height: 74px;
+  --agent-principal-card-height: var(--agent-card-height);
+  --agent-engineer-card-height: var(--agent-card-height);
+  --agent-worker-card-height: var(--agent-card-height);
+}
 #standalone-bottom-dock,
 #standalone-right-rail,
 #standalone-bottom-resize-handle,
@@ -166,6 +184,13 @@ body.runtime-embedded main {
   background:
     linear-gradient(180deg, rgba(255,255,255,.02), transparent 180px),
     var(--bg-surface);
+  --agent-architect-column-width: 106px;
+  --agent-engineer-column-width: 106px;
+  --agent-card-height: 108px;
+  --agent-user-card-height: 80px;
+  --agent-principal-card-height: var(--agent-card-height);
+  --agent-engineer-card-height: var(--agent-card-height);
+  --agent-worker-card-height: var(--agent-card-height);
 }
 body.runtime-embedded #standalone-bottom-dock,
 body.runtime-embedded #standalone-right-rail {
