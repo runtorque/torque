@@ -143,6 +143,19 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         state._emit_agent(worker)
         return worker
 
+    def test_relaunch_command_base_strips_managed_prompt_flag(self):
+        command = (
+            "claude --model sonnet --append-system-prompt-file "
+            "/tmp/.loom/loom-system-prompt-arch-1.md --dangerously-skip"
+        )
+        self.assertEqual(
+            self.server_mod._relaunch_command_base(
+                command,
+                "loom-system-prompt-arch-1.md",
+            ),
+            "claude --model sonnet --dangerously-skip",
+        )
+
     def test_injected_engineer_to_architect_prompt_respects_ack_required(self):
         status_prompt = self.server_mod._format_injected_mcp_message_prompt(
             message="Status: going quiet.",
@@ -890,6 +903,115 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(engineer.status, "stopped")
         self.assertIsNone(engineer.session_id)
 
+    async def test_dismiss_architect_closes_only_architect_keeps_hired_engineers_active(self):
+        state = self._make_state()
+        architect = self._add_architect_cell(state, "arch-1", "Productmind")
+        architect.session_id = "session-architect"
+        engineer = self._add_engineer_cell(state, "eng-alice", "Alice")
+        engineer.hired_by_architect_id = architect.id
+        engineer.session_id = "session-engineer"
+        worker = self._add_worker_cell(state, engineer)
+        worker.session_id = "session-worker"
+        bridge = _CapturingBridge()
+        panel_events = []
+
+        denied = await self.server_mod._handle_architect_dismiss_command(
+            {
+                "architect_id": architect.id,
+                "caller_kind": "architect",
+            },
+            state,
+            close_session=bridge.close_session,
+        )
+        self.assertEqual(denied["type"], "error")
+        self.assertEqual(architect.dismissed_at, 0)
+
+        result = await self.server_mod._handle_architect_dismiss_command(
+            {
+                "architect_id": architect.id,
+                "reason": "pause",
+            },
+            state,
+            close_session=bridge.close_session,
+            panel_event=lambda *args, **kwargs: panel_events.append(args),
+        )
+
+        self.assertEqual(result["type"], "ok")
+        self.assertGreater(architect.dismissed_at, 0)
+        self.assertEqual(architect.status, "stopped")
+        self.assertIsNone(architect.session_id)
+        self.assertEqual(engineer.hired_by_architect_id, architect.id)
+        self.assertEqual(engineer.session_id, "session-engineer")
+        self.assertEqual(worker.session_id, "session-worker")
+        self.assertEqual(bridge.closed_sessions, ["session-architect"])
+        self.assertEqual(panel_events[0][0], "architect_dismissed")
+        self.assertIn(
+            "architect_dismissed",
+            [op.get("op") for op in state._delta_ops],
+        )
+
+        second = await self.server_mod._handle_architect_dismiss_command(
+            {"architect_id": architect.id},
+            state,
+            close_session=bridge.close_session,
+        )
+        self.assertTrue(second["already_dismissed"])
+        self.assertEqual(second["closed_sessions"], 0)
+
+    async def test_rehire_architect_restores_session_and_preserves_engineer_links(self):
+        state = self._make_state()
+        architect = self._add_architect_cell(state, "arch-1", "Productmind")
+        architect.status = "stopped"
+        architect.dismissed_at = 123
+        architect.command = "custom-architect-command --flag"
+        architect.agent_type = "generic"
+        engineer = self._add_engineer_cell(state, "eng-alice", "Alice")
+        engineer.hired_by_architect_id = architect.id
+        bridge = _CapturingBridge()
+        panel_events = []
+
+        async def fake_resolve_base_dir(group):
+            self.assertEqual(group, "loom")
+            return temp_dir
+
+        def fake_resolve_architect_launch_config(group, *, base_dir="",
+                                                 explicit_template="",
+                                                 overrides=None):
+            self.assertEqual(group, "loom")
+            self.assertEqual(overrides, {})
+            return self._launch_config(base_dir)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            architect.directory = temp_dir
+            result = await self.server_mod._handle_architect_rehire_command(
+                {"architect_id": architect.id},
+                state,
+                bridge=bridge,
+                worktree_mgr=_FakeWorktreeManager(),
+                resolve_base_dir=fake_resolve_base_dir,
+                resolve_agent_launch_config=lambda *a, **k: {},
+                resolve_engineer_launch_config=lambda *a, **k: {},
+                resolve_architect_launch_config=fake_resolve_architect_launch_config,
+                apply_persistent_prompt=lambda *a, **k: None,
+                build_cell_persistent_prompt=lambda *a, **k: "persistent",
+                persistent_prompt_filename=lambda cell: f"{cell.id}.md",
+                is_designated_engineer=lambda cell: False,
+                panel_event=lambda *args, **kwargs: panel_events.append(args),
+            )
+
+        self.assertEqual(result["type"], "ok")
+        self.assertEqual(architect.dismissed_at, 0)
+        self.assertEqual(architect.session_id, "session-new")
+        self.assertEqual(architect.command, "custom-architect-command --flag")
+        self.assertEqual(architect.agent_type, "generic")
+        self.assertEqual(engineer.hired_by_architect_id, architect.id)
+        self.assertEqual(len(bridge.create_session_calls), 1)
+        self.assertEqual(panel_events[0][0], "architect_rehired")
+        self.assertIn(
+            "architect_rehired",
+            [op.get("op") for op in state._delta_ops],
+        )
+
     async def test_rename_engineer_updates_name_slug_and_preserves_kind(self):
         state = self._make_state()
         engineer = self._add_engineer_cell(state, "eng-alice", "Alice")
@@ -1233,6 +1355,57 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         # value when it's empty — but here launch_cfg provides temp_dir
         # so the assertion is that the engineer's directory matches.
         self.assertEqual(engineer.directory, temp_dir)
+
+    async def test_relaunch_stopped_engineer_uses_updated_launch_settings(self):
+        state = self._make_state()
+        engineer = self._add_engineer_cell(state, "eng-alice", "Alice")
+        engineer.status = "stopped"
+        engineer.agent_type = "codex"
+        engineer.command = "old-command"
+        bridge = _CapturingBridge()
+        apply_calls = []
+
+        async def fake_resolve_base_dir(group):
+            del group
+            return temp_dir
+
+        def fake_resolve_engineer_launch_config(group, *, base_dir="",
+                                              explicit_template="",
+                                              overrides=None):
+            del group, base_dir, explicit_template, overrides
+            cfg = self._launch_config(temp_dir)
+            cfg["command"] = "new-command"
+            cfg["agent_type"] = "generic"
+            cfg["env_vars"] = {"NEW": "1"}
+            return cfg
+
+        def fake_apply_persistent_prompt(cell, launch_cfg, prompt_text):
+            del prompt_text
+            apply_calls.append((cell.command, cell.agent_type, launch_cfg["command"]))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            engineer.directory = temp_dir
+            await self.server_mod._handle_relaunch_agent_command(
+                {"id": engineer.id},
+                state,
+                bridge=bridge,
+                worktree_mgr=_FakeWorktreeManager(),
+                resolve_base_dir=fake_resolve_base_dir,
+                resolve_agent_launch_config=lambda *a, **k: {},
+                resolve_engineer_launch_config=fake_resolve_engineer_launch_config,
+                apply_persistent_prompt=fake_apply_persistent_prompt,
+                build_cell_persistent_prompt=lambda *a, **k: "",
+                persistent_prompt_filename=lambda cell: f"{cell.id}.md",
+                is_designated_engineer=lambda cell: False,
+            )
+
+        self.assertEqual(engineer.command, "new-command")
+        self.assertEqual(engineer.agent_type, "generic")
+        self.assertEqual(apply_calls, [("new-command", "generic", "new-command")])
+        self.assertEqual(
+            bridge.create_session_calls[0]["kwargs"]["env_vars"]["NEW"],
+            "1",
+        )
 
     async def test_relaunch_fresh_session_codex_engineer_fires_kickoff_sequence(self):
         """Codex relaunch into a fresh session must re-seat the persistent

@@ -510,6 +510,14 @@ def _resolve_engineer_cell(state_data, identifier: str):
     return cell
 
 
+def _resolve_architect_cell(state_data, identifier: str):
+    """Resolve an architect by id/slug/name/prefix or exit with a clear error."""
+    cell = resolve_cell(state_data, identifier)
+    if str(cell.get("kind", "") or "").strip() != "architect":
+        die(f"'{identifier}' is not an architect")
+    return cell
+
+
 def _validate_engineer_assignment(state_data, engineer_slug: str, group: str) -> str:
     """Resolve an engineer slug for a specific group or exit with a clear error."""
     wanted = str(engineer_slug or "").strip()
@@ -2920,6 +2928,42 @@ def cmd_architect_settings(args):
             print(f"  {key}: {value}")
 
 
+def cmd_architect_dismiss(args):
+    """Dismiss/pause an architect while preserving history."""
+    state_data = get_state(args.port)
+    architect = _resolve_architect_cell(state_data, args.identifier)
+    resp = api_call(
+        "architect_dismiss",
+        port=args.port,
+        architect_id=architect["id"],
+        reason=args.reason or "",
+    )
+    data = check_ok(resp)
+    if data.get("already_dismissed"):
+        print(f"Architect \"{architect['name']}\" is already dismissed")
+    else:
+        print(
+            f"Dismissed \"{architect['name']}\" "
+            f"(closed {data.get('closed_sessions', 0)} sessions)"
+        )
+
+
+def cmd_architect_rehire(args):
+    """Rehire/resume a dismissed architect."""
+    state_data = get_state(args.port)
+    architect = _resolve_architect_cell(state_data, args.identifier)
+    resp = api_call(
+        "architect_rehire",
+        port=args.port,
+        architect_id=architect["id"],
+    )
+    data = check_ok(resp)
+    if data.get("already_hired"):
+        print(f"Architect \"{architect['name']}\" is already active")
+    else:
+        print(f"Rehired \"{architect['name']}\"")
+
+
 def cmd_task_verify(args):
     """Record a deploy/restart verification checkpoint for a task."""
     st = get_state_local(args.port)
@@ -4702,6 +4746,17 @@ def build_parser():
     p.add_argument("--json", action="store_true",
                    help="Output raw JSON")
     p.set_defaults(func=cmd_architect_settings)
+
+    p = arch_sub.add_parser("dismiss",
+                            help="Dismiss/pause an architect")
+    p.add_argument("identifier", help="Architect ID, slug, or name")
+    p.add_argument("--reason", help="Optional dismissal reason")
+    p.set_defaults(func=cmd_architect_dismiss)
+
+    p = arch_sub.add_parser("rehire",
+                            help="Rehire/resume a dismissed architect")
+    p.add_argument("identifier", help="Architect ID, slug, or name")
+    p.set_defaults(func=cmd_architect_rehire)
 
     # -- workflow breach ----------------------------------------------------
     p = sub.add_parser("workflow-breach",

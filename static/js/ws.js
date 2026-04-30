@@ -822,6 +822,16 @@ function _deltaSurfaceInvalidations(ops, hints) {
         }
         break;
       }
+      case 'architect_dismissed':
+      case 'architect_rehired': {
+        const _archLifeFocused = _focusedEngineerAgent();
+        const _archLifeId = String((op && op.architect_id) || '');
+        if (_archLifeFocused && _archLifeId
+            && String(_archLifeFocused.id || '') === _archLifeId) {
+          _markSurface(flags, 'engineer');
+        }
+        break;
+      }
       case 'engineer_settings_update': {
         _markSurface(flags, 'main');
         const _esFocused = _focusedEngineerAgent();
@@ -1937,6 +1947,10 @@ function _applyDelta(ops) {
         }
         break;
       }
+
+      case 'architect_dismissed':
+      case 'architect_rehired':
+        break;
 
       case 'engineer_buffer_stats': {
         if (!state.engineer_buffer_stats) state.engineer_buffer_stats = {};

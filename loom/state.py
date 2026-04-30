@@ -743,7 +743,7 @@ class AgentCell:
     owner_engineer_id: str = ""  # owning engineer for worker/terminal agents
     hired_by_architect_id: str = ""  # architect provenance for hires
     engineer_specializations: list[str] = field(default_factory=list)  # ordered, primary first
-    dismissed_at: int = 0  # unix timestamp when an engineer is paused/dismissed
+    dismissed_at: int = 0  # unix timestamp when an architect/engineer is paused/dismissed
     deleted_at: float = 0.0  # unix timestamp when the cell entered the restore window
     permanent_delete_after: float = 0.0  # unix timestamp when tombstone is purgeable
     persistent: bool = False  # architect/engineer survive across sessions

@@ -3144,9 +3144,38 @@ function _engineerWorkerAgents(group, engineerId) {
 }
 
 function _engineerAgentStatusLabel(agent) {
+  if (agent && Number(agent.dismissed_at || 0) > 0) return 'dismissed';
   if (!agent || agent.status === 'stopped') return 'stopped';
   if (agent.activity || agent.activity_detail) return 'running';
   return 'idle';
+}
+
+function _agentPanelIsArchitectDismissed(architectId) {
+  var key = String(architectId || '').trim();
+  var architect = key && state && state.agents ? state.agents[key] : null;
+  return !!(architect && Number(architect.dismissed_at || 0) > 0);
+}
+
+function _agentPanelDecisionArchitectId(decisionId) {
+  var key = String(decisionId || '').trim();
+  if (!key) return '';
+  var stores = _agentPanelDecisionStores();
+  for (var storeIndex = 0; storeIndex < stores.length; storeIndex++) {
+    var store = stores[storeIndex] || {};
+    var decision = Array.isArray(store)
+      ? store.find(function(item) { return String((item && item.id) || '') === key; })
+      : store[key];
+    if (decision) return String(decision.architect_id || '').trim();
+  }
+  return '';
+}
+
+function _agentPanelBlockDismissedArchitectDecisionMutation(architectId) {
+  if (!_agentPanelIsArchitectDismissed(architectId)) return false;
+  if (typeof _showToast === 'function') {
+    _showToast('Rehire architect to modify decisions', 'warning');
+  }
+  return true;
 }
 
 function _engineerEngineerStatusLabel(agent) {
@@ -3610,6 +3639,7 @@ function _agentPanelLegacyRenderEngineerTreeRows(group, engineers, levelClass, w
 
 function _agentPanelLegacyRenderDecisionRow(architectId, decision) {
   var ui = _engineerDecisionUiState(decision.id, decision);
+  var readOnly = _agentPanelIsArchitectDismissed(architectId);
   var decisionIdJs = JSON.stringify(String(decision.id || ''));
   var architectIdJs = JSON.stringify(String(architectId || ''));
   var titleFocusKey = _engineerDecisionFocusKey(decision.id, 'title');
@@ -3638,7 +3668,7 @@ function _agentPanelLegacyRenderDecisionRow(architectId, decision) {
   html += '<span class="detail-expand-caret">' + (ui.expanded ? '\u25BE' : '\u25B8') + '</span>';
   html += '</button>';
   html += '<div class="detail-section-card-actions">';
-  if (!ui.editing) {
+  if (!readOnly && !ui.editing) {
     html += '<button type="button" class="detail-inline-editor-btn" onclick="'
       + _agentPanelEventAttr('event.stopPropagation();engineerStartDecisionEdit(' + decisionIdJs + ')')
       + '">Edit</button>';
@@ -3648,13 +3678,15 @@ function _agentPanelLegacyRenderDecisionRow(architectId, decision) {
         + '">Acknowledge</button>';
     }
   }
-  html += '<button type="button" class="detail-inline-editor-btn" onclick="'
-    + _agentPanelEventAttr('event.stopPropagation();engineerArchiveDecision(' + architectIdJs + ',' + decisionIdJs + ')')
-    + '">Archive</button>';
+  if (!readOnly) {
+    html += '<button type="button" class="detail-inline-editor-btn" onclick="'
+      + _agentPanelEventAttr('event.stopPropagation();engineerArchiveDecision(' + architectIdJs + ',' + decisionIdJs + ')')
+      + '">Archive</button>';
+  }
   html += '</div></div>';
   if (ui.expanded || ui.editing) {
     html += '<div class="architect-decision-body">';
-    if (ui.editing) {
+    if (ui.editing && !readOnly) {
       html += '<input class="detail-inline-description-input architect-decision-input"'
         + ' id="' + _esc(titleFocusKey) + '"'
         + ' data-focus-key="' + _esc(titleFocusKey) + '"'
@@ -3706,34 +3738,36 @@ function _agentPanelLegacyRenderDecisionRow(architectId, decision) {
       if (supersededByIds.length) {
         html += _engineerDecisionMetaRowHtml('Superseded by', _engineerDecisionRefsHtml(supersededByIds, 'None'));
       }
-      html += '<div class="architect-decision-link-row">';
-      html += '<select class="architect-decision-link-select" onchange="'
-        + _agentPanelEventAttr('engineerDecisionLinkSelect(' + decisionIdJs + ',\'task\',this.value)')
-        + '">';
-      html += '<option value="">Link task…</option>';
-      for (var taskIndex = 0; taskIndex < taskOptions.length; taskIndex++) {
-        var taskOption = taskOptions[taskIndex];
-        var taskSelected = ui.link_task_id === taskOption.value ? ' selected' : '';
-        html += '<option value="' + _esc(taskOption.value) + '"' + taskSelected + '>' + _esc(taskOption.label) + '</option>';
+      if (!readOnly) {
+        html += '<div class="architect-decision-link-row">';
+        html += '<select class="architect-decision-link-select" onchange="'
+          + _agentPanelEventAttr('engineerDecisionLinkSelect(' + decisionIdJs + ',\'task\',this.value)')
+          + '">';
+        html += '<option value="">Link task…</option>';
+        for (var taskIndex = 0; taskIndex < taskOptions.length; taskIndex++) {
+          var taskOption = taskOptions[taskIndex];
+          var taskSelected = ui.link_task_id === taskOption.value ? ' selected' : '';
+          html += '<option value="' + _esc(taskOption.value) + '"' + taskSelected + '>' + _esc(taskOption.label) + '</option>';
+        }
+        html += '</select>';
+        html += '<button type="button" class="detail-inline-editor-btn" onclick="'
+          + _agentPanelEventAttr('engineerLinkDecisionTask(' + architectIdJs + ',' + decisionIdJs + ')')
+          + '">Link task</button>';
+        html += '<select class="architect-decision-link-select" onchange="'
+          + _agentPanelEventAttr('engineerDecisionLinkSelect(' + decisionIdJs + ',\'engineer\',this.value)')
+          + '">';
+        html += '<option value="">Link engineer…</option>';
+        for (var engineerIndex = 0; engineerIndex < engineerOptions.length; engineerIndex++) {
+          var engineerOption = engineerOptions[engineerIndex];
+          var engineerSelected = ui.link_engineer_id === engineerOption.value ? ' selected' : '';
+          html += '<option value="' + _esc(engineerOption.value) + '"' + engineerSelected + '>' + _esc(engineerOption.label) + '</option>';
+        }
+        html += '</select>';
+        html += '<button type="button" class="detail-inline-editor-btn" onclick="'
+          + _agentPanelEventAttr('engineerLinkDecisionEngineer(' + architectIdJs + ',' + decisionIdJs + ')')
+          + '">Link engineer</button>';
+        html += '</div>';
       }
-      html += '</select>';
-      html += '<button type="button" class="detail-inline-editor-btn" onclick="'
-        + _agentPanelEventAttr('engineerLinkDecisionTask(' + architectIdJs + ',' + decisionIdJs + ')')
-        + '">Link task</button>';
-      html += '<select class="architect-decision-link-select" onchange="'
-        + _agentPanelEventAttr('engineerDecisionLinkSelect(' + decisionIdJs + ',\'engineer\',this.value)')
-        + '">';
-      html += '<option value="">Link engineer…</option>';
-      for (var engineerIndex = 0; engineerIndex < engineerOptions.length; engineerIndex++) {
-        var engineerOption = engineerOptions[engineerIndex];
-        var engineerSelected = ui.link_engineer_id === engineerOption.value ? ' selected' : '';
-        html += '<option value="' + _esc(engineerOption.value) + '"' + engineerSelected + '>' + _esc(engineerOption.label) + '</option>';
-      }
-      html += '</select>';
-      html += '<button type="button" class="detail-inline-editor-btn" onclick="'
-        + _agentPanelEventAttr('engineerLinkDecisionEngineer(' + architectIdJs + ',' + decisionIdJs + ')')
-        + '">Link engineer</button>';
-      html += '</div>';
     }
     html += '</div>';
   }
@@ -3760,6 +3794,7 @@ function _agentPanelLegacyRenderArchitectRoster(group) {
     var expanded = _engineerArchitectExpandedState(architect.id);
     var hireCounts = _engineerArchitectTransferCounts(architect.id);
     var architectIdJs = JSON.stringify(String(architect.id || ''));
+    var dismissed = Number(architect.dismissed_at || 0) > 0;
     html += '<div class="architect-row' + (expanded ? ' expanded' : '') + '">';
     html += '<div class="engineer-row architect-parent-row">';
     html += '<div class="engineer-row-main">';
@@ -3772,7 +3807,12 @@ function _agentPanelLegacyRenderArchitectRoster(group) {
     html += '</div>';
     html += '<div class="engineer-row-meta">';
     html += '<span class="engineer-row-status engineer-row-status-' + _esc(status) + '">' + _esc(status) + '</span>';
-    html += '<button type="button" class="engineer-row-btn" onclick="event.stopPropagation();relaunchAgent(\'' + _esc(architect.id) + '\')">Relaunch</button>';
+    if (dismissed) {
+      html += '<button type="button" class="engineer-row-btn" onclick="event.stopPropagation();rehireArchitect(\'' + _esc(architect.id) + '\')">Rehire</button>';
+    } else {
+      html += '<button type="button" class="engineer-row-btn" onclick="event.stopPropagation();relaunchAgent(\'' + _esc(architect.id) + '\')">Relaunch</button>';
+      html += '<button type="button" class="engineer-row-btn engineer-row-btn-danger" onclick="event.stopPropagation();dismissArchitect(\'' + _esc(architect.id) + '\')">Dismiss</button>';
+    }
     html += '<button type="button" class="engineer-row-btn" onclick="event.stopPropagation();engineerRenameArchitect(\'' + _esc(architect.id) + '\')">Rename</button>';
     html += '<button type="button" class="engineer-row-btn" onclick="event.stopPropagation();engineerToggleArchitect(\'' + _esc(architect.id) + '\')">' + (expanded ? 'Hide decision log' : 'Open decision log') + '</button>';
     html += '<button type="button" class="engineer-row-btn engineer-row-btn-danger" onclick="event.stopPropagation();engineerDeleteArchitect(\'' + _esc(architect.id) + '\')">Delete</button>';
@@ -3795,9 +3835,15 @@ function _agentPanelLegacyRenderArchitectRoster(group) {
       } else {
         html += '<div class="engineers-roster-empty architect-roster-empty">No hired engineers yet.</div>';
       }
-      html += '<div class="architect-roster-section-head"><span class="architect-roster-section-title">Decision log</span><span class="architect-roster-section-actions"><span class="architect-roster-section-count">' + decisions.length + '</span><button type="button" class="engineer-row-btn" onclick="'
-        + _agentPanelEventAttr('event.stopPropagation();openArchitectDecisionModal(' + architectIdJs + ')')
-        + '">+ New decision</button></span></div>';
+      html += '<div class="architect-roster-section-head"><span class="architect-roster-section-title">Decision log</span><span class="architect-roster-section-actions"><span class="architect-roster-section-count">' + decisions.length + '</span>';
+      if (dismissed) {
+        html += '<button type="button" class="engineer-row-btn" disabled title="Rehire architect to add decisions">+ New decision</button>';
+      } else {
+        html += '<button type="button" class="engineer-row-btn" onclick="'
+          + _agentPanelEventAttr('event.stopPropagation();openArchitectDecisionModal(' + architectIdJs + ')')
+          + '">+ New decision</button>';
+      }
+      html += '</span></div>';
       var hasDecisionRows = false;
       for (var statusIndex = 0; statusIndex < _ENGINEER_DECISION_STATUSES.length; statusIndex++) {
         var statusName = _ENGINEER_DECISION_STATUSES[statusIndex];
@@ -3926,6 +3972,8 @@ function engineerToggleDecision(decisionId) {
 }
 
 function engineerStartDecisionEdit(decisionId) {
+  var architectId = _agentPanelDecisionArchitectId(decisionId);
+  if (_agentPanelBlockDismissedArchitectDecisionMutation(architectId)) return;
   var ui = _engineerDecisionUiState(decisionId);
   ui.expanded = true;
   ui.editing = true;
@@ -3945,6 +3993,11 @@ function engineerCancelDecisionEdit(decisionId) {
 
 function engineerSaveDecisionEdit(architectId, decisionId) {
   var ui = _engineerDecisionUiState(decisionId);
+  if (_agentPanelBlockDismissedArchitectDecisionMutation(architectId)) {
+    ui.editing = false;
+    _agentPanelRefreshVisibleSurface();
+    return;
+  }
   send({
     cmd: 'architect_decision_update',
     architect_id: String(architectId || ''),
@@ -3959,6 +4012,7 @@ function engineerSaveDecisionEdit(architectId, decisionId) {
 }
 
 function engineerAcknowledgeDecision(architectId, decisionId) {
+  if (_agentPanelBlockDismissedArchitectDecisionMutation(architectId)) return;
   send({
     cmd: 'architect_decision_update',
     architect_id: String(architectId || ''),
@@ -3969,6 +4023,7 @@ function engineerAcknowledgeDecision(architectId, decisionId) {
 }
 
 function engineerArchiveDecision(architectId, decisionId) {
+  if (_agentPanelBlockDismissedArchitectDecisionMutation(architectId)) return;
   send({
     cmd: 'architect_decision_update',
     architect_id: String(architectId || ''),
@@ -3985,6 +4040,7 @@ function engineerDecisionLinkSelect(decisionId, kind, value) {
 }
 
 function engineerLinkDecisionTask(architectId, decisionId) {
+  if (_agentPanelBlockDismissedArchitectDecisionMutation(architectId)) return;
   var ui = _engineerDecisionUiState(decisionId);
   if (!ui.link_task_id) return;
   send({
@@ -3999,6 +4055,7 @@ function engineerLinkDecisionTask(architectId, decisionId) {
 }
 
 function engineerLinkDecisionEngineer(architectId, decisionId) {
+  if (_agentPanelBlockDismissedArchitectDecisionMutation(architectId)) return;
   var ui = _engineerDecisionUiState(decisionId);
   if (!ui.link_engineer_id) return;
   send({

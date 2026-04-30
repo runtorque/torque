@@ -344,6 +344,46 @@ def _engineer_dismissed_error(engineer_id: str) -> str:
     })
 
 
+def _architect_dismissed_error(architect_id: str) -> str:
+    return json.dumps({
+        "type": "error",
+        "reason": "architect_dismissed",
+        "message": f"architect {architect_id} is dismissed",
+        "architect_id": str(architect_id or "").strip(),
+    })
+
+
+_ARCHITECT_READ_TOOL_NAMES = frozenset({
+    "action_show",
+    "actions_list",
+    "agent_show",
+    "agents_list",
+    "board_list",
+    "board_summary",
+    "decision_list",
+    "deploy_state",
+    "diff",
+    "engineer_journal_read",
+    "engineer_list",
+    "engineer_pending_question",
+    "events",
+    "events_recent",
+    "get_architect_settings",
+    "journal_read",
+    "mcp_calls",
+    "pending_hire_list",
+    "pending_hire_status",
+    "session_map",
+    "specialization_show",
+    "specializations_list",
+    "stream_show",
+    "streams_list",
+    "task_chain",
+    "task_list",
+    "task_show",
+})
+
+
 def _caller_group(state, caller_id: str) -> str:
     caller = state.agents.get(str(caller_id or "").strip())
     return str(getattr(caller, "group", "") or "").strip() if caller else ""
@@ -1835,6 +1875,11 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
     state = view_state
     tool_name = normalize_tool_name(name, tool_prefix)
     _raw_handle_command = handle_command
+    if (
+            caller_kind == "architect"
+            and _agent_dismissed_at(_engineer_cell)
+            and tool_name not in _ARCHITECT_READ_TOOL_NAMES):
+        return _architect_dismissed_error(caller_id), True
 
     async def handle_command(payload):
         command_payload = dict(payload or {})
