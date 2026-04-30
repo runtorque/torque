@@ -372,7 +372,7 @@ def _build_agents(state, group: str, *, engineer_cell, limit: int) -> dict:
     items = []
     total = 0
     needs_attention = 0
-    for cell in state.agents.values():
+    for cell in state.iter_active_agents():
         if getattr(cell, "cell_type", "") not in {"agent", "terminal"}:
             continue
         if getattr(cell, "group", "") != group:

@@ -124,6 +124,7 @@ function _agentPanelVirtualUserPrincipal(group) {
 
 function _agentPanelAgentVisibleInCurrentMode(agent) {
   if (!agent) return null;
+  if (typeof _isTombstonedAgent === 'function' && _isTombstonedAgent(agent)) return null;
   if (typeof _singleGroupModeEnabled !== 'function'
       || !_singleGroupModeEnabled()
       || typeof _activeGroup !== 'function') {
@@ -2378,6 +2379,7 @@ function _agentPanelArchitectHiredEngineers(agent) {
   for (var key in allAgents) {
     var candidate = allAgents[key];
     if (!candidate) continue;
+    if (typeof _isTombstonedAgent === 'function' && _isTombstonedAgent(candidate)) continue;
     if (String(candidate.kind || '') !== 'engineer') continue;
     if (String(candidate.hired_by_architect_id || '') !== architectId) continue;
     engineers.push(candidate);
@@ -3103,6 +3105,7 @@ function _engineerGroupAgents(group) {
   for (var agentId in state.agents) {
     var agent = state.agents[agentId];
     if (!agent || agent.cell_type !== 'agent') continue;
+    if (typeof _isTombstonedAgent === 'function' && _isTombstonedAgent(agent)) continue;
     if (group && agent.group !== group) continue;
     agents.push(agent);
   }

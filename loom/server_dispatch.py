@@ -45,7 +45,7 @@ def _cells_share_worktree_context(a, b) -> bool:
 
 def _is_busy_agent(state: MatrixState, agent_id: str) -> bool:
     cell = state.agents.get(agent_id)
-    if not cell or cell.cell_type != "agent":
+    if not cell or state.agent_is_tombstoned(cell) or cell.cell_type != "agent":
         return False
     return state.agent_is_busy(agent_id)
 
@@ -53,7 +53,7 @@ def _is_busy_agent(state: MatrixState, agent_id: str) -> bool:
 def _active_worker_ids(state: MatrixState, group: str) -> set[str]:
     active = set()
     engineer_id = state.get_group_settings(group).engineer_agent_id
-    for cell in state.agents.values():
+    for cell in state.iter_active_agents():
         if cell.cell_type != "agent":
             continue
         if cell.group != group:
@@ -79,7 +79,7 @@ def _find_active_worktree_owner(state: MatrixState, cell):
     """Return the active agent currently owning a shared worktree context."""
     if not cell or not (cell.worktree_path or cell.worktree_branch):
         return None
-    for other in state.agents.values():
+    for other in state.iter_active_agents():
         if not _agent_has_active_worktree_context(state, other):
             continue
         if _cells_share_worktree_context(cell, other):

@@ -216,7 +216,7 @@ class AgentLaunchService:
         )
         base = " ".join(word.capitalize() for word in base.split()) or "Agent"
         existing = {
-            cell.name for cell in self.state.agents.values()
+            cell.name for cell in self.state.iter_active_agents()
             if cell.group == group and cell.cell_type == "agent"
         }
         if base not in existing:

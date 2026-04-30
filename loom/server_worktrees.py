@@ -129,7 +129,7 @@ async def _worktree_diff_updater(state, worktree_mgr):
     while True:
         await asyncio.sleep(60)
         changed = False
-        for cell in state.agents.values():
+        for cell in state.iter_active_agents():
             if not cell.worktree_path:
                 continue
             try:

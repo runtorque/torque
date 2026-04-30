@@ -424,9 +424,18 @@ def db_read_doctor_report():
     return build_doctor_report_for_db(LOOM_DB)
 
 
+def _is_tombstoned_cell(cell):
+    try:
+        return float((cell or {}).get("deleted_at", 0) or 0) > 0
+    except (TypeError, ValueError):
+        return False
+
+
 def _iter_engineers_from_state(state_data):
     """Yield engineer agent dicts in the state's natural order."""
     for cell in (state_data.get("agents", {}) or {}).values():
+        if _is_tombstoned_cell(cell):
+            continue
         if cell.get("cell_type", "") != "agent":
             continue
         if str(cell.get("kind", "") or "").strip() != "engineer":
@@ -439,6 +448,8 @@ def _engineer_counts_from_state(state_data):
     worker_counts = {}
     task_counts = {}
     for cell in (state_data.get("agents", {}) or {}).values():
+        if _is_tombstoned_cell(cell):
+            continue
         if cell.get("cell_type", "") != "agent":
             continue
         if str(cell.get("kind", "") or "").strip() != "worker":
@@ -507,6 +518,8 @@ def _validate_engineer_assignment(state_data, engineer_slug: str, group: str) ->
     engineer = _resolve_engineer_by_slug(state_data, wanted)
     if not engineer:
         die(f"no engineer with slug '{wanted}'")
+    if _is_tombstoned_cell(engineer):
+        die(f"engineer '{wanted}' is tombstoned")
     engineer_group = str(engineer.get("group", "") or "").strip()
     if engineer_group != str(group or "").strip():
         die(
@@ -530,7 +543,7 @@ def _validate_task_group_assignment_change(state_data, task, fields):
     if not assigned_engineer_id:
         return
     engineer = (state_data.get("agents", {}) or {}).get(assigned_engineer_id)
-    if not engineer:
+    if not engineer or _is_tombstoned_cell(engineer):
         return
     engineer_group = str(engineer.get("group", "") or "").strip()
     if engineer_group == target_group:
@@ -707,12 +720,13 @@ def resolve_cell(state_data, identifier):
     agents = state_data.get("agents", {})
 
     # Exact ID match
-    if identifier in agents:
+    if identifier in agents and not _is_tombstoned_cell(agents[identifier]):
         return agents[identifier]
 
     # Slug match (slugs are lowercase by construction)
     slug_matches = [c for c in agents.values()
-                    if c.get("slug") and c["slug"] == identifier.lower()]
+                    if not _is_tombstoned_cell(c)
+                    and c.get("slug") and c["slug"] == identifier.lower()]
     if len(slug_matches) == 1:
         return slug_matches[0]
     if len(slug_matches) > 1:
@@ -725,7 +739,8 @@ def resolve_cell(state_data, identifier):
 
     # Name match (case-insensitive)
     matches = [c for c in agents.values()
-               if c["name"].lower() == identifier.lower()]
+               if not _is_tombstoned_cell(c)
+               and c["name"].lower() == identifier.lower()]
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
@@ -738,7 +753,8 @@ def resolve_cell(state_data, identifier):
 
     # Partial ID match (prefix)
     matches = [c for c in agents.values()
-               if c["id"].startswith(identifier.lower())]
+               if not _is_tombstoned_cell(c)
+               and c["id"].startswith(identifier.lower())]
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
@@ -878,6 +894,8 @@ def detect_context(state_data):
 
     cell = None
     for c in agents.values():
+        if _is_tombstoned_cell(c):
+            continue
         if c.get("session_id") == guid:
             cell = c
             break
@@ -941,6 +959,8 @@ def format_status_table(state_data, group_filter=None, window_id=None):
     # Compute column width from the longest slug across all visible cells
     max_slug = 0
     for c in agents.values():
+        if _is_tombstoned_cell(c):
+            continue
         slug = c.get("slug", "") or c["id"]
         max_slug = max(max_slug, len(slug))
     # prefix = "  {slug}" (top-level) or "    ↳ {slug}" (child, 6-char indent)
@@ -951,7 +971,9 @@ def format_status_table(state_data, group_filter=None, window_id=None):
             continue
 
         top_cells = [agents[cid] for cid in cell_ids
-                     if cid in agents and not agents[cid].get("parent_id")]
+                     if cid in agents
+                     and not _is_tombstoned_cell(agents[cid])
+                     and not agents[cid].get("parent_id")]
 
         # Window filter: keep agents that have any cell in this window
         if window_id:
@@ -965,7 +987,9 @@ def format_status_table(state_data, group_filter=None, window_id=None):
                 return False
             top_cells = [c for c in top_cells if _in_window(c)]
         child_cells_in_group = [agents[cid] for cid in cell_ids
-                                if cid in agents and agents[cid].get("parent_id")]
+                                if cid in agents
+                                and not _is_tombstoned_cell(agents[cid])
+                                and agents[cid].get("parent_id")]
 
         count = len(top_cells)
         if window_id and count == 0:
@@ -1024,7 +1048,7 @@ def _append_cell_line(lines, cell, children, agents, is_child=False,
     if not is_child:
         for child_id in children.get(cid, []):
             child = agents.get(child_id)
-            if child:
+            if child and not _is_tombstoned_cell(child):
                 _append_cell_line(lines, child, children, agents,
                                   is_child=True, prefix_w=prefix_w)
 
@@ -1608,7 +1632,10 @@ def cmd_agent_remove(args):
     cell = resolve_cell(state_data, args.identifier)
     resp = api_call("remove_agent", port=args.port, id=cell["id"])
     check_ok(resp)
-    print(f"Removed \"{cell['name']}\" ({cell.get('slug', '') or cell['id']})")
+    print(
+        f"Scheduled \"{cell['name']}\" ({cell.get('slug', '') or cell['id']}) "
+        "for permanent deletion in 7 days"
+    )
 
 
 def cmd_agent_focus(args):

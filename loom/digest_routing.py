@@ -44,6 +44,16 @@ def _cell_kind(cell) -> str:
     return str(getattr(cell, "kind", "") or "").strip()
 
 
+def _is_tombstoned(state, cell) -> bool:
+    checker = getattr(state, "agent_is_tombstoned", None)
+    if callable(checker):
+        return bool(checker(cell))
+    try:
+        return float(getattr(cell, "deleted_at", 0) or 0) > 0
+    except (TypeError, ValueError):
+        return False
+
+
 def _event_kind(event: dict) -> str:
     return str((event or {}).get("kind", "") or "").strip()
 
@@ -80,7 +90,7 @@ def _task_routing_source(state, event: dict):
         ).strip()
         if assigned_engineer_id:
             engineer = state.agents.get(assigned_engineer_id)
-            if engineer:
+            if engineer and not _is_tombstoned(state, engineer):
                 return engineer
             return _NO_ROUTING_SOURCE
         next_id = str(getattr(current, "parent_task_id", "") or "").strip()
@@ -94,7 +104,7 @@ def _task_routing_source(state, event: dict):
         if not cell_id:
             continue
         source = state.agents.get(cell_id)
-        if source:
+        if source and not _is_tombstoned(state, source):
             return source
     return None
 
@@ -109,7 +119,7 @@ def _event_routing_source(state, event: dict):
     cell_id = str(event.get("cell_id", "") or "").strip()
     if cell_id:
         source = state.agents.get(cell_id)
-        if source:
+        if source and not _is_tombstoned(state, source):
             return source
 
     group = str(event.get("group", "") or "").strip()
@@ -123,6 +133,8 @@ def candidate_digest_recipients(state, event: dict) -> list[str]:
     source = _event_routing_source(state, event)
     if not source:
         return []
+    if _is_tombstoned(state, source):
+        return []
 
     kind = _cell_kind(source)
     recipients: list[str] = []
@@ -131,14 +143,14 @@ def candidate_digest_recipients(state, event: dict) -> list[str]:
     if kind == "worker":
         owner_id = _effective_owner_engineer_id(source)
         owner = state.agents.get(owner_id) if owner_id else None
-        if owner and _cell_kind(owner) == "engineer":
+        if owner and not _is_tombstoned(state, owner) and _cell_kind(owner) == "engineer":
             recipients.append(owner.id)
             if architect_eligible:
                 architect_id = str(
                     getattr(owner, "hired_by_architect_id", "") or ""
                 ).strip()
                 architect = state.agents.get(architect_id) if architect_id else None
-                if architect and _cell_kind(architect) == "architect":
+                if architect and not _is_tombstoned(state, architect) and _cell_kind(architect) == "architect":
                     recipients.append(architect.id)
     elif kind == "engineer":
         architect_id = str(
@@ -146,12 +158,12 @@ def candidate_digest_recipients(state, event: dict) -> list[str]:
         ).strip()
         architect = state.agents.get(architect_id) if architect_id else None
         if _event_kind(event) in ENGINEER_ASK_EVENT_KINDS:
-            if architect and _cell_kind(architect) == "architect":
+            if architect and not _is_tombstoned(state, architect) and _cell_kind(architect) == "architect":
                 recipients.append(architect.id)
         else:
             recipients.append(source.id)
             if architect_eligible:
-                if architect and _cell_kind(architect) == "architect":
+                if architect and not _is_tombstoned(state, architect) and _cell_kind(architect) == "architect":
                     recipients.append(architect.id)
     elif kind == "architect":
         return []
@@ -163,6 +175,9 @@ def candidate_digest_recipients(state, event: dict) -> list[str]:
     for recipient_id in recipients:
         recipient_id = str(recipient_id or "").strip()
         if not recipient_id or recipient_id in seen:
+            continue
+        recipient = state.agents.get(recipient_id)
+        if _is_tombstoned(state, recipient):
             continue
         ordered.append(recipient_id)
         seen.add(recipient_id)
