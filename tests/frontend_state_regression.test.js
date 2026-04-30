@@ -12118,6 +12118,85 @@ test('architect decision cards show acknowledge only for active proposed decisio
   });
 });
 
+test('dismissed architect decision panel hides mutators and blocks stale handlers', () => {
+  const { context, document } = createEngineerHarness();
+  const panel = document.register('panel-agent');
+
+  context.state.agents = {
+    'arch-1': {
+      id: 'arch-1',
+      name: 'Architect One',
+      kind: 'architect',
+      group: 'alpha',
+      cell_type: 'agent',
+      dismissed_at: 123,
+    },
+    'eng-1': {
+      id: 'eng-1',
+      name: 'Engineer One',
+      kind: 'engineer',
+      group: 'alpha',
+      cell_type: 'agent',
+      hired_by_architect_id: 'arch-1',
+    },
+  };
+  context.state.board_tasks = {
+    'LOOM:1': { id: 'LOOM:1', task: 'Implement decision', group: 'alpha' },
+  };
+  context.state.decisions = {
+    proposed: {
+      id: 'proposed',
+      architect_id: 'arch-1',
+      title: 'Proposed decision',
+      rationale: 'Readable while the architect is dismissed.',
+      status: 'proposed',
+      created_at: 10,
+      updated_at: 10,
+    },
+  };
+  context.focusedItemId = 'arch-1';
+
+  runInContext(context, `
+    _agentPanelLastSelectedTabByKind.architect = 'decisions';
+    _engineerDecisionUiState('proposed', state.decisions.proposed).expanded = true;
+    renderAgentPanel();
+  `);
+
+  assert.match(panel.innerHTML, /Readable while the architect is dismissed/);
+  assert.doesNotMatch(panel.innerHTML, />Edit<\/button>/);
+  assert.doesNotMatch(panel.innerHTML, />Acknowledge<\/button>/);
+  assert.doesNotMatch(panel.innerHTML, />Archive<\/button>/);
+  assert.doesNotMatch(panel.innerHTML, />Link task<\/button>/);
+  assert.doesNotMatch(panel.innerHTML, /Link task…/);
+  assert.doesNotMatch(panel.innerHTML, /Link engineer…/);
+
+  runInContext(context, `
+    var toastCalls = [];
+    _showToast = function(message, level) { toastCalls.push({ message: message, level: level }); };
+    engineerStartDecisionEdit('proposed');
+    var ui = _engineerDecisionUiState('proposed', state.decisions.proposed);
+    ui.editing = true;
+    ui.link_task_id = 'LOOM:1';
+    ui.link_engineer_id = 'eng-1';
+    engineerSaveDecisionEdit('arch-1', 'proposed');
+    engineerAcknowledgeDecision('arch-1', 'proposed');
+    engineerArchiveDecision('arch-1', 'proposed');
+    engineerLinkDecisionTask('arch-1', 'proposed');
+    engineerLinkDecisionEngineer('arch-1', 'proposed');
+  `);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(context.sendCalls)), []);
+  assert.equal(jsonValue(context, `_engineerArchitectDecisionUi.proposed.editing`), false);
+  assert.deepEqual(jsonValue(context, `toastCalls.map(function(item) { return item.level + ':' + item.message; })`), [
+    'warning:Rehire architect to modify decisions',
+    'warning:Rehire architect to modify decisions',
+    'warning:Rehire architect to modify decisions',
+    'warning:Rehire architect to modify decisions',
+    'warning:Rehire architect to modify decisions',
+    'warning:Rehire architect to modify decisions',
+  ]);
+});
+
 test('architect decision and message caches invalidate on relevant websocket deltas', () => {
   const { context, document } = createEngineerWsHarness();
   const panel = document.getElementById('panel-agent');

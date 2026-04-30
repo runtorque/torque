@@ -360,6 +360,7 @@ _ARCHITECT_READ_TOOL_NAMES = frozenset({
     "agents_list",
     "board_list",
     "board_summary",
+    "decision_list",
     "deploy_state",
     "diff",
     "engineer_journal_read",

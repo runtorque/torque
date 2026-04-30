@@ -1968,6 +1968,14 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             assigned_engineer_id=engineer.id,
             created_by_architect_id=architect.id,
         )
+        decision = self.state.save_decision({
+            "id": "decision-visible",
+            "architect_id": architect.id,
+            "title": "Keep durable decisions readable",
+            "rationale": "Dismiss is a pause, not an archive.",
+            "status": "accepted",
+        })
+        self.assertIsNotNone(decision)
 
         read_text, read_error = await self._call(
             "architect_task_list",
@@ -1976,6 +1984,18 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(read_error)
         self.assertIn("task-visible", read_text)
+
+        decision_text, decision_error = await self._call(
+            "architect_decision_list",
+            {},
+            architect.id,
+        )
+        self.assertFalse(decision_error, decision_text)
+        decision_payload = json.loads(decision_text)
+        self.assertEqual(
+            [item["id"] for item in decision_payload["decisions"]],
+            ["decision-visible"],
+        )
 
         create_text, create_error = await self._call(
             "architect_task_create",

@@ -1356,6 +1356,57 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         # so the assertion is that the engineer's directory matches.
         self.assertEqual(engineer.directory, temp_dir)
 
+    async def test_relaunch_stopped_engineer_uses_updated_launch_settings(self):
+        state = self._make_state()
+        engineer = self._add_engineer_cell(state, "eng-alice", "Alice")
+        engineer.status = "stopped"
+        engineer.agent_type = "codex"
+        engineer.command = "old-command"
+        bridge = _CapturingBridge()
+        apply_calls = []
+
+        async def fake_resolve_base_dir(group):
+            del group
+            return temp_dir
+
+        def fake_resolve_engineer_launch_config(group, *, base_dir="",
+                                              explicit_template="",
+                                              overrides=None):
+            del group, base_dir, explicit_template, overrides
+            cfg = self._launch_config(temp_dir)
+            cfg["command"] = "new-command"
+            cfg["agent_type"] = "generic"
+            cfg["env_vars"] = {"NEW": "1"}
+            return cfg
+
+        def fake_apply_persistent_prompt(cell, launch_cfg, prompt_text):
+            del prompt_text
+            apply_calls.append((cell.command, cell.agent_type, launch_cfg["command"]))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            engineer.directory = temp_dir
+            await self.server_mod._handle_relaunch_agent_command(
+                {"id": engineer.id},
+                state,
+                bridge=bridge,
+                worktree_mgr=_FakeWorktreeManager(),
+                resolve_base_dir=fake_resolve_base_dir,
+                resolve_agent_launch_config=lambda *a, **k: {},
+                resolve_engineer_launch_config=fake_resolve_engineer_launch_config,
+                apply_persistent_prompt=fake_apply_persistent_prompt,
+                build_cell_persistent_prompt=lambda *a, **k: "",
+                persistent_prompt_filename=lambda cell: f"{cell.id}.md",
+                is_designated_engineer=lambda cell: False,
+            )
+
+        self.assertEqual(engineer.command, "new-command")
+        self.assertEqual(engineer.agent_type, "generic")
+        self.assertEqual(apply_calls, [("new-command", "generic", "new-command")])
+        self.assertEqual(
+            bridge.create_session_calls[0]["kwargs"]["env_vars"]["NEW"],
+            "1",
+        )
+
     async def test_relaunch_fresh_session_codex_engineer_fires_kickoff_sequence(self):
         """Codex relaunch into a fresh session must re-seat the persistent
         system prompt as the first chat turn — the codex CLI has no

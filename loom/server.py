@@ -5216,6 +5216,7 @@ async def _handle_engineer_rehire_command(
             persistent_prompt_filename=persistent_prompt_filename,
             is_designated_engineer=is_designated_engineer,
             send_agent_prompt=send_agent_prompt,
+            preserve_cell_launch_config=True,
         )
     except Exception as exc:
         log.exception("Failed to rehire engineer '%s'", engineer.name)
@@ -5425,6 +5426,7 @@ async def _handle_architect_rehire_command(
             persistent_prompt_filename=persistent_prompt_filename,
             is_designated_engineer=is_designated_engineer,
             send_agent_prompt=send_agent_prompt,
+            preserve_cell_launch_config=True,
         )
     except Exception as exc:
         log.exception("Failed to rehire architect '%s'", architect.name)
@@ -5758,7 +5760,8 @@ async def _handle_relaunch_agent_command(
         build_cell_persistent_prompt,
         persistent_prompt_filename,
         is_designated_engineer,
-        send_agent_prompt=None) -> dict | None:
+        send_agent_prompt=None,
+        preserve_cell_launch_config: bool = False) -> dict | None:
     """Relaunch a stopped agent or terminal using current launch settings.
 
     When the new session is opened against a fresh provider conversation
@@ -5805,11 +5808,12 @@ async def _handle_relaunch_agent_command(
         explicit_template=cell.template,
         overrides={},
     )
-    if cell.cell_type == "agent":
-        # A stopped persistent agent already carries the concrete launch
-        # identity it was created with.  Re-resolving the group template is
-        # still useful for env/worktree/system-prompt defaults, but must not
-        # clobber per-agent provider/command choices during relaunch/rehire.
+    if cell.cell_type == "agent" and preserve_cell_launch_config:
+        # Rehire resumes the same durable person, so keep the provider and
+        # command captured on the cell even if group launch settings have
+        # since changed.  Plain relaunch is intentionally different: it
+        # honors the current resolved launch settings and only falls back
+        # to cell values for blank resolver fields below.
         if cell.command:
             launch_cfg["command"] = _relaunch_command_base(
                 cell.command,
