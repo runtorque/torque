@@ -1926,10 +1926,12 @@ class MatrixState:
                 agent_id: asdict(settings)
                 for agent_id, settings in self.agent_digest_settings.items()
             },
-            "engineer_journal": {
-                g: self.journal_read(g, limit=50)
-                for g in self.engineer_settings
-            },
+            # Engineer journal rows are stored with author_cell_id; expose the
+            # UI snapshot cache with the same author key so focusing one
+            # engineer never renders another engineer's group-mate entries.
+            "engineer_journal": self.engineer_journal_snapshot_by_author(
+                limit=50
+            ),
             "engineer_worklog": {
                 g: [dict(entry) for entry in entries]
                 for g, entries in self.engineer_worklog.items()
@@ -1958,6 +1960,51 @@ class MatrixState:
             if board_task_is_archived(task)
             and (not group or str(task.group or "") == group)
         }
+
+    def engineer_ids_for_group(self, group: str) -> list[str]:
+        """Return engineer cell ids in a group for author-keyed UI caches."""
+        group = str(group or "").strip()
+        if not group:
+            return []
+        ids: list[str] = []
+        seen: set[str] = set()
+        settings = self.group_settings.get(group)
+        configured_id = str(
+            getattr(settings, "engineer_agent_id", "") if settings else ""
+        ).strip()
+        if configured_id:
+            ids.append(configured_id)
+            seen.add(configured_id)
+        for aid, agent in self.agents.items():
+            if str(getattr(agent, "group", "") or "") != group:
+                continue
+            if str(getattr(agent, "cell_type", "") or "") != "agent":
+                continue
+            if str(getattr(agent, "kind", "") or "") != "engineer":
+                continue
+            aid = str(aid or "").strip()
+            if aid and aid not in seen:
+                ids.append(aid)
+                seen.add(aid)
+        return ids
+
+    def engineer_journal_snapshot_by_author(
+            self, group: str = "", limit: int = 50) -> dict[str, list[dict]]:
+        """Return engineer journal entries keyed by author_cell_id."""
+        groups = [str(group or "").strip()] if group else sorted(
+            set(self.engineer_settings) | set(self.groups)
+        )
+        snapshot: dict[str, list[dict]] = {}
+        for group_name in groups:
+            if not group_name:
+                continue
+            for engineer_id in self.engineer_ids_for_group(group_name):
+                snapshot[engineer_id] = self.journal_read(
+                    group_name,
+                    limit=limit,
+                    author_cell_id=engineer_id,
+                )
+        return snapshot
 
     def to_dict_compact(self) -> dict:
         """Return an opt-in compact snapshot for new lazy-loading clients.

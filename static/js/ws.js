@@ -765,7 +765,15 @@ function _deltaSurfaceInvalidations(ops, hints) {
         break;
       }
       case 'journal_append':
-      case 'journal_delete':
+      case 'journal_delete': {
+        const _journalFocused = _focusedEngineerAgent();
+        const _journalAuthorId = String((op && op.author_cell_id) || '');
+        if (_journalFocused && _journalAuthorId
+            && String(_journalFocused.id || '') === _journalAuthorId) {
+          _markSurface(flags, 'engineer');
+        }
+        break;
+      }
       case 'digest_buffer_stats':
       case 'digest_sent_push':
       case 'engineer_buffer_stats':
@@ -870,6 +878,7 @@ function _deltaSurfaceInvalidations(ops, hints) {
           id: op.id || '',
           group: op.group || '',
           cell_id: op.cell_id || (op.call && op.call.cell_id) || '',
+          author_cell_id: op.author_cell_id || '',
           architect_id: op.architect_id || '',
         };
         console.warn('[loom render] engineer-flag set by op:',
@@ -1822,24 +1831,32 @@ function _applyDelta(ops) {
 
       case 'journal_append': {
         if (!state.engineer_journal) state.engineer_journal = {};
-        var grp = op.group || '';
-        if (grp) {
-          if (!state.engineer_journal[grp]) state.engineer_journal[grp] = [];
+        var authorId = String((op && op.author_cell_id) || '');
+        if (authorId) {
+          if (!state.engineer_journal[authorId]) state.engineer_journal[authorId] = [];
           var je = Object.assign({}, op);
           delete je.op;
-          state.engineer_journal[grp].push(je);
-          // Cap at 200 entries per group
-          if (state.engineer_journal[grp].length > 200)
-            state.engineer_journal[grp] = state.engineer_journal[grp].slice(-200);
+          state.engineer_journal[authorId].unshift(je);
+          // Cap at 200 entries per engineer
+          if (state.engineer_journal[authorId].length > 200)
+            state.engineer_journal[authorId] = state.engineer_journal[authorId].slice(0, 200);
         }
         break;
       }
 
       case 'journal_delete': {
-        var grpd = op.group || '';
-        if (grpd && state.engineer_journal && state.engineer_journal[grpd]) {
-          state.engineer_journal[grpd] = state.engineer_journal[grpd].filter(
+        var authorDel = String((op && op.author_cell_id) || '');
+        if (authorDel && state.engineer_journal && state.engineer_journal[authorDel]) {
+          state.engineer_journal[authorDel] = state.engineer_journal[authorDel].filter(
             function(e) { return e.id !== op.id; });
+        } else if (state.engineer_journal) {
+          Object.keys(state.engineer_journal).forEach(function(key) {
+            var bucket = state.engineer_journal[key];
+            if (!Array.isArray(bucket)) return;
+            state.engineer_journal[key] = bucket.filter(function(e) {
+              return e.id !== op.id;
+            });
+          });
         }
         break;
       }

@@ -1953,8 +1953,8 @@ function _renderAgentMcpTab(agent) {
 
 function _renderEngineerJournal(agent) {
   var group = String((agent && agent.group) || '');
-  if (typeof _agentPanelLegacyRenderJournal === 'function') return _agentPanelLegacyRenderJournal(group);
-  var entries = (state && state.engineer_journal && state.engineer_journal[group]) || [];
+  if (typeof _agentPanelLegacyRenderJournal === 'function') return _agentPanelLegacyRenderJournal(group, agent);
+  var entries = _agentPanelEngineerJournalEntries(group, agent);
   if (typeof _agentPanelLegacyRenderJournalEntries === 'function') return _agentPanelLegacyRenderJournalEntries(entries, true);
   if (!entries.length) return '<div class="agent-panel-empty">No journal entries yet.</div>';
   var html = '<div class="agent-panel-journal">';
@@ -1970,6 +1970,29 @@ function _renderEngineerJournal(agent) {
   }
   html += '</div>';
   return html;
+}
+
+function _agentPanelEngineerJournalAuthorId(group, agent) {
+  if (agent && String((agent.kind || '')).trim() === 'engineer'
+      && String(agent.id || '').trim()) {
+    return String(agent.id || '').trim();
+  }
+  var configured = group ? _agentPanelEngineerAgent(group) : null;
+  return configured && configured.id ? String(configured.id || '').trim() : '';
+}
+
+function _agentPanelEngineerJournalEntries(group, agent) {
+  var store = state && state.engineer_journal ? state.engineer_journal : null;
+  if (!store) return [];
+  var authorId = _agentPanelEngineerJournalAuthorId(group, agent);
+  if (authorId && Array.isArray(store[authorId])) return store[authorId];
+  var legacy = group && Array.isArray(store[group]) ? store[group] : [];
+  if (authorId && legacy.length) {
+    return legacy.filter(function(entry) {
+      return String((entry && entry.author_cell_id) || '') === authorId;
+    });
+  }
+  return [];
 }
 
 function _renderAgentDigestEvents(agent) {
@@ -4077,7 +4100,7 @@ function renderLegacyGroupPanel() {
   } else if (activeTab === 'worklog') {
     html += _agentPanelLegacyRenderWorklog(group, ws);
   } else {
-    html += _agentPanelLegacyRenderJournal(group);
+    html += _agentPanelLegacyRenderJournal(group, engineer);
   }
   html += '</div>';
   html += '</div>';
@@ -4738,7 +4761,7 @@ function _engineerWorklogAgentLabel(entry, task) {
 
 // -- Journal tab -----------------------------------------------------------
 
-function _agentPanelLegacyRenderJournal(group) {
+function _agentPanelLegacyRenderJournal(group, agent) {
   if (!group) {
     return '<div class="agent-panel-empty">No engineer configured for any group.</div>';
   }
@@ -4782,16 +4805,19 @@ function _agentPanelLegacyRenderJournal(group) {
     return html;
   }
 
-  // Journal entries come from state.engineer_journal (populated by delta ops).
+  // Journal entries come from state.engineer_journal[author_cell_id]
+  // (populated by snapshots/delta ops). The legacy group-key fallback only
+  // renders rows stamped with the focused/configured engineer's id.
   // Render a "last 20 + Load older" window so long sessions don't explode the
   // DOM; the shared section pager in _agentPanelSectionPage grows the window on
   // top-insert so the anchor-restore helper keeps the user's scroll position.
-  var entries = (state.engineer_journal && state.engineer_journal[group]) || [];
+  var authorId = _agentPanelEngineerJournalAuthorId(group, agent);
+  var entries = _agentPanelEngineerJournalEntries(group, agent);
   if (entries.length) {
     var sorted = entries.slice().sort(function(a, b) {
       return (b.id || 0) - (a.id || 0);
     });
-    var page = _agentPanelSectionPage(group, 'journal', sorted);
+    var page = _agentPanelSectionPage(authorId || group, 'journal', sorted);
     html += _agentPanelLegacyRenderJournalEntries(page.events, true, true);
     html += _agentPanelRenderSectionLoadMore(page, { singular: 'entry', plural: 'entries' });
   } else {
@@ -5847,9 +5873,19 @@ function engineerEntryCtx(e, entryId) {
 function engineerDeleteEntry(entryId) {
   var group = _agentPanelCurrentGroup();
   if (!group) return;
-  send({ cmd: 'engineer_journal_delete', group: group, entry_id: entryId });
+  var focused = _resolveFocusedAgent();
+  var authorId = _agentPanelEngineerJournalAuthorId(group, focused);
+  send({
+    cmd: 'engineer_journal_delete',
+    group: group,
+    entry_id: entryId,
+    author_cell_id: authorId,
+  });
   // Optimistic removal from local state
-  if (state.engineer_journal && state.engineer_journal[group]) {
+  if (state.engineer_journal && authorId && state.engineer_journal[authorId]) {
+    state.engineer_journal[authorId] = state.engineer_journal[authorId].filter(
+      function(e) { return e.id !== entryId; });
+  } else if (state.engineer_journal && state.engineer_journal[group]) {
     state.engineer_journal[group] = state.engineer_journal[group].filter(
       function(e) { return e.id !== entryId; });
   }
@@ -5959,7 +5995,7 @@ function _engineerHasPanelState(group, ws, engineer, bstats) {
   if (_engineerGroupHasState(bstats)) return true;
   if (_engineerGroupStoreHasState(state.engineer_board_summary, group)) return true;
   if (_engineerGroupStoreHasState(state.engineer_buffer_stats, group)) return true;
-  if (_engineerGroupStoreHasState(state.engineer_journal, group)) return true;
+  if (_engineerJournalStoreHasStateForGroup(state.engineer_journal, group)) return true;
   if (_engineerGroupStoreHasState(state.engineer_sent_events, group)) return true;
   if (_engineerGroupStoreHasState(state.engineer_session_maps, group)) return true;
   if (_engineerGroupStoreHasState(state.engineer_streams, group)) return true;
@@ -5983,6 +6019,32 @@ function _engineerGroupStoreHasState(store, group) {
     }
   }
   return _engineerGroupHasState(store[group]);
+}
+
+function _engineerJournalStoreHasStateForGroup(store, group) {
+  if (!store || !group) return false;
+  var configured = _agentPanelEngineerAgent(group);
+  if (configured && configured.id && _engineerGroupHasState(store[configured.id])) {
+    return true;
+  }
+  if (state && state.agents) {
+    for (var aid in state.agents) {
+      var agent = state.agents[aid];
+      if (!agent || String(agent.group || '') !== String(group || '')) continue;
+      if (String(agent.kind || '') !== 'engineer') continue;
+      if (_engineerGroupHasState(store[aid])) return true;
+    }
+  }
+  for (var key in store) {
+    var entries = store[key];
+    if (!Array.isArray(entries)) continue;
+    for (var i = 0; i < entries.length; i++) {
+      if (String((entries[i] && entries[i].group) || '') === String(group || '')) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 function _engineerGroupHasState(value) {
