@@ -12,6 +12,24 @@ var _defaultPanelMinHeight = 80;
 var _workspaceSidebarDefaultWidth = 340;
 var _workspaceSidebarStorageKey = 'loom.ide.sidebar_width';
 
+function _syncGroupSwitcherSelectValue() {
+  var select = document.getElementById('active-group-select');
+  if (!select || typeof _activeGroup !== 'function') return;
+  var active = _activeGroup() || '';
+  if (select.value !== active) select.value = active;
+}
+
+function _scheduleGroupSwitcherSelectSync() {
+  var sync = function() { _syncGroupSwitcherSelectValue(); };
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(sync);
+  } else if (typeof setTimeout === 'function') {
+    setTimeout(sync, 0);
+  } else {
+    sync();
+  }
+}
+
 function renderGroupSwitcher() {
   var root = document.getElementById('group-switcher');
   var addGroupButton = document.getElementById('add-group-header-btn');
@@ -31,14 +49,6 @@ function renderGroupSwitcher() {
     ? _groupNamesSorted()
     : Object.keys((state && state.groups) || {}).sort();
   var active = (typeof _activeGroup === 'function') ? (_activeGroup() || '') : '';
-  if (typeof console !== 'undefined' && console.log) {
-    console.log('[LOOM287 renderGroupSwitcher]', {
-      active: active,
-      stateActive: state && state.active_group,
-      pending: (typeof _pendingActiveGroup !== 'undefined') ? _pendingActiveGroup : undefined,
-      lastHtmlHasActive: root._loomLastHtml ? root._loomLastHtml.indexOf(' selected') >= 0 : false,
-    });
-  }
   root.hidden = false;
   var html = '<label class="group-switcher-label" for="active-group-select">Group:</label>';
   html += '<select id="active-group-select" class="group-switcher-select"'
@@ -61,6 +71,7 @@ function renderGroupSwitcher() {
     root.innerHTML = html;
     root._loomLastHtml = html;
   }
+  _syncGroupSwitcherSelectValue();
 }
 
 function openActiveGroupMenu(event) {
@@ -85,28 +96,16 @@ function openActiveGroupMenu(event) {
 }
 
 function onActiveGroupSelect(value) {
-  if (typeof console !== 'undefined' && console.log) {
-    console.log('[LOOM287 onActiveGroupSelect before]', {
-      value: value,
-      active: (typeof _activeGroup === 'function') ? (_activeGroup() || '') : '',
-      stateActive: state && state.active_group,
-      selectValue: (document.getElementById('active-group-select') || {}).value || '',
-    });
-  }
   if (value === '__new_group__') {
     var select = document.getElementById('active-group-select');
     if (select && typeof _activeGroup === 'function') select.value = _activeGroup() || '';
+    _scheduleGroupSwitcherSelectSync();
     if (typeof openAddGroup === 'function') openAddGroup();
     return;
   }
-  if (typeof setActiveGroup === 'function') setActiveGroup(value);
-  if (typeof console !== 'undefined' && console.log) {
-    console.log('[LOOM287 onActiveGroupSelect after]', {
-      value: value,
-      active: (typeof _activeGroup === 'function') ? (_activeGroup() || '') : '',
-      stateActive: state && state.active_group,
-      selectValue: (document.getElementById('active-group-select') || {}).value || '',
-    });
+  if (typeof setActiveGroup === 'function') {
+    setActiveGroup(value);
+    _scheduleGroupSwitcherSelectSync();
   }
 }
 

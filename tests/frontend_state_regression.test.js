@@ -15410,6 +15410,58 @@ test('header group switcher is hidden in toolbelt and switches active group in s
   assert.match(root.innerHTML, /<option value="gamma" selected>gamma<\/option>/);
 });
 
+test('header group switcher resyncs stale browser select value after switch and cache hit', () => {
+  const rafCallbacks = [];
+  const { context, document } = createMainHarness({
+    renderTerminalWorkspace() {},
+    requestAnimationFrame(fn) {
+      rafCallbacks.push(fn);
+      return rafCallbacks.length;
+    },
+  });
+  const root = document.getElementById('group-switcher');
+  const select = document.register('active-group-select');
+  loadScript(context, 'static/js/render.js');
+  runInContext(context, `
+    var focusedItemId = null;
+    var selectedTerminalId = null;
+    state.runtime = {
+      mode: 'standalone',
+      embedded_terminal: true,
+      profile: 'switcher-desync-test',
+      port: 18955,
+    };
+    state.groups = { alpha: [], beta: [] };
+    state.group_settings = {
+      alpha: { collapsed_default: false },
+      beta: { collapsed_default: false },
+    };
+    state.children = {};
+    renderGroupSwitcher();
+  `);
+
+  assert.equal(select.value, 'alpha');
+
+  runInContext(context, `onActiveGroupSelect('beta');`);
+  assert.equal(jsonValue(context, `state.active_group`), 'beta');
+
+  // Real browsers can restore the select's live value after the change
+  // handler replaces the element; the rAF sync repairs that post-event
+  // stale visual state.
+  select.value = 'alpha';
+  while (rafCallbacks.length) rafCallbacks.shift()();
+  assert.equal(select.value, 'beta');
+
+  const cachedHtml = root._loomLastHtml;
+  select.value = 'alpha';
+  runInContext(context, `onActiveGroupSelect('beta');`);
+
+  // Re-selecting the already-active group is a cache hit; the post-render
+  // sync must still run even though innerHTML is not rewritten.
+  assert.equal(root._loomLastHtml, cachedHtml);
+  assert.equal(select.value, 'beta');
+});
+
 test('active group changes reload visible group-scoped Actions and Roles panels', () => {
   const { context, sandbox } = createMainHarness({
     renderTerminalWorkspace() {},
