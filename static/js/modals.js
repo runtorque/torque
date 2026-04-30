@@ -599,6 +599,12 @@ function openArchitectDecisionModal(architectId) {
   if (!modal) return;
   _architectDecisionModalArchitectId = String(architectId || '').trim();
   const architect = state && state.agents ? state.agents[_architectDecisionModalArchitectId] : null;
+  if (architect && Number(architect.dismissed_at || 0) > 0) {
+    if (typeof _showToast === 'function') {
+      _showToast('Rehire the architect before adding decisions.', 'warning');
+    }
+    return;
+  }
   const summary = document.getElementById('architect-decision-modal-summary');
   const titleInput = document.getElementById('architect-decision-title-input');
   const rationaleInput = document.getElementById('architect-decision-rationale-input');
@@ -642,6 +648,13 @@ function _selectedMultiValues(selectId) {
 function submitArchitectDecision() {
   const architectId = String(_architectDecisionModalArchitectId || '').trim();
   if (!architectId) return;
+  const architect = state && state.agents ? state.agents[architectId] : null;
+  if (architect && Number(architect.dismissed_at || 0) > 0) {
+    if (typeof _showToast === 'function') {
+      _showToast('Rehire the architect before adding decisions.', 'warning');
+    }
+    return;
+  }
   const titleInput = document.getElementById('architect-decision-title-input');
   const rationaleInput = document.getElementById('architect-decision-rationale-input');
   const title = titleInput ? String(titleInput.value || '').trim() : '';

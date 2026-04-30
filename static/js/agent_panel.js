@@ -3144,6 +3144,7 @@ function _engineerWorkerAgents(group, engineerId) {
 }
 
 function _engineerAgentStatusLabel(agent) {
+  if (agent && Number(agent.dismissed_at || 0) > 0) return 'dismissed';
   if (!agent || agent.status === 'stopped') return 'stopped';
   if (agent.activity || agent.activity_detail) return 'running';
   return 'idle';
@@ -3760,6 +3761,7 @@ function _agentPanelLegacyRenderArchitectRoster(group) {
     var expanded = _engineerArchitectExpandedState(architect.id);
     var hireCounts = _engineerArchitectTransferCounts(architect.id);
     var architectIdJs = JSON.stringify(String(architect.id || ''));
+    var dismissed = Number(architect.dismissed_at || 0) > 0;
     html += '<div class="architect-row' + (expanded ? ' expanded' : '') + '">';
     html += '<div class="engineer-row architect-parent-row">';
     html += '<div class="engineer-row-main">';
@@ -3772,7 +3774,12 @@ function _agentPanelLegacyRenderArchitectRoster(group) {
     html += '</div>';
     html += '<div class="engineer-row-meta">';
     html += '<span class="engineer-row-status engineer-row-status-' + _esc(status) + '">' + _esc(status) + '</span>';
-    html += '<button type="button" class="engineer-row-btn" onclick="event.stopPropagation();relaunchAgent(\'' + _esc(architect.id) + '\')">Relaunch</button>';
+    if (dismissed) {
+      html += '<button type="button" class="engineer-row-btn" onclick="event.stopPropagation();rehireArchitect(\'' + _esc(architect.id) + '\')">Rehire</button>';
+    } else {
+      html += '<button type="button" class="engineer-row-btn" onclick="event.stopPropagation();relaunchAgent(\'' + _esc(architect.id) + '\')">Relaunch</button>';
+      html += '<button type="button" class="engineer-row-btn engineer-row-btn-danger" onclick="event.stopPropagation();dismissArchitect(\'' + _esc(architect.id) + '\')">Dismiss</button>';
+    }
     html += '<button type="button" class="engineer-row-btn" onclick="event.stopPropagation();engineerRenameArchitect(\'' + _esc(architect.id) + '\')">Rename</button>';
     html += '<button type="button" class="engineer-row-btn" onclick="event.stopPropagation();engineerToggleArchitect(\'' + _esc(architect.id) + '\')">' + (expanded ? 'Hide decision log' : 'Open decision log') + '</button>';
     html += '<button type="button" class="engineer-row-btn engineer-row-btn-danger" onclick="event.stopPropagation();engineerDeleteArchitect(\'' + _esc(architect.id) + '\')">Delete</button>';
@@ -3795,9 +3802,15 @@ function _agentPanelLegacyRenderArchitectRoster(group) {
       } else {
         html += '<div class="engineers-roster-empty architect-roster-empty">No hired engineers yet.</div>';
       }
-      html += '<div class="architect-roster-section-head"><span class="architect-roster-section-title">Decision log</span><span class="architect-roster-section-actions"><span class="architect-roster-section-count">' + decisions.length + '</span><button type="button" class="engineer-row-btn" onclick="'
-        + _agentPanelEventAttr('event.stopPropagation();openArchitectDecisionModal(' + architectIdJs + ')')
-        + '">+ New decision</button></span></div>';
+      html += '<div class="architect-roster-section-head"><span class="architect-roster-section-title">Decision log</span><span class="architect-roster-section-actions"><span class="architect-roster-section-count">' + decisions.length + '</span>';
+      if (dismissed) {
+        html += '<button type="button" class="engineer-row-btn" disabled title="Rehire architect to add decisions">+ New decision</button>';
+      } else {
+        html += '<button type="button" class="engineer-row-btn" onclick="'
+          + _agentPanelEventAttr('event.stopPropagation();openArchitectDecisionModal(' + architectIdJs + ')')
+          + '">+ New decision</button>';
+      }
+      html += '</span></div>';
       var hasDecisionRows = false;
       for (var statusIndex = 0; statusIndex < _ENGINEER_DECISION_STATUSES.length; statusIndex++) {
         var statusName = _ENGINEER_DECISION_STATUSES[statusIndex];

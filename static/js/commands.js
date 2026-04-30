@@ -270,6 +270,18 @@ function _isEngineerDismissedCell(cell) {
   );
 }
 
+function _isArchitectDismissedCell(cell) {
+  return !!(
+    cell
+    && (cell.kind || '') === 'architect'
+    && Number(cell.dismissed_at || 0) > 0
+  );
+}
+
+function _isLifecycleDismissedCell(cell) {
+  return _isEngineerDismissedCell(cell) || _isArchitectDismissedCell(cell);
+}
+
 function _canCurrentSessionManageEngineer(engineer) {
   if (!engineer || (engineer.kind || '') !== 'engineer') return false;
   var architect = _currentArchitectSessionCell();
@@ -325,6 +337,37 @@ function rehireEngineer(id) {
   const engineer = state.agents ? state.agents[id] : null;
   if (!engineer || !_canCurrentSessionManageEngineer(engineer)) return;
   send(_engineerLifecyclePayload('architect_engineer_rehire', engineer));
+}
+
+async function dismissArchitect(id) {
+  const architect = state.agents ? state.agents[id] : null;
+  if (!architect || (architect.kind || '') !== 'architect') return;
+  if (_isArchitectDismissedCell(architect)) return;
+  var engineerCount = 0;
+  if (state && state.agents) {
+    for (var agentId in state.agents) {
+      var candidate = state.agents[agentId];
+      if (!candidate || (candidate.kind || '') !== 'engineer') continue;
+      if (String(candidate.hired_by_architect_id || '') === String(architect.id || '')) {
+        engineerCount += 1;
+      }
+    }
+  }
+  var msg = 'Dismiss "' + (architect.name || architect.id) + '"? This closes the architect terminal';
+  if (engineerCount > 0) {
+    msg += '. Its ' + engineerCount + ' hired engineer' + (engineerCount === 1 ? '' : 's')
+      + ' will stay active';
+  }
+  msg += '. You can rehire the architect later from this menu.';
+  if (await showConfirm(msg, { label: 'Dismiss architect', variant: 'btn-danger' })) {
+    send({ cmd: 'architect_dismiss', architect_id: architect.id, reason: 'Dismissed from UI' });
+  }
+}
+
+function rehireArchitect(id) {
+  const architect = state.agents ? state.agents[id] : null;
+  if (!architect || (architect.kind || '') !== 'architect') return;
+  send({ cmd: 'architect_rehire', architect_id: architect.id });
 }
 
 async function restartAgent(id) {
@@ -739,18 +782,20 @@ function onCellContextMenu(e, id) {
   const gs = (state.group_settings || {})[cell.group] || {};
   const isDesignatedEngineer = gs.engineer_agent_id === id;
   const isDismissedEngineer = _isEngineerDismissedCell(cell);
+  const isDismissedArchitect = _isArchitectDismissedCell(cell);
+  const isDismissedLifecycleCell = _isLifecycleDismissedCell(cell);
 
   const items = [
     { label: 'Edit\u2026', action: `openEditCell('${id}')` },
     { label: 'Focus', action: `focusAgent('${id}')` },
   ];
-  if (cell.status === 'stopped' && !isDismissedEngineer) {
+  if (cell.status === 'stopped' && !isDismissedLifecycleCell) {
     items.push({
       label: isDesignatedEngineer ? 'Restart Engineer\u2026' : 'Relaunch',
       action: `relaunchAgent('${id}')`,
     });
   }
-  if (cell.cell_type === 'agent' && !isDismissedEngineer) {
+  if (cell.cell_type === 'agent' && !isDismissedLifecycleCell) {
     items.push({
       label: 'Restart\u2026',
       action: `restartAgent('${id}')`,
@@ -768,6 +813,20 @@ function onCellContextMenu(e, id) {
       items.push({
         label: 'Dismiss\u2026',
         action: `dismissEngineer('${id}')`,
+        danger: true,
+      });
+    }
+  }
+  if (cell.cell_type === 'agent' && (cell.kind || '') === 'architect') {
+    if (isDismissedArchitect) {
+      items.push({
+        label: 'Rehire',
+        action: `rehireArchitect('${id}')`,
+      });
+    } else {
+      items.push({
+        label: 'Dismiss\u2026',
+        action: `dismissArchitect('${id}')`,
         danger: true,
       });
     }

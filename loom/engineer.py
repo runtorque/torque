@@ -115,6 +115,8 @@ _ARCHITECT_EVENT_LABELS = {
     "engineer_fired": "engineer fired",
     "engineer_dismissed": "engineer dismissed",
     "engineer_rehired": "engineer rehired",
+    "architect_dismissed": "architect dismissed",
+    "architect_rehired": "architect rehired",
     "workflow_breach": "workflow breach",
     "engineer_queue_empty": "queue empty",
     "engineer_awaiting_human_input": "awaiting human input",

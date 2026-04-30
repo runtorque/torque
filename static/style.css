@@ -1076,6 +1076,12 @@ body.runtime-embedded .agent-focus-header {
 .principal-card.dim {
   opacity: .55;
 }
+.principal-card.dismissed {
+  opacity: .5;
+  filter: grayscale(.35);
+  border-color: color-mix(in srgb, var(--text-dim) 44%, transparent);
+  box-shadow: none;
+}
 .principal-card--user {
   min-height: var(--agent-user-card-height, 74px);
   /* User card has no controls, so it doesn't need the controls-clearance
@@ -1150,6 +1156,11 @@ body.runtime-embedded .agent-focus-header {
   color: #1f1300;
   background: color-mix(in srgb, var(--amber) 82%, white);
   border-color: color-mix(in srgb, var(--amber) 58%, transparent);
+}
+.principal-card-kind--dismissed {
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--text-dim) 13%, transparent);
+  border-color: color-mix(in srgb, var(--text-dim) 24%, transparent);
 }
 .principal-card-kind--owner {
   color: var(--text-dim);
@@ -1242,6 +1253,23 @@ body.runtime-embedded .agent-focus-header {
 .principal-card-status.idle { background: var(--text-dim); }
 .principal-card-status.attention { background: var(--amber); }
 .principal-card-status.disconnected { background: var(--red); }
+.principal-card-status.dismissed {
+  width: 12px;
+  height: 12px;
+  top: 2px;
+  right: 2px;
+  background: var(--text-dim);
+}
+.principal-card-status.dismissed::after {
+  content: "–";
+  position: absolute;
+  inset: 0;
+  color: var(--bg);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 12px;
+  text-align: center;
+}
 @media (max-width: 400px) {
   .principals-row {
     gap: 5px;
@@ -1422,7 +1450,7 @@ body.runtime-embedded .agent-focus-header {
 .cell.engineer {
   border-left-color: transparent;
 }
-.cell.engineer.dismissed {
+.cell.dismissed {
   opacity: .5;
   filter: grayscale(.35);
   border-left-color: color-mix(in srgb, var(--text-dim) 72%, transparent);
@@ -1432,7 +1460,7 @@ body.runtime-embedded .agent-focus-header {
   color: color-mix(in srgb, var(--accent) 78%, var(--text));
   font-weight: 600;
 }
-.cell.engineer.dismissed .cell-name {
+.cell.dismissed .cell-name {
   color: var(--text-dim);
 }
 .cell.worker {

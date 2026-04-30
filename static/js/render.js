@@ -680,6 +680,14 @@ function _isTombstonedAgent(agent) {
   return Number.isFinite(value) && value > 0;
 }
 
+function _isDismissedArchitect(agent) {
+  return !!(agent && (agent.kind || '') === 'architect' && _agentDismissedAt(agent));
+}
+
+function _isLifecycleDismissedAgent(agent) {
+  return _isDismissedEngineer(agent) || _isDismissedArchitect(agent);
+}
+
 function _buildHierarchicalAgentSections(agents) {
   const visibleById = {};
   const architects = [];
@@ -1830,11 +1838,15 @@ function _renderPrincipalArchitectCard(groupName, section, selectedPrincipalId) 
   const classes = ['principal-card', 'principal-card--architect'];
   if (isSelected) classes.push('selected');
   else classes.push('dim');
+  const dismissedAt = _agentDismissedAt(architect);
+  if (dismissedAt) classes.push('dismissed');
   classes.push(_principalCardFocusedClass(navId).trim());
   const displayName = architect.name || architect.slug || id;
   const groupArg = _jsStringAttr(groupName);
   const idArg = _jsStringAttr(id);
-  const statusCls = typeof agentStatusClass === 'function' ? agentStatusClass(architect) : '';
+  const statusCls = dismissedAt
+    ? 'dismissed'
+    : (typeof agentStatusClass === 'function' ? agentStatusClass(architect) : '');
   const stats = _architectStatsForCard(architect, section);
   const actionLabel = _agentCardCurrentOrLastActionLabel(architect);
   const digestSettings = (state && state.agent_digest_settings)
@@ -1842,6 +1854,15 @@ function _renderPrincipalArchitectCard(groupName, section, selectedPrincipalId) 
   const digestPaused = !!(digestSettings && digestSettings.paused);
   const pauseTitle = digestPaused ? 'Resume event delivery' : 'Pause event delivery';
   const pauseIcon = digestPaused ? '▶' : '⏸';
+  const lifecycleButton = dismissedAt
+    ? '<button type="button" class="principal-card-pause running"'
+      + ' data-focus-key="principal-rehire:' + esc(id) + '"'
+      + ' onclick="event.stopPropagation();rehireArchitect(' + idArg + ')"'
+      + ' title="Rehire architect">↻</button>'
+    : '<button type="button" class="principal-card-pause ' + (digestPaused ? 'paused' : 'running') + '"'
+      + ' data-focus-key="principal-pause:' + esc(id) + '"'
+      + ' onclick="event.stopPropagation();toggleDigestPauseForAgent(' + idArg + ')"'
+      + ' title="' + esc(pauseTitle) + '">' + pauseIcon + '</button>';
   /* Nested <button> inside <button> is invalid HTML; render the card as a
      div with role="tab" so close/pause controls can be real buttons. */
   return '<div class="' + esc(classes.filter(Boolean).join(' ')) + '"'
@@ -1854,7 +1875,7 @@ function _renderPrincipalArchitectCard(groupName, section, selectedPrincipalId) 
     + ' aria-selected="' + (isSelected ? 'true' : 'false') + '"'
     + ' onclick="event.stopPropagation();selectPrincipal(' + idArg + ',' + groupArg + ')"'
     + ' oncontextmenu="onCellContextMenu(event,' + idArg + ')"'
-    + ' title="Architect ' + esc(displayName) + '">'
+    + ' title="Architect ' + esc(displayName) + (dismissedAt ? ' — dismissed' : '') + '">'
     + '<div class="principal-card-controls">'
     + '<button type="button" class="principal-card-close"'
     + ' data-focus-key="principal-close:' + esc(id) + '"'
@@ -1864,6 +1885,7 @@ function _renderPrincipalArchitectCard(groupName, section, selectedPrincipalId) 
     + ' data-focus-key="principal-pause:' + esc(id) + '"'
     + ' onclick="event.stopPropagation();toggleDigestPauseForAgent(' + idArg + ')"'
     + ' title="' + esc(pauseTitle) + '">' + pauseIcon + '</button>'
+    + lifecycleButton
     + '</div>'
     + '<span class="principal-card-status ' + esc(statusCls) + '" aria-hidden="true"></span>'
     + '<div class="principal-card-body">'
@@ -1876,7 +1898,9 @@ function _renderPrincipalArchitectCard(groupName, section, selectedPrincipalId) 
     + '</span>'
     + '</div>'
     + _renderAgentProviderBadge(architect.agent_type, 'principal-card-provider')
-    + '<span class="principal-card-kind principal-card-kind--architect">Architect</span>'
+    + '<span class="principal-card-kind '
+      + (dismissedAt ? 'principal-card-kind--dismissed' : 'principal-card-kind--architect')
+      + '">' + (dismissedAt ? 'Dismissed' : 'Architect') + '</span>'
     + '</div>';
 }
 
@@ -3601,7 +3625,7 @@ function renderAgentCell(a, options) {
   const _isArchitect = (a.kind || '') === 'architect';
   const _isEngineerKind = (a.kind || '') === 'engineer';
   const _isWorker = (a.kind || '') === 'worker';
-  const _isDismissed = _isDismissedEngineer(a);
+  const _isDismissed = _isLifecycleDismissedAgent(a);
   // Check if this agent is the engineer for its group
   const _gs = (state.group_settings || {})[a.group];
   const _isDesignatedEngineer = _gs && _gs.engineer_agent_id === a.id;
@@ -3671,13 +3695,15 @@ function renderAgentCell(a, options) {
   const badgeLabel = _agentKindBadgeLabel(a.kind || '', _isDismissed);
   const badgeClass = _agentKindBadgeClass(a.kind || '', _isDismissed);
   h += '<div class="agent-card-kind ' + esc(badgeClass) + '"'
-    + (_isDismissed ? ' title="Dismissed engineer"' : '')
+    + (_isDismissed ? ' title="Dismissed ' + esc(a.kind || 'agent') + '"' : '')
     + '>' + esc(badgeLabel) + '</div>';
   if (childCount > 0) {
     h += `<div class="cell-term-count">${childCount}</div>`;
   }
   if (_isDismissed) {
-    h += `<button class="cell-relaunch cell-rehire" onclick="event.stopPropagation();rehireEngineer('${a.id}')" title="Rehire engineer">\u21BB rehire</button>`;
+    const rehireAction = _isArchitect ? 'rehireArchitect' : 'rehireEngineer';
+    const rehireTitle = _isArchitect ? 'Rehire architect' : 'Rehire engineer';
+    h += `<button class="cell-relaunch cell-rehire" onclick="event.stopPropagation();${rehireAction}('${a.id}')" title="${rehireTitle}">\u21BB rehire</button>`;
   } else if (a.status === 'stopped') {
     h += `<button class="cell-relaunch" onclick="event.stopPropagation();relaunchAgent('${a.id}')" title="Relaunch">\u21BB relaunch</button>`;
   }

@@ -1956,6 +1956,42 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reassign_payload["reason"], "engineer_dismissed")
         self.assertEqual(self.state.board_tasks[task.id].assigned_engineer_id, peer.id)
 
+    async def test_dismissed_architect_mcp_allows_reads_and_rejects_mutations(self):
+        architect = self._add_architect("arch-1", "Architect")
+        architect.dismissed_at = 123
+        engineer = self._add_engineer(
+            "eng-hired", "Hired", hired_by_architect_id=architect.id
+        )
+        self._add_task(
+            "task-visible",
+            "Existing work",
+            assigned_engineer_id=engineer.id,
+            created_by_architect_id=architect.id,
+        )
+
+        read_text, read_error = await self._call(
+            "architect_task_list",
+            {},
+            architect.id,
+        )
+        self.assertFalse(read_error)
+        self.assertIn("task-visible", read_text)
+
+        create_text, create_error = await self._call(
+            "architect_task_create",
+            {
+                "title": "Blocked mutation",
+                "group": "loom",
+                "assigned_engineer_id": engineer.id,
+            },
+            architect.id,
+        )
+        self.assertTrue(create_error)
+        create_payload = json.loads(create_text)
+        self.assertEqual(create_payload["reason"], "architect_dismissed")
+        self.assertEqual(create_payload["architect_id"], architect.id)
+        self.assertEqual(len(self.handle_calls), 0)
+
     async def test_architect_task_move_uses_group_scope_and_can_clear_status(self):
         architect = self._add_architect("arch-1", "Architect")
         other_architect = self._add_architect("arch-2", "Other Architect")

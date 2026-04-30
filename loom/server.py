@@ -5,6 +5,7 @@ import contextlib
 import json
 import mimetypes
 import os
+import shlex
 import shutil
 import sys
 import time
@@ -4064,6 +4065,33 @@ def _agent_dismissed_at(cell) -> int:
         return 0
 
 
+def _relaunch_command_base(command: str, prompt_filename: str) -> str:
+    """Return a persisted relaunch command without Loom-managed prompt flags."""
+    command = str(command or "").strip()
+    prompt_filename = str(prompt_filename or "").strip()
+    if not command or not prompt_filename:
+        return command
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return command
+    cleaned = []
+    idx = 0
+    while idx < len(parts):
+        part = parts[idx]
+        if (
+                part == "--append-system-prompt-file"
+                and idx + 1 < len(parts)
+                and prompt_filename in parts[idx + 1]):
+            idx += 2
+            continue
+        cleaned.append(part)
+        idx += 1
+    if len(cleaned) == len(parts):
+        return command
+    return shlex.join(cleaned)
+
+
 def _engineer_dismissed_error(engineer_id: str) -> dict:
     return {
         "type": "error",
@@ -4082,6 +4110,15 @@ def _engineer_tombstoned_error(engineer_id: str) -> dict:
     }
 
 
+def _architect_dismissed_error(architect_id: str) -> dict:
+    return {
+        "type": "error",
+        "reason": "architect_dismissed",
+        "message": f"architect {architect_id} is dismissed",
+        "architect_id": str(architect_id or "").strip(),
+    }
+
+
 def _validate_engineer_lifecycle_authority(
         state: MatrixState,
         engineer,
@@ -4097,6 +4134,22 @@ def _validate_engineer_lifecycle_authority(
     hired_by = str(getattr(engineer, "hired_by_architect_id", "") or "").strip()
     if hired_by != architect.id:
         return {"type": "error", "message": "engineer not found in scope"}
+    return None
+
+
+def _validate_architect_lifecycle_authority(
+        state: MatrixState,
+        architect,
+        *,
+        caller_kind: str = "") -> dict | None:
+    """Return an error if a non-user tries to manage architect lifecycle."""
+    del state, architect
+    caller_kind = str(caller_kind or "").strip()
+    if caller_kind and caller_kind != "user":
+        return {
+            "type": "error",
+            "message": "architect lifecycle is user-only",
+        }
     return None
 
 
@@ -4515,6 +4568,8 @@ async def _handle_architect_engineer_hire_command(
     )
     if not architect:
         return {"type": "error", "message": "Architect not found"}
+    if _agent_dismissed_at(architect):
+        return _architect_dismissed_error(architect.id)
     if not architect.group:
         return {"type": "error", "message": "Architect is not assigned to a group"}
 
@@ -4568,6 +4623,8 @@ async def _handle_pending_hire_approve_command(
     )
     if not architect:
         return {"type": "error", "message": "Architect not found for pending hire"}
+    if _agent_dismissed_at(architect):
+        return _architect_dismissed_error(architect.id)
     if not architect.group:
         return {"type": "error", "message": "Architect is not assigned to a group"}
 
@@ -4695,6 +4752,13 @@ def _handle_archived_tasks_command(data: dict, state: MatrixState) -> dict:
         "type": "archived_tasks",
         "group": group,
         "board_tasks": state.get_archived_task_details(group=group),
+    }
+
+
+def _architect_ui_tool_is_read(name: str) -> bool:
+    return str(name or "").strip() in {
+        "architect_decision_list",
+        "architect_task_list",
     }
 
 
@@ -5190,6 +5254,220 @@ async def _handle_engineer_rehire_command(
     }
 
 
+async def _handle_architect_dismiss_command(
+        data: dict,
+        state: MatrixState, *,
+        close_session,
+        panel_event=None) -> dict:
+    """Pause an architect by closing its session while preserving rows/history."""
+    architect = _resolve_architect_cell(
+        state,
+        architect_id=data.get("architect_id", "") or data.get("id", ""),
+        architect_slug=data.get("slug", ""),
+    )
+    if not architect:
+        return {"type": "error", "message": "Architect not found"}
+    authority_error = _validate_architect_lifecycle_authority(
+        state,
+        architect,
+        caller_kind=data.get("caller_kind", "") or data.get("_caller_kind", ""),
+    )
+    if authority_error:
+        return authority_error
+
+    if _agent_dismissed_at(architect):
+        return {
+            "type": "ok",
+            "architect_id": architect.id,
+            "dismissed_at": _agent_dismissed_at(architect),
+            "already_dismissed": True,
+            "closed_sessions": 0,
+        }
+
+    dismissed_at = int(time.time())
+    architect.dismissed_at = dismissed_at
+    state._emit_agent(architect)
+    state._db_save_agent(architect)
+
+    errors: list[str] = []
+    closed_sessions = 0
+    if await _close_cell_session_preserving_state(
+            state,
+            architect,
+            close_session,
+            errors=errors):
+        closed_sessions += 1
+
+    reason = str(data.get("reason", "") or "").strip()
+    state._emit(
+        "architect_dismissed",
+        architect_id=architect.id,
+        group=architect.group,
+        dismissed_at=dismissed_at,
+    )
+    if panel_event:
+        panel_event(
+            "architect_dismissed",
+            architect.id,
+            architect.name,
+            architect.group,
+            reason or "Architect dismissed",
+        )
+    result = {
+        "type": "ok",
+        "architect_id": architect.id,
+        "dismissed_at": dismissed_at,
+        "closed_sessions": closed_sessions,
+    }
+    if errors:
+        result["close_errors"] = errors
+    return result
+
+
+async def _handle_architect_rehire_command(
+        data: dict,
+        state: MatrixState, *,
+        bridge,
+        worktree_mgr,
+        resolve_base_dir,
+        resolve_agent_launch_config,
+        resolve_engineer_launch_config,
+        resolve_architect_launch_config=None,
+        apply_persistent_prompt,
+        build_cell_persistent_prompt,
+        persistent_prompt_filename,
+        is_designated_engineer,
+        send_agent_prompt=None,
+        panel_event=None) -> dict:
+    """Resume a dismissed architect with the same id/slug and launch config."""
+    architect = _resolve_architect_cell(
+        state,
+        architect_id=data.get("architect_id", "") or data.get("id", ""),
+        architect_slug=data.get("slug", ""),
+    )
+    if not architect:
+        return {"type": "error", "message": "Architect not found"}
+    authority_error = _validate_architect_lifecycle_authority(
+        state,
+        architect,
+        caller_kind=data.get("caller_kind", "") or data.get("_caller_kind", ""),
+    )
+    if authority_error:
+        return authority_error
+
+    dismissed_at = _agent_dismissed_at(architect)
+    if not dismissed_at:
+        return {
+            "type": "ok",
+            "architect_id": architect.id,
+            "dismissed_at": 0,
+            "already_hired": True,
+            "replayed_messages": 0,
+        }
+    if architect.session_id:
+        architect.dismissed_at = 0
+        state._emit_agent(architect)
+        state._db_save_agent(architect)
+        replayed = await _replay_buffered_cross_kind_messages(
+            state, bridge, architect)
+        state._emit(
+            "architect_rehired",
+            architect_id=architect.id,
+            group=architect.group,
+        )
+        if panel_event:
+            panel_event(
+                "architect_rehired",
+                architect.id,
+                architect.name,
+                architect.group,
+                "Architect rehired",
+            )
+        return {
+            "type": "ok",
+            "architect_id": architect.id,
+            "dismissed_at": 0,
+            "already_running": True,
+            "replayed_messages": replayed,
+        }
+
+    architect.status = "stopped"
+    state._emit_agent(architect)
+    state._db_save_agent(architect)
+
+    async def _restore_dismissed_after_failed_rehire() -> None:
+        if architect.session_id:
+            try:
+                await bridge.close_session(architect.session_id)
+            except Exception:
+                log.exception(
+                    "Failed to close partial rehire session for '%s'",
+                    architect.name,
+                )
+        architect.dismissed_at = dismissed_at
+        architect.status = "stopped"
+        architect.session_id = None
+        state._emit_agent(architect)
+        state._db_save_agent(architect)
+
+    try:
+        relaunch_result = await _handle_relaunch_agent_command(
+            {"id": architect.id},
+            state,
+            bridge=bridge,
+            worktree_mgr=worktree_mgr,
+            resolve_base_dir=resolve_base_dir,
+            resolve_agent_launch_config=resolve_agent_launch_config,
+            resolve_engineer_launch_config=resolve_engineer_launch_config,
+            resolve_architect_launch_config=resolve_architect_launch_config,
+            apply_persistent_prompt=apply_persistent_prompt,
+            build_cell_persistent_prompt=build_cell_persistent_prompt,
+            persistent_prompt_filename=persistent_prompt_filename,
+            is_designated_engineer=is_designated_engineer,
+            send_agent_prompt=send_agent_prompt,
+        )
+    except Exception as exc:
+        log.exception("Failed to rehire architect '%s'", architect.name)
+        await _restore_dismissed_after_failed_rehire()
+        return {"type": "error", "message": f"Failed to rehire architect: {exc}"}
+
+    if relaunch_result and relaunch_result.get("type") == "error":
+        await _restore_dismissed_after_failed_rehire()
+        return relaunch_result
+    if not architect.session_id:
+        await _restore_dismissed_after_failed_rehire()
+        return {
+            "type": "error",
+            "message": "Failed to rehire architect: no session was created",
+        }
+
+    architect.dismissed_at = 0
+    state._emit_agent(architect)
+    state._db_save_agent(architect)
+    replayed = await _replay_buffered_cross_kind_messages(
+        state, bridge, architect)
+    state._emit(
+        "architect_rehired",
+        architect_id=architect.id,
+        group=architect.group,
+    )
+    if panel_event:
+        panel_event(
+            "architect_rehired",
+            architect.id,
+            architect.name,
+            architect.group,
+            "Architect rehired",
+        )
+    return {
+        "type": "ok",
+        "architect_id": architect.id,
+        "dismissed_at": 0,
+        "session_id": architect.session_id or "",
+        "replayed_messages": replayed,
+    }
+
+
 async def _handle_delete_engineer_command(
         data: dict,
         state: MatrixState, *,
@@ -5434,6 +5712,11 @@ async def _dispatch_architect_ui_tool(name: str, args: dict,
     caller_id = str(args.get("architect_id", "") or "").strip()
     if not caller_id:
         return {"type": "error", "message": "architect_id is required"}
+    caller = state.agents.get(caller_id)
+    if (
+            _agent_dismissed_at(caller)
+            and not _architect_ui_tool_is_read(name)):
+        return _architect_dismissed_error(caller_id)
 
     async def _unexpected_handle_command(_data: dict) -> dict:
         return {
@@ -5522,6 +5805,18 @@ async def _handle_relaunch_agent_command(
         explicit_template=cell.template,
         overrides={},
     )
+    if cell.cell_type == "agent":
+        # A stopped persistent agent already carries the concrete launch
+        # identity it was created with.  Re-resolving the group template is
+        # still useful for env/worktree/system-prompt defaults, but must not
+        # clobber per-agent provider/command choices during relaunch/rehire.
+        if cell.command:
+            launch_cfg["command"] = _relaunch_command_base(
+                cell.command,
+                persistent_prompt_filename(cell),
+            )
+        if cell.agent_type:
+            launch_cfg["agent_type"] = cell.agent_type
     cell.session_resume = bool(
         launch_cfg.get("session_resume", cell.session_resume))
     cell.idle_timeout = int(
@@ -7695,6 +7990,32 @@ async def main(connection=None):
 
             elif cmd in {"engineer_rehire", "architect_engineer_rehire"}:
                 result = await _handle_engineer_rehire_command(
+                    data,
+                    state,
+                    bridge=bridge,
+                    worktree_mgr=worktree_mgr,
+                    resolve_base_dir=_resolve_base_dir,
+                    resolve_agent_launch_config=_resolve_agent_launch_config,
+                    resolve_engineer_launch_config=_resolve_engineer_launch_config,
+                    resolve_architect_launch_config=_resolve_architect_launch_config,
+                    apply_persistent_prompt=_apply_persistent_prompt,
+                    build_cell_persistent_prompt=_build_cell_persistent_prompt,
+                    persistent_prompt_filename=_persistent_prompt_filename,
+                    is_designated_engineer=_is_designated_engineer,
+                    send_agent_prompt=_send_agent_prompt,
+                    panel_event=_panel_event,
+                )
+
+            elif cmd == "architect_dismiss":
+                result = await _handle_architect_dismiss_command(
+                    data,
+                    state,
+                    close_session=bridge.close_session,
+                    panel_event=_panel_event,
+                )
+
+            elif cmd == "architect_rehire":
+                result = await _handle_architect_rehire_command(
                     data,
                     state,
                     bridge=bridge,
@@ -12261,6 +12582,8 @@ async def main(connection=None):
                         "type": "error",
                         "message": "architect_id is required",
                     }
+                elif _agent_dismissed_at(state.agents.get(architect_id)):
+                    result = _architect_dismissed_error(architect_id)
                 elif entry_type not in (
                     "decision", "observation", "checkpoint", "plan"
                 ):

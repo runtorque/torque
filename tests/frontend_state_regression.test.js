@@ -7755,6 +7755,65 @@ test('engineer context menu exposes authorized dismiss and rehire controls', asy
   ]);
 });
 
+test('architect context menu exposes dismiss and rehire controls', async () => {
+  const { context, document } = createSelectionHarness();
+  const menu = document.register('ctx-menu');
+  context.showConfirm = function() { return Promise.resolve(true); };
+  context.state.group_settings = { alpha: {} };
+  context.state.agents = {
+    'arch-a': {
+      id: 'arch-a',
+      name: 'Planner A',
+      kind: 'architect',
+      group: 'alpha',
+      cell_type: 'agent',
+      session_id: 'sess-arch-a',
+      status: 'running',
+    },
+    'eng-a': {
+      id: 'eng-a',
+      name: 'Builder A',
+      kind: 'engineer',
+      group: 'alpha',
+      cell_type: 'agent',
+      hired_by_architect_id: 'arch-a',
+      status: 'running',
+    },
+  };
+
+  const evt = {
+    preventDefault() {},
+    stopPropagation() {},
+    clientX: 12,
+    clientY: 24,
+  };
+
+  context.onCellContextMenu(evt, 'arch-a');
+  assert.match(menu.innerHTML, /Dismiss/);
+  assert.doesNotMatch(menu.innerHTML, /Rehire/);
+
+  await context.dismissArchitect('arch-a');
+  context.state.agents['arch-a'].dismissed_at = 456;
+  context.state.agents['arch-a'].status = 'stopped';
+  context.onCellContextMenu(evt, 'arch-a');
+  assert.match(menu.innerHTML, /Rehire/);
+  assert.doesNotMatch(menu.innerHTML, /Relaunch/);
+  assert.doesNotMatch(menu.innerHTML, /Restart/);
+
+  context.rehireArchitect('arch-a');
+  assert.deepEqual(JSON.parse(JSON.stringify(context.sendCalls.slice(-2))), [
+    {
+      cmd: 'architect_dismiss',
+      architect_id: 'arch-a',
+      reason: 'Dismissed from UI',
+    },
+    {
+      cmd: 'architect_rehire',
+      architect_id: 'arch-a',
+    },
+  ]);
+});
+
 test('embedded terminal selection clears stale agent selection for standalone terminals', () => {
   const { context } = createSelectionHarness();
   context.isEmbeddedTerminalMode = function() { return true; };
@@ -10236,6 +10295,40 @@ test('architect_journal_append for non-focused architect does NOT invalidate eng
   flushRaf();
   assert.equal(sandbox.renderCalls.engineer, 0,
     'architect_journal_append for non-focused architect should not refresh engineer panel');
+});
+
+test('architect lifecycle deltas only invalidate focused architect panel', () => {
+  const { context, sandbox, flushRaf } = createStandaloneDeltaBatchHarness(['engineer']);
+  runInContext(context, `
+    selectedAgentId = 'arch-focused';
+    focusedItemId = 'arch-focused';
+    if (!state.agents) state.agents = {};
+    state.agents['arch-focused'] = { id: 'arch-focused', group: 'loom', kind: 'architect', cell_type: 'agent' };
+  `);
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'architect_dismissed',
+      architect_id: 'arch-other',
+      group: 'loom',
+      dismissed_at: 123,
+    }],
+  });
+  flushRaf();
+  assert.equal(sandbox.renderCalls.engineer, 0,
+    'architect_dismissed for non-focused architect should not refresh engineer panel');
+
+  context._handleDelta({
+    seq: 2,
+    ops: [{
+      op: 'architect_rehired',
+      architect_id: 'arch-focused',
+      group: 'loom',
+    }],
+  });
+  flushRaf();
+  assert.equal(sandbox.renderCalls.engineer, 1,
+    'architect_rehired for focused architect should refresh engineer panel');
 });
 
 test('journal_append for a different engineer in the same group does NOT invalidate focused engineer panel', () => {
@@ -17117,6 +17210,46 @@ test('main render keeps dismissed engineers in-place and preserves scroll across
   ]);
   assert.doesNotMatch(main.innerHTML, /cell-dismissed-badge/);
   assert.doesNotMatch(main.innerHTML, /rehireEngineer\('eng-dismissed'\)/);
+});
+
+test('main render shows dismissed architect badge and architect rehire control', () => {
+  const { context, document, sandbox } = createMainRenderHarness();
+  const main = document.getElementById('main');
+  sandbox.state.groups = { loom: ['arch-dismissed', 'eng-hired'] };
+  sandbox.state.group_settings = {
+    loom: { collapsed_default: false, engineer_agent_id: '' },
+  };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'arch-dismissed': {
+      id: 'arch-dismissed',
+      name: 'Paused Architect',
+      kind: 'architect',
+      group: 'loom',
+      cell_type: 'agent',
+      status: 'stopped',
+      dismissed_at: 123,
+    },
+    'eng-hired': {
+      id: 'eng-hired',
+      name: 'Hired Engineer',
+      kind: 'engineer',
+      hired_by_architect_id: 'arch-dismissed',
+      group: 'loom',
+      cell_type: 'agent',
+      status: 'running',
+      session_id: 'sess-eng',
+    },
+  };
+
+  runInContext(context, `render();`);
+
+  assert.match(main.innerHTML, /Paused Architect/);
+  assert.match(main.innerHTML, /principal-card[^"]*principal-card--architect[^"]*dismissed/);
+  assert.match(main.innerHTML, /principal-card-status dismissed/);
+  assert.match(main.innerHTML, /principal-card-kind--dismissed/);
+  assert.match(main.innerHTML, /rehireArchitect\(&quot;arch-dismissed&quot;\)/);
+  assert.doesNotMatch(main.innerHTML, /rehireEngineer\('arch-dismissed'\)/);
 });
 
 test('main render restores scroll when a section rerenders with a new engineer row', () => {
