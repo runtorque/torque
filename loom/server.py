@@ -5236,11 +5236,10 @@ async def _handle_delete_engineer_command(
         state.board_update_task(task.id, assigned_engineer_id="")
 
     tombstoned = await close_agent_session_only(engineer)
+    del tombstoned
     return {
-        "type": "ok",
         "transferred_agents": transferred_agents,
         "transferred_tasks": transferred_tasks,
-        "tombstoned": [cell.id for cell in tombstoned],
     }
 
 
@@ -5322,11 +5321,10 @@ async def _handle_delete_architect_command(
             archived_decisions += 1
 
     tombstoned = await close_agent_session_only(architect)
+    del tombstoned
     return {
-        "type": "ok",
         "transferred_engineers": transferred_engineers,
         "archived_decisions": archived_decisions,
-        "tombstoned": [cell.id for cell in tombstoned],
     }
 
 

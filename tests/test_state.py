@@ -506,7 +506,10 @@ class MatrixStateCleanupTests(unittest.TestCase):
 
         state.remove_agent(agent.id)
 
-        self.assertEqual(state.group_settings["g"].engineer_agent_id, "")
+        self.assertEqual(state.group_settings["g"].engineer_agent_id, agent.id)
+        self.assertTrue(state.agent_is_tombstoned(agent))
+        self.assertGreater(agent.permanent_delete_after, agent.deleted_at)
+        self.assertIsNone(state.get_engineer_for_group("g"))
         self.assertEqual(state.engineer_settings["g"].pending_question, "")
         self.assertEqual(state.engineer_settings["g"].pending_note, "")
         self.assertEqual(state.engineer_settings["g"].pending_note_kind, "")
@@ -521,6 +524,47 @@ class MatrixStateCleanupTests(unittest.TestCase):
                 for msg in state.board_tasks[ask.id].messages
             )
         )
+
+    def test_remove_agent_tombstones_restores_and_purges(self):
+        state = self.state_mod.MatrixState()
+        state.groups["g"] = []
+        agent = state.add_agent(name="Worker", group="g")
+        child = state.add_terminal(name="Shell", group="g", parent_id=agent.id)
+        agent.session_id = "session-agent"
+        child.session_id = "session-child"
+        task = self.state_mod.BoardTask(
+            id="task-1",
+            task="Do work",
+            group="g",
+            lane="In Progress",
+            agent_id=agent.id,
+        )
+        state.board_tasks[task.id] = task
+
+        tombstoned = state.remove_agent(agent.id)
+
+        self.assertEqual([c.id for c in tombstoned], [agent.id, child.id])
+        self.assertIn(agent.id, state.agents)
+        self.assertIn(agent.id, state.groups["g"])
+        self.assertTrue(state.agent_is_tombstoned(agent))
+        self.assertTrue(state.agent_is_tombstoned(child))
+        self.assertEqual(agent.session_id, None)
+        self.assertEqual(child.session_id, None)
+        self.assertEqual(task.agent_id, "")
+
+        restored = state.restore_agent(agent.id)
+        self.assertEqual([c.id for c in restored], [agent.id, child.id])
+        self.assertFalse(state.agent_is_tombstoned(agent))
+        self.assertFalse(state.agent_is_tombstoned(child))
+
+        state.remove_agent(agent.id)
+        agent.permanent_delete_after = 1
+        child.permanent_delete_after = 1
+        purged = state.purge_tombstoned_agents(now=2)
+        self.assertEqual([c.id for c in purged], [agent.id, child.id])
+        self.assertNotIn(agent.id, state.agents)
+        self.assertNotIn(child.id, state.agents)
+        self.assertNotIn(agent.id, state.groups["g"])
 
     def test_cleanup_orphaned_attention_expires_persisted_stale_state(self):
         state = self.state_mod.MatrixState()

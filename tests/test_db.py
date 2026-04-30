@@ -258,6 +258,34 @@ class LoomDBTests(unittest.TestCase):
         }
         self.assertIn("engineer_specializations", columns)
 
+    def test_agent_tombstone_fields_round_trip_and_migration_is_idempotent(self):
+        cell = AgentCell(
+            id="engineer-1",
+            name="Engineer",
+            group="g",
+            slug="engineer",
+            cell_type="agent",
+            kind="engineer",
+            deleted_at=123.5,
+            permanent_delete_after=456.5,
+        )
+        self.db.save_agent(cell)
+
+        loaded = self.db.load_all()
+
+        self.assertEqual(loaded["agents"]["engineer-1"]["deleted_at"], 123.5)
+        self.assertEqual(
+            loaded["agents"]["engineer-1"]["permanent_delete_after"],
+            456.5,
+        )
+        self.db._ensure_agent_tombstone_columns()
+        columns = {
+            row[1]
+            for row in self.db._conn.execute("PRAGMA table_info(agents)")
+        }
+        self.assertIn("deleted_at", columns)
+        self.assertIn("permanent_delete_after", columns)
+
     def test_default_engineer_specializations_round_trip(self):
         self.db.save_groups({"g": []}, {"g": "g"})
         self.db.save_group_settings(

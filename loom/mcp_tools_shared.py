@@ -289,6 +289,45 @@ def _agent_is_tombstoned(state, cell) -> bool:
         return False
 
 
+def _resolve_agent_including_tombstoned(state, identifier: str) -> str | None:
+    ident = str(identifier or "").strip()
+    if not ident:
+        return None
+    cell = state.agents.get(ident)
+    if cell and getattr(cell, "cell_type", "") == "agent":
+        return str(getattr(cell, "id", "") or "")
+    ident_lower = ident.lower()
+    iterator = getattr(state, "iter_agents", None)
+    cells = (
+        iterator(include_tombstoned=True)
+        if callable(iterator) else state.agents.values()
+    )
+    for cell in cells:
+        if getattr(cell, "cell_type", "") != "agent":
+            continue
+        if str(getattr(cell, "slug", "") or "").strip().lower() == ident_lower:
+            return str(getattr(cell, "id", "") or "")
+    cells = (
+        iterator(include_tombstoned=True)
+        if callable(iterator) else state.agents.values()
+    )
+    for cell in cells:
+        if getattr(cell, "cell_type", "") != "agent":
+            continue
+        if str(getattr(cell, "name", "") or "").strip().lower() == ident_lower:
+            return str(getattr(cell, "id", "") or "")
+    cells = (
+        iterator(include_tombstoned=True)
+        if callable(iterator) else state.agents.values()
+    )
+    for cell in cells:
+        if getattr(cell, "cell_type", "") != "agent":
+            continue
+        if str(getattr(cell, "id", "") or "").startswith(ident):
+            return str(getattr(cell, "id", "") or "")
+    return None
+
+
 def _agent_dismissed_at(cell) -> int:
     try:
         return int(getattr(cell, "dismissed_at", 0) or 0)
@@ -335,7 +374,7 @@ def _architect_visible_engineers(
     if not caller_group:
         return {}
     visible = {}
-    for cell in state.iter_active_agents():
+    for cell in state.iter_agents(include_tombstoned=include_tombstoned):
         if not cell or getattr(cell, "cell_type", "") != "agent":
             continue
         if str(getattr(cell, "kind", "") or "").strip() != "engineer":
@@ -364,7 +403,7 @@ def _architect_hired_engineer_ids(state, caller_id: str) -> set[str]:
 
 def _resolve_architect_engineer(state, caller_id: str,
                                 engineer_ident: str) -> tuple[str | None, str]:
-    engineer_id = _resolve_agent(state, engineer_ident)
+    engineer_id = _resolve_agent_including_tombstoned(state, engineer_ident)
     if not engineer_id:
         return None, f"Engineer not found: {engineer_ident}"
     engineer = state.agents.get(engineer_id)
@@ -380,7 +419,7 @@ def _resolve_architect_hired_engineer(state, caller_id: str,
                                       engineer_ident: str, *,
                                       include_tombstoned: bool = False
                                       ) -> tuple[str | None, str]:
-    engineer_id = _resolve_agent(state, engineer_ident)
+    engineer_id = _resolve_agent_including_tombstoned(state, engineer_ident)
     if not engineer_id:
         return None, f"Engineer not found: {engineer_ident}"
     engineer = state.agents.get(engineer_id)
@@ -399,7 +438,7 @@ def _resolve_architect_hired_engineer(state, caller_id: str,
 
 def _resolve_group_engineer(state, caller_id: str,
                             engineer_ident: str) -> tuple[str | None, str]:
-    engineer_id = _resolve_agent(state, engineer_ident)
+    engineer_id = _resolve_agent_including_tombstoned(state, engineer_ident)
     if not engineer_id:
         return None, f"Engineer not found: {engineer_ident}"
     engineer = state.agents.get(engineer_id)
@@ -1207,7 +1246,7 @@ def _visible_agent_ids_for_caller(state, caller_kind: str,
         return set()
     visible = set()
     caller_id = str(caller_id or "").strip()
-    for cell in state.iter_agents(include_tombstoned=include_tombstoned):
+    for cell in state.iter_active_agents():
         if state.agent_is_visible_to_engineer(
                 caller_id,
                 str(getattr(cell, "id", "") or "").strip()):

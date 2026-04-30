@@ -4874,6 +4874,7 @@ class MatrixState:
                 self._emit("task_upsert", **asdict(t))
                 self._db_save_task(t)
 
+        self.cleanup_orphaned_attention(allow_persisted_agent_fallback=False)
         return tombstoned
 
     def restore_agent(self, aid: str) -> list[AgentCell]:
