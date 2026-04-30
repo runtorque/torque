@@ -96,7 +96,7 @@ class ITerm2BridgeCore:
         # Index stopped cells by persisted session_id and by (group, name)
         by_sid: dict[str, AgentCell] = {}
         by_title: dict[tuple[str, str], AgentCell] = {}
-        for cell in self.state.agents.values():
+        for cell in self.state.iter_active_agents():
             if cell.status != "stopped":
                 continue
             if cell.session_id:
@@ -194,7 +194,7 @@ class ITerm2BridgeCore:
                 self._start_prompt_monitor(cell)
 
         # Clear session_id for cells that weren't matched (sessions truly gone)
-        for cell in self.state.agents.values():
+        for cell in self.state.iter_active_agents():
             if cell.status == "stopped" and cell.session_id \
                     and cell.id not in matched:
                 log.debug("Session %s gone for '%s' — clearing",
@@ -202,7 +202,7 @@ class ITerm2BridgeCore:
                 cell.session_id = None
 
         # Validate worktree paths still exist on disk
-        for cell in self.state.agents.values():
+        for cell in self.state.iter_active_agents():
             if cell.worktree_path and not os.path.isdir(cell.worktree_path):
                 log.warning("Worktree path gone for '%s': %s — clearing",
                             cell.name, cell.worktree_path)
@@ -211,10 +211,10 @@ class ITerm2BridgeCore:
                 cell.worktree_repo_root = ""
                 cell.worktree_base_branch = ""
 
-        for cell in self.state.agents.values():
+        for cell in self.state.iter_active_agents():
             self.state._emit_agent(cell)
             self.state._db_save_agent(cell)
-        stopped = sum(1 for c in self.state.agents.values()
+        stopped = sum(1 for c in self.state.iter_active_agents()
                       if c.status == "stopped")
         log.info("Orphan reconnect: %d re-linked, %d remain stopped",
                  len(matched), stopped)
@@ -765,7 +765,7 @@ class ITerm2BridgeCore:
         self._app_cache_expiry = 0.0
 
     def _find_cell_by_session(self, session_id: str) -> AgentCell | None:
-        for cell in self.state.agents.values():
+        for cell in self.state.iter_active_agents():
             if cell.session_id == session_id:
                 return cell
         return None
@@ -1039,7 +1039,7 @@ class ITerm2BridgeCore:
             async with iterm2.SessionTerminationMonitor(self.conn) as mon:
                 while True:
                     sid = await mon.async_get()
-                    for cell in self.state.agents.values():
+                    for cell in self.state.iter_active_agents():
                         if cell.session_id == sid:
                             log.info("Session terminated: '%s' (session %s)",
                                      cell.name, sid)

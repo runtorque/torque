@@ -75,7 +75,7 @@ def compute_engineer_hints(state, group: str, *, engineer_id: str = "",
 
 def _merged_cleanup_hints(state, group: str, *, engineer_id: str) -> list[dict]:
     candidates = []
-    for cell in state.agents.values():
+    for cell in state.iter_active_agents():
         if not _is_visible_actionable_agent(
                 state, cell, group=group, engineer_id=engineer_id):
             continue

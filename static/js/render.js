@@ -675,6 +675,11 @@ function _isDismissedEngineer(agent) {
   return !!(agent && (agent.kind || '') === 'engineer' && _agentDismissedAt(agent));
 }
 
+function _isTombstonedAgent(agent) {
+  const value = Number((agent && agent.deleted_at) || 0);
+  return Number.isFinite(value) && value > 0;
+}
+
 function _buildHierarchicalAgentSections(agents) {
   const visibleById = {};
   const architects = [];
@@ -1583,6 +1588,7 @@ function _workersForEngineer(engineerId) {
   for (const agentId in state.agents) {
     const agent = state.agents[agentId];
     if (!agent || agent.cell_type !== 'agent') continue;
+    if (_isTombstonedAgent(agent)) continue;
     if (!_isWorkerLikeAgent(agent)) continue;
     const owner = String(agent.owner_engineer_id || agent.created_by_engineer_id || '').trim();
     if (owner === id) workers.push(agent);
@@ -1617,6 +1623,7 @@ function _architectEngineersForCard(architectId, section) {
   for (const agentId in state.agents) {
     const agent = state.agents[agentId];
     if (!agent || agent.cell_type !== 'agent' || (agent.kind || '') !== 'engineer') continue;
+    if (_isTombstonedAgent(agent)) continue;
     if (String(agent.hired_by_architect_id || '').trim() === id) engineers.push(agent);
   }
   return engineers;
@@ -1965,6 +1972,7 @@ function _visibleGroupCellsForGrid(gname, embeddedMode) {
   for (const id of aids) {
     const c = state.agents[id];
     if (!c) continue;
+    if (_isTombstonedAgent(c)) continue;
     if (wid && c.window_id && c.window_id !== wid) continue;
     if (c.cell_type === 'agent') {
       agents.push(c);
@@ -2590,10 +2598,10 @@ function _renderMainGrid(opts, renderMode) {
   });
 
   // Clear selectedAgentId if it no longer exists
-  if (selectedAgentId && !state.agents[selectedAgentId]) selectedAgentId = null;
+  if (selectedAgentId && (!state.agents[selectedAgentId] || _isTombstonedAgent(state.agents[selectedAgentId]))) selectedAgentId = null;
   if (typeof selectedTerminalId !== 'undefined'
       && selectedTerminalId
-      && !state.agents[selectedTerminalId]) {
+      && (!state.agents[selectedTerminalId] || _isTombstonedAgent(state.agents[selectedTerminalId]))) {
     selectedTerminalId = null;
   }
 

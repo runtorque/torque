@@ -49,6 +49,7 @@ from .worktree_boundaries import clear_stale_successor_references
 ARCHIVED_LANE = "Archived"
 _RESERVED_LANES = ("Backlog", "To Do", "In Progress", "Done", ARCHIVED_LANE)
 _DEFAULT_LANES = list(_RESERVED_LANES)
+AGENT_TOMBSTONE_RETENTION_SECONDS = 7 * 86400
 _VERIFICATION_MODES = {"", "deploy", "restart"}
 _VERIFICATION_STATES = {"", "pending", "attempted", "passed", "failed"}
 _ENGINEER_AUTONOMY_MODES = {
@@ -743,6 +744,8 @@ class AgentCell:
     hired_by_architect_id: str = ""  # architect provenance for hires
     engineer_specializations: list[str] = field(default_factory=list)  # ordered, primary first
     dismissed_at: int = 0  # unix timestamp when an engineer is paused/dismissed
+    deleted_at: float = 0.0  # unix timestamp when the cell entered the restore window
+    permanent_delete_after: float = 0.0  # unix timestamp when tombstone is purgeable
     persistent: bool = False  # architect/engineer survive across sessions
     queue_empty_emitted: bool = True  # suppress duplicate engineer queue-empty events
     current_task_id: str = ""  # most recently dispatched task (ephemeral)
@@ -839,6 +842,11 @@ class AgentCell:
             _safe_float(self.last_event_at),
         )
         return after != before
+
+    @property
+    def is_tombstoned(self) -> bool:
+        """Whether this cell is inside the reversible deletion window."""
+        return _safe_float(self.deleted_at) > 0
 
 
 # Fields that are ephemeral (not meaningful across restarts)
@@ -1406,6 +1414,29 @@ class MatrixState:
             default=None,
         )
 
+    @staticmethod
+    def agent_is_tombstoned(cell) -> bool:
+        """Return True when ``cell`` is inside the soft-delete window."""
+        return bool(cell and _safe_float(getattr(cell, "deleted_at", 0.0)) > 0)
+
+    def iter_agents(self, *, include_tombstoned: bool = False):
+        """Iterate cells, excluding tombstones unless explicitly requested."""
+        for cell in self.agents.values():
+            if not include_tombstoned and self.agent_is_tombstoned(cell):
+                continue
+            yield cell
+
+    def iter_active_agents(self):
+        """Iterate non-tombstoned cells."""
+        return self.iter_agents(include_tombstoned=False)
+
+    def get_active_agent(self, agent_id: str) -> Optional[AgentCell]:
+        """Return a non-tombstoned cell by id, or None."""
+        cell = self.agents.get(str(agent_id or "").strip())
+        if self.agent_is_tombstoned(cell):
+            return None
+        return cell
+
     # -- Delta emission -----------------------------------------------------
 
     def _emit(self, op: str, **kwargs):
@@ -1703,7 +1734,7 @@ class MatrixState:
         groups.update(self._tasks_by_group.keys())
         groups.update(
             str(getattr(cell, "group", "") or "").strip()
-            for cell in self.agents.values()
+            for cell in self.iter_active_agents()
         )
         groups.discard("")
         return sorted(groups)
@@ -1766,6 +1797,7 @@ class MatrixState:
             str(op.get("current_task_id", "") or ""),
             str(op.get("status", "") or ""),
             str(op.get("cell_type", "") or ""),
+            _safe_float(op.get("deleted_at", 0.0) or 0.0),
         )
 
     def _collect_engineer_affected_groups(self, ops: list[dict]) -> set[str]:
@@ -3080,7 +3112,7 @@ class MatrixState:
     def _architect_cells_for_group(self, group: str) -> list[AgentCell]:
         group = str(group or "").strip()
         return [
-            cell for cell in self.agents.values()
+            cell for cell in self.iter_active_agents()
             if cell.cell_type == "agent"
             and str(getattr(cell, "kind", "") or "").strip() == "architect"
             and str(getattr(cell, "group", "") or "").strip() == group
@@ -3185,7 +3217,7 @@ class MatrixState:
         gs = self.group_settings.get(group)
         if not gs or not gs.engineer_agent_id:
             return None
-        return self.agents.get(gs.engineer_agent_id)
+        return self.get_active_agent(gs.engineer_agent_id)
 
     def get_engineer_settings(self, group: str) -> EngineerSettings:
         """Return engineer settings for a group, creating defaults if needed."""
@@ -3568,6 +3600,8 @@ class MatrixState:
         """
         engineer = self.agents.get(str(engineer_id or "").strip())
         agent = self.agents.get(str(agent_id or "").strip())
+        if self.agent_is_tombstoned(engineer) or self.agent_is_tombstoned(agent):
+            return False
         if not engineer or engineer.cell_type != "agent":
             return False
         if str(getattr(engineer, "kind", "") or "").strip() != "engineer":
@@ -3766,7 +3800,10 @@ class MatrixState:
             allow_persisted_agent_fallback: bool = True) -> dict[str, int]:
         """Expire asks and pending engineer questions whose source agent is gone."""
         cleaned = {"asks": 0, "engineer_questions": 0}
-        live_agents = set(self.agents)
+        live_agents = {
+            aid for aid, cell in self.agents.items()
+            if not self.agent_is_tombstoned(cell)
+        }
 
         for group, ws in self.engineer_settings.items():
             gs = self.group_settings.get(group)
@@ -4722,7 +4759,45 @@ class MatrixState:
         kw.setdefault("command", "")
         return self._add_cell(cell_type="terminal", **kw)
 
-    def remove_agent(self, aid: str) -> list[AgentCell]:
+    def _agent_cascade_cells(self, aid: str) -> list[AgentCell]:
+        """Return a root cell plus child terminals in deletion order."""
+        cell = self.agents.get(str(aid or "").strip())
+        if not cell:
+            return []
+        ordered: list[AgentCell] = []
+        seen: set[str] = set()
+
+        def add(cell_id: str) -> None:
+            if not cell_id or cell_id in seen:
+                return
+            seen.add(cell_id)
+            current = self.agents.get(cell_id)
+            if not current:
+                return
+            ordered.append(current)
+            for child_id in list(self._children.get(cell_id, [])):
+                add(child_id)
+
+        add(cell.id)
+        return ordered
+
+    def _prepare_tombstoned_cell(self, cell: AgentCell, now: float) -> None:
+        cell.deleted_at = now
+        cell.permanent_delete_after = now + AGENT_TOMBSTONE_RETENTION_SECONDS
+        cell.status = "stopped"
+        cell.session_id = None
+        cell.current_task_id = ""
+        cell.current_process = ""
+        cell.current_path = ""
+        cell.current_branch = ""
+        cell.git_root = ""
+        cell.activity = ""
+        cell.activity_detail = ""
+        cell.error_message = ""
+        cell.needs_attention = False
+
+    def _hard_delete_agent(self, aid: str, *,
+                           record_history: bool = True) -> list[AgentCell]:
         removed: list[AgentCell] = []
         cell = self.agents.pop(aid, None)
         if not cell:
@@ -4749,25 +4824,95 @@ class MatrixState:
                 self._emit("agent_remove", id=child_id,
                            group=child.group,
                            cell_type=child.cell_type)
-        self.cleanup_orphaned_attention(allow_persisted_agent_fallback=False)
         # Unlink from board tasks
+        removed_ids = {r.id for r in removed}
         for t in self.board_tasks.values():
-            if t.agent_id == aid:
+            if t.agent_id in removed_ids:
                 t.agent_id = ""
                 self._emit("task_upsert", **asdict(t))
                 self._db_save_task(t)
-        # Clear engineer designation if this agent was the engineer
+        # Clear engineer designation only when the row is permanently purged.
         gs = self.group_settings.get(cell.group)
         if gs and gs.engineer_agent_id == aid:
             gs.engineer_agent_id = ""
             self._emit("group_settings_update", name=cell.group, **asdict(gs))
             self._db_save_group_settings(cell.group)
         for r in removed:
+            if record_history and r.cell_type == "agent":
+                self.history_remove_agent(r)
             self.delete_agent_digest_settings(r.id)
-        for r in removed:
             self._db_delete_agent(r.id)
+        self.cleanup_orphaned_attention(allow_persisted_agent_fallback=False)
         self._db_save_groups()
         return removed
+
+    def remove_agent(self, aid: str) -> list[AgentCell]:
+        """Soft-delete an agent cell for the 7-day restore window.
+
+        Standalone terminals remain immediate hard deletes; soft-delete is for
+        agent cells and child terminals that cascade from an agent tombstone.
+        """
+        cell = self.agents.get(aid)
+        if not cell:
+            return []
+        if cell.cell_type == "terminal":
+            return self._hard_delete_agent(aid)
+
+        now = time.time()
+        tombstoned = self._agent_cascade_cells(aid)
+        tombstoned_ids = {c.id for c in tombstoned}
+        for target in tombstoned:
+            self._prepare_tombstoned_cell(target, now)
+            self._emit_agent(target)
+            self._db_save_agent(target)
+
+        # Existing hard-delete semantics detached tasks from the deleted cell.
+        # Keep that irreversible transfer at tombstone time so active routing
+        # never targets a hidden/restorable cell.
+        for t in self.board_tasks.values():
+            if t.agent_id in tombstoned_ids:
+                t.agent_id = ""
+                self._emit("task_upsert", **asdict(t))
+                self._db_save_task(t)
+
+        self.cleanup_orphaned_attention(allow_persisted_agent_fallback=False)
+        return tombstoned
+
+    def restore_agent(self, aid: str) -> list[AgentCell]:
+        """Restore a tombstoned agent and its tombstoned child terminals."""
+        cell = self.agents.get(str(aid or "").strip())
+        if not cell:
+            return []
+        targets = self._agent_cascade_cells(cell.id)
+        restored: list[AgentCell] = []
+        for target in targets:
+            if not self.agent_is_tombstoned(target):
+                continue
+            target.deleted_at = 0.0
+            target.permanent_delete_after = 0.0
+            restored.append(target)
+            self._emit_agent(target)
+            self._db_save_agent(target)
+        return restored
+
+    def purge_agent_now(self, aid: str) -> list[AgentCell]:
+        """Permanently delete an agent/tombstone immediately."""
+        return self._hard_delete_agent(str(aid or "").strip())
+
+    def purge_tombstoned_agents(self, now: float | None = None) -> list[AgentCell]:
+        """Permanently delete tombstones whose restore window has expired."""
+        ts = _safe_float(now if now is not None else time.time())
+        purged: list[AgentCell] = []
+        due_ids = [
+            cell.id for cell in list(self.agents.values())
+            if self.agent_is_tombstoned(cell)
+            and _safe_float(getattr(cell, "permanent_delete_after", 0.0)) <= ts
+        ]
+        for aid in due_ids:
+            if aid not in self.agents:
+                continue
+            purged.extend(self._hard_delete_agent(aid))
+        return purged
 
     def move_agent(self, aid: str, target_group: str, before: str = ""):
         cell = self.agents.get(aid)
@@ -4887,7 +5032,7 @@ class MatrixState:
 
     def cells_with_awareness(self) -> list[AgentCell]:
         """Return cells that have agent awareness active (agent_type set)."""
-        return [c for c in self.agents.values() if c.agent_type]
+        return [c for c in self.iter_active_agents() if c.agent_type]
 
     # -- Board (Phase 5) ---------------------------------------------------
 

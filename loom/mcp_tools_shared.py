@@ -265,15 +265,67 @@ def _architect_board_summary_json(summary: dict, task_items: list[dict]) -> str:
 def _is_engineer_like_cell(state, cell) -> bool:
     if not cell or getattr(cell, "cell_type", "") != "agent":
         return False
+    if _agent_is_tombstoned(state, cell):
+        return False
     return str(getattr(cell, "kind", "") or "").strip() == "engineer"
 
 
-def _is_architect_cell(cell) -> bool:
+def _is_architect_cell(cell, state=None) -> bool:
     return bool(
         cell
         and getattr(cell, "cell_type", "") == "agent"
+        and not (state is not None and _agent_is_tombstoned(state, cell))
         and str(getattr(cell, "kind", "") or "").strip() == "architect"
     )
+
+
+def _agent_is_tombstoned(state, cell) -> bool:
+    checker = getattr(state, "agent_is_tombstoned", None)
+    if callable(checker):
+        return bool(checker(cell))
+    try:
+        return float(getattr(cell, "deleted_at", 0) or 0) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _resolve_agent_including_tombstoned(state, identifier: str) -> str | None:
+    ident = str(identifier or "").strip()
+    if not ident:
+        return None
+    cell = state.agents.get(ident)
+    if cell and getattr(cell, "cell_type", "") == "agent":
+        return str(getattr(cell, "id", "") or "")
+    ident_lower = ident.lower()
+    iterator = getattr(state, "iter_agents", None)
+    cells = (
+        iterator(include_tombstoned=True)
+        if callable(iterator) else state.agents.values()
+    )
+    for cell in cells:
+        if getattr(cell, "cell_type", "") != "agent":
+            continue
+        if str(getattr(cell, "slug", "") or "").strip().lower() == ident_lower:
+            return str(getattr(cell, "id", "") or "")
+    cells = (
+        iterator(include_tombstoned=True)
+        if callable(iterator) else state.agents.values()
+    )
+    for cell in cells:
+        if getattr(cell, "cell_type", "") != "agent":
+            continue
+        if str(getattr(cell, "name", "") or "").strip().lower() == ident_lower:
+            return str(getattr(cell, "id", "") or "")
+    cells = (
+        iterator(include_tombstoned=True)
+        if callable(iterator) else state.agents.values()
+    )
+    for cell in cells:
+        if getattr(cell, "cell_type", "") != "agent":
+            continue
+        if str(getattr(cell, "id", "") or "").startswith(ident):
+            return str(getattr(cell, "id", "") or "")
+    return None
 
 
 def _agent_dismissed_at(cell) -> int:
@@ -313,13 +365,21 @@ def _dedupe_strings(values) -> list[str]:
     return out
 
 
-def _architect_visible_engineers(state, caller_id: str) -> dict[str, tuple[object, str]]:
+def _architect_visible_engineers(
+        state,
+        caller_id: str,
+        *,
+        include_tombstoned: bool = False) -> dict[str, tuple[object, str]]:
     caller_group = _caller_group(state, caller_id)
     if not caller_group:
         return {}
     visible = {}
-    for cell in state.agents.values():
-        if not _is_engineer_like_cell(state, cell):
+    for cell in state.iter_agents(include_tombstoned=include_tombstoned):
+        if not cell or getattr(cell, "cell_type", "") != "agent":
+            continue
+        if str(getattr(cell, "kind", "") or "").strip() != "engineer":
+            continue
+        if not include_tombstoned and _agent_is_tombstoned(state, cell):
             continue
         if str(getattr(cell, "group", "") or "").strip() != caller_group:
             continue
@@ -343,9 +403,12 @@ def _architect_hired_engineer_ids(state, caller_id: str) -> set[str]:
 
 def _resolve_architect_engineer(state, caller_id: str,
                                 engineer_ident: str) -> tuple[str | None, str]:
-    engineer_id = _resolve_agent(state, engineer_ident)
+    engineer_id = _resolve_agent_including_tombstoned(state, engineer_ident)
     if not engineer_id:
         return None, f"Engineer not found: {engineer_ident}"
+    engineer = state.agents.get(engineer_id)
+    if _agent_is_tombstoned(state, engineer):
+        return None, "engineer is tombstoned"
     visible = _architect_visible_engineers(state, caller_id)
     if engineer_id not in visible:
         return None, "engineer not found in scope"
@@ -353,21 +416,34 @@ def _resolve_architect_engineer(state, caller_id: str,
 
 
 def _resolve_architect_hired_engineer(state, caller_id: str,
-                                      engineer_ident: str) -> tuple[str | None, str]:
-    engineer_id = _resolve_agent(state, engineer_ident)
+                                      engineer_ident: str, *,
+                                      include_tombstoned: bool = False
+                                      ) -> tuple[str | None, str]:
+    engineer_id = _resolve_agent_including_tombstoned(state, engineer_ident)
     if not engineer_id:
         return None, f"Engineer not found: {engineer_ident}"
-    if engineer_id not in _architect_hired_engineer_ids(state, caller_id):
+    engineer = state.agents.get(engineer_id)
+    if _agent_is_tombstoned(state, engineer) and not include_tombstoned:
+        return None, "engineer is tombstoned"
+    hired_ids = {
+        eid for eid, (_cell, relation) in _architect_visible_engineers(
+            state, caller_id, include_tombstoned=include_tombstoned
+        ).items()
+        if relation == "hired"
+    }
+    if engineer_id not in hired_ids:
         return None, "engineer not found in scope"
     return engineer_id, ""
 
 
 def _resolve_group_engineer(state, caller_id: str,
                             engineer_ident: str) -> tuple[str | None, str]:
-    engineer_id = _resolve_agent(state, engineer_ident)
+    engineer_id = _resolve_agent_including_tombstoned(state, engineer_ident)
     if not engineer_id:
         return None, f"Engineer not found: {engineer_ident}"
     engineer = state.agents.get(engineer_id)
+    if _agent_is_tombstoned(state, engineer):
+        return None, "engineer is tombstoned"
     if not _is_engineer_like_cell(state, engineer):
         return None, "engineer not found in scope"
     caller_group = _caller_group(state, caller_id)
@@ -913,7 +989,7 @@ def _resolve_architect_for_engineer(state, caller_id: str,
     if not architect_id:
         return None, f"Architect not found: {architect_ident}"
     architect = state.agents.get(architect_id)
-    if not _is_architect_cell(architect):
+    if not _is_architect_cell(architect, state):
         return None, f"Architect not found: {architect_ident}"
     caller = state.agents.get(str(caller_id or "").strip())
     if not caller:
@@ -1170,7 +1246,7 @@ def _visible_agent_ids_for_caller(state, caller_kind: str,
         return set()
     visible = set()
     caller_id = str(caller_id or "").strip()
-    for cell in state.agents.values():
+    for cell in state.iter_active_agents():
         if state.agent_is_visible_to_engineer(
                 caller_id,
                 str(getattr(cell, "id", "") or "").strip()):
@@ -1184,7 +1260,7 @@ def _filter_agents_for_caller(state, caller_kind: str,
         state, caller_kind, caller_id
     )
     filtered = {}
-    for cell in state.agents.values():
+    for cell in state.iter_active_agents():
         if cell.id in visible_agent_ids:
             filtered[cell.id] = cell
     return filtered
@@ -1264,7 +1340,7 @@ def authorize_caller(state, *, caller_kind: str, caller_id: str):
         }), True
     cell = state.agents.get(caller_id)
     if caller_kind == "architect":
-        valid = _is_architect_cell(cell)
+        valid = _is_architect_cell(cell, state)
     else:
         valid = _is_engineer_like_cell(state, cell)
     if not valid:
@@ -1294,6 +1370,7 @@ def build_scoped_state_view(state, *, caller_kind: str, caller_id: str,
             cell_id: cell
             for cell_id, cell in state.agents.items()
             if str(getattr(cell, "group", "") or "").strip() == caller_group
+            and not _agent_is_tombstoned(state, cell)
         }
     else:
         visible_agents = _filter_agents_for_caller(state, caller_kind, caller_id)
@@ -2031,7 +2108,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         seen_branch_keys = set()
 
         agents = [
-            c for c in state.agents.values()
+            c for c in state.iter_active_agents()
             if c.cell_type == "agent"
             and c.group == _engineer_group
             and c.id != engineer_id
@@ -2443,12 +2520,13 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         }), False
 
     if tool_name == "engineer_list" and caller_kind == "architect":
+        include_tombstoned = bool(args.get("include_tombstoned", False))
         visible_task_ids = set(
             _filter_tasks_for_caller(real_state, caller_kind, caller_id)
         )
         engineers = []
         for cell, relation in _architect_visible_engineers(
-            real_state, caller_id
+            real_state, caller_id, include_tombstoned=include_tombstoned
         ).values():
             current_task = real_state.agent_current_task(cell.id)
             if current_task and current_task.id not in visible_task_ids:
@@ -2459,6 +2537,10 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 "slug": cell.slug,
                 "status": cell.status,
                 "dismissed_at": _agent_dismissed_at(cell),
+                "deleted_at": float(getattr(cell, "deleted_at", 0) or 0),
+                "permanent_delete_after": float(
+                    getattr(cell, "permanent_delete_after", 0) or 0
+                ),
                 "group": cell.group,
                 "relation": relation,
                 "current_task_id": current_task.id if current_task else "",
@@ -2503,7 +2585,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
 
     if tool_name == "agents_list":
         agents = []
-        for c in state.agents.values():
+        for c in state.iter_active_agents():
             if c.cell_type != "agent":
                 continue
             if c.group != _engineer_group:
@@ -2791,6 +2873,27 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             return engineer_error, True
         result = await handle_command({
             "cmd": "architect_engineer_rehire",
+            "architect_id": str(caller_id or "").strip(),
+            "engineer_id": engineer_id,
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps(result) if result else '{"type":"ok"}', False
+
+    if tool_name == "engineer_restore" and caller_kind == "architect":
+        engineer_ident = str(args.get("engineer_id", "") or "").strip()
+        if not engineer_ident:
+            return "engineer_id is required", True
+        engineer_id, engineer_error = _resolve_architect_hired_engineer(
+            real_state,
+            caller_id,
+            engineer_ident,
+            include_tombstoned=True,
+        )
+        if not engineer_id:
+            return engineer_error, True
+        result = await handle_command({
+            "cmd": "architect_engineer_restore",
             "architect_id": str(caller_id or "").strip(),
             "engineer_id": engineer_id,
         })

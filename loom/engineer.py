@@ -825,7 +825,7 @@ class EngineerEventBuffer:
     def export_state(self) -> dict:
         agent_ids = {
             cell.id
-            for cell in self._state.agents.values()
+            for cell in self._state.iter_active_agents()
             if self._digest_recipient(cell.id)
         }
         agent_ids.update(self._buffers.keys())
@@ -1994,7 +1994,7 @@ class EngineerEventBuffer:
 
     def _active_agents_summary(self) -> str:
         actives = []
-        for c in self._state.agents.values():
+        for c in self._state.iter_active_agents():
             if c.cell_type == "agent" and c.activity:
                 actives.append(f"{c.slug or c.name} ({c.activity})")
         return " · ".join(actives)
@@ -2154,7 +2154,7 @@ class EngineerEventBuffer:
         self._timer_handle = None
         stats_changed = False
 
-        for recipient in self._state.agents.values():
+        for recipient in self._state.iter_active_agents():
             if recipient.cell_type != "agent":
                 continue
             recipient_kind = str(getattr(recipient, "kind", "") or "").strip()

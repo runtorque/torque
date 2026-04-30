@@ -89,7 +89,7 @@ _AGENT_PERSISTED_COLS = [
     "tasks_dispatched",
     "queue_empty_emitted",
     "kind", "role", "owner_engineer_id", "hired_by_architect_id",
-    "dismissed_at", "persistent",
+    "dismissed_at", "deleted_at", "permanent_delete_after", "persistent",
     "engineer_specializations",
 ]
 
@@ -171,6 +171,8 @@ def _serialize_agent_cell(cell):
         owner_engineer_id,
         d.get("hired_by_architect_id", ""),
         int(d.get("dismissed_at", 0) or 0),
+        float(d.get("deleted_at", 0) or 0),
+        float(d.get("permanent_delete_after", 0) or 0),
         int(d.get("persistent", 0) or 0),
         json.dumps([
             str(n or "").strip()
@@ -475,6 +477,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self._refuse_unmigrated_legacy_rows_if_needed()
         self._migrate_kinds_schema_if_needed()
         self._ensure_agent_dismissed_at_column()
+        self._ensure_agent_tombstone_columns()
         self._ensure_agent_engineer_specializations_column()
         self._ensure_board_task_suggested_specialization_column()
         self._backfill_kinds_if_needed()
@@ -505,6 +508,17 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 "INTEGER NOT NULL DEFAULT 0"
             )
             self._conn.commit()
+
+    def _ensure_agent_tombstone_columns(self):
+        for col in ("deleted_at", "permanent_delete_after"):
+            try:
+                self._conn.execute(f"SELECT {col} FROM agents LIMIT 0")
+            except sqlite3.OperationalError:
+                self._conn.execute(
+                    f"ALTER TABLE agents ADD COLUMN {col} "
+                    "REAL NOT NULL DEFAULT 0"
+                )
+                self._conn.commit()
 
     def _ensure_agent_engineer_specializations_column(self):
         try:
@@ -3558,6 +3572,10 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 float(d.get("last_activity_at", 0) or 0),
                 d["last_progress_at"],
                 d["last_heartbeat_at"],
+            )
+            d["deleted_at"] = float(d.get("deleted_at", 0) or 0)
+            d["permanent_delete_after"] = float(
+                d.get("permanent_delete_after", 0) or 0
             )
             raw_specs = d.get("engineer_specializations", "")
             if isinstance(raw_specs, str):

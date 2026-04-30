@@ -925,7 +925,7 @@ def agent_event_from_ingest_envelope(state, envelope: dict) -> AgentEvent | None
         cwd = raw.get("cwd", "")
         if cwd:
             import os
-            for candidate in state.agents.values():
+            for candidate in state.iter_active_agents():
                 if candidate.session_id and candidate.directory and \
                         os.path.realpath(candidate.directory) == os.path.realpath(cwd):
                     cell = candidate

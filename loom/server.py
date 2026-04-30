@@ -258,20 +258,20 @@ def _resolve_agent_id(state, identifier: str) -> str:
         return ""
     if ident in state.agents:
         cell = state.agents[ident]
-        if cell.cell_type == "agent":
+        if cell.cell_type == "agent" and not state.agent_is_tombstoned(cell):
             return cell.id
     ident_lower = ident.lower()
-    for cell in state.agents.values():
+    for cell in state.iter_active_agents():
         if cell.cell_type != "agent":
             continue
         if cell.slug == ident_lower:
             return cell.id
-    for cell in state.agents.values():
+    for cell in state.iter_active_agents():
         if cell.cell_type != "agent":
             continue
         if cell.name.lower() == ident_lower:
             return cell.id
-    for cell in state.agents.values():
+    for cell in state.iter_active_agents():
         if cell.cell_type != "agent":
             continue
         if cell.id.startswith(ident):
@@ -4026,11 +4026,11 @@ def _resolve_engineer_group(state: MatrixState) -> str:
     """Return the reserved engineer group, preferring the designated engineer."""
     for group_name, group_settings in state.group_settings.items():
         engineer_id = str(getattr(group_settings, "engineer_agent_id", "") or "")
-        cell = state.agents.get(engineer_id)
+        cell = state.get_active_agent(engineer_id)
         if cell and cell.cell_type == "agent" \
                 and str(getattr(cell, "kind", "") or "").strip() == "engineer":
             return str(cell.group or group_name or "loom")
-    for cell in state.agents.values():
+    for cell in state.iter_active_agents():
         if cell.cell_type != "agent":
             continue
         if str(getattr(cell, "kind", "") or "").strip() == "engineer":
@@ -4039,11 +4039,12 @@ def _resolve_engineer_group(state: MatrixState) -> str:
 
 
 def _resolve_engineer_cell(state: MatrixState, *, engineer_id: str = "",
-                           engineer_slug: str = ""):
+                           engineer_slug: str = "",
+                           include_tombstoned: bool = False):
     """Resolve an engineer agent by exact id or slug."""
     engineer_id = str(engineer_id or "").strip()
     engineer_slug = str(engineer_slug or "").strip().lower()
-    for cell in state.agents.values():
+    for cell in state.iter_agents(include_tombstoned=include_tombstoned):
         if cell.cell_type != "agent":
             continue
         if str(getattr(cell, "kind", "") or "").strip() != "engineer":
@@ -4068,6 +4069,15 @@ def _engineer_dismissed_error(engineer_id: str) -> dict:
         "type": "error",
         "reason": "engineer_dismissed",
         "message": f"engineer {engineer_id} is dismissed",
+        "engineer_id": str(engineer_id or "").strip(),
+    }
+
+
+def _engineer_tombstoned_error(engineer_id: str) -> dict:
+    return {
+        "type": "error",
+        "reason": "engineer_tombstoned",
+        "message": f"engineer {engineer_id} is tombstoned",
         "engineer_id": str(engineer_id or "").strip(),
     }
 
@@ -4109,7 +4119,7 @@ def _dismissal_close_cells(state: MatrixState, engineer) -> list:
         roots.append(cell)
 
     add_root(engineer)
-    for cell in list(state.agents.values()):
+    for cell in list(state.iter_active_agents()):
         if cell.cell_type != "agent":
             continue
         if str(getattr(cell, "kind", "") or "").strip() != "worker":
@@ -4166,11 +4176,12 @@ async def _close_cell_session_preserving_state(
 
 
 def _resolve_architect_cell(state: MatrixState, *, architect_id: str = "",
-                            architect_slug: str = ""):
+                            architect_slug: str = "",
+                            include_tombstoned: bool = False):
     """Resolve an architect agent by exact id or slug."""
     architect_id = str(architect_id or "").strip()
     architect_slug = str(architect_slug or "").strip().lower()
-    for cell in state.agents.values():
+    for cell in state.iter_agents(include_tombstoned=include_tombstoned):
         if cell.cell_type != "agent":
             continue
         if str(getattr(cell, "kind", "") or "").strip() != "architect":
@@ -4213,7 +4224,7 @@ def _agent_name_exists_for_kind(state: MatrixState, name: str, *,
         return False
     excluded = str(exclude_id or "").strip()
     expected_kind = str(kind or "").strip()
-    for cell in state.agents.values():
+    for cell in state.iter_active_agents():
         if cell.cell_type != "agent":
             continue
         if str(getattr(cell, "kind", "") or "").strip() != expected_kind:
@@ -4849,12 +4860,12 @@ def _mcp_call_rows_for_ui(state: MatrixState, records: list[dict]) -> list[dict]
 
 def _engineer_mcp_visible_cell_ids(state: MatrixState, engineer_id: str) -> set[str]:
     engineer_id = str(engineer_id or "").strip()
-    engineer = state.agents.get(engineer_id)
+    engineer = state.get_active_agent(engineer_id)
     if not engineer:
         return set()
     group = str(getattr(engineer, "group", "") or "").strip()
     visible = {engineer_id}
-    for cell in state.agents.values():
+    for cell in state.iter_active_agents():
         if getattr(cell, "cell_type", "") != "agent":
             continue
         if group and str(getattr(cell, "group", "") or "").strip() != group:
@@ -4873,7 +4884,7 @@ def _architect_mcp_visible_cell_ids(state: MatrixState, architect_id: str) -> se
         return set()
     group = str(getattr(architect, "group", "") or "").strip()
     return {
-        cell.id for cell in state.agents.values()
+        cell.id for cell in state.iter_active_agents()
         if getattr(cell, "cell_type", "") == "agent"
         and str(getattr(cell, "group", "") or "").strip() == group
     }
@@ -5201,7 +5212,7 @@ async def _handle_delete_engineer_command(
         return {"type": "error", "message": "Engineer not found"}
 
     transferred_agents = 0
-    for cell in list(state.agents.values()):
+    for cell in list(state.iter_active_agents()):
         if cell.cell_type != "agent":
             continue
         owner_id = str(getattr(cell, "owner_engineer_id", "") or "").strip()
@@ -5224,7 +5235,8 @@ async def _handle_delete_engineer_command(
             transferred_tasks += 1
         state.board_update_task(task.id, assigned_engineer_id="")
 
-    await close_agent_session_only(engineer)
+    tombstoned = await close_agent_session_only(engineer)
+    del tombstoned
     return {
         "transferred_agents": transferred_agents,
         "transferred_tasks": transferred_tasks,
@@ -5286,7 +5298,7 @@ async def _handle_delete_architect_command(
         return {"type": "error", "message": "Architect not found"}
 
     transferred_engineers = 0
-    for cell in list(state.agents.values()):
+    for cell in list(state.iter_active_agents()):
         if cell.cell_type != "agent":
             continue
         if str(getattr(cell, "kind", "") or "").strip() != "engineer":
@@ -5308,11 +5320,110 @@ async def _handle_delete_architect_command(
         if saved:
             archived_decisions += 1
 
-    await close_agent_session_only(architect)
+    tombstoned = await close_agent_session_only(architect)
+    del tombstoned
     return {
         "transferred_engineers": transferred_engineers,
         "archived_decisions": archived_decisions,
     }
+
+
+async def _handle_remove_agent_command(
+        data: dict,
+        state: MatrixState, *,
+        close_agent_session_only,
+        cleanup_purged_agents) -> dict:
+    """Remove a cell using soft-delete for agents and hard-delete for terminals."""
+    cell = state.agents.get(str(data.get("id", "") or "").strip())
+    if not cell:
+        return {"type": "ok", "removed": []}
+    if str(getattr(cell, "cell_type", "") or "") == "terminal":
+        removed = state.remove_agent(cell.id)
+        await cleanup_purged_agents(removed)
+        return {"type": "ok", "removed": [c.id for c in removed]}
+    kind = str(getattr(cell, "kind", "") or "").strip()
+    if kind == "architect":
+        return await _handle_delete_architect_command(
+            {"id": cell.id},
+            state,
+            close_agent_session_only=close_agent_session_only,
+        )
+    if kind == "engineer":
+        return await _handle_delete_engineer_command(
+            {"id": cell.id},
+            state,
+            close_agent_session_only=close_agent_session_only,
+        )
+    tombstoned = await close_agent_session_only(cell)
+    return {
+        "type": "ok",
+        "tombstoned": [c.id for c in tombstoned],
+    }
+
+
+def _restore_or_purge_authority_error(state: MatrixState, cell, data: dict) -> dict | None:
+    """Return architect-scope authorization error for restore/purge commands."""
+    architect_id = str(data.get("architect_id", "") or "").strip()
+    if not architect_id:
+        return None
+    architect = _resolve_architect_cell(state, architect_id=architect_id)
+    if not architect:
+        return {"type": "error", "message": "Architect not found"}
+    if str(getattr(cell, "kind", "") or "").strip() != "engineer":
+        return {"type": "error", "message": "engineer not found in scope"}
+    if str(getattr(cell, "hired_by_architect_id", "") or "").strip() != architect.id:
+        return {"type": "error", "message": "engineer not found in scope"}
+    return None
+
+
+def _handle_restore_agent_command(data: dict, state: MatrixState) -> dict:
+    aid = str(data.get("id", "") or data.get("engineer_id", "") or "").strip()
+    cell = state.agents.get(aid)
+    if not cell:
+        return {"type": "error", "message": "Agent not found"}
+    authority_error = _restore_or_purge_authority_error(state, cell, data)
+    if authority_error:
+        return authority_error
+    if not state.agent_is_tombstoned(cell):
+        return {"type": "ok", "restored": [], "already_active": True}
+    restored = state.restore_agent(cell.id)
+    return {"type": "ok", "restored": [c.id for c in restored]}
+
+
+async def _handle_purge_agent_now_command(
+        data: dict,
+        state: MatrixState, *,
+        cleanup_purged_agents) -> dict:
+    aid = str(data.get("id", "") or data.get("engineer_id", "") or "").strip()
+    cell = state.agents.get(aid)
+    if not cell:
+        return {"type": "error", "message": "Agent not found"}
+    authority_error = _restore_or_purge_authority_error(state, cell, data)
+    if authority_error:
+        return authority_error
+    if not state.agent_is_tombstoned(cell):
+        return {
+            "type": "error",
+            "message": "Agent is not tombstoned; use Delete first",
+        }
+    removed = state.purge_agent_now(cell.id)
+    await cleanup_purged_agents(removed)
+    return {"type": "ok", "purged": [c.id for c in removed]}
+
+
+def _handle_recently_deleted_agents_command(
+        data: dict,
+        state: MatrixState) -> dict:
+    group = str(data.get("group", "") or "").strip()
+    agents = []
+    for cell in state.iter_agents(include_tombstoned=True):
+        if not state.agent_is_tombstoned(cell):
+            continue
+        if group and str(getattr(cell, "group", "") or "").strip() != group:
+            continue
+        agents.append(asdict(cell))
+    agents.sort(key=lambda item: (float(item.get("deleted_at") or 0), item["id"]))
+    return {"type": "ok", "agents": agents}
 
 
 async def _dispatch_architect_ui_tool(name: str, args: dict,
@@ -5898,13 +6009,32 @@ async def main(connection=None):
 
     async def _close_agent_session_only(cell, *,
                                         errors: list | None = None) -> list:
-        """Remove an agent session without removing its worktree."""
+        """Tombstone an agent and close live sessions without final cleanup."""
         if not cell:
             return []
+        session_ids = {
+            c.id: c.session_id
+            for c in state._agent_cascade_cells(cell.id)
+            if c.session_id
+        }
         removed = state.remove_agent(cell.id)
         for c in removed:
-            if c.cell_type == "agent":
-                state.history_remove_agent(c)
+            session_id = session_ids.get(c.id)
+            if session_id:
+                try:
+                    await bridge.close_session(session_id)
+                except Exception as exc:
+                    if errors is not None:
+                        errors.append(
+                            f"Failed to close session for '{c.name}': {exc}"
+                        )
+                    log.exception("Failed to close session for '%s'", c.name)
+        return removed
+
+    async def _cleanup_purged_agents(removed: list, *,
+                                     errors: list | None = None) -> None:
+        """Run irreversible filesystem/runtime cleanup for hard-purged cells."""
+        for c in removed:
             if c.session_id:
                 try:
                     await bridge.close_session(c.session_id)
@@ -5933,7 +6063,23 @@ async def main(connection=None):
                     )
             event_bus.cleanup_cell(c.id)
             worktree_mgr.forget_refresh_state(c.id)
-        return removed
+            if c.worktree_path:
+                ok = await _safe_remove_worktree(c)
+                if not ok and errors is not None:
+                    errors.append(f"Failed to remove worktree for '{c.name}'.")
+
+    async def _tombstone_sweeper():
+        """Periodically purge expired soft-deleted agents."""
+        while True:
+            await asyncio.sleep(300)
+            try:
+                removed = state.purge_tombstoned_agents()
+                if removed:
+                    await _cleanup_purged_agents(removed)
+                    await state.broadcast()
+                    log.info("Purged %d expired agent tombstone(s)", len(removed))
+            except Exception:
+                log.exception("Agent tombstone sweeper failed")
 
     def _checkpoint_message(cell) -> str:
         """Build a checkpoint commit message from the agent's last summary."""
@@ -6139,6 +6285,8 @@ async def main(connection=None):
     log.info("Startup checkpoint: orphan reconnect complete")
     asyncio.create_task(_worktree_diff_updater(state, worktree_mgr))
     log.info("Startup checkpoint: worktree diff updater scheduled")
+    asyncio.create_task(_tombstone_sweeper())
+    log.info("Startup checkpoint: tombstone sweeper scheduled")
 
     keybindings = None
     _displaced = [[]]
@@ -6420,7 +6568,7 @@ async def main(connection=None):
         path = str(path or "").strip()
         if not repo_root or not path:
             return None
-        for agent in state.agents.values():
+        for agent in state.iter_active_agents():
             if agent.cell_type != "agent":
                 continue
             if (agent.worktree_repo_root or agent.git_root or "") != repo_root:
@@ -7577,6 +7725,19 @@ async def main(connection=None):
                     close_agent_session_only=_close_agent_session_only,
                 )
 
+            elif cmd in {"restore_agent", "architect_engineer_restore"}:
+                result = _handle_restore_agent_command(data, state)
+
+            elif cmd == "purge_agent_now":
+                result = await _handle_purge_agent_now_command(
+                    data,
+                    state,
+                    cleanup_purged_agents=_cleanup_purged_agents,
+                )
+
+            elif cmd == "recently_deleted_agents":
+                result = _handle_recently_deleted_agents_command(data, state)
+
             elif cmd == "rename_engineer":
                 result = await _handle_rename_engineer_command(
                     data,
@@ -7757,19 +7918,12 @@ async def main(connection=None):
                         shell=shell)
 
             elif cmd == "remove_agent":
-                cell = state.agents.get(data["id"])
-                removed = []
-                if cell:
-                    if str(getattr(cell, "kind", "") or "").strip() == "architect":
-                        result = await _handle_delete_architect_command(
-                            {"id": cell.id},
-                            state,
-                            close_agent_session_only=_close_agent_session_only,
-                        )
-                    else:
-                        removed = await _close_agent_session_only(cell)
-                for c in removed:
-                    await _safe_remove_worktree(c)
+                result = await _handle_remove_agent_command(
+                    data,
+                    state,
+                    close_agent_session_only=_close_agent_session_only,
+                    cleanup_purged_agents=_cleanup_purged_agents,
+                )
 
             elif cmd == "update_agent":
                 cell = state.agents.get(data["id"])
@@ -7789,7 +7943,12 @@ async def main(connection=None):
 
             elif cmd == "focus_agent":
                 cell = state.agents.get(data["id"])
-                if cell and cell.session_id:
+                if cell and state.agent_is_tombstoned(cell):
+                    result = {
+                        "type": "error",
+                        "message": "Agent is tombstoned and cannot be focused",
+                    }
+                elif cell and cell.session_id:
                     await bridge.focus_session(cell.session_id)
 
             elif cmd == "send_text":
@@ -8798,63 +8957,69 @@ async def main(connection=None):
                     verification_summary=data.get(
                         "verification_summary", {}),
                 )
-                # Resolve deliverable contract from action + explicit kwarg
-                deliverable_explicit = data.get("deliverable")
-                if (action_name or isinstance(deliverable_explicit, dict)
-                        and deliverable_explicit):
-                    deliverable_base_dir = await _resolve_base_dir(group)
-                    deliverable_contract = _resolve_deliverable_for_create(
-                        action_name,
-                        deliverable_base_dir,
-                        deliverable_explicit
-                        if isinstance(deliverable_explicit, dict) else None,
-                    )
-                    add_kwargs["deliverable_required"] = bool(
-                        deliverable_contract["required"])
-                    add_kwargs["deliverable_type"] = deliverable_contract["type"]
-                    add_kwargs["deliverable_format"] = (
-                        deliverable_contract["format"])
-                    add_kwargs["deliverable_artifact_title"] = (
-                        deliverable_contract["artifact_title"])
-                # Pass client-provided ID (for pre-uploaded attachments)
-                draft_upload_id = ""
-                incoming_id = str(data.get("id", "") or "").strip()
-                if incoming_id:
-                    if is_draft_task_token(incoming_id) or (
-                        not is_canonical_task_id(incoming_id)
-                    ):
-                        draft_upload_id = incoming_id
-                    else:
-                        add_kwargs["id"] = incoming_id
-                # Attachments from client (already uploaded to disk)
-                if data.get("attachments"):
-                    add_kwargs["attachments"] = data["attachments"]
-                if data.get("artifacts"):
-                    add_kwargs["artifacts"] = data["artifacts"]
-                bt = state.board_add_task(**add_kwargs)
-                if not bt:
-                    result = {"type": "error",
-                              "message": "Invalid lane, group, or empty task"}
+                assigned_cell = state.agents.get(
+                    str(add_kwargs.get("assigned_engineer_id", "") or "").strip()
+                )
+                if assigned_cell and state.agent_is_tombstoned(assigned_cell):
+                    result = _engineer_tombstoned_error(assigned_cell.id)
                 else:
-                    if draft_upload_id:
-                        attachments, artifacts = finalize_task_attachments(
-                            bt.attachments,
-                            bt.artifacts,
-                            draft_task_id=draft_upload_id,
-                            task_id=bt.id,
+                    # Resolve deliverable contract from action + explicit kwarg
+                    deliverable_explicit = data.get("deliverable")
+                    if (action_name or isinstance(deliverable_explicit, dict)
+                            and deliverable_explicit):
+                        deliverable_base_dir = await _resolve_base_dir(group)
+                        deliverable_contract = _resolve_deliverable_for_create(
+                            action_name,
+                            deliverable_base_dir,
+                            deliverable_explicit
+                            if isinstance(deliverable_explicit, dict) else None,
                         )
-                        state.board_update_task(
-                            bt.id,
-                            attachments=attachments,
-                            artifacts=artifacts,
-                        )
-                        bt = state.board_tasks.get(bt.id, bt)
-                    result = {
-                        "type": "external_imported" if bt.external_id
-                        or bt.external_url else "board_task_added",
-                        "task_id": bt.id,
-                        "title": bt.task,
-                    }
+                        add_kwargs["deliverable_required"] = bool(
+                            deliverable_contract["required"])
+                        add_kwargs["deliverable_type"] = deliverable_contract["type"]
+                        add_kwargs["deliverable_format"] = (
+                            deliverable_contract["format"])
+                        add_kwargs["deliverable_artifact_title"] = (
+                            deliverable_contract["artifact_title"])
+                    # Pass client-provided ID (for pre-uploaded attachments)
+                    draft_upload_id = ""
+                    incoming_id = str(data.get("id", "") or "").strip()
+                    if incoming_id:
+                        if is_draft_task_token(incoming_id) or (
+                            not is_canonical_task_id(incoming_id)
+                        ):
+                            draft_upload_id = incoming_id
+                        else:
+                            add_kwargs["id"] = incoming_id
+                    # Attachments from client (already uploaded to disk)
+                    if data.get("attachments"):
+                        add_kwargs["attachments"] = data["attachments"]
+                    if data.get("artifacts"):
+                        add_kwargs["artifacts"] = data["artifacts"]
+                    bt = state.board_add_task(**add_kwargs)
+                    if not bt:
+                        result = {"type": "error",
+                                  "message": "Invalid lane, group, or empty task"}
+                    else:
+                        if draft_upload_id:
+                            attachments, artifacts = finalize_task_attachments(
+                                bt.attachments,
+                                bt.artifacts,
+                                draft_task_id=draft_upload_id,
+                                task_id=bt.id,
+                            )
+                            state.board_update_task(
+                                bt.id,
+                                attachments=attachments,
+                                artifacts=artifacts,
+                            )
+                            bt = state.board_tasks.get(bt.id, bt)
+                        result = {
+                            "type": "external_imported" if bt.external_id
+                            or bt.external_url else "board_task_added",
+                            "task_id": bt.id,
+                            "title": bt.task,
+                        }
 
             elif cmd == "board_archive_task":
                 result = _handle_board_archive_command(state, data)
@@ -8881,27 +9046,48 @@ async def main(connection=None):
                     fields["provider"] = link["provider"]
                     fields["external_id"] = link["external_id"]
                     fields["external_url"] = link["external_url"]
-                state.board_update_task(tid, **fields)
-                # Auto-dispatch if agent_id was set and agent is idle
-                _new_aid = fields.get("agent_id", "")
-                if _new_aid:
-                    _tsk = state.board_tasks.get(tid)
-                    _cell = state.agents.get(_new_aid)
-                    if (_tsk and _cell
-                            and _tsk.lane == "To Do"
-                            and not state.agent_is_busy(_new_aid)
-                            and _cell.cell_type == "agent"
-                            and state.board_deps_met(_tsk)):
-                        await handle_command({
-                            "cmd": "dispatch_task",
-                            "id": tid, "agent_id": _new_aid})
-                await _maybe_auto_resume_targets(
-                    state,
-                    handle_command,
-                    _panel_event,
-                    targets=_update_resume_targets,
-                    group=_update_task.group if _update_task else "",
+                assigned_update = str(
+                    fields.get("assigned_engineer_id", "") or ""
+                ).strip()
+                assigned_cell = (
+                    state.agents.get(assigned_update)
+                    if "assigned_engineer_id" in fields and assigned_update
+                    else None
                 )
+                agent_update = str(fields.get("agent_id", "") or "").strip()
+                agent_cell = (
+                    state.agents.get(agent_update)
+                    if "agent_id" in fields and agent_update else None
+                )
+                if assigned_cell and state.agent_is_tombstoned(assigned_cell):
+                    result = _engineer_tombstoned_error(assigned_cell.id)
+                elif agent_cell and state.agent_is_tombstoned(agent_cell):
+                    result = {
+                        "type": "error",
+                        "message": "Agent is tombstoned",
+                    }
+                else:
+                    state.board_update_task(tid, **fields)
+                    # Auto-dispatch if agent_id was set and agent is idle
+                    _new_aid = fields.get("agent_id", "")
+                    if _new_aid:
+                        _tsk = state.board_tasks.get(tid)
+                        _cell = state.agents.get(_new_aid)
+                        if (_tsk and _cell
+                                and _tsk.lane == "To Do"
+                                and not state.agent_is_busy(_new_aid)
+                                and _cell.cell_type == "agent"
+                                and state.board_deps_met(_tsk)):
+                            await handle_command({
+                                "cmd": "dispatch_task",
+                                "id": tid, "agent_id": _new_aid})
+                    await _maybe_auto_resume_targets(
+                        state,
+                        handle_command,
+                        _panel_event,
+                        targets=_update_resume_targets,
+                        group=_update_task.group if _update_task else "",
+                    )
 
             elif cmd == "board_verify_task":
                 tid = _resolve_task_id(state, data.get("id", ""))
@@ -9398,7 +9584,15 @@ async def main(connection=None):
                         ).strip()
                         if agent_id:
                             target_cell = state.agents.get(agent_id)
-                            if (
+                            if target_cell and state.agent_is_tombstoned(target_cell):
+                                result = {
+                                    "type": "error",
+                                    "message": "Agent is tombstoned",
+                                }
+                            elif agent_id and not target_cell:
+                                result = {"type": "error",
+                                          "message": "Agent not found"}
+                            elif (
                                 target_cell
                                 and str(getattr(target_cell, "kind", "") or "").strip()
                                 == "engineer"
@@ -9408,6 +9602,11 @@ async def main(connection=None):
                         elif dispatch_owner_id:
                             owner_cell = state.agents.get(dispatch_owner_id)
                             if (
+                                owner_cell
+                                and state.agent_is_tombstoned(owner_cell)
+                            ):
+                                result = _engineer_tombstoned_error(owner_cell.id)
+                            elif (
                                 owner_cell
                                 and str(getattr(owner_cell, "kind", "") or "").strip()
                                 == "engineer"
@@ -9422,13 +9621,14 @@ async def main(connection=None):
                                 state.agents.get(assigned_engineer_id)
                                 if assigned_engineer_id else None
                             )
-                            if _agent_dismissed_at(assigned_engineer):
+                            if assigned_engineer and state.agent_is_tombstoned(
+                                    assigned_engineer):
+                                result = _engineer_tombstoned_error(
+                                    assigned_engineer_id)
+                            elif _agent_dismissed_at(assigned_engineer):
                                 result = _engineer_dismissed_error(
                                     assigned_engineer_id)
-                        if agent_id and agent_id not in state.agents:
-                            result = {"type": "error",
-                                      "message": "Agent not found"}
-                        elif result:
+                        if result:
                             pass
                         elif agent_id:
                             # Dispatch to existing agent

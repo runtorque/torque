@@ -577,7 +577,8 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(hired.hired_by_architect_id, "")
             self.assertEqual(other.hired_by_architect_id, "")
-            self.assertNotIn(architect.id, state.agents)
+            self.assertIn(architect.id, state.agents)
+            self.assertTrue(state.agent_is_tombstoned(architect))
             self.assertEqual(removed, [architect.id])
             archived = state.load_decision("decision-1")
             self.assertTrue(archived["archived"])
@@ -621,7 +622,8 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(worker.owner_engineer_id, "")
         self.assertEqual(worker.created_by_engineer_id, "")
         self.assertEqual(state.board_tasks[task.id].assigned_engineer_id, "")
-        self.assertNotIn(engineer.id, state.agents)
+        self.assertIn(engineer.id, state.agents)
+        self.assertTrue(state.agent_is_tombstoned(engineer))
         self.assertEqual(removed, [engineer.id])
 
     async def test_delete_last_engineer_succeeds(self):
@@ -638,7 +640,67 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(result, {"transferred_agents": 0, "transferred_tasks": 0})
+        self.assertIn(engineer.id, state.agents)
+        self.assertTrue(state.agent_is_tombstoned(engineer))
+
+    async def test_restore_and_purge_agent_now_commands(self):
+        state = self._make_state()
+        engineer = self._add_engineer_cell(state, "eng-alice", "Alice")
+        state.remove_agent(engineer.id)
+        self.assertTrue(state.agent_is_tombstoned(engineer))
+
+        restored = self.server_mod._handle_restore_agent_command(
+            {"id": engineer.id},
+            state,
+        )
+        self.assertEqual(restored, {"type": "ok", "restored": [engineer.id]})
+        self.assertFalse(state.agent_is_tombstoned(engineer))
+
+        state.remove_agent(engineer.id)
+        cleaned = []
+
+        async def cleanup(removed):
+            cleaned.extend(c.id for c in removed)
+
+        purged = await self.server_mod._handle_purge_agent_now_command(
+            {"id": engineer.id},
+            state,
+            cleanup_purged_agents=cleanup,
+        )
+        self.assertEqual(purged, {"type": "ok", "purged": [engineer.id]})
+        self.assertEqual(cleaned, [engineer.id])
         self.assertNotIn(engineer.id, state.agents)
+
+    async def test_remove_agent_direct_terminal_hard_deletes_and_cleans_up(self):
+        state = self._make_state()
+        terminal = state.add_terminal(
+            name="Logs",
+            group="loom",
+            terminal_backend="iterm2",
+            profile="Default",
+            command="",
+            directory="/tmp/project",
+        )
+        terminal.session_id = "terminal-session"
+        cleaned = []
+
+        async def close_agent_session_only(_cell):
+            self.fail("direct terminal removal must not use tombstone close path")
+
+        async def cleanup_purged_agents(removed):
+            cleaned.extend(c.id for c in removed)
+
+        result = await self.server_mod._handle_remove_agent_command(
+            {"id": terminal.id},
+            state,
+            close_agent_session_only=close_agent_session_only,
+            cleanup_purged_agents=cleanup_purged_agents,
+        )
+
+        self.assertEqual(result, {"type": "ok", "removed": [terminal.id]})
+        self.assertEqual(cleaned, [terminal.id])
+        self.assertNotIn(terminal.id, state.agents)
+        self.assertNotIn(terminal.id, state.groups["loom"])
 
     async def test_dismiss_engineer_closes_engineer_and_owned_workers_preserves_assignments(self):
         state = self._make_state()

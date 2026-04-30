@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS agents (
     tasks_dispatched      INTEGER NOT NULL DEFAULT 0,
     queue_empty_emitted   INTEGER NOT NULL DEFAULT 1,
     dismissed_at          INTEGER NOT NULL DEFAULT 0,
+    deleted_at            REAL NOT NULL DEFAULT 0,
+    permanent_delete_after REAL NOT NULL DEFAULT 0,
     engineer_specializations TEXT NOT NULL DEFAULT '[]'
 );
 
@@ -1095,6 +1097,8 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
         ("worktree_merge_squash", "INTEGER", "1"),
         ("session_resume", "INTEGER", "1"),
         ("idle_timeout", "INTEGER", "0"),
+        ("deleted_at", "REAL", "0"),
+        ("permanent_delete_after", "REAL", "0"),
     ]:
         try:
             conn.execute(f"SELECT {col} FROM agents LIMIT 0")

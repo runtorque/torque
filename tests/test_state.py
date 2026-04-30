@@ -506,7 +506,10 @@ class MatrixStateCleanupTests(unittest.TestCase):
 
         state.remove_agent(agent.id)
 
-        self.assertEqual(state.group_settings["g"].engineer_agent_id, "")
+        self.assertEqual(state.group_settings["g"].engineer_agent_id, agent.id)
+        self.assertTrue(state.agent_is_tombstoned(agent))
+        self.assertGreater(agent.permanent_delete_after, agent.deleted_at)
+        self.assertIsNone(state.get_engineer_for_group("g"))
         self.assertEqual(state.engineer_settings["g"].pending_question, "")
         self.assertEqual(state.engineer_settings["g"].pending_note, "")
         self.assertEqual(state.engineer_settings["g"].pending_note_kind, "")
@@ -520,6 +523,76 @@ class MatrixStateCleanupTests(unittest.TestCase):
                 and "source agent is no longer available" in msg.get("message", "")
                 for msg in state.board_tasks[ask.id].messages
             )
+        )
+
+    def test_remove_agent_tombstones_restores_and_purges(self):
+        state = self.state_mod.MatrixState()
+        state.groups["g"] = []
+        agent = state.add_agent(name="Worker", group="g")
+        child = state.add_terminal(name="Shell", group="g", parent_id=agent.id)
+        agent.session_id = "session-agent"
+        child.session_id = "session-child"
+        agent.current_task_id = "task-1"
+        task = self.state_mod.BoardTask(
+            id="task-1",
+            task="Do work",
+            group="g",
+            lane="In Progress",
+            agent_id=agent.id,
+        )
+        state.board_tasks[task.id] = task
+
+        tombstoned = state.remove_agent(agent.id)
+
+        self.assertEqual([c.id for c in tombstoned], [agent.id, child.id])
+        self.assertIn(agent.id, state.agents)
+        self.assertIn(agent.id, state.groups["g"])
+        self.assertTrue(state.agent_is_tombstoned(agent))
+        self.assertTrue(state.agent_is_tombstoned(child))
+        self.assertEqual(agent.session_id, None)
+        self.assertEqual(child.session_id, None)
+        self.assertEqual(agent.current_task_id, "")
+        self.assertEqual(task.agent_id, "")
+
+        restored = state.restore_agent(agent.id)
+        self.assertEqual([c.id for c in restored], [agent.id, child.id])
+        self.assertFalse(state.agent_is_tombstoned(agent))
+        self.assertFalse(state.agent_is_tombstoned(child))
+
+        state.remove_agent(agent.id)
+        agent.permanent_delete_after = 1
+        child.permanent_delete_after = 1
+        purged = state.purge_tombstoned_agents(now=2)
+        self.assertEqual([c.id for c in purged], [agent.id, child.id])
+        self.assertNotIn(agent.id, state.agents)
+        self.assertNotIn(child.id, state.agents)
+        self.assertNotIn(agent.id, state.groups["g"])
+
+    def test_remove_direct_terminal_hard_deletes_without_tombstone(self):
+        state = self.state_mod.MatrixState()
+        state.groups["g"] = []
+        terminal = state.add_terminal(name="Shell", group="g")
+        terminal.session_id = "session-terminal"
+        state._delta_ops.clear()
+
+        removed = state.remove_agent(terminal.id)
+
+        self.assertEqual([c.id for c in removed], [terminal.id])
+        self.assertNotIn(terminal.id, state.agents)
+        self.assertNotIn(terminal.id, state.groups["g"])
+        self.assertEqual(
+            state._delta_ops,
+            [{
+                "op": "agent_remove",
+                "id": terminal.id,
+                "group": "g",
+                "cell_type": "terminal",
+            }, {
+                "op": "group_update",
+                "name": "g",
+                "slug": "",
+                "agents": [],
+            }],
         )
 
     def test_cleanup_orphaned_attention_expires_persisted_stale_state(self):
@@ -1695,6 +1768,32 @@ class MatrixStatePauseBroadcastTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ops[3]["agent_id"], "worker-1")
         self.assertEqual(ops[4]["entry"]["agent_id"], "worker-1")
         self.assertEqual(ops[5]["agent_id"], "eng-1")
+
+    async def test_tombstone_and_restore_upserts_emit_normally(self):
+        # Post-LOOM:294, pause no longer suppresses broadcast at emit time —
+        # tombstone/restore upserts simply reach _delta_ops like any other
+        # agent_upsert. Lock that lifecycle behavior down here.
+        state = self._make_state(engineer_paused=True)
+        worker = state.agents["worker-1"]
+
+        state._delta_ops.clear()
+        state.remove_agent(worker.id)
+
+        self.assertEqual(len(state._delta_ops), 1)
+        tombstone_op = state._delta_ops[0]
+        self.assertEqual(tombstone_op["op"], "agent_upsert")
+        self.assertEqual(tombstone_op["id"], worker.id)
+        self.assertGreater(tombstone_op["deleted_at"], 0)
+
+        state._delta_ops.clear()
+        state.restore_agent(worker.id)
+
+        self.assertEqual(len(state._delta_ops), 1)
+        restore_op = state._delta_ops[0]
+        self.assertEqual(restore_op["op"], "agent_upsert")
+        self.assertEqual(restore_op["id"], worker.id)
+        self.assertEqual(restore_op["deleted_at"], 0.0)
+        self.assertEqual(restore_op["permanent_delete_after"], 0.0)
 
     async def test_unpaused_digest_broadcasts_subagent_messages_normally(self):
         class FakeWS:

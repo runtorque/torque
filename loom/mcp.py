@@ -709,6 +709,8 @@ def _visible_tools(state, cell_id: str):
     """Return the MCP tool list visible to the caller."""
     tools = list(TOOLS)
     cell = state.agents.get(str(cell_id or "").strip()) if cell_id else None
+    if cell and state.agent_is_tombstoned(cell):
+        return []
     caller_kind = str(getattr(cell, "kind", "") or "").strip() if cell else ""
     if caller_kind == "engineer":
         tools.extend(eager_tool_specs(engineer_tools_for_cell(cell, state)))
@@ -720,6 +722,8 @@ def _visible_tools(state, cell_id: str):
 def _deferred_tools_for_caller(state, cell_id: str):
     """Return deferred MCP tool schemas available to the caller."""
     cell = state.agents.get(str(cell_id or "").strip()) if cell_id else None
+    if cell and state.agent_is_tombstoned(cell):
+        return []
     caller_kind = str(getattr(cell, "kind", "") or "").strip() if cell else ""
     if caller_kind == "engineer":
         return deferred_tool_specs(engineer_tools_for_cell(cell, state))
@@ -750,6 +754,8 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state, *,
         cell = state.agents.get(cell_id)
         if not cell:
             return f"Agent {cell_id} not found", True
+        if state.agent_is_tombstoned(cell):
+            return f"Agent {cell_id} is tombstoned", True
         from dataclasses import asdict
         tasks = {tid: serialize_task_for_mcp(t, tasks_by_id=state.board_tasks)
                  for tid, t in state.board_tasks.items()
@@ -1030,6 +1036,11 @@ async def dispatch_mcp_rpc_body(
         caller_kind = str(
             getattr(caller_cell, "kind", "") or ""
         ).strip() if caller_cell else ""
+        if caller_cell and state.agent_is_tombstoned(caller_cell):
+            return (
+                _jsonrpc_error(req_id, -32602, f"Agent {cell_id} is tombstoned"),
+                200,
+            )
         session_wake_pending = (
             caller_kind in {"architect", "engineer"}
             and _claim_session_wake(cell_id, mcp_session_id)

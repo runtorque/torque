@@ -157,12 +157,37 @@ function onAgentDblClick(id) {
 async function removeAgent(id) {
   const a = state.agents[id];
   if (!a) return;
+  if ((a.cell_type || '') === 'terminal') {
+    let terminalMsg = `Remove "${a.name}"? This terminal will be permanently deleted now and cannot be restored.`;
+    if (a.worktree_path) {
+      var terminalSharedWith = _worktreeSharedWith(a);
+      if (terminalSharedWith) {
+        terminalMsg += ' Its worktree is shared with ' + terminalSharedWith + ' and will be kept.';
+      } else {
+        const warnings = [];
+        if ((a.worktree_checkpoints || 0) > 0) warnings.push('has unmerged commits');
+        if (a.worktree_dirty) warnings.push('has uncommitted changes');
+        if (warnings.length) {
+          terminalMsg += ' Its worktree ' + warnings.join(' and ') + '. All changes will be lost.';
+        } else {
+          terminalMsg += ' Its worktree will be removed immediately.';
+        }
+      }
+    }
+    if (await showConfirm(terminalMsg)) {
+      if (selectedAgentId === id) selectedAgentId = null;
+      if (selectedTerminalId === id) selectedTerminalId = null;
+      send({ cmd: 'remove_agent', id });
+    }
+    return;
+  }
   if ((a.kind || '') === 'architect') {
     var hiredEngineers = 0;
     if (state && state.agents) {
       for (var architectAgentId in state.agents) {
         var candidate = state.agents[architectAgentId];
         if (!candidate || candidate.cell_type !== 'agent') continue;
+        if (typeof _isTombstonedAgent === 'function' && _isTombstonedAgent(candidate)) continue;
         if ((candidate.kind || '') !== 'engineer') continue;
         if (String(candidate.hired_by_architect_id || '') === String(a.id || '')) {
           hiredEngineers += 1;
@@ -173,7 +198,7 @@ async function removeAgent(id) {
     if (typeof _architectDecisionsForAgent === 'function') {
       decisionCount = _architectDecisionsForAgent(a.id).length;
     }
-    var architectMsg = 'Remove "' + a.name + '"? Deleting an architect transfers '
+    var architectMsg = 'Remove "' + a.name + '"? This schedules the architect for permanent deletion in 7 days. You can restore it from Recently deleted until then. Deleting an architect transfers '
       + hiredEngineers + ' hired engineer' + (hiredEngineers === 1 ? '' : 's')
       + ' to the user and archives ' + decisionCount + ' decision'
       + (decisionCount === 1 ? '' : 's') + '.';
@@ -185,9 +210,9 @@ async function removeAgent(id) {
     return;
   }
   const childCount = (state.children[id] || []).length;
-  let msg = `Remove "${a.name}"?`;
+  let msg = `Remove "${a.name}"? This schedules the agent for permanent deletion in 7 days. You can restore it from Recently deleted until then.`;
   if (childCount > 0) {
-    msg = `Remove "${a.name}" and its ${childCount} terminal(s)?`;
+    msg = `Remove "${a.name}" and its ${childCount} terminal(s)? This schedules them for permanent deletion in 7 days. You can restore them from Recently deleted until then.`;
   }
   if (a.worktree_path) {
     var sharedWith = _worktreeSharedWith(a);
@@ -198,9 +223,9 @@ async function removeAgent(id) {
       if ((a.worktree_checkpoints || 0) > 0) warnings.push('has unmerged commits');
       if (a.worktree_dirty) warnings.push('has uncommitted changes');
       if (warnings.length) {
-        msg += ' Its worktree ' + warnings.join(' and ') + '. All changes will be lost.';
+        msg += ' Its worktree ' + warnings.join(' and ') + ' and will be preserved during the 7-day restore window.';
       } else {
-        msg += ' Its worktree will also be removed.';
+        msg += ' Its worktree will be preserved during the 7-day restore window.';
       }
     }
   }

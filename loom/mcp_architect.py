@@ -24,6 +24,7 @@ ARCHITECT_DEFERRED_TOOL_NAMES = {
     "architect_get_architect_settings",
     "architect_engineer_dismiss",
     "architect_engineer_rehire",
+    "architect_engineer_restore",
     "architect_mcp_calls",
 }
 
@@ -398,7 +399,15 @@ _ARCHITECT_TOOL_SPECS = [
             "List engineers visible to this architect, marking each as hired "
             "or visible and including dismissed_at for paused engineers."
         ),
-        "inputSchema": {"type": "object", "properties": {}},
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "include_tombstoned": {
+                    "type": "boolean",
+                    "description": "Include engineers in the 7-day restore window.",
+                },
+            },
+        },
     },
     {
         "name": "architect_engineer_hire",
@@ -454,6 +463,23 @@ _ARCHITECT_TOOL_SPECS = [
         "description": (
             "Resume a previously dismissed hired engineer using the same "
             "agent id, slug, history, and launch configuration."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "engineer_id": {
+                    "type": "string",
+                    "description": "Engineer id/slug/name.",
+                },
+            },
+            "required": ["engineer_id"],
+        },
+    },
+    {
+        "name": "architect_engineer_restore",
+        "description": (
+            "Restore a hired engineer that is in the 7-day recently-deleted "
+            "window. Ownership transfers performed at delete time are not undone."
         ),
         "inputSchema": {
             "type": "object",

@@ -46,20 +46,20 @@ def resolve_agent(state, identifier: str) -> str | None:
         return None
     if identifier in state.agents:
         cell = state.agents[identifier]
-        if cell.cell_type == "agent":
+        if cell.cell_type == "agent" and not state.agent_is_tombstoned(cell):
             return cell.id
     ident_lower = identifier.lower()
-    for cell in state.agents.values():
+    for cell in state.iter_active_agents():
         if cell.cell_type != "agent":
             continue
         if cell.slug == ident_lower:
             return cell.id
-    for cell in state.agents.values():
+    for cell in state.iter_active_agents():
         if cell.cell_type != "agent":
             continue
         if cell.name.lower() == ident_lower:
             return cell.id
-    for cell in state.agents.values():
+    for cell in state.iter_active_agents():
         if cell.cell_type != "agent":
             continue
         if cell.id.startswith(identifier):
@@ -70,7 +70,7 @@ def resolve_agent(state, identifier: str) -> str | None:
 def is_busy_agent(state, agent_id: str) -> bool:
     """Return True when the agent has a live current task."""
     cell = state.agents.get(agent_id)
-    if not cell or cell.cell_type != "agent":
+    if not cell or state.agent_is_tombstoned(cell) or cell.cell_type != "agent":
         return False
     return state.agent_is_busy(agent_id)
 
@@ -79,7 +79,7 @@ def active_worker_ids(state, group: str) -> set[str]:
     """Count active non-engineer agents for a group."""
     active: set[str] = set()
     engineer_id = state.get_group_settings(group).engineer_agent_id
-    for cell in state.agents.values():
+    for cell in state.iter_active_agents():
         if cell.cell_type != "agent":
             continue
         if cell.group != group:

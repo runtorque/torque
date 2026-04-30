@@ -2125,6 +2125,7 @@ function send(obj) {
 
 function _syncSelectionToActiveSession() {
   for (const [id, cell] of Object.entries(state.agents)) {
+    if (typeof _isTombstonedAgent === 'function' && _isTombstonedAgent(cell)) continue;
     if (cell.session_id !== state.active_session_id) continue;
     selectedTerminalId = id;
     if (cell.cell_type === 'agent') {

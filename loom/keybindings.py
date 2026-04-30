@@ -172,7 +172,7 @@ def _next_name(state, prefix):
     """Mirror the frontend quick-add naming strategy."""
     existing = [
         cell.name
-        for cell in state.agents.values()
+        for cell in state.iter_active_agents()
         if cell.name.startswith(prefix + " ")
     ]
     i = 1
@@ -191,7 +191,7 @@ def _find_cell_for_session(state, session_id=""):
     sid = _normalize_session_id(session_id) or state.active_session_id or ""
     if not sid:
         return None
-    for cell in state.agents.values():
+    for cell in state.iter_active_agents():
         if cell.session_id == sid:
             return cell
     return None
@@ -200,9 +200,23 @@ def _find_cell_for_session(state, session_id=""):
 def build_close_cell_confirmation_message(state, cell):
     """Build the close/remove confirmation message for shortcut-triggered closes."""
     child_count = len(state._children.get(cell.id, []))
-    msg = f'Remove "{cell.name}"?'
+    is_terminal = getattr(cell, "cell_type", "") == "terminal"
+    if is_terminal:
+        msg = (
+            f'Remove "{cell.name}"? This terminal will be permanently '
+            "deleted now and cannot be restored."
+        )
+    else:
+        msg = (
+            f'Remove "{cell.name}"? It will be scheduled for permanent deletion '
+            "in 7 days and can be restored from Recently deleted until then."
+        )
     if child_count > 0:
-        msg = f'Remove "{cell.name}" and its {child_count} terminal(s)?'
+        msg = (
+            f'Remove "{cell.name}" and its {child_count} terminal(s)? They '
+            "will be scheduled for permanent deletion in 7 days and can be "
+            "restored from Recently deleted until then."
+        )
     if cell.worktree_path:
         shared_with = [
             other.name
@@ -220,10 +234,17 @@ def build_close_cell_confirmation_message(state, cell):
             if cell.worktree_dirty:
                 warnings.append("has uncommitted changes")
             if warnings:
-                msg += (" Its worktree " + " and ".join(warnings)
-                        + ". All changes will be lost.")
+                if is_terminal:
+                    msg += (" Its worktree " + " and ".join(warnings)
+                            + ". All changes will be lost.")
+                else:
+                    msg += (" Its worktree " + " and ".join(warnings)
+                            + " and will be preserved during the restore window.")
             else:
-                msg += " Its worktree will also be removed."
+                if is_terminal:
+                    msg += " Its worktree will be removed immediately."
+                else:
+                    msg += " Its worktree will be preserved during the restore window."
     return msg
 
 
@@ -245,6 +266,8 @@ def _get_group_display_ids(state, group_name):
     standalone = []
     for cell_id in ordered_ids:
         cell = state.agents.get(cell_id)
+        if cell and state.agent_is_tombstoned(cell):
+            continue
         if cell and cell.cell_type == "agent":
             visible_agents[cell_id] = cell
         else:

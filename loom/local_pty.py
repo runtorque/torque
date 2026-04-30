@@ -87,7 +87,7 @@ class LocalPtyAdapter:
 
     async def reconnect_orphans(self) -> None:
         cleared = 0
-        for cell in self.state.agents.values():
+        for cell in self.state.iter_active_agents():
             if not cell.session_id and cell.status == "stopped":
                 continue
             if cell.session_id or cell.status != "stopped":
@@ -923,7 +923,7 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
         claimed: set[str] = set()
         adopted = 0
         cleared = 0
-        for cell in list(self.state.agents.values()):
+        for cell in list(self.state.iter_active_agents()):
             sid = cell.session_id or ""
             if sid and sid in by_id and by_id[sid].get("alive"):
                 await self._adopt_supervisor_session(cell, by_id[sid])

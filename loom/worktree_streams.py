@@ -169,7 +169,7 @@ async def prefill_branch_exists_async(repo_roots: Iterable[str]) -> None:
 def _collect_state_repo_roots(state, *, group: str = "") -> set[str]:
     """Return distinct normalized repo_roots referenced by agents + tasks."""
     repo_roots: set[str] = set()
-    for cell in state.agents.values():
+    for cell in state.iter_active_agents():
         if getattr(cell, "cell_type", "") != "agent":
             continue
         if group and getattr(cell, "group", "") != group:
@@ -304,7 +304,7 @@ def compute_worktree_streams(state, *, group: str = "",
         if getattr(task, "lane", "") != "Archived"
     ]
     agents = [
-        cell for cell in state.agents.values()
+        cell for cell in state.iter_active_agents()
         if getattr(cell, "cell_type", "") == "agent"
         and (not group or getattr(cell, "group", "") == group)
     ]
@@ -476,7 +476,7 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
                     task_ids.add(task.id)
 
         inferred_stream_agent_ids = set(stream_agent_ids or set())
-        for cell in state.agents.values():
+        for cell in state.iter_active_agents():
             if getattr(cell, "cell_type", "") != "agent":
                 continue
             if group and getattr(cell, "group", "") != group:
@@ -886,7 +886,7 @@ def _classify_stream_presence(state, *, repo_root: str, branch: str,
         if getattr(task, "id", "")
     }
     stream_agents = [
-        cell for cell in state.agents.values()
+        cell for cell in state.iter_active_agents()
         if getattr(cell, "cell_type", "") == "agent"
         and (not group or getattr(cell, "group", "") == group)
         and stream_identity_for_agent(cell) == (repo_root, branch)
@@ -1086,7 +1086,7 @@ def _select_foreground_task(state, *, branch: str, repo_root: str,
     if review_task and getattr(review_task, "lane", "") not in _QUEUED_LANES:
         return review_task
 
-    for cell in state.agents.values():
+    for cell in state.iter_active_agents():
         if getattr(cell, "cell_type", "") != "agent":
             continue
         identity = stream_identity_for_agent(cell)
@@ -1611,7 +1611,7 @@ def _is_merged_stream(boundary_tasks: list[Any], state, *,
         latest = task_boundary(boundary_tasks[-1])
         if latest.get("status", "") == "merged":
             return True
-    for cell in state.agents.values():
+    for cell in state.iter_active_agents():
         if getattr(cell, "cell_type", "") != "agent":
             continue
         if stream_identity_for_agent(cell) != (repo_root, branch):

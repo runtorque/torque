@@ -1191,6 +1191,46 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(denied_error)
         self.assertEqual(denied_text, "engineer not found in scope")
 
+    async def test_architect_tools_exclude_and_reject_tombstoned_engineer(self):
+        architect = self._add_architect("arch-1", "Architect")
+        engineer = self._add_engineer(
+            "eng-alice", "Alice", hired_by_architect_id=architect.id
+        )
+        now = 123.0
+        engineer.deleted_at = now
+        engineer.permanent_delete_after = now + 7 * 86400
+
+        list_text, list_error = await self._call(
+            "architect_engineer_list",
+            {},
+            architect.id,
+        )
+        self.assertFalse(list_error, list_text)
+        self.assertEqual(json.loads(list_text)["engineers"], [])
+
+        create_text, create_error = await self._call(
+            "architect_task_create",
+            {
+                "title": "Assign tombstone",
+                "group": "loom",
+                "assigned_engineer_id": engineer.id,
+            },
+            architect.id,
+        )
+        self.assertTrue(create_error)
+        self.assertEqual(create_text, "engineer is tombstoned")
+
+        visible_text, visible_error = await self._call(
+            "architect_engineer_list",
+            {"include_tombstoned": True},
+            architect.id,
+        )
+        self.assertFalse(visible_error, visible_text)
+        engineers = json.loads(visible_text)["engineers"]
+        self.assertEqual(len(engineers), 1)
+        self.assertEqual(engineers[0]["id"], engineer.id)
+        self.assertEqual(engineers[0]["deleted_at"], now)
+
     async def test_architect_engineer_list_includes_specializations(self):
         architect = self._add_architect("arch-1", "Architect")
         alice = self._add_engineer(
