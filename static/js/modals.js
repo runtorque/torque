@@ -353,7 +353,8 @@ function showConfirm(message, opts) {
       }
     }
     const btn = document.getElementById('confirm-yes-btn');
-    btn.textContent = (opts && opts.label) || 'Remove';
+    const defaultLabel = /^\s*Delete\b/.test(String(message || '')) ? 'Delete' : 'OK';
+    btn.textContent = (opts && opts.label) || defaultLabel;
     btn.className = 'btn-primary ' + ((opts && opts.variant) || 'btn-danger');
     document.getElementById('modal-confirm').classList.add('visible');
   });
@@ -1033,7 +1034,7 @@ function renderGsEngineerSpecializations() {
       controls.appendChild(down);
     }
     const remove = document.createElement('button');
-    remove.type = 'button'; remove.textContent = '×'; remove.title = 'Remove';
+    remove.type = 'button'; remove.textContent = '×'; remove.title = 'Delete';
     remove.onclick = function () { gsEngineerRemoveSpecialization(idx); };
     controls.appendChild(remove);
     li.appendChild(controls);
