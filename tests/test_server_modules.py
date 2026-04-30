@@ -380,15 +380,32 @@ prompt: |
             [{'message': 'archived progress'}],
         )
 
-    def test_engineer_journal_snapshot_command_returns_group_payloads(self):
+    def test_engineer_journal_snapshot_command_returns_author_payloads(self):
         state = self.state_mod.MatrixState()
         state.groups['g'] = []
+        state.agents['eng-a'] = self.state_mod.AgentCell(
+            id='eng-a',
+            name='Engineer A',
+            group='g',
+            kind='engineer',
+        )
+        state.agents['eng-b'] = self.state_mod.AgentCell(
+            id='eng-b',
+            name='Engineer B',
+            group='g',
+            kind='engineer',
+        )
         state.engineer_worklog['g'] = [
             {'id': 2, 'entry': 'new'},
             {'id': 1, 'entry': 'old'},
         ]
-        state.journal_read = lambda group, limit=20, **_kwargs: [
-            {'id': 1, 'group': group, 'entry': f'limit={limit}'},
+        state.journal_read = lambda group, limit=20, **kwargs: [
+            {
+                'id': 1,
+                'group': group,
+                'entry': f"author={kwargs.get('author_cell_id')} limit={limit}",
+                'author_cell_id': kwargs.get('author_cell_id'),
+            },
         ]
 
         async def run():
@@ -408,7 +425,20 @@ prompt: |
         self.assertEqual(result['group'], 'g')
         self.assertEqual(
             result['engineer_journal'],
-            {'g': [{'id': 1, 'group': 'g', 'entry': 'limit=7'}]},
+            {
+                'eng-a': [{
+                    'id': 1,
+                    'group': 'g',
+                    'entry': 'author=eng-a limit=7',
+                    'author_cell_id': 'eng-a',
+                }],
+                'eng-b': [{
+                    'id': 1,
+                    'group': 'g',
+                    'entry': 'author=eng-b limit=7',
+                    'author_cell_id': 'eng-b',
+                }],
+            },
         )
         self.assertEqual(
             result['engineer_worklog'],

@@ -239,12 +239,12 @@ test('_compactHandleLazyResponse merges archived_tasks and engineer_journal_snap
   run(context, `_compactHandleLazyResponse({
     type: 'engineer_journal_snapshot',
     group: 'alpha',
-    engineer_journal: { alpha: [{ id: 1, entry: 'j1' }] },
+    engineer_journal: { 'eng-a': [{ id: 1, entry: 'j1', author_cell_id: 'eng-a' }] },
     engineer_worklog: { alpha: [{ id: 2, entry: 'w1' }] },
     engineer_streams: { alpha: { count: 3, items: [] } }
   })`);
-  assertPlainEqual(sandbox.state.engineer_journal.alpha,
-    [{ id: 1, entry: 'j1' }]);
+  assertPlainEqual(sandbox.state.engineer_journal['eng-a'],
+    [{ id: 1, entry: 'j1', author_cell_id: 'eng-a' }]);
   assertPlainEqual(sandbox.state.engineer_worklog.alpha,
     [{ id: 2, entry: 'w1' }]);
   assertPlainEqual(sandbox.state.engineer_streams.alpha,

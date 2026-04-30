@@ -283,12 +283,23 @@ class CompactSnapshotConsumerTests(unittest.TestCase):
         # Default filter must be 'pending' per the contract.
         self.assertEqual(state.db.status_filter, "pending")
 
-    def test_engineer_journal_round_trip_returns_group_payload(self):
+    def test_engineer_journal_round_trip_returns_author_payload(self):
         state = self.state_mod.MatrixState()
         state.groups["alpha"] = []
+        state.agents["eng-a"] = self.state_mod.AgentCell(
+            id="eng-a",
+            name="Engineer A",
+            group="alpha",
+            kind="engineer",
+        )
         state.engineer_worklog["alpha"] = [{"id": 1, "entry": "w1"}]
-        state.journal_read = lambda group, limit=20, **_kw: [
-            {"id": 1, "group": group, "entry": f"limit={limit}"},
+        state.journal_read = lambda group, limit=20, **kw: [
+            {
+                "id": 1,
+                "group": group,
+                "entry": f"author={kw.get('author_cell_id')} limit={limit}",
+                "author_cell_id": kw.get("author_cell_id"),
+            },
         ]
 
         async def run():
@@ -307,8 +318,13 @@ class CompactSnapshotConsumerTests(unittest.TestCase):
         self.assertEqual(result["type"], "engineer_journal_snapshot")
         self.assertEqual(result["group"], "alpha")
         self.assertEqual(
-            result["engineer_journal"]["alpha"],
-            [{"id": 1, "group": "alpha", "entry": "limit=5"}],
+            result["engineer_journal"]["eng-a"],
+            [{
+                "id": 1,
+                "group": "alpha",
+                "entry": "author=eng-a limit=5",
+                "author_cell_id": "eng-a",
+            }],
         )
         self.assertEqual(
             result["engineer_worklog"]["alpha"],

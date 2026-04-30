@@ -10236,6 +10236,88 @@ test('architect_journal_append for non-focused architect does NOT invalidate eng
     'architect_journal_append for non-focused architect should not refresh engineer panel');
 });
 
+test('journal_append for a different engineer in the same group does NOT invalidate focused engineer panel', () => {
+  const { context, sandbox, flushRaf } = createStandaloneDeltaBatchHarness(['engineer']);
+  runInContext(context, `
+    selectedAgentId = 'eng-b';
+    focusedItemId = 'eng-b';
+    if (!state.agents) state.agents = {};
+    state.agents['eng-a'] = { id: 'eng-a', group: 'alpha', kind: 'engineer', cell_type: 'agent' };
+    state.agents['eng-b'] = { id: 'eng-b', group: 'alpha', kind: 'engineer', cell_type: 'agent' };
+  `);
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'journal_append',
+      id: 1,
+      group: 'alpha',
+      author_cell_id: 'eng-a',
+      type: 'observation',
+      entry: 'A only',
+      timestamp: 1,
+    }],
+  });
+  flushRaf();
+  assert.equal(sandbox.renderCalls.engineer, 0,
+    'same-group journal append for non-focused engineer must not refresh panel');
+  assert.deepEqual(jsonValue(context, `state.engineer_journal['eng-a']`), [{
+    id: 1,
+    group: 'alpha',
+    author_cell_id: 'eng-a',
+    type: 'observation',
+    entry: 'A only',
+    timestamp: 1,
+  }]);
+
+  context._handleDelta({
+    seq: 2,
+    ops: [{
+      op: 'journal_append',
+      id: 2,
+      group: 'alpha',
+      author_cell_id: 'eng-b',
+      type: 'plan',
+      entry: 'B focused',
+      timestamp: 2,
+    }],
+  });
+  flushRaf();
+  assert.equal(sandbox.renderCalls.engineer, 1,
+    'focused engineer journal append should refresh panel');
+});
+
+test('journal_delete invalidates only the author-matching focused engineer panel', () => {
+  const { context, sandbox, flushRaf } = createStandaloneDeltaBatchHarness(['engineer']);
+  runInContext(context, `
+    selectedAgentId = 'eng-b';
+    focusedItemId = 'eng-b';
+    if (!state.agents) state.agents = {};
+    state.agents['eng-a'] = { id: 'eng-a', group: 'alpha', kind: 'engineer', cell_type: 'agent' };
+    state.agents['eng-b'] = { id: 'eng-b', group: 'alpha', kind: 'engineer', cell_type: 'agent' };
+    state.engineer_journal = {
+      'eng-a': [{ id: 1, group: 'alpha', author_cell_id: 'eng-a', entry: 'A' }],
+      'eng-b': [{ id: 2, group: 'alpha', author_cell_id: 'eng-b', entry: 'B' }]
+    };
+  `);
+  context._handleDelta({
+    seq: 1,
+    ops: [{ op: 'journal_delete', group: 'alpha', id: 1, author_cell_id: 'eng-a' }],
+  });
+  flushRaf();
+  assert.equal(sandbox.renderCalls.engineer, 0,
+    'non-focused engineer delete must not refresh panel');
+  assert.deepEqual(jsonValue(context, `state.engineer_journal['eng-a']`), []);
+
+  context._handleDelta({
+    seq: 2,
+    ops: [{ op: 'journal_delete', group: 'alpha', id: 2, author_cell_id: 'eng-b' }],
+  });
+  flushRaf();
+  assert.equal(sandbox.renderCalls.engineer, 1,
+    'focused engineer delete should refresh panel');
+  assert.deepEqual(jsonValue(context, `state.engineer_journal['eng-b']`), []);
+});
+
 test('engineer_streams_update for cross-group engineer does NOT invalidate focused engineer panel (LOOM:236 v7)', () => {
   // P0 LOOM:236 v7 regression: high-frequency stream/digest/stats deltas
   // for engineers in OTHER groups used to clobber the focused engineer

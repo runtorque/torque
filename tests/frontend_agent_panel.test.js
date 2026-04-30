@@ -493,13 +493,16 @@ test('_resolveFocusedAgent resolves the user principal nav id to a virtual user 
   assert.equal(agent.id, 'principal:alpha:user');
 });
 
-test('engineer panel renders journal, events, and worklog from the focused engineer group', () => {
+test('engineer panel renders journal for the focused engineer only', () => {
   const { context, panel } = createHarness();
   context.state.group_settings = { alpha: { engineer_agent_id: 'engineer-1' } };
   context.state.agents['engineer-1'] = { id: 'engineer-1', name: 'Engineer', group: 'alpha' };
   context.state.agent_digest_settings['eng-1'] = { agent_id: 'eng-1', paused: false };
-  context.state.engineer_journal.alpha = [
-    { id: 2, type: 'decision', entry: 'Approved the refactor', timestamp: 50 },
+  context.state.engineer_journal['eng-1'] = [
+    { id: 2, type: 'decision', entry: 'Approved the refactor', timestamp: 50, author_cell_id: 'eng-1' },
+  ];
+  context.state.engineer_journal['eng-2'] = [
+    { id: 3, type: 'decision', entry: 'Other engineer note', timestamp: 51, author_cell_id: 'eng-2' },
   ];
   context.state.digest_buffer_stats['eng-1'] = {
     agent_id: 'eng-1',
@@ -543,6 +546,7 @@ test('engineer panel renders journal, events, and worklog from the focused engin
 
   context.renderAgentPanel();
   assert.match(panel.innerHTML, /Approved the refactor/);
+  assert.doesNotMatch(panel.innerHTML, /Other engineer note/);
   assert.match(panel.innerHTML, /Group: alpha \(group-wide\)/);
 
   context.agentPanelSelectTab('events');
@@ -1812,7 +1816,7 @@ test('engineer journal caps at 20 entries and exposes a Load more button', () =>
       timestamp: 1000 + i,
     });
   }
-  context.state.engineer_journal.alpha = entries;
+  context.state.engineer_journal['eng-journal-cap'] = entries;
 
   context.renderAgentPanel();
 
@@ -1821,7 +1825,7 @@ test('engineer journal caps at 20 entries and exposes a Load more button', () =>
   assert.equal(itemCount, 20, 'Only 20 journal entries render initially');
   assert.match(html, /Load 5 older entries/);
   assert.match(html, /data-agent-panel-section="journal"/);
-  assert.match(html, /data-agent-panel-section-agent="alpha"/);
+  assert.match(html, /data-agent-panel-section-agent="eng-journal-cap"/);
 });
 
 test('engineer journal Load more appends 20 more entries without a re-fetch', () => {
@@ -1835,7 +1839,7 @@ test('engineer journal Load more appends 20 more entries without a re-fetch', ()
       timestamp: 1000 + i,
     });
   }
-  context.state.engineer_journal.alpha = entries;
+  context.state.engineer_journal['eng-journal-more'] = entries;
 
   context.renderAgentPanel();
   const sendsBefore = sendCalls.length;
@@ -1845,7 +1849,7 @@ test('engineer journal Load more appends 20 more entries without a re-fetch', ()
   );
 
   vm.runInContext(
-    `agentPanelLoadMoreSection(null, 'journal', 'alpha');`,
+    `agentPanelLoadMoreSection(null, 'journal', 'eng-journal-more');`,
     context,
   );
 
@@ -1874,7 +1878,7 @@ test('engineer journal pager grows to anchor around newly arriving entries', () 
       timestamp: 1000 + i,
     });
   }
-  context.state.engineer_journal.alpha = existing.slice();
+  context.state.engineer_journal['eng-journal-anchor'] = existing.slice();
 
   context.renderAgentPanel();
   let html = panel.innerHTML;
@@ -1890,7 +1894,7 @@ test('engineer journal pager grows to anchor around newly arriving entries', () 
     { id: 3100, type: 'decision', entry: 'Fresh decision', timestamp: 9000 },
     { id: 3101, type: 'plan', entry: 'Fresh plan', timestamp: 9001 },
   ];
-  context.state.engineer_journal.alpha = fresh.concat(existing);
+  context.state.engineer_journal['eng-journal-anchor'] = fresh.concat(existing);
 
   context.renderAgentPanel();
   html = panel.innerHTML;

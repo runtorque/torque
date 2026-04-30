@@ -4690,7 +4690,11 @@ def _handle_archived_tasks_command(data: dict, state: MatrixState) -> dict:
 async def _handle_engineer_journal_snapshot_command(
         data: dict,
         state: MatrixState) -> dict:
-    """Return deferred per-group Engineer journal/worklog/stream snapshots."""
+    """Return deferred Engineer journal/worklog/stream snapshots.
+
+    Journal entries are author-keyed (`engineer_journal[cell_id]`) while the
+    still group-wide worklog/stream slices remain keyed by group.
+    """
     group = str(data.get("group", "") or "").strip()
     if not group:
         return {"type": "error", "message": "group required"}
@@ -4719,12 +4723,27 @@ async def _handle_engineer_journal_snapshot_command(
         except Exception:
             log.exception("Failed to load engineer streams for %s", group)
 
+    engineer_id = str(
+        data.get("engineer_id") or data.get("cell_id") or ""
+    ).strip()
+    if engineer_id:
+        engineer_journal = {
+            engineer_id: state.journal_read(
+                group,
+                limit=limit,
+                author_cell_id=engineer_id,
+            ),
+        }
+    else:
+        engineer_journal = state.engineer_journal_snapshot_by_author(
+            group=group,
+            limit=limit,
+        )
+
     return {
         "type": "engineer_journal_snapshot",
         "group": group,
-        "engineer_journal": {
-            group: state.journal_read(group, limit=limit),
-        },
+        "engineer_journal": engineer_journal,
         "engineer_worklog": {
             group: [
                 dict(entry)
@@ -12136,12 +12155,24 @@ async def main(connection=None):
                 group = data.get("group", "")
                 entry_id = data.get("entry_id", 0)
                 if entry_id and db:
+                    author_cell_id = str(
+                        data.get("author_cell_id", "") or ""
+                    ).strip()
+                    if not author_cell_id:
+                        row = db._conn.execute(
+                            "SELECT author_cell_id FROM engineer_journal "
+                            "WHERE id=? AND group_name=?",
+                            (entry_id, group),
+                        ).fetchone()
+                        if row:
+                            author_cell_id = str(row[0] or "").strip()
                     db._conn.execute(
                         "DELETE FROM engineer_journal WHERE id=? "
                         "AND group_name=?", (entry_id, group))
                     db._conn.commit()
                     state._emit("journal_delete",
-                                group=group, id=entry_id)
+                                group=group, id=entry_id,
+                                author_cell_id=author_cell_id)
                 result = {"type": "ok"}
 
             elif cmd == "engineer_update_settings":

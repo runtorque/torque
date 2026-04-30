@@ -104,7 +104,7 @@ test('[toolbelt] engineer journal virtualization caps at 20 entries and renders 
     entries.push({ id: 1000 + i, type: 'observation',
       entry: 'Journal entry ' + i, timestamp: 1000 + i });
   }
-  context.state.engineer_journal.alpha = entries;
+  context.state.engineer_journal['eng-tb-virt'] = entries;
 
   context.renderAgentPanel();
 
@@ -125,7 +125,7 @@ test('[toolbelt] engineer journal Load older grows the window without a server f
     entries.push({ id: 2000 + i, type: 'observation',
       entry: 'J ' + i, timestamp: 1000 + i });
   }
-  context.state.engineer_journal.alpha = entries;
+  context.state.engineer_journal['eng-tb-pager'] = entries;
 
   context.renderAgentPanel();
   assert.equal(
@@ -135,7 +135,7 @@ test('[toolbelt] engineer journal Load older grows the window without a server f
   const sendsBefore = sendCalls.length;
 
   vm.runInContext(
-    `agentPanelLoadMoreSection(null, 'journal', 'alpha');`,
+    `agentPanelLoadMoreSection(null, 'journal', 'eng-tb-pager');`,
     context,
   );
 
@@ -152,11 +152,11 @@ test('[toolbelt] engineer journal pager grows to preserve anchor across WS delta
     existing.push({ id: 3000 + i, type: 'observation',
       entry: 'Existing ' + i, timestamp: 1000 + i });
   }
-  context.state.engineer_journal.alpha = existing.slice();
+  context.state.engineer_journal['eng-tb-anchor'] = existing.slice();
   context.renderAgentPanel();
   assert.ok(panel.innerHTML.indexOf('Existing 5') >= 0);
 
-  context.state.engineer_journal.alpha = [
+  context.state.engineer_journal['eng-tb-anchor'] = [
     { id: 3100, type: 'decision', entry: 'Fresh 1', timestamp: 9000 },
     { id: 3101, type: 'plan', entry: 'Fresh 2', timestamp: 9001 },
   ].concat(existing);

@@ -294,10 +294,14 @@ function _compactApplyEngineerJournalSnapshot(msg) {
   if (!state.engineer_journal) state.engineer_journal = {};
   if (!state.engineer_worklog) state.engineer_worklog = {};
   if (!state.engineer_streams) state.engineer_streams = {};
-  var journal = (msg.engineer_journal && msg.engineer_journal[g]) || [];
+  // engineer_journal is keyed by author_cell_id; worklog/streams remain
+  // keyed by group for their group-wide surfaces.
+  var journalByAuthor = (msg && msg.engineer_journal) || {};
   var worklog = (msg.engineer_worklog && msg.engineer_worklog[g]) || [];
   var streams = msg.engineer_streams && msg.engineer_streams[g];
-  state.engineer_journal[g] = journal.slice();
+  for (var authorId in journalByAuthor) {
+    state.engineer_journal[authorId] = (journalByAuthor[authorId] || []).slice();
+  }
   state.engineer_worklog[g] = worklog.slice();
   if (streams !== undefined) state.engineer_streams[g] = streams;
 }
