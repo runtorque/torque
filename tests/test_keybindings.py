@@ -450,8 +450,10 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             msg,
             'Remove "Worker" and its 1 terminal(s)? '
-            'Its worktree has unmerged commits and has uncommitted changes. '
-            'All changes will be lost.',
+            'They will be scheduled for permanent deletion in 7 days and can '
+            'be restored from Recently deleted until then. '
+            'Its worktree has unmerged commits and has uncommitted changes '
+            'and will be preserved during the restore window.',
         )
 
     async def test_build_close_confirmation_message_describes_shared_worktree(self):
@@ -479,7 +481,9 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             msg,
-            'Remove "Worker"? Its worktree is shared with "Peer" and will be kept.',
+            'Remove "Worker"? It will be scheduled for permanent deletion '
+            'in 7 days and can be restored from Recently deleted until then. '
+            'Its worktree is shared with "Peer" and will be kept.',
         )
 
     async def test_action_shortcuts_call_server_handlers_without_ws_clients(self):
