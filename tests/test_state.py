@@ -1769,21 +1769,16 @@ class MatrixStatePauseBroadcastTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ops[4]["entry"]["agent_id"], "worker-1")
         self.assertEqual(ops[5]["agent_id"], "eng-1")
 
-    async def test_tombstone_and_restore_upserts_bypass_pause_queue(self):
-        state = self._make_state(paused=True)
+    async def test_tombstone_and_restore_upserts_emit_normally(self):
+        # Post-LOOM:294, pause no longer suppresses broadcast at emit time —
+        # tombstone/restore upserts simply reach _delta_ops like any other
+        # agent_upsert. Lock that lifecycle behavior down here.
+        state = self._make_state(engineer_paused=True)
         worker = state.agents["worker-1"]
 
-        # A normal worker snapshot still respects pause suppression.
-        worker.activity_detail = "queued stale snapshot"
-        state._emit_agent(worker)
-        self.assertEqual(state._delta_ops, [])
-        self.assertEqual(len(state._paused_subagent_delta_ops), 1)
-        self.assertEqual(state._paused_subagent_delta_ops[0]["id"], worker.id)
-        self.assertEqual(state._paused_subagent_delta_ops[0]["deleted_at"], 0.0)
-
+        state._delta_ops.clear()
         state.remove_agent(worker.id)
 
-        self.assertEqual(state._paused_subagent_delta_ops, [])
         self.assertEqual(len(state._delta_ops), 1)
         tombstone_op = state._delta_ops[0]
         self.assertEqual(tombstone_op["op"], "agent_upsert")
@@ -1793,7 +1788,6 @@ class MatrixStatePauseBroadcastTests(unittest.IsolatedAsyncioTestCase):
         state._delta_ops.clear()
         state.restore_agent(worker.id)
 
-        self.assertEqual(state._paused_subagent_delta_ops, [])
         self.assertEqual(len(state._delta_ops), 1)
         restore_op = state._delta_ops[0]
         self.assertEqual(restore_op["op"], "agent_upsert")
