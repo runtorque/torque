@@ -155,10 +155,9 @@ test('focused architect hired-engineers tab nests hired engineers and workers on
   context.agentPanelSelectTab('hired_engineers');
 
   assert.match(panel.innerHTML, /Architect: Productmind · Group: loom/);
-  assert.match(panel.innerHTML, /agent-panel-hierarchy-breadcrumb/);
-  assert.match(panel.innerHTML, /agent-panel-hierarchy-crumb agent-panel-hierarchy-crumb-architect current/);
-  assert.match(panel.innerHTML, /Hired engineers<\/span><span class="agent-panel-hierarchy-count">1<\/span>/);
-  assert.match(panel.innerHTML, /Workers<\/span><span class="agent-panel-hierarchy-count">1<\/span>/);
+  assert.doesNotMatch(panel.innerHTML, /agent-panel-hierarchy-breadcrumb/);
+  assert.match(panel.innerHTML, /Hired engineers<\/span><span class="engineers-roster-count">1<\/span>/);
+  assert.match(panel.innerHTML, /engineers-roster-header[\s\S]*<\/div><div class="engineers-roster-list/);
   assert.match(panel.innerHTML, /Alice/);
   assert.match(panel.innerHTML, /Worker A/);
   assert.doesNotMatch(panel.innerHTML, /Bob/);

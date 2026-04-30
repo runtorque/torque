@@ -2364,33 +2364,11 @@ function _agentPanelArchitectHiredEngineers(agent) {
     var bName = String((b && (b.name || b.slug || b.id)) || '');
     return aName.localeCompare(bName);
   });
-  var workerCount = _agentPanelHierarchyWorkerCount(group, engineers);
-
   var html = '<div class="engineers-roster">';
   html += '<div class="engineers-roster-header">';
   html += '<span class="engineers-roster-title">Hired engineers</span>';
   html += '<span class="engineers-roster-count">' + engineers.length + '</span>';
   html += '</div>';
-  html += _agentPanelHierarchyBreadcrumb([
-    {
-      role: 'architect',
-      label: _agentPanelAgentDisplayName(agent, 'Architect'),
-      count: '',
-      current: true,
-    },
-    {
-      role: 'engineer',
-      label: 'Hired engineers',
-      count: engineers.length,
-      current: false,
-    },
-    {
-      role: 'worker',
-      label: 'Workers',
-      count: workerCount,
-      current: false,
-    },
-  ]);
   if (!engineers.length) {
     html += '<div class="engineers-roster-empty">No hired engineers yet.</div>';
     html += '</div>';
