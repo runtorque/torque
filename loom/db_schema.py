@@ -222,8 +222,7 @@ CREATE TABLE IF NOT EXISTS ui_state (
 CREATE TABLE IF NOT EXISTS global_settings (
     key               TEXT PRIMARY KEY,
     value             TEXT NOT NULL,
-    xterm_scrollback  INTEGER NOT NULL DEFAULT 2000,
-    pause_suppresses_subagent_messages INTEGER NOT NULL DEFAULT 1
+    xterm_scrollback  INTEGER NOT NULL DEFAULT 2000
 );
 
 CREATE TABLE IF NOT EXISTS panel_events (
@@ -910,18 +909,6 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
         conn.execute(
             "ALTER TABLE global_settings ADD COLUMN "
             "xterm_scrollback INTEGER NOT NULL DEFAULT 2000")
-        conn.commit()
-    # Migrate: add pause/subagent suppression setting cache column. Global
-    # settings remain key/value rows; this keeps the schema migration explicit.
-    try:
-        conn.execute(
-            "SELECT pause_suppresses_subagent_messages "
-            "FROM global_settings LIMIT 0")
-    except sqlite3.OperationalError:
-        conn.execute(
-            "ALTER TABLE global_settings ADD COLUMN "
-            "pause_suppresses_subagent_messages "
-            "INTEGER NOT NULL DEFAULT 1")
         conn.commit()
     # Migrate: add action_name and action_vars columns to board_tasks
     for col, default in [("action_name", "''"),

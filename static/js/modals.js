@@ -1743,10 +1743,6 @@ function _showGlobalSettingsModal(data) {
     s.focus_new_tabs !== undefined ? s.focus_new_tabs : true;
   document.getElementById('gls-focus-on-click').checked =
     s.focus_on_click || false;
-  var pauseSuppressEl = document.getElementById('gls-pause-suppresses-subagent-messages');
-  if (pauseSuppressEl) {
-    pauseSuppressEl.checked = s.pause_suppresses_subagent_messages !== false;
-  }
   document.getElementById('gls-max-event-log').value =
     s.max_event_log !== undefined ? s.max_event_log : 500;
   document.getElementById('gls-xterm-scrollback').value =
@@ -1927,11 +1923,6 @@ function submitGlobalSettings() {
     filter_by_window: document.getElementById('gls-filter-window').checked,
     focus_new_tabs: document.getElementById('gls-focus-new-tabs').checked,
     focus_on_click: document.getElementById('gls-focus-on-click').checked,
-    pause_suppresses_subagent_messages: (
-      document.getElementById('gls-pause-suppresses-subagent-messages')
-      ? document.getElementById('gls-pause-suppresses-subagent-messages').checked
-      : true
-    ),
     xterm_scrollback: xtermScrollback,
     default_lanes: lanes,
     keybindings: _glsKeybindings,
