@@ -71,6 +71,9 @@ function _selectionAgentRootId(id) {
 
 function _syncPanelsAfterSelectionChange(prevSelectedId) {
   if (prevSelectedId === selectedAgentId) return;
+  if (typeof refreshSelectedAgentFocus === 'function') {
+    refreshSelectedAgentFocus(prevSelectedId || '');
+  }
   var standaloneVisible = typeof _standaloneVisiblePanelApps === 'function'
     && _standalonePanelsEnabled()
     && _standaloneVisiblePanelApps().length > 0;
@@ -95,8 +98,9 @@ function focusAgent(id) {
   _updateSelectedAgentContext(id);
   selectedTerminalId = id;
   _syncPanelsAfterSelectionChange(prevSelectedId);
-  if (typeof renderTerminalWorkspace === 'function' && isEmbeddedTerminalMode()) {
-    render();
+  if (typeof renderAgentFocusPanel === 'function') renderAgentFocusPanel();
+  if (typeof renderTerminalWorkspace === 'function' && typeof isEmbeddedTerminalMode === 'function' && isEmbeddedTerminalMode()) {
+    renderTerminalWorkspace();
     if (typeof focusEmbeddedTerminalWorkspace === 'function') {
       focusEmbeddedTerminalWorkspace(true);
     }
@@ -108,13 +112,13 @@ function onAgentClick(id) {
   var prevSelectedId = selectedAgentId;
   focusedItemId = id;
   selectedTerminalId = id;
-  if (typeof renderTerminalWorkspace === 'function' && isEmbeddedTerminalMode()) {
+  if (typeof renderTerminalWorkspace === 'function' && typeof isEmbeddedTerminalMode === 'function' && isEmbeddedTerminalMode()) {
     _updateSelectedAgentContext(id);
-    render();
+    _syncPanelsAfterSelectionChange(prevSelectedId);
+    renderTerminalWorkspace();
     if (typeof focusEmbeddedTerminalWorkspace === 'function') {
       focusEmbeddedTerminalWorkspace(true);
     }
-    _syncPanelsAfterSelectionChange(prevSelectedId);
     send({ cmd: 'focus_agent', id });
     return;
   }
@@ -130,7 +134,6 @@ function onAgentClick(id) {
     if (state.global_settings && state.global_settings.focus_on_click) {
       send({ cmd: 'focus_agent', id });
     }
-    render();
     _syncPanelsAfterSelectionChange(prevSelectedId);
   }
 }
@@ -141,13 +144,14 @@ function onAgentDblClick(id) {
   _updateSelectedAgentContext(id);
   selectedTerminalId = id;
   send({ cmd: 'focus_agent', id });
-  render();
+  _syncPanelsAfterSelectionChange(prevSelectedId);
+  if (typeof renderTerminalWorkspace === 'function') renderTerminalWorkspace();
   if (typeof renderTerminalWorkspace === 'function'
+      && typeof isEmbeddedTerminalMode === 'function'
       && isEmbeddedTerminalMode()
       && typeof focusEmbeddedTerminalWorkspace === 'function') {
     focusEmbeddedTerminalWorkspace(true);
   }
-  _syncPanelsAfterSelectionChange(prevSelectedId);
 }
 
 async function removeAgent(id) {

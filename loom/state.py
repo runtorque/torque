@@ -1371,6 +1371,7 @@ class MatrixState:
         # architect's engineers + their workers.
         self.selected_principal_id: str = ""
         self.standalone_panel_layout: dict = {}
+        self.engineer_panel_split_fraction: float = 0.30
         self.events_dismissed_attention: dict[str, float] = {}
         self.board_filters_by_group: dict[str, dict] = {}
         self.board_saved_views_by_group: dict[str, list] = {}
@@ -1909,6 +1910,7 @@ class MatrixState:
             "board_panel_height": self.board_panel_height,
             "selected_principal_id": self.selected_principal_id,
             "standalone_panel_layout": self.standalone_panel_layout,
+            "engineer_panel_split_fraction": self.engineer_panel_split_fraction,
             "events_dismissed_attention": self.events_dismissed_attention,
             "board_filters_by_group": self.board_filters_by_group,
             "board_saved_views_by_group": self.board_saved_views_by_group,
@@ -2046,6 +2048,7 @@ class MatrixState:
             "board_panel_height": self.board_panel_height,
             "selected_principal_id": self.selected_principal_id,
             "standalone_panel_layout": self.standalone_panel_layout,
+            "engineer_panel_split_fraction": self.engineer_panel_split_fraction,
             "events_dismissed_attention": self.events_dismissed_attention,
             "board_filters_by_group": self.board_filters_by_group,
             "board_saved_views_by_group": self.board_saved_views_by_group,
@@ -2816,6 +2819,12 @@ class MatrixState:
             self.standalone_panel_layout = data.get(
                 "standalone_panel_layout", {}
             ) or {}
+            try:
+                self.engineer_panel_split_fraction = float(
+                    data.get("engineer_panel_split_fraction", 0.30) or 0.30
+                )
+            except (TypeError, ValueError):
+                self.engineer_panel_split_fraction = 0.30
             self.events_dismissed_attention = data.get(
                 "events_dismissed_attention", {}
             ) or {}

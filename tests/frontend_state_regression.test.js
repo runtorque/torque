@@ -4629,6 +4629,7 @@ test('decision and pending-hire deltas invalidate the main surface', () => {
     events: false,
     engineer: true,
     templates: false,
+    focus: true,
   });
   assert.deepEqual(jsonValue(context, `state.pending_hires["hire-1"]`), {
     id: 'hire-1',
@@ -4657,6 +4658,7 @@ test('decision and pending-hire deltas invalidate the main surface', () => {
     events: false,
     engineer: true,
     templates: false,
+    focus: true,
   });
   assert.equal(
     jsonValue(context, `Object.prototype.hasOwnProperty.call(state.pending_hires || {}, "hire-1")`),
@@ -14967,6 +14969,191 @@ test('full state toggles embedded runtime body class', () => {
   `);
 
   assert.equal(document.body.classList.contains('runtime-embedded'), false);
+});
+
+
+function attachAgentSplitDom(main, document, focusHtml) {
+  const split = new FakeElement('agent-split');
+  const grid = new FakeElement('agent-grid-pane');
+  const handle = new FakeElement('agent-focus-resizer');
+  const focus = new FakeElement('agent-focus-panel');
+  const focusScroll = new FakeElement('agent-focus-panel-scroll');
+  split.getBoundingClientRect = () => ({ top: 0, bottom: 608, left: 0, right: 320, width: 320, height: 608 });
+  handle.getBoundingClientRect = () => ({ top: 300, bottom: 308, left: 0, right: 320, width: 320, height: 8 });
+  focus.getBoundingClientRect = () => ({ top: 428, bottom: 608, left: 0, right: 320, width: 320, height: 180 });
+  focus.offsetHeight = 180;
+  focusScroll.innerHTML = focusHtml || '';
+  focusScroll._loomLastHtml = focusHtml || '';
+  split.appendChild(grid);
+  split.appendChild(handle);
+  split.appendChild(focus);
+  focus.appendChild(focusScroll);
+  main.setQuerySelector('[data-agent-split]', split);
+  main.setQuerySelector('[data-agent-grid-pane]', grid);
+  main.setQuerySelector('[data-agent-focus-resizer]', handle);
+  main.setQuerySelector('[data-agent-focus-panel]', focus);
+  main.setQuerySelector('[data-agent-focus-scroll]', focusScroll);
+  main.setQuerySelector('.agents-grid-pane', grid);
+  main.setQuerySelector('.agent-focus-panel-scroll', focusScroll);
+  document.register('agent-grid-pane', grid);
+  document.register('agent-focus-resizer', handle);
+  document.register('agent-focus-panel', focus);
+  return { split, grid, handle, focus, focusScroll };
+}
+
+test('agent focus split renders in toolbelt and standalone modes', () => {
+  for (const runtime of [{ mode: 'toolbelt' }, { mode: 'standalone', embedded_terminal: true }]) {
+    const { context, document, sandbox } = createMainRenderHarness();
+    const main = document.getElementById('main');
+    sandbox.state.runtime = runtime;
+    sandbox.state.groups = { alpha: [] };
+    sandbox.state.group_settings = { alpha: { collapsed_default: false } };
+    sandbox.state.children = {};
+    sandbox.state.agents = {};
+
+    runInContext(context, `render();`);
+
+    assert.match(main.innerHTML, /data-agent-split/);
+    assert.match(main.innerHTML, /id="agent-grid-pane"/);
+    assert.match(main.innerHTML, /id="agent-focus-resizer"[^>]*role="separator"[^>]*aria-orientation="horizontal"/);
+    assert.match(main.innerHTML, /id="agent-focus-panel"/);
+    assert.match(main.innerHTML, /Select an agent to view details and terminals\./);
+  }
+});
+
+test('agent focus selection updates focus panel without rewriting the grid shell', () => {
+  const { context, document, sandbox } = createMainGridDragHarness();
+  const main = document.getElementById('main');
+  let writes = 0;
+  Object.defineProperty(main, 'innerHTML', {
+    configurable: true,
+    get() { return this._innerHTML || ''; },
+    set(value) { this._innerHTML = value; writes += 1; this.scrollTop = 0; },
+  });
+  sandbox.state.groups = { alpha: ['agent-1', 'agent-2'] };
+  sandbox.state.group_settings = { alpha: { collapsed_default: false } };
+  sandbox.state.children = { 'agent-1': [], 'agent-2': [] };
+  sandbox.state.agents = {
+    'agent-1': { id: 'agent-1', name: 'Agent One', group: 'alpha', cell_type: 'agent', status: 'running' },
+    'agent-2': { id: 'agent-2', name: 'Agent Two', group: 'alpha', cell_type: 'agent', status: 'running' },
+  };
+
+  runInContext(context, `selectedAgentId = 'agent-1'; selectedTerminalId = 'agent-1'; render();`);
+  const initialWrites = writes;
+  main.scrollTop = 77;
+  const parts = attachAgentSplitDom(main, document, main._loomLastFocusHtml || '');
+
+  runInContext(context, `onAgentClick('agent-2');`);
+
+  assert.equal(writes, initialWrites, 'focus change must not rewrite #main/grid HTML');
+  assert.equal(main.scrollTop, 77);
+  assert.match(parts.focusScroll.innerHTML, /Agent Two/);
+  assert.equal(jsonValue(context, `selectedAgentId`), 'agent-2');
+});
+
+test('focus surface gates ignore non-focused traffic and preserve focus-panel scroll', () => {
+  const { sandbox, document } = createSandbox({ updateEventsAttentionBadge() {} });
+  document.register('main');
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/ws.js');
+  loadScript(context, 'static/js/render.js');
+  const main = document.getElementById('main');
+  sandbox.state.runtime = { mode: 'standalone', embedded_terminal: true };
+  sandbox.state.groups = { alpha: ['agent-1', 'agent-2'] };
+  sandbox.state.group_settings = { alpha: { collapsed_default: false } };
+  sandbox.state.children = { 'agent-1': [], 'agent-2': [] };
+  sandbox.state.agents = {
+    'agent-1': { id: 'agent-1', name: 'Focused', group: 'alpha', cell_type: 'agent', status: 'running', activity_detail: 'before' },
+    'agent-2': { id: 'agent-2', name: 'Other', group: 'alpha', cell_type: 'agent', status: 'running' },
+  };
+  runInContext(context, `
+    _standalonePanelsEnabled = function() { return true; };
+    _currentGroup = function() { return 'alpha'; };
+    selectedAgentId = 'agent-1';
+    selectedTerminalId = 'agent-1';
+    render();
+  `);
+  const parts = attachAgentSplitDom(main, document, main._loomLastFocusHtml || '');
+  parts.focusScroll.scrollTop = 91;
+
+  const nonFocusedAgent = runInContext(context, `_deltaSurfaceInvalidations([{ op: 'agent_upsert', id: 'agent-2', group: 'alpha', activity_detail: 'noise' }], [{ agent: state.agents['agent-2'], group: 'alpha' }])`);
+  assert.equal(!!nonFocusedAgent.focus, false);
+  assert.equal(nonFocusedAgent.main, true);
+  const nonFocusedEvent = runInContext(context, `_deltaSurfaceInvalidations([{ op: 'event_append', cell_id: 'agent-2', group: 'alpha' }], [{}])`);
+  assert.equal(!!nonFocusedEvent.focus, false);
+  const focusedEvent = runInContext(context, `_deltaSurfaceInvalidations([{ op: 'event_append', cell_id: 'agent-1', group: 'alpha' }], [{}])`);
+  assert.equal(focusedEvent.focus, true);
+  assert.equal(!!focusedEvent.main, false);
+
+  runInContext(context, `renderInvalidatedSurfaces({ focus: true });`);
+  assert.equal(parts.focusScroll.scrollTop, 91);
+});
+
+test('main-only grid updates do not clobber focused panel scroll', () => {
+  const { context, document, sandbox } = createMainGridDragHarness();
+  const main = document.getElementById('main');
+  let parts = null;
+  let mainWrites = 0;
+  Object.defineProperty(main, 'innerHTML', {
+    configurable: true,
+    get() { return this._innerHTML || ''; },
+    set(value) {
+      this._innerHTML = value;
+      mainWrites += 1;
+      if (parts) parts.focusScroll.scrollTop = 0;
+      this.children = [];
+    },
+  });
+  sandbox.state.runtime = { mode: 'standalone', embedded_terminal: true };
+  sandbox.state.groups = { alpha: ['agent-1', 'agent-2'] };
+  sandbox.state.group_settings = { alpha: { collapsed_default: false } };
+  sandbox.state.children = { 'agent-1': [], 'agent-2': [] };
+  sandbox.state.agents = {
+    'agent-1': { id: 'agent-1', name: 'Focused', group: 'alpha', cell_type: 'agent', status: 'running', activity_detail: 'reading' },
+    'agent-2': { id: 'agent-2', name: 'Other', group: 'alpha', cell_type: 'agent', status: 'running', activity_detail: 'before' },
+  };
+
+  runInContext(context, `
+    selectedAgentId = 'agent-1';
+    selectedTerminalId = 'agent-1';
+    render();
+  `);
+  const initialWrites = mainWrites;
+  parts = attachAgentSplitDom(main, document, main._loomLastFocusHtml || '');
+  parts.grid.innerHTML = main._loomLastGridHtml || '';
+  parts.focusScroll.scrollTop = 91;
+  const focusHtml = parts.focusScroll.innerHTML;
+
+  runInContext(context, `
+    state.agents['agent-2'].activity_detail = 'non-focused grid noise';
+    renderInvalidatedSurfaces({ main: true, focus: false });
+  `);
+
+  assert.equal(mainWrites, initialWrites, 'main-only grid rerender must not replace the split shell');
+  assert.equal(parts.focusScroll.scrollTop, 91);
+  assert.equal(parts.focusScroll.innerHTML, focusHtml);
+  assert.match(parts.grid.innerHTML, /non-focused grid noise/);
+});
+
+test('agent focus split resize clamps and persists a fraction once on mouseup', () => {
+  const { context, document, sandbox } = createMainRenderHarness();
+  const main = document.getElementById('main');
+  attachAgentSplitDom(main, document, '');
+
+  runInContext(context, `_agentFocusResizeStart({ clientY: 300, preventDefault: function() {} });`);
+  document.listeners.mousemove({ clientY: 120 });
+  assert.equal(sandbox.sendCalls.length, 0, 'dragging must not persist per pixel');
+  document.listeners.mouseup({});
+
+  assert.equal(sandbox.sendCalls.length, 1);
+  assert.equal(sandbox.sendCalls[0].cmd, 'ui_set_engineer_panel_split');
+  assert.ok(sandbox.sendCalls[0].fraction > 0.30);
+  assert.ok(sandbox.sendCalls[0].fraction <= 0.75);
+  assert.equal(jsonValue(context, `state.engineer_panel_split_fraction`), sandbox.sendCalls[0].fraction);
+
+  runInContext(context, `state.engineer_panel_split_fraction = 0.5; _agentFocusApplyPersistedSplit();`);
+  const focus = document.getElementById('agent-focus-panel');
+  assert.equal(focus.style.flexBasis, '304px');
 });
 
 test('embedded runtime reuses the shared group, cell, and terminal UI', () => {

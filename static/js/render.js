@@ -76,6 +76,158 @@ function _embeddedRuntimeEnabled() {
   return !!(state && state.runtime && state.runtime.embedded_terminal);
 }
 
+
+var AGENT_FOCUS_SPLIT_KEY = 'engineer_panel_split_fraction';
+var AGENT_FOCUS_DEFAULT_FRACTION = 0.30;
+var AGENT_FOCUS_MIN_HEIGHT = 120;
+var AGENT_GRID_MIN_HEIGHT = 200;
+var _agentFocusResize = null;
+var _agentFocusResizeRaf = 0;
+var _agentFocusResizePendingHeight = 0;
+
+function _agentFocusClampFraction(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return AGENT_FOCUS_DEFAULT_FRACTION;
+  return Math.max(0.12, Math.min(0.75, n));
+}
+
+function _agentFocusPersistedFraction() {
+  if (!state) return AGENT_FOCUS_DEFAULT_FRACTION;
+  const raw = state[AGENT_FOCUS_SPLIT_KEY];
+  if (raw === null || raw === undefined || raw === '') return AGENT_FOCUS_DEFAULT_FRACTION;
+  return _agentFocusClampFraction(raw);
+}
+
+function _agentFocusSplitParts(root) {
+  root = root || document.getElementById('main');
+  if (!root || typeof root.querySelector !== 'function') return null;
+  const split = root.querySelector('[data-agent-split]');
+  const grid = root.querySelector('[data-agent-grid-pane]');
+  const handle = root.querySelector('[data-agent-focus-resizer]');
+  const focus = root.querySelector('[data-agent-focus-panel]');
+  const focusScroll = root.querySelector('[data-agent-focus-scroll]');
+  if (!split || !grid || !handle || !focus || !focusScroll) return null;
+  return { root, split, grid, handle, focus, focusScroll };
+}
+
+function _agentFocusHandleHeight(parts) {
+  if (!parts || !parts.handle || typeof parts.handle.getBoundingClientRect !== 'function') return 8;
+  const rect = parts.handle.getBoundingClientRect();
+  return Math.max(6, Math.round(rect.height || 8));
+}
+
+function _agentFocusContainerHeight(parts) {
+  if (!parts || !parts.split || typeof parts.split.getBoundingClientRect !== 'function') return 0;
+  const rect = parts.split.getBoundingClientRect();
+  return Math.max(0, Math.round(rect.height || 0));
+}
+
+function _agentFocusClampHeight(height, totalHeight, handleHeight) {
+  let next = Number(height);
+  if (!Number.isFinite(next)) next = 0;
+  const total = Math.max(0, Number(totalHeight) || 0);
+  const handle = Math.max(0, Number(handleHeight) || 0);
+  if (total <= 0) return Math.max(AGENT_FOCUS_MIN_HEIGHT, next);
+  const maxFocus = Math.max(AGENT_FOCUS_MIN_HEIGHT, total - handle - AGENT_GRID_MIN_HEIGHT);
+  return Math.max(AGENT_FOCUS_MIN_HEIGHT, Math.min(maxFocus, next));
+}
+
+function _agentFocusApplyHeight(height, opts) {
+  opts = opts || {};
+  const parts = _agentFocusSplitParts();
+  if (!parts) return 0;
+  const total = opts.totalHeight || _agentFocusContainerHeight(parts);
+  const handle = opts.handleHeight || _agentFocusHandleHeight(parts);
+  const clamped = _agentFocusClampHeight(height, total, handle);
+  parts.focus.style.flexBasis = clamped + 'px';
+  parts.focus.style.height = clamped + 'px';
+  return clamped;
+}
+
+function _agentFocusApplyPersistedSplit() {
+  const parts = _agentFocusSplitParts();
+  if (!parts) return;
+  const total = _agentFocusContainerHeight(parts);
+  if (total <= 0) {
+    parts.focus.style.flexBasis = (_agentFocusPersistedFraction() * 100) + '%';
+    parts.focus.style.height = '';
+    return;
+  }
+  const handle = _agentFocusHandleHeight(parts);
+  _agentFocusApplyHeight(total * _agentFocusPersistedFraction(), {
+    totalHeight: total,
+    handleHeight: handle,
+  });
+}
+
+function _agentFocusScheduleResizeHeight(height) {
+  _agentFocusResizePendingHeight = height;
+  if (_agentFocusResizeRaf) return;
+  const apply = function() {
+    _agentFocusResizeRaf = 0;
+    if (!_agentFocusResize) return;
+    _agentFocusApplyHeight(_agentFocusResizePendingHeight, {
+      totalHeight: _agentFocusResize.totalHeight,
+      handleHeight: _agentFocusResize.handleHeight,
+    });
+  };
+  if (typeof requestAnimationFrame === 'function') {
+    _agentFocusResizeRaf = requestAnimationFrame(apply);
+  } else {
+    apply();
+  }
+}
+
+function _agentFocusResizeStart(event) {
+  const parts = _agentFocusSplitParts();
+  if (!parts) return;
+  if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  const totalHeight = _agentFocusContainerHeight(parts);
+  const handleHeight = _agentFocusHandleHeight(parts);
+  const focusRect = parts.focus.getBoundingClientRect ? parts.focus.getBoundingClientRect() : { height: 0 };
+  _agentFocusResizePendingHeight = 0;
+  _agentFocusResize = {
+    startY: event ? event.clientY : 0,
+    startHeight: focusRect.height || parts.focus.offsetHeight || (totalHeight * _agentFocusPersistedFraction()),
+    totalHeight,
+    handleHeight,
+  };
+  if (document && document.body && document.body.classList) {
+    document.body.classList.add('agent-focus-resizing');
+    document.body.style.cursor = 'ns-resize';
+  }
+  document.addEventListener('mousemove', _agentFocusResizeMove);
+  document.addEventListener('mouseup', _agentFocusResizeEnd);
+}
+
+function _agentFocusResizeMove(event) {
+  if (!_agentFocusResize) return;
+  const dy = (event ? event.clientY : 0) - _agentFocusResize.startY;
+  _agentFocusScheduleResizeHeight(_agentFocusResize.startHeight - dy);
+}
+
+function _agentFocusResizeEnd() {
+  if (!_agentFocusResize) return;
+  const resize = _agentFocusResize;
+  _agentFocusResize = null;
+  document.removeEventListener('mousemove', _agentFocusResizeMove);
+  document.removeEventListener('mouseup', _agentFocusResizeEnd);
+  if (document && document.body && document.body.classList) {
+    document.body.classList.remove('agent-focus-resizing');
+    document.body.style.cursor = '';
+  }
+  const applied = _agentFocusApplyHeight(_agentFocusResizePendingHeight || resize.startHeight, {
+    totalHeight: resize.totalHeight,
+    handleHeight: resize.handleHeight,
+  });
+  const available = Math.max(1, (resize.totalHeight || 0) - (resize.handleHeight || 0));
+  const fraction = _agentFocusClampFraction(applied / available);
+  if (state) state[AGENT_FOCUS_SPLIT_KEY] = fraction;
+  if (typeof send === 'function') {
+    send({ cmd: 'ui_set_engineer_panel_split', fraction: fraction });
+  }
+}
+
 var _activeGroupSurfaceStateByGroup = {};
 var _activeGroupStoragePrefix = 'loom.active_group';
 var _pendingActiveGroup = '';
@@ -333,6 +485,8 @@ function _captureActiveGroupUiState(group) {
     surfaces.main = _captureSurfaceState(main, {
       scrollSelectors: [
         ':root',
+        '.agents-grid-pane',
+        '.agent-focus-panel-scroll',
         '.mcp-log',
         '.detail-decisions-log',
         '.loose-workers-strip',
@@ -828,7 +982,11 @@ function renderInvalidatedSurfaces(flags) {
   // set. This eliminates the redundant in-place panel refresh that
   // hundreds of agent_upsert pulses per second produced (cheap post-v9
   // but still wasteful + masks any future capture/restore regression).
-  if (flags.main) render({ skipPanelRefresh: true });
+  if (flags.main) {
+    render({ skipPanelRefresh: true, skipFocusRefresh: !flags.focus });
+  } else if (flags.focus && typeof renderAgentFocusPanel === 'function') {
+    renderAgentFocusPanel();
+  }
   const surfaces = _currentPanelSurfaces();
   for (let i = 0; i < surfaces.length; i++) {
     const surface = surfaces[i];
@@ -2191,6 +2349,180 @@ function _renderEngineerRow(row, renderCell) {
   return html;
 }
 
+
+function _selectedAgentForFocusPanel() {
+  if (!selectedAgentId || !state || !state.agents) return null;
+  const agent = state.agents[selectedAgentId];
+  if (!agent || agent.cell_type === 'terminal') return null;
+  const selectedCell = selectedTerminalId && state.agents[selectedTerminalId];
+  if (_embeddedRuntimeEnabled()
+      && selectedCell
+      && selectedCell.cell_type === 'terminal'
+      && selectedCell.parent_id !== agent.id) {
+    return null;
+  }
+  return agent;
+}
+
+function _renderSelectedAgentTerminalDrawer(agent) {
+  if (!agent) return '';
+  const wid = (typeof getFilterByWindow === 'function' && getFilterByWindow())
+    ? state.current_window_id
+    : null;
+  const childIds = (state.children && state.children[agent.id]) || [];
+  const childTerms = childIds
+    .map(id => state.agents[id])
+    .filter(c => c && (!wid || !c.window_id || c.window_id === wid));
+  let html = `<div class="terminal-drawer agent-focus-terminals">`;
+  html += `<div class="drawer-hdr">`;
+  html += `  <span class="drawer-label">${esc(agent.name)} terminals</span>`;
+  html += `  <span class="drawer-count">${childTerms.length}</span>`;
+  html += `</div>`;
+  html += `<div class="term-list" data-drop-type="terminal" data-drop-group="${esc(agent.group)}" data-drop-parent="${esc(agent.id)}">`;
+  for (const t of childTerms) html += renderTerminalRow(t);
+  html += `</div>`;
+  html += renderTermAddBtn(agent.group, agent.id);
+  html += `</div>`;
+  return html;
+}
+
+function _renderAgentFocusPanelHtml() {
+  const agent = _selectedAgentForFocusPanel();
+  let html = '<div class="agent-focus-header">'
+    + '<div class="agent-focus-title">Focus</div>';
+  if (agent) {
+    html += '<div class="agent-focus-subtitle" title="' + esc(agent.name || '') + '">'
+      + esc(agent.name || agent.id || 'Agent')
+      + '</div>';
+  }
+  html += '</div>';
+  if (!agent) {
+    html += '<div class="agent-focus-empty">Select an agent to view details and terminals.</div>';
+    return html;
+  }
+  html += '<div class="agent-focus-content">';
+  html += renderAgentDetails(agent);
+  html += _renderSelectedAgentTerminalDrawer(agent);
+  html += '</div>';
+  return html;
+}
+
+function _agentFocusShellHtml(gridHtml, focusHtml) {
+  return '<div class="agent-split" data-agent-split>'
+    + '<div id="agent-grid-pane" class="agents-grid-pane" data-agent-grid-pane>'
+    + (gridHtml || '')
+    + '</div>'
+    + '<div id="agent-focus-resizer" class="agent-focus-resizer" role="separator" aria-orientation="horizontal" tabindex="0" data-agent-focus-resizer onmousedown="_agentFocusResizeStart(event)">'
+    + '<div class="agent-focus-resizer-grip" aria-hidden="true"></div>'
+    + '</div>'
+    + '<section id="agent-focus-panel" class="agent-focus-panel" data-agent-focus-panel>'
+    + '<div class="agent-focus-panel-scroll" data-agent-focus-scroll>'
+    + (focusHtml || '')
+    + '</div>'
+    + '</section>'
+    + '</div>';
+}
+
+function _renderAgentGridAndFocus(main, gridHtml, opts) {
+  opts = opts || {};
+  const renderFocus = opts.renderFocus !== false;
+  const focusHtml = renderFocus
+    ? _renderAgentFocusPanelHtml()
+    : (main._loomLastFocusHtml || _renderAgentFocusPanelHtml());
+  const combined = _agentFocusShellHtml(gridHtml, focusHtml);
+  const gridChanged = main._loomLastGridHtml !== gridHtml;
+  const parts = _agentFocusSplitParts(main);
+  const shellMissing = !main._loomHasAgentSplitShell;
+  if (shellMissing || (gridChanged && !parts)) {
+    main.innerHTML = combined;
+    main._loomHasAgentSplitShell = true;
+    main._loomLastGridHtml = gridHtml;
+    main._loomLastFocusHtml = focusHtml;
+    main._loomLastHtml = combined;
+    _agentFocusApplyPersistedSplit();
+    return { mainHtmlChanged: true, focusHtmlChanged: renderFocus };
+  }
+  if (gridChanged) {
+    parts.grid.innerHTML = gridHtml || '';
+    main._loomLastGridHtml = gridHtml;
+    const focusChanged = renderFocus
+      ? renderAgentFocusPanel({ main, focusHtml })
+      : false;
+    if (!renderFocus) main._loomLastFocusHtml = focusHtml;
+    main._loomLastHtml = _agentFocusShellHtml(
+      gridHtml,
+      main._loomLastFocusHtml || focusHtml,
+    );
+    return { mainHtmlChanged: true, focusHtmlChanged: focusChanged };
+  }
+  main._loomLastHtml = combined;
+  if (renderFocus) renderAgentFocusPanel({ main, focusHtml });
+  return { mainHtmlChanged: false, focusHtmlChanged: renderFocus && main._loomLastFocusHtml !== focusHtml };
+}
+
+function renderAgentFocusPanel(opts) {
+  opts = opts || {};
+  const main = opts.main || document.getElementById('main');
+  if (!main) return false;
+  if (typeof _captureAgentDetailDrafts === 'function') _captureAgentDetailDrafts();
+  const focusHtml = Object.prototype.hasOwnProperty.call(opts, 'focusHtml')
+    ? opts.focusHtml
+    : _renderAgentFocusPanelHtml();
+  if (main._loomLastFocusHtml === focusHtml) return false;
+  const parts = _agentFocusSplitParts(main);
+  if (!parts) {
+    const gridHtml = main._loomLastGridHtml || '';
+    main.innerHTML = _agentFocusShellHtml(gridHtml, focusHtml);
+    main._loomHasAgentSplitShell = true;
+    main._loomLastFocusHtml = focusHtml;
+    main._loomLastHtml = main.innerHTML;
+    _agentFocusApplyPersistedSplit();
+    _restoreActiveDetailInputFocus();
+    return true;
+  }
+  if (parts.focusScroll._loomLastHtml === focusHtml || main._loomLastFocusHtml === focusHtml) {
+    parts.focusScroll._loomLastHtml = focusHtml;
+    main._loomLastFocusHtml = focusHtml;
+    return false;
+  }
+  const panelState = typeof _captureSurfaceState === 'function'
+    ? _captureSurfaceState(parts.focusScroll, { scrollSelectors: [':root', '.mcp-log', '.detail-decisions-log'] })
+    : null;
+  parts.focusScroll.innerHTML = focusHtml;
+  parts.focusScroll._loomLastHtml = focusHtml;
+  main._loomLastFocusHtml = focusHtml;
+  main._loomLastHtml = _agentFocusShellHtml(main._loomLastGridHtml || '', focusHtml);
+  if (typeof _restoreSurfaceState === 'function') {
+    _restoreSurfaceState(parts.focusScroll, panelState, { scrollSelectors: [':root', '.mcp-log', '.detail-decisions-log'] });
+    _restoreActiveDetailInputFocus();
+  }
+  return true;
+}
+
+function _updateAgentGridSelectionForFocus(prevId, nextId) {
+  if (prevId === nextId) return;
+  const main = document.getElementById('main');
+  if (!main || typeof main.querySelector !== 'function') return;
+  const cssEscape = function(value) {
+    const raw = String(value || '');
+    if (typeof CSS !== 'undefined' && CSS && typeof CSS.escape === 'function') return CSS.escape(raw);
+    return raw.replace(/"/g, '\\"');
+  };
+  if (prevId) {
+    const prev = main.querySelector('[data-drag-id="' + cssEscape(prevId) + '"]');
+    if (prev && prev.classList) prev.classList.remove('selected');
+  }
+  if (nextId) {
+    const next = main.querySelector('[data-drag-id="' + cssEscape(nextId) + '"]');
+    if (next && next.classList) next.classList.add('selected');
+  }
+}
+
+function refreshSelectedAgentFocus(prevSelectedId) {
+  _updateAgentGridSelectionForFocus(prevSelectedId || '', selectedAgentId || '');
+  if (typeof renderAgentFocusPanel === 'function') renderAgentFocusPanel();
+}
+
 function render(opts) {
   if (typeof renderGroupSwitcher === 'function') renderGroupSwitcher();
   if (_loomUiMode() === 'toolbelt') {
@@ -2226,10 +2558,11 @@ function _renderMainGrid(opts, renderMode) {
         No groups yet.<br>Create one to get started.
         ${action}
       </div>`;
-    if (main._loomLastHtml !== emptyHtml) {
-      main.innerHTML = emptyHtml;
-      main._loomLastHtml = emptyHtml;
-    }
+    const emptyState = _captureSurfaceState(main, { scrollSelectors: [':root', '.agents-grid-pane'] });
+    const result = _renderAgentGridAndFocus(main, emptyHtml, {
+      renderFocus: !(opts && opts.skipFocusRefresh),
+    });
+    if (result.mainHtmlChanged) _restoreSurfaceState(main, emptyState);
     window._navItems = [];
     window._navAgents = [];
     window._navByGroup = {};
@@ -2250,8 +2583,7 @@ function _renderMainGrid(opts, renderMode) {
   const mainState = _captureSurfaceState(main, {
     scrollSelectors: [
       ':root',
-      '.mcp-log',
-      '.detail-decisions-log',
+      '.agents-grid-pane',
       '.loose-workers-strip',
     ],
     captureFocusKey: _captureMainFocusKey,
@@ -2378,39 +2710,6 @@ function _renderMainGrid(opts, renderMode) {
     }
     html += `</div>`;
 
-    /* Details + terminal drawer for selected agent (if in this group) */
-    const selectedCell = selectedTerminalId && state.agents[selectedTerminalId];
-    const selAgent = selectedAgentId && state.agents[selectedAgentId];
-    const showAgentDetails = !!(
-      selAgent
-      && selAgent.group === gname
-      && (
-        !embeddedMode
-        || !selectedCell
-        || selectedCell.cell_type === 'agent'
-        || selectedCell.parent_id === selAgent.id
-      )
-    );
-    if (showAgentDetails) {
-      /* Agent details section */
-      html += renderAgentDetails(selAgent);
-
-      const childIds = state.children[selectedAgentId] || [];
-      const childTerms = childIds
-        .map(id => state.agents[id])
-        .filter(c => c && (!wid || !c.window_id || c.window_id === wid));
-      html += `<div class="terminal-drawer">`;
-      html += `<div class="drawer-hdr">`;
-      html += `  <span class="drawer-label">${esc(selAgent.name)} terminals</span>`;
-      html += `  <span class="drawer-count">${childTerms.length}</span>`;
-      html += `</div>`;
-      html += `<div class="term-list" data-drop-type="terminal" data-drop-group="${esc(gname)}" data-drop-parent="${esc(selectedAgentId)}">`;
-      for (const t of childTerms) html += renderTerminalRow(t);
-      html += `</div>`;
-      html += renderTermAddBtn(gname, selectedAgentId);
-      html += `</div>`;
-    }
-
     if (standaloneTerms.length) {
       html += `<div class="terminal-drawer">`;
       html += `<div class="drawer-hdr">`;
@@ -2439,11 +2738,13 @@ function _renderMainGrid(opts, renderMode) {
   // hovered. Same `_loomLastHtml` pattern as the topbar/tabs cache from
   // `06611b8`. When the html is unchanged the FLIP animation + surface
   // restore are no-ops on identical DOM, so skip them too.
-  const mainHtmlChanged = main._loomLastHtml !== html;
-  if (mainHtmlChanged) {
-    main.innerHTML = html;
-    main._loomLastHtml = html;
-  }
+  // The effective grid clobber is still guarded like `main._loomLastHtml !== html`;
+  // after a successful split write the aggregate cache is updated like `main._loomLastHtml = html`.
+  // The split stores the grid fragment separately so focus-only refreshes do not rewrite it.
+  const mainRenderResult = _renderAgentGridAndFocus(main, html, {
+    renderFocus: !(opts && opts.skipFocusRefresh),
+  });
+  const mainHtmlChanged = !!mainRenderResult.mainHtmlChanged;
 
   // Update navigable item lists after resolving focus so the rendered
   // `.focused` marker and the keyboard model describe the same grid.
@@ -2464,6 +2765,7 @@ function _renderMainGrid(opts, renderMode) {
   if (mainHtmlChanged) {
     if (oldRects) _applyFlip(main, oldRects);
     _restoreSurfaceState(main, mainState);
+    _restoreActiveDetailInputFocus();
   }
   renderPendingHireBanner();
   _updateEngineerTaskbarBadge();
@@ -3082,6 +3384,14 @@ function _preservedMergeDiffForAgent(agent) {
 function _captureMainFocusKey(el) {
   if (!el || !el.dataset || !el.dataset.focusKey) return '';
   return '[data-focus-key="' + CSS.escape(el.dataset.focusKey) + '"]';
+}
+
+
+function _restoreActiveDetailInputFocus() {
+  const active = document && document.activeElement;
+  if (!active || active.id !== 'detail-description-input' || typeof active.focus !== 'function') return;
+  try { active.focus({ preventScroll: true }); }
+  catch (_e) { active.focus(); }
 }
 
 function _captureAgentDetailDrafts() {

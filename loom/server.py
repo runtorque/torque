@@ -10292,6 +10292,23 @@ async def main(connection=None):
                         json.dumps(state.standalone_panel_layout),
                     )
 
+            elif cmd == "ui_set_engineer_panel_split":
+                try:
+                    fraction = float(data.get("fraction", 0.30))
+                except (TypeError, ValueError):
+                    fraction = 0.30
+                fraction = max(0.12, min(0.75, fraction))
+                state.engineer_panel_split_fraction = fraction
+                state._emit(
+                    "ui_update",
+                    key="engineer_panel_split_fraction",
+                    value=state.engineer_panel_split_fraction,
+                )
+                state._db_save_ui(
+                    "engineer_panel_split_fraction",
+                    state.engineer_panel_split_fraction,
+                )
+
             elif cmd == "events_dismiss":
                 item_id = str(data.get("id", "") or "").strip()
                 if not item_id:

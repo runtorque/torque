@@ -8,6 +8,7 @@ let state = {
   children: {},
   active_session_id: null,
   selected_principal_id: '',
+  engineer_panel_split_fraction: 0.30,
 };
 let dragInProgress = false;
 let selectedAgentId = null;
@@ -482,6 +483,10 @@ function _handleFullState(msg) {
   if (typeof state.selected_principal_id !== 'string') {
     state.selected_principal_id = '';
   }
+  if (typeof state.engineer_panel_split_fraction !== 'number') {
+    var _splitFraction = Number(state.engineer_panel_split_fraction);
+    state.engineer_panel_split_fraction = Number.isFinite(_splitFraction) ? _splitFraction : 0.30;
+  }
   if (typeof _applyEmbeddedTerminalScrollbackFromSettings === 'function') {
     _applyEmbeddedTerminalScrollbackFromSettings();
   }
@@ -756,6 +761,9 @@ function _deltaSurfaceInvalidations(ops, hints) {
         const _appendCellId = (op.op === 'mcp_call_append')
           ? String((op.call && op.call.cell_id) || '')
           : String(op.cell_id || '');
+        if (_focusAppendInvalidatesFocusPanel(_appendFocusedId, _appendCellId)) {
+          _markSurface(flags, 'focus');
+        }
         if (_appendFocusedId && _appendCellId
             && _appendFocusedId === _appendCellId
             && (op.op !== 'mcp_call_append'
@@ -810,7 +818,7 @@ function _deltaSurfaceInvalidations(ops, hints) {
         const _ajArchId = String((op && op.architect_id) || '');
         if (_ajFocused && _ajArchId
             && String(_ajFocused.id || '') === _ajArchId) {
-          _markSurface(flags, 'engineer');
+          _markSurface(flags, 'focus', 'engineer');
         }
         break;
       }
@@ -859,7 +867,7 @@ function _deltaSurfaceInvalidations(ops, hints) {
         }
         if (_dpFocused && _dpArchId
             && String(_dpFocused.id || '') === _dpArchId) {
-          _markSurface(flags, 'engineer');
+          _markSurface(flags, 'focus', 'engineer');
         } else if (!_dpArchId) {
           // No way to tell which architect this belongs to — be safe and
           // refresh. (Preserves legacy behavior for ops missing the field.)
@@ -1269,6 +1277,51 @@ function _taskMessagesThreadTouchesAgent(task, agentId) {
   return String(task.agent_id || '') === agentId && thread.length > 0;
 }
 
+
+function _focusedAgentIdForFocusPanel() {
+  if (typeof selectedAgentId === 'undefined' || !selectedAgentId) return '';
+  return String(selectedAgentId || '');
+}
+
+function _focusPanelAgentTouchesFocused(previous, next, op) {
+  const focusedId = _focusedAgentIdForFocusPanel();
+  if (!focusedId) return false;
+  const agentId = String((op && op.id) || (previous && previous.id) || (next && next.id) || '');
+  if (agentId && agentId === focusedId) return true;
+  const prevParent = previous ? String(previous.parent_id || '') : '';
+  const nextParent = next ? String(next.parent_id || '') : '';
+  return prevParent === focusedId || nextParent === focusedId;
+}
+
+function _agentDeltaInvalidatesFocusPanel(previous, next, op) {
+  if (!_focusPanelAgentTouchesFocused(previous, next, op)) return false;
+  const focusedId = _focusedAgentIdForFocusPanel();
+  const focused = focusedId && state && state.agents ? state.agents[focusedId] : null;
+  const focusedGroup = String((focused && focused.group) || (previous && previous.group) || (next && next.group) || '');
+  if (!focusedGroup) return true;
+  return _agentTouchesGroup(previous, next, focusedGroup);
+}
+
+function _taskDeltaInvalidatesFocusPanel(previous, next, op) {
+  const focusedId = _focusedAgentIdForFocusPanel();
+  if (!focusedId) return false;
+  const prevAgent = previous ? String(previous.agent_id || '') : '';
+  const nextAgent = next ? String(next.agent_id || '') : '';
+  const prevEngineer = previous ? String(previous.assigned_engineer_id || '') : '';
+  const nextEngineer = next ? String(next.assigned_engineer_id || '') : '';
+  return prevAgent === focusedId || nextAgent === focusedId
+    || prevEngineer === focusedId || nextEngineer === focusedId;
+}
+
+function _focusAppendInvalidatesFocusPanel(focusedId, cellId) {
+  focusedId = String(focusedId || '');
+  cellId = String(cellId || '');
+  if (!focusedId || !cellId) return false;
+  if (focusedId === cellId) return true;
+  const cell = state && state.agents ? state.agents[cellId] : null;
+  return !!(cell && String(cell.parent_id || '') === focusedId);
+}
+
 function _taskDeltaInvalidatesEngineer(previous, next, op) {
   if (!_standaloneDeltaOptimizationsEnabled()) return true;
   const group = _currentSurfaceGroup();
@@ -1308,16 +1361,18 @@ function _taskDeltaInvalidatesEngineer(previous, next, op) {
 }
 
 function _applyTaskSurfaceInvalidation(flags, op, hint) {
-  if (!_standaloneDeltaOptimizationsEnabled()) {
-    _markSurface(flags, 'main', 'board', 'context', 'events', 'engineer');
-    return;
-  }
   const previous = hint && hint.task ? hint.task : null;
   const next = _taskNextFromDelta(op, previous);
+  if (!_standaloneDeltaOptimizationsEnabled()) {
+    _markSurface(flags, 'main', 'board', 'context', 'events', 'engineer');
+    if (_taskDeltaInvalidatesFocusPanel(previous, next, op)) _markSurface(flags, 'focus');
+    return;
+  }
   if (_taskDeltaInvalidatesMain(previous, next, op)) _markSurface(flags, 'main');
   if (_taskDeltaInvalidatesBoard(previous, next, op)) _markSurface(flags, 'board');
   if (_taskDeltaInvalidatesContext(previous, next, op)) _markSurface(flags, 'context');
   if (_taskDeltaInvalidatesEvents(previous, next, op)) _markSurface(flags, 'events');
+  if (_taskDeltaInvalidatesFocusPanel(previous, next, op)) _markSurface(flags, 'focus');
   if (_taskDeltaInvalidatesEngineer(previous, next, op)) _markSurface(flags, 'engineer');
 }
 
@@ -1412,15 +1467,17 @@ function _agentDeltaInvalidatesEngineer(previous, next, op) {
 }
 
 function _applyAgentSurfaceInvalidation(flags, op, hint) {
-  if (!_standaloneDeltaOptimizationsEnabled()) {
-    _markSurface(flags, 'main', 'context', 'events', 'engineer');
-    return;
-  }
   const previous = hint && hint.agent ? hint.agent : null;
   const next = _agentNextFromDelta(op, previous);
+  if (!_standaloneDeltaOptimizationsEnabled()) {
+    _markSurface(flags, 'main', 'context', 'events', 'engineer');
+    if (_agentDeltaInvalidatesFocusPanel(previous, next, op)) _markSurface(flags, 'focus');
+    return;
+  }
   _markSurface(flags, 'main');
   if (_agentDeltaInvalidatesContext(previous, next, op)) _markSurface(flags, 'context');
   if (_agentDeltaInvalidatesEvents(previous, next, op)) _markSurface(flags, 'events');
+  if (_agentDeltaInvalidatesFocusPanel(previous, next, op)) _markSurface(flags, 'focus');
   if (_agentDeltaInvalidatesEngineer(previous, next, op)) _markSurface(flags, 'engineer');
 }
 
