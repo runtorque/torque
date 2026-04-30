@@ -3459,6 +3459,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 "board_panel_height",
                 "selected_principal_id",
                 "standalone_panel_layout",
+                "engineer_panel_split_fraction",
             ):
                 val = state_dict.get(key)
                 if val is not None:
@@ -3736,6 +3737,9 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "standalone_panel_layout": (
                 json.loads(ui.get("standalone_panel_layout", "{}"))
                 if ui.get("standalone_panel_layout") else {}
+            ),
+            "engineer_panel_split_fraction": float(
+                ui.get("engineer_panel_split_fraction", "0.30") or "0.30"
             ),
             "events_dismissed_attention": (
                 json.loads(ui.get("events_dismissed_attention", "{}"))

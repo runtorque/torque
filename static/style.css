@@ -687,6 +687,123 @@ body.runtime-embedded .terminal-empty {
   padding: 6px 8px 0;
 }
 
+
+/* ------------------------------------------------------------------ */
+/* Agent grid/focus split                                              */
+/* ------------------------------------------------------------------ */
+main {
+  padding: 0;
+  overflow: hidden;
+}
+.agent-split {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+}
+.agents-grid-pane {
+  flex: 1 1 auto;
+  min-height: 200px;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 8px;
+}
+.agents-grid-pane > .empty {
+  min-height: 100%;
+}
+.agent-focus-resizer {
+  flex: 0 0 8px;
+  height: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: ns-resize;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid rgba(255,255,255,.04);
+  background: color-mix(in srgb, var(--bg-surface) 78%, var(--bg-hover));
+  user-select: none;
+}
+.agent-focus-resizer:hover,
+.agent-focus-resizer:focus-visible {
+  background: color-mix(in srgb, var(--bg-hover) 74%, var(--accent) 10%);
+  outline: none;
+}
+.agent-focus-resizer-grip {
+  width: 42px;
+  height: 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-dim) 55%, transparent);
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--text-dim) 28%, transparent);
+}
+.agent-focus-panel {
+  flex: 0 0 30%;
+  min-height: 120px;
+  min-width: 0;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--bg-surface) 86%, var(--bg));
+}
+.agent-focus-panel-scroll {
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+  padding: 0 4px 8px;
+}
+.agent-focus-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 6px 8px 4px;
+  background: color-mix(in srgb, var(--bg-surface) 92%, transparent);
+  border-bottom: 1px solid rgba(255,255,255,.04);
+}
+.agent-focus-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--text-dim);
+}
+.agent-focus-subtitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text);
+}
+.agent-focus-empty {
+  padding: 18px 10px;
+  color: var(--text-dim);
+  font-size: 11px;
+  text-align: center;
+}
+.agent-focus-content .agent-details:first-child {
+  border-top: none;
+}
+body.agent-focus-resizing {
+  user-select: none;
+}
+body.runtime-embedded main {
+  padding: 0;
+}
+body.runtime-embedded .agents-grid-pane {
+  padding: 12px 12px 10px;
+}
+body.runtime-embedded .agent-focus-panel-scroll {
+  padding: 0 6px 8px;
+}
+body.runtime-embedded .agent-focus-header {
+  min-height: 26px;
+  padding: 5px 8px 3px;
+}
+
 /* ------------------------------------------------------------------ */
 /* Agent grid                                                          */
 /* ------------------------------------------------------------------ */
