@@ -31,6 +31,14 @@ function renderGroupSwitcher() {
     ? _groupNamesSorted()
     : Object.keys((state && state.groups) || {}).sort();
   var active = (typeof _activeGroup === 'function') ? (_activeGroup() || '') : '';
+  if (typeof console !== 'undefined' && console.log) {
+    console.log('[LOOM287 renderGroupSwitcher]', {
+      active: active,
+      stateActive: state && state.active_group,
+      pending: (typeof _pendingActiveGroup !== 'undefined') ? _pendingActiveGroup : undefined,
+      lastHtmlHasActive: root._loomLastHtml ? root._loomLastHtml.indexOf(' selected') >= 0 : false,
+    });
+  }
   root.hidden = false;
   var html = '<label class="group-switcher-label" for="active-group-select">Group:</label>';
   html += '<select id="active-group-select" class="group-switcher-select"'
@@ -77,6 +85,14 @@ function openActiveGroupMenu(event) {
 }
 
 function onActiveGroupSelect(value) {
+  if (typeof console !== 'undefined' && console.log) {
+    console.log('[LOOM287 onActiveGroupSelect before]', {
+      value: value,
+      active: (typeof _activeGroup === 'function') ? (_activeGroup() || '') : '',
+      stateActive: state && state.active_group,
+      selectValue: (document.getElementById('active-group-select') || {}).value || '',
+    });
+  }
   if (value === '__new_group__') {
     var select = document.getElementById('active-group-select');
     if (select && typeof _activeGroup === 'function') select.value = _activeGroup() || '';
@@ -84,6 +100,14 @@ function onActiveGroupSelect(value) {
     return;
   }
   if (typeof setActiveGroup === 'function') setActiveGroup(value);
+  if (typeof console !== 'undefined' && console.log) {
+    console.log('[LOOM287 onActiveGroupSelect after]', {
+      value: value,
+      active: (typeof _activeGroup === 'function') ? (_activeGroup() || '') : '',
+      stateActive: state && state.active_group,
+      selectValue: (document.getElementById('active-group-select') || {}).value || '',
+    });
+  }
 }
 
 function _panelRootId(appName) {
