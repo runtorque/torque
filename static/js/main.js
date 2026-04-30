@@ -12,6 +12,24 @@ var _defaultPanelMinHeight = 80;
 var _workspaceSidebarDefaultWidth = 340;
 var _workspaceSidebarStorageKey = 'loom.ide.sidebar_width';
 
+function _syncGroupSwitcherSelectValue() {
+  var select = document.getElementById('active-group-select');
+  if (!select || typeof _activeGroup !== 'function') return;
+  var active = _activeGroup() || '';
+  if (select.value !== active) select.value = active;
+}
+
+function _scheduleGroupSwitcherSelectSync() {
+  var sync = function() { _syncGroupSwitcherSelectValue(); };
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(sync);
+  } else if (typeof setTimeout === 'function') {
+    setTimeout(sync, 0);
+  } else {
+    sync();
+  }
+}
+
 function renderGroupSwitcher() {
   var root = document.getElementById('group-switcher');
   var addGroupButton = document.getElementById('add-group-header-btn');
@@ -53,6 +71,7 @@ function renderGroupSwitcher() {
     root.innerHTML = html;
     root._loomLastHtml = html;
   }
+  _syncGroupSwitcherSelectValue();
 }
 
 function openActiveGroupMenu(event) {
@@ -80,10 +99,14 @@ function onActiveGroupSelect(value) {
   if (value === '__new_group__') {
     var select = document.getElementById('active-group-select');
     if (select && typeof _activeGroup === 'function') select.value = _activeGroup() || '';
+    _scheduleGroupSwitcherSelectSync();
     if (typeof openAddGroup === 'function') openAddGroup();
     return;
   }
-  if (typeof setActiveGroup === 'function') setActiveGroup(value);
+  if (typeof setActiveGroup === 'function') {
+    setActiveGroup(value);
+    _scheduleGroupSwitcherSelectSync();
+  }
 }
 
 function _panelRootId(appName) {
