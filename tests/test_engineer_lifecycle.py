@@ -671,6 +671,37 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cleaned, [engineer.id])
         self.assertNotIn(engineer.id, state.agents)
 
+    async def test_remove_agent_direct_terminal_hard_deletes_and_cleans_up(self):
+        state = self._make_state()
+        terminal = state.add_terminal(
+            name="Logs",
+            group="loom",
+            terminal_backend="iterm2",
+            profile="Default",
+            command="",
+            directory="/tmp/project",
+        )
+        terminal.session_id = "terminal-session"
+        cleaned = []
+
+        async def close_agent_session_only(_cell):
+            self.fail("direct terminal removal must not use tombstone close path")
+
+        async def cleanup_purged_agents(removed):
+            cleaned.extend(c.id for c in removed)
+
+        result = await self.server_mod._handle_remove_agent_command(
+            {"id": terminal.id},
+            state,
+            close_agent_session_only=close_agent_session_only,
+            cleanup_purged_agents=cleanup_purged_agents,
+        )
+
+        self.assertEqual(result, {"type": "ok", "removed": [terminal.id]})
+        self.assertEqual(cleaned, [terminal.id])
+        self.assertNotIn(terminal.id, state.agents)
+        self.assertNotIn(terminal.id, state.groups["loom"])
+
     async def test_dismiss_engineer_closes_engineer_and_owned_workers_preserves_assignments(self):
         state = self._make_state()
         architect = self._add_architect_cell(state, "arch-1", "Productmind")

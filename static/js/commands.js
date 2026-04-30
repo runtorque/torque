@@ -157,6 +157,30 @@ function onAgentDblClick(id) {
 async function removeAgent(id) {
   const a = state.agents[id];
   if (!a) return;
+  if ((a.cell_type || '') === 'terminal') {
+    let terminalMsg = `Remove "${a.name}"? This terminal will be permanently deleted now and cannot be restored.`;
+    if (a.worktree_path) {
+      var terminalSharedWith = _worktreeSharedWith(a);
+      if (terminalSharedWith) {
+        terminalMsg += ' Its worktree is shared with ' + terminalSharedWith + ' and will be kept.';
+      } else {
+        const warnings = [];
+        if ((a.worktree_checkpoints || 0) > 0) warnings.push('has unmerged commits');
+        if (a.worktree_dirty) warnings.push('has uncommitted changes');
+        if (warnings.length) {
+          terminalMsg += ' Its worktree ' + warnings.join(' and ') + '. All changes will be lost.';
+        } else {
+          terminalMsg += ' Its worktree will be removed immediately.';
+        }
+      }
+    }
+    if (await showConfirm(terminalMsg)) {
+      if (selectedAgentId === id) selectedAgentId = null;
+      if (selectedTerminalId === id) selectedTerminalId = null;
+      send({ cmd: 'remove_agent', id });
+    }
+    return;
+  }
   if ((a.kind || '') === 'architect') {
     var hiredEngineers = 0;
     if (state && state.agents) {

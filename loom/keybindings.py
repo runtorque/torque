@@ -200,10 +200,17 @@ def _find_cell_for_session(state, session_id=""):
 def build_close_cell_confirmation_message(state, cell):
     """Build the close/remove confirmation message for shortcut-triggered closes."""
     child_count = len(state._children.get(cell.id, []))
-    msg = (
-        f'Remove "{cell.name}"? It will be scheduled for permanent deletion '
-        "in 7 days and can be restored from Recently deleted until then."
-    )
+    is_terminal = getattr(cell, "cell_type", "") == "terminal"
+    if is_terminal:
+        msg = (
+            f'Remove "{cell.name}"? This terminal will be permanently '
+            "deleted now and cannot be restored."
+        )
+    else:
+        msg = (
+            f'Remove "{cell.name}"? It will be scheduled for permanent deletion '
+            "in 7 days and can be restored from Recently deleted until then."
+        )
     if child_count > 0:
         msg = (
             f'Remove "{cell.name}" and its {child_count} terminal(s)? They '
@@ -227,10 +234,17 @@ def build_close_cell_confirmation_message(state, cell):
             if cell.worktree_dirty:
                 warnings.append("has uncommitted changes")
             if warnings:
-                msg += (" Its worktree " + " and ".join(warnings)
-                        + " and will be preserved during the restore window.")
+                if is_terminal:
+                    msg += (" Its worktree " + " and ".join(warnings)
+                            + ". All changes will be lost.")
+                else:
+                    msg += (" Its worktree " + " and ".join(warnings)
+                            + " and will be preserved during the restore window.")
             else:
-                msg += " Its worktree will be preserved during the restore window."
+                if is_terminal:
+                    msg += " Its worktree will be removed immediately."
+                else:
+                    msg += " Its worktree will be preserved during the restore window."
     return msg
 
 

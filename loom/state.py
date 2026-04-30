@@ -4786,6 +4786,7 @@ class MatrixState:
         cell.permanent_delete_after = now + AGENT_TOMBSTONE_RETENTION_SECONDS
         cell.status = "stopped"
         cell.session_id = None
+        cell.current_task_id = ""
         cell.current_process = ""
         cell.current_path = ""
         cell.current_branch = ""

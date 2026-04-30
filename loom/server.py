@@ -5328,6 +5328,39 @@ async def _handle_delete_architect_command(
     }
 
 
+async def _handle_remove_agent_command(
+        data: dict,
+        state: MatrixState, *,
+        close_agent_session_only,
+        cleanup_purged_agents) -> dict:
+    """Remove a cell using soft-delete for agents and hard-delete for terminals."""
+    cell = state.agents.get(str(data.get("id", "") or "").strip())
+    if not cell:
+        return {"type": "ok", "removed": []}
+    if str(getattr(cell, "cell_type", "") or "") == "terminal":
+        removed = state.remove_agent(cell.id)
+        await cleanup_purged_agents(removed)
+        return {"type": "ok", "removed": [c.id for c in removed]}
+    kind = str(getattr(cell, "kind", "") or "").strip()
+    if kind == "architect":
+        return await _handle_delete_architect_command(
+            {"id": cell.id},
+            state,
+            close_agent_session_only=close_agent_session_only,
+        )
+    if kind == "engineer":
+        return await _handle_delete_engineer_command(
+            {"id": cell.id},
+            state,
+            close_agent_session_only=close_agent_session_only,
+        )
+    tombstoned = await close_agent_session_only(cell)
+    return {
+        "type": "ok",
+        "tombstoned": [c.id for c in tombstoned],
+    }
+
+
 def _restore_or_purge_authority_error(state: MatrixState, cell, data: dict) -> dict | None:
     """Return architect-scope authorization error for restore/purge commands."""
     architect_id = str(data.get("architect_id", "") or "").strip()
@@ -7885,26 +7918,12 @@ async def main(connection=None):
                         shell=shell)
 
             elif cmd == "remove_agent":
-                cell = state.agents.get(data["id"])
-                if cell:
-                    if str(getattr(cell, "kind", "") or "").strip() == "architect":
-                        result = await _handle_delete_architect_command(
-                            {"id": cell.id},
-                            state,
-                            close_agent_session_only=_close_agent_session_only,
-                        )
-                    elif str(getattr(cell, "kind", "") or "").strip() == "engineer":
-                        result = await _handle_delete_engineer_command(
-                            {"id": cell.id},
-                            state,
-                            close_agent_session_only=_close_agent_session_only,
-                        )
-                    else:
-                        tombstoned = await _close_agent_session_only(cell)
-                        result = {
-                            "type": "ok",
-                            "tombstoned": [c.id for c in tombstoned],
-                        }
+                result = await _handle_remove_agent_command(
+                    data,
+                    state,
+                    close_agent_session_only=_close_agent_session_only,
+                    cleanup_purged_agents=_cleanup_purged_agents,
+                )
 
             elif cmd == "update_agent":
                 cell = state.agents.get(data["id"])
