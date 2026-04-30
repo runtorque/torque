@@ -11833,6 +11833,118 @@ test('architect messages and decisions use virtual windows for large histories',
   assert.match(panel.innerHTML, /1000/);
 });
 
+test('architect decision cards render timestamps and sort newest within status', () => {
+  const { context, document } = createEngineerHarness();
+  const panel = document.register('panel-agent');
+  context.Date.now = () => Date.parse('2026-04-30T12:00:00Z');
+  const ts = (iso) => Date.parse(iso) / 1000;
+
+  context.state.agents = {
+    'arch-1': {
+      id: 'arch-1',
+      name: 'Architect One',
+      kind: 'architect',
+      group: 'alpha',
+      cell_type: 'agent',
+    },
+  };
+  context.state.decisions = {
+    fresh: {
+      id: 'fresh',
+      architect_id: 'arch-1',
+      title: 'Fresh unedited decision',
+      rationale: 'created only',
+      status: 'accepted',
+      created_at: ts('2026-04-30T11:00:00Z'),
+      updated_at: ts('2026-04-30T11:00:30Z'),
+    },
+    edited: {
+      id: 'edited',
+      architect_id: 'arch-1',
+      title: 'Older edited decision',
+      rationale: 'updated later',
+      status: 'accepted',
+      created_at: ts('2026-04-30T09:00:00Z'),
+      updated_at: ts('2026-04-30T11:30:00Z'),
+    },
+  };
+  context.focusedItemId = 'arch-1';
+
+  runInContext(context, `
+    _agentPanelLastSelectedTabByKind.architect = 'decisions';
+    _engineerDecisionUiState('fresh', state.decisions.fresh).expanded = true;
+    _engineerDecisionUiState('edited', state.decisions.edited).expanded = true;
+    renderAgentPanel();
+  `);
+
+  assert.match(panel.innerHTML, /class="architect-decision-ref-empty architect-decision-time" title="2026-04-30T11:30:00Z">30m ago<\/span>/);
+  assert.match(panel.innerHTML, /class="architect-decision-ref-empty architect-decision-time" title="2026-04-30T11:00:00Z">1h ago<\/span>/);
+  assert.match(panel.innerHTML, /architect-decision-meta-label">Created<\/span><span class="architect-decision-meta-value"><span class="architect-decision-ref-empty" title="2026-04-30T09:00:00Z">3h ago<\/span>/);
+  assert.match(panel.innerHTML, /architect-decision-meta-label">Updated<\/span><span class="architect-decision-meta-value"><span class="architect-decision-ref-empty" title="2026-04-30T11:30:00Z">30m ago<\/span>/);
+  assert.equal((panel.innerHTML.match(/architect-decision-meta-label">Updated/g) || []).length, 1);
+  assert.ok(
+    panel.innerHTML.indexOf('Older edited decision') < panel.innerHTML.indexOf('Fresh unedited decision'),
+    'accepted decisions are sorted by updated_at descending',
+  );
+});
+
+test('architect decision cards show acknowledge only for active proposed decisions', () => {
+  const { context, document } = createEngineerHarness();
+  const panel = document.register('panel-agent');
+
+  context.state.agents = {
+    'arch-1': {
+      id: 'arch-1',
+      name: 'Architect One',
+      kind: 'architect',
+      group: 'alpha',
+      cell_type: 'agent',
+    },
+  };
+  context.state.decisions = {
+    proposed: {
+      id: 'proposed',
+      architect_id: 'arch-1',
+      title: 'Proposed decision',
+      status: 'proposed',
+      created_at: 10,
+      updated_at: 10,
+    },
+    accepted: {
+      id: 'accepted',
+      architect_id: 'arch-1',
+      title: 'Accepted decision',
+      status: 'accepted',
+      created_at: 20,
+      updated_at: 20,
+    },
+    archived: {
+      id: 'archived',
+      architect_id: 'arch-1',
+      title: 'Archived proposed decision',
+      status: 'proposed',
+      archived: true,
+      created_at: 30,
+      updated_at: 30,
+    },
+  };
+  context.focusedItemId = 'arch-1';
+
+  runInContext(context, `
+    _agentPanelLastSelectedTabByKind.architect = 'decisions';
+    renderAgentPanel();
+    engineerAcknowledgeDecision('arch-1', 'proposed');
+  `);
+
+  assert.equal((panel.innerHTML.match(/>Acknowledge<\/button>/g) || []).length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(context.sendCalls[0])), {
+    cmd: 'architect_decision_update',
+    architect_id: 'arch-1',
+    id: 'proposed',
+    status: 'accepted',
+  });
+});
+
 test('architect decision and message caches invalidate on relevant websocket deltas', () => {
   const { context, document } = createEngineerWsHarness();
   const panel = document.getElementById('panel-agent');

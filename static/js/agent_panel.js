@@ -3225,6 +3225,9 @@ function _engineerDecisionGroups(decisions) {
     if (!grouped[status]) grouped[status] = [];
     grouped[status].push(decision);
   }
+  Object.keys(grouped).forEach(function(status) {
+    grouped[status].sort(_engineerDecisionRecencySort);
+  });
   return grouped;
 }
 
@@ -3310,6 +3313,62 @@ function _engineerDecisionMetaRowHtml(label, valueHtml) {
     + '<span class="architect-decision-meta-label">' + _agentPanelEsc(label) + '</span>'
     + '<span class="architect-decision-meta-value">' + (valueHtml || '') + '</span>'
     + '</div>';
+}
+
+function _engineerDecisionTimestampSeconds(value) {
+  if (typeof _agentCardTimestampSeconds === 'function') {
+    return _agentCardTimestampSeconds(value);
+  }
+  var numeric = Number(value || 0);
+  if (Number.isFinite(numeric) && numeric > 0) {
+    return numeric > 100000000000 ? numeric / 1000 : numeric;
+  }
+  var parsed = Date.parse(String(value || ''));
+  return Number.isFinite(parsed) ? parsed / 1000 : 0;
+}
+
+function _engineerDecisionTimestampIso(ts) {
+  ts = _engineerDecisionTimestampSeconds(ts);
+  if (!ts) return '';
+  try {
+    return new Date(ts * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  } catch (err) {
+    return '';
+  }
+}
+
+function _engineerDecisionRelativeTimestamp(ts) {
+  ts = _engineerDecisionTimestampSeconds(ts);
+  if (!ts) return '';
+  var diff = Math.max(0, (Date.now() / 1000) - ts);
+  if (diff < 7 * 86400 && typeof _agentPanelTimeAgo === 'function') {
+    return _agentPanelTimeAgo(ts);
+  }
+  return _engineerDecisionTimestampIso(ts).slice(0, 10);
+}
+
+function _engineerDecisionTimestampHtml(ts, extraClass) {
+  var label = _engineerDecisionRelativeTimestamp(ts);
+  if (!label) return '';
+  var iso = _engineerDecisionTimestampIso(ts);
+  var cls = 'architect-decision-ref-empty';
+  if (extraClass) cls += ' ' + extraClass;
+  return '<span class="' + _agentPanelAttr(cls) + '" title="'
+    + _agentPanelAttr(iso) + '">' + _agentPanelEsc(label) + '</span>';
+}
+
+function _engineerDecisionDisplayTimestamp(decision) {
+  var created = _engineerDecisionTimestampSeconds(decision && decision.created_at);
+  var updated = _engineerDecisionTimestampSeconds(decision && decision.updated_at);
+  if (created && updated && updated > created + 60) return updated;
+  return created || updated;
+}
+
+function _engineerDecisionRecencySort(a, b) {
+  var aTs = _engineerDecisionTimestampSeconds(a && (a.updated_at || a.created_at));
+  var bTs = _engineerDecisionTimestampSeconds(b && (b.updated_at || b.created_at));
+  if (aTs !== bTs) return bTs - aTs;
+  return String((a && a.id) || '').localeCompare(String((b && b.id) || ''));
 }
 
 function _agentPanelHierarchyThemeClass(levelClass, workerLevelClass) {
@@ -3556,6 +3615,12 @@ function _agentPanelLegacyRenderDecisionRow(architectId, decision) {
   var linkedEngineerIds = Array.isArray(decision.linked_engineer_ids) ? decision.linked_engineer_ids : [];
   var supersedesId = String(decision.supersedes || '').trim();
   var supersededByIds = _engineerDecisionSupersededByIds(architectId, decision.id);
+  var createdTs = _engineerDecisionTimestampSeconds(decision.created_at);
+  var updatedTs = _engineerDecisionTimestampSeconds(decision.updated_at);
+  var headTimestampHtml = _engineerDecisionTimestampHtml(
+    _engineerDecisionDisplayTimestamp(decision),
+    'architect-decision-time'
+  );
   var taskOptions = getArchitectDecisionTaskOptions(architectId);
   var engineerOptions = getArchitectDecisionEngineerOptions(architectId);
   var html = '<div class="detail-section-card architect-decision-card" data-agent-panel-anchor="decision-'
@@ -3565,6 +3630,7 @@ function _agentPanelLegacyRenderDecisionRow(architectId, decision) {
     + _agentPanelEventAttr('engineerToggleDecision(' + decisionIdJs + ')') + '">';
   html += '<span class="detail-section-primary" title="' + _esc(decision.title || '') + '">' + _esc(decision.title || 'Decision') + '</span>';
   html += '<span class="detail-task-status">' + _esc(decision.status || 'proposed') + '</span>';
+  if (headTimestampHtml) html += headTimestampHtml;
   html += '<span class="detail-expand-caret">' + (ui.expanded ? '\u25BE' : '\u25B8') + '</span>';
   html += '</button>';
   html += '<div class="detail-section-card-actions">';
@@ -3572,6 +3638,11 @@ function _agentPanelLegacyRenderDecisionRow(architectId, decision) {
     html += '<button type="button" class="detail-inline-editor-btn" onclick="'
       + _agentPanelEventAttr('event.stopPropagation();engineerStartDecisionEdit(' + decisionIdJs + ')')
       + '">Edit</button>';
+    if (String(decision.status || 'proposed') === 'proposed' && !decision.archived) {
+      html += '<button type="button" class="detail-inline-editor-btn" onclick="'
+        + _agentPanelEventAttr('event.stopPropagation();engineerAcknowledgeDecision(' + architectIdJs + ',' + decisionIdJs + ')')
+        + '">Acknowledge</button>';
+    }
   }
   html += '<button type="button" class="detail-inline-editor-btn" onclick="'
     + _agentPanelEventAttr('event.stopPropagation();engineerArchiveDecision(' + architectIdJs + ',' + decisionIdJs + ')')
@@ -3617,6 +3688,12 @@ function _agentPanelLegacyRenderDecisionRow(architectId, decision) {
         '<span class="detail-task-status">' + _agentPanelEsc(decision.status || 'proposed') + '</span>'
           + (decision.archived ? ' <span class="architect-decision-ref-empty">archived</span>' : '')
       );
+      if (createdTs) {
+        html += _engineerDecisionMetaRowHtml('Created', _engineerDecisionTimestampHtml(createdTs));
+      }
+      if (createdTs && updatedTs > createdTs + 60) {
+        html += _engineerDecisionMetaRowHtml('Updated', _engineerDecisionTimestampHtml(updatedTs));
+      }
       html += _engineerDecisionMetaRowHtml('Linked tasks', _engineerDecisionRefsHtml(linkedTaskIds, 'None'));
       html += _engineerDecisionMetaRowHtml('Linked engineers', _engineerDecisionRefsHtml(linkedEngineerIds, 'None'));
       if (supersedesId) {
@@ -3875,6 +3952,16 @@ function engineerSaveDecisionEdit(architectId, decisionId) {
   ui.editing = false;
   if (typeof _showToast === 'function') _showToast('Decision updated', 'success');
   _agentPanelRefreshVisibleSurface();
+}
+
+function engineerAcknowledgeDecision(architectId, decisionId) {
+  send({
+    cmd: 'architect_decision_update',
+    architect_id: String(architectId || ''),
+    id: String(decisionId || ''),
+    status: 'accepted',
+  });
+  if (typeof _showToast === 'function') _showToast('Decision acknowledged', 'success');
 }
 
 function engineerArchiveDecision(architectId, decisionId) {
