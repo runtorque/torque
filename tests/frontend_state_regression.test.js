@@ -15772,7 +15772,7 @@ test('header group switcher is hidden in toolbelt and switches active group in s
   assert.deepEqual(Array.from(sandbox.activeGroupMenu.items, (item) => item.label), [
     'Group settings…',
     'Broadcast to alpha…',
-    'Remove group',
+    'Delete group',
   ]);
 
   runInContext(context, `onActiveGroupSelect('beta');`);

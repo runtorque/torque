@@ -157,24 +157,13 @@ function onAgentDblClick(id) {
 async function removeAgent(id) {
   const a = state.agents[id];
   if (!a) return;
+  const name = a.name || a.id || id;
+  const deleteConfirm = (message) => showConfirm(message, {
+    label: 'Delete',
+    variant: 'btn-danger',
+  });
   if ((a.cell_type || '') === 'terminal') {
-    let terminalMsg = `Remove "${a.name}"? This terminal will be permanently deleted now and cannot be restored.`;
-    if (a.worktree_path) {
-      var terminalSharedWith = _worktreeSharedWith(a);
-      if (terminalSharedWith) {
-        terminalMsg += ' Its worktree is shared with ' + terminalSharedWith + ' and will be kept.';
-      } else {
-        const warnings = [];
-        if ((a.worktree_checkpoints || 0) > 0) warnings.push('has unmerged commits');
-        if (a.worktree_dirty) warnings.push('has uncommitted changes');
-        if (warnings.length) {
-          terminalMsg += ' Its worktree ' + warnings.join(' and ') + '. All changes will be lost.';
-        } else {
-          terminalMsg += ' Its worktree will be removed immediately.';
-        }
-      }
-    }
-    if (await showConfirm(terminalMsg)) {
+    if (await deleteConfirm(`Delete "${name}"? This terminal will close.`)) {
       if (selectedAgentId === id) selectedAgentId = null;
       if (selectedTerminalId === id) selectedTerminalId = null;
       send({ cmd: 'remove_agent', id });
@@ -196,13 +185,17 @@ async function removeAgent(id) {
     }
     var decisionCount = 0;
     if (typeof _architectDecisionsForAgent === 'function') {
-      decisionCount = _architectDecisionsForAgent(a.id).length;
+      decisionCount = _architectDecisionsForAgent(a.id)
+        .filter(function(decision) { return !(decision && decision.archived); })
+        .length;
     }
-    var architectMsg = 'Remove "' + a.name + '"? This schedules the architect for permanent deletion in 7 days. You can restore it from Recently deleted until then. Deleting an architect transfers '
+    var architectMsg = 'Delete "' + name + '"? '
       + hiredEngineers + ' hired engineer' + (hiredEngineers === 1 ? '' : 's')
-      + ' to the user and archives ' + decisionCount + ' decision'
-      + (decisionCount === 1 ? '' : 's') + '.';
-    if (await showConfirm(architectMsg)) {
+      + ' will be transferred to the user, ' + decisionCount + ' decision'
+      + (decisionCount === 1 ? '' : 's') + ' will be archived. '
+      + 'The architect will be scheduled for permanent deletion in 7 days \u2014 '
+      + 'you can restore it from Recently deleted before then.';
+    if (await deleteConfirm(architectMsg)) {
       if (selectedAgentId === id) selectedAgentId = null;
       if (selectedTerminalId === id) selectedTerminalId = null;
       send({ cmd: 'delete_architect', id });
@@ -210,9 +203,17 @@ async function removeAgent(id) {
     return;
   }
   const childCount = (state.children[id] || []).length;
-  let msg = `Remove "${a.name}"? This schedules the agent for permanent deletion in 7 days. You can restore it from Recently deleted until then.`;
-  if (childCount > 0) {
-    msg = `Remove "${a.name}" and its ${childCount} terminal(s)? This schedules them for permanent deletion in 7 days. You can restore them from Recently deleted until then.`;
+  const kind = (a.kind || '') === 'engineer' ? 'engineer'
+    : ((a.kind || '') === 'worker' ? 'worker' : 'agent');
+  let msg = `Delete "${name}"? `;
+  if (kind === 'engineer') {
+    msg += 'Owned workers and assigned tasks will be transferred to the user. ';
+  } else if (childCount > 0) {
+    msg = `Delete "${name}" and its ${childCount} terminal(s)? `;
+  }
+  msg += `The ${kind}${childCount > 0 && kind !== 'engineer' ? ' and its terminal(s)' : ''} will be scheduled for permanent deletion in 7 days \u2014 you can restore it from Recently deleted before then.`;
+  if (kind === 'engineer' && childCount > 0) {
+    msg += ' Its terminal(s) are included in the restore window.';
   }
   if (a.worktree_path) {
     var sharedWith = _worktreeSharedWith(a);
@@ -220,16 +221,17 @@ async function removeAgent(id) {
       msg += ' Its worktree is shared with ' + sharedWith + ' and will be kept.';
     } else {
       const warnings = [];
-      if ((a.worktree_checkpoints || 0) > 0) warnings.push('has unmerged commits');
-      if (a.worktree_dirty) warnings.push('has uncommitted changes');
+      if ((a.worktree_checkpoints || 0) > 0) warnings.push('unmerged commits');
+      if (a.worktree_dirty) warnings.push('uncommitted changes');
       if (warnings.length) {
-        msg += ' Its worktree ' + warnings.join(' and ') + ' and will be preserved during the 7-day restore window.';
+        msg += ' Its worktree has ' + warnings.join(' and ')
+          + '. The worktree is preserved during the 7-day restore window; if not restored, all changes will be lost.';
       } else {
-        msg += ' Its worktree will be preserved during the 7-day restore window.';
+        msg += ' Its worktree will be preserved during the 7-day restore window, then permanently removed.';
       }
     }
   }
-  if (await showConfirm(msg)) {
+  if (await deleteConfirm(msg)) {
     if (selectedAgentId === id) selectedAgentId = null;
     if (selectedTerminalId === id) selectedTerminalId = null;
     send({ cmd: 'remove_agent', id });
@@ -390,8 +392,8 @@ async function restartDaemon() {
 async function removeGroup(group) {
   const count = (state.groups[group] || []).length;
   const msg = count > 0
-    ? `Remove group "${group}" and its ${count} cell(s)?`
-    : `Remove empty group "${group}"?`;
+    ? `Delete group "${group}" and its ${count} cell(s)?`
+    : `Delete empty group "${group}"?`;
   if (await showConfirm(msg)) send({ cmd: 'remove_group', group });
 }
 
@@ -615,7 +617,7 @@ function _showWorktreeSubmenu(id) {
   html += `<button onclick="closeContextMenu();worktreeCreatePR('${id}')">Create PR</button>`;
   html += `<button onclick="closeContextMenu();worktreeMerge('${id}')">Merge to Main</button>`;
   html += `<div class="ctx-sep"></div>`;
-  html += `<button class="danger" onclick="closeContextMenu();worktreeRemove('${id}')">Remove Worktree</button>`;
+  html += `<button class="danger" onclick="closeContextMenu();worktreeRemove('${id}')">Delete Worktree</button>`;
   menu.innerHTML = html;
 }
 
@@ -678,7 +680,7 @@ async function _confirmWorktreeMerge(id, message) {
       label: 'Merge', variant: 'btn-green',
       checkboxes: [
         { key: 'close_agent_on_merge', label: 'Close agent after merge', checked: mergeDefaults.close },
-        { key: 'remove_worktree_on_merge', label: 'Remove worktree after merge', checked: mergeDefaults.remove },
+        { key: 'remove_worktree_on_merge', label: 'Delete worktree after merge', checked: mergeDefaults.remove },
         { key: 'preserve_merge_diff', label: 'Preserve merge diff on boundary task', checked: mergeDefaults.preserveDiff },
         { key: 'clear_context', label: 'Clear context after merge', checked: false },
       ],
@@ -706,8 +708,8 @@ async function worktreeRemove(id) {
   if (!cell) return;
   var sharedWith = _worktreeSharedWith(cell);
   if (sharedWith) {
-    let msg = `Worktree for "${cell.name}" is shared with ${sharedWith}. Only the link will be removed.`;
-    if (await showConfirm(msg)) {
+    let msg = `Delete worktree link for "${cell.name}"? The worktree is shared with ${sharedWith}, so only this agent's link will be cleared.`;
+    if (await showConfirm(msg, { label: 'Delete', variant: 'btn-danger' })) {
       send({ cmd: 'worktree_remove', id, relaunch: !!cell.session_id });
     }
     return;
@@ -718,9 +720,9 @@ async function worktreeRemove(id) {
   if (hasCommits) warnings.push('has unmerged commits');
   if (dirty) warnings.push('has uncommitted changes');
   if (cell.session_id) warnings.push('agent will restart in a fresh session');
-  let msg = `Remove worktree for "${cell.name}"?`;
+  let msg = `Delete worktree for "${cell.name}"?`;
   if (warnings.length) msg += ' ' + warnings.join(', ').replace(/^./, c => c.toUpperCase()) + '. All changes will be lost.';
-  if (await showConfirm(msg)) {
+  if (await showConfirm(msg, { label: 'Delete', variant: 'btn-danger' })) {
     send({ cmd: 'worktree_remove', id, relaunch: !!cell.session_id });
   }
 }
@@ -789,7 +791,7 @@ function onCellContextMenu(e, id) {
   }
   items.push({ separator: true });
   items.push({ label: `Copy ID: ${id.slice(0, 8)}\u2026`, action: `copyAgentId('${id}')` });
-  items.push({ label: 'Remove', action: `removeAgent('${id}')`, danger: true });
+  items.push({ label: 'Delete', action: `removeAgent('${id}')`, danger: true });
   showContextMenu(e.clientX, e.clientY, items);
 }
 
@@ -800,7 +802,7 @@ function onGroupContextMenu(e, group) {
   const items = [
     { label: 'Settings\u2026', action: `openGroupSettings('${esc(group)}')` },
     { label: 'Broadcast\u2026', action: `openBroadcast('${esc(group)}')` },
-    { label: 'Remove', action: `removeGroup('${esc(group)}')`, danger: true },
+    { label: 'Delete', action: `removeGroup('${esc(group)}')`, danger: true },
   ];
   showContextMenu(e.clientX, e.clientY, items);
 }

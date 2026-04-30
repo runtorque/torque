@@ -12624,7 +12624,7 @@ async def main(connection=None):
                 window_id=cell.window_id or state.current_window_id or None,
             )
             alert.add_button("Cancel")
-            alert.add_button("Remove")
+            alert.add_button("Delete")
             return await alert.async_run(connection) == 1001
         except Exception:
             log.exception("Failed to confirm close-cell keybinding for '%s'",

@@ -558,7 +558,7 @@ function _tplTransitionRow(idx, tr) {
   var locBypass = !!(locGate && locGate.self_review_bypass_allowed);
   var locDisabled = locEnabled ? '' : ' disabled';
   var html = '<div class="tpled-transition-entry" data-idx="' + idx + '">';
-  html += '<button class="tpled-tr-remove" onclick="tplRemoveTransition(' + idx + ')" title="Remove transition">\u2715</button>';
+  html += '<button class="tpled-tr-remove" onclick="tplRemoveTransition(' + idx + ')" title="Delete transition">\u2715</button>';
   html += '<div class="tpled-transition-body">';
   html += '<div class="tpled-transition-row">';
   html += '<div class="tpled-tr-field">';

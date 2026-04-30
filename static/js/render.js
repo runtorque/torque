@@ -1859,7 +1859,7 @@ function _renderPrincipalArchitectCard(groupName, section, selectedPrincipalId) 
     + '<button type="button" class="principal-card-close"'
     + ' data-focus-key="principal-close:' + esc(id) + '"'
     + ' onclick="event.stopPropagation();removeAgent(' + idArg + ')"'
-    + ' title="Remove architect">✕</button>'
+    + ' title="Delete architect">✕</button>'
     + '<button type="button" class="principal-card-pause ' + (digestPaused ? 'paused' : 'running') + '"'
     + ' data-focus-key="principal-pause:' + esc(id) + '"'
     + ' onclick="event.stopPropagation();toggleDigestPauseForAgent(' + idArg + ')"'
@@ -2651,7 +2651,7 @@ function _renderMainGrid(opts, renderMode) {
       html += `  <span class="group-count">${agents.length}</span>`;
       html += `  <button class="group-btn" draggable="false" title="Group settings" onclick="event.stopPropagation();openGroupSettings('${esc(gname)}')">\u2699</button>`;
       html += `  <button class="group-btn" draggable="false" title="Broadcast to ${esc(gname)}" onclick="openBroadcast('${esc(gname)}')">\u2318</button>`;
-      html += `  <button class="group-btn" draggable="false" title="Remove group" onclick="removeGroup('${esc(gname)}')">\u2715</button>`;
+      html += `  <button class="group-btn" draggable="false" title="Delete group" onclick="removeGroup('${esc(gname)}')">\u2715</button>`;
       html += `</div>`;
 
       html += `<div class="group-body"><div class="group-body-inner">`;
@@ -3487,7 +3487,7 @@ function _agentCellSubtitle(a) {
 function _renderAgentCardControls(a, opts) {
   opts = opts || {};
   const id = String((a && a.id) || '');
-  const closeTitle = opts.dismissed ? 'Remove dismissed engineer' : 'Remove';
+  const closeTitle = opts.dismissed ? 'Delete dismissed engineer' : 'Delete';
   const paused = !!opts.paused;
   const pauseTitle = opts.pauseTitle || (paused ? 'Resume event delivery' : 'Pause event delivery');
   const pauseIcon = paused ? '&#x25B6;' : '&#x23F8;';
@@ -3924,7 +3924,7 @@ function renderTerminalRow(t) {
   if (t.status === 'stopped') {
     h += `<button class="term-action" onclick="event.stopPropagation();relaunchAgent('${t.id}')" title="Relaunch">\u21BB</button>`;
   }
-  h += `<button class="term-action danger" onclick="event.stopPropagation();removeAgent('${t.id}')" title="Remove">\u2715</button>`;
+  h += `<button class="term-action danger" onclick="event.stopPropagation();removeAgent('${t.id}')" title="Delete">\u2715</button>`;
   h += `</div>`;
   h += `</div>`;
   return h;

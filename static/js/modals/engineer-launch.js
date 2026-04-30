@@ -52,7 +52,7 @@ function renderEngineerLaunchSpecializations() {
     const remove = document.createElement('button');
     remove.type = 'button';
     remove.textContent = '×';
-    remove.title = 'Remove';
+    remove.title = 'Delete';
     remove.onclick = function () { engineerLaunchRemoveSpecialization(idx); };
     controls.appendChild(remove);
     li.appendChild(controls);

@@ -202,21 +202,48 @@ def build_close_cell_confirmation_message(state, cell):
     child_count = len(state._children.get(cell.id, []))
     is_terminal = getattr(cell, "cell_type", "") == "terminal"
     if is_terminal:
+        return f'Delete "{cell.name}"? This terminal will close.'
+    kind = str(getattr(cell, "kind", "") or "").strip()
+    if kind == "architect":
+        hired = 0
+        for other in state.agents.values():
+            if getattr(other, "cell_type", "") != "agent":
+                continue
+            if str(getattr(other, "kind", "") or "").strip() != "engineer":
+                continue
+            if str(getattr(other, "hired_by_architect_id", "") or "").strip() == cell.id:
+                hired += 1
+        decisions = 0
+        for decision in getattr(state, "decisions", {}).values():
+            if str(decision.get("architect_id", "") or "").strip() != cell.id:
+                continue
+            if decision.get("archived"):
+                continue
+            decisions += 1
         msg = (
-            f'Remove "{cell.name}"? This terminal will be permanently '
-            "deleted now and cannot be restored."
+            f'Delete "{cell.name}"? {hired} hired engineer'
+            f'{" will" if hired == 1 else "s will"} be transferred to the user, '
+            f'{decisions} decision{" will" if decisions == 1 else "s will"} be archived. '
+            "The architect will be scheduled for permanent deletion in 7 days — "
+            "you can restore it from Recently deleted before then."
         )
     else:
+        noun = "engineer" if kind == "engineer" else (
+            "worker" if kind == "worker" else "agent")
         msg = (
-            f'Remove "{cell.name}"? It will be scheduled for permanent deletion '
-            "in 7 days and can be restored from Recently deleted until then."
+            f'Delete "{cell.name}"? '
         )
-    if child_count > 0:
-        msg = (
-            f'Remove "{cell.name}" and its {child_count} terminal(s)? They '
-            "will be scheduled for permanent deletion in 7 days and can be "
-            "restored from Recently deleted until then."
+        if kind == "engineer":
+            msg += "Owned workers and assigned tasks will be transferred to the user. "
+        elif child_count > 0:
+            msg = f'Delete "{cell.name}" and its {child_count} terminal(s)? '
+        msg += (
+            f'The {noun}{" and its terminal(s)" if child_count > 0 and kind != "engineer" else ""} '
+            "will be scheduled for permanent deletion in 7 days — you can "
+            "restore it from Recently deleted before then."
         )
+        if kind == "engineer" and child_count > 0:
+            msg += " Its terminal(s) are included in the restore window."
     if cell.worktree_path:
         shared_with = [
             other.name
@@ -238,13 +265,17 @@ def build_close_cell_confirmation_message(state, cell):
                     msg += (" Its worktree " + " and ".join(warnings)
                             + ". All changes will be lost.")
                 else:
-                    msg += (" Its worktree " + " and ".join(warnings)
-                            + " and will be preserved during the restore window.")
+                    warning_text = " and ".join(
+                        w.removeprefix("has ") for w in warnings)
+                    msg += (" Its worktree has " + warning_text
+                            + ". The worktree is preserved during the 7-day restore window; "
+                            "if not restored, all changes will be lost.")
             else:
                 if is_terminal:
-                    msg += " Its worktree will be removed immediately."
+                    msg += " Its worktree will be deleted immediately."
                 else:
-                    msg += " Its worktree will be preserved during the restore window."
+                    msg += (" Its worktree will be preserved during the 7-day "
+                            "restore window, then permanently removed.")
     return msg
 
 

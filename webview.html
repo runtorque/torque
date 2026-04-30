@@ -527,7 +527,7 @@
         </label>
         <label class="gs-checkbox">
           <input id="gs-terminal-close-on-disconnect" type="checkbox"> Close on disconnect
-          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Automatically remove the terminal from Loom when its iTerm2 tab is closed.">?</span>
+          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Automatically delete the terminal from Loom when its iTerm2 tab is closed.">?</span>
         </label>
       </div>
 
@@ -564,8 +564,8 @@
           <select id="gs-wt-merge-cleanup">
             <option value="keep">Keep agent and worktree</option>
             <option value="close">Close agent only</option>
-            <option value="remove">Remove worktree only</option>
-            <option value="close_remove">Close agent and remove worktree</option>
+            <option value="remove">Delete worktree only</option>
+            <option value="close_remove">Close agent and delete worktree</option>
           </select>
           <label class="gs-checkbox">
             <input id="gs-wt-merge-preserve-diff" type="checkbox"> Preserve merge diff by default
@@ -1319,7 +1319,7 @@
     <div id="confirm-extras"></div>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="confirmNo()">Cancel</button>
-      <button id="confirm-yes-btn" class="btn-primary btn-danger" onclick="confirmYes()">Remove</button>
+      <button id="confirm-yes-btn" class="btn-primary btn-danger" onclick="confirmYes()">Delete</button>
     </div>
   </div>
 </div>

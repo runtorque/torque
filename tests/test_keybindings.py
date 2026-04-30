@@ -430,6 +430,7 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
             group="g",
             slug="worker",
             cell_type="agent",
+            kind="worker",
             worktree_path="/tmp/wt",
             worktree_checkpoints=2,
             worktree_dirty=True,
@@ -449,11 +450,12 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             msg,
-            'Remove "Worker" and its 1 terminal(s)? '
-            'They will be scheduled for permanent deletion in 7 days and can '
-            'be restored from Recently deleted until then. '
-            'Its worktree has unmerged commits and has uncommitted changes '
-            'and will be preserved during the restore window.',
+            'Delete "Worker" and its 1 terminal(s)? '
+            'The worker and its terminal(s) will be scheduled for permanent '
+            'deletion in 7 days — you can restore it from Recently deleted '
+            'before then. Its worktree has unmerged commits and uncommitted '
+            'changes. The worktree is preserved during the 7-day restore '
+            'window; if not restored, all changes will be lost.',
         )
 
     async def test_build_close_confirmation_message_describes_shared_worktree(self):
@@ -464,6 +466,7 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
             group="g",
             slug="worker",
             cell_type="agent",
+            kind="worker",
             worktree_path="/tmp/shared",
         )
         shared = self.state_mod.AgentCell(
@@ -481,10 +484,67 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             msg,
-            'Remove "Worker"? It will be scheduled for permanent deletion '
-            'in 7 days and can be restored from Recently deleted until then. '
+            'Delete "Worker"? The worker will be scheduled for permanent '
+            'deletion in 7 days — you can restore it from Recently deleted '
+            'before then. '
             'Its worktree is shared with "Peer" and will be kept.',
         )
+
+    async def test_build_close_confirmation_message_engineer_transfers_owned_work(self):
+        state = self.state_mod.MatrixState()
+        engineer = self.state_mod.AgentCell(
+            id="eng-1",
+            name="Engineer",
+            group="g",
+            slug="engineer",
+            cell_type="agent",
+            kind="engineer",
+        )
+        state.agents = {engineer.id: engineer}
+
+        msg = self.keybindings_mod.build_close_cell_confirmation_message(
+            state, engineer)
+
+        self.assertIn('Delete "Engineer"?', msg)
+        self.assertIn(
+            "Owned workers and assigned tasks will be transferred to the user",
+            msg,
+        )
+        self.assertIn("permanent deletion in 7 days", msg)
+        self.assertIn("Recently deleted", msg)
+
+    async def test_build_close_confirmation_message_architect_transfers_and_archives(self):
+        state = self.state_mod.MatrixState()
+        architect = self.state_mod.AgentCell(
+            id="arch-1",
+            name="Architect",
+            group="g",
+            slug="architect",
+            cell_type="agent",
+            kind="architect",
+        )
+        engineer = self.state_mod.AgentCell(
+            id="eng-1",
+            name="Engineer",
+            group="g",
+            slug="engineer",
+            cell_type="agent",
+            kind="engineer",
+            hired_by_architect_id="arch-1",
+        )
+        state.agents = {architect.id: architect, engineer.id: engineer}
+        state.decisions = {
+            "dec-1": {"id": "dec-1", "architect_id": "arch-1"},
+        }
+
+        msg = self.keybindings_mod.build_close_cell_confirmation_message(
+            state, architect)
+
+        self.assertIn('Delete "Architect"?', msg)
+        self.assertIn("1 hired engineer will be transferred to the user", msg)
+        self.assertIn("1 decision will be archived", msg)
+        self.assertIn("permanent deletion in 7 days", msg)
+        self.assertIn("Recently deleted", msg)
 
     async def test_build_close_confirmation_message_direct_terminal_is_immediate(self):
         state = self.state_mod.MatrixState()
@@ -502,8 +562,7 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             msg,
-            'Remove "Logs"? This terminal will be permanently deleted now '
-            'and cannot be restored.',
+            'Delete "Logs"? This terminal will close.',
         )
         self.assertNotIn("Recently deleted", msg)
 

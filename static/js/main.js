@@ -91,7 +91,7 @@ function openActiveGroupMenu(event) {
   showContextMenu(x || 0, y || 0, [
     { label: 'Group settings…', action: `openGroupSettings('${esc(group)}')` },
     { label: `Broadcast to ${group}…`, action: `openBroadcast('${esc(group)}')` },
-    { label: 'Remove group', action: `removeGroup('${esc(group)}')`, danger: true },
+    { label: 'Delete group', action: `removeGroup('${esc(group)}')`, danger: true },
   ]);
 }
 

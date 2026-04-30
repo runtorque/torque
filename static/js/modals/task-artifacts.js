@@ -405,7 +405,7 @@ function _renderArtifactCard(artifact, opts) {
     html += '<button class="artifact-card-action" onclick="' + opts.onEdit + '">Edit</button>';
   }
   if (opts.onRemove) {
-    html += '<button class="artifact-card-action artifact-card-action-danger" onclick="' + opts.onRemove + '">Remove</button>';
+    html += '<button class="artifact-card-action artifact-card-action-danger" onclick="' + opts.onRemove + '">Delete</button>';
   }
   html += '</div>';
   html += '</div>';

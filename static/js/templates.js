@@ -302,7 +302,7 @@ function renderAgentTemplatesEditor() {
 function _agentTemplateTerminalRow(idx, term) {
   term = term || {};
   var html = '<div class="tpled-transition-entry" data-idx="' + idx + '">';
-  html += '<button class="tpled-tr-remove" onclick="agentTemplateRemoveTerminal(' + idx + ')" title="Remove terminal">\u2715</button>';
+  html += '<button class="tpled-tr-remove" onclick="agentTemplateRemoveTerminal(' + idx + ')" title="Delete terminal">\u2715</button>';
   html += '<div class="tpled-transition-body">';
   html += '<label>Name</label><input class="agent-template-terminal-name" value="' + esc(term.name || '') + '" onchange="agentTemplateMarkDirty()" autocomplete="off">';
   html += '<label>Command</label><input class="agent-template-terminal-command" value="' + esc(term.command || '') + '" onchange="agentTemplateMarkDirty()" autocomplete="off">';
@@ -314,7 +314,7 @@ function _agentTemplatePriorityRow(idx, value) {
   var html = '<div class="tpled-priority-row" data-idx="' + idx + '">';
   html += '<span class="tpled-priority-grip" aria-hidden="true">\u22EE\u22EE</span>';
   html += '<input type="text" class="agent-template-priority-input" value="' + esc(value || '') + '" onchange="agentTemplateMarkDirty()" autocomplete="off" placeholder="e.g. ship small">';
-  html += '<button class="tpled-priority-remove" onclick="agentTemplateRemovePriority(' + idx + ')" title="Remove priority">\u2715</button>';
+  html += '<button class="tpled-priority-remove" onclick="agentTemplateRemovePriority(' + idx + ')" title="Delete priority">\u2715</button>';
   html += '</div>';
   return html;
 }
