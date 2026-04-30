@@ -8875,7 +8875,6 @@ test('global scrollback setting edit updates existing and new embedded terminals
     'gls-filter-window',
     'gls-focus-new-tabs',
     'gls-focus-on-click',
-    'gls-pause-suppresses-subagent-messages',
     'gls-default-lanes',
     'gls-max-pipeline-depth',
     'gls-max-event-log',
@@ -8885,7 +8884,6 @@ test('global scrollback setting edit updates existing and new embedded terminals
   document.getElementById('gls-filter-window').checked = true;
   document.getElementById('gls-focus-new-tabs').checked = true;
   document.getElementById('gls-focus-on-click').checked = false;
-  document.getElementById('gls-pause-suppresses-subagent-messages').checked = true;
   document.getElementById('gls-default-lanes').value = 'Backlog\nDone';
   document.getElementById('gls-max-pipeline-depth').value = '10';
   document.getElementById('gls-max-event-log').value = '500';
@@ -8905,7 +8903,6 @@ test('global scrollback setting edit updates existing and new embedded terminals
   assert.equal(sandbox.sendCalls.length, 1);
   const saved = sandbox.sendCalls[0].settings;
   assert.equal(saved.xterm_scrollback, 9000);
-  assert.equal(saved.pause_suppresses_subagent_messages, true);
 
   context.__savedSettings = saved;
   const newSurface = new FakeElement('new-surface');
@@ -8929,7 +8926,6 @@ test('global settings modal rejects out-of-range xterm scrollback', () => {
     'gls-filter-window',
     'gls-focus-new-tabs',
     'gls-focus-on-click',
-    'gls-pause-suppresses-subagent-messages',
     'gls-default-lanes',
     'gls-max-pipeline-depth',
     'gls-max-event-log',
