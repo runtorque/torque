@@ -7025,6 +7025,11 @@ button.agent-panel-hierarchy-crumb:focus-visible {
 .architect-decision-ref-empty {
   color: var(--text-dim);
 }
+.architect-decision-time {
+  flex-shrink: 0;
+  font-size: 9px;
+  white-space: nowrap;
+}
 .architect-decision-link-row {
   display: flex;
   flex-wrap: wrap;
