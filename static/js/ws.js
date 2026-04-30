@@ -746,19 +746,20 @@ function _deltaSurfaceInvalidations(ops, hints) {
       case 'mcp_call_append': {
         _markSurface(flags, 'events');
         // Engineer panel only needs a full re-render when the append
-        // belongs to the focused agent. Cross-agent traffic (e.g. another
-        // worker firing loom_progress while the user is reading a
-        // different agent's panel) used to clobber the focused panel's
-        // DOM — destroying any in-progress textarea selection / scroll
-        // anchor — even though nothing the panel displayed had changed.
-        // Same-agent traffic still refreshes (the user is watching that
-        // agent's events / MCP feed and expects updates).
+        // belongs to the focused agent *and* the focused panel is displaying
+        // the affected sub-surface. Cross-agent traffic (e.g. another worker
+        // firing loom_progress while the user is reading a different agent's
+        // panel) used to clobber the focused panel's DOM — destroying any
+        // in-progress textarea selection / scroll anchor — even though
+        // nothing the panel displayed had changed.
         const _appendFocusedId = _contextFocusedAgentBeforeDelta();
         const _appendCellId = (op.op === 'mcp_call_append')
           ? String((op.call && op.call.cell_id) || '')
           : String(op.cell_id || '');
         if (_appendFocusedId && _appendCellId
-            && _appendFocusedId === _appendCellId) {
+            && _appendFocusedId === _appendCellId
+            && (op.op !== 'mcp_call_append'
+              || _focusedAgentMcpEventsSubtabActive(_appendFocusedId))) {
           _markSurface(flags, 'engineer');
         }
         break;
@@ -1131,6 +1132,23 @@ function _contextFocusedAgentBeforeDelta() {
     return String(focusedItemId || '');
   }
   return '';
+}
+
+function _focusedAgentMcpEventsSubtabActive(agentId) {
+  agentId = String(agentId || '');
+  if (!agentId || !state || !state.agents) return false;
+  const agent = state.agents[agentId];
+  if (!agent) return false;
+  if (typeof _agentPanelIsMcpSubtabActive === 'function') {
+    return !!_agentPanelIsMcpSubtabActive(agent);
+  }
+  if (typeof _agentPanelKind !== 'function'
+      || typeof _agentPanelActiveTab !== 'function'
+      || typeof _agentPanelEventsInnerTab !== 'function') {
+    return false;
+  }
+  return _agentPanelActiveTab(_agentPanelKind(agent)) === 'events'
+    && _agentPanelEventsInnerTab(agent) === 'mcp';
 }
 
 function _taskPipelineRef(task) {

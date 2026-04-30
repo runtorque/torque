@@ -164,6 +164,52 @@ test('renderAgentPanel renders architect, engineer, worker, and terminal panels'
   assert.match(panel.innerHTML, /pytest/);
 });
 
+test('agent panel folds MCP into Events subtabs for standalone and toolbelt modes', () => {
+  const { context, panel } = createHarness();
+  const expectedSpecs = {
+    architect: ['decisions', 'journal', 'hired_engineers', 'messages', 'events'],
+    engineer: ['journal', 'events', 'worklog'],
+    worker: ['events', 'messages', 'worklog'],
+  };
+  const agents = {
+    architect: { id: 'arch-1', name: 'Planner', kind: 'architect', group: 'alpha', cell_type: 'agent' },
+    engineer: { id: 'eng-1', name: 'Builder', kind: 'engineer', group: 'alpha', cell_type: 'agent' },
+    worker: { id: 'worker-1', name: 'Worker Bee', kind: 'worker', group: 'alpha', cell_type: 'agent' },
+  };
+  const runtimes = [
+    { mode: 'standalone', embedded_terminal: true },
+    { mode: 'toolbelt', embedded_terminal: false },
+  ];
+
+  for (const runtime of runtimes) {
+    context.state.runtime = runtime;
+    for (const kind of Object.keys(expectedSpecs)) {
+      assert.deepEqual(
+        JSON.parse(JSON.stringify(vm.runInContext(
+          `_agentPanelTabSpec('${kind}').map(function(tab) { return tab.key; })`,
+          context
+        ))),
+        expectedSpecs[kind],
+        kind + ' tab spec in ' + runtime.mode
+      );
+      context.state.agents = { [agents[kind].id]: agents[kind] };
+      context.focusedItemId = agents[kind].id;
+      vm.runInContext(`_agentPanelLastSelectedTabByKind.${kind} = 'events';`, context);
+      context.renderAgentPanel();
+      assert.doesNotMatch(panel.innerHTML, /id="agent-panel-tab-mcp"/,
+        kind + ' must not expose a top-level MCP tab in ' + runtime.mode);
+      assert.match(
+        panel.innerHTML,
+        /data-agent-panel-events-inner-tab="inbox"[\s\S]*data-agent-panel-events-inner-tab="lifecycle"[\s\S]*data-agent-panel-events-inner-tab="mcp"/,
+        kind + ' Events subtabs must be inbox, lifecycle, mcp in ' + runtime.mode
+      );
+    }
+  }
+
+  const source = fs.readFileSync(path.join(repoRoot, 'static/js/agent_panel.js'), 'utf8');
+  assert.equal(source.includes("activeTab === 'mcp'"), false);
+});
+
 test('architect roster renders worker kind badges with worker-specific class', () => {
   const { context, panel } = createHarness();
   context._esc = function(value) { return String(value); };
@@ -528,6 +574,7 @@ test('worker panel filters per-cell events and task history to the focused worke
     'LOOM:2': { id: 'LOOM:2', task: 'Ignore task', agent_id: 'worker-2', lane: 'Done', status: 'done', created_at: 15 },
     'LOOM:3': { id: 'LOOM:3', task: 'Compile feature branch', agent_id: 'worker-1', lane: 'Doing', status: 'running', created_at: 25 },
   };
+  vm.runInContext(`_agentPanelEventsInnerTabByAgentId['worker-1'] = 'lifecycle';`, context);
 
   context.renderAgentPanel();
   assert.match(panel.innerHTML, /Finished compile step/);
@@ -1034,7 +1081,7 @@ test('focused engineer events tab starts the live countdown timer', () => {
   assert.equal(intervalCalls[0].ms, 1000);
 });
 
-test('agent MCP tab fetches calls, filters, and expands redacted details', () => {
+test('agent Events MCP subtab fetches calls, filters, and expands redacted details', () => {
   const { context, panel, sendCalls } = createHarness();
   const now = Math.floor(Date.now() / 1000);
   setFocusedAgent(context, {
@@ -1045,11 +1092,16 @@ test('agent MCP tab fetches calls, filters, and expands redacted details', () =>
     cell_type: 'agent',
   });
   context.state.global_settings.mcp_call_log_args_capture = 'metadata';
-  vm.runInContext(`_agentPanelLastSelectedTabByKind.worker = 'mcp';`, context);
+  vm.runInContext(`
+    _agentPanelLastSelectedTabByKind.worker = 'events';
+    _agentPanelEventsInnerTabByAgentId['worker-mcp'] = 'mcp';
+  `, context);
 
   context.renderAgentPanel();
 
-  assert.match(panel.innerHTML, /id="agent-panel-tab-mcp" class="agent-panel-tab active"/);
+  assert.match(panel.innerHTML, /id="agent-panel-tab-events" class="agent-panel-tab active"/);
+  assert.doesNotMatch(panel.innerHTML, /id="agent-panel-tab-mcp"/);
+  assert.match(panel.innerHTML, /id="agent-panel-events-subtab-mcp" class="agent-panel-events-subtab active"/);
   assert.doesNotMatch(panel.innerHTML, /agent-panel-mcp-banner/);
   assert.ok(sendCalls.some((call) => call.cmd === 'mcp_calls'
     && call.cell_id === 'worker-mcp'
@@ -1088,7 +1140,7 @@ test('agent MCP tab fetches calls, filters, and expands redacted details', () =>
   assert.equal(sendCalls[sendCalls.length - 1].tool_name_pattern, '*progress*');
 });
 
-test('agent MCP tab hides settings banner in full capture mode and renders full args', () => {
+test('agent Events MCP subtab hides settings banner in full capture mode and renders full args', () => {
   const { context, panel } = createHarness();
   const now = Math.floor(Date.now() / 1000);
   setFocusedAgent(context, {
@@ -1113,7 +1165,10 @@ test('agent MCP tab hides settings banner in full capture mode and renders full 
       result_redacted: false,
     },
   ];
-  vm.runInContext(`_agentPanelLastSelectedTabByKind.worker = 'mcp';`, context);
+  vm.runInContext(`
+    _agentPanelLastSelectedTabByKind.worker = 'events';
+    _agentPanelEventsInnerTabByAgentId['worker-full'] = 'mcp';
+  `, context);
 
   context.renderAgentPanel();
   context.agentPanelToggleMcpCall('worker-full', '1');
@@ -1123,7 +1178,7 @@ test('agent MCP tab hides settings banner in full capture mode and renders full 
   assert.doesNotMatch(panel.innerHTML, /Args redacted at ingest\./);
 });
 
-test('agent MCP tab live update prepends without losing expanded row across rerender', () => {
+test('agent Events MCP subtab live update prepends without losing expanded row across rerender', () => {
   const { context, panel, captureCalls, restoreCalls } = createHarness();
   const now = Math.floor(Date.now() / 1000);
   setFocusedAgent(context, {
@@ -1147,7 +1202,10 @@ test('agent MCP tab live update prepends without losing expanded row across rere
       result_redacted: false,
     },
   ];
-  vm.runInContext(`_agentPanelLastSelectedTabByKind.worker = 'mcp';`, context);
+  vm.runInContext(`
+    _agentPanelLastSelectedTabByKind.worker = 'events';
+    _agentPanelEventsInnerTabByAgentId['worker-live'] = 'mcp';
+  `, context);
   context.renderAgentPanel();
   context.agentPanelToggleMcpCall('worker-live', '1');
   const captureBefore = captureCalls.length;
@@ -1191,7 +1249,44 @@ test('agent MCP tab live update prepends without losing expanded row across rere
   const latestCapture = captureCalls[captureCalls.length - 1];
   const scrollSelectors = JSON.parse(JSON.stringify(latestCapture.opts.scrollSelectors));
   assert.ok(scrollSelectors.indexOf('.agent-panel-mcp-list') >= 0,
-    'MCP tab must register its list for rerender scroll preservation');
+    'Events.MCP subtab must register its list for rerender scroll preservation');
+});
+
+test('agentPanelSelectTab mcp redirects to Events MCP subtab and subtab state is per-agent', () => {
+  const { context, panel } = createHarness();
+  const engA = {
+    id: 'eng-a',
+    name: 'Engineer A',
+    kind: 'engineer',
+    group: 'alpha',
+    cell_type: 'agent',
+  };
+  const engB = {
+    id: 'eng-b',
+    name: 'Engineer B',
+    kind: 'engineer',
+    group: 'alpha',
+    cell_type: 'agent',
+  };
+  context.state.agents = { 'eng-a': engA, 'eng-b': engB };
+
+  context.focusedItemId = 'eng-a';
+  context.renderAgentPanel();
+  context.agentPanelSelectTab('mcp');
+  assert.match(panel.innerHTML, /id="agent-panel-tab-events" class="agent-panel-tab active"/);
+  assert.match(panel.innerHTML, /id="agent-panel-events-subtab-mcp" class="agent-panel-events-subtab active"/);
+
+  context.focusedItemId = 'eng-b';
+  context.renderAgentPanel();
+  assert.match(panel.innerHTML, /id="agent-panel-events-subtab-inbox" class="agent-panel-events-subtab active"/);
+  assert.doesNotMatch(panel.innerHTML, /id="agent-panel-events-subtab-mcp" class="agent-panel-events-subtab active"/);
+
+  context.agentPanelSelectEventsInnerTab('lifecycle');
+  assert.match(panel.innerHTML, /id="agent-panel-events-subtab-lifecycle" class="agent-panel-events-subtab active"/);
+
+  context.focusedItemId = 'eng-a';
+  context.renderAgentPanel();
+  assert.match(panel.innerHTML, /id="agent-panel-events-subtab-mcp" class="agent-panel-events-subtab active"/);
 });
 
 test('focused engineer pause toggle sends per-agent digest pause and resume commands', () => {
@@ -1512,7 +1607,7 @@ test('architect Events tab splits digest inbox from Cell events lifecycle', () =
   assert.doesNotMatch(html, /Send queued now/);
 });
 
-test('worker Events tab stays a single event list without inner subtabs', () => {
+test('worker Events tab exposes inbox, lifecycle, and MCP subtabs with lifecycle event list', () => {
   const { context, panel } = createHarness();
   setFocusedAgent(context, {
     id: 'worker-events',
@@ -1530,14 +1625,18 @@ test('worker Events tab stays a single event list without inner subtabs', () => 
       timestamp: 10,
     },
   ];
-  vm.runInContext(`_agentPanelLastSelectedTabByKind.worker = 'events';`, context);
+  vm.runInContext(`
+    _agentPanelLastSelectedTabByKind.worker = 'events';
+    _agentPanelEventsInnerTabByAgentId['worker-events'] = 'lifecycle';
+  `, context);
 
   context.renderAgentPanel();
 
+  assert.match(panel.innerHTML, /agent-panel-events-subtabs/);
+  assert.match(panel.innerHTML, /data-agent-panel-events-inner-tab="inbox"[\s\S]*data-agent-panel-events-inner-tab="lifecycle"[\s\S]*data-agent-panel-events-inner-tab="mcp"/);
+  assert.match(panel.innerHTML, /data-agent-panel-events-inner-tab="lifecycle"[^>]*aria-selected="true"/);
   assert.match(panel.innerHTML, /Worker events/);
   assert.match(panel.innerHTML, /Worker booted/);
-  assert.doesNotMatch(panel.innerHTML, /agent-panel-events-subtabs/);
-  assert.doesNotMatch(panel.innerHTML, /data-agent-panel-events-inner-tab/);
 });
 
 test('Already sent section caps at 20 events and exposes a Load more button', () => {

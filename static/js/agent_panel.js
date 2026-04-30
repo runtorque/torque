@@ -54,19 +54,16 @@ var _agentPanelTabSpecByKind = {
     { key: 'journal', label: 'Journal' },
     { key: 'hired_engineers', label: 'Hired engineers' },
     { key: 'messages', label: 'Messages' },
-    { key: 'mcp', label: 'MCP' },
     { key: 'events', label: 'Events' },
   ],
   engineer: [
     { key: 'journal', label: 'Journal' },
-    { key: 'mcp', label: 'MCP' },
     { key: 'events', label: 'Events' },
     { key: 'worklog', label: 'Worklog' },
   ],
   worker: [
     { key: 'events', label: 'Events' },
     { key: 'messages', label: 'Messages' },
-    { key: 'mcp', label: 'MCP' },
     { key: 'worklog', label: 'Worklog' },
   ],
   user: [],
@@ -205,8 +202,14 @@ function agentPanelSelectTab(tab) {
   if (!agent) return;
   var kind = _agentPanelKind(agent);
   if (!kind) return;
+  tab = String(tab || '');
+  if (tab === 'mcp' && _agentPanelCanUseEventInnerTabs(agent)) {
+    var agentId = String(agent.id || '');
+    if (agentId) _agentPanelEventsInnerTabByAgentId[agentId] = 'mcp';
+    tab = 'events';
+  }
   var previousTab = _agentPanelActiveTab(kind);
-  _agentPanelLastSelectedTabByKind[kind] = String(tab || '');
+  _agentPanelLastSelectedTabByKind[kind] = tab;
   var activeTab = _agentPanelActiveTab(kind);
   if (_agentPanelRenderFocusedTabInPlace(agent, kind, previousTab, activeTab)) return;
   renderAgentPanel();
@@ -215,12 +218,19 @@ function agentPanelSelectTab(tab) {
 function _agentPanelEventsInnerTab(agent) {
   var agentId = String((agent && agent.id) || '');
   var selected = agentId ? _agentPanelEventsInnerTabByAgentId[agentId] : '';
-  return selected === 'lifecycle' ? 'lifecycle' : 'inbox';
+  if (selected === 'lifecycle' || selected === 'mcp') return selected;
+  return 'inbox';
 }
 
 function _agentPanelCanUseEventInnerTabs(agent) {
   var kind = _agentPanelKind(agent);
-  return kind === 'engineer' || kind === 'architect';
+  return kind === 'engineer' || kind === 'architect' || kind === 'worker';
+}
+
+function _agentPanelIsMcpSubtabActive(agent) {
+  if (!agent || !_agentPanelCanUseEventInnerTabs(agent)) return false;
+  return _agentPanelActiveTab(_agentPanelKind(agent)) === 'events'
+    && _agentPanelEventsInnerTab(agent) === 'mcp';
 }
 
 function agentPanelSelectEventsInnerTab(tab) {
@@ -229,7 +239,8 @@ function agentPanelSelectEventsInnerTab(tab) {
   if (_agentPanelActiveTab(_agentPanelKind(agent)) !== 'events') return;
   var agentId = String(agent.id || '');
   if (!agentId) return;
-  var next = String(tab || '') === 'lifecycle' ? 'lifecycle' : 'inbox';
+  tab = String(tab || '');
+  var next = (tab === 'lifecycle' || tab === 'mcp') ? tab : 'inbox';
   if (_agentPanelEventsInnerTab(agent) === next) return;
   _agentPanelEventsInnerTabByAgentId[agentId] = next;
   renderAgentPanel();
@@ -845,7 +856,9 @@ function agentPanelLoadMoreEvents(evt) {
 
 function _agentPanelShouldAutoLoadEvents(agent) {
   if (!agent) return false;
-  if (_agentPanelKind(agent) === 'worker') return true;
+  if (_agentPanelKind(agent) === 'worker') {
+    return _agentPanelEventsInnerTab(agent) === 'lifecycle';
+  }
   if (_agentPanelUsesMergedCellEvents(agent)) {
     return _agentPanelEventsInnerTab(agent) === 'lifecycle';
   }
@@ -1132,6 +1145,7 @@ function _agentPanelRenderEventsInnerTabs(agent) {
   var tabs = [
     { key: 'inbox', label: 'Inbox' },
     { key: 'lifecycle', label: 'Lifecycle' },
+    { key: 'mcp', label: 'MCP' },
   ];
   var html = '<div class="agent-panel-events-subtabs" role="tablist" aria-label="Events views">';
   for (var i = 0; i < tabs.length; i++) {
@@ -1155,9 +1169,13 @@ function _renderAgentEventsWithInnerTabs(agent) {
   var html = '<div class="agent-panel-events-tab" data-agent-panel-events-view="'
     + _agentPanelEsc(active) + '">';
   html += _agentPanelRenderEventsInnerTabs(agent);
-  if (active === 'lifecycle') {
+  if (active === 'mcp') {
+    html += _renderAgentMcpTab(agent);
+  } else if (active === 'lifecycle') {
     html += '<div class="agent-panel-events-lifecycle" data-agent-panel-events-panel="lifecycle">'
-      + _renderPersistentCellEvents(agent)
+      + (_agentPanelKind(agent) === 'worker'
+        ? _agentPanelWorkerEvents(agent)
+        : _renderPersistentCellEvents(agent))
       + '</div>';
   } else {
     html += _renderAgentDigestEvents(agent);
@@ -1689,7 +1707,7 @@ function agentPanelReceiveMcpCalls(data) {
   state.mcp_calls[agentId] = calls.slice();
   var focused = _resolveFocusedAgent();
   if (focused && String(focused.id || '') === agentId
-      && _agentPanelActiveTab(_agentPanelKind(focused)) === 'mcp') {
+      && _agentPanelIsMcpSubtabActive(focused)) {
     if (typeof _agentPanelRefreshCurrentTab === 'function'
         && _agentPanelRefreshCurrentTab()) return;
     if (typeof renderAgentPanel === 'function') renderAgentPanel();
@@ -1709,7 +1727,7 @@ function agentPanelReceiveMcpCallAppend(call) {
   state.mcp_calls[agentId] = _agentPanelMcpCallsByAgent[agentId].slice();
   var focused = _resolveFocusedAgent();
   if (focused && String(focused.id || '') === agentId
-      && _agentPanelActiveTab(_agentPanelKind(focused)) === 'mcp') {
+      && _agentPanelIsMcpSubtabActive(focused)) {
     if (typeof _agentPanelRefreshCurrentTab === 'function'
         && _agentPanelRefreshCurrentTab()) return;
     if (typeof renderAgentPanel === 'function') renderAgentPanel();
@@ -2106,9 +2124,7 @@ function _agentPanelTabRenderParts(agent, kind, activeTab) {
   if (kind === 'engineer') {
     var engineerGroup = String((agent && agent.group) || '');
     parts.bodyHtml = _agentPanelGroupWideNote(engineerGroup);
-    if (activeTab === 'mcp') {
-      parts.bodyHtml += _renderAgentMcpTab(agent);
-    } else if (activeTab === 'events') {
+    if (activeTab === 'events') {
       parts.headerRightHtml = _agentPanelDigestHeaderRight(agent);
       parts.bodyHtml += _renderEngineerEvents(agent);
     } else if (activeTab === 'worklog') {
@@ -2119,13 +2135,11 @@ function _agentPanelTabRenderParts(agent, kind, activeTab) {
     return parts;
   }
   if (kind === 'worker') {
-    parts.bodyHtml = (activeTab === 'mcp')
-      ? _renderAgentMcpTab(agent)
-      : (activeTab === 'worklog')
+    parts.bodyHtml = (activeTab === 'worklog')
       ? _agentPanelWorkerWorklog(agent)
       : (activeTab === 'messages')
       ? _agentPanelWorkerMessages(agent)
-      : _agentPanelWorkerEvents(agent);
+      : _renderAgentEventsWithInnerTabs(agent);
     return parts;
   }
   if (kind === 'architect') {
@@ -2136,8 +2150,6 @@ function _agentPanelTabRenderParts(agent, kind, activeTab) {
     } else if (activeTab === 'events') {
       parts.headerRightHtml = _agentPanelDigestHeaderRight(agent);
       parts.bodyHtml = _renderArchitectEvents(agent);
-    } else if (activeTab === 'mcp') {
-      parts.bodyHtml = _renderAgentMcpTab(agent);
     } else if (activeTab === 'journal') {
       parts.bodyHtml = _agentPanelArchitectJournalHtml(agent);
     } else {
@@ -2753,7 +2765,9 @@ function _renderTerminalPanel(agent) {
 function _agentPanelBuildPanelStateOptions(agent, activeTab, virtualMetas) {
   virtualMetas = virtualMetas || [];
   var scrollSelectors = ['.agent-panel-content', '.agent-panel-message-list'];
-  if (activeTab === 'mcp') scrollSelectors.push('.agent-panel-mcp-list');
+  if (activeTab === 'events' && _agentPanelEventsInnerTab(agent) === 'mcp') {
+    scrollSelectors.push('.agent-panel-mcp-list');
+  }
   var panelStateOptions = {
     scrollSelectors: scrollSelectors,
     capture: function(snapshot, root) {

@@ -10134,11 +10134,17 @@ test('mcp_call_append for non-focused agent does NOT invalidate engineer panel (
     'mcp_call_append for non-focused agent should not refresh engineer panel');
 });
 
-test('mcp_call_append for focused agent DOES invalidate engineer panel (LOOM:236 v4)', () => {
-  // Same-agent traffic still refreshes — the user is watching that agent's
-  // MCP feed and expects updates.
+test('mcp_call_append for focused agent on Events.MCP DOES invalidate engineer panel (LOOM:236 v4)', () => {
+  // Same-agent traffic refreshes only when the user is watching that agent's
+  // folded Events.MCP feed.
   const { context, sandbox, rafCallbacks, flushRaf } = createStandaloneDeltaBatchHarness(['engineer']);
-  runInContext(context, `selectedAgentId = 'agent-1';`);
+  runInContext(context, `
+    selectedAgentId = 'agent-1';
+    state.agents = { 'agent-1': { id: 'agent-1', kind: 'worker', cell_type: 'agent' } };
+    _agentPanelKind = function(agent) { return agent.kind || 'worker'; };
+    _agentPanelActiveTab = function() { return 'events'; };
+    _agentPanelEventsInnerTab = function() { return 'mcp'; };
+  `);
   context._handleDelta({
     seq: 1,
     ops: [{
@@ -10154,7 +10160,34 @@ test('mcp_call_append for focused agent DOES invalidate engineer panel (LOOM:236
   });
   flushRaf();
   assert.equal(sandbox.renderCalls.engineer, 1,
-    'mcp_call_append for focused agent should refresh engineer panel');
+    'mcp_call_append for focused agent on Events.MCP should refresh engineer panel');
+});
+
+test('mcp_call_append for focused agent on non-MCP Events subtab does NOT invalidate engineer panel', () => {
+  const { context, sandbox, flushRaf } = createStandaloneDeltaBatchHarness(['engineer']);
+  runInContext(context, `
+    selectedAgentId = 'agent-1';
+    state.agents = { 'agent-1': { id: 'agent-1', kind: 'worker', cell_type: 'agent' } };
+    _agentPanelKind = function(agent) { return agent.kind || 'worker'; };
+    _agentPanelActiveTab = function() { return 'events'; };
+    _agentPanelEventsInnerTab = function() { return 'inbox'; };
+  `);
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'mcp_call_append',
+      group: 'alpha',
+      call: {
+        cell_id: 'agent-1',
+        tool_name: 'mcp__loom__loom_progress',
+        hook_event_name: 'PostToolUse',
+        cursor: 1,
+      },
+    }],
+  });
+  flushRaf();
+  assert.equal(sandbox.renderCalls.engineer, 0,
+    'mcp_call_append for focused agent on Events.inbox should not refresh engineer panel');
 });
 
 test('event_append for non-focused agent does NOT invalidate engineer panel (LOOM:236 v4)', () => {
@@ -11604,7 +11637,11 @@ test('agentPanelSelectTab rerenders only the active Agent tab body', () => {
     },
   };
   context.focusedItemId = 'worker-1';
-  runInContext(context, `_agentPanelLastSelectedTabByKind.worker = 'events';`);
+  runInContext(context, `
+    _agentPanelLastSelectedTabByKind.worker = 'events';
+    _agentPanelEventsInnerTabByAgentId['worker-1'] = 'lifecycle';
+    _agentPanelEventsInnerTabByAgentId['worker-2'] = 'lifecycle';
+  `);
   context.renderAgentPanel();
 
   const shell = document.createElement('div');
@@ -12165,7 +12202,11 @@ test('renderAgentPanel paginates worker Events and resets the page when focus ch
     });
   }
   context.focusedItemId = 'worker-1';
-  runInContext(context, `_agentPanelLastSelectedTabByKind.worker = 'events';`);
+  runInContext(context, `
+    _agentPanelLastSelectedTabByKind.worker = 'events';
+    _agentPanelEventsInnerTabByAgentId['worker-1'] = 'lifecycle';
+    _agentPanelEventsInnerTabByAgentId['worker-2'] = 'lifecycle';
+  `);
 
   context.renderAgentPanel();
 
@@ -12231,6 +12272,7 @@ test('renderAgentPanel preserves Events scroll anchor when a focused-agent event
     state.panel_events = ${JSON.stringify(events)};
     focusedItemId = 'worker-1';
     _agentPanelLastSelectedTabByKind.worker = 'events';
+    _agentPanelEventsInnerTabByAgentId['worker-1'] = 'lifecycle';
   `);
   context.renderAgentPanel();
   context.agentPanelLoadMoreEvents();
@@ -12332,6 +12374,7 @@ test('renderAgentPanel keeps the current newest-first Events live tail pinned on
     state.panel_events = ${JSON.stringify(events)};
     focusedItemId = 'worker-1';
     _agentPanelLastSelectedTabByKind.worker = 'events';
+    _agentPanelEventsInnerTabByAgentId['worker-1'] = 'lifecycle';
   `);
   context.renderAgentPanel();
 
