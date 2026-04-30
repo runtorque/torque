@@ -2431,8 +2431,9 @@ function _renderAgentGridAndFocus(main, gridHtml, opts) {
     : (main._loomLastFocusHtml || _renderAgentFocusPanelHtml());
   const combined = _agentFocusShellHtml(gridHtml, focusHtml);
   const gridChanged = main._loomLastGridHtml !== gridHtml;
+  const parts = _agentFocusSplitParts(main);
   const shellMissing = !main._loomHasAgentSplitShell;
-  if (shellMissing || gridChanged) {
+  if (shellMissing || (gridChanged && !parts)) {
     main.innerHTML = combined;
     main._loomHasAgentSplitShell = true;
     main._loomLastGridHtml = gridHtml;
@@ -2440,6 +2441,19 @@ function _renderAgentGridAndFocus(main, gridHtml, opts) {
     main._loomLastHtml = combined;
     _agentFocusApplyPersistedSplit();
     return { mainHtmlChanged: true, focusHtmlChanged: renderFocus };
+  }
+  if (gridChanged) {
+    parts.grid.innerHTML = gridHtml || '';
+    main._loomLastGridHtml = gridHtml;
+    const focusChanged = renderFocus
+      ? renderAgentFocusPanel({ main, focusHtml })
+      : false;
+    if (!renderFocus) main._loomLastFocusHtml = focusHtml;
+    main._loomLastHtml = _agentFocusShellHtml(
+      gridHtml,
+      main._loomLastFocusHtml || focusHtml,
+    );
+    return { mainHtmlChanged: true, focusHtmlChanged: focusChanged };
   }
   main._loomLastHtml = combined;
   if (renderFocus) renderAgentFocusPanel({ main, focusHtml });

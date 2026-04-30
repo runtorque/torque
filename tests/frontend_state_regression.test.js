@@ -15089,6 +15089,52 @@ test('focus surface gates ignore non-focused traffic and preserve focus-panel sc
   assert.equal(parts.focusScroll.scrollTop, 91);
 });
 
+test('main-only grid updates do not clobber focused panel scroll', () => {
+  const { context, document, sandbox } = createMainGridDragHarness();
+  const main = document.getElementById('main');
+  let parts = null;
+  let mainWrites = 0;
+  Object.defineProperty(main, 'innerHTML', {
+    configurable: true,
+    get() { return this._innerHTML || ''; },
+    set(value) {
+      this._innerHTML = value;
+      mainWrites += 1;
+      if (parts) parts.focusScroll.scrollTop = 0;
+      this.children = [];
+    },
+  });
+  sandbox.state.runtime = { mode: 'standalone', embedded_terminal: true };
+  sandbox.state.groups = { alpha: ['agent-1', 'agent-2'] };
+  sandbox.state.group_settings = { alpha: { collapsed_default: false } };
+  sandbox.state.children = { 'agent-1': [], 'agent-2': [] };
+  sandbox.state.agents = {
+    'agent-1': { id: 'agent-1', name: 'Focused', group: 'alpha', cell_type: 'agent', status: 'running', activity_detail: 'reading' },
+    'agent-2': { id: 'agent-2', name: 'Other', group: 'alpha', cell_type: 'agent', status: 'running', activity_detail: 'before' },
+  };
+
+  runInContext(context, `
+    selectedAgentId = 'agent-1';
+    selectedTerminalId = 'agent-1';
+    render();
+  `);
+  const initialWrites = mainWrites;
+  parts = attachAgentSplitDom(main, document, main._loomLastFocusHtml || '');
+  parts.grid.innerHTML = main._loomLastGridHtml || '';
+  parts.focusScroll.scrollTop = 91;
+  const focusHtml = parts.focusScroll.innerHTML;
+
+  runInContext(context, `
+    state.agents['agent-2'].activity_detail = 'non-focused grid noise';
+    renderInvalidatedSurfaces({ main: true, focus: false });
+  `);
+
+  assert.equal(mainWrites, initialWrites, 'main-only grid rerender must not replace the split shell');
+  assert.equal(parts.focusScroll.scrollTop, 91);
+  assert.equal(parts.focusScroll.innerHTML, focusHtml);
+  assert.match(parts.grid.innerHTML, /non-focused grid noise/);
+});
+
 test('agent focus split resize clamps and persists a fraction once on mouseup', () => {
   const { context, document, sandbox } = createMainRenderHarness();
   const main = document.getElementById('main');
