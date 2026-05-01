@@ -1,7 +1,7 @@
 """Global iTerm2 key bindings for Loom.
 
-Installs Cmd+Option+Arrow (all four directions) and Cmd+Shift+B as global
-shortcuts that invoke registered RPC functions.  Up/Down cycle through all
+Installs Cmd+Option+Arrow (all four directions) as global shortcuts that
+invoke registered RPC functions.  Up/Down cycle through all
 managed cells; Left/Right cycle through agents only.  Bindings are added on
 startup and removed on shutdown/restart.  Any pre-existing bindings with the
 same key combos are saved and restored when our bindings are removed.
@@ -45,11 +45,6 @@ _ACTION_DEFAULTS = {
                     iterm2.keyboard.Modifier.FUNCTION],
                    iterm2.keyboard.Keycode.LEFT_ARROW,
                    "loom_prev_agent()"),
-    "toggle_broadcast": (ord('B'),
-                         [iterm2.keyboard.Modifier.COMMAND,
-                          iterm2.keyboard.Modifier.SHIFT],
-                         iterm2.keyboard.Keycode.ANSI_B,
-                         "loom_toggle_broadcast()"),
     "close_cell": (ord('C'),
                    [iterm2.keyboard.Modifier.COMMAND,
                     iterm2.keyboard.Modifier.OPTION],
@@ -82,7 +77,6 @@ _ACTION_LABELS = {
     "focus_prev": "Focus previous cell",
     "next_agent": "Next agent",
     "prev_agent": "Previous agent",
-    "toggle_broadcast": "Toggle broadcast",
     "close_cell": "Close cell",
     "add_agent": "Add agent",
     "add_engineer": "Add engineer",
@@ -552,14 +546,6 @@ async def setup(connection, state, bridge, overrides=None, *,
         state._ws_clients -= dead
 
     @iterm2.RPC
-    async def loom_toggle_broadcast(session_id=iterm2.Reference("id")):
-        source_cell = _find_cell_for_session(state, session_id)
-        group = source_cell.group if source_cell else None
-        if not group:
-            return
-        await _send_action("toggle_broadcast", group=group)
-
-    @iterm2.RPC
     async def loom_close_cell(session_id=iterm2.Reference("id")):
         cell = _find_cell_for_session(state, session_id)
         if cell:
@@ -631,7 +617,6 @@ async def setup(connection, state, bridge, overrides=None, *,
     await loom_focus_prev.async_register(connection, timeout=10)
     await loom_next_agent.async_register(connection, timeout=10)
     await loom_prev_agent.async_register(connection, timeout=10)
-    await loom_toggle_broadcast.async_register(connection, timeout=10)
     await loom_close_cell.async_register(connection, timeout=10)
     await loom_add_agent.async_register(connection, timeout=10)
     await loom_add_engineer.async_register(connection, timeout=10)

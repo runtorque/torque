@@ -39,11 +39,9 @@ See [Keyboard Shortcuts](keyboard-shortcuts.md) for the full list. The shortcuts
 | ++n++ | Quick-add an agent to the focused group |
 | ++t++ | Add a terminal for the selected agent |
 | ++g++ | Create a group |
-| ++b++ | Toggle the broadcast bar |
 | ++r++ | Relaunch the focused agent or terminal |
 | ++cmd+option+right++ / ++cmd+option+left++ | Move between agents |
 | ++cmd+option+down++ / ++cmd+option+up++ | Move between all Loom-managed cells |
-| ++cmd+shift+b++ | Toggle broadcast for the current group from any tab |
 
 ## Settings that change behavior
 

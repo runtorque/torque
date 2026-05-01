@@ -114,7 +114,6 @@ The docs are organized by job:
 - [Task Board](docs/board.md) for tasks, dispatch, attachments, artifacts, dependencies, and agent reporting
 - [Actions & Templates](docs/actions.md) for prompt templates, transitions, and pipelines
 - [Worktrees](docs/worktrees.md) for isolated branches and checkpoints
-- [Sessions](docs/sessions.md) for groups, agents, terminals, broadcast, relaunch, and navigation
 - [Schedules](docs/schedules.md) for recurring and one-shot task dispatch
 - [Engineer](docs/engineer.md) for orchestrator workflows and tools
 - [Operations](docs/operations.md) for runtime modes, logs, deploy/update, and notifications

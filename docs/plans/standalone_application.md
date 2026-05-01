@@ -563,7 +563,6 @@ async def install_keybindings(self, bindings):
 | Tab reordering | Full API | Not available | Low |
 | Profile listing | Full API | Not available | Low |
 | Global keybindings | Dynamic API | Config file + reload | Medium |
-| Broadcast mode | Direct text send | Direct text send | None |
 
 **Overall:** ~80% feature parity achievable. The missing 20% is mostly latency (polling vs callbacks) and cosmetic (tab colors).
 

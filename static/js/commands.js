@@ -860,33 +860,9 @@ function onGroupContextMenu(e, group) {
   e.stopPropagation();
   const items = [
     { label: 'Settings\u2026', action: `openGroupSettings('${esc(group)}')` },
-    { label: 'Broadcast\u2026', action: `openBroadcast('${esc(group)}')` },
     { label: 'Delete', action: `removeGroup('${esc(group)}')`, danger: true },
   ];
   showContextMenu(e.clientX, e.clientY, items);
-}
-
-/* Broadcast bar */
-let broadcastGroup = null;
-
-function openBroadcast(group) {
-  broadcastGroup = group;
-  document.getElementById('broadcast-target').textContent = '\u2192 ' + group;
-  document.getElementById('broadcast').classList.add('visible');
-  const inp = document.getElementById('broadcast-input');
-  inp.value = '';
-  inp.focus();
-}
-function closeBroadcast() {
-  broadcastGroup = null;
-  document.getElementById('broadcast').classList.remove('visible');
-}
-function sendBroadcast() {
-  const text = document.getElementById('broadcast-input').value;
-  if (text && broadcastGroup) {
-    send({ cmd: 'broadcast_to_group', group: broadcastGroup, text: text + '\n' });
-    document.getElementById('broadcast-input').value = '';
-  }
 }
 
 /* Principal selector — top-row filter for the agent grid.

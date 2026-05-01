@@ -2674,7 +2674,6 @@ function _renderMainGrid(opts, renderMode) {
       html += `  <span class="group-name" title="${esc(gname)}">${esc(gname)}</span>`;
       html += `  <span class="group-count">${agents.length}</span>`;
       html += `  <button class="group-btn" draggable="false" title="Group settings" onclick="event.stopPropagation();openGroupSettings('${esc(gname)}')">\u2699</button>`;
-      html += `  <button class="group-btn" draggable="false" title="Broadcast to ${esc(gname)}" onclick="openBroadcast('${esc(gname)}')">\u2318</button>`;
       html += `  <button class="group-btn" draggable="false" title="Delete group" onclick="removeGroup('${esc(gname)}')">\u2715</button>`;
       html += `</div>`;
 

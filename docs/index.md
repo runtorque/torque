@@ -5,7 +5,7 @@ Loom is an iTerm2 Toolbelt plugin for organizing AI agents and terminal sessions
 ## Start here
 
 - [Getting Started](getting-started.md) — install Loom, launch it, and create your first group, agent, and terminal
-- [Concepts](concepts.md) — learn the basic vocabulary in plain language: groups, agents, terminals, broadcasts, and actions
+- [Concepts](concepts.md) — learn the basic vocabulary in plain language: groups, agents, terminals, and actions
 - [CLI Reference](cli.md) — use Loom from the command line once the UI basics are familiar
 
 ## Common paths

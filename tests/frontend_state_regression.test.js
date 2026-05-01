@@ -883,7 +883,6 @@ function createMainHarness(overrides = {}) {
     connect() {},
     setupDrag() {},
     closeModals() {},
-    closeBroadcast() {},
     closeMenus() {},
     closeContextMenu() {},
     boardKeydown() { return false; },
@@ -894,7 +893,6 @@ function createMainHarness(overrides = {}) {
     quickAddAgent() {},
     openAddGroup() {},
     quickAddTerminal() {},
-    openBroadcast() {},
     relaunchAgent() {},
     getFilterByWindow() { return false; },
   }, overrides));
@@ -14913,7 +14911,7 @@ test('diff review surfaces stale-base warning before merge controls', () => {
 test('diff review overlay hides the workspace shell so standalone merge review uses the full viewport', () => {
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
 
-  assert.match(css, /body\.diff-view-open #workspace-shell,\s*body\.diff-view-open main,\s*body\.diff-view-open #standalone-bottom-dock,\s*body\.diff-view-open #standalone-right-rail,\s*body\.diff-view-open #standalone-float-layer,\s*body\.diff-view-open #bottom-panel,\s*body\.diff-view-open #taskbar,\s*body\.diff-view-open #broadcast,\s*body\.diff-view-open #ctx-menu\s*\{[^}]*display:\s*none\s*!important;/);
+  assert.match(css, /body\.diff-view-open #workspace-shell,\s*body\.diff-view-open main,\s*body\.diff-view-open #standalone-bottom-dock,\s*body\.diff-view-open #standalone-right-rail,\s*body\.diff-view-open #standalone-float-layer,\s*body\.diff-view-open #bottom-panel,\s*body\.diff-view-open #taskbar,\s*body\.diff-view-open #ctx-menu\s*\{[^}]*display:\s*none\s*!important;/);
 });
 
 test('Escape closes the read-only diff viewer through the shared key handler', () => {
@@ -16002,7 +16000,6 @@ test('header group switcher is hidden in toolbelt and switches active group in s
   `);
   assert.deepEqual(Array.from(sandbox.activeGroupMenu.items, (item) => item.label), [
     'Group settings…',
-    'Broadcast to alpha…',
     'Delete group',
   ]);
 

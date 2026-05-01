@@ -2163,13 +2163,7 @@ function _syncSelectionToActiveSession() {
 }
 
 function handleAction(msg) {
-  if (msg.action === 'toggle_broadcast') {
-    if (broadcastGroup) {
-      closeBroadcast();
-    } else if (msg.group) {
-      openBroadcast(msg.group);
-    }
-  } else if (msg.action === 'close_cell') {
+  if (msg.action === 'close_cell') {
     if (msg.cell_id) removeAgent(msg.cell_id);
   } else if (msg.action === 'add_agent') {
     if (msg.group) quickAddAgent(msg.group);

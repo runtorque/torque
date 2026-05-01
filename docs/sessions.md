@@ -16,7 +16,6 @@ A group gives you:
 
 - Default settings for new agents and terminals
 - A dedicated grid in the UI
-- Broadcast to every session in that group
 - Per-group board, engineer, and dispatch defaults
 - Optional filtering so the group only appears in windows where it has active sessions
 
@@ -70,16 +69,6 @@ Use the dropdown next to **+ New** to open the custom creation dialog. That dial
 - Environment
 
 Group defaults, agent templates, and action-linked creation all layer into this flow.
-
-## Broadcast
-
-Use the group broadcast button or ++cmd+shift+b++ to send text to every live session in a group.
-
-This is useful for commands like:
-
-- `git pull`
-- `npm install`
-- `pytest`
 
 ## Drag and Drop
 

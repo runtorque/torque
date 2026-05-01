@@ -144,7 +144,7 @@ For `add_agent` and `add_terminal`: the handler already has the new cell's ID in
 ```
 loom <noun> <verb> [args] [flags]
 
-Nouns: status, group, agent, terminal, worktree, broadcast, send, logs
+Nouns: status, group, agent, terminal, worktree, send, logs
 ```
 
 ### Full command reference
@@ -178,7 +178,6 @@ loom terminal reparent <id> -p <parent>  Attach terminal to different agent
 loom terminal reparent <id> --detach     Detach terminal from parent
 
 loom send <id|name> <text>               Send text to a session
-loom broadcast <group> <text>            Broadcast text to all sessions in group
 
 loom worktree create <id|name>           Create worktree for agent
   [--relaunch]

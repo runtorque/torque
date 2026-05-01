@@ -25,10 +25,9 @@ These work when the Loom panel in the Toolbelt has focus. Click anywhere in the 
 | ++n++ | Quick-add an agent to the focused group |
 | ++t++ | Quick-add a terminal to the selected agent |
 | ++g++ | Create a new group |
-| ++b++ | Toggle the broadcast bar for the focused group |
 | ++r++ | Relaunch the focused agent or terminal (if stopped) |
 | ++delete++ or ++backspace++ | Remove the focused agent or terminal |
-| ++escape++ | Close any open modal, menu, or broadcast bar |
+| ++escape++ | Close any open modal or menu |
 
 ## Global shortcuts
 
@@ -40,7 +39,6 @@ These work from any iTerm2 tab, even when the Toolbelt is not focused. They are 
 | ++cmd+option+up++ | Focus the previous managed cell |
 | ++cmd+option+right++ | Focus the next agent (skips terminals) |
 | ++cmd+option+left++ | Focus the previous agent |
-| ++cmd+shift+b++ | Toggle the broadcast bar for the current group |
 
 !!! tip
     The global arrow shortcuts cycle through all managed sessions in the current window, ordered by group position. This means you can navigate between agents and their terminals without touching the Toolbelt panel.

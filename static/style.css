@@ -2357,30 +2357,6 @@ body.runtime-embedded .term-row.term-add {
 }
 
 /* ------------------------------------------------------------------ */
-/* Broadcast bar                                                       */
-/* ------------------------------------------------------------------ */
-#broadcast {
-  display: none;
-  position: fixed; bottom: 26px; left: 0; right: 0;
-  background: var(--bg-surface);
-  border-top: 1px solid var(--border);
-  padding: 6px 8px;
-  gap: 6px; align-items: center; z-index: 20;
-}
-#broadcast.visible { display: flex; }
-#broadcast-target {
-  font-size: 10px; color: var(--accent);
-  white-space: nowrap; flex-shrink: 0;
-}
-#broadcast input { flex: 1; font-size: 11px; padding: 4px 6px; }
-#broadcast button {
-  flex-shrink: 0; font-size: 12px;
-  color: var(--text-dim); padding: 2px 6px;
-  border-radius: 4px;
-}
-#broadcast button:hover { color: var(--text); background: var(--bg-hover); }
-
-/* ------------------------------------------------------------------ */
 /* Modal                                                               */
 /* ------------------------------------------------------------------ */
 .overlay {
@@ -6106,7 +6082,6 @@ body.diff-view-open #standalone-right-rail,
 body.diff-view-open #standalone-float-layer,
 body.diff-view-open #bottom-panel,
 body.diff-view-open #taskbar,
-body.diff-view-open #broadcast,
 body.diff-view-open #ctx-menu {
   display: none !important;
 }

@@ -92,7 +92,7 @@ Important notes:
 2. Add an agent with **+ New**.
 3. Select that agent and add a companion terminal from the drawer below.
 4. Click a cell to focus its iTerm2 tab.
-5. Use the group broadcast button to send the same command to every session in the group.
+5. Use per-agent or per-engineer controls when you need to send follow-up instructions.
 
 See [Sessions](sessions.md) for the full session model and [Keyboard Shortcuts](keyboard-shortcuts.md) for navigation.
 
