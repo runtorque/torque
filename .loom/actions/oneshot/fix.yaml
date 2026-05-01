@@ -30,7 +30,7 @@ prompt: |
   5. Do a manual smoke check for user-visible changes when practical
   6. End by stating what you verified, what you did not verify, and whether live verification could not be performed
   {% else %}
-  You have a new bug to fix. Same approach as before — understand the root cause before changing anything, keep the fix minimal, start with the narrowest relevant tests or checks, smoke-check user-visible changes when practical, and say what you did and did not verify. Say explicitly if live verification could not be performed. Do NOT deploy the changes.
+  You have a new bug to fix. Same approach as before — understand the root cause before changing anything, keep the fix minimal, start with the narrowest relevant tests or checks, smoke-check user-visible changes when practical, and say what you verified, what you did not verify. Say explicitly if live verification could not be performed. Do NOT deploy the changes.
 
   ## Bug report
 
