@@ -144,7 +144,10 @@ If you are a Loom worker or engineer running **inside the live daemon's Python r
 
 ## Testing changes
 
-There are no automated tests. To test changes:
+Run the automated regression suite with `make test`; the target self-sanitizes
+`LOOM_*` runtime variables inherited from worker/standalone shells.
+
+For manual runtime testing:
 1. `make deploy`
 2. Restart from Scripts menu
 3. Check `loom.log` in the install dir for errors:
