@@ -40,8 +40,14 @@ class FakeElement {
     this.style = {};
     this.children = [];
     this.focused = false;
+    this.scrollTop = 0;
+    this.selectionStart = 0;
+    this.selectionEnd = 0;
     this.classList = new FakeClassList();
     this._firstSubtab = null;
+    this._subtabs = [];
+    this._subpanes = [];
+    this._closestPane = null;
     this._label = null;
   }
   appendChild(child) {
@@ -66,10 +72,13 @@ class FakeElement {
     }
     return null;
   }
-  querySelectorAll() {
+  querySelectorAll(selector) {
+    if (selector === '.gs-subtab') return this._subtabs || [];
+    if (selector === '.gs-subpane') return this._subpanes || [];
     return [];
   }
-  closest() {
+  closest(selector) {
+    if (selector === '.gs-pane' && this._closestPane) return this._closestPane;
     return this;
   }
 }
@@ -92,12 +101,32 @@ function createSandbox() {
     return el;
   });
   const paneByName = Object.fromEntries(gsPanes.map((pane) => [pane.dataset.pane, pane]));
-  const agentSubtabs = ['agent-general', 'agent-terminals', 'agent-worktree', 'agent-notifications'].map((name) => {
-    const el = new FakeElement(`subtab-${name}`);
-    el.dataset.subtab = name;
-    return el;
-  });
-  paneByName.agents._firstSubtab = agentSubtabs[0];
+  const subtabNamesByPane = {
+    agents: ['agent-general', 'agent-terminals', 'agent-worktree', 'agent-notifications'],
+    engineer: ['engineer-general', 'engineer-behavior', 'engineer-digests'],
+    architect: ['architect-general', 'architect-behavior', 'architect-digests'],
+  };
+  const gsSubtabs = {};
+  const gsSubpanes = {};
+  for (const [paneName, names] of Object.entries(subtabNamesByPane)) {
+    const pane = paneByName[paneName];
+    gsSubtabs[paneName] = names.map((name, idx) => {
+      const el = new FakeElement(`subtab-${name}`);
+      el.dataset.subtab = name;
+      el._closestPane = pane;
+      if (idx === 0) el.classList.add('active');
+      return el;
+    });
+    gsSubpanes[paneName] = names.map((name, idx) => {
+      const el = new FakeElement(`subpane-${name}`);
+      el.dataset.subpane = name;
+      if (idx === 0) el.classList.add('active');
+      return el;
+    });
+    pane._firstSubtab = gsSubtabs[paneName][0];
+    pane._subtabs = gsSubtabs[paneName];
+    pane._subpanes = gsSubpanes[paneName];
+  }
 
   const sandbox = {
     console,
@@ -140,8 +169,8 @@ function createSandbox() {
         const paneMatch = selector.match(/^\.gs-pane\[data-pane="([^"]+)"\]$/);
         if (paneMatch) return paneByName[paneMatch[1]] || null;
         const subtabMatch = selector.match(/^\.gs-pane\[data-pane="([^"]+)"\] \.gs-subtab\[data-subtab="([^"]+)"\]$/);
-        if (subtabMatch && subtabMatch[1] === 'agents') {
-          return agentSubtabs.find((el) => el.dataset.subtab === subtabMatch[2]) || null;
+        if (subtabMatch) {
+          return (gsSubtabs[subtabMatch[1]] || []).find((el) => el.dataset.subtab === subtabMatch[2]) || null;
         }
         return null;
       },
@@ -311,9 +340,14 @@ test('group settings modal populates engineer fields and honors engineer tab dee
   assert.equal(ensure('gs-engineer-escalation-style').value, 'keep_moving');
   assert.equal(ensure('gs-wt-merge-cleanup').value, 'close_remove');
   assert.equal(ensure('gs-wt-merge-preserve-diff').checked, true);
-  assert.equal(ensure('gs-engineer-provider-section').open, true);
-  assert.equal(ensure('gs-engineer-autonomy-section').open, true);
-  assert.equal(ensure('gs-engineer-digest-section').open, false);
+  assert.equal(
+    sandbox.document.querySelector('.gs-pane[data-pane="engineer"] .gs-subtab[data-subtab="engineer-general"]').classList.contains('active'),
+    true,
+  );
+  assert.equal(
+    sandbox.document.querySelector('.gs-pane[data-pane="engineer"] .gs-subtab[data-subtab="engineer-digests"]').classList.contains('active'),
+    false,
+  );
   assert.equal(ensure('gs-engineer-event-agent-started').checked, true);
   assert.equal(ensure('gs-engineer-event-agent-progress').checked, true);
   assert.equal(ensure('gs-architect-provider').value, 'codex');
@@ -329,15 +363,16 @@ test('group settings modal populates engineer fields and honors engineer tab dee
   assert.equal(ensure('modal-group-settings').classList.contains('visible'), true);
 });
 
-test('group settings resets the Engineer section defaults when reopened', () => {
+test('group settings resets Engineer and Architect sub-tabs to General when reopened', () => {
   const { sandbox, ensure } = createSandbox();
   const context = vm.createContext(sandbox);
   loadModals(context);
   seedProviders(context, sandbox._cachedProviders);
 
-  ensure('gs-engineer-provider-section').open = false;
-  ensure('gs-engineer-autonomy-section').open = false;
-  ensure('gs-engineer-digest-section').open = true;
+  vm.runInContext(`
+    switchGsSubTab('engineer', document.querySelector('.gs-pane[data-pane="engineer"] .gs-subtab[data-subtab="engineer-digests"]'));
+    switchGsSubTab('architect', document.querySelector('.gs-pane[data-pane="architect"] .gs-subtab[data-subtab="architect-digests"]'));
+  `, context);
 
   vm.runInContext(`_showGroupSettings("alpha", {
     settings: {},
@@ -345,21 +380,120 @@ test('group settings resets the Engineer section defaults when reopened', () => 
     profiles: ["Default"]
   })`, context);
 
-  assert.equal(ensure('gs-engineer-provider-section').open, true);
-  assert.equal(ensure('gs-engineer-autonomy-section').open, true);
-  assert.equal(ensure('gs-engineer-digest-section').open, false);
-  assert.equal(ensure('gs-architect-boot-section').open, true);
-  assert.equal(ensure('gs-architect-behavior-section').open, true);
-  assert.equal(ensure('gs-architect-custom-section').open, true);
-  assert.equal(ensure('gs-architect-runtime-section').open, true);
+  assert.equal(
+    sandbox.document.querySelector('.gs-pane[data-pane="engineer"] .gs-subtab[data-subtab="engineer-general"]').classList.contains('active'),
+    true,
+  );
+  assert.equal(
+    sandbox.document.querySelector('.gs-pane[data-pane="engineer"] .gs-subtab[data-subtab="engineer-digests"]').classList.contains('active'),
+    false,
+  );
+  assert.equal(
+    sandbox.document.querySelector('.gs-pane[data-pane="architect"] .gs-subtab[data-subtab="architect-general"]').classList.contains('active'),
+    true,
+  );
+  assert.equal(
+    sandbox.document.querySelector('.gs-pane[data-pane="architect"] .gs-subtab[data-subtab="architect-digests"]').classList.contains('active'),
+    false,
+  );
   assert.equal(ensure('gs-engineer-notification-preset').value, 'normal');
   assert.equal(ensure('gs-engineer-can-override-worker-provider').checked, true);
 });
 
-test('architect runtime settings no longer show fallback review-gate controls', () => {
+test('engineer and architect group settings use three scoped sub-tabs', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
-  assert.match(html, /id="gs-architect-runtime-section"/);
+  const topStrip = html.slice(
+    html.indexOf('<div class="gs-tabs">'),
+    html.indexOf('    <!-- Group tab -->'),
+  );
+  assert.match(topStrip, /data-tab="group"/);
+  assert.match(topStrip, /data-tab="agents"/);
+  assert.match(topStrip, /data-tab="engineer"/);
+  assert.match(topStrip, /data-tab="architect"/);
+  assert.doesNotMatch(topStrip, /data-tab="advanced"/i);
+
+  for (const pane of ['engineer', 'architect']) {
+    assert.match(
+      html,
+      new RegExp(`<div class="gs-pane" data-pane="${pane}">[\\s\\S]*?data-subtab="${pane}-general"[\\s\\S]*?data-subtab="${pane}-behavior"[\\s\\S]*?data-subtab="${pane}-digests"`),
+    );
+    assert.match(html, new RegExp(`data-subpane="${pane}-general"`));
+    assert.match(html, new RegExp(`data-subpane="${pane}-behavior"`));
+    assert.match(html, new RegExp(`data-subpane="${pane}-digests"`));
+    assert.doesNotMatch(
+      html,
+      new RegExp(`<details[^>]+id="gs-${pane}-[^\\"]+-section"`),
+    );
+  }
+
+  const engineerGeneral = html.indexOf('data-subpane="engineer-general"');
+  const engineerBehavior = html.indexOf('data-subpane="engineer-behavior"');
+  const engineerDigests = html.indexOf('data-subpane="engineer-digests"');
+  assert.ok(engineerGeneral < html.indexOf('id="gs-engineer-provider"'));
+  assert.ok(engineerBehavior < html.indexOf('id="gs-engineer-specializations-picker"'));
+  assert.ok(engineerBehavior < html.indexOf('id="gs-engineer-autonomy-mode"'));
+  assert.ok(engineerDigests < html.indexOf('id="gs-engineer-push-interval"'));
+
+  const architectGeneral = html.indexOf('data-subpane="architect-general"');
+  const architectBehavior = html.indexOf('data-subpane="architect-behavior"');
+  const architectDigests = html.indexOf('data-subpane="architect-digests"');
+  assert.ok(architectGeneral < html.indexOf('id="gs-architect-provider"'));
+  assert.ok(architectBehavior < html.indexOf('id="gs-architect-autonomy-mode"'));
+  assert.ok(architectBehavior < html.indexOf('id="gs-architect-custom-instructions"'));
+  assert.ok(architectBehavior < html.indexOf('id="gs-architect-journal-checkpoint"'));
+  assert.ok(architectDigests < html.indexOf('id="gs-architect-push-interval"'));
+});
+
+test('group settings sub-tab switching preserves scroll focus and inline draft state', () => {
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+
+  const pane = sandbox.document.querySelector('.gs-pane[data-pane="engineer"]');
+  pane.scrollTop = 144;
+  const draft = ensure('gs-engineer-custom-instructions');
+  draft.value = 'draft instructions in progress';
+  draft.selectionStart = 6;
+  draft.selectionEnd = 18;
+  draft.focus();
+
+  vm.runInContext(
+    `switchGsSubTab('engineer', document.querySelector('.gs-pane[data-pane="engineer"] .gs-subtab[data-subtab="engineer-digests"]'))`,
+    context,
+  );
+
+  assert.equal(pane.scrollTop, 144);
+  assert.equal(draft.focused, true);
+  assert.equal(draft.value, 'draft instructions in progress');
+  assert.equal(draft.selectionStart, 6);
+  assert.equal(draft.selectionEnd, 18);
+  assert.equal(
+    sandbox.document.querySelector('.gs-pane[data-pane="engineer"] .gs-subtab[data-subtab="engineer-digests"]').classList.contains('active'),
+    true,
+  );
+  assert.equal(
+    sandbox.document.querySelector('.gs-pane[data-pane="architect"] .gs-subtab[data-subtab="architect-general"]').classList.contains('active'),
+    true,
+  );
+});
+
+test('group settings sub-tab CSS remains reusable in narrow toolbelt layouts', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+
+  assert.match(html, /<div class="gs-pane" data-pane="engineer">\s*<div class="gs-subtabs">/);
+  assert.match(html, /<div class="gs-pane" data-pane="architect">\s*<div class="gs-subtabs">/);
+  assert.match(css, /\.gs-subtabs\s*\{[^}]*display:\s*flex;[^}]*border-bottom:\s*1px solid var\(--border\);/s);
+  assert.match(css, /\.gs-subpane\s*\{\s*display:\s*none;\s*\}/);
+  assert.match(css, /\.gs-subpane\.active\s*\{\s*display:\s*block;\s*\}/);
+});
+
+test('architect behavior sub-tab keeps runtime fields without fallback review-gate controls', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  assert.match(html, /data-subpane="architect-behavior"/);
   assert.match(html, /Configure architect digest verbosity and checkpoint policy\./);
+  assert.match(html, /id="gs-architect-digest-verbosity"/);
+  assert.match(html, /id="gs-architect-journal-checkpoint"/);
   assert.doesNotMatch(html, /fallback review-gate defaults for transitions without their own LOC gate/);
   assert.doesNotMatch(html, /Fallback review-gate thresholds/);
   assert.doesNotMatch(html, /gs-architect-review-/);

@@ -14457,25 +14457,36 @@ test('task modal keeps external and verification collapsed by default with respo
   assert.match(css, /\.task-modal-check-grid\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(160px,\s*1fr\)\);/);
 });
 
-test('engineer group settings keep provider first and digest details collapsed by default', () => {
+test('engineer and architect group settings use sub-tabs instead of collapsible sections', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
 
-  const providerIndex = html.indexOf('<details id="gs-engineer-provider-section" class="task-modal-section" open>');
-  const autonomyIndex = html.indexOf('<details id="gs-engineer-autonomy-section" class="task-modal-section" open>');
-  const digestIndex = html.indexOf('<details id="gs-engineer-digest-section" class="task-modal-section">');
+  const engineerGeneral = html.indexOf('data-subpane="engineer-general"');
+  const engineerBehavior = html.indexOf('data-subpane="engineer-behavior"');
+  const engineerDigests = html.indexOf('data-subpane="engineer-digests"');
+  const architectGeneral = html.indexOf('data-subpane="architect-general"');
+  const architectBehavior = html.indexOf('data-subpane="architect-behavior"');
+  const architectDigests = html.indexOf('data-subpane="architect-digests"');
 
-  assert.notEqual(providerIndex, -1);
-  assert.notEqual(autonomyIndex, -1);
-  assert.notEqual(digestIndex, -1);
-  assert.ok(providerIndex < autonomyIndex);
-  assert.ok(autonomyIndex < digestIndex);
-  assert.match(html, /<details id="gs-engineer-provider-section" class="task-modal-section" open>\s*<summary>Provider<\/summary>/);
-  assert.match(html, /<details id="gs-engineer-autonomy-section" class="task-modal-section" open>\s*<summary>Autonomy mode/);
-  assert.match(html, /<details id="gs-engineer-digest-section" class="task-modal-section">\s*<summary>Digest details<\/summary>/);
-  assert.equal(html.includes('<details id="gs-engineer-digest-section" class="task-modal-section" open>'), false);
-  assert.match(css, /\.task-modal-section\[open\] summary\s*\{[^}]*border-bottom:\s*1px solid var\(--border\);/);
-  assert.match(css, /\.task-modal-section-intro\s*\{[^}]*margin-bottom:\s*8px;/);
+  for (const idx of [
+    engineerGeneral,
+    engineerBehavior,
+    engineerDigests,
+    architectGeneral,
+    architectBehavior,
+    architectDigests,
+  ]) {
+    assert.notEqual(idx, -1);
+  }
+  assert.ok(engineerGeneral < engineerBehavior);
+  assert.ok(engineerBehavior < engineerDigests);
+  assert.ok(architectGeneral < architectBehavior);
+  assert.ok(architectBehavior < architectDigests);
+  assert.doesNotMatch(html, /<details[^>]+id="gs-engineer-[^\"]+-section"/);
+  assert.doesNotMatch(html, /<details[^>]+id="gs-architect-[^\"]+-section"/);
+  assert.match(css, /\.gs-subtabs\s*\{[^}]*border-bottom:\s*1px solid var\(--border\);/);
+  assert.match(css, /\.gs-subpane\s*\{\s*display:\s*none;\s*\}/);
+  assert.match(css, /\.gs-subpane\.active\s*\{\s*display:\s*block;\s*\}/);
 });
 
 test('context menu constrains width and clamps wrapped task-title rows', () => {

@@ -998,16 +998,13 @@ function _getEngineerEnabledEvents() {
   return events;
 }
 
-function _setDetailsOpen(id, open) {
-  const el = document.getElementById(id);
-  if (el) el.open = !!open;
+function _resetGsSubTabs(paneName, subtabName) {
+  const btn = document.querySelector(`.gs-pane[data-pane="${paneName}"] .gs-subtab[data-subtab="${subtabName}"]`);
+  if (btn) switchGsSubTab(paneName, btn);
 }
 
 function _resetGsEngineerSections() {
-  _setDetailsOpen('gs-engineer-provider-section', true);
-  _setDetailsOpen('gs-engineer-specializations-section', true);
-  _setDetailsOpen('gs-engineer-autonomy-section', true);
-  _setDetailsOpen('gs-engineer-digest-section', false);
+  _resetGsSubTabs('engineer', 'engineer-general');
 }
 
 /* -- Group Settings: Engineer-tab default specializations picker -------- */
@@ -1188,11 +1185,7 @@ function _getArchitectEnabledEvents() {
 }
 
 function _resetGsArchitectSections() {
-  _setDetailsOpen('gs-architect-boot-section', true);
-  _setDetailsOpen('gs-architect-behavior-section', true);
-  _setDetailsOpen('gs-architect-custom-section', true);
-  _setDetailsOpen('gs-architect-runtime-section', true);
-  _setDetailsOpen('gs-architect-digest-section', false);
+  _resetGsSubTabs('architect', 'architect-general');
 }
 
 function _showGroupSettings(group, data) {
