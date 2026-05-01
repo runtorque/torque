@@ -14416,6 +14416,9 @@ test('task modal keeps a scrollable body separate from its footer actions', () =
   assert.match(html, /<div id="task-modal-body" class="task-modal-body">[\s\S]*<div class="modal-actions">/);
   assert.match(css, /#modal-task \.modal\s*\{[^}]*overflow:\s*hidden;/);
   assert.match(css, /\.task-modal-body\s*\{[^}]*flex:\s*1;[^}]*overflow-y:\s*auto;/);
+  assert.match(css, /body\[data-loom-mode="standalone"\] #modal-task \.modal,\s*body\[data-loom-mode="desktop"\] #modal-task \.modal\s*\{[^}]*max-width:\s*420px;/);
+  assert.match(css, /@media \(min-width:\s*900px\)\s*\{\s*body\[data-loom-mode="standalone"\] #modal-task \.modal,\s*body\[data-loom-mode="desktop"\] #modal-task \.modal\s*\{[^}]*max-width:\s*780px;/);
+  assert.doesNotMatch(css, /body\[data-loom-mode="toolbelt"\] #modal-task/);
 });
 
 test('task modal prioritizes labels, dependencies, and schedule before lower-frequency sections', () => {
@@ -18732,7 +18735,7 @@ test('standalone shell owns the full-width bottom dock rows and drag selector', 
 
   assert.match(
     css,
-    /body\.runtime-embedded #workspace-shell\s*\{[^}]*grid-template-columns:\s*max\(var\(--standalone-sidebar-width\),\s*calc\(240px\s*\+\s*8px\s*\+\s*var\(--standalone-right-rail-width,\s*0px\)\)\)\s+8px\s+minmax\(0,\s*1fr\);/s,
+    /body\.runtime-embedded #workspace-shell\s*\{[^}]*grid-template-columns:\s*max\(var\(--standalone-sidebar-width\),\s*calc\(360px\s*\+\s*8px\s*\+\s*var\(--standalone-right-rail-width,\s*0px\)\)\)\s+8px\s+minmax\(0,\s*1fr\);/s,
   );
   assert.match(
     html,
@@ -18740,7 +18743,7 @@ test('standalone shell owns the full-width bottom dock rows and drag selector', 
   );
   assert.match(
     css,
-    /body\.runtime-embedded #standalone-sidebar-shell\s*\{[^}]*grid-template-columns:\s*minmax\(240px,\s*1fr\)\s+8px\s+var\(--standalone-right-rail-width,\s*320px\);[^}]*grid-template-rows:\s*minmax\(0,\s*1fr\)\s+8px\s+var\(--standalone-bottom-height,\s*280px\);/s,
+    /body\.runtime-embedded #standalone-sidebar-shell\s*\{[^}]*grid-template-columns:\s*minmax\(360px,\s*1fr\)\s+8px\s+var\(--standalone-right-rail-width,\s*320px\);[^}]*grid-template-rows:\s*minmax\(0,\s*1fr\)\s+8px\s+var\(--standalone-bottom-height,\s*280px\);/s,
   );
   assert.match(
     css,
@@ -18754,6 +18757,8 @@ test('standalone shell owns the full-width bottom dock rows and drag selector', 
     css,
     /body\.runtime-embedded\.standalone-panel-dragging #standalone-bottom-dock,\s*body\.runtime-embedded\.standalone-panel-dragging #standalone-right-rail\s*\{/s,
   );
+  assert.match(css, /\.group-switcher-select\s*\{[^}]*flex:\s*1 1 120px;[^}]*width:\s*auto;/s);
+  assert.match(css, /@media \(min-width:\s*600px\)\s*\{\s*\.group-switcher\s*\{\s*flex-basis:\s*292px;/s);
 });
 
 test('standalone keeps the legacy bottom panel parking host fully collapsed', () => {

@@ -83,10 +83,15 @@ header h1 {
 .group-switcher-select {
   min-width: 120px;
   max-width: 220px;
-  width: 100%;
+  flex: 1 1 120px;
+  width: auto;
   padding: 3px 7px;
   font-size: 10px;
   background: var(--bg);
+}
+
+@media (min-width: 600px) {
+  .group-switcher { flex-basis: 292px; }
 }
 .group-switcher-menu-btn {
   flex: 0 0 auto;
@@ -146,14 +151,14 @@ main {
 body.runtime-embedded #workspace-shell {
   display: grid;
   grid-template-columns:
-    max(var(--standalone-sidebar-width), calc(240px + 8px + var(--standalone-right-rail-width, 0px)))
+    max(var(--standalone-sidebar-width), calc(360px + 8px + var(--standalone-right-rail-width, 0px)))
     8px
     minmax(0, 1fr);
   min-height: 0;
 }
 body.runtime-embedded #standalone-sidebar-shell {
   display: grid;
-  grid-template-columns: minmax(240px, 1fr) 8px var(--standalone-right-rail-width, 320px);
+  grid-template-columns: minmax(360px, 1fr) 8px var(--standalone-right-rail-width, 320px);
   grid-template-rows: minmax(0, 1fr) 8px var(--standalone-bottom-height, 280px);
   min-height: 0;
 }
@@ -6066,6 +6071,24 @@ body.runtime-embedded .board-empty-action:focus-visible {
 @media (min-width: 900px) {
   .modal { max-width: 520px; }
   .modal.modal-wide { max-width: 920px; }
+}
+
+
+body[data-loom-mode="standalone"] #modal-task .modal,
+body[data-loom-mode="desktop"] #modal-task .modal {
+  max-width: 420px;
+}
+@media (min-width: 400px) {
+  body[data-loom-mode="standalone"] #modal-task .modal,
+  body[data-loom-mode="desktop"] #modal-task .modal { max-width: 540px; }
+}
+@media (min-width: 600px) {
+  body[data-loom-mode="standalone"] #modal-task .modal,
+  body[data-loom-mode="desktop"] #modal-task .modal { max-width: 660px; }
+}
+@media (min-width: 900px) {
+  body[data-loom-mode="standalone"] #modal-task .modal,
+  body[data-loom-mode="desktop"] #modal-task .modal { max-width: 780px; }
 }
 
 /* -- Diff review view ------------------------------------------------- */
