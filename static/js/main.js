@@ -66,7 +66,7 @@ function renderGroupSwitcher() {
   html += '</select>';
   html += '<button type="button" class="group-switcher-menu-btn"'
     + (active ? '' : ' disabled')
-    + ' title="Group actions" onclick="openActiveGroupMenu(event)">&#8942;</button>';
+    + ' title="Group settings" aria-label="Group settings" onclick="openActiveGroupSettings(event)">&#9881;</button>';
   if (root._loomLastHtml !== html) {
     root.innerHTML = html;
     root._loomLastHtml = html;
@@ -74,24 +74,14 @@ function renderGroupSwitcher() {
   _syncGroupSwitcherSelectValue();
 }
 
-function openActiveGroupMenu(event) {
+function openActiveGroupSettings(event) {
   if (event) {
     event.preventDefault();
     event.stopPropagation();
   }
   var group = (typeof _activeGroup === 'function') ? (_activeGroup() || '') : '';
-  if (!group || typeof showContextMenu !== 'function') return;
-  var x = event && event.clientX;
-  var y = event && event.clientY;
-  if ((!x || !y) && event && event.currentTarget && event.currentTarget.getBoundingClientRect) {
-    var rect = event.currentTarget.getBoundingClientRect();
-    x = rect.left;
-    y = rect.bottom + 4;
-  }
-  showContextMenu(x || 0, y || 0, [
-    { label: 'Group settings…', action: `openGroupSettings('${esc(group)}')` },
-    { label: 'Delete group', action: `removeGroup('${esc(group)}')`, danger: true },
-  ]);
+  if (!group || typeof openGroupSettings !== 'function') return;
+  openGroupSettings(group);
 }
 
 function onActiveGroupSelect(value) {

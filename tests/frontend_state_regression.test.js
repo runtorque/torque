@@ -15986,22 +15986,23 @@ test('header group switcher is hidden in toolbelt and switches active group in s
   assert.match(root.innerHTML, /Group:/);
   assert.match(root.innerHTML, /<option value="alpha" selected>alpha<\/option>[\s\S]*<option value="beta"/);
   assert.match(root.innerHTML, /\+ New group/);
-  assert.match(root.innerHTML, /openActiveGroupMenu\(event\)/);
+  assert.match(root.innerHTML, /title="Group settings"/);
+  assert.match(root.innerHTML, /openActiveGroupSettings\(event\)/);
+  assert.match(root.innerHTML, /&#9881;/);
+  assert.doesNotMatch(root.innerHTML, /openActiveGroupMenu|&#8942;|Delete group/);
 
-  sandbox.showContextMenu = function(x, y, items) {
-    sandbox.activeGroupMenu = { x, y, items };
+  sandbox.openedGroupSettings = [];
+  sandbox.openGroupSettings = function(group) {
+    sandbox.openedGroupSettings.push(group);
   };
   runInContext(context, `
-    openActiveGroupMenu({
+    openActiveGroupSettings({
       preventDefault() {},
       stopPropagation() {},
       currentTarget: { getBoundingClientRect() { return { left: 12, bottom: 34 }; } },
     });
   `);
-  assert.deepEqual(Array.from(sandbox.activeGroupMenu.items, (item) => item.label), [
-    'Group settings…',
-    'Delete group',
-  ]);
+  assert.deepEqual(sandbox.openedGroupSettings, ['alpha']);
 
   runInContext(context, `onActiveGroupSelect('beta');`);
   assert.equal(jsonValue(context, `state.active_group`), 'beta');

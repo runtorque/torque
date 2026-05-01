@@ -778,6 +778,15 @@ function openGroupSettings(group, initialTab, initialSubtab) {
   send({ cmd: 'get_group_settings', group });
 }
 
+async function deleteSettingsGroup() {
+  const group = _settingsGroup;
+  if (!group || typeof removeGroup !== 'function') return;
+  if (await removeGroup(group)) {
+    _settingsGroup = null;
+    closeModals();
+  }
+}
+
 function _populateProfileSelect(el, profiles, selected, emptyLabel) {
   el.innerHTML = `<option value="">${emptyLabel}</option>`;
   for (const name of (profiles || [])) {
