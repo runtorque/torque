@@ -21,6 +21,8 @@ PERF_BASELINE  ?= tests/perf/baseline.json
 PERF_RUN_DIR   ?= tests/perf/runs
 PERF_VENV      ?= $(HOME)/.cache/loom/perf-harness-venv
 PERF_PYTHON    ?= $(PERF_VENV)/bin/python
+# Test recipes must not inherit Loom runtime/agent env from worker shells.
+SANITIZE_LOOM_TEST_ENV = env $$(env | sed -n 's/^\(LOOM_[A-Za-z0-9_]*\)=.*/-u \1/p')
 
 .PHONY: install uninstall run deps desktop-deps check stop deploy autolaunch cli standalone standalone-bg desktop desktop-attach open test perf-deps perf-baseline perf-delta
 
@@ -356,7 +358,7 @@ check:
 
 ## test: Run the automated regression suite
 test:
-	@python3 -m unittest discover -s tests -v
+	@$(SANITIZE_LOOM_TEST_ENV) python3 -m unittest discover -s tests -v
 
 ## perf-deps: Prepare the cached Python environment used by perf harness targets
 perf-deps:
