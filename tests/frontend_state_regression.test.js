@@ -3590,7 +3590,7 @@ test('_boardTaskDispatchEligibility only surfaces non-default dispatch states on
     ),
     JSON.stringify({
       className: 'board-card-dispatch board-card-dispatch-blocked',
-      label: 'Blocked by deps',
+      label: 'Blocked by dep',
       title: 'Waiting on: Dependency',
     }),
   );
@@ -3822,6 +3822,8 @@ test('_boardTaskDependencyBadges exposes blocked and blocking counts compactly',
   context.state.board_tasks = {
     depA: { id: 'depA', task: 'API contract', lane: 'To Do', group: 'alpha' },
     depB: { id: 'depB', task: 'Schema migration', lane: 'Done', group: 'alpha' },
+    depC: { id: 'depC', task: 'Cache seed', lane: 'Backlog', group: 'alpha' },
+    depD: { id: 'depD', task: 'Search index', lane: 'In Progress', group: 'alpha' },
     blocked1: {
       id: 'blocked1',
       task: 'Rollout docs',
@@ -3846,14 +3848,14 @@ test('_boardTaskDependencyBadges exposes blocked and blocking counts compactly',
         task: 'Ship release',
         lane: 'Backlog',
         group: 'alpha',
-        depends_on: ['depA', 'depB']
+        depends_on: ['depA', 'depB', 'depC', 'depD']
       }))`,
     ),
     JSON.stringify([
       {
         className: 'board-card-dependency board-card-dependency-blocked',
-        label: 'Blocked by 1',
-        title: 'Waiting on: API contract',
+        label: 'Blocked by depA +2 more',
+        title: 'Waiting on: API contract, Cache seed, +1',
         targetTaskId: 'depA',
       },
       {
@@ -3894,13 +3896,56 @@ test('_renderBoardCard shows inline dependency badges instead of the old generic
   `);
 
   assert.match(html, /board-card-dependency-blocked/);
-  assert.match(html, />Blocked by 1</);
+  assert.match(html, />Blocked by dep</);
+  assert.doesNotMatch(html, /Blocked by deps/);
+  assert.doesNotMatch(html, /Blocked by 1/);
   assert.match(html, /board-card-badge-jump/);
   assert.match(html, /boardJumpToTask\('dep'\)/);
   assert.match(html, /board-card-dependency-blocking/);
   assert.match(html, />Blocks 1</);
   assert.match(html, /boardJumpToTask\('blocked'\)/);
   assert.doesNotMatch(html, /&#x1F512; deps/);
+});
+
+test('_renderBoardCard uses canonical blocker IDs for single and multi-dependency blocked labels', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadBoardScripts(context);
+
+  context.state.board_tasks = {
+    'LOOM:302': { id: 'LOOM:302', task: 'API contract', lane: 'To Do', group: 'alpha' },
+    'LOOM:303': { id: 'LOOM:303', task: 'Schema migration', lane: 'Backlog', group: 'alpha' },
+    'LOOM:304': { id: 'LOOM:304', task: 'Docs', lane: 'In Progress', group: 'alpha' },
+  };
+
+  const singleHtml = runInContext(context, `
+    _renderBoardCard({
+      id: 'single',
+      group: 'alpha',
+      task: 'Single blocked task',
+      lane: 'Backlog',
+      depends_on: ['LOOM:302'],
+      health_state: 'blocked',
+      health_details: { reasons: ['dependency_blocked'] },
+      labels: []
+    }, {}, 0)
+  `);
+  const multiHtml = runInContext(context, `
+    _renderBoardCard({
+      id: 'multi',
+      group: 'alpha',
+      task: 'Multi blocked task',
+      lane: 'Backlog',
+      depends_on: ['LOOM:302', 'LOOM:303', 'LOOM:304'],
+      health_state: 'blocked',
+      health_details: { reasons: ['dependency_blocked'] },
+      labels: []
+    }, {}, 0)
+  `);
+
+  assert.equal((singleHtml.match(/Blocked by LOOM:302/g) || []).length, 1);
+  assert.match(multiHtml, />Blocked by LOOM:302 \+2 more</);
+  assert.doesNotMatch(singleHtml + multiHtml, /Blocked by deps|Blocked by 1|>Blocked</);
 });
 
 test('boardCardMenu uses a dependency picker instead of inline blocker rows', () => {
@@ -6004,8 +6049,9 @@ test('board lane cache rerenders visible dependency badges when a dependency is 
 
   context.renderBoard();
 
-  assert.match(panel.innerHTML, /Blocked by deps/);
-  assert.match(panel.innerHTML, /Blocked by 1/);
+  assert.match(panel.innerHTML, /Blocked by dep/);
+  assert.doesNotMatch(panel.innerHTML, /Blocked by deps/);
+  assert.doesNotMatch(panel.innerHTML, /Blocked by 1/);
 
   runInContext(context, `
     cardRenderCalls = 0;
@@ -6022,8 +6068,7 @@ test('board lane cache rerenders visible dependency badges when a dependency is 
   context.renderBoard();
 
   assert.equal(runInContext(context, 'cardRenderCalls'), 1);
-  assert.doesNotMatch(cards.innerHTML, /Blocked by deps/);
-  assert.doesNotMatch(cards.innerHTML, /Blocked by 1/);
+  assert.doesNotMatch(cards.innerHTML, /Blocked by dep/);
   assert.match(cards.innerHTML, /Deps 1/);
 });
 
@@ -6087,8 +6132,9 @@ test('board lane cache rerenders deeply nested dependent card in visible root la
 
   context.renderBoard();
 
-  assert.match(panel.innerHTML, /Blocked by deps/);
-  assert.match(panel.innerHTML, /Blocked by 1/);
+  assert.match(panel.innerHTML, /Blocked by dep/);
+  assert.doesNotMatch(panel.innerHTML, /Blocked by deps/);
+  assert.doesNotMatch(panel.innerHTML, /Blocked by 1/);
 
   runInContext(context, `
     cardRenderCalls = 0;
@@ -6105,8 +6151,7 @@ test('board lane cache rerenders deeply nested dependent card in visible root la
   context.renderBoard();
 
   assert.equal(runInContext(context, 'cardRenderCalls'), 4);
-  assert.doesNotMatch(cards.innerHTML, /Blocked by deps/);
-  assert.doesNotMatch(cards.innerHTML, /Blocked by 1/);
+  assert.doesNotMatch(cards.innerHTML, /Blocked by dep/);
   assert.match(cards.innerHTML, /Deps 1/);
 });
 
