@@ -144,7 +144,7 @@ For `add_agent` and `add_terminal`: the handler already has the new cell's ID in
 ```
 loom <noun> <verb> [args] [flags]
 
-Nouns: status, group, agent, terminal, worktree, broadcast, send, logs
+Nouns: status, group, agent, terminal, worktree, send, logs
 ```
 
 ### Full command reference
