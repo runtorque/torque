@@ -178,7 +178,6 @@ loom terminal reparent <id> -p <parent>  Attach terminal to different agent
 loom terminal reparent <id> --detach     Detach terminal from parent
 
 loom send <id|name> <text>               Send text to a session
-loom broadcast <group> <text>            Broadcast text to all sessions in group
 
 loom worktree create <id|name>           Create worktree for agent
   [--relaunch]

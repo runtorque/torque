@@ -8291,31 +8291,6 @@ async def main(connection=None):
             elif cmd == "send_user_message":
                 await _handle_send_user_message_command(data, state, bridge)
 
-            elif cmd == "broadcast_to_group":
-                for aid in state.groups.get(data["group"], []):
-                    cell = state.agents.get(aid)
-                    if cell and cell.session_id:
-                        cell.status = "running"
-                        state.mark_agent_progress(cell, emit=False)
-                        state._emit_agent(cell)
-                    await _queue_cell_prompt_send(
-                        cell,
-                        data.get("text", ""),
-                        _send_agent_prompt,
-                    )
-                    # Also send to child terminals
-                    for child_id in state._children.get(aid, []):
-                        child = state.agents.get(child_id)
-                        if child and child.session_id:
-                            child.status = "running"
-                            state.mark_agent_progress(child, emit=False)
-                            state._emit_agent(child)
-                        await _queue_cell_prompt_send(
-                            child,
-                            data.get("text", ""),
-                            _send_agent_prompt,
-                        )
-
             elif cmd == "relaunch_agent":
                 result = await _handle_relaunch_agent_command(
                     data,

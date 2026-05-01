@@ -238,18 +238,6 @@ loom send "fix the auth bug" -t impl-add-auth -w    # send and wait for completi
 
 ---
 
-## broadcast
-
-Send a command to all agents in a group.
-
-```bash
-loom broadcast backend "git pull"
-```
-
-Alias: `bc`
-
----
-
 ## task
 
 Task and ticket management.

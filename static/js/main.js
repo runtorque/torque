@@ -90,7 +90,6 @@ function openActiveGroupMenu(event) {
   }
   showContextMenu(x || 0, y || 0, [
     { label: 'Group settings…', action: `openGroupSettings('${esc(group)}')` },
-    { label: `Broadcast to ${group}…`, action: `openBroadcast('${esc(group)}')` },
     { label: 'Delete group', action: `removeGroup('${esc(group)}')`, danger: true },
   ]);
 }
@@ -965,15 +964,6 @@ function openAddTerminalForFocused() {
   }
 }
 
-function toggleBroadcastForFocused() {
-  if (broadcastGroup) {
-    closeBroadcast();
-  } else {
-    const gname = _focusedGroup() || _firstGroup();
-    if (gname) openBroadcast(gname);
-  }
-}
-
 function relaunchFocused() {
   if (!focusedItemId) return;
   const cell = state.agents[focusedItemId];
@@ -1005,12 +995,6 @@ document.addEventListener('keydown', (e) => {
       e.preventDefault();
       hideDiffView();
     }
-    return;
-  }
-
-  // If broadcast input is focused, let it handle its own keys
-  if (document.activeElement && document.activeElement.id === 'broadcast-input') {
-    if (e.key === 'Escape') closeBroadcast();
     return;
   }
 
@@ -1083,11 +1067,6 @@ document.addEventListener('keydown', (e) => {
       e.preventDefault();
       openAddTerminalForFocused();
       break;
-    case 'b':
-    case 'B':
-      e.preventDefault();
-      toggleBroadcastForFocused();
-      break;
     case 'r':
     case 'R':
       e.preventDefault();
@@ -1108,7 +1087,6 @@ document.addEventListener('keydown', (e) => {
         break;
       }
       closeModals();
-      closeBroadcast();
       closeMenus();
       closeContextMenu();
       if (_activePanelApp) togglePanel(_activePanelApp);

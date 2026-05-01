@@ -79,7 +79,7 @@ Loom shouldn't only be usable from the toolbelt. This phase adds programmatic ac
 
 A single-file Python CLI (`bin/loom`, stdlib only) that talks to the Loom daemon over a REST API (`POST /api/cmd`). The server's `handle_command` function is shared between the WebSocket (toolbelt) and REST (CLI) paths — same code, zero drift.
 
-Commands cover the full surface: `status`, `group`, `agent`, `terminal`, `send`, `broadcast`, `worktree`, and `logs`. Context-aware — auto-detects the current group, parent agent, and window from `$ITERM_SESSION_ID` when run inside a Loom-managed session.
+Commands cover the full surface: `status`, `group`, `agent`, `terminal`, `send`, `worktree`, and `logs`. Context-aware — auto-detects the current group, parent agent, and window from `$ITERM_SESSION_ID` when run inside a Loom-managed session.
 
 Key features:
 
@@ -376,7 +376,7 @@ The toolbelt is Loom's primary interface. It should scale from 1 agent to 50.
 
 ### Command Palette
 
-`Cmd+K` style fuzzy finder in the toolbelt. Type to search: "start bug fix", "show agent 3 diff", "broadcast git pull", "open Linear settings". Fast access to everything without navigating menus.
+`Cmd+K` style fuzzy finder in the toolbelt. Type to search: "start bug fix", "show agent 3 diff", "open Linear settings". Fast access to everything without navigating menus.
 
 ### Minimap & Timeline
 

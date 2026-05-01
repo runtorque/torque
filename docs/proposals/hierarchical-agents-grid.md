@@ -271,7 +271,7 @@ Out of scope for v1. Drag-and-drop reparenting is the near-future evolution desc
 ### Right-click context menus
 
 - Architect card: existing controls + `+ Hire engineer` shortcut (equivalent to clicking `+ New Engineer` in the header row).
-- Engineer card: existing controls (dismiss, rehire, broadcast, remove). Dismissed engineers render greyed in-place.
+- Engineer card: existing controls (dismiss, rehire, remove). Dismissed engineers render greyed in-place.
 - Worker card: existing controls.
 - Loose-workers strip (empty area): `+ New Worker` shortcut.
 - Section divider: no menu in v1 — reserved for future section-level actions.

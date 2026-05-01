@@ -1956,7 +1956,7 @@ def cmd_terminal_reparent(args):
         print(f"Detached \"{cell['name']}\"")
 
 
-# -- Send / Broadcast -------------------------------------------------------
+# -- Send -------------------------------------------------------------------
 
 def wait_for_idle(cell_id, cell_name, port, interval=2):
     """Poll until the agent finishes its turn.
@@ -2038,18 +2038,6 @@ def cmd_send(args):
     if args.wait:
         rc = wait_for_idle(cell["id"], cell["name"], args.port)
         sys.exit(rc)
-
-
-def cmd_broadcast(args):
-    state_data = get_state(args.port)
-    group = resolve_group(state_data, args.group)
-    text = args.text
-    if not text.endswith("\r") and not text.endswith("\n"):
-        text += "\r"
-    resp = api_call("broadcast_to_group", port=args.port,
-                    group=group, text=text)
-    check_ok(resp)
-    print(f"Broadcast to \"{group}\"")
 
 
 # -- Worktree commands ------------------------------------------------------
@@ -4832,13 +4820,6 @@ def build_parser():
     p.add_argument("-w", "--wait", action="store_true",
                    help="Wait until the agent finishes (polls every 2s)")
     p.set_defaults(func=cmd_send)
-
-    # -- broadcast ----------------------------------------------------------
-    p = sub.add_parser("broadcast", aliases=["bc"],
-                       help="Broadcast text to a group")
-    p.add_argument("group", help="Group name")
-    p.add_argument("text", help="Text to broadcast")
-    p.set_defaults(func=cmd_broadcast)
 
     # -- worktree -----------------------------------------------------------
     wt = sub.add_parser("worktree", aliases=["wt"],
