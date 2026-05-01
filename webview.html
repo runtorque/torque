@@ -394,6 +394,7 @@
       <button class="gs-tab" data-tab="agents" onclick="switchGsTab('agents')">Agents</button>
       <button class="gs-tab" data-tab="engineer" onclick="switchGsTab('engineer')">Engineer</button>
       <button class="gs-tab" data-tab="architect" onclick="switchGsTab('architect')">Architect</button>
+      <button class="gs-tab" data-tab="advanced" onclick="switchGsTab('advanced')">Advanced</button>
     </div>
 
     <!-- Group tab -->
@@ -839,6 +840,13 @@
         <label>Events</label>
         <div class="task-modal-check-grid" id="gs-architect-events-grid"></div>
       </div>
+    </div>
+
+    <!-- Advanced tab -->
+    <div class="gs-pane" data-pane="advanced">
+      <label>Delete group</label>
+      <div class="label-hint task-modal-section-intro">Delete this group and its cells. This action uses the existing delete confirmation flow.</div>
+      <button type="button" class="btn-danger" onclick="removeGroup(_settingsGroup)">Delete group</button>
     </div>
 
     <div class="modal-actions">

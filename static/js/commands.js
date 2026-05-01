@@ -437,7 +437,11 @@ async function removeGroup(group) {
   const msg = count > 0
     ? `Delete group "${group}" and its ${count} cell(s)?`
     : `Delete empty group "${group}"?`;
-  if (await showConfirm(msg)) send({ cmd: 'remove_group', group });
+  if (await showConfirm(msg, { label: 'Delete', variant: 'btn-danger' })) {
+    send({ cmd: 'remove_group', group });
+    return true;
+  }
+  return false;
 }
 
 /* Drag and drop
@@ -851,17 +855,6 @@ function onCellContextMenu(e, id) {
   items.push({ separator: true });
   items.push({ label: `Copy ID: ${id.slice(0, 8)}\u2026`, action: `copyAgentId('${id}')` });
   items.push({ label: 'Delete', action: `removeAgent('${id}')`, danger: true });
-  showContextMenu(e.clientX, e.clientY, items);
-}
-
-/* Group context menu (right-click on group header) */
-function onGroupContextMenu(e, group) {
-  e.preventDefault();
-  e.stopPropagation();
-  const items = [
-    { label: 'Settings\u2026', action: `openGroupSettings('${esc(group)}')` },
-    { label: 'Delete', action: `removeGroup('${esc(group)}')`, danger: true },
-  ];
   showContextMenu(e.clientX, e.clientY, items);
 }
 

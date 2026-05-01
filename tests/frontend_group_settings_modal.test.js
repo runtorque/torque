@@ -90,12 +90,12 @@ function createSandbox() {
     return elements.get(id);
   }
 
-  const gsTabs = ['group', 'agents', 'engineer', 'architect'].map((name) => {
+  const gsTabs = ['group', 'agents', 'engineer', 'architect', 'advanced'].map((name) => {
     const el = new FakeElement(`tab-${name}`);
     el.dataset.tab = name;
     return el;
   });
-  const gsPanes = ['group', 'agents', 'engineer', 'architect'].map((name) => {
+  const gsPanes = ['group', 'agents', 'engineer', 'architect', 'advanced'].map((name) => {
     const el = new FakeElement(`pane-${name}`);
     el.dataset.pane = name;
     return el;
@@ -406,11 +406,10 @@ test('engineer and architect group settings use three scoped sub-tabs', () => {
     html.indexOf('<div class="gs-tabs">'),
     html.indexOf('    <!-- Group tab -->'),
   );
-  assert.match(topStrip, /data-tab="group"/);
-  assert.match(topStrip, /data-tab="agents"/);
-  assert.match(topStrip, /data-tab="engineer"/);
-  assert.match(topStrip, /data-tab="architect"/);
-  assert.doesNotMatch(topStrip, /data-tab="advanced"/i);
+  assert.match(
+    topStrip,
+    /data-tab="group"[\s\S]*data-tab="agents"[\s\S]*data-tab="engineer"[\s\S]*data-tab="architect"[\s\S]*data-tab="advanced"/,
+  );
 
   for (const pane of ['engineer', 'architect']) {
     assert.match(
@@ -442,6 +441,36 @@ test('engineer and architect group settings use three scoped sub-tabs', () => {
   assert.ok(architectBehavior < html.indexOf('id="gs-architect-custom-instructions"'));
   assert.ok(architectBehavior < html.indexOf('id="gs-architect-journal-checkpoint"'));
   assert.ok(architectDigests < html.indexOf('id="gs-architect-push-interval"'));
+});
+
+test('group settings Advanced tab owns Delete group action', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  const commands = fs.readFileSync(path.join(repoRoot, 'static/js/commands.js'), 'utf8');
+  const render = fs.readFileSync(path.join(repoRoot, 'static/js/render.js'), 'utf8');
+  const main = fs.readFileSync(path.join(repoRoot, 'static/js/main.js'), 'utf8');
+
+  const advancedTabIndex = html.indexOf('data-tab="advanced"');
+  const advancedPaneIndex = html.indexOf('data-pane="advanced"');
+  assert.notEqual(advancedTabIndex, -1);
+  assert.notEqual(advancedPaneIndex, -1);
+  assert.ok(html.indexOf('data-tab="architect"') < advancedTabIndex);
+  assert.ok(html.indexOf('data-pane="architect"') < advancedPaneIndex);
+
+  const advancedPane = html.slice(
+    advancedPaneIndex,
+    html.indexOf('<div class="modal-actions">', advancedPaneIndex),
+  );
+  assert.match(advancedPane, /Delete group/);
+  assert.match(advancedPane, /class="btn-danger"/);
+  assert.match(advancedPane, /removeGroup\(_settingsGroup\)/);
+  assert.doesNotMatch(advancedPane, /gs-subtabs|gs-subtab|gs-subpane/);
+
+  assert.doesNotMatch(commands, /function\s+onGroupContextMenu\b/);
+  assert.doesNotMatch(render, /oncontextmenu="onGroupContextMenu/);
+  assert.doesNotMatch(render, /title="Delete group"/);
+  assert.match(render, /title="Group settings"[^`]*\\u2699/);
+  assert.match(main, /openActiveGroupSettings\(event\)[\s\S]*&#9881;/);
+  assert.doesNotMatch(main, /openActiveGroupMenu|&#8942;|Delete group/);
 });
 
 test('group settings sub-tab switching preserves scroll focus and inline draft state', () => {
