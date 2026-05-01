@@ -232,12 +232,10 @@ function _boardEnsureDispatchEligibilityRefs(group, model) {
 }
 
 function _boardUnmetDependencyNames(task) {
-  if (!task || !Array.isArray(task.depends_on)) return [];
-  var tasks = _boardTasks();
+  var unmet = _boardUnmetDependencyTasks(task);
   var names = [];
-  for (var i = 0; i < task.depends_on.length; i++) {
-    var dep = tasks[task.depends_on[i]];
-    if (dep && dep.lane !== 'Done') names.push(dep.task || dep.id);
+  for (var i = 0; i < unmet.length; i++) {
+    names.push(unmet[i].task || unmet[i].id);
   }
   return names;
 }
@@ -301,7 +299,7 @@ function _boardTaskDispatchEligibility(task) {
     if (unmetDeps.length > 2) preview += ', +' + (unmetDeps.length - 2);
     return {
       className: 'board-card-dispatch board-card-dispatch-blocked',
-      label: 'Blocked by deps',
+      label: _boardDependencyBlockedLabel(task),
       title: 'Waiting on: ' + preview,
     };
   }
@@ -343,6 +341,12 @@ function _boardTaskHealthState(task) {
   return task.health_state;
 }
 
+function _boardTaskHasDependencyBlockedReason(task) {
+  var details = (task && task.health_details) || {};
+  var reasons = Array.isArray(details.reasons) ? details.reasons : [];
+  return reasons.indexOf('dependency_blocked') >= 0;
+}
+
 function _boardVerificationState(task) {
   if (!task || !task.verification_state) return '';
   return task.verification_state;
@@ -382,11 +386,22 @@ function _boardHealthDisplayName(stateName) {
   return _boardHealthLabels[stateName] || stateName;
 }
 
+function _boardTaskHealthLabel(task) {
+  var stateName = _boardTaskHealthState(task);
+  if (stateName === 'blocked'
+      && (_boardTaskHasDependencyBlockedReason(task) || _boardDepsBlocked(task))) {
+    // Defensive fallback: dependency_blocked normally has at least one unmet
+    // depends_on task, but stale/malformed state can lack a resolvable blocker.
+    return _boardDependencyBlockedLabel(task) || _boardHealthDisplayName(stateName);
+  }
+  return _boardHealthDisplayName(stateName);
+}
+
 function _boardHealthTitle(task) {
   if (!task) return '';
   var stateName = _boardTaskHealthState(task);
   if (stateName === 'healthy') return '';
-  var parts = [_boardHealthDisplayName(stateName)];
+  var parts = [_boardTaskHealthLabel(task)];
   var details = task.health_details || {};
   if (details.aggregate && details.source_task_title) {
     parts.push('via ' + details.source_task_title);
@@ -458,12 +473,22 @@ function _boardDependencyTasks(task) {
 }
 
 function _boardUnmetDependencyTasks(task) {
-  var deps = _boardDependencyTasks(task);
+  if (!task || !Array.isArray(task.depends_on)) return [];
+  var tasks = _boardTasks();
   var unmet = [];
-  for (var i = 0; i < deps.length; i++) {
-    if (deps[i].lane !== 'Done') unmet.push(deps[i]);
+  for (var i = 0; i < task.depends_on.length; i++) {
+    var dep = tasks[task.depends_on[i]];
+    if (dep && dep.lane !== 'Done') unmet.push(dep);
   }
   return unmet;
+}
+
+function _boardDependencyBlockedLabel(task) {
+  var unmet = _boardUnmetDependencyTasks(task);
+  if (!unmet.length) return '';
+  var label = 'Blocked by ' + (unmet[0].id || unmet[0].task || 'dependency');
+  if (unmet.length > 1) label += ' +' + (unmet.length - 1) + ' more';
+  return label;
 }
 
 function _boardActiveDependentNames(task) {
@@ -502,7 +527,7 @@ function _boardTaskDependencyBadges(task) {
       if (unmetDeps.length > 2) unmetPreview += ', +' + (unmetDeps.length - 2);
       badges.push({
         className: 'board-card-dependency board-card-dependency-blocked',
-        label: 'Blocked by ' + unmetDeps.length,
+        label: _boardDependencyBlockedLabel(task),
         title: 'Waiting on: ' + unmetPreview,
         targetTaskId: unmetDepTasks[0].id,
       });
@@ -717,19 +742,23 @@ function _renderBoardCard(t, childrenOf, depth, renderState) {
   cardHtml += '<div class="board-card-title">' + titlePrefix + formatCode(t.task || '') + '</div>';
   cardHtml += '</div>';
   var meta = '';
+  var dependencyBlockedLabel = _boardDependencyBlockedLabel(t);
   if (typeof _taskCreatedByBadgeHtml === 'function') {
     meta += _taskCreatedByBadgeHtml(t);
   }
   var dispatchEligibility = _boardTaskDispatchEligibility(t);
-  if (dispatchEligibility) {
+  if (dispatchEligibility && dispatchEligibility.label !== dependencyBlockedLabel) {
     meta += '<span class="board-card-label ' + esc(dispatchEligibility.className)
       + '" title="' + esc(dispatchEligibility.title) + '">'
       + esc(dispatchEligibility.label) + '</span>';
   }
   if (showExecutionState && t.status) meta += '<span class="board-card-label board-card-status">' + esc(t.status) + '</span>';
-  if (showExecutionState && _boardTaskHealthState(t) !== 'healthy') {
-    meta += '<span class="board-card-label board-card-health board-card-health-' + esc(_boardTaskHealthState(t))
-      + '" title="' + esc(_boardHealthTitle(t)) + '">' + esc(_boardHealthDisplayName(_boardTaskHealthState(t))) + '</span>';
+  var healthState = _boardTaskHealthState(t);
+  var healthLabel = _boardTaskHealthLabel(t);
+  if (showExecutionState && healthState !== 'healthy'
+      && healthLabel !== dependencyBlockedLabel) {
+    meta += '<span class="board-card-label board-card-health board-card-health-' + esc(healthState)
+      + '" title="' + esc(_boardHealthTitle(t)) + '">' + esc(healthLabel) + '</span>';
   }
   if (_boardVerificationState(t)) {
     meta += '<span class="board-card-label board-card-verification board-card-verification-' + esc(_boardVerificationState(t))
