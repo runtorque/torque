@@ -448,6 +448,7 @@ test('group settings Advanced tab owns Delete group action', () => {
   const commands = fs.readFileSync(path.join(repoRoot, 'static/js/commands.js'), 'utf8');
   const render = fs.readFileSync(path.join(repoRoot, 'static/js/render.js'), 'utf8');
   const main = fs.readFileSync(path.join(repoRoot, 'static/js/main.js'), 'utf8');
+  const modals = fs.readFileSync(path.join(repoRoot, 'static/js/modals.js'), 'utf8');
 
   const advancedTabIndex = html.indexOf('data-tab="advanced"');
   const advancedPaneIndex = html.indexOf('data-pane="advanced"');
@@ -462,8 +463,9 @@ test('group settings Advanced tab owns Delete group action', () => {
   );
   assert.match(advancedPane, /Delete group/);
   assert.match(advancedPane, /class="btn-danger"/);
-  assert.match(advancedPane, /removeGroup\(_settingsGroup\)/);
+  assert.match(advancedPane, /deleteSettingsGroup\(\)/);
   assert.doesNotMatch(advancedPane, /gs-subtabs|gs-subtab|gs-subpane/);
+  assert.match(modals, /async function deleteSettingsGroup\(\)[\s\S]*removeGroup\(group\)[\s\S]*closeModals\(\)/);
 
   assert.doesNotMatch(commands, /function\s+onGroupContextMenu\b/);
   assert.doesNotMatch(render, /oncontextmenu="onGroupContextMenu/);
