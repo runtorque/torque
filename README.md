@@ -22,7 +22,7 @@ Loom is an iTerm2-first agent orchestration workspace for people who already liv
 ### Set up and learn the basics
 
 - [Getting Started](docs/getting-started.md) — install Loom, run it, and create your first group, agent, and terminal
-- [Concepts](docs/concepts.md) — plain-language overview of groups, agents, terminals, broadcasts, and actions
+- [Concepts](docs/concepts.md) — plain-language overview of groups, agents, terminals, and actions
 - [Agents & Sessions](docs/agents-and-sessions.md) — understand providers, boot commands, prompts, worktrees, resume, and runtime integration
 - [Group Settings](docs/group-settings.md) — configure defaults, overrides, windows, and session behavior
 - [Keyboard Shortcuts](docs/keyboard-shortcuts.md) — navigate Loom quickly from the terminal
