@@ -90,18 +90,19 @@ function createSandbox() {
     return elements.get(id);
   }
 
-  const gsTabs = ['group', 'agents', 'engineer', 'architect', 'advanced'].map((name) => {
+  const gsTabs = ['group', 'agents', 'engineer', 'architect'].map((name) => {
     const el = new FakeElement(`tab-${name}`);
     el.dataset.tab = name;
     return el;
   });
-  const gsPanes = ['group', 'agents', 'engineer', 'architect', 'advanced'].map((name) => {
+  const gsPanes = ['group', 'agents', 'engineer', 'architect'].map((name) => {
     const el = new FakeElement(`pane-${name}`);
     el.dataset.pane = name;
     return el;
   });
   const paneByName = Object.fromEntries(gsPanes.map((pane) => [pane.dataset.pane, pane]));
   const subtabNamesByPane = {
+    group: ['group-general', 'group-advanced'],
     agents: ['agent-general', 'agent-terminals', 'agent-worktree', 'agent-notifications'],
     engineer: ['engineer-general', 'engineer-behavior', 'engineer-digests'],
     architect: ['architect-general', 'architect-behavior', 'architect-digests'],
@@ -406,10 +407,15 @@ test('engineer and architect group settings use three scoped sub-tabs', () => {
     html.indexOf('<div class="gs-tabs">'),
     html.indexOf('    <!-- Group tab -->'),
   );
+  const topTabs = Array.from(topStrip.matchAll(/data-tab="([^"]+)"/g), (match) => match[1]);
+  assert.deepEqual(topTabs, ['group', 'agents', 'engineer', 'architect']);
+
   assert.match(
-    topStrip,
-    /data-tab="group"[\s\S]*data-tab="agents"[\s\S]*data-tab="engineer"[\s\S]*data-tab="architect"[\s\S]*data-tab="advanced"/,
+    html,
+    /<div class="gs-pane active" data-pane="group">[\s\S]*?data-subtab="group-general"[\s\S]*?data-subtab="group-advanced"/,
   );
+  assert.match(html, /data-subpane="group-general"/);
+  assert.match(html, /data-subpane="group-advanced"/);
 
   for (const pane of ['engineer', 'architect']) {
     assert.match(
@@ -431,6 +437,8 @@ test('engineer and architect group settings use three scoped sub-tabs', () => {
   assert.ok(engineerGeneral < html.indexOf('id="gs-engineer-provider"'));
   assert.ok(engineerBehavior < html.indexOf('id="gs-engineer-specializations-picker"'));
   assert.ok(engineerBehavior < html.indexOf('id="gs-engineer-autonomy-mode"'));
+  assert.ok(engineerBehavior < html.indexOf('id="gs-engineer-custom-instructions"'));
+  assert.ok(html.indexOf('id="gs-engineer-custom-instructions"') < engineerDigests);
   assert.ok(engineerDigests < html.indexOf('id="gs-engineer-push-interval"'));
 
   const architectGeneral = html.indexOf('data-subpane="architect-general"');
@@ -439,32 +447,37 @@ test('engineer and architect group settings use three scoped sub-tabs', () => {
   assert.ok(architectGeneral < html.indexOf('id="gs-architect-provider"'));
   assert.ok(architectBehavior < html.indexOf('id="gs-architect-autonomy-mode"'));
   assert.ok(architectBehavior < html.indexOf('id="gs-architect-custom-instructions"'));
+  assert.ok(html.indexOf('id="gs-architect-custom-instructions"') < architectDigests);
   assert.ok(architectBehavior < html.indexOf('id="gs-architect-journal-checkpoint"'));
   assert.ok(architectDigests < html.indexOf('id="gs-architect-push-interval"'));
 });
 
-test('group settings Advanced tab owns Delete group action', () => {
+test('group settings Advanced sub-tab owns Delete group action', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   const commands = fs.readFileSync(path.join(repoRoot, 'static/js/commands.js'), 'utf8');
   const render = fs.readFileSync(path.join(repoRoot, 'static/js/render.js'), 'utf8');
   const main = fs.readFileSync(path.join(repoRoot, 'static/js/main.js'), 'utf8');
   const modals = fs.readFileSync(path.join(repoRoot, 'static/js/modals.js'), 'utf8');
 
-  const advancedTabIndex = html.indexOf('data-tab="advanced"');
-  const advancedPaneIndex = html.indexOf('data-pane="advanced"');
-  assert.notEqual(advancedTabIndex, -1);
-  assert.notEqual(advancedPaneIndex, -1);
-  assert.ok(html.indexOf('data-tab="architect"') < advancedTabIndex);
-  assert.ok(html.indexOf('data-pane="architect"') < advancedPaneIndex);
+  assert.equal(html.indexOf('data-tab="advanced"'), -1);
+  assert.equal(html.indexOf('data-pane="advanced"'), -1);
 
-  const advancedPane = html.slice(
-    advancedPaneIndex,
-    html.indexOf('<div class="modal-actions">', advancedPaneIndex),
-  );
+  const groupPaneIndex = html.indexOf('data-pane="group"');
+  const agentsPaneIndex = html.indexOf('data-pane="agents"');
+  assert.notEqual(groupPaneIndex, -1);
+  assert.notEqual(agentsPaneIndex, -1);
+  const groupPane = html.slice(groupPaneIndex, agentsPaneIndex);
+  const groupGeneralIndex = groupPane.indexOf('data-subpane="group-general"');
+  const groupAdvancedIndex = groupPane.indexOf('data-subpane="group-advanced"');
+  assert.notEqual(groupGeneralIndex, -1);
+  assert.notEqual(groupAdvancedIndex, -1);
+  assert.ok(groupGeneralIndex < groupAdvancedIndex);
+  assert.match(groupPane, /data-subtab="group-general"[\s\S]*data-subtab="group-advanced"/);
+
+  const advancedPane = groupPane.slice(groupAdvancedIndex);
   assert.match(advancedPane, /Delete group/);
   assert.match(advancedPane, /class="btn-danger"/);
   assert.match(advancedPane, /deleteSettingsGroup\(\)/);
-  assert.doesNotMatch(advancedPane, /gs-subtabs|gs-subtab|gs-subpane/);
   assert.match(modals, /async function deleteSettingsGroup\(\)[\s\S]*removeGroup\(group\)[\s\S]*closeModals\(\)/);
 
   assert.doesNotMatch(commands, /function\s+onGroupContextMenu\b/);
@@ -512,6 +525,7 @@ test('group settings sub-tab CSS remains reusable in narrow toolbelt layouts', (
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
 
+  assert.match(html, /<div class="gs-pane active" data-pane="group">\s*<div class="gs-subtabs">/);
   assert.match(html, /<div class="gs-pane" data-pane="engineer">\s*<div class="gs-subtabs">/);
   assert.match(html, /<div class="gs-pane" data-pane="architect">\s*<div class="gs-subtabs">/);
   assert.match(css, /\.gs-subtabs\s*\{[^}]*display:\s*flex;[^}]*border-bottom:\s*1px solid var\(--border\);/s);

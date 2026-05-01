@@ -394,11 +394,17 @@
       <button class="gs-tab" data-tab="agents" onclick="switchGsTab('agents')">Agents</button>
       <button class="gs-tab" data-tab="engineer" onclick="switchGsTab('engineer')">Engineer</button>
       <button class="gs-tab" data-tab="architect" onclick="switchGsTab('architect')">Architect</button>
-      <button class="gs-tab" data-tab="advanced" onclick="switchGsTab('advanced')">Advanced</button>
     </div>
 
     <!-- Group tab -->
     <div class="gs-pane active" data-pane="group">
+      <div class="gs-subtabs">
+        <button class="gs-subtab active" data-subtab="group-general" onclick="switchGsSubTab('group',this)">General</button>
+        <button class="gs-subtab" data-subtab="group-advanced" onclick="switchGsSubTab('group',this)">Advanced</button>
+      </div>
+
+      <!-- General sub-tab -->
+      <div class="gs-subpane active" data-subpane="group-general">
       <label>Directory</label>
       <input id="gs-directory" placeholder="/path/to/project" autocomplete="off">
       <label>Profile</label>
@@ -428,6 +434,14 @@
         <input id="gs-filter-window" type="checkbox"> Pin to active window
         <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Only show this group in windows where it has active sessions. If all sessions are closed, the group appears in every window so you can relaunch.">?</span>
       </label>
+      </div>
+
+      <!-- Advanced sub-tab -->
+      <div class="gs-subpane" data-subpane="group-advanced">
+        <label>Delete group</label>
+        <div class="label-hint task-modal-section-intro">Delete this group and its cells. This action uses the existing delete confirmation flow.</div>
+        <button type="button" class="btn-danger" onclick="deleteSettingsGroup()">Delete group</button>
+      </div>
     </div>
 
     <!-- Agents tab -->
@@ -642,8 +656,6 @@
         </select>
         <label>Tab color</label>
         <div class="color-swatches" id="gs-engineer-color-swatches"></div>
-        <label>Custom instructions <span class="label-hint">expert override</span></label>
-        <textarea id="gs-engineer-custom-instructions" rows="5" placeholder="Instructions appended after Loom's built-in Engineer policy..."></textarea>
       </div>
 
       <!-- Behavior sub-tab -->
@@ -717,6 +729,8 @@
           <option value="note_then_ask">Note first, ask when blocked</option>
           <option value="keep_moving">Keep moving unless blocked</option>
         </select>
+        <label>Custom instructions <span class="label-hint">expert override</span></label>
+        <textarea id="gs-engineer-custom-instructions" rows="5" placeholder="Instructions appended after Loom's built-in Engineer policy..."></textarea>
       </div>
 
       <!-- Digests sub-tab -->
@@ -840,13 +854,6 @@
         <label>Events</label>
         <div class="task-modal-check-grid" id="gs-architect-events-grid"></div>
       </div>
-    </div>
-
-    <!-- Advanced tab -->
-    <div class="gs-pane" data-pane="advanced">
-      <label>Delete group</label>
-      <div class="label-hint task-modal-section-intro">Delete this group and its cells. This action uses the existing delete confirmation flow.</div>
-      <button type="button" class="btn-danger" onclick="deleteSettingsGroup()">Delete group</button>
     </div>
 
     <div class="modal-actions">
