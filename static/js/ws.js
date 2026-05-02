@@ -392,10 +392,17 @@ function _handleEngineerSessionMapMessage(msg) {
 
 function _applyRuntimeMode() {
   const embedded = !!(state && state.runtime && state.runtime.embedded_terminal);
+  const mode = (typeof _loomUiMode === 'function')
+    ? _loomUiMode()
+    : (embedded ? 'standalone' : 'toolbelt');
+  const standalone = mode === 'standalone' || mode === 'desktop';
+  const iterm2 = mode === 'toolbelt';
+  if (!document.body) return;
   document.body.classList.toggle('runtime-embedded', embedded);
-  if (document.body && document.body.dataset
-      && typeof _loomUiMode === 'function') {
-    document.body.dataset.loomMode = _loomUiMode();
+  document.body.classList.toggle('standalone-mode', standalone);
+  document.body.classList.toggle('iterm2-mode', iterm2);
+  if (document.body.dataset) {
+    document.body.dataset.loomMode = mode;
   }
 }
 

@@ -533,6 +533,61 @@ test('group settings sub-tab CSS remains reusable in narrow toolbelt layouts', (
   assert.match(css, /\.gs-subpane\.active\s*\{\s*display:\s*block;\s*\}/);
 });
 
+test('group settings marks iTerm2-only controls for standalone mode gating', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const ws = fs.readFileSync(path.join(repoRoot, 'static/js/ws.js'), 'utf8');
+  const start = html.indexOf('<!-- Group Settings modal -->');
+  const end = html.indexOf('<!-- Global Settings modal -->', start);
+  const modal = html.slice(start, end === -1 ? html.indexOf('<!-- Confirm dialog', start) : end);
+
+  function assertControlMarked(id, labelText) {
+    const controlMatch = modal.match(new RegExp(`<[^>]+id="${id}"[^>]*>`));
+    assert.ok(controlMatch, `${id} control should exist`);
+    assert.match(
+      controlMatch[0],
+      /class="[^"]*\biterm2-only\b[^"]*"/,
+      `${id} control should carry iterm2-only`,
+    );
+    const before = modal.slice(Math.max(0, controlMatch.index - 220), controlMatch.index);
+    assert.match(
+      before,
+      new RegExp(`<label class="[^"]*iterm2-only[^"]*">\\s*${labelText}\\s*</label>\\s*$`),
+      `${id} label should carry iterm2-only`,
+    );
+  }
+
+  [
+    ['gs-profile', 'Profile'],
+    ['gs-agent-profile', 'Profile'],
+    ['gs-terminal-profile', 'Profile'],
+    ['gs-engineer-profile', 'Profile'],
+    ['gs-color-swatches', 'Tab color'],
+    ['gs-agent-color-swatches', 'Tab color'],
+    ['gs-terminal-color-swatches', 'Tab color'],
+    ['gs-engineer-color-swatches', 'Tab color'],
+  ].forEach(([id, label]) => assertControlMarked(id, label));
+
+  [
+    ['gs-collapsed', 'Start collapsed on load'],
+    ['gs-filter-window', 'Pin to active window'],
+    ['gs-terminal-close-on-disconnect', 'Close on disconnect'],
+  ].forEach(([id, label]) => {
+    assert.match(
+      modal,
+      new RegExp(`<label class="[^"]*iterm2-only[^"]*">\\s*<input id="${id}"[^>]*>\\s*${label}`),
+      `${id} checkbox row should carry iterm2-only`,
+    );
+  });
+
+  assert.match(
+    css,
+    /body\.standalone-mode \.iterm2-only,\s*body\[data-loom-mode="standalone"\] \.iterm2-only,\s*body\[data-loom-mode="desktop"\] \.iterm2-only\s*\{[^}]*display:\s*none\s*!important;/s,
+  );
+  assert.match(ws, /classList\.toggle\('standalone-mode',\s*standalone\)/);
+  assert.match(ws, /classList\.toggle\('iterm2-mode',\s*iterm2\)/);
+});
+
 test('architect behavior sub-tab keeps runtime fields without fallback review-gate controls', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   assert.match(html, /data-subpane="architect-behavior"/);

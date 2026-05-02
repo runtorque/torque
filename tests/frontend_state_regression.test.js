@@ -15187,7 +15187,7 @@ test('Cmd+Option+P opens the add architect modal through the shared key handler'
   assert.deepEqual(sandbox.addArchitectModalCalls, ['loom']);
 });
 
-test('full state toggles embedded runtime body class', () => {
+test('full state toggles runtime body mode classes', () => {
   const { context, document } = createWsRenderHarness();
 
   runInContext(context, `
@@ -15198,11 +15198,14 @@ test('full state toggles embedded runtime body class', () => {
       board_lanes: [],
       board_tasks: {},
       panel_events: [],
-      runtime: { embedded_terminal: true },
+      runtime: { mode: 'standalone', embedded_terminal: true },
     });
   `);
 
   assert.equal(document.body.classList.contains('runtime-embedded'), true);
+  assert.equal(document.body.classList.contains('standalone-mode'), true);
+  assert.equal(document.body.classList.contains('iterm2-mode'), false);
+  assert.equal(document.body.dataset.loomMode, 'standalone');
 
   runInContext(context, `
     _handleFullState({
@@ -15212,11 +15215,14 @@ test('full state toggles embedded runtime body class', () => {
       board_lanes: [],
       board_tasks: {},
       panel_events: [],
-      runtime: { embedded_terminal: false },
+      runtime: { mode: 'toolbelt', embedded_terminal: false },
     });
   `);
 
   assert.equal(document.body.classList.contains('runtime-embedded'), false);
+  assert.equal(document.body.classList.contains('standalone-mode'), false);
+  assert.equal(document.body.classList.contains('iterm2-mode'), true);
+  assert.equal(document.body.dataset.loomMode, 'toolbelt');
 });
 
 
