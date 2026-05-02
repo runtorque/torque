@@ -7967,19 +7967,7 @@ async def main(connection=None):
                 for key, value in data.items():
                     if key in valid and key != "group":
                         settings[key] = value
-                previous = bool(
-                    state.get_architect_settings(group).architect_paused
-                )
-                applied = state.update_architect_settings(group, **settings)
-                if "architect_paused" in applied:
-                    paused = bool(
-                        state.get_architect_settings(group).architect_paused
-                    )
-                    for architect in state._architect_cells_for_group(group):
-                        if paused:
-                            engineer_buffer.on_delivery_paused(architect.id)
-                        elif previous:
-                            engineer_buffer.on_delivery_resumed(architect.id)
+                state.update_architect_settings(group, **settings)
                 result = {
                     "type": "ok",
                     "settings": asdict(state.get_architect_settings(group)),

@@ -1154,7 +1154,6 @@ class MatrixStateCleanupTests(unittest.TestCase):
                 architect_reasoning_effort="high",
                 architect_custom_instructions="Own scope.",
                 architect_autonomy_mode="ask_always",
-                architect_paused=True,
                 architect_digest_verbosity="verbose",
                 architect_journal_checkpoint_frequency="every_20_minutes",
                 architect_review_gate_thresholds={
@@ -1175,7 +1174,6 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertEqual(settings.architect_reasoning_effort, "high")
         self.assertEqual(settings.architect_custom_instructions, "Own scope.")
         self.assertEqual(settings.architect_autonomy_mode, "ask_always")
-        self.assertTrue(settings.architect_paused)
         self.assertEqual(settings.architect_digest_verbosity, "verbose")
         self.assertEqual(
             settings.architect_journal_checkpoint_frequency,
@@ -1654,7 +1652,8 @@ class MatrixStatePauseBroadcastTests(unittest.IsolatedAsyncioTestCase):
         self.state_mod = importlib.import_module("loom.state")
         self.state_mod = importlib.reload(self.state_mod)
 
-    def _make_state(self, *, engineer_paused=True, architect_paused=False):
+    def _make_state(self, *, engineer_digest_paused=True,
+                    architect_digest_paused=False):
         state = self.state_mod.MatrixState()
         state.groups["g"] = ["arch-1", "eng-1", "worker-1"]
         state.group_settings["g"] = self.state_mod.GroupSettings(
@@ -1683,8 +1682,14 @@ class MatrixStatePauseBroadcastTests(unittest.IsolatedAsyncioTestCase):
             owner_engineer_id="eng-1",
             hired_by_architect_id="arch-1",
         )
-        state.update_agent_digest_settings("eng-1", paused=engineer_paused)
-        state.update_agent_digest_settings("arch-1", paused=architect_paused)
+        state.update_agent_digest_settings(
+            "eng-1",
+            paused=engineer_digest_paused,
+        )
+        state.update_agent_digest_settings(
+            "arch-1",
+            paused=architect_digest_paused,
+        )
         state._delta_ops.clear()
         return state
 
@@ -1696,7 +1701,10 @@ class MatrixStatePauseBroadcastTests(unittest.IsolatedAsyncioTestCase):
             async def send_str(self, msg):
                 self.messages.append(json.loads(msg))
 
-        state = self._make_state(engineer_paused=True, architect_paused=True)
+        state = self._make_state(
+            engineer_digest_paused=True,
+            architect_digest_paused=True,
+        )
         ws = FakeWS()
         state._ws_clients.add(ws)
 
@@ -1773,7 +1781,7 @@ class MatrixStatePauseBroadcastTests(unittest.IsolatedAsyncioTestCase):
         # Post-LOOM:294, pause no longer suppresses broadcast at emit time —
         # tombstone/restore upserts simply reach _delta_ops like any other
         # agent_upsert. Lock that lifecycle behavior down here.
-        state = self._make_state(engineer_paused=True)
+        state = self._make_state(engineer_digest_paused=True)
         worker = state.agents["worker-1"]
 
         state._delta_ops.clear()
@@ -1803,7 +1811,7 @@ class MatrixStatePauseBroadcastTests(unittest.IsolatedAsyncioTestCase):
             async def send_str(self, msg):
                 self.messages.append(json.loads(msg))
 
-        state = self._make_state(engineer_paused=False)
+        state = self._make_state(engineer_digest_paused=False)
         ws = FakeWS()
         state._ws_clients.add(ws)
 
