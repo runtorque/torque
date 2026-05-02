@@ -618,21 +618,11 @@
       <div class="gs-subtabs">
         <button class="gs-subtab active" data-subtab="engineer-general" onclick="switchGsSubTab('engineer',this)">General</button>
         <button class="gs-subtab" data-subtab="engineer-behavior" onclick="switchGsSubTab('engineer',this)">Behavior</button>
-        <button class="gs-subtab" data-subtab="engineer-digests" onclick="switchGsSubTab('engineer',this)">Digests</button>
+        <button class="gs-subtab" data-subtab="engineer-system" onclick="switchGsSubTab('engineer',this)">System</button>
       </div>
 
       <!-- General sub-tab -->
       <div class="gs-subpane active" data-subpane="engineer-general">
-        <label class="gs-checkbox">
-          <input id="gs-engineer-restrict-to-created-agents" type="checkbox">
-          Hide other engineers' workers from this engineer
-          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="When enabled, this engineer only sees and controls worker agents it created itself. Other engineers' workers stay invisible to it. Human operators still see all agents on the board.">?</span>
-        </label>
-        <label class="gs-checkbox">
-          <input id="gs-engineer-can-override-worker-provider" type="checkbox" checked>
-          Allow worker provider override on dispatch
-          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="When disabled, this Engineer's MCP dispatch tools omit the worker provider override field and stale override attempts fall back to the group's default worker provider.">?</span>
-        </label>
         <label>Provider</label>
         <select id="gs-engineer-provider" onchange="onGsEngineerProviderChange()"></select>
         <label>Command override</label>
@@ -708,7 +698,7 @@
           <option value="prefer_fresh_agent">Prefer fresh agent</option>
         </select>
         <label>Notification noise
-          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Quick presets for how much digest noise Engineer should send. Detailed changes below switch the preset to Custom.">?</span>
+          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Quick presets for how much digest noise Engineer should send. Detailed changes in System → Digest settings switch the preset to Custom.">?</span>
         </label>
         <select id="gs-engineer-notification-preset" onchange="onGsEngineerNotificationPresetChange()">
           <option value="quiet">Quiet</option>
@@ -717,12 +707,6 @@
           <option value="custom">Custom</option>
         </select>
         <div id="gs-engineer-notification-preset-hint" class="label-hint task-modal-section-intro"></div>
-        <label>Digest verbosity</label>
-        <select id="gs-engineer-digest-verbosity" onchange="syncGsEngineerNotificationPreset()">
-          <option value="compact">Compact</option>
-          <option value="balanced">Balanced</option>
-          <option value="detailed">Detailed</option>
-        </select>
         <label>Escalation style</label>
         <select id="gs-engineer-escalation-style">
           <option value="ask_early">Ask early</option>
@@ -733,44 +717,72 @@
         <textarea id="gs-engineer-custom-instructions" rows="5" placeholder="Instructions appended after Loom's built-in Engineer policy..."></textarea>
       </div>
 
-      <!-- Digests sub-tab -->
-      <div class="gs-subpane" data-subpane="engineer-digests">
-        <div class="label-hint task-modal-section-intro">Advanced notification controls. Heartbeats and optional event types affect digest noise, not the Engineer's orchestration policy presets.</div>
-        <label>Push interval</label>
-        <select id="gs-engineer-push-interval" onchange="syncGsEngineerNotificationPreset()">
-          <option value="10">10s</option>
-          <option value="30">30s</option>
-          <option value="60">60s</option>
-          <option value="120">120s</option>
-          <option value="300">300s</option>
-        </select>
-        <label>Max interval</label>
-        <select id="gs-engineer-max-interval" onchange="syncGsEngineerNotificationPreset()">
-          <option value="60">60s</option>
-          <option value="120">120s</option>
-          <option value="300">300s</option>
-          <option value="600">600s</option>
-        </select>
-        <label>Idle heartbeat</label>
-        <select id="gs-engineer-heartbeat-interval" onchange="syncGsEngineerNotificationPreset()">
-          <option value="0">Off</option>
-          <option value="60">1 min</option>
-          <option value="120">2 min</option>
-          <option value="300">5 min</option>
-          <option value="600">10 min</option>
-        </select>
-        <label>Events</label>
-        <div class="task-modal-check-grid">
-          <label class="gs-checkbox"><input type="checkbox" checked disabled> task_completed <span class="label-hint">(mandatory)</span></label>
-          <label class="gs-checkbox"><input type="checkbox" checked disabled> agent_error <span class="label-hint">(mandatory)</span></label>
-          <label class="gs-checkbox"><input type="checkbox" checked disabled> agent_reply <span class="label-hint">(mandatory)</span></label>
-          <label class="gs-checkbox"><input type="checkbox" checked disabled> agent_blocked <span class="label-hint">(mandatory)</span></label>
-          <label class="gs-checkbox"><input type="checkbox" checked disabled> ask_created <span class="label-hint">(mandatory)</span></label>
-          <label class="gs-checkbox"><input id="gs-engineer-event-agent-started" type="checkbox" onchange="syncGsEngineerNotificationPreset()"> agent_started</label>
-          <label class="gs-checkbox"><input id="gs-engineer-event-task-dispatched" type="checkbox" onchange="syncGsEngineerNotificationPreset()"> task_dispatched</label>
-          <label class="gs-checkbox"><input id="gs-engineer-event-task-derived" type="checkbox" onchange="syncGsEngineerNotificationPreset()"> task_derived</label>
-          <label class="gs-checkbox"><input id="gs-engineer-event-agent-progress" type="checkbox" onchange="syncGsEngineerNotificationPreset()"> agent_progress</label>
-          <label class="gs-checkbox"><input id="gs-engineer-event-task-health-alert" type="checkbox" onchange="syncGsEngineerNotificationPreset()"> task_health_alert</label>
+      <!-- System sub-tab -->
+      <div class="gs-subpane" data-subpane="engineer-system">
+        <div class="gs-settings-section">
+          <div class="gs-settings-section-title">Permissions</div>
+          <div class="gs-settings-section-body">
+            <label class="gs-checkbox">
+              <input id="gs-engineer-restrict-to-created-agents" type="checkbox" checked>
+              Allow the Engineer to see workers created by other Engineers
+              <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="When enabled, this Engineer can see and control worker agents created by other Engineers. Human operators still see all agents on the board.">?</span>
+            </label>
+            <label class="gs-checkbox">
+              <input id="gs-engineer-can-override-worker-provider" type="checkbox" checked>
+              Allow the Engineer to override the provider for the workers it creates
+              <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Engineers running Claude Code tend to choose Claude Code for their workers regardless of the group's default provider. Disable this to force the engineer to use the group default.">?</span>
+            </label>
+          </div>
+        </div>
+        <div class="gs-settings-section">
+          <div class="gs-settings-section-title">Digest settings</div>
+          <div class="gs-settings-section-body">
+            <div class="label-hint task-modal-section-intro">Advanced notification controls. Heartbeats and optional event types affect digest noise, not the Engineer's orchestration policy presets.</div>
+            <label>Digest verbosity
+              <span id="gs-engineer-digest-verbosity-hint" class="hint-btn" onclick="event.preventDefault();toggleHint(this)">?</span>
+            </label>
+            <select id="gs-engineer-digest-verbosity" onchange="syncGsEngineerNotificationPreset()">
+              <option value="compact">Compact</option>
+              <option value="balanced">Balanced</option>
+              <option value="detailed">Detailed</option>
+            </select>
+            <label>Push interval</label>
+            <select id="gs-engineer-push-interval" onchange="syncGsEngineerNotificationPreset()">
+              <option value="10">10s</option>
+              <option value="30">30s</option>
+              <option value="60">60s</option>
+              <option value="120">120s</option>
+              <option value="300">300s</option>
+            </select>
+            <label>Max interval</label>
+            <select id="gs-engineer-max-interval" onchange="syncGsEngineerNotificationPreset()">
+              <option value="60">60s</option>
+              <option value="120">120s</option>
+              <option value="300">300s</option>
+              <option value="600">600s</option>
+            </select>
+            <label>Idle heartbeat</label>
+            <select id="gs-engineer-heartbeat-interval" onchange="syncGsEngineerNotificationPreset()">
+              <option value="0">Off</option>
+              <option value="60">1 min</option>
+              <option value="120">2 min</option>
+              <option value="300">5 min</option>
+              <option value="600">10 min</option>
+            </select>
+            <label>Events</label>
+            <div class="task-modal-check-grid">
+              <label class="gs-checkbox"><input type="checkbox" checked disabled> task_completed <span class="label-hint">(mandatory)</span></label>
+              <label class="gs-checkbox"><input type="checkbox" checked disabled> agent_error <span class="label-hint">(mandatory)</span></label>
+              <label class="gs-checkbox"><input type="checkbox" checked disabled> agent_reply <span class="label-hint">(mandatory)</span></label>
+              <label class="gs-checkbox"><input type="checkbox" checked disabled> agent_blocked <span class="label-hint">(mandatory)</span></label>
+              <label class="gs-checkbox"><input type="checkbox" checked disabled> ask_created <span class="label-hint">(mandatory)</span></label>
+              <label class="gs-checkbox"><input id="gs-engineer-event-agent-started" type="checkbox" onchange="syncGsEngineerNotificationPreset()"> agent_started</label>
+              <label class="gs-checkbox"><input id="gs-engineer-event-task-dispatched" type="checkbox" onchange="syncGsEngineerNotificationPreset()"> task_dispatched</label>
+              <label class="gs-checkbox"><input id="gs-engineer-event-task-derived" type="checkbox" onchange="syncGsEngineerNotificationPreset()"> task_derived</label>
+              <label class="gs-checkbox"><input id="gs-engineer-event-agent-progress" type="checkbox" onchange="syncGsEngineerNotificationPreset()"> agent_progress</label>
+              <label class="gs-checkbox"><input id="gs-engineer-event-task-health-alert" type="checkbox" onchange="syncGsEngineerNotificationPreset()"> task_health_alert</label>
+            </div>
+          </div>
         </div>
       </div>
     </div>

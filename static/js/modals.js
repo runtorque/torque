@@ -749,6 +749,28 @@ let _gsEngineerColor = '';
 let _gsInitialTab = 'group';
 let _gsInitialSubtab = '';
 
+const DIGEST_VERBOSITY_TOOLTIP_HELP = 'Controls how much detail appears in digest events sent to this agent. Higher verbosity can wake the agent more often on coarse-event activity in the group.';
+
+function _setHintText(id, text) {
+  const el = document.getElementById(id);
+  if (el) el.dataset.hint = text;
+}
+
+function _wireGroupSettingsTooltipText() {
+  _setHintText('gs-engineer-digest-verbosity-hint', DIGEST_VERBOSITY_TOOLTIP_HELP);
+  _setHintText('gs-architect-digest-verbosity-hint', DIGEST_VERBOSITY_TOOLTIP_HELP);
+}
+
+function _setEngineerWorkerVisibilityPermission(restrictToCreatedAgents) {
+  // The stored setting keeps the legacy "hide other Engineers' workers"
+  // polarity. The UI presents the inverse, affirmative permission.
+  document.getElementById('gs-engineer-restrict-to-created-agents').checked = !restrictToCreatedAgents;
+}
+
+function _getEngineerRestrictToCreatedAgentsFromPermission() {
+  return !document.getElementById('gs-engineer-restrict-to-created-agents').checked;
+}
+
 function switchGsTab(name) {
   document.querySelectorAll('.gs-tab').forEach(t =>
     t.classList.toggle('active', t.dataset.tab === name));
@@ -1199,6 +1221,7 @@ function _resetGsArchitectSections() {
 
 function _showGroupSettings(group, data) {
   _settingsGroup = group;
+  _wireGroupSettingsTooltipText();
   const s = data.settings;
   const ws = Object.assign(
     _defaultEngineerNotificationSettings(),
@@ -1304,7 +1327,7 @@ function _showGroupSettings(group, data) {
     : [];
   send({ cmd: 'list_specializations', group: group });
   renderGsEngineerSpecializations();
-  document.getElementById('gs-engineer-restrict-to-created-agents').checked = !!ws.restrict_to_created_agents;
+  _setEngineerWorkerVisibilityPermission(!!ws.restrict_to_created_agents);
   document.getElementById('gs-engineer-can-override-worker-provider').checked = ws.engineer_can_override_worker_provider !== false;
   _setSelectValue('gs-engineer-autonomy-mode', ws.autonomy_mode, 'dispatch_when_clear');
   _setSelectValue(
@@ -1510,7 +1533,7 @@ function submitGroupSettings() {
     engineer_shell: document.getElementById('gs-engineer-shell').value,
     engineer_tab_color: _gsEngineerColor,
     custom_instructions: document.getElementById('gs-engineer-custom-instructions').value,
-    restrict_to_created_agents: document.getElementById('gs-engineer-restrict-to-created-agents').checked,
+    restrict_to_created_agents: _getEngineerRestrictToCreatedAgentsFromPermission(),
     engineer_can_override_worker_provider: document.getElementById('gs-engineer-can-override-worker-provider').checked,
     autonomy_mode: document.getElementById('gs-engineer-autonomy-mode').value,
     default_worker_concurrency: parseInt(document.getElementById('gs-engineer-default-worker-concurrency').value, 10) || 2,

@@ -2728,6 +2728,26 @@ body.runtime-embedded #modal-group .modal-summary {
 }
 .gs-subpane { display: none; }
 .gs-subpane.active { display: block; }
+.gs-settings-section {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-cell);
+  margin: 0 0 10px;
+  overflow: hidden;
+}
+.gs-settings-section-title {
+  padding: 8px 10px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+}
+.gs-settings-section-body {
+  padding: 2px 10px 10px;
+}
+.gs-settings-section-body label:first-child {
+  margin-top: 0;
+}
 
 .gs-checkbox {
   display: flex !important; align-items: center; gap: 6px;
