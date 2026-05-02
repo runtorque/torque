@@ -5821,7 +5821,8 @@ def _handle_recently_deleted_agents_command(
 
 
 async def _dispatch_architect_ui_tool(name: str, args: dict,
-                                      state: MatrixState) -> dict:
+                                      state: MatrixState, *,
+                                      handle_command=None) -> dict:
     """Run an architect-scoped shared-core tool for the user-facing UI."""
     from .mcp_tools_shared import dispatch_scoped_tool
 
@@ -5834,7 +5835,10 @@ async def _dispatch_architect_ui_tool(name: str, args: dict,
             and not _architect_ui_tool_is_read(name)):
         return _architect_dismissed_error(caller_id)
 
-    async def _unexpected_handle_command(_data: dict) -> dict:
+    async def _restricted_handle_command(_data: dict) -> dict:
+        cmd = str((_data or {}).get("cmd", "") or "").strip()
+        if handle_command and cmd in {"board_update_task", "list_actions"}:
+            return await handle_command(dict(_data or {}))
         return {
             "type": "error",
             "message": "Architect UI command cannot route nested commands",
@@ -5843,7 +5847,7 @@ async def _dispatch_architect_ui_tool(name: str, args: dict,
     payload_text, is_error = await dispatch_scoped_tool(
         name,
         args,
-        _unexpected_handle_command,
+        _restricted_handle_command,
         state,
         tool_prefix="architect_",
         caller_kind="architect",
@@ -8183,6 +8187,7 @@ async def main(connection=None):
                     cmd,
                     data,
                     state,
+                    handle_command=handle_command,
                 )
 
             elif cmd == "add_agent":

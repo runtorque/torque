@@ -143,6 +143,11 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
                 **{k: v for k, v in payload.items() if k not in {"cmd", "id"}},
             )
             return {"type": "ok"}
+        if payload["cmd"] == "list_actions":
+            return {
+                "type": "actions", "group": payload.get("group", ""),
+                "actions": [{"name": "feature/implement"}, {"name": "oneshot/fix"}],
+            }
         if payload["cmd"] == "board_move_task":
             task = self.state.board_tasks.get(payload.get("id", ""))
             if not task:
@@ -1639,6 +1644,50 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(updated.description, "Final description")
         self.assertEqual(updated.labels, ["final"])
 
+    async def test_architect_task_update_sets_action_fields_and_rejects_unknown(self):
+        architect = self._add_architect("arch-1", "Architect")
+        task = self._add_task(
+            "task-update-action",
+            "Action target",
+            action_name="feature/implement",
+            action_vars={"old": "value", "drop": "me"},
+            created_by_architect_id=architect.id,
+        )
+
+        text, is_error = await self._call(
+            "architect_task_update",
+            {
+                "task": task.id,
+                "action_name": "oneshot/fix",
+                "action_vars": {"mode": "focused"},
+            },
+            architect.id,
+        )
+
+        self.assertFalse(is_error, text)
+        self.assertEqual(
+            json.loads(text)["updated_fields"],
+            ["action_name", "action_vars"],
+        )
+        updated = self.state.board_tasks[task.id]
+        self.assertEqual(updated.action_name, "oneshot/fix")
+        self.assertEqual(updated.action_vars, {"mode": "focused"})
+        persisted = self.db.load_all()["board_tasks"][task.id]
+        self.assertEqual(persisted["action_name"], "oneshot/fix")
+        self.assertEqual(persisted["action_vars"], {"mode": "focused"})
+
+        bad_text, bad_error = await self._call(
+            "architect_task_update",
+            {"task": task.id, "action_name": "bogus/nonexistent-action"},
+            architect.id,
+        )
+
+        self.assertTrue(bad_error)
+        self.assertIn("Unknown action_name 'bogus/nonexistent-action'", bad_text)
+        self.assertIn("ActionManager.list_actions()", bad_text)
+        self.assertEqual(self.state.board_tasks[task.id].action_name, "oneshot/fix")
+        self.assertEqual(self.state.board_tasks[task.id].action_vars, {"mode": "focused"})
+
     async def test_architect_task_update_enforces_creator_and_group_scope(self):
         architect = self._add_architect("arch-1", "Architect")
         other_architect = self._add_architect("arch-2", "Other Architect")
@@ -1680,7 +1729,11 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(task=task.id):
                 text, is_error = await self._call(
                     "architect_task_update",
-                    {"task": task.id, "title": "Should not update"},
+                    {
+                        "task": task.id,
+                        "title": "Should not update",
+                        "action_name": "oneshot/fix",
+                    },
                     architect.id,
                 )
                 self.assertTrue(is_error)
@@ -1689,6 +1742,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
                     self.state.board_tasks[task.id].task,
                     "Should not update",
                 )
+                self.assertEqual(self.state.board_tasks[task.id].action_name, "")
 
         user_text, user_error = await self._call(
             "architect_task_update",
@@ -1740,6 +1794,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             ({"title": ""}, "title is required"),
             ({"description": "   "}, "description is required"),
             ({"labels": "triage"}, "labels must be a list"),
+            ({"action_vars": "mode=fast"}, "action_vars must be an object"),
             ({}, "At least one editable field is required"),
         ):
             with self.subTest(args=args):
