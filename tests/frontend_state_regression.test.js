@@ -14177,6 +14177,19 @@ test('task title label operator consumes escaped percent without opening labels'
     jsonValue(context, `_taskTitleOperatorBundle(document.getElementById('task-task-input'))`),
     { task: 'Use % literally', labels: [] },
   );
+
+  input.value = 'Keep \\\\% literally';
+  input.selectionStart = input.value.length;
+  input.selectionEnd = input.value.length;
+  runInContext(context, `_taskResetTitleLabelState(document.getElementById('task-task-input'))`);
+  context.taskTitleInput(input);
+
+  assert.equal(input.value, 'Keep \\% literally');
+  assert.equal(dropdown.style.display, 'none');
+  assert.deepEqual(
+    jsonValue(context, `_taskTitleOperatorBundle(document.getElementById('task-task-input'))`),
+    { task: 'Keep \\% literally', labels: [] },
+  );
 });
 
 test('task title Backspace removes a completed label operator token as a unit', () => {
