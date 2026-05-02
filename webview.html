@@ -707,6 +707,9 @@
         </select>
         <label>Custom instructions <span class="label-hint">expert override</span></label>
         <textarea id="gs-engineer-custom-instructions" rows="5" placeholder="Instructions appended after Loom's built-in Engineer policy..."></textarea>
+        <div class="system-prompt-preview-row">
+          <button type="button" id="gs-engineer-view-system-prompt" class="btn-secondary system-prompt-preview-btn" onclick="openGroupSystemPromptPreview('engineer')">View system prompt</button>
+        </div>
       </div>
 
       <!-- System sub-tab -->
@@ -809,6 +812,9 @@
         </select>
         <label>Custom instructions</label>
         <textarea id="gs-architect-custom-instructions" rows="6" class="gs-autogrow" oninput="_autoGrowTextArea('gs-architect-custom-instructions')" placeholder="Instructions appended after Loom's built-in Architect policy..."></textarea>
+        <div class="system-prompt-preview-row">
+          <button type="button" id="gs-architect-view-system-prompt" class="btn-secondary system-prompt-preview-btn" onclick="openGroupSystemPromptPreview('architect')">View system prompt</button>
+        </div>
         <div class="label-hint task-modal-section-intro">Configure architect checkpoint policy.</div>
         <label>Journal checkpoint cadence
           <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="How often Loom reminds the architect to write a `checkpoint` journal entry summarizing active engineers, open scope, pending hires, open decisions, and planned next moves.">?</span>
@@ -887,6 +893,23 @@
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeModals()">Cancel</button>
       <button class="btn-primary" onclick="submitGroupSettings()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- System prompt preview modal -->
+<div class="overlay" id="modal-system-prompt-preview" onclick="if(event.target===this)closeSystemPromptPreview()">
+  <div class="modal modal-tall preview-popup" role="dialog" aria-modal="true" aria-labelledby="system-prompt-preview-title">
+    <div class="preview-popup-header">
+      <h2 id="system-prompt-preview-title">System Prompt</h2>
+      <button type="button" class="preview-popup-close" aria-label="Close" onclick="closeSystemPromptPreview()">×</button>
+    </div>
+    <div id="system-prompt-preview-summary" class="modal-summary"></div>
+    <pre id="system-prompt-preview-content" class="system-prompt-preview-text" tabindex="0"></pre>
+    <div id="system-prompt-preview-error" class="system-prompt-preview-error" style="display:none"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="copySystemPromptPreview()" id="system-prompt-preview-copy-btn">Copy to clipboard</button>
+      <button class="btn-cancel" onclick="closeSystemPromptPreview()">Close</button>
     </div>
   </div>
 </div>

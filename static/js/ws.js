@@ -325,6 +325,10 @@ function connect() {
       }
     } else if (msg.type === 'prompt_preview') {
       _showPromptPreview(msg);
+    } else if (msg.type === 'system_prompt_preview') {
+      if (typeof _showSystemPromptPreview === 'function') {
+        _showSystemPromptPreview(msg);
+      }
     } else if (msg.type === 'dispatch_action_missing') {
       _handleDispatchActionMissing(msg);
     } else if (msg.type === 'external_open') {

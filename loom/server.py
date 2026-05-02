@@ -39,6 +39,7 @@ from .state import (
     ARCHIVED_LANE,
     ArchitectSettings,
     BoardTask,
+    EngineerSettings,
     COMPACT_SNAPSHOT_PROTOCOL,
     MatrixState,
     hot_json_dumps_async,
@@ -4429,6 +4430,161 @@ def _architect_persistent_prompt_text(group: str = "",
     return build_loom_system_prompt().rstrip() + "\n\n" + architect_body + "\n"
 
 
+def _snapshot_dataclass_like(obj) -> dict:
+    if obj is None:
+        return {}
+    try:
+        return asdict(obj)
+    except TypeError:
+        return {
+            key: getattr(obj, key)
+            for key in dir(obj)
+            if not key.startswith("_")
+            and not callable(getattr(obj, key, None))
+        }
+
+
+def _preview_group_settings_for_prompt(
+        state: MatrixState, group: str, payload: dict | None = None):
+    """Return a group-settings snapshot with unsaved form values overlaid."""
+    values = _snapshot_dataclass_like(state.get_group_settings(group))
+    for key, value in dict(payload or {}).items():
+        if key in values:
+            values[key] = value
+    return SimpleNamespace(**values)
+
+
+def _preview_engineer_settings_for_prompt(
+        state: MatrixState, group: str, payload: dict | None = None
+        ) -> EngineerSettings:
+    """Return EngineerSettings with unsaved form values overlaid.
+
+    The preview path intentionally does not mutate MatrixState; it mirrors the
+    prompt builder's inputs so the settings modal can ask for a one-off render
+    while the user is still editing the form.
+    """
+    values = _snapshot_dataclass_like(state.get_engineer_settings(group))
+    values["group"] = group
+    valid = set(EngineerSettings.__dataclass_fields__)
+    for key, value in dict(payload or {}).items():
+        if key in valid and key != "group":
+            values[key] = value
+    values["group"] = group
+    return EngineerSettings(**{
+        key: values.get(key)
+        for key in EngineerSettings.__dataclass_fields__
+    })
+
+
+def _preview_architect_settings_for_prompt(
+        state: MatrixState, group: str, payload: dict | None = None
+        ) -> ArchitectSettings:
+    """Return ArchitectSettings with unsaved form values overlaid."""
+    incoming = dict(payload or {})
+    if (
+            "custom_instructions" in incoming
+            and "architect_custom_instructions" not in incoming):
+        incoming["architect_custom_instructions"] = incoming.pop(
+            "custom_instructions"
+        )
+    values = _snapshot_dataclass_like(state.get_architect_settings(group))
+    values["group"] = group
+    valid = set(ArchitectSettings.__dataclass_fields__)
+    for key, value in incoming.items():
+        if key in valid and key != "group":
+            values[key] = value
+    values["group"] = group
+    return ArchitectSettings(**{
+        key: values.get(key)
+        for key in ArchitectSettings.__dataclass_fields__
+    })
+
+
+def _build_group_system_prompt_preview(
+        state: MatrixState, group: str, kind: str, *,
+        settings_payload: dict | None = None,
+        group_settings_payload: dict | None = None,
+        action_system_prompt: str = "",
+        specializations_preamble: str = "") -> str:
+    """Build the settings-modal system-prompt preview for a group role.
+
+    Mirrors the current boot prompt paths instead of reimplementing prompt
+    assembly in JavaScript:
+
+    - Engineer: ``build_engineer_system_prompt(...)`` as used for designated
+      engineer launch/relaunch.
+    - Architect: Loom's persistent agent preamble plus
+      ``build_architect_system_prompt(...)`` as used by
+      ``_architect_persistent_prompt_text``.
+    """
+    normalized_kind = str(kind or "").strip().lower()
+    group_name = str(group or "").strip() or "default"
+    group_settings = _preview_group_settings_for_prompt(
+        state, group_name, group_settings_payload)
+
+    if normalized_kind == "engineer":
+        from .engineer import build_engineer_system_prompt
+
+        engineer_settings = _preview_engineer_settings_for_prompt(
+            state, group_name, settings_payload)
+        return build_engineer_system_prompt(
+            group_name,
+            engineer_settings,
+            action_system_prompt,
+            group_settings=group_settings,
+            specializations_preamble=specializations_preamble,
+        ).rstrip() + "\n"
+
+    if normalized_kind == "architect":
+        from .architect import build_architect_system_prompt
+
+        architect_settings = _preview_architect_settings_for_prompt(
+            state, group_name, settings_payload)
+        architect_body = build_architect_system_prompt(
+            group_name,
+            architect_settings=architect_settings,
+            action_system_prompt=action_system_prompt,
+            group_settings=group_settings,
+        ).rstrip()
+        return build_loom_system_prompt().rstrip() + "\n\n" + architect_body + "\n"
+
+    raise ValueError("kind must be 'engineer' or 'architect'")
+
+
+def _agent_overrides_from_role_settings(kind: str, settings) -> dict:
+    normalized_kind = str(kind or "").strip().lower()
+    if normalized_kind == "engineer":
+        mapping = {
+            "engineer_provider": "provider",
+            "engineer_boot_command": "command",
+            "engineer_model": "model",
+            "engineer_reasoning_effort": "reasoning_effort",
+            "engineer_directory": "directory",
+            "engineer_profile": "profile",
+            "engineer_shell": "shell",
+            "engineer_tab_color": "tab_color",
+        }
+    else:
+        mapping = {
+            "architect_provider": "provider",
+            "architect_boot_command": "command",
+            "architect_model": "model",
+            "architect_reasoning_effort": "reasoning_effort",
+            "architect_directory": "directory",
+            "architect_profile": "profile",
+            "architect_shell": "shell",
+            "architect_tab_color": "tab_color",
+        }
+    out = {}
+    for source, target in mapping.items():
+        value = getattr(settings, source, "")
+        if isinstance(value, str):
+            value = value.strip()
+        if value:
+            out[target] = value
+    return out
+
+
 async def _handle_add_engineer_command(
         data: dict,
         state: MatrixState, *,
@@ -7450,6 +7606,79 @@ async def main(connection=None):
                 "type": "architect_settings",
                 "group": group,
                 "settings": asdict(state.get_architect_settings(group)),
+            }
+
+        if cmd == "preview_system_prompt":
+            kind = str(data.get("kind", "") or "").strip().lower()
+            if kind not in {"engineer", "architect"}:
+                return {
+                    "type": "error",
+                    "message": "kind must be 'engineer' or 'architect'",
+                }
+            group = str(data.get("group", "") or "").strip()
+            settings_payload = dict(data.get("settings", {}) or {})
+            group_settings_payload = dict(
+                data.get("group_settings", {}) or {}
+            )
+            group_settings = _preview_group_settings_for_prompt(
+                state, group, group_settings_payload)
+            if kind == "engineer":
+                role_settings = _preview_engineer_settings_for_prompt(
+                    state, group, settings_payload)
+            else:
+                role_settings = _preview_architect_settings_for_prompt(
+                    state, group, settings_payload)
+            base_dir = await _resolve_base_dir(group)
+            resolved = template_mgr.resolve_agent_config(
+                "",
+                group_settings,
+                _agent_overrides_from_role_settings(kind, role_settings),
+                base_dir=base_dir,
+            )
+            specializations_preamble = ""
+            specialization_names = []
+            if kind == "engineer":
+                raw_specializations = getattr(
+                    group_settings, "default_engineer_specializations", []
+                )
+                if isinstance(raw_specializations, list):
+                    specialization_names = [
+                        str(item or "").strip()
+                        for item in raw_specializations
+                        if str(item or "").strip()
+                    ]
+                if specialization_names:
+                    try:
+                        specializations_preamble = (
+                            specialization_mgr.render_engineer_preamble(
+                                specialization_names,
+                                base_dir=base_dir,
+                            )
+                        )
+                    except Exception:
+                        log.exception(
+                            "failed to render system prompt preview "
+                            "specializations for group=%s", group)
+            prompt = _build_group_system_prompt_preview(
+                state,
+                group,
+                kind,
+                settings_payload=settings_payload,
+                group_settings_payload=group_settings_payload,
+                action_system_prompt=resolved.get("system_prompt", ""),
+                specializations_preamble=specializations_preamble,
+            )
+            return {
+                "type": "system_prompt_preview",
+                "request_id": str(data.get("request_id", "") or ""),
+                "kind": kind,
+                "group": group,
+                "prompt": prompt,
+                "metadata": {
+                    "provider": resolved.get("provider", ""),
+                    "template": resolved.get("template", ""),
+                    "specializations": specialization_names,
+                },
             }
 
         # get_global_settings: respond directly

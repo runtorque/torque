@@ -469,6 +469,67 @@ class ServerSelfDispatchTests(unittest.TestCase):
         )
         self.assertNotIn("loom_a-", prompt)
 
+    def test_system_prompt_preview_uses_unsaved_engineer_form_values(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        state.update_engineer_settings(
+            "g",
+            custom_instructions="Saved engineer instructions.",
+            autonomy_mode="suggest_only",
+        )
+        state.update_group_settings("g", worktree_merge_cleanup="keep")
+
+        prompt = self.server_mod._build_group_system_prompt_preview(
+            state,
+            "g",
+            "engineer",
+            settings_payload={
+                "custom_instructions": "Unsaved engineer instructions.",
+                "autonomy_mode": "aggressive_auto_continue",
+            },
+            group_settings_payload={
+                "worktree_merge_cleanup": "close_remove",
+            },
+            action_system_prompt="Template system prompt.",
+        )
+
+        self.assertIn("Template system prompt.", prompt)
+        self.assertIn("Unsaved engineer instructions.", prompt)
+        self.assertNotIn("Saved engineer instructions.", prompt)
+        self.assertIn("Autonomy mode: Aggressive auto-continue", prompt)
+        self.assertIn(
+            "Default post-merge cleanup: Close agent session and remove worktree",
+            prompt,
+        )
+
+    def test_system_prompt_preview_uses_unsaved_architect_form_values(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        state.update_architect_settings(
+            "g",
+            architect_custom_instructions="Saved architect instructions.",
+            architect_autonomy_mode="dispatch_after_confirm",
+        )
+
+        prompt = self.server_mod._build_group_system_prompt_preview(
+            state,
+            "g",
+            "architect",
+            settings_payload={
+                "architect_custom_instructions": "Unsaved architect instructions.",
+                "architect_autonomy_mode": "ask_always",
+                "architect_journal_checkpoint_frequency": "manual_only",
+            },
+            action_system_prompt="Architect template system prompt.",
+        )
+
+        self.assertIn("# Loom Agent", prompt)
+        self.assertIn("Architect template system prompt.", prompt)
+        self.assertIn("Unsaved architect instructions.", prompt)
+        self.assertNotIn("Saved architect instructions.", prompt)
+        self.assertIn("Autonomy mode: Ask always", prompt)
+        self.assertIn("Journal checkpoint cadence: manual_only", prompt)
+
     def test_dispatch_postscript_clean_variant_is_compact_and_transition_aware(self):
         prompt = self.server_prompts_mod.build_dispatch_postscript(
             transitions=[
