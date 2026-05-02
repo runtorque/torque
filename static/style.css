@@ -2872,6 +2872,48 @@ textarea:focus { border-color: var(--accent); }
 textarea.task-tpl-var, #task-task-input, #task-description-input {
   min-height: 0; max-height: 30vh; resize: none; overflow-y: auto;
 }
+.task-title-label-wrap {
+  position: relative;
+}
+.task-title-label-wrap textarea {
+  color: transparent;
+  caret-color: var(--text);
+  background: transparent;
+  position: relative;
+  z-index: 1;
+}
+.task-title-label-wrap textarea::placeholder {
+  color: var(--text-dim);
+  opacity: .75;
+}
+.task-title-label-backdrop {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  min-height: 100%;
+  padding: 6px 8px;
+  font: inherit;
+  line-height: normal;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+.task-title-label-token {
+  border-radius: 4px;
+  padding: 0 2px;
+  box-shadow: 0 0 0 1px rgba(88, 166, 255, .16);
+  font-weight: 600;
+}
+#task-title-label-dropdown {
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+}
 .prompt-preview-text {
   white-space: pre-wrap; word-break: break-word;
   font-size: 11px; line-height: 1.4;

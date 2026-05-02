@@ -14157,6 +14157,97 @@ test('previewTaskPrompt includes the currently selected role in the preview requ
   ]);
 });
 
+test('task title label operator consumes escaped percent without opening labels', () => {
+  const { context, document } = createModalHarness();
+  const input = document.register('task-task-input');
+  const dropdown = document.register('task-title-label-dropdown');
+  const highlight = document.register('task-title-label-highlight');
+  runInContext(context, `_getAllLabels = function() { return ['release']; };`);
+
+  input.value = 'Use \\% literally';
+  input.selectionStart = input.value.length;
+  input.selectionEnd = input.value.length;
+
+  context.taskTitleInput(input);
+
+  assert.equal(input.value, 'Use % literally');
+  assert.equal(dropdown.style.display, 'none');
+  assert.doesNotMatch(highlight.innerHTML, /task-title-label-token/);
+  assert.deepEqual(
+    jsonValue(context, `_taskTitleOperatorBundle(document.getElementById('task-task-input'))`),
+    { task: 'Use % literally', labels: [] },
+  );
+});
+
+test('task title Backspace removes a completed label operator token as a unit', () => {
+  const { context, document } = createModalHarness();
+  const input = document.register('task-task-input');
+  document.register('task-title-label-dropdown');
+  const highlight = document.register('task-title-label-highlight');
+  input.value = 'Ship %release ';
+  input.selectionStart = input.value.length;
+  input.selectionEnd = input.value.length;
+  context.taskTitleInput(input);
+  assert.match(highlight.innerHTML, /task-title-label-token/);
+
+  const event = {
+    key: 'Backspace',
+    target: input,
+    altKey: false,
+    ctrlKey: false,
+    metaKey: false,
+    preventDefaultCalled: false,
+    preventDefault() { this.preventDefaultCalled = true; },
+    stopPropagation() {},
+  };
+  context.taskTitleKeydown(event);
+
+  assert.equal(event.preventDefaultCalled, true);
+  assert.equal(input.value, 'Ship ');
+  assert.equal(input.selectionStart, 'Ship '.length);
+  assert.doesNotMatch(highlight.innerHTML, /task-title-label-token/);
+});
+
+test('task title label operator selection highlights and submits labels separately', () => {
+  const { context, document } = createModalHarness();
+  const input = document.register('task-task-input');
+  const dropdown = document.register('task-title-label-dropdown');
+  const highlight = document.register('task-title-label-highlight');
+  document.register('task-description-input').value = '';
+  document.register('task-group-select').value = 'alpha';
+  document.register('task-template-select').value = '';
+  document.register('task-labels-input').value = '';
+  document.register('task-scheduled-input').value = '';
+  document.register('modal-task').dataset.lane = 'Backlog';
+  context.state.board_tasks = {
+    existing: { id: 'existing', labels: ['release'] },
+  };
+  runInContext(context, `_taskLabels = []; _taskSystemLabels = [];`);
+  input.value = 'Ship %rel';
+  input.selectionStart = input.value.length;
+  input.selectionEnd = input.value.length;
+
+  context.taskTitleInput(input);
+  assert.equal(dropdown.style.display, '');
+
+  context.taskPickTitleLabel('release');
+
+  assert.equal(input.value, 'Ship %release ');
+  assert.equal(dropdown.style.display, 'none');
+  assert.match(highlight.innerHTML, /task-title-label-token/);
+  assert.match(highlight.innerHTML, /%release/);
+
+  context.submitTask();
+
+  assert.deepEqual(jsonValue(context, 'sendCalls[0]'), {
+    cmd: 'board_add_task',
+    task: 'Ship',
+    group: 'alpha',
+    lane: 'Backlog',
+    labels: ['release'],
+  });
+});
+
 test('openEditTask clears past scheduled times instead of showing stale dispatch state', () => {
   const { context, document } = createModalHarness();
 
