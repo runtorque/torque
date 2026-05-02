@@ -16,8 +16,11 @@ class _FakeState:
                  engineer_shell="", engineer_tab_color="",
                  architect_provider="", architect_boot_command="",
                  architect_model="", architect_reasoning_effort="",
+                 architect_directory="", architect_profile="",
+                 architect_shell="", architect_tab_color="",
                  agent_provider="", agent_boot_command="",
                  agent_model="", agent_reasoning_effort="",
+                 agent_tab_color="", tab_color="",
                  default_command="claude", git_worktree=False):
         self._settings = types.SimpleNamespace(
             agent_directory=agent_directory,
@@ -26,8 +29,8 @@ class _FakeState:
             agent_boot_command=agent_boot_command,
             agent_model=agent_model,
             agent_reasoning_effort=agent_reasoning_effort,
-            agent_tab_color="",
-            tab_color="",
+            agent_tab_color=agent_tab_color,
+            tab_color=tab_color,
             agent_profile="",
             profile="Default",
             agent_shell="",
@@ -60,6 +63,10 @@ class _FakeState:
             architect_boot_command=architect_boot_command,
             architect_model=architect_model,
             architect_reasoning_effort=architect_reasoning_effort,
+            architect_directory=architect_directory,
+            architect_profile=architect_profile,
+            architect_shell=architect_shell,
+            architect_tab_color=architect_tab_color,
         )
         self._default_command = default_command
 
@@ -229,6 +236,23 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resolved["tab_color"], "")
         self.assertFalse(resolved["worktree"])
 
+    def test_resolve_engineer_launch_config_none_tab_color_suppresses_inherited_colors(self):
+        service = self.server_agent_mod.AgentLaunchService(
+            state=_FakeState(
+                engineer_tab_color="none",
+                agent_tab_color="#654321",
+                tab_color="#123456",
+            ),
+            connection=None,
+            bridge=_FakeBridge(),
+            worktree_mgr=None,
+            template_mgr=_FakeTemplateManager(),
+        )
+
+        resolved = service.resolve_engineer_launch_config("backend")
+
+        self.assertEqual(resolved["tab_color"], "")
+
     def test_resolve_architect_launch_config_prefers_architect_specific_overrides(self):
         service = self.server_agent_mod.AgentLaunchService(
             state=_FakeState(
@@ -269,6 +293,46 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
             "codex --model gpt-5 -c model_reasoning_effort=high",
         )
         self.assertFalse(resolved["worktree"])
+
+    def test_resolve_architect_launch_config_applies_terminal_overrides(self):
+        service = self.server_agent_mod.AgentLaunchService(
+            state=_FakeState(
+                agent_directory="/repo",
+                architect_directory="/repo/.loom/architect",
+                architect_profile="Ops",
+                architect_shell="fish",
+                architect_tab_color="none",
+            ),
+            connection=None,
+            bridge=_FakeBridge(),
+            worktree_mgr=None,
+            template_mgr=_FakeTemplateManager(),
+        )
+
+        resolved = service.resolve_architect_launch_config("backend")
+
+        self.assertEqual(resolved["directory"], "/repo/.loom/architect")
+        self.assertEqual(resolved["profile"], "Ops")
+        self.assertEqual(resolved["shell"], "fish")
+        self.assertEqual(resolved["tab_color"], "")
+        self.assertFalse(resolved["worktree"])
+
+    def test_resolve_architect_launch_config_none_tab_color_suppresses_inherited_colors(self):
+        service = self.server_agent_mod.AgentLaunchService(
+            state=_FakeState(
+                architect_tab_color="none",
+                agent_tab_color="#654321",
+                tab_color="#123456",
+            ),
+            connection=None,
+            bridge=_FakeBridge(),
+            worktree_mgr=None,
+            template_mgr=_FakeTemplateManager(),
+        )
+
+        resolved = service.resolve_architect_launch_config("backend")
+
+        self.assertEqual(resolved["tab_color"], "")
 
     def test_resolve_agent_launch_config_detects_default_provider_from_command(self):
         service = self.server_agent_mod.AgentLaunchService(

@@ -14527,25 +14527,25 @@ test('engineer and architect group settings use sub-tabs instead of collapsible 
 
   const engineerGeneral = html.indexOf('data-subpane="engineer-general"');
   const engineerBehavior = html.indexOf('data-subpane="engineer-behavior"');
-  const engineerDigests = html.indexOf('data-subpane="engineer-digests"');
+  const engineerSystem = html.indexOf('data-subpane="engineer-system"');
   const architectGeneral = html.indexOf('data-subpane="architect-general"');
   const architectBehavior = html.indexOf('data-subpane="architect-behavior"');
-  const architectDigests = html.indexOf('data-subpane="architect-digests"');
+  const architectSystem = html.indexOf('data-subpane="architect-system"');
 
   for (const idx of [
     engineerGeneral,
     engineerBehavior,
-    engineerDigests,
+    engineerSystem,
     architectGeneral,
     architectBehavior,
-    architectDigests,
+    architectSystem,
   ]) {
     assert.notEqual(idx, -1);
   }
   assert.ok(engineerGeneral < engineerBehavior);
-  assert.ok(engineerBehavior < engineerDigests);
+  assert.ok(engineerBehavior < engineerSystem);
   assert.ok(architectGeneral < architectBehavior);
-  assert.ok(architectBehavior < architectDigests);
+  assert.ok(architectBehavior < architectSystem);
   assert.doesNotMatch(html, /<details[^>]+id="gs-engineer-[^\"]+-section"/);
   assert.doesNotMatch(html, /<details[^>]+id="gs-architect-[^\"]+-section"/);
   assert.match(css, /\.gs-subtabs\s*\{[^}]*border-bottom:\s*1px solid var\(--border\);/);

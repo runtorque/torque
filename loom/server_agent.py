@@ -264,7 +264,7 @@ class AgentLaunchService:
         tab_color = resolved.get("tab_color", "")
         if tab_color == "none":
             tab_color = ""
-        if not tab_color:
+        elif not tab_color:
             agent_tab_color = gs.agent_tab_color
             if agent_tab_color == "none":
                 tab_color = ""
@@ -379,6 +379,14 @@ class AgentLaunchService:
             merged["model"] = ws.architect_model
         if getattr(ws, "architect_reasoning_effort", ""):
             merged["reasoning_effort"] = ws.architect_reasoning_effort
+        if getattr(ws, "architect_directory", ""):
+            merged["directory"] = ws.architect_directory
+        if getattr(ws, "architect_profile", ""):
+            merged["profile"] = ws.architect_profile
+        if getattr(ws, "architect_shell", ""):
+            merged["shell"] = ws.architect_shell
+        if getattr(ws, "architect_tab_color", ""):
+            merged["tab_color"] = ws.architect_tab_color
         resolved = self.resolve_agent_launch_config(
             group,
             base_dir=base_dir,

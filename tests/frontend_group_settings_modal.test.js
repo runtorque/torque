@@ -104,8 +104,8 @@ function createSandbox() {
   const subtabNamesByPane = {
     group: ['group-general', 'group-advanced'],
     agents: ['agent-general', 'agent-terminals', 'agent-worktree', 'agent-notifications'],
-    engineer: ['engineer-general', 'engineer-behavior', 'engineer-digests'],
-    architect: ['architect-general', 'architect-behavior', 'architect-digests'],
+    engineer: ['engineer-general', 'engineer-behavior', 'engineer-system'],
+    architect: ['architect-general', 'architect-behavior', 'architect-system'],
   };
   const gsSubtabs = {};
   const gsSubpanes = {};
@@ -163,7 +163,8 @@ function createSandbox() {
         if (selector === '#gs-color-swatches .swatch'
           || selector === '#gs-agent-color-swatches .swatch'
           || selector === '#gs-terminal-color-swatches .swatch'
-          || selector === '#gs-engineer-color-swatches .swatch') return [];
+          || selector === '#gs-engineer-color-swatches .swatch'
+          || selector === '#gs-architect-color-swatches .swatch') return [];
         return [];
       },
       querySelector(selector) {
@@ -325,6 +326,10 @@ test('group settings modal populates engineer fields and honors engineer tab dee
       architect_boot_command: "codex --architect",
       architect_model: "gpt-5.1-architect",
       architect_reasoning_effort: "high",
+      architect_directory: "/repo/.loom/architect",
+      architect_profile: "Ops",
+      architect_shell: "fish",
+      architect_tab_color: "none",
       architect_custom_instructions: "Own scope crisply.",
       architect_autonomy_mode: "ask_always",
       architect_digest_verbosity: "verbose",
@@ -356,7 +361,7 @@ test('group settings modal populates engineer fields and honors engineer tab dee
     ['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh'],
   );
   assert.equal(ensure('gs-engineer-custom-instructions').value, 'Watch for regressions.');
-  assert.equal(ensure('gs-engineer-restrict-to-created-agents').checked, true);
+  assert.equal(ensure('gs-engineer-restrict-to-created-agents').checked, false);
   assert.equal(ensure('gs-engineer-can-override-worker-provider').checked, false);
   assert.equal(ensure('gs-engineer-autonomy-mode').value, 'aggressive_auto_continue');
   assert.equal(ensure('gs-engineer-default-worker-concurrency').value, '4');
@@ -372,7 +377,7 @@ test('group settings modal populates engineer fields and honors engineer tab dee
     true,
   );
   assert.equal(
-    sandbox.document.querySelector('.gs-pane[data-pane="engineer"] .gs-subtab[data-subtab="engineer-digests"]').classList.contains('active'),
+    sandbox.document.querySelector('.gs-pane[data-pane="engineer"] .gs-subtab[data-subtab="engineer-system"]').classList.contains('active'),
     false,
   );
   assert.equal(ensure('gs-engineer-event-agent-started').checked, true);
@@ -381,6 +386,9 @@ test('group settings modal populates engineer fields and honors engineer tab dee
   assert.equal(ensure('gs-architect-boot-cmd').value, 'codex --architect');
   assert.equal(ensure('gs-architect-model').value, 'gpt-5.1-architect');
   assert.equal(ensure('gs-architect-reasoning-effort').value, 'high');
+  assert.equal(ensure('gs-architect-directory').value, '/repo/.loom/architect');
+  assert.equal(ensure('gs-architect-profile').value, 'Ops');
+  assert.equal(ensure('gs-architect-shell').value, 'fish');
   assert.equal(ensure('gs-architect-custom-instructions').value, 'Own scope crisply.');
   assert.equal(ensure('gs-architect-autonomy-mode').value, 'ask_always');
   assert.equal(ensure('gs-architect-digest-verbosity').value, 'verbose');
@@ -427,8 +435,8 @@ test('group settings resets Engineer and Architect sub-tabs to General when reop
   seedProviders(context, sandbox._cachedProviders);
 
   vm.runInContext(`
-    switchGsSubTab('engineer', document.querySelector('.gs-pane[data-pane="engineer"] .gs-subtab[data-subtab="engineer-digests"]'));
-    switchGsSubTab('architect', document.querySelector('.gs-pane[data-pane="architect"] .gs-subtab[data-subtab="architect-digests"]'));
+    switchGsSubTab('engineer', document.querySelector('.gs-pane[data-pane="engineer"] .gs-subtab[data-subtab="engineer-system"]'));
+    switchGsSubTab('architect', document.querySelector('.gs-pane[data-pane="architect"] .gs-subtab[data-subtab="architect-system"]'));
   `, context);
 
   vm.runInContext(`_showGroupSettings("alpha", {
@@ -442,7 +450,7 @@ test('group settings resets Engineer and Architect sub-tabs to General when reop
     true,
   );
   assert.equal(
-    sandbox.document.querySelector('.gs-pane[data-pane="engineer"] .gs-subtab[data-subtab="engineer-digests"]').classList.contains('active'),
+    sandbox.document.querySelector('.gs-pane[data-pane="engineer"] .gs-subtab[data-subtab="engineer-system"]').classList.contains('active'),
     false,
   );
   assert.equal(
@@ -450,10 +458,11 @@ test('group settings resets Engineer and Architect sub-tabs to General when reop
     true,
   );
   assert.equal(
-    sandbox.document.querySelector('.gs-pane[data-pane="architect"] .gs-subtab[data-subtab="architect-digests"]').classList.contains('active'),
+    sandbox.document.querySelector('.gs-pane[data-pane="architect"] .gs-subtab[data-subtab="architect-system"]').classList.contains('active'),
     false,
   );
   assert.equal(ensure('gs-engineer-notification-preset').value, 'normal');
+  assert.equal(ensure('gs-engineer-restrict-to-created-agents').checked, true);
   assert.equal(ensure('gs-engineer-can-override-worker-provider').checked, true);
 });
 
@@ -473,39 +482,153 @@ test('engineer and architect group settings use three scoped sub-tabs', () => {
   assert.match(html, /data-subpane="group-general"/);
   assert.match(html, /data-subpane="group-advanced"/);
 
-  for (const pane of ['engineer', 'architect']) {
-    assert.match(
-      html,
-      new RegExp(`<div class="gs-pane" data-pane="${pane}">[\\s\\S]*?data-subtab="${pane}-general"[\\s\\S]*?data-subtab="${pane}-behavior"[\\s\\S]*?data-subtab="${pane}-digests"`),
-    );
-    assert.match(html, new RegExp(`data-subpane="${pane}-general"`));
-    assert.match(html, new RegExp(`data-subpane="${pane}-behavior"`));
-    assert.match(html, new RegExp(`data-subpane="${pane}-digests"`));
-    assert.doesNotMatch(
-      html,
-      new RegExp(`<details[^>]+id="gs-${pane}-[^\\"]+-section"`),
-    );
-  }
+  assert.match(
+    html,
+    /<div class="gs-pane" data-pane="engineer">[\s\S]*?data-subtab="engineer-general"[\s\S]*?data-subtab="engineer-behavior"[\s\S]*?data-subtab="engineer-system"[\s\S]*?>System<\/button>/,
+  );
+  assert.match(html, /data-subpane="engineer-general"/);
+  assert.match(html, /data-subpane="engineer-behavior"/);
+  assert.match(html, /data-subpane="engineer-system"/);
+  assert.doesNotMatch(html, /<details[^>]+id="gs-engineer-[^\"]+-section"/);
+
+  assert.match(
+    html,
+    /<div class="gs-pane" data-pane="architect">[\s\S]*?data-subtab="architect-general"[\s\S]*?data-subtab="architect-behavior"[\s\S]*?data-subtab="architect-system"[\s\S]*?>System<\/button>/,
+  );
+  assert.match(html, /data-subpane="architect-general"/);
+  assert.match(html, /data-subpane="architect-behavior"/);
+  assert.match(html, /data-subpane="architect-system"/);
+  assert.doesNotMatch(html, /<details[^>]+id="gs-architect-[^\"]+-section"/);
 
   const engineerGeneral = html.indexOf('data-subpane="engineer-general"');
   const engineerBehavior = html.indexOf('data-subpane="engineer-behavior"');
-  const engineerDigests = html.indexOf('data-subpane="engineer-digests"');
+  const engineerSystem = html.indexOf('data-subpane="engineer-system"');
   assert.ok(engineerGeneral < html.indexOf('id="gs-engineer-provider"'));
   assert.ok(engineerBehavior < html.indexOf('id="gs-engineer-specializations-picker"'));
   assert.ok(engineerBehavior < html.indexOf('id="gs-engineer-autonomy-mode"'));
+  assert.ok(engineerBehavior < html.indexOf('id="gs-engineer-notification-preset"'));
   assert.ok(engineerBehavior < html.indexOf('id="gs-engineer-custom-instructions"'));
-  assert.ok(html.indexOf('id="gs-engineer-custom-instructions"') < engineerDigests);
-  assert.ok(engineerDigests < html.indexOf('id="gs-engineer-push-interval"'));
+  assert.ok(html.indexOf('id="gs-engineer-custom-instructions"') < engineerSystem);
+  assert.ok(engineerSystem < html.indexOf('id="gs-engineer-restrict-to-created-agents"'));
+  assert.ok(engineerSystem < html.indexOf('id="gs-engineer-digest-verbosity"'));
+  assert.ok(html.indexOf('id="gs-engineer-digest-verbosity"') < html.indexOf('id="gs-engineer-push-interval"'));
 
   const architectGeneral = html.indexOf('data-subpane="architect-general"');
   const architectBehavior = html.indexOf('data-subpane="architect-behavior"');
-  const architectDigests = html.indexOf('data-subpane="architect-digests"');
+  const architectSystem = html.indexOf('data-subpane="architect-system"');
   assert.ok(architectGeneral < html.indexOf('id="gs-architect-provider"'));
   assert.ok(architectBehavior < html.indexOf('id="gs-architect-autonomy-mode"'));
   assert.ok(architectBehavior < html.indexOf('id="gs-architect-custom-instructions"'));
-  assert.ok(html.indexOf('id="gs-architect-custom-instructions"') < architectDigests);
+  assert.ok(html.indexOf('id="gs-architect-custom-instructions"') < architectSystem);
   assert.ok(architectBehavior < html.indexOf('id="gs-architect-journal-checkpoint"'));
-  assert.ok(architectDigests < html.indexOf('id="gs-architect-push-interval"'));
+  assert.ok(architectSystem < html.indexOf('id="gs-architect-directory"'));
+  assert.ok(architectSystem < html.indexOf('id="gs-architect-digest-verbosity"'));
+  assert.ok(html.indexOf('id="gs-architect-digest-verbosity"') < html.indexOf('id="gs-architect-push-interval"'));
+});
+
+test('engineer System sub-tab groups permissions and digest settings', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  const modals = fs.readFileSync(path.join(repoRoot, 'static/js/modals.js'), 'utf8');
+  const engineerStart = html.indexOf('<div class="gs-pane" data-pane="engineer">');
+  const architectStart = html.indexOf('<div class="gs-pane" data-pane="architect">');
+  const engineerPane = html.slice(engineerStart, architectStart);
+  const general = engineerPane.indexOf('data-subpane="engineer-general"');
+  const behavior = engineerPane.indexOf('data-subpane="engineer-behavior"');
+  const system = engineerPane.indexOf('data-subpane="engineer-system"');
+  const permissions = engineerPane.indexOf('gs-settings-section-title">Permissions');
+  const digestSettings = engineerPane.indexOf('gs-settings-section-title">Digest settings');
+
+  assert.notEqual(system, -1);
+  assert.ok(general < behavior);
+  assert.ok(behavior < system);
+  assert.ok(system < permissions);
+  assert.ok(permissions < digestSettings);
+  assert.equal(engineerPane.indexOf('>Digests</button>'), -1);
+  assert.match(engineerPane, /data-subtab="engineer-system"[\s\S]*>System<\/button>/);
+  assert.match(engineerPane, /Allow the Engineer to see workers created by other Engineers/);
+  assert.match(engineerPane, /Allow the Engineer to override the provider for the workers it creates/);
+  assert.match(
+    engineerPane,
+    /Engineers running Claude Code tend to choose Claude Code for their workers regardless of the group's default provider\. Disable this to force the engineer to use the group default\./,
+  );
+  assert.ok(permissions < engineerPane.indexOf('id="gs-engineer-restrict-to-created-agents"'));
+  assert.ok(engineerPane.indexOf('id="gs-engineer-can-override-worker-provider"') < digestSettings);
+  assert.ok(digestSettings < engineerPane.indexOf('id="gs-engineer-digest-verbosity"'));
+  assert.ok(engineerPane.indexOf('id="gs-engineer-digest-verbosity"') < engineerPane.indexOf('id="gs-engineer-push-interval"'));
+  assert.ok(behavior < engineerPane.indexOf('id="gs-engineer-notification-preset"'));
+  assert.ok(engineerPane.indexOf('id="gs-engineer-notification-preset"') < system);
+  assert.match(engineerPane, /id="gs-engineer-digest-verbosity-hint" class="hint-btn"/);
+  assert.match(modals, /const DIGEST_VERBOSITY_TOOLTIP_HELP = 'Controls how much detail appears in digest events sent to this agent\. Higher verbosity can wake the agent more often on coarse-event activity in the group\.'/);
+  assert.match(modals, /gs-engineer-digest-verbosity-hint', DIGEST_VERBOSITY_TOOLTIP_HELP/);
+  assert.match(modals, /gs-architect-digest-verbosity-hint', DIGEST_VERBOSITY_TOOLTIP_HELP/);
+});
+
+test('architect System sub-tab groups terminal overrides and digest settings', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  const architectStart = html.indexOf('<div class="gs-pane" data-pane="architect">');
+  const footerStart = html.indexOf('<div class="modal-actions">', architectStart);
+  const architectPane = html.slice(architectStart, footerStart);
+  const general = architectPane.indexOf('data-subpane="architect-general"');
+  const behavior = architectPane.indexOf('data-subpane="architect-behavior"');
+  const system = architectPane.indexOf('data-subpane="architect-system"');
+  const terminalOverrides = architectPane.indexOf('gs-settings-section-title">Terminal overrides');
+  const digestSettings = architectPane.indexOf('gs-settings-section-title">Digest settings');
+
+  assert.notEqual(system, -1);
+  assert.ok(general < behavior);
+  assert.ok(behavior < system);
+  assert.ok(system < terminalOverrides);
+  assert.ok(terminalOverrides < digestSettings);
+  assert.equal(architectPane.indexOf('>Digests</button>'), -1);
+  assert.match(architectPane, /data-subtab="architect-system"[\s\S]*>System<\/button>/);
+  assert.ok(terminalOverrides < architectPane.indexOf('id="gs-architect-directory"'));
+  assert.ok(architectPane.indexOf('id="gs-architect-directory"') < architectPane.indexOf('id="gs-architect-profile"'));
+  assert.ok(architectPane.indexOf('id="gs-architect-profile"') < architectPane.indexOf('id="gs-architect-shell"'));
+  assert.ok(architectPane.indexOf('id="gs-architect-shell"') < architectPane.indexOf('id="gs-architect-color-swatches"'));
+  assert.match(
+    architectPane,
+    /<label class="iterm2-only">Profile<\/label>\s*<select id="gs-architect-profile" class="iterm2-only"><\/select>/,
+  );
+  assert.match(
+    architectPane,
+    /<label class="iterm2-only">Tab color<\/label>\s*<div class="color-swatches iterm2-only" id="gs-architect-color-swatches"><\/div>/,
+  );
+  assert.ok(digestSettings < architectPane.indexOf('id="gs-architect-digest-verbosity"'));
+  assert.ok(architectPane.indexOf('id="gs-architect-digest-verbosity"') < architectPane.indexOf('id="gs-architect-push-interval"'));
+  assert.ok(behavior < architectPane.indexOf('id="gs-architect-journal-checkpoint"'));
+  assert.ok(architectPane.indexOf('id="gs-architect-journal-checkpoint"') < system);
+  assert.match(architectPane, /id="gs-architect-digest-verbosity-hint" class="hint-btn"/);
+});
+
+test('engineer worker visibility permission defaults true and inverts legacy hide setting', () => {
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+  seedProviders(context, sandbox._cachedProviders);
+
+  vm.runInContext(`_showGroupSettings("alpha", {
+    settings: {},
+    engineer_settings: {},
+    profiles: ["Default"]
+  })`, context);
+
+  assert.equal(ensure('gs-engineer-restrict-to-created-agents').checked, true);
+  sandbox.sendCalls.length = 0;
+  ensure('gs-engineer-restrict-to-created-agents').checked = true;
+  vm.runInContext('submitGroupSettings()', context);
+  assert.equal(sandbox.sendCalls[1].restrict_to_created_agents, false);
+
+  sandbox.sendCalls.length = 0;
+  vm.runInContext(`_showGroupSettings("alpha", {
+    settings: {},
+    engineer_settings: { restrict_to_created_agents: true },
+    profiles: ["Default"]
+  })`, context);
+  assert.equal(ensure('gs-engineer-restrict-to-created-agents').checked, false);
+  sandbox.sendCalls.length = 0;
+  ensure('gs-engineer-restrict-to-created-agents').checked = false;
+  vm.runInContext('submitGroupSettings()', context);
+  assert.equal(sandbox.sendCalls[1].restrict_to_created_agents, true);
 });
 
 test('group settings Advanced sub-tab owns Delete group action', () => {
@@ -558,7 +681,7 @@ test('group settings sub-tab switching preserves scroll focus and inline draft s
   draft.focus();
 
   vm.runInContext(
-    `switchGsSubTab('engineer', document.querySelector('.gs-pane[data-pane="engineer"] .gs-subtab[data-subtab="engineer-digests"]'))`,
+    `switchGsSubTab('engineer', document.querySelector('.gs-pane[data-pane="engineer"] .gs-subtab[data-subtab="engineer-system"]'))`,
     context,
   );
 
@@ -568,7 +691,7 @@ test('group settings sub-tab switching preserves scroll focus and inline draft s
   assert.equal(draft.selectionStart, 6);
   assert.equal(draft.selectionEnd, 18);
   assert.equal(
-    sandbox.document.querySelector('.gs-pane[data-pane="engineer"] .gs-subtab[data-subtab="engineer-digests"]').classList.contains('active'),
+    sandbox.document.querySelector('.gs-pane[data-pane="engineer"] .gs-subtab[data-subtab="engineer-system"]').classList.contains('active'),
     true,
   );
   assert.equal(
@@ -618,10 +741,12 @@ test('group settings marks iTerm2-only controls for standalone mode gating', () 
     ['gs-agent-profile', 'Profile'],
     ['gs-terminal-profile', 'Profile'],
     ['gs-engineer-profile', 'Profile'],
+    ['gs-architect-profile', 'Profile'],
     ['gs-color-swatches', 'Tab color'],
     ['gs-agent-color-swatches', 'Tab color'],
     ['gs-terminal-color-swatches', 'Tab color'],
     ['gs-engineer-color-swatches', 'Tab color'],
+    ['gs-architect-color-swatches', 'Tab color'],
   ].forEach(([id, label]) => assertControlMarked(id, label));
 
   [
@@ -644,11 +769,14 @@ test('group settings marks iTerm2-only controls for standalone mode gating', () 
   assert.match(ws, /classList\.toggle\('iterm2-mode',\s*iterm2\)/);
 });
 
-test('architect behavior sub-tab keeps runtime fields without fallback review-gate controls', () => {
+test('architect behavior sub-tab keeps policy fields without fallback review-gate controls', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   assert.match(html, /data-subpane="architect-behavior"/);
-  assert.match(html, /Configure architect digest verbosity and checkpoint policy\./);
-  assert.match(html, /id="gs-architect-digest-verbosity"/);
+  const behaviorStart = html.indexOf('data-subpane="architect-behavior"');
+  const systemStart = html.indexOf('data-subpane="architect-system"');
+  const behaviorPane = html.slice(behaviorStart, systemStart);
+  assert.match(behaviorPane, /Configure architect checkpoint policy\./);
+  assert.doesNotMatch(behaviorPane, /id="gs-architect-digest-verbosity"/);
   assert.match(html, /id="gs-architect-journal-checkpoint"/);
   assert.doesNotMatch(html, /fallback review-gate defaults for transitions without their own LOC gate/);
   assert.doesNotMatch(html, /Fallback review-gate thresholds/);
@@ -681,7 +809,7 @@ test('submitGroupSettings sends group, engineer, and architect updates separatel
   ensure('gs-engineer-shell').value = 'fish';
   vm.runInContext(`_gsEngineerColor = 'none';`, context);
   ensure('gs-engineer-custom-instructions').value = 'Stay focused';
-  ensure('gs-engineer-restrict-to-created-agents').checked = true;
+  ensure('gs-engineer-restrict-to-created-agents').checked = false;
   ensure('gs-engineer-can-override-worker-provider').checked = false;
   ensure('gs-engineer-autonomy-mode').value = 'suggest_only';
   ensure('gs-engineer-default-worker-concurrency').value = '3';
@@ -698,6 +826,10 @@ test('submitGroupSettings sends group, engineer, and architect updates separatel
   ensure('gs-architect-boot-cmd').value = 'codex --architect';
   ensure('gs-architect-model').value = 'gpt-5.1-architect';
   ensure('gs-architect-reasoning-effort').value = 'high';
+  ensure('gs-architect-directory').value = '/repo/.loom/architect';
+  ensure('gs-architect-profile').value = 'Ops';
+  ensure('gs-architect-shell').value = 'zsh';
+  vm.runInContext(`_gsArchitectColor = 'none';`, context);
   ensure('gs-architect-custom-instructions').value = 'Own scope';
   ensure('gs-architect-autonomy-mode').value = 'dispatch_freely';
   ensure('gs-architect-digest-verbosity').value = 'terse';
@@ -744,6 +876,10 @@ test('submitGroupSettings sends group, engineer, and architect updates separatel
   assert.equal(sandbox.sendCalls[2].settings.architect_boot_command, 'codex --architect');
   assert.equal(sandbox.sendCalls[2].settings.architect_model, 'gpt-5.1-architect');
   assert.equal(sandbox.sendCalls[2].settings.architect_reasoning_effort, 'high');
+  assert.equal(sandbox.sendCalls[2].settings.architect_directory, '/repo/.loom/architect');
+  assert.equal(sandbox.sendCalls[2].settings.architect_profile, 'Ops');
+  assert.equal(sandbox.sendCalls[2].settings.architect_shell, 'zsh');
+  assert.equal(sandbox.sendCalls[2].settings.architect_tab_color, 'none');
   assert.equal(sandbox.sendCalls[2].settings.architect_custom_instructions, 'Own scope');
   assert.equal(sandbox.sendCalls[2].settings.architect_autonomy_mode, 'dispatch_freely');
   assert.equal(
@@ -803,7 +939,8 @@ test('group settings no longer renders the legacy no-engineer placeholder copy',
   const legacyCopy = new RegExp('No engineer' + ' agent');
   assert.doesNotMatch(html, legacyCopy);
   assert.doesNotMatch(modalJs, legacyCopy);
-  assert.match(html, /Hide other engineers' workers from this engineer/);
+  assert.doesNotMatch(html, /Hide other engineers' workers from this engineer/);
+  assert.match(html, /Allow the Engineer to see workers created by other Engineers/);
   assert.match(html, /Human operators still see all agents on the board/);
   // _showGroupSettings fetches specializations to populate the
   // default-specializations picker; ignore that side request here.

@@ -1152,6 +1152,10 @@ class MatrixStateCleanupTests(unittest.TestCase):
                 architect_provider="codex",
                 architect_model="gpt-5.1-architect",
                 architect_reasoning_effort="high",
+                architect_directory="/repo/.loom/architect",
+                architect_profile="Ops",
+                architect_shell="fish",
+                architect_tab_color="none",
                 architect_custom_instructions="Own scope.",
                 architect_autonomy_mode="ask_always",
                 architect_digest_verbosity="verbose",
@@ -1172,6 +1176,10 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertEqual(settings.architect_provider, "codex")
         self.assertEqual(settings.architect_model, "gpt-5.1-architect")
         self.assertEqual(settings.architect_reasoning_effort, "high")
+        self.assertEqual(settings.architect_directory, "/repo/.loom/architect")
+        self.assertEqual(settings.architect_profile, "Ops")
+        self.assertEqual(settings.architect_shell, "fish")
+        self.assertEqual(settings.architect_tab_color, "none")
         self.assertEqual(settings.architect_custom_instructions, "Own scope.")
         self.assertEqual(settings.architect_autonomy_mode, "ask_always")
         self.assertEqual(settings.architect_digest_verbosity, "verbose")
