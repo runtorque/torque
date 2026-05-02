@@ -268,6 +268,44 @@ function _ensureTerminalWorkspaceDom(root) {
   };
 }
 
+function _terminalCellIsTombstoned(cell) {
+  const value = Number((cell && cell.deleted_at) || 0);
+  return Number.isFinite(value) && value > 0;
+}
+
+function _terminalSelectionBelongsToClosedCell(selectedId, cellId) {
+  if (!selectedId) return false;
+  if (String(selectedId) === String(cellId)) return true;
+  const selectedCell = state && state.agents ? state.agents[selectedId] : null;
+  return !!(selectedCell && String(selectedCell.parent_id || '') === String(cellId));
+}
+
+function _terminalClearSelectionForClosedCell(cellId) {
+  if (_terminalSelectionBelongsToClosedCell(selectedAgentId, cellId)) selectedAgentId = null;
+  if (typeof selectedTerminalId !== 'undefined'
+      && _terminalSelectionBelongsToClosedCell(selectedTerminalId, cellId)) {
+    selectedTerminalId = null;
+  }
+  if (typeof focusedItemId !== 'undefined'
+      && _terminalSelectionBelongsToClosedCell(focusedItemId, cellId)) {
+    focusedItemId = null;
+  }
+}
+
+function closeTerminalTab(cellId, evt) {
+  if (evt && typeof evt.preventDefault === 'function') evt.preventDefault();
+  if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
+  const cell = state && state.agents ? state.agents[cellId] : null;
+  if (!cell) return false;
+  if (_terminalCellIsTombstoned(cell)) {
+    _terminalClearSelectionForClosedCell(cellId);
+    send({ cmd: 'purge_agent_now', id: cellId });
+    return false;
+  }
+  if (typeof removeAgent === 'function') removeAgent(cellId);
+  return false;
+}
+
 function _renderTerminalTabs(cells, activeId) {
   if (!cells.length) return '<div class="terminal-tabs-empty">No sessions</div>';
   let html = '';
@@ -275,14 +313,17 @@ function _renderTerminalTabs(cells, activeId) {
     const cell = cells[i];
     const active = cell.id === activeId;
     const stopped = cell.status === 'stopped' || !cell.session_id;
-    html += '<button class="terminal-tab'
+    html += '<div class="terminal-tab'
       + (active ? ' active' : '')
       + (stopped ? ' stopped' : '')
-      + '" onclick="focusAgent(\'' + esc(cell.id) + '\')">'
+      + '" data-cell-id="' + esc(cell.id) + '">'
+      + '<button type="button" class="terminal-tab-select" onclick="focusAgent(\'' + esc(cell.id) + '\')">'
       + '<span class="terminal-tab-dot ' + esc(agentStatusClass(cell)) + '"></span>'
       + '<span class="terminal-tab-label">' + esc(cell.name) + '</span>'
       + (cell.cell_type === 'terminal' ? '<span class="terminal-tab-kind">term</span>' : '')
-      + '</button>';
+      + '</button>'
+      + '<button type="button" class="terminal-tab-close" aria-label="Close ' + esc(cell.name || cell.id) + '" onclick="return closeTerminalTab(\'' + esc(cell.id) + '\', event)">×</button>'
+      + '</div>';
   }
   return html;
 }
@@ -1364,7 +1405,7 @@ function renderTerminalWorkspace() {
     onclick: 'relaunchAgent(\'' + esc(cell.id) + '\')',
   } : null;
   const topbarAction = cell ? (cell.session_id ? primaryAction : relaunchAction) : null;
-  const showTabs = cells.length > 1;
+  const showTabs = cells.length > 0;
   const displayPath = _terminalDisplayPath(cell);
   const dom = _ensureTerminalWorkspaceDom(root);
   const workspaceState = _captureTerminalWorkspaceState(root, cell);

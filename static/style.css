@@ -424,7 +424,7 @@ body.runtime-embedded .group-body-inner {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 9px;
+  padding: 6px 7px 6px 9px;
   border-radius: 8px;
   border: 1px solid transparent;
   background: rgba(255,255,255,.03);
@@ -442,6 +442,37 @@ body.runtime-embedded .group-body-inner {
 }
 .terminal-tab.stopped {
   opacity: .62;
+}
+.terminal-tab-select,
+.terminal-tab-close {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+.terminal-tab-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.terminal-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 999px;
+  color: color-mix(in srgb, var(--text-dim) 70%, transparent);
+  cursor: pointer;
+}
+.terminal-tab-close:hover,
+.terminal-tab-close:focus-visible {
+  color: var(--text);
+  background: rgba(255,255,255,.08);
 }
 .terminal-tab-dot {
   width: 7px;
@@ -645,7 +676,7 @@ body.runtime-embedded .terminal-tabs {
   border-bottom: none;
 }
 body.runtime-embedded .terminal-tab {
-  padding: 6px 10px;
+  padding: 6px 8px 6px 10px;
   border-radius: 9px;
   background: rgba(255,255,255,.025);
 }
@@ -4718,7 +4749,8 @@ body.runtime-embedded .board-filter-btn {
 }
 .board-filter-btn:hover { color: var(--text); border-color: var(--text-dim); }
 body.runtime-embedded .taskbar-app:focus-visible,
-body.runtime-embedded .terminal-tab:focus-visible,
+body.runtime-embedded .terminal-tab-select:focus-visible,
+body.runtime-embedded .terminal-tab-close:focus-visible,
 body.runtime-embedded .terminal-topbar-btn:focus-visible,
 body.runtime-embedded .board-filter-btn:focus-visible,
 body.runtime-embedded .board-empty-action:focus-visible {
