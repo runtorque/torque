@@ -13228,7 +13228,15 @@ test('agent kind badges render in the bottom-right opposite the provider badge',
 
 test('agent cards do not define legacy engineer edge chrome', () => {
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const engineerCellRules = Array.from(
+    css.matchAll(/^\.cell\.engineer\s*\{[^}]*\}/gm),
+    (match) => match[0],
+  );
 
+  assert.ok(engineerCellRules.length, '.cell.engineer rules exist');
+  for (const rule of engineerCellRules) {
+    assert.doesNotMatch(rule, /border-(?:top|right|bottom|left)(?:-[\w-]+)?\s*:/);
+  }
   assert.doesNotMatch(css, /\.cell\.engineer\s*\{[^}]*border-left:\s*3px solid rgba\(88, 166, 255, 0\.72\);/);
   assert.doesNotMatch(css, /\.cell\.engineer\s*\{[^}]*box-shadow:\s*inset 3px 0 0/);
   assert.doesNotMatch(css, /\.cell\.engineer-asking(?:[\s.#:{]|$)/);

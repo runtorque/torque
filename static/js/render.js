@@ -1881,10 +1881,6 @@ function _renderPrincipalArchitectCard(groupName, section, selectedPrincipalId) 
     + ' data-focus-key="principal-close:' + esc(id) + '"'
     + ' onclick="event.stopPropagation();removeAgent(' + idArg + ')"'
     + ' title="Delete architect">✕</button>'
-    + '<button type="button" class="principal-card-pause ' + (digestPaused ? 'paused' : 'running') + '"'
-    + ' data-focus-key="principal-pause:' + esc(id) + '"'
-    + ' onclick="event.stopPropagation();toggleDigestPauseForAgent(' + idArg + ')"'
-    + ' title="' + esc(pauseTitle) + '">' + pauseIcon + '</button>'
     + lifecycleButton
     + '</div>'
     + '<span class="principal-card-status ' + esc(statusCls) + '" aria-hidden="true"></span>'

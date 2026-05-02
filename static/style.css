@@ -1452,9 +1452,6 @@ body.runtime-embedded .agent-focus-header {
   outline-offset: -1px;
 }
 .cell.stopped { opacity: .55; }
-.cell.engineer {
-  border-left-color: transparent;
-}
 .cell.dismissed {
   opacity: .5;
   filter: grayscale(.35);
