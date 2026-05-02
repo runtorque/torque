@@ -59,6 +59,18 @@ def _sqlite_retry_backoff(attempt: int) -> float:
     backoffs = (0.01, 0.025, 0.05)
     return backoffs[min(max(0, attempt - 1), len(backoffs) - 1)]
 
+
+def _group_settings_field_names() -> set[str] | None:
+    """Return the current GroupSettings dataclass field names when available."""
+    state_mod = sys.modules.get("loom.state")
+    group_settings_cls = getattr(state_mod, "GroupSettings", None)
+    if group_settings_cls is None:
+        try:
+            from loom.state import GroupSettings as group_settings_cls
+        except Exception:
+            return None
+    return set(getattr(group_settings_cls, "__dataclass_fields__", {}) or {})
+
 _KINDS_SCHEMA_MIGRATION_VERSION = 1
 _KINDS_BACKFILL_MIGRATION_VERSION = 2
 _KINDS_CLEANUP_MIGRATION_VERSION = 3
@@ -3458,8 +3470,11 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
 
             # Group settings
             c.execute("DELETE FROM group_settings")
+            gs_fields = _group_settings_field_names()
             for gname, gs in state_dict.get("group_settings", {}).items():
                 d = dict(gs) if isinstance(gs, dict) else asdict(gs)
+                if gs_fields is not None:
+                    d = {k: v for k, v in d.items() if k in gs_fields}
                 for k in _GS_JSON_FIELDS:
                     if k in d:
                         d[k] = json.dumps(d[k])
@@ -3663,9 +3678,12 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         rows = c.execute("SELECT * FROM group_settings").fetchall()
         if rows:
             cols = [d[0] for d in c.description]
+            gs_fields = _group_settings_field_names()
             for row in rows:
                 d = dict(zip(cols, row))
                 gname = d.pop("group_name")
+                if gs_fields is not None:
+                    d = {k: v for k, v in d.items() if k in gs_fields}
                 # Decode JSON fields
                 for k in _GS_JSON_FIELDS:
                     if k in d and isinstance(d[k], str):
