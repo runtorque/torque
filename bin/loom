@@ -4716,7 +4716,8 @@ def build_parser():
     p.add_argument("-n", "--tail", type=int, default=20,
                    help="Number of entries (default: 20)")
     p.add_argument("-t", "--type",
-                   choices=["decision", "observation", "checkpoint", "plan"],
+                   choices=["decision", "observation", "checkpoint", "plan",
+                            "note_dismissed", "qa"],
                    help="Filter by entry type")
     p.add_argument("--json", action="store_true",
                    help="JSON output")
