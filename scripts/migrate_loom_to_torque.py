@@ -93,9 +93,10 @@ def _rewrite_db(db_path: Path) -> None:
                         (old, new, f"%{old}%"),
                     )
         # Clear stale worktree_branch refs whose git branches were deleted.
+        # Column may be NOT NULL in some schema versions, so use empty string.
         if "agents" in tables:
             conn.execute(
-                "UPDATE agents SET worktree_branch = NULL "
+                "UPDATE agents SET worktree_branch = '' "
                 "WHERE worktree_branch LIKE 'torque/%'"
             )
         conn.commit()
@@ -153,27 +154,35 @@ def _drop_legacy_iterm2_keybindings() -> None:
 
 
 def main() -> int:
-    if not OLD.exists():
+    sentinel = NEW / "MIGRATED_FROM_LOOM"
+    resuming = NEW.exists() and BACKUP.exists() and not sentinel.exists()
+
+    if not OLD.exists() and not resuming:
         print(f"No {OLD} found — nothing to migrate.")
         return 0
-    if NEW.exists():
+    if NEW.exists() and not resuming:
         print(
             f"ERROR: {NEW} already exists. Move or remove it before running this script.",
             file=sys.stderr,
         )
         return 1
 
-    print(f"Backing up {OLD} -> {BACKUP}")
-    if BACKUP.exists():
+    if resuming:
         print(
-            f"ERROR: {BACKUP} already exists. Remove it first.",
-            file=sys.stderr,
+            f"Resuming partial migration: {NEW} and {BACKUP} both exist, sentinel missing."
         )
-        return 1
-    shutil.copytree(OLD, BACKUP, symlinks=True)
+    else:
+        print(f"Backing up {OLD} -> {BACKUP}")
+        if BACKUP.exists():
+            print(
+                f"ERROR: {BACKUP} already exists. Remove it first.",
+                file=sys.stderr,
+            )
+            return 1
+        shutil.copytree(OLD, BACKUP, symlinks=True)
 
-    print(f"Moving {OLD} -> {NEW}")
-    shutil.move(str(OLD), str(NEW))
+        print(f"Moving {OLD} -> {NEW}")
+        shutil.move(str(OLD), str(NEW))
 
     print("Renaming loom.* files inside the new directory")
     _rename_loom_files(NEW)
@@ -194,7 +203,6 @@ def main() -> int:
     print("Cleaning up legacy iTerm2 keybindings")
     _drop_legacy_iterm2_keybindings()
 
-    sentinel = NEW / "MIGRATED_FROM_LOOM"
     sentinel.write_text(
         "Migrated from ~/.loom on first Torque launch. "
         "Backup at ~/.loom.pre-torque.bak — remove once verified.\n"
