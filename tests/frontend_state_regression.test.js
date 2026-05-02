@@ -16409,9 +16409,14 @@ test('user principal Add Worker affordance survives delta rerenders and uses sta
     });
   `);
 
-  assert.match(main.innerHTML, /loose-workers-strip[\s\S]*Standalone Worker/);
+  assert.match(main.innerHTML, /loose-workers-strip[\s\S]*Standalone Worker[\s\S]*\+ Add Worker/);
+  assert.ok(
+    main.innerHTML.indexOf('class="loose-workers-strip"')
+      < main.innerHTML.indexOf('data-engineer-id="eng-a"'),
+    'standalone workers row should render before user-owned engineer rows',
+  );
   assert.match(main.innerHTML, /class="ghost-card ghost-card--engineer[\s\S]*\+ New Engineer/);
-  assert.match(main.innerHTML, /class="ghost-card ghost-card--worker[\s\S]*\+ Add Worker/);
+  assert.match(main.innerHTML, /class="ghost-card ghost-card--worker standalone-worker-card-new[\s\S]*\+ Add Worker/);
 });
 
 test('principals row renders User + architects + + New Architect anchor', () => {
@@ -16514,7 +16519,7 @@ test('user-section + New Architect ghost opens the group-scoped architect modal'
   }]);
 });
 
-test('hierarchical creation controls render shared quarter-height ghost-card classes and labels', () => {
+test('hierarchical creation controls render full-card standalone worker tile and scoped labels', () => {
   const { context, document, sandbox } = createMainRenderHarness();
   const main = document.getElementById('main');
 
@@ -16525,7 +16530,7 @@ test('hierarchical creation controls render shared quarter-height ghost-card cla
 
   runInContext(context, `render();`);
 
-  assert.match(main.innerHTML, /class="ghost-card ghost-card--worker[\s\S]*\+ Add Worker/);
+  assert.match(main.innerHTML, /class="ghost-card ghost-card--worker standalone-worker-card-new[\s\S]*\+ Add Worker/);
   assert.match(main.innerHTML, /class="ghost-card ghost-card--engineer[\s\S]*\+ New Engineer/);
   assert.match(main.innerHTML, /class="ghost-card ghost-card--architect[\s\S]*\+ New Architect/);
 
@@ -16537,6 +16542,7 @@ test('hierarchical creation controls render shared quarter-height ghost-card cla
   assert.match(css, /\.ghost-card--architect\s*\{[\s\S]*width:\s*var\(--agent-architect-column-width\)/);
   assert.match(css, /\.ghost-card--engineer\s*\{[\s\S]*width:\s*var\(--agent-engineer-column-width\)/);
   assert.match(css, /\.ghost-card--worker\s*\{[\s\S]*flex:\s*0 1 var\(--agent-grid-card-basis\)/);
+  assert.match(css, /\.standalone-worker-card-new\s*\{[\s\S]*height:\s*auto;[\s\S]*min-height:\s*var\(--agent-worker-card-height,\s*96px\);/);
   assert.match(css, /body\.runtime-embedded \.agent-grid\s*\{[\s\S]*--agent-grid-card-height:\s*108px;/);
   assert.match(css, /\.agent-grid\s*\{[\s\S]*--agent-worker-card-height:\s*var\(--agent-card-height\);/);
   assert.match(css, /body\.runtime-embedded \.agent-grid\s*\{[\s\S]*--agent-worker-card-height:\s*var\(--agent-card-height\);/);
@@ -18499,10 +18505,10 @@ test('main grid keyboard navigation traverses logical rows across sections', () 
   // hidden unless filtered in.
   assert.deepEqual(jsonValue(context, `window._navGridRows.map(function(row) { return { type: row.rowType, items: row.items.map(function(item) { return item.id; }) }; })`), [
     { type: 'principals-row', items: ['principal:loom:user', 'principal:loom:arch-a', 'principal:loom:arch-b', 'grid-control:agent-new-architect:loom'] },
-    { type: 'standalone-workers-row', items: ['loose-1', 'loose-2'] },
+    { type: 'standalone-workers-row', items: ['loose-1', 'loose-2', 'grid-control:section-new-worker:loom:user'] },
     { type: 'engineer-row', items: ['eng-user-a', 'worker-user-a1', 'worker-user-a2'] },
     { type: 'engineer-row', items: ['eng-user-b', 'worker-user-b1'] },
-    { type: 'section-creation-row', items: ['grid-control:section-new-engineer:loom:user', 'grid-control:section-new-worker:loom:user'] },
+    { type: 'section-creation-row', items: ['grid-control:section-new-engineer:loom:user'] },
   ]);
 
   runInContext(context, `moveFocusHorizontal(1);`);
@@ -18512,13 +18518,13 @@ test('main grid keyboard navigation traverses logical rows across sections', () 
   runInContext(context, `moveFocusDown();`);
   assert.equal(jsonValue(context, `focusedItemId`), 'worker-user-b1');
   runInContext(context, `moveFocusDown();`);
-  assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:section-new-worker:loom:user');
+  assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:section-new-engineer:loom:user');
 
   // Arrow-up from first engineer lands on standalone workers, then the
   // selected principal (user).
   runInContext(context, `focusedItemId = 'eng-user-a'; render();`);
   runInContext(context, `moveFocusUp();`);
-  assert.equal(jsonValue(context, `focusedItemId`), 'loose-2');
+  assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:section-new-worker:loom:user');
   runInContext(context, `moveFocusUp();`);
   assert.equal(jsonValue(context, `focusedItemId`), 'principal:loom:user');
 
