@@ -153,7 +153,7 @@ function renderTemplatesPanel() {
   // View toggle
   html += '<div class="tpled-view-toggle">';
   html += '<button class="tpled-view-btn' + (_tplPanelView === 'editor' ? ' active' : '') + '" onclick="tplSwitchView(\'editor\')">Editor</button>';
-  html += '<button class="tpled-view-btn' + (_tplPanelView === 'pipelines' ? ' active' : '') + '" onclick="tplSwitchView(\'pipelines\')">Pipelines</button>';
+  html += '<button class="tpled-view-btn' + (_tplPanelView === 'pipelines' ? ' active' : '') + '" onclick="tplSwitchView(\'pipelines\')">DAG</button>';
   html += '</div>';
   html += '</div>';
   html += '</div>';

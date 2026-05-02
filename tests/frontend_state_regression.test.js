@@ -1765,6 +1765,21 @@ test('actions editor removes fallback threshold copy and renames transition LOC 
   assert.match(source, /Require this transition above N LOC/);
 });
 
+test('actions panel labels the pipeline graph tab as DAG', () => {
+  const { sandbox, document } = createSandbox({
+    _cachedAgentTemplates: [],
+  });
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/actions.js');
+  const panel = document.register('panel-actions');
+
+  context.renderTemplatesPanel();
+
+  assert.match(panel.innerHTML, /onclick="tplSwitchView\('editor'\)">Editor<\/button>/);
+  assert.match(panel.innerHTML, /onclick="tplSwitchView\('pipelines'\)">DAG<\/button>/);
+  assert.doesNotMatch(panel.innerHTML, />Pipelines<\/button>/);
+});
+
 test('actions editor save payload includes transition LOC gate overrides', () => {
   const { sandbox, document } = createSandbox({
     _showToast() {},
