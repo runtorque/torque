@@ -1168,6 +1168,10 @@ class GroupSettings:
     architect_provider: str = ""
     architect_model: str = ""
     architect_reasoning_effort: str = ""
+    architect_directory: str = ""
+    architect_profile: str = ""
+    architect_shell: str = ""
+    architect_tab_color: str = ""
     architect_custom_instructions: str = ""
     architect_autonomy_mode: str = _DEFAULT_ARCHITECT_AUTONOMY_MODE
     architect_paused: bool = False
@@ -1197,6 +1201,10 @@ class ArchitectSettings:
     architect_provider: str = ""
     architect_model: str = ""
     architect_reasoning_effort: str = ""
+    architect_directory: str = ""
+    architect_profile: str = ""
+    architect_shell: str = ""
+    architect_tab_color: str = ""
     architect_custom_instructions: str = ""
     architect_autonomy_mode: str = _DEFAULT_ARCHITECT_AUTONOMY_MODE
     architect_paused: bool = False
@@ -3090,6 +3098,8 @@ class MatrixState:
         for key in (
                 "architect_boot_command", "architect_provider",
                 "architect_model", "architect_reasoning_effort",
+                "architect_directory", "architect_profile",
+                "architect_shell", "architect_tab_color",
                 "architect_custom_instructions"):
             if key in fields:
                 fields[key] = str(fields[key] or "").strip()

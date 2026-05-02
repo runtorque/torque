@@ -746,6 +746,7 @@ let _gsColor = '';
 let _gsAgentColor = '';
 let _gsTerminalColor = '';
 let _gsEngineerColor = '';
+let _gsArchitectColor = '';
 let _gsInitialTab = 'group';
 let _gsInitialSubtab = '';
 
@@ -1169,6 +1170,10 @@ function _defaultArchitectSettings() {
     architect_provider: '',
     architect_model: '',
     architect_reasoning_effort: '',
+    architect_directory: '',
+    architect_profile: '',
+    architect_shell: '',
+    architect_tab_color: '',
     architect_custom_instructions: '',
     architect_autonomy_mode: 'dispatch_after_confirm',
     architect_paused: false,
@@ -1375,6 +1380,21 @@ function _showGroupSettings(group, data) {
   document.getElementById('gs-architect-boot-cmd').value = architectSettings.architect_boot_command || '';
   document.getElementById('gs-architect-model').value = architectSettings.architect_model || '';
   document.getElementById('gs-architect-reasoning-effort').value = architectSettings.architect_reasoning_effort || '';
+  document.getElementById('gs-architect-directory').value = architectSettings.architect_directory || '';
+  document.getElementById('gs-architect-shell').value = architectSettings.architect_shell || '';
+  _populateProfileSelect(
+    document.getElementById('gs-architect-profile'),
+    data.profiles,
+    architectSettings.architect_profile,
+    'Same as agent/group'
+  );
+  _gsArchitectColor = architectSettings.architect_tab_color || '';
+  _renderSwatches(
+    'gs-architect-color-swatches',
+    _gsArchitectColor,
+    'selectGsArchitectColor',
+    true
+  );
   document.getElementById('gs-architect-custom-instructions').value = architectSettings.architect_custom_instructions || '';
   _autoGrowTextArea('gs-architect-custom-instructions');
   _setSelectValue(
@@ -1459,6 +1479,12 @@ function selectGsTerminalColor(hex) {
 function selectGsEngineerColor(hex) {
   _gsEngineerColor = hex;
   document.querySelectorAll('#gs-engineer-color-swatches .swatch').forEach(s => {
+    s.classList.toggle('selected', (s.dataset.color || '') === hex);
+  });
+}
+function selectGsArchitectColor(hex) {
+  _gsArchitectColor = hex;
+  document.querySelectorAll('#gs-architect-color-swatches .swatch').forEach(s => {
     s.classList.toggle('selected', (s.dataset.color || '') === hex);
   });
 }
@@ -1551,6 +1577,10 @@ function submitGroupSettings() {
     architect_boot_command: document.getElementById('gs-architect-boot-cmd').value.trim(),
     architect_model: document.getElementById('gs-architect-model').value.trim(),
     architect_reasoning_effort: document.getElementById('gs-architect-reasoning-effort').value,
+    architect_directory: document.getElementById('gs-architect-directory').value.trim(),
+    architect_profile: document.getElementById('gs-architect-profile').value,
+    architect_shell: document.getElementById('gs-architect-shell').value,
+    architect_tab_color: _gsArchitectColor,
     architect_custom_instructions: document.getElementById('gs-architect-custom-instructions').value,
     architect_autonomy_mode: document.getElementById('gs-architect-autonomy-mode').value,
     architect_paused: document.getElementById('gs-architect-paused').checked,

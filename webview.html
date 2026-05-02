@@ -792,7 +792,7 @@
       <div class="gs-subtabs">
         <button class="gs-subtab active" data-subtab="architect-general" onclick="switchGsSubTab('architect',this)">General</button>
         <button class="gs-subtab" data-subtab="architect-behavior" onclick="switchGsSubTab('architect',this)">Behavior</button>
-        <button class="gs-subtab" data-subtab="architect-digests" onclick="switchGsSubTab('architect',this)">Digests</button>
+        <button class="gs-subtab" data-subtab="architect-system" onclick="switchGsSubTab('architect',this)">System</button>
       </div>
 
       <!-- General sub-tab -->
@@ -821,50 +821,76 @@
         </label>
         <label>Custom instructions</label>
         <textarea id="gs-architect-custom-instructions" rows="6" class="gs-autogrow" oninput="_autoGrowTextArea('gs-architect-custom-instructions')" placeholder="Instructions appended after Loom's built-in Architect policy..."></textarea>
-        <div class="label-hint task-modal-section-intro">Configure architect digest verbosity and checkpoint policy.</div>
-        <label>Digest verbosity</label>
-        <select id="gs-architect-digest-verbosity">
-          <option value="terse">Terse</option>
-          <option value="balanced">Balanced</option>
-          <option value="verbose">Verbose</option>
-        </select>
+        <div class="label-hint task-modal-section-intro">Configure architect checkpoint policy.</div>
         <label>Journal checkpoint</label>
         <input id="gs-architect-journal-checkpoint" placeholder="every_10_actions" autocomplete="off">
       </div>
 
-      <!-- Digests sub-tab -->
-      <div class="gs-subpane" data-subpane="architect-digests">
-        <div class="label-hint task-modal-section-intro">Throttle digest delivery to architect agents in this group. Defaults are tuned to suppress empty-window heartbeats.</div>
-        <label>Push interval</label>
-        <select id="gs-architect-push-interval">
-          <option value="60">60s</option>
-          <option value="120">120s</option>
-          <option value="300">300s</option>
-          <option value="600">600s</option>
-          <option value="900">900s</option>
-        </select>
-        <label>Max interval</label>
-        <select id="gs-architect-max-interval">
-          <option value="120">120s</option>
-          <option value="300">300s</option>
-          <option value="600">600s</option>
-          <option value="1200">1200s</option>
-          <option value="1800">1800s</option>
-        </select>
-        <label>Idle heartbeat</label>
-        <select id="gs-architect-heartbeat-interval">
-          <option value="0">Off</option>
-          <option value="300">5 min</option>
-          <option value="600">10 min</option>
-          <option value="1200">20 min</option>
-          <option value="1800">30 min</option>
-        </select>
-        <label class="gs-checkbox">
-          <input id="gs-architect-suppress-empty" type="checkbox"> Suppress empty-window digests
-          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="When checked, the architect heartbeat is silently advanced when no events accrued in the window — no digest is sent. Recommended on to avoid empty notifications.">?</span>
-        </label>
-        <label>Events</label>
-        <div class="task-modal-check-grid" id="gs-architect-events-grid"></div>
+      <!-- System sub-tab -->
+      <div class="gs-subpane" data-subpane="architect-system">
+        <div class="gs-settings-section">
+          <div class="gs-settings-section-title">Terminal overrides</div>
+          <div class="gs-settings-section-body">
+            <div class="label-hint task-modal-section-intro">Optional launch overrides for Architect agents only. Leave blank to inherit the usual agent/group defaults.</div>
+            <label>Directory</label>
+            <input id="gs-architect-directory" placeholder="Same as agent/group" autocomplete="off">
+            <label class="iterm2-only">Profile</label>
+            <select id="gs-architect-profile" class="iterm2-only"></select>
+            <label>Shell</label>
+            <select id="gs-architect-shell">
+              <option value="">Same as agent/group</option>
+              <option value="zsh">zsh</option>
+              <option value="bash">bash</option>
+              <option value="fish">fish</option>
+            </select>
+            <label class="iterm2-only">Tab color</label>
+            <div class="color-swatches iterm2-only" id="gs-architect-color-swatches"></div>
+          </div>
+        </div>
+        <div class="gs-settings-section">
+          <div class="gs-settings-section-title">Digest settings</div>
+          <div class="gs-settings-section-body">
+            <div class="label-hint task-modal-section-intro">Throttle digest delivery to architect agents in this group. Defaults are tuned to suppress empty-window heartbeats.</div>
+            <label>Digest verbosity
+              <span id="gs-architect-digest-verbosity-hint" class="hint-btn" onclick="event.preventDefault();toggleHint(this)">?</span>
+            </label>
+            <select id="gs-architect-digest-verbosity">
+              <option value="terse">Terse</option>
+              <option value="balanced">Balanced</option>
+              <option value="verbose">Verbose</option>
+            </select>
+            <label>Push interval</label>
+            <select id="gs-architect-push-interval">
+              <option value="60">60s</option>
+              <option value="120">120s</option>
+              <option value="300">300s</option>
+              <option value="600">600s</option>
+              <option value="900">900s</option>
+            </select>
+            <label>Max interval</label>
+            <select id="gs-architect-max-interval">
+              <option value="120">120s</option>
+              <option value="300">300s</option>
+              <option value="600">600s</option>
+              <option value="1200">1200s</option>
+              <option value="1800">1800s</option>
+            </select>
+            <label>Idle heartbeat</label>
+            <select id="gs-architect-heartbeat-interval">
+              <option value="0">Off</option>
+              <option value="300">5 min</option>
+              <option value="600">10 min</option>
+              <option value="1200">20 min</option>
+              <option value="1800">30 min</option>
+            </select>
+            <label class="gs-checkbox">
+              <input id="gs-architect-suppress-empty" type="checkbox"> Suppress empty-window digests
+              <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="When checked, the architect heartbeat is silently advanced when no events accrued in the window — no digest is sent. Recommended on to avoid empty notifications.">?</span>
+            </label>
+            <label>Events</label>
+            <div class="task-modal-check-grid" id="gs-architect-events-grid"></div>
+          </div>
+        </div>
       </div>
     </div>
 
