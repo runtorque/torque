@@ -5767,6 +5767,87 @@ class MatrixState:
         self._clear_parent_awaiting_input(parent, exclude_task_id=task.id)
         self.recompute_task_health()
 
+    def board_archive_tasks(self, tids) -> list[str]:
+        """Archive multiple board tasks as one atomic persisted operation."""
+        requested: list[str] = []
+        missing: list[str] = []
+        seen: set[str] = set()
+        for raw_tid in tids or []:
+            tid = self.resolve_task_alias(str(raw_tid or ""))
+            if not tid or tid not in self.board_tasks:
+                missing.append(str(raw_tid or ""))
+                continue
+            if tid in seen:
+                continue
+            seen.add(tid)
+            requested.append(tid)
+        if missing:
+            raise ValueError(
+                "Task not found: " + ", ".join(tid or "(empty)" for tid in missing)
+            )
+        if not requested:
+            return []
+        if ARCHIVED_LANE not in self.board_lanes:
+            raise ValueError("Archived lane is not configured")
+
+        archive_targets = [
+            tid for tid in requested
+            if self.board_tasks[tid].lane != ARCHIVED_LANE
+        ]
+        if not archive_targets:
+            return []
+
+        before_tasks = {
+            tid: copy.deepcopy(task)
+            for tid, task in self.board_tasks.items()
+        }
+        before_agents = {
+            aid: copy.deepcopy(agent)
+            for aid, agent in self.agents.items()
+        }
+        before_delta_len = len(self._delta_ops)
+        before_health_dirty = set(self._task_health_dirty)
+        before_health_force_full = self._task_health_force_full
+        existing_capture = self._current_critical_write_capture()
+        before_capture = copy.deepcopy(existing_capture) if existing_capture else None
+        temp_capture = bool(self.db and existing_capture is None)
+
+        if temp_capture:
+            self._critical_write_capture_var.set(CriticalWriteCapture(
+                command_name="board_archive_tasks",
+                idempotency_key="",
+                request_hash="",
+            ))
+
+        try:
+            for tid in archive_targets:
+                self.board_archive_task(tid)
+
+            if temp_capture:
+                capture = self._current_critical_write_capture()
+                self._critical_write_capture_var.set(None)
+                tasks_to_save = list((capture.tasks if capture else {}).values())
+                if tasks_to_save:
+                    self.db.save_board_tasks(tasks_to_save)
+        except Exception:
+            if temp_capture:
+                self._critical_write_capture_var.set(None)
+            elif existing_capture is not None:
+                self._critical_write_capture_var.set(before_capture)
+            self.board_tasks = before_tasks
+            self.agents = before_agents
+            self._rebuild_task_indexes()
+            self._delta_ops = self._delta_ops[:before_delta_len]
+            self._task_health_dirty = before_health_dirty
+            self._task_health_force_full = before_health_force_full
+            raise
+
+        return [
+            tid for tid in archive_targets
+            if self.board_tasks.get(tid)
+            and self.board_tasks[tid].lane == ARCHIVED_LANE
+        ]
+
     def board_unarchive_task(self, tid: str, *,
                              lane: str = "",
                              position: Optional[int] = None):

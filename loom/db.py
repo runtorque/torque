@@ -1199,6 +1199,29 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             self._insert_board_task_row(self._conn, task)
             self._conn.commit()
 
+    def save_board_tasks(self, tasks):
+        """Upsert multiple board tasks in one SQLite transaction."""
+        task_rows = list(tasks or [])
+        if not task_rows:
+            return
+
+        def _operation():
+            try:
+                self._conn.execute("BEGIN")
+                for task in task_rows:
+                    self._insert_board_task_row(self._conn, task)
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+
+        with profiling.timer("sqlite_write_ms"), \
+                profiling.timer("sqlite_write_save_board_tasks_ms"):
+            self._run_sqlite_write_with_lock_retry(
+                _operation,
+                surface="board_tasks",
+            )
+
     def save_board_task_deferred(self, task) -> None:
         """Persist a board task off-loop when called from asyncio code."""
         self.defer_write(
