@@ -1,6 +1,6 @@
 site_name: Torque
 site_description: iTerm2 agent and terminal orchestration
-repo_url: https://github.com/aleksanderarruda/iterm2-agent-orchestration
+repo_url: https://github.com/runtorque/torque
 
 theme:
   name: material
@@ -51,17 +51,3 @@ nav:
   - Project:
       - Architecture: architecture.md
       - Roadmap: roadmap.md
-  - Internals:
-      - Plans Archive:
-          - Overview: plans/index.md
-          - Auto-Generated Playbooks: plans/auto-generated-playbooks.md
-          - Agent Awareness: plans/agent-awareness.md
-          - Agent Context Preservation: plans/agent-context.md
-          - CLI & REST API: plans/cli.md
-          - CLI AI Commands: plans/cli_ai_commands.md
-          - Git Worktree Lifecycle: plans/git-worktree-lifecycle.md
-          - Pipelines: plans/pipelines.md
-          - Standalone Application: plans/standalone_application.md
-          - Task Board Plan: plans/task-board.md
-          - Engineer Plan: plans/engineer.md
-          - Workflow Automation: plans/workflow-automation.md
