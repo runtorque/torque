@@ -30,11 +30,11 @@ class FakeBridge:
 class DigestRoutingTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         _install_aiohttp_stub()
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
-        self.routing_mod = importlib.import_module("loom.digest_routing")
+        self.routing_mod = importlib.import_module("torque.digest_routing")
         self.routing_mod = importlib.reload(self.routing_mod)
-        self.engineer_mod = importlib.import_module("loom.engineer")
+        self.engineer_mod = importlib.import_module("torque.engineer")
         self.engineer_mod = importlib.reload(self.engineer_mod)
 
     def _make_state(self):

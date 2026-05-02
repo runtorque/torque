@@ -1,4 +1,4 @@
-"""Tests for the mandatory-review enforcement contract (LOOM:256).
+"""Tests for the mandatory-review enforcement contract (TORQUE:256).
 
 Covers:
 - Action loader: ``transitions[].required`` and ``transitions[].pre_approved``
@@ -8,10 +8,10 @@ Covers:
 - Dispatch postscript: review-required block injected when
   ``requires_review=True``; pre-approved acknowledgement block injected
   when ``pre_approved_by`` is set.
-- Server-side hard gate: ``loom_done`` / ``loom_ready`` refuse with
+- Server-side hard gate: ``torque_done`` / ``torque_ready`` refuse with
   ``review_required`` on tasks carrying ``requires_review=True`` and an
   empty ``pre_approved_by``; pass when ``pre_approved_by`` is set;
-  ``loom_blocked`` / ``loom_ask`` / ``loom_error`` are not gated.
+  ``torque_blocked`` / ``torque_ask`` / ``torque_error`` are not gated.
 - Catalog: ``feature/implement`` declares the required transition;
   ``feature/review`` declares the two-shape transition list.
 - Backwards-compat: existing actions and pre-existing tasks load without
@@ -31,19 +31,19 @@ except ModuleNotFoundError:
 
 install_aiohttp_stub()
 
-from loom.actions import ActionManager
-from loom.db import LoomDB
-from loom.db_board import (
+from torque.actions import ActionManager
+from torque.db import TorqueDB
+from torque.db_board import (
     _BOARD_TASK_COLUMNS,
     _serialize_board_task,
     decode_board_task_row,
 )
-from loom.server_prompts import build_dispatch_postscript
-from loom.state import BoardTask
+from torque.server_prompts import build_dispatch_postscript
+from torque.state import BoardTask
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-CATALOG_DIR = REPO_ROOT / ".loom" / "actions"
+CATALOG_DIR = REPO_ROOT / ".torque" / "actions"
 
 
 class ReviewRequiredActionLoaderTests(unittest.TestCase):
@@ -78,7 +78,7 @@ transitions:
     required: true
 """
         with tempfile.TemporaryDirectory() as tmp:
-            actions_dir = Path(tmp) / ".loom" / "actions" / "feature"
+            actions_dir = Path(tmp) / ".torque" / "actions" / "feature"
             actions_dir.mkdir(parents=True)
             (actions_dir / "implement.yaml").write_text(raw)
             transitions = self.amgr.get_transitions(
@@ -104,7 +104,7 @@ transitions:
     pre_approved: true
 """
         with tempfile.TemporaryDirectory() as tmp:
-            actions_dir = Path(tmp) / ".loom" / "actions" / "feature"
+            actions_dir = Path(tmp) / ".torque" / "actions" / "feature"
             actions_dir.mkdir(parents=True)
             (actions_dir / "review.yaml").write_text(raw)
             transitions = self.amgr.get_transitions(
@@ -133,7 +133,7 @@ transitions:
     pre_approved: true
 """
         with tempfile.TemporaryDirectory() as tmp:
-            actions_dir = Path(tmp) / ".loom" / "actions" / "feature"
+            actions_dir = Path(tmp) / ".torque" / "actions" / "feature"
             actions_dir.mkdir(parents=True)
             (actions_dir / "review.yaml").write_text(raw)
             # find_transition returns the FIRST entry; we just verify the
@@ -153,11 +153,11 @@ class ReviewRequiredBoardTaskMigrationTests(unittest.TestCase):
 
     def test_migration_adds_review_columns_with_defaults(self):
         path = Path(self.tmp.name) / "legacy.db"
-        db = LoomDB(path)
+        db = TorqueDB(path)
         self.addCleanup(db.close)
         db.init()
 
-        # Insert a row, drop the new columns to simulate a pre-LOOM:256
+        # Insert a row, drop the new columns to simulate a pre-TORQUE:256
         # database, then re-run init() and confirm the migration adds
         # them back with the correct defaults.
         db._conn.execute(
@@ -207,11 +207,11 @@ class ReviewRequiredBoardTaskMigrationTests(unittest.TestCase):
         self.assertEqual(decoded["pre_approved_by"], "task-review-7")
 
     def test_legacy_task_loads_with_default_review_fields(self):
-        path = Path(self.tmp.name) / "loom.db"
-        db = LoomDB(path)
+        path = Path(self.tmp.name) / "torque.db"
+        db = TorqueDB(path)
         self.addCleanup(db.close)
         db.init()
-        bt = BoardTask(id="t-leg", task="Pre-LOOM:256 task", group="g")
+        bt = BoardTask(id="t-leg", task="Pre-TORQUE:256 task", group="g")
         db.save_board_task(bt)
         snapshot = db.load_all()
         loaded = snapshot["board_tasks"]["t-leg"]
@@ -258,7 +258,7 @@ class ReviewRequiredPostscriptTests(unittest.TestCase):
         )
         self.assertIn("Review pre-approved", ps)
         self.assertIn("task-review-42", ps)
-        self.assertIn("loom_done", ps)
+        self.assertIn("torque_done", ps)
         self.assertNotIn("Review required", ps)
 
 
@@ -266,7 +266,7 @@ class ReviewRequiredGatePredicateTests(unittest.TestCase):
     """Unit tests for the gate's predicate."""
 
     def setUp(self):
-        from loom.server import _reject_pending_review
+        from torque.server import _reject_pending_review
         self._reject = _reject_pending_review
 
     def _task(self, **kwargs):
@@ -282,16 +282,16 @@ class ReviewRequiredGatePredicateTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result["type"], "review_required")
         self.assertIn("review required", result["message"])
-        self.assertIn("loom_done", result["message"])
+        self.assertIn("torque_done", result["message"])
         # The error suggests the standard derive form.
-        self.assertIn("loom_derive", result["message"])
+        self.assertIn("torque_derive", result["message"])
 
     def test_required_without_pre_approved_rejects_ready(self):
         task = self._task(requires_review=True)
         result = self._reject(task, "ready")
         self.assertIsNotNone(result)
         self.assertEqual(result["type"], "review_required")
-        self.assertIn("loom_ready", result["message"])
+        self.assertIn("torque_ready", result["message"])
 
     def test_required_with_pre_approved_passes(self):
         task = self._task(
@@ -326,7 +326,7 @@ class CatalogActionsTests(unittest.TestCase):
 
     def test_feature_review_declares_blocking_and_pre_approved_transitions(self):
         # Distinct action names disambiguate the two shapes — without
-        # this, `loom_derive(action="feature/implement")` was ambiguous
+        # this, `torque_derive(action="feature/implement")` was ambiguous
         # and the server picked up `pre_approved` from any matching
         # transition, silently bypassing re-review on blocking fixes.
         transitions = self.mgr.get_transitions(
@@ -386,13 +386,13 @@ class ReviewRequiredHandleCommandGateTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub()
         self.state_mod = importlib.reload(
-            importlib.import_module("loom.state")
+            importlib.import_module("torque.state")
         )
         self.actions_mod = importlib.reload(
-            importlib.import_module("loom.actions")
+            importlib.import_module("torque.actions")
         )
         self.server_mod = importlib.reload(
-            importlib.import_module("loom.server")
+            importlib.import_module("torque.server")
         )
 
     @staticmethod
@@ -497,7 +497,7 @@ class ReviewRequiredHandleCommandGateTests(unittest.IsolatedAsyncioTestCase):
         cell.current_task_id = task.id
         return state, cell, task
 
-    async def test_loom_done_refused_when_review_required_and_no_bypass(self):
+    async def test_torque_done_refused_when_review_required_and_no_bypass(self):
         state, cell, task = self._build_state(requires_review=True)
         action_mgr = self.actions_mod.ActionManager()
         handle_command = self._extract_handle_command(
@@ -516,7 +516,7 @@ class ReviewRequiredHandleCommandGateTests(unittest.IsolatedAsyncioTestCase):
         # Task stays In Progress; the gate refuses without mutating lane.
         self.assertEqual(task.lane, "In Progress")
 
-    async def test_loom_ready_refused_when_review_required_and_no_bypass(self):
+    async def test_torque_ready_refused_when_review_required_and_no_bypass(self):
         state, cell, task = self._build_state(requires_review=True)
         action_mgr = self.actions_mod.ActionManager()
         handle_command = self._extract_handle_command(
@@ -531,7 +531,7 @@ class ReviewRequiredHandleCommandGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.get("type"), "review_required")
         self.assertEqual(task.lane, "In Progress")
 
-    async def test_loom_done_allowed_when_pre_approved_by_set(self):
+    async def test_torque_done_allowed_when_pre_approved_by_set(self):
         state, cell, task = self._build_state(
             requires_review=True,
             pre_approved_by="task-review-9",
@@ -592,7 +592,7 @@ class ReviewerDeriveChainE2ETests(unittest.IsolatedAsyncioTestCase):
 
     Catches the round-1 review bug where two transitions targeting the
     same action (``feature/implement``) made
-    ``loom_derive(action="feature/implement")`` ambiguous and the server
+    ``torque_derive(action="feature/implement")`` ambiguous and the server
     would scan all matching transitions, picking up ``pre_approved=True``
     from the bypass shape on EVERY ``feature/implement`` derive — silently
     bypassing re-review on blocking fixes.
@@ -608,13 +608,13 @@ class ReviewerDeriveChainE2ETests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub()
         self.state_mod = importlib.reload(
-            importlib.import_module("loom.state")
+            importlib.import_module("torque.state")
         )
         self.actions_mod = importlib.reload(
-            importlib.import_module("loom.actions")
+            importlib.import_module("torque.actions")
         )
         self.server_mod = importlib.reload(
-            importlib.import_module("loom.server")
+            importlib.import_module("torque.server")
         )
 
     @staticmethod
@@ -813,8 +813,8 @@ class ReviewerDeriveChainE2ETests(unittest.IsolatedAsyncioTestCase):
             f"{derived_task.pre_approved_by!r}",
         )
 
-    async def test_blocking_fix_derived_task_loom_done_refused(self):
-        """End-to-end: blocking-fix derive → ``loom_done`` direct call on
+    async def test_blocking_fix_derived_task_torque_done_refused(self):
+        """End-to-end: blocking-fix derive → ``torque_done`` direct call on
         the derived task refused with ``review_required``.
 
         Models the "after dispatch" state by running the dispatch
@@ -841,7 +841,7 @@ class ReviewerDeriveChainE2ETests(unittest.IsolatedAsyncioTestCase):
             if t.action_name == "feature/implement"
             and t.id != impl_task.id
         ][0]
-        # Mirror dispatch_task's late-bind (LOOM:256): when an action
+        # Mirror dispatch_task's late-bind (TORQUE:256): when an action
         # declares any required transition, requires_review gets stamped
         # on the task at dispatch time.
         if action_mgr.has_required_transition(
@@ -868,7 +868,7 @@ class ReviewerDeriveChainE2ETests(unittest.IsolatedAsyncioTestCase):
         })
         self.assertEqual(
             result.get("type"), "review_required",
-            f"blocking fix worker's direct loom_done should be refused, "
+            f"blocking fix worker's direct torque_done should be refused, "
             f"got {result}",
         )
         # The gate refuses BEFORE moving the task to Done; the derived
@@ -876,8 +876,8 @@ class ReviewerDeriveChainE2ETests(unittest.IsolatedAsyncioTestCase):
         # task that hadn't been dispatched yet).
         self.assertNotEqual(state.board_tasks[derived.id].lane, "Done")
 
-    async def test_pre_approved_derived_task_loom_done_succeeds(self):
-        """End-to-end: pre-approved derive → fix-worker's ``loom_done``
+    async def test_pre_approved_derived_task_torque_done_succeeds(self):
+        """End-to-end: pre-approved derive → fix-worker's ``torque_done``
         succeeds (gate sees ``pre_approved_by`` set, action also opts
         out of ``requires_review``).
         """
@@ -920,7 +920,7 @@ class ReviewerDeriveChainE2ETests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(
             result.get("type") if isinstance(result, dict) else None,
             "review_required",
-            f"pre-approved fix's direct loom_done was unexpectedly "
+            f"pre-approved fix's direct torque_done was unexpectedly "
             f"refused: {result}",
         )
         self.assertEqual(state.board_tasks[derived.id].lane, "Done")

@@ -8,7 +8,7 @@
 
 ## Executive summary
 
-Loom today is already good at tracking **tasks**, **agents**, and **branch boundaries**. The next step is to make the system equally good at tracking the thing the designated engineer actually reasons about most of the time:
+Torque today is already good at tracking **tasks**, **agents**, and **branch boundaries**. The next step is to make the system equally good at tracking the thing the designated engineer actually reasons about most of the time:
 
 > a shared branch/worktree slice of work that evolves through implementation, review, blocker-fix loops, validation, and merge.
 
@@ -64,7 +64,7 @@ It is more precisely:
 
 > only one task at a time should own the stream's foreground mutable execution lane, while review/validation tasks can exist around it without competing for branch ownership or queue priority.
 
-That distinction matters because it lets Loom keep the branch conflict-free **without** losing explicit reviews, blocker fixes, or validation gates.
+That distinction matters because it lets Torque keep the branch conflict-free **without** losing explicit reviews, blocker fixes, or validation gates.
 
 ---
 
@@ -79,7 +79,7 @@ During complex orchestration, the designated engineer is rarely thinking in term
 - Is this branch clean but blocked on human validation?
 - What should happen next without manually steering the agent?
 
-Today Loom has most of the raw ingredients to answer those questions, but they are scattered across:
+Today Torque has most of the raw ingredients to answer those questions, but they are scattered across:
 
 - board task lanes and statuses
 - derived task chains
@@ -122,7 +122,7 @@ The missing abstraction is the stream.
    If a branch is code-clean but waiting on runtime smoke or operator sign-off, the stream should say so explicitly.
 
 7. **MVP should be computed first**  
-   Before adding a new persistent database object, Loom should prove the model by computing stream state from existing task, boundary, review, and verification data.
+   Before adding a new persistent database object, Torque should prove the model by computing stream state from existing task, boundary, review, and verification data.
 
 ---
 
@@ -234,7 +234,7 @@ A stream may include:
 - zero or one validation/merge gate
 - a lightweight communication/visibility timeline
 
-The stream is the place where Loom should answer:
+The stream is the place where Torque should answer:
 
 - what branch is this?
 - which product tasks, workflow tasks, and visibility items belong to it?
@@ -301,18 +301,18 @@ A root task is often too narrow to represent the actual stream.
 
 Example from recent work:
 
-- LOOM:333 — Add Events tab
-- LOOM:334 — Add Worklog tab
-- LOOM:342 — Countdown fix
+- TORQUE:333 — Add Events tab
+- TORQUE:334 — Add Worklog tab
+- TORQUE:342 — Countdown fix
 - multiple review/fix/re-review loops
 - all on the same branch/worktree
 
 There was clearly **one stream**, but multiple root tasks.
 
-If stream state were attached to LOOM:333 alone, then:
+If stream state were attached to TORQUE:333 alone, then:
 
-- LOOM:334 would look like a separate branch state when it was not
-- LOOM:342 would look like a separate story when it was actually a follow-up on the same stream
+- TORQUE:334 would look like a separate branch state when it was not
+- TORQUE:342 would look like a separate story when it was actually a follow-up on the same stream
 - merge readiness would be ambiguous
 
 So the right model is:
@@ -344,26 +344,26 @@ The stream can be synthesized from:
 ```json
 {
   "stream_id": "stream:/repo::branch",
-  "group": "Loom",
+  "group": "Torque",
   "repo_root": "/path/to/repo",
-  "branch": "loom/add-events-tab...",
+  "branch": "torque/add-events-tab...",
 
   "agent_id": "837241c8",
   "agent_name": "add-events-tab-to-the-engineer-panel-for",
   "agent_slug": "add-events-tab-to-the-engineer-panel-for",
 
-  "foreground_task_id": "LOOM:342",
+  "foreground_task_id": "TORQUE:342",
   "foreground_task_title": "Keep Engineer Events next-dispatch timing accurate...",
 
-  "product_task_ids": ["LOOM:333", "LOOM:334", "LOOM:342"],
-  "workflow_task_ids": ["LOOM:333:4", "LOOM:333:5", "LOOM:342:1"],
+  "product_task_ids": ["TORQUE:333", "TORQUE:334", "TORQUE:342"],
+  "workflow_task_ids": ["TORQUE:333:4", "TORQUE:333:5", "TORQUE:342:1"],
   "queued_task_ids": [],
-  "started_task_ids": ["LOOM:342"],
+  "started_task_ids": ["TORQUE:342"],
   "visibility_items": [
     {"kind": "engineer_message", "summary": "Reprioritized blocker fix before queued work"}
   ],
 
-  "latest_boundary_task_id": "LOOM:342:1",
+  "latest_boundary_task_id": "TORQUE:342:1",
   "latest_boundary_task_title": "Review Engineer Events countdown update",
   "latest_boundary_recorded_at": "...",
   "latest_reviewed_commit_sha": "fbcf26b...",
@@ -436,8 +436,8 @@ A stream should expose at most one current queue gate at a time, such as:
 ```json
 {
   "gate_type": "review_blocker",
-  "blocking_task_id": "LOOM:333:5",
-  "source_task_id": "LOOM:333:4",
+  "blocking_task_id": "TORQUE:333:5",
+  "source_task_id": "TORQUE:333:4",
   "reason": "Self-dispatch priming regression must be fixed before resuming queued work",
   "clears_when": "review_passes"
 }
@@ -466,7 +466,7 @@ This is where the ideas converge.
 
 ### Rule: review blockers preempt the queue
 
-If review finds a blocker on the current stream, Loom should:
+If review finds a blocker on the current stream, Torque should:
 
 1. set stream state to `fixing_blockers`
 2. make the blocker-fix task the new foreground task
@@ -475,7 +475,7 @@ If review finds a blocker on the current stream, Loom should:
 
 ### Rule: review completion clears the gate
 
-When blocker-fix review passes, Loom should:
+When blocker-fix review passes, Torque should:
 
 1. clear the blocker gate
 2. recompute stream state
@@ -484,17 +484,17 @@ When blocker-fix review passes, Loom should:
 
 ### Rule: validation may pause the queue
 
-If a stream becomes code-clean and review-clean but still requires manual smoke or human approval, Loom should be able to represent that as:
+If a stream becomes code-clean and review-clean but still requires manual smoke or human approval, Torque should be able to represent that as:
 
 - stream state = `awaiting_human_validation`
 - queue gate = `human_validation`
 - queued tasks = `paused_by_validation` if continuation should pause
 
-In the MVP, Loom only needs to **represent** this gate clearly. Rich validation workflow controls can come later once the stream read model is in place.
+In the MVP, Torque only needs to **represent** this gate clearly. Rich validation workflow controls can come later once the stream read model is in place.
 
 ### Rule: merge conflict preempts the queue
 
-If merge or rebase fails and conflict resolution is required, Loom should:
+If merge or rebase fails and conflict resolution is required, Torque should:
 
 - set stream state to `fixing_blockers` or a more specific `merge_conflict` code_state
 - make the conflict-resolution task foreground
@@ -563,20 +563,20 @@ That is a much better product model.
 │                                                                      │
 │  [A] Engineer Events + Worklog                                         │
 │      state: fixing_blockers                                          │
-│      branch: loom/add-events-tab-to-the-engineer-p-837241c             │
+│      branch: torque/add-events-tab-to-the-engineer-p-837241c             │
 │      foreground: Fix self-dispatch priming regression                │
 │      gate: waiting for re-review                                     │
 │      queue: Add Worklog tab (paused by blocker)                      │
 │                                                                      │
 │  [B] Interactive agent detail                                        │
 │      state: implementing                                             │
-│      branch: loom/make-the-agent-detail-panel-in...                  │
+│      branch: torque/make-the-agent-detail-panel-in...                  │
 │      foreground: Keep labels quick editor open                       │
 │      queue: none                                                     │
 │                                                                      │
 │  [C] Self-dispatch prompt bug                                        │
 │      state: reviewing                                                │
-│      branch: loom/fix-self-dispatch-so-derived-task...               │
+│      branch: torque/fix-self-dispatch-so-derived-task...               │
 │      foreground: Review self-dispatch prompt submission fix          │
 │      queue: none                                                     │
 └──────────────────────────────────────────────────────────────────────┘
@@ -588,7 +588,7 @@ That is a much better product model.
 ┌───────────────────────────────────────────────────────────────┐
 │ Stream: Engineer Events + Worklog                               │
 ├───────────────────────────────────────────────────────────────┤
-│ Branch        loom/add-events-tab-to-the-engineer-p-837241c     │
+│ Branch        torque/add-events-tab-to-the-engineer-p-837241c     │
 │ State         Awaiting human validation                        │
 │ Code          Reviewed clean                                   │
 │ Validation    Pending manual smoke                             │
@@ -596,7 +596,7 @@ That is a much better product model.
 │ Gate          Live/manual Engineer-panel smoke pending           │
 │ Next action   Merge after validation                           │
 │ Latest commit fbcf26b                                          │
-│ Roots         LOOM:333, LOOM:334, LOOM:342                     │
+│ Roots         TORQUE:333, TORQUE:334, TORQUE:342                     │
 │                                                              │
 │ Foreground    none                                             │
 │ Queue         none                                             │
@@ -613,11 +613,11 @@ That is a much better product model.
 │ Gate          Review blocker                                  │
 │ Reason        Self-dispatch priming regression must be fixed  │
 │                                                              │
-│ Foreground    LOOM:333:5  Fix review blockers                 │
+│ Foreground    TORQUE:333:5  Fix review blockers                 │
 │                                                              │
 │ Queue                                                         │
-│   1. LOOM:334   Add Worklog tab            paused_by_blocker  │
-│   2. LOOM:342   Countdown update           queued             │
+│   1. TORQUE:334   Add Worklog tab            paused_by_blocker  │
+│   2. TORQUE:342   Countdown update           queued             │
 │                                                              │
 │ Auto-resume    When blocker review passes                     │
 └───────────────────────────────────────────────────────────────┘
@@ -773,7 +773,7 @@ For the stream-owning implementation agent, show:
 
 ## Product-task vs workflow-task vs visibility-item rules
 
-To keep streams useful without adding new noise, Loom should classify stream members into three presentation buckets:
+To keep streams useful without adding new noise, Torque should classify stream members into three presentation buckets:
 
 ### Product tasks
 These are the deliverables the user actually asked for. They are the things that should naturally appear as root tasks in backlog planning and wave selection.
@@ -808,7 +808,7 @@ Examples:
 - Message/thread status should be separate from task status. Useful states include: `informational`, `awaiting_reply`, `acknowledged`, `replied`, and `unread`.
 - Visibility items should render as a threaded stream/agent timeline rather than as flat task spam.
 - Visibility items should not affect backlog counts, in-progress counts, queue ordering, or wave planning.
-- If Loom still stores internal task-like records for correlation, UI layers must classify them as visibility-only and hide them from root/backlog/product views by default.
+- If Torque still stores internal task-like records for correlation, UI layers must classify them as visibility-only and hide them from root/backlog/product views by default.
 
 ### Promotion rule
 A visibility item should only be promoted into a workflow task when it creates a real completion boundary that needs explicit ownership and closure. Examples might include an explicit validation handoff or a required operator follow-up. Simple steering messages, reprioritization notes, and acknowledgements should remain visibility items.
@@ -817,7 +817,7 @@ A visibility item should only be promoted into a workflow task when it creates a
 - Product tasks should appear in backlog/wave planning as the main deliverables.
 - Workflow tasks should be shown inside the stream as operational steps, ideally collapsed under the stream unless expanded.
 - Visibility items should appear in stream history/timeline and agent history, not as root/product task cards by default.
-- A Engineer question/message should never be treated as a root/product task. If Loom still stores it as an internal record for correlation, UI layers should classify and render it as visibility-only.
+- A Engineer question/message should never be treated as a root/product task. If Torque still stores it as an internal record for correlation, UI layers should classify and render it as visibility-only.
 
 ## Proposed controls
 
@@ -882,11 +882,11 @@ Manual validation is part of Phase 1 at the **read-model level**. The stream mus
 
 Likely new module:
 
-- `loom/worktree_streams.py`
+- `torque/worktree_streams.py`
 
 Likely consumers:
 
-- `loom/mcp_engineer.py`
+- `torque/mcp_engineer.py`
 - Engineer board UI
 
 Validation behavior included in Phase 1:
@@ -976,7 +976,7 @@ That is the clean connection between all the recommendations.
 
 ## Final recommendation
 
-Loom should adopt a **stream-centered orchestration model**:
+Torque should adopt a **stream-centered orchestration model**:
 
 1. treat **streams** as the branch/worktree-level execution state machine
 2. treat **queue state and priority** as stream behavior
@@ -984,7 +984,7 @@ Loom should adopt a **stream-centered orchestration model**:
 4. keep **tasks and derived tasks** as the explicit, auditable work records inside each stream
 5. keep **Engineer/worker communication** as visibility-thread state by default, promoting it to workflow tasks only when explicit closure semantics are needed
 
-If implemented this way, Loom will become much easier to reason about in exactly the places that currently slow orchestration down:
+If implemented this way, Torque will become much easier to reason about in exactly the places that currently slow orchestration down:
 
 - review/fix loops
 - same-agent queued follow-ups

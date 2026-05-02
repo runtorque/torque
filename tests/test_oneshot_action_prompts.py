@@ -1,7 +1,7 @@
 import unittest
 from pathlib import Path
 
-from loom.actions import ActionManager
+from torque.actions import ActionManager
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -38,10 +38,10 @@ class OneshotActionPromptTests(unittest.TestCase):
         }
 
         rendered_prompts = [
-            mgr.render_prompt("oneshot/fix", {}, base_dir=str(REPO_ROOT), loom_context=clean_context),
-            mgr.render_prompt("oneshot/fix", {}, base_dir=str(REPO_ROOT), loom_context=follow_up_context),
-            mgr.render_prompt("oneshot/feature", {}, base_dir=str(REPO_ROOT), loom_context=clean_context),
-            mgr.render_prompt("oneshot/feature", {}, base_dir=str(REPO_ROOT), loom_context=follow_up_context),
+            mgr.render_prompt("oneshot/fix", {}, base_dir=str(REPO_ROOT), torque_context=clean_context),
+            mgr.render_prompt("oneshot/fix", {}, base_dir=str(REPO_ROOT), torque_context=follow_up_context),
+            mgr.render_prompt("oneshot/feature", {}, base_dir=str(REPO_ROOT), torque_context=clean_context),
+            mgr.render_prompt("oneshot/feature", {}, base_dir=str(REPO_ROOT), torque_context=follow_up_context),
         ]
 
         for prompt in rendered_prompts:

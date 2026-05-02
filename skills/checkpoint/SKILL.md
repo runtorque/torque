@@ -6,7 +6,7 @@ argument-hint: [message]
 
 Create a checkpoint commit in the current worktree.
 
-Run: `loom worktree checkpoint`
+Run: `torque worktree checkpoint`
 
 If $ARGUMENTS is provided, mention it as context for what was checkpointed.
 

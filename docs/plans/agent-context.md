@@ -8,7 +8,7 @@
 
 ## The Problem
 
-Loom can dispatch a task to an agent, and agents can derive follow-up tasks via `loom ai derive`. But every derivation spawns a new agent with a fresh context window. This is wasteful in three scenarios:
+Torque can dispatch a task to an agent, and agents can derive follow-up tasks via `torque ai derive`. But every derivation spawns a new agent with a fresh context window. This is wasteful in three scenarios:
 
 1. **Review → fix cycle**: Agent A implements, Agent B reviews and finds issues, then derives a "fix" task. Today this spawns Agent C. But Agent A already has the full codebase in context — the fix task should go back to Agent A.
 2. **Sequential dispatch**: A user finishes a task with an agent, then wants to dispatch a related follow-up to the same agent. The agent already understands the codebase, but the action template has no way to know this — it sends the full system prompt again, wasting tokens and context window.
@@ -20,21 +20,21 @@ In all three cases, the action template needs to know: "is this agent starting f
 
 ## Design Principles
 
-1. **Templates opt in** — The `loom` namespace is always injected into the Jinja2 context, but templates that don't reference it behave identically to today. No existing action breaks.
+1. **Templates opt in** — The `torque` namespace is always injected into the Jinja2 context, but templates that don't reference it behave identically to today. No existing action breaks.
 2. **Context is inferred, not declared** — The system determines `is_clean` from a simple counter on the agent. No explicit "context mode" to configure.
-3. **Derive targets are explicit** — `--agent <slug>` and `--self` are opt-in flags on `loom ai derive`. The default behavior (spawn a new agent) is unchanged.
-4. **Rich namespace, shallow depth** — The `loom` object exposes agent, worktree, task, and terminal state in a flat, predictable structure. Template authors don't need to understand Loom internals — just dot into what they need.
+3. **Derive targets are explicit** — `--agent <slug>` and `--self` are opt-in flags on `torque ai derive`. The default behavior (spawn a new agent) is unchanged.
+4. **Rich namespace, shallow depth** — The `torque` object exposes agent, worktree, task, and terminal state in a flat, predictable structure. Template authors don't need to understand Torque internals — just dot into what they need.
 
 ---
 
 ## Architecture
 
-### The `loom` Jinja2 namespace
+### The `torque` Jinja2 namespace
 
-Every prompt render injects a `loom` dict into the Jinja2 context alongside `TASK` and user-defined action variables. The namespace is reserved — action variables named `loom` are rejected on save.
+Every prompt render injects a `torque` dict into the Jinja2 context alongside `TASK` and user-defined action variables. The namespace is reserved — action variables named `torque` are rejected on save.
 
 ```python
-loom = {
+torque = {
     "agent": {
         "name":      "my-reviewer",        # display name
         "slug":      "my-reviewer",         # unique identifier
@@ -53,8 +53,8 @@ loom = {
 
     "worktree": {
         "active":       True,                                       # worktree exists
-        "path":         "/Users/me/project/.loom/worktrees/...",    # absolute path
-        "branch":       "loom/my-reviewer-a1b2c3d4",               # worktree branch
+        "path":         "/Users/me/project/.torque/worktrees/...",    # absolute path
+        "branch":       "torque/my-reviewer-a1b2c3d4",               # worktree branch
         "base_branch":  "main",                                     # forked from
         "dirty":        True,                                       # uncommitted changes
         "diff":         {"files": 3, "insertions": 42, "deletions": 7},
@@ -77,7 +77,7 @@ loom = {
             "slug":            "my-reviewer:logs",
             "current_path":    "/Users/me/project",
             "current_process": "tail",
-            "current_branch":  "loom/my-reviewer-a1b2c3d4",
+            "current_branch":  "torque/my-reviewer-a1b2c3d4",
         },
     ],
 }
@@ -88,16 +88,16 @@ loom = {
 ```
 Agent B (reviewer) finishes task T2, wants to send fix back to Agent A
   │
-  ├── loom ai derive "Fix the 3 auth issues"   ← creates T3
+  ├── torque ai derive "Fix the 3 auth issues"   ← creates T3
   │     --action fix                               T3.parent_task_id = T2.id
   │     --agent agent-a                            T3.pipeline_depth = 2
   │
   └── Server resolves --agent agent-a
         │
         ├── dispatch_data = {agent_id: A.id}    ← reuses Agent A
-        ├── Renders prompt with loom context:
-        │     loom.context.is_clean = False      (A.tasks_dispatched > 0)
-        │     loom.context.previous_tasks = [{task: "Implement auth", ...}]
+        ├── Renders prompt with torque context:
+        │     torque.context.is_clean = False      (A.tasks_dispatched > 0)
+        │     torque.context.previous_tasks = [{task: "Implement auth", ...}]
         ├── Sends rendered prompt to A's terminal
         └── Agent A receives abbreviated prompt  ← already has codebase context
 ```
@@ -107,9 +107,9 @@ Agent B (reviewer) finishes task T2, wants to send fix back to Agent A
 ```
 Agent A finishes phase 1 of a multi-phase action
   │
-  ├── loom ai derive "Now add tests"           ← creates T2
+  ├── torque ai derive "Now add tests"           ← creates T2
   │     --action test                              T2.parent_task_id = T1.id
-  │     --self                                     equivalent to --agent $LOOM_CELL_ID
+  │     --self                                     equivalent to --agent $TORQUE_CELL_ID
   │
   └── Server dispatches T2 to Agent A
         │
@@ -124,8 +124,8 @@ Agent A finishes phase 1 of a multi-phase action
 User dispatches task T2 from the board UI, selecting Agent A as target
   │
   ├── dispatch_task with agent_id = A.id        ← reuses Agent A
-  ├── Prompt rendered with loom context
-  │     loom.context.is_clean = False
+  ├── Prompt rendered with torque context
+  │     torque.context.is_clean = False
   └── Sent to Agent A's terminal immediately
 ```
 
@@ -136,8 +136,8 @@ User dispatches task T2 from the board UI, selecting Agent A as target
 ### Conditional system prompt
 
 ```jinja2
-{% if loom.context.is_clean %}
-You are a senior engineer working on the {{ loom.worktree.base_branch | default("main") }} branch.
+{% if torque.context.is_clean %}
+You are a senior engineer working on the {{ torque.worktree.base_branch | default("main") }} branch.
 Review the code carefully and provide detailed, actionable feedback.
 
 {{ TASK }}
@@ -149,10 +149,10 @@ Review the code carefully and provide detailed, actionable feedback.
 ### Worktree-aware instructions
 
 ```jinja2
-{% if loom.worktree.active %}
-You're working in worktree branch `{{ loom.worktree.branch }}`, forked from `{{ loom.worktree.base_branch }}`.
-{% if loom.worktree.dirty %}
-Note: there are uncommitted changes ({{ loom.worktree.diff.files }} files, +{{ loom.worktree.diff.insertions }}/-{{ loom.worktree.diff.deletions }}).
+{% if torque.worktree.active %}
+You're working in worktree branch `{{ torque.worktree.branch }}`, forked from `{{ torque.worktree.base_branch }}`.
+{% if torque.worktree.dirty %}
+Note: there are uncommitted changes ({{ torque.worktree.diff.files }} files, +{{ torque.worktree.diff.insertions }}/-{{ torque.worktree.diff.deletions }}).
 {% endif %}
 {% endif %}
 
@@ -162,8 +162,8 @@ Note: there are uncommitted changes ({{ loom.worktree.diff.files }} files, +{{ l
 ### Pipeline depth awareness
 
 ```jinja2
-{% if loom.task.is_derived %}
-This is a follow-up task at depth {{ loom.task.depth }} in the pipeline.
+{% if torque.task.is_derived %}
+This is a follow-up task at depth {{ torque.task.depth }} in the pipeline.
 {% endif %}
 
 {{ TASK }}
@@ -172,9 +172,9 @@ This is a follow-up task at depth {{ loom.task.depth }} in the pipeline.
 ### Terminal awareness
 
 ```jinja2
-{% if loom.terminals %}
+{% if torque.terminals %}
 You have these terminal sessions available:
-{% for t in loom.terminals %}
+{% for t in torque.terminals %}
 - {{ t.name }}{% if t.current_process %} (running: {{ t.current_process }}){% endif %}
 {% endfor %}
 {% endif %}
@@ -185,16 +185,16 @@ You have these terminal sessions available:
 ### Full multi-phase action
 
 ```jinja2
-{% if loom.context.is_clean %}
+{% if torque.context.is_clean %}
 You are an implementation agent. Your job is to implement features in this codebase.
 
 ## Environment
-- Working directory: {{ loom.agent.directory }}
-{% if loom.worktree.active %}
-- Branch: `{{ loom.worktree.branch }}` (forked from `{{ loom.worktree.base_branch }}`)
+- Working directory: {{ torque.agent.directory }}
+{% if torque.worktree.active %}
+- Branch: `{{ torque.worktree.branch }}` (forked from `{{ torque.worktree.base_branch }}`)
 {% endif %}
-{% if loom.terminals %}
-- Terminals: {{ loom.terminals | map(attribute='name') | join(', ') }}
+{% if torque.terminals %}
+- Terminals: {{ torque.terminals | map(attribute='name') | join(', ') }}
 {% endif %}
 
 ## Task
@@ -203,7 +203,7 @@ You are an implementation agent. Your job is to implement features in this codeb
 ## Guidelines
 - Write clean, tested code
 - Commit frequently with descriptive messages
-- When done, use `loom ai derive` to send to review
+- When done, use `torque ai derive` to send to review
 {% else %}
 Continue working in this session.
 
@@ -228,11 +228,11 @@ class AgentCell:
 
 This counter is incremented in `dispatch_task` **after** the prompt is rendered and sent. On the first dispatch, the counter is `0`, so `is_clean = True`. On the second dispatch, it's `1`, so `is_clean = False`.
 
-The counter is never decremented or reset. Even after `loom ai ready` (which unlinks the task from the agent), the counter persists, correctly reflecting that the agent has prior context.
+The counter is never decremented or reset. Even after `torque ai ready` (which unlinks the task from the agent), the counter persists, correctly reflecting that the agent has prior context.
 
 ### 2. Schema migration — `db.py`
 
-In `LoomDB.init()`:
+In `TorqueDB.init()`:
 
 ```python
 try:
@@ -244,13 +244,13 @@ except Exception:
 
 Update `save_agent` to persist the field. Update `load_all` to read it back (with `0` default for existing rows).
 
-### 3. Loom context builder — `server.py`
+### 3. Torque context builder — `server.py`
 
-New helper function that assembles the `loom` dict from existing state:
+New helper function that assembles the `torque` dict from existing state:
 
 ```python
-def _build_loom_context(state, cell, task):
-    """Build the loom namespace dict for Jinja2 template rendering."""
+def _build_torque_context(state, cell, task):
+    """Build the torque namespace dict for Jinja2 template rendering."""
 
     # Agent identity
     agent = {
@@ -320,12 +320,12 @@ def _build_loom_context(state, cell, task):
     }
 ```
 
-### 4. Thread loom context through rendering — `actions.py`
+### 4. Thread torque context through rendering — `actions.py`
 
-`render_prompt` and `render_action` accept an optional `loom_context` parameter:
+`render_prompt` and `render_action` accept an optional `torque_context` parameter:
 
 ```python
-def render_prompt(self, name, variables, base_dir="", loom_context=None):
+def render_prompt(self, name, variables, base_dir="", torque_context=None):
     raw = self._load_raw(name, base_dir)
     if raw is None:
         return None
@@ -339,23 +339,23 @@ def render_prompt(self, name, variables, base_dir="", loom_context=None):
     prompt_raw = _migrate_syntax(prompt_raw)
 
     render_vars = dict(variables)
-    if loom_context:
-        render_vars["loom"] = loom_context
+    if torque_context:
+        render_vars["torque"] = torque_context
     return self._render_str(prompt_raw, render_vars)
 ```
 
-Add validation in `save_action` (or `get_action_vars`) to reject action variables named `loom`:
+Add validation in `save_action` (or `get_action_vars`) to reject action variables named `torque`:
 
 ```python
-if "loom" in discovered_vars:
+if "torque" in discovered_vars:
     return {"type": "error",
-            "message": "'loom' is a reserved variable name"}
+            "message": "'torque' is a reserved variable name"}
 ```
 
-The Jinja2 `SandboxedEnvironment` already uses `StrictUndefined`, so referencing `loom.foo` in a template where `loom` isn't injected (e.g., a preview render without dispatch context) would raise an error. To handle this gracefully, switch to `ChainableUndefined` or inject a stub `loom` dict with safe defaults during preview renders:
+The Jinja2 `SandboxedEnvironment` already uses `StrictUndefined`, so referencing `torque.foo` in a template where `torque` isn't injected (e.g., a preview render without dispatch context) would raise an error. To handle this gracefully, switch to `ChainableUndefined` or inject a stub `torque` dict with safe defaults during preview renders:
 
 ```python
-LOOM_CONTEXT_STUB = {
+TORQUE_CONTEXT_STUB = {
     "agent":     {"name": "", "slug": "", "type": "", "group": "", "directory": ""},
     "context":   {"is_clean": True, "tasks_dispatched": 0, "previous_tasks": []},
     "worktree":  {"active": False, "path": "", "branch": "", "base_branch": "",
@@ -366,24 +366,24 @@ LOOM_CONTEXT_STUB = {
 }
 ```
 
-This stub is used when `loom_context` is `None` (preview renders, validation), so templates referencing `loom.*` don't error during preview.
+This stub is used when `torque_context` is `None` (preview renders, validation), so templates referencing `torque.*` don't error during preview.
 
 ### 5. Dispatch integration — `server.py` `dispatch_task`
 
 In the prompt rendering section of `dispatch_task`, after resolving the target agent (`cell`) and task:
 
 ```python
-# Build loom context for template rendering
-loom_ctx = _build_loom_context(state, cell, task)
+# Build torque context for template rendering
+torque_ctx = _build_torque_context(state, cell, task)
 
-# Render prompt with loom context
+# Render prompt with torque context
 if task.action_name and not data.get("force_no_action"):
     base_dir = cell.directory or await _resolve_base_dir(group)
     tvars = {"TASK": task.task, **(task.action_vars or {})}
     rendered = action_mgr.render_prompt(
         task.action_name, tvars,
         base_dir=base_dir,
-        loom_context=loom_ctx)
+        torque_context=torque_ctx)
     ...
 ```
 
@@ -403,9 +403,9 @@ Add an `is_clean` parameter to `_build_postscript`. When `False`, emit a one-lin
 ```python
 def _build_postscript(task, action_data, transitions, is_clean=True):
     if not is_clean:
-        return "\n\n---\nUse `loom ai done` when finished, or `loom ai blocked \"reason\"` if stuck.\n"
+        return "\n\n---\nUse `torque ai done` when finished, or `torque ai blocked \"reason\"` if stuck.\n"
 
-    # ... existing full postscript with all loom ai commands documented ...
+    # ... existing full postscript with all torque ai commands documented ...
 ```
 
 Pass `is_clean` from the dispatch context:
@@ -413,7 +413,7 @@ Pass `is_clean` from the dispatch context:
 ```python
 postscript = _build_postscript(
     task, action_data, transitions,
-    is_clean=loom_ctx["context"]["is_clean"])
+    is_clean=torque_ctx["context"]["is_clean"])
 ```
 
 ### 7. Derive-to-agent — `server.py` `ai_report`
@@ -463,7 +463,7 @@ elif action == "derive":
 
 The `_resolve_agent` helper reuses the same resolution logic as the CLI's `resolve_cell` — match by ID, slug, name (case-insensitive), or ID prefix.
 
-**Self-dispatch delay**: When `reuse_self` is set, the calling agent is still processing the `loom ai derive` CLI call. The prompt must arrive after the agent's current turn finishes. In `dispatch_task`, when the target is the calling agent:
+**Self-dispatch delay**: When `reuse_self` is set, the calling agent is still processing the `torque ai derive` CLI call. The prompt must arrive after the agent's current turn finishes. In `dispatch_task`, when the target is the calling agent:
 
 ```python
 if agent_id and cell.session_id:
@@ -487,7 +487,7 @@ if agent_id and cell.session_id:
 
 The `_self_dispatch` flag is set internally when `reuse_self` flows through to `dispatch_task`.
 
-### 8. CLI flags — `bin/loom`
+### 8. CLI flags — `bin/torque`
 
 Add `--agent` and `--self` to the `ai derive` subcommand:
 
@@ -535,16 +535,16 @@ if args.reuse_self and args.agent:
 
 ### 9. Preview rendering — `server.py` `preview_prompt` / `render_action`
 
-The `preview_prompt` and `render_action` commands render prompts outside of a dispatch context (no real agent or task). Use `LOOM_CONTEXT_STUB` so templates referencing `loom.*` render with safe defaults:
+The `preview_prompt` and `render_action` commands render prompts outside of a dispatch context (no real agent or task). Use `TORQUE_CONTEXT_STUB` so templates referencing `torque.*` render with safe defaults:
 
 ```python
 # In preview_prompt handler
 rendered = action_mgr.render_prompt(
     action_name, tvars, base_dir=base_dir,
-    loom_context=LOOM_CONTEXT_STUB)
+    torque_context=TORQUE_CONTEXT_STUB)
 ```
 
-This means `loom.context.is_clean` is `True` in previews, which shows the "full prompt" branch — the more informative preview for the user.
+This means `torque.context.is_clean` is `True` in previews, which shows the "full prompt" branch — the more informative preview for the user.
 
 ---
 
@@ -552,11 +552,11 @@ This means `loom.context.is_clean` is `True` in previews, which shows the "full 
 
 | File | Change |
 |---|---|
-| `loom/state.py` | Add `tasks_dispatched: int = 0` field to `AgentCell` |
-| `loom/db.py` | `ALTER TABLE` migration for `tasks_dispatched`. Update `save_agent` / `load_all`. |
-| `loom/actions.py` | `render_prompt` / `render_action`: accept `loom_context` param, inject as `loom` into Jinja2 vars. Define `LOOM_CONTEXT_STUB`. |
-| `loom/server.py` | New `_build_loom_context()` helper. Wire into `dispatch_task` prompt rendering. Increment `tasks_dispatched` after send. Pass `is_clean` to `_build_postscript`. Handle `target_agent` / `reuse_self` in `ai_report` derive. Add `_self_dispatch` delay path. Use `LOOM_CONTEXT_STUB` in preview renders. Reject `loom` as action variable name in `save_action`. |
-| `bin/loom` | Add `--agent` and `--self` flags to `ai derive`. Mutual exclusivity check. Wire to API params. |
+| `torque/state.py` | Add `tasks_dispatched: int = 0` field to `AgentCell` |
+| `torque/db.py` | `ALTER TABLE` migration for `tasks_dispatched`. Update `save_agent` / `load_all`. |
+| `torque/actions.py` | `render_prompt` / `render_action`: accept `torque_context` param, inject as `torque` into Jinja2 vars. Define `TORQUE_CONTEXT_STUB`. |
+| `torque/server.py` | New `_build_torque_context()` helper. Wire into `dispatch_task` prompt rendering. Increment `tasks_dispatched` after send. Pass `is_clean` to `_build_postscript`. Handle `target_agent` / `reuse_self` in `ai_report` derive. Add `_self_dispatch` delay path. Use `TORQUE_CONTEXT_STUB` in preview renders. Reject `torque` as action variable name in `save_action`. |
+| `bin/torque` | Add `--agent` and `--self` flags to `ai derive`. Mutual exclusivity check. Wire to API params. |
 
 **No changes to**: action YAML format, board/pipeline data model, task chaining, frontend UI, WebSocket protocol, delta ops.
 
@@ -564,7 +564,7 @@ This means `loom.context.is_clean` is `True` in previews, which shows the "full 
 
 ## Edge Cases
 
-### `loom ai ready` then re-dispatch
+### `torque ai ready` then re-dispatch
 
 `ready` clears `task.agent_id`, so `previous_tasks` will be empty on the next dispatch. But `tasks_dispatched` (the counter on the agent) is never decremented, so `is_clean` correctly remains `False`. The agent still has conversational context even though the task link is gone.
 
@@ -574,7 +574,7 @@ If the agent's iTerm2 session is relaunched (e.g., via session resume), the Clau
 
 ### Preview renders
 
-Templates referencing `loom.*` get `LOOM_CONTEXT_STUB` during preview, which defaults to `is_clean: True`. This shows the "full prompt" branch in previews, which is the most useful view.
+Templates referencing `torque.*` get `TORQUE_CONTEXT_STUB` during preview, which defaults to `is_clean: True`. This shows the "full prompt" branch in previews, which is the most useful view.
 
 ### `--agent` targeting an agent in a different group
 
@@ -588,4 +588,4 @@ When the target agent has no worktree but the calling agent does, no worktree in
 
 ### Self-dispatch timing
 
-The 3-second delay for `--self` dispatches is a heuristic. The calling agent is executing `loom ai derive --self` as a tool call. The CLI returns immediately, the agent's current turn finishes, and then the new prompt arrives. The 3-second delay covers the gap between the CLI response and the agent outputting its final message. If the agent is slow, the prompt may arrive mid-output — but this is the same race condition as the existing 2-second boot delay for new agents, which works in practice.
+The 3-second delay for `--self` dispatches is a heuristic. The calling agent is executing `torque ai derive --self` as a tool call. The CLI returns immediately, the agent's current turn finishes, and then the new prompt arrives. The 3-second delay covers the gap between the CLI response and the agent outputting its final message. If the agent is slow, the prompt may arrive mid-output — but this is the same race condition as the existing 2-second boot delay for new agents, which works in practice.

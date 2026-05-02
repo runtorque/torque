@@ -360,10 +360,10 @@ function createSandbox(overrides = {}) {
     sendCalls: [],
     esc(value) { return String(value); },
     formatCode(value) { return String(value); },
-    isSystemLabel(label) { return String(label).startsWith('loom:'); },
+    isSystemLabel(label) { return String(label).startsWith('torque:'); },
     displayLabel(label) {
       const text = String(label);
-      return text.startsWith('loom:') ? text.slice(5) : text;
+      return text.startsWith('torque:') ? text.slice(5) : text;
     },
     labelColor() { return '#58a6ff'; },
     _schedFormatTime(value) { return value; },
@@ -2059,7 +2059,7 @@ test('board lane tabs exclude engineer message followups from actionable counts'
       task: 'Engineer: Need status',
       lane: 'Backlog',
       position: 2,
-      labels: ['loom:engineer-message'],
+      labels: ['torque:engineer-message'],
       status: 'Awaiting Reply',
     },
   };
@@ -2296,7 +2296,7 @@ test('wide embedded board lanes can be collapsed and persist locally', () => {
   assert.match(panel.innerHTML, /Show Done lane/);
   assert.doesNotMatch(panel.innerHTML, /<div class="board-card">done<\/div>/);
   assert.deepEqual(
-    JSON.parse(context.localStorage.getItem('loom.board.hidden_wide_lanes_by_group')),
+    JSON.parse(context.localStorage.getItem('torque.board.hidden_wide_lanes_by_group')),
     { alpha: { Done: true } },
   );
 
@@ -2306,7 +2306,7 @@ test('wide embedded board lanes can be collapsed and persist locally', () => {
 
   context.boardToggleWideLane(null, 'Done');
   assert.match(panel.innerHTML, /<div class="board-card">done<\/div>/);
-  assert.equal(context.localStorage.getItem('loom.board.hidden_wide_lanes_by_group'), null);
+  assert.equal(context.localStorage.getItem('torque.board.hidden_wide_lanes_by_group'), null);
 
   panel.clientWidth = 820;
   context.boardToggleWideLane(null, 'Backlog');
@@ -2431,8 +2431,8 @@ test('renderBoard rerender moves cascaded task from In Progress to Done lane', (
   runInContext(context, `
     state.board_lanes = ['Backlog', 'In Progress', 'Done'];
     state.board_tasks = {
-      'LOOM:77': {
-        id: 'LOOM:77',
+      'TORQUE:77': {
+        id: 'TORQUE:77',
         task: 'Ship cascaded review chain',
         group: 'alpha',
         lane: 'In Progress',
@@ -2447,20 +2447,20 @@ test('renderBoard rerender moves cascaded task from In Progress to Done lane', (
 
   context.renderBoard();
 
-  assert.match(panel.innerHTML, /card-LOOM:77-lane-In Progress/);
-  assert.doesNotMatch(panel.innerHTML, /card-LOOM:77-lane-Done/);
+  assert.match(panel.innerHTML, /card-TORQUE:77-lane-In Progress/);
+  assert.doesNotMatch(panel.innerHTML, /card-TORQUE:77-lane-Done/);
 
   runInContext(context, `
-    state.board_tasks['LOOM:77'] = Object.assign(
+    state.board_tasks['TORQUE:77'] = Object.assign(
       {},
-      state.board_tasks['LOOM:77'],
+      state.board_tasks['TORQUE:77'],
       { lane: 'Done' }
     );
   `);
   context.renderBoard();
 
-  assert.doesNotMatch(panel.innerHTML, /card-LOOM:77-lane-In Progress/);
-  assert.match(panel.innerHTML, /card-LOOM:77-lane-Done/);
+  assert.doesNotMatch(panel.innerHTML, /card-TORQUE:77-lane-In Progress/);
+  assert.match(panel.innerHTML, /card-TORQUE:77-lane-Done/);
 });
 
 test('wide standalone lane columns keep their direct children from shrinking', () => {
@@ -2697,7 +2697,7 @@ test('board saved views persist per group and apply without extra hidden state',
         name: 'Review Queue',
         search_query: 'review',
         quick_view: '',
-        filter_labels: ['loom:blocked'],
+        filter_labels: ['torque:blocked'],
         filter_actions: ['feature/review'],
         filter_agents: [],
         filter_health: [],
@@ -2709,7 +2709,7 @@ test('board saved views persist per group and apply without extra hidden state',
       id: 'alphaTask',
       group: 'alpha',
       task: 'Review auth flow',
-      labels: ['loom:blocked'],
+      labels: ['torque:blocked'],
       action_name: 'feature/review',
       lane: 'Backlog',
       position: 2,
@@ -2744,7 +2744,7 @@ test('board saved views persist per group and apply without extra hidden state',
           name: 'Review Queue',
           search_query: 'review',
           quick_view: '',
-          filter_labels: ['loom:blocked'],
+          filter_labels: ['torque:blocked'],
           filter_actions: ['feature/review'],
           filter_agents: [],
           filter_health: [],
@@ -2765,7 +2765,7 @@ test('board saved views persist per group and apply without extra hidden state',
   context.boardApplySavedView('Review Queue');
   assert.equal(runInContext(context, '_boardSearchQuery'), 'review');
   assert.equal(runInContext(context, '_boardQuickView'), '');
-  assert.deepEqual(jsonValue(context, '_boardFilterLabels'), ['loom:blocked']);
+  assert.deepEqual(jsonValue(context, '_boardFilterLabels'), ['torque:blocked']);
   assert.deepEqual(jsonValue(context, '_boardFilterActions'), ['feature/review']);
   assert.equal(
     context.sendCalls.at(-1).cmd,
@@ -2781,7 +2781,7 @@ test('board saved views persist per group and apply without extra hidden state',
           name: 'Review Queue',
           search_query: 'review',
           quick_view: '',
-          filter_labels: ['loom:blocked'],
+          filter_labels: ['torque:blocked'],
           filter_actions: ['feature/review'],
           filter_agents: [],
           filter_health: [],
@@ -3948,9 +3948,9 @@ test('_renderBoardCard uses canonical blocker IDs for single and multi-dependenc
   loadBoardScripts(context);
 
   context.state.board_tasks = {
-    'LOOM:302': { id: 'LOOM:302', task: 'API contract', lane: 'To Do', group: 'alpha' },
-    'LOOM:303': { id: 'LOOM:303', task: 'Schema migration', lane: 'Backlog', group: 'alpha' },
-    'LOOM:304': { id: 'LOOM:304', task: 'Docs', lane: 'In Progress', group: 'alpha' },
+    'TORQUE:302': { id: 'TORQUE:302', task: 'API contract', lane: 'To Do', group: 'alpha' },
+    'TORQUE:303': { id: 'TORQUE:303', task: 'Schema migration', lane: 'Backlog', group: 'alpha' },
+    'TORQUE:304': { id: 'TORQUE:304', task: 'Docs', lane: 'In Progress', group: 'alpha' },
   };
 
   const singleHtml = runInContext(context, `
@@ -3959,7 +3959,7 @@ test('_renderBoardCard uses canonical blocker IDs for single and multi-dependenc
       group: 'alpha',
       task: 'Single blocked task',
       lane: 'Backlog',
-      depends_on: ['LOOM:302'],
+      depends_on: ['TORQUE:302'],
       health_state: 'blocked',
       health_details: { reasons: ['dependency_blocked'] },
       labels: []
@@ -3971,15 +3971,15 @@ test('_renderBoardCard uses canonical blocker IDs for single and multi-dependenc
       group: 'alpha',
       task: 'Multi blocked task',
       lane: 'Backlog',
-      depends_on: ['LOOM:302', 'LOOM:303', 'LOOM:304'],
+      depends_on: ['TORQUE:302', 'TORQUE:303', 'TORQUE:304'],
       health_state: 'blocked',
       health_details: { reasons: ['dependency_blocked'] },
       labels: []
     }, {}, 0)
   `);
 
-  assert.equal((singleHtml.match(/Blocked by LOOM:302/g) || []).length, 1);
-  assert.match(multiHtml, />Blocked by LOOM:302 \+2 more</);
+  assert.equal((singleHtml.match(/Blocked by TORQUE:302/g) || []).length, 1);
+  assert.match(multiHtml, />Blocked by TORQUE:302 \+2 more</);
   assert.doesNotMatch(singleHtml + multiHtml, /Blocked by deps|Blocked by 1|>Blocked</);
 });
 
@@ -4239,7 +4239,7 @@ test('renderBoardCard shows branch boundary review notes', () => {
       position: 1,
       worktree_boundary: {
         repo_root: '/repo',
-        branch: 'loom/worker',
+        branch: 'torque/worker',
         status: 'open',
         recorded_at: '2026-04-07T10:00:00+00:00',
       },
@@ -4319,9 +4319,9 @@ test('renderAgentDetails shows branch boundary status and queued follow-ups', ()
       group: 'alpha',
       cell_type: 'agent',
       status: 'running',
-      worktree_path: '/repo/.loom/worktrees/worker',
+      worktree_path: '/repo/.torque/worktrees/worker',
       worktree_repo_root: '/repo',
-      worktree_branch: 'loom/worker',
+      worktree_branch: 'torque/worker',
       mcp_messages: [],
     },
   };
@@ -4334,7 +4334,7 @@ test('renderAgentDetails shows branch boundary status and queued follow-ups', ()
       agent_id: 'agent-1',
       worktree_boundary: {
         repo_root: '/repo',
-        branch: 'loom/worker',
+        branch: 'torque/worker',
         status: 'open',
         recorded_at: '2026-04-07T10:00:00+00:00',
       },
@@ -4518,7 +4518,7 @@ test('renderAgentDetails adds clickable diff, checkpoint, and preserved-merge af
       cell_type: 'agent',
       status: 'running',
       worktree_repo_root: '/repo',
-      worktree_branch: 'loom/worker',
+      worktree_branch: 'torque/worker',
       worktree_merged: true,
       worktree_diff: { files: 2, insertions: 7, deletions: 3 },
       worktree_checkpoints: 4,
@@ -4541,7 +4541,7 @@ test('renderAgentDetails adds clickable diff, checkpoint, and preserved-merge af
       agent_id: 'agent-1',
       worktree_boundary: {
         repo_root: '/repo',
-        branch: 'loom/worker',
+        branch: 'torque/worker',
         status: 'merged',
         merged_at: '2026-04-10T10:00:00Z',
       },
@@ -4554,7 +4554,7 @@ test('renderAgentDetails adds clickable diff, checkpoint, and preserved-merge af
         storage: { kind: 'path', path: '/tmp/worker-pre-merge.patch', content: '' },
         metadata: {
           preserved_on_merge: true,
-          worktree_branch: 'loom/worker',
+          worktree_branch: 'torque/worker',
           boundary_recorded_at: '2026-04-10T09:58:00Z',
         },
       }],
@@ -4699,7 +4699,7 @@ test('decision and pending-hire deltas invalidate the main surface', () => {
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/ws.js');
 
-  // LOOM:236 v12: focus the architect that owns the decision/hire so
+  // TORQUE:236 v12: focus the architect that owns the decision/hire so
   // the engineer-surface gate fires. Cross-architect decisions skip
   // engineer (covered by a separate test below).
   runInContext(context, `
@@ -4707,7 +4707,7 @@ test('decision and pending-hire deltas invalidate the main surface', () => {
     selectedAgentId = 'arch-1';
     focusedItemId = 'arch-1';
     if (!state.agents) state.agents = {};
-    state.agents['arch-1'] = { id: 'arch-1', group: 'loom', kind: 'architect', cell_type: 'agent' };
+    state.agents['arch-1'] = { id: 'arch-1', group: 'torque', kind: 'architect', cell_type: 'agent' };
   `);
   context._handleDelta({
     seq: 1,
@@ -5052,7 +5052,7 @@ test('boardDuplicateTask creates a fresh task from reusable fields only', () => 
       action_vars: { OWNER: 'frontend' },
       agent_template: 'worker',
       agent_id: 'agent-1',
-      labels: ['bug', 'loom:error'],
+      labels: ['bug', 'torque:error'],
       depends_on: ['dep-1'],
       scheduled_at: '2099-01-01T12:00:00.000Z',
       parent_task_id: 'parent-1',
@@ -5097,7 +5097,7 @@ test('boardCloneTask opens a fresh create modal with sanitized copied fields', (
       action_vars: { OWNER: 'frontend' },
       agent_template: 'worker',
       agent_id: 'agent-1',
-      labels: ['bug', 'loom:error'],
+      labels: ['bug', 'torque:error'],
       depends_on: ['dep-1'],
       scheduled_at: '2099-01-01T12:00:00.000Z',
       parent_task_id: 'parent-1',
@@ -5137,7 +5137,7 @@ test('boardQuickSetPriority replaces only the priority label', () => {
       id: 'task-1',
       group: 'alpha',
       task: 'Ship release',
-      labels: ['bug', 'loom:error', 'priority:low'],
+      labels: ['bug', 'torque:error', 'priority:low'],
     },
   };
 
@@ -5146,7 +5146,7 @@ test('boardQuickSetPriority replaces only the priority label', () => {
   assert.deepEqual(jsonValue(context, 'sendCalls'), [{
     cmd: 'board_update_task',
     id: 'task-1',
-    labels: ['bug', 'loom:error', 'priority:high'],
+    labels: ['bug', 'torque:error', 'priority:high'],
   }]);
 });
 
@@ -5182,7 +5182,7 @@ test('boardQuickAddLabel and boardQuickRemoveLabel preserve unrelated labels', (
       id: 'task-1',
       group: 'alpha',
       task: 'Ship release',
-      labels: ['bug', 'loom:error', 'priority:medium'],
+      labels: ['bug', 'torque:error', 'priority:medium'],
     },
   };
 
@@ -5194,12 +5194,12 @@ test('boardQuickAddLabel and boardQuickRemoveLabel preserve unrelated labels', (
     {
       cmd: 'board_update_task',
       id: 'task-1',
-      labels: ['bug', 'loom:error', 'priority:medium', 'ops'],
+      labels: ['bug', 'torque:error', 'priority:medium', 'ops'],
     },
     {
       cmd: 'board_update_task',
       id: 'task-1',
-      labels: ['loom:error', 'priority:medium', 'ops'],
+      labels: ['torque:error', 'priority:medium', 'ops'],
     },
   ]);
 });
@@ -5394,7 +5394,7 @@ test('boardApplyBatchEdit applies touched fields across all selected tasks', () 
       id: 'task-1',
       group: 'alpha',
       task: 'Ship release',
-      labels: ['bug', 'loom:error'],
+      labels: ['bug', 'torque:error'],
     },
     'task-2': {
       id: 'task-2',
@@ -5420,7 +5420,7 @@ test('boardApplyBatchEdit applies touched fields across all selected tasks', () 
     {
       cmd: 'board_update_task',
       id: 'task-1',
-      labels: ['bug', 'loom:error', 'ops', 'priority:high'],
+      labels: ['bug', 'torque:error', 'ops', 'priority:high'],
       agent_id: 'agent-9',
       action_name: 'triage',
       action_vars: {},
@@ -5490,7 +5490,7 @@ test('boardBulkArchiveSelected archives selected completed tasks and their desce
       task: 'Verify release',
       lane: 'Done',
       parent_task_id: 'root',
-      labels: ['loom:error'],
+      labels: ['torque:error'],
       archived_from_lane: '',
     },
     active: {
@@ -5539,7 +5539,7 @@ test('boardBulkRestoreSelected restores archived tasks and descendants', () => {
       lane: 'Archived',
       archived_from_lane: 'Done',
       parent_task_id: 'root',
-      labels: ['loom:error'],
+      labels: ['torque:error'],
     },
   };
 
@@ -6273,7 +6273,7 @@ test('board lane cache rerenders Backlog summary when an offscreen dependency un
       group: 'alpha',
       task: 'Visible blocked task',
       lane: 'Backlog',
-      labels: ['loom:blocked'],
+      labels: ['torque:blocked'],
       position: 3,
     },
     offscreenBlocked: {
@@ -6457,7 +6457,7 @@ test('events attention items include active asks and blocked agents for the curr
       group: 'alpha',
       task: 'Need approval',
       description: 'Choose merge strategy',
-      labels: ['loom:human'],
+      labels: ['torque:human'],
       parent_task_id: 'parent',
       lane: 'Backlog',
       created_at: '2099-01-02T00:00:00Z',
@@ -6467,7 +6467,7 @@ test('events attention items include active asks and blocked agents for the curr
       group: 'alpha',
       task: 'Choose milestone scope',
       description: 'Option A: cut reports. Option B: delay launch.',
-      labels: ['loom:human', 'architect-ask'],
+      labels: ['torque:human', 'architect-ask'],
       lane: 'Backlog',
       reply_agent_id: 'arch-1',
       created_by_architect_id: 'arch-1',
@@ -6477,7 +6477,7 @@ test('events attention items include active asks and blocked agents for the curr
       id: 'doneAsk',
       group: 'alpha',
       task: 'Already resolved',
-      labels: ['loom:human'],
+      labels: ['torque:human'],
       lane: 'Done',
       created_at: '2099-01-01T00:00:00Z',
     },
@@ -6943,7 +6943,7 @@ test('agent history task links open the board and focus the selected task', () =
       group: 'alpha',
       task: 'Review agent output',
       lane: 'Done',
-      labels: ['loom:archived'],
+      labels: ['torque:archived'],
       position: 1,
     },
   };
@@ -7138,7 +7138,7 @@ test('events scroll anchors preserve the attention list while asks are visible',
       group: 'alpha',
       task: 'Newest question',
       lane: 'Backlog',
-      labels: ['loom:human'],
+      labels: ['torque:human'],
       created_at: '2026-04-10T10:05:00+00:00',
     },
     'ask-1': {
@@ -7146,7 +7146,7 @@ test('events scroll anchors preserve the attention list while asks are visible',
       group: 'alpha',
       task: 'Original question',
       lane: 'Backlog',
-      labels: ['loom:human'],
+      labels: ['torque:human'],
       created_at: '2026-04-10T10:00:00+00:00',
     },
   };
@@ -7349,7 +7349,7 @@ test('events live appends keep search focus and resolve drafts while patching on
       id: 'ask-1',
       group: 'alpha',
       task: 'Need answer',
-      labels: ['loom:human'],
+      labels: ['torque:human'],
       parent_task_id: 'parent',
       lane: 'Backlog',
       created_at: '2026-04-10T10:00:00Z',
@@ -7534,7 +7534,7 @@ test('context panel renders compacted summaries as read-only entries', () => {
       scope_kind: 'group',
       scope_ref: 'alpha',
       source_kind: 'system',
-      source_name: 'Loom',
+      source_name: 'Torque',
       created_at: 100,
       updated_at: 120,
       links: [],
@@ -8549,8 +8549,8 @@ test('terminal compose image drop uploads files and inserts returned paths at th
           return Promise.resolve({
             ok: true,
             data: [
-              { path: '/Users/aleksanderarruda/.loom/attachments/agent-1-first.png' },
-              { path: '/Users/aleksanderarruda/.loom/attachments/agent-1-second.jpg' },
+              { path: '/Users/aleksanderarruda/.torque/attachments/agent-1-first.png' },
+              { path: '/Users/aleksanderarruda/.torque/attachments/agent-1-second.jpg' },
             ],
           });
         },
@@ -8598,8 +8598,8 @@ test('terminal compose image drop uploads files and inserts returned paths at th
     ['file', imageOne],
     ['file', imageTwo],
   ]);
-  const inserted = '/Users/aleksanderarruda/.loom/attachments/agent-1-first.png'
-    + '\n/Users/aleksanderarruda/.loom/attachments/agent-1-second.jpg';
+  const inserted = '/Users/aleksanderarruda/.torque/attachments/agent-1-first.png'
+    + '\n/Users/aleksanderarruda/.torque/attachments/agent-1-second.jpg';
   assert.equal(input.value, 'prefix-' + inserted + ' suffix');
   assert.equal(input.selectionStart, 'prefix-'.length + inserted.length);
   assert.equal(input.selectionEnd, input.selectionStart);
@@ -8695,7 +8695,7 @@ test('embedded terminal rekeys the xterm cache and ignores stale websocket outpu
     jsonValue(context, 'Object.keys(_embeddedTerminalSessions)'),
     ['term-1:session-new'],
   );
-  assert.ok(currentTerminal.writes.some((line) => String(line).includes('Loom session restarted')));
+  assert.ok(currentTerminal.writes.some((line) => String(line).includes('Torque session restarted')));
 
   currentSocket.onmessage({
     data: JSON.stringify({
@@ -8706,7 +8706,7 @@ test('embedded terminal rekeys the xterm cache and ignores stale websocket outpu
     }),
   });
   assert.equal(currentTerminal.resetCount, 1);
-  assert.deepEqual(currentTerminal.writes.map(String).filter((line) => !line.includes('Loom session restarted') && line.trim() !== ''), [
+  assert.deepEqual(currentTerminal.writes.map(String).filter((line) => !line.includes('Torque session restarted') && line.trim() !== ''), [
     'old scrollback',
     'clean prompt',
   ]);
@@ -8719,7 +8719,7 @@ test('embedded terminal rekeys the xterm cache and ignores stale websocket outpu
       data: 'autoload -Uz add-zsh-hook',
     }),
   });
-  assert.deepEqual(currentTerminal.writes.map(String).filter((line) => !line.includes('Loom session restarted') && line.trim() !== ''), [
+  assert.deepEqual(currentTerminal.writes.map(String).filter((line) => !line.includes('Torque session restarted') && line.trim() !== ''), [
     'old scrollback',
     'clean prompt',
   ]);
@@ -8732,7 +8732,7 @@ test('embedded terminal rekeys the xterm cache and ignores stale websocket outpu
       data: '\nready',
     }),
   });
-  assert.deepEqual(currentTerminal.writes.map(String).filter((line) => !line.includes('Loom session restarted') && line.trim() !== ''), [
+  assert.deepEqual(currentTerminal.writes.map(String).filter((line) => !line.includes('Torque session restarted') && line.trim() !== ''), [
     'old scrollback',
     'clean prompt',
     '\nready',
@@ -8827,14 +8827,14 @@ test('embedded terminal stop then relaunch preserves same-cell scrollback buffer
     jsonValue(context, 'Object.keys(_embeddedTerminalSessions)'),
     ['term-a:sess-new'],
   );
-  assert.ok(terminals[0].writes.some((line) => String(line).includes('Loom session restarted')));
+  assert.ok(terminals[0].writes.some((line) => String(line).includes('Torque session restarted')));
 
   sockets[1].onmessage({
     data: JSON.stringify({ type: 'snapshot', session_id: 'sess-new', data: 'A_MARK_after_relaunch' }),
   });
 
   assert.equal(terminals[0].resetCount, 1);
-  assert.deepEqual(terminals[0].writes.map(String).filter((line) => !line.includes('Loom session restarted') && line.trim() !== ''), [
+  assert.deepEqual(terminals[0].writes.map(String).filter((line) => !line.includes('Torque session restarted') && line.trim() !== ''), [
     'A_MARK_before_stop',
     'A_MARK_after_relaunch',
   ]);
@@ -8872,7 +8872,7 @@ test('embedded terminal running agent restart preserves same-cell scrollback buf
     jsonValue(context, 'Object.keys(_embeddedTerminalSessions)'),
     ['agent-a:agent-new'],
   );
-  assert.ok(terminals[0].writes.some((line) => String(line).includes('Loom session restarted')));
+  assert.ok(terminals[0].writes.some((line) => String(line).includes('Torque session restarted')));
 
   sockets[1].onmessage({
     data: JSON.stringify({ type: 'snapshot', session_id: 'agent-new', data: 'AGENT_MARK_after_restart' }),
@@ -8882,7 +8882,7 @@ test('embedded terminal running agent restart preserves same-cell scrollback buf
   });
 
   assert.equal(terminals[0].resetCount, 1);
-  assert.deepEqual(terminals[0].writes.map(String).filter((line) => !line.includes('Loom session restarted') && line.trim() !== ''), [
+  assert.deepEqual(terminals[0].writes.map(String).filter((line) => !line.includes('Torque session restarted') && line.trim() !== ''), [
     'AGENT_MARK_before_restart',
     'AGENT_MARK_after_restart',
     '\nAGENT_MARK_live_after_restart',
@@ -9538,12 +9538,12 @@ test('ws global settings delta live-applies xterm scrollback hook', () => {
 test('ws architect_journal_append delta invalidates the engineer surface and rerenders agent panel', () => {
   const { context, sandbox } = createWsRenderHarness();
   sandbox._activePanelApp = 'engineer';
-  // LOOM:236 v12: focus the architect that owns this journal so the gate fires.
+  // TORQUE:236 v12: focus the architect that owns this journal so the gate fires.
   runInContext(context, `
     selectedAgentId = 'arch-1';
     focusedItemId = 'arch-1';
     if (!state.agents) state.agents = {};
-    state.agents['arch-1'] = { id: 'arch-1', group: 'loom', kind: 'architect', cell_type: 'agent' };
+    state.agents['arch-1'] = { id: 'arch-1', group: 'torque', kind: 'architect', cell_type: 'agent' };
     state.architect_journals = {
       'arch-1': [
         { id: 'j-0', architect_id: 'arch-1', type: 'observation',
@@ -10425,8 +10425,8 @@ test('standalone event_append deltas batch events rendering and keep log state i
   });
 });
 
-test('mcp_call_append for non-focused agent does NOT invalidate engineer panel (LOOM:236 v4)', () => {
-  // P0 LOOM:236 final fix: cross-agent MCP traffic used to clobber the
+test('mcp_call_append for non-focused agent does NOT invalidate engineer panel (TORQUE:236 v4)', () => {
+  // P0 TORQUE:236 final fix: cross-agent MCP traffic used to clobber the
   // focused engineer panel via _renderSurface('engineer') -> renderAgentPanel(),
   // destroying the textarea node + scroll anchor on every worker MCP call,
   // even though nothing the panel displayed had changed. The fix gates
@@ -10441,7 +10441,7 @@ test('mcp_call_append for non-focused agent does NOT invalidate engineer panel (
       group: 'alpha',
       call: {
         cell_id: 'agent-2',
-        tool_name: 'mcp__loom__loom_progress',
+        tool_name: 'mcp__torque__torque_progress',
         hook_event_name: 'PostToolUse',
         cursor: 1,
       },
@@ -10453,7 +10453,7 @@ test('mcp_call_append for non-focused agent does NOT invalidate engineer panel (
     'mcp_call_append for non-focused agent should not refresh engineer panel');
 });
 
-test('mcp_call_append for focused agent on Events.MCP DOES invalidate engineer panel (LOOM:236 v4)', () => {
+test('mcp_call_append for focused agent on Events.MCP DOES invalidate engineer panel (TORQUE:236 v4)', () => {
   // Same-agent traffic refreshes only when the user is watching that agent's
   // folded Events.MCP feed.
   const { context, sandbox, rafCallbacks, flushRaf } = createStandaloneDeltaBatchHarness(['engineer']);
@@ -10471,7 +10471,7 @@ test('mcp_call_append for focused agent on Events.MCP DOES invalidate engineer p
       group: 'alpha',
       call: {
         cell_id: 'agent-1',
-        tool_name: 'mcp__loom__loom_progress',
+        tool_name: 'mcp__torque__torque_progress',
         hook_event_name: 'PostToolUse',
         cursor: 1,
       },
@@ -10498,7 +10498,7 @@ test('mcp_call_append for focused agent on non-MCP Events subtab does NOT invali
       group: 'alpha',
       call: {
         cell_id: 'agent-1',
-        tool_name: 'mcp__loom__loom_progress',
+        tool_name: 'mcp__torque__torque_progress',
         hook_event_name: 'PostToolUse',
         cursor: 1,
       },
@@ -10509,7 +10509,7 @@ test('mcp_call_append for focused agent on non-MCP Events subtab does NOT invali
     'mcp_call_append for focused agent on Events.inbox should not refresh engineer panel');
 });
 
-test('event_append for non-focused agent does NOT invalidate engineer panel (LOOM:236 v4)', () => {
+test('event_append for non-focused agent does NOT invalidate engineer panel (TORQUE:236 v4)', () => {
   const { context, sandbox, rafCallbacks, flushRaf } = createStandaloneDeltaBatchHarness(['engineer']);
   runInContext(context, `selectedAgentId = 'agent-1';`);
   context._handleDelta({
@@ -10529,8 +10529,8 @@ test('event_append for non-focused agent does NOT invalidate engineer panel (LOO
     'event_append for non-focused agent should not refresh engineer panel');
 });
 
-test('architect_journal_append for non-focused architect does NOT invalidate engineer panel (LOOM:236 v12)', () => {
-  // P0 LOOM:236 v12 regression: every architect journal entry used to
+test('architect_journal_append for non-focused architect does NOT invalidate engineer panel (TORQUE:236 v12)', () => {
+  // P0 TORQUE:236 v12 regression: every architect journal entry used to
   // refresh the focused engineer panel via _markSurface(flags, 'main',
   // 'engineer') regardless of which architect's journal it belonged to.
   // Architects journal dozens of entries per debug session, so this was
@@ -10541,7 +10541,7 @@ test('architect_journal_append for non-focused architect does NOT invalidate eng
     selectedAgentId = 'eng-1';
     focusedItemId = 'eng-1';
     if (!state.agents) state.agents = {};
-    state.agents['eng-1'] = { id: 'eng-1', group: 'loom', kind: 'engineer', cell_type: 'agent' };
+    state.agents['eng-1'] = { id: 'eng-1', group: 'torque', kind: 'engineer', cell_type: 'agent' };
   `);
   context._handleDelta({
     seq: 1,
@@ -10565,14 +10565,14 @@ test('architect lifecycle deltas only invalidate focused architect panel', () =>
     selectedAgentId = 'arch-focused';
     focusedItemId = 'arch-focused';
     if (!state.agents) state.agents = {};
-    state.agents['arch-focused'] = { id: 'arch-focused', group: 'loom', kind: 'architect', cell_type: 'agent' };
+    state.agents['arch-focused'] = { id: 'arch-focused', group: 'torque', kind: 'architect', cell_type: 'agent' };
   `);
   context._handleDelta({
     seq: 1,
     ops: [{
       op: 'architect_dismissed',
       architect_id: 'arch-other',
-      group: 'loom',
+      group: 'torque',
       dismissed_at: 123,
     }],
   });
@@ -10585,7 +10585,7 @@ test('architect lifecycle deltas only invalidate focused architect panel', () =>
     ops: [{
       op: 'architect_rehired',
       architect_id: 'arch-focused',
-      group: 'loom',
+      group: 'torque',
     }],
   });
   flushRaf();
@@ -10675,8 +10675,8 @@ test('journal_delete invalidates only the author-matching focused engineer panel
   assert.deepEqual(jsonValue(context, `state.engineer_journal['eng-b']`), []);
 });
 
-test('engineer_streams_update for cross-group engineer does NOT invalidate focused engineer panel (LOOM:236 v7)', () => {
-  // P0 LOOM:236 v7 regression: high-frequency stream/digest/stats deltas
+test('engineer_streams_update for cross-group engineer does NOT invalidate focused engineer panel (TORQUE:236 v7)', () => {
+  // P0 TORQUE:236 v7 regression: high-frequency stream/digest/stats deltas
   // for engineers in OTHER groups used to clobber the focused engineer
   // panel via _markSurface(flags, 'engineer'). With multiple groups +
   // active engineers, this fired several times per second per group.
@@ -10701,8 +10701,8 @@ test('engineer_streams_update for cross-group engineer does NOT invalidate focus
     'engineer_streams_update for cross-group engineer should not refresh focused panel');
 });
 
-test('agent_upsert for non-focused agent does NOT invalidate engineer panel (LOOM:236 v5)', () => {
-  // P0 LOOM:236 v5 regression: every worker activity pulse used to
+test('agent_upsert for non-focused agent does NOT invalidate engineer panel (TORQUE:236 v5)', () => {
+  // P0 TORQUE:236 v5 regression: every worker activity pulse used to
   // invalidate the engineer panel system-wide via the dead-code
   // fallthrough `return true` in `_agentDeltaInvalidatesEngineer`. With
   // workers churning agent_upsert per progress event, this clobbered the
@@ -10734,7 +10734,7 @@ test('agent_upsert for non-focused agent does NOT invalidate engineer panel (LOO
     'agent_upsert for unrelated agent should not refresh engineer panel');
 });
 
-test('agent_upsert for engineer-owned worker DOES invalidate focused engineer panel (LOOM:236 v5)', () => {
+test('agent_upsert for engineer-owned worker DOES invalidate focused engineer panel (TORQUE:236 v5)', () => {
   // Workers owned by the focused engineer must still refresh — workers list
   // / worklog views in the engineer panel read those workers' status.
   const { context, sandbox, rafCallbacks, flushRaf } = createStandaloneDeltaBatchHarness(['engineer']);
@@ -10769,7 +10769,7 @@ test('agent_upsert for engineer-owned worker DOES invalidate focused engineer pa
 
 test('standalone agent_upsert deltas batch current-group engineer rendering', () => {
   const { context, sandbox, rafCallbacks, flushRaf } = createStandaloneDeltaBatchHarness(['engineer']);
-  // LOOM:236 v5: engineer-surface invalidation is now gated on focused-agent
+  // TORQUE:236 v5: engineer-surface invalidation is now gated on focused-agent
   // relevance, so the test must focus the agent receiving the upserts.
   runInContext(context, `
     selectedAgentId = 'agent-1';
@@ -10808,13 +10808,13 @@ test('standalone agent_upsert deltas batch current-group engineer rendering', ()
 });
 
 test('user press defers delta-driven DOM-replacing renders until after release', () => {
-  // P0 LOOM:235 regression: the worker MCP firehose (:224) was rerendering
+  // P0 TORQUE:235 regression: the worker MCP firehose (:224) was rerendering
   // between pointerdown and pointerup, suppressing the synthetic click. The
   // press-defer keeps the press's target element alive until the browser
   // emits the click; the deferred batch flushes on the next frame after
   // pointerup so the click target is delivered before any DOM swap.
   const { context, sandbox, rafCallbacks, flushRaf, document } = createStandaloneDeltaBatchHarness(['engineer']);
-  // LOOM:236 v5: focus the agent receiving deltas so engineer surface invalidates.
+  // TORQUE:236 v5: focus the agent receiving deltas so engineer surface invalidates.
   runInContext(context, `
     selectedAgentId = 'agent-1';
     focusedItemId = 'agent-1';
@@ -10864,7 +10864,7 @@ test('user press defers an already-scheduled delta render frame across the press
   // attempt: a frame queued before pointerdown must NOT swap the DOM during
   // the press, and the batch must flush on the next frame after release.
   const { context, sandbox, rafCallbacks, flushRaf, document } = createStandaloneDeltaBatchHarness(['engineer']);
-  // LOOM:236 v5: focus the agent receiving deltas so engineer surface invalidates.
+  // TORQUE:236 v5: focus the agent receiving deltas so engineer surface invalidates.
   runInContext(context, `
     selectedAgentId = 'agent-1';
     focusedItemId = 'agent-1';
@@ -10920,8 +10920,8 @@ test('user press defers an already-scheduled delta render frame across the press
   assert.equal(sandbox.renderCalls.engineer, 1);
 });
 
-test('keydown on a textarea defers delta-driven renders until keyup (LOOM:236 v3)', () => {
-  // P0 LOOM:236 v3 regression: even at moderate delta rate, an
+test('keydown on a textarea defers delta-driven renders until keyup (TORQUE:236 v3)', () => {
+  // P0 TORQUE:236 v3 regression: even at moderate delta rate, an
   // innerHTML rebuild during a keystroke replaces the focused textbox
   // before the browser can dispatch the synthetic `input` event,
   // dropping the in-flight character + breaking selection. The
@@ -10930,7 +10930,7 @@ test('keydown on a textarea defers delta-driven renders until keyup (LOOM:236 v3
   // the keystroke commits.
   const { context, sandbox, rafCallbacks, flushRaf, document } =
     createStandaloneDeltaBatchHarness(['engineer']);
-  // LOOM:236 v5: focus the agent receiving deltas so engineer surface invalidates.
+  // TORQUE:236 v5: focus the agent receiving deltas so engineer surface invalidates.
   runInContext(context, `
     selectedAgentId = 'agent-1';
     focusedItemId = 'agent-1';
@@ -10971,13 +10971,13 @@ test('keydown on a textarea defers delta-driven renders until keyup (LOOM:236 v3
   assert.equal(sandbox.renderCalls.engineer, 1);
 });
 
-test('keydown outside text-editing targets does NOT defer renders (LOOM:236 v3)', () => {
+test('keydown outside text-editing targets does NOT defer renders (TORQUE:236 v3)', () => {
   // Global hotkeys (Cmd+B, Tab, etc.) fire keydown on document.body or
   // a button — those should pass through to renders normally so
   // navigation/shortcuts don't queue up while the user is browsing.
   const { context, sandbox, rafCallbacks, flushRaf, document } =
     createStandaloneDeltaBatchHarness(['engineer']);
-  // LOOM:236 v5: focus the agent receiving deltas so engineer surface invalidates.
+  // TORQUE:236 v5: focus the agent receiving deltas so engineer surface invalidates.
   runInContext(context, `
     selectedAgentId = 'agent-1';
     focusedItemId = 'agent-1';
@@ -11007,14 +11007,14 @@ test('keydown outside text-editing targets does NOT defer renders (LOOM:236 v3)'
   assert.equal(sandbox.renderCalls.engineer, 1);
 });
 
-test('IME compositionstart..compositionend defers delta-driven renders (LOOM:236 v3)', () => {
+test('IME compositionstart..compositionend defers delta-driven renders (TORQUE:236 v3)', () => {
   // CJK / accented input via IME spans multiple keystrokes joined by
   // composition events. The composer state lives on the editing
   // element and is destroyed if innerHTML rebuild swaps the node
   // mid-composition. Defer renders for the full composition window.
   const { context, sandbox, rafCallbacks, flushRaf, document } =
     createStandaloneDeltaBatchHarness(['engineer']);
-  // LOOM:236 v5: focus the agent receiving deltas so engineer surface invalidates.
+  // TORQUE:236 v5: focus the agent receiving deltas so engineer surface invalidates.
   runInContext(context, `
     selectedAgentId = 'agent-1';
     focusedItemId = 'agent-1';
@@ -11110,7 +11110,7 @@ test('focus_update on an architect agent focuses the principal card, not the age
       'arch-1': {
         id: 'arch-1',
         name: 'Productmind',
-        group: 'loom',
+        group: 'torque',
         kind: 'architect',
         cell_type: 'agent',
         session_id: 'sess-arch',
@@ -11119,14 +11119,14 @@ test('focus_update on an architect agent focuses the principal card, not the age
       'eng-1': {
         id: 'eng-1',
         name: 'Eng',
-        group: 'loom',
+        group: 'torque',
         kind: 'engineer',
         cell_type: 'agent',
         session_id: 'sess-eng',
         status: 'running',
       },
     };
-    state.groups = { loom: ['arch-1', 'eng-1'] };
+    state.groups = { torque: ['arch-1', 'eng-1'] };
     state.active_session_id = 'sess-eng';
     selectedAgentId = 'eng-1';
     selectedTerminalId = 'eng-1';
@@ -11146,7 +11146,7 @@ test('focus_update on an architect agent focuses the principal card, not the age
   // Architects render as principal cards, so focusedItemId must use the
   // principal-row nav id — using the bare agent id falls through
   // _resolveFocusedItemForGridRender to the first engineer.
-  assert.equal(jsonValue(context, 'focusedItemId'), 'principal:loom:arch-1');
+  assert.equal(jsonValue(context, 'focusedItemId'), 'principal:torque:arch-1');
 });
 
 test('standalone task invalidation is scoped by group and active context selection', () => {
@@ -11233,7 +11233,7 @@ test('standalone ask task and attention agent deltas narrow events invalidation'
   runInContext(context, `
     state.board_tasks = {
       'parent-1': { id: 'parent-1', task: 'Parent', group: 'alpha', lane: 'In Progress', agent_id: 'agent-1' },
-      'ask-1': { id: 'ask-1', task: 'Question', group: 'alpha', lane: 'In Progress', parent_task_id: 'parent-1', labels: ['loom:human'] }
+      'ask-1': { id: 'ask-1', task: 'Question', group: 'alpha', lane: 'In Progress', parent_task_id: 'parent-1', labels: ['torque:human'] }
     };
     state.agents = {
       'agent-1': { id: 'agent-1', name: 'Worker', group: 'alpha', cell_type: 'agent', needs_attention: false }
@@ -11262,7 +11262,7 @@ test('standalone ask task and attention agent deltas narrow events invalidation'
       group: 'alpha',
       lane: 'In Progress',
       parent_task_id: 'parent-1',
-      labels: ['loom:human'],
+      labels: ['torque:human'],
     }],
   });
   flushRaf();
@@ -11648,7 +11648,7 @@ test('renderAgentPanel preserves expanded architect decision state and scroll ac
       },
     };
     state.board_tasks = {
-      'LOOM:200': { id: 'LOOM:200', task: 'Implement decision UI', group: 'alpha', lane: 'In Progress' },
+      'TORQUE:200': { id: 'TORQUE:200', task: 'Implement decision UI', group: 'alpha', lane: 'In Progress' },
     };
     state.decisions = {
       'decision-1': {
@@ -11677,7 +11677,7 @@ test('renderAgentPanel preserves expanded architect decision state and scroll ac
         title: 'Define scope first',
         rationale: 'Updated rationale from server',
         status: 'accepted',
-        linked_task_ids: ['LOOM:200'],
+        linked_task_ids: ['TORQUE:200'],
         linked_engineer_ids: ['eng-1'],
         supersedes: 'decision-0',
         updated_at: 30,
@@ -11699,7 +11699,7 @@ test('renderAgentPanel preserves expanded architect decision state and scroll ac
   assert.equal(jsonValue(context, `_engineerArchitectDecisionUi['decision-1'].expanded`), true);
   assert.match(panel.innerHTML, /Updated rationale from server/);
   assert.match(panel.innerHTML, /Linked tasks/);
-  assert.match(panel.innerHTML, /LOOM:200/);
+  assert.match(panel.innerHTML, /TORQUE:200/);
   assert.match(panel.innerHTML, /Linked engineers/);
   assert.match(panel.innerHTML, /eng-1/);
   assert.match(panel.innerHTML, /Supersedes/);
@@ -12407,7 +12407,7 @@ test('dismissed architect decision panel hides mutators and blocks stale handler
     },
   };
   context.state.board_tasks = {
-    'LOOM:1': { id: 'LOOM:1', task: 'Implement decision', group: 'alpha' },
+    'TORQUE:1': { id: 'TORQUE:1', task: 'Implement decision', group: 'alpha' },
   };
   context.state.decisions = {
     proposed: {
@@ -12442,7 +12442,7 @@ test('dismissed architect decision panel hides mutators and blocks stale handler
     engineerStartDecisionEdit('proposed');
     var ui = _engineerDecisionUiState('proposed', state.decisions.proposed);
     ui.editing = true;
-    ui.link_task_id = 'LOOM:1';
+    ui.link_task_id = 'TORQUE:1';
     ui.link_engineer_id = 'eng-1';
     engineerSaveDecisionEdit('arch-1', 'proposed');
     engineerAcknowledgeDecision('arch-1', 'proposed');
@@ -12671,7 +12671,7 @@ test('renderAgentPanel preserves the selected Worklog tab across rerenders', () 
     alpha: [
       {
         id: 3,
-        task_id: 'LOOM:3',
+        task_id: 'TORQUE:3',
         task_title: 'Add Worklog tab',
         agent_id: 'agent-1',
         agent_name: 'Worker',
@@ -12681,8 +12681,8 @@ test('renderAgentPanel preserves the selected Worklog tab across rerenders', () 
     ],
   };
   context.state.board_tasks = {
-    'LOOM:3': {
-      id: 'LOOM:3',
+    'TORQUE:3': {
+      id: 'TORQUE:3',
       task: 'Add Worklog tab',
       group: 'alpha',
       lane: 'Review',
@@ -13450,9 +13450,9 @@ test('renderAgentPanel shows branch review-point summary in Session Map view', (
       kind: 'engineer',
       cell_type: 'agent',
       status: 'running',
-      worktree_path: '/repo/.loom/worktrees/worker',
+      worktree_path: '/repo/.torque/worktrees/worker',
       worktree_repo_root: '/repo',
-      worktree_branch: 'loom/worker',
+      worktree_branch: 'torque/worker',
     },
   };
   context.state.group_settings = {
@@ -13465,7 +13465,7 @@ test('renderAgentPanel shows branch review-point summary in Session Map view', (
       branch_boundaries: {
         items: [
           {
-            branch: 'loom/worker',
+            branch: 'torque/worker',
             latest_boundary_task: 'Stable review point',
             partial_review_safe: false,
             foreground_task_title: 'Implement follow-up',
@@ -13556,7 +13556,7 @@ test('agent digest deltas rerender the main grid for engineer card pause state u
 test('engineer sent-event deltas rerender only the active agent panel surface', () => {
   const { context, sandbox } = createWsRenderHarness();
   sandbox._activePanelApp = 'engineer';
-  // LOOM:236 v7: focus an engineer in the same group so engineer-stream
+  // TORQUE:236 v7: focus an engineer in the same group so engineer-stream
   // ops invalidate the panel (they're scoped to the focused engineer's group).
   runInContext(context, `
     selectedAgentId = 'eng-alpha';
@@ -13620,7 +13620,7 @@ test('togglePanel renders the agent slot through renderAgentPanel only', () => {
 test('engineer worklog deltas rerender only the active agent panel surface', () => {
   const { context, sandbox } = createWsRenderHarness();
   sandbox._activePanelApp = 'engineer';
-  // LOOM:236 v7: focus an engineer in the same group.
+  // TORQUE:236 v7: focus an engineer in the same group.
   runInContext(context, `
     selectedAgentId = 'eng-alpha';
     focusedItemId = 'eng-alpha';
@@ -13636,7 +13636,7 @@ test('engineer worklog deltas rerender only the active agent panel surface', () 
         group: 'alpha',
         entry: {
           id: 7,
-          task_id: 'LOOM:7',
+          task_id: 'TORQUE:7',
           task_title: 'Review Worklog tab',
           agent_id: 'agent-7',
           agent_name: 'Worker Seven',
@@ -13659,7 +13659,7 @@ test('engineer worklog deltas rerender only the active agent panel surface', () 
   assert.deepEqual(jsonValue(context, 'state.engineer_worklog.alpha'), [
     {
       id: 7,
-      task_id: 'LOOM:7',
+      task_id: 'TORQUE:7',
       task_title: 'Review Worklog tab',
       agent_id: 'agent-7',
       agent_name: 'Worker Seven',
@@ -13672,7 +13672,7 @@ test('engineer worklog deltas rerender only the active agent panel surface', () 
 test('engineer stream deltas rerender only the active agent panel surface', () => {
   const { context, sandbox } = createWsRenderHarness();
   sandbox._activePanelApp = 'engineer';
-  // LOOM:236 v7: focus an engineer in the same group.
+  // TORQUE:236 v7: focus an engineer in the same group.
   runInContext(context, `
     selectedAgentId = 'eng-alpha';
     focusedItemId = 'eng-alpha';
@@ -13692,7 +13692,7 @@ test('engineer stream deltas rerender only the active agent panel surface', () =
           items: [
             {
               stream_id: 'stream-events',
-              branch: 'loom/events-panel',
+              branch: 'torque/events-panel',
               state: 'awaiting_human_validation',
               recommended_next_action: 'run_manual_validation',
             },
@@ -13717,7 +13717,7 @@ test('engineer stream deltas rerender only the active agent panel surface', () =
     items: [
       {
         stream_id: 'stream-events',
-        branch: 'loom/events-panel',
+        branch: 'torque/events-panel',
         state: 'awaiting_human_validation',
         recommended_next_action: 'run_manual_validation',
       },
@@ -13836,7 +13836,7 @@ test('task deltas mark the current group Session Map stale', () => {
     ops: [
       {
         op: 'task_upsert',
-        id: 'LOOM:1',
+        id: 'TORQUE:1',
         group: 'alpha',
         task: 'Refresh Session Map',
         lane: 'Backlog',
@@ -13864,8 +13864,8 @@ test('full state hydrates engineer streams for the journal tab', () => {
           by_state: { ready_to_merge: 1 },
           items: [
             {
-              stream_id: 'stream:/repo::loom/events-panel',
-              branch: 'loom/events-panel',
+              stream_id: 'stream:/repo::torque/events-panel',
+              branch: 'torque/events-panel',
               state: 'ready_to_merge',
               foreground_task_title: 'Ship the Events panel',
             },
@@ -13880,8 +13880,8 @@ test('full state hydrates engineer streams for the journal tab', () => {
     by_state: { ready_to_merge: 1 },
     items: [
       {
-        stream_id: 'stream:/repo::loom/events-panel',
-        branch: 'loom/events-panel',
+        stream_id: 'stream:/repo::torque/events-panel',
+        branch: 'torque/events-panel',
         state: 'ready_to_merge',
         foreground_task_title: 'Ship the Events panel',
       },
@@ -13930,8 +13930,8 @@ test('roles panel renders role fields and saves via save_role with blank priorit
   assert.match(editor.innerHTML, /Preamble \(behavior\)/);
   assert.match(editor.innerHTML, /Behavior guidance for workers with this role/);
   assert.match(editor.innerHTML, /Priorities/);
-  assert.match(editor.innerHTML, /Project \(\.loom\/roles\/\)/);
-  assert.match(editor.innerHTML, /User \(~\/\.loom\/roles\/\)/);
+  assert.match(editor.innerHTML, /Project \(\.torque\/roles\/\)/);
+  assert.match(editor.innerHTML, /User \(~\/\.torque\/roles\/\)/);
 
   document.register('agent-template-name').value = 'reviewer';
   document.register('agent-template-display').value = 'Reviewer';
@@ -14126,7 +14126,7 @@ test('eventsDismiss clears drafts and hides dismissed attention items from the b
       id: 'ask',
       group: 'alpha',
       task: 'Need input',
-      labels: ['loom:human'],
+      labels: ['torque:human'],
       lane: 'Backlog',
       created_at: '2099-01-01T00:00:00Z',
     },
@@ -14221,7 +14221,7 @@ test('openEditTask populates modal state from the task and preserves editable ve
       id: 'task-1',
       task: 'Fix flakey UI state',
       description: 'Preserve modal data after rerenders',
-      labels: ['bug', 'loom:blocked'],
+      labels: ['bug', 'torque:blocked'],
       depends_on: ['dep'],
       attachments: [{ filename: 'screenshot.png' }],
       action_name: 'triage',
@@ -14259,7 +14259,7 @@ test('openEditTask populates modal state from the task and preserves editable ve
     new Date(futureIso).toISOString().slice(0, 16),
   );
   assert.deepEqual(jsonValue(context, '_taskLabels'), ['bug']);
-  assert.deepEqual(jsonValue(context, '_taskSystemLabels'), ['loom:blocked']);
+  assert.deepEqual(jsonValue(context, '_taskSystemLabels'), ['torque:blocked']);
   assert.deepEqual(jsonValue(context, '_taskDeps'), ['dep']);
   assert.equal(document.getElementById('task-group-select').value, 'beta');
   assert.equal(document.getElementById('task-external-provider-input').value, 'github');
@@ -14555,7 +14555,7 @@ test('submitAdd includes worktree_name for custom agent worktrees', () => {
   document.register('add-model-input').value = 'gpt-5';
   document.register('add-reasoning-effort').value = 'high';
   document.register('add-wt-enabled').checked = true;
-  document.register('add-wt-base-dir').value = '.loom/worktrees';
+  document.register('add-wt-base-dir').value = '.torque/worktrees';
   document.register('add-wt-base-branch').value = 'main';
   document.register('add-wt-name').value = 'Feature API / v2';
   document.register('add-wt-auto-checkpoint').checked = false;
@@ -14573,7 +14573,7 @@ test('submitAdd includes worktree_name for custom agent worktrees', () => {
     model: 'gpt-5',
     reasoning_effort: 'high',
     worktree: true,
-    worktree_base_dir: '.loom/worktrees',
+    worktree_base_dir: '.torque/worktrees',
     worktree_base_branch: 'main',
     worktree_name: 'Feature API / v2',
     worktree_auto_checkpoint: false,
@@ -14598,7 +14598,7 @@ test('submitAdd omits worktree_name when custom worktree naming is blank or disa
   document.register('add-model-input').value = '';
   document.register('add-reasoning-effort').value = '';
   document.register('add-wt-enabled').checked = true;
-  document.register('add-wt-base-dir').value = '.loom/worktrees';
+  document.register('add-wt-base-dir').value = '.torque/worktrees';
   document.register('add-wt-base-branch').value = 'main';
   document.register('add-wt-name').value = '   ';
   document.register('add-wt-auto-checkpoint').checked = false;
@@ -14750,9 +14750,9 @@ test('task modal keeps a scrollable body separate from its footer actions', () =
   assert.match(html, /<div id="task-modal-body" class="task-modal-body">[\s\S]*<div class="modal-actions">/);
   assert.match(css, /#modal-task \.modal\s*\{[^}]*overflow:\s*hidden;/);
   assert.match(css, /\.task-modal-body\s*\{[^}]*flex:\s*1;[^}]*overflow-y:\s*auto;/);
-  assert.match(css, /body\[data-loom-mode="standalone"\] #modal-task \.modal,\s*body\[data-loom-mode="desktop"\] #modal-task \.modal\s*\{[^}]*max-width:\s*420px;/);
-  assert.match(css, /@media \(min-width:\s*900px\)\s*\{\s*body\[data-loom-mode="standalone"\] #modal-task \.modal,\s*body\[data-loom-mode="desktop"\] #modal-task \.modal\s*\{[^}]*max-width:\s*780px;/);
-  assert.doesNotMatch(css, /body\[data-loom-mode="toolbelt"\] #modal-task/);
+  assert.match(css, /body\[data-torque-mode="standalone"\] #modal-task \.modal,\s*body\[data-torque-mode="desktop"\] #modal-task \.modal\s*\{[^}]*max-width:\s*420px;/);
+  assert.match(css, /@media \(min-width:\s*900px\)\s*\{\s*body\[data-torque-mode="standalone"\] #modal-task \.modal,\s*body\[data-torque-mode="desktop"\] #modal-task \.modal\s*\{[^}]*max-width:\s*780px;/);
+  assert.doesNotMatch(css, /body\[data-torque-mode="toolbelt"\] #modal-task/);
 });
 
 test('task modal prioritizes labels, dependencies, and schedule before lower-frequency sections', () => {
@@ -15132,7 +15132,7 @@ test('diff review bulk collapse controls stay stable across refreshes', () => {
     _diffViewOpen = true;
     _diffViewData = {
       agent_name: 'Worker',
-      branch: 'loom/worker',
+      branch: 'torque/worker',
       base_branch: 'main',
       stats: { files: 2, insertions: 4, deletions: 1 },
       files: [
@@ -15168,7 +15168,7 @@ test('diff review bulk collapse controls stay stable across refreshes', () => {
   runInContext(context, `
     _diffViewData = {
       agent_name: 'Worker',
-      branch: 'loom/worker',
+      branch: 'torque/worker',
       base_branch: 'main',
       stats: { files: 3, insertions: 5, deletions: 1 },
       files: [
@@ -15223,17 +15223,17 @@ test('diff review surfaces stale-base warning before merge controls', () => {
     _diffViewAgentId = 'agent-1';
     _diffViewData = {
       agent_name: 'Worker',
-      branch: 'loom/worker',
+      branch: 'torque/worker',
       base_branch: 'main',
       stats: { files: 1, insertions: 1, deletions: 0 },
       files: [{ path: 'src/a.js', status: 'modified', hunks: [] }],
-      stale_base_warning: '⚠ STALE BASE: loom/worker forks from 11111111 (old).',
+      stale_base_warning: '⚠ STALE BASE: torque/worker forks from 11111111 (old).',
       stale_base: { stale: true },
     };
     _diffMergeCheck = {
       clean: false,
       conflicts: [],
-      stale_base_warning: '⚠ STALE BASE: loom/worker forks from 11111111 (old).',
+      stale_base_warning: '⚠ STALE BASE: torque/worker forks from 11111111 (old).',
       stale_base: { stale: true },
     };
     renderDiffView();
@@ -15259,7 +15259,7 @@ test('Escape closes the read-only diff viewer through the shared key handler', (
     _diffViewAgentId = 'agent-1';
     _diffViewData = {
       agent_name: 'Worker',
-      branch: 'loom/worker',
+      branch: 'torque/worker',
       base_branch: 'main',
       stats: { files: 1, insertions: 2, deletions: 1 },
       files: [],
@@ -15289,7 +15289,7 @@ test('Escape prefers the active overlay over the underlying read-only diff viewe
     _diffViewAgentId = 'agent-1';
     _diffViewData = {
       agent_name: 'Worker',
-      branch: 'loom/worker',
+      branch: 'torque/worker',
       base_branch: 'main',
       stats: { files: 1, insertions: 2, deletions: 1 },
       files: [],
@@ -15486,7 +15486,7 @@ test('Cmd+Option+P opens the add architect modal through the shared key handler'
       sandbox.addArchitectModalCalls.push(group);
     },
     _agentPanelCurrentGroup() {
-      return 'loom';
+      return 'torque';
     },
   });
   let prevented = false;
@@ -15501,7 +15501,7 @@ test('Cmd+Option+P opens the add architect modal through the shared key handler'
   });
 
   assert.equal(prevented, true);
-  assert.deepEqual(sandbox.addArchitectModalCalls, ['loom']);
+  assert.deepEqual(sandbox.addArchitectModalCalls, ['torque']);
 });
 
 test('full state toggles runtime body mode classes', () => {
@@ -15522,7 +15522,7 @@ test('full state toggles runtime body mode classes', () => {
   assert.equal(document.body.classList.contains('runtime-embedded'), true);
   assert.equal(document.body.classList.contains('standalone-mode'), true);
   assert.equal(document.body.classList.contains('iterm2-mode'), false);
-  assert.equal(document.body.dataset.loomMode, 'standalone');
+  assert.equal(document.body.dataset.torqueMode, 'standalone');
 
   runInContext(context, `
     _handleFullState({
@@ -15539,7 +15539,7 @@ test('full state toggles runtime body mode classes', () => {
   assert.equal(document.body.classList.contains('runtime-embedded'), false);
   assert.equal(document.body.classList.contains('standalone-mode'), false);
   assert.equal(document.body.classList.contains('iterm2-mode'), true);
-  assert.equal(document.body.dataset.loomMode, 'toolbelt');
+  assert.equal(document.body.dataset.torqueMode, 'toolbelt');
 });
 
 
@@ -15554,7 +15554,7 @@ function attachAgentSplitDom(main, document, focusHtml) {
   focus.getBoundingClientRect = () => ({ top: 428, bottom: 608, left: 0, right: 320, width: 320, height: 180 });
   focus.offsetHeight = 180;
   focusScroll.innerHTML = focusHtml || '';
-  focusScroll._loomLastHtml = focusHtml || '';
+  focusScroll._torqueLastHtml = focusHtml || '';
   split.appendChild(grid);
   split.appendChild(handle);
   split.appendChild(focus);
@@ -15612,7 +15612,7 @@ test('agent focus selection updates focus panel without rewriting the grid shell
   runInContext(context, `selectedAgentId = 'agent-1'; selectedTerminalId = 'agent-1'; render();`);
   const initialWrites = writes;
   main.scrollTop = 77;
-  const parts = attachAgentSplitDom(main, document, main._loomLastFocusHtml || '');
+  const parts = attachAgentSplitDom(main, document, main._torqueLastFocusHtml || '');
 
   runInContext(context, `onAgentClick('agent-2');`);
 
@@ -15644,7 +15644,7 @@ test('focus surface gates ignore non-focused traffic and preserve focus-panel sc
     selectedTerminalId = 'agent-1';
     render();
   `);
-  const parts = attachAgentSplitDom(main, document, main._loomLastFocusHtml || '');
+  const parts = attachAgentSplitDom(main, document, main._torqueLastFocusHtml || '');
   parts.focusScroll.scrollTop = 91;
 
   const nonFocusedAgent = runInContext(context, `_deltaSurfaceInvalidations([{ op: 'agent_upsert', id: 'agent-2', group: 'alpha', activity_detail: 'noise' }], [{ agent: state.agents['agent-2'], group: 'alpha' }])`);
@@ -15690,8 +15690,8 @@ test('main-only grid updates do not clobber focused panel scroll', () => {
     render();
   `);
   const initialWrites = mainWrites;
-  parts = attachAgentSplitDom(main, document, main._loomLastFocusHtml || '');
-  parts.grid.innerHTML = main._loomLastGridHtml || '';
+  parts = attachAgentSplitDom(main, document, main._torqueLastFocusHtml || '');
+  parts.grid.innerHTML = main._torqueLastGridHtml || '';
   parts.focusScroll.scrollTop = 91;
   const focusHtml = parts.focusScroll.innerHTML;
 
@@ -15879,9 +15879,9 @@ test('standalone sidebar formats repo and home paths compactly', () => {
       command: 'codex',
       status: 'idle',
       session_id: 'sess-1',
-      directory: '/Users/aleks/dev/personal/gh/iterm2-loom',
-      current_path: '/Users/aleks/dev/personal/gh/iterm2-loom/docs',
-      git_root: '/Users/aleks/dev/personal/gh/iterm2-loom',
+      directory: '/Users/aleks/dev/personal/gh/iterm2-torque',
+      current_path: '/Users/aleks/dev/personal/gh/iterm2-torque/docs',
+      git_root: '/Users/aleks/dev/personal/gh/iterm2-torque',
     },
     'term-1': {
       id: 'term-1',
@@ -15903,14 +15903,14 @@ test('standalone sidebar formats repo and home paths compactly', () => {
   // Engineer summary cards no longer spend body space on paths; terminals
   // still render compact home-relative paths and the formatter remains
   // available for detail surfaces.
-  assert.doesNotMatch(main.innerHTML, /\/Users\/aleks\/dev\/personal\/gh\/iterm2-loom\/docs/);
+  assert.doesNotMatch(main.innerHTML, /\/Users\/aleks\/dev\/personal\/gh\/iterm2-torque\/docs/);
   assert.match(main.innerHTML, /~\/dev\/personal\/scratch/);
   assert.equal(
     jsonValue(
       context,
-      `_formatDisplayPath('/Users/aleks/dev/personal/gh/iterm2-loom/docs', '/Users/aleks/dev/personal/gh/iterm2-loom')`
+      `_formatDisplayPath('/Users/aleks/dev/personal/gh/iterm2-torque/docs', '/Users/aleks/dev/personal/gh/iterm2-torque')`
     ),
-    'iterm2-loom/docs'
+    'iterm2-torque/docs'
   );
 });
 
@@ -15921,7 +15921,7 @@ test('standalone runtime metadata does not change embedded-runtime detection', (
     mode: 'standalone',
     embedded_terminal: true,
     profile: 'desktop',
-    data_dir: '/Users/aleks/.loom/profiles/desktop',
+    data_dir: '/Users/aleks/.torque/profiles/desktop',
     port: 18933,
     home_directory: '/Users/aleks',
   };
@@ -15959,7 +15959,7 @@ test('toolbelt mode keeps the stacked multi-group render path', () => {
 
   runInContext(context, `render();`);
 
-  assert.equal(jsonValue(context, `_loomUiMode()`), 'toolbelt');
+  assert.equal(jsonValue(context, `_torqueUiMode()`), 'toolbelt');
   assert.match(main.innerHTML, /data-group-name="alpha"/);
   assert.match(main.innerHTML, /data-group-name="beta"/);
   assert.match(main.innerHTML, /class="group-hdr"/);
@@ -16400,13 +16400,13 @@ test('header group switcher resyncs stale browser select value after switch and 
   while (rafCallbacks.length) rafCallbacks.shift()();
   assert.equal(select.value, 'beta');
 
-  const cachedHtml = root._loomLastHtml;
+  const cachedHtml = root._torqueLastHtml;
   select.value = 'alpha';
   runInContext(context, `onActiveGroupSelect('beta');`);
 
   // Re-selecting the already-active group is a cache hit; the post-render
   // sync must still run even though innerHTML is not rewritten.
-  assert.equal(root._loomLastHtml, cachedHtml);
+  assert.equal(root._torqueLastHtml, cachedHtml);
   assert.equal(select.value, 'beta');
 });
 
@@ -16467,7 +16467,7 @@ test('Actions and Roles panels hide stale lists while loading the new active gro
 
   runInContext(context, `
     _tplEditorLoadedGroup = 'alpha';
-    _tplEditorList = [{ name: 'AlphaAction', global: false, dir: '/alpha/.loom/actions' }];
+    _tplEditorList = [{ name: 'AlphaAction', global: false, dir: '/alpha/.torque/actions' }];
     _tplEditorSelected = 'project:AlphaAction';
     _tplEditorData = { name: 'AlphaAction', prompt: 'alpha' };
     renderTemplatesPanel();
@@ -16497,15 +16497,15 @@ test('architect section + New Engineer ghost opens a scoped modal and submits ar
   loadModalScripts(context);
   const main = document.getElementById('main');
 
-  sandbox.state.groups = { loom: ['arch-a'] };
-  sandbox.state.group_settings = { loom: { collapsed_default: false } };
+  sandbox.state.groups = { torque: ['arch-a'] };
+  sandbox.state.group_settings = { torque: { collapsed_default: false } };
   sandbox.state.children = {};
   sandbox.state.agents = {
     'arch-a': {
       id: 'arch-a',
       name: 'Productmind',
       kind: 'architect',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: 'P',
       status: 'running',
@@ -16521,17 +16521,17 @@ test('architect section + New Engineer ghost opens a scoped modal and submits ar
   assert.match(main.innerHTML, /agent-section-body[\s\S]*class="ghost-card ghost-card--engineer"/);
   assert.match(main.innerHTML, /class="ghost-card ghost-card--engineer"/);
   assert.match(main.innerHTML, /data-hired-by-architect-id="arch-a"/);
-  assert.match(main.innerHTML, /openAddEngineerForSection\(&quot;loom&quot;,&quot;arch-a&quot;\)/);
+  assert.match(main.innerHTML, /openAddEngineerForSection\(&quot;torque&quot;,&quot;arch-a&quot;\)/);
   assert.doesNotMatch(main.innerHTML, /architect-header-row|agent-section-header-row/);
 
-  const click = main.innerHTML.match(/onclick="([^"]*openAddEngineerForSection\(&quot;loom&quot;,&quot;arch-a&quot;\)[^"]*)"/);
+  const click = main.innerHTML.match(/onclick="([^"]*openAddEngineerForSection\(&quot;torque&quot;,&quot;arch-a&quot;\)[^"]*)"/);
   assert.ok(click, 'new-engineer ghost should have a scoped click handler');
   runInContext(context, `
     var event = { stopPropagation() {} };
     ${click[1].replace(/&quot;/g, '"')};
   `);
   assert.equal(modalDom.modal.classList.contains('visible'), true);
-  assert.equal(modalDom.summary.textContent, 'Create a persistent engineer session hired by Productmind in loom.');
+  assert.equal(modalDom.summary.textContent, 'Create a persistent engineer session hired by Productmind in torque.');
   modalDom.nameInput.value = 'Casey';
   modalDom.commandInput.value = 'codex --fast';
 
@@ -16540,7 +16540,7 @@ test('architect section + New Engineer ghost opens a scoped modal and submits ar
   assert.deepEqual(jsonValue(context, `sendCalls`), [{
     cmd: 'add_engineer',
     name: 'Casey',
-    group: 'loom',
+    group: 'torque',
     hired_by_architect_id: 'arch-a',
     command: 'codex --fast',
   }]);
@@ -16552,8 +16552,8 @@ test('user section + New Engineer ghost submits a user-hired engineer without ar
   loadModalScripts(context);
   const main = document.getElementById('main');
 
-  sandbox.state.groups = { loom: [] };
-  sandbox.state.group_settings = { loom: { collapsed_default: false } };
+  sandbox.state.groups = { torque: [] };
+  sandbox.state.group_settings = { torque: { collapsed_default: false } };
   sandbox.state.children = {};
   sandbox.state.agents = {};
 
@@ -16564,11 +16564,11 @@ test('user section + New Engineer ghost submits a user-hired engineer without ar
   assert.match(main.innerHTML, /agent-section-body[\s\S]*class="ghost-card ghost-card--engineer"/);
   assert.match(main.innerHTML, /class="ghost-card ghost-card--engineer"/);
   assert.match(main.innerHTML, /data-hired-by-architect-id=""/);
-  assert.match(main.innerHTML, /openAddEngineerForSection\(&quot;loom&quot;,&quot;&quot;\)/);
+  assert.match(main.innerHTML, /openAddEngineerForSection\(&quot;torque&quot;,&quot;&quot;\)/);
   assert.doesNotMatch(main.innerHTML, /architect-header-row|agent-section-header-row/);
 
-  runInContext(context, `openAddEngineerForSection('loom', '');`);
-  assert.equal(modalDom.summary.textContent, 'Create a persistent user-hired engineer session in loom.');
+  runInContext(context, `openAddEngineerForSection('torque', '');`);
+  assert.equal(modalDom.summary.textContent, 'Create a persistent user-hired engineer session in torque.');
   modalDom.nameInput.value = 'User Engineer';
 
   runInContext(context, `submitAddEngineer();`);
@@ -16577,14 +16577,14 @@ test('user section + New Engineer ghost submits a user-hired engineer without ar
   assert.deepEqual(sendCalls, [{
     cmd: 'add_engineer',
     name: 'User Engineer',
-    group: 'loom',
+    group: 'torque',
   }]);
   assert.equal(Object.prototype.hasOwnProperty.call(sendCalls[0], 'hired_by_architect_id'), false);
 });
 
 test('user principal Add Worker affordance survives delta rerenders and uses standalone worker flow', () => {
   const { sandbox, document } = createSandbox({
-    _currentGroup() { return 'loom'; },
+    _currentGroup() { return 'torque'; },
     renderTerminalWorkspace() {},
     updateEventsAttentionBadge() {},
   });
@@ -16607,14 +16607,14 @@ test('user principal Add Worker affordance survives delta rerenders and uses sta
     send = function(message) { sendCalls.push(message); };
     _cachedAgentTemplates = [];
     selectedTerminalId = null;
-    focusedItemId = 'principal:loom:user';
+    focusedItemId = 'principal:torque:user';
     getFilterByWindow = function() { return false; };
     _handleFullState({
       seq: 1,
-      groups: { loom: ['eng-a'] },
-      group_settings: { loom: { collapsed_default: false } },
+      groups: { torque: ['eng-a'] },
+      group_settings: { torque: { collapsed_default: false } },
       agents: {
-        'eng-a': { id: 'eng-a', name: 'Engineer A', kind: 'engineer', group: 'loom', cell_type: 'agent', status: 'running', created_at: 1 }
+        'eng-a': { id: 'eng-a', name: 'Engineer A', kind: 'engineer', group: 'torque', cell_type: 'agent', status: 'running', created_at: 1 }
       },
       children: {},
       board_lanes: [],
@@ -16633,22 +16633,22 @@ test('user principal Add Worker affordance survives delta rerenders and uses sta
     _handleDelta({
       seq: 2,
       ops: [
-        { op: 'agent_upsert', id: 'eng-a', group: 'loom', activity_detail: 'still running' },
-        { op: 'group_update', name: 'loom', agents: ['eng-a'] }
+        { op: 'agent_upsert', id: 'eng-a', group: 'torque', activity_detail: 'still running' },
+        { op: 'group_update', name: 'torque', agents: ['eng-a'] }
       ]
     });
   `);
 
   assert.match(main.innerHTML, /class="ghost-card ghost-card--engineer[\s\S]*\+ New Engineer/);
   assert.match(main.innerHTML, /class="ghost-card ghost-card--worker[\s\S]*\+ Add Worker/);
-  assert.equal(jsonValue(context, `focusedItemId`), 'principal:loom:user');
+  assert.equal(jsonValue(context, `focusedItemId`), 'principal:torque:user');
   assert.equal(jsonValue(context, `state.selected_principal_id`), '');
   assert.equal(main.scrollTop, 37);
 
-  runInContext(context, `openAddWorkerForSection('loom');`);
-  assert.deepEqual(jsonValue(context, `sendCalls`), [{ cmd: 'get_config', group: 'loom' }]);
+  runInContext(context, `openAddWorkerForSection('torque');`);
+  assert.deepEqual(jsonValue(context, `sendCalls`), [{ cmd: 'get_config', group: 'torque' }]);
   runInContext(context, `
-    _showAddModal('worker', 'loom', {
+    _showAddModal('worker', 'torque', {
       current_path: '/repo',
       group_cells: [],
       group_settings: {},
@@ -16665,7 +16665,7 @@ test('user principal Add Worker affordance survives delta rerenders and uses sta
     /user-owned detached worker/,
   );
   document.getElementById('add-name-input').value = 'Standalone Worker';
-  document.getElementById('add-group-select').value = 'loom';
+  document.getElementById('add-group-select').value = 'torque';
   document.getElementById('add-profile-select').value = 'Default';
 
   runInContext(context, `submitAdd();`);
@@ -16674,7 +16674,7 @@ test('user principal Add Worker affordance survives delta rerenders and uses sta
   assert.deepEqual(createPayload, {
     cmd: 'add_worker',
     name: 'Standalone Worker',
-    group: 'loom',
+    group: 'torque',
     profile: 'Default',
     worktree: false,
   });
@@ -16689,12 +16689,12 @@ test('user principal Add Worker affordance survives delta rerenders and uses sta
           id: 'worker-standalone',
           name: 'Standalone Worker',
           kind: 'worker',
-          group: 'loom',
+          group: 'torque',
           cell_type: 'agent',
           status: 'running',
           created_at: 2
         },
-        { op: 'group_update', name: 'loom', agents: ['eng-a', 'worker-standalone'] }
+        { op: 'group_update', name: 'torque', agents: ['eng-a', 'worker-standalone'] }
       ]
     });
   `);
@@ -16713,15 +16713,15 @@ test('principals row renders User + architects + + New Architect anchor', () => 
   const { context, document, sandbox } = createMainRenderHarness();
   const main = document.getElementById('main');
 
-  sandbox.state.groups = { loom: ['arch-a'] };
-  sandbox.state.group_settings = { loom: { collapsed_default: false } };
+  sandbox.state.groups = { torque: ['arch-a'] };
+  sandbox.state.group_settings = { torque: { collapsed_default: false } };
   sandbox.state.children = {};
   sandbox.state.agents = {
     'arch-a': {
       id: 'arch-a',
       name: 'Architect A',
       kind: 'architect',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: 'A',
       status: 'running',
@@ -16763,15 +16763,15 @@ test('user-section + New Architect ghost opens the group-scoped architect modal'
   loadModalScripts(context);
   const main = document.getElementById('main');
 
-  sandbox.state.groups = { loom: ['arch-a'] };
-  sandbox.state.group_settings = { loom: { collapsed_default: false } };
+  sandbox.state.groups = { torque: ['arch-a'] };
+  sandbox.state.group_settings = { torque: { collapsed_default: false } };
   sandbox.state.children = {};
   sandbox.state.agents = {
     'arch-a': {
       id: 'arch-a',
       name: 'Architect A',
       kind: 'architect',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: 'A',
       status: 'running',
@@ -16782,20 +16782,20 @@ test('user-section + New Architect ghost opens the group-scoped architect modal'
   runInContext(context, `render();`);
 
   assert.match(main.innerHTML, /class="ghost-card ghost-card--architect/);
-  assert.match(main.innerHTML, /openAddArchitectForGroup\(&quot;loom&quot;\)/);
+  assert.match(main.innerHTML, /openAddArchitectForGroup\(&quot;torque&quot;\)/);
   // + New Architect now lives in the principals row alongside User + architects.
   assert.match(main.innerHTML, /principals-row[\s\S]*principal-card--user[\s\S]*Architect A[\s\S]*\+ New Architect/);
   assert.doesNotMatch(main.innerHTML, /agent-grid-new-architect-row/);
   assert.doesNotMatch(main.innerHTML, /cell cell-add/);
 
-  const click = main.innerHTML.match(/onclick="([^"]*openAddArchitectForGroup\(&quot;loom&quot;\)[^"]*)"/);
+  const click = main.innerHTML.match(/onclick="([^"]*openAddArchitectForGroup\(&quot;torque&quot;\)[^"]*)"/);
   assert.ok(click, 'new-architect ghost should have a click handler');
   runInContext(context, `
     var event = { stopPropagation() {} };
     ${click[1].replace(/&quot;/g, '"')};
   `);
   assert.equal(modalDom.modal.classList.contains('visible'), true);
-  assert.equal(modalDom.summary.textContent, 'Create a persistent architect session for loom.');
+  assert.equal(modalDom.summary.textContent, 'Create a persistent architect session for torque.');
   modalDom.nameInput.value = 'Second Architect';
   modalDom.commandInput.value = 'codex architect';
 
@@ -16804,7 +16804,7 @@ test('user-section + New Architect ghost opens the group-scoped architect modal'
   assert.deepEqual(jsonValue(context, `sendCalls`), [{
     cmd: 'add_architect',
     name: 'Second Architect',
-    group: 'loom',
+    group: 'torque',
     command: 'codex architect',
   }]);
 });
@@ -16813,8 +16813,8 @@ test('hierarchical creation controls render full-card standalone worker tile and
   const { context, document, sandbox } = createMainRenderHarness();
   const main = document.getElementById('main');
 
-  sandbox.state.groups = { loom: [] };
-  sandbox.state.group_settings = { loom: { collapsed_default: false } };
+  sandbox.state.groups = { torque: [] };
+  sandbox.state.group_settings = { torque: { collapsed_default: false } };
   sandbox.state.children = {};
   sandbox.state.agents = {};
 
@@ -16853,8 +16853,8 @@ test('agents-grid v1.6 uses one-line metrics, action threshold labels, empty-row
   });
 
   const now = Date.now() / 1000;
-  sandbox.state.groups = { loom: ['arch-a', 'eng-empty', 'eng-full', 'worker-a'] };
-  sandbox.state.group_settings = { loom: { collapsed_default: false } };
+  sandbox.state.groups = { torque: ['arch-a', 'eng-empty', 'eng-full', 'worker-a'] };
+  sandbox.state.group_settings = { torque: { collapsed_default: false } };
   sandbox.state.children = {};
   sandbox.state.selected_principal_id = 'arch-a';
   sandbox.state.agents = {
@@ -16862,7 +16862,7 @@ test('agents-grid v1.6 uses one-line metrics, action threshold labels, empty-row
       id: 'arch-a',
       name: 'Productmind',
       kind: 'architect',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       status: 'running',
       created_at: now - 600,
@@ -16875,7 +16875,7 @@ test('agents-grid v1.6 uses one-line metrics, action threshold labels, empty-row
       name: 'Empty Engineer',
       kind: 'engineer',
       hired_by_architect_id: 'arch-a',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       status: 'idle',
       created_at: now - 500,
@@ -16894,7 +16894,7 @@ test('agents-grid v1.6 uses one-line metrics, action threshold labels, empty-row
       name: 'Panelsmith',
       kind: 'engineer',
       hired_by_architect_id: 'arch-a',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       status: 'running',
       created_at: now - 400,
@@ -16907,28 +16907,28 @@ test('agents-grid v1.6 uses one-line metrics, action threshold labels, empty-row
       slug: 'worker-polish-pass',
       kind: 'worker',
       owner_engineer_id: 'eng-full',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       status: 'running',
       created_at: now - 300,
-      current_task_id: 'LOOM:216',
+      current_task_id: 'TORQUE:216',
       worktree_diff: { insertions: 4, deletions: 1 },
-      worktree_branch: 'loom/panelsmith/worker-polish-pass-abc123',
+      worktree_branch: 'torque/panelsmith/worker-polish-pass-abc123',
       last_progress_at: now - 30,
       activity_detail: 'writing tests',
     },
   };
   sandbox.state.board_tasks = {
-    'LOOM:216': {
-      id: 'LOOM:216',
-      group: 'loom',
+    'TORQUE:216': {
+      id: 'TORQUE:216',
+      group: 'torque',
       lane: 'In Progress',
       action_name: 'feature/review',
       agent_id: 'worker-a',
     },
     'backlog-user': {
       id: 'backlog-user',
-      group: 'loom',
+      group: 'torque',
       lane: 'Backlog',
     },
   };
@@ -16957,10 +16957,10 @@ test('agents-grid v1.6 uses one-line metrics, action threshold labels, empty-row
   assert.match(main.innerHTML, /data-drag-id="eng-full"[\s\S]*cell-engineer-queue">queue: 0/);
   assert.match(main.innerHTML, /data-drag-id="eng-full"[\s\S]*cell-engineer-activity[^>]*>reviewing :222:2 \(1m\)/);
 
-  assert.match(main.innerHTML, /data-drag-id="worker-a"[\s\S]*cell-worker-task cell-worker-task--clickable[^"]*"[^>]*>LOOM:216/);
+  assert.match(main.innerHTML, /data-drag-id="worker-a"[\s\S]*cell-worker-task cell-worker-task--clickable[^"]*"[^>]*>TORQUE:216/);
   assert.match(main.innerHTML, /data-drag-id="worker-a"[\s\S]*cell-worker-cycle">cycle: review/);
   assert.match(main.innerHTML, /data-drag-id="worker-a"[\s\S]*cell-worker-activity[^>]*>running node tests/);
-  assert.doesNotMatch(main.innerHTML, /engineers ·|queue: 0 ·|LOOM:216 ·|last action 30s/);
+  assert.doesNotMatch(main.innerHTML, /engineers ·|queue: 0 ·|TORQUE:216 ·|last action 30s/);
 });
 
 test('agent card action line renders no-timestamp action without old prefix in real card markup', () => {
@@ -16971,7 +16971,7 @@ test('agent card action line renders no-timestamp action without old prefix in r
     id: 'worker-no-ts',
     name: 'No Timestamp Worker',
     kind: 'worker',
-    group: 'loom',
+    group: 'torque',
     cell_type: 'agent',
     status: 'running',
     activity_detail: 'Session Ended',
@@ -17040,10 +17040,10 @@ test('main render renders engineer rows under the user principal and exposes row
   const main = document.getElementById('main');
 
   sandbox.state.groups = {
-    loom: ['eng-a', 'worker-a', 'eng-b', 'worker-b', 'agent-user'],
+    torque: ['eng-a', 'worker-a', 'eng-b', 'worker-b', 'agent-user'],
   };
   sandbox.state.group_settings = {
-    loom: { collapsed_default: false, engineer_agent_id: 'eng-a' },
+    torque: { collapsed_default: false, engineer_agent_id: 'eng-a' },
   };
   sandbox.state.children = {};
   sandbox.state.agents = {
@@ -17051,7 +17051,7 @@ test('main render renders engineer rows under the user principal and exposes row
       id: 'eng-a',
       name: 'Alice',
       kind: 'engineer',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: 'A',
       status: 'running',
@@ -17063,7 +17063,7 @@ test('main render renders engineer rows under the user principal and exposes row
       name: 'Worker A',
       kind: 'worker',
       owner_engineer_id: 'eng-a',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: '1',
       status: 'running',
@@ -17074,7 +17074,7 @@ test('main render renders engineer rows under the user principal and exposes row
       id: 'eng-b',
       name: 'Bob',
       kind: 'engineer',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: '2',
       status: 'running',
@@ -17086,7 +17086,7 @@ test('main render renders engineer rows under the user principal and exposes row
       name: 'Worker B',
       kind: 'worker',
       owner_engineer_id: 'eng-b',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: '3',
       status: 'running',
@@ -17097,7 +17097,7 @@ test('main render renders engineer rows under the user principal and exposes row
       id: 'agent-user',
       name: 'User Worker',
       kind: 'worker',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: 'U',
       status: 'running',
@@ -17133,10 +17133,10 @@ test('main render falls back to state.groups ordering within hierarchy buckets w
   const main = document.getElementById('main');
 
   sandbox.state.groups = {
-    loom: ['worker-a-2', 'eng-b', 'worker-b-2', 'eng-a', 'worker-b-1', 'agent-user', 'worker-a-1'],
+    torque: ['worker-a-2', 'eng-b', 'worker-b-2', 'eng-a', 'worker-b-1', 'agent-user', 'worker-a-1'],
   };
   sandbox.state.group_settings = {
-    loom: { collapsed_default: false, engineer_agent_id: 'eng-a' },
+    torque: { collapsed_default: false, engineer_agent_id: 'eng-a' },
   };
   sandbox.state.children = {};
   sandbox.state.agents = {
@@ -17144,7 +17144,7 @@ test('main render falls back to state.groups ordering within hierarchy buckets w
       id: 'eng-a',
       name: 'Alice',
       kind: 'engineer',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: 'A',
       status: 'running',
@@ -17154,7 +17154,7 @@ test('main render falls back to state.groups ordering within hierarchy buckets w
       id: 'eng-b',
       name: 'Bob',
       kind: 'engineer',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: 'B',
       status: 'running',
@@ -17165,7 +17165,7 @@ test('main render falls back to state.groups ordering within hierarchy buckets w
       name: 'Worker A1',
       kind: 'worker',
       owner_engineer_id: 'eng-a',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: '1',
       status: 'running',
@@ -17176,7 +17176,7 @@ test('main render falls back to state.groups ordering within hierarchy buckets w
       name: 'Worker A2',
       kind: 'worker',
       owner_engineer_id: 'eng-a',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: '2',
       status: 'running',
@@ -17187,7 +17187,7 @@ test('main render falls back to state.groups ordering within hierarchy buckets w
       name: 'Worker B1',
       kind: 'worker',
       owner_engineer_id: 'eng-b',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: '3',
       status: 'running',
@@ -17198,7 +17198,7 @@ test('main render falls back to state.groups ordering within hierarchy buckets w
       name: 'Worker B2',
       kind: 'worker',
       owner_engineer_id: 'eng-b',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: '4',
       status: 'running',
@@ -17208,7 +17208,7 @@ test('main render falls back to state.groups ordering within hierarchy buckets w
       id: 'agent-user',
       name: 'User Worker',
       kind: 'worker',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: 'U',
       status: 'running',
@@ -17235,10 +17235,10 @@ test('main render orders sections user-first then architect creation order', () 
   const main = document.getElementById('main');
 
   sandbox.state.groups = {
-    loom: ['worker-hired-a', 'arch-a', 'eng-hired-a', 'arch-b', 'eng-hired-b', 'worker-user', 'eng-user', 'worker-user-owned'],
+    torque: ['worker-hired-a', 'arch-a', 'eng-hired-a', 'arch-b', 'eng-hired-b', 'worker-user', 'eng-user', 'worker-user-owned'],
   };
   sandbox.state.group_settings = {
-    loom: { collapsed_default: false, engineer_agent_id: '' },
+    torque: { collapsed_default: false, engineer_agent_id: '' },
   };
   sandbox.state.children = {};
   sandbox.state.agents = {
@@ -17246,7 +17246,7 @@ test('main render orders sections user-first then architect creation order', () 
       id: 'arch-a',
       name: 'Architect A',
       kind: 'architect',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: 'A',
       status: 'running',
@@ -17257,7 +17257,7 @@ test('main render orders sections user-first then architect creation order', () 
       id: 'arch-b',
       name: 'Architect B',
       kind: 'architect',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: 'B',
       status: 'running',
@@ -17269,7 +17269,7 @@ test('main render orders sections user-first then architect creation order', () 
       name: 'Alice A',
       kind: 'engineer',
       hired_by_architect_id: 'arch-a',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: 'E',
       status: 'running',
@@ -17281,7 +17281,7 @@ test('main render orders sections user-first then architect creation order', () 
       name: 'Worker A',
       kind: 'worker',
       owner_engineer_id: 'eng-hired-a',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: 'W',
       status: 'running',
@@ -17293,7 +17293,7 @@ test('main render orders sections user-first then architect creation order', () 
       name: 'Alice B',
       kind: 'engineer',
       hired_by_architect_id: 'arch-b',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: 'F',
       status: 'running',
@@ -17304,7 +17304,7 @@ test('main render orders sections user-first then architect creation order', () 
       id: 'eng-user',
       name: 'Bob',
       kind: 'engineer',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: 'U',
       status: 'running',
@@ -17316,7 +17316,7 @@ test('main render orders sections user-first then architect creation order', () 
       name: 'Worker B',
       kind: 'worker',
       owner_engineer_id: 'eng-user',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: 'V',
       status: 'running',
@@ -17327,7 +17327,7 @@ test('main render orders sections user-first then architect creation order', () 
       id: 'worker-user',
       name: 'Loose Worker',
       kind: 'worker',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: 'O',
       status: 'running',
@@ -17355,10 +17355,10 @@ test('main render uses containment primitives and retires cell hierarchy indenta
   const main = document.getElementById('main');
 
   sandbox.state.groups = {
-    loom: ['arch-a', 'eng-hired', 'worker-hired', 'orphan'],
+    torque: ['arch-a', 'eng-hired', 'worker-hired', 'orphan'],
   };
   sandbox.state.group_settings = {
-    loom: { collapsed_default: false, engineer_agent_id: '' },
+    torque: { collapsed_default: false, engineer_agent_id: '' },
   };
   sandbox.state.children = {};
   sandbox.state.agents = {
@@ -17366,7 +17366,7 @@ test('main render uses containment primitives and retires cell hierarchy indenta
       id: 'arch-a',
       name: 'Architect A',
       kind: 'architect',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: 'A',
       status: 'running',
@@ -17376,7 +17376,7 @@ test('main render uses containment primitives and retires cell hierarchy indenta
       name: 'Alice',
       kind: 'engineer',
       hired_by_architect_id: 'arch-a',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: 'E',
       status: 'running',
@@ -17386,7 +17386,7 @@ test('main render uses containment primitives and retires cell hierarchy indenta
       name: 'Worker A',
       kind: 'worker',
       owner_engineer_id: 'eng-hired',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: 'W',
       status: 'running',
@@ -17395,7 +17395,7 @@ test('main render uses containment primitives and retires cell hierarchy indenta
       id: 'orphan',
       name: 'Orphan Worker',
       kind: 'worker',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: 'O',
       status: 'running',
@@ -17434,10 +17434,10 @@ test('main render anchors each architect once in a fixed left column with engine
   const main = document.getElementById('main');
 
   sandbox.state.groups = {
-    loom: ['arch-a', 'eng-a1', 'worker-a1', 'eng-a2', 'worker-a2', 'eng-a3'],
+    torque: ['arch-a', 'eng-a1', 'worker-a1', 'eng-a2', 'worker-a2', 'eng-a3'],
   };
   sandbox.state.group_settings = {
-    loom: { collapsed_default: false, engineer_agent_id: '' },
+    torque: { collapsed_default: false, engineer_agent_id: '' },
   };
   sandbox.state.children = {};
   sandbox.state.agents = {
@@ -17445,7 +17445,7 @@ test('main render anchors each architect once in a fixed left column with engine
       id: 'arch-a',
       name: 'Productmind',
       kind: 'architect',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: 'P',
       status: 'running',
@@ -17456,7 +17456,7 @@ test('main render anchors each architect once in a fixed left column with engine
       name: 'Engineer One',
       kind: 'engineer',
       hired_by_architect_id: 'arch-a',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: '1',
       status: 'running',
@@ -17467,7 +17467,7 @@ test('main render anchors each architect once in a fixed left column with engine
       name: 'Worker One',
       kind: 'worker',
       owner_engineer_id: 'eng-a1',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: 'W',
       status: 'running',
@@ -17478,7 +17478,7 @@ test('main render anchors each architect once in a fixed left column with engine
       name: 'Engineer Two',
       kind: 'engineer',
       hired_by_architect_id: 'arch-a',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: '2',
       status: 'running',
@@ -17489,7 +17489,7 @@ test('main render anchors each architect once in a fixed left column with engine
       name: 'Worker Two',
       kind: 'worker',
       owner_engineer_id: 'eng-a2',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: 'V',
       status: 'running',
@@ -17500,7 +17500,7 @@ test('main render anchors each architect once in a fixed left column with engine
       name: 'Engineer Three',
       kind: 'engineer',
       hired_by_architect_id: 'arch-a',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: '3',
       status: 'running',
@@ -17538,7 +17538,7 @@ test('main render keeps wrapped workers inside their engineer row and fixes arch
       id: 'eng-a',
       name: 'Engineer A',
       kind: 'engineer',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: 'E',
       status: 'running',
@@ -17548,7 +17548,7 @@ test('main render keeps wrapped workers inside their engineer row and fixes arch
       id: 'eng-b',
       name: 'Engineer B',
       kind: 'engineer',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: 'B',
       status: 'running',
@@ -17563,7 +17563,7 @@ test('main render keeps wrapped workers inside their engineer row and fixes arch
       name: 'Worker ' + i,
       kind: 'worker',
       owner_engineer_id: 'eng-a',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: String(i),
       status: 'running',
@@ -17572,8 +17572,8 @@ test('main render keeps wrapped workers inside their engineer row and fixes arch
   }
   ids.push('eng-b');
 
-  sandbox.state.groups = { loom: ids };
-  sandbox.state.group_settings = { loom: { collapsed_default: false, engineer_agent_id: '' } };
+  sandbox.state.groups = { torque: ids };
+  sandbox.state.group_settings = { torque: { collapsed_default: false, engineer_agent_id: '' } };
   sandbox.state.children = {};
   sandbox.state.agents = agents;
 
@@ -17613,10 +17613,10 @@ test('main render keeps dismissed engineers in-place and preserves scroll across
   });
 
   sandbox.state.groups = {
-    loom: ['eng-dismissed', 'worker-dismissed', 'eng-active', 'worker-active'],
+    torque: ['eng-dismissed', 'worker-dismissed', 'eng-active', 'worker-active'],
   };
   sandbox.state.group_settings = {
-    loom: { collapsed_default: false, engineer_agent_id: '' },
+    torque: { collapsed_default: false, engineer_agent_id: '' },
   };
   sandbox.state.children = {};
   sandbox.state.agents = {
@@ -17624,7 +17624,7 @@ test('main render keeps dismissed engineers in-place and preserves scroll across
       id: 'eng-dismissed',
       name: 'Paused Engineer',
       kind: 'engineer',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: 'D',
       status: 'stopped',
@@ -17635,7 +17635,7 @@ test('main render keeps dismissed engineers in-place and preserves scroll across
       name: 'Paused Worker',
       kind: 'worker',
       owner_engineer_id: 'eng-dismissed',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: 'W',
       status: 'stopped',
@@ -17644,7 +17644,7 @@ test('main render keeps dismissed engineers in-place and preserves scroll across
       id: 'eng-active',
       name: 'Active Engineer',
       kind: 'engineer',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: 'A',
       status: 'running',
@@ -17655,7 +17655,7 @@ test('main render keeps dismissed engineers in-place and preserves scroll across
       name: 'Active Worker',
       kind: 'worker',
       owner_engineer_id: 'eng-active',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: 'B',
       status: 'running',
@@ -17699,9 +17699,9 @@ test('main render keeps dismissed engineers in-place and preserves scroll across
 test('main render shows dismissed architect badge and architect rehire control', () => {
   const { context, document, sandbox } = createMainRenderHarness();
   const main = document.getElementById('main');
-  sandbox.state.groups = { loom: ['arch-dismissed', 'eng-hired'] };
+  sandbox.state.groups = { torque: ['arch-dismissed', 'eng-hired'] };
   sandbox.state.group_settings = {
-    loom: { collapsed_default: false, engineer_agent_id: '' },
+    torque: { collapsed_default: false, engineer_agent_id: '' },
   };
   sandbox.state.children = {};
   sandbox.state.agents = {
@@ -17709,7 +17709,7 @@ test('main render shows dismissed architect badge and architect rehire control',
       id: 'arch-dismissed',
       name: 'Paused Architect',
       kind: 'architect',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       status: 'stopped',
       dismissed_at: 123,
@@ -17719,7 +17719,7 @@ test('main render shows dismissed architect badge and architect rehire control',
       name: 'Hired Engineer',
       kind: 'engineer',
       hired_by_architect_id: 'arch-dismissed',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       status: 'running',
       session_id: 'sess-eng',
@@ -17752,15 +17752,15 @@ test('main render restores scroll when a section rerenders with a new engineer r
     },
   });
 
-  sandbox.state.groups = { loom: ['arch-a', 'eng-a'] };
-  sandbox.state.group_settings = { loom: { collapsed_default: false } };
+  sandbox.state.groups = { torque: ['arch-a', 'eng-a'] };
+  sandbox.state.group_settings = { torque: { collapsed_default: false } };
   sandbox.state.children = {};
   sandbox.state.agents = {
     'arch-a': {
       id: 'arch-a',
       name: 'Architect A',
       kind: 'architect',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: 'R',
       status: 'running',
@@ -17772,7 +17772,7 @@ test('main render restores scroll when a section rerenders with a new engineer r
       name: 'Alice',
       kind: 'engineer',
       hired_by_architect_id: 'arch-a',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: 'A',
       status: 'running',
@@ -17792,14 +17792,14 @@ test('main render restores scroll when a section rerenders with a new engineer r
     name: 'Bob',
     kind: 'engineer',
     hired_by_architect_id: 'arch-a',
-    group: 'loom',
+    group: 'torque',
     cell_type: 'agent',
     icon: 'B',
     status: 'running',
     session_id: 'sess-eng-b',
     created_at: 11,
   };
-  sandbox.state.groups.loom = ['arch-a', 'eng-a', 'eng-b'];
+  sandbox.state.groups.torque = ['arch-a', 'eng-a', 'eng-b'];
 
   runInContext(context, `render();`);
 
@@ -17834,7 +17834,7 @@ test('main render indexes board task lookups for subtitles and branch boundary d
       status: 'running',
       created_at: i,
       worktree_repo_root: i === 0 ? '/repo' : '',
-      worktree_branch: i === 0 ? 'loom/feature' : '',
+      worktree_branch: i === 0 ? 'torque/feature' : '',
     };
     sandbox.state.board_tasks['task-agent-' + i] = {
       id: 'task-agent-' + i,
@@ -17864,7 +17864,7 @@ test('main render indexes board task lookups for subtitles and branch boundary d
     worktree_boundary: {
       status: 'open',
       repo_root: '/repo',
-      branch: 'loom/feature',
+      branch: 'torque/feature',
       recorded_at: '2026-04-22T12:00:00Z',
     },
   };
@@ -17943,15 +17943,15 @@ test('main hierarchy row shapes preserve focused controls across rerenders', () 
       },
     });
 
-    sandbox.state.groups = { loom: ['arch-1', 'eng-1', 'loose-1'] };
-    sandbox.state.group_settings = { loom: { collapsed_default: false } };
+    sandbox.state.groups = { torque: ['arch-1', 'eng-1', 'loose-1'] };
+    sandbox.state.group_settings = { torque: { collapsed_default: false } };
     sandbox.state.children = {};
     sandbox.state.agents = {
       'arch-1': {
         id: 'arch-1',
         name: 'Architect',
         kind: 'architect',
-        group: 'loom',
+        group: 'torque',
         cell_type: 'agent',
         icon: 'A',
         status: 'running',
@@ -17962,7 +17962,7 @@ test('main hierarchy row shapes preserve focused controls across rerenders', () 
         name: 'Engineer',
         kind: 'engineer',
         hired_by_architect_id: 'arch-1',
-        group: 'loom',
+        group: 'torque',
         cell_type: 'agent',
         icon: 'E',
         status: 'running',
@@ -17972,7 +17972,7 @@ test('main hierarchy row shapes preserve focused controls across rerenders', () 
         id: 'loose-1',
         name: 'Loose Worker',
         kind: 'worker',
-        group: 'loom',
+        group: 'torque',
         cell_type: 'agent',
         icon: 'W',
         status: 'running',
@@ -18006,13 +18006,13 @@ test('main hierarchy row shapes preserve focused controls across rerenders', () 
       name: 'Engineer 2',
       kind: 'engineer',
       hired_by_architect_id: 'arch-1',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: '2',
       status: 'running',
       created_at: 4,
     };
-    sandbox.state.groups.loom = ['arch-1', 'eng-1', 'loose-1', 'eng-2'];
+    sandbox.state.groups.torque = ['arch-1', 'eng-1', 'loose-1', 'eng-2'];
 
     runInContext(context, `render();`);
 
@@ -18041,14 +18041,14 @@ test('add engineer modal draft survives agent grid rerender during websocket del
   runInContext(context, `
     _handleFullState({
       seq: 1,
-      groups: { loom: ['arch-a'] },
-      group_settings: { loom: { collapsed_default: false } },
+      groups: { torque: ['arch-a'] },
+      group_settings: { torque: { collapsed_default: false } },
       agents: {
         'arch-a': {
           id: 'arch-a',
           name: 'Architect A',
           kind: 'architect',
-          group: 'loom',
+          group: 'torque',
           cell_type: 'agent',
           icon: 'A',
           status: 'running',
@@ -18061,7 +18061,7 @@ test('add engineer modal draft survives agent grid rerender during websocket del
       panel_events: [],
       selected_principal_id: 'arch-a'
     });
-    openAddEngineerForSection('loom', 'arch-a');
+    openAddEngineerForSection('torque', 'arch-a');
   `);
 
   modalDom.nameInput.value = 'Draft Engineer';
@@ -18074,8 +18074,8 @@ test('add engineer modal draft survives agent grid rerender during websocket del
     _handleDelta({
       seq: 2,
       ops: [
-        { op: 'agent_upsert', id: 'eng-a', name: 'Engineer A', kind: 'engineer', hired_by_architect_id: 'arch-a', group: 'loom', cell_type: 'agent', icon: 'E', status: 'running', created_at: 2 },
-        { op: 'group_update', name: 'loom', agents: ['arch-a', 'eng-a'] }
+        { op: 'agent_upsert', id: 'eng-a', name: 'Engineer A', kind: 'engineer', hired_by_architect_id: 'arch-a', group: 'torque', cell_type: 'agent', icon: 'E', status: 'running', created_at: 2 },
+        { op: 'group_update', name: 'torque', agents: ['arch-a', 'eng-a'] }
       ]
     });
   `);
@@ -18216,9 +18216,9 @@ test('task delta updates visible worker cycle state while preserving main-grid f
 
 test('main hierarchy preserves focused ghost-card state across websocket delta rerenders', () => {
   const cases = [
-    { label: 'worker ghost', focusKey: 'section-new-worker:loom:user', principal: '' },
-    { label: 'engineer ghost', focusKey: 'section-new-engineer:loom:architect:arch-a', principal: 'arch-a' },
-    { label: 'architect ghost', focusKey: 'agent-new-architect:loom', principal: '' },
+    { label: 'worker ghost', focusKey: 'section-new-worker:torque:user', principal: '' },
+    { label: 'engineer ghost', focusKey: 'section-new-engineer:torque:architect:arch-a', principal: 'arch-a' },
+    { label: 'architect ghost', focusKey: 'agent-new-architect:torque', principal: '' },
   ];
 
   for (const item of cases) {
@@ -18263,14 +18263,14 @@ test('main hierarchy preserves focused ghost-card state across websocket delta r
     runInContext(context, `
       _handleFullState({
         seq: 1,
-        groups: { loom: ['arch-a'] },
-        group_settings: { loom: { collapsed_default: false } },
+        groups: { torque: ['arch-a'] },
+        group_settings: { torque: { collapsed_default: false } },
         agents: {
           'arch-a': {
             id: 'arch-a',
             name: 'Architect A',
             kind: 'architect',
-            group: 'loom',
+            group: 'torque',
             cell_type: 'agent',
             icon: 'A',
             status: 'running',
@@ -18300,13 +18300,13 @@ test('main hierarchy preserves focused ghost-card state across websocket delta r
             name: 'Engineer A',
             kind: 'engineer',
             hired_by_architect_id: 'arch-a',
-            group: 'loom',
+            group: 'torque',
             cell_type: 'agent',
             icon: 'E',
             status: 'running',
             created_at: 2
           },
-          { op: 'group_update', name: 'loom', agents: ['arch-a', 'eng-a'] }
+          { op: 'group_update', name: 'torque', agents: ['arch-a', 'eng-a'] }
         ]
       });
     `);
@@ -18337,8 +18337,8 @@ test('main hierarchy ordering is stable when multiple agent deltas arrive in one
   runInContext(context, `
     _handleFullState({
       seq: 1,
-      groups: { loom: [] },
-      group_settings: { loom: { collapsed_default: false } },
+      groups: { torque: [] },
+      group_settings: { torque: { collapsed_default: false } },
       agents: {},
       children: {},
       board_lanes: [],
@@ -18348,14 +18348,14 @@ test('main hierarchy ordering is stable when multiple agent deltas arrive in one
     _handleDelta({
       seq: 2,
       ops: [
-        { op: 'agent_upsert', id: 'arch-a', name: 'Architect A', kind: 'architect', group: 'loom', cell_type: 'agent', icon: 'A', status: 'running', created_at: 30 },
-        { op: 'agent_upsert', id: 'eng-user', name: 'User Engineer', kind: 'engineer', group: 'loom', cell_type: 'agent', icon: 'U', status: 'running', created_at: 2 },
-        { op: 'agent_upsert', id: 'arch-b', name: 'Architect B', kind: 'architect', group: 'loom', cell_type: 'agent', icon: 'B', status: 'running', created_at: 20 },
-        { op: 'agent_upsert', id: 'worker-user', name: 'User Worker', kind: 'worker', owner_engineer_id: 'eng-user', group: 'loom', cell_type: 'agent', icon: 'w', status: 'running', created_at: 3 },
-        { op: 'agent_upsert', id: 'eng-a', name: 'Engineer A', kind: 'engineer', hired_by_architect_id: 'arch-a', group: 'loom', cell_type: 'agent', icon: 'E', status: 'running', created_at: 31 },
-        { op: 'agent_upsert', id: 'eng-b', name: 'Engineer B', kind: 'engineer', hired_by_architect_id: 'arch-b', group: 'loom', cell_type: 'agent', icon: 'F', status: 'running', created_at: 21 },
-        { op: 'agent_upsert', id: 'loose', name: 'Loose', kind: 'worker', group: 'loom', cell_type: 'agent', icon: 'L', status: 'running', created_at: 1 },
-        { op: 'group_update', name: 'loom', agents: ['eng-a', 'arch-a', 'worker-user', 'arch-b', 'loose', 'eng-b', 'eng-user'] }
+        { op: 'agent_upsert', id: 'arch-a', name: 'Architect A', kind: 'architect', group: 'torque', cell_type: 'agent', icon: 'A', status: 'running', created_at: 30 },
+        { op: 'agent_upsert', id: 'eng-user', name: 'User Engineer', kind: 'engineer', group: 'torque', cell_type: 'agent', icon: 'U', status: 'running', created_at: 2 },
+        { op: 'agent_upsert', id: 'arch-b', name: 'Architect B', kind: 'architect', group: 'torque', cell_type: 'agent', icon: 'B', status: 'running', created_at: 20 },
+        { op: 'agent_upsert', id: 'worker-user', name: 'User Worker', kind: 'worker', owner_engineer_id: 'eng-user', group: 'torque', cell_type: 'agent', icon: 'w', status: 'running', created_at: 3 },
+        { op: 'agent_upsert', id: 'eng-a', name: 'Engineer A', kind: 'engineer', hired_by_architect_id: 'arch-a', group: 'torque', cell_type: 'agent', icon: 'E', status: 'running', created_at: 31 },
+        { op: 'agent_upsert', id: 'eng-b', name: 'Engineer B', kind: 'engineer', hired_by_architect_id: 'arch-b', group: 'torque', cell_type: 'agent', icon: 'F', status: 'running', created_at: 21 },
+        { op: 'agent_upsert', id: 'loose', name: 'Loose', kind: 'worker', group: 'torque', cell_type: 'agent', icon: 'L', status: 'running', created_at: 1 },
+        { op: 'group_update', name: 'torque', agents: ['eng-a', 'arch-a', 'worker-user', 'arch-b', 'loose', 'eng-b', 'eng-user'] }
       ]
     });
   `);
@@ -18378,15 +18378,15 @@ test('main grid drag reorders agents within a hierarchical row without changing 
   const { context, document, sandbox } = createMainGridDragHarness();
   const main = document.getElementById('main');
 
-  sandbox.state.groups = { loom: ['eng-1', 'worker-1', 'worker-2'] };
-  sandbox.state.group_settings = { loom: { collapsed_default: false } };
+  sandbox.state.groups = { torque: ['eng-1', 'worker-1', 'worker-2'] };
+  sandbox.state.group_settings = { torque: { collapsed_default: false } };
   sandbox.state.children = {};
   sandbox.state.agents = {
     'eng-1': {
       id: 'eng-1',
       name: 'Engineer',
       kind: 'engineer',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: 'E',
       status: 'running',
@@ -18396,7 +18396,7 @@ test('main grid drag reorders agents within a hierarchical row without changing 
       name: 'Worker 1',
       kind: 'worker',
       owner_engineer_id: 'eng-1',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: '1',
       status: 'running',
@@ -18406,7 +18406,7 @@ test('main grid drag reorders agents within a hierarchical row without changing 
       name: 'Worker 2',
       kind: 'worker',
       owner_engineer_id: 'eng-1',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: '2',
       status: 'running',
@@ -18426,14 +18426,14 @@ test('main grid drag reorders agents within a hierarchical row without changing 
   const worker1 = createDragDomElement({
     dragId: 'worker-1',
     dragType: 'agent',
-    dragGroup: 'loom',
+    dragGroup: 'torque',
     rect: { left: 180, right: 300, width: 120 },
     parent: row,
   });
   const worker2 = createDragDomElement({
     dragId: 'worker-2',
     dragType: 'agent',
-    dragGroup: 'loom',
+    dragGroup: 'torque',
     rect: { left: 320, right: 440, width: 120 },
     parent: row,
   });
@@ -18444,11 +18444,11 @@ test('main grid drag reorders agents within a hierarchical row without changing 
   assert.deepEqual(jsonValue(context, `sendCalls[0]`), {
     cmd: 'move_agent',
     id: 'worker-2',
-    target_group: 'loom',
+    target_group: 'torque',
     before: 'worker-1',
   });
 
-  applyMoveAgentForDragState(sandbox.state, 'worker-2', 'loom', 'worker-1');
+  applyMoveAgentForDragState(sandbox.state, 'worker-2', 'torque', 'worker-1');
   runInContext(context, `render();`);
 
   assert.deepEqual(
@@ -18470,15 +18470,15 @@ test('terminal drag moves between an agent drawer and standalone while preservin
   const { context, document, sandbox } = createMainGridDragHarness();
   const main = document.getElementById('main');
 
-  sandbox.state.groups = { loom: ['agent-1', 'term-standalone'] };
-  sandbox.state.group_settings = { loom: { collapsed_default: false } };
+  sandbox.state.groups = { torque: ['agent-1', 'term-standalone'] };
+  sandbox.state.group_settings = { torque: { collapsed_default: false } };
   sandbox.state.children = { 'agent-1': ['term-child'] };
   sandbox.state.agents = {
     'agent-1': {
       id: 'agent-1',
       name: 'Agent',
       kind: 'engineer',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: 'A',
       status: 'running',
@@ -18488,21 +18488,21 @@ test('terminal drag moves between an agent drawer and standalone while preservin
       id: 'term-child',
       name: 'Child Terminal',
       kind: 'terminal',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'terminal',
       parent_id: 'agent-1',
       status: 'running',
       session_id: 'child-session',
       current_process: 'zsh',
-      worktree_path: '/repo/.loom/worktrees/term-child',
-      worktree_branch: 'loom/term-child',
+      worktree_path: '/repo/.torque/worktrees/term-child',
+      worktree_branch: 'torque/term-child',
       current_path: '/repo',
     },
     'term-standalone': {
       id: 'term-standalone',
       name: 'Standalone Terminal',
       kind: 'terminal',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'terminal',
       status: 'running',
       session_id: 'standalone-session',
@@ -18515,12 +18515,12 @@ test('terminal drag moves between an agent drawer and standalone while preservin
   const childTerminal = createDragDomElement({
     dragId: 'term-child',
     dragType: 'terminal',
-    dragGroup: 'loom',
+    dragGroup: 'torque',
     parent: main,
   });
   const standaloneList = createDragDomElement({
     dropType: 'terminal',
-    dropGroup: 'loom',
+    dropGroup: 'torque',
     classNames: ['term-list'],
     parent: main,
   });
@@ -18530,40 +18530,40 @@ test('terminal drag moves between an agent drawer and standalone while preservin
   assert.deepEqual(jsonValue(context, `sendCalls[0]`), {
     cmd: 'move_agent',
     id: 'term-child',
-    target_group: 'loom',
+    target_group: 'torque',
     before: '',
   });
 
-  applyMoveAgentForDragState(sandbox.state, 'term-child', 'loom', '');
+  applyMoveAgentForDragState(sandbox.state, 'term-child', 'torque', '');
   runInContext(context, `render();`);
 
   assert.deepEqual(jsonValue(context, `({
     parent: state.agents['term-child'].parent_id,
     group: state.agents['term-child'].group,
-    groups: state.groups.loom,
+    groups: state.groups.torque,
     children: state.children['agent-1'],
     session: state.agents['term-child'].session_id,
     worktreePath: state.agents['term-child'].worktree_path,
     worktreeBranch: state.agents['term-child'].worktree_branch
   })`), {
     parent: '',
-    group: 'loom',
+    group: 'torque',
     groups: ['agent-1', 'term-standalone', 'term-child'],
     children: [],
     session: 'child-session',
-    worktreePath: '/repo/.loom/worktrees/term-child',
-    worktreeBranch: 'loom/term-child',
+    worktreePath: '/repo/.torque/worktrees/term-child',
+    worktreeBranch: 'torque/term-child',
   });
 
   const detachedTerminal = createDragDomElement({
     dragId: 'term-child',
     dragType: 'terminal',
-    dragGroup: 'loom',
+    dragGroup: 'torque',
     parent: main,
   });
   const parentDrawerList = createDragDomElement({
     dropType: 'terminal',
-    dropGroup: 'loom',
+    dropGroup: 'torque',
     dropParent: 'agent-1',
     classNames: ['term-list'],
     parent: main,
@@ -18583,7 +18583,7 @@ test('terminal drag moves between an agent drawer and standalone while preservin
   assert.deepEqual(jsonValue(context, `({
     parent: state.agents['term-child'].parent_id,
     group: state.agents['term-child'].group,
-    groups: state.groups.loom,
+    groups: state.groups.torque,
     children: state.children['agent-1'],
     navItems: window._navItems,
     session: state.agents['term-child'].session_id,
@@ -18591,13 +18591,13 @@ test('terminal drag moves between an agent drawer and standalone while preservin
     worktreeBranch: state.agents['term-child'].worktree_branch
   })`), {
     parent: 'agent-1',
-    group: 'loom',
+    group: 'torque',
     groups: ['agent-1', 'term-standalone'],
     children: ['term-child'],
     navItems: ['agent-1', 'term-child', 'term-standalone'],
     session: 'child-session',
-    worktreePath: '/repo/.loom/worktrees/term-child',
-    worktreeBranch: 'loom/term-child',
+    worktreePath: '/repo/.torque/worktrees/term-child',
+    worktreeBranch: 'torque/term-child',
   });
 });
 
@@ -18605,15 +18605,15 @@ test('agent drag across an architect section boundary preserves ownership instea
   const { context, document, sandbox } = createMainGridDragHarness();
   const main = document.getElementById('main');
 
-  sandbox.state.groups = { loom: ['eng-user', 'worker-user', 'arch-a', 'eng-a'] };
-  sandbox.state.group_settings = { loom: { collapsed_default: false } };
+  sandbox.state.groups = { torque: ['eng-user', 'worker-user', 'arch-a', 'eng-a'] };
+  sandbox.state.group_settings = { torque: { collapsed_default: false } };
   sandbox.state.children = {};
   sandbox.state.agents = {
     'eng-user': {
       id: 'eng-user',
       name: 'User Engineer',
       kind: 'engineer',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: 'U',
       status: 'running',
@@ -18623,7 +18623,7 @@ test('agent drag across an architect section boundary preserves ownership instea
       name: 'User Worker',
       kind: 'worker',
       owner_engineer_id: 'eng-user',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: 'W',
       status: 'running',
@@ -18632,7 +18632,7 @@ test('agent drag across an architect section boundary preserves ownership instea
       id: 'arch-a',
       name: 'Architect A',
       kind: 'architect',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: 'A',
       status: 'running',
@@ -18642,7 +18642,7 @@ test('agent drag across an architect section boundary preserves ownership instea
       name: 'Architect Engineer',
       kind: 'engineer',
       hired_by_architect_id: 'arch-a',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       icon: 'E',
       status: 'running',
@@ -18664,14 +18664,14 @@ test('agent drag across an architect section boundary preserves ownership instea
   const workerUser = createDragDomElement({
     dragId: 'worker-user',
     dragType: 'agent',
-    dragGroup: 'loom',
+    dragGroup: 'torque',
     rect: { left: 180, right: 300, width: 120 },
     parent: userSection,
   });
   const architectEngineer = createDragDomElement({
     dragId: 'eng-a',
     dragType: 'agent',
-    dragGroup: 'loom',
+    dragGroup: 'torque',
     rect: { left: 180, right: 300, width: 120 },
     parent: architectSection,
   });
@@ -18681,12 +18681,12 @@ test('agent drag across an architect section boundary preserves ownership instea
   assert.deepEqual(jsonValue(context, `sendCalls[0]`), {
     cmd: 'move_agent',
     id: 'worker-user',
-    target_group: 'loom',
+    target_group: 'torque',
     before: 'eng-a',
   });
   assert.equal(jsonValue(context, `sendCalls.length`), 1);
 
-  applyMoveAgentForDragState(sandbox.state, 'worker-user', 'loom', 'eng-a');
+  applyMoveAgentForDragState(sandbox.state, 'worker-user', 'torque', 'eng-a');
   runInContext(context, `render();`);
 
   assert.deepEqual(jsonValue(context, `({
@@ -18751,7 +18751,7 @@ test('main grid keyboard navigation traverses logical rows across sections', () 
   const { context, sandbox } = createMainNavigationHarness();
 
   sandbox.state.groups = {
-    loom: [
+    torque: [
       'loose-1',
       'loose-2',
       'eng-user-a',
@@ -18768,23 +18768,23 @@ test('main grid keyboard navigation traverses logical rows across sections', () 
       'worker-b1',
     ],
   };
-  sandbox.state.group_settings = { loom: { collapsed_default: false } };
+  sandbox.state.group_settings = { torque: { collapsed_default: false } };
   sandbox.state.children = {};
   sandbox.state.agents = {
-    'loose-1': { id: 'loose-1', name: 'Loose 1', kind: 'worker', group: 'loom', cell_type: 'agent', status: 'running', created_at: 1 },
-    'loose-2': { id: 'loose-2', name: 'Loose 2', kind: 'worker', group: 'loom', cell_type: 'agent', status: 'running', created_at: 2 },
-    'eng-user-a': { id: 'eng-user-a', name: 'User A', kind: 'engineer', group: 'loom', cell_type: 'agent', status: 'running', created_at: 10 },
-    'worker-user-a1': { id: 'worker-user-a1', name: 'A1', kind: 'worker', owner_engineer_id: 'eng-user-a', group: 'loom', cell_type: 'agent', status: 'running', created_at: 11 },
-    'worker-user-a2': { id: 'worker-user-a2', name: 'A2', kind: 'worker', owner_engineer_id: 'eng-user-a', group: 'loom', cell_type: 'agent', status: 'running', created_at: 12 },
-    'eng-user-b': { id: 'eng-user-b', name: 'User B', kind: 'engineer', group: 'loom', cell_type: 'agent', status: 'running', created_at: 20 },
-    'worker-user-b1': { id: 'worker-user-b1', name: 'B1', kind: 'worker', owner_engineer_id: 'eng-user-b', group: 'loom', cell_type: 'agent', status: 'running', created_at: 21 },
-    'arch-a': { id: 'arch-a', name: 'Architect A', kind: 'architect', group: 'loom', cell_type: 'agent', status: 'running', created_at: 30 },
-    'eng-a': { id: 'eng-a', name: 'Eng A', kind: 'engineer', hired_by_architect_id: 'arch-a', group: 'loom', cell_type: 'agent', status: 'running', created_at: 31 },
-    'worker-a1': { id: 'worker-a1', name: 'WA1', kind: 'worker', owner_engineer_id: 'eng-a', group: 'loom', cell_type: 'agent', status: 'running', created_at: 32 },
-    'worker-a2': { id: 'worker-a2', name: 'WA2', kind: 'worker', owner_engineer_id: 'eng-a', group: 'loom', cell_type: 'agent', status: 'running', created_at: 33 },
-    'arch-b': { id: 'arch-b', name: 'Architect B', kind: 'architect', group: 'loom', cell_type: 'agent', status: 'running', created_at: 40 },
-    'eng-b': { id: 'eng-b', name: 'Eng B', kind: 'engineer', hired_by_architect_id: 'arch-b', group: 'loom', cell_type: 'agent', status: 'running', created_at: 41 },
-    'worker-b1': { id: 'worker-b1', name: 'WB1', kind: 'worker', owner_engineer_id: 'eng-b', group: 'loom', cell_type: 'agent', status: 'running', created_at: 42 },
+    'loose-1': { id: 'loose-1', name: 'Loose 1', kind: 'worker', group: 'torque', cell_type: 'agent', status: 'running', created_at: 1 },
+    'loose-2': { id: 'loose-2', name: 'Loose 2', kind: 'worker', group: 'torque', cell_type: 'agent', status: 'running', created_at: 2 },
+    'eng-user-a': { id: 'eng-user-a', name: 'User A', kind: 'engineer', group: 'torque', cell_type: 'agent', status: 'running', created_at: 10 },
+    'worker-user-a1': { id: 'worker-user-a1', name: 'A1', kind: 'worker', owner_engineer_id: 'eng-user-a', group: 'torque', cell_type: 'agent', status: 'running', created_at: 11 },
+    'worker-user-a2': { id: 'worker-user-a2', name: 'A2', kind: 'worker', owner_engineer_id: 'eng-user-a', group: 'torque', cell_type: 'agent', status: 'running', created_at: 12 },
+    'eng-user-b': { id: 'eng-user-b', name: 'User B', kind: 'engineer', group: 'torque', cell_type: 'agent', status: 'running', created_at: 20 },
+    'worker-user-b1': { id: 'worker-user-b1', name: 'B1', kind: 'worker', owner_engineer_id: 'eng-user-b', group: 'torque', cell_type: 'agent', status: 'running', created_at: 21 },
+    'arch-a': { id: 'arch-a', name: 'Architect A', kind: 'architect', group: 'torque', cell_type: 'agent', status: 'running', created_at: 30 },
+    'eng-a': { id: 'eng-a', name: 'Eng A', kind: 'engineer', hired_by_architect_id: 'arch-a', group: 'torque', cell_type: 'agent', status: 'running', created_at: 31 },
+    'worker-a1': { id: 'worker-a1', name: 'WA1', kind: 'worker', owner_engineer_id: 'eng-a', group: 'torque', cell_type: 'agent', status: 'running', created_at: 32 },
+    'worker-a2': { id: 'worker-a2', name: 'WA2', kind: 'worker', owner_engineer_id: 'eng-a', group: 'torque', cell_type: 'agent', status: 'running', created_at: 33 },
+    'arch-b': { id: 'arch-b', name: 'Architect B', kind: 'architect', group: 'torque', cell_type: 'agent', status: 'running', created_at: 40 },
+    'eng-b': { id: 'eng-b', name: 'Eng B', kind: 'engineer', hired_by_architect_id: 'arch-b', group: 'torque', cell_type: 'agent', status: 'running', created_at: 41 },
+    'worker-b1': { id: 'worker-b1', name: 'WB1', kind: 'worker', owner_engineer_id: 'eng-b', group: 'torque', cell_type: 'agent', status: 'running', created_at: 42 },
   };
 
   runInContext(context, `focusedItemId = 'eng-user-a'; render();`);
@@ -18794,11 +18794,11 @@ test('main grid keyboard navigation traverses logical rows across sections', () 
   // rows, then + New Engineer/+ Add Worker controls. Architects' engineers are
   // hidden unless filtered in.
   assert.deepEqual(jsonValue(context, `window._navGridRows.map(function(row) { return { type: row.rowType, items: row.items.map(function(item) { return item.id; }) }; })`), [
-    { type: 'principals-row', items: ['principal:loom:user', 'principal:loom:arch-a', 'principal:loom:arch-b', 'grid-control:agent-new-architect:loom'] },
-    { type: 'standalone-workers-row', items: ['loose-1', 'loose-2', 'grid-control:section-new-worker:loom:user'] },
+    { type: 'principals-row', items: ['principal:torque:user', 'principal:torque:arch-a', 'principal:torque:arch-b', 'grid-control:agent-new-architect:torque'] },
+    { type: 'standalone-workers-row', items: ['loose-1', 'loose-2', 'grid-control:section-new-worker:torque:user'] },
     { type: 'engineer-row', items: ['eng-user-a', 'worker-user-a1', 'worker-user-a2'] },
     { type: 'engineer-row', items: ['eng-user-b', 'worker-user-b1'] },
-    { type: 'section-creation-row', items: ['grid-control:section-new-engineer:loom:user'] },
+    { type: 'section-creation-row', items: ['grid-control:section-new-engineer:torque:user'] },
   ]);
 
   runInContext(context, `moveFocusHorizontal(1);`);
@@ -18808,20 +18808,20 @@ test('main grid keyboard navigation traverses logical rows across sections', () 
   runInContext(context, `moveFocusDown();`);
   assert.equal(jsonValue(context, `focusedItemId`), 'worker-user-b1');
   runInContext(context, `moveFocusDown();`);
-  assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:section-new-engineer:loom:user');
+  assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:section-new-engineer:torque:user');
 
   // Arrow-up from first engineer lands on standalone workers, then the
   // selected principal (user).
   runInContext(context, `focusedItemId = 'eng-user-a'; render();`);
   runInContext(context, `moveFocusUp();`);
-  assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:section-new-worker:loom:user');
+  assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:section-new-worker:torque:user');
   runInContext(context, `moveFocusUp();`);
-  assert.equal(jsonValue(context, `focusedItemId`), 'principal:loom:user');
+  assert.equal(jsonValue(context, `focusedItemId`), 'principal:torque:user');
 
   // Arrow-right across principals row switches the filter to arch-a;
   // arrow-down lands on arch-a's engineer.
   runInContext(context, `moveFocusHorizontal(1);`);
-  assert.equal(jsonValue(context, `focusedItemId`), 'principal:loom:arch-a');
+  assert.equal(jsonValue(context, `focusedItemId`), 'principal:torque:arch-a');
   assert.equal(jsonValue(context, `state.selected_principal_id`), 'arch-a');
   runInContext(context, `moveFocusDown();`);
   assert.equal(jsonValue(context, `focusedItemId`), 'eng-a');
@@ -18833,17 +18833,17 @@ test('main grid keyboard navigation keeps wrapped worker rows in logical order',
   document.setSelector('.focused', focusedMarker);
 
   sandbox.state.groups = {
-    loom: ['eng-a', 'worker-1', 'worker-2', 'worker-3', 'worker-4', 'worker-5'],
+    torque: ['eng-a', 'worker-1', 'worker-2', 'worker-3', 'worker-4', 'worker-5'],
   };
-  sandbox.state.group_settings = { loom: { collapsed_default: false } };
+  sandbox.state.group_settings = { torque: { collapsed_default: false } };
   sandbox.state.children = {};
   sandbox.state.agents = {
-    'eng-a': { id: 'eng-a', name: 'Engineer', kind: 'engineer', group: 'loom', cell_type: 'agent', status: 'running', created_at: 1 },
-    'worker-1': { id: 'worker-1', name: 'Worker 1', kind: 'worker', owner_engineer_id: 'eng-a', group: 'loom', cell_type: 'agent', status: 'running', created_at: 2 },
-    'worker-2': { id: 'worker-2', name: 'Worker 2', kind: 'worker', owner_engineer_id: 'eng-a', group: 'loom', cell_type: 'agent', status: 'running', created_at: 3 },
-    'worker-3': { id: 'worker-3', name: 'Worker 3', kind: 'worker', owner_engineer_id: 'eng-a', group: 'loom', cell_type: 'agent', status: 'running', created_at: 4 },
-    'worker-4': { id: 'worker-4', name: 'Worker 4', kind: 'worker', owner_engineer_id: 'eng-a', group: 'loom', cell_type: 'agent', status: 'running', created_at: 5 },
-    'worker-5': { id: 'worker-5', name: 'Worker 5', kind: 'worker', owner_engineer_id: 'eng-a', group: 'loom', cell_type: 'agent', status: 'running', created_at: 6 },
+    'eng-a': { id: 'eng-a', name: 'Engineer', kind: 'engineer', group: 'torque', cell_type: 'agent', status: 'running', created_at: 1 },
+    'worker-1': { id: 'worker-1', name: 'Worker 1', kind: 'worker', owner_engineer_id: 'eng-a', group: 'torque', cell_type: 'agent', status: 'running', created_at: 2 },
+    'worker-2': { id: 'worker-2', name: 'Worker 2', kind: 'worker', owner_engineer_id: 'eng-a', group: 'torque', cell_type: 'agent', status: 'running', created_at: 3 },
+    'worker-3': { id: 'worker-3', name: 'Worker 3', kind: 'worker', owner_engineer_id: 'eng-a', group: 'torque', cell_type: 'agent', status: 'running', created_at: 4 },
+    'worker-4': { id: 'worker-4', name: 'Worker 4', kind: 'worker', owner_engineer_id: 'eng-a', group: 'torque', cell_type: 'agent', status: 'running', created_at: 5 },
+    'worker-5': { id: 'worker-5', name: 'Worker 5', kind: 'worker', owner_engineer_id: 'eng-a', group: 'torque', cell_type: 'agent', status: 'running', created_at: 6 },
   };
 
   runInContext(context, `focusedItemId = 'eng-a'; render();`);
@@ -18885,14 +18885,14 @@ test('main grid focus falls forward across websocket delta removals', () => {
   runInContext(context, `
     _handleFullState({
       seq: 1,
-      groups: { loom: ['loose-1', 'eng-a', 'worker-a1', 'worker-a2', 'eng-b'] },
-      group_settings: { loom: { collapsed_default: false } },
+      groups: { torque: ['loose-1', 'eng-a', 'worker-a1', 'worker-a2', 'eng-b'] },
+      group_settings: { torque: { collapsed_default: false } },
       agents: {
-        'loose-1': { id: 'loose-1', name: 'Loose', kind: 'worker', group: 'loom', cell_type: 'agent', status: 'running', created_at: 1 },
-        'eng-a': { id: 'eng-a', name: 'Engineer A', kind: 'engineer', group: 'loom', cell_type: 'agent', status: 'running', created_at: 10 },
-        'worker-a1': { id: 'worker-a1', name: 'Worker A1', kind: 'worker', owner_engineer_id: 'eng-a', group: 'loom', cell_type: 'agent', status: 'running', created_at: 11 },
-        'worker-a2': { id: 'worker-a2', name: 'Worker A2', kind: 'worker', owner_engineer_id: 'eng-a', group: 'loom', cell_type: 'agent', status: 'running', created_at: 12 },
-        'eng-b': { id: 'eng-b', name: 'Engineer B', kind: 'engineer', group: 'loom', cell_type: 'agent', status: 'running', created_at: 20 }
+        'loose-1': { id: 'loose-1', name: 'Loose', kind: 'worker', group: 'torque', cell_type: 'agent', status: 'running', created_at: 1 },
+        'eng-a': { id: 'eng-a', name: 'Engineer A', kind: 'engineer', group: 'torque', cell_type: 'agent', status: 'running', created_at: 10 },
+        'worker-a1': { id: 'worker-a1', name: 'Worker A1', kind: 'worker', owner_engineer_id: 'eng-a', group: 'torque', cell_type: 'agent', status: 'running', created_at: 11 },
+        'worker-a2': { id: 'worker-a2', name: 'Worker A2', kind: 'worker', owner_engineer_id: 'eng-a', group: 'torque', cell_type: 'agent', status: 'running', created_at: 12 },
+        'eng-b': { id: 'eng-b', name: 'Engineer B', kind: 'engineer', group: 'torque', cell_type: 'agent', status: 'running', created_at: 20 }
       },
       children: {},
       board_lanes: [],
@@ -18905,7 +18905,7 @@ test('main grid focus falls forward across websocket delta removals', () => {
       seq: 2,
       ops: [
         { op: 'agent_remove', id: 'worker-a1' },
-        { op: 'group_update', name: 'loom', agents: ['loose-1', 'eng-a', 'worker-a2', 'eng-b'] }
+        { op: 'group_update', name: 'torque', agents: ['loose-1', 'eng-a', 'worker-a2', 'eng-b'] }
       ]
     });
   `);
@@ -18916,7 +18916,7 @@ test('main grid focus falls forward across websocket delta removals', () => {
       seq: 3,
       ops: [
         { op: 'agent_remove', id: 'worker-a2' },
-        { op: 'group_update', name: 'loom', agents: ['loose-1', 'eng-a', 'eng-b'] }
+        { op: 'group_update', name: 'torque', agents: ['loose-1', 'eng-a', 'eng-b'] }
       ]
     });
   `);
@@ -18927,7 +18927,7 @@ test('main grid focus falls forward across websocket delta removals', () => {
       seq: 4,
       ops: [
         { op: 'agent_remove', id: 'eng-a' },
-        { op: 'group_update', name: 'loom', agents: ['loose-1', 'eng-b'] }
+        { op: 'group_update', name: 'torque', agents: ['loose-1', 'eng-b'] }
       ]
     });
   `);
@@ -18938,7 +18938,7 @@ test('main grid focus falls forward across websocket delta removals', () => {
       seq: 5,
       ops: [
         { op: 'agent_remove', id: 'eng-b' },
-        { op: 'group_update', name: 'loom', agents: ['loose-1'] }
+        { op: 'group_update', name: 'torque', agents: ['loose-1'] }
       ]
     });
   `);
@@ -18950,15 +18950,15 @@ test('main grid focus falls forward across websocket delta removals', () => {
 test('main grid Enter activates focused creation ghost cards with scoped context', () => {
   const { context, document, sandbox } = createMainNavigationHarness();
 
-  sandbox.state.groups = { loom: ['arch-a'] };
-  sandbox.state.group_settings = { loom: { collapsed_default: false } };
+  sandbox.state.groups = { torque: ['arch-a'] };
+  sandbox.state.group_settings = { torque: { collapsed_default: false } };
   sandbox.state.children = {};
   sandbox.state.agents = {
     'arch-a': {
       id: 'arch-a',
       name: 'Architect A',
       kind: 'architect',
-      group: 'loom',
+      group: 'torque',
       cell_type: 'agent',
       status: 'running',
       created_at: 1,
@@ -18992,19 +18992,19 @@ test('main grid Enter activates focused creation ghost cards with scoped context
   }
 
   // Enter on creation ghosts invokes the scoped modals.
-  pressEnter('grid-control:section-new-engineer:loom:user');
-  pressEnter('grid-control:section-new-worker:loom:user');
+  pressEnter('grid-control:section-new-engineer:torque:user');
+  pressEnter('grid-control:section-new-worker:torque:user');
   // Switch the principal to arch-a so its + New Engineer control is rendered.
   runInContext(context, `state.selected_principal_id = 'arch-a'; render();`);
-  pressEnter('grid-control:section-new-engineer:loom:architect:arch-a');
-  pressEnter('grid-control:agent-new-architect:loom');
+  pressEnter('grid-control:section-new-engineer:torque:architect:arch-a');
+  pressEnter('grid-control:agent-new-architect:torque');
 
-  assert.deepEqual(jsonValue(context, `workerGhostCalls`), [{ group: 'loom' }]);
+  assert.deepEqual(jsonValue(context, `workerGhostCalls`), [{ group: 'torque' }]);
   assert.deepEqual(jsonValue(context, `engineerGhostCalls`), [
-    { group: 'loom', architectId: '' },
-    { group: 'loom', architectId: 'arch-a' },
+    { group: 'torque', architectId: '' },
+    { group: 'torque', architectId: 'arch-a' },
   ]);
-  assert.deepEqual(jsonValue(context, `architectGhostCalls`), [{ group: 'loom' }]);
+  assert.deepEqual(jsonValue(context, `architectGhostCalls`), [{ group: 'torque' }]);
 });
 
 
@@ -19328,7 +19328,7 @@ test('standalone first full-state restore persists responsive defaults once', ()
     standalone_panel_layout: {},
   });
 
-  assert.equal(context.localStorage.getItem('loom.ide.sidebar_width'), '784');
+  assert.equal(context.localStorage.getItem('torque.ide.sidebar_width'), '784');
   assert.equal(jsonValue(context, `_workspaceSidebarWidth`), 784);
   assert.equal(jsonValue(context, `sendCalls.length`), 1);
   assert.deepEqual(jsonValue(context, `sendCalls[0]`), {
@@ -19371,7 +19371,7 @@ test('standalone startup preserves persisted layouts by widening the sidebar whe
   `);
 
   assert.equal(jsonValue(context, `_workspaceSidebarWidth`), 688);
-  assert.equal(context.localStorage.getItem('loom.ide.sidebar_width'), null);
+  assert.equal(context.localStorage.getItem('torque.ide.sidebar_width'), null);
   assert.equal(jsonValue(context, `sendCalls.length`), 0);
   assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout()`), {
     version: 1,
@@ -19387,7 +19387,7 @@ test('standalone startup widens a saved sidebar width that cannot fit the open r
   document.body.classList.add('runtime-embedded');
   context.isEmbeddedTerminalMode = function() { return true; };
   context.window.innerWidth = 1400;
-  context.localStorage.setItem('loom.ide.sidebar_width', '340');
+  context.localStorage.setItem('torque.ide.sidebar_width', '340');
 
   runInContext(context, `
     state = {
@@ -19404,7 +19404,7 @@ test('standalone startup widens a saved sidebar width that cannot fit the open r
   `);
 
   assert.equal(jsonValue(context, `_workspaceSidebarWidth`), 688);
-  assert.equal(context.localStorage.getItem('loom.ide.sidebar_width'), '688');
+  assert.equal(context.localStorage.getItem('torque.ide.sidebar_width'), '688');
   assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.size`), 320);
 });
 
@@ -19412,7 +19412,7 @@ test('standalone startup preserves a saved sidebar width', () => {
   const { context, document } = createPanelHarness();
   document.body.classList.add('runtime-embedded');
   context.isEmbeddedTerminalMode = function() { return true; };
-  context.localStorage.setItem('loom.ide.sidebar_width', '720');
+  context.localStorage.setItem('torque.ide.sidebar_width', '720');
 
   runInContext(context, `
     state = {
@@ -19439,7 +19439,7 @@ test('restoreStandaloneLayoutDefaults resets width and ignores legacy state', ()
   context.isEmbeddedTerminalMode = function() { return true; };
   context.window.innerWidth = 1400;
   context.window.innerHeight = 900;
-  context.localStorage.setItem('loom.ide.sidebar_width', '612');
+  context.localStorage.setItem('torque.ide.sidebar_width', '612');
 
   runInContext(context, `
     state = {
@@ -19461,7 +19461,7 @@ test('restoreStandaloneLayoutDefaults resets width and ignores legacy state', ()
     restoreStandaloneLayoutDefaults();
   `);
 
-  assert.equal(context.localStorage.getItem('loom.ide.sidebar_width'), '784');
+  assert.equal(context.localStorage.getItem('torque.ide.sidebar_width'), '784');
   assert.equal(jsonValue(context, `_workspaceSidebarWidth`), 784);
   assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout()`), {
     version: 1,

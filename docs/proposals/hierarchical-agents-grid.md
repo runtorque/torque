@@ -4,7 +4,7 @@
 **Audience**: product, frontend UI (Panelsmith), backend/state
 **Primary goal**: replace the current flat sequential ordering of the agents grid with an explicit two-dimensional hierarchy that makes architect → engineer → worker ownership visually unambiguous, supports detached user-owned workers as first-class citizens, and prepares the grid for near-future detach/reparent flows.
 
-Supersedes the visual-hierarchy approach shipped in LOOM:72 (sequential ordering with indentation + typographic cues). That was a good temporary solution; this proposal is the durable replacement.
+Supersedes the visual-hierarchy approach shipped in TORQUE:72 (sequential ordering with indentation + typographic cues). That was a good temporary solution; this proposal is the durable replacement.
 
 ---
 
@@ -33,7 +33,7 @@ That lets an operator answer three questions instantly — _who owns this worker
 
 ## Problem statement
 
-The designated engineer operating Loom today routinely asks questions like:
+The designated engineer operating Torque today routinely asks questions like:
 
 - Which engineer does this worker belong to?
 - How many workers does Courier currently own?
@@ -174,7 +174,7 @@ The grid's creation affordances align with the ownership rules:
 
 - **`+ New Architect`** (ghost card inside the User section's architect column, directly below the User card): creates a new architect at group scope. Opens the existing architect-creation modal.
 - **`+ New Engineer`** (ghost card at the bottom of each section's engineer-row stack): creates an engineer hired by that specific architect, or for the User section, a user-created engineer. The architect context is implicit from the section the ghost card sits in — no more disambiguation modal step.
-- **Worker creation remains engineer-driven**: an engineer creates workers attached to itself via `loom ai derive` or engineer MCP surfaces. The grid does not expose a direct `+ New Worker` ghost on engineer rows in v1. Rationale: per the kinds-refactor invariants, workers are engineer-dispatched; surfacing a grid ghost would invite the wrong mental model ("users create workers for engineers"). We may revisit this in a follow-up if engineers want a manual worker-spawn affordance.
+- **Worker creation remains engineer-driven**: an engineer creates workers attached to itself via `torque ai derive` or engineer MCP surfaces. The grid does not expose a direct `+ New Worker` ghost on engineer rows in v1. Rationale: per the kinds-refactor invariants, workers are engineer-dispatched; surfacing a grid ghost would invite the wrong mental model ("users create workers for engineers"). We may revisit this in a follow-up if engineers want a manual worker-spawn affordance.
 - **Detached worker creation**: a dedicated `+ New Worker` ghost card lives in the User section's loose-workers strip. This is the only path through which a user creates a worker directly; it always produces a detached (no-engineer) worker. Users cannot create a worker under an engineer they did not hire, and cannot create a worker under an engineer at all — the engineer owns that surface.
 - **Terminal creation**: unchanged from today. Terminals attach to any agent kind (architect, engineer, worker) and render in that agent's drawer. A terminal is never a first-class grid cell in this proposal.
 - **Legacy `+ New` kind-picker dropdown**: retired. It was the only creation surface before the per-section ghost cards existed. With architect/engineer/worker all having explicit ghost-card creation surfaces tied to their spatial context, the kind-picker is redundant and should be removed from the grid entirely.
@@ -197,7 +197,7 @@ Strip behavior:
 
 **Kind contract for the strip:** the strip renders exactly **user-owned cells with `kind == worker` and null `owner_engineer_id`** — nothing else. In particular:
 
-- **Terminals never render in the strip.** Per the kinds model, terminals always carry a `parent_id` to some agent and render in that agent's drawer. A terminal without a parent is a data-integrity issue, not a strip resident — surface it via `loom doctor` rather than normalizing it into worker rendering.
+- **Terminals never render in the strip.** Per the kinds model, terminals always carry a `parent_id` to some agent and render in that agent's drawer. A terminal without a parent is a data-integrity issue, not a strip resident — surface it via `torque doctor` rather than normalizing it into worker rendering.
 - **Engineers never render in the strip.** User-created engineers render as engineer rows in the User section with the leading-engineer-card + wrapping-workers layout. They are not "detached workers" even when they have no architect.
 - **The `+ New Worker` button always produces `kind == worker`.** There is no "quick-add with unspecified kind" path through the strip; the button's output kind is fixed.
 
@@ -231,7 +231,7 @@ All three creation surfaces (`+ New Architect`, `+ New Engineer`, `+ New Worker`
 
 **Why ghost cards over solid buttons:**
 
-- **Spatial ownership is unambiguous**: a ghost card in the architect column clearly creates an architect; one in an engineer-row stack clearly creates an engineer for that architect. Solid buttons stacked at the bottom of the grid created the ambiguity ("is this for the last section or global?") that LOOM:110's first iteration had.
+- **Spatial ownership is unambiguous**: a ghost card in the architect column clearly creates an architect; one in an engineer-row stack clearly creates an engineer for that architect. Solid buttons stacked at the bottom of the grid created the ambiguity ("is this for the last section or global?") that TORQUE:110's first iteration had.
 - **Consistent visual language**: all three creation surfaces share one grammar (dashed card = "empty slot you can fill"). The loose-workers strip already used this pattern; extending it to engineer/architect creation unifies the grid.
 - **Reduced visual weight**: dashed outlines read as "empty slot," not "attention-demanding action." Real agent cards remain the focal point of the grid.
 
@@ -349,6 +349,6 @@ Phasing, each landing as an independent PR:
 4. **Keyboard navigation update**: two-dimensional traversal across sections, rows, and strips.
 5. **Rerender-guardrail regression tests** (bundled with each of 1–4 where relevant; no standalone PR).
 
-LOOM:72's current typographic hierarchy remains in place until step 1 lands, then is removed (visual classes retired) as part of step 1's diff.
+TORQUE:72's current typographic hierarchy remains in place until step 1 lands, then is removed (visual classes retired) as part of step 1's diff.
 
 Near-future evolution (detach flows) is a separate proposal/spec; this proposal intentionally stops at the render layer so the visual model is in place first.

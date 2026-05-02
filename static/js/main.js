@@ -10,7 +10,7 @@ var _panelIds = ['panel-board', 'panel-actions', 'panel-templates', 'panel-conte
 var _embeddedPanelMinHeight = 180;
 var _defaultPanelMinHeight = 80;
 var _workspaceSidebarDefaultWidth = 340;
-var _workspaceSidebarStorageKey = 'loom.ide.sidebar_width';
+var _workspaceSidebarStorageKey = 'torque.ide.sidebar_width';
 
 function _syncGroupSwitcherSelectValue() {
   var select = document.getElementById('active-group-select');
@@ -39,9 +39,9 @@ function renderGroupSwitcher() {
   if (!root) return;
   if (!singleGroupMode) {
     root.hidden = true;
-    if (root._loomLastHtml !== '') {
+    if (root._torqueLastHtml !== '') {
       root.innerHTML = '';
-      root._loomLastHtml = '';
+      root._torqueLastHtml = '';
     }
     return;
   }
@@ -67,9 +67,9 @@ function renderGroupSwitcher() {
   html += '<button type="button" class="group-switcher-menu-btn"'
     + (active ? '' : ' disabled')
     + ' title="Group settings" aria-label="Group settings" onclick="openActiveGroupSettings(event)">&#9881;</button>';
-  if (root._loomLastHtml !== html) {
+  if (root._torqueLastHtml !== html) {
     root.innerHTML = html;
-    root._loomLastHtml = html;
+    root._torqueLastHtml = html;
   }
   _syncGroupSwitcherSelectValue();
 }

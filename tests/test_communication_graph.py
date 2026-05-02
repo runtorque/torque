@@ -13,25 +13,25 @@ except ModuleNotFoundError:
 class CommunicationGraphTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub()
-        self.db_mod = importlib.import_module("loom.db")
+        self.db_mod = importlib.import_module("torque.db")
         self.db_mod = importlib.reload(self.db_mod)
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
-        self.mcp_architect_mod = importlib.import_module("loom.mcp_architect")
+        self.mcp_architect_mod = importlib.import_module("torque.mcp_architect")
         self.mcp_architect_mod = importlib.reload(self.mcp_architect_mod)
-        self.mcp_engineer_mod = importlib.import_module("loom.mcp_engineer")
+        self.mcp_engineer_mod = importlib.import_module("torque.mcp_engineer")
         self.mcp_engineer_mod = importlib.reload(self.mcp_engineer_mod)
 
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.db_path = Path(self.tmp.name) / "loom.db"
-        self.db = self.db_mod.LoomDB(self.db_path)
+        self.db_path = Path(self.tmp.name) / "torque.db"
+        self.db = self.db_mod.TorqueDB(self.db_path)
         self.db.init()
         self.addCleanup(self.db.close)
 
         self.state = self.state_mod.MatrixState(db=self.db)
         self.state.board_lanes = ["Backlog", "To Do", "In Progress", "Done", "Archived"]
-        self.state.groups["loom"] = []
+        self.state.groups["torque"] = []
         self.state._db_save_groups()
         self.handle_calls = []
 
@@ -40,14 +40,14 @@ class CommunicationGraphTests(unittest.IsolatedAsyncioTestCase):
             id=agent_id,
             name=name,
             slug=name.lower().replace(" ", "-"),
-            group="loom",
+            group="torque",
             cell_type="agent",
             kind="architect",
             status="running",
             persistent=True,
         )
         self.state.agents[cell.id] = cell
-        self.state.groups["loom"].append(cell.id)
+        self.state.groups["torque"].append(cell.id)
         self.state._db_save_agent(cell)
         self.state._db_save_groups()
         return cell
@@ -57,7 +57,7 @@ class CommunicationGraphTests(unittest.IsolatedAsyncioTestCase):
             id=agent_id,
             name=name,
             slug=name.lower().replace(" ", "-"),
-            group="loom",
+            group="torque",
             cell_type="agent",
             kind="engineer",
             status="running",
@@ -65,7 +65,7 @@ class CommunicationGraphTests(unittest.IsolatedAsyncioTestCase):
             hired_by_architect_id=hired_by_architect_id,
         )
         self.state.agents[cell.id] = cell
-        self.state.groups["loom"].append(cell.id)
+        self.state.groups["torque"].append(cell.id)
         self.state._db_save_agent(cell)
         self.state._db_save_groups()
         return cell
@@ -75,7 +75,7 @@ class CommunicationGraphTests(unittest.IsolatedAsyncioTestCase):
             id=agent_id,
             name=name,
             slug=name.lower().replace(" ", "-"),
-            group="loom",
+            group="torque",
             cell_type="agent",
             kind="worker",
             status="idle",
@@ -83,7 +83,7 @@ class CommunicationGraphTests(unittest.IsolatedAsyncioTestCase):
             created_by_engineer_id=owner_engineer_id,
         )
         self.state.agents[cell.id] = cell
-        self.state.groups["loom"].append(cell.id)
+        self.state.groups["torque"].append(cell.id)
         self.state._db_save_agent(cell)
         self.state._db_save_groups()
         return cell

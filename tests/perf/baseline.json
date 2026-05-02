@@ -14,12 +14,12 @@
     "startup_timeout_sec": 20.0
   },
   "generated_at": "2026-04-22T22:32:42.082076+00:00",
-  "kind": "loom-perf-profile",
+  "kind": "torque-perf-profile",
   "mode": "baseline",
   "repo": {
-    "branch": "loom/courier/perf-harness-n10-n20-n30-ac43a0c",
+    "branch": "torque/courier/perf-harness-n10-n20-n30-ac43a0c",
     "head": "74470daae4a72b148f5f5ee0364ebe47b55c13e1",
-    "root": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9",
+    "root": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9",
     "status_short": ""
   },
   "runs": [
@@ -128,11 +128,11 @@
         "ws_snapshots": 1
       },
       "daemon": {
-        "data_dir": "/var/folders/c9/18cc_c7d0f532zt5drvlszg40000gn/T/loom-perf-n10-v_hplecf",
+        "data_dir": "/var/folders/c9/18cc_c7d0f532zt5drvlszg40000gn/T/torque-perf-n10-v_hplecf",
         "pid": 50382,
         "port": 53852,
-        "stderr": "/var/folders/c9/18cc_c7d0f532zt5drvlszg40000gn/T/loom-perf-n10-v_hplecf/daemon.stderr.log",
-        "stdout": "/var/folders/c9/18cc_c7d0f532zt5drvlszg40000gn/T/loom-perf-n10-v_hplecf/daemon.stdout.log"
+        "stderr": "/var/folders/c9/18cc_c7d0f532zt5drvlszg40000gn/T/torque-perf-n10-v_hplecf/daemon.stderr.log",
+        "stdout": "/var/folders/c9/18cc_c7d0f532zt5drvlszg40000gn/T/torque-perf-n10-v_hplecf/daemon.stdout.log"
       },
       "duration_sec": 1.0,
       "elapsed_sec": 3.2139295830002084,
@@ -221,7 +221,7 @@
           {
             "calls": 39,
             "cumulative_sec": 0.027450000000000002,
-            "function": "/private/tmp/loom-perf-venv/lib/python3.14/site-packages/aiohttp/web_protocol.py:550(start)",
+            "function": "/private/tmp/torque-perf-venv/lib/python3.14/site-packages/aiohttp/web_protocol.py:550(start)",
             "per_call_cumulative_sec": 0.0007038461538461539,
             "per_call_total_sec": 1.2149153846153846e-05,
             "primitive_calls": 39,
@@ -248,7 +248,7 @@
           {
             "calls": 29,
             "cumulative_sec": 0.021559835000000003,
-            "function": "/private/tmp/loom-perf-venv/lib/python3.14/site-packages/aiohttp/web_protocol.py:507(_handle_request)",
+            "function": "/private/tmp/torque-perf-venv/lib/python3.14/site-packages/aiohttp/web_protocol.py:507(_handle_request)",
             "per_call_cumulative_sec": 0.0007434425862068967,
             "per_call_total_sec": 6.495724137931034e-06,
             "primitive_calls": 29,
@@ -257,7 +257,7 @@
           {
             "calls": 29,
             "cumulative_sec": 0.019724499,
-            "function": "/private/tmp/loom-perf-venv/lib/python3.14/site-packages/aiohttp/web_app.py:527(_handle)",
+            "function": "/private/tmp/torque-perf-venv/lib/python3.14/site-packages/aiohttp/web_app.py:527(_handle)",
             "per_call_cumulative_sec": 0.0006801551379310344,
             "per_call_total_sec": 8.631758620689656e-06,
             "primitive_calls": 29,
@@ -266,7 +266,7 @@
           {
             "calls": 26,
             "cumulative_sec": 0.017354752,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/server.py:9740(handle_events)",
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/server.py:9740(handle_events)",
             "per_call_cumulative_sec": 0.0006674904615384616,
             "per_call_total_sec": 1.3298076923076924e-05,
             "primitive_calls": 26,
@@ -275,7 +275,7 @@
           {
             "calls": 26,
             "cumulative_sec": 0.014883332,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/events.py:394(emit)",
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/events.py:394(emit)",
             "per_call_cumulative_sec": 0.0005724358461538461,
             "per_call_total_sec": 7.6875e-06,
             "primitive_calls": 26,
@@ -293,7 +293,7 @@
           {
             "calls": 53,
             "cumulative_sec": 0.012408163000000002,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/profiling.py:290(_loop_lag_probe)",
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/profiling.py:290(_loop_lag_probe)",
             "per_call_cumulative_sec": 0.00023411628301886795,
             "per_call_total_sec": 8.131264150943397e-06,
             "primitive_calls": 53,
@@ -365,7 +365,7 @@
           {
             "calls": 26,
             "cumulative_sec": 0.007890081,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/events.py:440(_apply)",
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/events.py:440(_apply)",
             "per_call_cumulative_sec": 0.00030346465384615385,
             "per_call_total_sec": 5.837730769230769e-06,
             "primitive_calls": 26,
@@ -374,7 +374,7 @@
           {
             "calls": 36,
             "cumulative_sec": 0.007418210000000001,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/state.py:1293(_db_save_agent)",
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/state.py:1293(_db_save_agent)",
             "per_call_cumulative_sec": 0.0002060613888888889,
             "per_call_total_sec": 5.475277777777779e-07,
             "primitive_calls": 36,
@@ -383,7 +383,7 @@
           {
             "calls": 36,
             "cumulative_sec": 0.007398499,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/db.py:448(save_agent)",
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/db.py:448(save_agent)",
             "per_call_cumulative_sec": 0.00020551386111111112,
             "per_call_total_sec": 2.748777777777778e-06,
             "primitive_calls": 36,
@@ -681,11 +681,11 @@
         "ws_snapshots": 1
       },
       "daemon": {
-        "data_dir": "/var/folders/c9/18cc_c7d0f532zt5drvlszg40000gn/T/loom-perf-n20-faqqzwrg",
+        "data_dir": "/var/folders/c9/18cc_c7d0f532zt5drvlszg40000gn/T/torque-perf-n20-faqqzwrg",
         "pid": 50472,
         "port": 53875,
-        "stderr": "/var/folders/c9/18cc_c7d0f532zt5drvlszg40000gn/T/loom-perf-n20-faqqzwrg/daemon.stderr.log",
-        "stdout": "/var/folders/c9/18cc_c7d0f532zt5drvlszg40000gn/T/loom-perf-n20-faqqzwrg/daemon.stdout.log"
+        "stderr": "/var/folders/c9/18cc_c7d0f532zt5drvlszg40000gn/T/torque-perf-n20-faqqzwrg/daemon.stderr.log",
+        "stdout": "/var/folders/c9/18cc_c7d0f532zt5drvlszg40000gn/T/torque-perf-n20-faqqzwrg/daemon.stdout.log"
       },
       "duration_sec": 1.0,
       "elapsed_sec": 3.2217617500000415,
@@ -774,7 +774,7 @@
           {
             "calls": 74,
             "cumulative_sec": 0.046522996000000004,
-            "function": "/private/tmp/loom-perf-venv/lib/python3.14/site-packages/aiohttp/web_protocol.py:550(start)",
+            "function": "/private/tmp/torque-perf-venv/lib/python3.14/site-packages/aiohttp/web_protocol.py:550(start)",
             "per_call_cumulative_sec": 0.0006286891351351352,
             "per_call_total_sec": 1.0036905405405406e-05,
             "primitive_calls": 74,
@@ -783,7 +783,7 @@
           {
             "calls": 54,
             "cumulative_sec": 0.035695086,
-            "function": "/private/tmp/loom-perf-venv/lib/python3.14/site-packages/aiohttp/web_protocol.py:507(_handle_request)",
+            "function": "/private/tmp/torque-perf-venv/lib/python3.14/site-packages/aiohttp/web_protocol.py:507(_handle_request)",
             "per_call_cumulative_sec": 0.0006610201111111111,
             "per_call_total_sec": 5.646629629629629e-06,
             "primitive_calls": 54,
@@ -810,7 +810,7 @@
           {
             "calls": 54,
             "cumulative_sec": 0.032578833,
-            "function": "/private/tmp/loom-perf-venv/lib/python3.14/site-packages/aiohttp/web_app.py:527(_handle)",
+            "function": "/private/tmp/torque-perf-venv/lib/python3.14/site-packages/aiohttp/web_app.py:527(_handle)",
             "per_call_cumulative_sec": 0.0006033117222222223,
             "per_call_total_sec": 8.134185185185185e-06,
             "primitive_calls": 54,
@@ -819,7 +819,7 @@
           {
             "calls": 51,
             "cumulative_sec": 0.029180622000000003,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/server.py:9740(handle_events)",
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/server.py:9740(handle_events)",
             "per_call_cumulative_sec": 0.0005721690588235295,
             "per_call_total_sec": 1.136480392156863e-05,
             "primitive_calls": 51,
@@ -828,7 +828,7 @@
           {
             "calls": 51,
             "cumulative_sec": 0.024913085,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/events.py:394(emit)",
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/events.py:394(emit)",
             "per_call_cumulative_sec": 0.0004884918627450981,
             "per_call_total_sec": 6.304803921568628e-06,
             "primitive_calls": 51,
@@ -873,7 +873,7 @@
           {
             "calls": 51,
             "cumulative_sec": 0.013352206,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/events.py:440(_apply)",
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/events.py:440(_apply)",
             "per_call_cumulative_sec": 0.00026180796078431373,
             "per_call_total_sec": 4.658509803921569e-06,
             "primitive_calls": 51,
@@ -891,7 +891,7 @@
           {
             "calls": 53,
             "cumulative_sec": 0.012356292000000001,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/profiling.py:290(_loop_lag_probe)",
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/profiling.py:290(_loop_lag_probe)",
             "per_call_cumulative_sec": 0.0002331375849056604,
             "per_call_total_sec": 7.837396226415095e-06,
             "primitive_calls": 53,
@@ -900,7 +900,7 @@
           {
             "calls": 71,
             "cumulative_sec": 0.011766382,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/state.py:1293(_db_save_agent)",
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/state.py:1293(_db_save_agent)",
             "per_call_cumulative_sec": 0.00016572369014084508,
             "per_call_total_sec": 4.0377464788732397e-07,
             "primitive_calls": 71,
@@ -909,7 +909,7 @@
           {
             "calls": 71,
             "cumulative_sec": 0.011737714000000002,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/db.py:448(save_agent)",
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/db.py:448(save_agent)",
             "per_call_cumulative_sec": 0.00016531991549295776,
             "per_call_total_sec": 2.271830985915493e-06,
             "primitive_calls": 71,
@@ -981,7 +981,7 @@
           {
             "calls": 42,
             "cumulative_sec": 0.006806122,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/events.py:205(append)",
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/events.py:205(append)",
             "per_call_cumulative_sec": 0.00016205052380952381,
             "per_call_total_sec": 2.089166666666667e-06,
             "primitive_calls": 42,
@@ -1234,11 +1234,11 @@
         "ws_snapshots": 1
       },
       "daemon": {
-        "data_dir": "/var/folders/c9/18cc_c7d0f532zt5drvlszg40000gn/T/loom-perf-n30-hj0nzzdl",
+        "data_dir": "/var/folders/c9/18cc_c7d0f532zt5drvlszg40000gn/T/torque-perf-n30-hj0nzzdl",
         "pid": 50490,
         "port": 53908,
-        "stderr": "/var/folders/c9/18cc_c7d0f532zt5drvlszg40000gn/T/loom-perf-n30-hj0nzzdl/daemon.stderr.log",
-        "stdout": "/var/folders/c9/18cc_c7d0f532zt5drvlszg40000gn/T/loom-perf-n30-hj0nzzdl/daemon.stdout.log"
+        "stderr": "/var/folders/c9/18cc_c7d0f532zt5drvlszg40000gn/T/torque-perf-n30-hj0nzzdl/daemon.stderr.log",
+        "stdout": "/var/folders/c9/18cc_c7d0f532zt5drvlszg40000gn/T/torque-perf-n30-hj0nzzdl/daemon.stdout.log"
       },
       "duration_sec": 1.0,
       "elapsed_sec": 3.237864165999781,
@@ -1327,7 +1327,7 @@
           {
             "calls": 116,
             "cumulative_sec": 0.075722042,
-            "function": "/private/tmp/loom-perf-venv/lib/python3.14/site-packages/aiohttp/web_protocol.py:550(start)",
+            "function": "/private/tmp/torque-perf-venv/lib/python3.14/site-packages/aiohttp/web_protocol.py:550(start)",
             "per_call_cumulative_sec": 0.0006527762241379311,
             "per_call_total_sec": 1.050596551724138e-05,
             "primitive_calls": 116,
@@ -1336,7 +1336,7 @@
           {
             "calls": 86,
             "cumulative_sec": 0.05818262800000001,
-            "function": "/private/tmp/loom-perf-venv/lib/python3.14/site-packages/aiohttp/web_protocol.py:507(_handle_request)",
+            "function": "/private/tmp/torque-perf-venv/lib/python3.14/site-packages/aiohttp/web_protocol.py:507(_handle_request)",
             "per_call_cumulative_sec": 0.0006765421860465117,
             "per_call_total_sec": 5.859953488372094e-06,
             "primitive_calls": 86,
@@ -1345,7 +1345,7 @@
           {
             "calls": 86,
             "cumulative_sec": 0.052995459,
-            "function": "/private/tmp/loom-perf-venv/lib/python3.14/site-packages/aiohttp/web_app.py:527(_handle)",
+            "function": "/private/tmp/torque-perf-venv/lib/python3.14/site-packages/aiohttp/web_app.py:527(_handle)",
             "per_call_cumulative_sec": 0.0006162262674418605,
             "per_call_total_sec": 8.043023255813954e-06,
             "primitive_calls": 86,
@@ -1354,7 +1354,7 @@
           {
             "calls": 83,
             "cumulative_sec": 0.048315165,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/server.py:9740(handle_events)",
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/server.py:9740(handle_events)",
             "per_call_cumulative_sec": 0.000582110421686747,
             "per_call_total_sec": 1.1737662650602409e-05,
             "primitive_calls": 83,
@@ -1381,7 +1381,7 @@
           {
             "calls": 83,
             "cumulative_sec": 0.041210538000000005,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/events.py:394(emit)",
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/events.py:394(emit)",
             "per_call_cumulative_sec": 0.0004965125060240965,
             "per_call_total_sec": 6.1389759036144576e-06,
             "primitive_calls": 83,
@@ -1399,7 +1399,7 @@
           {
             "calls": 83,
             "cumulative_sec": 0.020967583,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/events.py:440(_apply)",
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/events.py:440(_apply)",
             "per_call_cumulative_sec": 0.00025262148192771087,
             "per_call_total_sec": 4.600566265060241e-06,
             "primitive_calls": 83,
@@ -1417,7 +1417,7 @@
           {
             "calls": 114,
             "cumulative_sec": 0.02012933,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/state.py:1293(_db_save_agent)",
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/state.py:1293(_db_save_agent)",
             "per_call_cumulative_sec": 0.0001765730701754386,
             "per_call_total_sec": 4.356052631578947e-07,
             "primitive_calls": 114,
@@ -1426,7 +1426,7 @@
           {
             "calls": 114,
             "cumulative_sec": 0.020079671,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/db.py:448(save_agent)",
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/db.py:448(save_agent)",
             "per_call_cumulative_sec": 0.0001761374649122807,
             "per_call_total_sec": 2.3635877192982455e-06,
             "primitive_calls": 114,
@@ -1489,7 +1489,7 @@
           {
             "calls": 53,
             "cumulative_sec": 0.012438082000000001,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/profiling.py:290(_loop_lag_probe)",
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/profiling.py:290(_loop_lag_probe)",
             "per_call_cumulative_sec": 0.0002346807924528302,
             "per_call_total_sec": 8.034622641509435e-06,
             "primitive_calls": 53,
@@ -1516,7 +1516,7 @@
           {
             "calls": 64,
             "cumulative_sec": 0.010574461,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/events.py:205(append)",
+            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/events.py:205(append)",
             "per_call_cumulative_sec": 0.000165225953125,
             "per_call_total_sec": 2.0344531250000003e-06,
             "primitive_calls": 64,

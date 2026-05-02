@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from loom.worktree import WorktreeManager
+from torque.worktree import WorktreeManager
 
 
 class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
@@ -15,8 +15,8 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.mgr = WorktreeManager()
 
         await self._git("init", "-b", "main")
-        await self._git("config", "user.name", "Loom Test")
-        await self._git("config", "user.email", "loom@example.com")
+        await self._git("config", "user.name", "Torque Test")
+        await self._git("config", "user.email", "torque@example.com")
 
         (self.repo_root / "README.md").write_text("line one\nline two\n")
         (self.repo_root / "shared").mkdir()
@@ -95,7 +95,7 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cell.worktree_path, wt_path)
         self.assertEqual(cell.worktree_repo_root, str(self.repo_root))
         self.assertEqual(cell.worktree_base_branch, "main")
-        self.assertTrue(cell.worktree_branch.startswith("loom/worker-"))
+        self.assertTrue(cell.worktree_branch.startswith("torque/worker-"))
 
         link = Path(wt_path) / "local-only" / "config.json"
         self.assertTrue(link.is_symlink())
@@ -268,9 +268,9 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(wt_path)
         self.assertEqual(
             Path(wt_path).resolve(),
-            (self.repo_root / ".loom" / "worktrees" / cell.id).resolve(),
+            (self.repo_root / ".torque" / "worktrees" / cell.id).resolve(),
         )
-        self.assertTrue(cell.worktree_branch.startswith("loom/worker-"))
+        self.assertTrue(cell.worktree_branch.startswith("torque/worker-"))
 
     async def test_worker_branch_is_namespaced_under_owner_engineer_slug(self):
         engineer = self._make_cell(agent_id="eng12345", name="Alice")
@@ -291,7 +291,7 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(wt_path)
         self.assertRegex(
             worker.worktree_branch,
-            r"^loom/alice/feature-worker-[a-f0-9]+$",
+            r"^torque/alice/feature-worker-[a-f0-9]+$",
         )
 
     async def test_worker_branch_uses_user_namespace_without_owner(self):
@@ -309,7 +309,7 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(wt_path)
         self.assertRegex(
             worker.worktree_branch,
-            r"^loom/user/feature-worker-[a-f0-9]+$",
+            r"^torque/user/feature-worker-[a-f0-9]+$",
         )
 
     async def test_engineer_branch_keeps_flat_naming(self):
@@ -325,7 +325,7 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertIsNotNone(wt_path)
-        self.assertRegex(engineer.worktree_branch, r"^loom/alice-[a-f0-9]+$")
+        self.assertRegex(engineer.worktree_branch, r"^torque/alice-[a-f0-9]+$")
 
     async def test_engineer_worktree_disables_claude_auto_memory(self):
         engineer = self._make_cell(agent_id="beef1234", name="Alice")
@@ -441,7 +441,7 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(wt_path)
         self.assertRegex(
             architect.worktree_branch,
-            r"^loom/productmind-[a-f0-9]+$",
+            r"^torque/productmind-[a-f0-9]+$",
         )
 
     async def test_custom_worktree_name_is_sanitized_for_branch_and_path(self):
@@ -450,7 +450,7 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         wt_path = await self.mgr.create(
             cell,
             str(self.repo_root),
-            base_dir=".loom/custom-worktrees",
+            base_dir=".torque/custom-worktrees",
             base_branch="main",
             worktree_name="Feature API / v2!!!",
         )
@@ -458,9 +458,9 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(wt_path)
         self.assertEqual(
             Path(wt_path).resolve(),
-            (self.repo_root / ".loom" / "custom-worktrees" / "feature-api-v2").resolve(),
+            (self.repo_root / ".torque" / "custom-worktrees" / "feature-api-v2").resolve(),
         )
-        self.assertEqual(cell.worktree_branch, "loom/feature-api-v2")
+        self.assertEqual(cell.worktree_branch, "torque/feature-api-v2")
 
     async def test_worker_custom_worktree_name_keeps_namespaced_shortid_branch(self):
         engineer = self._make_cell(agent_id="eng12345", name="Alice")
@@ -474,7 +474,7 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         wt_path = await self.mgr.create(
             worker,
             str(self.repo_root),
-            base_dir=".loom/custom-worktrees",
+            base_dir=".torque/custom-worktrees",
             base_branch="main",
             worktree_name="Feature API / v2!!!",
             state=self._make_state(engineer, worker),
@@ -483,11 +483,11 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(wt_path)
         self.assertEqual(
             Path(wt_path).resolve(),
-            (self.repo_root / ".loom" / "custom-worktrees" / "feature-api-v2").resolve(),
+            (self.repo_root / ".torque" / "custom-worktrees" / "feature-api-v2").resolve(),
         )
         self.assertEqual(
             worker.worktree_branch,
-            "loom/alice/feature-api-v2-face123",
+            "torque/alice/feature-api-v2-face123",
         )
 
     async def test_custom_worktree_name_collision_adds_numeric_suffix(self):
@@ -509,11 +509,11 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNotNone(first_path)
         self.assertIsNotNone(second_path)
-        self.assertEqual(first.worktree_branch, "loom/feature-api-v2")
-        self.assertEqual(second.worktree_branch, "loom/feature-api-v2-2")
+        self.assertEqual(first.worktree_branch, "torque/feature-api-v2")
+        self.assertEqual(second.worktree_branch, "torque/feature-api-v2-2")
         self.assertEqual(
             Path(second_path).resolve(),
-            (self.repo_root / ".loom" / "worktrees" / "feature-api-v2-2").resolve(),
+            (self.repo_root / ".torque" / "worktrees" / "feature-api-v2-2").resolve(),
         )
 
     async def test_legacy_flat_branch_still_diff_merges_and_removes(self):
@@ -521,9 +521,9 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         cell.kind = "worker"
         cell.slug = "legacy-worker"
         cell.worktree_path = str(
-            self.repo_root / ".loom" / "worktrees" / "legacy-worker"
+            self.repo_root / ".torque" / "worktrees" / "legacy-worker"
         )
-        cell.worktree_branch = "loom/legacy-worker-123abcd"
+        cell.worktree_branch = "torque/legacy-worker-123abcd"
         cell.worktree_repo_root = str(self.repo_root)
         cell.worktree_base_branch = "main"
 
@@ -587,7 +587,7 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(commits[1]["message"], "Implement step 1")
         self.assertEqual(
             commits[0]["message"],
-            f"loom: checkpoint 2 — {cell.name}",
+            f"torque: checkpoint 2 — {cell.name}",
         )
 
         rolled_back = await self.mgr.rollback(cell, first_sha)

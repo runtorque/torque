@@ -1,11 +1,11 @@
-"""Tests for the deliverable contract feature (LOOM:244).
+"""Tests for the deliverable contract feature (TORQUE:244).
 
 Covers:
 - Action loader: ``deliverable`` block parsed and normalized.
 - BoardTask migration: legacy DBs default to ``deliverable_required=False``.
 - Dispatch postscript: Deliverable contract block injected when required.
-- Server-side hard gate: ``loom_done`` / ``loom_ready`` refuse without artifact;
-  pass when one is attached; ``loom_blocked`` / ``loom_ask`` / ``loom_error``
+- Server-side hard gate: ``torque_done`` / ``torque_ready`` refuse without artifact;
+  pass when one is attached; ``torque_blocked`` / ``torque_ask`` / ``torque_error``
   are not gated. Backward-compat: actions without ``deliverable`` and tasks
   without ``deliverable_required`` behave exactly as before.
 """
@@ -21,15 +21,15 @@ except ModuleNotFoundError:
 
 install_aiohttp_stub()
 
-from loom.actions import ActionManager, normalize_deliverable
-from loom.db import LoomDB
-from loom.db_board import (
+from torque.actions import ActionManager, normalize_deliverable
+from torque.db import TorqueDB
+from torque.db_board import (
     _BOARD_TASK_COLUMNS,
     _serialize_board_task,
     decode_board_task_row,
 )
-from loom.server_prompts import build_dispatch_postscript, deliverable_word
-from loom.state import BoardTask
+from torque.server_prompts import build_dispatch_postscript, deliverable_word
+from torque.state import BoardTask
 
 
 class DeliverableActionLoaderTests(unittest.TestCase):
@@ -110,7 +110,7 @@ class DeliverableBoardTaskMigrationTests(unittest.TestCase):
         # a pre-deliverable database, and re-run init() to confirm the
         # migration adds them back with the correct defaults.
         path = Path(self.tmp.name) / "legacy.db"
-        db = LoomDB(path)
+        db = TorqueDB(path)
         self.addCleanup(db.close)
         db.init()
 
@@ -200,7 +200,7 @@ class DeliverablePostscriptTests(unittest.TestCase):
             task_title="MCP tool surface audit",
         )
         self.assertIn("Deliverable contract", ps)
-        self.assertIn("loom_task_upload_artifact", ps)
+        self.assertIn("torque_task_upload_artifact", ps)
         self.assertIn("MCP audit report", ps)
         self.assertIn("report", ps)
         self.assertIn("markdown", ps)
@@ -306,7 +306,7 @@ class DeliverableArtifactMatchTests(unittest.TestCase):
 
     def setUp(self):
         # Defer import: server.py touches aiohttp on import.
-        from loom.server import (
+        from torque.server import (
             _reject_missing_deliverable,
             _task_has_matching_deliverable_artifact,
         )
@@ -387,7 +387,7 @@ class DeliverableGateErrorTypeAwareCopyTests(unittest.TestCase):
     """Gate error message must use the contract's deliverable noun."""
 
     def setUp(self):
-        from loom.server import _reject_missing_deliverable
+        from torque.server import _reject_missing_deliverable
 
         self._reject = _reject_missing_deliverable
 
@@ -449,8 +449,8 @@ class DeliverableBoardTaskRoundTripTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        path = Path(self.tmp.name) / "loom.db"
-        self.db = LoomDB(path)
+        path = Path(self.tmp.name) / "torque.db"
+        self.db = TorqueDB(path)
         self.addCleanup(self.db.close)
         self.db.init()
 
@@ -458,7 +458,7 @@ class DeliverableBoardTaskRoundTripTests(unittest.TestCase):
         bt = BoardTask(
             id="t-deliv-1",
             task="Audit MCP surface",
-            group="loom",
+            group="torque",
             deliverable_required=True,
             deliverable_type="report",
             deliverable_format="markdown",
@@ -486,7 +486,7 @@ class DeliverableBoardTaskRoundTripTests(unittest.TestCase):
 
 
 class DeliverableCliFailureSurfaceTests(unittest.TestCase):
-    """The documented `loom ai done` / `loom ai ready` paths must exit
+    """The documented `torque ai done` / `torque ai ready` paths must exit
     with a non-zero status when the server refuses with
     ``deliverable_missing``. Without this, workers using the CLI would
     see a fake "Done" message even though the gate refused completion.
@@ -498,11 +498,11 @@ class DeliverableCliFailureSurfaceTests(unittest.TestCase):
         from importlib.machinery import SourceFileLoader
 
         path = (
-            Path(__file__).resolve().parents[1] / "bin" / "loom"
+            Path(__file__).resolve().parents[1] / "bin" / "torque"
         )
-        loader = SourceFileLoader("loom_cli_deliverable", str(path))
+        loader = SourceFileLoader("torque_cli_deliverable", str(path))
         spec = importlib.util.spec_from_loader(
-            "loom_cli_deliverable", loader)
+            "torque_cli_deliverable", loader)
         mod = importlib.util.module_from_spec(spec)
         loader.exec_module(mod)
         cls.cli = mod
@@ -520,8 +520,8 @@ class DeliverableCliFailureSurfaceTests(unittest.TestCase):
             "error": (
                 "Cannot mark task done: deliverable required "
                 "(type=report) but no matching artifact attached. "
-                "Call `loom_task_upload_artifact(...)` first, then "
-                "retry loom_done."
+                "Call `torque_task_upload_artifact(...)` first, then "
+                "retry torque_done."
             ),
         }
 

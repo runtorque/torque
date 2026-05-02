@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from loom.roles import RoleManager
+from torque.roles import RoleManager
 
 
 class RoleManagerTemplateCompatTests(unittest.TestCase):
@@ -14,10 +14,10 @@ class RoleManagerTemplateCompatTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.project = self.root / "repo" / "subdir"
         self.project.mkdir(parents=True)
-        self.project_roles = self.root / "repo" / ".loom" / "roles"
+        self.project_roles = self.root / "repo" / ".torque" / "roles"
         self.project_roles.mkdir(parents=True)
         self.user_home = self.root / "home"
-        self.user_roles = self.user_home / ".loom" / "roles"
+        self.user_roles = self.user_home / ".torque" / "roles"
         self.user_roles.mkdir(parents=True)
         self.prev_home = os.environ.get("HOME")
         os.environ["HOME"] = str(self.user_home)
@@ -102,7 +102,7 @@ class RoleManagerTemplateCompatTests(unittest.TestCase):
             agent_tab_color="#abcdef",
             agent_env_vars={"GROUP": "1", "SHARED": "group"},
             git_worktree=False,
-            worktree_base_dir=".loom/custom",
+            worktree_base_dir=".torque/custom",
             worktree_base_branch="develop",
             worktree_auto_checkpoint=True,
             worktree_merge_squash=False,
@@ -130,7 +130,7 @@ class RoleManagerTemplateCompatTests(unittest.TestCase):
         self.assertEqual(resolved["shell"], "bash")
         self.assertEqual(resolved["tab_color"], "#333333")
         self.assertFalse(resolved["worktree"])
-        self.assertEqual(resolved["worktree_base_dir"], ".loom/custom")
+        self.assertEqual(resolved["worktree_base_dir"], ".torque/custom")
         self.assertEqual(resolved["worktree_base_branch"], "develop")
         self.assertTrue(resolved["worktree_auto_checkpoint"])
         self.assertFalse(resolved["worktree_merge_squash"])
@@ -159,7 +159,7 @@ class RoleManagerTemplateCompatTests(unittest.TestCase):
             agent_tab_color="",
             agent_env_vars={},
             git_worktree=True,
-            worktree_base_dir=".loom/worktrees",
+            worktree_base_dir=".torque/worktrees",
             worktree_base_branch="main",
             worktree_auto_checkpoint=False,
             worktree_merge_squash=True,

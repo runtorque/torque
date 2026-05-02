@@ -19,15 +19,15 @@ except ModuleNotFoundError:
 class ServerModuleExtractionTests(unittest.TestCase):
     def setUp(self):
         install_aiohttp_stub()
-        self.server_actions = importlib.import_module('loom.server_actions')
+        self.server_actions = importlib.import_module('torque.server_actions')
         self.server_actions = importlib.reload(self.server_actions)
-        self.server_dispatch = importlib.import_module('loom.server_dispatch')
+        self.server_dispatch = importlib.import_module('torque.server_dispatch')
         self.server_dispatch = importlib.reload(self.server_dispatch)
-        self.server_worktrees = importlib.import_module('loom.server_worktrees')
+        self.server_worktrees = importlib.import_module('torque.server_worktrees')
         self.server_worktrees = importlib.reload(self.server_worktrees)
-        self.state_mod = importlib.import_module('loom.state')
+        self.state_mod = importlib.import_module('torque.state')
         self.state_mod = importlib.reload(self.state_mod)
-        self.server_mod = importlib.import_module('loom.server')
+        self.server_mod = importlib.import_module('torque.server')
         self.server_mod = importlib.reload(self.server_mod)
 
     def test_parse_unified_diff_summarizes_added_file(self):
@@ -126,7 +126,7 @@ class ServerModuleExtractionTests(unittest.TestCase):
         )
 
     def test_action_parser_preserves_transition_loc_gate(self):
-        actions_mod = importlib.import_module('loom.actions')
+        actions_mod = importlib.import_module('torque.actions')
         actions_mod = importlib.reload(actions_mod)
         act = actions_mod.parse_yaml("""
 name: feature/implement
@@ -264,16 +264,16 @@ prompt: |
             with self.subTest(cmd=cmd):
                 with self.assertLogs(self.server_mod.log, level="WARNING"):
                     result = self.server_mod._api_worker_context_guard(
-                        {"cmd": cmd}, {"LOOM_CELL_ID": "worker-1"}, "127.0.0.1")
+                        {"cmd": cmd}, {"TORQUE_CELL_ID": "worker-1"}, "127.0.0.1")
 
                 self.assertEqual(result["status"], 403)
                 self.assertIn("force=true", result["message"])
                 self.assertIsNone(self.server_mod._api_worker_context_guard(
                     {"cmd": cmd, "force": True},
-                    {"LOOM_CELL_ID": "worker-1"},
+                    {"TORQUE_CELL_ID": "worker-1"},
                     "127.0.0.1"))
         result = self.server_mod._api_worker_context_guard(
-            {"cmd": "restart", "loom_cell_id": "worker-2"},
+            {"cmd": "restart", "torque_cell_id": "worker-2"},
             {},
             "127.0.0.1",
         )
@@ -653,17 +653,17 @@ prompt: |
         )
 
     def test_doctor_command_returns_stage1_report(self):
-        from loom.db import LoomDB
+        from torque.db import TorqueDB
 
         with tempfile.TemporaryDirectory() as tmp:
-            db = LoomDB(Path(tmp) / 'loom.db')
+            db = TorqueDB(Path(tmp) / 'torque.db')
             db.init()
             self.addCleanup(db.close)
             db.save_agent(
                 self.state_mod.AgentCell(
                     id='engineer-1',
                     name='Engineer',
-                    group='loom',
+                    group='torque',
                     slug='engineer',
                     cell_type='agent',
                     kind='engineer',
@@ -742,7 +742,7 @@ prompt: |
             cell_type='agent',
             kind='worker',
             owner_engineer_id=engineer.id,
-            worktree_branch='loom/worker-1',
+            worktree_branch='torque/worker-1',
         )
         state.agents[engineer.id] = engineer
         state.agents[worker.id] = worker
@@ -782,7 +782,7 @@ prompt: |
         self.assertEqual(events[0]['cell_id'], engineer.id)
         self.assertIn('manual', events[0]['message'])
         self.assertIn('Operator caught reviewer residue', events[0]['message'])
-        self.assertIn('branch=loom/worker-1', events[0]['message'])
+        self.assertIn('branch=torque/worker-1', events[0]['message'])
 
     def test_stale_base_workflow_breach_targets_worker_owner(self):
         state = self.state_mod.MatrixState()
@@ -801,7 +801,7 @@ prompt: |
             cell_type='agent',
             kind='worker',
             owner_engineer_id=engineer.id,
-            worktree_branch='loom/worker-1',
+            worktree_branch='torque/worker-1',
         )
         state.agents[engineer.id] = engineer
         state.agents[worker.id] = worker
@@ -840,10 +840,10 @@ prompt: |
             root = Path(tmp)
             project = root / 'repo' / 'subdir'
             project.mkdir(parents=True)
-            (root / 'repo' / '.loom' / 'agents').mkdir(parents=True)
+            (root / 'repo' / '.torque' / 'agents').mkdir(parents=True)
             home = root / 'home'
-            (home / '.loom').mkdir(parents=True)
-            (home / '.loom' / 'agents').mkdir(parents=True)
+            (home / '.torque').mkdir(parents=True)
+            (home / '.torque' / 'agents').mkdir(parents=True)
             prev_home = os.environ.get('HOME')
             os.environ['HOME'] = str(home)
             self.addCleanup(
@@ -852,7 +852,7 @@ prompt: |
                 else os.environ.pop('HOME', None)
             )
 
-            roles_mod = importlib.import_module('loom.roles')
+            roles_mod = importlib.import_module('torque.roles')
             roles_mod = importlib.reload(roles_mod)
             role_mgr = roles_mod.RoleManager()
 
@@ -883,7 +883,7 @@ prompt: |
             self.assertEqual(demo['preamble'], 'Be careful.')
             self.assertEqual(demo['priorities'], ['ship small', 'test first'])
             saved_role = yaml.safe_load(
-                (home / '.loom' / 'roles' / 'demo.yaml').read_text(
+                (home / '.torque' / 'roles' / 'demo.yaml').read_text(
                     encoding='utf-8'
                 )
             )
@@ -932,10 +932,10 @@ prompt: |
             )
 
             self.assertEqual(save_template['type'], 'templates')
-            self.assertTrue((project / '.loom' / 'roles' / 'compat.yaml').is_file())
-            self.assertFalse((root / 'repo' / '.loom' / 'agents' / 'compat.yaml').exists())
+            self.assertTrue((project / '.torque' / 'roles' / 'compat.yaml').is_file())
+            self.assertFalse((root / 'repo' / '.torque' / 'agents' / 'compat.yaml').exists())
 
-            legacy_user_template = home / '.loom' / 'agents' / 'legacy.yaml'
+            legacy_user_template = home / '.torque' / 'agents' / 'legacy.yaml'
             legacy_user_template.write_text('name: legacy\ndescription: Legacy\n')
             delete_role_legacy = asyncio.run(
                 self.server_mod._handle_role_template_command(
@@ -976,7 +976,7 @@ prompt: |
             })
             self.assertTrue(legacy_user_template.exists())
 
-            legacy_rename_path = home / '.loom' / 'agents' / 'rename-me.yaml'
+            legacy_rename_path = home / '.torque' / 'agents' / 'rename-me.yaml'
             legacy_rename_path.write_text('name: rename-me\ndescription: Legacy\n')
             rename_template = asyncio.run(
                 self.server_mod._handle_role_template_command(
@@ -998,7 +998,7 @@ prompt: |
 
             self.assertEqual(rename_template['type'], 'templates')
             self.assertTrue(legacy_rename_path.exists())
-            self.assertTrue((home / '.loom' / 'roles' / 'renamed.yaml').is_file())
+            self.assertTrue((home / '.torque' / 'roles' / 'renamed.yaml').is_file())
 
             delete_role = asyncio.run(
                 self.server_mod._handle_role_template_command(
@@ -1015,15 +1015,15 @@ prompt: |
 
             self.assertEqual(delete_role['type'], 'roles')
             self.assertEqual(delete_role['deleted'], 'demo')
-            self.assertFalse((home / '.loom' / 'roles' / 'demo.yaml').exists())
+            self.assertFalse((home / '.torque' / 'roles' / 'demo.yaml').exists())
 
 
 class ServerPromptQueueTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub()
-        self.state_mod = importlib.import_module('loom.state')
+        self.state_mod = importlib.import_module('torque.state')
         self.state_mod = importlib.reload(self.state_mod)
-        self.server_mod = importlib.import_module('loom.server')
+        self.server_mod = importlib.import_module('torque.server')
         self.server_mod = importlib.reload(self.server_mod)
 
     async def test_dismiss_engineer_note_archives_it_to_panel_events(self):
@@ -1262,9 +1262,9 @@ class ServerPromptQueueTests(unittest.IsolatedAsyncioTestCase):
 class ServerWebSocketResyncTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub()
-        self.state_mod = importlib.import_module('loom.state')
+        self.state_mod = importlib.import_module('torque.state')
         self.state_mod = importlib.reload(self.state_mod)
-        self.server_mod = importlib.import_module('loom.server')
+        self.server_mod = importlib.import_module('torque.server')
         self.server_mod = importlib.reload(self.server_mod)
 
     async def test_register_ready_ui_ws_client_retries_until_inflight_updates_are_reflected(self):
@@ -1423,9 +1423,9 @@ class ServerWebSocketResyncTests(unittest.IsolatedAsyncioTestCase):
 class ServerMergeCleanupTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub()
-        self.state_mod = importlib.import_module('loom.state')
+        self.state_mod = importlib.import_module('torque.state')
         self.state_mod = importlib.reload(self.state_mod)
-        self.server_mod = importlib.import_module('loom.server')
+        self.server_mod = importlib.import_module('torque.server')
         self.server_mod = importlib.reload(self.server_mod)
 
     async def test_relaunch_after_worktree_removal_resets_live_agent_session(self):
@@ -1460,8 +1460,8 @@ class ServerMergeCleanupTests(unittest.IsolatedAsyncioTestCase):
                 'overrides': overrides,
             })
             return {
-                'env_vars': {'LOOM_ENV': '1'},
-                'env_file': '/tmp/loom.env',
+                'env_vars': {'TORQUE_ENV': '1'},
+                'env_file': '/tmp/torque.env',
                 'shell': 'zsh',
                 'system_prompt': 'system prompt',
             }
@@ -1525,7 +1525,7 @@ class ServerMergeCleanupTests(unittest.IsolatedAsyncioTestCase):
             [{
                 'directory': '/repo',
                 'prompt': 'system prompt @ /repo',
-                'env_file': '/tmp/loom.env',
+                'env_file': '/tmp/torque.env',
             }],
         )
         self.assertEqual(
@@ -1533,11 +1533,11 @@ class ServerMergeCleanupTests(unittest.IsolatedAsyncioTestCase):
             [{
                 'directory': '/repo',
                 'kwargs': {
-                    'env_vars': {'LOOM_ENV': '1'},
-                    'env_file': '/tmp/loom.env',
+                    'env_vars': {'TORQUE_ENV': '1'},
+                    'env_file': '/tmp/torque.env',
                     'shell': 'zsh',
                     'system_prompt': 'system prompt',
-                    'mcp_entrypoint': 'loom/mcp.py',
+                    'mcp_entrypoint': 'torque/mcp.py',
                 },
             }],
         )
@@ -1554,15 +1554,15 @@ class ServerMergeCleanupTests(unittest.IsolatedAsyncioTestCase):
 class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub()
-        self.state_mod = importlib.import_module('loom.state')
+        self.state_mod = importlib.import_module('torque.state')
         self.state_mod = importlib.reload(self.state_mod)
-        self.server_mod = importlib.import_module('loom.server')
+        self.server_mod = importlib.import_module('torque.server')
         self.server_mod = importlib.reload(self.server_mod)
-        from loom.db import LoomDB
+        from torque.db import TorqueDB
 
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.db = LoomDB(Path(self.tmp.name) / 'loom.db')
+        self.db = TorqueDB(Path(self.tmp.name) / 'torque.db')
         self.db.init()
         self.addCleanup(self.db.close)
 
@@ -1646,15 +1646,15 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(follow_up.pipeline_depth, 1)
         self.assertEqual(follow_up.reply_agent_id, worker.id)
         self.assertEqual(follow_up.status, 'Awaiting Reply')
-        self.assertIn('loom:derived', follow_up.labels)
-        self.assertIn('loom:engineer-message', follow_up.labels)
+        self.assertIn('torque:derived', follow_up.labels)
+        self.assertIn('torque:engineer-message', follow_up.labels)
         self.assertEqual(follow_up.messages[-1]['action'], 'engineer_message')
         self.assertTrue(worker.pending_engineer_message)
         self.assertEqual(primed, ['session-1'])
         self.assertEqual(sent[0][0], 'session-1')
         self.assertIn(f'Task: {follow_up.id}', sent[0][1])
         self.assertIn(
-            f'loom_reply(task=\"{follow_up.id}\", message=\"your response\")',
+            f'torque_reply(task=\"{follow_up.id}\", message=\"your response\")',
             sent[0][1],
         )
         self.assertEqual(events, [{
@@ -1702,7 +1702,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(follow_up.pipeline_root_id, '')
         self.assertEqual(follow_up.pipeline_depth, 0)
         self.assertEqual(follow_up.group, 'g')
-        self.assertEqual(follow_up.labels, ['loom:engineer-message'])
+        self.assertEqual(follow_up.labels, ['torque:engineer-message'])
 
     async def test_send_engineer_message_reply_not_required_appends_inline_thread(self):
         state = self._make_state()
@@ -1759,7 +1759,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(entry['reply_required'])
         self.assertFalse(worker.pending_engineer_message)
         self.assertEqual(events, [])
-        self.assertNotIn('loom_reply', sent[0][1])
+        self.assertNotIn('torque_reply', sent[0][1])
         self.assertEqual(
             self.db.load_agent_messages_by_task(parent.id)[0]['action'],
             'engineer_message',
@@ -1913,7 +1913,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             pipeline_root_id=parent.id,
             pipeline_depth=1,
             reply_agent_id=worker.id,
-            labels=['loom:derived', 'loom:engineer-message'],
+            labels=['torque:derived', 'torque:engineer-message'],
             status='Awaiting Reply',
         )
         state.history_record_dispatch(worker, follow_up)
@@ -1963,7 +1963,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             lane='Backlog',
             id='task-first',
             reply_agent_id=worker.id,
-            labels=['loom:engineer-message'],
+            labels=['torque:engineer-message'],
             status='Awaiting Reply',
         )
         second = state.board_add_task(
@@ -1972,7 +1972,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             lane='Backlog',
             id='task-second',
             reply_agent_id=worker.id,
-            labels=['loom:engineer-message'],
+            labels=['torque:engineer-message'],
             status='Awaiting Reply',
         )
         worker.pending_engineer_message = True
@@ -2015,7 +2015,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             lane='Backlog',
             id='ask-1',
             description='Option A: defer. Option B: delay launch.',
-            labels=['loom:human', 'architect-ask'],
+            labels=['torque:human', 'architect-ask'],
             status='Awaiting Input',
             reply_agent_id=architect.id,
             created_by_architect_id=architect.id,
@@ -2075,15 +2075,15 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
 class ServerWorktreeMergeDiffTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub()
-        self.state_mod = importlib.import_module('loom.state')
+        self.state_mod = importlib.import_module('torque.state')
         self.state_mod = importlib.reload(self.state_mod)
-        self.server_mod = importlib.import_module('loom.server')
+        self.server_mod = importlib.import_module('torque.server')
         self.server_mod = importlib.reload(self.server_mod)
-        self.server_artifacts = importlib.import_module('loom.server_artifacts')
+        self.server_artifacts = importlib.import_module('torque.server_artifacts')
         self.server_artifacts = importlib.reload(self.server_artifacts)
-        self.server_worktrees = importlib.import_module('loom.server_worktrees')
+        self.server_worktrees = importlib.import_module('torque.server_worktrees')
         self.server_worktrees = importlib.reload(self.server_worktrees)
-        self.worktree_mod = importlib.import_module('loom.worktree')
+        self.worktree_mod = importlib.import_module('torque.worktree')
         self.worktree_mod = importlib.reload(self.worktree_mod)
 
     async def asyncSetUp(self):
@@ -2092,8 +2092,8 @@ class ServerWorktreeMergeDiffTests(unittest.IsolatedAsyncioTestCase):
         self.repo_root = Path(self.tmp.name)
         self.worktree_mgr = self.worktree_mod.WorktreeManager()
         await self._git('init', '-b', 'main')
-        await self._git('config', 'user.name', 'Loom Tests')
-        await self._git('config', 'user.email', 'loom-tests@example.com')
+        await self._git('config', 'user.name', 'Torque Tests')
+        await self._git('config', 'user.email', 'torque-tests@example.com')
         (self.repo_root / 'README.md').write_text('base\n')
         await self._git('add', 'README.md')
         await self._git('commit', '-m', 'Initial commit')
@@ -2311,7 +2311,7 @@ class ServerWorktreeMergeDiffTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             warning,
-            'Merge succeeded, but Loom could not save the preserved diff artifact.',
+            'Merge succeeded, but Torque could not save the preserved diff artifact.',
         )
         self.assertEqual(boundary_task.artifacts, [])
         self.assertEqual(boundary_task.updated_at, '2026-04-10T00:00:00+00:00')
@@ -2336,11 +2336,11 @@ class ResolvePendingEngineerSpecializationsTests(unittest.TestCase):
     def setUp(self):
         install_aiohttp_stub()
         self.state_mod = importlib.reload(
-            importlib.import_module('loom.state'))
+            importlib.import_module('torque.state'))
         self.server_mod = importlib.reload(
-            importlib.import_module('loom.server'))
+            importlib.import_module('torque.server'))
 
-    def _make_state(self, group: str = "loom",
+    def _make_state(self, group: str = "torque",
                     default_specs=None) -> object:
         state = self.state_mod.MatrixState()
         state.add_group(group)
@@ -2354,13 +2354,13 @@ class ResolvePendingEngineerSpecializationsTests(unittest.TestCase):
     def test_returns_empty_for_non_engineer(self):
         state = self._make_state(default_specs=["ui-frontend"])
         result = self.server_mod._resolve_pending_engineer_specializations(
-            {}, state, "loom", is_engineer=False)
+            {}, state, "torque", is_engineer=False)
         self.assertEqual(result, [])
 
     def test_falls_back_to_group_default_when_specs_absent(self):
         state = self._make_state(default_specs=["ui-frontend", "react"])
         result = self.server_mod._resolve_pending_engineer_specializations(
-            {}, state, "loom", is_engineer=True)
+            {}, state, "torque", is_engineer=True)
         self.assertEqual(result, ["ui-frontend", "react"])
 
     def test_explicit_pick_overrides_group_default(self):
@@ -2368,7 +2368,7 @@ class ResolvePendingEngineerSpecializationsTests(unittest.TestCase):
         state = self._make_state(default_specs=["ui-frontend", "react"])
         result = self.server_mod._resolve_pending_engineer_specializations(
             {"specializations": ["rust-systems"]},
-            state, "loom", is_engineer=True)
+            state, "torque", is_engineer=True)
         self.assertEqual(result, ["rust-systems"])
 
     def test_explicit_empty_list_is_intentional_clear(self):
@@ -2377,81 +2377,81 @@ class ResolvePendingEngineerSpecializationsTests(unittest.TestCase):
         state = self._make_state(default_specs=["ui-frontend"])
         result = self.server_mod._resolve_pending_engineer_specializations(
             {"specializations": []},
-            state, "loom", is_engineer=True)
+            state, "torque", is_engineer=True)
         self.assertEqual(result, [])
 
     def test_no_default_and_no_explicit_returns_empty(self):
         state = self._make_state(default_specs=None)
         result = self.server_mod._resolve_pending_engineer_specializations(
-            {}, state, "loom", is_engineer=True)
+            {}, state, "torque", is_engineer=True)
         self.assertEqual(result, [])
 
     def test_strips_whitespace_and_drops_blanks(self):
         state = self._make_state(default_specs=None)
         result = self.server_mod._resolve_pending_engineer_specializations(
             {"specializations": ["  rust  ", "", "  ", "react"]},
-            state, "loom", is_engineer=True)
+            state, "torque", is_engineer=True)
         self.assertEqual(result, ["rust", "react"])
 
     def test_default_with_blanks_is_cleaned(self):
         state = self._make_state(default_specs=["", " ui-frontend ", ""])
         result = self.server_mod._resolve_pending_engineer_specializations(
-            {}, state, "loom", is_engineer=True)
+            {}, state, "torque", is_engineer=True)
         self.assertEqual(result, ["ui-frontend"])
 
 
-class LoomAiMcpReportToolNamesTests(unittest.TestCase):
-    """LOOM:238 cutover: workers report exclusively via
-    `mcp__loom__loom_*` MCP tools (no Bash CLI rewrite bridge). The
-    `_LOOM_AI_MCP_REPORT_TOOL_NAMES` set drives the `/events` capture
+class TorqueAiMcpReportToolNamesTests(unittest.TestCase):
+    """TORQUE:238 cutover: workers report exclusively via
+    `mcp__torque__torque_*` MCP tools (no Bash CLI rewrite bridge). The
+    `_TORQUE_AI_MCP_REPORT_TOOL_NAMES` set drives the `/events` capture
     clause's broadcast-suppression for those specific tool names so
     the ai_report `_append_mcp` synthesis isn't double-emitted.
     """
 
     def setUp(self):
         install_aiohttp_stub()
-        self.server_mod = importlib.import_module('loom.server')
+        self.server_mod = importlib.import_module('torque.server')
         self.server_mod = importlib.reload(self.server_mod)
 
     def test_report_tool_names_match_actions(self):
-        actions = self.server_mod._LOOM_AI_MCP_REPORT_ACTIONS
-        tool_names = self.server_mod._LOOM_AI_MCP_REPORT_TOOL_NAMES
+        actions = self.server_mod._TORQUE_AI_MCP_REPORT_ACTIONS
+        tool_names = self.server_mod._TORQUE_AI_MCP_REPORT_TOOL_NAMES
         # Every whitelisted action must have a corresponding fully-
         # qualified MCP tool name in the suppression set.
         self.assertEqual(
             tool_names,
-            frozenset("mcp__loom__loom_" + a for a in actions),
+            frozenset("mcp__torque__torque_" + a for a in actions),
         )
 
     def test_covers_all_nine_worker_reporting_actions(self):
         # The cutover whitelist must cover every action the MCP server
-        # in `loom/mcp.py` routes to `cmd=ai_report`. If a new worker
+        # in `torque/mcp.py` routes to `cmd=ai_report`. If a new worker
         # action is added there, it MUST also be added here or the
         # `/events` PostToolUse for that tool will fire a duplicate
-        # `mcp_call_append` broadcast (re-introducing the LOOM:236
+        # `mcp_call_append` broadcast (re-introducing the TORQUE:236
         # firehose pattern).
         expected = {
             "progress", "done", "blocked", "error",
             "ask", "derive", "ready", "verify", "name",
         }
         self.assertEqual(
-            set(self.server_mod._LOOM_AI_MCP_REPORT_ACTIONS),
+            set(self.server_mod._TORQUE_AI_MCP_REPORT_ACTIONS),
             expected,
         )
 
     def test_engineer_architect_tool_names_NOT_in_suppression_set(self):
-        # Engineer/architect MCP tools (e.g. `mcp__loom__engineer_*`,
-        # `mcp__loom__architect_*`) MUST NOT appear in the suppression
+        # Engineer/architect MCP tools (e.g. `mcp__torque__engineer_*`,
+        # `mcp__torque__architect_*`) MUST NOT appear in the suppression
         # set — they don't go through `_append_mcp`, so suppressing
         # the `/events` capture clause for them would lose the live
         # delta entirely.
-        suppressed = self.server_mod._LOOM_AI_MCP_REPORT_TOOL_NAMES
+        suppressed = self.server_mod._TORQUE_AI_MCP_REPORT_TOOL_NAMES
         for tool in (
-            "mcp__loom__engineer_task_create",
-            "mcp__loom__engineer_task_dispatch",
-            "mcp__loom__architect_message_engineer",
-            "mcp__loom__architect_journal",
-            "mcp__loom__loom_reply",  # `reply` is not a worker reporting action
+            "mcp__torque__engineer_task_create",
+            "mcp__torque__engineer_task_dispatch",
+            "mcp__torque__architect_message_engineer",
+            "mcp__torque__architect_journal",
+            "mcp__torque__torque_reply",  # `reply` is not a worker reporting action
         ):
             self.assertNotIn(
                 tool, suppressed,
@@ -2459,14 +2459,14 @@ class LoomAiMcpReportToolNamesTests(unittest.TestCase):
             )
 
     def test_bridge_function_removed(self):
-        # The `_maybe_loom_ai_mcp_tool_name` bridge from `:236` v1-v3
+        # The `_maybe_torque_ai_mcp_tool_name` bridge from `:236` v1-v3
         # is gone — workers no longer use the Bash CLI, so the Bash
         # PostToolUse rewriting path is no longer needed. If this
         # symbol comes back, it likely means a regression that
         # re-introduces the dual-broadcast firehose.
         self.assertFalse(
-            hasattr(self.server_mod, "_maybe_loom_ai_mcp_tool_name"),
-            "_maybe_loom_ai_mcp_tool_name should be removed in LOOM:238",
+            hasattr(self.server_mod, "_maybe_torque_ai_mcp_tool_name"),
+            "_maybe_torque_ai_mcp_tool_name should be removed in TORQUE:238",
         )
 
 

@@ -64,9 +64,9 @@ class ServerDeriveLifecycleTests(unittest.TestCase):
     def setUp(self):
         _install_aiohttp_stub()
         _install_iterm2_stub()
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
-        self.server_mod = importlib.import_module("loom.server")
+        self.server_mod = importlib.import_module("torque.server")
         self.server_mod = importlib.reload(self.server_mod)
 
     def _make_state(self):
@@ -240,9 +240,9 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         _install_aiohttp_stub()
         _install_iterm2_stub()
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
-        self.server_mod = importlib.import_module("loom.server")
+        self.server_mod = importlib.import_module("torque.server")
         self.server_mod = importlib.reload(self.server_mod)
 
     @staticmethod

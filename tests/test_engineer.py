@@ -112,13 +112,13 @@ class FakeDigestDB:
 class EngineerEventBufferTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         _install_aiohttp_stub()
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
-        self.events_mod = importlib.import_module("loom.events")
+        self.events_mod = importlib.import_module("torque.events")
         self.events_mod = importlib.reload(self.events_mod)
-        self.routing_mod = importlib.import_module("loom.digest_routing")
+        self.routing_mod = importlib.import_module("torque.digest_routing")
         self.routing_mod = importlib.reload(self.routing_mod)
-        self.engineer_mod = importlib.import_module("loom.engineer")
+        self.engineer_mod = importlib.import_module("torque.engineer")
         self.engineer_mod = importlib.reload(self.engineer_mod)
 
     def _make_state(self):
@@ -348,7 +348,7 @@ class EngineerEventBufferTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0.05)
 
         self.assertEqual(len(bridge.sent), 1)
-        self.assertIn("## Loom Digest (1 event)", bridge.sent[0])
+        self.assertIn("## Torque Digest (1 event)", bridge.sent[0])
         self.assertTrue(bridge.sent[0].strip().endswith("---"))
         self.assertNotIn("Heartbeat", bridge.sent[0])
 
@@ -384,7 +384,7 @@ class EngineerEventBufferTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.05)
 
         self.assertEqual(len(bridge.sent), 1)
-        self.assertIn("## Loom Digest (1 event)", bridge.sent[0])
+        self.assertIn("## Torque Digest (1 event)", bridge.sent[0])
         buffer.stop()
 
     async def test_max_interval_caps_buffered_digest_delay(self):
@@ -534,7 +534,7 @@ class EngineerEventBufferTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0.05)
 
         self.assertEqual(len(bridge.sent), 1)
-        self.assertIn("## Loom Digest (0 events)", bridge.sent[0])
+        self.assertIn("## Torque Digest (0 events)", bridge.sent[0])
         self.assertIn("No new events since last digest.", bridge.sent[0])
         self.assertIn("Active: worker (thinking)", bridge.sent[0])
         self.assertIn("Attention: blocked: Investigate blocked review", bridge.sent[0])
@@ -648,7 +648,7 @@ class EngineerEventBufferTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0.05)
 
         self.assertEqual(len(bridge.sent), 1)
-        self.assertIn("## Loom Digest (1 event)", bridge.sent[0])
+        self.assertIn("## Torque Digest (1 event)", bridge.sent[0])
 
     async def test_idle_heartbeat_does_not_fire_while_engineer_is_active(self):
         state, group, engineer = self._make_state()
@@ -684,7 +684,7 @@ class EngineerEventBufferTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0.05)
 
         self.assertEqual(len(bridge.sent), 1)
-        self.assertIn("## Loom Digest (7 events)", bridge.sent[0])
+        self.assertIn("## Torque Digest (7 events)", bridge.sent[0])
         self.assertIn("… 2 more events", bridge.sent[0])
 
     async def test_detailed_digest_verbosity_includes_attention_even_with_events(self):
@@ -1582,7 +1582,7 @@ class EngineerEventBufferTests(unittest.IsolatedAsyncioTestCase):
             group,
             lane="Backlog",
             id="task-reply",
-            labels=["loom:engineer-message"],
+            labels=["torque:engineer-message"],
         )
         self.assertIsNotNone(real_task)
         self.assertIsNotNone(followup)
@@ -1641,9 +1641,9 @@ class EngineerEventBufferTests(unittest.IsolatedAsyncioTestCase):
                 owner_engineer_id=engineer.id,
                 created_by_engineer_id=engineer.id,
                 status="idle",
-                worktree_path=f"/repo/.loom/worktrees/{worker_id}",
+                worktree_path=f"/repo/.torque/worktrees/{worker_id}",
                 worktree_repo_root="/repo",
-                worktree_branch=f"loom/{worker_id}",
+                worktree_branch=f"torque/{worker_id}",
                 worktree_merged=True,
             )
             state.agents[worker.id] = worker
@@ -1657,7 +1657,7 @@ class EngineerEventBufferTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0.05)
 
         self.assertEqual(len(bridge.sent), 1)
-        self.assertIn("## Loom Digest (0 events)", bridge.sent[0])
+        self.assertIn("## Torque Digest (0 events)", bridge.sent[0])
         self.assertIn("Hints:", bridge.sent[0])
         self.assertIn("merged branches ready for cleanup", bridge.sent[0])
 
@@ -1675,9 +1675,9 @@ class EngineerEventBufferTests(unittest.IsolatedAsyncioTestCase):
             owner_engineer_id=engineer.id,
             created_by_engineer_id=engineer.id,
             status="idle",
-            worktree_path="/repo/.loom/worktrees/worker-c",
+            worktree_path="/repo/.torque/worktrees/worker-c",
             worktree_repo_root="/repo",
-            worktree_branch="loom/worker-c",
+            worktree_branch="torque/worker-c",
             worktree_merged=True,
         )
         state.agents[worker_c.id] = worker_c
@@ -1709,9 +1709,9 @@ class EngineerEventBufferTests(unittest.IsolatedAsyncioTestCase):
                 owner_engineer_id=engineer.id,
                 created_by_engineer_id=engineer.id,
                 status="idle",
-                worktree_path=f"/repo/.loom/worktrees/{worker_id}",
+                worktree_path=f"/repo/.torque/worktrees/{worker_id}",
                 worktree_repo_root="/repo",
-                worktree_branch=f"loom/{worker_id}",
+                worktree_branch=f"torque/{worker_id}",
                 worktree_merged=True,
             )
             state.agents[worker.id] = worker
@@ -1741,7 +1741,7 @@ class EngineerEventBufferTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.05)
 
         self.assertEqual(len(bridge.sent), 1)
-        self.assertIn("## Loom Digest (1 event)", bridge.sent[0])
+        self.assertIn("## Torque Digest (1 event)", bridge.sent[0])
         self.assertIn("batched with hint", bridge.sent[0])
         self.assertIn("Hints:", bridge.sent[0])
         self.assertIn("merged branches ready for cleanup", bridge.sent[0])
@@ -1798,7 +1798,7 @@ class EngineerEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(buffer.get_buffer_stats(group)["buffered_events"], 0)
         self.assertEqual(len(bridge.sent), 1)
         digest = bridge.sent[0]
-        self.assertIn("## Loom Digest (2 events)", digest)
+        self.assertIn("## Torque Digest (2 events)", digest)
         self.assertLess(
             digest.index("first while paused"),
             digest.index("second while paused"),

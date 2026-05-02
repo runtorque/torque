@@ -1,6 +1,6 @@
 # Sessions
 
-Loom's core workspace model is simple:
+Torque's core workspace model is simple:
 
 - A **group** holds related work.
 - An **agent** is an AI session in its own terminal tab.
@@ -23,7 +23,7 @@ Configure group defaults from the gear icon on the group header. See [Group Sett
 
 ## Agents
 
-An agent is a managed AI coding session. Loom opens it in its own iTerm2 tab, runs the configured boot command, and tracks its runtime state.
+An agent is a managed AI coding session. Torque opens it in its own iTerm2 tab, runs the configured boot command, and tracks its runtime state.
 
 Agents can have:
 
@@ -32,18 +32,18 @@ Agents can have:
 - Group-level or template-driven environment
 - A managed git worktree
 - Companion child terminals
-- Linked board tasks and `loom ai` reporting state
+- Linked board tasks and `torque ai` reporting state
 
 ### Agent lifecycle
 
-1. Created: Loom opens a tab and launches the boot command.
+1. Created: Torque opens a tab and launches the boot command.
 2. Running: the agent is actively doing work.
 3. Idle: the shell prompt has returned.
-4. Stopped: the tab closed or the session ended, but Loom keeps the record so it can be relaunched.
+4. Stopped: the tab closed or the session ended, but Torque keeps the record so it can be relaunched.
 
 ## Terminals
 
-Terminals are plain shells managed by Loom.
+Terminals are plain shells managed by Torque.
 
 ### Child terminals
 
@@ -72,7 +72,7 @@ Group defaults, agent templates, and action-linked creation all layer into this 
 
 ## Drag and Drop
 
-Loom supports reordering and reparenting from the UI:
+Torque supports reordering and reparenting from the UI:
 
 - Move groups to change workspace order
 - Move agents between groups
@@ -81,12 +81,12 @@ Loom supports reordering and reparenting from the UI:
 
 ## Relaunch and Cleanup
 
-- Relaunch a stopped agent or terminal with the relaunch action or `loom agent relaunch`
+- Relaunch a stopped agent or terminal with the relaunch action or `torque agent relaunch`
 - Remove an agent when the task is done; child terminals are cleaned up with it
 - Use worktree checkpoints before risky changes if the agent has a managed worktree
 
 ## Standalone Browser View
 
-The browser view is the same live UI backed by the same daemon. In dual mode the Toolbelt and browser stay in sync. In standalone-only mode Loom skips Toolbelt registration and serves only the browser UI.
+The browser view is the same live UI backed by the same daemon. In dual mode the Toolbelt and browser stay in sync. In standalone-only mode Torque skips Toolbelt registration and serves only the browser UI.
 
 See [Operations](operations.md) for runtime modes.

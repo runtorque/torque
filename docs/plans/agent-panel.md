@@ -108,7 +108,7 @@ Manual (no automated tests per CLAUDE.md):
 3. Click `+ New` on the grid → confirm menu now lists Architect, Engineer, roles, and no Engineer. Create an architect, an engineer, and a worker.
 4. Focus each kind in turn and confirm the correct tab set renders:
    - Architect: Decisions + Hired engineers + Messages populate.
-   - Engineer: Journal entries from CLI `loom ai` or MCP `engineer_*` show up. Events and Worklog render.
+   - Engineer: Journal entries from CLI `torque ai` or MCP `engineer_*` show up. Events and Worklog render.
    - Worker: dispatch a task; confirm Worklog shows it. Trigger a few events (activity, blocked) and confirm Events shows them.
    - Terminal: confirm the stub renders without errors.
 5. Delete the architect → confirm engineers fall back to "user-owned" in the grid, panel for a user-owned engineer still works.

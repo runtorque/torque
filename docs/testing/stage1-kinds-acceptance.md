@@ -3,17 +3,17 @@
 > Stage-1-only manual smoke for the Agent Kinds Refactor. Later stages should
 > add their own acceptance docs instead of extending this one indefinitely.
 
-This protocol assumes you are upgrading an existing Loom install that already
-has a live Engineer/loom-group workflow. Fresh-install and edge-case migration
+This protocol assumes you are upgrading an existing Torque install that already
+has a live Engineer/torque-group workflow. Fresh-install and edge-case migration
 paths are covered separately by automated tests.
 
 ## Preflight
 
 ```bash
-LOOM_DIR="$HOME/Library/Application Support/iTerm2/Scripts/loom/loom"
-DB="$LOOM_DIR/loom.db"
-LOG="$LOOM_DIR/loom.log"
-BACKUP="$LOOM_DIR/loom.db.pre-kinds.bak"
+TORQUE_DIR="$HOME/Library/Application Support/iTerm2/Scripts/torque/torque"
+DB="$TORQUE_DIR/torque.db"
+LOG="$TORQUE_DIR/torque.log"
+BACKUP="$TORQUE_DIR/torque.db.pre-kinds.bak"
 ```
 
 Record the current row counts so you can confirm nothing disappears:
@@ -36,10 +36,10 @@ Deploy the build:
 make deploy
 ```
 
-Restart Loom from the iTerm2 Scripts menu:
+Restart Torque from the iTerm2 Scripts menu:
 
 ```text
-iTerm2 → Scripts → loom
+iTerm2 → Scripts → torque
 ```
 
 Tail the daemon log and watch the first boot:
@@ -119,10 +119,10 @@ sqlite3 "$DB" "SELECT COUNT(*) FROM agents WHERE kind='worker' AND template != '
 
 Expected: `0`
 
-## Verify `loom doctor`
+## Verify `torque doctor`
 
 ```bash
-loom doctor
+torque doctor
 ```
 
 Expected:
@@ -133,7 +133,7 @@ Expected:
 - engineer count is `1`
 
 ```bash
-loom doctor --json | jq '.result'
+torque doctor --json | jq '.result'
 ```
 
 Expected:
@@ -160,7 +160,7 @@ Expected: one row; `template` and `role` are both non-empty and identical.
 Next, dispatch a task through the existing UI flow, then re-run:
 
 ```bash
-loom doctor
+torque doctor
 ```
 
 Expected: still `Result: PASS`.

@@ -1,7 +1,7 @@
 - generic [active] [ref=e1]:
   - banner [ref=e2]:
     - generic "Connected" [ref=e3]
-    - heading "LOOM" [level=1] [ref=e4]
+    - heading "TORQUE" [level=1] [ref=e4]
     - button "↻" [ref=e5] [cursor=pointer]
     - button "⚙" [ref=e6] [cursor=pointer]
     - button "+ Group" [ref=e7] [cursor=pointer]

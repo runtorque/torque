@@ -38,17 +38,17 @@ These settings override the group defaults when creating agents specifically. Le
 | **Provider** | Preferred agent backend (`claude-code`, `codex`, `gemini-cli`, or empty to auto-detect from the boot command). |
 | **Default model** | Optional provider-specific model override for new agents in this group. |
 | **Default reasoning effort** | Optional provider-specific reasoning-effort override for new agents in this group. Unsupported providers ignore it. |
-| **Boot command** | Command Loom runs when the agent tab opens. Leave empty to use the provider default or global default command. |
+| **Boot command** | Command Torque runs when the agent tab opens. Leave empty to use the provider default or global default command. |
 | **Tab color** | Tab color for agents. Select the arrow (++up++) to inherit from the group, or ++x++ for no color. |
 | **Additional environment** | Extra environment variables for agents, merged with (and can override) the group environment. |
 | **Environment file** | Optional shell file sourced before the boot command runs. |
 | **Default agent template** | Optional base template applied to new agents in this group before group-specific `agent_*` overrides. |
 | **Session resume** | When supported by the provider, relaunch resumes the provider conversation instead of starting from scratch. |
-| **Idle timeout** | Minutes Loom waits before it may flag a quiet agent for attention. Set to `0` to disable. |
+| **Idle timeout** | Minutes Torque waits before it may flag a quiet agent for attention. Set to `0` to disable. |
 
 ### Git worktree per agent
 
-When enabled, creating an agent automatically creates a new git worktree branched from the directory's repository. Each agent gets its own branch (`loom/{slug}-{short-id}`) and worktree path, so multiple agents can work on the same repo in parallel without conflicts. The worktree is cleaned up when the agent is removed.
+When enabled, creating an agent automatically creates a new git worktree branched from the directory's repository. Each agent gets its own branch (`torque/{slug}-{short-id}`) and worktree path, so multiple agents can work on the same repo in parallel without conflicts. The worktree is cleaned up when the agent is removed.
 
 See [Worktrees](worktrees.md) for the full guide on checkpoints, rollback, and merge.
 
@@ -61,21 +61,21 @@ When worktrees are enabled, these settings control the execution environment:
 
 | Setting | Description |
 |---------|-------------|
-| **Worktree base directory** | Repo-relative directory where Loom stores worktrees. |
+| **Worktree base directory** | Repo-relative directory where Torque stores worktrees. |
 | **Worktree base branch** | Branch to fork from. Leave empty to use the repo's current HEAD. |
 | **Auto-checkpoint on stop** | Create a checkpoint commit when the agent session ends. |
 | **Checkpoint on progress / done** | Create throttled checkpoints when the agent reports progress or completion. |
 | **Squash on merge** | Prefer squash merge when merging worktree branches back to the base branch. |
-| **Merge instructions** | Extra text Loom appends to merge prompts. |
-| **Default post-merge cleanup** | What Loom should do by default after a successful merge when no explicit cleanup choice is provided. |
+| **Merge instructions** | Extra text Torque appends to merge prompts. |
+| **Default post-merge cleanup** | What Torque should do by default after a successful merge when no explicit cleanup choice is provided. |
 | **Preserve merge diff by default** | Save the full pre-merge patch as a diff artifact on the latest open branch-boundary task. |
 | **Symlink paths** | Repo-relative exact paths or glob patterns that should be mirrored into every worktree as symlinks. Recursive `**` is supported (for example `etl/**/node_modules`). Only existing matches inside the repo root are linked. |
 
 ### Provider and resume notes
 
-- If you set **Provider**, Loom treats that adapter as authoritative even if you also override the boot command.
-- If Provider is empty, Loom tries to infer the adapter from the boot command or running process name.
-- **Default model** and **Default reasoning effort** are only auto-applied when Loom is shaping the provider's normal command path. If you fully override the boot command, include any provider-specific flags yourself.
+- If you set **Provider**, Torque treats that adapter as authoritative even if you also override the boot command.
+- If Provider is empty, Torque tries to infer the adapter from the boot command or running process name.
+- **Default model** and **Default reasoning effort** are only auto-applied when Torque is shaping the provider's normal command path. If you fully override the boot command, include any provider-specific flags yourself.
 - Session resume only works for adapters that expose a provider session ID. Claude Code and Codex support it; generic terminals do not.
 
 See [Agents & Sessions](agents-and-sessions.md) for the end-to-end runtime model.
@@ -120,7 +120,7 @@ The designated engineer can be restarted from its context menu. The restart flow
 
 ## How defaults are resolved
 
-When creating an agent, Loom resolves settings in this order:
+When creating an agent, Torque resolves settings in this order:
 
 1. Group default agent template
 2. Group `agent_*` overrides

@@ -182,7 +182,7 @@ function _boardPersistLaneSorts() {
   }
 }
 
-var _boardHiddenWideLanesStorageKey = 'loom.board.hidden_wide_lanes_by_group';
+var _boardHiddenWideLanesStorageKey = 'torque.board.hidden_wide_lanes_by_group';
 
 function _boardHydrateHiddenWideLanes() {
   if (_boardHiddenWideLanesByGroup) return;

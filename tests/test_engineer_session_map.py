@@ -10,9 +10,9 @@ except ModuleNotFoundError:
 class EngineerSessionMapScopingTests(unittest.TestCase):
     def setUp(self):
         install_aiohttp_stub()
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
-        self.session_map_mod = importlib.import_module("loom.engineer_session_map")
+        self.session_map_mod = importlib.import_module("torque.engineer_session_map")
         self.session_map_mod = importlib.reload(self.session_map_mod)
 
     def _add_cell(self, state, agent_id, name, *, kind="worker",
@@ -23,7 +23,7 @@ class EngineerSessionMapScopingTests(unittest.TestCase):
             id=agent_id,
             name=name,
             slug=name.lower().replace(" ", "-"),
-            group="loom",
+            group="torque",
             cell_type=cell_type,
             kind=kind,
             owner_engineer_id=owner_engineer_id,
@@ -33,13 +33,13 @@ class EngineerSessionMapScopingTests(unittest.TestCase):
             status=status,
         )
         state.agents[cell.id] = cell
-        state.groups.setdefault("loom", []).append(cell.id)
+        state.groups.setdefault("torque", []).append(cell.id)
         return cell
 
     def _make_scoped_state(self):
         state = self.state_mod.MatrixState()
         state.board_lanes = ["Backlog", "To Do", "In Progress", "Done", "Archived"]
-        state.groups["loom"] = []
+        state.groups["torque"] = []
         architect = self._add_cell(
             state, "arch-a", "Architect A", kind="architect"
         )
@@ -78,7 +78,7 @@ class EngineerSessionMapScopingTests(unittest.TestCase):
             owner_engineer_id=engineer_b.id,
             created_by_engineer_id=engineer_b.id,
         )
-        state.group_settings["loom"] = self.state_mod.GroupSettings(
+        state.group_settings["torque"] = self.state_mod.GroupSettings(
             engineer_agent_id=engineer_a.id,
         )
         return state, {
@@ -96,7 +96,7 @@ class EngineerSessionMapScopingTests(unittest.TestCase):
 
         session_map = self.session_map_mod.build_engineer_session_map(
             state,
-            "loom",
+            "torque",
             engineer_cell=cells["engineer_a"],
             item_limit=20,
         )
@@ -115,7 +115,7 @@ class EngineerSessionMapScopingTests(unittest.TestCase):
 
         session_map = self.session_map_mod.build_engineer_session_map(
             state,
-            "loom",
+            "torque",
             item_limit=20,
         )
 
@@ -131,7 +131,7 @@ class EngineerSessionMapScopingTests(unittest.TestCase):
         state.board_tasks["active"] = BoardTask(
             id="active",
             task="Active verification",
-            group="loom",
+            group="torque",
             lane="In Progress",
             verification_mode="restart",
             verification_state="pending",
@@ -140,7 +140,7 @@ class EngineerSessionMapScopingTests(unittest.TestCase):
         state.board_tasks["no-boundary"] = BoardTask(
             id="no-boundary",
             task="No boundary verification",
-            group="loom",
+            group="torque",
             lane="In Progress",
             verification_mode="restart",
             verification_state="pending",
@@ -148,7 +148,7 @@ class EngineerSessionMapScopingTests(unittest.TestCase):
         state.board_tasks["merged"] = BoardTask(
             id="merged",
             task="Merged verification",
-            group="loom",
+            group="torque",
             lane="Done",
             verification_mode="restart",
             verification_state="pending",
@@ -157,7 +157,7 @@ class EngineerSessionMapScopingTests(unittest.TestCase):
 
         session_map = self.session_map_mod.build_engineer_session_map(
             state,
-            "loom",
+            "torque",
             engineer_cell=cells["engineer_a"],
             item_limit=20,
         )

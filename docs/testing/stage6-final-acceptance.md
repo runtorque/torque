@@ -8,26 +8,26 @@ This smoke confirms the full kinds-refactor cleanup shipped and that no legacy s
   - one engineer
   - one worker with a role-backed launch preset
   - one task assigned to that engineer
-- Also keep one legacy `~/.loom/agents/*.yaml` file around for the ignored-file warning check.
+- Also keep one legacy `~/.torque/agents/*.yaml` file around for the ignored-file warning check.
 
 ## 1. Normal boot migrates to cleanup-complete state
 
-Start Loom on a normally migrated database.
+Start Torque on a normally migrated database.
 
 Expected:
 
 - boot succeeds
-- `loom doctor` reports `Result: PASS` or `PASS (with warnings)`
+- `torque doctor` reports `Result: PASS` or `PASS (with warnings)`
 - `[stage_6_cleanup]` is present
 - `legacy_columns_present: false`
 - `engineer_tool_aliases_present: false`
-- if `~/.loom/agents/*.yaml` still exists without a matching role, `legacy_template_files_ignored` is non-zero and the warning names the ignored file(s)
+- if `~/.torque/agents/*.yaml` still exists without a matching role, `legacy_template_files_ignored` is non-zero and the warning names the ignored file(s)
 
 ## 2. Legacy role files are ignored
 
-With a file that exists only under `~/.loom/agents/`:
+With a file that exists only under `~/.torque/agents/`:
 
-- confirm Loom logs a warning on startup naming the ignored file and directing you to move it into `~/.loom/roles/`
+- confirm Torque logs a warning on startup naming the ignored file and directing you to move it into `~/.torque/roles/`
 - confirm the role editor / loader does not surface that file unless an equivalent slug exists under `roles/`
 
 ## 3. Stage-5 end-to-end scenario still works
@@ -52,8 +52,8 @@ Try booting this version against a pre-stage-1 DB (legacy columns populated, new
 
 Expected:
 
-- Loom refuses to start before serving HTTP
-- stderr / `loom.log` include the actionable migration error directing the operator to install Loom 1.x first, boot once, then upgrade to Loom 2.0.0
+- Torque refuses to start before serving HTTP
+- stderr / `torque.log` include the actionable migration error directing the operator to install Torque 1.x first, boot once, then upgrade to Torque 2.0.0
 
 ## 5. Schema cleanup verification
 

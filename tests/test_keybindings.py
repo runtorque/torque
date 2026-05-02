@@ -118,9 +118,9 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub()
         self.stored, self.binding_mod, self.keyboard_mod = _install_iterm2_stub()
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
-        self.keybindings_mod = importlib.import_module("loom.keybindings")
+        self.keybindings_mod = importlib.import_module("torque.keybindings")
         self.keybindings_mod = importlib.reload(self.keybindings_mod)
 
     async def test_resolve_binding_specs_restores_function_modifier_for_arrows(self):
@@ -185,14 +185,14 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_engineer_hierarchy_drives_navigation_order(self):
         state = self.state_mod.MatrixState()
-        state.groups = {"loom": ["eng-a", "worker-a", "eng-b", "worker-b", "user-1"]}
+        state.groups = {"torque": ["eng-a", "worker-a", "eng-b", "worker-b", "user-1"]}
         state._children = {"eng-a": [], "worker-a": ["term-1"], "eng-b": [], "worker-b": [], "user-1": []}
 
         engineer_a = self.state_mod.AgentCell(
             id="eng-a",
             name="Alice",
             kind="engineer",
-            group="loom",
+            group="torque",
             slug="alice",
             cell_type="agent",
             session_id="session-eng-a",
@@ -201,7 +201,7 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
         worker_a = self.state_mod.AgentCell(
             id="worker-a",
             name="Worker A",
-            group="loom",
+            group="torque",
             slug="worker-a",
             cell_type="agent",
             session_id="session-worker-a",
@@ -212,7 +212,7 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
             id="eng-b",
             name="Bob",
             kind="engineer",
-            group="loom",
+            group="torque",
             slug="bob",
             cell_type="agent",
             session_id="session-eng-b",
@@ -221,7 +221,7 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
         worker_b = self.state_mod.AgentCell(
             id="worker-b",
             name="Worker B",
-            group="loom",
+            group="torque",
             slug="worker-b",
             cell_type="agent",
             session_id="session-worker-b",
@@ -231,7 +231,7 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
         user_worker = self.state_mod.AgentCell(
             id="user-1",
             name="User Worker",
-            group="loom",
+            group="torque",
             slug="user-worker",
             cell_type="agent",
             session_id="session-user-1",
@@ -240,7 +240,7 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
         terminal = self.state_mod.AgentCell(
             id="term-1",
             name="Logs",
-            group="loom",
+            group="torque",
             slug="worker-a:logs",
             cell_type="terminal",
             session_id="session-term",
@@ -271,7 +271,7 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
     async def test_engineer_hierarchy_preserves_manual_group_order_within_buckets(self):
         state = self.state_mod.MatrixState()
         state.groups = {
-            "loom": [
+            "torque": [
                 "worker-a-2",
                 "eng-b",
                 "worker-b-2",
@@ -295,7 +295,7 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
             id="eng-a",
             name="Alice",
             kind="engineer",
-            group="loom",
+            group="torque",
             slug="alice",
             cell_type="agent",
             session_id="session-eng-a",
@@ -305,7 +305,7 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
             id="eng-b",
             name="Bob",
             kind="engineer",
-            group="loom",
+            group="torque",
             slug="bob",
             cell_type="agent",
             session_id="session-eng-b",
@@ -314,7 +314,7 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
         worker_a_1 = self.state_mod.AgentCell(
             id="worker-a-1",
             name="Worker A1",
-            group="loom",
+            group="torque",
             slug="worker-a-1",
             cell_type="agent",
             session_id="session-worker-a-1",
@@ -324,7 +324,7 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
         worker_a_2 = self.state_mod.AgentCell(
             id="worker-a-2",
             name="Worker A2",
-            group="loom",
+            group="torque",
             slug="worker-a-2",
             cell_type="agent",
             session_id="session-worker-a-2",
@@ -334,7 +334,7 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
         worker_b_1 = self.state_mod.AgentCell(
             id="worker-b-1",
             name="Worker B1",
-            group="loom",
+            group="torque",
             slug="worker-b-1",
             cell_type="agent",
             session_id="session-worker-b-1",
@@ -344,7 +344,7 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
         worker_b_2 = self.state_mod.AgentCell(
             id="worker-b-2",
             name="Worker B2",
-            group="loom",
+            group="torque",
             slug="worker-b-2",
             cell_type="agent",
             session_id="session-worker-b-2",
@@ -354,7 +354,7 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
         user_worker = self.state_mod.AgentCell(
             id="user-1",
             name="User Worker",
-            group="loom",
+            group="torque",
             slug="user-worker",
             cell_type="agent",
             session_id="session-user-1",
@@ -412,7 +412,7 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
         installed = self.stored["bindings"]
         self.assertIn(unrelated, installed)
         self.assertTrue(any(
-            binding.param == "loom_focus_next()"
+            binding.param == "torque_focus_next()"
             for binding in installed
         ))
 
@@ -606,9 +606,9 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
             close_cell_handler=close_cell_handler,
         )
 
-        await self.stored["rpcs"]["loom_add_agent"]()
-        await self.stored["rpcs"]["loom_add_terminal"]()
-        await self.stored["rpcs"]["loom_close_cell"]()
+        await self.stored["rpcs"]["torque_add_agent"]()
+        await self.stored["rpcs"]["torque_add_terminal"]()
+        await self.stored["rpcs"]["torque_close_cell"]()
 
         self.assertEqual(
             calls,
@@ -621,15 +621,15 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_action_shortcuts_use_invocation_session_not_stale_active_session(self):
         state = self.state_mod.MatrixState()
-        state.groups = {"loom": ["loom-agent"], "other": ["other-agent"]}
-        loom_agent = self.state_mod.AgentCell(
-            id="loom-agent",
-            name="Loom Agent",
-            group="loom",
-            slug="loom-agent",
+        state.groups = {"torque": ["torque-agent"], "other": ["other-agent"]}
+        torque_agent = self.state_mod.AgentCell(
+            id="torque-agent",
+            name="Torque Agent",
+            group="torque",
+            slug="torque-agent",
             cell_type="agent",
-            session_id="session-loom",
-            window_id="window-loom",
+            session_id="session-torque",
+            window_id="window-torque",
         )
         other_agent = self.state_mod.AgentCell(
             id="other-agent",
@@ -640,7 +640,7 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
             session_id="session-other",
             window_id="window-other",
         )
-        state.agents = {loom_agent.id: loom_agent, other_agent.id: other_agent}
+        state.agents = {torque_agent.id: torque_agent, other_agent.id: other_agent}
         state.active_session_id = other_agent.session_id
         state.current_window_id = other_agent.window_id
 
@@ -668,16 +668,16 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
             close_cell_handler=close_cell_handler,
         )
 
-        await self.stored["rpcs"]["loom_add_agent"](session_id=loom_agent.session_id)
-        await self.stored["rpcs"]["loom_add_terminal"](session_id=loom_agent.session_id)
-        await self.stored["rpcs"]["loom_close_cell"](session_id=loom_agent.session_id)
+        await self.stored["rpcs"]["torque_add_agent"](session_id=torque_agent.session_id)
+        await self.stored["rpcs"]["torque_add_terminal"](session_id=torque_agent.session_id)
+        await self.stored["rpcs"]["torque_close_cell"](session_id=torque_agent.session_id)
 
         self.assertEqual(
             calls,
             [
-                ("add_agent", "loom", "Agent 1", "session-loom"),
-                ("add_terminal", "loom", "loom-agent", "Terminal 1"),
-                ("close_cell", "loom-agent"),
+                ("add_agent", "torque", "Agent 1", "session-torque"),
+                ("add_terminal", "torque", "torque-agent", "Terminal 1"),
+                ("close_cell", "torque-agent"),
             ],
         )
 
@@ -698,7 +698,7 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
 
         await self.keybindings_mod.setup(object(), state, Bridge())
 
-        await self.stored["rpcs"]["loom_add_engineer"]()
+        await self.stored["rpcs"]["torque_add_engineer"]()
 
         defaults = self.keybindings_mod.get_default_bindings()
         self.assertIn("add_engineer", defaults)
@@ -711,11 +711,11 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_add_architect_shortcut_dispatches_frontend_action(self):
         state = self.state_mod.MatrixState()
-        state.groups = {"loom": ["agent-1"]}
+        state.groups = {"torque": ["agent-1"]}
         agent = self.state_mod.AgentCell(
             id="agent-1",
             name="Agent 1",
-            group="loom",
+            group="torque",
             slug="agent-1",
             cell_type="agent",
             session_id="session-1",
@@ -738,7 +738,7 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
 
         await self.keybindings_mod.setup(object(), state, Bridge())
 
-        await self.stored["rpcs"]["loom_add_architect"](
+        await self.stored["rpcs"]["torque_add_architect"](
             session_id=agent.session_id,
         )
 
@@ -748,19 +748,19 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(defaults["add_architect"]["label"], "Add architect")
         self.assertEqual(
             sent,
-            [{"type": "action", "action": "add_architect", "group": "loom"}],
+            [{"type": "action", "action": "add_architect", "group": "torque"}],
         )
 
     async def test_navigation_rpcs_follow_engineer_hierarchy_order(self):
         state = self.state_mod.MatrixState()
-        state.groups = {"loom": ["eng-a", "worker-a", "eng-b", "worker-b", "user-1"]}
+        state.groups = {"torque": ["eng-a", "worker-a", "eng-b", "worker-b", "user-1"]}
         state._children = {"eng-a": [], "worker-a": ["term-1"], "eng-b": [], "worker-b": [], "user-1": []}
 
         engineer_a = self.state_mod.AgentCell(
             id="eng-a",
             name="Alice",
             kind="engineer",
-            group="loom",
+            group="torque",
             slug="alice",
             cell_type="agent",
             session_id="session-eng-a",
@@ -769,7 +769,7 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
         worker_a = self.state_mod.AgentCell(
             id="worker-a",
             name="Worker A",
-            group="loom",
+            group="torque",
             slug="worker-a",
             cell_type="agent",
             session_id="session-worker-a",
@@ -780,7 +780,7 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
             id="eng-b",
             name="Bob",
             kind="engineer",
-            group="loom",
+            group="torque",
             slug="bob",
             cell_type="agent",
             session_id="session-eng-b",
@@ -789,7 +789,7 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
         worker_b = self.state_mod.AgentCell(
             id="worker-b",
             name="Worker B",
-            group="loom",
+            group="torque",
             slug="worker-b",
             cell_type="agent",
             session_id="session-worker-b",
@@ -799,7 +799,7 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
         user_worker = self.state_mod.AgentCell(
             id="user-1",
             name="User Worker",
-            group="loom",
+            group="torque",
             slug="user-worker",
             cell_type="agent",
             session_id="session-user-1",
@@ -808,7 +808,7 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
         terminal = self.state_mod.AgentCell(
             id="term-1",
             name="Logs",
-            group="loom",
+            group="torque",
             slug="worker-a:logs",
             cell_type="terminal",
             session_id="session-term",
@@ -834,17 +834,17 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
         await self.keybindings_mod.setup(object(), state, Bridge())
 
         state.active_session_id = worker_a.session_id
-        await self.stored["rpcs"]["loom_focus_prev"]()
+        await self.stored["rpcs"]["torque_focus_prev"]()
         self.assertEqual(focused.pop(), engineer_a.session_id)
 
         state.active_session_id = worker_a.session_id
-        await self.stored["rpcs"]["loom_focus_next"]()
+        await self.stored["rpcs"]["torque_focus_next"]()
         self.assertEqual(focused.pop(), terminal.session_id)
 
         state.active_session_id = terminal.session_id
-        await self.stored["rpcs"]["loom_prev_agent"]()
+        await self.stored["rpcs"]["torque_prev_agent"]()
         self.assertEqual(focused.pop(), engineer_a.session_id)
 
         state.active_session_id = terminal.session_id
-        await self.stored["rpcs"]["loom_next_agent"]()
+        await self.stored["rpcs"]["torque_next_agent"]()
         self.assertEqual(focused.pop(), engineer_b.session_id)

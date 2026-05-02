@@ -2,20 +2,20 @@
 
 **Roadmap phase**: 1 — Agent Awareness
 **Status**: Implemented
-**Goal**: Give Loom real-time visibility into what its managed agents are doing, using a provider-agnostic architecture that works across Claude Code, Codex, Gemini CLI, and future agents.
+**Goal**: Give Torque real-time visibility into what its managed agents are doing, using a provider-agnostic architecture that works across Claude Code, Codex, Gemini CLI, and future agents.
 
 ---
 
 ## The Problem
 
-Loom currently knows three things about an agent: whether its terminal session exists, whether the shell prompt has fired (via PromptMonitor), and what the foreground process name is (via jobName). It has no idea what the agent is *thinking*, *doing*, or *producing*. A cell that says "running" tells you nothing about whether the agent is reading files, writing code, stuck in a retry loop, or waiting for input.
+Torque currently knows three things about an agent: whether its terminal session exists, whether the shell prompt has fired (via PromptMonitor), and what the foreground process name is (via jobName). It has no idea what the agent is *thinking*, *doing*, or *producing*. A cell that says "running" tells you nothing about whether the agent is reading files, writing code, stuck in a retry loop, or waiting for input.
 
 ## Design Principles
 
-1. **Provider-agnostic core** — Loom's internal event model and UI are decoupled from any specific agent. Agent-specific translation happens in adapters.
+1. **Provider-agnostic core** — Torque's internal event model and UI are decoupled from any specific agent. Agent-specific translation happens in adapters.
 2. **Graceful degradation** — Agents with rich hook systems (Claude Code, Gemini CLI) get deep integration. Agents with nothing (OpenCode) still get basic process-level monitoring. The UI adapts to what's available.
-3. **Push over poll** — Agents push events to Loom via HTTP hooks or stdout parsing. Loom never polls agent internals.
-4. **Non-blocking** — Hooks and adapters must never slow down the agent. All Loom-bound hooks are fire-and-forget (async, short timeouts, no blocking decisions).
+3. **Push over poll** — Agents push events to Torque via HTTP hooks or stdout parsing. Torque never polls agent internals.
+4. **Non-blocking** — Hooks and adapters must never slow down the agent. All Torque-bound hooks are fire-and-forget (async, short timeouts, no blocking decisions).
 5. **Opt-in** — Agent awareness is enabled per group or per agent. Users who just want tab management are unaffected.
 
 ---
@@ -103,9 +103,9 @@ class AgentEvent:
 
 ### Adapter Framework
 
-Base class in `loom/adapters/base.py` with methods: `match_process()`, `match_command()`, `get_hook_config()`, `get_env_vars()`, `parse_event()`.
+Base class in `torque/adapters/base.py` with methods: `match_process()`, `match_command()`, `get_hook_config()`, `get_env_vars()`, `parse_event()`.
 
-Registry in `loom/adapters/__init__.py` with `detect_agent_type()` (by process name), `detect_by_command()` (by boot command), `get_adapter()` (by name).
+Registry in `torque/adapters/__init__.py` with `detect_agent_type()` (by process name), `detect_by_command()` (by boot command), `get_adapter()` (by name).
 
 **Implemented adapters:**
 
@@ -118,7 +118,7 @@ Registry in `loom/adapters/__init__.py` with `detect_agent_type()` (by process n
 
 ### Claude Code Adapter
 
-**Hook installation**: Loom writes hooks to `.claude/settings.local.json` in the agent's working directory using a merge strategy. Loom hooks are identified by their URL (`http://localhost:18932/events`) and can be cleanly added/removed without affecting user hooks. HTTP hooks include `allowedEnvVars: ["LOOM_CELL_ID"]` for header interpolation.
+**Hook installation**: Torque writes hooks to `.claude/settings.local.json` in the agent's working directory using a merge strategy. Torque hooks are identified by their URL (`http://localhost:18932/events`) and can be cleanly added/removed without affecting user hooks. HTTP hooks include `allowedEnvVars: ["TORQUE_CELL_ID"]` for header interpolation.
 
 **Hooks subscribed**: `SessionStart` (command hook — HTTP not supported), `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Notification`, `Stop`, `SubagentStart`, `SubagentStop`, `StopFailure` (all HTTP hooks).
 
@@ -145,11 +145,11 @@ Registry in `loom/adapters/__init__.py` with `detect_agent_type()` (by process n
 - `Agent` → "Subagent: {description}"
 - `WebFetch` / `WebSearch` → "Fetching web page" / "Searching web"
 
-**Session resume**: When `SessionStart` fires, the adapter captures Claude Code's `session_id` and stores it in `cell.agent_session_id` (persisted to `state.json` immediately). On relaunch, Loom runs `claude --resume <session_id>` instead of plain `claude`, continuing the conversation where it left off. Controlled by the `agent_session_resume` group setting (default: on). A `/clear` in Claude Code generates a new session ID, so resume after clear starts from a blank conversation.
+**Session resume**: When `SessionStart` fires, the adapter captures Claude Code's `session_id` and stores it in `cell.agent_session_id` (persisted to `state.json` immediately). On relaunch, Torque runs `claude --resume <session_id>` instead of plain `claude`, continuing the conversation where it left off. Controlled by the `agent_session_resume` group setting (default: on). A `/clear` in Claude Code generates a new session ID, so resume after clear starts from a blank conversation.
 
 ### Event Bus and Throttling
 
-`EventBus` in `loom/events.py`:
+`EventBus` in `torque/events.py`:
 - Receives events via `emit()`, updates cell fields, appends to `EventLog`, notifies `NotificationManager`
 - Trailing-edge broadcast throttle: at most one WebSocket broadcast per second globally
 - Activity-resuming events (`tool_start`, `tool_end`, `activity_change`, `message`) clear `needs_attention` — agents recover automatically from stuck/error state
@@ -158,7 +158,7 @@ Registry in `loom/adapters/__init__.py` with `detect_agent_type()` (by process n
 
 ### HTTP Endpoint
 
-`POST /events` on the existing aiohttp server (port 18932). Correlation: `X-Loom-Cell-Id` header (primary) → `cwd` directory match (fallback). Always returns `200 {}`.
+`POST /events` on the existing aiohttp server (port 18932). Correlation: `X-Torque-Cell-Id` header (primary) → `cwd` directory match (fallback). Always returns `200 {}`.
 
 ### Auto-Detection
 
@@ -173,7 +173,7 @@ Two detection points:
 On daemon restart, `reconnect_orphans`:
 - Sets status to `"running"` (not `"idle"`) for cells with a boot command
 - Re-installs hooks for cells with `agent_type`
-- `LOOM_CELL_ID` env var persists in the terminal session, so hook correlation continues working
+- `TORQUE_CELL_ID` env var persists in the terminal session, so hook correlation continues working
 
 ### Health Monitoring
 
@@ -184,7 +184,7 @@ On daemon restart, `reconnect_orphans`:
 
 ### macOS Notifications
 
-`NotificationManager` in `loom/notifications.py`:
+`NotificationManager` in `torque/notifications.py`:
 - 5-second batching window per group
 - Combined messages: "2 agents finished, 1 needs attention in group 'Backend'"
 - Sent via `osascript` (`display notification`)
@@ -212,7 +212,7 @@ Agents without awareness (`agent_type` empty) render exactly as before — fully
 New files:
 
 ```
-loom/
+torque/
   adapters/
     __init__.py          # Registry: detect_agent_type(), detect_by_command(), get_adapter()
     base.py              # AgentAdapter base class, AgentEvent dataclass, EVENT_TYPES
@@ -227,9 +227,9 @@ loom/
 Modified files:
 
 ```
-loom/state.py            # AgentCell +8 fields, GroupSettings +4 fields, _EPHEMERAL_FIELDS, cells_with_awareness()
-loom/server.py           # POST /events route, event bus + notifier wiring, hook cleanup on remove
-loom/bridge.py           # Auto-detection, LOOM_CELL_ID injection, hook install, session resume, reconnect fixes
+torque/state.py            # AgentCell +8 fields, GroupSettings +4 fields, _EPHEMERAL_FIELDS, cells_with_awareness()
+torque/server.py           # POST /events route, event bus + notifier wiring, hook cleanup on remove
+torque/bridge.py           # Auto-detection, TORQUE_CELL_ID injection, hook install, session resume, reconnect fixes
 static/js/constants.js   # AGENT_TYPE_LABELS
 static/js/render.js      # agentStatusClass() (gray/green/red), activity detail, type label
 static/js/modals.js      # Agent settings (boot cmd, resume, idle timeout, notifications) in group settings modal
@@ -244,9 +244,9 @@ Makefile                 # Copy adapters/, events.py, notifications.py
 
 Resolved during implementation:
 
-1. **Hook config scope** — Loom writes to `.claude/settings.local.json` using a merge strategy. Loom hooks are identified by URL (`localhost:18932/events`) and cleanly added/removed without affecting user hooks. `allowedEnvVars` is required for header interpolation.
+1. **Hook config scope** — Torque writes to `.claude/settings.local.json` using a merge strategy. Torque hooks are identified by URL (`localhost:18932/events`) and cleanly added/removed without affecting user hooks. `allowedEnvVars` is required for header interpolation.
 
-2. **Multi-window correlation** — `LOOM_CELL_ID` is the mandatory primary key, injected as env var and interpolated into HTTP hook headers. `cwd` matching is a debug fallback.
+2. **Multi-window correlation** — `TORQUE_CELL_ID` is the mandatory primary key, injected as env var and interpolated into HTTP hook headers. `cwd` matching is a debug fallback.
 
 3. **Adapter scope** — Claude Code is fully implemented. Gemini CLI and Codex are stubs (process matching only). Generic is the fallback.
 
@@ -262,7 +262,7 @@ Resolved during implementation:
 
 9. **Idle vs. waiting** — `idle_prompt` (agent finished, waiting for next task) maps to `session_end`, not `waiting`. Only `permission_prompt` (agent blocked, needs approval) sets `needs_attention`.
 
-10. **SessionStart hook type** — Claude Code only supports `type: "command"` for `SessionStart` events. HTTP hooks are silently ignored. Uses `curl` to POST to Loom instead.
+10. **SessionStart hook type** — Claude Code only supports `type: "command"` for `SessionStart` events. HTTP hooks are silently ignored. Uses `curl` to POST to Torque instead.
 
 11. **Status dot simplification** — Three states: gray (idle), green (working), red (disconnected). For awareness agents, `activity` field is the source of truth — `status` field stays "running" while a TUI app is active (PromptMonitor limitation). Awareness agents start as idle on boot; hooks flip to working.
 

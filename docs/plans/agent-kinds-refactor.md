@@ -6,7 +6,7 @@
 2. Add a new **Architect** kind: product-level, creates and assigns tasks, maintains a typed decision log and journal, can hire engineers, talks only to engineers and the user.
 3. Rename regular agents to **Workers**; rename **Templates → Roles** and attach them to workers as persistent personas (provider, env, and a behavior preamble injected at dispatch).
 4. User sees everything in the UI, ordered hierarchically: Architect → its Engineers → each Engineer's Workers.
-5. Branch namespacing per engineer (`loom/<engineer-slug>/...`).
+5. Branch namespacing per engineer (`torque/<engineer-slug>/...`).
 6. Orphan policy on engineer deletion: transfer to user.
 
 ## 1. Data model changes
@@ -35,9 +35,9 @@ Ownership rule on derive: if a worker or engineer derives a task, the new task i
 
 ### 1.3 Role (replacing Template)
 
-Primary role files live in `~/.loom/roles/` (and project `.loom/roles/`) with
-compat read-through from the legacy template locations `~/.loom/agents/` and
-project `.loom/agents/` during the transition.
+Primary role files live in `~/.torque/roles/` (and project `.torque/roles/`) with
+compat read-through from the legacy template locations `~/.torque/agents/` and
+project `.torque/agents/` during the transition.
 
 Schema adds:
 
@@ -45,7 +45,7 @@ Schema adds:
 - `priorities: list[str]` — optional ordered list surfaced in the preamble as a bullet list (lightweight structured guidance so users don't have to write free-form preambles).
 - All existing template fields (provider/command/model/env_vars/worktree/etc.) carry over.
 
-Dispatch prompt assembly becomes: `role.preamble → action.prompt(vars) → loom_postscript`. Actions may opt out of the preamble injection by setting `disable_role_preamble: true` — for edge cases like one-shot diagnostics where a persona would be noise.
+Dispatch prompt assembly becomes: `role.preamble → action.prompt(vars) → torque_postscript`. Actions may opt out of the preamble injection by setting `disable_role_preamble: true` — for edge cases like one-shot diagnostics where a persona would be noise.
 
 ### 1.4 Decision log (Architect)
 
@@ -111,9 +111,9 @@ Identical behavior to today's `engineer_*`, but ownership-filtered:
 - Tasks the user or an architect assigned to this engineer appear in its scope.
 - Worker creation happens implicitly via the existing dispatch/create flow.
 
-### Worker tools (`loom_*`, unchanged)
+### Worker tools (`torque_*`, unchanged)
 
-- `loom ai done|blocked|error|progress|ready|derive|ask` — the CLI agent reports directly.
+- `torque ai done|blocked|error|progress|ready|derive|ask` — the CLI agent reports directly.
 
 ### Implementation
 
@@ -161,25 +161,25 @@ The UI stays "see everything" but the order changes:
 
 ## 6. Branch namespacing
 
-Worker worktree branches go from `loom/<agent-slug>-<shortid>` to `loom/<engineer-slug>/<worker-slug>-<shortid>`. Workers owned by the user (no engineer) use `loom/user/<worker-slug>-<shortid>`. Engineer and architect worktrees stay flat (`loom/<engineer-slug>-<shortid>` / `loom/<architect-slug>-<shortid>`) because they are already the ownership root. This lives in `worktree.py`. Migration: existing branches are grandfathered (no rename), new ones use the new scheme.
+Worker worktree branches go from `torque/<agent-slug>-<shortid>` to `torque/<engineer-slug>/<worker-slug>-<shortid>`. Workers owned by the user (no engineer) use `torque/user/<worker-slug>-<shortid>`. Engineer and architect worktrees stay flat (`torque/<engineer-slug>-<shortid>` / `torque/<architect-slug>-<shortid>`) because they are already the ownership root. This lives in `worktree.py`. Migration: existing branches are grandfathered (no rename), new ones use the new scheme.
 
 ## 7. Dispatch prompt changes
 
-Today's dispatch prompt is `action.prompt(vars) + loom_postscript`. New:
+Today's dispatch prompt is `action.prompt(vars) + torque_postscript`. New:
 
 ```
 {role.preamble}            # omitted if action.disable_role_preamble or no role
 
 {action.prompt(vars)}
 
-{loom_postscript}
+{torque_postscript}
 ```
 
-The `loom` context namespace gets additions:
+The `torque` context namespace gets additions:
 
-- `loom.agent.kind` — `"worker"` / `"engineer"` / `"architect"`
-- `loom.agent.role` — role name (workers only)
-- `loom.agent.owner_engineer` — engineer name (workers only)
+- `torque.agent.kind` — `"worker"` / `"engineer"` / `"architect"`
+- `torque.agent.role` — role name (workers only)
+- `torque.agent.owner_engineer` — engineer name (workers only)
 
 Architects and engineers get their own boot prompts when launched (like the legacy `engineer_*` boot prompt), stored as special system roles (not user-editable in the first pass).
 
@@ -193,7 +193,7 @@ Enforce in the MCP layer, not via runtime checks:
 - Engineers can talk only to their hiring architect via `engineer_message_architect` and reply to architect messages via `engineer_reply`. No user approval — routine coordination.
 - `engineer_*` compatibility aliases stay bound to the explicit engineer session when one is present; fallback to the default engineer only when no engineer session id is available.
 - The engineer boot prompt explicitly instructs: *when a non-trivial product or scope decision arises, call the architect via `engineer_message_architect` before committing to a direction.* This keeps decision ownership with the architect.
-- Workers never initiate messages to engineers or architects — they use `loom ai` to report, which surfaces in the dashboards.
+- Workers never initiate messages to engineers or architects — they use `torque ai` to report, which surfaces in the dashboards.
 
 ## 9. Staging
 
@@ -203,17 +203,17 @@ Six stages, each independently shippable with a concrete acceptance criterion.
 
 **Deliverable**: a safely-migrated database with new columns populated, zero behavior change, and a verification tool.
 
-- Back up `loom.db` to `loom.db.pre-kinds.bak` before migration runs (once, idempotent — skip if backup already exists).
+- Back up `torque.db` to `torque.db.pre-kinds.bak` before migration runs (once, idempotent — skip if backup already exists).
 - Add all new columns (`kind`, `role`, `owner_engineer_id`, `hired_by_architect_id`, `persistent`, `assigned_engineer_id`, `created_by_architect_id`, `suggested_action`) and create `decisions` table.
-- Define an explicit **legacy-engineer identification rule** for backfill: an agent is treated as the stage-1 migrated engineer if (a) it's in the "loom" reserved group and (b) its `template` matches the legacy Engineer template slug, else fall back to the agent whose MCP session registers the `engineer_*` tool surface on startup. Document this rule in the migration module.
+- Define an explicit **legacy-engineer identification rule** for backfill: an agent is treated as the stage-1 migrated engineer if (a) it's in the "torque" reserved group and (b) its `template` matches the legacy Engineer template slug, else fall back to the agent whose MCP session registers the `engineer_*` tool surface on startup. Document this rule in the migration module.
 - Backfill:
   - Each identified Engineer → `kind='engineer'`, `persistent=1`, name coerced to `"Engineer"` (with uniqueness suffix if needed).
   - Other agents → `kind='worker'`, `role=template`, `owner_engineer_id=created_by_engineer_id`.
   - Tasks → `assigned_engineer_id=engineer_owner_id`, `created_by_architect_id=''`.
 - **Dual-write safety net**: until stage 6, every write path that sets `template` also sets `role`, every write that sets `engineer_owner_id` also sets `assigned_engineer_id`, and vice versa. Implemented as a thin wrapper layer in `db.py` so no call site has to remember. Prevents drift while old and new code coexist.
-- Add a `loom doctor` CLI subcommand (and `/api/cmd doctor` endpoint) that reports: total agents by `kind`, total tasks with non-empty `assigned_engineer_id`, drift between old/new columns (should be zero), backup file presence, migration timestamp. This is the verification surface.
+- Add a `torque doctor` CLI subcommand (and `/api/cmd doctor` endpoint) that reports: total agents by `kind`, total tasks with non-empty `assigned_engineer_id`, drift between old/new columns (should be zero), backup file presence, migration timestamp. This is the verification surface.
 
-**Acceptance criterion**: on an existing database, `loom doctor` reports zero drift, exactly one engineer (named `"Engineer"`), every worker has `owner_engineer_id` set or empty-for-orphans, every task has `assigned_engineer_id` matching legacy `engineer_owner_id`. No UI or dispatch behavior change observed by the user.
+**Acceptance criterion**: on an existing database, `torque doctor` reports zero drift, exactly one engineer (named `"Engineer"`), every worker has `owner_engineer_id` set or empty-for-orphans, every task has `assigned_engineer_id` matching legacy `engineer_owner_id`. No UI or dispatch behavior change observed by the user.
 
 ### Stage 2 — Roles + preamble (worker persona layer) ✓ shipped (`6c10bab`)
 
@@ -222,8 +222,8 @@ Six stages, each independently shippable with a concrete acceptance criterion.
 - Rename the effective template storage to `roles/` with compat read-through from legacy `agents/`: if a name exists in both paths, `roles/` wins and a warning is logged. Writes always go to `roles/`.
 - Add `preamble: str` (block scalar) and `priorities: list[str]` to the role schema. `priorities` renders into the preamble as a bullet list at render time (not stored twice).
 - Add `disable_role_preamble: bool` to the action schema and honor it in the dispatch prompt assembler: when true, skip the preamble block entirely.
-- Dispatch prompt assembly (workers only): `role.preamble → action.prompt(vars) → loom_postscript`. Engineers and architects bypass role preamble — they have their own boot prompts (stage 3/4).
-- Extend the `loom` Jinja context: `loom.agent.kind`, `loom.agent.role`, `loom.agent.owner_engineer`.
+- Dispatch prompt assembly (workers only): `role.preamble → action.prompt(vars) → torque_postscript`. Engineers and architects bypass role preamble — they have their own boot prompts (stage 3/4).
+- Extend the `torque` Jinja context: `torque.agent.kind`, `torque.agent.role`, `torque.agent.owner_engineer`.
 - UI: rename Templates editor to Roles, add a `preamble` textarea with Jinja-aware editing and a `priorities` list editor.
 
 **Acceptance criterion**: create a role with a preamble + two priorities, assign it to a worker, dispatch a task → preview prompt shows the preamble at the top followed by the action prompt. Create an action with `disable_role_preamble: true` → preview omits the preamble. Existing templates load and dispatch unchanged (compat read works).
@@ -232,11 +232,11 @@ Six stages, each independently shippable with a concrete acceptance criterion.
 
 **Deliverable**: the user can create multiple named engineers; each sees only its own agents and tasks; existing `engineer_*` clients still work via an alias.
 
-- **Engineer launch infra**: new "Add Engineer" action in the Agent panel. Prompts for name + provider/command (default: the same Claude Code command the default engineer uses today). Spawns a persistent agent with `kind='engineer'`, unique `LOOM_ENGINEER_ID` env var, and the engineer MCP config pointing at `mcp_engineer.py`.
-- **MCP session binding**: engineer MCP server runs through a local stdio entrypoint (`mcp_engineer.py`), reads `LOOM_ENGINEER_ID` on startup, rejects tool calls if the env var is missing or the referenced engineer has been deleted, and scopes every read/write by that id.
+- **Engineer launch infra**: new "Add Engineer" action in the Agent panel. Prompts for name + provider/command (default: the same Claude Code command the default engineer uses today). Spawns a persistent agent with `kind='engineer'`, unique `TORQUE_ENGINEER_ID` env var, and the engineer MCP config pointing at `mcp_engineer.py`.
+- **MCP session binding**: engineer MCP server runs through a local stdio entrypoint (`mcp_engineer.py`), reads `TORQUE_ENGINEER_ID` on startup, rejects tool calls if the env var is missing or the referenced engineer has been deleted, and scopes every read/write by that id.
 - Split the tool implementation: the existing single-surface module splits into a shared core (ownership-filtered CRUD) and per-kind entrypoints. `engineer_*` names stay as aliases routed to a deterministic "default engineer" — the one named `"Engineer"` if present, else the first engineer by creation order. When the alias is called from a bound legacy Engineer or engineer session, it stays bound to that session instead of jumping to the global default. If zero engineers exist, the alias returns a clear error telling the user to create one.
 - Enforce ownership scoping on all `engineer_*` reads and writes. Writes that create agents or tasks auto-stamp `owner_engineer_id` / `assigned_engineer_id` to the caller, and engineer task access is group-scoped.
-- CLI: `loom task create` from a terminal remains unassigned by default (`assigned_engineer_id=''`). Add `--engineer <slug>` for explicit assignment, extend `loom task edit` with the same reassignment flag, and add offline-capable `loom engineer list`.
+- CLI: `torque task create` from a terminal remains unassigned by default (`assigned_engineer_id=''`). Add `--engineer <slug>` for explicit assignment, extend `torque task edit` with the same reassignment flag, and add offline-capable `torque engineer list`.
 - Keybindings: `Cmd+Option+A` continues to add a worker (default); new `Cmd+Option+E` adds an engineer. Document in settings.
 - UI:
   - Rename the old "Engineer" surface to the Agent panel, listing engineers with status/rename/delete controls.
@@ -270,12 +270,12 @@ Six stages, each independently shippable with a concrete acceptance criterion.
 
 **Deliverable**: worktree branches are engineer-namespaced, the communication graph is fully enforced (no stray tools on the wrong surfaces), and we run a full acceptance pass.
 
-- Change new worktree branch scheme to `loom/<engineer-slug>/<worker-slug>-<shortid>` (or `loom/user/...` for user-owned workers). Existing branches are grandfathered.
+- Change new worktree branch scheme to `torque/<engineer-slug>/<worker-slug>-<shortid>` (or `torque/user/...` for user-owned workers). Existing branches are grandfathered.
 - Audit every MCP tool registration to confirm: architects cannot message workers, engineers cannot message workers owned by other engineers, workers have no cross-agent messaging tools. Remove or gate anything that violates this.
 - Remove the "hints" in code comments / docs that still reference the legacy single-engineer model.
 - **Full acceptance test**: architect → hires engineer (with approval) → creates task → engineer dispatches worker → worker runs, reports progress, derives a sub-task (inherits `assigned_engineer_id`) → worker asks a clarifying question → engineer escalates to architect → architect writes a decision and updates the task → engineer re-dispatches → worker completes → merge back. All communication flows through the permitted paths; no scope leakage.
 
-**Acceptance criterion**: the end-to-end scenario above runs green. `loom doctor` still reports zero drift. No `engineer_*` alias call makes it to an unintended surface.
+**Acceptance criterion**: the end-to-end scenario above runs green. `torque doctor` still reports zero drift. No `engineer_*` alias call makes it to an unintended surface.
 
 ### Stage 6 — Cleanup & compatibility sunset ✓ shipped (`2300d5f`)
 
@@ -284,10 +284,10 @@ Six stages, each independently shippable with a concrete acceptance criterion.
 - **Upgrade guard**: on boot, if the database has legacy columns populated but `kind` is empty on any row, refuse to start and print an actionable error: "this version requires a prior upgrade; install version X first, run once, then upgrade". Prevents skipping stage 1.
 - Drop columns: `template`, `engineer_owner_id`, `created_by_engineer_id`. Use the SQLite 14-step table-rebuild pattern so WAL doesn't get confused.
 - Remove `engineer_*` MCP tool aliases and the default-engineer routing layer.
-- Remove legacy `~/.loom/agents/` compat read; roles live in `~/.loom/roles/` only.
+- Remove legacy `~/.torque/agents/` compat read; roles live in `~/.torque/roles/` only.
 - Bump major version.
 
-**Acceptance criterion**: fresh install + upgrade from stage-5 db succeed; attempt to upgrade from pre-stage-1 db is refused with a clear message. `loom doctor` reports clean state with no legacy-column references.
+**Acceptance criterion**: fresh install + upgrade from stage-5 db succeed; attempt to upgrade from pre-stage-1 db is refused with a clear message. `torque doctor` reports clean state with no legacy-column references.
 
 ## 10. Risks & mitigations
 
@@ -297,12 +297,12 @@ Six stages, each independently shippable with a concrete acceptance criterion.
 - **Ordering under groups**: we're effectively subordinating groups to hierarchy. Users who relied on groups for organization may dislike. → Keep groups visible as a secondary filter; allow switching between hierarchy view and group view.
 - **Engineer visibility edge cases** (user-created workers, manual cell creation): → explicit rule — anything not owned by an engineer is owned by the user; user sees all, engineers don't see user-owned workers by default. Architect can reassign.
 ~~**Migration of in-flight work**: users upgrading mid-session need existing tasks/agents to keep working. → Stage 1 is pure additive + backfill + dual-write; zero behavior change, so upgrades are safe even with live sessions.~~
-~~**Dual-write drift between old and new columns** (stages 1–5): a future code path might update only one side. → All writes go through a thin wrapper layer in `db.py` that writes both columns. `loom doctor` is run in CI and reports any drift, catching regressions.~~
-~~**Engineer identification ambiguity**: if migration can't uniquely identify the existing Engineer (e.g. no group match, no tool-surface registration history), backfill would silently misclassify. → Migration refuses to proceed and prints a diagnostic asking the user to confirm which agent was the stage-1 migrated engineer, falling back to an interactive prompt or a CLI flag (`loom migrate --engineer-id <id>`).~~
+~~**Dual-write drift between old and new columns** (stages 1–5): a future code path might update only one side. → All writes go through a thin wrapper layer in `db.py` that writes both columns. `torque doctor` is run in CI and reports any drift, catching regressions.~~
+~~**Engineer identification ambiguity**: if migration can't uniquely identify the existing Engineer (e.g. no group match, no tool-surface registration history), backfill would silently misclassify. → Migration refuses to proceed and prints a diagnostic asking the user to confirm which agent was the stage-1 migrated engineer, falling back to an interactive prompt or a CLI flag (`torque migrate --engineer-id <id>`).~~
 - **MCP session binding spoofing**: a compromised env var could let an engineer session claim another engineer's id. → Not a hardening goal for v1 (local trust model), but documented; future could sign session tokens.
 - **Architect task-reassign authority**: allowing any architect to reassign any task creates unclear ownership. → V1: architect can only reassign tasks it created. Revisit if workflow demands broader reassignment.
 ~~**Version skip during cleanup** (stage 6): users upgrading directly from pre-stage-1 to post-stage-6 would lose data. → Upgrade guard refuses to boot with a clear "install intermediate version first" error.~~
-- **Worktree orphans on engineer delete**: when an engineer is deleted and its workers transfer to the user, worktree branches still exist under the old `loom/<engineer-slug>/...` prefix. → Keep the branches as-is (don't rename — breaks git refs); document that branch names reflect creation-time ownership, not current.
+- **Worktree orphans on engineer delete**: when an engineer is deleted and its workers transfer to the user, worktree branches still exist under the old `torque/<engineer-slug>/...` prefix. → Keep the branches as-is (don't rename — breaks git refs); document that branch names reflect creation-time ownership, not current.
 - **Pending-hire table growth**: approved/rejected hires pile up. → Auto-archive entries older than 30 days; expose a "clear history" action in the Agent panel.
 
 ## 11. Testing plan per stage
@@ -310,23 +310,23 @@ Six stages, each independently shippable with a concrete acceptance criterion.
 Each stage lands with:
 
 - Unit tests for the new data model / scoping queries.
-- Integration test: spawn fresh daemon → migrate old `loom.db` from fixture → verify backfill and tool surface behave correctly.
+- Integration test: spawn fresh daemon → migrate old `torque.db` from fixture → verify backfill and tool surface behave correctly.
 - Manual smoke: UI hierarchy renders; dispatch prompt includes role preamble; engineer scoping doesn't leak; architect hire flow requires approval; decision log persists.
 
 ## 12. Cross-cutting implementation notes
 
 These apply across multiple stages; listed here once to avoid repetition.
 
-- **Agent launch paths**: engineers and architects are launched through the shared helpers in `server_agent.py`, which stamp the right env vars (`LOOM_ENGINEER_ID` or `LOOM_ARCHITECT_ID`), choose the MCP entrypoint, and install the per-provider MCP config. Engineers use the local stdio `mcp_engineer.py` entrypoint so session binding is validated before proxying tool calls to the daemon.
+- **Agent launch paths**: engineers and architects are launched through the shared helpers in `server_agent.py`, which stamp the right env vars (`TORQUE_ENGINEER_ID` or `TORQUE_ARCHITECT_ID`), choose the MCP entrypoint, and install the per-provider MCP config. Engineers use the local stdio `mcp_engineer.py` entrypoint so session binding is validated before proxying tool calls to the daemon.
 - **MCP tool registration**: add `mcp_engineer.py` and `mcp_architect.py` as thin entrypoints that import from a shared implementation module. Each entrypoint registers only the tools permitted for its kind. The existing `mcp_engineer.py` stays as a compat shim that delegates to `mcp_engineer.py` via the default-engineer alias.
 - **Delta protocol additions**: `static/js/ws.js` must learn new op types — `decision_upsert`, `decision_remove`, `pending_hire_upsert`, `pending_hire_resolve`. Server-side `_emit()` helpers mirror the existing pattern.
-- **CLI ownership behavior**: user-originated `loom task create` commands default to `assigned_engineer_id=''` (unassigned). `loom task create` and `loom task edit` accept `--engineer <slug>` for explicit assignment / reassignment. Unassigned tasks are visible to all engineers within their own group but scoped out of `engineer_board_summary` until assigned.
+- **CLI ownership behavior**: user-originated `torque task create` commands default to `assigned_engineer_id=''` (unassigned). `torque task create` and `torque task edit` accept `--engineer <slug>` for explicit assignment / reassignment. Unassigned tasks are visible to all engineers within their own group but scoped out of `engineer_board_summary` until assigned.
 - **Keybindings**: `Cmd+Option+A` → add worker (existing), `Cmd+Option+E` → add engineer (stage 3), `Cmd+Option+P` → add architect (stage 4). All user-configurable via the existing keybindings settings.
-- **Backup on migration**: the stage-1 migration writes `loom.db.pre-kinds.bak` before altering the schema. Idempotent — skipped on second run.
-- **Boot-prompt management**: engineer and architect boot prompts live in `loom/prompts/engineer_boot.md` and `loom/prompts/architect_boot.md`, loaded at launch. Not user-editable in v1 but easy to find for iteration.
+- **Backup on migration**: the stage-1 migration writes `torque.db.pre-kinds.bak` before altering the schema. Idempotent — skipped on second run.
+- **Boot-prompt management**: engineer and architect boot prompts live in `torque/prompts/engineer_boot.md` and `torque/prompts/architect_boot.md`, loaded at launch. Not user-editable in v1 but easy to find for iteration.
 - **Session persistence**: engineers and architects get `session_resume=True` by default (persistent kinds benefit most from resume). `reconnect_orphans` in the adapter needs no change — it already handles persistent agents.
-- **Dispatch context** (`loom` Jinja namespace): stage 2 adds `loom.agent.kind` / `loom.agent.role` / `loom.agent.owner_engineer`. Stage 4 adds `loom.agent.hired_by_architect` for workers whose engineer was hired by an architect.
-- **`loom doctor` command**: landed in stage 1 and extended in every subsequent stage — each stage adds checks for the new invariants it introduces. Runs in CI on a fixture db so regressions are caught automatically.
+- **Dispatch context** (`torque` Jinja namespace): stage 2 adds `torque.agent.kind` / `torque.agent.role` / `torque.agent.owner_engineer`. Stage 4 adds `torque.agent.hired_by_architect` for workers whose engineer was hired by an architect.
+- **`torque doctor` command**: landed in stage 1 and extended in every subsequent stage — each stage adds checks for the new invariants it introduces. Runs in CI on a fixture db so regressions are caught automatically.
 
 ## 13. Resolved decisions
 

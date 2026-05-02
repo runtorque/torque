@@ -12,7 +12,7 @@ that want the full shape.
 
 The official frontend ships compact-v1 by default. It appends `?compact=1`
 to the WebSocket URL unless the operator explicitly opts out by setting
-`localStorage["loom:snapshot_protocol"]` to one of `legacy`, `off`, `0`, or
+`localStorage["torque:snapshot_protocol"]` to one of `legacy`, `off`, `0`, or
 `false`. Backend handshake accepts any of these equivalent opt-in signals,
 which external consumers or pinned tests can use explicitly:
 
@@ -35,14 +35,14 @@ Query opt-in is preferred because it applies to the first snapshot frame.
 ### Rollback to the legacy snapshot
 
 The official frontend opts in to compact-v1 whenever
-`localStorage["loom:snapshot_protocol"]` is unset or holds any non-opt-out
+`localStorage["torque:snapshot_protocol"]` is unset or holds any non-opt-out
 value, so **clearing the key does not roll back** — it leaves the client
 on compact. To drop a browser session back onto the legacy full snapshot,
 explicitly store one of the opt-out sentinels before reloading:
 
 ```js
-// In devtools, on the Loom origin:
-localStorage.setItem('loom:snapshot_protocol', 'legacy');
+// In devtools, on the Torque origin:
+localStorage.setItem('torque:snapshot_protocol', 'legacy');
 // then reload the page
 ```
 
@@ -69,10 +69,10 @@ eager fields:
 
 ```json
 {
-  "id": "LOOM:134",
+  "id": "TORQUE:134",
   "task": "short title",
   "slug": "short-title",
-  "group": "loom",
+  "group": "torque",
   "lane": "In Progress",
   "position": 39,
   "action_name": "feature/implement",
@@ -85,7 +85,7 @@ eager fields:
   "created_at": "2026-04-22T22:00:00+00:00",
   "updated_at": "2026-04-22T23:30:03.758052+00:00",
   "scheduled_at": "",
-  "depends_on": ["LOOM:120"],
+  "depends_on": ["TORQUE:120"],
   "provider": "github",
   "external_id": "123",
   "external_url": "https://github.com/openai/openai/issues/123",
@@ -163,13 +163,13 @@ Fetches one full `BoardTask` dict for modals/history/detail panels.
 Request:
 
 ```json
-{ "cmd": "task_detail", "id": "LOOM:134" }
+{ "cmd": "task_detail", "id": "TORQUE:134" }
 ```
 
 Response:
 
 ```json
-{ "type": "task_detail", "id": "LOOM:134", "task": { "id": "LOOM:134" } }
+{ "type": "task_detail", "id": "TORQUE:134", "task": { "id": "TORQUE:134" } }
 ```
 
 `task` is the same full BoardTask shape used by the legacy full snapshot.
@@ -207,13 +207,13 @@ Response shape:
 Fetches full archived tasks on archived-tab open. `group` is optional.
 
 ```json
-{ "cmd": "archived_tasks", "group": "loom" }
+{ "cmd": "archived_tasks", "group": "torque" }
 ```
 
 Response shape:
 
 ```json
-{ "type": "archived_tasks", "group": "loom", "board_tasks": { "task-id": {} } }
+{ "type": "archived_tasks", "group": "torque", "board_tasks": { "task-id": {} } }
 ```
 
 ### `engineer_journal_snapshot`
@@ -221,7 +221,7 @@ Response shape:
 Fetches deferred per-group Engineer panel data.
 
 ```json
-{ "cmd": "engineer_journal_snapshot", "group": "loom", "limit": 50 }
+{ "cmd": "engineer_journal_snapshot", "group": "torque", "limit": 50 }
 ```
 
 Response shape:
@@ -229,10 +229,10 @@ Response shape:
 ```json
 {
   "type": "engineer_journal_snapshot",
-  "group": "loom",
-  "engineer_journal": { "loom": [] },
-  "engineer_worklog": { "loom": [] },
-  "engineer_streams": { "loom": { "count": 0, "by_state": {}, "items": [], "truncated": false } }
+  "group": "torque",
+  "engineer_journal": { "torque": [] },
+  "engineer_worklog": { "torque": [] },
+  "engineer_streams": { "torque": { "count": 0, "by_state": {}, "items": [], "truncated": false } }
 }
 ```
 

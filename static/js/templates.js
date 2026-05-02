@@ -216,7 +216,7 @@ function renderAgentTemplatesEditor() {
   }
   if (!dataForScope && !newForScope) {
     if (listForScope.length === 0) {
-      el.innerHTML = '<div class="tpled-empty">No roles found.<br>Click <b>+</b> to save a launch preset,<br>or add <code>.yaml</code> files to <code>.loom/roles/</code>.</div>';
+      el.innerHTML = '<div class="tpled-empty">No roles found.<br>Click <b>+</b> to save a launch preset,<br>or add <code>.yaml</code> files to <code>.torque/roles/</code>.</div>';
     } else {
       el.innerHTML = '<div class="tpled-empty">Pick a role from the library above.</div>';
     }
@@ -229,8 +229,8 @@ function renderAgentTemplatesEditor() {
   html += '<input id="agent-template-name" value="' + esc(d.name || '') + '" onchange="agentTemplateMarkDirty()" autocomplete="off">';
   html += '<label>Scope</label>';
   html += '<select id="agent-template-scope" onchange="agentTemplateMarkDirty()">';
-  html += '<option value="project"' + (_agentTplScope === 'project' ? ' selected' : '') + '>Project (.loom/roles/)</option>';
-  html += '<option value="user"' + (_agentTplScope === 'user' ? ' selected' : '') + '>User (~/.loom/roles/)</option>';
+  html += '<option value="project"' + (_agentTplScope === 'project' ? ' selected' : '') + '>Project (.torque/roles/)</option>';
+  html += '<option value="user"' + (_agentTplScope === 'user' ? ' selected' : '') + '>User (~/.torque/roles/)</option>';
   html += '</select>';
   html += '<label>Display name</label>';
   html += '<input id="agent-template-display" value="' + esc(d.display_name || '') + '" onchange="agentTemplateMarkDirty()" autocomplete="off">';

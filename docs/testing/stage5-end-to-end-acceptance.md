@@ -2,7 +2,7 @@
 
 > Manual smoke for Stage 5 of the Agent Kinds Refactor: worktree branch
 > namespacing, architect↔engineer coordination, worker reporting, communication
-> graph enforcement, and the new `loom doctor` worktree namespace checks.
+> graph enforcement, and the new `torque doctor` worktree namespace checks.
 
 This assumes Stage 1–4 are already deployed and healthy. Run the whole flow in
 one session so you exercise the full ownership chain:
@@ -16,10 +16,10 @@ User → Architect → Engineer → Worker
 Keep the live database, backup, and log paths handy:
 
 ```bash
-LOOM_DIR="$HOME/Library/Application Support/iTerm2/Scripts/loom/loom"
-DB="$LOOM_DIR/loom.db"
-BACKUP="$LOOM_DIR/loom.db.pre-kinds.bak"
-LOG="$LOOM_DIR/loom.log"
+TORQUE_DIR="$HOME/Library/Application Support/iTerm2/Scripts/torque/torque"
+DB="$TORQUE_DIR/torque.db"
+BACKUP="$TORQUE_DIR/torque.db.pre-kinds.bak"
+LOG="$TORQUE_DIR/torque.log"
 ```
 
 If you want live logs in a second terminal:
@@ -33,7 +33,7 @@ tail -f "$LOG"
 ### 1.1 Confirm doctor is clean before the stage-5 flow
 
 ```bash
-loom doctor
+torque doctor
 ```
 
 Expected:
@@ -46,7 +46,7 @@ Expected:
 Capture the starting counts:
 
 ```bash
-loom doctor --json | jq '{result: .result, architects: .architects.total, engineers: .engineers.total, pending_hires: .pending_hires.pending, worktrees: .worktrees}'
+torque doctor --json | jq '{result: .result, architects: .architects.total, engineers: .engineers.total, pending_hires: .pending_hires.pending, worktrees: .worktrees}'
 ```
 
 Expected before this smoke begins:
@@ -63,7 +63,7 @@ echo "$ENGINEER_ID"
 test -n "$ENGINEER_ID"
 ```
 
-### 1.2 Deploy the build and restart Loom
+### 1.2 Deploy the build and restart Torque
 
 ```bash
 make deploy
@@ -72,7 +72,7 @@ make deploy
 Then restart from:
 
 ```text
-iTerm2 → Scripts → loom
+iTerm2 → Scripts → torque
 ```
 
 ## Phase 2 — Create the architect and route the work
@@ -99,7 +99,7 @@ Open the `productmind` terminal and paste this prompt:
 
 ```text
 Before doing anything else:
-1. Use a shell command to print the LOOM_ARCHITECT_ID environment variable.
+1. Use a shell command to print the TORQUE_ARCHITECT_ID environment variable.
 2. List the available MCP tool names in this session.
 3. Confirm architect_decision_create, architect_engineer_hire, architect_task_create, architect_engineer_message, and architect_reply are present.
 Return only the environment value and the tool names.
@@ -107,7 +107,7 @@ Return only the environment value and the tool names.
 
 Expected:
 
-- the printed `LOOM_ARCHITECT_ID` matches `$PRODUCTMIND_ID`
+- the printed `TORQUE_ARCHITECT_ID` matches `$PRODUCTMIND_ID`
 - the tool list contains the `architect_*` surface
 - there is no architect worker-messaging tool in the list
 
@@ -176,7 +176,7 @@ In the `productmind` session, paste this prompt after replacing `ALICE_ID_VALUE`
 
 ```text
 Call architect_task_create with:
-{"title":"Implement feature X","group":"loom","assigned_engineer_id":"ALICE_ID_VALUE","suggested_action":"feature/implement"}
+{"title":"Implement feature X","group":"torque","assigned_engineer_id":"ALICE_ID_VALUE","suggested_action":"feature/implement"}
 Return only the JSON result.
 ```
 
@@ -204,7 +204,7 @@ Open alice's engineer terminal and paste:
 
 ```text
 Before dispatching anything:
-1. Use a shell command to print the LOOM_ENGINEER_ID environment variable.
+1. Use a shell command to print the TORQUE_ENGINEER_ID environment variable.
 2. Call engineer_agents_list with an empty object.
 3. Call engineer_board_summary with an empty object.
 Return the environment value followed by the two JSON results.
@@ -212,7 +212,7 @@ Return the environment value followed by the two JSON results.
 
 Expected:
 
-- `LOOM_ENGINEER_ID` matches `$ALICE_ID`
+- `TORQUE_ENGINEER_ID` matches `$ALICE_ID`
 - `engineer_agents_list()` shows alice and only agents alice owns
 - `engineer_board_summary()` includes `Implement feature X`
 
@@ -241,15 +241,15 @@ test -n "$WORKER_BRANCH"
 Expected:
 
 - the worker row has `owner_engineer_id='$ALICE_ID'`
-- `WORKER_BRANCH` matches `loom/alice/<worker-slug>-<shortid>`
-- `git -C "$(git rev-parse --show-toplevel)" branch --list 'loom/alice/*'` shows the new branch
+- `WORKER_BRANCH` matches `torque/alice/<worker-slug>-<shortid>`
+- `git -C "$(git rev-parse --show-toplevel)" branch --list 'torque/alice/*'` shows the new branch
 
 ### 3.3 Worker reports progress
 
 Open the worker terminal and run:
 
 ```bash
-loom ai progress "working on it"
+torque ai progress "working on it"
 ```
 
 Expected: alice sees the worker progress update in the board / agent history.
@@ -259,7 +259,7 @@ Expected: alice sees the worker progress update in the board / agent history.
 In the worker terminal, run:
 
 ```bash
-loom ai ask "should X be configurable or hardcoded?"
+torque ai ask "should X be configurable or hardcoded?"
 ```
 
 Capture the ask task id:
@@ -347,8 +347,8 @@ Expected:
 In the worker terminal, run:
 
 ```bash
-loom ai progress "implemented configurable option; handing off to review"
-loom ai derive "Review feature X implementation" -t feature/review
+torque ai progress "implemented configurable option; handing off to review"
+torque ai derive "Review feature X implementation" -t feature/review
 ```
 
 Capture the review task id and verify ownership inheritance:
@@ -377,7 +377,7 @@ Expected:
 Open the review agent terminal and run:
 
 ```bash
-loom ai done "review complete — ready to merge"
+torque ai done "review complete — ready to merge"
 ```
 
 Verify the review task is closed:
@@ -393,7 +393,7 @@ Expected: the review task is now in `Done`.
 In the worker terminal, run:
 
 ```bash
-loom ai done "feature X with configurable option"
+torque ai done "feature X with configurable option"
 ```
 
 Verify that all child tasks are closed before the parent is completed:
@@ -435,14 +435,14 @@ Expected:
 
 - the diff summary call succeeds
 - the merge call succeeds
-- the branch name used for the worker is namespaced under `loom/alice/`
+- the branch name used for the worker is namespaced under `torque/alice/`
 
 ## Phase 6 — Postflight doctor and persistence
 
 ### 6.1 Run doctor after the whole flow
 
 ```bash
-loom doctor
+torque doctor
 ```
 
 Expected:
@@ -457,7 +457,7 @@ Expected:
 Capture the post-run counts:
 
 ```bash
-loom doctor --json | jq '{result: .result, architects: .architects.total, engineers: .engineers.total, pending_hires: .pending_hires.pending, worktrees: .worktrees}'
+torque doctor --json | jq '{result: .result, architects: .architects.total, engineers: .engineers.total, pending_hires: .pending_hires.pending, worktrees: .worktrees}'
 sqlite3 "$DB" "SELECT COUNT(*) FROM decisions WHERE architect_id='$PRODUCTMIND_ID' AND status='accepted' AND archived=0;"
 ```
 
@@ -468,7 +468,7 @@ Expected:
 
 ### 6.2 Restart the daemon and confirm persistence
 
-Stop Loom, then restart it from the Scripts menu:
+Stop Torque, then restart it from the Scripts menu:
 
 ```bash
 make stop
@@ -477,13 +477,13 @@ make stop
 Restart from:
 
 ```text
-iTerm2 → Scripts → loom
+iTerm2 → Scripts → torque
 ```
 
 Then re-run these checks:
 
 ```bash
-loom doctor
+torque doctor
 sqlite3 "$DB" "SELECT id, name, kind, hired_by_architect_id FROM agents WHERE id IN ('$PRODUCTMIND_ID', '$ALICE_ID', '$WORKER_ID') ORDER BY rowid;"
 sqlite3 "$DB" "SELECT id, status, rationale FROM decisions WHERE id='$DECISION_ID';"
 sqlite3 "$DB" "SELECT id, task, assigned_engineer_id, parent_task_id, pipeline_root_id, action_name, lane FROM board_tasks WHERE id IN ('$TASK_ID', '$REVIEW_TASK_ID', '$ASK_TASK_ID') ORDER BY rowid;"
@@ -549,7 +549,7 @@ Expected: the call fails with `architect not found in scope` because alice is hi
 The safest rollback path is to restore the pre-kinds backup from Stage 1 and
 then relaunch a build that still understands the pre-kinds schema.
 
-Stop Loom first:
+Stop Torque first:
 
 ```bash
 make stop
@@ -567,7 +567,7 @@ Restore it over the live database:
 cp "$BACKUP" "$DB"
 ```
 
-Then restart the older compatible Loom build from the Scripts menu.
+Then restart the older compatible Torque build from the Scripts menu.
 
 If you need to preserve the current migrated database before rolling back,
 copy it aside first:

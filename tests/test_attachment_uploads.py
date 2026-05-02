@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from loom.attachment_uploads import (
+from torque.attachment_uploads import (
     AttachmentUploadError,
     save_message_attachment_bytes,
 )

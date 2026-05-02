@@ -1,4 +1,4 @@
-"""Regression tests for LOOM:262 — dispatch must auto-promote
+"""Regression tests for TORQUE:262 — dispatch must auto-promote
 ``suggested_action`` to ``action_name`` so the action's deliverable
 contract / template / transitions bind without manual ``engineer_task_edit``
 intervention.
@@ -31,10 +31,10 @@ class PromoteSuggestedActionUnitTests(unittest.TestCase):
     def setUp(self):
         install_aiohttp_stub()
         self.state_mod = importlib.reload(
-            importlib.import_module("loom.state")
+            importlib.import_module("torque.state")
         )
         self.server_mod = importlib.reload(
-            importlib.import_module("loom.server")
+            importlib.import_module("torque.server")
         )
         self.state = self.state_mod.MatrixState()
         self.state.add_group("g")
@@ -108,7 +108,7 @@ class PromoteSuggestedActionUnitTests(unittest.TestCase):
 class PromoteAndContractBindIntegrationTests(unittest.TestCase):
     """Verify the late-bind contract path in dispatch_task picks up the
     promoted action_name and stamps the deliverable contract on the task.
-    Mirrors loom/server.py::dispatch_task lines around the
+    Mirrors torque/server.py::dispatch_task lines around the
     ``_promote_suggested_action`` -> ``get_deliverable`` -> ``board_update_task``
     sequence so the regression is caught even if the call ordering inside
     dispatch_task is later refactored.
@@ -117,13 +117,13 @@ class PromoteAndContractBindIntegrationTests(unittest.TestCase):
     def setUp(self):
         install_aiohttp_stub()
         self.state_mod = importlib.reload(
-            importlib.import_module("loom.state")
+            importlib.import_module("torque.state")
         )
         self.actions_mod = importlib.reload(
-            importlib.import_module("loom.actions")
+            importlib.import_module("torque.actions")
         )
         self.server_mod = importlib.reload(
-            importlib.import_module("loom.server")
+            importlib.import_module("torque.server")
         )
 
     def _build_state_and_task(self, *, action_name="", suggested_action=""):
@@ -239,7 +239,7 @@ class DispatchTaskInvokesPromotionTests(unittest.TestCase):
     def setUp(self):
         install_aiohttp_stub()
         self.server_mod = importlib.reload(
-            importlib.import_module("loom.server")
+            importlib.import_module("torque.server")
         )
 
     def test_dispatch_task_handler_references_promote_helper(self):

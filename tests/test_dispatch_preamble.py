@@ -14,13 +14,13 @@ except ModuleNotFoundError:
 class DispatchPreambleTests(unittest.TestCase):
     def setUp(self):
         install_aiohttp_stub()
-        self.actions_mod = importlib.import_module("loom.actions")
+        self.actions_mod = importlib.import_module("torque.actions")
         self.actions_mod = importlib.reload(self.actions_mod)
-        self.roles_mod = importlib.import_module("loom.roles")
+        self.roles_mod = importlib.import_module("torque.roles")
         self.roles_mod = importlib.reload(self.roles_mod)
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
-        self.server_mod = importlib.import_module("loom.server")
+        self.server_mod = importlib.import_module("torque.server")
         self.server_mod = importlib.reload(self.server_mod)
 
         self.tmp = tempfile.TemporaryDirectory()
@@ -28,9 +28,9 @@ class DispatchPreambleTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.project = self.root / "repo" / "subdir"
         self.project.mkdir(parents=True)
-        (self.root / "repo" / ".loom" / "roles").mkdir(parents=True)
+        (self.root / "repo" / ".torque" / "roles").mkdir(parents=True)
         self.user_home = self.root / "home"
-        (self.user_home / ".loom" / "roles").mkdir(parents=True)
+        (self.user_home / ".torque" / "roles").mkdir(parents=True)
         self.prev_home = os.environ.get("HOME")
         os.environ["HOME"] = str(self.user_home)
         self.addCleanup(self._restore_home)
@@ -90,11 +90,11 @@ class DispatchPreambleTests(unittest.TestCase):
         else:
             os.environ["HOME"] = self.prev_home
 
-    def _render_action(self, raw: str, *, loom_context=None) -> dict:
+    def _render_action(self, raw: str, *, torque_context=None) -> dict:
         return self.action_mgr.render_action(
             raw,
             {"TASK": self.task.task},
-            loom_context=loom_context,
+            torque_context=torque_context,
         )
 
     def test_worker_role_preamble_is_prepended_before_action_and_postscript(self):
@@ -108,12 +108,12 @@ class DispatchPreambleTests(unittest.TestCase):
             scope="project",
             base_dir=str(self.project),
         )
-        loom_ctx = self.server_mod._build_loom_context(
+        torque_ctx = self.server_mod._build_torque_context(
             self.state, self.worker, self.task
         )
         rendered = self._render_action(
             "name: review\nprompt: |\n  {{ TASK }}\n",
-            loom_context=loom_ctx,
+            torque_context=torque_ctx,
         )
 
         prompt = self.server_mod._assemble_worker_prompt(
@@ -121,7 +121,7 @@ class DispatchPreambleTests(unittest.TestCase):
             cell=self.worker,
             base_dir=str(self.project),
             prompt_body=rendered["prompt"],
-            postscript="LOOM POSTSCRIPT",
+            postscript="TORQUE POSTSCRIPT",
             disable_role_preamble=rendered["disable_role_preamble"],
         )
 
@@ -129,7 +129,7 @@ class DispatchPreambleTests(unittest.TestCase):
             prompt,
             "You are Worker (worker, id=worker-1).\n\n"
             "Be careful.\n\nPriorities:\n- a\n- b\n\n"
-            "Implement feature\n\nLOOM POSTSCRIPT\n",
+            "Implement feature\n\nTORQUE POSTSCRIPT\n",
         )
 
     def test_empty_role_preamble_emits_no_preamble_block(self):
@@ -145,13 +145,13 @@ class DispatchPreambleTests(unittest.TestCase):
             cell=self.worker,
             base_dir=str(self.project),
             prompt_body="Implement feature",
-            postscript="LOOM POSTSCRIPT",
+            postscript="TORQUE POSTSCRIPT",
         )
 
         self.assertEqual(
             prompt,
             "You are Worker (worker, id=worker-1).\n\n"
-            "Implement feature\n\nLOOM POSTSCRIPT\n",
+            "Implement feature\n\nTORQUE POSTSCRIPT\n",
         )
 
     def test_disable_role_preamble_omits_preamble_even_for_worker(self):
@@ -174,14 +174,14 @@ class DispatchPreambleTests(unittest.TestCase):
             cell=self.worker,
             base_dir=str(self.project),
             prompt_body=rendered["prompt"],
-            postscript="LOOM POSTSCRIPT",
+            postscript="TORQUE POSTSCRIPT",
             disable_role_preamble=rendered["disable_role_preamble"],
         )
 
         self.assertEqual(
             prompt,
             "You are Worker (worker, id=worker-1).\n\n"
-            "Implement feature\n\nLOOM POSTSCRIPT\n",
+            "Implement feature\n\nTORQUE POSTSCRIPT\n",
         )
 
     def test_engineer_and_terminal_agents_do_not_get_role_preamble(self):
@@ -199,13 +199,13 @@ class DispatchPreambleTests(unittest.TestCase):
             cell=self.engineer,
             base_dir=str(self.project),
             prompt_body="Implement feature",
-            postscript="LOOM POSTSCRIPT",
+            postscript="TORQUE POSTSCRIPT",
         )
 
         self.assertEqual(
             prompt,
             "You are Engineer (engineer, id=engineer-1).\n\n"
-            "Implement feature\n\nLOOM POSTSCRIPT\n",
+            "Implement feature\n\nTORQUE POSTSCRIPT\n",
         )
 
     def test_legacy_worker_without_kind_still_gets_role_preamble(self):
@@ -221,21 +221,21 @@ class DispatchPreambleTests(unittest.TestCase):
             cell=self.legacy_worker,
             base_dir=str(self.project),
             prompt_body="Implement feature",
-            postscript="LOOM POSTSCRIPT",
+            postscript="TORQUE POSTSCRIPT",
         )
 
         self.assertEqual(
             prompt,
             "You are Legacy Worker (worker, id=worker-legacy).\n\n"
-            "Be careful.\n\nImplement feature\n\nLOOM POSTSCRIPT\n",
+            "Be careful.\n\nImplement feature\n\nTORQUE POSTSCRIPT\n",
         )
 
-    def test_loom_agent_context_and_stub_defaults_render_safely(self):
+    def test_torque_agent_context_and_stub_defaults_render_safely(self):
         raw = (
             "name: inspect\nprompt: |\n"
-            "  kind={{ loom.agent.kind }}\n"
-            "  role={{ loom.agent.role }}\n"
-            "  owner={{ loom.agent.owner_engineer }}\n"
+            "  kind={{ torque.agent.kind }}\n"
+            "  role={{ torque.agent.role }}\n"
+            "  owner={{ torque.agent.owner_engineer }}\n"
             "  {{ TASK }}\n"
         )
 
@@ -245,15 +245,15 @@ class DispatchPreambleTests(unittest.TestCase):
             "kind=\nrole=\nowner=\nImplement feature",
         )
 
-        loom_ctx = self.server_mod._build_loom_context(
+        torque_ctx = self.server_mod._build_torque_context(
             self.state, self.worker, self.task
         )
-        self.assertEqual(loom_ctx["agent"]["kind"], "worker")
-        self.assertEqual(loom_ctx["agent"]["id"], "worker-1")
-        self.assertEqual(loom_ctx["agent"]["role"], "reviewer")
-        self.assertEqual(loom_ctx["agent"]["owner_engineer"], "Engineer")
+        self.assertEqual(torque_ctx["agent"]["kind"], "worker")
+        self.assertEqual(torque_ctx["agent"]["id"], "worker-1")
+        self.assertEqual(torque_ctx["agent"]["role"], "reviewer")
+        self.assertEqual(torque_ctx["agent"]["owner_engineer"], "Engineer")
 
-        rendered = self._render_action(raw, loom_context=loom_ctx)
+        rendered = self._render_action(raw, torque_context=torque_ctx)
         self.assertEqual(
             rendered["prompt"],
             "kind=worker\nrole=reviewer\nowner=Engineer\nImplement feature",
@@ -266,15 +266,15 @@ class DispatchPreambleTests(unittest.TestCase):
             scope="project",
             base_dir=str(self.project),
         )
-        loom_ctx = self.server_mod._build_loom_context(
+        torque_ctx = self.server_mod._build_torque_context(
             self.state, self.worker, self.task
         )
         rendered = self._render_action(
             "name: review\nprompt: |\n  {{ TASK }}\n",
-            loom_context=loom_ctx,
+            torque_context=torque_ctx,
         )
         prompt_body = rendered["prompt"] + "\n\n## Task artifacts\n- none"
-        postscript = "LOOM POSTSCRIPT"
+        postscript = "TORQUE POSTSCRIPT"
 
         dispatch_prompt = self.server_mod._assemble_worker_prompt(
             role_mgr=self.role_mgr,
@@ -298,16 +298,16 @@ class DispatchPreambleTests(unittest.TestCase):
     def test_worktree_checkpoint_context_preserves_integer_zero(self):
         self.worker.worktree_checkpoints = 0
 
-        loom_ctx = self.server_mod._build_loom_context(
+        torque_ctx = self.server_mod._build_torque_context(
             self.state, self.worker, self.task
         )
-        self.assertIsInstance(loom_ctx["worktree"]["checkpoints"], int)
-        self.assertEqual(loom_ctx["worktree"]["checkpoints"], 0)
+        self.assertIsInstance(torque_ctx["worktree"]["checkpoints"], int)
+        self.assertEqual(torque_ctx["worktree"]["checkpoints"], 0)
 
         rendered = self._render_action(
             "name: preview\nprompt: |\n"
-            "  checkpoints={{ loom.worktree.checkpoints }}\n",
-            loom_context=loom_ctx,
+            "  checkpoints={{ torque.worktree.checkpoints }}\n",
+            torque_context=torque_ctx,
         )
         self.assertEqual(rendered["prompt"], "checkpoints=0")
 
@@ -364,45 +364,45 @@ class DispatchPreambleTests(unittest.TestCase):
             agent_id="",
         )
 
-        loom_ctx = self.server_mod._build_loom_context(
+        torque_ctx = self.server_mod._build_torque_context(
             self.state, preview_cell, preview_task
         )
-        self.assertTrue(loom_ctx["context"]["is_clean"])
-        self.assertEqual(loom_ctx["context"]["tasks_dispatched"], 0)
-        self.assertEqual(loom_ctx["worktree"]["path"], "")
-        self.assertIsInstance(loom_ctx["worktree"]["checkpoints"], int)
-        self.assertEqual(loom_ctx["worktree"]["checkpoints"], 0)
-        self.assertEqual(loom_ctx["agent"]["role"], "reviewer")
+        self.assertTrue(torque_ctx["context"]["is_clean"])
+        self.assertEqual(torque_ctx["context"]["tasks_dispatched"], 0)
+        self.assertEqual(torque_ctx["worktree"]["path"], "")
+        self.assertIsInstance(torque_ctx["worktree"]["checkpoints"], int)
+        self.assertEqual(torque_ctx["worktree"]["checkpoints"], 0)
+        self.assertEqual(torque_ctx["agent"]["role"], "reviewer")
 
         rendered = self._render_action(
             "name: preview\nprompt: |\n"
-            "  role={{ loom.agent.role }}\n"
-            "  checkpoints={{ loom.worktree.checkpoints }}\n"
+            "  role={{ torque.agent.role }}\n"
+            "  checkpoints={{ torque.worktree.checkpoints }}\n"
             "  {{ TASK }}\n",
-            loom_context=loom_ctx,
+            torque_context=torque_ctx,
         )
         prompt = self.server_mod._assemble_worker_prompt(
             role_mgr=self.role_mgr,
             cell=preview_cell,
             base_dir=str(self.project),
             prompt_body=rendered["prompt"],
-            postscript="LOOM POSTSCRIPT",
+            postscript="TORQUE POSTSCRIPT",
             disable_role_preamble=rendered["disable_role_preamble"],
         )
 
         self.assertEqual(
             prompt,
             "Be careful.\n\nrole=reviewer\ncheckpoints=0\n"
-            "Implement feature\n\nLOOM POSTSCRIPT\n",
+            "Implement feature\n\nTORQUE POSTSCRIPT\n",
         )
 
     def test_worker_dispatch_prompt_starts_with_identity_anchor(self):
-        loom_ctx = self.server_mod._build_loom_context(
+        torque_ctx = self.server_mod._build_torque_context(
             self.state, self.worker, self.task
         )
         rendered = self._render_action(
             "name: implement\nprompt: |\n  {{ TASK }}\n",
-            loom_context=loom_ctx,
+            torque_context=torque_ctx,
         )
 
         prompt = self.server_mod._assemble_worker_prompt(
@@ -410,7 +410,7 @@ class DispatchPreambleTests(unittest.TestCase):
             cell=self.worker,
             base_dir=str(self.project),
             prompt_body=rendered["prompt"],
-            postscript="LOOM POSTSCRIPT",
+            postscript="TORQUE POSTSCRIPT",
             disable_role_preamble=rendered["disable_role_preamble"],
         )
 

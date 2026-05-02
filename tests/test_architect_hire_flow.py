@@ -29,27 +29,27 @@ class _CapturingBridge:
 class ArchitectHireFlowTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub()
-        self.db_mod = importlib.import_module("loom.db")
+        self.db_mod = importlib.import_module("torque.db")
         self.db_mod = importlib.reload(self.db_mod)
-        self.server_mod = importlib.import_module("loom.server")
+        self.server_mod = importlib.import_module("torque.server")
         self.server_mod = importlib.reload(self.server_mod)
-        self.server_agent_mod = importlib.import_module("loom.server_agent")
+        self.server_agent_mod = importlib.import_module("torque.server_agent")
         self.server_agent_mod = importlib.reload(self.server_agent_mod)
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
-        self.mcp_architect_mod = importlib.import_module("loom.mcp_architect")
+        self.mcp_architect_mod = importlib.import_module("torque.mcp_architect")
         self.mcp_architect_mod = importlib.reload(self.mcp_architect_mod)
 
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.db_path = Path(self.tmp.name) / "loom.db"
-        self.db = self.db_mod.LoomDB(self.db_path)
+        self.db_path = Path(self.tmp.name) / "torque.db"
+        self.db = self.db_mod.TorqueDB(self.db_path)
         self.db.init()
         self.addCleanup(self.db.close)
 
         self.state = self.state_mod.MatrixState(db=self.db)
         self.state.board_lanes = ["Backlog", "To Do", "In Progress", "Done", "Archived"]
-        self.state.groups["loom"] = []
+        self.state.groups["torque"] = []
         self.state._db_save_groups()
 
     def _add_architect(self, agent_id: str, name: str):
@@ -57,14 +57,14 @@ class ArchitectHireFlowTests(unittest.IsolatedAsyncioTestCase):
             id=agent_id,
             name=name,
             slug=name.lower(),
-            group="loom",
+            group="torque",
             cell_type="agent",
             kind="architect",
             status="running",
             persistent=True,
         )
         self.state.agents[cell.id] = cell
-        self.state.groups["loom"].append(cell.id)
+        self.state.groups["torque"].append(cell.id)
         self.state._db_save_agent(cell)
         self.state._db_save_groups()
         return cell
@@ -149,11 +149,11 @@ class ArchitectHireFlowTests(unittest.IsolatedAsyncioTestCase):
         )
 
         async def fake_resolve_base_dir(group):
-            self.assertEqual(group, "loom")
+            self.assertEqual(group, "torque")
             return self.tmp.name
 
         def fake_resolve_engineer_launch_config(group, *, base_dir="", explicit_template="", overrides=None):
-            self.assertEqual(group, "loom")
+            self.assertEqual(group, "torque")
             self.assertEqual(base_dir, self.tmp.name)
             self.assertEqual(explicit_template, "")
             self.assertEqual(
@@ -191,8 +191,8 @@ class ArchitectHireFlowTests(unittest.IsolatedAsyncioTestCase):
         op_names = [op["op"] for op in self.state._delta_ops]
         self.assertIn("agent_upsert", op_names)
         self.assertIn("pending_hire_resolve", op_names)
-        self.assertEqual(bridge.create_session_calls[0]["kwargs"]["env_vars"]["LOOM_ENGINEER_ID"], engineer.id)
-        # LOOM:263 — empty role initial_prompt + engineer kind synthesizes
+        self.assertEqual(bridge.create_session_calls[0]["kwargs"]["env_vars"]["TORQUE_ENGINEER_ID"], engineer.id)
+        # TORQUE:263 — empty role initial_prompt + engineer kind synthesizes
         # the configured default boot nudge so the wake protocol fires on
         # first launch via architect-pending-hire approval.
         self.assertEqual(len(sent_prompts), 2)

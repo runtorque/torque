@@ -1,12 +1,12 @@
 ---
-description: Show the Loom task board with all lanes and tasks
+description: Show the Torque task board with all lanes and tasks
 allowed-tools: Bash
 ---
 
-Show the current Loom task board.
+Show the current Torque task board.
 
 ## Board state
-!`loom board list`
+!`torque board list`
 
 Summarize the board state: how many tasks in each lane,
 any tasks that need attention (blocked/error labels),

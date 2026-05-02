@@ -1,7 +1,7 @@
 ITERM2_SCRIPTS := $(HOME)/Library/Application Support/iTerm2/Scripts
-ITERM2_PROJECT := $(ITERM2_SCRIPTS)/loom
-SCRIPT_DIR     := $(ITERM2_PROJECT)/loom
-MAIN_SCRIPT    := loom.py
+ITERM2_PROJECT := $(ITERM2_SCRIPTS)/torque
+SCRIPT_DIR     := $(ITERM2_PROJECT)/torque
+MAIN_SCRIPT    := torque.py
 AUTOLAUNCH_DIR := $(ITERM2_SCRIPTS)/AutoLaunch
 
 # Global iTerm2 Python environment (used to bootstrap the project env)
@@ -19,18 +19,18 @@ PERF_MATRIX    ?= 10,20,30
 PERF_DURATION  ?= 15
 PERF_BASELINE  ?= tests/perf/baseline.json
 PERF_RUN_DIR   ?= tests/perf/runs
-PERF_VENV      ?= $(HOME)/.cache/loom/perf-harness-venv
+PERF_VENV      ?= $(HOME)/.cache/torque/perf-harness-venv
 PERF_PYTHON    ?= $(PERF_VENV)/bin/python
-# Test recipes must not inherit Loom runtime/agent env from worker shells.
-SANITIZE_LOOM_TEST_ENV = env $$(env | sed -n 's/^\(LOOM_[A-Za-z0-9_]*\)=.*/-u \1/p')
+# Test recipes must not inherit Torque runtime/agent env from worker shells.
+SANITIZE_TORQUE_TEST_ENV = env $$(env | sed -n 's/^\(TORQUE_[A-Za-z0-9_]*\)=.*/-u \1/p')
 
 .PHONY: install uninstall run deps desktop-deps check stop deploy autolaunch cli standalone standalone-bg desktop desktop-attach open test perf-deps perf-baseline perf-delta
 
 ## install: Set up the iTerm2 script project and copy all files
 install:
 	@# -- Ensure project directory exists --
-	@mkdir -p "$(SCRIPT_DIR)/loom"
-	@mkdir -p "$(SCRIPT_DIR)/loom/adapters"
+	@mkdir -p "$(SCRIPT_DIR)/torque"
+	@mkdir -p "$(SCRIPT_DIR)/torque/adapters"
 	@mkdir -p "$(SCRIPT_DIR)/static/js"
 	@# -- Bootstrap iterm2env if missing --
 	@if [ ! -d "$(ITERM2_PROJECT)/iterm2env" ]; then \
@@ -52,11 +52,11 @@ install:
 		echo "Generating setup.cfg (python=$${PY_VER:-3.14})"; \
 		printf '%s\n' \
 			'[metadata]' \
-			'name=loom' \
+			'name=torque' \
 			'version=2.0.0' \
 			'' \
 			'[options]' \
-			'scripts=loom/loom.py' \
+			'scripts=torque/torque.py' \
 			'install_requires=iterm2' \
 			"python_requires = =$${PY_VER:-3.14}" \
 			'' \
@@ -65,10 +65,10 @@ install:
 			> "$(ITERM2_PROJECT)/setup.cfg"; \
 	fi
 	@# -- Copy source files --
-	cp loom.py "$(SCRIPT_DIR)/$(MAIN_SCRIPT)"
-	cp loom_desktop.py "$(SCRIPT_DIR)/loom_desktop.py"
+	cp torque.py "$(SCRIPT_DIR)/$(MAIN_SCRIPT)"
+	cp torque_desktop.py "$(SCRIPT_DIR)/torque_desktop.py"
 	cp webview.html "$(SCRIPT_DIR)/webview.html"
-	@find loom -type f -name '*.py' -print0 | while IFS= read -r -d '' src; do \
+	@find torque -type f -name '*.py' -print0 | while IFS= read -r -d '' src; do \
 		dest="$(SCRIPT_DIR)/$$src"; \
 		mkdir -p "$$(dirname "$$dest")"; \
 		cp "$$src" "$$dest"; \
@@ -79,9 +79,9 @@ install:
 		cp "$$src" "$$dest"; \
 	done
 	@if repo_root=$$(git rev-parse --show-toplevel 2>/dev/null); then \
-		printf '%s\n' "$$repo_root" > "$(SCRIPT_DIR)/.loom_source_repo_root"; \
+		printf '%s\n' "$$repo_root" > "$(SCRIPT_DIR)/.torque_source_repo_root"; \
 	else \
-		rm -f "$(SCRIPT_DIR)/.loom_source_repo_root"; \
+		rm -f "$(SCRIPT_DIR)/.torque_source_repo_root"; \
 	fi
 	@# -- Install dependencies --
 	@PYTHON="$(PROJECT_PYTHON)"; \
@@ -96,9 +96,9 @@ install:
 	@echo "Installed to $(SCRIPT_DIR)"
 	@echo ""
 	@echo "Next steps:"
-	@echo "  1. Run: Scripts menu → loom"
+	@echo "  1. Run: Scripts menu → torque"
 	@echo "  2. Show Toolbelt: View → Show Toolbelt (⌘⇧B)"
-	@echo "  3. Check 'Loom' in the Toolbelt gear menu"
+	@echo "  3. Check 'Torque' in the Toolbelt gear menu"
 
 ## autolaunch: Symlink for auto-start on iTerm2 launch
 autolaunch: install
@@ -108,7 +108,7 @@ autolaunch: install
 
 ## uninstall: Remove installed files and autolaunch symlink
 uninstall:
-	rm -f "$(SCRIPT_DIR)/$(MAIN_SCRIPT)" "$(SCRIPT_DIR)/loom_desktop.py" "$(SCRIPT_DIR)/webview.html" "$(SCRIPT_DIR)/state.json" "$(SCRIPT_DIR)/loom.db" "$(SCRIPT_DIR)/.loom_source_repo_root"
+	rm -f "$(SCRIPT_DIR)/$(MAIN_SCRIPT)" "$(SCRIPT_DIR)/torque_desktop.py" "$(SCRIPT_DIR)/webview.html" "$(SCRIPT_DIR)/state.json" "$(SCRIPT_DIR)/torque.db" "$(SCRIPT_DIR)/.torque_source_repo_root"
 	rm -f "$(AUTOLAUNCH_DIR)/$(MAIN_SCRIPT)"
 	@echo "Uninstalled."
 
@@ -136,32 +136,32 @@ run:
 		echo "Error: iTerm2 Python not found. Run make install first."; \
 		exit 1; \
 	fi
-	@pid_file="$(SCRIPT_DIR)/loom.pid"; \
-	profile="$(LOOM_PROFILE)"; \
-	if [ -n "$(LOOM_DATA_DIR)" ]; then \
-		data_dir="$(LOOM_DATA_DIR)"; \
+	@pid_file="$(SCRIPT_DIR)/torque.pid"; \
+	profile="$(TORQUE_PROFILE)"; \
+	if [ -n "$(TORQUE_DATA_DIR)" ]; then \
+		data_dir="$(TORQUE_DATA_DIR)"; \
 	elif [ -n "$$profile" ]; then \
 		safe_profile=$$(printf '%s' "$$profile" \
 			| tr '[:upper:]' '[:lower:]' \
 			| sed -E 's/[^A-Za-z0-9._-]+/-/g; s/^[._-]+//; s/[._-]+$$//'); \
 		[ -n "$$safe_profile" ] || safe_profile=default; \
-		data_dir="$$HOME/.loom/profiles/$$safe_profile"; \
+		data_dir="$$HOME/.torque/profiles/$$safe_profile"; \
 	else \
 		data_dir="$(SCRIPT_DIR)"; \
 	fi; \
 	mkdir -p "$$data_dir"; \
-	nohup env LOOM_PORT="$(or $(LOOM_PORT),18932)" \
-		LOOM_PROFILE="$$profile" \
-		LOOM_DATA_DIR="$(LOOM_DATA_DIR)" \
+	nohup env TORQUE_PORT="$(or $(TORQUE_PORT),18932)" \
+		TORQUE_PROFILE="$$profile" \
+		TORQUE_DATA_DIR="$(TORQUE_DATA_DIR)" \
 		"$(ITERM2_PYTHON)" "$(SCRIPT_DIR)/$(MAIN_SCRIPT)" \
-		>> "$$data_dir/loom.log" 2>&1 < /dev/null & \
+		>> "$$data_dir/torque.log" 2>&1 < /dev/null & \
 	pid=$$!; \
 	echo "$$pid" > "$$pid_file"; \
-	echo "Loom started (PID $$pid). Logs: $$data_dir/loom.log"
+	echo "Torque started (PID $$pid). Logs: $$data_dir/torque.log"
 
-## stop: Kill any running loom instance (by port)
+## stop: Kill any running torque instance (by port)
 stop: _check_not_in_worker
-	@port="$(or $(LOOM_PORT),18932)"; \
+	@port="$(or $(TORQUE_PORT),18932)"; \
 	pid=$$(lsof -ti TCP:$$port -sTCP:LISTEN 2>/dev/null); \
 	if [ -n "$$pid" ]; then \
 		kill $$pid 2>/dev/null; \
@@ -170,8 +170,8 @@ stop: _check_not_in_worker
 		echo "No process on port $$port."; \
 	fi
 
-## _check_not_in_worker: Refuse stop/deploy when called from inside a Loom worker
-## worktree or with LOOM_CELL_ID set. The main daemon is the process being killed;
+## _check_not_in_worker: Refuse stop/deploy when called from inside a Torque worker
+## worktree or with TORQUE_CELL_ID set. The main daemon is the process being killed;
 ## running this from a worker corrupts the in-memory dispatch pipeline on the
 ## next boot. Override with FORCE=1 only after reading the failure-mode notes in
 ## CLAUDE.md → "Never `make deploy` mid-session".
@@ -180,16 +180,16 @@ _check_not_in_worker:
 	@if [ -n "$$FORCE" ]; then \
 		exit 0; \
 	fi; \
-	if [ -n "$$LOOM_CELL_ID" ]; then \
-		echo "Error: LOOM_CELL_ID=$$LOOM_CELL_ID is set — you are inside a Loom worker."; \
+	if [ -n "$$TORQUE_CELL_ID" ]; then \
+		echo "Error: TORQUE_CELL_ID=$$TORQUE_CELL_ID is set — you are inside a Torque worker."; \
 		echo "       \`make stop\`/\`make deploy\` would kill the daemon you are talking to."; \
 		echo "       See CLAUDE.md → 'Never \`make deploy\` mid-session'."; \
 		echo "       If you really mean it: FORCE=1 make <target>"; \
 		exit 1; \
 	fi; \
 	case "$$(pwd)" in \
-	*.loom/worktrees/*) \
-		echo "Error: pwd is under .loom/worktrees/ — you are inside a Loom worker worktree."; \
+	*.torque/worktrees/*) \
+		echo "Error: pwd is under .torque/worktrees/ — you are inside a Torque worker worktree."; \
 		echo "       \`make stop\`/\`make deploy\` would kill the daemon that spawned you."; \
 		echo "       See CLAUDE.md → 'Never \`make deploy\` mid-session'."; \
 		echo "       If you really mean it: FORCE=1 make <target>"; \
@@ -200,46 +200,46 @@ _check_not_in_worker:
 ## deploy: Stop old instance, install new files, prompt to restart
 deploy: stop install
 	@echo ""
-	@echo "Now restart via: make run (or Scripts menu → loom)"
+	@echo "Now restart via: make run (or Scripts menu → torque)"
 
 ## restart: Deploy and launch in one step
 restart: deploy run
 
-## cli: Install the loom CLI to ~/.local/bin (add to PATH if needed)
+## cli: Install the torque CLI to ~/.local/bin (add to PATH if needed)
 cli:
-	@chmod +x bin/loom
+	@chmod +x bin/torque
 	@mkdir -p "$(HOME)/.local/bin"
-	@ln -sf "$(CURDIR)/bin/loom" "$(HOME)/.local/bin/loom"
-	@echo "Installed: loom → $(CURDIR)/bin/loom"
-	@echo "  Symlink: $(HOME)/.local/bin/loom"
+	@ln -sf "$(CURDIR)/bin/torque" "$(HOME)/.local/bin/torque"
+	@echo "Installed: torque → $(CURDIR)/bin/torque"
+	@echo "  Symlink: $(HOME)/.local/bin/torque"
 	@case "$$PATH" in *$(HOME)/.local/bin*) ;; *) \
 		echo ""; \
 		echo "  Add to your PATH if not already:"; \
 		echo "    export PATH=\"\$$HOME/.local/bin:\$$PATH\"";; \
 	esac
 
-## standalone: Run Loom in standalone-only mode in the foreground
+## standalone: Run Torque in standalone-only mode in the foreground
 standalone: install
 	@if [ -z "$(ITERM2_PYTHON)" ]; then \
 		echo "Error: iTerm2 Python not found. Run make install first."; \
 		exit 1; \
 	fi
-	@profile="$(or $(LOOM_PROFILE),standalone)"; \
-	if [ -n "$(LOOM_DATA_DIR)" ]; then \
-		data_dir="$(LOOM_DATA_DIR)"; \
+	@profile="$(or $(TORQUE_PROFILE),standalone)"; \
+	if [ -n "$(TORQUE_DATA_DIR)" ]; then \
+		data_dir="$(TORQUE_DATA_DIR)"; \
 	else \
 		safe_profile=$$(printf '%s' "$$profile" \
 			| tr '[:upper:]' '[:lower:]' \
 			| sed -E 's/[^A-Za-z0-9._-]+/-/g; s/^[._-]+//; s/[._-]+$$//'); \
 		[ -n "$$safe_profile" ] || safe_profile=default; \
-		data_dir="$$HOME/.loom/profiles/$$safe_profile"; \
+		data_dir="$$HOME/.torque/profiles/$$safe_profile"; \
 	fi; \
-	echo "Starting Loom standalone on http://127.0.0.1:$(or $(LOOM_PORT),18932)/"; \
+	echo "Starting Torque standalone on http://127.0.0.1:$(or $(TORQUE_PORT),18932)/"; \
 	echo "Using standalone data dir: $$data_dir"; \
 	echo "Running in the foreground. Keep this shell open; press Ctrl-C to stop."; \
-	env LOOM_STANDALONE=1 LOOM_PORT="$(or $(LOOM_PORT),18932)" \
-		LOOM_PROFILE="$$profile" \
-		LOOM_DATA_DIR="$(LOOM_DATA_DIR)" \
+	env TORQUE_STANDALONE=1 TORQUE_PORT="$(or $(TORQUE_PORT),18932)" \
+		TORQUE_PROFILE="$$profile" \
+		TORQUE_DATA_DIR="$(TORQUE_DATA_DIR)" \
 		"$(ITERM2_PYTHON)" "$(SCRIPT_DIR)/$(MAIN_SCRIPT)"
 
 ## standalone-bg: Best-effort detached standalone launch
@@ -249,88 +249,88 @@ standalone-bg: install
 		exit 1; \
 	fi
 	@pid_file="$(SCRIPT_DIR)/standalone.pid"; \
-	profile="$(or $(LOOM_PROFILE),standalone)"; \
-	if [ -n "$(LOOM_DATA_DIR)" ]; then \
-		data_dir="$(LOOM_DATA_DIR)"; \
+	profile="$(or $(TORQUE_PROFILE),standalone)"; \
+	if [ -n "$(TORQUE_DATA_DIR)" ]; then \
+		data_dir="$(TORQUE_DATA_DIR)"; \
 	else \
 		safe_profile=$$(printf '%s' "$$profile" \
 			| tr '[:upper:]' '[:lower:]' \
 			| sed -E 's/[^A-Za-z0-9._-]+/-/g; s/^[._-]+//; s/[._-]+$$//'); \
 		[ -n "$$safe_profile" ] || safe_profile=default; \
-		data_dir="$$HOME/.loom/profiles/$$safe_profile"; \
+		data_dir="$$HOME/.torque/profiles/$$safe_profile"; \
 	fi; \
 	mkdir -p "$$data_dir"; \
-	nohup env LOOM_STANDALONE=1 LOOM_PORT="$(or $(LOOM_PORT),18932)" \
-		LOOM_PROFILE="$$profile" \
-		LOOM_DATA_DIR="$(LOOM_DATA_DIR)" \
+	nohup env TORQUE_STANDALONE=1 TORQUE_PORT="$(or $(TORQUE_PORT),18932)" \
+		TORQUE_PROFILE="$$profile" \
+		TORQUE_DATA_DIR="$(TORQUE_DATA_DIR)" \
 		"$(ITERM2_PYTHON)" "$(SCRIPT_DIR)/$(MAIN_SCRIPT)" \
-		>> "$$data_dir/loom.log" 2>&1 < /dev/null & \
+		>> "$$data_dir/torque.log" 2>&1 < /dev/null & \
 	pid=$$!; \
 	echo "$$pid" > "$$pid_file"; \
-	echo "Loom standalone launch requested (PID $$pid). Logs: $$data_dir/loom.log"; \
-	echo "Open http://127.0.0.1:$(or $(LOOM_PORT),18932)/ in a browser"
+	echo "Torque standalone launch requested (PID $$pid). Logs: $$data_dir/torque.log"; \
+	echo "Open http://127.0.0.1:$(or $(TORQUE_PORT),18932)/ in a browser"
 
-## desktop: Run Loom in a native pywebview window backed by a standalone server
+## desktop: Run Torque in a native pywebview window backed by a standalone server
 desktop:
 	@if [ -z "$(ITERM2_PYTHON)" ]; then \
 		echo "Error: iTerm2 Python not found. Run make install first."; \
 		exit 1; \
 	fi
-	@profile="$(or $(LOOM_PROFILE),desktop)"; \
-	port="$(or $(LOOM_PORT),18933)"; \
-	if [ -n "$(LOOM_DATA_DIR)" ]; then \
-		data_dir="$(LOOM_DATA_DIR)"; \
+	@profile="$(or $(TORQUE_PROFILE),desktop)"; \
+	port="$(or $(TORQUE_PORT),18933)"; \
+	if [ -n "$(TORQUE_DATA_DIR)" ]; then \
+		data_dir="$(TORQUE_DATA_DIR)"; \
 	else \
 		safe_profile=$$(printf '%s' "$$profile" \
 			| tr '[:upper:]' '[:lower:]' \
 			| sed -E 's/[^A-Za-z0-9._-]+/-/g; s/^[._-]+//; s/[._-]+$$//'); \
 		[ -n "$$safe_profile" ] || safe_profile=default; \
-		data_dir="$$HOME/.loom/profiles/$$safe_profile"; \
+		data_dir="$$HOME/.torque/profiles/$$safe_profile"; \
 	fi; \
-	echo "Starting Loom desktop shell on http://127.0.0.1:$$port/"; \
+	echo "Starting Torque desktop shell on http://127.0.0.1:$$port/"; \
 	echo "Using desktop profile: $$profile"; \
 	echo "Using desktop data dir: $$data_dir"; \
-	env LOOM_DESKTOP_PORT="$$port" \
-		LOOM_DESKTOP_PROFILE="$$profile" \
-		LOOM_DESKTOP_DATA_DIR="$$data_dir" \
-		LOOM_PORT="$$port" \
-		LOOM_PROFILE="$$profile" \
-		LOOM_DATA_DIR="$$data_dir" \
-		LOOM_DESKTOP_MODE="spawn" \
-		"$(ITERM2_PYTHON)" "$(CURDIR)/loom_desktop.py"
+	env TORQUE_DESKTOP_PORT="$$port" \
+		TORQUE_DESKTOP_PROFILE="$$profile" \
+		TORQUE_DESKTOP_DATA_DIR="$$data_dir" \
+		TORQUE_PORT="$$port" \
+		TORQUE_PROFILE="$$profile" \
+		TORQUE_DATA_DIR="$$data_dir" \
+		TORQUE_DESKTOP_MODE="spawn" \
+		"$(ITERM2_PYTHON)" "$(CURDIR)/torque_desktop.py"
 
-## desktop-attach: Attach the native shell to an existing matching standalone Loom server
+## desktop-attach: Attach the native shell to an existing matching standalone Torque server
 desktop-attach:
 	@if [ -z "$(ITERM2_PYTHON)" ]; then \
 		echo "Error: iTerm2 Python not found. Run make install first."; \
 		exit 1; \
 	fi
-	@profile="$(or $(LOOM_PROFILE),desktop)"; \
-	port="$(or $(LOOM_PORT),18933)"; \
-	if [ -n "$(LOOM_DATA_DIR)" ]; then \
-		data_dir="$(LOOM_DATA_DIR)"; \
+	@profile="$(or $(TORQUE_PROFILE),desktop)"; \
+	port="$(or $(TORQUE_PORT),18933)"; \
+	if [ -n "$(TORQUE_DATA_DIR)" ]; then \
+		data_dir="$(TORQUE_DATA_DIR)"; \
 	else \
 		safe_profile=$$(printf '%s' "$$profile" \
 			| tr '[:upper:]' '[:lower:]' \
 			| sed -E 's/[^A-Za-z0-9._-]+/-/g; s/^[._-]+//; s/[._-]+$$//'); \
 		[ -n "$$safe_profile" ] || safe_profile=default; \
-		data_dir="$$HOME/.loom/profiles/$$safe_profile"; \
+		data_dir="$$HOME/.torque/profiles/$$safe_profile"; \
 	fi; \
-	echo "Attaching Loom desktop shell to http://127.0.0.1:$$port/"; \
+	echo "Attaching Torque desktop shell to http://127.0.0.1:$$port/"; \
 	echo "Expecting standalone profile: $$profile"; \
 	echo "Expecting standalone data dir: $$data_dir"; \
-	env LOOM_DESKTOP_PORT="$$port" \
-		LOOM_DESKTOP_PROFILE="$$profile" \
-		LOOM_DESKTOP_DATA_DIR="$$data_dir" \
-		LOOM_PORT="$$port" \
-		LOOM_PROFILE="$$profile" \
-		LOOM_DATA_DIR="$$data_dir" \
-		LOOM_DESKTOP_MODE="attach" \
-		"$(ITERM2_PYTHON)" "$(CURDIR)/loom_desktop.py"
+	env TORQUE_DESKTOP_PORT="$$port" \
+		TORQUE_DESKTOP_PROFILE="$$profile" \
+		TORQUE_DESKTOP_DATA_DIR="$$data_dir" \
+		TORQUE_PORT="$$port" \
+		TORQUE_PROFILE="$$profile" \
+		TORQUE_DATA_DIR="$$data_dir" \
+		TORQUE_DESKTOP_MODE="attach" \
+		"$(ITERM2_PYTHON)" "$(CURDIR)/torque_desktop.py"
 
-## open: Open the Loom UI in the default browser (works in dual or standalone mode)
+## open: Open the Torque UI in the default browser (works in dual or standalone mode)
 open:
-	@open "http://127.0.0.1:$(or $(LOOM_PORT),18932)/"
+	@open "http://127.0.0.1:$(or $(TORQUE_PORT),18932)/"
 
 ## check: Verify prerequisites
 check:
@@ -358,7 +358,7 @@ check:
 
 ## test: Run the automated regression suite
 test:
-	@$(SANITIZE_LOOM_TEST_ENV) python3 -m unittest discover -s tests -v
+	@$(SANITIZE_TORQUE_TEST_ENV) python3 -m unittest discover -s tests -v
 
 ## perf-deps: Prepare the cached Python environment used by perf harness targets
 perf-deps:

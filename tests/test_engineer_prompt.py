@@ -21,11 +21,11 @@ def _install_aiohttp_stub():
 class EngineerPromptTests(unittest.TestCase):
     def setUp(self):
         _install_aiohttp_stub()
-        self.engineer_mod = importlib.import_module("loom.engineer")
+        self.engineer_mod = importlib.import_module("torque.engineer")
         self.engineer_mod = importlib.reload(self.engineer_mod)
 
     def test_prompt_includes_compact_operational_guidance_sections(self):
-        prompt = self.engineer_mod.build_engineer_system_prompt("Loom")
+        prompt = self.engineer_mod.build_engineer_system_prompt("Torque")
 
         self.assertIn("## Core orchestration model", prompt)
         self.assertIn("engineer_streams_list", prompt)
@@ -35,7 +35,7 @@ class EngineerPromptTests(unittest.TestCase):
         self.assertIn("**Stream** = one branch/worktree execution lane", prompt)
         self.assertIn("**Product tasks** = deliverables", prompt)
         self.assertIn("**Workflow tasks** = review/fix/validation", prompt)
-        self.assertIn("**Derived tasks** = Loom-created workflow handoffs", prompt)
+        self.assertIn("**Derived tasks** = Torque-created workflow handoffs", prompt)
         self.assertIn("**Visibility items** = communication/context", prompt)
         self.assertIn("actions are workflow contracts", prompt)
         self.assertIn("Most derived tasks are workflow tasks inside an existing stream", prompt)
@@ -91,7 +91,7 @@ class EngineerPromptTests(unittest.TestCase):
         self.assertIn("board should stop widening work", prompt)
         self.assertIn("use `engineer_note`", prompt)
         self.assertIn("instead of `engineer_ask`", prompt)
-        self.assertIn("**Loom mechanics**", prompt)
+        self.assertIn("**Torque mechanics**", prompt)
         self.assertIn("shared `agent_group`", prompt)
         self.assertIn("`engineer_task_dispatch(agent=...)`", prompt)
         self.assertIn("share one worktree/branch until merge or cleanup", prompt)
@@ -99,7 +99,7 @@ class EngineerPromptTests(unittest.TestCase):
 
     def test_prompt_includes_structured_policy_overrides(self):
         prompt = self.engineer_mod.build_engineer_system_prompt(
-            "Loom",
+            "Torque",
             SimpleNamespace(
                 autonomy_mode="suggest_only",
                 default_worker_concurrency=4,
@@ -131,11 +131,11 @@ class EngineerPromptTests(unittest.TestCase):
             prompt,
         )
         self.assertIn("prefer `engineer_note` with a proposed wave", prompt)
-        self.assertIn("Shape Loom digests as detailed by default.", prompt)
+        self.assertIn("Shape Torque digests as detailed by default.", prompt)
 
     def test_prompt_uses_markdown_heading_for_custom_instructions(self):
         prompt = self.engineer_mod.build_engineer_system_prompt(
-            "Loom",
+            "Torque",
             SimpleNamespace(
                 custom_instructions="Use concise notes.",
             ),
@@ -145,7 +145,7 @@ class EngineerPromptTests(unittest.TestCase):
         self.assertIn("Use concise notes.", prompt)
 
     def test_engineer_prompt_includes_architect_escalation_guidance(self):
-        prompt = self.engineer_mod.build_engineer_system_prompt("Loom")
+        prompt = self.engineer_mod.build_engineer_system_prompt("Torque")
 
         self.assertIn("## Architect escalation", prompt)
         self.assertIn("engineer_message_architect", prompt)
@@ -159,7 +159,7 @@ class EngineerPromptTests(unittest.TestCase):
             "Priorities:\n- rerender hygiene\n- accessibility"
         )
         prompt = self.engineer_mod.build_engineer_system_prompt(
-            "Loom",
+            "Torque",
             SimpleNamespace(custom_instructions="Use concise notes."),
             specializations_preamble=preamble,
         )
@@ -176,7 +176,7 @@ class EngineerPromptTests(unittest.TestCase):
 
     def test_prompt_omits_specializations_section_when_empty(self):
         prompt = self.engineer_mod.build_engineer_system_prompt(
-            "Loom",
+            "Torque",
             SimpleNamespace(custom_instructions="Use concise notes."),
             specializations_preamble="",
         )

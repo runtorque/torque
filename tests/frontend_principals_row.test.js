@@ -51,8 +51,8 @@ function createSandbox() {
     window: {},
     state: {
       agents: {},
-      groups: { loom: [] },
-      group_settings: { loom: { collapsed_default: false } },
+      groups: { torque: [] },
+      group_settings: { torque: { collapsed_default: false } },
       children: {},
       board_tasks: {},
       selected_principal_id: '',
@@ -64,7 +64,7 @@ function createSandbox() {
     dragInProgress: false,
     sendCalls: [],
     esc(value) { return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); },
-    isSystemLabel(l) { return String(l).startsWith('loom:'); },
+    isSystemLabel(l) { return String(l).startsWith('torque:'); },
     displayLabel(l) { return String(l); },
     agentStatusClass(a) {
       if (!a) return '';
@@ -144,7 +144,7 @@ function createFullHarness() {
 function architect(id, name, createdAt) {
   return {
     id, name, slug: id, kind: 'architect',
-    group: 'loom', cell_type: 'agent', status: 'running',
+    group: 'torque', cell_type: 'agent', status: 'running',
     created_at: createdAt || 1,
   };
 }
@@ -153,7 +153,7 @@ function engineer(id, name, hiredBy, createdAt) {
   return {
     id, name, slug: id, kind: 'engineer',
     hired_by_architect_id: hiredBy || '',
-    group: 'loom', cell_type: 'agent', status: 'running',
+    group: 'torque', cell_type: 'agent', status: 'running',
     created_at: createdAt || 1,
   };
 }
@@ -162,14 +162,14 @@ function worker(id, name, ownerEngineer, createdAt) {
   return {
     id, name, slug: id, kind: 'worker',
     owner_engineer_id: ownerEngineer,
-    group: 'loom', cell_type: 'agent', status: 'running',
+    group: 'torque', cell_type: 'agent', status: 'running',
     created_at: createdAt || 1,
   };
 }
 
 test('principals row renders user + each architect + new architect ghost', () => {
   const { context, sandbox, mainEl } = createHarness();
-  sandbox.state.groups.loom = ['arch-a', 'arch-b'];
+  sandbox.state.groups.torque = ['arch-a', 'arch-b'];
   sandbox.state.agents['arch-a'] = architect('arch-a', 'Productmind', 2);
   sandbox.state.agents['arch-b'] = architect('arch-b', 'Platform', 3);
   vm.runInContext('render();', context);
@@ -185,7 +185,7 @@ test('principals row renders user + each architect + new architect ghost', () =>
   assert.match(mainEl.innerHTML, /principal-card-new[\s\S]*\+ New Architect/);
 });
 
-test('principal-card-new CSS preserves dimensions when wrapped (LOOM:209 regression)', () => {
+test('principal-card-new CSS preserves dimensions when wrapped (TORQUE:209 regression)', () => {
   // The "+ New Architect" ghost button uses .ghost-card height (~16-20px) by
   // default, which makes it look squeezed when it wraps to its own row in a
   // narrow panel. .principal-card-new must override height + min-height so the
@@ -286,7 +286,7 @@ test('agent card density CSS uses taller narrower cards in classic and runtime-e
 
 test('default (empty) selected_principal_id filters grid to user-owned engineers', () => {
   const { context, sandbox, mainEl } = createHarness();
-  sandbox.state.groups.loom = ['arch-a', 'eng-user', 'eng-arch'];
+  sandbox.state.groups.torque = ['arch-a', 'eng-user', 'eng-arch'];
   sandbox.state.agents['arch-a'] = architect('arch-a', 'Productmind', 2);
   sandbox.state.agents['eng-user'] = engineer('eng-user', 'UserEng', '', 3);
   sandbox.state.agents['eng-arch'] = engineer('eng-arch', 'ArchEng', 'arch-a', 4);
@@ -303,7 +303,7 @@ test('default (empty) selected_principal_id filters grid to user-owned engineers
 
 test('architect selection filters grid to that architect\'s engineers + workers', () => {
   const { context, sandbox, mainEl } = createHarness();
-  sandbox.state.groups.loom = ['arch-a', 'eng-user', 'eng-arch', 'worker-a'];
+  sandbox.state.groups.torque = ['arch-a', 'eng-user', 'eng-arch', 'worker-a'];
   sandbox.state.agents['arch-a'] = architect('arch-a', 'Productmind', 2);
   sandbox.state.agents['eng-user'] = engineer('eng-user', 'UserEng', '', 3);
   sandbox.state.agents['eng-arch'] = engineer('eng-arch', 'ArchEng', 'arch-a', 4);
@@ -320,7 +320,7 @@ test('architect selection filters grid to that architect\'s engineers + workers'
 
 test('clicking an architect principal sets filter AND makes it the focused agent', () => {
   const { context, sandbox, mainEl } = createHarness();
-  sandbox.state.groups.loom = ['arch-a'];
+  sandbox.state.groups.torque = ['arch-a'];
   sandbox.state.agents['arch-a'] = architect('arch-a', 'Productmind', 2);
   vm.runInContext('render();', context);
 
@@ -339,7 +339,7 @@ test('clicking an architect principal sets filter AND makes it the focused agent
 
 test('clicking the User principal sets filter but does not hijack selectedAgentId', () => {
   const { context, sandbox } = createHarness();
-  sandbox.state.groups.loom = ['arch-a', 'eng-prev'];
+  sandbox.state.groups.torque = ['arch-a', 'eng-prev'];
   sandbox.state.agents['arch-a'] = architect('arch-a', 'Productmind', 2);
   sandbox.state.agents['eng-prev'] = engineer('eng-prev', 'PriorEng', '', 3);
   sandbox.state.selected_principal_id = 'arch-a';
@@ -356,7 +356,7 @@ test('clicking the User principal sets filter but does not hijack selectedAgentI
 
 test('selectPrincipal refocuses the architect terminal even when already selected', () => {
   const { context, sandbox } = createHarness();
-  sandbox.state.groups.loom = ['arch-a'];
+  sandbox.state.groups.torque = ['arch-a'];
   sandbox.state.agents['arch-a'] = architect('arch-a', 'Productmind', 2);
   sandbox.state.selected_principal_id = 'arch-a';
   vm.runInContext("selectedAgentId = 'arch-a';", context);
@@ -467,7 +467,7 @@ test('agent card action label prefers fresh activity detail over stale MCP messa
 test('non-selected architect card shows engineer count and action, not decision stats', () => {
   const { context, sandbox, mainEl } = createHarness();
   const now = Date.now() / 1000;
-  sandbox.state.groups.loom = ['arch-a', 'eng-arch', 'worker-err'];
+  sandbox.state.groups.torque = ['arch-a', 'eng-arch', 'worker-err'];
   sandbox.state.agents['arch-a'] = architect('arch-a', 'Productmind', 2);
   sandbox.state.agents['arch-a'].last_progress_at = now - 120;
   sandbox.state.agents['arch-a'].activity_detail = 'planning v1.6';
@@ -488,20 +488,20 @@ test('non-selected architect card shows engineer count and action, not decision 
 
 test('user principal card shows user-owned engineer count and backlog count', () => {
   const { context, sandbox, mainEl } = createHarness();
-  sandbox.state.groups.loom = ['eng-user', 'eng-arch', 'arch-a'];
+  sandbox.state.groups.torque = ['eng-user', 'eng-arch', 'arch-a'];
   sandbox.state.agents['eng-user'] = engineer('eng-user', 'UserEng', '', 2);
   sandbox.state.agents['eng-arch'] = engineer('eng-arch', 'ArchEng', 'arch-a', 3);
   sandbox.state.agents['arch-a'] = architect('arch-a', 'Productmind', 4);
   sandbox.state.board_tasks = {
     'user-backlog': {
       id: 'user-backlog',
-      group: 'loom',
+      group: 'torque',
       lane: 'Backlog',
       assigned_engineer_id: 'eng-user',
     },
     'arch-backlog': {
       id: 'arch-backlog',
-      group: 'loom',
+      group: 'torque',
       lane: 'Backlog',
       assigned_engineer_id: 'eng-arch',
     },
@@ -525,7 +525,7 @@ test('user principal card shows user-owned engineer count and backlog count', ()
 
 test('selected principal card does not render the status badge', () => {
   const { context, sandbox, mainEl } = createHarness();
-  sandbox.state.groups.loom = ['arch-a', 'eng-arch'];
+  sandbox.state.groups.torque = ['arch-a', 'eng-arch'];
   sandbox.state.agents['arch-a'] = architect('arch-a', 'Productmind', 2);
   sandbox.state.agents['eng-arch'] = engineer('eng-arch', 'ArchEng', 'arch-a', 3);
   sandbox.state.selected_principal_id = 'arch-a';
@@ -538,7 +538,7 @@ test('selected principal card does not render the status badge', () => {
 
 test('ui_select_principal delta op updates state.selected_principal_id on the client', () => {
   const { context, sandbox } = createHarness();
-  sandbox.state.groups.loom = ['arch-a'];
+  sandbox.state.groups.torque = ['arch-a'];
   sandbox.state.agents['arch-a'] = architect('arch-a', 'Productmind', 2);
   // Simulate a delta push of the selection change (from a different UI tab).
   vm.runInContext("state.selected_principal_id = 'arch-a';", context);
@@ -548,19 +548,19 @@ test('ui_select_principal delta op updates state.selected_principal_id on the cl
 
 test('user view shows standalone Add Worker affordance', () => {
   const { context, sandbox, mainEl } = createHarness();
-  sandbox.state.groups.loom = [];
+  sandbox.state.groups.torque = [];
   sandbox.state.selected_principal_id = '';
   vm.runInContext('render();', context);
 
   assert.match(mainEl.innerHTML, /\+ Add Worker/);
   assert.match(mainEl.innerHTML, /standalone-worker-card-new/);
-  assert.match(mainEl.innerHTML, /openAddWorkerForSection\(&quot;loom&quot;\)/);
+  assert.match(mainEl.innerHTML, /openAddWorkerForSection\(&quot;torque&quot;\)/);
   assert.match(mainEl.innerHTML, /loose-workers-strip[\s\S]*\+ Add Worker/);
 });
 
 test('falls back to user principal when stored architect id no longer exists', () => {
   const { context, sandbox, mainEl } = createHarness();
-  sandbox.state.groups.loom = ['eng-user'];
+  sandbox.state.groups.torque = ['eng-user'];
   sandbox.state.agents['eng-user'] = engineer('eng-user', 'UserEng', '', 3);
   sandbox.state.selected_principal_id = 'arch-ghost';
   vm.runInContext('render();', context);
@@ -572,7 +572,7 @@ test('falls back to user principal when stored architect id no longer exists', (
 
 test('principals row registers principal items in the nav grid rows', () => {
   const { context, sandbox } = createHarness();
-  sandbox.state.groups.loom = ['arch-a'];
+  sandbox.state.groups.torque = ['arch-a'];
   sandbox.state.agents['arch-a'] = architect('arch-a', 'Productmind', 2);
   vm.runInContext('render();', context);
 
@@ -587,24 +587,24 @@ test('principals row registers principal items in the nav grid rows', () => {
   assert.equal(principalsRow.items.length, 3);
   assert.equal(principalsRow.items[0].type, 'principal');
   assert.equal(principalsRow.items[0].principalId, '');
-  assert.equal(principalsRow.items[0].id, 'principal:loom:user');
+  assert.equal(principalsRow.items[0].id, 'principal:torque:user');
   assert.equal(principalsRow.items[1].type, 'principal');
   assert.equal(principalsRow.items[1].principalId, 'arch-a');
-  assert.equal(principalsRow.items[1].id, 'principal:loom:arch-a');
+  assert.equal(principalsRow.items[1].id, 'principal:torque:arch-a');
   assert.equal(principalsRow.items[2].type, 'control');
 });
 
 test('arrow-right on principals row focuses next principal and commits the filter', () => {
   const { context, sandbox } = createHarness();
-  sandbox.state.groups.loom = ['arch-a'];
+  sandbox.state.groups.torque = ['arch-a'];
   sandbox.state.agents['arch-a'] = architect('arch-a', 'Productmind', 2);
   sandbox.state.selected_principal_id = '';
   vm.runInContext('render();', context);
 
   // Simulate arrow-right from user principal → architect principal.
-  vm.runInContext("focusedItemId = 'principal:loom:user'; moveFocusHorizontal(1);", context);
+  vm.runInContext("focusedItemId = 'principal:torque:user'; moveFocusHorizontal(1);", context);
 
-  assert.equal(vm.runInContext('focusedItemId', context), 'principal:loom:arch-a');
+  assert.equal(vm.runInContext('focusedItemId', context), 'principal:torque:arch-a');
   assert.equal(sandbox.state.selected_principal_id, 'arch-a');
   assert.ok(sandbox.sendCalls.some(function(c) {
     return c.cmd === 'ui_select_principal' && c.principal_id === 'arch-a';
@@ -613,7 +613,7 @@ test('arrow-right on principals row focuses next principal and commits the filte
 
 test('arrow-up from an engineer returns to the currently-selected principal card', () => {
   const { context, sandbox } = createHarness();
-  sandbox.state.groups.loom = ['arch-a', 'eng-arch'];
+  sandbox.state.groups.torque = ['arch-a', 'eng-arch'];
   sandbox.state.agents['arch-a'] = architect('arch-a', 'Productmind', 2);
   sandbox.state.agents['eng-arch'] = engineer('eng-arch', 'ArchEng', 'arch-a', 3);
   sandbox.state.selected_principal_id = 'arch-a';
@@ -621,7 +621,7 @@ test('arrow-up from an engineer returns to the currently-selected principal card
 
   vm.runInContext("focusedItemId = 'eng-arch'; moveFocusUp();", context);
 
-  assert.equal(vm.runInContext('focusedItemId', context), 'principal:loom:arch-a');
+  assert.equal(vm.runInContext('focusedItemId', context), 'principal:torque:arch-a');
 });
 
 test('principal nav ids are group-scoped so multi-group workspaces do not collide', () => {
@@ -654,7 +654,7 @@ test('principal nav ids are group-scoped so multi-group workspaces do not collid
 
 test('empty selected principal renders the "No engineers yet." placeholder', () => {
   const { context, sandbox, mainEl } = createHarness();
-  sandbox.state.groups.loom = [];
+  sandbox.state.groups.torque = [];
   sandbox.state.selected_principal_id = '';
   vm.runInContext('render();', context);
 
@@ -664,7 +664,7 @@ test('empty selected principal renders the "No engineers yet." placeholder', () 
 
 test('architect with no engineers renders the empty placeholder when selected', () => {
   const { context, sandbox, mainEl } = createHarness();
-  sandbox.state.groups.loom = ['arch-a'];
+  sandbox.state.groups.torque = ['arch-a'];
   sandbox.state.agents['arch-a'] = architect('arch-a', 'Productmind', 2);
   sandbox.state.selected_principal_id = 'arch-a';
   vm.runInContext('render();', context);
@@ -680,7 +680,7 @@ test('narrow viewports allow the principals row to wrap via flex-wrap', () => {
 });
 
 /* ------------------------------------------------------------------ */
-/* LOOM:190 post-deploy regression hotfix coverage.                     */
+/* TORQUE:190 post-deploy regression hotfix coverage.                     */
 /* ------------------------------------------------------------------ */
 
 test('User + architect principal cards share the same width variable (Bug 1)', () => {
@@ -701,7 +701,7 @@ test('User + architect principal cards share the same width variable (Bug 1)', (
 
 test('architect principal card renders pause + close controls (Bug 3)', () => {
   const { context, sandbox, mainEl } = createHarness();
-  sandbox.state.groups.loom = ['arch-a'];
+  sandbox.state.groups.torque = ['arch-a'];
   sandbox.state.agents['arch-a'] = architect('arch-a', 'Productmind', 2);
   vm.runInContext('render();', context);
 
@@ -720,7 +720,7 @@ test('architect principal card renders pause + close controls (Bug 3)', () => {
 
 test('User principal card omits pause + close controls (Bug 3)', () => {
   const { context, sandbox, mainEl } = createHarness();
-  sandbox.state.groups.loom = [];
+  sandbox.state.groups.torque = [];
   vm.runInContext('render();', context);
 
   const userBlock = extractPrincipalCardHtml(mainEl.innerHTML, 'user', '');
@@ -733,7 +733,7 @@ test('User principal card omits pause + close controls (Bug 3)', () => {
 
 test('paused architect principal card renders resume icon + paused class (Bug 3)', () => {
   const { context, sandbox, mainEl } = createHarness();
-  sandbox.state.groups.loom = ['arch-a'];
+  sandbox.state.groups.torque = ['arch-a'];
   sandbox.state.agents['arch-a'] = architect('arch-a', 'Productmind', 2);
   sandbox.state.agent_digest_settings = { 'arch-a': { paused: true } };
   vm.runInContext('render();', context);
@@ -751,7 +751,7 @@ test('pause toggle on architect principal invokes toggleDigestPauseForAgent (Bug
   // agent_panel.js; stub it and confirm the click expression in the
   // rendered markup evaluates to a call for this architect.
   const { context, sandbox, mainEl } = createHarness();
-  sandbox.state.groups.loom = ['arch-a'];
+  sandbox.state.groups.torque = ['arch-a'];
   sandbox.state.agents['arch-a'] = architect('arch-a', 'Productmind', 2);
   let lastToggleCall = null;
   vm.runInContext(
@@ -797,10 +797,10 @@ function extractAgentCellHtml(html, agentId) {
 test('agents-grid v2 renders all kind shells with one-metric lines and required corner badges', () => {
   const { context, sandbox, mainEl } = createFullHarness();
   const now = Date.now() / 1000;
-  sandbox.state.groups.loom = ['arch-a', 'eng-a', 'worker-a'];
+  sandbox.state.groups.torque = ['arch-a', 'eng-a', 'worker-a'];
   sandbox.state.children = {};
   sandbox.state.agents['arch-a'] = {
-    ...architect('arch-a', 'Loomer', 1),
+    ...architect('arch-a', 'Torquer', 1),
     agent_type: 'claude-code',
     last_progress_at: now - 300,
     activity_detail: 'planning hierarchy',
@@ -815,17 +815,17 @@ test('agents-grid v2 renders all kind shells with one-metric lines and required 
     ...worker('worker-a', 'Worker', 'eng-a', 3),
     slug: 'architect-card-click-focus-fix',
     agent_type: 'codex',
-    current_task_id: 'LOOM:216',
+    current_task_id: 'TORQUE:216',
     worktree_diff: { files: 3, insertions: 58, deletions: 3 },
     worktree_dirty: false,
-    worktree_branch: 'loom/panelsmith/architect-card-click-focus-fix-746495a',
+    worktree_branch: 'torque/panelsmith/architect-card-click-focus-fix-746495a',
     last_progress_at: now - 30,
     activity_detail: 'editing cards',
   };
   sandbox.state.board_tasks = {
-    'LOOM:216': {
-      id: 'LOOM:216',
-      group: 'loom',
+    'TORQUE:216': {
+      id: 'TORQUE:216',
+      group: 'torque',
       task: 'Review worker cards',
       lane: 'In Progress',
       action_name: 'feature/review',
@@ -833,10 +833,10 @@ test('agents-grid v2 renders all kind shells with one-metric lines and required 
     },
     'ask-1': {
       id: 'ask-1',
-      group: 'loom',
+      group: 'torque',
       task: 'Need user decision',
       lane: 'To Do',
-      labels: ['loom:human', 'architect-ask'],
+      labels: ['torque:human', 'architect-ask'],
       created_by_architect_id: 'arch-a',
     },
   };
@@ -894,9 +894,9 @@ test('agents-grid v2 renders all kind shells with one-metric lines and required 
   assert.match(workerBlock, /cell-worker-badge">Worker/);
   assert.match(workerBlock, /architect-car…/);
   assert.match(workerBlock, /data-tooltip="architect-card-click-focus-fix"/);
-  assert.match(workerBlock, /cell-worker-task cell-worker-task--clickable[^"]*"[^>]*>LOOM:216/);
+  assert.match(workerBlock, /cell-worker-task cell-worker-task--clickable[^"]*"[^>]*>TORQUE:216/);
   assert.match(workerBlock, /cell-worker-cycle">cycle: review/);
-  assert.doesNotMatch(workerBlock, /LOOM:216 · review/);
+  assert.doesNotMatch(workerBlock, /TORQUE:216 · review/);
   assert.match(workerBlock, /\+58\/-3 \(clean\)/);
   assert.match(workerBlock, /worktree: archite…/);
   assert.match(workerBlock, /cell-worker-activity[^>]*>editing cards/);
@@ -908,8 +908,8 @@ test('agents-grid v2 renders all kind shells with one-metric lines and required 
 test('architect card omits decision count and last-decision timer even when decisions exist', () => {
   const { context, sandbox, mainEl } = createFullHarness();
   const now = Date.now() / 1000;
-  sandbox.state.groups.loom = ['arch-a'];
-  sandbox.state.agents['arch-a'] = architect('arch-a', 'Loomer', now - 3600);
+  sandbox.state.groups.torque = ['arch-a'];
+  sandbox.state.agents['arch-a'] = architect('arch-a', 'Torquer', now - 3600);
   sandbox.state.agents['arch-a'].last_progress_at = now - 120;
   sandbox.state.agents['arch-a'].activity_detail = 'coordinating engineers';
   sandbox.state.decisions = {
@@ -951,14 +951,14 @@ test('architect card omits decision count and last-decision timer even when deci
   assert.doesNotMatch(archBlock, /last decision 15h/);
 });
 
-test('worktree branch shortname strips loom engineer prefix and short id suffix', () => {
+test('worktree branch shortname strips torque engineer prefix and short id suffix', () => {
   const { context } = createFullHarness();
   assert.equal(
-    vm.runInContext("_worktreeBranchShortName('loom/panelsmith/architect-card-click-focus-fix-746495a')", context),
+    vm.runInContext("_worktreeBranchShortName('torque/panelsmith/architect-card-click-focus-fix-746495a')", context),
     'architect-card-click-focus-fix',
   );
   assert.equal(
-    vm.runInContext("_worktreeBranchShortName('loom/agents-grid-layout-v2-28c6725')", context),
+    vm.runInContext("_worktreeBranchShortName('torque/agents-grid-layout-v2-28c6725')", context),
     'agents-grid-layout-v2',
   );
   assert.equal(
@@ -969,44 +969,44 @@ test('worktree branch shortname strips loom engineer prefix and short id suffix'
 
 test('architect principal card omits pending asks even when architect asks exist', () => {
   const { context, sandbox, mainEl } = createFullHarness();
-  sandbox.state.groups.loom = ['arch-a', 'arch-b'];
+  sandbox.state.groups.torque = ['arch-a', 'arch-b'];
   sandbox.state.agents['arch-a'] = architect('arch-a', 'Architect A', 1);
   sandbox.state.agents['arch-b'] = architect('arch-b', 'Architect B', 2);
   sandbox.state.board_tasks = {
     'worker-ask': {
       id: 'worker-ask',
-      group: 'loom',
+      group: 'torque',
       task: 'Worker needs input',
       lane: 'To Do',
-      labels: ['loom:human', 'loom:derived'],
+      labels: ['torque:human', 'torque:derived'],
       created_at: 1,
     },
     'arch-a-ask': {
       id: 'arch-a-ask',
-      group: 'loom',
+      group: 'torque',
       task: 'Architect A needs input',
       lane: 'To Do',
-      labels: ['loom:human', 'architect-ask'],
+      labels: ['torque:human', 'architect-ask'],
       created_by_architect_id: 'arch-a',
       reply_agent_id: 'arch-a',
       created_at: 2,
     },
     'arch-b-ask': {
       id: 'arch-b-ask',
-      group: 'loom',
+      group: 'torque',
       task: 'Architect B needs input',
       lane: 'To Do',
-      labels: ['loom:human', 'architect-ask'],
+      labels: ['torque:human', 'architect-ask'],
       created_by_architect_id: 'arch-b',
       reply_agent_id: 'arch-b',
       created_at: 3,
     },
     'arch-a-done-ask': {
       id: 'arch-a-done-ask',
-      group: 'loom',
+      group: 'torque',
       task: 'Done architect ask',
       lane: 'Done',
-      labels: ['loom:human', 'architect-ask'],
+      labels: ['torque:human', 'architect-ask'],
       created_by_architect_id: 'arch-a',
       reply_agent_id: 'arch-a',
       created_at: 4,
@@ -1041,25 +1041,25 @@ test('worker slug truncation uses immediate tooltip metadata, not title-only bro
   sandbox.state.children = {};
   sandbox.state.group_settings = {};
   sandbox.state.board_tasks = {
-    'LOOM:216': { id: 'LOOM:216', lane: 'In Progress', action_name: 'feature/implement', agent_id: 'worker-a' },
+    'TORQUE:216': { id: 'TORQUE:216', lane: 'In Progress', action_name: 'feature/implement', agent_id: 'worker-a' },
   };
   const html = vm.runInContext(`renderAgentCell({
     id: 'worker-a',
     name: 'Worker',
     slug: 'architect-card-click-focus-fix',
     kind: 'worker',
-    group: 'loom',
+    group: 'torque',
     cell_type: 'agent',
     status: 'running',
-    current_task_id: 'LOOM:216',
-    worktree_branch: 'loom/panelsmith/architect-card-click-focus-fix-746495a'
+    current_task_id: 'TORQUE:216',
+    worktree_branch: 'torque/panelsmith/architect-card-click-focus-fix-746495a'
   })`, context);
   assert.match(html, /architect-car…/);
-  assert.match(html, /cell-worker-task cell-worker-task--clickable[^"]*"[^>]*>LOOM:216/);
+  assert.match(html, /cell-worker-task cell-worker-task--clickable[^"]*"[^>]*>TORQUE:216/);
   assert.match(html, /cell-worker-cycle">cycle: implementation/);
   assert.match(html, /worktree: archite…/);
-  assert.doesNotMatch(html, /LOOM:216 · implementation/);
-  assert.doesNotMatch(html, /LOOM:216 · impl<\/div>/);
+  assert.doesNotMatch(html, /TORQUE:216 · implementation/);
+  assert.doesNotMatch(html, /TORQUE:216 · impl<\/div>/);
   assert.doesNotMatch(html, /wkt:/);
   assert.match(
     html,
@@ -1088,7 +1088,7 @@ test('provider badges render full subdued provider names', () => {
     id: 'eng-a',
     name: 'Panelsmith',
     kind: 'engineer',
-    group: 'loom',
+    group: 'torque',
     cell_type: 'agent',
     status: 'running',
     agent_type: 'claude-code'
@@ -1097,7 +1097,7 @@ test('provider badges render full subdued provider names', () => {
     id: 'worker-a',
     name: 'Worker',
     kind: 'worker',
-    group: 'loom',
+    group: 'torque',
     cell_type: 'agent',
     status: 'running',
     agent_type: 'codex'
@@ -1123,18 +1123,18 @@ test('agents-grid v2 rerender preserves main scroll while card bodies update', (
       this.scrollTop = 0;
     },
   });
-  sandbox.state.groups.loom = ['arch-a', 'eng-a', 'worker-a'];
+  sandbox.state.groups.torque = ['arch-a', 'eng-a', 'worker-a'];
   sandbox.state.children = {};
-  sandbox.state.agents['arch-a'] = architect('arch-a', 'Loomer', 1);
+  sandbox.state.agents['arch-a'] = architect('arch-a', 'Torquer', 1);
   sandbox.state.agents['eng-a'] = engineer('eng-a', 'Panelsmith', 'arch-a', 2);
   sandbox.state.agents['worker-a'] = {
     ...worker('worker-a', 'Worker', 'eng-a', 3),
     slug: 'worker-a',
-    current_task_id: 'LOOM:216',
+    current_task_id: 'TORQUE:216',
     worktree_diff: { insertions: 1, deletions: 0 },
   };
   sandbox.state.board_tasks = {
-    'LOOM:216': { id: 'LOOM:216', lane: 'In Progress', action_name: 'feature/implement', agent_id: 'worker-a' },
+    'TORQUE:216': { id: 'TORQUE:216', lane: 'In Progress', action_name: 'feature/implement', agent_id: 'worker-a' },
   };
   sandbox.state.selected_principal_id = 'arch-a';
 

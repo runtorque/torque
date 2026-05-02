@@ -9,7 +9,7 @@
  * These tests lock that contract in by asserting each primitive works with
  * state.runtime = { embedded_terminal: false } set explicitly. A future
  * change that adds a standalone-only gate inside any of these primitives
- * will fail here. Follow-up from LOOM:147 audit. */
+ * will fail here. Follow-up from TORQUE:147 audit. */
 
 const test = require('node:test');
 const assert = require('node:assert/strict');

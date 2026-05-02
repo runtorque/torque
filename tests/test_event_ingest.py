@@ -13,16 +13,16 @@ import warnings
 from pathlib import Path
 from unittest import mock
 
-from loom import event_ingest_daemon, profiling
-from loom.event_ingest_db import EventIngestStore
-from loom.event_ingest_daemon import (
+from torque import event_ingest_daemon, profiling
+from torque.event_ingest_db import EventIngestStore
+from torque.event_ingest_daemon import (
     EventIngestDaemon,
     PROTOCOL_VERSION,
     read_frame,
     write_frame,
 )
-from loom.event_ingest_client import EventIngestClient, EventIngestProtocolError
-from loom.events import (
+from torque.event_ingest_client import EventIngestClient, EventIngestProtocolError
+from torque.events import (
     EventBus,
     EventIngestDrainer,
     EventLog,
@@ -36,7 +36,7 @@ except ModuleNotFoundError:
 
 install_aiohttp_stub()
 
-from loom.state import AgentCell, MatrixState
+from torque.state import AgentCell, MatrixState
 
 
 async def _open_client(path: Path):
@@ -102,7 +102,7 @@ class EventIngestStoreTests(unittest.TestCase):
             raw["tool_output"] = tool_output
         return build_event_ingest_envelope(
             raw,
-            headers={"X-Loom-Cell-Id": cell_id},
+            headers={"X-Torque-Cell-Id": cell_id},
             received_at=received_at,
         )
 
@@ -153,7 +153,7 @@ class EventIngestStoreTests(unittest.TestCase):
                 store.append(
                     self._envelope(
                         "cell-a",
-                        "mcp__loom__loom_progress",
+                        "mcp__torque__torque_progress",
                         "PreToolUse",
                         received_at=10,
                     ),
@@ -163,7 +163,7 @@ class EventIngestStoreTests(unittest.TestCase):
                 store.append(
                     self._envelope(
                         "cell-a",
-                        "mcp__loom__loom_progress",
+                        "mcp__torque__torque_progress",
                         "PostToolUse",
                         tool_input={"message": "done"},
                         received_at=20,
@@ -174,7 +174,7 @@ class EventIngestStoreTests(unittest.TestCase):
                 store.append(
                     self._envelope(
                         "cell-b",
-                        "mcp__loom__loom_done",
+                        "mcp__torque__torque_done",
                         "PostToolUse",
                         received_at=30,
                     ),
@@ -193,20 +193,20 @@ class EventIngestStoreTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     [r["tool_name"] for r in store.query(
-                        tool_name_pattern="mcp__loom__loom_progress",
+                        tool_name_pattern="mcp__torque__torque_progress",
                         limit=10,
                     )],
-                    ["mcp__loom__loom_progress", "mcp__loom__loom_progress"],
+                    ["mcp__torque__torque_progress", "mcp__torque__torque_progress"],
                 )
                 self.assertEqual(
                     [r["tool_name"] for r in store.query(
-                        tool_name_pattern="mcp__loom__%",
+                        tool_name_pattern="mcp__torque__%",
                         limit=10,
                     )],
                     [
-                        "mcp__loom__loom_done",
-                        "mcp__loom__loom_progress",
-                        "mcp__loom__loom_progress",
+                        "mcp__torque__torque_done",
+                        "mcp__torque__torque_progress",
+                        "mcp__torque__torque_progress",
                     ],
                 )
                 self.assertEqual(
@@ -215,7 +215,7 @@ class EventIngestStoreTests(unittest.TestCase):
                         hook_event_name="PostToolUse",
                         since=15,
                         until=35,
-                        tool_name_pattern="mcp__loom__%",
+                        tool_name_pattern="mcp__torque__%",
                         limit=5,
                     )],
                     ["q2"],
@@ -247,7 +247,7 @@ class EventIngestStoreTests(unittest.TestCase):
                 )
                 event = self._envelope(
                     "legacy-cell",
-                    "mcp__loom__loom_context",
+                    "mcp__torque__torque_context",
                     "PostToolUse",
                     received_at=100,
                 )
@@ -264,7 +264,7 @@ class EventIngestStoreTests(unittest.TestCase):
             try:
                 rows = store.query(cell_id="legacy-cell", limit=10)
                 self.assertEqual(len(rows), 1)
-                self.assertEqual(rows[0]["tool_name"], "mcp__loom__loom_context")
+                self.assertEqual(rows[0]["tool_name"], "mcp__torque__torque_context")
             finally:
                 store.close()
 
@@ -272,9 +272,9 @@ class EventIngestStoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             event = self._envelope(
                 "cell",
-                "mcp__loom__secret",
+                "mcp__torque__secret",
                 "PostToolUse",
-                tool_input={"token": "secret", "task_id": "LOOM:1"},
+                tool_input={"token": "secret", "task_id": "TORQUE:1"},
                 tool_output={"result": "secret"},
             )
             off = EventIngestStore(
@@ -292,7 +292,7 @@ class EventIngestStoreTests(unittest.TestCase):
             allow = EventIngestStore(
                 Path(tmp) / "allow.db",
                 args_capture="metadata",
-                full_capture_tools=["mcp__loom__secret"],
+                full_capture_tools=["mcp__torque__secret"],
             ).init()
             try:
                 off.append(event, "off")
@@ -334,7 +334,7 @@ class EventIngestStoreTests(unittest.TestCase):
             try:
                 for idx in range(5):
                     store.append({"n": idx}, f"row-{idx}", now=100 + idx)
-                with mock.patch("loom.event_ingest_db.time.time", return_value=105):
+                with mock.patch("torque.event_ingest_db.time.time", return_value=105):
                     ack = store.ack(up_to=5)
                 self.assertEqual(ack["trimmed"], 2)
                 self.assertEqual([r["event"]["n"] for r in store.query(limit=10)], [4, 3, 2])
@@ -352,7 +352,7 @@ class EventIngestStoreTests(unittest.TestCase):
                 store.append({"n": "old"}, "old", now=100)
                 store.append({"n": "new"}, "new", now=now)
                 with mock.patch(
-                    "loom.event_ingest_db.time.time",
+                    "torque.event_ingest_db.time.time",
                     return_value=now,
                 ):
                     ack = store.ack(up_to=2)
@@ -364,8 +364,8 @@ class EventIngestStoreTests(unittest.TestCase):
 
 class EventIngestClientCounterTests(unittest.IsolatedAsyncioTestCase):
     async def test_ack_records_trimmed_rows_counter(self):
-        old_profile_enabled = os.environ.get("LOOM_PROFILE_ENABLED")
-        os.environ["LOOM_PROFILE_ENABLED"] = "1"
+        old_profile_enabled = os.environ.get("TORQUE_PROFILE_ENABLED")
+        os.environ["TORQUE_PROFILE_ENABLED"] = "1"
         profiling.reset()
         try:
             with tempfile.TemporaryDirectory() as tmp:
@@ -392,9 +392,9 @@ class EventIngestClientCounterTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(counters.get("events_ingest_ring_trimmed"), 1)
         finally:
             if old_profile_enabled is None:
-                os.environ.pop("LOOM_PROFILE_ENABLED", None)
+                os.environ.pop("TORQUE_PROFILE_ENABLED", None)
             else:
-                os.environ["LOOM_PROFILE_ENABLED"] = old_profile_enabled
+                os.environ["TORQUE_PROFILE_ENABLED"] = old_profile_enabled
             profiling.reset()
 
     async def test_configure_rejects_unknown_op_error_response(self):
@@ -482,18 +482,18 @@ class EventIngestLifecycleTests(unittest.TestCase):
                 return {"type": "pong", "version": PROTOCOL_VERSION, "pid": new_pid}
 
             with mock.patch(
-                "loom.event_ingest_daemon._ping_socket",
+                "torque.event_ingest_daemon._ping_socket",
                 side_effect=fake_ping,
             ), mock.patch(
-                "loom.event_ingest_daemon._pid_alive",
+                "torque.event_ingest_daemon._pid_alive",
                 return_value=True,
             ), mock.patch(
-                "loom.event_ingest_daemon._terminate_pid",
+                "torque.event_ingest_daemon._terminate_pid",
             ) as terminate_pid, mock.patch(
-                "loom.event_ingest_daemon._read_pid_file",
+                "torque.event_ingest_daemon._read_pid_file",
                 return_value=None,
             ), mock.patch(
-                "loom.event_ingest_daemon.spawn_detached",
+                "torque.event_ingest_daemon.spawn_detached",
                 return_value=new_pid,
             ) as spawn_detached:
                 sock_path = event_ingest_daemon.ensure_running(data_dir, timeout=1.0)
@@ -620,7 +620,7 @@ class EventIngestClientAndDrainerTests(unittest.IsolatedAsyncioTestCase):
                     "tool_name": "Bash",
                     "tool_input": {"command": "echo hello"},
                 },
-                headers={"X-Loom-Cell-Id": cell.id},
+                headers={"X-Torque-Cell-Id": cell.id},
             )
             await client.append(envelope, idempotency_key="drain-1")
 
@@ -643,7 +643,7 @@ class EventIngestClientAndDrainerTests(unittest.IsolatedAsyncioTestCase):
         await first_client.append(
             build_event_ingest_envelope(
                 {"hook_event_name": "PostToolUse", "tool_name": "Bash"},
-                headers={"X-Loom-Cell-Id": cell.id},
+                headers={"X-Torque-Cell-Id": cell.id},
             ),
             idempotency_key="restart-1",
         )
@@ -679,7 +679,7 @@ class EventIngestClientAndDrainerTests(unittest.IsolatedAsyncioTestCase):
                         "hook_event_name": "Stop",
                         "last_assistant_message": "finished from backlog",
                     },
-                    headers={"X-Loom-Cell-Id": cell.id},
+                    headers={"X-Torque-Cell-Id": cell.id},
                 ),
                 idempotency_key="startup-session-end",
             )

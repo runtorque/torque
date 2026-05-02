@@ -16,27 +16,27 @@ except ModuleNotFoundError:
 class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub()
-        self.db_mod = importlib.import_module("loom.db")
+        self.db_mod = importlib.import_module("torque.db")
         self.db_mod = importlib.reload(self.db_mod)
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
-        self.shared_mod = importlib.import_module("loom.mcp_tools_shared")
+        self.shared_mod = importlib.import_module("torque.mcp_tools_shared")
         self.shared_mod = importlib.reload(self.shared_mod)
-        self.mcp_architect_mod = importlib.import_module("loom.mcp_architect")
+        self.mcp_architect_mod = importlib.import_module("torque.mcp_architect")
         self.mcp_architect_mod = importlib.reload(self.mcp_architect_mod)
-        self.mcp_engineer_mod = importlib.import_module("loom.mcp_engineer")
+        self.mcp_engineer_mod = importlib.import_module("torque.mcp_engineer")
         self.mcp_engineer_mod = importlib.reload(self.mcp_engineer_mod)
 
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.db_path = Path(self.tmp.name) / "loom.db"
-        self.db = self.db_mod.LoomDB(self.db_path)
+        self.db_path = Path(self.tmp.name) / "torque.db"
+        self.db = self.db_mod.TorqueDB(self.db_path)
         self.db.init()
         self.addCleanup(self.db.close)
 
         self.state = self.state_mod.MatrixState(db=self.db)
         self.state.board_lanes = ["Backlog", "To Do", "In Progress", "Done", "Archived"]
-        self.state.groups["loom"] = []
+        self.state.groups["torque"] = []
         self.state._db_save_groups()
         self.handle_calls = []
 
@@ -45,14 +45,14 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             id=agent_id,
             name=name,
             slug=name.lower(),
-            group="loom",
+            group="torque",
             cell_type="agent",
             kind="architect",
             status="running",
             persistent=True,
         )
         self.state.agents[cell.id] = cell
-        self.state.groups["loom"].append(cell.id)
+        self.state.groups["torque"].append(cell.id)
         self.state._db_save_agent(cell)
         self.state._db_save_groups()
         return cell
@@ -62,7 +62,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             id=agent_id,
             name=name,
             slug=name.lower().replace(" ", "-"),
-            group="loom",
+            group="torque",
             cell_type="agent",
             kind="engineer",
             status="running",
@@ -70,7 +70,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             hired_by_architect_id=hired_by_architect_id,
         )
         self.state.agents[cell.id] = cell
-        self.state.groups["loom"].append(cell.id)
+        self.state.groups["torque"].append(cell.id)
         self.state._db_save_agent(cell)
         self.state._db_save_groups()
         return cell
@@ -80,7 +80,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             id=agent_id,
             name=name,
             slug=name.lower().replace(" ", "-"),
-            group="loom",
+            group="torque",
             cell_type="agent",
             kind="worker",
             owner_engineer_id=owner_engineer_id,
@@ -88,7 +88,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             status="idle",
         )
         self.state.agents[cell.id] = cell
-        self.state.groups["loom"].append(cell.id)
+        self.state.groups["torque"].append(cell.id)
         self.state._db_save_agent(cell)
         self.state._db_save_groups()
         return cell
@@ -96,7 +96,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
     def _add_task(self, task_id: str, title: str, **kwargs):
         task = self.state.board_add_task(
             title,
-            kwargs.pop("group", "loom"),
+            kwargs.pop("group", "torque"),
             lane=kwargs.pop("lane", "Backlog"),
             id=task_id,
             **kwargs,
@@ -106,7 +106,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
 
     def _save_panel_event(self, event_id: int, kind: str, *,
                           cell_id: str = "", agent_name: str = "",
-                          group: str = "loom", message: str = "",
+                          group: str = "torque", message: str = "",
                           task_id: str = "", timestamp: float | None = None):
         self.db.save_panel_event({
             "id": event_id,
@@ -275,25 +275,25 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         user_worker = self._add_worker("worker-user", "User Worker", user_engineer.id)
 
         alice_task = self._add_task(
-            "LOOM:201",
+            "TORQUE:201",
             "Alice task",
             assigned_engineer_id=alice.id,
             created_by_architect_id=architect.id,
         )
         other_task = self._add_task(
-            "LOOM:202",
+            "TORQUE:202",
             "Other architect task",
             assigned_engineer_id=bob.id,
             created_by_architect_id=other_architect.id,
         )
         architect_created_other_worker_task = self._add_task(
-            "LOOM:203",
+            "TORQUE:203",
             "Architect-originated task",
             assigned_engineer_id=bob.id,
             created_by_architect_id=architect.id,
         )
         user_task = self._add_task(
-            "LOOM:204",
+            "TORQUE:204",
             "User-visible engineer task",
             assigned_engineer_id=user_engineer.id,
         )
@@ -367,13 +367,13 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         alice_worker = self._add_worker("worker-alice", "Alice Worker", alice.id)
         courier_worker = self._add_worker("worker-courier", "Courier Worker", courier.id)
         alice_task = self._add_task(
-            "LOOM:211",
+            "TORQUE:211",
             "Alice task",
             assigned_engineer_id=alice.id,
             created_by_architect_id=architect.id,
         )
         courier_task = self._add_task(
-            "LOOM:212",
+            "TORQUE:212",
             "Courier task",
             assigned_engineer_id=courier.id,
             created_by_architect_id=architect.id,
@@ -415,7 +415,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([event["id"] for event in payload["events"]], ["4"])
         self.assertEqual(payload["events"][0]["message"], "matching event")
 
-    async def test_architect_events_recent_shows_loom108_attribution_and_recipients(self):
+    async def test_architect_events_recent_shows_torque108_attribution_and_recipients(self):
         architect = self._add_architect("arch-1", "Architect")
         assigned = self._add_engineer(
             "eng-assigned", "Assigned Engineer",
@@ -424,7 +424,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         owner = self._add_engineer("eng-owner", "Worker Owner")
         worker = self._add_worker("worker-1", "Worker Bee", owner.id)
         task = self._add_task(
-            "LOOM:108",
+            "TORQUE:108",
             "Architect-created attribution bug",
             assigned_engineer_id=assigned.id,
             created_by_architect_id=architect.id,
@@ -510,7 +510,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         )
         worker = self._add_worker("worker-1", "Worker", engineer.id)
         task = self._add_task(
-            "LOOM:220",
+            "TORQUE:220",
             "Bounded response task",
             assigned_engineer_id=engineer.id,
             created_by_architect_id=architect.id,
@@ -554,11 +554,11 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             if args == ("rev-list", "--count", "boot-sha..main"):
                 return "2"
             if args == ("log", "--format=%B", "--reverse", "boot-sha..main"):
-                return "Merge LOOM:118\nMerge LOOM:119"
+                return "Merge TORQUE:118\nMerge TORQUE:119"
             raise AssertionError(f"unexpected git call: {args}")
 
-        with mock.patch("loom.deploy_state._run_git", side_effect=fake_git), \
-                mock.patch("loom.deploy_state.time.time", return_value=160.0):
+        with mock.patch("torque.deploy_state._run_git", side_effect=fake_git), \
+                mock.patch("torque.deploy_state.time.time", return_value=160.0):
             text, is_error = await self._call(
                 "architect_deploy_state",
                 {},
@@ -573,20 +573,20 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["daemon_uptime_seconds"], 60)
         self.assertEqual(payload["pending_deploy"]["count"], 2)
         self.assertEqual(
-            payload["pending_deploy"]["loom_task_ids"],
-            ["LOOM:118", "LOOM:119"],
+            payload["pending_deploy"]["torque_task_ids"],
+            ["TORQUE:118", "TORQUE:119"],
         )
 
     # Alias-resolution coverage: architect/engineer task-read MCP tools must
-    # follow `state.task_id_aliases` from a literal LOOM:N legacy id to the
+    # follow `state.task_id_aliases` from a literal TORQUE:N legacy id to the
     # canonical hash id, and must not surface the archived literal task.
     async def test_task_reads_resolve_literal_alias_to_hash_task(self):
         architect = self._add_architect("arch-1", "Architect")
         engineer = self._add_engineer("eng-1", "Engineer")
         archived = self.state_mod.BoardTask(
-            id="LOOM:51",
+            id="TORQUE:51",
             task="Archived header task",
-            group="loom",
+            group="torque",
             lane="Archived",
             archived_at="2026-04-07T00:00:00+00:00",
         )
@@ -594,21 +594,21 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             id="bcf3a475",
             task="Keep track of which agent moved a task",
             description="Live canonical description",
-            group="loom",
+            group="torque",
             lane="Backlog",
             action_name="feature/implement",
             assigned_engineer_id=engineer.id,
             created_by_architect_id=architect.id,
         )
         self.db.save_board_task(archived)
-        self.db.save_task_id_alias("LOOM:51", live.id)
+        self.db.save_task_id_alias("TORQUE:51", live.id)
         self.state.board_tasks[archived.id] = archived
         self.state.board_tasks[live.id] = live
-        self.state.task_id_aliases["LOOM:51"] = live.id
+        self.state.task_id_aliases["TORQUE:51"] = live.id
 
         text, is_error = await self._call(
             "architect_task_show",
-            {"task": "LOOM:51"},
+            {"task": "TORQUE:51"},
             architect.id,
         )
 
@@ -622,7 +622,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
 
         text, is_error = await self._call_engineer(
             "engineer_task_show",
-            {"task": "LOOM:51"},
+            {"task": "TORQUE:51"},
             engineer.id,
         )
         self.assertFalse(is_error, text)
@@ -678,7 +678,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             "silence_secs": 12,
         }
 
-        with mock.patch("loom.mcp_tools_shared.time.time", return_value=base_ts + 900):
+        with mock.patch("torque.mcp_tools_shared.time.time", return_value=base_ts + 900):
             text, is_error = await self._call(
                 "architect_task_show",
                 {"task": task.id},
@@ -704,7 +704,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         worker_three = self._add_worker("worker-3", "Worker Three", engineer.id)
 
         root = self._add_task(
-            "LOOM:75",
+            "TORQUE:75",
             "Pipeline root",
             lane="Done",
             status="shipped",
@@ -712,7 +712,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             created_by_architect_id=architect.id,
         )
         child_one = self._add_task(
-            "LOOM:75:1",
+            "TORQUE:75:1",
             "Implementation",
             lane="Done",
             status="merged",
@@ -723,7 +723,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             agent_id=worker_one.id,
         )
         child_two = self._add_task(
-            "LOOM:75:2",
+            "TORQUE:75:2",
             "Follow-up review",
             lane="Done",
             status="approved",
@@ -734,7 +734,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             agent_id=worker_two.id,
         )
         grandchild_one = self._add_task(
-            "LOOM:75:3",
+            "TORQUE:75:3",
             "Fix blockers",
             lane="In Progress",
             status="editing",
@@ -745,7 +745,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             agent_id=worker_one.id,
         )
         grandchild_two = self._add_task(
-            "LOOM:75:4",
+            "TORQUE:75:4",
             "Verification",
             lane="Done",
             status="passed",
@@ -756,7 +756,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             agent_id=worker_two.id,
         )
         leaf = self._add_task(
-            "LOOM:75:5",
+            "TORQUE:75:5",
             "Ship follow-up",
             lane="In Progress",
             status="awaiting-review",
@@ -1015,7 +1015,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         followup = self._add_task(
             "task-reply",
             "Engineer: Need status",
-            labels=["loom:engineer-message"],
+            labels=["torque:engineer-message"],
             status="Awaiting Reply",
             reply_agent_id="worker-1",
             created_by_engineer_id="eng-1",
@@ -1150,7 +1150,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             "architect_task_create",
             {
                 "title": "Investigate regression",
-                "group": "loom",
+                "group": "torque",
                 "description": "Repro and isolate root cause",
                 "suggested_action": "feature/implement",
                 "action_vars": {"TEST_COMMAND": "python3 -m unittest"},
@@ -1173,7 +1173,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             "architect_task_create",
             {
                 "title": "Visible engineer assign",
-                "group": "loom",
+                "group": "torque",
                 "assigned_engineer_id": visible_engineer.id,
             },
             architect.id,
@@ -1187,7 +1187,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             "architect_task_create",
             {
                 "title": "Cross-architect assign",
-                "group": "loom",
+                "group": "torque",
                 "assigned_engineer_id": bob.id,
             },
             architect.id,
@@ -1217,7 +1217,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             "architect_task_create",
             {
                 "title": "Assign tombstone",
-                "group": "loom",
+                "group": "torque",
                 "assigned_engineer_id": engineer.id,
             },
             architect.id,
@@ -1280,7 +1280,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             "architect_task_create",
             {
                 "title": "Polish task modal layout",
-                "group": "loom",
+                "group": "torque",
                 "assigned_engineer_id": alice.id,
                 "suggested_specialization": "ui-ux",
             },
@@ -1296,7 +1296,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             "architect_task_create",
             {
                 "title": "UI polish for settings",
-                "group": "loom",
+                "group": "torque",
                 "assigned_engineer_id": bob.id,
                 "suggested_specialization": "ui-ux",
             },
@@ -1815,7 +1815,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_architect_ask_creates_visible_human_attention_task(self):
         architect = self._add_architect("arch-1", "Architect")
-        self.state.get_group_settings("loom").board_default_action = "feature/implement"
+        self.state.get_group_settings("torque").board_default_action = "feature/implement"
 
         text, is_error = await self._call(
             "architect_ask",
@@ -1838,7 +1838,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(task.group, architect.group)
         self.assertEqual(task.lane, "Backlog")
         self.assertEqual(task.status, "Awaiting Input")
-        self.assertIn("loom:human", task.labels)
+        self.assertIn("torque:human", task.labels)
         self.assertIn("architect-ask", task.labels)
         self.assertEqual(task.action_name, "")
         self.assertEqual(task.created_by_architect_id, architect.id)
@@ -1931,7 +1931,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             "architect_task_create",
             {
                 "title": "Wrong target",
-                "group": "loom",
+                "group": "torque",
                 "assigned_engineer_id": worker.id,
             },
             architect.id,
@@ -1944,7 +1944,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             "architect_task_create",
             {
                 "title": "Wrong target",
-                "group": "loom",
+                "group": "torque",
                 "assigned_engineer_id": other_architect.id,
             },
             architect.id,
@@ -1991,7 +1991,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             "architect_task_create",
             {
                 "title": "Dismissed target",
-                "group": "loom",
+                "group": "torque",
                 "assigned_engineer_id": engineer.id,
             },
             architect.id,
@@ -2056,7 +2056,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             "architect_task_create",
             {
                 "title": "Blocked mutation",
-                "group": "loom",
+                "group": "torque",
                 "assigned_engineer_id": engineer.id,
             },
             architect.id,
@@ -2545,25 +2545,25 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
 
         with mock.patch("time.time", side_effect=[100.0, 200.0, 300.0, 400.0]):
             self.state.journal_append(
-                "loom",
+                "torque",
                 "checkpoint",
                 "Old checkpoint",
                 author_cell_id=hired.id,
             )
             self.state.journal_append(
-                "loom",
+                "torque",
                 "plan",
                 "Recent plan",
                 author_cell_id=hired.id,
             )
             self.state.journal_append(
-                "loom",
+                "torque",
                 "observation",
                 "Recent observation",
                 author_cell_id=hired.id,
             )
             self.state.journal_append(
-                "loom",
+                "torque",
                 "plan",
                 "Other engineer plan",
                 author_cell_id=other_hired.id,
@@ -2587,7 +2587,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             payload["entries"],
             [{
                 "id": 2,
-                "group": "loom",
+                "group": "torque",
                 "timestamp": 200.0,
                 "type": "plan",
                 "entry": "Recent plan",
@@ -2621,7 +2621,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
 
         with mock.patch("time.time", return_value=1234.5):
             self.state.update_engineer_settings(
-                "loom",
+                "torque",
                 pending_question=question,
                 paused=True,
                 _pending_question_actor_id=hired.id,
@@ -2659,7 +2659,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
 
         with mock.patch("time.time", return_value=2345.6):
             self.state.update_engineer_settings(
-                "loom",
+                "torque",
                 pending_question="Secret question from other architect's engineer",
                 paused=True,
                 _pending_question_actor_id=other_hired.id,
@@ -2704,14 +2704,14 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
 class ArchitectBindingValidationTests(unittest.TestCase):
     def setUp(self):
         install_aiohttp_stub()
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
-        self.mcp_architect_mod = importlib.import_module("loom.mcp_architect")
+        self.mcp_architect_mod = importlib.import_module("torque.mcp_architect")
         self.mcp_architect_mod = importlib.reload(self.mcp_architect_mod)
 
     def _make_state(self):
         state = self.state_mod.MatrixState()
-        state.groups["loom"] = []
+        state.groups["torque"] = []
         return state
 
     def test_validate_architect_binding_requires_env_var(self):
@@ -2719,11 +2719,11 @@ class ArchitectBindingValidationTests(unittest.TestCase):
             architect_id, error = self.mcp_architect_mod.validate_architect_binding()
 
         self.assertEqual(architect_id, "")
-        self.assertEqual(error, "LOOM_ARCHITECT_ID is required")
+        self.assertEqual(error, "TORQUE_ARCHITECT_ID is required")
 
     def test_exit_if_invalid_architect_binding_rejects_missing_architect(self):
         state = self._make_state()
-        with mock.patch.dict("os.environ", {"LOOM_ARCHITECT_ID": "arch-missing"}, clear=True):
+        with mock.patch.dict("os.environ", {"TORQUE_ARCHITECT_ID": "arch-missing"}, clear=True):
             with self.assertRaises(SystemExit) as ctx:
                 self.mcp_architect_mod.exit_if_invalid_architect_binding(state)
 
@@ -2735,15 +2735,15 @@ class ArchitectBindingValidationTests(unittest.TestCase):
             id="eng-1",
             name="Engineer",
             slug="engineer",
-            group="loom",
+            group="torque",
             cell_type="agent",
             kind="engineer",
             status="running",
         )
         state.agents[engineer.id] = engineer
-        state.groups["loom"].append(engineer.id)
+        state.groups["torque"].append(engineer.id)
 
-        with mock.patch.dict("os.environ", {"LOOM_ARCHITECT_ID": engineer.id}, clear=True):
+        with mock.patch.dict("os.environ", {"TORQUE_ARCHITECT_ID": engineer.id}, clear=True):
             with self.assertRaises(SystemExit) as ctx:
                 self.mcp_architect_mod.exit_if_invalid_architect_binding(state)
 

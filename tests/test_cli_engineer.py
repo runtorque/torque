@@ -10,9 +10,9 @@ from unittest import mock
 
 
 def _load_cli_module():
-    path = Path(__file__).resolve().parents[1] / "bin" / "loom"
-    loader = SourceFileLoader("loom_cli_engineer", str(path))
-    spec = importlib.util.spec_from_loader("loom_cli_engineer", loader)
+    path = Path(__file__).resolve().parents[1] / "bin" / "torque"
+    loader = SourceFileLoader("torque_cli_engineer", str(path))
+    spec = importlib.util.spec_from_loader("torque_cli_engineer", loader)
     mod = importlib.util.module_from_spec(spec)
     loader.exec_module(mod)
     return mod
@@ -64,12 +64,12 @@ class CliEngineerTests(unittest.TestCase):
             "architect",
             "settings",
             "--group",
-            "loom",
+            "torque",
             "--json",
         ])
         self.assertEqual(args.command, "architect")
         self.assertEqual(args.architect_cmd, "settings")
-        self.assertEqual(args.group, "loom")
+        self.assertEqual(args.group, "torque")
         self.assertTrue(args.json)
 
     def test_parser_accepts_mcp_log(self):
@@ -80,7 +80,7 @@ class CliEngineerTests(unittest.TestCase):
             "--limit",
             "5",
             "--tool-filter",
-            "mcp__loom__%",
+            "mcp__torque__%",
             "--json",
         ])
         self.assertEqual(args.command, "mcp-log")
@@ -97,7 +97,7 @@ class CliEngineerTests(unittest.TestCase):
                     "id": "worker-a",
                     "name": "Worker A",
                     "slug": "worker-a",
-                    "group": "loom",
+                    "group": "torque",
                     "kind": "worker",
                     "cell_type": "agent",
                 }
@@ -107,7 +107,7 @@ class CliEngineerTests(unittest.TestCase):
             port=18932,
             agent="worker-a",
             limit=3,
-            tool_filter="mcp__loom__%",
+            tool_filter="mcp__torque__%",
             hook="PostToolUse",
             since_seconds=0,
             json=False,
@@ -120,7 +120,7 @@ class CliEngineerTests(unittest.TestCase):
                      "ok": True,
                      "data": {
                          "calls": [{
-                             "tool_name": "mcp__loom__loom_progress",
+                             "tool_name": "mcp__torque__torque_progress",
                              "hook_event_name": "PostToolUse",
                              "appended_at": 1712345678,
                              "success": True,
@@ -137,12 +137,12 @@ class CliEngineerTests(unittest.TestCase):
             "mcp_calls",
             port=18932,
             cell_id="worker-a",
-            tool_name_pattern="mcp__loom__%",
+            tool_name_pattern="mcp__torque__%",
             hook_event_name="PostToolUse",
             since=None,
             limit=3,
         )
-        self.assertIn("mcp__loom__loom_progress", out.getvalue())
+        self.assertIn("mcp__torque__torque_progress", out.getvalue())
         self.assertIn("args:redacted", out.getvalue())
 
     def test_cmd_engineer_dismiss_and_rehire_resolve_engineer_and_call_daemon(self):
@@ -152,7 +152,7 @@ class CliEngineerTests(unittest.TestCase):
                     "id": "eng-alice",
                     "name": "Alice",
                     "slug": "alice",
-                    "group": "loom",
+                    "group": "torque",
                     "kind": "engineer",
                     "cell_type": "agent",
                 }
@@ -200,10 +200,10 @@ class CliEngineerTests(unittest.TestCase):
         self.assertIn('Rehired "Alice"', out.getvalue())
 
     def test_cmd_architect_settings_rejects_updates(self):
-        state = {"groups": {"loom": []}, "group_slugs": {"loom": "loom"}}
+        state = {"groups": {"torque": []}, "group_slugs": {"torque": "torque"}}
         args = SimpleNamespace(
             port=18932,
-            group="loom",
+            group="torque",
             set=[
                 "architect_autonomy_mode=ask_always",
                 "architect_digest_verbosity=verbose",
@@ -233,7 +233,7 @@ class CliEngineerTests(unittest.TestCase):
                     "id": "eng-alice",
                     "name": "Alice",
                     "slug": "alice",
-                    "group": "loom",
+                    "group": "torque",
                     "kind": "engineer",
                     "cell_type": "agent",
                 }
@@ -242,7 +242,7 @@ class CliEngineerTests(unittest.TestCase):
         args = SimpleNamespace(
             port=18932,
             description="Ship it",
-            group="loom",
+            group="torque",
             engineer="alice",
             context=None,
             labels=None,
@@ -261,7 +261,7 @@ class CliEngineerTests(unittest.TestCase):
             "board_add_task",
             port=18932,
             task="Ship it",
-            group="loom",
+            group="torque",
             lane="Backlog",
             assigned_engineer_id="eng-alice",
         )
@@ -272,7 +272,7 @@ class CliEngineerTests(unittest.TestCase):
         args = SimpleNamespace(
             port=18932,
             description="Ship it",
-            group="loom",
+            group="torque",
             engineer="alice",
             context=None,
             labels=None,
@@ -333,7 +333,7 @@ class CliEngineerTests(unittest.TestCase):
                     "id": "eng-alice",
                     "name": "Alice",
                     "slug": "alice",
-                    "group": "loom",
+                    "group": "torque",
                     "kind": "engineer",
                     "cell_type": "agent",
                 }
@@ -343,7 +343,7 @@ class CliEngineerTests(unittest.TestCase):
                     "id": "task-1",
                     "task": "Ship it",
                     "slug": "ship-it",
-                    "group": "loom",
+                    "group": "torque",
                     "verification_summary": {},
                 }
             },

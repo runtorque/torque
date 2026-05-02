@@ -10,11 +10,11 @@ except ModuleNotFoundError:
 class NotificationManagerTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub()
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
-        self.base_mod = importlib.import_module("loom.adapters.base")
+        self.base_mod = importlib.import_module("torque.adapters.base")
         self.base_mod = importlib.reload(self.base_mod)
-        self.notifications_mod = importlib.import_module("loom.notifications")
+        self.notifications_mod = importlib.import_module("torque.notifications")
         self.notifications_mod = importlib.reload(self.notifications_mod)
 
     def _make_state(self):
@@ -112,8 +112,8 @@ class NotificationManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             sent,
             [
-                ("Loom — g", "Alpha finished, Beta error"),
-                ("Loom — other", "Gamma finished"),
+                ("Torque — g", "Alpha finished, Beta error"),
+                ("Torque — other", "Gamma finished"),
             ],
         )
 
@@ -176,7 +176,7 @@ class NotificationManagerTests(unittest.IsolatedAsyncioTestCase):
             sent,
             [
                 (
-                    "Loom — g",
+                    "Torque — g",
                     'Task "Investigate silent worker" stalled, '
                     'Task "Stabilize retry loop" thrashing',
                 ),

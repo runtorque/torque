@@ -54,7 +54,7 @@ class _FakeWorktreeManager:
         self.create_calls += 1
         if self.worktree_path:
             cell.worktree_path = self.worktree_path
-            cell.worktree_branch = f"loom/{cell.slug}-abc123"
+            cell.worktree_branch = f"torque/{cell.slug}-abc123"
             cell.worktree_repo_root = repo_root
             return self.worktree_path
         return ""
@@ -63,16 +63,16 @@ class _FakeWorktreeManager:
 class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub()
-        self.server_mod = importlib.import_module("loom.server")
+        self.server_mod = importlib.import_module("torque.server")
         self.server_mod = importlib.reload(self.server_mod)
-        self.server_agent_mod = importlib.import_module("loom.server_agent")
+        self.server_agent_mod = importlib.import_module("torque.server_agent")
         self.server_agent_mod = importlib.reload(self.server_agent_mod)
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
 
     def _make_state(self):
         state = self.state_mod.MatrixState()
-        state.add_group("loom")
+        state.add_group("torque")
         return state
 
     def _launch_config(self, directory: str) -> dict:
@@ -99,7 +99,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         del engineer_id
         engineer = state.add_agent(
             name=name,
-            group="loom",
+            group="torque",
             terminal_backend="iterm2",
             profile="Default",
             command="codex",
@@ -115,7 +115,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         del architect_id
         architect = state.add_agent(
             name=name,
-            group="loom",
+            group="torque",
             terminal_backend="iterm2",
             profile="Default",
             command="codex",
@@ -130,7 +130,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
     def _add_worker_cell(self, state, engineer, name: str = "Worker"):
         worker = state.add_agent(
             name=name,
-            group="loom",
+            group="torque",
             terminal_backend="iterm2",
             profile="Default",
             command="codex",
@@ -146,12 +146,12 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
     def test_relaunch_command_base_strips_managed_prompt_flag(self):
         command = (
             "claude --model sonnet --append-system-prompt-file "
-            "/tmp/.loom/loom-system-prompt-arch-1.md --dangerously-skip"
+            "/tmp/.torque/torque-system-prompt-arch-1.md --dangerously-skip"
         )
         self.assertEqual(
             self.server_mod._relaunch_command_base(
                 command,
-                "loom-system-prompt-arch-1.md",
+                "torque-system-prompt-arch-1.md",
             ),
             "claude --model sonnet --dangerously-skip",
         )
@@ -167,7 +167,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("## Message from Alice (engineer)", status_prompt)
         self.assertIn("Status: going quiet.", status_prompt)
         self.assertNotIn("Reply with:", status_prompt)
-        self.assertNotIn("mcp__loom__architect_reply", status_prompt)
+        self.assertNotIn("mcp__torque__architect_reply", status_prompt)
 
         question_prompt = self.server_mod._format_injected_mcp_message_prompt(
             message="Should I cut scope?",
@@ -178,7 +178,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             ack_required=True,
         )
         self.assertIn(
-            'Reply with: mcp__loom__architect_reply(message_id="msg-question"',
+            'Reply with: mcp__torque__architect_reply(message_id="msg-question"',
             question_prompt,
         )
 
@@ -190,7 +190,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             message_id="msg-architect",
         )
         self.assertIn(
-            'Reply with: mcp__loom__engineer_reply(message_id="msg-architect"',
+            'Reply with: mcp__torque__engineer_reply(message_id="msg-architect"',
             engineer_prompt,
         )
 
@@ -207,13 +207,13 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         sent_prompts = []
 
         async def fake_resolve_base_dir(group):
-            self.assertEqual(group, "loom")
+            self.assertEqual(group, "torque")
             return temp_dir
 
         def fake_resolve_engineer_launch_config(group, *, base_dir="",
                                               explicit_template="",
                                               overrides=None):
-            self.assertEqual(group, "loom")
+            self.assertEqual(group, "torque")
             self.assertEqual(base_dir, temp_dir)
             self.assertEqual(explicit_template, "")
             self.assertEqual(
@@ -255,7 +255,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(bridge.create_session_calls), 1)
         call = bridge.create_session_calls[0]["kwargs"]
         self.assertEqual(call["env_vars"]["BASE"], "1")
-        self.assertEqual(call["env_vars"]["LOOM_ENGINEER_ID"], engineer.id)
+        self.assertEqual(call["env_vars"]["TORQUE_ENGINEER_ID"], engineer.id)
         self.assertEqual(
             call["mcp_entrypoint"],
             self.server_agent_mod.ENGINEER_MCP_ENTRYPOINT,
@@ -264,7 +264,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.server_agent_mod.mcp_entrypoint_for_cell(engineer),
             self.server_agent_mod.ENGINEER_MCP_ENTRYPOINT,
         )
-        # LOOM:263 — empty role initial_prompt + engineer kind synthesizes
+        # TORQUE:263 — empty role initial_prompt + engineer kind synthesizes
         # the configured default boot nudge so the wake protocol fires.
         # The codex startup_prompt is the persistent system prompt, then the
         # default nudge follows.
@@ -318,13 +318,13 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         sent_prompts = []
 
         async def fake_resolve_base_dir(group):
-            self.assertEqual(group, "loom")
+            self.assertEqual(group, "torque")
             return temp_dir
 
         def fake_resolve_agent_launch_config(group, *, base_dir="",
                                              explicit_template="",
                                              overrides=None):
-            self.assertEqual(group, "loom")
+            self.assertEqual(group, "torque")
             self.assertEqual(base_dir, temp_dir)
             self.assertEqual(explicit_template, "worker/reviewer")
             self.assertEqual(
@@ -350,7 +350,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             result = await self.server_mod._handle_add_worker_command(
                 {
                     "name": "Detached Worker",
-                    "group": "loom",
+                    "group": "torque",
                     "command": "codex --worker",
                     "provider": "codex",
                     "template": "worker/reviewer",
@@ -374,8 +374,8 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(bridge.create_session_calls), 1)
         call = bridge.create_session_calls[0]["kwargs"]
         self.assertEqual(call["env_vars"]["BASE"], "1")
-        self.assertNotIn("LOOM_ENGINEER_ID", call["env_vars"])
-        self.assertNotIn("LOOM_ARCHITECT_ID", call["env_vars"])
+        self.assertNotIn("TORQUE_ENGINEER_ID", call["env_vars"])
+        self.assertNotIn("TORQUE_ARCHITECT_ID", call["env_vars"])
         self.assertEqual(
             call["mcp_entrypoint"],
             self.server_agent_mod.DEFAULT_MCP_ENTRYPOINT,
@@ -402,7 +402,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         result = await self.server_mod._handle_add_worker_command(
             {
                 "name": "Bad Worker",
-                "group": "loom",
+                "group": "torque",
                 "owner_engineer_id": "eng-alice",
             },
             state,
@@ -429,13 +429,13 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         sent_prompts = []
 
         async def fake_resolve_base_dir(group):
-            self.assertEqual(group, "loom")
+            self.assertEqual(group, "torque")
             return temp_dir
 
         def fake_resolve_engineer_launch_config(group, *, base_dir="",
                                               explicit_template="",
                                               overrides=None):
-            self.assertEqual(group, "loom")
+            self.assertEqual(group, "torque")
             self.assertEqual(base_dir, temp_dir)
             self.assertEqual(explicit_template, "")
             self.assertEqual(overrides, {"command": "codex --architect"})
@@ -453,7 +453,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "name": "Productmind",
                     "command": "codex --architect",
-                    "group": "loom",
+                    "group": "torque",
                 },
                 state,
                 resolve_base_dir=fake_resolve_base_dir,
@@ -471,12 +471,12 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(bridge.create_session_calls), 1)
         call = bridge.create_session_calls[0]["kwargs"]
         self.assertEqual(call["env_vars"]["BASE"], "1")
-        self.assertEqual(call["env_vars"]["LOOM_ARCHITECT_ID"], architect.id)
+        self.assertEqual(call["env_vars"]["TORQUE_ARCHITECT_ID"], architect.id)
         self.assertEqual(
             call["mcp_entrypoint"],
             self.server_agent_mod.ARCHITECT_MCP_ENTRYPOINT,
         )
-        # LOOM:263 — empty role initial_prompt + architect kind synthesizes
+        # TORQUE:263 — empty role initial_prompt + architect kind synthesizes
         # the configured default boot nudge so the wake protocol fires.
         self.assertEqual(len(sent_prompts), 2)
         self.assertIn(
@@ -487,12 +487,12 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
     async def test_architect_persistent_prompt_injects_custom_instructions(self):
         state = self._make_state()
         state.update_architect_settings(
-            "loom",
+            "torque",
             architect_custom_instructions="Prefer reversible scope cuts.",
         )
 
         prompt = self.server_mod._architect_persistent_prompt_text(
-            group="loom",
+            group="torque",
             action_system_prompt="Action-specific context.",
             state=state,
         )
@@ -505,10 +505,10 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         async def spawn(*, knob=False, launch_worktree=False, group_worktree=False):
             state = self._make_state()
             if group_worktree:
-                state.update_group_settings("loom", git_worktree=True)
+                state.update_group_settings("torque", git_worktree=True)
             repo_root = "/repo"
             subdir = "/repo/packages/app"
-            worktree_path = "/repo/.loom/worktrees/architect"
+            worktree_path = "/repo/.torque/worktrees/architect"
             worktree_mgr = _FakeWorktreeManager(repo_root, worktree_path)
             service = self.server_agent_mod.AgentLaunchService(
                 state=state,
@@ -532,9 +532,9 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 return cfg
 
             try:
-                self.server_mod.loom_config.ARCHITECT_USES_WORKTREE = knob
+                self.server_mod.torque_config.ARCHITECT_USES_WORKTREE = knob
                 result = await self.server_mod._handle_add_architect_command(
-                    {"name": "Productmind", "group": "loom"},
+                    {"name": "Productmind", "group": "torque"},
                     state,
                     resolve_base_dir=fake_resolve_base_dir,
                     resolve_engineer_launch_config=fake_resolve_engineer_launch_config,
@@ -543,7 +543,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 )
                 return state.agents[result["id"]], worktree_mgr
             finally:
-                self.server_mod.loom_config.ARCHITECT_USES_WORKTREE = False
+                self.server_mod.torque_config.ARCHITECT_USES_WORKTREE = False
 
         architect, worktree_mgr = await spawn(launch_worktree=True)
         self.assertEqual(architect.directory, worktree_mgr.repo_root)
@@ -557,7 +557,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_delete_architect_transfers_hired_engineers_and_archives_decisions(self):
         state = self._make_state()
-        state.db = self.server_mod.LoomDB(Path(":memory:"))
+        state.db = self.server_mod.TorqueDB(Path(":memory:"))
         state.db.init()
         try:
             architect = self._add_architect_cell(state, "arch-1", "Productmind")
@@ -603,7 +603,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         engineer = self._add_engineer_cell(state, "eng-alice", "Alice")
         worker = state.add_agent(
             name="Worker",
-            group="loom",
+            group="torque",
             terminal_backend="iterm2",
             profile="Default",
             command="codex",
@@ -614,7 +614,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         worker.created_by_engineer_id = engineer.id
         task = state.board_add_task(
             "Review implementation",
-            "loom",
+            "torque",
             lane="Backlog",
             id="task-1",
             assigned_engineer_id=engineer.id,
@@ -688,7 +688,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         state = self._make_state()
         terminal = state.add_terminal(
             name="Logs",
-            group="loom",
+            group="torque",
             terminal_backend="iterm2",
             profile="Default",
             command="",
@@ -713,7 +713,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, {"type": "ok", "removed": [terminal.id]})
         self.assertEqual(cleaned, [terminal.id])
         self.assertNotIn(terminal.id, state.agents)
-        self.assertNotIn(terminal.id, state.groups["loom"])
+        self.assertNotIn(terminal.id, state.groups["torque"])
 
     async def test_dismiss_engineer_closes_engineer_and_owned_workers_preserves_assignments(self):
         state = self._make_state()
@@ -729,7 +729,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         other_worker.session_id = "session-other-worker"
         task = state.board_add_task(
             "Keep assignment",
-            "loom",
+            "torque",
             id="task-keep-assignment",
             assigned_engineer_id=engineer.id,
         )
@@ -807,13 +807,13 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         panel_events = []
 
         async def fake_resolve_base_dir(group):
-            self.assertEqual(group, "loom")
+            self.assertEqual(group, "torque")
             return temp_dir
 
         def fake_resolve_engineer_launch_config(group, *, base_dir="",
                                               explicit_template="",
                                               overrides=None):
-            self.assertEqual(group, "loom")
+            self.assertEqual(group, "torque")
             self.assertEqual(overrides, {})
             return self._launch_config(base_dir)
 
@@ -971,13 +971,13 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         panel_events = []
 
         async def fake_resolve_base_dir(group):
-            self.assertEqual(group, "loom")
+            self.assertEqual(group, "torque")
             return temp_dir
 
         def fake_resolve_architect_launch_config(group, *, base_dir="",
                                                  explicit_template="",
                                                  overrides=None):
-            self.assertEqual(group, "loom")
+            self.assertEqual(group, "torque")
             self.assertEqual(overrides, {})
             return self._launch_config(base_dir)
 
@@ -1018,7 +1018,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         engineer.session_id = "session-alice"
         terminal = state.add_terminal(
             name="Shell",
-            group="loom",
+            group="torque",
             terminal_backend="iterm2",
             profile="Default",
             command="",
@@ -1081,7 +1081,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         apply_calls = []
 
         async def fake_resolve_base_dir(group):
-            self.assertEqual(group, "loom")
+            self.assertEqual(group, "torque")
             return temp_dir
 
         def fake_resolve_agent_launch_config(*args, **kwargs):
@@ -1090,7 +1090,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         def fake_resolve_engineer_launch_config(group, *, base_dir="",
                                               explicit_template="",
                                               overrides=None):
-            self.assertEqual(group, "loom")
+            self.assertEqual(group, "torque")
             self.assertEqual(base_dir, temp_dir)
             self.assertEqual(explicit_template, "default")
             self.assertEqual(overrides, {})
@@ -1125,7 +1125,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(bridge.create_session_calls), 1)
         call = bridge.create_session_calls[0]["kwargs"]
         self.assertEqual(call["env_vars"]["BASE"], "1")
-        self.assertEqual(call["env_vars"]["LOOM_ENGINEER_ID"], engineer.id)
+        self.assertEqual(call["env_vars"]["TORQUE_ENGINEER_ID"], engineer.id)
         self.assertEqual(
             call["mcp_entrypoint"],
             self.server_agent_mod.ENGINEER_MCP_ENTRYPOINT,
@@ -1133,13 +1133,13 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_relaunch_stopped_architect_uses_engineer_launch_and_architect_mcp_entrypoint(self):
         state = self._make_state()
-        architect = self._add_architect_cell(state, "arch-1", "Loomer")
+        architect = self._add_architect_cell(state, "arch-1", "Torquer")
         architect.status = "stopped"
         architect.agent_type = "codex"
         bridge = _CapturingBridge()
 
         async def fake_resolve_base_dir(group):
-            self.assertEqual(group, "loom")
+            self.assertEqual(group, "torque")
             return temp_dir
 
         def fake_resolve_agent_launch_config(*args, **kwargs):
@@ -1149,7 +1149,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         def fake_resolve_engineer_launch_config(group, *, base_dir="",
                                               explicit_template="",
                                               overrides=None):
-            self.assertEqual(group, "loom")
+            self.assertEqual(group, "torque")
             self.assertEqual(overrides, {})
             # Engineer launch config sets worktree=False — architects
             # must NOT spawn a worktree on relaunch.
@@ -1177,7 +1177,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(architect.kind, "architect")
         self.assertEqual(len(bridge.create_session_calls), 1)
         call = bridge.create_session_calls[0]["kwargs"]
-        self.assertEqual(call["env_vars"]["LOOM_ARCHITECT_ID"], architect.id)
+        self.assertEqual(call["env_vars"]["TORQUE_ARCHITECT_ID"], architect.id)
         self.assertEqual(
             call["mcp_entrypoint"],
             self.server_agent_mod.ARCHITECT_MCP_ENTRYPOINT,
@@ -1193,7 +1193,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         engineer.agent_type = "codex"
         engineer.agent_session_id = "prev-session"
         engineer.tasks_dispatched = 5
-        engineer.current_task_id = "LOOM:99"
+        engineer.current_task_id = "TORQUE:99"
         engineer.session_id = "active-session"
         closed = []
         sent_prompts = []
@@ -1259,10 +1259,10 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_restart_agent_rejects_terminals(self):
         state = self._make_state()
-        state.add_group("loom")
+        state.add_group("torque")
         terminal = state.add_terminal(
             name="Term",
-            group="loom",
+            group="torque",
             terminal_backend="iterm2",
             profile="Default",
             command="",
@@ -1643,7 +1643,7 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         """Architects share the relaunch handler; fresh-session architect
         relaunch must fire the kickoff sequence too."""
         state = self._make_state()
-        architect = self._add_architect_cell(state, "arch-1", "Loomer")
+        architect = self._add_architect_cell(state, "arch-1", "Torquer")
         architect.status = "stopped"
         architect.agent_type = "codex"
         architect.agent_session_id = ""
@@ -1702,10 +1702,10 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         """Terminals route through the same handler but are not agents and
         have no role prompts. The kickoff gate must skip them entirely."""
         state = self._make_state()
-        state.add_group("loom")
+        state.add_group("torque")
         terminal = state.add_terminal(
             name="Shell",
-            group="loom",
+            group="torque",
             terminal_backend="iterm2",
             profile="Default",
             command="",
@@ -1822,10 +1822,10 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         (cell_type != "agent" returns early). The kickoff must not fire and
         the bridge must not be touched."""
         state = self._make_state()
-        state.add_group("loom")
+        state.add_group("torque")
         terminal = state.add_terminal(
             name="Shell",
-            group="loom",
+            group="torque",
             terminal_backend="iterm2",
             profile="Default",
             command="",

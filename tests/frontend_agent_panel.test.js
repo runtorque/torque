@@ -154,9 +154,9 @@ test('renderAgentPanel renders architect, engineer, worker, and terminal panels'
     id: 'term-1',
     name: 'Shell Root',
     cell_type: 'terminal',
-    current_branch: 'loom/feature-x',
+    current_branch: 'torque/feature-x',
     current_process: 'pytest',
-    current_path: '/tmp/loom',
+    current_path: '/tmp/torque',
   });
   context.renderAgentPanel();
   assert.match(panel.innerHTML, /Terminal: Shell Root/);
@@ -315,7 +315,7 @@ test('worker panel header shows clickable upward architect and engineer parent c
   context.state.agents = {
     'arch-1': {
       id: 'arch-1',
-      name: 'Loomer',
+      name: 'Torquer',
       kind: 'architect',
       group: 'alpha',
       cell_type: 'agent',
@@ -345,7 +345,7 @@ test('worker panel header shows clickable upward architect and engineer parent c
   assert.match(panel.innerHTML, /button type="button" class="agent-panel-hierarchy-crumb agent-panel-hierarchy-crumb-architect"/);
   assert.match(panel.innerHTML, /button type="button" class="agent-panel-hierarchy-crumb agent-panel-hierarchy-crumb-engineer"/);
   assert.match(panel.innerHTML, /span class="agent-panel-hierarchy-crumb agent-panel-hierarchy-crumb-worker current"/);
-  assert.match(panel.innerHTML, /ARCH[\s\S]*Loomer[\s\S]*ENGINEER[\s\S]*Panelsmith[\s\S]*WORKER[\s\S]*Hierarchy worker/);
+  assert.match(panel.innerHTML, /ARCH[\s\S]*Torquer[\s\S]*ENGINEER[\s\S]*Panelsmith[\s\S]*WORKER[\s\S]*Hierarchy worker/);
 
   const restoreCountBeforeClick = restoreCalls.length;
   vm.runInContext(`agentPanelFocusHierarchyTarget("eng-1", "engineer", "alpha")`, context);
@@ -364,7 +364,7 @@ test('engineer panel header shows architect or User parent chain with current se
   context.state.agents = {
     'arch-1': {
       id: 'arch-1',
-      name: 'Loomer',
+      name: 'Torquer',
       kind: 'architect',
       group: 'alpha',
       cell_type: 'agent',
@@ -390,7 +390,7 @@ test('engineer panel header shows architect or User parent chain with current se
   context.renderAgentPanel();
   assert.match(panel.innerHTML, /button type="button" class="agent-panel-hierarchy-crumb agent-panel-hierarchy-crumb-architect"/);
   assert.match(panel.innerHTML, /span class="agent-panel-hierarchy-crumb agent-panel-hierarchy-crumb-engineer current"/);
-  assert.match(panel.innerHTML, /ARCH[\s\S]*Loomer[\s\S]*ENGINEER[\s\S]*Hired Engineer/);
+  assert.match(panel.innerHTML, /ARCH[\s\S]*Torquer[\s\S]*ENGINEER[\s\S]*Hired Engineer/);
 
   context.focusedItemId = 'eng-user';
   context.renderAgentPanel();
@@ -404,7 +404,7 @@ test('architect and user panel headers show only their current hierarchy chip', 
   context.state.agents = {
     'arch-1': {
       id: 'arch-1',
-      name: 'Loomer',
+      name: 'Torquer',
       kind: 'architect',
       group: 'alpha',
       cell_type: 'agent',
@@ -421,7 +421,7 @@ test('architect and user panel headers show only their current hierarchy chip', 
   context.focusedItemId = 'arch-1';
   context.renderAgentPanel();
   assert.match(panel.innerHTML, /span class="agent-panel-hierarchy-crumb agent-panel-hierarchy-crumb-architect current"/);
-  assert.match(panel.innerHTML, /ARCH[\s\S]*Loomer/);
+  assert.match(panel.innerHTML, /ARCH[\s\S]*Torquer/);
   assert.doesNotMatch(panel.innerHTML, /agentPanelFocusHierarchyTarget/);
 
   vm.runInContext(`agentPanelFocusHierarchyTarget("", "user", "alpha")`, context);
@@ -520,15 +520,15 @@ test('engineer panel renders journal for the focused engineer only', () => {
   context.state.engineer_worklog.alpha = [
     {
       id: 9,
-      task_id: 'LOOM:9',
+      task_id: 'TORQUE:9',
       task_title: 'Ship engineer panel',
       agent_id: 'eng-1',
       agent_name: 'Builder',
       started_at: 30,
     },
   ];
-  context.state.board_tasks['LOOM:9'] = {
-    id: 'LOOM:9',
+  context.state.board_tasks['TORQUE:9'] = {
+    id: 'TORQUE:9',
     task: 'Ship engineer panel',
     lane: 'Review',
     status: 'In progress',
@@ -572,11 +572,11 @@ test('worker panel filters per-cell events and task history to the focused worke
 
   context.state.panel_events = [
     { id: 2, cell_id: 'worker-2', kind: 'task_completed', message: 'Ignore me', timestamp: 20 },
-    { id: 3, cell_id: 'worker-1', kind: 'task_completed', message: 'Finished compile step', timestamp: 30, task_id: 'LOOM:3' },
+    { id: 3, cell_id: 'worker-1', kind: 'task_completed', message: 'Finished compile step', timestamp: 30, task_id: 'TORQUE:3' },
   ];
   context.state.board_tasks = {
-    'LOOM:2': { id: 'LOOM:2', task: 'Ignore task', agent_id: 'worker-2', lane: 'Done', status: 'done', created_at: 15 },
-    'LOOM:3': { id: 'LOOM:3', task: 'Compile feature branch', agent_id: 'worker-1', lane: 'Doing', status: 'running', created_at: 25 },
+    'TORQUE:2': { id: 'TORQUE:2', task: 'Ignore task', agent_id: 'worker-2', lane: 'Done', status: 'done', created_at: 15 },
+    'TORQUE:3': { id: 'TORQUE:3', task: 'Compile feature branch', agent_id: 'worker-1', lane: 'Doing', status: 'running', created_at: 25 },
   };
   vm.runInContext(`_agentPanelEventsInnerTabByAgentId['worker-1'] = 'lifecycle';`, context);
 
@@ -970,7 +970,7 @@ test('focused architect decision rows render parseable click handlers and expand
       title: 'Keep the focused agent surface stable',
       rationale: 'Show the operator why this direction was chosen.',
       status: 'accepted',
-      linked_task_ids: ['LOOM:101'],
+      linked_task_ids: ['TORQUE:101'],
       linked_engineer_ids: ['eng-1'],
       supersedes: 'd0',
       updated_at: 40,
@@ -998,7 +998,7 @@ test('focused architect decision rows render parseable click handlers and expand
   assert.match(panel.innerHTML, /Status/);
   assert.match(panel.innerHTML, /accepted/);
   assert.match(panel.innerHTML, /Linked tasks/);
-  assert.match(panel.innerHTML, /LOOM:101/);
+  assert.match(panel.innerHTML, /TORQUE:101/);
   assert.match(panel.innerHTML, /Linked engineers/);
   assert.match(panel.innerHTML, /eng-1/);
   assert.match(panel.innerHTML, /Supersedes/);
@@ -1119,7 +1119,7 @@ test('agent Events MCP subtab fetches calls, filters, and expands redacted detai
       {
         cursor: 10,
         cell_id: 'worker-mcp',
-        tool_name: 'mcp__loom__loom_progress',
+        tool_name: 'mcp__torque__torque_progress',
         hook_event_name: 'PostToolUse',
         appended_at: now,
         success: true,
@@ -1131,7 +1131,7 @@ test('agent Events MCP subtab fetches calls, filters, and expands redacted detai
       },
     ],
   });
-  assert.match(panel.innerHTML, /mcp__loom__loom_progress/);
+  assert.match(panel.innerHTML, /mcp__torque__torque_progress/);
   assert.match(panel.innerHTML, /redacted keys: message/);
 
   context.agentPanelToggleMcpCall('worker-mcp', '10');
@@ -1159,7 +1159,7 @@ test('agent Events MCP subtab hides settings banner in full capture mode and ren
     {
       cursor: 1,
       cell_id: 'worker-full',
-      tool_name: 'mcp__loom__loom_done',
+      tool_name: 'mcp__torque__torque_done',
       hook_event_name: 'PostToolUse',
       appended_at: now,
       success: true,
@@ -1196,7 +1196,7 @@ test('agent Events MCP subtab live update prepends without losing expanded row a
     {
       cursor: 1,
       cell_id: 'worker-live',
-      tool_name: 'mcp__loom__old',
+      tool_name: 'mcp__torque__old',
       hook_event_name: 'PostToolUse',
       appended_at: now - 10,
       success: true,
@@ -1218,23 +1218,23 @@ test('agent Events MCP subtab live update prepends without losing expanded row a
   context.agentPanelReceiveMcpCallAppend({
     cursor: 2,
     cell_id: 'worker-live',
-    tool_name: 'mcp__loom__pre',
+    tool_name: 'mcp__torque__pre',
     hook_event_name: 'PreToolUse',
     appended_at: now,
     success: true,
-    args: { task_id: 'LOOM:1' },
+    args: { task_id: 'TORQUE:1' },
     args_redacted: false,
     result: null,
     result_redacted: true,
   });
 
-  assert.doesNotMatch(panel.innerHTML, /mcp__loom__pre/);
-  assert.equal(context.state.mcp_calls['worker-live'].some((call) => call.tool_name === 'mcp__loom__pre'), false);
+  assert.doesNotMatch(panel.innerHTML, /mcp__torque__pre/);
+  assert.equal(context.state.mcp_calls['worker-live'].some((call) => call.tool_name === 'mcp__torque__pre'), false);
 
   context.agentPanelReceiveMcpCallAppend({
     cursor: 3,
     cell_id: 'worker-live',
-    tool_name: 'mcp__loom__new',
+    tool_name: 'mcp__torque__new',
     hook_event_name: 'PostToolUse',
     appended_at: now,
     success: false,
@@ -1246,7 +1246,7 @@ test('agent Events MCP subtab live update prepends without losing expanded row a
   });
 
   const html = panel.innerHTML;
-  assert.ok(html.indexOf('mcp__loom__new') < html.indexOf('mcp__loom__old'));
+  assert.ok(html.indexOf('mcp__torque__new') < html.indexOf('mcp__torque__old'));
   assert.match(html, /&quot;old&quot;: true/);
   assert.ok(captureCalls.length > captureBefore);
   assert.ok(restoreCalls.length > restoreBefore);
@@ -1391,21 +1391,21 @@ test('worker worklog updates after task changes and preserves the current anchor
       if (selector !== '[data-agent-panel-anchor]' && selector !== '[data-engineer-anchor]') return [];
       return [
         {
-          dataset: { agentPanelAnchor: 'worker-task-LOOM:2' },
+          dataset: { agentPanelAnchor: 'worker-task-TORQUE:2' },
           getBoundingClientRect() {
             return { top: 20, bottom: 40, left: 0, right: 200, width: 200, height: 20 };
           },
           getAttribute(name) {
-            return name === 'data-agent-panel-anchor' ? 'worker-task-LOOM:2' : '';
+            return name === 'data-agent-panel-anchor' ? 'worker-task-TORQUE:2' : '';
           },
         },
         {
-          dataset: { agentPanelAnchor: 'worker-task-LOOM:1' },
+          dataset: { agentPanelAnchor: 'worker-task-TORQUE:1' },
           getBoundingClientRect() {
             return { top: 60, bottom: 80, left: 0, right: 200, width: 200, height: 20 };
           },
           getAttribute(name) {
-            return name === 'data-agent-panel-anchor' ? 'worker-task-LOOM:1' : '';
+            return name === 'data-agent-panel-anchor' ? 'worker-task-TORQUE:1' : '';
           },
         },
       ];
@@ -1420,30 +1420,30 @@ test('worker worklog updates after task changes and preserves the current anchor
       if (selector !== '[data-agent-panel-anchor]' && selector !== '[data-engineer-anchor]') return [];
       return [
         {
-          dataset: { agentPanelAnchor: 'worker-task-LOOM:3' },
+          dataset: { agentPanelAnchor: 'worker-task-TORQUE:3' },
           getBoundingClientRect() {
             return { top: 10, bottom: 30, left: 0, right: 200, width: 200, height: 20 };
           },
           getAttribute(name) {
-            return name === 'data-agent-panel-anchor' ? 'worker-task-LOOM:3' : '';
+            return name === 'data-agent-panel-anchor' ? 'worker-task-TORQUE:3' : '';
           },
         },
         {
-          dataset: { agentPanelAnchor: 'worker-task-LOOM:2' },
+          dataset: { agentPanelAnchor: 'worker-task-TORQUE:2' },
           getBoundingClientRect() {
             return { top: 40, bottom: 60, left: 0, right: 200, width: 200, height: 20 };
           },
           getAttribute(name) {
-            return name === 'data-agent-panel-anchor' ? 'worker-task-LOOM:2' : '';
+            return name === 'data-agent-panel-anchor' ? 'worker-task-TORQUE:2' : '';
           },
         },
         {
-          dataset: { agentPanelAnchor: 'worker-task-LOOM:1' },
+          dataset: { agentPanelAnchor: 'worker-task-TORQUE:1' },
           getBoundingClientRect() {
             return { top: 80, bottom: 100, left: 0, right: 200, width: 200, height: 20 };
           },
           getAttribute(name) {
-            return name === 'data-agent-panel-anchor' ? 'worker-task-LOOM:1' : '';
+            return name === 'data-agent-panel-anchor' ? 'worker-task-TORQUE:1' : '';
           },
         },
       ];
@@ -1466,16 +1466,16 @@ test('worker worklog updates after task changes and preserves the current anchor
   });
 
   context.state.board_tasks = {
-    'LOOM:2': { id: 'LOOM:2', task: 'Second task', agent_id: 'worker-1', lane: 'Doing', status: 'running', created_at: 20 },
-    'LOOM:1': { id: 'LOOM:1', task: 'First task', agent_id: 'worker-1', lane: 'Todo', status: 'queued', created_at: 10 },
+    'TORQUE:2': { id: 'TORQUE:2', task: 'Second task', agent_id: 'worker-1', lane: 'Doing', status: 'running', created_at: 20 },
+    'TORQUE:1': { id: 'TORQUE:1', task: 'First task', agent_id: 'worker-1', lane: 'Todo', status: 'queued', created_at: 10 },
   };
 
   context.renderAgentPanel();
   assert.equal(newContent.scrollTop, 20);
   assert.match(panel.innerHTML, /Second task/);
 
-  context.state.board_tasks['LOOM:3'] = {
-    id: 'LOOM:3',
+  context.state.board_tasks['TORQUE:3'] = {
+    id: 'TORQUE:3',
     task: 'Newest task',
     agent_id: 'worker-1',
     lane: 'Review',
@@ -1911,7 +1911,7 @@ test('engineer worklog caps at 20 dispatched tasks and exposes a Load more butto
   for (let i = 0; i < 25; i++) {
     entries.push({
       id: 2000 + i,
-      task_id: 'LOOM:' + (2000 + i),
+      task_id: 'TORQUE:' + (2000 + i),
       task_title: 'Dispatched task ' + i,
       agent_id: 'eng-wkl-cap',
       agent_name: 'Builder',
@@ -1936,7 +1936,7 @@ test('engineer worklog Load more appends 20 more tasks without a re-fetch', () =
   for (let i = 0; i < 45; i++) {
     entries.push({
       id: 2000 + i,
-      task_id: 'LOOM:' + (2000 + i),
+      task_id: 'TORQUE:' + (2000 + i),
       task_title: 'Dispatched task ' + i,
       agent_id: 'eng-wkl-more',
       agent_name: 'Builder',
@@ -1976,7 +1976,7 @@ test('engineer worklog pager grows to anchor around newly dispatched tasks', () 
   for (let i = 0; i < 25; i++) {
     existing.push({
       id: 4000 + i,
-      task_id: 'LOOM:' + (4000 + i),
+      task_id: 'TORQUE:' + (4000 + i),
       task_title: 'Existing task ' + i,
       agent_id: 'eng-wkl-anchor',
       agent_name: 'Builder',
@@ -1998,7 +1998,7 @@ test('engineer worklog pager grows to anchor around newly dispatched tasks', () 
   const fresh = [
     {
       id: 4100,
-      task_id: 'LOOM:4100',
+      task_id: 'TORQUE:4100',
       task_title: 'Fresh dispatched task 1',
       agent_id: 'eng-wkl-anchor',
       agent_name: 'Builder',
@@ -2006,7 +2006,7 @@ test('engineer worklog pager grows to anchor around newly dispatched tasks', () 
     },
     {
       id: 4101,
-      task_id: 'LOOM:4101',
+      task_id: 'TORQUE:4101',
       task_title: 'Fresh dispatched task 2',
       agent_id: 'eng-wkl-anchor',
       agent_name: 'Builder',

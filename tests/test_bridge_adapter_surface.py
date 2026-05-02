@@ -70,9 +70,9 @@ class FakeApp:
 class BridgeAdapterSurfaceTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         _install_test_stubs()
-        self.bridge_mod = importlib.import_module("loom.bridge")
+        self.bridge_mod = importlib.import_module("torque.bridge")
         self.bridge_mod = importlib.reload(self.bridge_mod)
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
 
     async def test_list_profiles_returns_sorted_unique_names(self):
@@ -109,8 +109,8 @@ class BridgeAdapterSurfaceTests(unittest.IsolatedAsyncioTestCase):
     async def test_register_web_view_tool_delegates_to_iterm2(self):
         bridge = self.bridge_mod.ITerm2Adapter(None, self.state_mod.MatrixState())
         registered = await bridge.register_web_view_tool(
-            display_name="Loom",
-            identifier="com.loom.toolbelt",
+            display_name="Torque",
+            identifier="com.torque.toolbelt",
             url="http://127.0.0.1:18932/",
         )
 
@@ -118,7 +118,7 @@ class BridgeAdapterSurfaceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.bridge_mod.iterm2.tool.calls), 1)
         self.assertEqual(
             self.bridge_mod.iterm2.tool.calls[0]["identifier"],
-            "com.loom.toolbelt",
+            "com.torque.toolbelt",
         )
 
     async def test_iterm2_capabilities_remain_classic_toolbelt_only(self):

@@ -1,7 +1,7 @@
 import types
 import unittest
 
-from loom import external_tickets as ext
+from torque import external_tickets as ext
 
 
 class DummyAdapter(ext.ExternalTicketAdapter):
@@ -68,5 +68,5 @@ class ExternalTicketTests(unittest.TestCase):
             "Fix flaky tests",
             "Stabilized the retry path and updated assertions.",
         )
-        self.assertIn("Loom completed: Fix flaky tests", comment)
+        self.assertIn("Torque completed: Fix flaky tests", comment)
         self.assertIn("Summary:", comment)

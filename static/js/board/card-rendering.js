@@ -273,7 +273,7 @@ function _boardTaskNeedsEligibilityRefs(task) {
 
 function _boardTaskIsDispatchBlocked(task) {
   return _boardDepsBlocked(task)
-    || !!(task.labels && task.labels.indexOf('loom:blocked') >= 0);
+    || !!(task.labels && task.labels.indexOf('torque:blocked') >= 0);
 }
 
 function _boardTaskDispatchEligibility(task) {
@@ -303,7 +303,7 @@ function _boardTaskDispatchEligibility(task) {
       title: 'Waiting on: ' + preview,
     };
   }
-  if (task.labels && task.labels.indexOf('loom:blocked') >= 0) {
+  if (task.labels && task.labels.indexOf('torque:blocked') >= 0) {
     return {
       className: 'board-card-dispatch board-card-dispatch-blocked',
       label: 'Blocked',
@@ -788,8 +788,8 @@ function _renderBoardCard(t, childrenOf, depth, renderState) {
     for (var li = 0; li < sysLbls.length; li++) {
       var lb = sysLbls[li];
       var cls = 'board-card-label board-label-system';
-      if (lb === 'loom:blocked') cls += ' board-label-blocked';
-      else if (lb === 'loom:error') cls += ' board-label-error';
+      if (lb === 'torque:blocked') cls += ' board-label-blocked';
+      else if (lb === 'torque:error') cls += ' board-label-error';
       meta += '<span class="' + cls + '">' + esc(displayLabel(lb)) + '</span>';
     }
   }
@@ -834,7 +834,7 @@ function _renderBoardCard(t, childrenOf, depth, renderState) {
   // Pipeline chain indicator (only for subordinate cards)
   if (isSubordinate && t.parent_task_id) {
     var chainInfo = '↳ depth ' + (t.pipeline_depth || 0);
-    if (t.labels && t.labels.indexOf('loom:human') >= 0) chainInfo += ' · awaiting human';
+    if (t.labels && t.labels.indexOf('torque:human') >= 0) chainInfo += ' · awaiting human';
     cardHtml += '<div class="board-card-chain">' + chainInfo + '</div>';
   }
   if (t.agent_id) {

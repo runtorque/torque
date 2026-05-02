@@ -1,6 +1,6 @@
-"""LOOM:116 — static webview/CSS layout regression tests.
+"""TORQUE:116 — static webview/CSS layout regression tests.
 
-These are structural guardrails for the LOOM:116 top-bar-relocation change.
+These are structural guardrails for the TORQUE:116 top-bar-relocation change.
 The standalone-mode header has to live inside #standalone-main-stack so it
 only spans the agent panel column (and doesn't stretch above the terminal
 workspace). If someone accidentally moves it back to body level, these
@@ -55,7 +55,7 @@ class WebviewHeaderLocationTests(unittest.TestCase):
             "<header>",
             stack_inner,
             "<header> must live inside #standalone-main-stack so it only "
-            "spans the agent panel column in standalone mode (LOOM:116).",
+            "spans the agent panel column in standalone mode (TORQUE:116).",
         )
         self.assertIn(
             'id="main"',
@@ -65,7 +65,7 @@ class WebviewHeaderLocationTests(unittest.TestCase):
 
     def test_header_is_not_a_body_level_sibling_of_workspace_shell(self):
         html = _read(WEBVIEW)
-        # The old pre-LOOM:116 layout put <header> directly above
+        # The old pre-TORQUE:116 layout put <header> directly above
         # <div id="workspace-shell">. Lock against a revert.
         pattern = re.compile(
             r"</header>\s*(?:<!--[^>]*-->\s*)*<div[^>]*id=\"workspace-shell\"",
@@ -82,7 +82,7 @@ class WebviewHeaderLocationTests(unittest.TestCase):
         html = _read(WEBVIEW)
         # Confirm the exact controls the user expects still exist on the
         # relocated header. Each is load-bearing: global settings, add group,
-        # restart daemon. Connection status indicator + LOOM branding also.
+        # restart daemon. Connection status indicator + TORQUE branding also.
         self.assertRegex(
             html,
             r'<header>[\s\S]*id="conn-dot"[\s\S]*</header>',
@@ -90,8 +90,8 @@ class WebviewHeaderLocationTests(unittest.TestCase):
         )
         self.assertRegex(
             html,
-            r'<header>[\s\S]*<h1>LOOM</h1>[\s\S]*</header>',
-            "LOOM branding missing from header",
+            r'<header>[\s\S]*<h1>TORQUE</h1>[\s\S]*</header>',
+            "TORQUE branding missing from header",
         )
         self.assertRegex(
             html,

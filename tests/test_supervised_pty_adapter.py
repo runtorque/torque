@@ -18,15 +18,15 @@ try:
 except ModuleNotFoundError:
     from tests.helpers import install_aiohttp_stub
 
-from loom.pty_supervisor import PtySupervisor
+from torque.pty_supervisor import PtySupervisor
 
 
 class SupervisedPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         install_aiohttp_stub()
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
-        self.pty_mod = importlib.import_module("loom.local_pty")
+        self.pty_mod = importlib.import_module("torque.local_pty")
         self.pty_mod = importlib.reload(self.pty_mod)
 
         self.tmp = tempfile.TemporaryDirectory()
@@ -50,10 +50,10 @@ class SupervisedPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
     async def test_create_session_spawns_via_supervisor_and_emits_output(self):
         state, adapter = await self._make_adapter()
         try:
-            state.add_group("Loom")
+            state.add_group("Torque")
             cell = state.add_terminal(
                 name="Term 1",
-                group="Loom",
+                group="Torque",
                 terminal_backend="pty",
                 command="printf 'hello-sup-ad\\n'",
             )
@@ -76,10 +76,10 @@ class SupervisedPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
     async def test_write_input_round_trips_through_cat(self):
         state, adapter = await self._make_adapter()
         try:
-            state.add_group("Loom")
+            state.add_group("Torque")
             cell = state.add_terminal(
                 name="Term 2",
-                group="Loom",
+                group="Torque",
                 terminal_backend="pty",
                 command="cat",
             )
@@ -101,10 +101,10 @@ class SupervisedPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
     async def test_close_session_marks_cell_stopped(self):
         state, adapter = await self._make_adapter()
         try:
-            state.add_group("Loom")
+            state.add_group("Torque")
             cell = state.add_terminal(
                 name="Term 3",
-                group="Loom",
+                group="Torque",
                 terminal_backend="pty",
                 command="sleep 30",
             )
@@ -126,10 +126,10 @@ class SupervisedPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
     async def test_resize_propagates_to_supervisor(self):
         state, adapter = await self._make_adapter()
         try:
-            state.add_group("Loom")
+            state.add_group("Torque")
             cell = state.add_terminal(
                 name="Term 4",
-                group="Loom",
+                group="Torque",
                 terminal_backend="pty",
                 command="sleep 30",
             )
@@ -148,10 +148,10 @@ class SupervisedPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
         re-adopt the session + resume output.
         """
         state_a, adapter_a = await self._make_adapter()
-        state_a.add_group("Loom")
+        state_a.add_group("Torque")
         cell_a = state_a.add_terminal(
             name="Survivor",
-            group="Loom",
+            group="Torque",
             terminal_backend="pty",
             command="i=0; while [ $i -lt 50 ]; do "
                     "printf 'tick-%d\\n' $i; i=$((i+1)); sleep 0.1; done",
@@ -169,10 +169,10 @@ class SupervisedPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
         # New "daemon image" starts. Persist the cell into a fresh
         # state that has the same id/session_id.
         state_b = self.state_mod.MatrixState()
-        state_b.add_group("Loom")
+        state_b.add_group("Torque")
         cell_b = state_b.add_terminal(
             name="Survivor",
-            group="Loom",
+            group="Torque",
             terminal_backend="pty",
         )
         # Align cell ids + session_id as if loaded from SQLite.
@@ -214,10 +214,10 @@ class SupervisedPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
         """
         state, adapter = await self._make_adapter()
         try:
-            state.add_group("Loom")
+            state.add_group("Torque")
             cell = state.add_agent(
                 name="Awareness",
-                group="Loom",
+                group="Torque",
                 terminal_backend="pty",
                 command="sleep 3",
                 directory=self.tmp.name,
@@ -249,10 +249,10 @@ class SupervisedPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
     async def test_reconnect_orphans_clears_cells_without_live_sessions(self):
         state, adapter = await self._make_adapter()
         try:
-            state.add_group("Loom")
+            state.add_group("Torque")
             cell = state.add_terminal(
                 name="Ghost",
-                group="Loom",
+                group="Torque",
                 terminal_backend="pty",
             )
             # Cell has a stale session_id but no supervisor session.
@@ -279,10 +279,10 @@ class SupervisedPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
 
         adapter.on_supervisor_event = on_event
         try:
-            state.add_group("Loom")
+            state.add_group("Torque")
             cell = state.add_terminal(
                 name="Evt",
-                group="Loom",
+                group="Torque",
                 terminal_backend="pty",
                 command="sleep 30",
             )
@@ -316,10 +316,10 @@ class SupervisedPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
 
         adapter.on_supervisor_event = on_event
         try:
-            state.add_group("Loom")
+            state.add_group("Torque")
             cell = state.add_terminal(
                 name="Ev2",
-                group="Loom",
+                group="Torque",
                 terminal_backend="pty",
                 command="sleep 30",
             )

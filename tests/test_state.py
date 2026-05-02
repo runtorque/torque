@@ -24,7 +24,7 @@ def _install_aiohttp_stub():
 class HotJsonSerializationTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         _install_aiohttp_stub()
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
 
     def _state_payload_with_task_message(self, message: str) -> dict:
@@ -180,7 +180,7 @@ class HotJsonSerializationTests(unittest.IsolatedAsyncioTestCase):
     def test_hot_json_bytes_and_string_outputs_parse_equally(self):
         payload = {
             "task": "Check JSON 🚀",
-            "path": Path("/tmp/loom"),
+            "path": Path("/tmp/torque"),
             "when": datetime(2026, 4, 22, 12, 0, tzinfo=timezone.utc),
         }
 
@@ -196,7 +196,7 @@ class HotJsonSerializationTests(unittest.IsolatedAsyncioTestCase):
 class MatrixStateCleanupTests(unittest.TestCase):
     def setUp(self):
         _install_aiohttp_stub()
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
 
     def test_update_global_settings_validates_xterm_scrollback(self):
@@ -407,7 +407,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
             self.state_mod.hot_json_dumps_bytes(state.to_dict_compact()))
         reduction = 1 - (compact_bytes / full_bytes)
 
-        # LOOM:154 phase-1 measured ~98% reduction. Preserve at least 95% of
+        # TORQUE:154 phase-1 measured ~98% reduction. Preserve at least 95% of
         # that win after eagerly restoring board-semantic metadata.
         self.assertGreaterEqual(reduction, 0.931)
 
@@ -455,12 +455,12 @@ class MatrixStateCleanupTests(unittest.TestCase):
 
     def test_hot_json_default_handles_guarded_types(self):
         raw = self.state_mod.hot_json_dumps({
-            "path": Path("/tmp/loom"),
+            "path": Path("/tmp/torque"),
             "when": datetime(2026, 4, 22, 12, 0, tzinfo=timezone.utc),
         })
 
         self.assertEqual(json.loads(raw), {
-            "path": "/tmp/loom",
+            "path": "/tmp/torque",
             "when": "2026-04-22T12:00:00+00:00",
         })
 
@@ -485,7 +485,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
             task="Review plan",
             group="g",
             lane="Backlog",
-            labels=["loom:human", "loom:derived"],
+            labels=["torque:human", "torque:derived"],
             parent_task_id=parent.id,
         )
 
@@ -610,7 +610,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
             task="Review plan",
             group="g",
             lane="Backlog",
-            labels=["loom:human", "loom:derived"],
+            labels=["torque:human", "torque:derived"],
             parent_task_id=parent.id,
         )
 
@@ -637,11 +637,11 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertEqual(state._delta_ops, [])
 
     def test_cleanup_orphaned_attention_keeps_persisted_engineer_during_boot(self):
-        from loom.db import LoomDB
+        from torque.db import TorqueDB
 
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        db = LoomDB(Path(tmp.name) / "loom.db")
+        db = TorqueDB(Path(tmp.name) / "torque.db")
         db.init()
         self.addCleanup(db.close)
         engineer = self.state_mod.AgentCell(
@@ -682,11 +682,11 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertTrue(ws.paused)
 
     def test_cleanup_orphaned_attention_false_fallback_clears_persisted_agent_row(self):
-        from loom.db import LoomDB
+        from torque.db import TorqueDB
 
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        db = LoomDB(Path(tmp.name) / "loom.db")
+        db = TorqueDB(Path(tmp.name) / "torque.db")
         db.init()
         self.addCleanup(db.close)
         engineer = self.state_mod.AgentCell(
@@ -708,7 +708,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
             task="Review plan",
             group="g",
             lane="Backlog",
-            labels=["loom:human", "loom:derived"],
+            labels=["torque:human", "torque:derived"],
             parent_task_id=parent.id,
         )
         db.save_group("g", 0)
@@ -750,11 +750,11 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertEqual(state.board_tasks[ask.id].lane, "Done")
 
     def test_load_preserves_pending_question_for_persisted_engineer(self):
-        from loom.db import LoomDB
+        from torque.db import TorqueDB
 
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        db = LoomDB(Path(tmp.name) / "loom.db")
+        db = TorqueDB(Path(tmp.name) / "torque.db")
         db.init()
         self.addCleanup(db.close)
         engineer = self.state_mod.AgentCell(
@@ -800,7 +800,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
             lane="Done",
             worktree_boundary={
                 "repo_root": "/repo",
-                "branch": "loom/worker",
+                "branch": "torque/worker",
                 "status": "merged",
                 "recorded_at": "2026-04-07T10:00:00+00:00",
             },
@@ -824,11 +824,11 @@ class MatrixStateCleanupTests(unittest.TestCase):
         )
 
     def test_load_clears_stale_boundary_successors_and_keeps_open_ones(self):
-        from loom.db import LoomDB
+        from torque.db import TorqueDB
 
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        db = LoomDB(Path(tmp.name) / "loom.db")
+        db = TorqueDB(Path(tmp.name) / "torque.db")
         db.init()
         self.addCleanup(db.close)
         db.save_groups({"g": []}, {"g": "g"})
@@ -840,7 +840,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
                 lane="Done",
                 worktree_boundary={
                     "repo_root": "/repo",
-                    "branch": "loom/worker",
+                    "branch": "torque/worker",
                     "status": "open",
                     "recorded_at": "2026-04-07T10:00:00+00:00",
                 },
@@ -854,7 +854,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
                 lane="Done",
                 worktree_boundary={
                     "repo_root": "/repo",
-                    "branch": "loom/worker",
+                    "branch": "torque/worker",
                     "status": "merged",
                     "recorded_at": "2026-04-07T11:00:00+00:00",
                 },
@@ -892,11 +892,11 @@ class MatrixStateCleanupTests(unittest.TestCase):
         )
 
     def test_load_migrates_legacy_archived_label_to_archived_lane(self):
-        from loom.db import LoomDB
+        from torque.db import TorqueDB
 
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        db = LoomDB(Path(tmp.name) / "loom.db")
+        db = TorqueDB(Path(tmp.name) / "torque.db")
         db.init()
         self.addCleanup(db.close)
         db.save_groups({"g": []}, {"g": "g"})
@@ -906,7 +906,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
                 task="Old archived task",
                 group="g",
                 lane="Done",
-                labels=["loom:archived", "bug"],
+                labels=["torque:archived", "bug"],
                 updated_at="2026-04-07T10:00:00+00:00",
             )
         )
@@ -921,11 +921,11 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertEqual(task.labels, ["bug"])
 
     def test_load_migrates_legacy_non_done_archives_without_done_semantics(self):
-        from loom.db import LoomDB
+        from torque.db import TorqueDB
 
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        db = LoomDB(Path(tmp.name) / "loom.db")
+        db = TorqueDB(Path(tmp.name) / "torque.db")
         db.init()
         self.addCleanup(db.close)
         db.save_groups({"g": []}, {"g": "g"})
@@ -935,7 +935,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
                 task="Legacy archived child",
                 group="g",
                 lane="In Progress",
-                labels=["loom:archived"],
+                labels=["torque:archived"],
                 updated_at="2026-04-07T10:00:00+00:00",
             )
         )
@@ -959,11 +959,11 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertFalse(state.board_deps_met(state.board_tasks["task-1"]))
 
     def test_load_restores_auto_dispatch_queue_and_busy_agents(self):
-        from loom.db import LoomDB
+        from torque.db import TorqueDB
 
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        db = LoomDB(Path(tmp.name) / "loom.db")
+        db = TorqueDB(Path(tmp.name) / "torque.db")
         db.init()
         self.addCleanup(db.close)
         db.save_groups({"g": ["agent-1"]}, {"g": "g"})
@@ -1032,11 +1032,11 @@ class MatrixStateCleanupTests(unittest.TestCase):
         )
 
     def test_load_restores_kinds_fields_on_agents_and_tasks(self):
-        from loom.db import LoomDB
+        from torque.db import TorqueDB
 
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        db = LoomDB(Path(tmp.name) / "loom.db")
+        db = TorqueDB(Path(tmp.name) / "torque.db")
         db.init()
         self.addCleanup(db.close)
         db.save_groups({"g": ["agent-1"]}, {"g": "g"})
@@ -1090,11 +1090,11 @@ class MatrixStateCleanupTests(unittest.TestCase):
         )
 
     def test_load_backfills_architect_queue_empty_digest_default(self):
-        from loom.db import LoomDB
+        from torque.db import TorqueDB
 
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        db = LoomDB(Path(tmp.name) / "loom.db")
+        db = TorqueDB(Path(tmp.name) / "torque.db")
         db.init()
         self.addCleanup(db.close)
         db.save_groups({"g": ["arch-1"]}, {"g": "g"})
@@ -1137,11 +1137,11 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertIn("engineer_ask_resolved", persisted["enabled_events"])
 
     def test_architect_settings_round_trip_through_group_settings(self):
-        from loom.db import LoomDB
+        from torque.db import TorqueDB
 
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        db = LoomDB(Path(tmp.name) / "loom.db")
+        db = TorqueDB(Path(tmp.name) / "torque.db")
         db.init()
         self.addCleanup(db.close)
         db.save_groups({"g": []}, {"g": "g"})
@@ -1152,7 +1152,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
                 architect_provider="codex",
                 architect_model="gpt-5.1-architect",
                 architect_reasoning_effort="high",
-                architect_directory="/repo/.loom/architect",
+                architect_directory="/repo/.torque/architect",
                 architect_profile="Ops",
                 architect_shell="fish",
                 architect_tab_color="none",
@@ -1176,7 +1176,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertEqual(settings.architect_provider, "codex")
         self.assertEqual(settings.architect_model, "gpt-5.1-architect")
         self.assertEqual(settings.architect_reasoning_effort, "high")
-        self.assertEqual(settings.architect_directory, "/repo/.loom/architect")
+        self.assertEqual(settings.architect_directory, "/repo/.torque/architect")
         self.assertEqual(settings.architect_profile, "Ops")
         self.assertEqual(settings.architect_shell, "fish")
         self.assertEqual(settings.architect_tab_color, "none")
@@ -1206,11 +1206,11 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertIn("task_done", settings.architect_enabled_events)
 
     def test_architect_digest_knobs_round_trip_through_group_settings(self):
-        from loom.db import LoomDB
+        from torque.db import TorqueDB
 
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        db = LoomDB(Path(tmp.name) / "loom.db")
+        db = TorqueDB(Path(tmp.name) / "torque.db")
         db.init()
         self.addCleanup(db.close)
         db.save_groups({"g": []}, {"g": "g"})
@@ -1288,11 +1288,11 @@ class MatrixStateCleanupTests(unittest.TestCase):
 
     def test_load_backfills_suppress_empty_for_legacy_architect_rows(self):
         """Pre-existing architect digest rows should pick up suppress_empty."""
-        from loom.db import LoomDB
+        from torque.db import TorqueDB
 
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        db = LoomDB(Path(tmp.name) / "loom.db")
+        db = TorqueDB(Path(tmp.name) / "torque.db")
         db.init()
         self.addCleanup(db.close)
         db.save_groups({"g": ["arch-1"]}, {"g": "g"})
@@ -1337,11 +1337,11 @@ class MatrixStateCleanupTests(unittest.TestCase):
 
     def test_backfill_runs_only_once_respects_user_override(self):
         """Once the marker is set, a user-set False is preserved across reloads."""
-        from loom.db import LoomDB
+        from torque.db import TorqueDB
 
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        db = LoomDB(Path(tmp.name) / "loom.db")
+        db = TorqueDB(Path(tmp.name) / "torque.db")
         db.init()
         self.addCleanup(db.close)
         db.save_groups({"g": ["arch-1"]}, {"g": "g"})
@@ -1513,7 +1513,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
             lane="Done",
             worktree_boundary={
                 "repo_root": "/repo",
-                "branch": "loom/worker",
+                "branch": "torque/worker",
                 "status": "open",
                 "recorded_at": "2026-04-07T10:00:00+00:00",
             },
@@ -1588,11 +1588,11 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertTrue(gs.worktree_merge_preserve_diff)
 
     def test_history_record_dispatch_persists_engineer_worklog_and_survives_reload(self):
-        from loom.db import LoomDB
+        from torque.db import TorqueDB
 
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        db = LoomDB(Path(tmp.name) / "loom.db")
+        db = TorqueDB(Path(tmp.name) / "torque.db")
         db.init()
         self.addCleanup(db.close)
 
@@ -1630,7 +1630,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
             "Ship Worklog tab",
             "g",
             lane="In Progress",
-            id="LOOM:1",
+            id="TORQUE:1",
             agent_id=worker.id,
         )
 
@@ -1657,7 +1657,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
 class MatrixStatePauseBroadcastTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         _install_aiohttp_stub()
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
 
     def _make_state(self, *, engineer_digest_paused=True,
@@ -1733,14 +1733,14 @@ class MatrixStatePauseBroadcastTests(unittest.IsolatedAsyncioTestCase):
             group="g",
             call={
                 "cell_id": "worker-1",
-                "tool_name": "mcp__loom__loom_progress",
+                "tool_name": "mcp__torque__torque_progress",
                 "hook_event_name": "PostToolUse",
                 "appended_at": 2,
             },
         )
         state._emit(
             "task_upsert",
-            id="LOOM:1",
+            id="TORQUE:1",
             group="g",
             task="Visible worker task",
             agent_id="worker-1",
@@ -1750,7 +1750,7 @@ class MatrixStatePauseBroadcastTests(unittest.IsolatedAsyncioTestCase):
             group="g",
             entry={
                 "agent_id": "worker-1",
-                "task_id": "LOOM:1",
+                "task_id": "TORQUE:1",
                 "event": "progress",
             },
         )
@@ -1786,7 +1786,7 @@ class MatrixStatePauseBroadcastTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ops[5]["agent_id"], "eng-1")
 
     async def test_tombstone_and_restore_upserts_emit_normally(self):
-        # Post-LOOM:294, pause no longer suppresses broadcast at emit time —
+        # Post-TORQUE:294, pause no longer suppresses broadcast at emit time —
         # tombstone/restore upserts simply reach _delta_ops like any other
         # agent_upsert. Lock that lifecycle behavior down here.
         state = self._make_state(engineer_digest_paused=True)
@@ -1845,7 +1845,7 @@ class MatrixStatePauseBroadcastTests(unittest.IsolatedAsyncioTestCase):
 class MatrixStateBoardWorkflowTests(unittest.TestCase):
     def setUp(self):
         _install_aiohttp_stub()
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
 
     def _make_state(self):
@@ -1867,7 +1867,7 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
             pipeline_depth=depth,
             reply_agent_id=reply_agent_id,
             status=status,
-            labels=["loom:derived", "loom:engineer-message"],
+            labels=["torque:derived", "torque:engineer-message"],
             messages=list(messages or []),
         )
 
@@ -1883,7 +1883,7 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
     def test_resolve_board_task_id_prefers_alias_over_archived_literal(self):
         state = self._make_state()
         archived = self.state_mod.BoardTask(
-            id="LOOM:51",
+            id="TORQUE:51",
             task="Archived task",
             group="g",
             lane="Archived",
@@ -1899,49 +1899,49 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
         state.board_tasks[live.id] = live
         state.task_id_aliases[archived.id] = live.id
 
-        self.assertEqual(state.resolve_task_alias("LOOM:51"), live.id)
-        self.assertEqual(state.resolve_board_task_id("LOOM:51"), live.id)
-        self.assertEqual(state.resolve_board_task_id("LOOM:5"), live.id)
+        self.assertEqual(state.resolve_task_alias("TORQUE:51"), live.id)
+        self.assertEqual(state.resolve_board_task_id("TORQUE:51"), live.id)
+        self.assertEqual(state.resolve_board_task_id("TORQUE:5"), live.id)
 
     def test_board_add_task_archived_literal_collision_creates_persisted_alias(self):
-        from loom.db import LoomDB
+        from torque.db import TorqueDB
 
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        db = LoomDB(Path(tmp.name) / "loom.db")
+        db = TorqueDB(Path(tmp.name) / "torque.db")
         db.init()
         self.addCleanup(db.close)
 
         state = self.state_mod.MatrixState(db=db)
-        state.groups["Loom"] = []
+        state.groups["Torque"] = []
         state._db_save_groups()
-        state.task_id_counters["LOOM"] = 51
+        state.task_id_counters["TORQUE"] = 51
         archived = self.state_mod.BoardTask(
-            id="LOOM:51",
+            id="TORQUE:51",
             task="Archived original",
-            group="Loom",
+            group="Torque",
             lane="Archived",
             archived_at="2026-04-07T00:00:00+00:00",
         )
         state.board_tasks[archived.id] = archived
         state._db_save_task(archived)
 
-        task = state.board_add_task("New live task", "Loom")
+        task = state.board_add_task("New live task", "Torque")
 
         self.assertIsNotNone(task)
-        self.assertNotEqual(task.id, "LOOM:51")
+        self.assertNotEqual(task.id, "TORQUE:51")
         self.assertEqual(len(task.id), 8)
-        self.assertEqual(state.task_id_aliases["LOOM:51"], task.id)
+        self.assertEqual(state.task_id_aliases["TORQUE:51"], task.id)
         self.assertTrue(db.board_task_exists(task.id))
-        self.assertTrue(db.board_task_exists("LOOM:51"))
-        self.assertEqual(state.resolve_board_task_id("LOOM:51"), task.id)
+        self.assertTrue(db.board_task_exists("TORQUE:51"))
+        self.assertEqual(state.resolve_board_task_id("TORQUE:51"), task.id)
 
     def test_board_update_task_alias_persists_missing_canonical_and_full_delta(self):
-        from loom.db import LoomDB
+        from torque.db import TorqueDB
 
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        db = LoomDB(Path(tmp.name) / "loom.db")
+        db = TorqueDB(Path(tmp.name) / "torque.db")
         db.init()
         self.addCleanup(db.close)
         db.save_groups({"g": []}, {"g": "g"})
@@ -1949,7 +1949,7 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
         state = self.state_mod.MatrixState(db=db)
         state.groups["g"] = []
         archived = self.state_mod.BoardTask(
-            id="LOOM:51",
+            id="TORQUE:51",
             task="Highlight Events panel header",
             group="g",
             lane="Archived",
@@ -1962,13 +1962,13 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
             lane="Backlog",
         )
         db.save_board_task(archived)
-        db.save_task_id_alias("LOOM:51", live.id)
+        db.save_task_id_alias("TORQUE:51", live.id)
         state.board_tasks[archived.id] = archived
         state.board_tasks[live.id] = live
-        state.task_id_aliases["LOOM:51"] = live.id
+        state.task_id_aliases["TORQUE:51"] = live.id
 
         state.board_update_task(
-            "LOOM:51",
+            "TORQUE:51",
             description="Architect-written description",
             action_name="feature/implement",
             assigned_engineer_id="eng-1",
@@ -1978,7 +1978,7 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
         self.assertEqual(updated.description, "Architect-written description")
         self.assertEqual(updated.action_name, "feature/implement")
         self.assertEqual(updated.assigned_engineer_id, "eng-1")
-        self.assertEqual(state.board_tasks["LOOM:51"].task, archived.task)
+        self.assertEqual(state.board_tasks["TORQUE:51"].task, archived.task)
         self.assertTrue(db.board_task_exists(live.id))
         row = db._conn.execute(
             "SELECT description, action_name, assigned_engineer_id "
@@ -1990,7 +1990,7 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
             ("Architect-written description", "feature/implement", "eng-1"),
         )
         archived_row = db._conn.execute(
-            "SELECT task, description FROM board_tasks WHERE id='LOOM:51'"
+            "SELECT task, description FROM board_tasks WHERE id='TORQUE:51'"
         ).fetchone()
         self.assertEqual(archived_row, (archived.task, ""))
         task_ops = [
@@ -2007,7 +2007,7 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
 
         reloaded = self.state_mod.MatrixState(db=db)
         reloaded.load()
-        self.assertEqual(reloaded.resolve_board_task_id("LOOM:51"), live.id)
+        self.assertEqual(reloaded.resolve_board_task_id("TORQUE:51"), live.id)
         self.assertEqual(
             reloaded.board_tasks[live.id].description,
             "Architect-written description",
@@ -2015,15 +2015,15 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
 
     def test_board_add_task_allocates_group_scoped_root_ids(self):
         state = self.state_mod.MatrixState()
-        state.groups["Loom Team"] = []
+        state.groups["Torque Team"] = []
         state.groups["Ops"] = []
 
-        first = state.board_add_task("First task", "Loom Team")
-        second = state.board_add_task("Second task", "Loom Team")
+        first = state.board_add_task("First task", "Torque Team")
+        second = state.board_add_task("Second task", "Torque Team")
         third = state.board_add_task("Ops task", "Ops")
 
-        self.assertEqual(first.id, "LOOM_TEAM:1")
-        self.assertEqual(second.id, "LOOM_TEAM:2")
+        self.assertEqual(first.id, "TORQUE_TEAM:1")
+        self.assertEqual(second.id, "TORQUE_TEAM:2")
         self.assertEqual(third.id, "OPS:1")
 
     def test_board_add_task_transliterates_accented_group_names(self):
@@ -2036,13 +2036,13 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
 
     def test_board_add_task_allocates_pipeline_scoped_child_ids_across_groups(self):
         state = self.state_mod.MatrixState()
-        state.groups["Loom"] = []
+        state.groups["Torque"] = []
         state.groups["Review Team"] = []
 
-        root = state.board_add_task("Root", "Loom")
+        root = state.board_add_task("Root", "Torque")
         child = state.board_add_task(
             "Implement",
-            "Loom",
+            "Torque",
             parent_task_id=root.id,
             pipeline_root_id=root.id,
             pipeline_depth=1,
@@ -2055,8 +2055,8 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
             pipeline_depth=2,
         )
 
-        self.assertEqual(root.id, "LOOM:1")
-        self.assertEqual(child.id, "LOOM:1:1")
+        self.assertEqual(root.id, "TORQUE:1")
+        self.assertEqual(child.id, "TORQUE:1:1")
         self.assertEqual(cross_group.id, "REVIEW_TEAM:1:2")
 
     def test_started_descendant_handoff_frees_parent_execution_slot(self):
@@ -2132,7 +2132,7 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
             lane="Done",
             id="task-done",
             reply_agent_id="agent-1",
-            labels=["loom:engineer-message"],
+            labels=["torque:engineer-message"],
         )
         pending_old = state.board_add_task(
             "Older thread",
@@ -2140,7 +2140,7 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
             lane="Backlog",
             id="task-old",
             reply_agent_id="agent-1",
-            labels=["loom:engineer-message"],
+            labels=["torque:engineer-message"],
         )
         pending_new = state.board_add_task(
             "Newer thread",
@@ -2148,7 +2148,7 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
             lane="Backlog",
             id="task-new",
             reply_agent_id="agent-1",
-            labels=["loom:engineer-message"],
+            labels=["torque:engineer-message"],
         )
         state.board_add_task(
             "Other worker thread",
@@ -2156,7 +2156,7 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
             lane="Backlog",
             id="task-other",
             reply_agent_id="agent-2",
-            labels=["loom:engineer-message"],
+            labels=["torque:engineer-message"],
         )
 
         pending = state.agent_pending_engineer_reply_tasks("agent-1")
@@ -2164,11 +2164,11 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
         self.assertEqual([task.id for task in pending], [pending_old.id, pending_new.id])
 
     def test_load_restores_pending_engineer_message_from_open_followup_tasks(self):
-        from loom.db import LoomDB
+        from torque.db import TorqueDB
 
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        db = LoomDB(Path(tmp.name) / "loom.db")
+        db = TorqueDB(Path(tmp.name) / "torque.db")
         db.init()
         self.addCleanup(db.close)
         db.save_groups({"g": ["agent-1"]}, {"g": "g"})
@@ -2188,7 +2188,7 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
                 group="g",
                 lane="Backlog",
                 reply_agent_id="agent-1",
-                labels=["loom:engineer-message"],
+                labels=["torque:engineer-message"],
             )
         )
 
@@ -2202,11 +2202,11 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
         )
 
     def test_load_retroactively_expires_historical_engineer_message_ghosts(self):
-        from loom.db import LoomDB
+        from torque.db import TorqueDB
 
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        db = LoomDB(Path(tmp.name) / "loom.db")
+        db = TorqueDB(Path(tmp.name) / "torque.db")
         db.init()
         self.addCleanup(db.close)
         db.save_groups({"g": ["agent-1"]}, {"g": "g"})
@@ -2238,7 +2238,7 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
                 pipeline_depth=1,
                 reply_agent_id="agent-1",
                 status="Awaiting Reply",
-                labels=["loom:engineer-message"],
+                labels=["torque:engineer-message"],
             )
         )
 
@@ -2345,7 +2345,7 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
             "Implement cascading completion",
             "g",
             lane="In Progress",
-            id="LOOM:77",
+            id="TORQUE:77",
             status="On review",
             health_state="idle-risk",
             health_details={"reasons": ["progress_silence_warning"]},
@@ -2354,7 +2354,7 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
             "Review pass 1",
             "g",
             lane="In Progress",
-            id="LOOM:77:1",
+            id="TORQUE:77:1",
             parent_task_id=root.id,
             pipeline_root_id=root.id,
             pipeline_depth=1,
@@ -2366,7 +2366,7 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
             "Fix review pass 1",
             "g",
             lane="In Progress",
-            id="LOOM:77:2",
+            id="TORQUE:77:2",
             parent_task_id=review_one.id,
             pipeline_root_id=root.id,
             pipeline_depth=2,
@@ -2375,7 +2375,7 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
             "Review pass 2",
             "g",
             lane="In Progress",
-            id="LOOM:77:3",
+            id="TORQUE:77:3",
             parent_task_id=fix_one.id,
             pipeline_root_id=root.id,
             pipeline_depth=3,
@@ -2384,7 +2384,7 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
             "Fix review pass 2",
             "g",
             lane="In Progress",
-            id="LOOM:77:4",
+            id="TORQUE:77:4",
             parent_task_id=review_two.id,
             pipeline_root_id=root.id,
             pipeline_depth=4,
@@ -2393,7 +2393,7 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
             "Final review pass",
             "g",
             lane="In Progress",
-            id="LOOM:77:5",
+            id="TORQUE:77:5",
             parent_task_id=fix_two.id,
             pipeline_root_id=root.id,
             pipeline_depth=5,
@@ -2412,12 +2412,12 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
         self.assertEqual(
             [(task.id, task.lane) for task in chain],
             [
-                ("LOOM:77", "Done"),
-                ("LOOM:77:1", "Done"),
-                ("LOOM:77:2", "Done"),
-                ("LOOM:77:3", "Done"),
-                ("LOOM:77:4", "Done"),
-                ("LOOM:77:5", "Done"),
+                ("TORQUE:77", "Done"),
+                ("TORQUE:77:1", "Done"),
+                ("TORQUE:77:2", "Done"),
+                ("TORQUE:77:3", "Done"),
+                ("TORQUE:77:4", "Done"),
+                ("TORQUE:77:5", "Done"),
             ],
         )
         self.assertEqual(state.board_tasks[root.id].status, "")
@@ -2484,7 +2484,7 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
             parent_task_id=parent.id,
             pipeline_root_id=parent.id,
             pipeline_depth=1,
-            labels=["loom:derived", "loom:engineer-message"],
+            labels=["torque:derived", "torque:engineer-message"],
         )
 
         state.board_move_task(follow_up.id, "Done")
@@ -2703,14 +2703,14 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
             task="Engineer: Need status",
             group="g",
             lane="Backlog",
-            labels=["loom:derived", "loom:engineer-message"],
+            labels=["torque:derived", "torque:engineer-message"],
         )
         normal = self.state_mod.BoardTask(
             id="task-normal",
             task="Implement feature",
             group="g",
             lane="Backlog",
-            labels=["loom:derived"],
+            labels=["torque:derived"],
         )
 
         self.assertTrue(
@@ -2730,7 +2730,7 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
             "g",
             lane="In Progress",
             id="task-reply",
-            labels=["loom:derived", "loom:engineer-message"],
+            labels=["torque:derived", "torque:engineer-message"],
         )
         child = state.board_add_task(
             "Investigate reply",
@@ -2740,7 +2740,7 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
             parent_task_id=parent.id,
             pipeline_root_id=parent.id,
             pipeline_depth=1,
-            labels=["loom:derived"],
+            labels=["torque:derived"],
         )
 
         state.board_move_task(child.id, "Done")
@@ -2794,7 +2794,7 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
             "g",
             description="Initial description",
             id="task-1",
-            labels=["loom:blocked", "keep"],
+            labels=["torque:blocked", "keep"],
             depends_on=["dep-1", "missing-task"],
             verification_mode="deploy",
             verification_state="pending",
@@ -2832,7 +2832,7 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
             task.id,
             task="Ship feature safely",
             description="Updated description",
-            labels=["loom:error", "keep"],
+            labels=["torque:error", "keep"],
             scheduled_at="2026-04-07T10:00:00+00:00",
             verification_state="failed",
             verification_notes="Smoke failed on login redirect",
@@ -2853,7 +2853,7 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
 
         updated = state.board_tasks[task.id]
         self.assertEqual(updated.description, "Updated description")
-        self.assertEqual(updated.labels, ["loom:error", "keep"])
+        self.assertEqual(updated.labels, ["torque:error", "keep"])
         self.assertEqual(updated.scheduled_at, "2026-04-07T10:00:00+00:00")
         self.assertEqual(updated.artifacts[0]["type"], "snippet")
         self.assertEqual(updated.artifacts[0]["storage"]["kind"], "inline")
@@ -2988,11 +2988,11 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
         self.assertEqual(archived.description, "Keep for reference")
 
     def test_board_move_task_clears_status_for_archived_noop_and_persists(self):
-        from loom.db import LoomDB
+        from torque.db import TorqueDB
 
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        db = LoomDB(Path(tmp.name) / "loom.db")
+        db = TorqueDB(Path(tmp.name) / "torque.db")
         db.init()
         self.addCleanup(db.close)
 
@@ -3119,7 +3119,7 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
 class MatrixStateEngineerStreamTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         _install_aiohttp_stub()
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
 
     def _make_state_with_open_stream(self):
@@ -3134,16 +3134,16 @@ class MatrixStateEngineerStreamTests(unittest.IsolatedAsyncioTestCase):
             group="g",
             cell_type="agent",
             status="idle",
-            worktree_path="/repo/.loom/worktrees/agent-1",
+            worktree_path="/repo/.torque/worktrees/agent-1",
             worktree_repo_root="/repo",
-            worktree_branch="loom/worker",
+            worktree_branch="torque/worker",
             git_root="/repo",
         )
         state.agents[worker.id] = worker
         state.groups["g"].append(worker.id)
 
         product = self.state_mod.BoardTask(
-            id="LOOM:1",
+            id="TORQUE:1",
             task="Add Events tab",
             group="g",
             lane="Done",
@@ -3154,7 +3154,7 @@ class MatrixStateEngineerStreamTests(unittest.IsolatedAsyncioTestCase):
             lane_entered_at="2026-04-07T10:00:00+00:00",
         )
         review = self.state_mod.BoardTask(
-            id="LOOM:1:1",
+            id="TORQUE:1:1",
             task="Review Events implementation",
             group="g",
             lane="Done",
@@ -3169,7 +3169,7 @@ class MatrixStateEngineerStreamTests(unittest.IsolatedAsyncioTestCase):
             worktree_boundary={
                 "version": "1",
                 "repo_root": "/repo",
-                "branch": "loom/worker",
+                "branch": "torque/worker",
                 "status": "open",
                 "recorded_at": "2026-04-07T11:30:00+00:00",
                 "commit_sha": "abc123",
@@ -3189,7 +3189,7 @@ class MatrixStateEngineerStreamTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("g", payload["engineer_streams"])
         summary = payload["engineer_streams"]["g"]
         self.assertEqual(summary["count"], 1)
-        self.assertEqual(summary["items"][0]["branch"], "loom/worker")
+        self.assertEqual(summary["items"][0]["branch"], "torque/worker")
         self.assertEqual(summary["items"][0]["state"], "ready_to_merge")
 
     async def test_snapshot_msg_async_round_trips_state_payload(self):
@@ -3247,14 +3247,14 @@ class MatrixStateEngineerStreamTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stream_ops[0]["streams"]["count"], 1)
         self.assertEqual(
             stream_ops[0]["streams"]["items"][0]["branch"],
-            "loom/worker",
+            "torque/worker",
         )
 
 
 class AgentCellActivityClockTests(unittest.TestCase):
     def setUp(self):
         _install_aiohttp_stub()
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
 
     def test_heartbeat_updates_only_heartbeat_and_activity_alias(self):
@@ -3305,11 +3305,11 @@ class AgentCellActivityClockTests(unittest.TestCase):
         self.assertEqual(cell.last_heartbeat_at, 200.0)
         self.assertEqual(cell.last_activity_at, 200.0)
 
-        from loom.db import LoomDB
+        from torque.db import TorqueDB
 
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        db = LoomDB(Path(tmp.name) / "loom.db")
+        db = TorqueDB(Path(tmp.name) / "torque.db")
         db.init()
         self.addCleanup(db.close)
         db.save_groups({"g": [cell.id]}, {"g": "g"})
@@ -3340,7 +3340,7 @@ class AgentCellActivityClockTests(unittest.TestCase):
 class SelectedPrincipalIdTests(unittest.TestCase):
     def setUp(self):
         _install_aiohttp_stub()
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
 
     def test_default_is_empty_string(self):
@@ -3360,11 +3360,11 @@ class SelectedPrincipalIdTests(unittest.TestCase):
         self.assertEqual(d["selected_principal_id"], "architect-b")
 
     def test_persists_and_restores_selected_principal_id(self):
-        from loom.db import LoomDB
+        from torque.db import TorqueDB
 
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        db = LoomDB(Path(tmp.name) / "loom.db")
+        db = TorqueDB(Path(tmp.name) / "torque.db")
         db.init()
         self.addCleanup(db.close)
 
@@ -3379,11 +3379,11 @@ class SelectedPrincipalIdTests(unittest.TestCase):
         self.assertEqual(state.selected_principal_id, "architect-42")
 
     def test_defaults_to_empty_when_ui_state_missing(self):
-        from loom.db import LoomDB
+        from torque.db import TorqueDB
 
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        db = LoomDB(Path(tmp.name) / "loom.db")
+        db = TorqueDB(Path(tmp.name) / "torque.db")
         db.init()
         self.addCleanup(db.close)
 

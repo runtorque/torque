@@ -1,6 +1,6 @@
 ---
-description: Show all Loom agents and what they're working on
-allowed-tools: mcp__loom__engineer_agents_list
+description: Show all Torque agents and what they're working on
+allowed-tools: mcp__torque__engineer_agents_list
 ---
 
 List all active agents using the engineer_agents_list MCP tool.

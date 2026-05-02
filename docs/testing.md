@@ -1,6 +1,6 @@
 # Testing
 
-Loom's automated coverage is intentionally layered. Most confidence should come
+Torque's automated coverage is intentionally layered. Most confidence should come
 from Python unit and integration tests, with only a thin UI/state smoke layer
 for frontend regressions.
 
@@ -9,8 +9,8 @@ for frontend regressions.
 Before expanding coverage, the suite needed one explicit cleanup:
 
 - `tests/test_worktree_gitignore.py` had drifted from the current product
-  behavior. `loom/worktree.py` only writes `.loom/worktrees/` to `.gitignore`;
-  Loom-injected local files belong in `.git/info/exclude`. The test now matches
+  behavior. `torque/worktree.py` only writes `.torque/worktrees/` to `.gitignore`;
+  Torque-injected local files belong in `.git/info/exclude`. The test now matches
   that contract so the baseline can go green before broader coverage expansion.
 
 ## Regression Matrix

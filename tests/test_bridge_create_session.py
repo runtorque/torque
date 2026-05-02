@@ -128,8 +128,8 @@ class FakeApp:
 class CreateSessionWindowTargetTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         _install_test_stubs()
-        self.bridge_mod = importlib.import_module("loom.bridge")
-        self.state_mod = importlib.import_module("loom.state")
+        self.bridge_mod = importlib.import_module("torque.bridge")
+        self.state_mod = importlib.import_module("torque.state")
 
     async def _make_bridge(self, app):
         async def fake_get_app(conn):
@@ -215,7 +215,7 @@ class CreateSessionWindowTargetTests(unittest.IsolatedAsyncioTestCase):
     async def test_create_session_uses_launch_context_directory_for_blank_agent_dir(self):
         focused = FakeWindow("focused-window")
         bridge, _state = await self._make_bridge(FakeApp(focused, [focused]))
-        terminal_adapter = importlib.import_module("loom.terminal_adapter")
+        terminal_adapter = importlib.import_module("torque.terminal_adapter")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             async def fake_get_launch_context():
@@ -362,7 +362,7 @@ class CreateSessionWindowTargetTests(unittest.IsolatedAsyncioTestCase):
             session.sent,
             [
                 expected_cd,
-                "export LOOM_CELL_ID=child\n",
+                "export TORQUE_CELL_ID=child\n",
                 "codex\n",
             ],
         )

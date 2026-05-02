@@ -6,7 +6,7 @@ from pathlib import Path
 
 class ServerArtifactHelperTests(unittest.TestCase):
     def setUp(self):
-        self.helper = importlib.import_module("loom.server_artifacts")
+        self.helper = importlib.import_module("torque.server_artifacts")
         self.helper = importlib.reload(self.helper)
 
     def test_store_task_upload_from_inline_text_persists_file_and_metadata(self):
@@ -223,7 +223,7 @@ class ServerArtifactHelperTests(unittest.TestCase):
                 artifact = self.helper.store_preserved_merge_diff(
                     task_id="task-1",
                     patch_text="diff --git a/README.md b/README.md\n+hello\n",
-                    worktree_branch="loom/worker",
+                    worktree_branch="torque/worker",
                     base_branch="main",
                     merge_commit_sha="abc123",
                     boundary_task_id="task-1",
@@ -246,7 +246,7 @@ class ServerArtifactHelperTests(unittest.TestCase):
 
         self.assertEqual(artifact["type"], "diff")
         self.assertEqual(artifact["prompt"]["mode"], "summary")
-        self.assertEqual(artifact["provenance"]["source"], "loom")
+        self.assertEqual(artifact["provenance"]["source"], "torque")
         self.assertTrue(artifact["metadata"]["preserved_on_merge"])
         self.assertEqual(artifact["metadata"]["merge_commit_sha"], "abc123")
         self.assertEqual(artifact["metadata"]["stats"]["files"], 1)
@@ -257,7 +257,7 @@ class ServerArtifactHelperTests(unittest.TestCase):
             task_id="task-1",
             task_label="Review worker patch",
         )
-        self.assertIn("/attachments/task-1/loom_worker-pre-merge.patch", digest_text)
+        self.assertIn("/attachments/task-1/torque_worker-pre-merge.patch", digest_text)
         self.assertIn("README.md (+1/-0)", digest_text)
 
     def test_finalize_task_attachments_moves_draft_uploads_to_canonical_task_id(self):
@@ -280,15 +280,15 @@ class ServerArtifactHelperTests(unittest.TestCase):
                     attachments,
                     [draft_artifact],
                     draft_task_id="draft-abcd1234",
-                    task_id="LOOM:7",
+                    task_id="TORQUE:7",
                 )
             finally:
                 self.helper.ATTACHMENTS_DIR = original_dir
 
         self.assertTrue(Path(new_attachments[0]["path"]).name == "image.png")
-        self.assertIn("/LOOM:7/", new_attachments[0]["path"])
-        self.assertIn("/LOOM:7/", new_artifacts[0]["path"])
-        self.assertEqual(new_artifacts[0]["provenance"]["task_id"], "LOOM:7")
+        self.assertIn("/TORQUE:7/", new_attachments[0]["path"])
+        self.assertIn("/TORQUE:7/", new_artifacts[0]["path"])
+        self.assertEqual(new_artifacts[0]["provenance"]["task_id"], "TORQUE:7")
 
 
 if __name__ == "__main__":

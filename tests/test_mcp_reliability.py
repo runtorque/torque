@@ -13,9 +13,9 @@ except ModuleNotFoundError:
 
 install_aiohttp_stub(include_json_helpers=True)
 
-from loom.db import LoomDB
-from loom.doctor import build_doctor_report, format_mcp_health_report
-from loom.mcp_retry import (
+from torque.db import TorqueDB
+from torque.doctor import build_doctor_report, format_mcp_health_report
+from torque.mcp_retry import (
     IDEMPOTENCY_ARG,
     api_request_hash,
     ensure_mcp_payload_idempotency,
@@ -24,7 +24,7 @@ from loom.mcp_retry import (
     replay_failed_writes,
     retry_async,
 )
-from loom.state import AgentCell, MatrixState
+from torque.state import AgentCell, MatrixState
 
 
 class MCPRetryHelperTests(unittest.IsolatedAsyncioTestCase):
@@ -69,7 +69,7 @@ class MCPRetryHelperTests(unittest.IsolatedAsyncioTestCase):
             "params": {
                 "name": "architect_task_update",
                 "arguments": {
-                    "task": "LOOM:217",
+                    "task": "TORQUE:217",
                     "title": "Updated title",
                 },
             },
@@ -87,23 +87,23 @@ class MCPRetryHelperTests(unittest.IsolatedAsyncioTestCase):
         )
 
     def test_all_registered_write_tools_classify_independent_of_lazy_partition(self):
-        mcp_mod = importlib.reload(importlib.import_module("loom.mcp"))
+        mcp_mod = importlib.reload(importlib.import_module("torque.mcp"))
         write_tools = {
-            "loom_task_upload_artifact",
-            "loom_done",
-            "loom_blocked",
-            "loom_error",
-            "loom_progress",
-            "loom_verify",
-            "loom_ready",
-            "loom_name",
-            "loom_derive",
-            "loom_ask",
-            "loom_reply",
-            "loom_memory_publish",
-            "loom_memory_pin",
-            "loom_memory_link",
-            "loom_memory_unpin",
+            "torque_task_upload_artifact",
+            "torque_done",
+            "torque_blocked",
+            "torque_error",
+            "torque_progress",
+            "torque_verify",
+            "torque_ready",
+            "torque_name",
+            "torque_derive",
+            "torque_ask",
+            "torque_reply",
+            "torque_memory_publish",
+            "torque_memory_pin",
+            "torque_memory_link",
+            "torque_memory_unpin",
             "engineer_launch_settings",
             "engineer_notifications",
             "engineer_resume",
@@ -179,7 +179,7 @@ class MCPIdempotencyTests(unittest.IsolatedAsyncioTestCase):
         install_aiohttp_stub(include_json_helpers=True)
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.db = LoomDB(Path(self.tmp.name) / "loom.db")
+        self.db = TorqueDB(Path(self.tmp.name) / "torque.db")
         self.db.init()
         self.addCleanup(self.db.close)
         self.state = MatrixState(db=self.db)
@@ -189,9 +189,9 @@ class MCPIdempotencyTests(unittest.IsolatedAsyncioTestCase):
             group="g",
             cell_type="agent",
         )
-        self.mcp = importlib.import_module("loom.mcp")
+        self.mcp = importlib.import_module("torque.mcp")
         self.mcp = importlib.reload(self.mcp)
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
 
     async def test_duplicate_mcp_write_with_same_key_does_not_run_twice(self):
         calls = []
@@ -205,7 +205,7 @@ class MCPIdempotencyTests(unittest.IsolatedAsyncioTestCase):
             "id": 1,
             "method": "tools/call",
             "params": {
-                "name": "loom_progress",
+                "name": "torque_progress",
                 "arguments": {
                     "message": "still running",
                     IDEMPOTENCY_ARG: "idem-1",
@@ -248,7 +248,7 @@ class MCPIdempotencyTests(unittest.IsolatedAsyncioTestCase):
             "id": 1,
             "method": "tools/call",
             "params": {
-                "name": "loom_progress",
+                "name": "torque_progress",
                 "arguments": {
                     "message": "first",
                     IDEMPOTENCY_ARG: "idem-conflict",
@@ -346,7 +346,7 @@ class MCPFailedWriteReplayTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.db = LoomDB(Path(self.tmp.name) / "loom.db")
+        self.db = TorqueDB(Path(self.tmp.name) / "torque.db")
         self.db.init()
         self.addCleanup(self.db.close)
 
@@ -356,15 +356,15 @@ class MCPFailedWriteReplayTests(unittest.IsolatedAsyncioTestCase):
             "id": 1,
             "method": "tools/call",
             "params": {
-                "name": "loom_progress",
+                "name": "torque_progress",
                 "arguments": {"message": "queued", IDEMPOTENCY_ARG: "idem-queued"},
             },
         }
         self.db.enqueue_failed_write(
             idempotency_key="idem-queued",
             endpoint="/mcp",
-            surface="loom",
-            tool_name="loom_progress",
+            surface="torque",
+            tool_name="torque_progress",
             caller_id="agent-1",
             payload=payload,
             attempts=4,
@@ -379,13 +379,13 @@ class MCPFailedWriteReplayTests(unittest.IsolatedAsyncioTestCase):
         summary = await replay_failed_writes(self.db, sender)
 
         self.assertEqual(summary, {"attempted": 1, "replayed": 1, "failed": 0})
-        self.assertEqual(seen, ["loom_progress"])
+        self.assertEqual(seen, ["torque_progress"])
         self.assertEqual(self.db.load_failed_writes(), [])
         health = self.db.load_mcp_health_summary(since=0)
         self.assertEqual(health["totals"].get("replay"), 1)
 
     async def test_api_failed_write_replay_dedupes_existing_idempotency_row(self):
-        from loom.server import replay_api_failed_write_payload
+        from torque.server import replay_api_failed_write_payload
 
         payload = {
             "cmd": "board_add_task",
@@ -394,7 +394,7 @@ class MCPFailedWriteReplayTests(unittest.IsolatedAsyncioTestCase):
         }
         cached_response = {
             "ok": True,
-            "data": {"type": "board_task_added", "task_id": "LOOM:1"},
+            "data": {"type": "board_task_added", "task_id": "TORQUE:1"},
         }
         self.db.save_mcp_idempotency(
             idempotency_key="api-queued-idem",
@@ -438,7 +438,7 @@ class MCPFailedWriteReplayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(health["totals"].get("dedupe"), 1)
 
     async def test_internal_failed_write_replay_dedupes_existing_command_receipt(self):
-        from loom.server import (
+        from torque.server import (
             _internal_failed_write_key,
             replay_internal_failed_write_payload,
         )
@@ -502,7 +502,7 @@ class MCPFailedWriteReplayTests(unittest.IsolatedAsyncioTestCase):
         the worker uploads an artifact — re-runs the gate cleanly
         instead of replaying the cached refusal.
         """
-        from loom.server import replay_api_failed_write_payload
+        from torque.server import replay_api_failed_write_payload
 
         payload = {
             "cmd": "ai_report",
@@ -519,8 +519,8 @@ class MCPFailedWriteReplayTests(unittest.IsolatedAsyncioTestCase):
                 "message": (
                     "Cannot mark task done: deliverable required "
                     "(type=report) but no matching artifact attached. "
-                    "Call `loom_task_upload_artifact(...)` first, "
-                    "then retry loom_done."
+                    "Call `torque_task_upload_artifact(...)` first, "
+                    "then retry torque_done."
                 ),
             }
 
@@ -549,7 +549,7 @@ class MCPFailedWriteReplayTests(unittest.IsolatedAsyncioTestCase):
         it as a semantic failure envelope so the caller does not treat
         the refusal as completion.
         """
-        from loom.server import replay_internal_failed_write_payload
+        from torque.server import replay_internal_failed_write_payload
 
         payload = {
             "cmd": "ai_report",
@@ -586,7 +586,7 @@ class MCPFailedWriteReplayTests(unittest.IsolatedAsyncioTestCase):
 
     def test_architect_journal_replay_recovers_existing_jsonl_entry_without_duplicate(self):
         state = MatrixState(db=self.db)
-        state_mod = importlib.import_module("loom.state")
+        state_mod = importlib.import_module("torque.state")
 
         with mock.patch.object(state_mod, "DATA_DIR", Path(self.tmp.name)):
             first = state.architect_journal_append(
@@ -619,8 +619,8 @@ class MCPFailedWriteReplayTests(unittest.IsolatedAsyncioTestCase):
 
     def test_doctor_mcp_health_reports_recent_retry_drop_counts(self):
         self.db.record_mcp_health_event(
-            surface="loom",
-            tool_name="loom_progress",
+            surface="torque",
+            tool_name="torque_progress",
             event="retry",
             error="timeout",
         )
@@ -648,7 +648,7 @@ class MCPFailedWriteReplayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(health["totals"].get("retry"), 1)
         self.assertEqual(health["totals"].get("drop"), 1)
         self.assertEqual(health["pending_failed_writes"], 1)
-        self.assertIn("Loom MCP health", rendered)
+        self.assertIn("Torque MCP health", rendered)
         self.assertIn("retries=1", rendered)
         self.assertIn("drops=1", rendered)
         self.assertIn("architect_journal", rendered)
@@ -659,7 +659,7 @@ class CriticalWriteCaptureIsolationTests(unittest.IsolatedAsyncioTestCase):
         install_aiohttp_stub(include_json_helpers=True)
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.db = LoomDB(Path(self.tmp.name) / "loom.db")
+        self.db = TorqueDB(Path(self.tmp.name) / "torque.db")
         self.db.init()
         self.addCleanup(self.db.close)
         self.state = MatrixState(db=self.db)
@@ -678,7 +678,7 @@ class CriticalWriteCaptureIsolationTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_overlapping_critical_receipts_are_isolated_per_task(self):
-        from loom.server import _internal_failed_write_key
+        from torque.server import _internal_failed_write_key
 
         started = asyncio.Event()
         release = asyncio.Event()

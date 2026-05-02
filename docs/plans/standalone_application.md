@@ -2,11 +2,11 @@
 
 ## Executive Summary
 
-Loom can run as both an iTerm2 toolbelt panel AND a standalone desktop window simultaneously. The architecture already supports this: the aiohttp server broadcasts state to all connected WebSocket clients, so the toolbelt webview and a standalone window are simply two UI clients seeing the same live state. No mode switching or restart required — open a browser or native window alongside the toolbelt and both stay in sync.
+Torque can run as both an iTerm2 toolbelt panel AND a standalone desktop window simultaneously. The architecture already supports this: the aiohttp server broadcasts state to all connected WebSocket clients, so the toolbelt webview and a standalone window are simply two UI clients seeing the same live state. No mode switching or restart required — open a browser or native window alongside the toolbelt and both stay in sync.
 
 The iTerm2 Python API works identically from external processes, so when running standalone-only (without the toolbelt), no API capabilities are lost. The daemon can also run headless (no toolbelt registration) for pure standalone or Ghostty-only workflows.
 
-Ghostty support is feasible but limited. Ghostty's AppleScript API (macOS, v1.3+) covers session creation and text input, but lacks the event monitoring and session observation that Loom relies on heavily. A Ghostty adapter would require polling-based workarounds and would not reach feature parity with the iTerm2 adapter.
+Ghostty support is feasible but limited. Ghostty's AppleScript API (macOS, v1.3+) covers session creation and text input, but lacks the event monitoring and session observation that Torque relies on heavily. A Ghostty adapter would require polling-based workarounds and would not reach feature parity with the iTerm2 adapter.
 
 ---
 
@@ -53,7 +53,7 @@ These workarounds make the UI portable to any browser/webview:
 
 ## Phase 1: Dual-Mode Desktop App (Toolbelt + Standalone)
 
-**Goal:** Run Loom simultaneously as an iTerm2 toolbelt panel and a standalone desktop window. Both UIs connect to the same daemon and stay in sync. Users can also choose to run standalone-only (no toolbelt) or toolbelt-only (current behavior).
+**Goal:** Run Torque simultaneously as an iTerm2 toolbelt panel and a standalone desktop window. Both UIs connect to the same daemon and stay in sync. Users can also choose to run standalone-only (no toolbelt) or toolbelt-only (current behavior).
 
 ### 1.1 Why Dual-Mode Works Already
 
@@ -63,7 +63,7 @@ The aiohttp server broadcasts every delta to all connected WebSocket clients. Th
 ┌─────────────────────┐
 │ iTerm2 Toolbelt     │──┐
 │ (WKWebView)         │  │    ┌──────────────────────┐
-└─────────────────────┘  │    │ Loom Daemon           │
+└─────────────────────┘  │    │ Torque Daemon           │
                          ├─WS→│ aiohttp server        │
 ┌─────────────────────┐  │    │ bridge.py → iTerm2 API│
 │ Standalone Window   │──┘    │ SQLite state          │
@@ -80,7 +80,7 @@ No multiplexing, session isolation, or leader election needed. All clients are e
 |------|-------------------|-------------------|---------------|
 | **Toolbelt-only** (current) | Yes | No | iTerm2 Scripts menu |
 | **Dual** | Yes | Yes | Scripts menu + `make standalone` or `open http://127.0.0.1:18932/` |
-| **Standalone-only** | No | Yes | `LOOM_STANDALONE=1 loom` (daemon connects to iTerm2 externally) |
+| **Standalone-only** | No | Yes | `TORQUE_STANDALONE=1 torque` (daemon connects to iTerm2 externally) |
 
 In dual mode, the daemon runs inside iTerm2 as it does today (launched from the Scripts menu). The standalone window is just a second client — it can be a browser tab, a PyWebView window, or a Tauri app pointing at the same URL the toolbelt uses. No server changes needed for this mode.
 
@@ -91,7 +91,7 @@ Standalone-only mode is for users who don't want the toolbelt panel, or who are 
 The `iterm2` Python package works identically from external processes. Connection flow:
 
 1. Library connects to iTerm2's Unix socket at `~/Library/Application Support/iTerm2/private/socket` (or falls back to `ws://localhost:1912`)
-2. Authentication via AppleScript: `tell application "iTerm2" to request cookie and key for app named "Loom"`
+2. Authentication via AppleScript: `tell application "iTerm2" to request cookie and key for app named "Torque"`
 3. All 35 API methods work without restriction
 
 **Prerequisites for users (standalone-only mode):**
@@ -103,12 +103,12 @@ The `iterm2` Python package works identically from external processes. Connectio
 ### 1.4 Entry Point Changes
 
 ```python
-# loom.py — modified entry point
+# torque.py — modified entry point
 import os
 import sys
 
 # Standalone-only mode: daemon runs outside iTerm2, no toolbelt registration
-STANDALONE = os.environ.get("LOOM_STANDALONE", "").lower() in ("1", "true", "yes")
+STANDALONE = os.environ.get("TORQUE_STANDALONE", "").lower() in ("1", "true", "yes")
 
 def main_standalone():
     """Launch as external daemon — connect to iTerm2 over Unix socket."""
@@ -137,8 +137,8 @@ if not STANDALONE:
     # Registers toolbelt panel (works in both toolbelt-only and dual mode)
     await iterm2.tool.async_register_web_view_tool(
         connection,
-        display_name="Loom",
-        identifier="com.loom.toolbelt",
+        display_name="Torque",
+        identifier="com.torque.toolbelt",
         reveal_if_already_registered=True,
         url=f"http://127.0.0.1:{WS_PORT}/",
     )
@@ -147,7 +147,7 @@ if not STANDALONE:
 Optionally bind to `0.0.0.0` for network access (useful for remote/iPad access):
 
 ```python
-bind_host = "0.0.0.0" if os.environ.get("LOOM_BIND_ALL") else "127.0.0.1"
+bind_host = "0.0.0.0" if os.environ.get("TORQUE_BIND_ALL") else "127.0.0.1"
 site = web.TCPSite(runner, bind_host, WS_PORT, reuse_address=True)
 ```
 
@@ -181,7 +181,7 @@ For the standalone window (used in both dual and standalone-only modes), there a
 #### Option C: PyWebView
 
 - **Why:** Pure Python, zero new language/toolchain
-- **How:** `webview.create_window("Loom", "http://127.0.0.1:18932/")` — uses native WebKit on macOS
+- **How:** `webview.create_window("Torque", "http://127.0.0.1:18932/")` — uses native WebKit on macOS
 - **Pros:** Simplest integration, same language as daemon, pip-installable
 - **Cons:** Limited windowing features (no tray icon, no docking), less polished
 
@@ -208,7 +208,7 @@ Changes needed:
 
 | Concern | Toolbelt-only | Dual Mode | Standalone-only |
 |---------|--------------|-----------|-----------------|
-| **Daemon start** | iTerm2 Scripts menu | iTerm2 Scripts menu | `loom` CLI / launchd |
+| **Daemon start** | iTerm2 Scripts menu | iTerm2 Scripts menu | `torque` CLI / launchd |
 | **Standalone window** | N/A | `open http://…` / PyWebView | PyWebView / Tauri / browser |
 | **Daemon stop** | Kill process / Scripts menu | Same | `make stop` / quit app |
 | **iTerm2 restart** | `run_forever` reconnects | Same | `retry=True` reconnects |
@@ -220,18 +220,18 @@ In dual mode, closing the standalone window has no effect on the daemon or the t
 For standalone-only production use, register a `launchd` plist for auto-start:
 
 ```xml
-<!-- ~/Library/LaunchAgents/com.loom.daemon.plist -->
+<!-- ~/Library/LaunchAgents/com.torque.daemon.plist -->
 <plist version="1.0">
 <dict>
-    <key>Label</key><string>com.loom.daemon</string>
+    <key>Label</key><string>com.torque.daemon</string>
     <key>ProgramArguments</key>
     <array>
         <string>/path/to/python3</string>
-        <string>/path/to/loom.py</string>
+        <string>/path/to/torque.py</string>
     </array>
     <key>EnvironmentVariables</key>
     <dict>
-        <key>LOOM_STANDALONE</key><string>1</string>
+        <key>TORQUE_STANDALONE</key><string>1</string>
     </dict>
     <key>KeepAlive</key><true/>
     <key>RunAtLoad</key><true/>
@@ -244,7 +244,7 @@ For standalone-only production use, register a `launchd` plist for auto-start:
 | Task | Files Changed | Scope |
 |------|--------------|-------|
 | **Dual mode (zero effort)** | None | Already works — open browser to `http://127.0.0.1:18932/` |
-| Entry point standalone-only mode | `loom.py` | ~20 lines |
+| Entry point standalone-only mode | `torque.py` | ~20 lines |
 | Conditional toolbelt registration | `server.py` | ~5 lines |
 | Config flag + bind address | `config.py` | ~5 lines |
 | PyWebView wrapper (standalone window) | New: `standalone.py` | ~30 lines |
@@ -258,14 +258,14 @@ For standalone-only production use, register a `launchd` plist for auto-start:
 
 ## Phase 2: Terminal Adapter Abstraction
 
-**Goal:** Abstract the terminal backend so Loom can control any terminal emulator.
+**Goal:** Abstract the terminal backend so Torque can control any terminal emulator.
 
 ### 2.1 Adapter Interface
 
 Currently, `bridge.py` (`ITerm2Bridge`) directly calls `iterm2.*` methods. Extract a `TerminalAdapter` protocol:
 
 ```python
-# loom/terminal_adapter.py
+# torque/terminal_adapter.py
 from typing import Protocol, Optional, Callable, Awaitable
 
 class TerminalAdapter(Protocol):
@@ -318,7 +318,7 @@ class TerminalAdapter(Protocol):
 Wrap the existing `bridge.py` logic:
 
 ```python
-# loom/adapters/iterm2_terminal.py
+# torque/adapters/iterm2_terminal.py
 class ITerm2Adapter:
     """TerminalAdapter implementation using iTerm2 Python API."""
 
@@ -371,7 +371,7 @@ async def main(connection):
 
 Ghostty (v1.3+) exposes automation primarily through AppleScript on macOS:
 
-| Capability | API | Loom Requirement |
+| Capability | API | Torque Requirement |
 |-----------|-----|-----------------|
 | **Create window/tab/split** | AppleScript: `new window`, `new tab`, `split` | Session creation |
 | **Send text** | AppleScript: `input text` | Agent commands, dispatch |
@@ -389,7 +389,7 @@ Ghostty (v1.3+) exposes automation primarily through AppleScript on macOS:
 ### 3.2 Ghostty Adapter — What Works
 
 ```python
-# loom/adapters/ghostty_terminal.py
+# torque/adapters/ghostty_terminal.py
 import subprocess
 import asyncio
 
@@ -460,7 +460,7 @@ class GhosttyAdapter:
 
 #### Gap 1: No Event Monitors
 
-**Problem:** Ghostty has no equivalent to iTerm2's `SessionTerminationMonitor`, `FocusMonitor`, `VariableMonitor`, or `PromptMonitor`. These are critical for Loom's real-time state tracking.
+**Problem:** Ghostty has no equivalent to iTerm2's `SessionTerminationMonitor`, `FocusMonitor`, `VariableMonitor`, or `PromptMonitor`. These are critical for Torque's real-time state tracking.
 
 **Workaround: Polling loop**
 
@@ -507,7 +507,7 @@ async def _poll_sessions(self):
 
 #### Gap 4: No Global Keybinding Registration at Runtime
 
-**Problem:** iTerm2 lets Loom install/remove global key bindings dynamically via API. Ghostty only supports keybindings via config file with `global:` prefix.
+**Problem:** iTerm2 lets Torque install/remove global key bindings dynamically via API. Ghostty only supports keybindings via config file with `global:` prefix.
 
 **Workaround:** Write keybindings to Ghostty config and trigger `reload_config`. Or use macOS system-wide keyboard shortcuts via Accessibility API / `CGEventTap`.
 
@@ -532,7 +532,7 @@ async def install_keybindings(self, bindings):
 
 **Problem:** Cannot read terminal buffer. A PR exists (#11208) but isn't merged.
 
-**Workaround:** Not critical for Loom's core function. Loom doesn't read terminal content — it tracks metadata (process, path, status).
+**Workaround:** Not critical for Torque's core function. Torque doesn't read terminal content — it tracks metadata (process, path, status).
 
 #### Gap 7: Linux Support
 
@@ -547,7 +547,7 @@ async def install_keybindings(self, bindings):
 
 ### 3.4 Ghostty Feature Parity Matrix
 
-| Loom Feature | iTerm2 | Ghostty | Gap Severity |
+| Torque Feature | iTerm2 | Ghostty | Gap Severity |
 |-------------|--------|---------|-------------|
 | Create sessions | Full API | AppleScript | None |
 | Send commands | Full API | AppleScript | None |
@@ -575,7 +575,7 @@ async def install_keybindings(self, bindings):
 ### 4.1 Adapter Registry
 
 ```python
-# loom/terminal_registry.py
+# torque/terminal_registry.py
 class TerminalRegistry:
     """Manages multiple terminal adapters."""
 
@@ -608,7 +608,7 @@ class AgentCell:
     terminal_backend: str = "iterm2"  # or "ghostty"
 ```
 
-This allows a single Loom instance to manage agents across both iTerm2 and Ghostty simultaneously.
+This allows a single Torque instance to manage agents across both iTerm2 and Ghostty simultaneously.
 
 ---
 
@@ -619,13 +619,13 @@ This allows a single Loom instance to manage agents across both iTerm2 and Ghost
 For the best user experience, package as a proper `.app`:
 
 ```
-Loom.app/
+Torque.app/
   Contents/
     MacOS/
-      loom-launcher      # Thin shell that starts Python daemon + webview
+      torque-launcher      # Thin shell that starts Python daemon + webview
     Resources/
       python/            # Embedded Python + dependencies
-      loom/              # Application code
+      torque/              # Application code
       static/            # Web assets
       webview.html
     Info.plist
@@ -636,12 +636,12 @@ Loom.app/
 ### 5.2 Homebrew Cask
 
 ```ruby
-cask "loom" do
+cask "torque" do
   version "1.0.0"
-  url "https://github.com/.../releases/download/v#{version}/Loom.app.zip"
-  name "Loom"
+  url "https://github.com/.../releases/download/v#{version}/Torque.app.zip"
+  name "Torque"
   desc "AI agent session manager for terminal emulators"
-  app "Loom.app"
+  app "Torque.app"
 end
 ```
 
@@ -650,7 +650,7 @@ end
 The packaging must preserve all three operating modes:
 
 ```python
-# loom/config.py
+# torque/config.py
 import os
 
 def is_iterm2_script_env():
@@ -658,14 +658,14 @@ def is_iterm2_script_env():
     return "ITERM2_COOKIE" in os.environ and "ITERM_SESSION_ID" in os.environ
 
 # Only skip toolbelt registration when explicitly in standalone-only mode
-STANDALONE = os.environ.get("LOOM_STANDALONE", "").lower() in ("1", "true", "yes")
+STANDALONE = os.environ.get("TORQUE_STANDALONE", "").lower() in ("1", "true", "yes")
 ```
 
 | Distribution | Toolbelt-only | Dual | Standalone-only |
 |-------------|--------------|------|-----------------|
-| iTerm2 Script (current) | Default | Open browser alongside | Set `LOOM_STANDALONE=1` |
+| iTerm2 Script (current) | Default | Open browser alongside | Set `TORQUE_STANDALONE=1` |
 | macOS `.app` bundle | N/A | Launch app + Scripts menu | Default |
-| Homebrew | N/A | Both install paths | `loom --standalone` |
+| Homebrew | N/A | Both install paths | `torque --standalone` |
 
 ---
 
@@ -673,7 +673,7 @@ STANDALONE = os.environ.get("LOOM_STANDALONE", "").lower() in ("1", "true", "yes
 
 ### Sprint 1: Dual-Mode + Standalone (Phase 1)
 - Verify dual mode works (open browser to existing server — should work already)
-- Add `LOOM_STANDALONE` flag for standalone-only mode
+- Add `TORQUE_STANDALONE` flag for standalone-only mode
 - Conditional toolbelt registration
 - Add PyWebView launcher (`standalone.py`) for native standalone window
 - Add responsive CSS for wider standalone layouts
@@ -712,7 +712,7 @@ STANDALONE = os.environ.get("LOOM_STANDALONE", "").lower() in ("1", "true", "yes
 | Ghostty AppleScript API changes (pre-1.0 stability) | Medium | Medium | Pin minimum version, adapter versioning |
 | Polling overhead for Ghostty monitoring | Low | Low | 2s interval is fine; tune if needed |
 | PyWebView rendering differences vs WKWebView | Low | Low | Both use WebKit on macOS |
-| Port conflicts with multiple Loom instances | Medium | Low | Already handled by `make stop` |
+| Port conflicts with multiple Torque instances | Medium | Low | Already handled by `make stop` |
 | Ghostty Linux support too limited | High | Medium | Ship as macOS-only, wait for scripting API |
 
 ---

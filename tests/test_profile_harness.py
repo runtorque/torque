@@ -3,7 +3,7 @@ import sys
 import unittest
 from pathlib import Path
 
-from loom.profiling import ProfileRecorder, percentile, summarize
+from torque.profiling import ProfileRecorder, percentile, summarize
 
 
 HARNESS_PATH = Path(__file__).resolve().parents[1] / "scripts" / "profile_harness.py"

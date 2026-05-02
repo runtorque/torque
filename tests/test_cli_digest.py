@@ -9,9 +9,9 @@ from unittest import mock
 
 
 def _load_cli_module():
-    path = Path(__file__).resolve().parents[1] / "bin" / "loom"
-    loader = SourceFileLoader("loom_cli_digest", str(path))
-    spec = importlib.util.spec_from_loader("loom_cli_digest", loader)
+    path = Path(__file__).resolve().parents[1] / "bin" / "torque"
+    loader = SourceFileLoader("torque_cli_digest", str(path))
+    spec = importlib.util.spec_from_loader("torque_cli_digest", loader)
     mod = importlib.util.module_from_spec(spec)
     loader.exec_module(mod)
     return mod
@@ -42,7 +42,7 @@ class CliDigestTests(unittest.TestCase):
                     "id": "eng-1",
                     "name": "Panelsmith",
                     "slug": "panelsmith",
-                    "group": "loom",
+                    "group": "torque",
                     "kind": "engineer",
                     "cell_type": "agent",
                 }
@@ -74,7 +74,7 @@ class CliDigestTests(unittest.TestCase):
                     "id": "eng-1",
                     "name": "Panelsmith",
                     "slug": "panelsmith",
-                    "group": "loom",
+                    "group": "torque",
                     "kind": "engineer",
                     "cell_type": "agent",
                 }

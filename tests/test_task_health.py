@@ -16,9 +16,9 @@ def _iso(ts: float) -> str:
 class TaskHealthTests(unittest.TestCase):
     def setUp(self):
         install_aiohttp_stub()
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
-        self.task_health_mod = importlib.import_module("loom.task_health")
+        self.task_health_mod = importlib.import_module("torque.task_health")
         self.task_health_mod = importlib.reload(self.task_health_mod)
 
     def test_explicit_human_and_dependency_signals_are_blocked(self):
@@ -33,7 +33,7 @@ class TaskHealthTests(unittest.TestCase):
             task="Needs review",
             group="g",
             lane="In Progress",
-            labels=["loom:human"],
+            labels=["torque:human"],
             depends_on=["dep-1"],
             updated_at=_iso(1_000),
         )
@@ -234,7 +234,7 @@ class TaskHealthTests(unittest.TestCase):
                 group="g",
                 cell_type="agent",
                 status="running",
-                worktree_path="/repo/.loom/worktrees/agent-1",
+                worktree_path="/repo/.torque/worktrees/agent-1",
                 worktree_checkpoints=2,
                 worktree_dirty=False,
             )
@@ -277,7 +277,7 @@ class TaskHealthTests(unittest.TestCase):
                 group="g",
                 cell_type="agent",
                 status="running",
-                worktree_path="/repo/.loom/worktrees/agent-1",
+                worktree_path="/repo/.torque/worktrees/agent-1",
                 worktree_checkpoints=1,
                 worktree_dirty=False,
             ),
@@ -323,7 +323,7 @@ class TaskHealthTests(unittest.TestCase):
                 group="g",
                 cell_type="agent",
                 status="running",
-                worktree_path="/repo/.loom/worktrees/agent-1",
+                worktree_path="/repo/.torque/worktrees/agent-1",
                 worktree_checkpoints=1,
                 worktree_dirty=False,
             )
@@ -381,7 +381,7 @@ class TaskHealthTests(unittest.TestCase):
 class MatrixStateTaskHealthTests(unittest.TestCase):
     def setUp(self):
         install_aiohttp_stub()
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
 
     def test_recompute_task_health_updates_since_only_on_transition(self):
@@ -421,7 +421,7 @@ class MatrixStateTaskHealthTests(unittest.TestCase):
         state.groups["g"] = []
         state.board_add_task("Quiet", "g", id="task-1")
 
-        task_health_mod = importlib.import_module("loom.task_health")
+        task_health_mod = importlib.import_module("torque.task_health")
         with mock.patch.object(
                 task_health_mod,
                 "compute_task_health",
@@ -440,7 +440,7 @@ class MatrixStateTaskHealthTests(unittest.TestCase):
         )
         state.board_add_task("Unrelated", "g", id="unrelated")
 
-        task_health_mod = importlib.import_module("loom.task_health")
+        task_health_mod = importlib.import_module("torque.task_health")
         original = task_health_mod._compute_local_health
         calls = []
 
@@ -452,7 +452,7 @@ class MatrixStateTaskHealthTests(unittest.TestCase):
                 task_health_mod,
                 "_compute_local_health",
                 side_effect=wrapped):
-            state.board_update_task(child.id, labels=["loom:blocked"])
+            state.board_update_task(child.id, labels=["torque:blocked"])
 
         self.assertCountEqual(calls, ["child", "parent"])
         self.assertNotIn("unrelated", calls)
@@ -468,7 +468,7 @@ class MatrixStateTaskHealthTests(unittest.TestCase):
             parent_task_id=parent.id,
         )
 
-        state.board_update_task(child.id, labels=["loom:blocked"])
+        state.board_update_task(child.id, labels=["torque:blocked"])
 
         self.assertEqual(state.board_tasks["child"].health_state, "blocked")
         self.assertEqual(state.board_tasks["parent"].health_state, "blocked")
@@ -492,7 +492,7 @@ class MatrixStateTaskHealthTests(unittest.TestCase):
             group="g",
             cell_type="agent",
             status="running",
-            worktree_path="/repo/.loom/worktrees/agent-1",
+            worktree_path="/repo/.torque/worktrees/agent-1",
             worktree_checkpoints=1,
             worktree_dirty=False,
         )
@@ -512,7 +512,7 @@ class MatrixStateTaskHealthTests(unittest.TestCase):
             agent_id="agent-1",
         )
 
-        task_health_mod = importlib.import_module("loom.task_health")
+        task_health_mod = importlib.import_module("torque.task_health")
         full = task_health_mod.compute_task_health(
             state.board_tasks,
             state.agents,
@@ -530,7 +530,7 @@ class MatrixStateTaskHealthTests(unittest.TestCase):
             group="g",
             cell_type="agent",
             status="running",
-            worktree_path="/repo/.loom/worktrees/agent-1",
+            worktree_path="/repo/.torque/worktrees/agent-1",
             worktree_checkpoints=1,
             worktree_dirty=False,
         )
@@ -552,7 +552,7 @@ class MatrixStateTaskHealthTests(unittest.TestCase):
 
         state.board_update_task("task-2", lane="Done")
 
-        task_health_mod = importlib.import_module("loom.task_health")
+        task_health_mod = importlib.import_module("torque.task_health")
         full = task_health_mod.compute_task_health(
             state.board_tasks,
             state.agents,
@@ -573,7 +573,7 @@ class MatrixStateTaskHealthTests(unittest.TestCase):
             group="g",
             cell_type="agent",
             status="running",
-            worktree_path="/repo/.loom/worktrees/agent-1",
+            worktree_path="/repo/.torque/worktrees/agent-1",
             worktree_checkpoints=1,
             worktree_dirty=False,
         )
@@ -612,7 +612,7 @@ class MatrixStateTaskHealthTests(unittest.TestCase):
             id="child",
             lane="To Do",
             parent_task_id=parent.id,
-            labels=["loom:blocked"],
+            labels=["torque:blocked"],
         )
         self.assertEqual(state.board_tasks["parent"].health_state, "blocked")
 

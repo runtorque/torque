@@ -1,0 +1,47 @@
+name: oneshot/fix
+description: Diagnose and fix a bug directly on the current branch
+
+agent:
+  name_prefix: fix
+  tab_color: "#f85149"
+
+implementation_depth: true
+
+prompt: |
+  {% if torque.context.is_clean %}
+  You are diagnosing and fixing a bug. This is a quick, targeted fix — no review pipeline. Focus on understanding the root cause before writing any code.
+
+  ## Bug report
+
+  {{ torque.task.title }}
+
+  {% if torque.task.description %}
+  ## Context
+
+  {{ torque.task.description }}
+  {% endif %}
+
+  ## Approach
+
+  1. Reproduce first — confirm you can see the failure before changing anything
+  2. Find the root cause — don't just patch symptoms
+  3. Keep the fix minimal — no drive-by refactors or unrelated changes
+  4. Run the narrowest relevant tests or checks first — only broaden to a larger suite if the changed surface or risk warrants it
+  5. Do a manual smoke check for user-visible changes when practical
+  6. End by stating what you verified, what you did not verify, and whether live verification could not be performed
+  {% else %}
+  You have a new bug to fix. Same approach as before — understand the root cause before changing anything, keep the fix minimal, start with the narrowest relevant tests or checks, smoke-check user-visible changes when practical, and say what you did and did not verify. Say explicitly if live verification could not be performed. Do NOT deploy the changes.
+
+  ## Bug report
+
+  {{ torque.task.title }}
+
+  {% if torque.task.description %}
+  ## Context
+
+  {{ torque.task.description }}
+  {% endif %}
+  {% endif %}
+
+labels:
+  - bugfix

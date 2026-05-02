@@ -2,7 +2,7 @@
 
 **Roadmap phase**: 4 — Workflow Automation
 **Status**: Implemented (Jinja2 actions, task dispatch/create, action-to-task flow, structured task fields)
-**Goal**: Make Loom a task runner, not just a session manager. `loom task dispatch` combines ticket creation, agent launch, worktree setup, and task delivery into a single operation. `loom task create` parks tickets for later pickup. Actions make these tasks repeatable and integrate with the board's ticketing system.
+**Goal**: Make Torque a task runner, not just a session manager. `torque task dispatch` combines ticket creation, agent launch, worktree setup, and task delivery into a single operation. `torque task create` parks tickets for later pickup. Actions make these tasks repeatable and integrate with the board's ticketing system.
 
 ---
 
@@ -14,8 +14,8 @@ For recurring workflows — bug fixes, code reviews, dependency updates — you 
 
 ## Design Principles
 
-1. **Actions are data, not code** — An action is a JSON file with pre-filled agent settings. No scripting language, no conditionals, no Turing-completeness. Complex workflows are shell scripts that call `loom dispatch`.
-2. **`loom dispatch` is the entry point** — One command that creates an agent from an action and sends it a prompt. It composes existing primitives (`add_agent` + `send_text` + `wait_for_idle`).
+1. **Actions are data, not code** — An action is a JSON file with pre-filled agent settings. No scripting language, no conditionals, no Turing-completeness. Complex workflows are shell scripts that call `torque dispatch`.
+2. **`torque dispatch` is the entry point** — One command that creates an agent from an action and sends it a prompt. It composes existing primitives (`add_agent` + `send_text` + `wait_for_idle`).
 3. **Actions layer on top of GroupSettings** — Actions don't replace group settings. They provide per-task overrides. The resolution cascade is: action field → group setting → system default.
 4. **No new server commands for v1** — Actions are resolved client-side in the CLI. The server receives the same `add_agent` and `send_text` payloads it already handles. This keeps the server simple and actions a CLI-only concept initially.
 
@@ -24,9 +24,9 @@ For recurring workflows — bug fixes, code reviews, dependency updates — you 
 ## Architecture
 
 ```
-loom dispatch "Fix the login bug" --action bugfix -g Backend
+torque dispatch "Fix the login bug" --action bugfix -g Backend
   │
-  │  1. Load action from .loom/actions/bugfix.yaml
+  │  1. Load action from .torque/actions/bugfix.yaml
   │  2. Merge action fields with CLI flags
   │
   ├──► POST /api/cmd  {"cmd": "add_agent", ...}
@@ -48,7 +48,7 @@ Actions stay in the CLI layer. The server is unaware of them — it just receive
 
 ## Action Format
 
-Actions live in `.loom/actions/` relative to the git repo root (version-controlled — only `.loom/worktrees/` is gitignored). Each action is a YAML file. Actions support **subdirectory namespaces**: `oneshot/feature.yaml` → action name `oneshot/feature`.
+Actions live in `.torque/actions/` relative to the git repo root (version-controlled — only `.torque/worktrees/` is gitignored). Each action is a YAML file. Actions support **subdirectory namespaces**: `oneshot/feature.yaml` → action name `oneshot/feature`.
 
 ```yaml
 name: feature/implement
@@ -88,7 +88,7 @@ prompt: |
 | Field | Type | Description |
 |---|---|---|
 | `name` | string | Action identifier (matches filename without `.yaml`) |
-| `description` | string | Human-readable description for `loom action list` |
+| `description` | string | Human-readable description for `torque action list` |
 | `agent.name_prefix` | string | Agent name prefix. Full name: `{prefix}-{task_slug}` |
 | `agent.command` | string | Boot command override. Empty = use group default |
 | `agent.directory` | string | Working directory override. Empty = use group default |
@@ -118,7 +118,7 @@ An empty string in an action field means "fall through to group settings." This 
 
 Only the `prompt` field is rendered through Jinja2 with the provided variables. Variables are auto-discovered from the AST — no explicit declaration needed. Default values are extracted from `| default()` filters. All other fields are plain YAML.
 
-The `TASK` variable is always the task description passed to `loom task dispatch`. Custom variables are passed via `-v KEY=VALUE`.
+The `TASK` variable is always the task description passed to `torque task dispatch`. Custom variables are passed via `-v KEY=VALUE`.
 
 Legacy `${VAR}` syntax is automatically migrated to `{{ VAR }}`. Old-format actions with `task:`+`instructions:`+`context:`+`criteria:` are auto-coalesced into a single `prompt` on load.
 
@@ -126,18 +126,18 @@ Legacy `${VAR}` syntax is automatically migrated to `{{ VAR }}`. Old-format acti
 
 ## CLI Commands
 
-### `loom task dispatch`
+### `torque task dispatch`
 
 Create a ticket, launch an agent, and send the task. The ticket is placed in the "In Progress" lane and linked to the new agent.
 
 ```
-loom task dispatch <description> [flags]
+torque task dispatch <description> [flags]
 
 Arguments:
   description              Task description (sent to agent)
 
 Flags:
-  -t, --action NAME        Action name (looks in .loom/actions/)
+  -t, --action NAME        Action name (looks in .torque/actions/)
   -g, --group GROUP        Target group (auto-detected if omitted)
   -n, --name NAME          Agent name override
   -a, --assign PREFIX      Assign to agent name prefix (e.g. 'frontend')
@@ -153,24 +153,24 @@ Flags:
 
 ```bash
 # Dispatch with action
-loom task dispatch "Fix the login bug" -t fix --wait
+torque task dispatch "Fix the login bug" -t fix --wait
 
 # With custom test command
-loom task dispatch "Fix it" -t fix -v TEST_COMMAND=pytest --wait
+torque task dispatch "Fix it" -t fix -v TEST_COMMAND=pytest --wait
 
 # Assign to agent pool
-loom task dispatch "Review PR #42" -t review -a review --labels urgent
+torque task dispatch "Review PR #42" -t review -a review --labels urgent
 
 # Fire and forget
-loom task dispatch "Update all dependencies" -t migrate
+torque task dispatch "Update all dependencies" -t migrate
 ```
 
-### `loom task create`
+### `torque task create`
 
 Create a ticket in the Backlog lane without launching an agent.
 
 ```
-loom task create <description> [flags]
+torque task create <description> [flags]
 
 Arguments:
   description              Task description
@@ -185,23 +185,23 @@ Flags:
 
 ```bash
 # Add to backlog
-loom task create "Refactor the auth module"
+torque task create "Refactor the auth module"
 
 # With assignment and labels
-loom task create "Add rate limiting to API" -a backend -l feature,api
+torque task create "Add rate limiting to API" -a backend -l feature,api
 ```
 
-### `loom action`
+### `torque action`
 
 Action management commands.
 
 ```
-loom action list                    # list available actions
-loom action show <name>             # show action contents
-loom action create <name>           # create an action interactively
+torque action list                    # list available actions
+torque action show <name>             # show action contents
+torque action create <name>           # create an action interactively
 ```
 
-`loom action list` scans `.loom/actions/` and shows name + description for each. `loom action show` pretty-prints the JSON. `loom action create` writes a starter action file.
+`torque action list` scans `.torque/actions/` and shows name + description for each. `torque action show` pretty-prints the JSON. `torque action create` writes a starter action file.
 
 ---
 
@@ -209,16 +209,16 @@ loom action create <name>           # create an action interactively
 
 ### Step 1: Action loader
 
-**File**: `bin/loom` (new functions)
+**File**: `bin/torque` (new functions)
 
-- `find_actions_dir()` — walk up from cwd to find `.loom/actions/`, return path or None
-- `load_action(name)` — read and parse `.loom/actions/{name}.yaml`, return dict
+- `find_actions_dir()` — walk up from cwd to find `.torque/actions/`, return path or None
+- `load_action(name)` — read and parse `.torque/actions/{name}.yaml`, return dict
 - `list_actions()` — scan dir, return list of `{name, description}`
 - `render_prompt(action, task, agent_name, agent_id, branch, directory)` — substitute `${TASK}` etc.
 
-### Step 2: `loom dispatch` command
+### Step 2: `torque dispatch` command
 
-**File**: `bin/loom` (new subcommand)
+**File**: `bin/torque` (new subcommand)
 
 Sequence:
 1. Load action (if `--action` given)
@@ -231,13 +231,13 @@ Sequence:
 8. Call `send_text` API
 9. If `--wait`: call `wait_for_idle`
 
-### Step 3: `loom action` commands
+### Step 3: `torque action` commands
 
-**File**: `bin/loom` (new subcommands)
+**File**: `bin/torque` (new subcommands)
 
-- `loom action list` — scan `.loom/actions/`, print table
-- `loom action show <name>` — pretty-print YAML
-- `loom action create <name>` — write a starter action to `.loom/actions/{name}.yaml`
+- `torque action list` — scan `.torque/actions/`, print table
+- `torque action show <name>` — pretty-print YAML
+- `torque action create <name>` — write a starter action to `.torque/actions/{name}.yaml`
 
 ### Step 4: Built-in starter actions
 
@@ -250,7 +250,7 @@ Five starter actions in subdirectory namespaces:
 - `feature/review.yaml` — code review (→ fix-review or ask human)
 - `feature/fix-review.yaml` — fix review issues (→ review)
 
-Users copy these into their project's `.loom/actions/` and customize.
+Users copy these into their project's `.torque/actions/` and customize.
 
 ### Step 5: Agent boot readiness
 
@@ -279,8 +279,8 @@ A short additional delay (~1s) after boot detection ensures the shell and boot c
 
 - **Action inheritance** — Actions are flat. No `extends: base-action` chains.
 - **Conditional logic in actions** — Jinja2 variables and filters only. No `{% if %}` blocks. Use separate actions for different scenarios.
-- **Pipeline composition** — Now supported via `transitions` in actions and `loom ai derive`. Actions can declare valid next steps, forming pipelines (e.g. implement → review ↔ fix-review).
-- **Retry / fallback** — Deferred. Retry is `loom task dispatch --wait || loom task dispatch --wait` in a shell script for now.
+- **Pipeline composition** — Now supported via `transitions` in actions and `torque ai derive`. Actions can declare valid next steps, forming pipelines (e.g. implement → review ↔ fix-review).
+- **Retry / fallback** — Deferred. Retry is `torque task dispatch --wait || torque task dispatch --wait` in a shell script for now.
 - **Auto-assignment** — Agents don't yet automatically pick up tickets matching their assignee prefix. Manual assignment or explicit dispatch required.
 
 ---
@@ -289,9 +289,9 @@ A short additional delay (~1s) after boot detection ensures the shell and boot c
 
 | File | Change |
 |---|---|
-| `loom/actions.py` | Action loading, Jinja2 rendering, variable discovery, `render_action` returns structured fields, `load_action_raw` for editor, scope-aware `list_actions` with overridden detection |
-| `loom/server.py` | `add_agent_from_action` handler, `render_action` command for board integration, `save_action` / `delete_action` CRUD commands (scope-aware) |
-| `bin/loom` | `task dispatch`, `task create`, `action` subcommands, action loader |
+| `torque/actions.py` | Action loading, Jinja2 rendering, variable discovery, `render_action` returns structured fields, `load_action_raw` for editor, scope-aware `list_actions` with overridden detection |
+| `torque/server.py` | `add_agent_from_action` handler, `render_action` command for board integration, `save_action` / `delete_action` CRUD commands (scope-aware) |
+| `bin/torque` | `task dispatch`, `task create`, `action` subcommands, action loader |
 | `static/js/modals.js` | Task create/edit modal with action picker and prompt preview |
 | `static/js/board.js` | Inline "+ Add task" composer for quick task creation |
 | `static/js/actions.js` | **New** — Actions panel app (dropdown with Project/User optgroups, structured form editor, Jinja2 syntax highlighting, save/duplicate/delete, scope picker) |

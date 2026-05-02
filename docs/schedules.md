@@ -1,16 +1,16 @@
 # Schedules
 
-Loom can create tasks on a timer and optionally dispatch them automatically. There are two related mechanisms:
+Torque can create tasks on a timer and optionally dispatch them automatically. There are two related mechanisms:
 
 - **Scheduled tasks**: a board task with `scheduled_at`
-- **Schedules**: reusable one-shot or recurring rules stored in Loom
+- **Schedules**: reusable one-shot or recurring rules stored in Torque
 
 ## Scheduled Tasks
 
-You can create a normal task now and ask Loom to dispatch it later:
+You can create a normal task now and ask Torque to dispatch it later:
 
 ```bash
-loom task create "Re-run weekly dependency audit" \
+torque task create "Re-run weekly dependency audit" \
   -g backend \
   --at "tomorrow 09:00"
 ```
@@ -21,7 +21,7 @@ Supported `--at` formats include:
 - Relative values like `+30m`, `+2h`, `+1d`
 - `tomorrow 09:00`
 
-When the scheduled time arrives, Loom dispatches the task and clears the stored schedule time.
+When the scheduled time arrives, Torque dispatches the task and clears the stored schedule time.
 
 ## Reusable Schedules
 
@@ -30,7 +30,7 @@ Schedules are first-class records for recurring or one-shot automation.
 Create a recurring schedule:
 
 ```bash
-loom schedule create nightly-tests \
+torque schedule create nightly-tests \
   -g backend \
   --task "Run nightly test sweep" \
   --cron "0 2 * * *" \
@@ -40,7 +40,7 @@ loom schedule create nightly-tests \
 Create a one-shot schedule:
 
 ```bash
-loom schedule create triage-followup \
+torque schedule create triage-followup \
   -g backend \
   --task "Follow up on auth rollout" \
   --at "+2h"
@@ -64,13 +64,13 @@ Task title templates can include time placeholders such as `{date}`, `{time}`, a
 ## Managing Schedules
 
 ```bash
-loom schedule list
-loom schedule show nightly-tests
-loom schedule edit nightly-tests --cron "0 3 * * *"
-loom schedule disable nightly-tests
-loom schedule enable nightly-tests
-loom schedule run nightly-tests
-loom schedule delete nightly-tests
+torque schedule list
+torque schedule show nightly-tests
+torque schedule edit nightly-tests --cron "0 3 * * *"
+torque schedule disable nightly-tests
+torque schedule enable nightly-tests
+torque schedule run nightly-tests
+torque schedule delete nightly-tests
 ```
 
 ## How Execution Works
@@ -80,7 +80,7 @@ The daemon periodically checks:
 - board tasks with `scheduled_at`
 - due schedule records
 
-When a schedule fires, Loom creates a new board task and, if configured, dispatches it through the normal task flow.
+When a schedule fires, Torque creates a new board task and, if configured, dispatches it through the normal task flow.
 
 ## When to Use Which
 

@@ -109,9 +109,9 @@ class FakeApp:
 class BridgeSendTextTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         _install_test_stubs()
-        self.bridge_mod = importlib.import_module("loom.bridge")
+        self.bridge_mod = importlib.import_module("torque.bridge")
         self.bridge_mod = importlib.reload(self.bridge_mod)
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
 
     async def _make_bridge(self, session):
@@ -309,7 +309,7 @@ class BridgeSendTextTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(delays, [0.25, 0.25, 0.3])
 
     async def test_send_text_logs_warning_when_session_not_found(self):
-        # LOOM:165 observability — a missing iTerm2 session on dispatch
+        # TORQUE:165 observability — a missing iTerm2 session on dispatch
         # used to silently drop the prompt, producing DOA workers after
         # daemon restarts with zero log signal. Surface it.
         session = FakeSession("present-session")
@@ -325,7 +325,7 @@ class BridgeSendTextTests(unittest.IsolatedAsyncioTestCase):
         )
         state.agents[cell.id] = cell
 
-        with self.assertLogs("loom", level="WARNING") as logs:
+        with self.assertLogs("torque", level="WARNING") as logs:
             await bridge.send_text("missing-session", "some prompt body\r")
 
         joined = "\n".join(logs.output)

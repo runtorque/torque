@@ -1,13 +1,13 @@
 # Implementation Plan: Auto-Generated Playbooks
 
 **Status**: Proposed research/design
-**Goal**: Learn reusable Loom workflows from successful historical task and pipeline runs, then publish them as reviewable playbook drafts that can become explicit, human-approved operational artifacts built from existing Loom actions, agent templates, and pipeline transitions.
+**Goal**: Learn reusable Torque workflows from successful historical task and pipeline runs, then publish them as reviewable playbook drafts that can become explicit, human-approved operational artifacts built from existing Torque actions, agent templates, and pipeline transitions.
 
 ---
 
 ## The Problem
 
-Loom already captures enough structure to see repeated workflows:
+Torque already captures enough structure to see repeated workflows:
 
 - board tasks record action names, labels, timestamps, parent/child pipeline links, and task activity messages
 - agent history records template, type, task count, and message history
@@ -15,7 +15,7 @@ Loom already captures enough structure to see repeated workflows:
 
 That is enough to observe that some patterns recur: `feature/implement -> feature/review`, research tasks that always escalate to a human gate, or work that reliably succeeds only when a specific template or worktree mode is used.
 
-What Loom does **not** have today is a safe way to turn that history into a reusable artifact. Naively copying the most common sequence would produce brittle cargo-cult automation:
+What Torque does **not** have today is a safe way to turn that history into a reusable artifact. Naively copying the most common sequence would produce brittle cargo-cult automation:
 
 - one-off firefights look like workflows if you only inspect a few runs
 - repeated failures can masquerade as "activity"
@@ -24,7 +24,7 @@ What Loom does **not** have today is a safe way to turn that history into a reus
 The design therefore has to answer two questions at once:
 
 1. What counts as a playbook candidate?
-2. How do we prevent Loom from publishing false patterns?
+2. How do we prevent Torque from publishing false patterns?
 
 It also needs a third answer for v1 that earlier versions left too vague:
 
@@ -40,13 +40,13 @@ It also needs a third answer for v1 that earlier versions left too vague:
 
 2. **Use the pipeline chain as the primary unit**
 
-   The main observation is not an individual task. It is a root task plus its derived descendants, because successful Loom workflows often span multiple actions.
+   The main observation is not an individual task. It is a root task plus its derived descendants, because successful Torque workflows often span multiple actions.
 
 3. **Publish suggestions, not silent mutations**
 
    A mined playbook should become a draft artifact with evidence attached. It should not automatically rewrite actions or enable a new pipeline without review.
 
-4. **Map onto Loom's existing primitives**
+4. **Map onto Torque's existing primitives**
 
    Actions remain the executable prompt units. Agent templates remain launch/runtime presets. Pipelines remain emergent from action transitions. Playbooks sit above them as a recommendation and packaging layer.
 
@@ -56,7 +56,7 @@ It also needs a third answer for v1 that earlier versions left too vague:
 
 6. **Separate drafts from operational objects**
 
-   Unpublished candidates are inert review artifacts. Only published playbooks become usable Loom objects.
+   Unpublished candidates are inert review artifacts. Only published playbooks become usable Torque objects.
 
 ---
 
@@ -65,15 +65,15 @@ It also needs a third answer for v1 that earlier versions left too vague:
 The primary v1 consumer is a **human workflow curator**:
 
 - a project maintainer
-- an operator managing Loom actions/templates
+- an operator managing Torque actions/templates
 - a human reviewing project automation before it is exposed to day-to-day users
 
 The activation path is explicit:
 
-1. Loom mines history and creates a **draft playbook candidate**.
+1. Torque mines history and creates a **draft playbook candidate**.
 2. A human reviews the candidate, its evidence, and the exact publication effect.
-3. If approved, Loom publishes a **playbook recipe**.
-4. Only that published recipe is exposed operationally in Loom.
+3. If approved, Torque publishes a **playbook recipe**.
+4. Only that published recipe is exposed operationally in Torque.
 
 For v1, a published playbook should be a named **dispatch recipe**:
 
@@ -85,7 +85,7 @@ For v1, a published playbook should be a named **dispatch recipe**:
 That makes the consumer and the activation path concrete:
 
 - **draft candidates** are used only by the human reviewer
-- **published playbook recipes** are used by Loom operators in task creation/dispatch flows
+- **published playbook recipes** are used by Torque operators in task creation/dispatch flows
 
 The designated engineer is **not** a v1 consumer of raw generated candidates. A later phase may let Engineer recommend or execute **published** playbooks, but unpublished drafts must remain inert.
 
@@ -93,7 +93,7 @@ The designated engineer is **not** a v1 consumer of raw generated candidates. A 
 
 ## What A Playbook Is
 
-A **playbook** is a reusable workflow artifact describing how Loom should approach a recurring class of work.
+A **playbook** is a reusable workflow artifact describing how Torque should approach a recurring class of work.
 
 It should include:
 
@@ -107,7 +107,7 @@ It should include:
 
 A draft playbook candidate is **not** operational by itself. It becomes operational only after publication.
 
-For v1, the operational form should be a **published dispatch recipe** that references existing Loom primitives. A published playbook is **not** a separate execution engine. At runtime Loom should still dispatch an action, use an agent template, and rely on action transitions for pipeline derivation.
+For v1, the operational form should be a **published dispatch recipe** that references existing Torque primitives. A published playbook is **not** a separate execution engine. At runtime Torque should still dispatch an action, use an agent template, and rely on action transitions for pipeline derivation.
 
 The playbook layer is therefore a publishing and packaging layer:
 
@@ -163,7 +163,7 @@ Phase 1 should keep normalization conservative:
 - bucket by root action plus normalized labels
 - treat obviously unique runs as outliers instead of forcing them into a family
 
-Phase 2 can add semantic clustering once Loom has better transcript and artifact capture.
+Phase 2 can add semantic clustering once Torque has better transcript and artifact capture.
 
 ### 3. Form candidate families
 
@@ -200,7 +200,7 @@ The extractor should emit a draft object with:
 
 If the family does not pass the gates, the output should be an internal observation only.
 
-If the family does pass the gates, the output is still only a **draft candidate**. It does not become visible as a reusable Loom object until a human publishes it.
+If the family does pass the gates, the output is still only a **draft candidate**. It does not become visible as a reusable Torque object until a human publishes it.
 
 ---
 
@@ -214,7 +214,7 @@ Success should be measured at the **run** level first, then rolled up to the fam
 - no stage in the chain ends in `blocked` or `error`
 - a review stage ends without spawning a subsequent fix stage
 - the chain reaches its expected terminal action without exceeding depth limits
-- the worktree is later merged or a PR is created successfully, if Loom has that signal
+- the worktree is later merged or a PR is created successfully, if Torque has that signal
 
 ### Medium signals
 
@@ -226,7 +226,7 @@ Success should be measured at the **run** level first, then rolled up to the fam
 ### Negative signals
 
 - unresolved `ask` tasks
-- tasks marked with `loom:error` or `loom:blocked`
+- tasks marked with `torque:error` or `torque:blocked`
 - review chains that repeatedly bounce between review and fix
 - runs that required manual rescue outside the inferred pattern
 - abandoned chains where the latest descendant never completed
@@ -242,7 +242,7 @@ Success should be measured at the **run** level first, then rolled up to the fam
 
 ## Historical Data Requirements
 
-The proposal should explicitly separate what Loom already records from what must be added for robust extraction.
+The proposal should explicitly separate what Torque already records from what must be added for robust extraction.
 
 | Signal | Available today | Use | Gap |
 |---|---|---|---|
@@ -345,11 +345,11 @@ Before publication, a human should approve:
 - the stage graph and any human gates
 - whether publication should create or update the operational recipe and any supporting action/transition artifacts
 
-Initial versions should require review for **every** published playbook. Auto-publishing should be out of scope until Loom has richer telemetry and a proven approval history.
+Initial versions should require review for **every** published playbook. Auto-publishing should be out of scope until Torque has richer telemetry and a proven approval history.
 
 ### Publication targets
 
-Publishing a playbook should produce a concrete operational object. For v1, that object should be a **published dispatch recipe** stored in project metadata and exposed intentionally in Loom's dispatch/task-creation flows.
+Publishing a playbook should produce a concrete operational object. For v1, that object should be a **published dispatch recipe** stored in project metadata and exposed intentionally in Torque's dispatch/task-creation flows.
 
 Publication may also result in one or more supporting changes:
 
@@ -375,11 +375,11 @@ The cleanest model is:
 - **Agent templates** remain the execution preset for a stage or playbook
 - **Pipelines** remain the allowed graph of action transitions
 - **Draft playbook candidates** become the mined review artifacts derived from history
-- **Published playbooks** become the approved dispatch recipes that bind the learned workflow to Loom's runtime primitives
+- **Published playbooks** become the approved dispatch recipes that bind the learned workflow to Torque's runtime primitives
 
 This has two advantages:
 
-1. Loom does not need a second orchestration engine.
+1. Torque does not need a second orchestration engine.
 2. Humans can inspect and edit the concrete runtime primitives they already understand.
 
 In practice, a published playbook should usually point to:
@@ -434,7 +434,7 @@ Engineer should not read or act on unpublished candidate drafts.
    Expose published recipes in task creation/dispatch flows. Do not surface raw candidates to Engineer or normal operators.
 
 9. **Backtest before enabling by default**
-   Run the miner over existing Loom history fixtures and real projects to measure false positives and ambiguous families.
+   Run the miner over existing Torque history fixtures and real projects to measure false positives and ambiguous families.
 
 ---
 
@@ -451,4 +451,4 @@ The first implementation should stay intentionally narrow:
 - surface only **published** playbooks in task creation/dispatch flows
 - keep Engineer out of the loop until a later published-playbook integration step
 
-That scope is enough to prove whether Loom can learn useful workflows from history without claiming more certainty than the data supports.
+That scope is enough to prove whether Torque can learn useful workflows from history without claiming more certainty than the data supports.

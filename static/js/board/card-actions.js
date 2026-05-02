@@ -127,7 +127,7 @@ function _boardRenderCardMenu(taskId) {
   }
 
   // Resolve (ask tasks with human label)
-  if (task.labels && task.labels.indexOf('loom:human') >= 0 && task.lane !== 'Done') {
+  if (task.labels && task.labels.indexOf('torque:human') >= 0 && task.lane !== 'Done') {
     html += '<button onclick="event.stopPropagation();boardOpenResolve(\'' + taskId + '\')">Resolve...</button>';
   }
 

@@ -15,9 +15,9 @@ except ModuleNotFoundError:
 class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub(include_json_helpers=True)
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
-        self.mcp_mod = importlib.import_module("loom.mcp")
+        self.mcp_mod = importlib.import_module("torque.mcp")
         self.mcp_mod = importlib.reload(self.mcp_mod)
 
     async def _flush_session_wake_tasks(self):
@@ -48,7 +48,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             return {"type": "ok"}
 
         text, is_error = await self.mcp_mod._dispatch_tool(
-            "loom_progress",
+            "torque_progress",
             {"message": "Running tests"},
             cell.id,
             fake_handle_command,
@@ -58,7 +58,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(json.loads(text), {"type": "ok"})
 
         text, is_error = await self.mcp_mod._dispatch_tool(
-            "loom_verify",
+            "torque_verify",
             {
                 "state": "pending",
                 "mode": "deploy",
@@ -77,7 +77,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(json.loads(text), {"type": "ok"})
 
         text, is_error = await self.mcp_mod._dispatch_tool(
-            "loom_derive",
+            "torque_derive",
             {
                 "description": "Implement follow-up",
                 "context": "Keep the matrix current.",
@@ -151,7 +151,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             }
 
         text, is_error = await self.mcp_mod._dispatch_tool(
-            "loom_task_upload_artifact",
+            "torque_task_upload_artifact",
             {
                 "filename": "report.txt",
                 "content_text": "hello",
@@ -177,7 +177,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             }],
         )
 
-    async def test_loom_reply_forwards_optional_task_id(self):
+    async def test_torque_reply_forwards_optional_task_id(self):
         state = self.state_mod.MatrixState()
         cell = self.state_mod.AgentCell(
             id="agent-1",
@@ -191,25 +191,25 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
 
         async def fake_handle_command(payload):
             calls.append(dict(payload))
-            return {"type": "ok", "task_id": "LOOM:1:2"}
+            return {"type": "ok", "task_id": "TORQUE:1:2"}
 
         text, is_error = await self.mcp_mod._dispatch_tool(
-            "loom_reply",
-            {"task": "LOOM:1:2", "message": "Rebased successfully"},
+            "torque_reply",
+            {"task": "TORQUE:1:2", "message": "Rebased successfully"},
             cell.id,
             fake_handle_command,
             state,
         )
 
         self.assertFalse(is_error)
-        self.assertEqual(json.loads(text), {"type": "ok", "task_id": "LOOM:1:2"})
+        self.assertEqual(json.loads(text), {"type": "ok", "task_id": "TORQUE:1:2"})
         self.assertEqual(
             calls,
             [{
                 "cmd": "ai_report",
                 "cell_id": "agent-1",
                 "action": "reply",
-                "task_id": "LOOM:1:2",
+                "task_id": "TORQUE:1:2",
                 "message": "Rebased successfully",
             }],
         )
@@ -233,7 +233,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             return {"type": "memory_entry", "entry": {"id": "mem-1"}}
 
         text, is_error = await self.mcp_mod._dispatch_tool(
-            "loom_memory_publish",
+            "torque_memory_publish",
             {
                 "entry_type": "decision",
                 "content": "Use durable storage.",
@@ -251,7 +251,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(json.loads(text)["entry"]["id"], "mem-1")
 
         text, is_error = await self.mcp_mod._dispatch_tool(
-            "loom_memory_list",
+            "torque_memory_list",
             {
                 "scope_kind": "group",
                 "scope_ref": "g",
@@ -267,7 +267,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(json.loads(text)["type"], "memory_entries")
 
         text, is_error = await self.mcp_mod._dispatch_tool(
-            "loom_memory_read",
+            "torque_memory_read",
             {"entry_id": "mem-1"},
             cell.id,
             fake_handle_command,
@@ -276,7 +276,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(is_error)
 
         text, is_error = await self.mcp_mod._dispatch_tool(
-            "loom_memory_pin",
+            "torque_memory_pin",
             {"entry_id": "mem-1"},
             cell.id,
             fake_handle_command,
@@ -285,7 +285,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(is_error)
 
         text, is_error = await self.mcp_mod._dispatch_tool(
-            "loom_memory_link",
+            "torque_memory_link",
             {"entry_id": "mem-1", "target_kind": "task", "target_ref": "task-1"},
             cell.id,
             fake_handle_command,
@@ -294,7 +294,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(is_error)
 
         text, is_error = await self.mcp_mod._dispatch_tool(
-            "loom_memory_unpin",
+            "torque_memory_unpin",
             {"entry_id": "mem-1"},
             cell.id,
             fake_handle_command,
@@ -418,12 +418,12 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             tool["name"]
             for tool in listed_missing_header.payload["result"]["tools"]
         ]
-        self.assertIn("loom_progress", tool_names)
-        self.assertIn("loom_verify", tool_names)
-        self.assertIn("loom_task_upload_artifact", tool_names)
-        self.assertIn("loom_memory_publish", tool_names)
-        self.assertIn("loom_memory_read", tool_names)
-        self.assertIn("loom_memory_link", tool_names)
+        self.assertIn("torque_progress", tool_names)
+        self.assertIn("torque_verify", tool_names)
+        self.assertIn("torque_task_upload_artifact", tool_names)
+        self.assertIn("torque_memory_publish", tool_names)
+        self.assertIn("torque_memory_read", tool_names)
+        self.assertIn("torque_memory_link", tool_names)
         self.assertNotIn("engineer_board_summary", tool_names)
         self.assertNotIn("engineer_board_summary", tool_names)
         self.assertNotIn("architect_board_summary", tool_names)
@@ -432,13 +432,13 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         listed_worker = await handler(
             FakeRequest(
                 {"jsonrpc": "2.0", "id": 11, "method": "tools/list"},
-                headers={"X-Loom-Cell-Id": worker.id},
+                headers={"X-Torque-Cell-Id": worker.id},
             )
         )
         worker_tool_names = [
             tool["name"] for tool in listed_worker.payload["result"]["tools"]
         ]
-        self.assertIn("loom_progress", worker_tool_names)
+        self.assertIn("torque_progress", worker_tool_names)
         self.assertNotIn("engineer_board_summary", worker_tool_names)
         self.assertNotIn("engineer_board_summary", worker_tool_names)
         self.assertNotIn("architect_board_summary", worker_tool_names)
@@ -447,7 +447,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         listed_architect = await handler(
             FakeRequest(
                 {"jsonrpc": "2.0", "id": 12, "method": "tools/list"},
-                headers={"X-Loom-Cell-Id": architect.id},
+                headers={"X-Torque-Cell-Id": architect.id},
             )
         )
         architect_tool_names = [
@@ -479,7 +479,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         listed_engineer = await handler(
             FakeRequest(
                 {"jsonrpc": "2.0", "id": 121, "method": "tools/list"},
-                headers={"X-Loom-Cell-Id": engineer.id},
+                headers={"X-Torque-Cell-Id": engineer.id},
             )
         )
         engineer_tool_names = [
@@ -501,7 +501,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         listed_hired_engineer = await handler(
             FakeRequest(
                 {"jsonrpc": "2.0", "id": 122, "method": "tools/list"},
-                headers={"X-Loom-Cell-Id": hired_engineer.id},
+                headers={"X-Torque-Cell-Id": hired_engineer.id},
             )
         )
         hired_engineer_tool_names = [
@@ -517,13 +517,13 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                     "jsonrpc": "2.0",
                     "id": 2,
                     "method": "tools/call",
-                    "params": {"name": "loom_progress", "arguments": {"message": "hi"}},
+                    "params": {"name": "torque_progress", "arguments": {"message": "hi"}},
                 }
             )
         )
         self.assertTrue(missing_header.payload["result"]["isError"])
         self.assertIn(
-            "X-Loom-Cell-Id header is required",
+            "X-Torque-Cell-Id header is required",
             missing_header.payload["result"]["content"][0]["text"],
         )
 
@@ -539,7 +539,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(removed_alias.payload["result"]["isError"])
         self.assertIn(
-            "X-Loom-Cell-Id header is required",
+            "X-Torque-Cell-Id header is required",
             removed_alias.payload["result"]["content"][0]["text"],
         )
 
@@ -551,12 +551,12 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                     "method": "tools/call",
                     "params": {"name": "architect_board_summary", "arguments": {}},
                 },
-                headers={"X-Loom-Cell-Id": worker.id},
+                headers={"X-Torque-Cell-Id": worker.id},
             )
         )
         self.assertTrue(denied_architect_summary.payload["result"]["isError"])
         self.assertIn(
-            "architect tools are only available inside a Loom-managed architect session",
+            "architect tools are only available inside a Torque-managed architect session",
             denied_architect_summary.payload["result"]["content"][0]["text"],
         )
 
@@ -568,7 +568,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                     "method": "tools/call",
                     "params": {"name": "engineer_board_summary", "arguments": {}},
                 },
-                headers={"X-Loom-Cell-Id": engineer.id},
+                headers={"X-Torque-Cell-Id": engineer.id},
             )
         )
         self.assertFalse(summary.payload["result"]["isError"])
@@ -603,7 +603,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             listed = await handler(
                 FakeRequest(
                     {"jsonrpc": "2.0", "id": tool_name, "method": "tools/list"},
-                    headers={"X-Loom-Cell-Id": engineer.id},
+                    headers={"X-Torque-Cell-Id": engineer.id},
                 )
             )
             tools = listed.payload["result"]["tools"]
@@ -667,7 +667,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                         },
                     },
                 },
-                headers={"X-Loom-Cell-Id": engineer.id},
+                headers={"X-Torque-Cell-Id": engineer.id},
             )
         )
 
@@ -698,7 +698,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             return {"type": "ok"}
 
         handler = self.mcp_mod.create_mcp_handler(fake_handle_command, state)
-        with self.assertLogs("loom", level="WARNING") as logs:
+        with self.assertLogs("torque", level="WARNING") as logs:
             response = await handler(
                 FakeRequest(
                     {
@@ -713,7 +713,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                             },
                         },
                     },
-                    headers={"X-Loom-Cell-Id": engineer.id},
+                    headers={"X-Torque-Cell-Id": engineer.id},
                 )
             )
 
@@ -776,7 +776,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             response = await handler(
                 FakeRequest(
                     {"jsonrpc": "2.0", "id": cell_id, "method": "tools/list"},
-                    headers={"X-Loom-Cell-Id": cell_id},
+                    headers={"X-Torque-Cell-Id": cell_id},
                 )
             )
             return {tool["name"] for tool in response.payload["result"]["tools"]}
@@ -797,7 +797,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                             "arguments": {"query": "engineer_message_architect"},
                         },
                     },
-                    headers={"X-Loom-Cell-Id": cell.id},
+                    headers={"X-Torque-Cell-Id": cell.id},
                 )
             )
             payload = self._parse_functions_block(
@@ -814,7 +814,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                             "method": "tools/call",
                             "params": {"name": tool_name, "arguments": {}},
                         },
-                        headers={"X-Loom-Cell-Id": cell.id},
+                        headers={"X-Torque-Cell-Id": cell.id},
                     )
                 )
                 self.assertIn("error", response.payload)
@@ -864,7 +864,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                         },
                     },
                 },
-                headers={"X-Loom-Cell-Id": engineer.id},
+                headers={"X-Torque-Cell-Id": engineer.id},
             )
         )
         self.assertFalse(exact.payload["result"]["isError"])
@@ -891,7 +891,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                         },
                     },
                 },
-                headers={"X-Loom-Cell-Id": engineer.id},
+                headers={"X-Torque-Cell-Id": engineer.id},
             )
         )
         keyword_payload = self._parse_functions_block(
@@ -915,7 +915,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                         },
                     },
                 },
-                headers={"X-Loom-Cell-Id": architect.id},
+                headers={"X-Torque-Cell-Id": architect.id},
             )
         )
         architect_payload = self._parse_functions_block(
@@ -964,7 +964,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                         "arguments": {},
                     },
                 },
-                headers={"X-Loom-Cell-Id": architect.id},
+                headers={"X-Torque-Cell-Id": architect.id},
             )
         )
         self.assertFalse(architect_settings.payload["result"]["isError"])
@@ -984,7 +984,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                         "arguments": {},
                     },
                 },
-                headers={"X-Loom-Cell-Id": engineer.id},
+                headers={"X-Torque-Cell-Id": engineer.id},
             )
         )
         self.assertFalse(engineer_show.payload["result"]["isError"])
@@ -1008,7 +1008,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         listed = await handler(
             FakeRequest(
                 {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-                headers={"X-Loom-Cell-Id": architect.id},
+                headers={"X-Torque-Cell-Id": architect.id},
             )
         )
         tool_names = {
@@ -1028,7 +1028,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                         "method": "tools/call",
                         "params": {"name": tool_name, "arguments": {}},
                     },
-                    headers={"X-Loom-Cell-Id": architect.id},
+                    headers={"X-Torque-Cell-Id": architect.id},
                 )
             )
             self.assertIn("error", response.payload)
@@ -1040,20 +1040,20 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             "architect_" + "workspace_overview",
         ]
         root = Path(__file__).resolve().parents[1]
-        paths = list((root / "loom").glob("*.py")) + [root / "bin" / "loom"]
+        paths = list((root / "torque").glob("*.py")) + [root / "bin" / "torque"]
         for path in paths:
             text = path.read_text()
             for tool_name in removed_names:
                 self.assertNotIn(tool_name, text, str(path))
 
-    def test_loom_ask_tool_description_marks_it_as_blocking(self):
+    def test_torque_ask_tool_description_marks_it_as_blocking(self):
         ask_tool = next(
             tool for tool in self.mcp_mod.TOOLS
-            if tool["name"] == "loom_ask"
+            if tool["name"] == "torque_ask"
         )
         reply_tool = next(
             tool for tool in self.mcp_mod.TOOLS
-            if tool["name"] == "loom_reply"
+            if tool["name"] == "torque_reply"
         )
 
         self.assertIn("blocking human decision or approval", ask_tool["description"])
@@ -1061,7 +1061,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("include the task id", reply_tool["description"])
         self.assertIn("task", reply_tool["inputSchema"]["properties"])
 
-    async def test_loom_context_includes_combined_task_artifacts(self):
+    async def test_torque_context_includes_combined_task_artifacts(self):
         state = self.state_mod.MatrixState()
         cell = self.state_mod.AgentCell(
             id="agent-1",
@@ -1086,7 +1086,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             self.fail(f"Unexpected handle_command call: {payload}")
 
         text, is_error = await self.mcp_mod._dispatch_tool(
-            "loom_context",
+            "torque_context",
             {},
             cell.id,
             fake_handle_command,
@@ -1098,7 +1098,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(payload["tasks"]["task-1"]["task_artifacts"]), 2)
         self.assertEqual(payload["tasks"]["task-1"]["task_artifacts"][0]["url"], "/attachments/task-1/image.png")
 
-    async def test_loom_context_includes_upstream_artifacts_for_derived_tasks(self):
+    async def test_torque_context_includes_upstream_artifacts_for_derived_tasks(self):
         state = self.state_mod.MatrixState()
         cell = self.state_mod.AgentCell(
             id="agent-1",
@@ -1136,7 +1136,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             self.fail(f"Unexpected handle_command call: {payload}")
 
         text, is_error = await self.mcp_mod._dispatch_tool(
-            "loom_context",
+            "torque_context",
             {},
             cell.id,
             fake_handle_command,
@@ -1170,7 +1170,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             "jsonrpc": "2.0",
             "id": 1,
             "method": "tools/call",
-            "params": {"name": "loom_context", "arguments": {}},
+            "params": {"name": "torque_context", "arguments": {}},
         }
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1389,7 +1389,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             "jsonrpc": "2.0",
             "id": 4,
             "method": "tools/call",
-            "params": {"name": "loom_context", "arguments": {}},
+            "params": {"name": "torque_context", "arguments": {}},
         }
 
         with mock.patch("time.time", return_value=9000.0):

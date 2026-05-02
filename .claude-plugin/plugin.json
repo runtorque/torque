@@ -1,5 +1,5 @@
 {
-  "name": "loom",
-  "description": "iTerm2 Loom agent session and task management",
+  "name": "torque",
+  "description": "iTerm2 Torque agent session and task management",
   "version": "1.0.0"
 }

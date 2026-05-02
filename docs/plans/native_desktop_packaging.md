@@ -2,9 +2,9 @@
 
 ## Executive Summary
 
-Loom now has a working native desktop shell built with `pywebview`. That shell is intentionally thin: it opens the existing Loom web UI inside a native window and reuses the existing Python daemon, HTTP/WebSocket server, frontend assets, and SQLite state model.
+Torque now has a working native desktop shell built with `pywebview`. That shell is intentionally thin: it opens the existing Torque web UI inside a native window and reuses the existing Python daemon, HTTP/WebSocket server, frontend assets, and SQLite state model.
 
-That was the correct first step. It proved that Loom can run as a real native window without forking the product into a second frontend or a second backend.
+That was the correct first step. It proved that Torque can run as a real native window without forking the product into a second frontend or a second backend.
 
 The next step is different in kind: turn that native shell into a packaged desktop product that can be installed and operated without depending on the current iTerm-oriented runtime layout.
 
@@ -27,11 +27,11 @@ This keeps the implementation pragmatic:
 
 ## Current Baseline
 
-After the native desktop-shell work, Loom currently has:
+After the native desktop-shell work, Torque currently has:
 
-- a native desktop entrypoint (`loom_desktop.py`)
-- a desktop launcher/service wrapper (`loom/desktop.py`)
-- CLI entrypoints (`loom desktop`, `make desktop`, `make desktop-attach`)
+- a native desktop entrypoint (`torque_desktop.py`)
+- a desktop launcher/service wrapper (`torque/desktop.py`)
+- CLI entrypoints (`torque desktop`, `make desktop`, `make desktop-attach`)
 - explicit spawn vs attach behavior
 - desktop-specific defaults for profile, port, and data directory
 - guardrails preventing accidental attachment to the iTerm-hosted Toolbelt daemon
@@ -53,16 +53,16 @@ That is the scope of this roadmap.
 The desktop product must preserve these constraints:
 
 1. **Do not break the iTerm product.**  
-   iTerm-hosted Loom remains a first-class product surface. Desktop work must not regress Toolbelt behavior, install flows, or existing operator habits.
+   iTerm-hosted Torque remains a first-class product surface. Desktop work must not regress Toolbelt behavior, install flows, or existing operator habits.
 
 2. **Do not fork the core product.**  
-   The desktop app should continue to use the same backend, state model, command handling, and frontend assets as the existing Loom product.
+   The desktop app should continue to use the same backend, state model, command handling, and frontend assets as the existing Torque product.
 
 3. **Stay lightweight.**  
    Avoid introducing a heavy desktop stack unless the current approach proves insufficient under measured constraints.
 
 4. **Be explicit about platform reality.**  
-   `pywebview` is cross-platform, but a real Loom desktop product also depends on terminal/process integration. That portability work is separate and must be planned honestly.
+   `pywebview` is cross-platform, but a real Torque desktop product also depends on terminal/process integration. That portability work is separate and must be planned honestly.
 
 ---
 
@@ -94,7 +94,7 @@ The desktop product must preserve these constraints:
 This is the lowest-risk path to a packaged product:
 
 - smallest architectural delta from what already works
-- easiest to verify against current Loom behavior
+- easiest to verify against current Torque behavior
 - lowest chance of introducing desktop-only feature drift
 - avoids a second application core
 
@@ -106,8 +106,8 @@ PyInstaller is the right first packaging choice because it works with the existi
 
 ### Shared product core
 
-- `loom/server.py`
-- `loom/state.py`
+- `torque/server.py`
+- `torque/state.py`
 - existing adapters, worktree logic, and CLI surfaces
 - existing frontend assets
 
@@ -122,12 +122,12 @@ PyInstaller is the right first packaging choice because it works with the existi
 
 The desktop app and the iTerm app should be treated as two launch products over one shared core:
 
-- **iTerm Loom**
+- **iTerm Torque**
   - Toolbelt-integrated
   - current install/deploy path
   - current runtime assumptions
 
-- **Loom Desktop**
+- **Torque Desktop**
   - desktop-owned runtime
   - packaged native entrypoint
   - desktop-owned defaults and install flow
@@ -170,7 +170,7 @@ Packaging before runtime ownership would produce a fragile desktop story. The ap
 ### Verification gates
 
 - desktop launch works without relying on the iTerm-managed runtime
-- `loom desktop` clearly reports which runtime it is using
+- `torque desktop` clearly reports which runtime it is using
 - iTerm install/deploy flows remain unchanged
 
 ---
@@ -227,7 +227,7 @@ Ship a Linux desktop build without introducing desktop-only product divergence.
 ### Verification gates
 
 - app launches on a clean Linux environment
-- native window loads the existing Loom UI correctly
+- native window loads the existing Torque UI correctly
 - terminal session creation works
 - TUI smoke (including NeoVim) remains stable
 
@@ -237,7 +237,7 @@ Ship a Linux desktop build without introducing desktop-only product divergence.
 
 ### Goal
 
-Make Loom's desktop app truly viable on Windows.
+Make Torque's desktop app truly viable on Windows.
 
 ### Why this is a separate phase
 
@@ -295,7 +295,7 @@ Make the desktop app releasable instead of only locally buildable.
 - attach mode
 - terminal open
 - TUI smoke
-- verification that iTerm-hosted Loom remains unaffected
+- verification that iTerm-hosted Torque remains unaffected
 
 ---
 
@@ -323,7 +323,7 @@ The following should **not** be folded into the first packaging push:
 
 - replacing `pywebview`
 - rewriting the frontend
-- replacing the Loom daemon architecture
+- replacing the Torque daemon architecture
 - changing persistence or state architecture
 - redesigning the desktop UI again
 - adding platform-specific feature creep unrelated to packaging/runtime ownership
@@ -351,8 +351,8 @@ This order keeps risk front-loaded where it belongs:
 
 ## Exit Criteria
 
-This roadmap is complete when Loom Desktop can be described accurately as:
+This roadmap is complete when Torque Desktop can be described accurately as:
 
-> a packaged native desktop app, using the same Loom core as the iTerm product, installable and operable without a browser and without dependence on the iTerm-managed runtime, with clear platform support boundaries and release artifacts for supported targets.
+> a packaged native desktop app, using the same Torque core as the iTerm product, installable and operable without a browser and without dependence on the iTerm-managed runtime, with clear platform support boundaries and release artifacts for supported targets.
 
 At that point, the iTerm integration remains intact, but the desktop product is no longer merely “the browser/standalone UI in a native shell.” It becomes an actual distributable application.

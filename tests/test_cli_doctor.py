@@ -11,9 +11,9 @@ from unittest import mock
 
 
 def _load_cli_module():
-    path = Path(__file__).resolve().parents[1] / "bin" / "loom"
-    loader = SourceFileLoader("loom_cli_doctor", str(path))
-    spec = importlib.util.spec_from_loader("loom_cli_doctor", loader)
+    path = Path(__file__).resolve().parents[1] / "bin" / "torque"
+    loader = SourceFileLoader("torque_cli_doctor", str(path))
+    spec = importlib.util.spec_from_loader("torque_cli_doctor", loader)
     mod = importlib.util.module_from_spec(spec)
     loader.exec_module(mod)
     return mod
@@ -74,7 +74,7 @@ class CliDoctorTests(unittest.TestCase):
                 "recent_window_seconds": 3600,
                 "pending_failed_writes": 1,
                 "totals": {"retry": 2, "drop": 1},
-                "surfaces": {"loom": {"events": {"retry": 2}, "tools": {}}},
+                "surfaces": {"torque": {"events": {"retry": 2}, "tools": {}}},
             },
         }
         with mock.patch.object(self.cli, "get_doctor_local", return_value=report):
@@ -85,7 +85,7 @@ class CliDoctorTests(unittest.TestCase):
                 )
 
         text = out.getvalue()
-        self.assertIn("Loom MCP health", text)
+        self.assertIn("Torque MCP health", text)
         self.assertIn("pending_failed_writes: 1", text)
         self.assertIn("retries=2", text)
 
@@ -198,7 +198,7 @@ class CliDoctorTests(unittest.TestCase):
                     "status": "warn",
                     "details": {
                         "count": 1,
-                        "files": ["~/.loom/agents/shared.yaml"],
+                        "files": ["~/.torque/agents/shared.yaml"],
                         "hint": (
                             "legacy template files in agents/ are ignored; "
                             "move them into roles/"
@@ -208,7 +208,7 @@ class CliDoctorTests(unittest.TestCase):
             ],
             "checks": [],
             "roles": {
-                "roles_dir": "/tmp/.loom/roles",
+                "roles_dir": "/tmp/.torque/roles",
                 "roles_file_count": 1,
                 "roles_with_preamble": 1,
                 "roles_with_priorities": 0,
@@ -227,7 +227,7 @@ class CliDoctorTests(unittest.TestCase):
         text = out.getvalue()
         self.assertIn("Result: PASS (with warnings)", text)
         self.assertIn(
-            "legacy template files in agents/ are ignored; move them into roles/: ~/.loom/agents/shared.yaml",
+            "legacy template files in agents/ are ignored; move them into roles/: ~/.torque/agents/shared.yaml",
             text,
         )
 

@@ -20,7 +20,7 @@ function buildContext(agents) {
     esc: (s) => String(s),
     labelColor: () => '#aaa',
     displayLabel: (s) => s,
-    isSystemLabel: (s) => String(s || '').startsWith('loom:'),
+    isSystemLabel: (s) => String(s || '').startsWith('torque:'),
   });
   const src = fs.readFileSync(
     path.join(repoRoot, 'static/js/modals/task-modal.js'),

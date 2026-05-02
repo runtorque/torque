@@ -212,7 +212,7 @@ function renderTemplatesEditor() {
 
   if (!dataForScope && !newForScope) {
     if (listForScope.length === 0) {
-      el.innerHTML = '<div class="tpled-empty">No actions found.<br>Click <b>+</b> to create one,<br>or add <code>.yaml</code> files to <code>.loom/actions/</code>.</div>';
+      el.innerHTML = '<div class="tpled-empty">No actions found.<br>Click <b>+</b> to create one,<br>or add <code>.yaml</code> files to <code>.torque/actions/</code>.</div>';
     } else {
       el.innerHTML = '<div class="tpled-empty">'
         + '<b>' + listForScope.length + '</b> action' + (listForScope.length !== 1 ? 's' : '') + ' available.<br>'
@@ -234,8 +234,8 @@ function renderTemplatesEditor() {
   html += '<input id="tpled-name" value="' + esc(d.name || _tplEditorSelected || '') + '" autocomplete="off" onchange="tplEditorMarkDirty()">';
   html += '<label>Scope</label>';
   html += '<select id="tpled-scope" onchange="tplEditorMarkDirty()">';
-  html += '<option value="project"' + (_tplEditorScope === 'project' ? ' selected' : '') + '>Project (.loom/actions/)</option>';
-  html += '<option value="user"' + (_tplEditorScope === 'user' ? ' selected' : '') + '>User (~/.loom/actions/)</option>';
+  html += '<option value="project"' + (_tplEditorScope === 'project' ? ' selected' : '') + '>Project (.torque/actions/)</option>';
+  html += '<option value="user"' + (_tplEditorScope === 'user' ? ' selected' : '') + '>User (~/.torque/actions/)</option>';
   html += '</select>';
   html += '<label>Description</label>';
   html += '<input id="tpled-desc" value="' + esc(d.description || '') + '" autocomplete="off" onchange="tplEditorMarkDirty()">';
@@ -467,8 +467,8 @@ function _tplHighlightWrap(id, value) {
 }
 
 function _tplShortenPath(p) {
-  // Strip .loom/actions suffix to show the project/user root
-  p = p.replace(/\/?\.loom\/actions\/?$/, '');
+  // Strip .torque/actions suffix to show the project/user root
+  p = p.replace(/\/?\.torque\/actions\/?$/, '');
   // Replace home dir with ~
   if (typeof navigator !== 'undefined') {
     // Detect home from common prefixes
@@ -801,7 +801,7 @@ function _tplEditorSaveInner() {
   var prompt = document.getElementById('tpled-prompt').value || '';
 
   // Validate {{ TASK }} is present
-  if (!/\{\{\s*TASK\s*(\|[^}]*)?\}\}/.test(prompt) && !/\{\{\s*loom\.task\.title\s*(\|[^}]*)?\}\}/.test(prompt)) {
+  if (!/\{\{\s*TASK\s*(\|[^}]*)?\}\}/.test(prompt) && !/\{\{\s*torque\.task\.title\s*(\|[^}]*)?\}\}/.test(prompt)) {
     var promptEl = document.getElementById('tpled-prompt');
     if (promptEl) { promptEl.focus(); promptEl.classList.add('input-error'); }
     _showToast('Prompt must contain {{ TASK }}', 'error');

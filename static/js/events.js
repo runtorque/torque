@@ -276,7 +276,7 @@ function _eventsGetAttentionItems() {
       && typeof ensureTaskDetail === 'function') {
     var _parentsToHydrate = {};
     _compactHydrateTasksMatching(function(t) {
-      if (!t || !t.labels || t.labels.indexOf('loom:human') < 0) return false;
+      if (!t || !t.labels || t.labels.indexOf('torque:human') < 0) return false;
       if (t.lane === 'Done') return false;
       if (grp && t.group !== grp) return false;
       if (t.parent_task_id) _parentsToHydrate[t.parent_task_id] = true;
@@ -286,7 +286,7 @@ function _eventsGetAttentionItems() {
   }
   for (var id in tasks) {
     var t = tasks[id];
-    if (!t.labels || t.labels.indexOf('loom:human') < 0) continue;
+    if (!t.labels || t.labels.indexOf('torque:human') < 0) continue;
     if (t.lane === 'Done') continue;
     if (grp && t.group !== grp) continue;
     var parent = _eventsAskParentTask(t);
@@ -370,7 +370,7 @@ function _eventsBuildShellHtml(grp, attention) {
   var html = '';
   var scopeLabel = grp
     ? 'Attention inbox and recent activity for ' + grp
-    : 'Attention inbox and recent activity across Loom';
+    : 'Attention inbox and recent activity across Torque';
 
   html += '<div class="events-header">';
   html += '<div class="events-header-copy">';

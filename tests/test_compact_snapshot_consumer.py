@@ -82,9 +82,9 @@ class CompactSnapshotConsumerTests(unittest.TestCase):
     def setUp(self):
         install_aiohttp_stub()
         self.state_mod = importlib.reload(
-            importlib.import_module("loom.state"))
+            importlib.import_module("torque.state"))
         self.server_mod = importlib.reload(
-            importlib.import_module("loom.server"))
+            importlib.import_module("torque.server"))
 
     def _populated_state(self):
         state = self.state_mod.MatrixState()
@@ -377,16 +377,16 @@ class CompactSnapshotConsumerTests(unittest.TestCase):
         context_text = ("Relevant context lines " * 80).strip()
         criteria = ("Acceptance criteria bullet " * 50).strip()
         action_vars = {
-            "target_module": "loom.state",
+            "target_module": "torque.state",
             "notes": "some notes " * 100,
             "long": "z" * 2000,
         }
 
         task = self.state_mod.BoardTask(
-            id="LOOM:200",
+            id="TORQUE:200",
             task="perf: finalize compact consumer",
             slug="perf-finalize-compact-consumer",
-            group="loom",
+            group="torque",
             lane="In Progress",
             position=42,
             action_name="feature/implement",
@@ -395,7 +395,7 @@ class CompactSnapshotConsumerTests(unittest.TestCase):
             assigned_engineer_id="eng-uuid-000000000000",
             created_at="2026-04-22T22:00:00+00:00",
             updated_at="2026-04-22T23:30:03.758052+00:00",
-            depends_on=["LOOM:120"],
+            depends_on=["TORQUE:120"],
             provider="github",
             external_id="123",
             external_url="https://github.com/x/y/issues/123",

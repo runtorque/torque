@@ -25,7 +25,7 @@ function assertPlainEqual(actual, expected, message) {
 function createCompactContext(opts) {
   var flag = (opts && opts.flag) || null;
   var localStorageState = new Map();
-  if (flag) localStorageState.set('loom:snapshot_protocol', flag);
+  if (flag) localStorageState.set('torque:snapshot_protocol', flag);
   var sandbox = {
     console,
     Date,
@@ -384,7 +384,7 @@ function createBoardConsumerContext() {
     _closeCtxMenu = function() {};
     _boardTasks = function() { return state.board_tasks; };
     _currentGroup = function() { return 'alpha'; };
-    isSystemLabel = function(l) { return String(l).indexOf('loom:') === 0; };
+    isSystemLabel = function(l) { return String(l).indexOf('torque:') === 0; };
     _boardTaskCloneFields = function(task) {
       return {
         task: task.task || '',

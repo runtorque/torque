@@ -12,20 +12,20 @@ class RoleManagerTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.project = self.root / "repo" / "subdir"
         self.project.mkdir(parents=True)
-        self.project_roles = self.root / "repo" / ".loom" / "roles"
+        self.project_roles = self.root / "repo" / ".torque" / "roles"
         self.project_roles.mkdir(parents=True)
-        self.project_templates = self.root / "repo" / ".loom" / "agents"
+        self.project_templates = self.root / "repo" / ".torque" / "agents"
         self.project_templates.mkdir(parents=True)
         self.user_home = self.root / "home"
-        self.user_roles = self.user_home / ".loom" / "roles"
+        self.user_roles = self.user_home / ".torque" / "roles"
         self.user_roles.mkdir(parents=True)
-        self.user_templates = self.user_home / ".loom" / "agents"
+        self.user_templates = self.user_home / ".torque" / "agents"
         self.user_templates.mkdir(parents=True)
         self.prev_home = os.environ.get("HOME")
         os.environ["HOME"] = str(self.user_home)
         self.addCleanup(self._restore_home)
 
-        self.roles_mod = importlib.import_module("loom.roles")
+        self.roles_mod = importlib.import_module("torque.roles")
         self.roles_mod = importlib.reload(self.roles_mod)
         self.mgr = self.roles_mod.RoleManager()
 
@@ -68,15 +68,15 @@ class RoleManagerTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-        with self.assertLogs("loom", level="WARNING") as logs:
+        with self.assertLogs("torque", level="WARNING") as logs:
             loaded = self.mgr.load_role("bar", base_dir=str(self.project))
 
         self.assertIsNone(loaded)
         self.assertEqual(
             logs.output,
             [
-                "WARNING:loom:legacy template file at ~/.loom/agents/bar.yaml "
-                "is ignored; move it to ~/.loom/roles/ to use as a role"
+                "WARNING:torque:legacy template file at ~/.torque/agents/bar.yaml "
+                "is ignored; move it to ~/.torque/roles/ to use as a role"
             ],
         )
         self.assertEqual(
@@ -94,7 +94,7 @@ class RoleManagerTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-        with self.assertNoLogs("loom", level="WARNING"):
+        with self.assertNoLogs("torque", level="WARNING"):
             listed = self.mgr.list_roles(str(self.project))
             loaded = self.mgr.load_role("foo", base_dir=str(self.project))
 
@@ -117,7 +117,7 @@ class RoleManagerTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-        with self.assertLogs("loom", level="WARNING") as logs:
+        with self.assertLogs("torque", level="WARNING") as logs:
             loaded = self.mgr.load_role("foo", base_dir=str(self.project))
             listed = self.mgr.list_roles(str(self.project))
 
@@ -130,8 +130,8 @@ class RoleManagerTests(unittest.TestCase):
         self.assertEqual(
             logs.output,
             [
-                f"WARNING:loom:legacy template file at {self.project_templates}/foo.yaml "
-                f"is ignored; move it to {self.project / '.loom' / 'roles'}/ to use as a role"
+                f"WARNING:torque:legacy template file at {self.project_templates}/foo.yaml "
+                f"is ignored; move it to {self.project / '.torque' / 'roles'}/ to use as a role"
             ],
         )
 
@@ -155,7 +155,7 @@ class RoleManagerTests(unittest.TestCase):
         legacy_path = self.user_templates / "bar.yaml"
         legacy_path.write_text("name: bar\ndescription: Legacy\n", encoding="utf-8")
 
-        with self.assertLogs("loom", level="WARNING") as logs:
+        with self.assertLogs("torque", level="WARNING") as logs:
             path = self.mgr.save_role(
                 "bar",
                 {
@@ -176,8 +176,8 @@ class RoleManagerTests(unittest.TestCase):
         self.assertEqual(
             logs.output,
             [
-                "WARNING:loom:legacy template file at ~/.loom/agents/bar.yaml "
-                "is ignored; move it to ~/.loom/roles/ to use as a role"
+                "WARNING:torque:legacy template file at ~/.torque/agents/bar.yaml "
+                "is ignored; move it to ~/.torque/roles/ to use as a role"
             ],
         )
 
@@ -185,7 +185,7 @@ class RoleManagerTests(unittest.TestCase):
         legacy_path = self.user_templates / "legacy.yaml"
         legacy_path.write_text("name: legacy\ndescription: Legacy\n", encoding="utf-8")
 
-        with self.assertLogs("loom", level="WARNING") as logs:
+        with self.assertLogs("torque", level="WARNING") as logs:
             deleted = self.mgr.delete_template(
                 "legacy",
                 scope="user",
@@ -197,8 +197,8 @@ class RoleManagerTests(unittest.TestCase):
         self.assertEqual(
             logs.output,
             [
-                "WARNING:loom:legacy template file at ~/.loom/agents/legacy.yaml "
-                "is ignored; move it to ~/.loom/roles/ to use as a role"
+                "WARNING:torque:legacy template file at ~/.torque/agents/legacy.yaml "
+                "is ignored; move it to ~/.torque/roles/ to use as a role"
             ],
         )
 
@@ -206,7 +206,7 @@ class RoleManagerTests(unittest.TestCase):
         legacy_path = self.user_templates / "legacy.yaml"
         legacy_path.write_text("name: legacy\ndescription: Legacy\n", encoding="utf-8")
 
-        with self.assertLogs("loom", level="WARNING") as logs:
+        with self.assertLogs("torque", level="WARNING") as logs:
             deleted = self.mgr.delete_role(
                 "legacy",
                 scope="user",
@@ -218,8 +218,8 @@ class RoleManagerTests(unittest.TestCase):
         self.assertEqual(
             logs.output,
             [
-                "WARNING:loom:legacy template file at ~/.loom/agents/legacy.yaml "
-                "is ignored; move it to ~/.loom/roles/ to use as a role"
+                "WARNING:torque:legacy template file at ~/.torque/agents/legacy.yaml "
+                "is ignored; move it to ~/.torque/roles/ to use as a role"
             ],
         )
 

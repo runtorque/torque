@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Loom</title>
+<title>Torque</title>
 <link rel="stylesheet" href="/static/style.css">
 <link rel="stylesheet" href="/static/vendor/xterm/xterm.css">
 </head>
@@ -20,11 +20,11 @@
     <div id="standalone-main-stack">
       <!-- Agent grid panel header. Lives inside the main stack so it
            only spans the agent panel column (instead of stretching
-           above the terminal workspace in standalone mode). LOOM:116. -->
+           above the terminal workspace in standalone mode). TORQUE:116. -->
       <header>
         <div id="conn-dot" title="Disconnected"></div>
-        <h1>LOOM</h1>
-        <button class="hdr-btn" onclick="restartDaemon()" title="Restart Loom">&#x21BB;</button>
+        <h1>TORQUE</h1>
+        <button class="hdr-btn" onclick="restartDaemon()" title="Restart Torque">&#x21BB;</button>
         <button class="hdr-btn" onclick="openGlobalSettings()" title="Settings">&#9881;</button>
         <div class="hdr-spacer"></div>
         <div id="group-switcher" class="group-switcher" hidden></div>
@@ -136,7 +136,7 @@
             </label>
             <div id="add-wt-fields" style="display:none;padding-left:20px">
               <label>Base directory <span class="label-hint">relative to repo root</span></label>
-              <input id="add-wt-base-dir" placeholder=".loom/worktrees" autocomplete="off">
+              <input id="add-wt-base-dir" placeholder=".torque/worktrees" autocomplete="off">
               <label>Base branch <span class="label-hint">empty = current HEAD</span></label>
               <input id="add-wt-base-branch" placeholder="main" autocomplete="off">
               <label>Worktree name <span class="label-hint">optional; used for both folder name and branch suffix</span></label>
@@ -255,7 +255,7 @@
         <label>Reasoning effort</label>
         <select id="engineer-launch-reasoning-effort"></select>
         <label>Custom instructions</label>
-        <textarea id="engineer-launch-custom-instructions" rows="5" placeholder="Instructions appended after Loom's built-in Engineer policy..."></textarea>
+        <textarea id="engineer-launch-custom-instructions" rows="5" placeholder="Instructions appended after Torque's built-in Engineer policy..."></textarea>
         <label>Specializations
           <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Ordered list of specialization YAMLs. The first one is the primary focus; each adds a preamble block to the engineer's boot prompt.">?</span>
         </label>
@@ -356,7 +356,7 @@
     <label>Scope</label>
     <select id="new-specialization-scope">
       <option value="project">Project</option>
-      <option value="user">User (~/.loom)</option>
+      <option value="user">User (~/.torque)</option>
     </select>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeModals()">Cancel</button>
@@ -525,7 +525,7 @@
         </label>
         <label class="gs-checkbox iterm2-only">
           <input id="gs-terminal-close-on-disconnect" type="checkbox"> Close on disconnect
-          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Automatically delete the terminal from Loom when its iTerm2 tab is closed.">?</span>
+          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Automatically delete the terminal from Torque when its iTerm2 tab is closed.">?</span>
         </label>
       </div>
 
@@ -537,7 +537,7 @@
         </label>
         <div id="gs-wt-fields" style="display:none;padding-left:20px">
           <label>Worktree directory <span class="label-hint">relative to repo root</span></label>
-          <input id="gs-wt-base-dir" placeholder=".loom/worktrees" autocomplete="off">
+          <input id="gs-wt-base-dir" placeholder=".torque/worktrees" autocomplete="off">
           <label>Base branch <span class="label-hint">empty = current HEAD</span></label>
           <input id="gs-wt-base-branch" placeholder="main" autocomplete="off">
           <label class="gs-checkbox">
@@ -557,7 +557,7 @@
           </label>
           <textarea id="gs-wt-merge-instructions" rows="2" placeholder="e.g. Use a conventional commit message"></textarea>
           <label>Default post-merge cleanup
-            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="What Loom should do by default after a successful merge when no explicit cleanup choice is provided. Same-agent queued follow-up tasks still keep the agent and worktree alive.">?</span>
+            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="What Torque should do by default after a successful merge when no explicit cleanup choice is provided. Same-agent queued follow-up tasks still keep the agent and worktree alive.">?</span>
           </label>
           <select id="gs-wt-merge-cleanup">
             <option value="keep">Keep agent and worktree</option>
@@ -567,7 +567,7 @@
           </select>
           <label class="gs-checkbox">
             <input id="gs-wt-merge-preserve-diff" type="checkbox"> Preserve merge diff by default
-            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="When a merge succeeds, save the full pre-merge patch as a diff artifact on the latest open branch-boundary task. If no open boundary task exists, Loom warns but still completes the merge.">?</span>
+            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="When a merge succeeds, save the full pre-merge patch as a diff artifact on the latest open branch-boundary task. If no open boundary task exists, Torque warns but still completes the merge.">?</span>
           </label>
           <label>Symlinks <span class="label-hint">symlinked from repo root</span>
             <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Repo-relative exact paths or glob patterns to symlink into each new worktree. Recursive `**` is supported (for example `etl/**/node_modules`). Only existing matches inside the repo root are linked, and escape paths like `..` are ignored.">?</span>
@@ -706,7 +706,7 @@
           <option value="keep_moving">Keep moving unless blocked</option>
         </select>
         <label>Custom instructions <span class="label-hint">expert override</span></label>
-        <textarea id="gs-engineer-custom-instructions" rows="5" placeholder="Instructions appended after Loom's built-in Engineer policy..."></textarea>
+        <textarea id="gs-engineer-custom-instructions" rows="5" placeholder="Instructions appended after Torque's built-in Engineer policy..."></textarea>
         <div class="system-prompt-preview-row">
           <button type="button" id="gs-engineer-view-system-prompt" class="btn-secondary system-prompt-preview-btn" onclick="openGroupSystemPromptPreview('engineer')">View system prompt</button>
         </div>
@@ -811,13 +811,13 @@
           <option value="ask_always">Ask always</option>
         </select>
         <label>Custom instructions</label>
-        <textarea id="gs-architect-custom-instructions" rows="6" class="gs-autogrow" oninput="_autoGrowTextArea('gs-architect-custom-instructions')" placeholder="Instructions appended after Loom's built-in Architect policy..."></textarea>
+        <textarea id="gs-architect-custom-instructions" rows="6" class="gs-autogrow" oninput="_autoGrowTextArea('gs-architect-custom-instructions')" placeholder="Instructions appended after Torque's built-in Architect policy..."></textarea>
         <div class="system-prompt-preview-row">
           <button type="button" id="gs-architect-view-system-prompt" class="btn-secondary system-prompt-preview-btn" onclick="openGroupSystemPromptPreview('architect')">View system prompt</button>
         </div>
         <div class="label-hint task-modal-section-intro">Configure architect checkpoint policy.</div>
         <label>Journal checkpoint cadence
-          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="How often Loom reminds the architect to write a `checkpoint` journal entry summarizing active engineers, open scope, pending hires, open decisions, and planned next moves.">?</span>
+          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="How often Torque reminds the architect to write a `checkpoint` journal entry summarizing active engineers, open scope, pending hires, open decisions, and planned next moves.">?</span>
         </label>
         <select id="gs-architect-journal-checkpoint"></select>
       </div>
@@ -934,7 +934,7 @@
       <div class="gs-subpane active" data-subpane="gls-server">
         <label>Default boot command
           <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)"
-            data-hint="The command used when creating new agents without a custom boot command. Overrides the LOOM_DEFAULT_CMD environment variable.">?</span>
+            data-hint="The command used when creating new agents without a custom boot command. Overrides the TORQUE_DEFAULT_CMD environment variable.">?</span>
         </label>
         <input id="gls-default-cmd" placeholder="claude" autocomplete="off">
         <label class="gs-checkbox">
@@ -972,7 +972,7 @@
           <option value="full">Full</option>
         </select>
         <label>Full-capture tool allowlist <span class="label-hint">one glob/regex per line</span></label>
-        <textarea id="gls-mcp-call-log-full-capture-tools" rows="3" placeholder="mcp__loom__loom_context"></textarea>
+        <textarea id="gls-mcp-call-log-full-capture-tools" rows="3" placeholder="mcp__torque__torque_context"></textarea>
         <label>Event ingest retention</label>
         <div class="inline-fields">
           <input type="number" id="gls-event-ingest-max-rows" min="1" value="100000" style="width:110px">

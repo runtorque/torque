@@ -4,7 +4,7 @@ Agent roles are reusable YAML-defined presets for creating agents and dispatchin
 
 For the runtime model behind these fields, see [Agents & Sessions](agents-and-sessions.md).
 
-This page keeps its historical filename (`agent-templates.md`) for backward-compatible links. Loom now stores these launch presets under `roles/`.
+This page keeps its historical filename (`agent-templates.md`) for backward-compatible links. Torque now stores these launch presets under `roles/`.
 
 > **Who should do this work?**
 
@@ -33,20 +33,20 @@ Role files are static config. Unlike action prompts, role fields are not rendere
 
 ## Field guide
 
-These fields map directly onto Loom's launch pipeline:
+These fields map directly onto Torque's launch pipeline:
 
 | Field | What it controls |
 |------|-------------------|
-| `provider` | Which adapter/backend Loom should use, such as `claude-code` or `codex` |
+| `provider` | Which adapter/backend Torque should use, such as `claude-code` or `codex` |
 | `command` | Explicit boot command override |
-| `model` | Provider model selection when Loom is constructing the default command |
+| `model` | Provider model selection when Torque is constructing the default command |
 | `permissions` | Provider-specific permission flags; currently meaningful for Claude Code |
 | `max_turns` | Maximum conversation turns for providers that support `--max-turns` |
-| `system_prompt` | Persistent session instructions that Loom folds into the provider's long-lived prompt |
+| `system_prompt` | Persistent session instructions that Torque folds into the provider's long-lived prompt |
 | `initial_prompt` | First normal user message sent after the session boots |
 | `session_resume` | Whether relaunch should try to resume the provider conversation |
-| `idle_timeout` | Minutes before Loom may flag an idle agent for attention |
-| `worktree` and related worktree fields | Whether the agent should run in an isolated git worktree and how Loom manages it |
+| `idle_timeout` | Minutes before Torque may flag an idle agent for attention |
+| `worktree` and related worktree fields | Whether the agent should run in an isolated git worktree and how Torque manages it |
 | `env_vars` / `env_file` | Runtime environment exported before the boot command runs |
 | `terminals` | Child terminals to create alongside the agent |
 
@@ -54,9 +54,9 @@ These fields map directly onto Loom's launch pipeline:
 
 The most important role fields are `provider` and `command`.
 
-- If you set only `provider`, Loom uses that adapter's default command.
-- If you set both `provider` and `command`, Loom uses your command but still treats the session as that provider.
-- If you set only `command`, Loom tries to auto-detect the provider from the command name.
+- If you set only `provider`, Torque uses that adapter's default command.
+- If you set both `provider` and `command`, Torque uses your command but still treats the session as that provider.
+- If you set only `command`, Torque tries to auto-detect the provider from the command name.
 
 Examples:
 
@@ -64,7 +64,7 @@ Examples:
 provider: claude-code
 ```
 
-Runs Claude Code with Loom-managed integration and the default `claude` command.
+Runs Claude Code with Torque-managed integration and the default `claude` command.
 
 ```yaml
 provider: codex
@@ -77,29 +77,29 @@ Still uses the Codex adapter, but with a custom boot command.
 command: claude --model sonnet
 ```
 
-Lets Loom infer the Claude Code adapter from the command itself.
+Lets Torque infer the Claude Code adapter from the command itself.
 
 ### Model and permission notes
 
-- `model` is only auto-appended when Loom is shaping the provider's default command path.
+- `model` is only auto-appended when Torque is shaping the provider's default command path.
 - `permissions` currently maps to Claude Code flags.
 - If you fully own the boot command, include any provider-specific flags directly in that command.
 
 ## Where roles live
 
-Loom discovers roles from two locations:
+Torque discovers roles from two locations:
 
 | Scope | Path |
 |-------|------|
-| Project | `.loom/roles/` |
-| User | `~/.loom/roles/` |
+| Project | `.torque/roles/` |
+| User | `~/.torque/roles/` |
 
-Project roles take precedence when a project and user role share the same name. User roles are still shown in the editor as overridden. Legacy `.loom/agents/*.yaml` files are ignored and surfaced as warnings in `loom doctor` and startup logs.
+Project roles take precedence when a project and user role share the same name. User roles are still shown in the editor as overridden. Legacy `.torque/agents/*.yaml` files are ignored and surfaced as warnings in `torque doctor` and startup logs.
 
 Subdirectories create namespaces. For example:
 
 ```text
-.loom/roles/ops/researcher.yaml
+.torque/roles/ops/researcher.yaml
 ```
 
 becomes the role:
@@ -132,11 +132,11 @@ icon: "🔎"
 worktree: false
 
 env_vars:
-  LOOM_ROLE: researcher
+  TORQUE_ROLE: researcher
 
 terminals:
   - name: logs
-    command: tail -f loom.log
+    command: tail -f torque.log
 ```
 
 This role says:
@@ -167,7 +167,7 @@ The `+ New` dropdown shows saved roles. Choosing a role creates a new agent with
 
 ### 2. Task dispatch
 
-Tasks can store an `agent_template` field for compatibility, but Loom resolves it by loading the matching role from `roles/`. When dispatch creates a new agent, Loom applies that role before sending the action prompt or raw task text.
+Tasks can store an `agent_template` field for compatibility, but Torque resolves it by loading the matching role from `roles/`. When dispatch creates a new agent, Torque applies that role before sending the action prompt or raw task text.
 
 ### 3. Actions can reference roles
 
@@ -177,7 +177,7 @@ An action can set:
 agent: researcher
 ```
 
-This tells Loom to use the `researcher` role whenever that action creates an agent.
+This tells Torque to use the `researcher` role whenever that action creates an agent.
 
 Legacy inline action agent mappings still work:
 
@@ -195,7 +195,7 @@ Each group can set a `default_agent_template` (historical field name). This acts
 
 ## Merge order
 
-When Loom resolves agent settings, it applies them in this order:
+When Torque resolves agent settings, it applies them in this order:
 
 1. Group default role
 2. Group `agent_*` overrides
@@ -208,12 +208,12 @@ Environment variables are merged across levels. Scalar fields overwrite less spe
 
 Roles influence more than the boot command:
 
-- `system_prompt` is folded into Loom's persistent agent prompt for supported adapters
+- `system_prompt` is folded into Torque's persistent agent prompt for supported adapters
 - `initial_prompt` is sent only after the provider is ready for input
 - `session_resume` controls whether relaunch uses the provider's own resume command
 - `worktree` changes the working directory before hooks, MCP config, and prompt files are installed
 
-See [Agents & Sessions](agents-and-sessions.md) for how Loom turns these fields into a live session.
+See [Agents & Sessions](agents-and-sessions.md) for how Torque turns these fields into a live session.
 
 ## Related docs
 

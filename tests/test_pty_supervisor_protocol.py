@@ -3,7 +3,7 @@ import json
 import struct
 import unittest
 
-from loom import pty_supervisor
+from torque import pty_supervisor
 
 
 class _FakeWriter:

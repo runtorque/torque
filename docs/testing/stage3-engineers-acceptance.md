@@ -11,7 +11,7 @@ existing migrated Engineer engineer is still present.
 Record the current engineer baseline before deploy:
 
 ```bash
-loom engineer list
+torque engineer list
 ```
 
 Expected: at least the existing `Engineer` engineer is listed.
@@ -19,10 +19,10 @@ Expected: at least the existing `Engineer` engineer is listed.
 Keep the live database and backup paths handy:
 
 ```bash
-LOOM_DIR="$HOME/Library/Application Support/iTerm2/Scripts/loom/loom"
-DB="$LOOM_DIR/loom.db"
-BACKUP="$LOOM_DIR/loom.db.pre-kinds.bak"
-LOG="$LOOM_DIR/loom.log"
+TORQUE_DIR="$HOME/Library/Application Support/iTerm2/Scripts/torque/torque"
+DB="$TORQUE_DIR/torque.db"
+BACKUP="$TORQUE_DIR/torque.db.pre-kinds.bak"
+LOG="$TORQUE_DIR/torque.log"
 ```
 
 ## Deploy and restart
@@ -33,10 +33,10 @@ Deploy the build:
 make deploy
 ```
 
-Restart Loom from:
+Restart Torque from:
 
 ```text
-iTerm2 → Scripts → loom
+iTerm2 → Scripts → torque
 ```
 
 If you want to watch startup in parallel:
@@ -45,12 +45,12 @@ If you want to watch startup in parallel:
 tail -f "$LOG"
 ```
 
-## Verify `loom doctor`
+## Verify `torque doctor`
 
 Run:
 
 ```bash
-loom doctor
+torque doctor
 ```
 
 Expected:
@@ -73,20 +73,20 @@ Expected:
 
 - `alice` appears in the Agent panel immediately
 - `alice` also appears in the main agent list
-- `loom engineer list` now shows both `Engineer` and `alice`
+- `torque engineer list` now shows both `Engineer` and `alice`
 
 ## Assign work to Alice
 
 Create a task explicitly assigned to Alice from the CLI:
 
 ```bash
-loom task create "Stage 3 smoke task" --group loom --engineer alice
+torque task create "Stage 3 smoke task" --group torque --engineer alice
 ```
 
 Expected:
 
 - the task is created successfully
-- `loom --json task show <task-slug-or-id>` includes Alice's `assigned_engineer_id`
+- `torque --json task show <task-slug-or-id>` includes Alice's `assigned_engineer_id`
 
 If you prefer a UI-only smoke, assign the task to Alice through the task modal
 instead, but keep the equivalent expectation: the task must end up with
@@ -139,7 +139,7 @@ Expected:
 Re-run:
 
 ```bash
-loom doctor
+torque doctor
 ```
 
 Expected:
@@ -151,18 +151,18 @@ Expected:
 
 ## Restart persistence check
 
-Restart Loom again from the Scripts menu.
+Restart Torque again from the Scripts menu.
 
 Expected after restart:
 
 - `alice` stays deleted
 - `Engineer` still exists and is still persistent/relaunchable
 - the transferred worker(s) remain user-owned
-- `loom doctor` still reports a healthy Stage 3 state
+- `torque doctor` still reports a healthy Stage 3 state
 
 ## Recovery / rollback
 
-If the migration or engineer state is corrupted, stop Loom and restore the
+If the migration or engineer state is corrupted, stop Torque and restore the
 stage-1 backup:
 
 ```bash
@@ -170,5 +170,5 @@ make stop
 cp "$BACKUP" "$DB"
 ```
 
-Then restart Loom from the Scripts menu and re-run the acceptance flow after
+Then restart Torque from the Scripts menu and re-run the acceptance flow after
 fixing the underlying issue.

@@ -19,11 +19,11 @@ except ModuleNotFoundError:
 class EventBusTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub()
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
-        self.events_mod = importlib.import_module("loom.events")
+        self.events_mod = importlib.import_module("torque.events")
         self.events_mod = importlib.reload(self.events_mod)
-        self.base_mod = importlib.import_module("loom.adapters.base")
+        self.base_mod = importlib.import_module("torque.adapters.base")
         self.base_mod = importlib.reload(self.base_mod)
 
     def _make_state(self):
@@ -39,15 +39,15 @@ class EventBusTests(unittest.IsolatedAsyncioTestCase):
             group="g",
             cell_type="agent",
             kind=kind,
-            current_task_id="LOOM:1",
+            current_task_id="TORQUE:1",
         )
 
     def _make_temp_db(self):
-        from loom.db import LoomDB
+        from torque.db import TorqueDB
 
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        db = LoomDB(Path(tmp.name) / "loom.db")
+        db = TorqueDB(Path(tmp.name) / "torque.db")
         db.init()
         self.addCleanup(db.close)
         return db
@@ -211,9 +211,9 @@ class EventBusTests(unittest.IsolatedAsyncioTestCase):
             flush_max_events=1,
             flush_interval=60.0,
         )
-        from loom.db import LoomDB
+        from torque.db import TorqueDB
 
-        original = LoomDB._save_panel_events_batch_on_conn
+        original = TorqueDB._save_panel_events_batch_on_conn
         calls = {"count": 0}
 
         def flaky(conn, events, updates, max_size):
@@ -224,7 +224,7 @@ class EventBusTests(unittest.IsolatedAsyncioTestCase):
 
         try:
             with mock.patch.object(
-                LoomDB, "_save_panel_events_batch_on_conn", side_effect=flaky
+                TorqueDB, "_save_panel_events_batch_on_conn", side_effect=flaky
             ):
                 panel_log.append(
                     kind="task_dispatched",
@@ -249,7 +249,7 @@ class EventBusTests(unittest.IsolatedAsyncioTestCase):
     def test_panel_event_log_forced_crash_mid_batch_loses_pending_queue(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        db_path = Path(tmp.name) / "loom.db"
+        db_path = Path(tmp.name) / "torque.db"
         repo_root = Path(__file__).resolve().parents[1]
         code = f"""
 import asyncio
@@ -257,11 +257,11 @@ import os
 import sqlite3
 from pathlib import Path
 
-from loom.db import LoomDB
-from loom.events import PanelEventLog
+from torque.db import TorqueDB
+from torque.events import PanelEventLog
 
 async def main():
-    db = LoomDB(Path({str(db_path)!r}))
+    db = TorqueDB(Path({str(db_path)!r}))
     db.init()
     panel_log = PanelEventLog(
         max_size=10,
@@ -293,9 +293,9 @@ asyncio.run(main())
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
-        from loom.db import LoomDB
+        from torque.db import TorqueDB
 
-        db = LoomDB(db_path)
+        db = TorqueDB(db_path)
         db.init()
         self.addCleanup(db.close)
         self.assertEqual(db.load_panel_events(limit=10), [])
@@ -316,7 +316,7 @@ asyncio.run(main())
                         "agent_name": "Architect",
                         "group": "g",
                         "message": "Persisted dispatch",
-                        "task_id": "LOOM:7",
+                        "task_id": "TORQUE:7",
                     }
                 ]
 
@@ -383,7 +383,7 @@ asyncio.run(main())
                         "agent_name": "Engineer",
                         "group": "g",
                         "message": "Persisted older",
-                        "task_id": "LOOM:1",
+                        "task_id": "TORQUE:1",
                     },
                     {
                         "id": 2,
@@ -393,7 +393,7 @@ asyncio.run(main())
                         "agent_name": "Engineer",
                         "group": "g",
                         "message": "Persisted middle",
-                        "task_id": "LOOM:2",
+                        "task_id": "TORQUE:2",
                     },
                 ]
 
@@ -563,7 +563,7 @@ asyncio.run(main())
             group="g",
             agent_id=cell.id,
             lane="In Progress",
-            labels=["loom:blocked", "keep"],
+            labels=["torque:blocked", "keep"],
         )
         state.agents[cell.id] = cell
         state.board_tasks[task.id] = task
@@ -715,7 +715,7 @@ asyncio.run(main())
             lane="To Do",
             parent_task_id=parent.id,
             pipeline_root_id=parent.id,
-            labels=["loom:derived"],
+            labels=["torque:derived"],
             agent_id="agent-2",
         )
         cell = self.state_mod.AgentCell(
@@ -999,7 +999,7 @@ asyncio.run(main())
             lane="Backlog",
             parent_task_id=parent.id,
             pipeline_root_id=parent.id,
-            labels=["loom:derived"],
+            labels=["torque:derived"],
         )
         cell = self.state_mod.AgentCell(
             id="agent-1",

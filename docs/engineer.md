@@ -27,7 +27,7 @@ Use the target group's **+ New** dropdown and choose **Engineer**.
 
 After that engineer exists, open **Group Settings** for that group and switch to the **Engineer** tab to manage its operating-style presets, advanced digest settings, and expert overrides.
 
-The designated engineer still uses Loom's persistent Engineer launch/settings flow because Loom needs to boot it with a dedicated system prompt. You cannot retroactively convert an arbitrary existing agent into that orchestration endpoint.
+The designated engineer still uses Torque's persistent Engineer launch/settings flow because Torque needs to boot it with a dedicated system prompt. You cannot retroactively convert an arbitrary existing agent into that orchestration endpoint.
 
 ### Agent panel
 
@@ -44,7 +44,7 @@ The panel header also shows:
 
 In standalone mode, the **Board** remains the default lower workspace. Open **Agent** when you need orchestration detail, journal context, or the deterministic session map.
 
-When event delivery is paused, Loom keeps buffering matching events for that engineer instead of dropping them. Resuming delivery flushes the buffered events in order, so pausing is safe even during busy boards.
+When event delivery is paused, Torque keeps buffering matching events for that engineer instead of dropping them. Resuming delivery flushes the buffered events in order, so pausing is safe even during busy boards.
 
 ### Group Settings → Engineer
 
@@ -70,7 +70,7 @@ The designated engineer agent is visually distinct:
 
 The designated engineer is most effective when it works in short control loops instead of trying to solve everything in one huge plan.
 
-Loom's newer orchestration model is **stream-centered**:
+Torque's newer orchestration model is **stream-centered**:
 
 - the designated engineer schedules **waves**
 - each branch/worktree execution lane is represented as a **stream**
@@ -83,7 +83,7 @@ See [Streams & Waves](streams-and-waves.md) for the detailed model and UI interp
 1. Read the current state with `engineer_board_summary`.
 2. Use `engineer_task_show`, `engineer_agent_show`, or `engineer_action_show` only for the tasks that need deeper inspection.
 3. Dispatch a wave of work with `engineer_task_dispatch` or `engineer_batch_dispatch`.
-4. Wait for Loom digests instead of polling constantly.
+4. Wait for Torque digests instead of polling constantly.
 5. When a digest arrives, react to the changed tasks and agents only.
 6. Journal significant decisions and write periodic checkpoints.
 7. Review diffs, merge, or ask the human when approval is needed.
@@ -102,17 +102,17 @@ The designated engineer system prompt steers it toward a few practical habits:
 Group settings now expose two safe first-class policy controls:
 
 - **Autonomy mode** — `Suggest only`, `Dispatch when clear`, or `Aggressive auto-continue`
-- **Default worker concurrency** — the fallback worker cap Loom uses when the designated engineer dispatches a batch without explicitly passing `max_concurrent`
+- **Default worker concurrency** — the fallback worker cap Torque uses when the designated engineer dispatches a batch without explicitly passing `max_concurrent`
 
 ## Event digests and delivery
 
-The designated engineer does not need to poll constantly. Loom pushes event digests into the designated engineer's terminal when appropriate.
+The designated engineer does not need to poll constantly. Torque pushes event digests into the designated engineer's terminal when appropriate.
 
 ### How digests work
 
 Digests are:
 
-- **idle-gated**: Loom only pushes them when the designated engineer is idle or waiting
+- **idle-gated**: Torque only pushes them when the designated engineer is idle or waiting
 - **buffered**: events accumulate between pushes
 - **heartbeat-aware**: an idle heartbeat can arrive if no digest was sent
   for `heartbeat_interval`
@@ -127,7 +127,7 @@ The notification controls expose three separate intervals:
 
 Paused delivery does not bypass these rules. Events continue accumulating in the per-group buffer while paused, then resume normal digest scheduling when delivery is unpaused.
 
-If there are no new events, Loom can still send a heartbeat-style digest
+If there are no new events, Torque can still send a heartbeat-style digest
 with a board summary, active-agent summary, and compact blocked/unhealthy
 task context when the heartbeat interval is reached. Set the heartbeat
 interval to `0` or `Off` to disable it.
@@ -211,7 +211,7 @@ When the designated engineer posts a non-blocking note:
 
 1. the note appears in the Journal tab as an informational banner
 2. event pushes continue normally
-3. Loom does not enter awaiting-input state
+3. Torque does not enter awaiting-input state
 4. the note is recorded in the journal and survives restart until dismissed
 
 When the designated engineer asks a question:
@@ -229,10 +229,10 @@ should use `engineer_note`, not `engineer_ask`.
 
 The human can answer in two ways:
 
-- **Via the panel**: Loom sends the reply to the designated engineer terminal and automatically unpauses events.
+- **Via the panel**: Torque sends the reply to the designated engineer terminal and automatically unpauses events.
 - **Directly in the terminal**: the designated engineer receives the reply in its own session and should call `engineer_resume` after handling it.
 
-If the designated engineer becomes active again after being idle with a pending question, Loom clears the pending-question state and unpauses delivery. The safest explicit pattern is still:
+If the designated engineer becomes active again after being idle with a pending question, Torque clears the pending-question state and unpauses delivery. The safest explicit pattern is still:
 
 1. receive the answer
 2. incorporate it into the plan
@@ -242,10 +242,10 @@ If the designated engineer becomes active again after being idle with a pending 
 
 All `engineer_*` tools are available through the same `/mcp` endpoint as agent tools.
 
-However, they are **only** visible and callable from the designated engineer session for that group. Loom authorizes them using the caller's `X-Loom-Cell-Id` header:
+However, they are **only** visible and callable from the designated engineer session for that group. Torque authorizes them using the caller's `X-Torque-Cell-Id` header:
 
-- the designated engineer sees both `loom_*` and `engineer_*` tools
-- regular agents only see `loom_*` tools
+- the designated engineer sees both `torque_*` and `engineer_*` tools
+- regular agents only see `torque_*` tools
 - direct calls to `engineer_*` from other agents are rejected
 
 In other words, `engineer_*` tools are group-scoped **and** designated-engineer-only.
@@ -300,16 +300,16 @@ In other words, `engineer_*` tools are group-scoped **and** designated-engineer-
 
 `engineer_agent_message` is now audited on the board instead of being a purely ephemeral terminal nudge:
 
-- If the target worker already has an active task, Loom creates a derived follow-up task under that task.
-- If the worker is otherwise idle, Loom creates a standalone root follow-up task in the same group.
+- If the target worker already has an active task, Torque creates a derived follow-up task under that task.
+- If the worker is otherwise idle, Torque creates a standalone root follow-up task in the same group.
 - The follow-up stores the worker it expects to hear back from, so replies can be resolved unambiguously later.
 
-Workers answer through `loom_reply(...)`:
+Workers answer through `torque_reply(...)`:
 
-- If there is only one open designated-engineer follow-up task for that worker, `loom_reply(message=\"...\")` is enough.
+- If there is only one open designated-engineer follow-up task for that worker, `torque_reply(message=\"...\")` is enough.
 - If multiple follow-ups are open, the worker must pass the specific task as well.
 
-When the worker replies, Loom appends the reply to the follow-up task's history and marks only that follow-up task as answered/done. It does **not** auto-complete the parent implementation/review task just because the side conversation is over.
+When the worker replies, Torque appends the reply to the follow-up task's history and marks only that follow-up task as answered/done. It does **not** auto-complete the parent implementation/review task just because the side conversation is over.
 
 ### Review, merge, and worktree operations
 
@@ -335,14 +335,14 @@ Batch dispatch:
 - can keep related tasks on the same agent with `agent_group`
 - refuses tasks that are already assigned, already done, already in progress, or blocked by dependencies
 
-If you omit `max_concurrent`, Loom uses the group's stored Engineer default worker concurrency.
+If you omit `max_concurrent`, Torque uses the group's stored Engineer default worker concurrency.
 
 ### Result states
 
 Batch results can come back as:
 
 - **`dispatched`** when the task was launched immediately
-- **`queued`** when Loom routed the work to an existing busy agent
+- **`queued`** when Torque routed the work to an existing busy agent
 - **`deferred`** when dispatch would exceed `max_concurrent`
 - **`failed`** when the task was invalid for dispatch
 
@@ -372,7 +372,7 @@ For shared same-agent branches, `engineer_agent_show` also exposes task-boundary
 
 ### Merge flow
 
-`engineer_merge` is a server-side merge operation. If Loom detects conflicts, it returns an error with conflict context and the designated engineer can run `engineer_rebase` before retrying the merge.
+`engineer_merge` is a server-side merge operation. If Torque detects conflicts, it returns an error with conflict context and the designated engineer can run `engineer_rebase` before retrying the merge.
 
 On shared sequential branches, `engineer_merge` also refuses to merge when the latest task boundary is no longer cleanly mergeable, for example because a queued follow-up already started or the branch tip moved after the boundary was recorded.
 
@@ -412,13 +412,13 @@ Use a compact pattern:
 1. `engineer_board_summary`
 2. `engineer_actions_list` or `engineer_action_show` if action choice matters
 3. `engineer_batch_dispatch` for the next wave
-4. wait for Loom digests
+4. wait for Torque digests
 
 ### Idle board with backlog remaining
 
 When a wave finishes, the designated engineer should distinguish between two states:
 
-- **Waiting on active work**: agents are still running or tasks are still in `In Progress`. In that case, wait for Loom digests.
+- **Waiting on active work**: agents are still running or tasks are still in `In Progress`. In that case, wait for Torque digests.
 - **Idle with backlog remaining**: there are 0 active agents, 0 `In Progress` tasks, and work still sits in `Backlog` or `To Do`. That is not a terminal steady state.
 
 In the second case, the designated engineer should read `engineer_board_summary` and then either:
@@ -456,12 +456,12 @@ When an agent is blocked or errors:
 The main Engineer-facing CLI surface today is journal inspection plus reply flow from agent sessions:
 
 ```bash
-loom engineer journal
-loom engineer journal -n 50
-loom engineer journal -t checkpoint
-loom engineer journal --json
+torque engineer journal
+torque engineer journal -n 50
+torque engineer journal -t checkpoint
+torque engineer journal --json
 
-loom ai reply "your response"
+torque ai reply "your response"
 ```
 
 Most orchestration control happens through the designated engineer's MCP tools rather than separate CLI commands.
@@ -482,4 +482,4 @@ If you want the designated engineer to work well, give it:
 - explicit review and merge habits
 - regular journal checkpoints
 
-That combination matches how Loom's current product behavior is designed to operate.
+That combination matches how Torque's current product behavior is designed to operate.

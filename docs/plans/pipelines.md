@@ -8,7 +8,7 @@
 
 ## The Problem
 
-Loom can dispatch a single task to a single agent. But real workflows have multiple stages: implement → test → review → merge. Today, the only way to chain stages is a shell script calling `loom task dispatch --wait` sequentially. This works but has drawbacks:
+Torque can dispatch a single task to a single agent. But real workflows have multiple stages: implement → test → review → merge. Today, the only way to chain stages is a shell script calling `torque task dispatch --wait` sequentially. This works but has drawbacks:
 
 - The shell script is the orchestrator — if it dies, the pipeline dies
 - Agents can't make runtime decisions about what comes next
@@ -20,9 +20,9 @@ The goal is to let agents themselves drive the pipeline forward by deriving new 
 ## Design Principles
 
 1. **Tasks only move forward** — An agent can mark its task as done and derive a new task. It cannot reopen its own task or send work backward. If a reviewer rejects work, it creates a *new* forward task ("fix this"), not a cycle back to the original.
-2. **Pipelines are emergent** — There is no `Pipeline` object. A pipeline is just a chain of tasks linked by `parent_task_id`. The chain is visible in the board UI and queryable via CLI, but Loom doesn't enforce a pipeline schema.
+2. **Pipelines are emergent** — There is no `Pipeline` object. A pipeline is just a chain of tasks linked by `parent_task_id`. The chain is visible in the board UI and queryable via CLI, but Torque doesn't enforce a pipeline schema.
 3. **Actions declare valid transitions** — Each action lists which actions it can derive into via a `transitions` field. The agent picks from those options; the server rejects anything not on the list. This makes pipeline structure visible and enforceable without a separate pipeline config object. The pipeline graph is emergent from the union of all actions' transition lists.
-4. **Human-in-the-loop is a first-class concept** — `loom ai ask` creates a derived task in Backlog instead of dispatching it. A human reviews, edits, and manually dispatches. This is the HITL gate.
+4. **Human-in-the-loop is a first-class concept** — `torque ai ask` creates a derived task in Backlog instead of dispatching it. A human reviews, edits, and manually dispatches. This is the HITL gate.
 5. **Depth limits prevent runaway chains** — A configurable `max_pipeline_depth` (global setting, overridable per action) caps how deep a chain can go. When exceeded, the task gets a `needs_attention` flag instead of deriving.
 6. **The entire chain shares one worktree** — When an agent derives a new task, the new agent inherits the parent agent's worktree. This is essential: a review agent must see the code the implement agent wrote. The worktree is created for the root task and reused by every derived task in the chain. No new worktree is created on derive.
 
@@ -35,22 +35,22 @@ The goal is to let agents themselves drive the pipeline forward by deriving new 
 ```
 Agent A (impl) finishes task T1
   │
-  ├── loom ai done                          ← marks T1 as Done
-  ├── loom ai derive "Review the login      ← creates T2 in dispatch lane
+  ├── torque ai done                          ← marks T1 as Done
+  ├── torque ai derive "Review the login      ← creates T2 in dispatch lane
   │     implementation" --action review         T2.parent_task_id = T1.id
   │                                            T2.pipeline_depth = T1.pipeline_depth + 1
   │                                            T2.pipeline_root_id = T1.pipeline_root_id
   │
   └── Agent B (review) boots with T2
         │
-        ├── (happy path) loom ai done       ← T2 Done, chain complete
+        ├── (happy path) torque ai done       ← T2 Done, chain complete
         │
-        └── (rejection) loom ai derive      ← creates T3
+        └── (rejection) torque ai derive      ← creates T3
               "Fix auth validation"            T3.parent_task_id = T2.id
               --action fix                      T3.pipeline_depth = 2
               Agent C (fix) boots with T3
                 │
-                └── loom ai derive          ← creates T4
+                └── torque ai derive          ← creates T4
                       "Re-review auth"
                       --action review
                       ...chain continues
@@ -61,7 +61,7 @@ Agent A (impl) finishes task T1
 ```
 Agent A finishes task T1
   │
-  ├── loom ai ask "Impl is done.           ← creates T2 in Backlog (not dispatched)
+  ├── torque ai ask "Impl is done.           ← creates T2 in Backlog (not dispatched)
   │     Should we deploy or add               T2.parent_task_id = T1.id
   │     more tests?"                          T2 has label: "human"
   │
@@ -74,7 +74,7 @@ Agent A finishes task T1
 ### Depth limit enforcement
 
 ```
-Agent tries: loom ai derive "..." --action review
+Agent tries: torque ai derive "..." --action review
   │
   Server checks: task.pipeline_depth + 1 > max_pipeline_depth?
   │
@@ -86,7 +86,7 @@ Agent tries: loom ai derive "..." --action review
 ### Data flow
 
 ```
-loom ai derive "Review login" --action review
+torque ai derive "Review login" --action review
   │
   ├──► POST /api/cmd  {"cmd": "ai_report", "action": "derive", ...}
   │
@@ -101,22 +101,22 @@ loom ai derive "Review login" --action review
 
 ### Worktree inheritance
 
-A pipeline's entire task chain runs in a single worktree. This is critical — if the implement agent writes code in `loom/impl-login-a3b2/`, the review agent must see those files, not start from a clean branch.
+A pipeline's entire task chain runs in a single worktree. This is critical — if the implement agent writes code in `torque/impl-login-a3b2/`, the review agent must see those files, not start from a clean branch.
 
 ```
 Root task T1 (implement)
   │
-  ├── Agent A spawns in worktree: .loom/worktrees/impl-login-a3b2/
-  │   branch: loom/impl-login-a3b2
-  │   Agent A writes code, commits, calls `loom ai derive -t review`
+  ├── Agent A spawns in worktree: .torque/worktrees/impl-login-a3b2/
+  │   branch: torque/impl-login-a3b2
+  │   Agent A writes code, commits, calls `torque ai derive -t review`
   │
   ├── derive creates T2 (review)
-  │   Agent B spawns in THE SAME worktree: .loom/worktrees/impl-login-a3b2/
+  │   Agent B spawns in THE SAME worktree: .torque/worktrees/impl-login-a3b2/
   │   Agent B sees all of Agent A's changes
-  │   Agent B calls `loom ai derive -t fix`
+  │   Agent B calls `torque ai derive -t fix`
   │
   └── derive creates T3 (fix)
-      Agent C spawns in THE SAME worktree: .loom/worktrees/impl-login-a3b2/
+      Agent C spawns in THE SAME worktree: .torque/worktrees/impl-login-a3b2/
       Agent C sees Agent A's code + Agent B's review comments (if committed)
 ```
 
@@ -171,7 +171,7 @@ class GlobalSettings:
 ### Action additions
 
 ```yaml
-# .loom/actions/implement.yaml
+# .torque/actions/implement.yaml
 name: implement
 # ... existing fields ...
 
@@ -196,9 +196,9 @@ A list of valid next steps for this action. Each entry is either:
 - `{action: "<name>", when: "<description>"}` — derive into another action. `when` is a human-readable hint included in the dispatch postscript so the agent knows when to pick this option.
 - `{ask: true, when: "<description>"}` — escalate to human. Always valid even if not listed, but listing it makes the option visible in the postscript and pipeline graph.
 
-**`done` is always implicitly valid** — an agent can always end the chain by calling `loom ai done` without deriving. Actions don't need to list it.
+**`done` is always implicitly valid** — an agent can always end the chain by calling `torque ai done` without deriving. Actions don't need to list it.
 
-**Server enforcement:** When an agent calls `loom ai derive -t <action>`, the server checks that the target action name appears in the current action's `transitions` list. If not, the derive is rejected with an error: `"Action 'review' cannot transition to 'deploy'. Valid transitions: review, fix"`. This prevents agents from inventing transitions that the user hasn't sanctioned.
+**Server enforcement:** When an agent calls `torque ai derive -t <action>`, the server checks that the target action name appears in the current action's `transitions` list. If not, the derive is rejected with an error: `"Action 'review' cannot transition to 'deploy'. Valid transitions: review, fix"`. This prevents agents from inventing transitions that the user hasn't sanctioned.
 
 **Actions with no `transitions` field** are terminal — calling `derive` from them always fails. The agent can only call `done`, `ask`, or `blocked`.
 
@@ -219,7 +219,7 @@ New labels used by the pipeline system:
 
 | Label | Meaning |
 |---|---|
-| `human` | Task requires human decision (created by `loom ai ask`) |
+| `human` | Task requires human decision (created by `torque ai ask`) |
 | `derived` | Task was created by derivation (auto-added) |
 | `depth-limit` | Derivation was refused due to depth limit |
 
@@ -334,10 +334,10 @@ Returns all tasks sharing the same `pipeline_root_id`, ordered by `pipeline_dept
 
 ## CLI Commands
 
-### `loom ai derive`
+### `torque ai derive`
 
 ```
-loom ai derive <description> [flags]
+torque ai derive <description> [flags]
 
 Arguments:
   description              Task description for the next agent
@@ -352,25 +352,25 @@ Flags:
 
 ```bash
 # After implementing, hand off to review
-loom ai derive "Review the login implementation" -t review
+torque ai derive "Review the login implementation" -t review
 
 # After review rejection, send back for fixes
-loom ai derive "Fix auth validation — reviewer found edge case with expired tokens" -t fix
+torque ai derive "Fix auth validation — reviewer found edge case with expired tokens" -t fix
 
 # With custom variables
-loom ai derive "Write tests for login" -t test -v TEST_COMMAND=pytest
+torque ai derive "Write tests for login" -t test -v TEST_COMMAND=pytest
 ```
 
 **Behavior:**
-- Auto-detects calling agent via `$LOOM_CELL_ID`
+- Auto-detects calling agent via `$TORQUE_CELL_ID`
 - Calls `ai_report(action="derive", ...)`
 - Prints the new task ID and agent name
 - Does NOT block (the new agent runs independently)
 
-### `loom ai ask`
+### `torque ai ask`
 
 ```
-loom ai ask <question>
+torque ai ask <question>
 
 Arguments:
   question                 Question or status for the human to review
@@ -380,22 +380,22 @@ Arguments:
 
 ```bash
 # Escalate to human
-loom ai ask "Implementation is done but I found a pre-existing bug in auth.py — should I fix it or just file an issue?"
+torque ai ask "Implementation is done but I found a pre-existing bug in auth.py — should I fix it or just file an issue?"
 
 # Request human decision on next step
-loom ai ask "All tests pass. Ready for review or should I also update the docs?"
+torque ai ask "All tests pass. Ready for review or should I also update the docs?"
 ```
 
 **Behavior:**
-- Auto-detects calling agent via `$LOOM_CELL_ID`
+- Auto-detects calling agent via `$TORQUE_CELL_ID`
 - Calls `ai_report(action="ask", ...)`
 - Prints the new task ID
 - The agent's current task is marked Done
 
-### `loom task chain`
+### `torque task chain`
 
 ```
-loom task chain <task>
+torque task chain <task>
 
 Arguments:
   task                     Task ID, slug, or title (any unique identifier)
@@ -416,14 +416,14 @@ Pipeline: root123 (depth 3)
 
 Shows the full chain with depth, status indicator, lane, and linked agent name.
 
-### `loom task list` — new flags
+### `torque task list` — new flags
 
 ```bash
 # Filter to a pipeline
-loom task list --pipeline <task>     # show only tasks in this chain
+torque task list --pipeline <task>     # show only tasks in this chain
 
 # Show pipeline info in output
-loom task list --chains              # add depth/root columns to table
+torque task list --chains              # add depth/root columns to table
 ```
 
 ---
@@ -438,15 +438,15 @@ If the dispatched task uses the `implement` action with transitions `[review, te
 
 ```
 Report your progress with these commands:
-- `loom ai done` — task complete, no follow-up needed
-- `loom ai derive "description" -t review` — implementation is complete and ready for review
-- `loom ai derive "description" -t test` — implementation needs dedicated test coverage first
-- `loom ai derive "description" -t fix` — found a bug during implementation that needs a separate fix
-- `loom ai ask "question"` — need human input on how to proceed
-- `loom ai pr URL` — opened a pull request
-- `loom ai merged` — PR merged
-- `loom ai blocked "reason"` — need user input
-- `loom ai error "message"` — unrecoverable error
+- `torque ai done` — task complete, no follow-up needed
+- `torque ai derive "description" -t review` — implementation is complete and ready for review
+- `torque ai derive "description" -t test` — implementation needs dedicated test coverage first
+- `torque ai derive "description" -t fix` — found a bug during implementation that needs a separate fix
+- `torque ai ask "question"` — need human input on how to proceed
+- `torque ai pr URL` — opened a pull request
+- `torque ai merged` — PR merged
+- `torque ai blocked "reason"` — need user input
+- `torque ai error "message"` — unrecoverable error
 ```
 
 The `when` descriptions from the action's `transitions` field become the help text for each derive option. The agent sees exactly which actions it can hand off to and when each one is appropriate.
@@ -455,12 +455,12 @@ The `when` descriptions from the action's `transitions` field become the help te
 
 ```
 Report your progress with these commands:
-- `loom ai done` — task complete
-- `loom ai ask "question"` — need human decision on next step
-- `loom ai pr URL` — opened a pull request
-- `loom ai merged` — PR merged
-- `loom ai blocked "reason"` — need user input
-- `loom ai error "message"` — unrecoverable error
+- `torque ai done` — task complete
+- `torque ai ask "question"` — need human decision on next step
+- `torque ai pr URL` — opened a pull request
+- `torque ai merged` — PR merged
+- `torque ai blocked "reason"` — need user input
+- `torque ai error "message"` — unrecoverable error
 ```
 
 No `derive` options are listed — the agent knows this is a terminal stage.
@@ -546,7 +546,7 @@ The `[Dispatch ▸]` button on human tasks opens the dispatch flow (pick action,
 
 ## Pipeline Visualization
 
-Actions define transitions. The union of all actions' transitions forms a directed graph — the pipeline graph. Loom renders this graph so users can see the full flow at a glance, including loops.
+Actions define transitions. The union of all actions' transitions forms a directed graph — the pipeline graph. Torque renders this graph so users can see the full flow at a glance, including loops.
 
 ### Pipeline discovery
 
@@ -591,7 +591,7 @@ The existing Actions panel in the taskbar gains a **view toggle** at the top:
 - **Editor** (existing) — the action dropdown + form editor
 - **Pipelines** (new) — the pipeline graph view
 
-When the user switches to the Pipelines view, Loom scans all actions, discovers pipelines, and renders them.
+When the user switches to the Pipelines view, Torque scans all actions, discovers pipelines, and renders them.
 
 ### Graph rendering
 
@@ -674,18 +674,18 @@ Pipeline: hotfix
 - **Click edge** → no-op (edges aren't actionable)
 - **Zoom** — if the graph is taller than the panel, it scrolls vertically. No pinch-to-zoom (keep it simple).
 
-### CLI: `loom pipeline`
+### CLI: `torque pipeline`
 
 ```bash
 # List discovered pipelines
-loom pipeline list
+torque pipeline list
 
 # Output:
 # feature    implement → review ⇄ fix, implement → test
 # hotfix     triage → fix → deploy
 
 # Show a pipeline's full graph
-loom pipeline show feature
+torque pipeline show feature
 
 # Output:
 # Pipeline: feature (4 actions)
@@ -712,7 +712,7 @@ The CLI renders the adjacency list form — compact and readable in a terminal. 
 
 ## Implementation Steps
 
-### Step 1: Data model (`loom/state.py`, `loom/db.py`) ✅
+### Step 1: Data model (`torque/state.py`, `torque/db.py`) ✅
 
 - Add `parent_task_id`, `pipeline_depth`, `pipeline_root_id` fields to `BoardTask`
 - Add `max_pipeline_depth` to `GlobalSettings` (default: 10)
@@ -720,7 +720,7 @@ The CLI renders the adjacency list form — compact and readable in a terminal. 
 - Update `save_board_task` and `load_all` to handle new columns
 - Add `board_get_chain(task_id)` method to `MatrixState` — returns all tasks with the same `pipeline_root_id`, ordered by depth then created_at
 
-### Step 2: Server — derive and ask actions (`loom/server.py`) ✅
+### Step 2: Server — derive and ask actions (`torque/server.py`) ✅
 
 - Extend `ai_report` handler with `action="derive"` and `action="ask"` branches
 - `derive`: validate transition → validate depth → mark parent Done → create child task → dispatch with worktree inheritance (reuse `dispatch_task` internals)
@@ -728,13 +728,13 @@ The CLI renders the adjacency list form — compact and readable in a terminal. 
 - Add `task_chain` command handler
 - Depth limit check reads action's `max_depth`, falls back to global `max_pipeline_depth`
 
-### Step 2b: Worktree inheritance in dispatch (`loom/server.py`) ✅
+### Step 2b: Worktree inheritance in dispatch (`torque/server.py`) ✅
 
 - `dispatch_task` accepts optional `inherit_worktree_from` agent ID
 - When set: skip `WorktreeManager.create()`, copy worktree fields from the source agent and set the new agent's directory to the worktree path
 - HITL dispatch path: when dispatching a task with `parent_task_id`, walk the parent chain to find the last agent with a worktree and inherit from it
 
-### Step 3: Action support (`loom/actions.py`) ✅
+### Step 3: Action support (`torque/actions.py`) ✅
 
 - `transitions` parsed as an optional action field (list of `{action, when}` or `{ask, when}` dicts — not rendered through Jinja2)
 - `max_depth` parsed as an optional action field
@@ -742,20 +742,20 @@ The CLI renders the adjacency list form — compact and readable in a terminal. 
 - `get_transitions(action_name)` helper returns the parsed transitions list for an action
 - `discover_pipelines(base_dir)` scans all actions, builds the transition graph, returns connected components as `[{name, actions, edges}]`
 
-### Step 4: Dispatch postscript (`loom/server.py`) ✅
+### Step 4: Dispatch postscript (`torque/server.py`) ✅
 
 - `_build_postscript()` generates the postscript dynamically from the action's `transitions` field
-- Each transition becomes a `loom ai derive -t <name>` line with the `when` description as help text
+- Each transition becomes a `torque ai derive -t <name>` line with the `when` description as help text
 - Actions with no transitions get a generic derive line
 - Derived tasks get pipeline context (parent task info, depth, root)
 
-### Step 5: CLI — derive, ask, and pipeline (`bin/loom`) ✅
+### Step 5: CLI — derive, ask, and pipeline (`bin/torque`) ✅
 
-- `loom ai derive` subcommand: parse args → `api_call("ai_report", action="derive", ...)`
-- `loom ai ask` subcommand: parse args → `api_call("ai_report", action="ask", ...)`
-- `loom task chain` subcommand: resolve task → reads chain locally from SQLite → render tree
-- `loom pipeline list` subcommand: call `discover_pipelines` → render summary table
-- `loom pipeline show <name>` subcommand: render adjacency list with transition descriptions
+- `torque ai derive` subcommand: parse args → `api_call("ai_report", action="derive", ...)`
+- `torque ai ask` subcommand: parse args → `api_call("ai_report", action="ask", ...)`
+- `torque task chain` subcommand: resolve task → reads chain locally from SQLite → render tree
+- `torque pipeline list` subcommand: call `discover_pipelines` → render summary table
+- `torque pipeline show <name>` subcommand: render adjacency list with transition descriptions
 
 ### Step 6: Board UI — chain indicators (`static/js/board.js`) ✅
 
@@ -794,7 +794,7 @@ The CLI renders the adjacency list form — compact and readable in a terminal. 
 - Action picker shows "(missing)" for saved transitions referencing deleted actions
 - Transitions serialized to YAML on save via `_action_to_yaml()` and loaded back on edit
 
-### Step 10: Server — pipeline discovery (`loom/server.py`) ✅
+### Step 10: Server — pipeline discovery (`torque/server.py`) ✅
 
 - `discover_pipelines` command handler calls `action_mgr.discover_pipelines()`, returns `{type: "pipelines", pipelines: [{name, actions, edges}]}`
 - Used by both the Actions panel (via WS) and the CLI (via REST)
@@ -808,7 +808,7 @@ The CLI renders the adjacency list form — compact and readable in a terminal. 
 ### Remaining Work
 
 - **Pipeline lane filter** (Step 8) — filter board lane to show only tasks from one pipeline chain
-- **`--pipeline` and `--chains` flags** on `loom task list` CLI command
+- **`--pipeline` and `--chains` flags** on `torque task list` CLI command
 - **Inline dispatch button** on human/HITL task cards in the board
 - **Worktree cleanup guard** — prevent `WorktreeManager.remove()` on worktrees belonging to active pipeline chains
 
@@ -821,7 +821,7 @@ The CLI renders the adjacency list form — compact and readable in a terminal. 
 - **Auto-retry** — If an agent errors, it doesn't auto-retry. A human or parent agent creates a new task.
 - **Pipeline-level status** — No aggregate "pipeline is 60% done" progress bar. The chain view shows individual task statuses.
 - **Cross-project pipelines** — Tasks and their chains are scoped to one project/board.
-- **Derive from UI** — The UI can view pipelines but derivation only happens via `loom ai derive` (agent-initiated) or `loom ai ask` (human gate). There's no "derive" button on task cards — that's what dispatch is for.
+- **Derive from UI** — The UI can view pipelines but derivation only happens via `torque ai derive` (agent-initiated) or `torque ai ask` (human gate). There's no "derive" button on task cards — that's what dispatch is for.
 - **Graph layout library** — The pipeline graph uses a simple BFS-based layout algorithm, not a full graph layout engine (dagre, elk, etc.). This keeps the zero-dependency constraint. Complex graphs with many cross-edges may not render perfectly, but typical pipelines (3-6 actions) will look clean.
 
 ---
@@ -830,11 +830,11 @@ The CLI renders the adjacency list form — compact and readable in a terminal. 
 
 | File | Change |
 |---|---|
-| `loom/state.py` | Add pipeline fields to `BoardTask`, `max_pipeline_depth` to `GlobalSettings`, `board_get_chain()` method |
-| `loom/db.py` | Add migration for `parent_task_id`, `pipeline_depth`, `pipeline_root_id` columns; update `save_board_task` and `save_all` |
-| `loom/server.py` | Extend `ai_report` with `derive`/`ask` actions (transition validation + worktree inheritance), add `task_chain` and `discover_pipelines` commands, `_build_postscript()` for dynamic postscript from action transitions, `_action_to_yaml()` serializes transitions, `dispatch_task` supports `inherit_worktree_from` + HITL parent-chain worktree resolution |
-| `loom/actions.py` | Parse `transitions` and `max_depth` from action YAML, add `get_transitions()`, `discover_pipelines()` (connected-component discovery) |
-| `bin/loom` | Add `loom ai derive`, `loom ai ask`, `loom task chain`, `loom pipeline list/show` commands |
+| `torque/state.py` | Add pipeline fields to `BoardTask`, `max_pipeline_depth` to `GlobalSettings`, `board_get_chain()` method |
+| `torque/db.py` | Add migration for `parent_task_id`, `pipeline_depth`, `pipeline_root_id` columns; update `save_board_task` and `save_all` |
+| `torque/server.py` | Extend `ai_report` with `derive`/`ask` actions (transition validation + worktree inheritance), add `task_chain` and `discover_pipelines` commands, `_build_postscript()` for dynamic postscript from action transitions, `_action_to_yaml()` serializes transitions, `dispatch_task` supports `inherit_worktree_from` + HITL parent-chain worktree resolution |
+| `torque/actions.py` | Parse `transitions` and `max_depth` from action YAML, add `get_transitions()`, `discover_pipelines()` (connected-component discovery) |
+| `bin/torque` | Add `torque ai derive`, `torque ai ask`, `torque task chain`, `torque pipeline list/show` commands |
 | `static/js/board.js` | Chain indicators on cards, pipeline thread overlay with `boardViewPipeline()`, "View pipeline" context menu |
 | `static/js/actions.js` | Editor/Pipelines view toggle, pipeline graph renderer (BFS layout, node boxes with adjacency lists), transitions editor in action form (type dropdown, action picker with Project/User optgroups, auto-growing "When" textarea with label and tooltip) |
 | `static/js/ws.js` | Route `pipelines` response type to `tplReceivePipelines()` |

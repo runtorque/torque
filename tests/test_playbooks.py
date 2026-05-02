@@ -9,22 +9,22 @@ except ModuleNotFoundError:
 
 install_aiohttp_stub()
 
-from loom.actions import ActionManager
-from loom.db import LoomDB
-from loom.playbooks import (
+from torque.actions import ActionManager
+from torque.db import TorqueDB
+from torque.playbooks import (
     build_playbook_draft,
     discard_playbook_record,
     publish_playbook_record,
 )
-from loom.state import BoardTask, MatrixState
-from loom.roles import RoleManager
+from torque.state import BoardTask, MatrixState
+from torque.roles import RoleManager
 
 
 class PlaybookCandidateExtractionTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.db = LoomDB(Path(self.tmp.name) / "loom.db")
+        self.db = TorqueDB(Path(self.tmp.name) / "torque.db")
         self.db.init()
         self.addCleanup(self.db.close)
         self.state = MatrixState(db=self.db)
@@ -52,7 +52,7 @@ class PlaybookCandidateExtractionTests(unittest.TestCase):
 
     def _record_dispatch(self, agent_id, task_id, task_title, started_at, *,
                          outcome="done", template="default",
-                         worktree_branch="loom/test", agent_type="codex"):
+                         worktree_branch="torque/test", agent_type="codex"):
         self.db.save_agent_history({
             "id": agent_id,
             "name": agent_id,
@@ -113,7 +113,7 @@ class PlaybookCandidateExtractionTests(unittest.TestCase):
             pipeline_root_id=root_id,
             pipeline_depth=1,
             messages=[{"action": "blocked", "message": "Waiting on fix"}],
-            labels=["feature", "loom:blocked"],
+            labels=["feature", "torque:blocked"],
         )
         self._record_dispatch(f"impl-{run_no}", root.id, root.task, float(run_no * 10))
         self._record_dispatch(
@@ -189,11 +189,11 @@ class PlaybookDraftPublicationTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.repo = Path(self.tmp.name) / "repo"
-        (self.repo / ".loom" / "actions" / "feature").mkdir(parents=True)
-        (self.repo / ".loom" / "actions" / "feature" / "implement.yaml").write_text(
+        (self.repo / ".torque" / "actions" / "feature").mkdir(parents=True)
+        (self.repo / ".torque" / "actions" / "feature" / "implement.yaml").write_text(
             "name: feature/implement\nprompt: |\n  {{ TASK }}\n"
         )
-        (self.repo / ".loom" / "actions" / "feature" / "review.yaml").write_text(
+        (self.repo / ".torque" / "actions" / "feature" / "review.yaml").write_text(
             "name: feature/review\nprompt: |\n  {{ TASK }}\n"
         )
         RoleManager().save_template(
@@ -205,7 +205,7 @@ class PlaybookDraftPublicationTests(unittest.TestCase):
             },
             base_dir=str(self.repo),
         )
-        self.db = LoomDB(self.repo / "loom.db")
+        self.db = TorqueDB(self.repo / "torque.db")
         self.db.init()
         self.addCleanup(self.db.close)
         self.state = MatrixState(db=self.db)

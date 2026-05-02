@@ -13,15 +13,15 @@ except ModuleNotFoundError:
 class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub()
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
-        self.mcp_engineer_mod = importlib.import_module("loom.mcp_engineer")
+        self.mcp_engineer_mod = importlib.import_module("torque.mcp_engineer")
         self.mcp_engineer_mod = importlib.reload(self.mcp_engineer_mod)
 
     def _make_state(self):
         state = self.state_mod.MatrixState()
         state.board_lanes = ["Backlog", "To Do", "In Progress", "Done", "Archived"]
-        state.groups["loom"] = []
+        state.groups["torque"] = []
         return state
 
     def _add_engineer(self, state, agent_id, name):
@@ -29,14 +29,14 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
             id=agent_id,
             name=name,
             slug=name.lower(),
-            group="loom",
+            group="torque",
             cell_type="agent",
             kind="engineer",
             status="running",
             persistent=True,
         )
         state.agents[agent_id] = engineer
-        state.groups["loom"].append(agent_id)
+        state.groups["torque"].append(agent_id)
         return engineer
 
     def _add_worker(self, state, agent_id, name, owner_id):
@@ -44,7 +44,7 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
             id=agent_id,
             name=name,
             slug=name.lower(),
-            group="loom",
+            group="torque",
             cell_type="agent",
             kind="worker",
             owner_engineer_id=owner_id,
@@ -52,10 +52,10 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
             status="idle",
         )
         state.agents[agent_id] = worker
-        state.groups["loom"].append(agent_id)
+        state.groups["torque"].append(agent_id)
         return worker
 
-    def _add_task(self, state, task_id, title, *, group="loom",
+    def _add_task(self, state, task_id, title, *, group="torque",
                   assigned_engineer_id="", **kwargs):
         task = self.state_mod.BoardTask(
             id=task_id,
@@ -140,7 +140,7 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
             "engineer_mcp_calls",
             {
                 "agent_id": worker.id,
-                "tool_name_pattern": "mcp__loom__%",
+                "tool_name_pattern": "mcp__torque__%",
                 "since": 123,
                 "limit": 7,
             },
@@ -152,7 +152,7 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(is_error, text)
         self.assertEqual(json.loads(text)["calls"], [{"cell_id": worker.id}])
         self.assertEqual(calls[-1]["agent_id"], worker.id)
-        self.assertEqual(calls[-1]["tool_name_pattern"], "mcp__loom__%")
+        self.assertEqual(calls[-1]["tool_name_pattern"], "mcp__torque__%")
         self.assertEqual(calls[-1]["since"], 123)
         self.assertEqual(calls[-1]["limit"], 7)
 
@@ -207,10 +207,10 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         alice = self._add_engineer(state, "eng-alice", "Alice")
         worker = self._add_worker(state, "worker-a", "Alice Worker", alice.id)
         worker.worktree_path = "/tmp/worker-a"
-        worker.worktree_branch = "loom/alice/worker-a"
+        worker.worktree_branch = "torque/alice/worker-a"
         worker.worktree_base_branch = "main"
         warning = (
-            "⚠ STALE BASE: loom/alice/worker-a forks from 11111111 "
+            "⚠ STALE BASE: torque/alice/worker-a forks from 11111111 "
             "(Old base)."
         )
         calls = []
@@ -260,12 +260,12 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         )
         for worker in (implementer, reviewer):
             worker.worktree_path = "/tmp/shared-review-worktree"
-            worker.worktree_branch = "loom/shared-review"
+            worker.worktree_branch = "torque/shared-review"
             worker.worktree_base_branch = "main"
             worker.worktree_repo_root = "/tmp/repo"
         root = self._add_task(
             state,
-            "LOOM:1",
+            "TORQUE:1",
             "Implement feature",
             assigned_engineer_id=alice.id,
         )
@@ -274,7 +274,7 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         root.action_name = "feature/implement"
         review = self._add_task(
             state,
-            "LOOM:1:review",
+            "TORQUE:1:review",
             "Review feature",
             assigned_engineer_id=alice.id,
         )
@@ -313,10 +313,10 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         alice = self._add_engineer(state, "eng-alice", "Alice")
         worker = self._add_worker(state, "worker-a", "Alice Worker", alice.id)
         worker.worktree_path = "/tmp/worker-a"
-        worker.worktree_branch = "loom/alice/worker-a"
+        worker.worktree_branch = "torque/alice/worker-a"
         worker.worktree_base_branch = "main"
         warning = (
-            "⚠ STALE BASE: loom/alice/worker-a forks from 11111111 "
+            "⚠ STALE BASE: torque/alice/worker-a forks from 11111111 "
             "(Old base)."
         )
         calls = []
@@ -391,7 +391,7 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         alice = self._add_engineer(state, "eng-alice", "Alice")
         worker = self._add_worker(state, "worker-a", "Alice Worker", alice.id)
         worker.worktree_path = "/tmp/worker-a"
-        worker.worktree_branch = "loom/alice/worker-a"
+        worker.worktree_branch = "torque/alice/worker-a"
         worker.worktree_base_branch = "main"
         calls = []
 
@@ -442,7 +442,7 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
 
         async def fake_handle_command(payload):
             calls.append(dict(payload))
-            return {"type": "board_task_added", "task_id": "LOOM:1"}
+            return {"type": "board_task_added", "task_id": "TORQUE:1"}
 
         text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
             "engineer_task_create",
@@ -459,7 +459,7 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(is_error, text)
         self.assertEqual(calls[0]["assigned_engineer_id"], alice.id)
         self.assertEqual(calls[0]["created_by_engineer_id"], alice.id)
-        self.assertEqual(json.loads(text)["task_id"], "LOOM:1")
+        self.assertEqual(json.loads(text)["task_id"], "TORQUE:1")
 
     async def test_engineer_task_create_forces_caller_group(self):
         state = self._make_state()
@@ -469,7 +469,7 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
 
         async def fake_handle_command(payload):
             calls.append(dict(payload))
-            return {"type": "board_task_added", "task_id": "LOOM:2"}
+            return {"type": "board_task_added", "task_id": "TORQUE:2"}
 
         text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
             "engineer_task_create",
@@ -483,7 +483,7 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertFalse(is_error, text)
-        self.assertEqual(calls[0]["group"], "loom")
+        self.assertEqual(calls[0]["group"], "torque")
         self.assertEqual(calls[0]["assigned_engineer_id"], alice.id)
         self.assertEqual(calls[0]["created_by_engineer_id"], alice.id)
 
@@ -692,7 +692,7 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
             "task-reply",
             "Engineer: Need status",
             assigned_engineer_id=alice.id,
-            labels=["loom:engineer-message"],
+            labels=["torque:engineer-message"],
             status="Awaiting Reply",
         )
 
@@ -720,7 +720,7 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         async def fake_handle_command(_payload):
             self.fail("read tool should not call handle_command")
 
-        with mock.patch("loom.mcp_tools_shared.time.time", return_value=base_ts + 600):
+        with mock.patch("torque.mcp_tools_shared.time.time", return_value=base_ts + 600):
             text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
                 "engineer_task_show",
                 {"task": task.id},
@@ -737,7 +737,7 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("status=idle", data["health_summary"])
         self.assertLessEqual(len(data["health_summary"]), 120)
 
-        with mock.patch("loom.mcp_tools_shared.time.time", return_value=base_ts + 900):
+        with mock.patch("torque.mcp_tools_shared.time.time", return_value=base_ts + 900):
             text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
                 "engineer_task_show",
                 {"task": task.id},
@@ -756,7 +756,7 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         async def fake_handle_command(_payload):
             self.fail("read tool should not call handle_command")
 
-        with mock.patch("loom.mcp_tools_shared.time.time", return_value=base_ts + 900):
+        with mock.patch("torque.mcp_tools_shared.time.time", return_value=base_ts + 900):
             text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
                 "engineer_agent_show",
                 {"agent": worker.id},
@@ -801,7 +801,7 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         async def fake_handle_command(_payload):
             self.fail("read tool should not call handle_command")
 
-        with mock.patch("loom.mcp_tools_shared.time.time", return_value=base_ts + 60):
+        with mock.patch("torque.mcp_tools_shared.time.time", return_value=base_ts + 60):
             text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
                 "engineer_task_show",
                 {"task": task.id},
@@ -843,7 +843,7 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
     async def test_deleted_engineer_session_returns_structured_error(self):
         state = self._make_state()
         alice = self._add_engineer(state, "eng-alice", "Alice")
-        state.groups["loom"].remove(alice.id)
+        state.groups["torque"].remove(alice.id)
         del state.agents[alice.id]
 
         async def fake_handle_command(_payload):
@@ -867,14 +867,14 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
 class EngineerBindingValidationTests(unittest.TestCase):
     def setUp(self):
         install_aiohttp_stub()
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
-        self.mcp_engineer_mod = importlib.import_module("loom.mcp_engineer")
+        self.mcp_engineer_mod = importlib.import_module("torque.mcp_engineer")
         self.mcp_engineer_mod = importlib.reload(self.mcp_engineer_mod)
 
     def _make_state(self):
         state = self.state_mod.MatrixState()
-        state.groups["loom"] = []
+        state.groups["torque"] = []
         return state
 
     def test_validate_engineer_binding_requires_env_var(self):
@@ -882,11 +882,11 @@ class EngineerBindingValidationTests(unittest.TestCase):
             engineer_id, error = self.mcp_engineer_mod.validate_engineer_binding()
 
         self.assertEqual(engineer_id, "")
-        self.assertEqual(error, "LOOM_ENGINEER_ID is required")
+        self.assertEqual(error, "TORQUE_ENGINEER_ID is required")
 
     def test_validate_engineer_binding_rejects_missing_engineer(self):
         state = self._make_state()
-        with mock.patch.dict("os.environ", {"LOOM_ENGINEER_ID": "eng-missing"}, clear=True):
+        with mock.patch.dict("os.environ", {"TORQUE_ENGINEER_ID": "eng-missing"}, clear=True):
             engineer_id, error = self.mcp_engineer_mod.validate_engineer_binding(state)
 
         self.assertEqual(engineer_id, "")

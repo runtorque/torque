@@ -14,8 +14,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from loom import pty_supervisor
-from loom.pty_supervisor import PtySupervisor, read_frame, write_frame
+from torque import pty_supervisor
+from torque.pty_supervisor import PtySupervisor, read_frame, write_frame
 
 
 async def _open_client(path: Path):

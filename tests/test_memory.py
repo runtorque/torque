@@ -12,11 +12,11 @@ except ModuleNotFoundError:
 class MemoryHelpersTests(unittest.TestCase):
     def setUp(self):
         install_aiohttp_stub()
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
-        self.db_mod = importlib.import_module("loom.db")
+        self.db_mod = importlib.import_module("torque.db")
         self.db_mod = importlib.reload(self.db_mod)
-        self.memory_mod = importlib.import_module("loom.memory")
+        self.memory_mod = importlib.import_module("torque.memory")
         self.memory_mod = importlib.reload(self.memory_mod)
 
     def test_build_memory_entry_defaults_to_task_scope(self):
@@ -137,7 +137,7 @@ class MemoryHelpersTests(unittest.TestCase):
     def test_select_relevant_prompt_entries_prefers_pins_then_nearest_scope(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        db = self.db_mod.LoomDB(Path(tmp.name) / "loom.db")
+        db = self.db_mod.TorqueDB(Path(tmp.name) / "torque.db")
         db.init()
         self.addCleanup(db.close)
 
@@ -257,7 +257,7 @@ class MemoryHelpersTests(unittest.TestCase):
     def test_build_prompt_memory_block_is_bounded_and_shaped(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        db = self.db_mod.LoomDB(Path(tmp.name) / "loom.db")
+        db = self.db_mod.TorqueDB(Path(tmp.name) / "torque.db")
         db.init()
         self.addCleanup(db.close)
 

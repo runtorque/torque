@@ -3,7 +3,7 @@ from pathlib import Path
 import subprocess
 import unittest
 
-from loom.worktree import LOOM_EXCLUDE_ENTRIES, WorktreeManager
+from torque.worktree import TORQUE_EXCLUDE_ENTRIES, WorktreeManager
 
 
 class WorktreeGitignoreTests(unittest.IsolatedAsyncioTestCase):
@@ -11,7 +11,7 @@ class WorktreeGitignoreTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as tmp:
             repo_root = Path(tmp)
             gitignore = repo_root / ".gitignore"
-            gitignore.write_text(".loom/worktrees/\n")
+            gitignore.write_text(".torque/worktrees/\n")
             subprocess.run(
                 ["git", "-C", str(repo_root), "init"],
                 check=True,
@@ -25,7 +25,7 @@ class WorktreeGitignoreTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 gitignore.read_text().splitlines(),
                 [
-                    ".loom/worktrees/",
+                    ".torque/worktrees/",
                 ],
             )
             exclude_lines = [
@@ -37,5 +37,5 @@ class WorktreeGitignoreTests(unittest.IsolatedAsyncioTestCase):
             ]
             self.assertEqual(
                 exclude_lines,
-                LOOM_EXCLUDE_ENTRIES,
+                TORQUE_EXCLUDE_ENTRIES,
             )

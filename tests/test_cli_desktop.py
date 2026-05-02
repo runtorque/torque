@@ -12,9 +12,9 @@ from unittest import mock
 
 
 def _load_cli_module():
-    path = Path(__file__).resolve().parents[1] / "bin" / "loom"
-    loader = SourceFileLoader("loom_cli_desktop", str(path))
-    spec = importlib.util.spec_from_loader("loom_cli_desktop", loader)
+    path = Path(__file__).resolve().parents[1] / "bin" / "torque"
+    loader = SourceFileLoader("torque_cli_desktop", str(path))
+    spec = importlib.util.spec_from_loader("torque_cli_desktop", loader)
     mod = importlib.util.module_from_spec(spec)
     loader.exec_module(mod)
     return mod
@@ -23,7 +23,7 @@ def _load_cli_module():
 class CliDesktopTests(unittest.TestCase):
     def setUp(self):
         self.cli = _load_cli_module()
-        self.entrypoint = Path(__file__).resolve().parents[1] / "loom_desktop.py"
+        self.entrypoint = Path(__file__).resolve().parents[1] / "torque_desktop.py"
         self.cli._ensure_desktop_runtime_ready = lambda python_path: None
         self._orig_popen = self.cli.subprocess.Popen
         self.addCleanup(
@@ -66,12 +66,12 @@ class CliDesktopTests(unittest.TestCase):
             calls[0][0],
             ["/python/bin/python3", str(self.entrypoint)],
         )
-        self.assertEqual(calls[0][1]["LOOM_PORT"], "18933")
-        self.assertEqual(calls[0][1]["LOOM_PROFILE"], "desktop")
-        self.assertEqual(calls[0][1]["LOOM_DESKTOP_MODE"], "spawn")
-        self.assertEqual(calls[0][1]["LOOM_DESKTOP_ATTACH"], "0")
-        self.assertIn("/.loom/profiles/desktop", calls[0][1]["LOOM_DATA_DIR"])
-        self.assertIn("Loom desktop spawn", out.getvalue())
+        self.assertEqual(calls[0][1]["TORQUE_PORT"], "18933")
+        self.assertEqual(calls[0][1]["TORQUE_PROFILE"], "desktop")
+        self.assertEqual(calls[0][1]["TORQUE_DESKTOP_MODE"], "spawn")
+        self.assertEqual(calls[0][1]["TORQUE_DESKTOP_ATTACH"], "0")
+        self.assertIn("/.torque/profiles/desktop", calls[0][1]["TORQUE_DATA_DIR"])
+        self.assertIn("Torque desktop spawn", out.getvalue())
 
     def test_cmd_desktop_attach_honors_explicit_target(self):
         calls = []
@@ -93,7 +93,7 @@ class CliDesktopTests(unittest.TestCase):
         args = SimpleNamespace(
             port=19001,
             profile="qa-desktop",
-            data_dir="/tmp/loom-qa",
+            data_dir="/tmp/torque-qa",
             python="/custom/python",
             attach=True,
         )
@@ -102,13 +102,13 @@ class CliDesktopTests(unittest.TestCase):
         with contextlib.redirect_stdout(out):
             self.cli.cmd_desktop(args)
 
-        self.assertEqual(calls[0][1]["LOOM_PORT"], "19001")
-        self.assertEqual(calls[0][1]["LOOM_PROFILE"], "qa-desktop")
-        self.assertEqual(calls[0][1]["LOOM_DATA_DIR"], "/tmp/loom-qa")
+        self.assertEqual(calls[0][1]["TORQUE_PORT"], "19001")
+        self.assertEqual(calls[0][1]["TORQUE_PROFILE"], "qa-desktop")
+        self.assertEqual(calls[0][1]["TORQUE_DATA_DIR"], "/tmp/torque-qa")
         self.assertEqual(calls[0][0][0], "/custom/python")
-        self.assertEqual(calls[0][1]["LOOM_DESKTOP_MODE"], "attach")
-        self.assertEqual(calls[0][1]["LOOM_DESKTOP_ATTACH"], "1")
-        self.assertIn("Loom desktop attach", out.getvalue())
+        self.assertEqual(calls[0][1]["TORQUE_DESKTOP_MODE"], "attach")
+        self.assertEqual(calls[0][1]["TORQUE_DESKTOP_ATTACH"], "1")
+        self.assertIn("Torque desktop attach", out.getvalue())
 
     def test_cmd_desktop_propagates_nonzero_exit_status(self):
         self.cli._resolve_desktop_entrypoint = lambda: self.entrypoint
@@ -144,22 +144,22 @@ class CliDesktopTests(unittest.TestCase):
 
         self.assertEqual(resolved, Path("/project/python3"))
 
-    def test_resolve_desktop_profile_ignores_general_loom_profile(self):
+    def test_resolve_desktop_profile_ignores_general_torque_profile(self):
         with mock.patch.dict(os.environ, {
-            "LOOM_PROFILE": "toolbelt-profile",
-            "LOOM_DESKTOP_PROFILE": "",
+            "TORQUE_PROFILE": "toolbelt-profile",
+            "TORQUE_DESKTOP_PROFILE": "",
         }, clear=False):
             self.assertEqual(
                 self.cli._resolve_desktop_profile(""),
                 self.cli.DESKTOP_DEFAULT_PROFILE,
             )
 
-    def test_resolve_desktop_port_ignores_general_loom_port(self):
+    def test_resolve_desktop_port_ignores_general_torque_port(self):
         args = SimpleNamespace(port=self.cli.DEFAULT_PORT)
         self.cli._argv_has_flag = lambda flag: False
         with mock.patch.dict(os.environ, {
-            "LOOM_PORT": "18932",
-            "LOOM_DESKTOP_PORT": "",
+            "TORQUE_PORT": "18932",
+            "TORQUE_DESKTOP_PORT": "",
         }, clear=False):
             self.assertEqual(
                 self.cli._resolve_desktop_port(args),

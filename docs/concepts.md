@@ -10,7 +10,7 @@ Groups can be configured to only appear in windows where they have active sessio
 
 ## Agents
 
-An agent is an AI coding session. When you create an agent, Loom opens a new iTerm2 tab and runs a boot command (defaults to `claude`). Agents appear as cells in the group grid.
+An agent is an AI coding session. When you create an agent, Torque opens a new iTerm2 tab and runs a boot command (defaults to `claude`). Agents appear as cells in the group grid.
 
 Each agent can have its own:
 
@@ -60,13 +60,13 @@ Most things can be reordered by dragging:
 
 ## Actions
 
-Actions are reusable prompt templates defined in YAML files. When you dispatch a task with an action, Loom renders the prompt template with the task description and sends it to the agent. Actions can declare transitions to create multi-step pipelines where agents hand off work to each other.
+Actions are reusable prompt templates defined in YAML files. When you dispatch a task with an action, Torque renders the prompt template with the task description and sends it to the agent. Actions can declare transitions to create multi-step pipelines where agents hand off work to each other.
 
 See [Actions & Templates](actions.md) for the full guide.
 
 ## Streams and waves
 
-When Loom's Engineer is coordinating larger pieces of work, it reasons at two levels:
+When Torque's Engineer is coordinating larger pieces of work, it reasons at two levels:
 
 - a **stream** is one branch/worktree execution lane that moves through implementation, review, blocker fixes, validation, and merge
 - a **wave** is the set of streams and/or standalone tasks the designated engineer intentionally activates in parallel

@@ -1,6 +1,6 @@
 # Worktrees
 
-Git worktrees let multiple agents work on the same repository in parallel, each on its own branch. Loom manages the worktree lifecycle: creation, checkpointing, rollback, and cleanup.
+Git worktrees let multiple agents work on the same repository in parallel, each on its own branch. Torque manages the worktree lifecycle: creation, checkpointing, rollback, and cleanup.
 
 For how worktrees fit into agent launch, prompts, MCP, and relaunch behavior, see [Agents & Sessions](agents-and-sessions.md).
 
@@ -29,7 +29,7 @@ Once enabled, every new agent created in that group gets its own worktree. The a
 | Setting | Description |
 |---------|-------------|
 | **Git worktree per agent** | Enable worktree creation for new agents. |
-| **Base directory** | Where worktrees are stored, relative to the repo root. Default: `.loom/worktrees`. |
+| **Base directory** | Where worktrees are stored, relative to the repo root. Default: `.torque/worktrees`. |
 | **Base branch** | Branch to fork from. Default: current HEAD. |
 | **Auto-checkpoint on stop** | Automatically commit changes when an agent's session ends. |
 | **Checkpoint on progress / done** | Throttled automatic checkpoints when the agent reports progress or completion. |
@@ -41,36 +41,36 @@ Once enabled, every new agent created in that group gets its own worktree. The a
 Or from the CLI:
 
 ```bash
-loom group settings backend -s git_worktree=true
-loom group settings backend -s worktree_base_branch=main
-loom group settings backend -s worktree_auto_checkpoint=true
-loom group settings backend -s 'worktree_symlinks=["etl/**/node_modules",".venv"]'
+torque group settings backend -s git_worktree=true
+torque group settings backend -s worktree_base_branch=main
+torque group settings backend -s worktree_auto_checkpoint=true
+torque group settings backend -s 'worktree_symlinks=["etl/**/node_modules",".venv"]'
 ```
 
 ## How worktrees work
 
 When an agent is created with worktrees enabled:
 
-1. Loom creates a new git branch: `loom/{agent-slug}-{short-id}` (e.g., `loom/impl-add-auth-a1b2c3d`)
-2. A worktree is checked out at `{repo-root}/.loom/worktrees/{agent-id}/`
+1. Torque creates a new git branch: `torque/{agent-slug}-{short-id}` (e.g., `torque/impl-add-auth-a1b2c3d`)
+2. A worktree is checked out at `{repo-root}/.torque/worktrees/{agent-id}/`
 3. The agent's working directory is set to the worktree path
 4. The agent's terminal opens in the worktree
-5. Loom installs adapter files such as hooks, MCP config, and persistent prompt files into that worktree
+5. Torque installs adapter files such as hooks, MCP config, and persistent prompt files into that worktree
 
-The `.loom/worktrees/` directory is automatically added to `.gitignore` so worktree directories don't pollute your repository.
+The `.torque/worktrees/` directory is automatically added to `.gitignore` so worktree directories don't pollute your repository.
 
-Loom also adds its own injected runtime files to the repo's git exclude list so worktree-backed agent sessions do not pollute `git status`. This includes files such as:
+Torque also adds its own injected runtime files to the repo's git exclude list so worktree-backed agent sessions do not pollute `git status`. This includes files such as:
 
 - `.mcp.json`
 - `.claude/settings.local.json`
 - `.claude/instructions.md`
-- `.claude/skills/loom-*/`
+- `.claude/skills/torque-*/`
 - `.codex/config.toml`
 - `.codex/hooks.json`
 
-For engineer and worker worktrees, Loom also writes `.claude/settings.local.json` with `autoMemoryEnabled: false`. This opts those Claude Code sessions out of opportunistic auto-memory so one engineer's memory index cannot bleed into another agent's identity context; Loom's journal-scoping rules are the complementary fix for shared Loom-authored narrative context.
+For engineer and worker worktrees, Torque also writes `.claude/settings.local.json` with `autoMemoryEnabled: false`. This opts those Claude Code sessions out of opportunistic auto-memory so one engineer's memory index cannot bleed into another agent's identity context; Torque's journal-scoping rules are the complementary fix for shared Torque-authored narrative context.
 
-For Codex, Loom may also clean up old Loom-managed sections in `.codex/AGENTS.md` left behind by earlier versions, but the current integration uses `.codex/config.toml` plus prompt files under `.loom/`.
+For Codex, Torque may also clean up old Torque-managed sections in `.codex/AGENTS.md` left behind by earlier versions, but the current integration uses `.codex/config.toml` plus prompt files under `.torque/`.
 
 !!! note
     The group's working directory must be inside a git repository for worktrees to work. If it's not, the setting is silently ignored.
@@ -88,35 +88,35 @@ Create a checkpoint at any time from the UI or CLI:
 **CLI:**
 
 ```bash
-loom worktree checkpoint impl-add-auth
+torque worktree checkpoint impl-add-auth
 ```
 
-This stages all changes (`git add -A`) and creates a commit with the message `loom: checkpoint N --- agent-name`.
+This stages all changes (`git add -A`) and creates a commit with the message `torque: checkpoint N --- agent-name`.
 
 ### Auto-checkpoints
 
-When **Auto-checkpoint on stop** is enabled in group settings, Loom automatically creates a checkpoint whenever an agent's session ends. This catches work in progress if an agent crashes or is stopped unexpectedly.
+When **Auto-checkpoint on stop** is enabled in group settings, Torque automatically creates a checkpoint whenever an agent's session ends. This catches work in progress if an agent crashes or is stopped unexpectedly.
 
 The auto-checkpoint uses the agent's last summary (if available) as the commit body, giving you context about what the agent was working on.
 
 ### Progress checkpoints
 
-When **Checkpoint on progress / done** is enabled, Loom can also create checkpoints when the agent reports progress or completion through `loom_progress(...)`, `loom_done(...)`, or `loom_ready()`. These checkpoints are throttled so progress spam does not create a commit every few seconds.
+When **Checkpoint on progress / done** is enabled, Torque can also create checkpoints when the agent reports progress or completion through `torque_progress(...)`, `torque_done(...)`, or `torque_ready()`. These checkpoints are throttled so progress spam does not create a commit every few seconds.
 
 ### Task boundaries on shared branches
 
-When the same agent keeps a shared worktree across sequential tasks, Loom records a task-scoped boundary whenever a worktree-backed task reaches `done` or `ready`.
+When the same agent keeps a shared worktree across sequential tasks, Torque records a task-scoped boundary whenever a worktree-backed task reaches `done` or `ready`.
 
-- If the worktree is dirty, Loom creates a dedicated boundary checkpoint commit.
-- If the worktree is already clean, Loom records a marker against the current `HEAD`.
+- If the worktree is dirty, Torque creates a dedicated boundary checkpoint commit.
+- If the worktree is already clean, Torque records a marker against the current `HEAD`.
 - The completed task stores the boundary metadata, and queued same-agent follow-up tasks point back to that task via `resume_after_boundary_task_id`.
 
-This lets Loom identify the latest clean mergeable task boundary on a shared branch instead of treating the whole branch history as one undifferentiated unit.
+This lets Torque identify the latest clean mergeable task boundary on a shared branch instead of treating the whole branch history as one undifferentiated unit.
 
 ### Viewing checkpoint history
 
 ```bash
-loom worktree history impl-add-auth
+torque worktree history impl-add-auth
 ```
 
 This shows all commits on the worktree branch since it forked, with SHA, timestamp, message, and diff stats (insertions/deletions).
@@ -126,8 +126,8 @@ This shows all commits on the worktree branch since it forked, with SHA, timesta
 To revert to a previous checkpoint:
 
 ```bash
-loom worktree history impl-add-auth          # find the checkpoint SHA
-loom worktree rollback impl-add-auth abc1234  # reset to that commit
+torque worktree history impl-add-auth          # find the checkpoint SHA
+torque worktree rollback impl-add-auth abc1234  # reset to that commit
 ```
 
 This does a hard reset of the worktree branch to the specified commit. Changes after that checkpoint are discarded.
@@ -136,7 +136,7 @@ This does a hard reset of the worktree branch to the specified commit. Changes a
 
 The agent cell in the grid shows worktree information:
 
-- **Branch badge** --- the worktree branch name (e.g., `loom/impl-a1b2c3d`)
+- **Branch badge** --- the worktree branch name (e.g., `torque/impl-a1b2c3d`)
 - **Diff stats** --- files changed, insertions, and deletions relative to the base branch
 - **Dirty indicator** --- whether there are uncommitted changes
 
@@ -146,8 +146,8 @@ These stats update periodically (every 60 seconds) and after checkpoints.
 
 When agents hand off work through [pipelines](actions.md#pipelines), worktrees are inherited so the next agent works on the same code:
 
-1. Agent A (implement) works in worktree branch `loom/impl-abc1234`
-2. Agent A calls `loom_derive(description="Review the changes", action="feature/review")`
+1. Agent A (implement) works in worktree branch `torque/impl-abc1234`
+2. Agent A calls `torque_derive(description="Review the changes", action="feature/review")`
 3. Agent B (review) is created and inherits Agent A's worktree
 4. Agent B sees Agent A's changes and reviews them
 
@@ -159,7 +159,7 @@ When an action transition routes follow-up work to an existing agent (for exampl
 
 ## Relaunch and recovery
 
-Worktrees persist independently of a live terminal session. On relaunch, Loom:
+Worktrees persist independently of a live terminal session. On relaunch, Torque:
 
 - reuses the existing worktree if it is still valid
 - clears stale worktree metadata if the path is gone
@@ -167,9 +167,9 @@ Worktrees persist independently of a live terminal session. On relaunch, Loom:
 
 This is why a stopped agent can often be relaunched back into the same isolated branch without manual setup.
 
-Task boundaries are reconstructed from persisted task metadata on restart. If the recorded boundary SHA no longer matches the branch tip, Loom treats that boundary as non-clean and refuses to present it as a merge target until a new clean boundary is recorded.
+Task boundaries are reconstructed from persisted task metadata on restart. If the recorded boundary SHA no longer matches the branch tip, Torque treats that boundary as non-clean and refuses to present it as a merge target until a new clean boundary is recorded.
 
-When Loom itself performs a successful rebase for a clean shared worktree, it re-anchors the latest clean boundary to the rebased branch tip instead of leaving that boundary stale. Loom does not do this if the worktree is dirty, if the recorded boundary did not match the pre-rebase tip, or if follow-up work has already started from that boundary.
+When Torque itself performs a successful rebase for a clean shared worktree, it re-anchors the latest clean boundary to the rebased branch tip instead of leaving that boundary stale. Torque does not do this if the worktree is dirty, if the recorded boundary did not match the pre-rebase tip, or if follow-up work has already started from that boundary.
 
 ## Merging
 
@@ -177,7 +177,7 @@ When an agent's work is complete and ready to merge back to the base branch, use
 
 **UI:** Right-click the agent and select **Merge Worktree**.
 
-This sends a merge prompt to the agent, asking it to merge the worktree branch into the base branch. Loom tracks the merge state and verifies it completed:
+This sends a merge prompt to the agent, asking it to merge the worktree branch into the base branch. Torque tracks the merge state and verifies it completed:
 
 - **Regular merge** --- detected via `git merge-base --is-ancestor`
 - **Squash merge** --- detected by simulating the merge with `git merge-tree` or by checking if the base branch advanced and includes the same file changes
@@ -186,32 +186,32 @@ After a successful merge, the agent is flagged and can be cleaned up.
 
 ### Merge boundaries for sequential waves
 
-On shared same-agent branches, Loom merges only the latest clean task boundary.
+On shared same-agent branches, Torque merges only the latest clean task boundary.
 
 - Review and merge views show which completed task currently defines the merge boundary.
-- If a queued follow-up has already started, Loom blocks merge and reports that the older boundary is no longer cleanly mergeable.
-- If queued follow-up tasks still remain after a successful merge, Loom keeps the agent/worktree alive, resets the branch to the updated base branch, and leaves those queued tasks attached for the next wave.
+- If a queued follow-up has already started, Torque blocks merge and reports that the older boundary is no longer cleanly mergeable.
+- If queued follow-up tasks still remain after a successful merge, Torque keeps the agent/worktree alive, resets the branch to the updated base branch, and leaves those queued tasks attached for the next wave.
 
 ### Merge settings
 
 The **Squash on merge** group setting (default: on) tells the merge prompt to use `git merge --squash` instead of a regular merge. This keeps the base branch history clean by collapsing the worktree's commits into a single commit.
 
-The **Default post-merge cleanup** worktree setting controls what Loom should do after a successful merge when no explicit cleanup choice is provided:
+The **Default post-merge cleanup** worktree setting controls what Torque should do after a successful merge when no explicit cleanup choice is provided:
 
 - keep the agent and worktree
 - close the agent session only
 - remove the worktree only
 - close the agent session and remove the worktree
 
-If the branch still has queued same-agent follow-up tasks attached, Loom keeps the agent/worktree alive regardless so the next wave can continue on a clean branch reset.
+If the branch still has queued same-agent follow-up tasks attached, Torque keeps the agent/worktree alive regardless so the next wave can continue on a clean branch reset.
 
 ### Preserving the merge diff
 
-When **Preserve merge diff by default** is enabled, Loom captures the full pre-merge patch and stores it as a diff artifact on the latest open branch-boundary task before marking the merge successful.
+When **Preserve merge diff by default** is enabled, Torque captures the full pre-merge patch and stores it as a diff artifact on the latest open branch-boundary task before marking the merge successful.
 
 - The artifact is attached to the latest open merge boundary on that branch, so the diff stays with the task that defined the mergeable slice.
 - You can still override the behavior per merge if the UI or caller passes an explicit preserve-diff choice.
-- If Loom cannot find an eligible open boundary task, or if capturing/persisting the patch fails, the merge still succeeds and Loom warns instead of failing the merge after the code has already landed.
+- If Torque cannot find an eligible open boundary task, or if capturing/persisting the patch fails, the merge still succeeds and Torque warns instead of failing the merge after the code has already landed.
 
 ## Creating and removing worktrees manually
 
@@ -220,26 +220,26 @@ You can manage worktrees independently of agent creation:
 ### Create a worktree for an existing agent
 
 ```bash
-loom worktree create impl-add-auth
-loom worktree create impl-add-auth --relaunch    # relaunch agent in the worktree
+torque worktree create impl-add-auth
+torque worktree create impl-add-auth --relaunch    # relaunch agent in the worktree
 ```
 
 ### Remove a worktree
 
 ```bash
-loom worktree remove impl-add-auth
-loom worktree remove impl-add-auth --relaunch    # relaunch agent in the original repo
+torque worktree remove impl-add-auth
+torque worktree remove impl-add-auth --relaunch    # relaunch agent in the original repo
 ```
 
 Removing a worktree deletes the worktree directory and its branch. The agent's working directory reverts to the original repository root.
 
 !!! note
-    When an agent is removed from Loom, its worktree is cleaned up automatically.
+    When an agent is removed from Torque, its worktree is cleaned up automatically.
 
-If you remove the worktree and relaunch the agent, Loom launches it from the repo root unless worktree settings tell it to create a new one.
+If you remove the worktree and relaunch the agent, Torque launches it from the repo root unless worktree settings tell it to create a new one.
 
 ## Closing agents with worktrees
 
-When you remove an agent that has an active worktree with uncommitted changes, Loom warns you about the state of the worktree (dirty files, number of commits) so you can checkpoint or merge before closing.
+When you remove an agent that has an active worktree with uncommitted changes, Torque warns you about the state of the worktree (dirty files, number of commits) so you can checkpoint or merge before closing.
 
-Removing the agent also removes Loom-managed runtime files associated with that session, such as adapter hooks, MCP config, and persistent prompt files in the worktree directory.
+Removing the agent also removes Torque-managed runtime files associated with that session, such as adapter hooks, MCP config, and persistent prompt files in the worktree directory.

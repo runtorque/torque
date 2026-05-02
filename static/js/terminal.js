@@ -563,7 +563,7 @@ function _renderTerminalCompose(root, cell) {
   // Idempotent path: if the form already exists for this cell, update only
   // the dynamic bits (placeholder, error, button disabled, draft value if it
   // drifted) without clobbering the textarea \u2014 clobbering destroys focus and
-  // produces the LOOM:264 textbox-border flicker under multi-agent activity.
+  // produces the TORQUE:264 textbox-border flicker under multi-agent activity.
   const existingForm = root.querySelector ? root.querySelector('.terminal-compose') : null;
   const existingCellId = existingForm && existingForm.dataset
     ? String(existingForm.dataset.cellId || '')
@@ -1088,9 +1088,9 @@ function _updateEmbeddedTerminalEntrySession(entry, cell, sessionKey, sessionId)
   entry.sessionId = sessionId;
   _embeddedTerminalSessions[sessionKey] = entry;
   if (entry.surface) {
-    if (entry.surface.dataset) entry.surface.dataset.loomSessionKey = sessionKey;
+    if (entry.surface.dataset) entry.surface.dataset.torqueSessionKey = sessionKey;
     if (typeof entry.surface.setAttribute === 'function') {
-      entry.surface.setAttribute('data-loom-session-key', sessionKey);
+      entry.surface.setAttribute('data-torque-session-key', sessionKey);
     }
   }
 }
@@ -1098,7 +1098,7 @@ function _updateEmbeddedTerminalEntrySession(entry, cell, sessionKey, sessionId)
 function _writeEmbeddedTerminalSessionRestartedSeparator(entry) {
   const term = entry && entry.terminal;
   if (!term) return;
-  const line = '──── Loom session restarted ────';
+  const line = '──── Torque session restarted ────';
   if (typeof term.writeln === 'function') {
     term.writeln(line);
   } else if (typeof term.write === 'function') {
@@ -1330,7 +1330,7 @@ function _clearEmbeddedTerminalStagePlaceholders(stage) {
 function _createEmbeddedTerminalSurface(stage, sessionKey) {
   _clearEmbeddedTerminalStagePlaceholders(stage);
   let surface = stage && stage.querySelector ? stage.querySelector('.terminal-surface') : null;
-  if (surface && surface.dataset && surface.dataset.loomSessionKey) surface = null;
+  if (surface && surface.dataset && surface.dataset.torqueSessionKey) surface = null;
   if (!surface) {
     surface = document.createElement('div');
     if (stage && typeof stage.appendChild === 'function') stage.appendChild(surface);
@@ -1339,9 +1339,9 @@ function _createEmbeddedTerminalSurface(stage, sessionKey) {
   if (surface.classList && typeof surface.classList.add === 'function') {
     surface.classList.add('terminal-surface');
   }
-  if (surface.dataset) surface.dataset.loomSessionKey = sessionKey;
+  if (surface.dataset) surface.dataset.torqueSessionKey = sessionKey;
   if (typeof surface.setAttribute === 'function') {
-    surface.setAttribute('data-loom-session-key', sessionKey);
+    surface.setAttribute('data-torque-session-key', sessionKey);
   }
   return surface;
 }
@@ -1370,7 +1370,7 @@ function _renderEmbeddedTerminalStagePlaceholder(stage, html) {
   const hasPlaceholder = !!(stage.children && Array.prototype.some.call(stage.children, function(child) {
     return !(child && child.classList && child.classList.contains('terminal-surface'));
   }));
-  if (stage._loomLastHtml === html && hasPlaceholder) return;
+  if (stage._torqueLastHtml === html && hasPlaceholder) return;
   _clearEmbeddedTerminalStagePlaceholders(stage);
   const placeholder = document.createElement('div');
   placeholder.className = 'terminal-empty';
@@ -1379,7 +1379,7 @@ function _renderEmbeddedTerminalStagePlaceholder(stage, html) {
   }
   placeholder.innerHTML = html;
   if (typeof stage.appendChild === 'function') stage.appendChild(placeholder);
-  stage._loomLastHtml = html;
+  stage._torqueLastHtml = html;
 }
 
 function renderTerminalWorkspace() {
@@ -1412,7 +1412,7 @@ function renderTerminalWorkspace() {
   const title = cell && cell.name ? cell.name : 'Terminal';
   // Idempotent topbar/tabs: skip the innerHTML clobber when the rendered
   // HTML hasn't changed. Under multi-agent activity `renderTerminalWorkspace`
-  // is called on every grid render (LOOM:264 firehose) — without this guard
+  // is called on every grid render (TORQUE:264 firehose) — without this guard
   // we rewrite the topbar + tabs DOM dozens of times per second even though
   // nothing visible changed.
   const topbarHtml = ''
@@ -1425,15 +1425,15 @@ function renderTerminalWorkspace() {
       ? '  <button class="terminal-topbar-btn terminal-topbar-btn-primary" onclick="' + topbarAction.onclick + '">' + topbarAction.label + '</button>'
       : '')
     + '</div>';
-  if (dom.topbar._loomLastHtml !== topbarHtml) {
+  if (dom.topbar._torqueLastHtml !== topbarHtml) {
     dom.topbar.innerHTML = topbarHtml;
-    dom.topbar._loomLastHtml = topbarHtml;
+    dom.topbar._torqueLastHtml = topbarHtml;
   }
   dom.tabs.classList.toggle('terminal-tabs-hidden', !showTabs);
   const tabsHtml = showTabs ? _renderTerminalTabs(cells, cell ? cell.id : '') : '';
-  if (dom.tabs._loomLastHtml !== tabsHtml) {
+  if (dom.tabs._torqueLastHtml !== tabsHtml) {
     dom.tabs.innerHTML = tabsHtml;
-    dom.tabs._loomLastHtml = tabsHtml;
+    dom.tabs._torqueLastHtml = tabsHtml;
   }
 
   if (!cell) {
@@ -1441,15 +1441,15 @@ function renderTerminalWorkspace() {
     const emptyHtml = ''
       + '<div class="terminal-empty">'
       + '  <div class="terminal-empty-title">Open a shell</div>'
-      + '  <div class="terminal-empty-body">Start a standalone terminal for this workspace and Loom will drop you into it ready to type.</div>'
+      + '  <div class="terminal-empty-body">Start a standalone terminal for this workspace and Torque will drop you into it ready to type.</div>'
       + (primaryAction
         ? '  <button class="terminal-empty-btn" onclick="' + primaryAction.onclick + '">' + primaryAction.label + '</button>'
         : '')
       + '  <div class="terminal-empty-meta">The terminal will take focus automatically when it opens.</div>'
       + '</div>';
-    if (dom.stage._loomLastHtml !== emptyHtml) {
+    if (dom.stage._torqueLastHtml !== emptyHtml) {
       dom.stage.innerHTML = emptyHtml;
-      dom.stage._loomLastHtml = emptyHtml;
+      dom.stage._torqueLastHtml = emptyHtml;
     }
     if (dom.statusbar.textContent !== 'Standalone PTY workspace') {
       dom.statusbar.textContent = 'Standalone PTY workspace';
@@ -1466,11 +1466,11 @@ function renderTerminalWorkspace() {
       + '  <div class="terminal-empty-title">' + esc(cell.name) + ' is stopped</div>'
       + '  <div class="terminal-empty-body">Relaunch this session to put it back in the workspace and return keyboard focus to the shell.</div>'
       + '  <button class="terminal-empty-btn" onclick="relaunchAgent(\'' + esc(cell.id) + '\')">Relaunch</button>'
-      + '  <div class="terminal-empty-meta">When it comes back, Loom will focus the terminal automatically.</div>';
+      + '  <div class="terminal-empty-meta">When it comes back, Torque will focus the terminal automatically.</div>';
     const stoppedEntry = _findEmbeddedTerminalEntryForCell(cell.id);
     if (stoppedEntry) {
       _activateEmbeddedTerminalSurface(dom.stage, stoppedEntry.sessionKey);
-      dom.stage._loomLastHtml = null;
+      dom.stage._torqueLastHtml = null;
     } else {
       _activateEmbeddedTerminalSurface(dom.stage, sessionKey);
       _renderEmbeddedTerminalStagePlaceholder(dom.stage, stoppedHtml);
@@ -1500,7 +1500,7 @@ function renderTerminalWorkspace() {
   // rather than rewriting `dom.stage.innerHTML`. Invalidate the empty/stopped
   // HTML cache so the next transition back to a no-cell / stopped-cell state
   // re-renders the empty placeholder.
-  dom.stage._loomLastHtml = null;
+  dom.stage._torqueLastHtml = null;
 
   _renderTerminalCompose(dom.compose, cell);
   const statusText = (displayPath || 'No directory') + '  |  ' + _terminalStatusLabel(cell);

@@ -1,12 +1,12 @@
 # CLI Reference
 
-The `loom` CLI lets you manage agents, terminals, tasks, and worktrees from the command line. Install it with:
+The `torque` CLI lets you manage agents, terminals, tasks, and worktrees from the command line. Install it with:
 
 ```bash
 make cli
 ```
 
-This creates a symlink so `loom` is available in your shell. The CLI talks to the running daemon over HTTP for write operations and reads SQLite directly for read-only queries (so commands like `loom task list` work even when the daemon is stopped).
+This creates a symlink so `torque` is available in your shell. The CLI talks to the running daemon over HTTP for write operations and reads SQLite directly for read-only queries (so commands like `torque task list` work even when the daemon is stopped).
 
 ## Global flags
 
@@ -22,10 +22,10 @@ This creates a symlink so `loom` is available in your shell. The CLI talks to th
 Show groups and agents, or details for a specific agent.
 
 ```bash
-loom status                       # show all groups and agents
-loom status -g backend            # filter by group
-loom status -a                    # show all windows
-loom status impl-add-auth         # show details for a specific agent
+torque status                       # show all groups and agents
+torque status -g backend            # filter by group
+torque status -a                    # show all windows
+torque status impl-add-auth         # show details for a specific agent
 ```
 
 | Flag | Description |
@@ -39,26 +39,26 @@ Aliases: `st`, `ls`
 
 ## desktop
 
-Launch Loom in the native desktop shell.
+Launch Torque in the native desktop shell.
 
 ```bash
-loom desktop
-loom desktop --attach --profile desktop --port 18933
-loom desktop --python "/path/to/python3"
+torque desktop
+torque desktop --attach --profile desktop --port 18933
+torque desktop --python "/path/to/python3"
 ```
 
 Default desktop values are intentionally separate from the Toolbelt daemon:
 
 - profile: `desktop`
 - port: `18933`
-- data dir: `~/.loom/profiles/desktop`
+- data dir: `~/.torque/profiles/desktop`
 
-Attach mode only reuses an existing **matching standalone** Loom server. It
+Attach mode only reuses an existing **matching standalone** Torque server. It
 will refuse to attach to the iTerm2-hosted Toolbelt daemon or to a standalone
 server with a different profile or data dir.
 
 `pywebview` must be installed in the Python runtime that launches the desktop
-shell. For the standard Loom install, run:
+shell. For the standard Torque install, run:
 
 ```bash
 make desktop-deps
@@ -66,7 +66,7 @@ make desktop-deps
 
 | Flag | Description |
 |------|-------------|
-| `--attach` | Reuse an existing matching standalone Loom server instead of spawning a child server |
+| `--attach` | Reuse an existing matching standalone Torque server instead of spawning a child server |
 | `--profile` | Desktop profile override |
 | `--port` | Desktop standalone port override |
 | `--data-dir` | Desktop data-dir override |
@@ -81,13 +81,13 @@ Manage groups.
 ### group add
 
 ```bash
-loom group add backend
+torque group add backend
 ```
 
 ### group remove
 
 ```bash
-loom group remove backend
+torque group remove backend
 ```
 
 Alias: `rm`
@@ -95,7 +95,7 @@ Alias: `rm`
 ### group rename
 
 ```bash
-loom group rename backend api
+torque group rename backend api
 ```
 
 Alias: `mv`
@@ -105,10 +105,10 @@ Alias: `mv`
 Show or update group settings.
 
 ```bash
-loom group settings backend                              # show settings
-loom group settings backend -s git_worktree=true         # enable worktrees
-loom group settings backend -s agent_boot_command=claude  # set boot command
-loom group settings backend -s 'worktree_symlinks=["etl/**/node_modules",".venv"]'
+torque group settings backend                              # show settings
+torque group settings backend -s git_worktree=true         # enable worktrees
+torque group settings backend -s agent_boot_command=claude  # set boot command
+torque group settings backend -s 'worktree_symlinks=["etl/**/node_modules",".venv"]'
 ```
 
 Pass `-s KEY=VALUE` to update. Multiple `-s` flags are supported. Boolean values use `true`/`false`.
@@ -124,13 +124,13 @@ Manage agents.
 ### agent add
 
 ```bash
-loom agent add my-agent -g backend
-loom agent add my-agent -g backend -c claude -d ~/project --color "#3fb950"
+torque agent add my-agent -g backend
+torque agent add my-agent -g backend -c claude -d ~/project --color "#3fb950"
 ```
 
 | Flag | Description |
 |------|-------------|
-| `-g, --group` | Target group (auto-detected if in a Loom session) |
+| `-g, --group` | Target group (auto-detected if in a Torque session) |
 | `-c, --command` | Boot command |
 | `-d, --directory` | Working directory |
 | `--profile` | iTerm2 profile |
@@ -139,7 +139,7 @@ loom agent add my-agent -g backend -c claude -d ~/project --color "#3fb950"
 ### agent remove
 
 ```bash
-loom agent remove impl-add-auth
+torque agent remove impl-add-auth
 ```
 
 Accepts ID, slug, or name. Alias: `rm`
@@ -149,7 +149,7 @@ Accepts ID, slug, or name. Alias: `rm`
 Focus the agent's iTerm2 tab.
 
 ```bash
-loom agent focus impl-add-auth
+torque agent focus impl-add-auth
 ```
 
 ### agent relaunch
@@ -157,7 +157,7 @@ loom agent focus impl-add-auth
 Restart a stopped agent.
 
 ```bash
-loom agent relaunch impl-add-auth
+torque agent relaunch impl-add-auth
 ```
 
 ### agent move
@@ -165,7 +165,7 @@ loom agent relaunch impl-add-auth
 Move an agent to a different group.
 
 ```bash
-loom agent move impl-add-auth -g frontend
+torque agent move impl-add-auth -g frontend
 ```
 
 ### agent edit
@@ -173,7 +173,7 @@ loom agent move impl-add-auth -g frontend
 Update an agent's name or tab color.
 
 ```bash
-loom agent edit impl-add-auth --name review-auth --color "#a371f7"
+torque agent edit impl-add-auth --name review-auth --color "#a371f7"
 ```
 
 Alias: `a`
@@ -187,9 +187,9 @@ Manage terminals.
 ### terminal add
 
 ```bash
-loom terminal add logs -p impl-add-auth                   # child of an agent
-loom terminal add shell -g backend                        # standalone in group
-loom terminal add tests -p impl-add-auth -c "npm test"    # with boot command
+torque terminal add logs -p impl-add-auth                   # child of an agent
+torque terminal add shell -g backend                        # standalone in group
+torque terminal add tests -p impl-add-auth -c "npm test"    # with boot command
 ```
 
 | Flag | Description |
@@ -204,7 +204,7 @@ loom terminal add tests -p impl-add-auth -c "npm test"    # with boot command
 ### terminal remove
 
 ```bash
-loom terminal remove impl-add-auth:logs
+torque terminal remove impl-add-auth:logs
 ```
 
 Alias: `rm`
@@ -214,8 +214,8 @@ Alias: `rm`
 Move a terminal to a different parent agent, or detach it.
 
 ```bash
-loom terminal reparent impl-add-auth:logs -p review-auth   # new parent
-loom terminal reparent impl-add-auth:logs --detach          # standalone
+torque terminal reparent impl-add-auth:logs -p review-auth   # new parent
+torque terminal reparent impl-add-auth:logs --detach          # standalone
 ```
 
 Aliases: `t`, `term`
@@ -227,13 +227,13 @@ Aliases: `t`, `term`
 Send text to an agent or terminal session.
 
 ```bash
-loom send "git status" -t impl-add-auth
-loom send "fix the auth bug" -t impl-add-auth -w    # send and wait for completion
+torque send "git status" -t impl-add-auth
+torque send "fix the auth bug" -t impl-add-auth -w    # send and wait for completion
 ```
 
 | Flag | Description |
 |------|-------------|
-| `-t, --to` | Target agent or terminal (auto-detected if in a Loom session) |
+| `-t, --to` | Target agent or terminal (auto-detected if in a Torque session) |
 | `-w, --wait` | Wait until the agent finishes (polls every 2s) |
 
 ---
@@ -247,11 +247,11 @@ Task and ticket management.
 Create a task in the Backlog without launching an agent.
 
 ```bash
-loom task create "Add dark mode support" -g frontend
-loom task create "Fix login bug" -t oneshot/fix -v MODULE=auth
-loom task create "Review PR" -l review,urgent
-loom task create "Deploy auth changes" --depends-on review-auth
-loom task create "Kick off release checklist" --at "tomorrow 09:00"
+torque task create "Add dark mode support" -g frontend
+torque task create "Fix login bug" -t oneshot/fix -v MODULE=auth
+torque task create "Review PR" -l review,urgent
+torque task create "Deploy auth changes" --depends-on review-auth
+torque task create "Kick off release checklist" --at "tomorrow 09:00"
 ```
 
 | Flag | Description |
@@ -270,9 +270,9 @@ Alias: `c`
 Create a task, launch an agent, and send the prompt --- all in one command.
 
 ```bash
-loom task dispatch "Add dark mode" -t feature/implement -g frontend
-loom task dispatch "Fix flaky test" -t oneshot/fix -v MODULE=auth -w
-loom task dispatch "Quick fix" -g backend                     # no action, raw task text
+torque task dispatch "Add dark mode" -t feature/implement -g frontend
+torque task dispatch "Fix flaky test" -t oneshot/fix -v MODULE=auth -w
+torque task dispatch "Quick fix" -g backend                     # no action, raw task text
 ```
 
 | Flag | Description |
@@ -294,7 +294,7 @@ Alias: `d`
 Show full details for a task.
 
 ```bash
-loom task show add-dark-mode
+torque task show add-dark-mode
 ```
 
 Accepts ID, slug, or title.
@@ -304,10 +304,10 @@ Accepts ID, slug, or title.
 List tasks with optional filters.
 
 ```bash
-loom task list                          # all tasks by lane
-loom task list -l "In Progress"         # only in-progress tasks
-loom task list -g backend               # filter by group
-loom task list --label review           # filter by label
+torque task list                          # all tasks by lane
+torque task list -l "In Progress"         # only in-progress tasks
+torque task list -g backend               # filter by group
+torque task list --label review           # filter by label
 ```
 
 | Flag | Description |
@@ -324,13 +324,13 @@ Alias: `ls`
 Edit a task's fields. Opens `$EDITOR` with the task as YAML, or use inline flags.
 
 ```bash
-loom task edit add-dark-mode                                # opens $EDITOR
-loom task edit add-dark-mode -t "Updated description"       # inline edit
-loom task edit add-dark-mode --action feature/implement     # change action
-loom task edit add-dark-mode -l feature,priority            # update labels
-loom task edit deploy-auth-middleware --depends-on review-auth,run-auth-tests
-loom task edit release-checklist --at "2026-04-07T12:00:00Z"
-loom task edit deploy-auth-middleware --verify-state pending --verify-mode deploy
+torque task edit add-dark-mode                                # opens $EDITOR
+torque task edit add-dark-mode -t "Updated description"       # inline edit
+torque task edit add-dark-mode --action feature/implement     # change action
+torque task edit add-dark-mode -l feature,priority            # update labels
+torque task edit deploy-auth-middleware --depends-on review-auth,run-auth-tests
+torque task edit release-checklist --at "2026-04-07T12:00:00Z"
+torque task edit deploy-auth-middleware --verify-state pending --verify-mode deploy
 ```
 
 | Flag | Description |
@@ -358,11 +358,11 @@ Alias: `e`
 Record a deploy/restart verification checkpoint without opening the full task editor.
 
 ```bash
-loom task verify deploy-auth-middleware --mode deploy --state pending --note "Waiting for staging deploy"
-loom task verify deploy-auth-middleware --mode deploy --attempted --note "Deployed to staging"
-loom task verify deploy-auth-middleware --smoke passed --note "Login and billing pages load"
-loom task verify deploy-auth-middleware --smoke failed --note "Smoke failed on login redirect"
-loom task verify deploy-auth-middleware --clear-deploy-needed --clear-human --smoke passed
+torque task verify deploy-auth-middleware --mode deploy --state pending --note "Waiting for staging deploy"
+torque task verify deploy-auth-middleware --mode deploy --attempted --note "Deployed to staging"
+torque task verify deploy-auth-middleware --smoke passed --note "Login and billing pages load"
+torque task verify deploy-auth-middleware --smoke failed --note "Smoke failed on login redirect"
+torque task verify deploy-auth-middleware --clear-deploy-needed --clear-human --smoke passed
 ```
 
 | Flag | Description |
@@ -386,7 +386,7 @@ loom task verify deploy-auth-middleware --clear-deploy-needed --clear-human --sm
 Move a task to a different lane.
 
 ```bash
-loom task move add-dark-mode -l Done
+torque task move add-dark-mode -l Done
 ```
 
 Alias: `mv`
@@ -396,7 +396,7 @@ Alias: `mv`
 Show the full pipeline derivation chain for a task.
 
 ```bash
-loom task chain add-dark-mode
+torque task chain add-dark-mode
 ```
 
 Displays the chain with depth, status, lane, and linked agent for each task.
@@ -406,7 +406,7 @@ Displays the chain with depth, status, lane, and linked agent for each task.
 Resolve a human-in-the-loop ask task by sending an answer back to the waiting agent.
 
 ```bash
-loom task resolve review-auth "Approved. Merge after CI passes."
+torque task resolve review-auth "Approved. Merge after CI passes."
 ```
 
 ---
@@ -418,8 +418,8 @@ Board management (aliases for common task operations).
 ### board list
 
 ```bash
-loom board list                 # all tasks by lane
-loom board list -l Backlog      # filter by lane
+torque board list                 # all tasks by lane
+torque board list -l Backlog      # filter by lane
 ```
 
 Alias: `ls`
@@ -427,31 +427,31 @@ Alias: `ls`
 ### board add
 
 ```bash
-loom board add "Quick fix needed" -g backend -l "In Progress"
+torque board add "Quick fix needed" -g backend -l "In Progress"
 ```
 
 ### board move
 
 ```bash
-loom board move fix-login -l Done
+torque board move fix-login -l Done
 ```
 
 ### board archive
 
 ```bash
-loom board archive fix-login
+torque board archive fix-login
 ```
 
 ### board unarchive
 
 ```bash
-loom board unarchive fix-login
+torque board unarchive fix-login
 ```
 
 ### board remove
 
 ```bash
-loom board remove fix-login
+torque board remove fix-login
 ```
 
 Alias: `rm`
@@ -461,7 +461,7 @@ Alias: `rm`
 List all lanes with task counts.
 
 ```bash
-loom board lanes
+torque board lanes
 ```
 
 Alias: `bd`
@@ -475,17 +475,17 @@ Action management.
 ### action list
 
 ```bash
-loom action list
+torque action list
 ```
 
-Shows all actions from project (`.loom/actions/`) and global (`~/.loom/actions/`) directories, with scope and variable info.
+Shows all actions from project (`.torque/actions/`) and global (`~/.torque/actions/`) directories, with scope and variable info.
 
 Alias: `ls`
 
 ### action show
 
 ```bash
-loom action show feature/review
+torque action show feature/review
 ```
 
 Displays the action YAML and auto-discovered variables.
@@ -493,10 +493,10 @@ Displays the action YAML and auto-discovered variables.
 ### action create
 
 ```bash
-loom action create my-action
+torque action create my-action
 ```
 
-Creates a starter action file in `.loom/actions/`.
+Creates a starter action file in `.torque/actions/`.
 
 Alias: `act`
 
@@ -509,15 +509,15 @@ Git worktree management. See [Worktrees](worktrees.md) for the full guide.
 ### worktree create
 
 ```bash
-loom worktree create impl-add-auth
-loom worktree create impl-add-auth --relaunch    # relaunch agent in the worktree
+torque worktree create impl-add-auth
+torque worktree create impl-add-auth --relaunch    # relaunch agent in the worktree
 ```
 
 ### worktree remove
 
 ```bash
-loom worktree remove impl-add-auth
-loom worktree remove impl-add-auth --relaunch    # relaunch agent in the original repo
+torque worktree remove impl-add-auth
+torque worktree remove impl-add-auth --relaunch    # relaunch agent in the original repo
 ```
 
 Alias: `rm`
@@ -527,7 +527,7 @@ Alias: `rm`
 Create a checkpoint commit (snapshot of current changes).
 
 ```bash
-loom worktree checkpoint impl-add-auth
+torque worktree checkpoint impl-add-auth
 ```
 
 Alias: `cp`
@@ -537,7 +537,7 @@ Alias: `cp`
 Show checkpoint history for an agent's worktree.
 
 ```bash
-loom worktree history impl-add-auth
+torque worktree history impl-add-auth
 ```
 
 Alias: `log`
@@ -547,7 +547,7 @@ Alias: `log`
 Reset the worktree to a previous checkpoint.
 
 ```bash
-loom worktree rollback impl-add-auth abc1234
+torque worktree rollback impl-add-auth abc1234
 ```
 
 Alias: `wt`
@@ -556,15 +556,15 @@ Alias: `wt`
 
 ## ai
 
-Agent reporting commands. These are designed to be called **by AI agents** (e.g., Claude Code) from within a Loom-managed session. The calling agent is auto-detected via the `LOOM_CELL_ID` environment variable.
+Agent reporting commands. These are designed to be called **by AI agents** (e.g., Claude Code) from within a Torque-managed session. The calling agent is auto-detected via the `TORQUE_CELL_ID` environment variable.
 
 ### ai done
 
 Mark the current task as complete.
 
 ```bash
-loom ai done
-loom ai done -m "Implemented auth with JWT tokens"    # with summary
+torque ai done
+torque ai done -m "Implemented auth with JWT tokens"    # with summary
 ```
 
 ### ai blocked
@@ -572,7 +572,7 @@ loom ai done -m "Implemented auth with JWT tokens"    # with summary
 Signal that the agent is blocked and needs user input.
 
 ```bash
-loom ai blocked "Need credentials for the staging database"
+torque ai blocked "Need credentials for the staging database"
 ```
 
 ### ai error
@@ -580,7 +580,7 @@ loom ai blocked "Need credentials for the staging database"
 Report an unrecoverable error.
 
 ```bash
-loom ai error "Build fails due to missing dependency"
+torque ai error "Build fails due to missing dependency"
 ```
 
 ### ai progress
@@ -588,7 +588,7 @@ loom ai error "Build fails due to missing dependency"
 Report progress on the current task (updates the activity detail in the UI).
 
 ```bash
-loom ai progress "Running test suite (3/5 passing)"
+torque ai progress "Running test suite (3/5 passing)"
 ```
 
 ### ai verify
@@ -596,9 +596,9 @@ loom ai progress "Running test suite (3/5 passing)"
 Record manual deploy, restart, smoke, and human-validation checkpoints for the current task.
 
 ```bash
-loom ai verify --state pending --mode deploy --tests "python3 -m unittest"
-loom ai verify --deploy-attempted --smoke-done -m "Smoke passed on staging"
-loom ai verify --state failed --human "Need PM sign-off after production check"
+torque ai verify --state pending --mode deploy --tests "python3 -m unittest"
+torque ai verify --deploy-attempted --smoke-done -m "Smoke passed on staging"
+torque ai verify --state failed --human "Need PM sign-off after production check"
 ```
 
 ### ai ready
@@ -606,7 +606,7 @@ loom ai verify --state failed --human "Need PM sign-off after production check"
 Signal that the agent is done and ready for a new task. Unlike `done`, this also unlinks the agent from the task.
 
 ```bash
-loom ai ready
+torque ai ready
 ```
 
 ### ai context
@@ -614,7 +614,7 @@ loom ai ready
 Show the current agent's context (name, group, directory, worktree, linked tasks). Works offline --- reads from the local database.
 
 ```bash
-loom ai context
+torque ai context
 ```
 
 ### ai derive
@@ -622,9 +622,9 @@ loom ai context
 Create a derived task and dispatch it. See [Actions & Templates](actions.md#transition-targeted-routing) for details on `--agent` and `--self`.
 
 ```bash
-loom ai derive "Review the implementation" -t feature/review
-loom ai derive "Fix the issues found" -t feature/fix-review --agent impl-add-auth
-loom ai derive "Now add tests" -t feature/implement --self
+torque ai derive "Review the implementation" -t feature/review
+torque ai derive "Fix the issues found" -t feature/fix-review --agent impl-add-auth
+torque ai derive "Now add tests" -t feature/implement --self
 ```
 
 | Flag | Description |
@@ -640,7 +640,7 @@ loom ai derive "Now add tests" -t feature/implement --self
 Create a task in Backlog for human review (human-in-the-loop gate).
 
 ```bash
-loom ai ask "Implementation is done. Should we deploy or add more tests?"
+torque ai ask "Implementation is done. Should we deploy or add more tests?"
 ```
 
 ---
@@ -652,7 +652,7 @@ Pipeline discovery from action transitions.
 ### pipeline list
 
 ```bash
-loom pipeline list
+torque pipeline list
 ```
 
 Lists all pipelines discovered by scanning action `transitions` fields.
@@ -660,7 +660,7 @@ Lists all pipelines discovered by scanning action `transitions` fields.
 ### pipeline show
 
 ```bash
-loom pipeline show feature/implement
+torque pipeline show feature/implement
 ```
 
 Shows the pipeline structure with actions and transition conditions.
@@ -676,13 +676,13 @@ Recurring and one-shot task creation plus automatic dispatch.
 ### schedule create
 
 ```bash
-loom schedule create weekly-deps \
+torque schedule create weekly-deps \
   -g backend \
   --cron "0 9 * * 1" \
   --task "Weekly dependency update {date}" \
   -t maintenance/deps
 
-loom schedule create release-checklist \
+torque schedule create release-checklist \
   -g ops \
   --at "tomorrow 09:00" \
   --task "Release checklist {datetime}"
@@ -703,7 +703,7 @@ loom schedule create release-checklist \
 ### schedule list
 
 ```bash
-loom schedule list
+torque schedule list
 ```
 
 Alias: `ls`
@@ -711,26 +711,26 @@ Alias: `ls`
 ### schedule show
 
 ```bash
-loom schedule show weekly-deps
+torque schedule show weekly-deps
 ```
 
 ### schedule edit
 
 ```bash
-loom schedule edit weekly-deps --cron "0 8 * * 1"
-loom schedule edit weekly-deps -t maintenance/deps -v MODULE=auth
+torque schedule edit weekly-deps --cron "0 8 * * 1"
+torque schedule edit weekly-deps -t maintenance/deps -v MODULE=auth
 ```
 
 ### schedule enable
 
 ```bash
-loom schedule enable weekly-deps
+torque schedule enable weekly-deps
 ```
 
 ### schedule disable
 
 ```bash
-loom schedule disable weekly-deps
+torque schedule disable weekly-deps
 ```
 
 ### schedule run
@@ -738,7 +738,7 @@ loom schedule disable weekly-deps
 Trigger the schedule immediately and create a fresh task now.
 
 ```bash
-loom schedule run weekly-deps
+torque schedule run weekly-deps
 ```
 
 ---
@@ -748,6 +748,6 @@ loom schedule run weekly-deps
 Tail the daemon log.
 
 ```bash
-loom logs              # show last 50 lines
-loom logs -f           # follow (like tail -f)
+torque logs              # show last 50 lines
+torque logs -f           # follow (like tail -f)
 ```

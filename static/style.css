@@ -1230,7 +1230,7 @@ body.runtime-embedded .agent-focus-header {
   align-self: stretch;
   /* Override .ghost-card height so the wrapped "+ New Architect" button on its
      own row preserves the populated principal-card height instead of collapsing
-     to the short ghost-card height. (LOOM:209) */
+     to the short ghost-card height. (TORQUE:209) */
   height: auto;
   min-height: var(--agent-card-height, 96px);
 }
@@ -2517,8 +2517,8 @@ body.standalone-mode .preview-popup {
  * desktop mode share the embedded terminal path, where these settings have
  * no effect.  Keep toolbelt display untouched by only hiding in standalone. */
 body.standalone-mode .iterm2-only,
-body[data-loom-mode="standalone"] .iterm2-only,
-body[data-loom-mode="desktop"] .iterm2-only {
+body[data-torque-mode="standalone"] .iterm2-only,
+body[data-torque-mode="desktop"] .iterm2-only {
   display: none !important;
 }
 
@@ -3914,13 +3914,13 @@ body.runtime-embedded #panel-board .board-wide-lane-body {
 .board-card:hover,
 .board-card.board-card-hovered { background: var(--bg-hover); }
 /* Brief highlight when a board task is opened externally via the
-   clickable LOOM:XXX label on a worker card. */
+   clickable TORQUE:XXX label on a worker card. */
 .board-card.board-card--external-focus {
   border-color: color-mix(in srgb, var(--accent) 78%, var(--border));
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
   transition: border-color .25s, box-shadow .25s;
 }
-/* Worker card: clickable LOOM:XXX label (opens the task in the Board panel). */
+/* Worker card: clickable TORQUE:XXX label (opens the task in the Board panel). */
 .cell-worker-task--clickable {
   cursor: pointer;
   color: var(--accent);
@@ -6281,21 +6281,21 @@ body.runtime-embedded .board-empty-action:focus-visible {
 }
 
 
-body[data-loom-mode="standalone"] #modal-task .modal,
-body[data-loom-mode="desktop"] #modal-task .modal {
+body[data-torque-mode="standalone"] #modal-task .modal,
+body[data-torque-mode="desktop"] #modal-task .modal {
   max-width: 420px;
 }
 @media (min-width: 400px) {
-  body[data-loom-mode="standalone"] #modal-task .modal,
-  body[data-loom-mode="desktop"] #modal-task .modal { max-width: 540px; }
+  body[data-torque-mode="standalone"] #modal-task .modal,
+  body[data-torque-mode="desktop"] #modal-task .modal { max-width: 540px; }
 }
 @media (min-width: 600px) {
-  body[data-loom-mode="standalone"] #modal-task .modal,
-  body[data-loom-mode="desktop"] #modal-task .modal { max-width: 660px; }
+  body[data-torque-mode="standalone"] #modal-task .modal,
+  body[data-torque-mode="desktop"] #modal-task .modal { max-width: 660px; }
 }
 @media (min-width: 900px) {
-  body[data-loom-mode="standalone"] #modal-task .modal,
-  body[data-loom-mode="desktop"] #modal-task .modal { max-width: 780px; }
+  body[data-torque-mode="standalone"] #modal-task .modal,
+  body[data-torque-mode="desktop"] #modal-task .modal { max-width: 780px; }
 }
 
 /* -- Diff review view ------------------------------------------------- */

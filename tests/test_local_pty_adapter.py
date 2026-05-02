@@ -18,9 +18,9 @@ except ModuleNotFoundError:
 class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub()
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
-        self.pty_mod = importlib.import_module("loom.local_pty")
+        self.pty_mod = importlib.import_module("torque.local_pty")
         self.pty_mod = importlib.reload(self.pty_mod)
 
     def test_capabilities_expose_embedded_terminal_without_toolbelt_registration(self):
@@ -30,12 +30,12 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_create_session_emits_output_and_tracks_focus(self):
         state = self.state_mod.MatrixState()
-        state.add_group("Loom")
+        state.add_group("Torque")
         cell = state.add_terminal(
             name="Terminal 1",
-            group="Loom",
+            group="Torque",
             terminal_backend="pty",
-            command="printf 'hello-loom\\n'",
+            command="printf 'hello-torque\\n'",
         )
         adapter = self.pty_mod.LocalPtyAdapter(state)
         seen = asyncio.Future()
@@ -43,7 +43,7 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
         async def on_output(cell_id, session_id, text):
             if (
                 cell_id == cell.id
-                and "hello-loom" in text
+                and "hello-torque" in text
                 and not seen.done()
             ):
                 seen.set_result((cell_id, session_id, text))
@@ -63,16 +63,16 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_create_session_preserves_existing_focus(self):
         state = self.state_mod.MatrixState()
-        state.add_group("Loom")
+        state.add_group("Torque")
         first = state.add_terminal(
             name="Terminal 1",
-            group="Loom",
+            group="Torque",
             terminal_backend="pty",
             command="sleep 30",
         )
         second = state.add_terminal(
             name="Terminal 2",
-            group="Loom",
+            group="Torque",
             terminal_backend="pty",
             command="sleep 30",
         )
@@ -133,10 +133,10 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_create_session_focuses_when_active_session_has_exited(self):
         state = self.state_mod.MatrixState()
-        state.add_group("Loom")
+        state.add_group("Torque")
         cell = state.add_terminal(
             name="Terminal 1",
-            group="Loom",
+            group="Torque",
             terminal_backend="pty",
             command="sleep 30",
         )
@@ -157,11 +157,11 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_write_input_accepts_raw_terminal_bytes(self):
         state = self.state_mod.MatrixState()
-        state.add_group("Loom")
+        state.add_group("Torque")
         with tempfile.TemporaryDirectory() as tmpdir:
             cell = state.add_terminal(
                 name="Terminal 1",
-                group="Loom",
+                group="Torque",
                 terminal_backend="pty",
                 directory=tmpdir,
             )
@@ -171,7 +171,7 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
             async def on_output(cell_id, session_id, text):
                 if (
                     cell_id == cell.id
-                    and "raw-loom" in text
+                    and "raw-torque" in text
                     and not seen.done()
                 ):
                     seen.set_result((cell_id, session_id, text))
@@ -183,21 +183,21 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
 
             await adapter.write_input(
                 cell.session_id,
-                "printf 'raw-loom\\n'\r",
+                "printf 'raw-torque\\n'\r",
             )
             result = await asyncio.wait_for(seen, timeout=4)
 
             self.assertEqual(result[0], cell.id)
-            self.assertIn("raw-loom", result[2])
+            self.assertIn("raw-torque", result[2])
 
             await adapter.close_session(cell.session_id)
 
     async def test_shutdown_closes_live_sessions(self):
         state = self.state_mod.MatrixState()
-        state.add_group("Loom")
+        state.add_group("Torque")
         cell = state.add_terminal(
             name="Terminal 1",
-            group="Loom",
+            group="Torque",
             terminal_backend="pty",
             command="sleep 30",
         )
@@ -217,10 +217,10 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_send_text_waits_for_input_ready_signal_for_hook_based_agent(self):
         state = self.state_mod.MatrixState()
-        state.add_group("Loom")
+        state.add_group("Torque")
         cell = state.add_agent(
             name="Engineer",
-            group="Loom",
+            group="Torque",
             terminal_backend="pty",
             command="claude",
             directory="/tmp",
@@ -255,10 +255,10 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_send_text_claude_multiline_uses_newline_shortcut_then_submit(self):
         state = self.state_mod.MatrixState()
-        state.add_group("Loom")
+        state.add_group("Torque")
         cell = state.add_agent(
             name="Engineer",
-            group="Loom",
+            group="Torque",
             terminal_backend="pty",
             command="claude",
             directory="/tmp",
@@ -289,10 +289,10 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_send_text_single_line_submits_without_settled_delay_by_default(self):
         state = self.state_mod.MatrixState()
-        state.add_group("Loom")
+        state.add_group("Torque")
         cell = state.add_agent(
             name="Engineer",
-            group="Loom",
+            group="Torque",
             terminal_backend="pty",
             command="codex",
             directory="/tmp",
@@ -331,10 +331,10 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_send_text_settled_submit_waits_before_single_line_submit(self):
         state = self.state_mod.MatrixState()
-        state.add_group("Loom")
+        state.add_group("Torque")
         cell = state.add_agent(
             name="Engineer",
-            group="Loom",
+            group="Torque",
             terminal_backend="pty",
             command="codex",
             directory="/tmp",
@@ -377,10 +377,10 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_send_text_waits_for_codex_ready_screen_once_in_standalone(self):
         state = self.state_mod.MatrixState()
-        state.add_group("Loom")
+        state.add_group("Torque")
         cell = state.add_agent(
             name="Engineer",
-            group="Loom",
+            group="Torque",
             terminal_backend="pty",
             command="codex",
             directory="/tmp",
@@ -446,10 +446,10 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_send_text_claude_applies_post_ready_delay_after_hook_signal(self):
         state = self.state_mod.MatrixState()
-        state.add_group("Loom")
+        state.add_group("Torque")
         cell = state.add_agent(
             name="Engineer",
-            group="Loom",
+            group="Torque",
             terminal_backend="pty",
             command="claude",
             directory="/tmp",
@@ -491,11 +491,11 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_create_session_installs_hooks_in_resolved_cwd_when_directory_blank(self):
         state = self.state_mod.MatrixState()
-        state.add_group("Loom")
+        state.add_group("Torque")
         with tempfile.TemporaryDirectory() as tmpdir:
             cell = state.add_agent(
                 name="Engineer",
-                group="Loom",
+                group="Torque",
                 terminal_backend="pty",
                 command="",
                 directory="",
@@ -506,7 +506,7 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
 
             try:
                 os.chdir(tmpdir)
-                with mock.patch.dict(os.environ, {"LOOM_PORT": "18933"}, clear=False):
+                with mock.patch.dict(os.environ, {"TORQUE_PORT": "18933"}, clear=False):
                     await adapter.start()
                     await adapter.create_session(cell)
                 resolved_tmpdir = os.path.realpath(tmpdir)
@@ -543,16 +543,16 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
         ):
             env = adapter._session_environment(
                 "cell-123",
-                {"CUSTOM_PATH": "~/loom-test"},
+                {"CUSTOM_PATH": "~/torque-test"},
             )
 
-        self.assertEqual(env["LOOM_CELL_ID"], "cell-123")
-        self.assertEqual(env["LOOM_STANDALONE_PTY"], "1")
+        self.assertEqual(env["TORQUE_CELL_ID"], "cell-123")
+        self.assertEqual(env["TORQUE_STANDALONE_PTY"], "1")
         self.assertEqual(env["TERM"], "xterm-256color")
         self.assertEqual(env["COLORTERM"], "truecolor")
         self.assertEqual(env["CLAUDE_GATEWAY_NO_AUTO_UPDATE"], "true")
         self.assertEqual(env["DISABLE_AUTOUPDATER"], "1")
-        self.assertEqual(env["CUSTOM_PATH"], os.path.expanduser("~/loom-test"))
+        self.assertEqual(env["CUSTOM_PATH"], os.path.expanduser("~/torque-test"))
         self.assertNotIn("ITERM_SESSION_ID", env)
         self.assertNotIn("ITERM_PROFILE", env)
         self.assertNotIn("LC_TERMINAL", env)
@@ -575,7 +575,7 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
             self.addCleanup(shutil.rmtree, bootstrap_dir, ignore_errors=True)
 
             self.assertEqual(env["ZDOTDIR"], bootstrap_dir)
-            self.assertEqual(env["LOOM_ORIGINAL_ZDOTDIR"], zdotdir)
+            self.assertEqual(env["TORQUE_ORIGINAL_ZDOTDIR"], zdotdir)
 
             zshrc = Path(bootstrap_dir) / ".zshrc"
             zshenv = Path(bootstrap_dir) / ".zshenv"
@@ -583,15 +583,15 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(zshenv.exists())
             zshrc_text = zshrc.read_text()
             self.assertIn('source "$ZDOTDIR/.zshrc"', zshrc_text)
-            self.assertIn("add-zsh-hook precmd _loom_precmd", zshrc_text)
+            self.assertIn("add-zsh-hook precmd _torque_precmd", zshrc_text)
             self.assertIn("printf '\\033]7;file://%s%s\\007'", zshrc_text)
 
     def test_startup_commands_skip_typed_bootstrap_for_zsh_sessions(self):
         state = self.state_mod.MatrixState()
-        state.add_group("Loom")
+        state.add_group("Torque")
         cell = state.add_terminal(
             name="Terminal 1",
-            group="Loom",
+            group="Torque",
             terminal_backend="pty",
             directory="/tmp",
         )

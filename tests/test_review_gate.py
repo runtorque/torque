@@ -41,11 +41,11 @@ class FakeWorktreeManager:
 class ReviewGateTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub()
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
-        self.server_mod = importlib.import_module("loom.server")
+        self.server_mod = importlib.import_module("torque.server")
         self.server_mod = importlib.reload(self.server_mod)
-        self.worktree_mod = importlib.import_module("loom.worktree")
+        self.worktree_mod = importlib.import_module("torque.worktree")
         self.worktree_mod = importlib.reload(self.worktree_mod)
 
     def _state_cell_task(self, *, action_name="feature/implement"):
@@ -200,7 +200,7 @@ class ReviewGateTests(unittest.IsolatedAsyncioTestCase):
         state.agents[engineer.id] = engineer
         cell.kind = "worker"
         cell.owner_engineer_id = engineer.id
-        cell.worktree_branch = "loom/worker-1"
+        cell.worktree_branch = "torque/worker-1"
         task.assigned_engineer_id = engineer.id
         action_mgr = FakeActionManager(
             {"implementation_depth": True, "review_required_above_loc": 100},
@@ -242,7 +242,7 @@ class ReviewGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(event["task_id"], task.id)
         self.assertIn("escape_clause_skip", event["message"])
         self.assertIn("worker=worker-1", event["message"])
-        self.assertIn("branch=loom/worker-1", event["message"])
+        self.assertIn("branch=torque/worker-1", event["message"])
 
     async def test_gate_skips_below_threshold(self):
         state, cell, task = self._state_cell_task()
@@ -468,7 +468,7 @@ class ReviewGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls, [])
 
     async def test_project_implementation_depth_actions_gate_by_default(self):
-        action_mgr = importlib.import_module("loom.actions").ActionManager()
+        action_mgr = importlib.import_module("torque.actions").ActionManager()
         repo_root = str(Path(__file__).resolve().parents[1])
 
         for action_name in (
@@ -505,7 +505,7 @@ class ReviewGateTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(calls[0]["action_name"], "feature/review")
 
     async def test_project_research_action_does_not_gate(self):
-        action_mgr = importlib.import_module("loom.actions").ActionManager()
+        action_mgr = importlib.import_module("torque.actions").ActionManager()
         repo_root = str(Path(__file__).resolve().parents[1])
         state, cell, task = self._state_cell_task(action_name="feature/research")
         worktree_mgr = FakeWorktreeManager(
@@ -984,7 +984,7 @@ class ReviewGateTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_non_test_filter_excludes_test_files_from_diff_size(self):
         summary, paths = self.worktree_mod._numstat_summary(
-            "120\t10\tloom/server.py\n"
+            "120\t10\ttorque/server.py\n"
             "999\t1\ttests/test_server.py\n"
             "50\t50\tstatic/app.test.js\n"
             "10\t10\tpkg/foo_test.go\n"
@@ -992,7 +992,7 @@ class ReviewGateTests(unittest.IsolatedAsyncioTestCase):
             non_test_only=True,
         )
 
-        self.assertEqual(paths, ["loom/server.py", "src/main.py"])
+        self.assertEqual(paths, ["torque/server.py", "src/main.py"])
         self.assertEqual(summary["files"], 2)
         self.assertEqual(summary["insertions"], 121)
         self.assertEqual(summary["deletions"], 12)

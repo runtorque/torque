@@ -1,4 +1,4 @@
-"""Tests for engineer-side deliverable awareness (LOOM:241 follow-up).
+"""Tests for engineer-side deliverable awareness (TORQUE:241 follow-up).
 
 When a task carries ``deliverable_required: true``, the engineer needs
 to know the deliverable contract and the engineer-side
@@ -30,9 +30,9 @@ except ModuleNotFoundError:
 class EngineerDeliverableAwarenessHelperTests(unittest.TestCase):
     def setUp(self):
         install_aiohttp_stub()
-        from loom.state import BoardTask
+        from torque.state import BoardTask
         self.BoardTask = BoardTask
-        from loom.server_prompts import build_engineer_deliverable_awareness
+        from torque.server_prompts import build_engineer_deliverable_awareness
         self._build = build_engineer_deliverable_awareness
 
     def test_no_block_when_not_required(self):
@@ -41,7 +41,7 @@ class EngineerDeliverableAwarenessHelperTests(unittest.TestCase):
 
     def test_block_includes_engineer_tool_with_task_id(self):
         task = self.BoardTask(
-            id="LOOM:99",
+            id="TORQUE:99",
             task="Audit MCP surface",
             group="g",
             deliverable_required=True,
@@ -52,12 +52,12 @@ class EngineerDeliverableAwarenessHelperTests(unittest.TestCase):
         block = self._build(task)
         self.assertIn("Deliverable contract on this task", block)
         self.assertIn("engineer_task_upload_artifact", block)
-        self.assertIn('task_id="LOOM:99"', block)
+        self.assertIn('task_id="TORQUE:99"', block)
         self.assertIn("Audit report", block)
         self.assertIn("report", block)
         self.assertIn("markdown", block)
         # Worker contract reference and gate note both surface.
-        self.assertIn("loom_task_upload_artifact", block)
+        self.assertIn("torque_task_upload_artifact", block)
         self.assertIn("engineer_task_resolve", block)
         # Lazy-load hint (the tool is in ENGINEER_DEFERRED_TOOL_NAMES).
         self.assertIn("engineer_tool_search", block)
@@ -89,38 +89,38 @@ class EngineerDeliverableAwarenessHelperTests(unittest.TestCase):
 class EngineerDeliverableAwarenessSurfaceTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub()
-        self.db_mod = importlib.import_module("loom.db")
+        self.db_mod = importlib.import_module("torque.db")
         self.db_mod = importlib.reload(self.db_mod)
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
-        self.shared_mod = importlib.import_module("loom.mcp_tools_shared")
+        self.shared_mod = importlib.import_module("torque.mcp_tools_shared")
         self.shared_mod = importlib.reload(self.shared_mod)
-        self.mcp_architect_mod = importlib.import_module("loom.mcp_architect")
+        self.mcp_architect_mod = importlib.import_module("torque.mcp_architect")
         self.mcp_architect_mod = importlib.reload(self.mcp_architect_mod)
-        self.mcp_engineer_mod = importlib.import_module("loom.mcp_engineer")
+        self.mcp_engineer_mod = importlib.import_module("torque.mcp_engineer")
         self.mcp_engineer_mod = importlib.reload(self.mcp_engineer_mod)
 
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.db_path = Path(self.tmp.name) / "loom.db"
-        self.db = self.db_mod.LoomDB(self.db_path)
+        self.db_path = Path(self.tmp.name) / "torque.db"
+        self.db = self.db_mod.TorqueDB(self.db_path)
         self.db.init()
         self.addCleanup(self.db.close)
 
         self.state = self.state_mod.MatrixState(db=self.db)
         self.state.board_lanes = [
             "Backlog", "To Do", "In Progress", "Done", "Archived"]
-        self.state.groups["loom"] = []
+        self.state.groups["torque"] = []
         self.state._db_save_groups()
 
     def _add_architect(self, agent_id, name):
         cell = self.state_mod.AgentCell(
             id=agent_id, name=name, slug=name.lower(),
-            group="loom", cell_type="agent", kind="architect",
+            group="torque", cell_type="agent", kind="architect",
             status="running", persistent=True,
         )
         self.state.agents[cell.id] = cell
-        self.state.groups["loom"].append(cell.id)
+        self.state.groups["torque"].append(cell.id)
         self.state._db_save_agent(cell)
         self.state._db_save_groups()
         return cell
@@ -128,12 +128,12 @@ class EngineerDeliverableAwarenessSurfaceTests(unittest.IsolatedAsyncioTestCase)
     def _add_engineer(self, agent_id, name, *, hired_by_architect_id=""):
         cell = self.state_mod.AgentCell(
             id=agent_id, name=name, slug=name.lower().replace(" ", "-"),
-            group="loom", cell_type="agent", kind="engineer",
+            group="torque", cell_type="agent", kind="engineer",
             status="running", persistent=True,
             hired_by_architect_id=hired_by_architect_id,
         )
         self.state.agents[cell.id] = cell
-        self.state.groups["loom"].append(cell.id)
+        self.state.groups["torque"].append(cell.id)
         self.state._db_save_agent(cell)
         self.state._db_save_groups()
         return cell
@@ -141,7 +141,7 @@ class EngineerDeliverableAwarenessSurfaceTests(unittest.IsolatedAsyncioTestCase)
     def _add_task(self, task_id, title, **kwargs):
         return self.state.board_add_task(
             title,
-            kwargs.pop("group", "loom"),
+            kwargs.pop("group", "torque"),
             lane=kwargs.pop("lane", "Backlog"),
             id=task_id,
             **kwargs,
@@ -206,7 +206,7 @@ class EngineerDeliverableAwarenessSurfaceTests(unittest.IsolatedAsyncioTestCase)
     async def test_engineer_task_show_includes_awareness_for_deliverable_task(self):
         engineer = self._add_engineer("eng-1", "Eng")
         task = self._add_task(
-            "LOOM:500", "Audit feature",
+            "TORQUE:500", "Audit feature",
             assigned_engineer_id=engineer.id,
             deliverable_required=True,
             deliverable_type="report",
@@ -222,14 +222,14 @@ class EngineerDeliverableAwarenessSurfaceTests(unittest.IsolatedAsyncioTestCase)
         block = data["deliverable_awareness"]
         self.assertIn("Deliverable contract on this task", block)
         self.assertIn("engineer_task_upload_artifact", block)
-        self.assertIn('task_id="LOOM:500"', block)
+        self.assertIn('task_id="TORQUE:500"', block)
         self.assertIn("Audit report", block)
         self.assertIn("engineer_tool_search", block)
 
     async def test_engineer_task_show_no_awareness_for_plain_task(self):
         engineer = self._add_engineer("eng-1", "Eng")
         task = self._add_task(
-            "LOOM:501", "Plain task",
+            "TORQUE:501", "Plain task",
             assigned_engineer_id=engineer.id,
         )
         text, is_error = await self._call_engineer(
@@ -248,7 +248,7 @@ class EngineerDeliverableAwarenessSurfaceTests(unittest.IsolatedAsyncioTestCase)
             "architect_task_create",
             {
                 "title": "Investigate regression",
-                "group": "loom",
+                "group": "torque",
                 "assigned_engineer_id": engineer.id,
                 "deliverable": {
                     "required": True,
@@ -277,7 +277,7 @@ class EngineerDeliverableAwarenessSurfaceTests(unittest.IsolatedAsyncioTestCase)
             "architect_task_create",
             {
                 "title": "Plain task",
-                "group": "loom",
+                "group": "torque",
                 "assigned_engineer_id": engineer.id,
             },
             architect.id,
@@ -292,7 +292,7 @@ class EngineerDeliverableAwarenessSurfaceTests(unittest.IsolatedAsyncioTestCase)
             "eng-1", "Alice", hired_by_architect_id=architect.id,
         )
         task = self._add_task(
-            "LOOM:600", "Audit feature",
+            "TORQUE:600", "Audit feature",
             assigned_engineer_id=engineer.id,
             deliverable_required=True,
             deliverable_type="report",
@@ -304,7 +304,7 @@ class EngineerDeliverableAwarenessSurfaceTests(unittest.IsolatedAsyncioTestCase)
             {
                 "engineer_id": engineer.id,
                 "message": (
-                    "Please pick up LOOM:600 and start with the rendering audit."
+                    "Please pick up TORQUE:600 and start with the rendering audit."
                 ),
             },
             architect.id,
@@ -312,10 +312,10 @@ class EngineerDeliverableAwarenessSurfaceTests(unittest.IsolatedAsyncioTestCase)
         self.assertFalse(is_error, text)
         # The recipient's inbox entry has the awareness block appended.
         recipient_msg = engineer.mcp_messages[0]["message"]
-        self.assertIn("LOOM:600", recipient_msg)
+        self.assertIn("TORQUE:600", recipient_msg)
         self.assertIn("Deliverable contract on this task", recipient_msg)
         self.assertIn("engineer_task_upload_artifact", recipient_msg)
-        self.assertIn('task_id="LOOM:600"', recipient_msg)
+        self.assertIn('task_id="TORQUE:600"', recipient_msg)
         # Sender entry stays clean (no awareness pollution on architect side).
         sender_msg = architect.mcp_messages[0]["message"]
         self.assertNotIn("Deliverable contract on this task", sender_msg)
@@ -327,7 +327,7 @@ class EngineerDeliverableAwarenessSurfaceTests(unittest.IsolatedAsyncioTestCase)
         )
         # Task with deliverable exists but is not mentioned in the message.
         self._add_task(
-            "LOOM:601", "Has a deliverable",
+            "TORQUE:601", "Has a deliverable",
             assigned_engineer_id=engineer.id,
             deliverable_required=True,
             deliverable_type="report",
@@ -350,20 +350,20 @@ class EngineerDeliverableAwarenessSurfaceTests(unittest.IsolatedAsyncioTestCase)
             "eng-1", "Alice", hired_by_architect_id=architect.id,
         )
         self._add_task(
-            "LOOM:602", "No deliverable",
+            "TORQUE:602", "No deliverable",
             assigned_engineer_id=engineer.id,
         )
         text, is_error = await self._call_architect(
             "architect_engineer_message",
             {
                 "engineer_id": engineer.id,
-                "message": "Please look into LOOM:602 when free.",
+                "message": "Please look into TORQUE:602 when free.",
             },
             architect.id,
         )
         self.assertFalse(is_error, text)
         recipient_msg = engineer.mcp_messages[0]["message"]
-        self.assertIn("LOOM:602", recipient_msg)
+        self.assertIn("TORQUE:602", recipient_msg)
         self.assertNotIn("Deliverable contract on this task", recipient_msg)
 
 

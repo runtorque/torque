@@ -294,7 +294,7 @@ function _agentPanelMessageKindLabel(kind) {
   if (kind === 'engineer') return 'Engineer';
   if (kind === 'worker') return 'Worker';
   if (kind === 'user' || kind === 'human') return 'User';
-  if (kind === 'engineer' || kind === 'system' || kind === 'loom') return 'User';
+  if (kind === 'engineer' || kind === 'system' || kind === 'torque') return 'User';
   return kind.charAt(0).toUpperCase() + kind.slice(1).replace(/_/g, ' ');
 }
 
@@ -1618,7 +1618,7 @@ function _agentPanelMcpSinceForRange(range) {
 
 function _agentPanelMcpToolPattern(toolText) {
   toolText = String(toolText || '').trim();
-  if (!toolText) return 'mcp__loom__%';
+  if (!toolText) return 'mcp__torque__%';
   if (toolText.indexOf('%') >= 0 || toolText.indexOf('*') >= 0) return toolText;
   return '*' + toolText + '*';
 }
@@ -2724,7 +2724,7 @@ function _agentPanelTerminalValue(value, fallback) {
 }
 
 function _renderTerminalPanel(agent) {
-  var branch = String((agent && (agent.worktree_branch || agent.current_branch)) || '').replace(/^loom\//, '');
+  var branch = String((agent && (agent.worktree_branch || agent.current_branch)) || '').replace(/^torque\//, '');
   var processInfo = (typeof _terminalStatusLabel === 'function')
     ? _terminalStatusLabel(agent)
     : ((agent && (agent.current_process || agent.activity_detail || agent.activity || agent.status)) || 'idle');
@@ -2846,13 +2846,13 @@ function _agentPanelHeaderRight(root) {
 }
 
 function _agentPanelRenderFocusedTabInPlace(agent, kind, previousTab, activeTab) {
-  // LOOM:236 v8/v11 instrumentation: enable with `window.__loomDebugRender = true;`
+  // TORQUE:236 v8/v11 instrumentation: enable with `window.__torqueDebugRender = true;`
   // v11 adds caller stack so the user can identify which path is still
   // firing in-place refreshes after v10's render-path skip.
-  if (typeof window !== 'undefined' && window.__loomDebugRender) {
+  if (typeof window !== 'undefined' && window.__torqueDebugRender) {
     try {
       var stk = (new Error()).stack || '';
-      console.log('[loom render] inPlace @' + Date.now()
+      console.log('[torque render] inPlace @' + Date.now()
         + ' kind=' + kind + ' tab=' + activeTab
         + ' agent=' + ((agent && agent.id) || '')
         + '\n' + stk.split('\n').slice(2, 8).join('\n'));
@@ -2893,25 +2893,25 @@ function _agentPanelRenderFocusedTabInPlace(agent, kind, previousTab, activeTab)
   var parts = _agentPanelTabRenderParts(agent, kind, activeTab);
   _agentPanelSetShellTab(shell, activeTab);
   _agentPanelSetActiveTabChrome(el, activeTab);
-  // LOOM:264 follow-up: byte-equality memoize the innerHTML clobber. Under
+  // TORQUE:264 follow-up: byte-equality memoize the innerHTML clobber. Under
   // multi-agent firehose this function fires dozens of times/sec; when the
   // rendered html is identical to the last paint the assignment still
   // destroys + recreates every child node, killing :hover state on tooltip
-  // pseudo-elements and resetting textarea caret. Same `_loomLastHtml`
+  // pseudo-elements and resetting textarea caret. Same `_torqueLastHtml`
   // pattern as `dom.topbar` / `dom.tabs` from `06611b8`.
   var newHeaderHtml = parts.headerRightHtml || '';
   var newBodyHtml = parts.bodyHtml || '';
-  var headerChanged = headerRight._loomLastHtml !== newHeaderHtml;
-  var bodyChanged = content._loomLastHtml !== newBodyHtml;
+  var headerChanged = headerRight._torqueLastHtml !== newHeaderHtml;
+  var bodyChanged = content._torqueLastHtml !== newBodyHtml;
   if (headerChanged) {
     headerRight.innerHTML = newHeaderHtml;
-    headerRight._loomLastHtml = newHeaderHtml;
+    headerRight._torqueLastHtml = newHeaderHtml;
   }
   if (bodyChanged) {
     content.innerHTML = newBodyHtml;
-    content._loomLastHtml = newBodyHtml;
+    content._torqueLastHtml = newBodyHtml;
   }
-  // Invalidate the root `el._loomLastHtml` cache when this surgical path
+  // Invalidate the root `el._torqueLastHtml` cache when this surgical path
   // mutates a child. Otherwise a later `renderAgentPanel()` whose computed
   // html happens to byte-equal the cache (e.g. matches the pre-mutation
   // full render) skips its `el.innerHTML = html` write and leaves the
@@ -2921,8 +2921,8 @@ function _agentPanelRenderFocusedTabInPlace(agent, kind, previousTab, activeTab)
   //   2. in-place refresh writes htmlB into a child
   //   3. state reverts; full render computes htmlA, gate skips, DOM stays
   //      at htmlB.
-  if ((headerChanged || bodyChanged) && el._loomLastHtml !== undefined) {
-    el._loomLastHtml = null;
+  if ((headerChanged || bodyChanged) && el._torqueLastHtml !== undefined) {
+    el._torqueLastHtml = null;
   }
 
   if (!switchingTabs && typeof _restoreSurfaceState === 'function') {
@@ -2952,14 +2952,14 @@ function _agentPanelRefreshCurrentTab() {
 }
 
 function renderAgentPanel() {
-  // LOOM:236 v8 instrumentation: enable in browser devtools console
-  // with `window.__loomDebugRender = true;` to log every full panel
+  // TORQUE:236 v8 instrumentation: enable in browser devtools console
+  // with `window.__torqueDebugRender = true;` to log every full panel
   // rebuild + the calling stack. Use to identify residual firehose
   // sources after the v4-v7 invalidation gates.
-  if (typeof window !== 'undefined' && window.__loomDebugRender) {
+  if (typeof window !== 'undefined' && window.__torqueDebugRender) {
     try {
       var stk = (new Error()).stack || '';
-      console.warn('[loom render] renderAgentPanel @' + Date.now()
+      console.warn('[torque render] renderAgentPanel @' + Date.now()
         + ' caller:\n' + stk.split('\n').slice(2, 8).join('\n'));
     } catch (_e) {}
   }
@@ -3016,11 +3016,11 @@ function renderAgentPanel() {
     }
   }
 
-  // LOOM:264 follow-up: byte-equality memoize the full panel clobber. Same
+  // TORQUE:264 follow-up: byte-equality memoize the full panel clobber. Same
   // pattern as the in-place tab refresh above.
-  if (el._loomLastHtml !== html) {
+  if (el._torqueLastHtml !== html) {
     el.innerHTML = html;
-    el._loomLastHtml = html;
+    el._torqueLastHtml = html;
   }
   if (typeof _restoreSurfaceState === 'function') {
     _restoreSurfaceState(el, panelState, panelStateOptions);
@@ -4154,10 +4154,10 @@ function renderLegacyGroupPanel() {
   }
   html += '</div>';
   html += '</div>';
-  // LOOM:264 follow-up: memoize the legacy engineer panel clobber.
-  if (el._loomLastHtml !== html) {
+  // TORQUE:264 follow-up: memoize the legacy engineer panel clobber.
+  if (el._torqueLastHtml !== html) {
     el.innerHTML = html;
-    el._loomLastHtml = html;
+    el._torqueLastHtml = html;
   }
   _restoreSurfaceState(el, panelState, panelStateOptions);
   _agentPanelAttachVirtualScrolls(el);
@@ -5038,7 +5038,7 @@ function _agentPanelLegacyRenderSessionMapHumanGates(summary) {
     html += '<span class="agent-panel-session-map-item-text">'
       + _esc(item.stream_title || item.branch || '') + '</span>';
     if (item.branch) {
-      html += '<span class="agent-panel-session-map-item-meta">' + _esc(item.branch.replace(/^loom\//, '')) + '</span>';
+      html += '<span class="agent-panel-session-map-item-meta">' + _esc(item.branch.replace(/^torque\//, '')) + '</span>';
     }
     html += '</div>';
     if (item.gate_reason) {
@@ -5122,7 +5122,7 @@ function _agentPanelLegacyRenderSessionMapBoundaries(summary) {
     html += '<span class="agent-panel-verification-item-title">'
       + _esc(item.latest_boundary_task || item.stream_title || '') + '</span>';
     if (item.branch) {
-      html += '<span class="agent-panel-verification-item-meta">' + _esc(item.branch.replace(/^loom\//, '')) + '</span>';
+      html += '<span class="agent-panel-verification-item-meta">' + _esc(item.branch.replace(/^torque\//, '')) + '</span>';
     }
     html += '</div>';
     if (item.foreground_task_title) {
@@ -5188,7 +5188,7 @@ function _agentPanelLegacyRenderSessionMapQueuedFollowUp(summary) {
     html += '<span class="agent-panel-health-pill agent-panel-health-pill-notice">' + _esc(pill) + '</span>';
     html += '<span class="agent-panel-session-map-item-text">' + _esc(item.task_title || item.task_id || '') + '</span>';
     if (item.branch) {
-      html += '<span class="agent-panel-session-map-item-meta">' + _esc(item.branch.replace(/^loom\//, '')) + '</span>';
+      html += '<span class="agent-panel-session-map-item-meta">' + _esc(item.branch.replace(/^torque\//, '')) + '</span>';
     } else if (item.target_agent_name) {
       html += '<span class="agent-panel-session-map-item-meta">' + _esc(item.target_agent_name) + '</span>';
     }
@@ -5681,7 +5681,7 @@ function _engineerStreamBranch(stream) {
 }
 
 function _engineerShortBranchLabel(branch) {
-  return String(branch || '').replace(/^loom\//, '');
+  return String(branch || '').replace(/^torque\//, '');
 }
 
 function _engineerHumanizeToken(value) {
@@ -5818,7 +5818,7 @@ function _agentPanelLegacyRenderBoundarySummary(group) {
       + _esc(pillLabel) + '</span>';
     html += '<span class="agent-panel-verification-item-title">' + _esc(item.latest_boundary_task) + '</span>';
     if (item.branch) {
-      html += '<span class="agent-panel-verification-item-meta">' + _esc(item.branch.replace(/^loom\//, '')) + '</span>';
+      html += '<span class="agent-panel-verification-item-meta">' + _esc(item.branch.replace(/^torque\//, '')) + '</span>';
     }
     html += '</div>';
     if (item.current_task) {

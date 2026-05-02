@@ -21,12 +21,12 @@ def _install_aiohttp_stub():
 class ArchitectPromptTests(unittest.TestCase):
     def setUp(self):
         _install_aiohttp_stub()
-        self.architect_mod = importlib.import_module("loom.architect")
+        self.architect_mod = importlib.import_module("torque.architect")
         self.architect_mod = importlib.reload(self.architect_mod)
 
     def test_prompt_includes_dispatch_freely_autonomy_guidance(self):
         prompt = self.architect_mod.build_architect_system_prompt(
-            "Loom",
+            "Torque",
             SimpleNamespace(
                 architect_autonomy_mode="dispatch_freely",
                 architect_custom_instructions="",
@@ -43,7 +43,7 @@ class ArchitectPromptTests(unittest.TestCase):
 
     def test_prompt_includes_ask_always_autonomy_guidance(self):
         prompt = self.architect_mod.build_architect_system_prompt(
-            "Loom",
+            "Torque",
             SimpleNamespace(
                 architect_autonomy_mode="ask_always",
                 architect_custom_instructions="",
@@ -56,7 +56,7 @@ class ArchitectPromptTests(unittest.TestCase):
 
     def test_prompt_defaults_to_dispatch_after_confirm_guidance(self):
         prompt = self.architect_mod.build_architect_system_prompt(
-            "Loom",
+            "Torque",
             SimpleNamespace(
                 architect_autonomy_mode="not-a-mode",
                 architect_custom_instructions="",
@@ -71,7 +71,7 @@ class ArchitectPromptTests(unittest.TestCase):
 
     def test_prompt_includes_minutes_checkpoint_cadence_guidance(self):
         prompt = self.architect_mod.build_architect_system_prompt(
-            "Loom",
+            "Torque",
             SimpleNamespace(
                 architect_autonomy_mode="dispatch_after_confirm",
                 architect_journal_checkpoint_frequency="every_20_minutes",
@@ -85,7 +85,7 @@ class ArchitectPromptTests(unittest.TestCase):
 
     def test_prompt_includes_manual_checkpoint_cadence_guidance(self):
         prompt = self.architect_mod.build_architect_system_prompt(
-            "Loom",
+            "Torque",
             SimpleNamespace(
                 architect_autonomy_mode="dispatch_after_confirm",
                 architect_journal_checkpoint_frequency="manual_only",

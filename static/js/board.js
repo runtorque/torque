@@ -5,7 +5,7 @@
 if (typeof taskIsEngineerMessageFollowup !== 'function') {
   var taskIsEngineerMessageFollowup = function(task) {
     var labels = (task && Array.isArray(task.labels)) ? task.labels : [];
-    return labels.indexOf('loom:engineer-message') >= 0;
+    return labels.indexOf('torque:engineer-message') >= 0;
   };
 }
 
@@ -78,7 +78,7 @@ var _boardBatchEditPriority = '__unchanged__'; // selected priority value
 var _boardBatchActionWaiting = false; // waiting for batch action list
 var _boardBatchActionOptions = [];    // actions for batch edit action picker
 var _boardArchivedLane = 'Archived';
-var _boardArchiveLabel = 'loom:archived'; // legacy compatibility for older state
+var _boardArchiveLabel = 'torque:archived'; // legacy compatibility for older state
 var _boardArchiveStaleDays = 7;
 var _boardLaneEntryRefreshTimer = 0;
 var _boardWideModeMinWidth = 960;
@@ -3218,7 +3218,7 @@ function boardDetachTask(taskId) {
   var tasks = _boardTasks();
   var task = tasks[taskId];
   if (!task) return;
-  var labels = (task.labels || []).filter(function(l) { return l !== 'loom:derived'; });
+  var labels = (task.labels || []).filter(function(l) { return l !== 'torque:derived'; });
   send({
     cmd: 'board_update_task', id: taskId,
     parent_task_id: '', pipeline_depth: 0,

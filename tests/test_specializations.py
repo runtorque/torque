@@ -12,17 +12,17 @@ class SpecializationManagerTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.project = self.root / "repo" / "subdir"
         self.project.mkdir(parents=True)
-        self.project_specs = self.root / "repo" / ".loom" / "specializations"
+        self.project_specs = self.root / "repo" / ".torque" / "specializations"
         self.project_specs.mkdir(parents=True)
         self.user_home = self.root / "home"
-        self.user_specs = self.user_home / ".loom" / "specializations"
+        self.user_specs = self.user_home / ".torque" / "specializations"
         self.user_specs.mkdir(parents=True)
 
         self.prev_home = os.environ.get("HOME")
         os.environ["HOME"] = str(self.user_home)
         self.addCleanup(self._restore_home)
 
-        self.spec_mod = importlib.import_module("loom.specializations")
+        self.spec_mod = importlib.import_module("torque.specializations")
         self.spec_mod = importlib.reload(self.spec_mod)
         self.mgr = self.spec_mod.SpecializationManager()
 
@@ -156,7 +156,7 @@ class SpecializationManagerTests(unittest.TestCase):
             scope="user",
             base_dir=str(self.project),
         )
-        with self.assertLogs("loom", level="WARNING"):
+        with self.assertLogs("torque", level="WARNING"):
             rendered = self.mgr.render_engineer_preamble(
                 ["ui-ux", "not-a-thing"], base_dir=str(self.project))
         self.assertIn("Specializations: ui-ux (primary)", rendered)

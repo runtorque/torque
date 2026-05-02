@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 import unittest
 
-from loom.cron import next_run, parse_cron
+from torque.cron import next_run, parse_cron
 
 
 class CronParsingTests(unittest.TestCase):

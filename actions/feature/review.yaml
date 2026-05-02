@@ -58,4 +58,4 @@ prompt: |
   - **Ship with fixes** — minor issues that should be addressed first
   - **Needs rework** — fundamental problems requiring significant changes
 
-  If changes look correct but still require human sign-off before merging, use `loom_ask(question="Human sign-off required", description="Include the verdict, verification summary, and merge-risk summary.")`.
+  If changes look correct but still require human sign-off before merging, use `torque_ask(question="Human sign-off required", description="Include the verdict, verification summary, and merge-risk summary.")`.

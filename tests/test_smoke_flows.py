@@ -21,14 +21,14 @@ def _install_aiohttp_stub():
     sys.modules["aiohttp.web"] = web
 
 
-class LoomSmokeFlowTests(unittest.IsolatedAsyncioTestCase):
+class TorqueSmokeFlowTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         _install_aiohttp_stub()
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
-        self.mcp_engineer_mod = importlib.import_module("loom.mcp_engineer")
+        self.mcp_engineer_mod = importlib.import_module("torque.mcp_engineer")
         self.mcp_engineer_mod = importlib.reload(self.mcp_engineer_mod)
-        self.worktree_mod = importlib.import_module("loom.worktree")
+        self.worktree_mod = importlib.import_module("torque.worktree")
         self.worktree_mod = importlib.reload(self.worktree_mod)
 
     async def asyncSetUp(self):
@@ -57,8 +57,8 @@ class LoomSmokeFlowTests(unittest.IsolatedAsyncioTestCase):
         )
 
         await self._git("init", "-b", "main")
-        await self._git("config", "user.name", "Loom Smoke")
-        await self._git("config", "user.email", "loom-smoke@example.com")
+        await self._git("config", "user.name", "Torque Smoke")
+        await self._git("config", "user.email", "torque-smoke@example.com")
         (self.repo_root / "README.md").write_text("base\n")
         await self._git("add", "README.md")
         await self._git("commit", "-m", "Initial commit")
@@ -255,7 +255,7 @@ class LoomSmokeFlowTests(unittest.IsolatedAsyncioTestCase):
             "engineer_task_create",
             {
                 "title": "Implement smoke path",
-                "description": "Exercise the critical Loom task lifecycle.",
+                "description": "Exercise the critical Torque task lifecycle.",
                 "labels": ["smoke"],
             },
         )
@@ -352,7 +352,7 @@ class LoomSmokeFlowTests(unittest.IsolatedAsyncioTestCase):
         ask = self.state.board_add_task(
             "Need release approval",
             "g",
-            labels=["loom:human"],
+            labels=["torque:human"],
             parent_task_id=blocker_task.id,
             pipeline_root_id=blocker_task.id,
             pipeline_depth=1,

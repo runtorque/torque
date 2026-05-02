@@ -2,13 +2,13 @@
 
 **Roadmap phase**: 2 — Git Worktree Lifecycle
 **Status**: Core implemented
-**Goal**: Make git worktrees a first-class concept in Loom — agents work in isolated branches by default, with checkpoints for rollback, auto-PR creation, and full lifecycle management from the toolbelt.
+**Goal**: Make git worktrees a first-class concept in Torque — agents work in isolated branches by default, with checkpoints for rollback, auto-PR creation, and full lifecycle management from the toolbelt.
 
 ---
 
 ## The Problem
 
-Loom can spawn multiple agents in the same repo. When two agents edit the same files, they collide. The current workaround is manual: the user creates branches and directories themselves. Loom has a basic `git worktree add/remove` path (Phase 1 leftover), but it's a checkbox with no lifecycle — no cleanup on stop, no UI feedback, no checkpoints, no PR creation. Agents need isolated workspaces by default, and Loom should manage the full arc from branch creation to PR merge to cleanup.
+Torque can spawn multiple agents in the same repo. When two agents edit the same files, they collide. The current workaround is manual: the user creates branches and directories themselves. Torque has a basic `git worktree add/remove` path (Phase 1 leftover), but it's a checkbox with no lifecycle — no cleanup on stop, no UI feedback, no checkpoints, no PR creation. Agents need isolated workspaces by default, and Torque should manage the full arc from branch creation to PR merge to cleanup.
 
 ## What Already Exists
 
@@ -18,7 +18,7 @@ The Phase 1 codebase has a partial foundation:
 |---|---|---|
 | `AgentCell.worktree_path` / `worktree_branch` | Persisted fields | Never displayed in UI |
 | `GroupSettings.git_worktree` | Boolean toggle + checkbox in Agents tab | No per-agent override |
-| `bridge.create_worktree(cell, base_dir)` | Creates `.worktrees/{cell_id}` with branch `loom/{cell_id}-{slug}` | No error feedback to UI, no validation on restart |
+| `bridge.create_worktree(cell, base_dir)` | Creates `.worktrees/{cell_id}` with branch `torque/{cell_id}-{slug}` | No error feedback to UI, no validation on restart |
 | `bridge.remove_worktree(cell)` | Force-removes worktree + branch | Not called on session termination, only on explicit agent removal |
 | `server.py` add_agent handler | Calls `create_worktree` if `gs.git_worktree` is true | Live session's cwd is not updated; worktree is created *after* session starts |
 | Relaunch handler | Ignores worktrees entirely | Doesn't reuse or recreate worktree |
@@ -28,7 +28,7 @@ The Phase 1 codebase has a partial foundation:
 ## Design Principles
 
 1. **Isolation by default** — When worktrees are enabled for a group, every agent gets its own branch and directory. No two agents share a working tree.
-2. **Full lifecycle** — Loom manages create → work → checkpoint → PR → merge → cleanup. The user never runs `git worktree` manually.
+2. **Full lifecycle** — Torque manages create → work → checkpoint → PR → merge → cleanup. The user never runs `git worktree` manually.
 3. **Visible state** — The toolbelt always shows the worktree branch, checkpoint count, and diff summary. No invisible git state.
 4. **Safe cleanup** — Worktrees are never deleted without user confirmation if they contain uncommitted changes. Auto-cleanup only happens for clean worktrees.
 5. **Incremental rollout** — Each sub-feature (managed worktrees, checkpoints, auto-PR) works independently. Users opt in per group.
@@ -75,23 +75,23 @@ The Phase 1 codebase has a partial foundation:
 
 ## What Was Built
 
-### WorktreeManager (`loom/worktree.py`)
+### WorktreeManager (`torque/worktree.py`)
 
 Dedicated module for all git worktree operations. Methods:
 
 | Method | Purpose |
 |---|---|
-| `create(cell, repo_root, base_dir, base_branch)` | Create worktree at `.loom/worktrees/{cell_id}`, branch `loom/{name}-{short_id}`. Records `worktree_path`, `worktree_branch`, `worktree_repo_root`, `worktree_base_branch` on the cell. Adds `.loom/` to `.gitignore`. |
+| `create(cell, repo_root, base_dir, base_branch)` | Create worktree at `.torque/worktrees/{cell_id}`, branch `torque/{name}-{short_id}`. Records `worktree_path`, `worktree_branch`, `worktree_repo_root`, `worktree_base_branch` on the cell. Adds `.torque/` to `.gitignore`. |
 | `remove(cell, force)` | Remove worktree + branch via `git -C {repo_root} worktree remove`. Resolves repo root from `cell.worktree_repo_root`, falling back to `get_repo_root()` or parent directory. |
 | `validate(cell)` | Check that `worktree_path` exists on disk and is a valid git working tree. |
 | `diff_summary(cell)` | `git diff --numstat {base_branch}...HEAD` → `{files, insertions, deletions}`. |
 | `has_uncommitted_changes(cell)` | `git status --porcelain` → bool. |
-| `checkpoint(cell, message)` | Stage all + commit with `loom: checkpoint N — {name}`. Increments `worktree_checkpoints`. Returns SHA. |
+| `checkpoint(cell, message)` | Stage all + commit with `torque: checkpoint N — {name}`. Increments `worktree_checkpoints`. Returns SHA. |
 | `count_commits(cell)` | `git rev-list --count {base_branch}..HEAD`. |
 | `get_repo_root(directory)` | `git rev-parse --show-toplevel`. |
 | `get_current_branch(repo_root)` | `git rev-parse --abbrev-ref HEAD`. |
 
-All git operations use `asyncio.create_subprocess_exec` and specify `-C {repo_root}` to avoid cwd dependency (the Loom daemon runs outside any repo).
+All git operations use `asyncio.create_subprocess_exec` and specify `-C {repo_root}` to avoid cwd dependency (the Torque daemon runs outside any repo).
 
 ### Data Model
 
@@ -100,7 +100,7 @@ All git operations use `asyncio.create_subprocess_exec` and specify `-C {repo_ro
 | Field | Type | Persisted | Purpose |
 |---|---|---|---|
 | `worktree_path` | str | Yes | *Pre-existing.* Absolute path to worktree directory |
-| `worktree_branch` | str | Yes | *Pre-existing.* Branch name (e.g., `loom/fix-auth-a1b2c3d`) |
+| `worktree_branch` | str | Yes | *Pre-existing.* Branch name (e.g., `torque/fix-auth-a1b2c3d`) |
 | `worktree_repo_root` | str | Yes | *New.* Original repo root (needed for `git -C` on remove/diff) |
 | `worktree_base_branch` | str | Yes | *New.* Branch the worktree forked from — used for diff base |
 | `worktree_dirty` | bool | No | *New.* Has uncommitted changes (updated by periodic diff task) |
@@ -113,7 +113,7 @@ All git operations use `asyncio.create_subprocess_exec` and specify `-C {repo_ro
 | Field | Type | Default | Purpose |
 |---|---|---|---|
 | `git_worktree` | bool | False | *Pre-existing.* Enable worktrees for agents in this group |
-| `worktree_base_dir` | str | `.loom/worktrees` | *New.* Directory for worktrees (relative to repo root) |
+| `worktree_base_dir` | str | `.torque/worktrees` | *New.* Directory for worktrees (relative to repo root) |
 | `worktree_base_branch` | str | `""` | *New.* Branch to fork from (empty = current HEAD) |
 | `worktree_auto_checkpoint` | bool | False | *New.* Auto-checkpoint when agent finishes a turn |
 
@@ -155,21 +155,21 @@ Both call the same `_auto_checkpoint(cell)` function in `server.py`, which check
 **Checkpoint commit messages:** When Claude Code's `Stop` hook fires, the `last_assistant_message` field is captured and stored as `cell.last_summary`. Checkpoint commits use this as the commit body:
 
 ```
-loom: checkpoint 3 — Agent 1
+torque: checkpoint 3 — Agent 1
 
 I've updated server.py to fix the auth validation bug and added
 unit tests in test_auth.py. The login endpoint now properly
 validates JWT expiry timestamps.
 ```
 
-If no summary is available, falls back to just the subject line: `loom: checkpoint 3 — Agent 1`.
+If no summary is available, falls back to just the subject line: `torque: checkpoint 3 — Agent 1`.
 
 ### Merge to Main
 
 Delegates the merge to the running Claude Code session. Flow:
 
 1. User clicks "Merge to Main" → confirm dialog: "Claude will perform the merge and resolve any conflicts. You'll be notified if it fails."
-2. Loom builds a fixed merge prompt with the branch names, repo root, and merge method (squash or regular). Any additional instructions from `worktree_merge_instructions` group setting are appended. The core prompt can't be broken by user input.
+2. Torque builds a fixed merge prompt with the branch names, repo root, and merge method (squash or regular). Any additional instructions from `worktree_merge_instructions` group setting are appended. The core prompt can't be broken by user input.
 3. Prompt is sent to the session via `bridge.send_text()` with `\r` to submit.
 4. Cell ID is added to `_pending_merges` set.
 5. When `session_end` fires for a pending-merge cell, `worktree_mgr.is_merged(cell)` runs `git merge-base --is-ancestor` to verify.
@@ -210,7 +210,7 @@ Broadcasts to the UI only if something changed.
 
 **Group settings modal (`modals.js`, Agents tab):**
 - Under "Git worktree per agent" checkbox, a collapsible section with:
-  - Worktree directory (default: `.loom/worktrees`)
+  - Worktree directory (default: `.torque/worktrees`)
   - Base branch (placeholder: "main", empty = current HEAD)
   - Auto-checkpoint on stop toggle
   - Squash commits on merge checkbox (default: on)
@@ -244,18 +244,18 @@ Broadcasts to the UI only if something changed.
 New files:
 
 ```
-loom/
+torque/
   worktree.py              # WorktreeManager: create, remove, validate, checkpoint, diff, count
 ```
 
 Modified files:
 
 ```
-loom/state.py              # AgentCell +6 fields, GroupSettings +3 fields, ephemeral field list
-loom/server.py             # WorktreeManager wiring, lifecycle fixes, 6 commands, diff updater, auto-checkpoint, checkpoint messages, merge verification, toast broadcast
-loom/bridge.py             # Removed worktree methods, added on_session_terminated callback, worktree validation on reconnect
-loom/events.py             # Added on_session_end callback, last_summary capture
-loom/adapters/claude_code.py  # Stop hook: capture last_assistant_message as summary
+torque/state.py              # AgentCell +6 fields, GroupSettings +3 fields, ephemeral field list
+torque/server.py             # WorktreeManager wiring, lifecycle fixes, 6 commands, diff updater, auto-checkpoint, checkpoint messages, merge verification, toast broadcast
+torque/bridge.py             # Removed worktree methods, added on_session_terminated callback, worktree validation on reconnect
+torque/events.py             # Added on_session_end callback, last_summary capture
+torque/adapters/claude_code.py  # Stop hook: capture last_assistant_message as summary
 static/js/render.js        # Branch badge, diff stats in agent cells
 static/js/ws.js            # worktree_history message handler
 static/js/commands.js      # Worktree submenu (Checkpoint, History, Create PR, Merge, Remove), worktree actions
@@ -269,9 +269,9 @@ Makefile                   # Copy worktree.py, fix stop target (LISTEN-only)
 
 ## Decisions (Resolved)
 
-1. **Worktree directory location** — `.loom/worktrees/` in the repo root. Added to `.gitignore` automatically.
+1. **Worktree directory location** — `.torque/worktrees/` in the repo root. Added to `.gitignore` automatically.
 
-2. **Branch naming** — `loom/{agent-name}-{short-id}` (e.g., `loom/fix-auth-a1b2c3d`). Human-readable, collision-safe via short-id suffix.
+2. **Branch naming** — `torque/{agent-name}-{short-id}` (e.g., `torque/fix-auth-a1b2c3d`). Human-readable, collision-safe via short-id suffix.
 
 3. **Auto-PR scope** — Deferred to a later phase. PR provider interface will be abstracted (not hardcoded to `gh`).
 
@@ -291,6 +291,6 @@ Makefile                   # Copy worktree.py, fix stop target (LISTEN-only)
 - **Diff viewer modal** — Read-only diff view in the toolbelt. Server sends `git diff` content; modal renders with line-level red/green coloring.
 - **Dirty worktree warning on agent removal** — The `removeAgent` function should check `worktree_dirty` and warn, not just the explicit "Remove Worktree" context menu.
 - **Multi-repo worktree sets** — Groundwork laid with `worktree_repo_root` field. Full multi-repo support deferred.
-- **Claude Code WorktreeCreate/WorktreeRemove hooks** — Listen for Claude Code's own worktree events to stay in sync. Orthogonal to Loom-managed worktrees.
+- **Claude Code WorktreeCreate/WorktreeRemove hooks** — Listen for Claude Code's own worktree events to stay in sync. Orthogonal to Torque-managed worktrees.
 - **Conflict detection** — Phase 6 (Multi-Agent Coordination). Two agents editing overlapping files in different worktrees.
 - **PR status polling** — Check if PR was merged/closed and auto-cleanup worktree.

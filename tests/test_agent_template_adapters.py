@@ -8,10 +8,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from loom.adapters import detect_by_command, get_default_command_for_provider, get_providers
-from loom.adapters.claude_code import ClaudeCodeAdapter
-from loom.adapters.codex import CodexAdapter
-from loom.adapters.generic import GenericAdapter
+from torque.adapters import detect_by_command, get_default_command_for_provider, get_providers
+from torque.adapters.claude_code import ClaudeCodeAdapter
+from torque.adapters.codex import CodexAdapter
+from torque.adapters.generic import GenericAdapter
 
 
 def _claude_mcp_config_worker(args):
@@ -43,45 +43,45 @@ class AgentTemplateAdapterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             adapter = ClaudeCodeAdapter()
             result = adapter.inject_persistent_prompt(
-                tmp, "loom-system-prompt-agent-1.md", "First prompt."
+                tmp, "torque-system-prompt-agent-1.md", "First prompt."
             )
             self.assertTrue(
                 result.startswith(" --append-system-prompt-file ")
             )
             self.assertTrue(
-                result.endswith("/.loom/loom-system-prompt-agent-1.md")
+                result.endswith("/.torque/torque-system-prompt-agent-1.md")
             )
             adapter.inject_persistent_prompt(
-                tmp, "loom-system-prompt-agent-2.md", "Second prompt."
+                tmp, "torque-system-prompt-agent-2.md", "Second prompt."
             )
-            loom_dir = Path(tmp) / ".loom"
+            torque_dir = Path(tmp) / ".torque"
             self.assertEqual(
-                (loom_dir / "loom-system-prompt-agent-1.md").read_text(),
+                (torque_dir / "torque-system-prompt-agent-1.md").read_text(),
                 "First prompt.\n",
             )
             self.assertEqual(
-                (loom_dir / "loom-system-prompt-agent-2.md").read_text(),
+                (torque_dir / "torque-system-prompt-agent-2.md").read_text(),
                 "Second prompt.\n",
             )
-            adapter.uninstall_persistent_prompt(tmp, "loom-system-prompt-agent-1.md")
-            self.assertFalse((loom_dir / "loom-system-prompt-agent-1.md").exists())
-            self.assertTrue((loom_dir / "loom-system-prompt-agent-2.md").exists())
+            adapter.uninstall_persistent_prompt(tmp, "torque-system-prompt-agent-1.md")
+            self.assertFalse((torque_dir / "torque-system-prompt-agent-1.md").exists())
+            self.assertTrue((torque_dir / "torque-system-prompt-agent-2.md").exists())
 
     def test_claude_persistent_prompt_uninstall_without_filename_removes_all(self):
         with tempfile.TemporaryDirectory() as tmp:
             adapter = ClaudeCodeAdapter()
             adapter.inject_persistent_prompt(
-                tmp, "loom-system-prompt-agent-1.md", "First prompt."
+                tmp, "torque-system-prompt-agent-1.md", "First prompt."
             )
             adapter.inject_persistent_prompt(
-                tmp, "loom-system-prompt-agent-2.md", "Second prompt."
+                tmp, "torque-system-prompt-agent-2.md", "Second prompt."
             )
 
             adapter.uninstall_persistent_prompt(tmp)
 
-            loom_dir = Path(tmp) / ".loom"
-            self.assertFalse((loom_dir / "loom-system-prompt-agent-1.md").exists())
-            self.assertFalse((loom_dir / "loom-system-prompt-agent-2.md").exists())
+            torque_dir = Path(tmp) / ".torque"
+            self.assertFalse((torque_dir / "torque-system-prompt-agent-1.md").exists())
+            self.assertFalse((torque_dir / "torque-system-prompt-agent-2.md").exists())
 
     def test_claude_hook_install_and_cleanup_preserve_user_settings(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -104,7 +104,7 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                 )
             )
 
-            with mock.patch.dict(os.environ, {"LOOM_PORT": "18933"}, clear=False):
+            with mock.patch.dict(os.environ, {"TORQUE_PORT": "18933"}, clear=False):
                 self.assertTrue(adapter.install_hooks(tmp))
 
             installed = json.loads(settings_file.read_text())
@@ -163,9 +163,9 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             )
 
             with mock.patch(
-                "loom.adapters.claude_code.os.rename", wraps=os.rename
+                "torque.adapters.claude_code.os.rename", wraps=os.rename
             ) as rename, mock.patch(
-                "loom.adapters.claude_code.fcntl.flock", wraps=fcntl.flock
+                "torque.adapters.claude_code.fcntl.flock", wraps=fcntl.flock
             ) as flock:
                 self.assertTrue(adapter.install_mcp_config(tmp))
                 self.assertEqual(Path(rename.call_args.args[1]), mcp_file)
@@ -176,14 +176,14 @@ class AgentTemplateAdapterTests(unittest.TestCase):
 
             installed = json.loads(mcp_file.read_text())
             self.assertIn("github", installed["mcpServers"])
-            self.assertEqual(installed["mcpServers"]["loom"]["type"], "http")
+            self.assertEqual(installed["mcpServers"]["torque"]["type"], "http")
             self.assertEqual(
-                installed["mcpServers"]["loom"]["headers"]["X-Loom-Cell-Id"],
-                "${LOOM_CELL_ID}",
+                installed["mcpServers"]["torque"]["headers"]["X-Torque-Cell-Id"],
+                "${TORQUE_CELL_ID}",
             )
 
             with mock.patch(
-                "loom.adapters.claude_code.os.rename", wraps=os.rename
+                "torque.adapters.claude_code.os.rename", wraps=os.rename
             ) as rename:
                 adapter.uninstall_mcp_config(tmp)
                 self.assertEqual(Path(rename.call_args.args[1]), mcp_file)
@@ -219,8 +219,8 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             servers = installed["mcpServers"]
             self.assertEqual(servers["github"], user_servers["github"])
             self.assertEqual(servers["linear"], user_servers["linear"])
-            self.assertEqual(list(servers).count("loom"), 1)
-            self.assertEqual(servers["loom"]["type"], "http")
+            self.assertEqual(list(servers).count("torque"), 1)
+            self.assertEqual(servers["torque"]["type"], "http")
 
             with ctx.Pool(10) as pool:
                 results = pool.map(
@@ -233,8 +233,8 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             servers = final["mcpServers"]
             self.assertEqual(servers["github"], user_servers["github"])
             self.assertEqual(servers["linear"], user_servers["linear"])
-            if "loom" in servers:
-                self.assertIn(servers["loom"]["type"], {"http", "stdio"})
+            if "torque" in servers:
+                self.assertIn(servers["torque"]["type"], {"http", "stdio"})
 
     def test_claude_engineer_mcp_config_uses_local_stdio_entrypoint(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -242,18 +242,18 @@ class AgentTemplateAdapterTests(unittest.TestCase):
 
             self.assertTrue(
                 adapter.install_mcp_config(
-                    tmp, mcp_entrypoint="loom/mcp_engineer.py"
+                    tmp, mcp_entrypoint="torque/mcp_engineer.py"
                 )
             )
 
             installed = json.loads((Path(tmp) / ".mcp.json").read_text())
-            loom_entry = installed["mcpServers"]["loom"]
-            self.assertEqual(loom_entry["type"], "stdio")
-            self.assertIn("command", loom_entry)
-            self.assertIn("args", loom_entry)
-            self.assertIn("loom.mcp_engineer", " ".join(loom_entry["args"]))
-            self.assertNotIn("url", loom_entry)
-            self.assertNotIn("headers", loom_entry)
+            torque_entry = installed["mcpServers"]["torque"]
+            self.assertEqual(torque_entry["type"], "stdio")
+            self.assertIn("command", torque_entry)
+            self.assertIn("args", torque_entry)
+            self.assertIn("torque.mcp_engineer", " ".join(torque_entry["args"]))
+            self.assertNotIn("url", torque_entry)
+            self.assertNotIn("headers", torque_entry)
 
     def test_codex_system_prompt_and_model_flags_use_cli_args(self):
         adapter = CodexAdapter()
@@ -271,16 +271,16 @@ class AgentTemplateAdapterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             adapter = CodexAdapter()
             result = adapter.inject_persistent_prompt(
-                tmp, "loom-system-prompt-agent-1.md", "First prompt."
+                tmp, "torque-system-prompt-agent-1.md", "First prompt."
             )
             self.assertEqual(result, "")
             self.assertEqual(
-                (Path(tmp) / ".loom" / "loom-system-prompt-agent-1.md").read_text(),
+                (Path(tmp) / ".torque" / "torque-system-prompt-agent-1.md").read_text(),
                 "First prompt.\n",
             )
             config = (Path(tmp) / ".codex" / "config.toml").read_text()
             self.assertIn("model_instructions_file =", config)
-            self.assertIn("loom-system-prompt-agent-1.md", config)
+            self.assertIn("torque-system-prompt-agent-1.md", config)
             self.assertFalse(
                 (Path(tmp) / ".codex" / "AGENTS.md").exists()
             )
@@ -300,20 +300,20 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             agents_file.parent.mkdir(parents=True, exist_ok=True)
             agents_file.write_text(
                 "\n".join([
-                    "<!-- Loom system prompt: loom-system-prompt-agent-1.md (managed by Loom, do not edit) -->",
+                    "<!-- Torque system prompt: torque-system-prompt-agent-1.md (managed by Torque, do not edit) -->",
                     "First prompt.",
-                    "<!-- Loom system prompt: loom-system-prompt-agent-1.md (managed by Loom, do not edit) -->",
+                    "<!-- Torque system prompt: torque-system-prompt-agent-1.md (managed by Torque, do not edit) -->",
                     "",
                     "User notes stay here.",
                     "",
-                    "<!-- Loom system prompt: loom-system-prompt-agent-2.md (managed by Loom, do not edit) -->",
+                    "<!-- Torque system prompt: torque-system-prompt-agent-2.md (managed by Torque, do not edit) -->",
                     "Second prompt.",
-                    "<!-- Loom system prompt: loom-system-prompt-agent-2.md (managed by Loom, do not edit) -->",
+                    "<!-- Torque system prompt: torque-system-prompt-agent-2.md (managed by Torque, do not edit) -->",
                     "",
                 ])
             )
 
-            adapter.uninstall_persistent_prompt(tmp, "loom-system-prompt-agent-1.md")
+            adapter.uninstall_persistent_prompt(tmp, "torque-system-prompt-agent-1.md")
 
             content = agents_file.read_text()
             self.assertNotIn("First prompt.", content)
@@ -324,13 +324,13 @@ class AgentTemplateAdapterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             adapter = CodexAdapter()
             adapter.inject_persistent_prompt(
-                tmp, "loom-system-prompt-agent-1.md", "First prompt."
+                tmp, "torque-system-prompt-agent-1.md", "First prompt."
             )
 
-            adapter.uninstall_persistent_prompt(tmp, "loom-system-prompt-agent-1.md")
+            adapter.uninstall_persistent_prompt(tmp, "torque-system-prompt-agent-1.md")
 
             self.assertFalse(
-                (Path(tmp) / ".loom" / "loom-system-prompt-agent-1.md").exists()
+                (Path(tmp) / ".torque" / "torque-system-prompt-agent-1.md").exists()
             )
             self.assertFalse(
                 (Path(tmp) / ".codex" / "config.toml").exists()
@@ -370,7 +370,7 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                 )
             )
 
-            with mock.patch.dict(os.environ, {"LOOM_PORT": "18933"}, clear=False):
+            with mock.patch.dict(os.environ, {"TORQUE_PORT": "18933"}, clear=False):
                 self.assertTrue(adapter.install_hooks(tmp))
 
             installed = json.loads(hooks_file.read_text())
@@ -411,12 +411,12 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                 "[profiles.default]\nmodel = \"gpt-5\"\n"
             )
 
-            with mock.patch.dict(os.environ, {"LOOM_PORT": "18933"}, clear=False):
+            with mock.patch.dict(os.environ, {"TORQUE_PORT": "18933"}, clear=False):
                 self.assertTrue(adapter.install_mcp_config(tmp))
 
             installed = config_file.read_text()
             self.assertIn("[profiles.default]", installed)
-            self.assertIn("[mcp_servers.loom]", installed)
+            self.assertIn("[mcp_servers.torque]", installed)
             self.assertIn("codex_hooks = true", installed)
             self.assertIn('url = "http://127.0.0.1:18933/mcp"', installed)
 
@@ -431,15 +431,15 @@ class AgentTemplateAdapterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             adapter = CodexAdapter()
             adapter.inject_persistent_prompt(
-                tmp, "loom-system-prompt-agent-1.md", "First prompt."
+                tmp, "torque-system-prompt-agent-1.md", "First prompt."
             )
 
             self.assertTrue(adapter.install_mcp_config(tmp))
 
             installed = (Path(tmp) / ".codex" / "config.toml").read_text()
             self.assertIn("model_instructions_file =", installed)
-            self.assertIn("loom-system-prompt-agent-1.md", installed)
-            self.assertIn("[mcp_servers.loom]", installed)
+            self.assertIn("torque-system-prompt-agent-1.md", installed)
+            self.assertIn("[mcp_servers.torque]", installed)
             self.assertIn("codex_hooks = true", installed)
 
     def test_codex_engineer_mcp_config_uses_local_stdio_entrypoint(self):
@@ -448,16 +448,16 @@ class AgentTemplateAdapterTests(unittest.TestCase):
 
             self.assertTrue(
                 adapter.install_mcp_config(
-                    tmp, mcp_entrypoint="loom/mcp_engineer.py"
+                    tmp, mcp_entrypoint="torque/mcp_engineer.py"
                 )
             )
 
             installed = (Path(tmp) / ".codex" / "config.toml").read_text()
-            self.assertIn("[mcp_servers.loom]", installed)
+            self.assertIn("[mcp_servers.torque]", installed)
             self.assertIn("command = ", installed)
-            self.assertIn("loom.mcp_engineer", installed)
+            self.assertIn("torque.mcp_engineer", installed)
             self.assertNotIn('url = "http://127.0.0.1', installed)
-            self.assertNotIn('env_http_headers = { "X-Loom-Cell-Id"', installed)
+            self.assertNotIn('env_http_headers = { "X-Torque-Cell-Id"', installed)
 
     def test_generic_adapter_is_noop_for_template_specific_flags(self):
         adapter = GenericAdapter()

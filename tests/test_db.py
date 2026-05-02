@@ -13,10 +13,10 @@ try:
 except ModuleNotFoundError:
     from tests.helpers import install_aiohttp_stub
 
-from loom.db import LoomDB
+from torque.db import TorqueDB
 
 install_aiohttp_stub()
-from loom.state import (
+from torque.state import (
     AgentCell,
     BoardTask,
     GlobalSettings,
@@ -26,11 +26,11 @@ from loom.state import (
 )
 
 
-class LoomDBTests(unittest.TestCase):
+class TorqueDBTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.db = LoomDB(Path(self.tmp.name) / "loom.db")
+        self.db = TorqueDB(Path(self.tmp.name) / "torque.db")
         self.db.init()
         self.addCleanup(self.db.close)
 
@@ -58,7 +58,7 @@ class LoomDBTests(unittest.TestCase):
         conn.commit()
         conn.close()
 
-        migrated = LoomDB(legacy_path)
+        migrated = TorqueDB(legacy_path)
         self.addCleanup(migrated.close)
         migrated.init()
 
@@ -119,7 +119,7 @@ class LoomDBTests(unittest.TestCase):
 
     def test_board_task_messages_thread_schema_migration_is_idempotent(self):
         legacy_path = Path(self.tmp.name) / "legacy-messages-thread.db"
-        seeded = LoomDB(legacy_path)
+        seeded = TorqueDB(legacy_path)
         seeded.init()
         seeded.save_board_task(BoardTask(id="task-1", task="Legacy task", group="g"))
         seeded.close()
@@ -143,10 +143,10 @@ class LoomDBTests(unittest.TestCase):
         conn.commit()
         conn.close()
 
-        migrated = LoomDB(legacy_path)
+        migrated = TorqueDB(legacy_path)
         migrated.init()
         migrated.close()
-        migrated_again = LoomDB(legacy_path)
+        migrated_again = TorqueDB(legacy_path)
         self.addCleanup(migrated_again.close)
         migrated_again.init()
 
@@ -171,7 +171,7 @@ class LoomDBTests(unittest.TestCase):
         group_settings=None,
     ):
         path = Path(self.tmp.name) / filename
-        seeded = LoomDB(path)
+        seeded = TorqueDB(path)
         seeded.init()
         if agents:
             for agent in agents:
@@ -337,7 +337,7 @@ class LoomDBTests(unittest.TestCase):
     def test_default_engineer_specializations_migration_adds_column(self):
         # Simulate an older DB by dropping the column then re-running init.
         legacy_path = Path(self.tmp.name) / "legacy-default-specs.db"
-        legacy = LoomDB(legacy_path)
+        legacy = TorqueDB(legacy_path)
         legacy.init()
         legacy._conn.execute(
             "CREATE TABLE legacy_gs AS SELECT * FROM group_settings"
@@ -353,7 +353,7 @@ class LoomDBTests(unittest.TestCase):
         legacy.close()
 
         # Re-open and run init() again — migration should add the column.
-        migrated = LoomDB(legacy_path)
+        migrated = TorqueDB(legacy_path)
         self.addCleanup(migrated.close)
         migrated.init()
         columns = {
@@ -375,8 +375,8 @@ class LoomDBTests(unittest.TestCase):
             session_id="session-1",
             command="codex",
             directory="/repo",
-            worktree_path="/repo/.loom/worktrees/agent-1",
-            worktree_branch="loom/worker",
+            worktree_path="/repo/.torque/worktrees/agent-1",
+            worktree_branch="torque/worker",
             worktree_repo_root="/repo",
             worktree_base_branch="main",
             worktree_auto_checkpoint=True,
@@ -432,7 +432,7 @@ class LoomDBTests(unittest.TestCase):
                 created_by_architect_id="architect-1",
                 suggested_action="feature/review",
                 reply_agent_id="agent-2",
-                labels=["loom:blocked", "keep"],
+                labels=["torque:blocked", "keep"],
                 created_at="2026-04-06T00:00:00+00:00",
                 updated_at="2026-04-06T01:00:00+00:00",
                 lane_entered_at="2026-04-06T00:30:00+00:00",
@@ -460,7 +460,7 @@ class LoomDBTests(unittest.TestCase):
                 },
                 worktree_boundary={
                     "version": "1",
-                    "branch": "loom/worker",
+                    "branch": "torque/worker",
                     "repo_root": "/repo",
                     "base_branch": "main",
                     "commit_sha": "abc123",
@@ -1214,23 +1214,23 @@ class LoomDBTests(unittest.TestCase):
             );
             """
         )
-        conn.execute("INSERT INTO groups (name, slug, position) VALUES ('Loom', 'loom', 0)")
+        conn.execute("INSERT INTO groups (name, slug, position) VALUES ('Torque', 'torque', 0)")
         conn.execute(
             "INSERT INTO board_tasks (id, task, group_name, created_at, updated_at, lane_entered_at) "
-            "VALUES ('task-root', 'Root', 'Loom', '2026-04-08T10:00:00+00:00', '2026-04-08T10:00:00+00:00', '2026-04-08T10:00:00+00:00')"
+            "VALUES ('task-root', 'Root', 'Torque', '2026-04-08T10:00:00+00:00', '2026-04-08T10:00:00+00:00', '2026-04-08T10:00:00+00:00')"
         )
         conn.execute(
             "INSERT INTO board_tasks (id, task, group_name, parent_task_id, pipeline_depth, pipeline_root_id, depends_on, created_at, updated_at, lane_entered_at) "
-            "VALUES ('task-child', 'Child', 'Loom', 'task-root', 1, 'task-root', '[\"task-root\"]', '2026-04-08T10:10:00+00:00', '2026-04-08T10:10:00+00:00', '2026-04-08T10:10:00+00:00')"
+            "VALUES ('task-child', 'Child', 'Torque', 'task-root', 1, 'task-root', '[\"task-root\"]', '2026-04-08T10:10:00+00:00', '2026-04-08T10:10:00+00:00', '2026-04-08T10:10:00+00:00')"
         )
         conn.execute(
-            "INSERT INTO auto_dispatch_queue (group_name, position, task_id) VALUES ('Loom', 0, 'task-child')"
+            "INSERT INTO auto_dispatch_queue (group_name, position, task_id) VALUES ('Torque', 0, 'task-child')"
         )
         conn.execute(
             "INSERT INTO panel_events (id, timestamp, kind, task_id) VALUES (1, 1.0, 'task_dispatched', 'task-child')"
         )
         conn.execute(
-            "INSERT INTO schedules (id, name, group_name, last_task_id, created_at, updated_at) VALUES ('sched', 'Nightly', 'Loom', 'task-root', '', '')"
+            "INSERT INTO schedules (id, name, group_name, last_task_id, created_at, updated_at) VALUES ('sched', 'Nightly', 'Torque', 'task-root', '', '')"
         )
         conn.execute(
             "INSERT INTO memory_entries (id, scope_kind, scope_ref, entry_type, content, task_id, created_at, updated_at) "
@@ -1251,25 +1251,25 @@ class LoomDBTests(unittest.TestCase):
         conn.commit()
         conn.close()
 
-        migrated_db = LoomDB(legacy_db)
+        migrated_db = TorqueDB(legacy_db)
         migrated_db.init()
         self.addCleanup(migrated_db.close)
         loaded = migrated_db.load_all()
 
-        self.assertIn("LOOM:1", loaded["board_tasks"])
-        self.assertIn("LOOM:1:1", loaded["board_tasks"])
-        self.assertEqual(loaded["board_tasks"]["LOOM:1:1"]["parent_task_id"], "LOOM:1")
-        self.assertEqual(loaded["board_tasks"]["LOOM:1:1"]["pipeline_root_id"], "LOOM:1")
-        self.assertEqual(loaded["board_tasks"]["LOOM:1:1"]["depends_on"], ["LOOM:1"])
-        self.assertEqual(loaded["board_tasks"]["LOOM:1"]["reply_agent_id"], "")
-        self.assertEqual(loaded["auto_dispatch_queues"]["Loom"][0]["task_id"], "LOOM:1:1")
+        self.assertIn("TORQUE:1", loaded["board_tasks"])
+        self.assertIn("TORQUE:1:1", loaded["board_tasks"])
+        self.assertEqual(loaded["board_tasks"]["TORQUE:1:1"]["parent_task_id"], "TORQUE:1")
+        self.assertEqual(loaded["board_tasks"]["TORQUE:1:1"]["pipeline_root_id"], "TORQUE:1")
+        self.assertEqual(loaded["board_tasks"]["TORQUE:1:1"]["depends_on"], ["TORQUE:1"])
+        self.assertEqual(loaded["board_tasks"]["TORQUE:1"]["reply_agent_id"], "")
+        self.assertEqual(loaded["auto_dispatch_queues"]["Torque"][0]["task_id"], "TORQUE:1:1")
         self.assertEqual(
-            loaded["auto_dispatch_queues"]["Loom"][0]["engineer_owner_id"],
+            loaded["auto_dispatch_queues"]["Torque"][0]["engineer_owner_id"],
             "",
         )
-        self.assertEqual(loaded["schedules"]["sched"]["last_task_id"], "LOOM:1")
-        self.assertEqual(loaded["task_id_aliases"]["task-root"], "LOOM:1")
-        self.assertEqual(loaded["task_id_aliases"]["task-child"], "LOOM:1:1")
+        self.assertEqual(loaded["schedules"]["sched"]["last_task_id"], "TORQUE:1")
+        self.assertEqual(loaded["task_id_aliases"]["task-root"], "TORQUE:1")
+        self.assertEqual(loaded["task_id_aliases"]["task-child"], "TORQUE:1:1")
 
     def test_load_all_restores_board_saved_views_by_group(self):
         views = {
@@ -1277,7 +1277,7 @@ class LoomDBTests(unittest.TestCase):
                 {
                     "name": "Review Queue",
                     "search_query": "review",
-                    "filter_labels": ["loom:blocked"],
+                    "filter_labels": ["torque:blocked"],
                     "filter_actions": ["feature/review"],
                     "filter_agents": [],
                 }
@@ -1457,7 +1457,7 @@ class LoomDBTests(unittest.TestCase):
                 "engineer_boot_command": "codex --model gpt-5",
                 "engineer_model": "gpt-5.1",
                 "engineer_reasoning_effort": "high",
-                "engineer_directory": "/repo/.loom/engineer",
+                "engineer_directory": "/repo/.torque/engineer",
                 "engineer_profile": "Ops",
                 "engineer_shell": "fish",
                 "engineer_tab_color": "none",
@@ -1489,7 +1489,7 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(loaded["engineer_boot_command"], "codex --model gpt-5")
         self.assertEqual(loaded["engineer_model"], "gpt-5.1")
         self.assertEqual(loaded["engineer_reasoning_effort"], "high")
-        self.assertEqual(loaded["engineer_directory"], "/repo/.loom/engineer")
+        self.assertEqual(loaded["engineer_directory"], "/repo/.torque/engineer")
         self.assertEqual(loaded["engineer_profile"], "Ops")
         self.assertEqual(loaded["engineer_shell"], "fish")
         self.assertEqual(loaded["engineer_tab_color"], "none")
@@ -1548,7 +1548,7 @@ class LoomDBTests(unittest.TestCase):
         conn.commit()
         conn.close()
 
-        migrated = LoomDB(legacy_path)
+        migrated = TorqueDB(legacy_path)
         self.addCleanup(migrated.close)
 
         migrated.init()
@@ -1678,7 +1678,7 @@ class LoomDBTests(unittest.TestCase):
         conn.commit()
         conn.close()
 
-        migrated = LoomDB(legacy_path)
+        migrated = TorqueDB(legacy_path)
         self.addCleanup(migrated.close)
         migrated.init()
 
@@ -1734,14 +1734,14 @@ class LoomDBTests(unittest.TestCase):
     def test_init_renames_legacy_engineer_payload_names(self):
         legacy = "wea" + "ver"
         legacy_path = Path(self.tmp.name) / "legacy-engineer-payloads.db"
-        seeded = LoomDB(legacy_path)
+        seeded = TorqueDB(legacy_path)
         seeded.init()
         seeded.save_board_task(
             BoardTask(
                 id="T-1",
                 task="Follow up",
                 group="g",
-                labels=[f"loom:{legacy}-message"],
+                labels=[f"torque:{legacy}-message"],
                 messages=[{"action": f"{legacy}_message"}],
             )
         )
@@ -1768,14 +1768,14 @@ class LoomDBTests(unittest.TestCase):
         seeded.save_ui_state("panel_active", legacy)
         seeded.close()
 
-        migrated = LoomDB(legacy_path)
+        migrated = TorqueDB(legacy_path)
         self.addCleanup(migrated.close)
         migrated.init()
 
         task = migrated._conn.execute(
             "SELECT labels, messages FROM board_tasks LIMIT 1"
         ).fetchone()
-        self.assertEqual(json.loads(task[0]), ["loom:engineer-message"])
+        self.assertEqual(json.loads(task[0]), ["torque:engineer-message"])
         self.assertEqual(json.loads(task[1])[0]["action"], "engineer_message")
         layout_row = migrated._conn.execute(
             "SELECT value FROM ui_state WHERE key='standalone_panel_layout'"
@@ -1853,7 +1853,7 @@ class LoomDBTests(unittest.TestCase):
         conn.commit()
         conn.close()
 
-        migrated = LoomDB(legacy_path)
+        migrated = TorqueDB(legacy_path)
         self.addCleanup(migrated.close)
         migrated.init()
 
@@ -2059,7 +2059,7 @@ class LoomDBTests(unittest.TestCase):
         )
         self.db.close()
 
-        reopened = LoomDB(self.db.db_path)
+        reopened = TorqueDB(self.db.db_path)
         reopened.init()
         self.addCleanup(reopened.close)
 
@@ -2077,7 +2077,7 @@ class LoomDBTests(unittest.TestCase):
         first_id = self.db.save_engineer_task_log_entry(
             {
                 "group": "g",
-                "task_id": "LOOM:1",
+                "task_id": "TORQUE:1",
                 "task_title": "Implement Worklog",
                 "agent_id": "agent-1",
                 "agent_name": "Worker One",
@@ -2089,7 +2089,7 @@ class LoomDBTests(unittest.TestCase):
         second_id = self.db.save_engineer_task_log_entry(
             {
                 "group": "g",
-                "task_id": "LOOM:2",
+                "task_id": "TORQUE:2",
                 "task_title": "Review Worklog",
                 "agent_id": "agent-2",
                 "agent_name": "Worker Two",
@@ -2102,20 +2102,20 @@ class LoomDBTests(unittest.TestCase):
         loaded = self.db.load_engineer_task_log("g", limit=10)
 
         self.assertEqual([entry["id"] for entry in loaded], [second_id, first_id])
-        self.assertEqual(loaded[0]["task_id"], "LOOM:2")
+        self.assertEqual(loaded[0]["task_id"], "TORQUE:2")
         self.assertFalse(loaded[0]["agent_owned"])
         self.assertEqual(loaded[1]["agent_slug"], "worker-one")
 
         self.db.rename_engineer_task_log_group("g", "renamed")
         renamed = self.db.load_engineer_task_log("renamed", limit=10)
 
-        self.assertEqual([entry["task_id"] for entry in renamed], ["LOOM:2", "LOOM:1"])
+        self.assertEqual([entry["task_id"] for entry in renamed], ["TORQUE:2", "TORQUE:1"])
         self.assertEqual(self.db.load_engineer_task_log("g", limit=10), [])
 
         self.db.trim_engineer_task_log("renamed", limit=1)
         self.assertEqual(
             [entry["task_id"] for entry in self.db.load_engineer_task_log("renamed", limit=10)],
-            ["LOOM:2"],
+            ["TORQUE:2"],
         )
 
     def test_playbook_candidates_roundtrip(self):
@@ -2184,7 +2184,7 @@ class LoomDBTests(unittest.TestCase):
             "published_at": None,
             "discarded_at": None,
             "name": "feature-implement-billing-dashboard",
-            "description": "Generated from Loom history. Review before publication.",
+            "description": "Generated from Torque history. Review before publication.",
             "match": {
                 "root_action": "feature/implement",
                 "labels": ["feature"],
@@ -2411,7 +2411,7 @@ class LoomDBTests(unittest.TestCase):
         conn.commit()
         conn.close()
 
-        upgraded = LoomDB(legacy_path)
+        upgraded = TorqueDB(legacy_path)
         self.addCleanup(upgraded.close)
 
         upgraded.init()
@@ -2432,13 +2432,13 @@ class LoomDBTests(unittest.TestCase):
         conn.commit()
         conn.close()
 
-        migrated = LoomDB(legacy_path)
+        migrated = TorqueDB(legacy_path)
         self.addCleanup(migrated.close)
 
-        with self.assertLogs("loom", level="INFO") as cm:
+        with self.assertLogs("torque", level="INFO") as cm:
             migrated.init()
 
-        backup_path = legacy_path.with_name("loom.db.pre-kinds.bak")
+        backup_path = legacy_path.with_name("torque.db.pre-kinds.bak")
         joined_logs = "\n".join(cm.output)
         self.assertIn(
             f"migration: created pre-kinds backup at {backup_path}",
@@ -2556,9 +2556,9 @@ class LoomDBTests(unittest.TestCase):
         backup_mtime_ns = backup_path.stat().st_mtime_ns
         migrated.close()
 
-        rerun = LoomDB(legacy_path)
+        rerun = TorqueDB(legacy_path)
         self.addCleanup(rerun.close)
-        logger = logging.getLogger("loom")
+        logger = logging.getLogger("torque")
         handler = logging.Handler()
         captured_messages = []
         handler.emit = lambda record: captured_messages.append(record.getMessage())
@@ -2587,13 +2587,13 @@ class LoomDBTests(unittest.TestCase):
 
     def test_init_backfills_empty_worker_kind_rows_once(self):
         path = Path(self.tmp.name) / "worker-kind-backfill.db"
-        seeded = LoomDB(path)
+        seeded = TorqueDB(path)
         seeded.init()
         seeded.save_agent(
             AgentCell(
                 id="engineer-1",
                 name="Courier",
-                group="loom",
+                group="torque",
                 slug="courier",
                 kind="engineer",
                 persistent=True,
@@ -2603,7 +2603,7 @@ class LoomDBTests(unittest.TestCase):
             AgentCell(
                 id="owned-worker",
                 name="Owned Worker",
-                group="loom",
+                group="torque",
                 slug="owned-worker",
                 kind="",
                 owner_engineer_id="engineer-1",
@@ -2614,7 +2614,7 @@ class LoomDBTests(unittest.TestCase):
             AgentCell(
                 id="user-worker",
                 name="User Worker",
-                group="loom",
+                group="torque",
                 slug="user-worker",
                 kind="",
                 persistent=False,
@@ -2624,7 +2624,7 @@ class LoomDBTests(unittest.TestCase):
             AgentCell(
                 id="persistent-empty",
                 name="Persistent Empty",
-                group="loom",
+                group="torque",
                 slug="persistent-empty",
                 kind="",
                 persistent=True,
@@ -2640,9 +2640,9 @@ class LoomDBTests(unittest.TestCase):
         conn.commit()
         conn.close()
 
-        migrated = LoomDB(path)
+        migrated = TorqueDB(path)
         self.addCleanup(migrated.close)
-        with self.assertLogs("loom", level="INFO") as cm:
+        with self.assertLogs("torque", level="INFO") as cm:
             migrated.init()
 
         self.assertIn(
@@ -2669,7 +2669,7 @@ class LoomDBTests(unittest.TestCase):
         )
 
         migrated.close()
-        rerun = LoomDB(path)
+        rerun = TorqueDB(path)
         self.addCleanup(rerun.close)
         rerun.init()
         self.assertEqual(
@@ -2692,13 +2692,13 @@ class LoomDBTests(unittest.TestCase):
                 AgentCell(
                     id="root-1",
                     name="Coordinator",
-                    group="loom",
+                    group="torque",
                     slug="coordinator",
                 ),
                 AgentCell(
                     id="worker-1",
                     name="Worker One",
-                    group="loom",
+                    group="torque",
                     slug="worker-one",
                     template="researcher",
                     created_by_engineer_id="root-1",
@@ -2712,21 +2712,21 @@ class LoomDBTests(unittest.TestCase):
                 AgentCell(
                     id="term-1",
                     name="Logs",
-                    group="loom",
-                    slug="loom:logs",
+                    group="torque",
+                    slug="torque:logs",
                     cell_type="terminal",
                 ),
             ],
             tasks=[
-                BoardTask(id="LOOM:1", task="Owned task", group="loom"),
+                BoardTask(id="TORQUE:1", task="Owned task", group="torque"),
                 BoardTask(id="ALPHA:1", task="Unowned task", group="alpha"),
             ],
         )
 
-        migrated = LoomDB(path)
+        migrated = TorqueDB(path)
         self.addCleanup(migrated.close)
 
-        with self.assertLogs("loom", level="INFO") as cm:
+        with self.assertLogs("torque", level="INFO") as cm:
             migrated.init()
 
         joined_logs = "\n".join(cm.output)
@@ -2761,7 +2761,7 @@ class LoomDBTests(unittest.TestCase):
             task_rows,
             [
                 ("ALPHA:1", "", "", ""),
-                ("LOOM:1", "", "", ""),
+                ("TORQUE:1", "", "", ""),
             ],
         )
         version = migrated._conn.execute(
@@ -2771,9 +2771,9 @@ class LoomDBTests(unittest.TestCase):
 
         migrated.close()
 
-        rerun = LoomDB(path)
+        rerun = TorqueDB(path)
         self.addCleanup(rerun.close)
-        logger = logging.getLogger("loom")
+        logger = logging.getLogger("torque")
         handler = logging.Handler()
         captured = []
         handler.emit = lambda record: captured.append(record.getMessage())
@@ -2790,14 +2790,14 @@ class LoomDBTests(unittest.TestCase):
             captured,
         )
 
-    def test_init_backfills_configured_loom_engineer_without_heuristic_match(self):
+    def test_init_backfills_configured_torque_engineer_without_heuristic_match(self):
         path = self._seed_stage1a_db(
             "kinds-backfill-configured-engineer.db",
             agents=[
                 AgentCell(
                     id="root-1",
                     name="Coordinator",
-                    group="loom",
+                    group="torque",
                     slug="coordinator",
                 ),
                 AgentCell(
@@ -2809,18 +2809,18 @@ class LoomDBTests(unittest.TestCase):
                 ),
             ],
             tasks=[
-                BoardTask(id="LOOM:1", task="Loom task", group="loom"),
+                BoardTask(id="TORQUE:1", task="Torque task", group="torque"),
                 BoardTask(id="ALPHA:1", task="Alpha task", group="alpha"),
             ],
             group_settings={
-                "loom": GroupSettings(engineer_agent_id="root-1"),
+                "torque": GroupSettings(engineer_agent_id="root-1"),
             },
         )
 
-        migrated = LoomDB(path)
+        migrated = TorqueDB(path)
         self.addCleanup(migrated.close)
 
-        with self.assertLogs("loom", level="INFO") as cm:
+        with self.assertLogs("torque", level="INFO") as cm:
             migrated.init()
 
         joined_logs = "\n".join(cm.output)
@@ -2848,7 +2848,7 @@ class LoomDBTests(unittest.TestCase):
             ).fetchall(),
             [
                 ("ALPHA:1", ""),
-                ("LOOM:1", "root-1"),
+                ("TORQUE:1", "root-1"),
             ],
         )
         self.assertEqual(
@@ -2872,7 +2872,7 @@ class LoomDBTests(unittest.TestCase):
                 AgentCell(
                     id="agent-2",
                     name="Coordinator",
-                    group="loom",
+                    group="torque",
                     slug="coordinator",
                     template="default",
                 ),
@@ -2880,10 +2880,10 @@ class LoomDBTests(unittest.TestCase):
             tasks=[BoardTask(id="ALPHA:1", task="Task", group="alpha")],
         )
 
-        migrated = LoomDB(path)
+        migrated = TorqueDB(path)
         self.addCleanup(migrated.close)
 
-        with self.assertLogs("loom", level="INFO") as cm:
+        with self.assertLogs("torque", level="INFO") as cm:
             migrated.init()
 
         joined_logs = "\n".join(cm.output)
@@ -2928,31 +2928,31 @@ class LoomDBTests(unittest.TestCase):
                 AgentCell(
                     id="engineer-a",
                     name="Engineer Alpha",
-                    group="loom",
+                    group="torque",
                     slug="engineer-alpha",
                 ),
                 AgentCell(
                     id="engineer-b",
                     name="Bob",
-                    group="loom",
+                    group="torque",
                     slug="bob",
                     template="engineer",
                 ),
                 AgentCell(
                     id="worker-1",
                     name="Worker",
-                    group="loom",
+                    group="torque",
                     slug="worker",
                     created_by_engineer_id="engineer-a",
                 ),
             ],
-            tasks=[BoardTask(id="LOOM:1", task="Task", group="loom")],
+            tasks=[BoardTask(id="TORQUE:1", task="Task", group="torque")],
         )
 
-        migrated = LoomDB(path)
+        migrated = TorqueDB(path)
         self.addCleanup(migrated.close)
 
-        with self.assertLogs("loom", level="ERROR") as cm:
+        with self.assertLogs("torque", level="ERROR") as cm:
             migrated.init()
 
         joined_logs = "\n".join(cm.output)
@@ -2981,47 +2981,47 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(
             migrated._conn.execute(
                 "SELECT assigned_engineer_id FROM board_tasks WHERE id='task-1'"
-                .replace("task-1", "LOOM:1")
+                .replace("task-1", "TORQUE:1")
             ).fetchone()[0],
             "",
         )
 
-    def test_init_uses_configured_loom_engineer_to_disambiguate_candidates(self):
+    def test_init_uses_configured_torque_engineer_to_disambiguate_candidates(self):
         path = self._seed_stage1a_db(
             "kinds-backfill-configured-disambiguation.db",
             agents=[
                 AgentCell(
                     id="engineer-a",
                     name="Engineer Alpha",
-                    group="loom",
+                    group="torque",
                     slug="engineer-alpha",
                 ),
                 AgentCell(
                     id="engineer-b",
                     name="Bob",
-                    group="loom",
+                    group="torque",
                     slug="bob",
                     template="engineer",
                 ),
                 AgentCell(
                     id="worker-1",
                     name="Worker",
-                    group="loom",
+                    group="torque",
                     slug="worker",
                     template="researcher",
                     created_by_engineer_id="engineer-b",
                 ),
             ],
-            tasks=[BoardTask(id="LOOM:1", task="Task", group="loom")],
+            tasks=[BoardTask(id="TORQUE:1", task="Task", group="torque")],
             group_settings={
-                "loom": GroupSettings(engineer_agent_id="engineer-b"),
+                "torque": GroupSettings(engineer_agent_id="engineer-b"),
             },
         )
 
-        migrated = LoomDB(path)
+        migrated = TorqueDB(path)
         self.addCleanup(migrated.close)
 
-        with self.assertLogs("loom", level="INFO") as cm:
+        with self.assertLogs("torque", level="INFO") as cm:
             migrated.init()
 
         joined_logs = "\n".join(cm.output)
@@ -3045,7 +3045,7 @@ class LoomDBTests(unittest.TestCase):
         )
         self.assertEqual(
             migrated._conn.execute(
-                "SELECT assigned_engineer_id FROM board_tasks WHERE id='LOOM:1'"
+                "SELECT assigned_engineer_id FROM board_tasks WHERE id='TORQUE:1'"
             ).fetchone()[0],
             "engineer-b",
         )
@@ -3063,33 +3063,33 @@ class LoomDBTests(unittest.TestCase):
                 AgentCell(
                     id="engineer-a",
                     name="Engineer Alpha",
-                    group="loom",
+                    group="torque",
                     slug="engineer-alpha",
                 ),
                 AgentCell(
                     id="engineer-b",
                     name="Bob",
-                    group="loom",
+                    group="torque",
                     slug="bob",
                     template="engineer",
                 ),
                 AgentCell(
                     id="worker-1",
                     name="Worker",
-                    group="loom",
+                    group="torque",
                     slug="worker",
                     template="researcher",
                     created_by_engineer_id="engineer-b",
                 ),
             ],
-            tasks=[BoardTask(id="LOOM:1", task="Task", group="loom")],
+            tasks=[BoardTask(id="TORQUE:1", task="Task", group="torque")],
         )
 
-        migrated = LoomDB(path)
+        migrated = TorqueDB(path)
         self.addCleanup(migrated.close)
 
-        with mock.patch.dict("os.environ", {"LOOM_MIGRATE_ENGINEER_ID": "engineer-b"}):
-            with self.assertLogs("loom", level="INFO") as cm:
+        with mock.patch.dict("os.environ", {"TORQUE_MIGRATE_ENGINEER_ID": "engineer-b"}):
+            with self.assertLogs("torque", level="INFO") as cm:
                 migrated.init()
 
         joined_logs = "\n".join(cm.output)
@@ -3112,7 +3112,7 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(
             migrated._conn.execute(
                 "SELECT assigned_engineer_id FROM board_tasks WHERE id='task-1'"
-                .replace("task-1", "LOOM:1")
+                .replace("task-1", "TORQUE:1")
             ).fetchone()[0],
             "",
         )
@@ -3130,7 +3130,7 @@ class LoomDBTests(unittest.TestCase):
                 AgentCell(
                     id="root-1",
                     name="Coordinator",
-                    group="loom",
+                    group="torque",
                     slug="coordinator",
                 ),
                 AgentCell(
@@ -3142,16 +3142,16 @@ class LoomDBTests(unittest.TestCase):
                 ),
             ],
             tasks=[
-                BoardTask(id="LOOM:1", task="Loom task", group="loom"),
-                BoardTask(id="LOOM:2", task="Second loom task", group="loom"),
+                BoardTask(id="TORQUE:1", task="Torque task", group="torque"),
+                BoardTask(id="TORQUE:2", task="Second torque task", group="torque"),
                 BoardTask(id="ALPHA:1", task="Alpha task", group="alpha"),
             ],
             group_settings={
-                "loom": GroupSettings(engineer_agent_id="root-1"),
+                "torque": GroupSettings(engineer_agent_id="root-1"),
             },
         )
 
-        migrated = LoomDB(path)
+        migrated = TorqueDB(path)
         self.addCleanup(migrated.close)
         migrated.init()
 
@@ -3161,8 +3161,8 @@ class LoomDBTests(unittest.TestCase):
             ).fetchall(),
             [
                 ("ALPHA:1", ""),
-                ("LOOM:1", "root-1"),
-                ("LOOM:2", "root-1"),
+                ("TORQUE:1", "root-1"),
+                ("TORQUE:2", "root-1"),
             ],
         )
         self.assertEqual(
@@ -3184,25 +3184,25 @@ class LoomDBTests(unittest.TestCase):
                     slug="worker",
                 ),
             ],
-            tasks=[BoardTask(id="LOOM:1", task="Loom task", group="loom")],
+            tasks=[BoardTask(id="TORQUE:1", task="Torque task", group="torque")],
             group_settings={
-                "loom": GroupSettings(engineer_agent_id="stale-id"),
+                "torque": GroupSettings(engineer_agent_id="stale-id"),
             },
         )
 
-        migrated = LoomDB(path)
+        migrated = TorqueDB(path)
         self.addCleanup(migrated.close)
 
-        with self.assertLogs("loom", level="INFO") as cm:
+        with self.assertLogs("torque", level="INFO") as cm:
             migrated.init()
 
         self.assertIn(
-            "migration: ignoring stale engineer_agent_id='stale-id' for group='loom'",
+            "migration: ignoring stale engineer_agent_id='stale-id' for group='torque'",
             "\n".join(cm.output),
         )
         self.assertEqual(
             migrated._conn.execute(
-                "SELECT assigned_engineer_id FROM board_tasks WHERE id='LOOM:1'"
+                "SELECT assigned_engineer_id FROM board_tasks WHERE id='TORQUE:1'"
             ).fetchone()[0],
             "",
         )
@@ -3220,31 +3220,31 @@ class LoomDBTests(unittest.TestCase):
                 AgentCell(
                     id="root-1",
                     name="Engineer",
-                    group="loom",
+                    group="torque",
                     slug="engineer",
                 ),
                 AgentCell(
                     id="worker-1",
                     name="Worker",
-                    group="loom",
+                    group="torque",
                     slug="worker",
                     created_by_engineer_id="root-1",
                 ),
             ],
-            tasks=[BoardTask(id="LOOM:1", task="Loom task", group="loom")],
+            tasks=[BoardTask(id="TORQUE:1", task="Torque task", group="torque")],
             group_settings={
-                "loom": GroupSettings(engineer_agent_id="stale-id"),
+                "torque": GroupSettings(engineer_agent_id="stale-id"),
             },
         )
 
-        migrated = LoomDB(path)
+        migrated = TorqueDB(path)
         self.addCleanup(migrated.close)
 
-        with self.assertLogs("loom", level="WARNING") as cm:
+        with self.assertLogs("torque", level="WARNING") as cm:
             migrated.init()
 
         self.assertIn(
-            "migration: ignoring stale engineer_agent_id='stale-id' for group='loom'",
+            "migration: ignoring stale engineer_agent_id='stale-id' for group='torque'",
             "\n".join(cm.output),
         )
         self.assertEqual(
@@ -3255,7 +3255,7 @@ class LoomDBTests(unittest.TestCase):
         )
         self.assertEqual(
             migrated._conn.execute(
-                "SELECT assigned_engineer_id FROM board_tasks WHERE id='LOOM:1'"
+                "SELECT assigned_engineer_id FROM board_tasks WHERE id='TORQUE:1'"
             ).fetchone()[0],
             "",
         )
@@ -3273,7 +3273,7 @@ class LoomDBTests(unittest.TestCase):
                 AgentCell(
                     id="root-1",
                     name="Engineer",
-                    group="loom",
+                    group="torque",
                     slug="engineer",
                     kind="engineer",
                     persistent=True,
@@ -3289,7 +3289,7 @@ class LoomDBTests(unittest.TestCase):
                 ),
             ],
             tasks=[
-                BoardTask(id="LOOM:1", task="Needs fixup", group="loom"),
+                BoardTask(id="TORQUE:1", task="Needs fixup", group="torque"),
                 BoardTask(
                     id="ALPHA:1",
                     task="Already assigned",
@@ -3298,7 +3298,7 @@ class LoomDBTests(unittest.TestCase):
                 ),
             ],
             group_settings={
-                "loom": GroupSettings(engineer_agent_id="root-1"),
+                "torque": GroupSettings(engineer_agent_id="root-1"),
             },
         )
         conn = sqlite3.connect(str(path))
@@ -3319,15 +3319,15 @@ class LoomDBTests(unittest.TestCase):
             "WHERE id='ALPHA:1'"
         )
         conn.execute(
-            "UPDATE board_tasks SET assigned_engineer_id='' WHERE id='LOOM:1'"
+            "UPDATE board_tasks SET assigned_engineer_id='' WHERE id='TORQUE:1'"
         )
         conn.commit()
         conn.close()
 
-        migrated = LoomDB(path)
+        migrated = TorqueDB(path)
         self.addCleanup(migrated.close)
 
-        with self.assertLogs("loom", level="INFO") as cm:
+        with self.assertLogs("torque", level="INFO") as cm:
             migrated.init()
 
         self.assertIn(
@@ -3340,7 +3340,7 @@ class LoomDBTests(unittest.TestCase):
             ).fetchall(),
             [
                 ("ALPHA:1", "explicit-owner"),
-                ("LOOM:1", "root-1"),
+                ("TORQUE:1", "root-1"),
             ],
         )
         self.assertEqual(
@@ -3358,15 +3358,15 @@ class LoomDBTests(unittest.TestCase):
                 AgentCell(
                     id="root-1",
                     name="Engineer",
-                    group="loom",
+                    group="torque",
                     slug="engineer",
                     kind="engineer",
                     persistent=True,
                 ),
             ],
-            tasks=[BoardTask(id="LOOM:1", task="Needs fixup", group="loom")],
+            tasks=[BoardTask(id="TORQUE:1", task="Needs fixup", group="torque")],
             group_settings={
-                "loom": GroupSettings(engineer_agent_id="stale-id"),
+                "torque": GroupSettings(engineer_agent_id="stale-id"),
             },
         )
         conn = sqlite3.connect(str(path))
@@ -3380,20 +3380,20 @@ class LoomDBTests(unittest.TestCase):
             "UPDATE agents SET kind='engineer', persistent=1 WHERE id='root-1'"
         )
         conn.execute(
-            "UPDATE board_tasks SET assigned_engineer_id='' WHERE id='LOOM:1'"
+            "UPDATE board_tasks SET assigned_engineer_id='' WHERE id='TORQUE:1'"
         )
         conn.commit()
         conn.close()
 
-        migrated = LoomDB(path)
+        migrated = TorqueDB(path)
         self.addCleanup(migrated.close)
 
-        with self.assertLogs("loom", level="INFO") as cm:
+        with self.assertLogs("torque", level="INFO") as cm:
             migrated.init()
 
         joined_logs = "\n".join(cm.output)
         self.assertIn(
-            "migration: ignoring stale engineer_agent_id='stale-id' for group='loom'",
+            "migration: ignoring stale engineer_agent_id='stale-id' for group='torque'",
             joined_logs,
         )
         self.assertIn(
@@ -3402,7 +3402,7 @@ class LoomDBTests(unittest.TestCase):
         )
         self.assertEqual(
             migrated._conn.execute(
-                "SELECT assigned_engineer_id FROM board_tasks WHERE id='LOOM:1'"
+                "SELECT assigned_engineer_id FROM board_tasks WHERE id='TORQUE:1'"
             ).fetchone()[0],
             "",
         )
@@ -3414,10 +3414,10 @@ class LoomDBTests(unittest.TestCase):
             "1",
         )
 
-class LoomDBAsyncWriteTests(unittest.IsolatedAsyncioTestCase):
+class TorqueDBAsyncWriteTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.db = LoomDB(Path(self.tmp.name) / "loom.db")
+        self.db = TorqueDB(Path(self.tmp.name) / "torque.db")
         self.db.init()
         self.db.enable_async_writes(True)
 
@@ -3442,13 +3442,13 @@ class LoomDBAsyncWriteTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_deferred_agent_save_returns_before_sync_write_runs(self):
         cell = AgentCell(id="agent-1", name="Agent", group="g")
-        original_save_agent = LoomDB.save_agent
+        original_save_agent = TorqueDB.save_agent
 
         def slow_save_agent(db_self, saved_cell):
             time.sleep(0.15)
             return original_save_agent(db_self, saved_cell)
 
-        with mock.patch.object(LoomDB, "save_agent", slow_save_agent):
+        with mock.patch.object(TorqueDB, "save_agent", slow_save_agent):
             started = time.monotonic()
             self.db.save_agent_deferred(cell)
             elapsed = time.monotonic() - started
@@ -3459,14 +3459,14 @@ class LoomDBAsyncWriteTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("agent-1", self.db.load_all()["agents"])
 
     async def test_delete_board_task_is_ordered_after_deferred_save(self):
-        task = BoardTask(id="LOOM:race", task="Race", group="g")
-        original_save_board_task = LoomDB.save_board_task
+        task = BoardTask(id="TORQUE:race", task="Race", group="g")
+        original_save_board_task = TorqueDB.save_board_task
 
         def slow_save_board_task(db_self, saved_task):
             time.sleep(0.15)
             return original_save_board_task(db_self, saved_task)
 
-        with mock.patch.object(LoomDB, "save_board_task", slow_save_board_task):
+        with mock.patch.object(TorqueDB, "save_board_task", slow_save_board_task):
             self.db.save_board_task_deferred(task)
             self.db.delete_board_task(task.id)
             await asyncio.wait_for(self.db.flush_async_writes(), timeout=5.0)
@@ -3475,13 +3475,13 @@ class LoomDBAsyncWriteTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_delete_agent_is_ordered_after_deferred_save(self):
         cell = AgentCell(id="agent-race", name="Agent", group="g")
-        original_save_agent = LoomDB.save_agent
+        original_save_agent = TorqueDB.save_agent
 
         def slow_save_agent(db_self, saved_cell):
             time.sleep(0.15)
             return original_save_agent(db_self, saved_cell)
 
-        with mock.patch.object(LoomDB, "save_agent", slow_save_agent):
+        with mock.patch.object(TorqueDB, "save_agent", slow_save_agent):
             self.db.save_agent_deferred(cell)
             self.db.delete_agent(cell.id)
             await asyncio.wait_for(self.db.flush_async_writes(), timeout=5.0)
@@ -3490,14 +3490,14 @@ class LoomDBAsyncWriteTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_delete_group_clears_queued_group_settings_save(self):
         self.db.save_group("stale", 0)
-        original_save_group_settings = LoomDB.save_group_settings
+        original_save_group_settings = TorqueDB.save_group_settings
 
         def slow_save_group_settings(db_self, group_name, settings):
             time.sleep(0.15)
             return original_save_group_settings(db_self, group_name, settings)
 
         with mock.patch.object(
-            LoomDB,
+            TorqueDB,
             "save_group_settings",
             slow_save_group_settings,
         ):
@@ -3515,7 +3515,7 @@ class LoomDBAsyncWriteTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("stale", loaded["group_settings"])
 
     async def test_memory_db_deferred_agent_save_falls_back_to_sync(self):
-        db = LoomDB(Path(":memory:"))
+        db = TorqueDB(Path(":memory:"))
         db.init()
         db.enable_async_writes(True)
         try:
@@ -3529,12 +3529,12 @@ class LoomDBAsyncWriteTests(unittest.IsolatedAsyncioTestCase):
             db.close()
 
     async def test_async_wrappers_return_saved_rows_after_queue_drain(self):
-        task = BoardTask(id="LOOM:1", task="Ship it", group="g")
+        task = BoardTask(id="TORQUE:1", task="Ship it", group="g")
         await self.db.save_board_task_async(task)
         task.lane = "Done"
         await self.db.save_board_task_async(task)
         self.assertEqual(
-            self.db.load_all()["board_tasks"]["LOOM:1"]["lane"],
+            self.db.load_all()["board_tasks"]["TORQUE:1"]["lane"],
             "Done",
         )
 

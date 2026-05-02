@@ -63,7 +63,7 @@ class FakeWindow:
 
 class DesktopLauncherTests(unittest.TestCase):
     def setUp(self):
-        self.desktop_mod = importlib.import_module("loom.desktop")
+        self.desktop_mod = importlib.import_module("torque.desktop")
         self.desktop_mod = importlib.reload(self.desktop_mod)
 
     def test_patch_pywebview_cocoa_first_mouse_overrides_host_once(self):
@@ -89,7 +89,7 @@ class DesktopLauncherTests(unittest.TestCase):
             FakeWebKitHost.acceptsFirstMouse_(object(), None)
         )
         self.assertTrue(
-            getattr(FakeWebKitHost, "_loom_accepts_first_mouse_patched")
+            getattr(FakeWebKitHost, "_torque_accepts_first_mouse_patched")
         )
 
         patched_again = self.desktop_mod._patch_pywebview_cocoa_first_mouse(
@@ -116,29 +116,29 @@ class DesktopLauncherTests(unittest.TestCase):
         self.assertEqual(settings.profile, "desktop")
         self.assertEqual(settings.port, 18933)
         self.assertEqual(settings.url, "http://127.0.0.1:18933/")
-        self.assertEqual(settings.script_path, Path("/repo/loom.py"))
+        self.assertEqual(settings.script_path, Path("/repo/torque.py"))
         self.assertEqual(
             settings.data_dir,
-            Path(home_dir) / ".loom" / "profiles" / "desktop",
+            Path(home_dir) / ".torque" / "profiles" / "desktop",
         )
 
         env = self.desktop_mod.build_server_env(
             settings,
             base_env={"HOME": home_dir},
         )
-        self.assertEqual(env["LOOM_DESKTOP_MODE"], "spawn")
-        self.assertEqual(env["LOOM_DESKTOP_ATTACH"], "0")
-        self.assertEqual(env["LOOM_STANDALONE"], "1")
-        self.assertEqual(env["LOOM_PROFILE"], "desktop")
-        self.assertEqual(env["LOOM_PORT"], "18933")
-        self.assertEqual(env["LOOM_DATA_DIR"], str(settings.data_dir))
+        self.assertEqual(env["TORQUE_DESKTOP_MODE"], "spawn")
+        self.assertEqual(env["TORQUE_DESKTOP_ATTACH"], "0")
+        self.assertEqual(env["TORQUE_STANDALONE"], "1")
+        self.assertEqual(env["TORQUE_PROFILE"], "desktop")
+        self.assertEqual(env["TORQUE_PORT"], "18933")
+        self.assertEqual(env["TORQUE_DATA_DIR"], str(settings.data_dir))
 
     def test_resolve_settings_honors_attach_mode(self):
         settings = self.desktop_mod.resolve_desktop_settings(
             env={
                 "HOME": "/tmp/home",
-                "LOOM_DESKTOP_MODE": "attach",
-                "LOOM_DESKTOP_PROFILE": "desktop-dev",
+                "TORQUE_DESKTOP_MODE": "attach",
+                "TORQUE_DESKTOP_PROFILE": "desktop-dev",
             },
             script_dir=Path("/repo"),
         )
@@ -147,19 +147,19 @@ class DesktopLauncherTests(unittest.TestCase):
         self.assertEqual(settings.profile, "desktop-dev")
         self.assertEqual(
             settings.data_dir,
-            Path("/tmp/home/.loom/profiles/desktop-dev"),
+            Path("/tmp/home/.torque/profiles/desktop-dev"),
         )
 
-    def test_desktop_specific_env_overrides_general_loom_runtime_values(self):
+    def test_desktop_specific_env_overrides_general_torque_runtime_values(self):
         settings = self.desktop_mod.resolve_desktop_settings(
             env={
                 "HOME": "/tmp/home",
-                "LOOM_PROFILE": "toolbelt-profile",
-                "LOOM_PORT": "18932",
-                "LOOM_DATA_DIR": "/tmp/toolbelt-runtime",
-                "LOOM_DESKTOP_PROFILE": "desktop-dev",
-                "LOOM_DESKTOP_PORT": "19022",
-                "LOOM_DESKTOP_DATA_DIR": "/tmp/desktop-runtime",
+                "TORQUE_PROFILE": "toolbelt-profile",
+                "TORQUE_PORT": "18932",
+                "TORQUE_DATA_DIR": "/tmp/toolbelt-runtime",
+                "TORQUE_DESKTOP_PROFILE": "desktop-dev",
+                "TORQUE_DESKTOP_PORT": "19022",
+                "TORQUE_DESKTOP_DATA_DIR": "/tmp/desktop-runtime",
             },
             script_dir=Path("/repo"),
         )
@@ -201,15 +201,15 @@ class DesktopLauncherTests(unittest.TestCase):
 
         self.assertEqual(
             popen_calls[0][0],
-            ["/fake/python", "/repo/loom.py"],
+            ["/fake/python", "/repo/torque.py"],
         )
         self.assertEqual(
-            popen_calls[0][1]["env"]["LOOM_DATA_DIR"],
+            popen_calls[0][1]["env"]["TORQUE_DATA_DIR"],
             str(settings.data_dir),
         )
         self.assertEqual(
             fake_webview.calls[0][:3],
-            ("create_window", "Loom", "http://127.0.0.1:18933/"),
+            ("create_window", "Torque", "http://127.0.0.1:18933/"),
         )
         self.assertEqual(len(fake_webview.window.events.closed.handlers), 1)
         self.assertEqual(len(fake_webview.window.events.closing.handlers), 1)
@@ -223,8 +223,8 @@ class DesktopLauncherTests(unittest.TestCase):
                 launch_mode="spawn",
                 profile="desktop",
                 port=18933,
-                data_dir=Path("/tmp/loom-desktop"),
-                script_path=Path("/repo/loom.py"),
+                data_dir=Path("/tmp/torque-desktop"),
+                script_path=Path("/repo/torque.py"),
             ),
             popen_factory=mock.Mock(),
         )
@@ -233,7 +233,7 @@ class DesktopLauncherTests(unittest.TestCase):
         with self.assertRaises(RuntimeError) as ctx:
             launcher.ensure_server()
 
-        self.assertIn("iTerm2-hosted Loom instance", str(ctx.exception))
+        self.assertIn("iTerm2-hosted Torque instance", str(ctx.exception))
         launcher._popen_factory.assert_not_called()
 
     def test_existing_standalone_can_be_attached_when_opted_in(self):
@@ -243,22 +243,22 @@ class DesktopLauncherTests(unittest.TestCase):
                 launch_mode="attach",
                 profile="desktop",
                 port=18933,
-                data_dir=Path("/tmp/loom-desktop"),
-                script_path=Path("/repo/loom.py"),
+                data_dir=Path("/tmp/torque-desktop"),
+                script_path=Path("/repo/torque.py"),
             ),
             popen_factory=mock.Mock(),
         )
         launcher.probe_runtime = lambda timeout=0.75: {
             "standalone": True,
             "profile": "desktop",
-            "data_dir": "/tmp/loom-desktop",
+            "data_dir": "/tmp/torque-desktop",
         }
 
         launcher.run(webview_module=fake_webview)
 
         self.assertEqual(
             fake_webview.calls[0][:3],
-            ("create_window", "Loom", "http://127.0.0.1:18933/"),
+            ("create_window", "Torque", "http://127.0.0.1:18933/"),
         )
         launcher._popen_factory.assert_not_called()
 
@@ -268,8 +268,8 @@ class DesktopLauncherTests(unittest.TestCase):
                 launch_mode="attach",
                 profile="desktop",
                 port=18933,
-                data_dir=Path("/tmp/loom-desktop"),
-                script_path=Path("/repo/loom.py"),
+                data_dir=Path("/tmp/torque-desktop"),
+                script_path=Path("/repo/torque.py"),
             ),
             popen_factory=mock.Mock(),
         )
@@ -291,8 +291,8 @@ class DesktopLauncherTests(unittest.TestCase):
                 launch_mode="attach",
                 profile="desktop",
                 port=18933,
-                data_dir=Path("/tmp/loom-desktop"),
-                script_path=Path("/repo/loom.py"),
+                data_dir=Path("/tmp/torque-desktop"),
+                script_path=Path("/repo/torque.py"),
             ),
             popen_factory=mock.Mock(),
         )
@@ -301,7 +301,7 @@ class DesktopLauncherTests(unittest.TestCase):
         with self.assertRaises(RuntimeError) as ctx:
             launcher.ensure_server()
 
-        self.assertIn("No standalone Loom server is listening", str(ctx.exception))
+        self.assertIn("No standalone Torque server is listening", str(ctx.exception))
         launcher._popen_factory.assert_not_called()
 
     def test_spawn_mode_rejects_existing_matching_server_until_attach_requested(self):
@@ -310,21 +310,21 @@ class DesktopLauncherTests(unittest.TestCase):
                 launch_mode="spawn",
                 profile="desktop",
                 port=18933,
-                data_dir=Path("/tmp/loom-desktop"),
-                script_path=Path("/repo/loom.py"),
+                data_dir=Path("/tmp/torque-desktop"),
+                script_path=Path("/repo/torque.py"),
             ),
             popen_factory=mock.Mock(),
         )
         launcher.probe_runtime = lambda timeout=0.75: {
             "standalone": True,
             "profile": "desktop",
-            "data_dir": "/tmp/loom-desktop",
+            "data_dir": "/tmp/torque-desktop",
         }
 
         with self.assertRaises(RuntimeError) as ctx:
             launcher.ensure_server()
 
-        self.assertIn("loom desktop --attach", str(ctx.exception))
+        self.assertIn("torque desktop --attach", str(ctx.exception))
         launcher._popen_factory.assert_not_called()
 
     def test_window_close_handler_stops_desktop_owned_child_server(self):
@@ -334,8 +334,8 @@ class DesktopLauncherTests(unittest.TestCase):
                 launch_mode="spawn",
                 profile="desktop",
                 port=18933,
-                data_dir=Path("/tmp/loom-desktop"),
-                script_path=Path("/repo/loom.py"),
+                data_dir=Path("/tmp/torque-desktop"),
+                script_path=Path("/repo/torque.py"),
             ),
             popen_factory=mock.Mock(),
         )

@@ -1,0 +1,43 @@
+name: oneshot/audit
+description: Systematic audit (security, performance, tool surface, dead code, etc.) producing a report
+agent:
+  name_prefix: audit
+  tab_color: '#d29922'
+worktree: false
+deliverable:
+  required: true
+  type: report
+  format: markdown
+  artifact_title: "Audit report"
+prompt: |
+  You are auditing a defined surface and producing a written report. Do NOT make code changes.
+
+  ## Task
+
+  {{ torque.task.title }}
+
+  {% if torque.task.description %}
+  ## Context
+
+  {{ torque.task.description }}
+  {% endif %}
+
+  ## Audit approach
+
+  - Define the audit scope explicitly — what's in, what's out — and stick to it.
+  - Walk the surface systematically (file by file, endpoint by endpoint, tool by tool, etc.) so coverage is auditable.
+  - For each finding, note severity, evidence (file:line), and proposed remediation.
+  - Flag anything ambiguous as an open question rather than guessing.
+
+  ## Report shape
+
+  Your report should cover (as applicable):
+  - Scope — what was audited and what was deliberately excluded.
+  - Findings — categorized (e.g. by severity or area), each with file:line references and a recommended fix.
+  - Risks / open questions — items requiring product or human judgment.
+  - Estimates — rough scope of remediation work.
+
+  Submit the report as the deliverable artifact (see Deliverable contract below). Do NOT inline the report in `torque_done.message` — the gate will refuse it.
+labels:
+- audit
+transitions: []

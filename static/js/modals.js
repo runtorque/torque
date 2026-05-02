@@ -381,7 +381,7 @@ function openAddGroup() {
   if (summary) {
     const standalone = !!(state && state.runtime && state.runtime.embedded_terminal);
     summary.textContent = standalone
-      ? 'Create the workspace first — Loom will take you straight into agent setup next.'
+      ? 'Create the workspace first — Torque will take you straight into agent setup next.'
       : '';
     summary.classList.toggle('hidden', !standalone);
   }
@@ -1088,7 +1088,7 @@ const _ENGINEER_NOTIFICATION_PRESETS = {
   },
   normal: {
     label: 'Normal',
-    description: 'Balanced Loom defaults with key lifecycle updates and heartbeats.',
+    description: 'Balanced Torque defaults with key lifecycle updates and heartbeats.',
     digest_verbosity: 'balanced',
     push_interval: 60,
     max_interval: 300,
@@ -1509,7 +1509,7 @@ function _showGroupSettings(group, data) {
   document.getElementById('gs-agent-reasoning-effort').value = s.agent_reasoning_effort || '';
   onGsProviderChange();
   document.getElementById('gs-worktree').checked = s.git_worktree || false;
-  document.getElementById('gs-wt-base-dir').value = s.worktree_base_dir || '.loom/worktrees';
+  document.getElementById('gs-wt-base-dir').value = s.worktree_base_dir || '.torque/worktrees';
   document.getElementById('gs-wt-base-branch').value = s.worktree_base_branch || '';
   document.getElementById('gs-wt-auto-checkpoint').checked = s.worktree_auto_checkpoint || false;
   document.getElementById('gs-wt-checkpoint-on-progress').checked = s.checkpoint_on_progress || false;
@@ -1760,7 +1760,7 @@ function submitGroupSettings() {
     agent_env_vars: _textToEnv('gs-agent-env-vars'),
     agent_env_file: document.getElementById('gs-agent-env-file').value.trim(),
     git_worktree: document.getElementById('gs-worktree').checked,
-    worktree_base_dir: document.getElementById('gs-wt-base-dir').value.trim() || '.loom/worktrees',
+    worktree_base_dir: document.getElementById('gs-wt-base-dir').value.trim() || '.torque/worktrees',
     worktree_base_branch: document.getElementById('gs-wt-base-branch').value.trim(),
     worktree_auto_checkpoint: document.getElementById('gs-wt-auto-checkpoint').checked,
     checkpoint_on_progress: document.getElementById('gs-wt-checkpoint-on-progress').checked,
@@ -1891,7 +1891,7 @@ function _showWorktreeHistory(data) {
   _histCellId = data.id;
   const cell = state.agents[data.id];
   const name = cell ? cell.name : data.id;
-  const branch = (data.branch || '').replace(/^loom\//, '');
+  const branch = (data.branch || '').replace(/^torque\//, '');
 
   document.getElementById('hist-title').textContent = name + ' History';
   document.getElementById('hist-branch').textContent = branch ? '\u2387 ' + branch : '';
@@ -2380,7 +2380,7 @@ function scheduleActionChanged() {
     if (_schedActions[i].name === action) { act = _schedActions[i]; break; }
   }
   if (act && act.vars) {
-    var varNames = act.vars.filter(function(v) { return v.name !== 'TASK' && v.name !== 'loom'; })
+    var varNames = act.vars.filter(function(v) { return v.name !== 'TASK' && v.name !== 'torque'; })
       .map(function(v) { return v.name; });
     _schedRenderActionVars(varNames);
   }
@@ -2400,7 +2400,7 @@ function _schedRenderActionVars(vars) {
 
   for (var i = 0; i < vars.length; i++) {
     var v = vars[i];
-    if (v === 'TASK' || v === 'loom') continue;
+    if (v === 'TASK' || v === 'torque') continue;
     var label = document.createElement('label');
     label.textContent = v;
     var ta = document.createElement('textarea');

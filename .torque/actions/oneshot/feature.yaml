@@ -1,0 +1,48 @@
+name: oneshot/feature
+description: Implement a small feature directly on the current branch
+
+agent:
+  name_prefix: feat
+  tab_color: "#3fb950"
+
+implementation_depth: true
+
+prompt: |
+  {% if torque.context.is_clean %}
+  You are implementing a feature. This is a quick, focused change — no review pipeline. Get it done cleanly in one pass.
+
+  ## Task
+
+  {{ torque.task.title }}
+
+  {% if torque.task.description %}
+  ## Context
+
+  {{ torque.task.description }}
+  {% endif %}
+
+  ## Approach
+
+  - Read the relevant code first to understand what exists
+  - Write clean, minimal code — no speculative abstractions or premature generalization
+  - Run the narrowest relevant tests or checks first — only broaden to a larger suite if the changed surface or risk warrants it
+  - Do a manual smoke check for user-visible changes when practical
+  - End by stating what you verified, what you did not verify, and whether live verification could not be performed
+  - Keep the diff focused — if you notice unrelated issues, leave them for a separate change
+  - Do NOT deploy the changes
+  {% else %}
+  You have a new task. Follow the same approach as before — read the relevant code, implement cleanly in one pass, start with the narrowest relevant tests or checks, smoke-check user-visible changes when practical, and say what you did and did not verify. Say explicitly if live verification could not be performed. Do NOT deploy the changes.
+
+  ## Task
+
+  {{ torque.task.title }}
+
+  {% if torque.task.description %}
+  ## Context
+
+  {{ torque.task.description }}
+  {% endif %}
+  {% endif %}
+
+labels:
+  - feature

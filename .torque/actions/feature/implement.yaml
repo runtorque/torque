@@ -1,0 +1,49 @@
+name: feature/implement
+description: Implement the plan from the research step
+
+agent:
+  name_prefix: impl
+  tab_color: "#3fb950"
+
+labels:
+  - feature
+
+implementation_depth: true
+transitions:
+  - action: feature/review
+    when: implementation is complete and ready for review
+    required: true
+    loc_gate:
+      ship_direct_max: 50
+      review_default_above: 200
+      self_review_bypass_allowed: false
+    status: "On Review"
+
+prompt: |
+  You are implementing a plan that was researched and designed in a previous step. Follow the plan closely — the research and planning work has already been done, so focus on execution.
+
+  ## Task
+
+  {{ torque.task.title }}
+
+  {% if torque.task.description %}
+  ## Context
+
+  {{ torque.task.description }}
+  {% endif %}
+
+  ## Approach
+
+  - Follow the plan from the previous steps — do not redesign or re-scope
+  - Write clean, minimal code that follows the existing patterns in the codebase
+  - Add or update tests to cover the new behavior
+  - Run the test suite to make sure nothing is broken
+  - Keep the diff focused — no unrelated changes
+
+  If you encounter something the plan didn't account for, handle it pragmatically. Only deviate from the plan when the plan is clearly wrong, and document what you changed and why in the derive description.
+
+  Do NOT deploy, run `make deploy`, or restart services. Only write code and commit.
+
+  ## Closeout reminder
+
+  If your task description contains a review requirement, you MUST call `torque ai derive "<summary>" -t feature/review` before `torque ai done`.

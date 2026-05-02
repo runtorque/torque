@@ -13,16 +13,16 @@ default `Engineer` engineer is fine).
 Keep the live database and backup paths handy:
 
 ```bash
-LOOM_DIR="$HOME/Library/Application Support/iTerm2/Scripts/loom/loom"
-DB="$LOOM_DIR/loom.db"
-BACKUP="$LOOM_DIR/loom.db.pre-kinds.bak"
-LOG="$LOOM_DIR/loom.log"
+TORQUE_DIR="$HOME/Library/Application Support/iTerm2/Scripts/torque/torque"
+DB="$TORQUE_DIR/torque.db"
+BACKUP="$TORQUE_DIR/torque.db.pre-kinds.bak"
+LOG="$TORQUE_DIR/torque.log"
 ```
 
 Run doctor before deploy:
 
 ```bash
-loom doctor
+torque doctor
 ```
 
 Expected:
@@ -34,7 +34,7 @@ Expected:
 Record the current architect / engineer counts:
 
 ```bash
-loom doctor --json | jq '{architects: .architects.total, engineers: .engineers.total, pending_hires: .pending_hires.pending}'
+torque doctor --json | jq '{architects: .architects.total, engineers: .engineers.total, pending_hires: .pending_hires.pending}'
 ```
 
 Capture the default engineer id for later task routing:
@@ -53,10 +53,10 @@ Deploy the build:
 make deploy
 ```
 
-Restart Loom from:
+Restart Torque from:
 
 ```text
-iTerm2 → Scripts → loom
+iTerm2 → Scripts → torque
 ```
 
 If you want startup logs in parallel:
@@ -95,13 +95,13 @@ test -n "$PRODUCTMIND_DIR"
 Verify the MCP config points at the architect entrypoint:
 
 ```bash
-rg -n "loom\\.mcp_architect|mcp_architect\\.py" \
+rg -n "torque\\.mcp_architect|mcp_architect\\.py" \
   "$PRODUCTMIND_DIR/.codex/config.toml" \
   "$PRODUCTMIND_DIR/.mcp.json"
 ```
 
 Expected: one of those provider config files contains the architect stdio
-entrypoint. The live `LOOM_ARCHITECT_ID` binding is checked in the next step
+entrypoint. The live `TORQUE_ARCHITECT_ID` binding is checked in the next step
 from inside the architect session itself.
 
 ## Verify the architect MCP session
@@ -110,7 +110,7 @@ Open productmind's agent terminal and paste this prompt:
 
 ```text
 Before doing anything else:
-1. Use a shell command to print the LOOM_ARCHITECT_ID environment variable.
+1. Use a shell command to print the TORQUE_ARCHITECT_ID environment variable.
 2. List the MCP tool names available in this session.
 3. Confirm whether these tools are present: architect_decision_create, architect_decision_list, architect_task_create, architect_engineer_hire, architect_engineer_message.
 Return only the environment value and the tool names.
@@ -118,7 +118,7 @@ Return only the environment value and the tool names.
 
 Expected:
 
-- the printed `LOOM_ARCHITECT_ID` matches `$PRODUCTMIND_ID`
+- the printed `TORQUE_ARCHITECT_ID` matches `$PRODUCTMIND_ID`
 - the tool list includes the `architect_*` surface
 
 ## Create and verify a decision
@@ -153,7 +153,7 @@ In the productmind session, paste:
 
 ```text
 Call architect_task_create with:
-{"title":"Do the thing","group":"loom","assigned_engineer_id":"ENGINEER_ID_VALUE","suggested_action":"feature/implement"}
+{"title":"Do the thing","group":"torque","assigned_engineer_id":"ENGINEER_ID_VALUE","suggested_action":"feature/implement"}
 Replace ENGINEER_ID_VALUE with the real engineer id before sending.
 Return only the JSON result.
 ```
@@ -294,7 +294,7 @@ Expected: `status='accepted'` and `archived=0`.
 
 ## Restart persistence check
 
-Restart Loom again from the Scripts menu.
+Restart Torque again from the Scripts menu.
 
 Expected after restart:
 
@@ -306,7 +306,7 @@ Expected after restart:
 Re-run:
 
 ```bash
-loom doctor
+torque doctor
 ```
 
 Expected:
@@ -336,7 +336,7 @@ Expected:
 
 ## Recovery / rollback
 
-If the migration or runtime state is corrupted, stop Loom and restore the
+If the migration or runtime state is corrupted, stop Torque and restore the
 stage-1 backup:
 
 ```bash
@@ -344,5 +344,5 @@ make stop
 cp "$BACKUP" "$DB"
 ```
 
-Then restart Loom from the Scripts menu and re-run this guide after fixing the
+Then restart Torque from the Scripts menu and re-run this guide after fixing the
 underlying issue.

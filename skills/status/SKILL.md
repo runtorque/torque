@@ -1,9 +1,9 @@
 ---
-description: Show current Loom agent context, linked task, and pipeline state
-allowed-tools: mcp__loom__loom_context
+description: Show current Torque agent context, linked task, and pipeline state
+allowed-tools: mcp__torque__torque_context
 ---
 
-Show the current Loom agent context using the loom_context MCP tool.
+Show the current Torque agent context using the torque_context MCP tool.
 
 Format the output clearly:
 - Agent name, group, and status

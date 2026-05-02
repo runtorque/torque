@@ -1,5 +1,5 @@
 /* Phase-2 regression harness for compact-v1 default-ON under the v2
- * eager-field contract (LOOM:180).
+ * eager-field contract (TORQUE:180).
  *
  * Pins the behaviors that flipped in this phase:
  *   - default-ON: unset localStorage opts into compact, explicit sentinels opt
@@ -84,7 +84,7 @@ test('unset localStorage flag opts into compact by default', () => {
 test('legacy sentinels opt out and strip the compact query annotation', () => {
   for (const sentinel of ['legacy', 'LEGACY', 'off', '0', 'false']) {
     const { context } = createCompactSandbox({
-      localStorage: { 'loom:snapshot_protocol': sentinel },
+      localStorage: { 'torque:snapshot_protocol': sentinel },
     });
     assert.equal(
       run(context, `_compactFlagEnabled()`), false,
@@ -99,7 +99,7 @@ test('legacy sentinels opt out and strip the compact query annotation', () => {
 test('compact-v1 / 1 / yes still opt in explicitly', () => {
   for (const value of ['compact-v1', '1', 'yes', 'compact', 'true']) {
     const { context } = createCompactSandbox({
-      localStorage: { 'loom:snapshot_protocol': value },
+      localStorage: { 'torque:snapshot_protocol': value },
     });
     assert.equal(
       run(context, `_compactFlagEnabled()`), true,
@@ -111,7 +111,7 @@ test('compact-v1 / 1 / yes still opt in explicitly', () => {
 
 function createEngineerSummaryHarness() {
   const { context, sandbox } = createCompactSandbox({
-    localStorage: { 'loom:snapshot_protocol': 'compact-v1' },
+    localStorage: { 'torque:snapshot_protocol': 'compact-v1' },
     state: {
       snapshot_protocol: 'compact-v1',
       board_tasks: {
@@ -173,7 +173,7 @@ test('_engineerVerificationSummary does not hydrate compact cards in v2', () => 
 
 function createPreservedMergeHarness() {
   const { context, sandbox } = createCompactSandbox({
-    localStorage: { 'loom:snapshot_protocol': 'compact-v1' },
+    localStorage: { 'torque:snapshot_protocol': 'compact-v1' },
     state: {
       snapshot_protocol: 'compact-v1',
       board_tasks: {
@@ -242,7 +242,7 @@ test('_preservedMergeDiffForAgent skips hydrate when agent has no branch', () =>
 
 function createShowTaskMessagesHarness() {
   const { context, sandbox } = createCompactSandbox({
-    localStorage: { 'loom:snapshot_protocol': 'compact-v1' },
+    localStorage: { 'torque:snapshot_protocol': 'compact-v1' },
     state: {
       snapshot_protocol: 'compact-v1',
       board_tasks: {
@@ -364,7 +364,7 @@ function createBoardSearchHarness(opts) {
     run(context, `_compactTasksFullyLoaded['t-desc'] = true;`);
   }
   run(context, `
-    function isSystemLabel(l) { return String(l).indexOf('loom:') === 0; }
+    function isSystemLabel(l) { return String(l).indexOf('torque:') === 0; }
     function displayLabel(l) { return String(l); }
     function _boardSearchMatch(query) {
       var q = String(query || '').toLowerCase();

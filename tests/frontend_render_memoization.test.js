@@ -1,4 +1,4 @@
-/* Regression tests for LOOM:264 follow-up: idempotent agent panel + agent
+/* Regression tests for TORQUE:264 follow-up: idempotent agent panel + agent
  * grid render under multi-agent firehose.
  *
  * Covered:
@@ -95,7 +95,7 @@ function createGridHarness() {
   return { context, sandbox, main };
 }
 
-test('LOOM:264 — render() memoizes empty-state main.innerHTML', () => {
+test('TORQUE:264 — render() memoizes empty-state main.innerHTML', () => {
   const { context, main } = createGridHarness();
   context.render();
   assert.equal(main._setCount, 1, 'first render writes empty-state html');
@@ -105,11 +105,11 @@ test('LOOM:264 — render() memoizes empty-state main.innerHTML', () => {
   assert.match(main.innerHTML, /No groups yet/);
 });
 
-test('LOOM:264 — render() exposes _loomLastHtml on the main element after first paint', () => {
+test('TORQUE:264 — render() exposes _torqueLastHtml on the main element after first paint', () => {
   const { context, main } = createGridHarness();
   context.render();
-  assert.equal(typeof main._loomLastHtml, 'string');
-  assert.equal(main._loomLastHtml, main.innerHTML,
+  assert.equal(typeof main._torqueLastHtml, 'string');
+  assert.equal(main._torqueLastHtml, main.innerHTML,
     'cache must mirror the last-applied html so byte-equality wins on the next render');
 });
 
@@ -150,7 +150,7 @@ function createDeferHarness() {
   return { context, sandbox, renderCalls };
 }
 
-test('LOOM:264 — _userInteracting() returns true when hovering', () => {
+test('TORQUE:264 — _userInteracting() returns true when hovering', () => {
   const { context } = createDeferHarness();
   assert.equal(vm.runInContext('_userInteracting()', context), false);
   vm.runInContext('_userHovering = true;', context);
@@ -159,7 +159,7 @@ test('LOOM:264 — _userInteracting() returns true when hovering', () => {
   assert.equal(vm.runInContext('_userInteracting()', context), false);
 });
 
-test('LOOM:264 — _queueDeltaSurfaceRender defers render while _userHovering is true', () => {
+test('TORQUE:264 — _queueDeltaSurfaceRender defers render while _userHovering is true', () => {
   const { context, renderCalls } = createDeferHarness();
   vm.runInContext('_userHovering = true;', context);
   vm.runInContext(
@@ -177,7 +177,7 @@ test('LOOM:264 — _queueDeltaSurfaceRender defers render while _userHovering is
     'pending batch must retain the main flag for replay after hover release');
 });
 
-test('LOOM:264 — flushing pending batch is gated by _userHovering', () => {
+test('TORQUE:264 — flushing pending batch is gated by _userHovering', () => {
   const { context, renderCalls } = createDeferHarness();
   vm.runInContext('_userHovering = true;', context);
   vm.runInContext('_queueDeltaSurfaceRender({ main: true });', context);
@@ -194,7 +194,7 @@ test('LOOM:264 — flushing pending batch is gated by _userHovering', () => {
   assert.equal(renderCalls[0].main, true);
 });
 
-test('LOOM:264 — _hoverEdgeIsBetweenTooltips ignores inner-descendant transitions', () => {
+test('TORQUE:264 — _hoverEdgeIsBetweenTooltips ignores inner-descendant transitions', () => {
   const { context } = createDeferHarness();
   // Two children of the same tooltip — pointer transitions between them
   // must NOT toggle the defer flag (would thrash hover->release->hover under
@@ -239,7 +239,7 @@ test('LOOM:264 — _hoverEdgeIsBetweenTooltips ignores inner-descendant transiti
 });
 
 /* -- A1: agent panel content memoization -------------------------------- */
-/* Direct verification that `_loomLastHtml` is read + written on the
+/* Direct verification that `_torqueLastHtml` is read + written on the
  * `content` and `headerRight` nodes in `_agentPanelRenderFocusedTabInPlace`.
  * We don't fully drive the panel render here (that's covered by
  * frontend_agent_panel.test.js) — we just confirm the gate exists by
@@ -248,12 +248,12 @@ test('LOOM:264 — _hoverEdgeIsBetweenTooltips ignores inner-descendant transiti
 
 /* -- Stale-root-cache behavioral coverage ------------------------------- */
 /* Reviewer-discovered correctness regression: when the surgical in-place
- * path writes a child's innerHTML, the root `el._loomLastHtml` cache is no
+ * path writes a child's innerHTML, the root `el._torqueLastHtml` cache is no
  * longer accurate (root html still reflects the pre-mutation state). A
  * subsequent `renderAgentPanel()` whose computed html byte-equals the
  * cache then short-circuits its own `el.innerHTML = html` write, leaving
  * the surgical-overwritten child in the DOM — stale content visible to
- * the user. Fix: in-place path must invalidate `el._loomLastHtml` when it
+ * the user. Fix: in-place path must invalidate `el._torqueLastHtml` when it
  * mutates a child. */
 
 function makePanelDomTree() {
@@ -289,7 +289,7 @@ function makePanelDomTree() {
   function rebuildChildrenFromRootHtml() {
     // Replace the child nodes with fresh ones — simulates the browser's
     // behavior when innerHTML is assigned: all descendants are recreated
-    // from scratch, losing any expandos like `_loomLastHtml`.
+    // from scratch, losing any expandos like `_torqueLastHtml`.
     shell = makeNode('', sel => null);
     headerRight = makeNode('', sel => null);
     content = makeNode('', sel => null);
@@ -304,47 +304,47 @@ function makePanelDomTree() {
     get headerRight() { return headerRight; }, get content() { return content; } };
 }
 
-test('LOOM:264 — surgical in-place path invalidates root _loomLastHtml so a later full render re-writes', () => {
+test('TORQUE:264 — surgical in-place path invalidates root _torqueLastHtml so a later full render re-writes', () => {
   // Simulate the exact flow the reviewer reproduced:
   //   1. Full renderAgentPanel writes htmlA to root, caches htmlA on el.
   //   2. In-place path writes htmlB to .agent-panel-content (mutates child).
   //   3. State reverts. renderAgentPanel computes htmlA again.
-  //   4. Without invalidation: gate skips because el._loomLastHtml===htmlA;
+  //   4. Without invalidation: gate skips because el._torqueLastHtml===htmlA;
   //      DOM stays at htmlB → STALE CONTENT.
-  //   5. With invalidation: in-place sets el._loomLastHtml=null at step 2;
+  //   5. With invalidation: in-place sets el._torqueLastHtml=null at step 2;
   //      step 3 writes el.innerHTML=htmlA → DOM matches state.
   const dom = makePanelDomTree();
   const el = dom.root;
 
   // Step 1 — simulate a full root write (renderAgentPanel) with cache.
   const htmlA = '<div class="agent-panel-panel"><div class="agent-panel-content">No worker events yet.</div></div>';
-  if (el._loomLastHtml !== htmlA) {
+  if (el._torqueLastHtml !== htmlA) {
     el.innerHTML = htmlA;
-    el._loomLastHtml = htmlA;
+    el._torqueLastHtml = htmlA;
   }
   assert.equal(el.setCount, 1, 'first full render writes innerHTML');
 
   // Step 2 — simulate the in-place surgical path mutating .agent-panel-content.
   // Mirror the production gate (now with the root-cache invalidation fix).
   const newBodyHtml = '<div>EVENT B</div>';
-  const bodyChanged = dom.content._loomLastHtml !== newBodyHtml;
+  const bodyChanged = dom.content._torqueLastHtml !== newBodyHtml;
   if (bodyChanged) {
     dom.content.innerHTML = newBodyHtml;
-    dom.content._loomLastHtml = newBodyHtml;
+    dom.content._torqueLastHtml = newBodyHtml;
   }
-  if (bodyChanged && el._loomLastHtml !== undefined) {
-    el._loomLastHtml = null;  // <— THE FIX
+  if (bodyChanged && el._torqueLastHtml !== undefined) {
+    el._torqueLastHtml = null;  // <— THE FIX
   }
   assert.equal(dom.content.setCount, 1);
-  assert.equal(el._loomLastHtml, null,
+  assert.equal(el._torqueLastHtml, null,
     'after a surgical child write, the root cache must be invalidated so a later'
     + ' full render with the original html does not skip its innerHTML write');
 
   // Step 3 — simulate the state reverting and renderAgentPanel computing htmlA.
   // The root gate must now write htmlA again because the cache was invalidated.
-  if (el._loomLastHtml !== htmlA) {
+  if (el._torqueLastHtml !== htmlA) {
     el.innerHTML = htmlA;
-    el._loomLastHtml = htmlA;
+    el._torqueLastHtml = htmlA;
   }
   assert.equal(el.setCount, 2,
     'root must rewrite htmlA after surgical mutation — otherwise the DOM stays at htmlB and the user sees stale content');
@@ -357,7 +357,7 @@ test('LOOM:264 — surgical in-place path invalidates root _loomLastHtml so a la
     'the `content` reference after the root write must be a fresh node — surgical caches do not bleed across full-render boundaries');
 });
 
-test('LOOM:264 — surgical no-op does NOT invalidate root cache', () => {
+test('TORQUE:264 — surgical no-op does NOT invalidate root cache', () => {
   // If the in-place path runs but neither child html actually changed, the
   // root cache must remain valid (no spurious invalidation that would
   // force a redundant full render later).
@@ -365,78 +365,78 @@ test('LOOM:264 — surgical no-op does NOT invalidate root cache', () => {
   const el = dom.root;
   const htmlA = '<div class="agent-panel-panel"><div class="agent-panel-content">A</div></div>';
   el.innerHTML = htmlA;
-  el._loomLastHtml = htmlA;
+  el._torqueLastHtml = htmlA;
 
   // Pre-seed the child cache so the gate sees a no-op.
-  dom.content._loomLastHtml = '<div>A</div>';
-  dom.headerRight._loomLastHtml = '';
+  dom.content._torqueLastHtml = '<div>A</div>';
+  dom.headerRight._torqueLastHtml = '';
   const newBodyHtml = '<div>A</div>';
   const newHeaderHtml = '';
-  const headerChanged = dom.headerRight._loomLastHtml !== newHeaderHtml;
-  const bodyChanged = dom.content._loomLastHtml !== newBodyHtml;
+  const headerChanged = dom.headerRight._torqueLastHtml !== newHeaderHtml;
+  const bodyChanged = dom.content._torqueLastHtml !== newBodyHtml;
   if (headerChanged) {
     dom.headerRight.innerHTML = newHeaderHtml;
-    dom.headerRight._loomLastHtml = newHeaderHtml;
+    dom.headerRight._torqueLastHtml = newHeaderHtml;
   }
   if (bodyChanged) {
     dom.content.innerHTML = newBodyHtml;
-    dom.content._loomLastHtml = newBodyHtml;
+    dom.content._torqueLastHtml = newBodyHtml;
   }
-  if ((headerChanged || bodyChanged) && el._loomLastHtml !== undefined) {
-    el._loomLastHtml = null;
+  if ((headerChanged || bodyChanged) && el._torqueLastHtml !== undefined) {
+    el._torqueLastHtml = null;
   }
 
-  assert.equal(el._loomLastHtml, htmlA,
+  assert.equal(el._torqueLastHtml, htmlA,
     'when both child gates skip (no DOM mutation), the root cache must remain valid');
 });
 
-test('LOOM:264 — agent_panel.js source contains the root-cache invalidation', () => {
+test('TORQUE:264 — agent_panel.js source contains the root-cache invalidation', () => {
   const source = fs.readFileSync(
     path.join(repoRoot, 'static/js/agent_panel.js'),
     'utf8',
   );
-  // The fix sets `el._loomLastHtml = null` (or unsets it) gated on
+  // The fix sets `el._torqueLastHtml = null` (or unsets it) gated on
   // headerChanged || bodyChanged. Match the canonical form.
-  assert.match(source, /\(headerChanged\s*\|\|\s*bodyChanged\)[\s\S]{0,120}el\._loomLastHtml\s*=/,
-    'in-place path must invalidate el._loomLastHtml when a child write actually mutates DOM —'
+  assert.match(source, /\(headerChanged\s*\|\|\s*bodyChanged\)[\s\S]{0,120}el\._torqueLastHtml\s*=/,
+    'in-place path must invalidate el._torqueLastHtml when a child write actually mutates DOM —'
     + ' otherwise renderAgentPanel skips its byte-equality gate and leaves stale child content');
 });
 
-test('LOOM:264 — agent_panel.js gates content/headerRight innerHTML on _loomLastHtml', () => {
+test('TORQUE:264 — agent_panel.js gates content/headerRight innerHTML on _torqueLastHtml', () => {
   const source = fs.readFileSync(
     path.join(repoRoot, 'static/js/agent_panel.js'),
     'utf8',
   );
   // Look for the memoized content/headerRight gate. Match form:
-  //   if (X._loomLastHtml !== Y) { X.innerHTML = Y; X._loomLastHtml = Y; }
-  assert.match(source, /headerRight\._loomLastHtml\s*!==\s*newHeaderHtml/,
-    'headerRight innerHTML write must be gated by _loomLastHtml byte-equality check');
-  assert.match(source, /content\._loomLastHtml\s*!==\s*newBodyHtml/,
-    'content innerHTML write must be gated by _loomLastHtml byte-equality check');
-  assert.match(source, /headerRight\._loomLastHtml\s*=\s*newHeaderHtml/,
+  //   if (X._torqueLastHtml !== Y) { X.innerHTML = Y; X._torqueLastHtml = Y; }
+  assert.match(source, /headerRight\._torqueLastHtml\s*!==\s*newHeaderHtml/,
+    'headerRight innerHTML write must be gated by _torqueLastHtml byte-equality check');
+  assert.match(source, /content\._torqueLastHtml\s*!==\s*newBodyHtml/,
+    'content innerHTML write must be gated by _torqueLastHtml byte-equality check');
+  assert.match(source, /headerRight\._torqueLastHtml\s*=\s*newHeaderHtml/,
     'headerRight cache must be updated after each successful write');
-  assert.match(source, /content\._loomLastHtml\s*=\s*newBodyHtml/,
+  assert.match(source, /content\._torqueLastHtml\s*=\s*newBodyHtml/,
     'content cache must be updated after each successful write');
   // Full panel render path (`renderAgentPanel`) — the el.innerHTML clobber
   // also needs gating for first-paint / shell-mismatch refreshes.
-  assert.match(source, /el\._loomLastHtml\s*!==\s*html/,
+  assert.match(source, /el\._torqueLastHtml\s*!==\s*html/,
     'renderAgentPanel must memoize el.innerHTML to preserve DOM identity under firehose');
 });
 
-test('LOOM:264 — render.js gates main.innerHTML on _loomLastHtml', () => {
+test('TORQUE:264 — render.js gates main.innerHTML on _torqueLastHtml', () => {
   const source = fs.readFileSync(
     path.join(repoRoot, 'static/js/render.js'),
     'utf8',
   );
-  assert.match(source, /main\._loomLastHtml\s*!==\s*html/,
+  assert.match(source, /main\._torqueLastHtml\s*!==\s*html/,
     'main grid innerHTML must be byte-equality memoized — destroying every agent card on every'
-    + ' delta tick produces the LOOM:264 tooltip flicker (style.css :hover::after pseudo-element'
+    + ' delta tick produces the TORQUE:264 tooltip flicker (style.css :hover::after pseudo-element'
     + ' on .agent-card-tooltip)');
-  assert.match(source, /main\._loomLastHtml\s*=\s*html/,
+  assert.match(source, /main\._torqueLastHtml\s*=\s*html/,
     'main grid cache must be updated after each successful innerHTML write');
 });
 
-test('LOOM:264 — ws.js exposes _userHovering + _userInteracting() gate', () => {
+test('TORQUE:264 — ws.js exposes _userHovering + _userInteracting() gate', () => {
   const source = fs.readFileSync(
     path.join(repoRoot, 'static/js/ws.js'),
     'utf8',

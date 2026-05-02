@@ -4,14 +4,14 @@
  * lazy-loads heavy task/decision/hire/archive/engineer detail on demand.
  * See docs/compact-snapshot-v1.md for the wire contract.
  *
- * Rollback hatch: localStorage flag "loom:snapshot_protocol" = "legacy"
+ * Rollback hatch: localStorage flag "torque:snapshot_protocol" = "legacy"
  * (or "off" / "0" / "false") drops the client back onto the legacy full
  * snapshot for the session. Any other value (including unset) opts into
  * compact-v1.
  */
 
 const COMPACT_SNAPSHOT_PROTOCOL = 'compact-v1';
-const COMPACT_FLAG_STORAGE_KEY = 'loom:snapshot_protocol';
+const COMPACT_FLAG_STORAGE_KEY = 'torque:snapshot_protocol';
 
 /* Fields the compact board_tasks entry still defers entirely. If a local task
  * needs these we must lazy-load the full detail before rendering modals or
@@ -39,7 +39,7 @@ function _compactFlagValue() {
 
 function _compactFlagEnabled() {
   // Default-on: compact is the normal path. Operators who need the legacy
-  // full-snapshot shape can set localStorage["loom:snapshot_protocol"] to
+  // full-snapshot shape can set localStorage["torque:snapshot_protocol"] to
   // one of the opt-out sentinels below.
   var v = _compactFlagValue();
   return v !== 'legacy' && v !== 'off' && v !== '0' && v !== 'false';

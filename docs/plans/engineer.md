@@ -2,13 +2,13 @@
 
 **Roadmap phase**: 5 — Semi-Autonomous Orchestration
 **Status**: Implemented (core: data model, event buffer, MCP tools, CLI, Agent panel, human interaction)
-**Goal**: A dedicated semi-autonomous orchestrator agent per group that manages tasks, dispatches agents, reacts to events, consults with the human at key decision points, and maintains a persistent decision journal. The engineer is a first-class concept in Loom — a special agent unique to each group with its own UI panel, event subscription system, human interaction flow, and context management strategy.
+**Goal**: A dedicated semi-autonomous orchestrator agent per group that manages tasks, dispatches agents, reacts to events, consults with the human at key decision points, and maintains a persistent decision journal. The engineer is a first-class concept in Torque — a special agent unique to each group with its own UI panel, event subscription system, human interaction flow, and context management strategy.
 
 ---
 
 ## The Problem
 
-Loom can dispatch tasks to agents and agents can self-organize via pipelines (`derive`, `ask`). But there is no entity that looks at the whole board, decides what to do next, responds to events, and drives the project forward. Today that role falls to the human — manually dispatching tasks, monitoring agent progress, resolving questions, and reacting to errors.
+Torque can dispatch tasks to agents and agents can self-organize via pipelines (`derive`, `ask`). But there is no entity that looks at the whole board, decides what to do next, responds to events, and drives the project forward. Today that role falls to the human — manually dispatching tasks, monitoring agent progress, resolving questions, and reacting to errors.
 
 The engineer fills this gap. It's an AI agent (Claude Code, Codex, etc.) that acts as a semi-autonomous project manager for a group:
 
@@ -30,7 +30,7 @@ The engineer is NOT fully autonomous — it's a semi-independent orchestrator th
 4. **Mandatory + optional events** — Some events always appear in digests (task completed, agent error, agent reply). Others are configurable (agent started, progress updates). A max interval (default 5 minutes) ensures the engineer gets periodic heartbeats even when nothing critical happened.
 5. **Journal as persistent brain** — The engineer writes structured journal entries (decisions, observations, checkpoints, plans). On context cleanup, the journal + current board state is enough to resume orchestration. The journal is per-group and stored in SQLite.
 6. **Pausable by the user** — A pause/resume button in the UI suspends event pushes so the human can interact with the engineer directly without competing with automated digests.
-7. **Human-in-the-loop** — The engineer is semi-autonomous: it uses `engineer_ask` to post questions to the human, which auto-pauses event delivery and shows the question in the Agent panel. The human can reply via the panel (Loom sends the answer to the terminal) or type directly into the designated engineer's Claude Code terminal. When the engineer becomes active again, the pending question auto-clears.
+7. **Human-in-the-loop** — The engineer is semi-autonomous: it uses `engineer_ask` to post questions to the human, which auto-pauses event delivery and shows the question in the Agent panel. The human can reply via the panel (Torque sends the answer to the terminal) or type directly into the designated engineer's Claude Code terminal. When the engineer becomes active again, the pending question auto-clears.
 8. **Engineer creation via UI** — The legacy `engineer_*` entrypoint is created through the Agent panel settings flow rather than by designating an arbitrary existing agent. This ensures the `--append-system-prompt-file` flag is set on boot.
 
 ---
@@ -60,7 +60,7 @@ User designates agent as engineer (UI or API)
               ├── Engineer writes journal entries
               ├── Engineer goes idle
               │     │
-              │     └── Loom pushes event digest
+              │     └── Torque pushes event digest
               │           │
               │           └── Engineer wakes up, processes events
               │                 ├── Dispatch next task
@@ -74,7 +74,7 @@ User designates agent as engineer (UI or API)
 ### Event push flow
 
 ```
-Agent calls loom_done (or error, blocked, reply, etc.)
+Agent calls torque_done (or error, blocked, reply, etc.)
   │
   ├── Panel event emitted (existing)
   │
@@ -102,15 +102,15 @@ Agent calls loom_done (or error, blocked, reply, etc.)
 ```
 Engineer → engineer_agent_message(agent="fix-auth", message="Rebase on main")
   │
-  ├── Loom sends formatted message to agent's terminal:
+  ├── Torque sends formatted message to agent's terminal:
   │     ── Message from Engineer ────────────────────
   │     Rebase on main, the auth PR was merged.
-  │     Reply with: loom_reply("your response")
+  │     Reply with: torque_reply("your response")
   │     ────────────────────────────────────────────
   │
   └── Agent reads message, does work, then:
         │
-        Agent → loom_reply(message="Rebased successfully")
+        Agent → torque_reply(message="Rebased successfully")
           │
           ├── Panel event: kind="agent_reply", message="Rebased successfully"
           ├── Buffered for engineer digest (mandatory event)
@@ -218,10 +218,10 @@ class EngineerSettings:
 
 **`custom_instructions`**: Free-text instructions injected into the engineer's system prompt via `--append-system-prompt`. The user writes these in the Agent panel settings tab. They are concatenated with the engineer's base system prompt (from the action's `system_prompt` field or a built-in default) and passed as a single `--append-system-prompt` flag on boot.
 
-**System prompt structure** (assembled by Loom, passed via `--append-system-prompt`):
+**System prompt structure** (assembled by Torque, passed via `--append-system-prompt`):
 
 ```
-You are the designated engineer — the orchestrator agent for the "{group}" group in Loom.
+You are the designated engineer — the orchestrator agent for the "{group}" group in Torque.
 Your role is to manage the task board, dispatch work to agents, react to events,
 and maintain a decision journal for context continuity.
 
@@ -303,7 +303,7 @@ class AgentCell:
     pending_engineer_message: bool = False   # agent has an unread message from engineer
 ```
 
-This is ephemeral (not persisted) — used to validate that `loom_reply` is only available when the agent has received a engineer message.
+This is ephemeral (not persisted) — used to validate that `torque_reply` is only available when the agent has received a engineer message.
 
 ---
 
@@ -313,7 +313,7 @@ The engineer's prompt is split into two layers, using Claude Code's `--append-sy
 
 ### System prompt (persistent across `/clear`)
 
-Assembled by Loom from three parts:
+Assembled by Torque from three parts:
 
 1. **Base engineer identity** — built-in text that defines the engineer role, available tools, and behavioral guidelines (e.g. "write journal entries at decision points", "write checkpoints periodically")
 2. **Action `system_prompt` field** (optional) — if the engineer action YAML has a `system_prompt` field, it's included. This lets the action template contribute project-level system instructions.
@@ -339,19 +339,19 @@ You are resuming an orchestration session.
 Read your journal to recover context, then check the board and recent events.
 ```
 
-The action template controls this via `{{ loom.context.is_clean }}` — the same mechanism regular actions use.
+The action template controls this via `{{ torque.context.is_clean }}` — the same mechanism regular actions use.
 
 ### Implementation: `inject_system_prompt` for engineer agents
 
 The current `ClaudeCodeAdapter.inject_system_prompt()` writes to `.claude/instructions.md`, which is loaded as user context, not as a true system prompt. For the engineer, we need the actual `--append-system-prompt` flag.
 
-**Approach**: When dispatching a engineer agent, Loom appends `--append-system-prompt-file <path>` to the boot command instead of using `inject_system_prompt()`. The file is written to a stable path (e.g. `.loom/engineer-system-prompt-{group}.md`) so it persists across restarts.
+**Approach**: When dispatching a engineer agent, Torque appends `--append-system-prompt-file <path>` to the boot command instead of using `inject_system_prompt()`. The file is written to a stable path (e.g. `.torque/engineer-system-prompt-{group}.md`) so it persists across restarts.
 
 ```python
 # In _create_agent_with_config() for engineer agents:
 if is_engineer:
     system_prompt_text = _build_engineer_system_prompt(group, engineer_settings)
-    prompt_path = os.path.join(git_root, ".loom", f"engineer-system-prompt-{group_slug}.md")
+    prompt_path = os.path.join(git_root, ".torque", f"engineer-system-prompt-{group_slug}.md")
     Path(prompt_path).write_text(system_prompt_text)
     cell.command += f" --append-system-prompt-file {shlex.quote(prompt_path)}"
 ```
@@ -359,7 +359,7 @@ if is_engineer:
 This is cleaner than the `instructions.md` approach because:
 - It uses the actual system prompt mechanism (survives `/clear`)
 - The file is scoped to the engineer (doesn't pollute `.claude/instructions.md` which other agents may use)
-- It's in `.loom/` which is already gitignored
+- It's in `.torque/` which is already gitignored
 
 For **Codex**, the adapter would use its equivalent mechanism (if available), or fall back to the instructions-file approach.
 
@@ -369,13 +369,13 @@ For **Codex**, the adapter would use its equivalent mechanism (if available), or
 
 ### Agent-side: new tool
 
-#### `loom_reply`
+#### `torque_reply`
 
 Reply to a message from the engineer. Only works when the agent has a pending engineer message.
 
 ```json
 {
-    "name": "loom_reply",
+    "name": "torque_reply",
     "description": "Reply to a message from the engineer (orchestrator agent). The reply is delivered to the engineer in its next event digest.",
     "inputSchema": {
         "type": "object",
@@ -394,7 +394,7 @@ Reply to a message from the engineer. Only works when the agent has a pending en
 
 ### Engineer-side: final tool list
 
-Tools are served from the same `/mcp` endpoint. The `engineer_` prefix provides namespace separation. Access is authorized by `X-Loom-Cell-Id`: only the designated engineer session for a group can list or call `engineer_*` tools. Regular agents only see the `loom_*` surface.
+Tools are served from the same `/mcp` endpoint. The `engineer_` prefix provides namespace separation. Access is authorized by `X-Torque-Cell-Id`: only the designated engineer session for a group can list or call `engineer_*` tools. Regular agents only see the `torque_*` surface.
 
 #### Read tools
 
@@ -536,7 +536,7 @@ Dispatch a task to an agent. Creates a new agent by default, or dispatches to an
 
 ##### `engineer_batch_dispatch`
 
-Dispatch an ordered wave of tasks with a concurrency cap. Entries that cannot start immediately are kept in a persistent auto-dispatch queue, so Loom can continue launching the next eligible task as worker slots open, even after restart. When entries share an `agent_group`, the first dispatch binds that group to one agent and later queued entries follow that same worker in order.
+Dispatch an ordered wave of tasks with a concurrency cap. Entries that cannot start immediately are kept in a persistent auto-dispatch queue, so Torque can continue launching the next eligible task as worker slots open, even after restart. When entries share an `agent_group`, the first dispatch binds that group to one agent and later queued entries follow that same worker in order.
 
 ##### `engineer_task_resolve` (keep)
 
@@ -685,7 +685,7 @@ Read recent journal entries. Use after context cleanup or startup to recover the
 
 ##### `engineer_agent_message` (new)
 
-Send a message to any agent's terminal. The agent can reply via `loom_reply`, which appears in the engineer's next event digest. Use for: redirecting agents, providing context, answering questions without the full ask/resolve flow.
+Send a message to any agent's terminal. The agent can reply via `torque_reply`, which appears in the engineer's next event digest. Use for: redirecting agents, providing context, answering questions without the full ask/resolve flow.
 
 ```json
 {
@@ -708,13 +708,13 @@ Send a message to any agent's terminal. The agent can reply via `loom_reply`, wh
 ── Message from Engineer ────────────────────────
 Rebase on main, the auth PR was merged.
 
-Reply with: loom_reply("your response")
+Reply with: torque_reply("your response")
 ────────────────────────────────────────────────
 ```
 
 ##### `engineer_ask` (new)
 
-Ask the human a question. Posts the question to the Agent panel and auto-pauses event delivery. The human can reply via the panel (Loom sends the answer to the terminal) or type directly into the designated engineer's Claude Code terminal.
+Ask the human a question. Posts the question to the Agent panel and auto-pauses event delivery. The human can reply via the panel (Torque sends the answer to the terminal) or type directly into the designated engineer's Claude Code terminal.
 
 ```json
 {
@@ -767,30 +767,30 @@ After the human responds, call engineer_resume to unpause event delivery.
 | Interaction | `agent_message`, `ask` | 2 |
 | **Total** | | **16** |
 
-Plus 1 new agent-side tool: `loom_reply`.
+Plus 1 new agent-side tool: `torque_reply`.
 
 ---
 
 ## CLI Commands
 
-### `loom ai reply`
+### `torque ai reply`
 
 ```
-loom ai reply <message>
+torque ai reply <message>
 
 Arguments:
   message              Reply text to send back to the engineer
 ```
 
 **Behavior:**
-- Auto-detects calling agent via `$LOOM_CELL_ID`
+- Auto-detects calling agent via `$TORQUE_CELL_ID`
 - Calls `ai_report(action="reply", message=...)`
 - Errors if agent has no pending engineer message
 
-### `loom engineer journal`
+### `torque engineer journal`
 
 ```
-loom engineer journal [--group GROUP] [--tail N] [--type TYPE]
+torque engineer journal [--group GROUP] [--tail N] [--type TYPE]
 
 Flags:
   -g, --group GROUP    Group name (default: auto-detect from agent)
@@ -798,13 +798,13 @@ Flags:
   -t, --type TYPE      Filter by entry type (decision/observation/checkpoint/plan)
 ```
 
-Reads the engineer journal directly from SQLite (works offline like other `loom` read commands).
+Reads the engineer journal directly from SQLite (works offline like other `torque` read commands).
 
 ---
 
 ## Event Push System
 
-### EngineerEventBuffer (new class in `loom/engineer.py`)
+### EngineerEventBuffer (new class in `torque/engineer.py`)
 
 Manages per-group event buffering and digest delivery.
 
@@ -848,7 +848,7 @@ class EngineerEventBuffer:
 ### Digest format
 
 ```
-── Loom Digest (3 events) ─────────────────────
+── Torque Digest (3 events) ─────────────────────
 • task_completed: "fix-auth-race" done by agent fix-auth-bug
 • agent_reply: fix-auth-bug → "Rebased, continuing with implementation"
 • agent_blocked: refactor-db → "Need migration schema clarification"
@@ -860,7 +860,7 @@ Board: 3 In Progress · 2 To Do · 5 Backlog · 4 Done
 ### Heartbeat format
 
 ```
-── Loom Heartbeat ─────────────────────────────
+── Torque Heartbeat ─────────────────────────────
 No new events in last 5m.
 Board: 3 In Progress · 2 To Do · 5 Backlog · 4 Done
 Active: fix-auth-bug (thinking) · add-logging (tool_call)
@@ -1144,7 +1144,7 @@ Toggle event push delivery. `engineer_resume` also clears `pending_question`.
 When `add_agent` receives `is_engineer: true`:
 1. Validates one-per-group (returns error if group already has a engineer)
 2. Builds engineer system prompt (base + action system_prompt + custom instructions)
-3. Writes to `.loom/engineer-system-prompt-{group}.md`
+3. Writes to `.torque/engineer-system-prompt-{group}.md`
 4. Appends `--append-system-prompt-file <path>` to the boot command
 5. Creates agent, sets `GroupSettings.engineer_agent_id`
 6. Default name: "Engineer" (user can override)
@@ -1159,7 +1159,7 @@ When the engineer agent is removed, clear `GroupSettings.engineer_agent_id`. The
 
 ## Implementation Steps
 
-### Step 1: Data model (`loom/state.py`, `loom/db.py`) ✅
+### Step 1: Data model (`torque/state.py`, `torque/db.py`) ✅
 
 - Add `engineer_agent_id` to `GroupSettings` dataclass
 - Add `EngineerSettings` dataclass with `pending_question` field
@@ -1172,9 +1172,9 @@ When the engineer agent is removed, clear `GroupSettings.engineer_agent_id`. The
 - Delta ops: `journal_append`, `engineer_settings_update`
 - Engineer cleanup on agent/group removal
 
-### Step 2: Event buffer (`loom/engineer.py`) ✅
+### Step 2: Event buffer (`torque/engineer.py`) ✅
 
-- New file: `loom/engineer.py` — `EngineerEventBuffer` class
+- New file: `torque/engineer.py` — `EngineerEventBuffer` class
 - `on_panel_event(event)` — check if event's group has a engineer, check event type filter, buffer if yes
 - `on_agent_activity_change(cell)` — if engineer goes idle → flush; if engineer becomes active → auto-clear `pending_question`
 - `_flush(group)` — format digest, send to engineer terminal via `bridge.send_text()`
@@ -1184,7 +1184,7 @@ When the engineer agent is removed, clear `GroupSettings.engineer_agent_id`. The
 - `build_engineer_system_prompt(group, settings, action_sp)` — assembles base identity + action system_prompt + custom instructions
 - Integrated into `EventBus` via `_engineer_buffer` attribute and `PanelEventLog.on_event` callback
 
-### Step 3: Server commands (`loom/server.py`) ✅
+### Step 3: Server commands (`torque/server.py`) ✅
 
 - `engineer_message` command: resolve agent, format message, send via bridge, set `pending_engineer_message`, emit panel event
 - `ai_report(action="reply")` handler: validate pending message, emit `agent_reply` panel event
@@ -1197,13 +1197,13 @@ When the engineer agent is removed, clear `GroupSettings.engineer_agent_id`. The
 - `remove_agent`: clear `engineer_agent_id` when engineer is removed
 - `EngineerEventBuffer` initialization and wiring at startup
 
-### Step 4: MCP tools — agent side (`loom/mcp.py`) ✅
+### Step 4: MCP tools — agent side (`torque/mcp.py`) ✅
 
-- Add `loom_reply` tool definition to `TOOLS` list
+- Add `torque_reply` tool definition to `TOOLS` list
 - Add `reply` to `action_map` in `_dispatch_tool()`
-- CLI: `loom ai reply` subcommand in `bin/loom`
+- CLI: `torque ai reply` subcommand in `bin/torque`
 
-### Step 5: MCP tools — engineer side (`loom/mcp_engineer.py`) ✅
+### Step 5: MCP tools — engineer side (`torque/mcp_engineer.py`) ✅
 
 - Remove `engineer_lanes_list`, `engineer_pipelines_list`, `engineer_task_chain` tool definitions
 - Enrich `engineer_task_show` response with auto-included `pipeline_chain`
@@ -1245,8 +1245,8 @@ When the engineer agent is removed, clear `GroupSettings.engineer_agent_id`. The
 
 ### Step 10: Engineer action template and base system prompt ✅ (base prompt only)
 
-- **Base system prompt** (built into `loom/engineer.py`): hardcoded text defining the engineer role, available tools, behavioral guidelines (journal usage, checkpoint cadence, event response, human interaction via `engineer_ask`). Assembled via `build_engineer_system_prompt()` and written to `.loom/engineer-system-prompt-{group}.md`, passed via `--append-system-prompt-file`.
-- **Default engineer action** (`.loom/actions/engineer/orchestrate.yaml`): not yet created — users can create their own action or rely on the base system prompt alone.
+- **Base system prompt** (built into `torque/engineer.py`): hardcoded text defining the engineer role, available tools, behavioral guidelines (journal usage, checkpoint cadence, event response, human interaction via `engineer_ask`). Assembled via `build_engineer_system_prompt()` and written to `.torque/engineer-system-prompt-{group}.md`, passed via `--append-system-prompt-file`.
+- **Default engineer action** (`.torque/actions/engineer/orchestrate.yaml`): not yet created — users can create their own action or rely on the base system prompt alone.
 
 ### Step 11: Human interaction flow ✅
 
@@ -1255,14 +1255,14 @@ When the engineer agent is removed, clear `GroupSettings.engineer_agent_id`. The
 - `engineer_ask` server command: sets `pending_question` + `paused`, logs to journal
 - Auto-clear `pending_question` on engineer activity change (human typed directly into terminal)
 - Panel UI: amber banner with question + reply textarea + "Send Reply" button
-- Two reply paths: panel (Loom-mediated) or direct terminal input (engineer self-resumes)
+- Two reply paths: panel (Torque-mediated) or direct terminal input (engineer self-resumes)
 
 ---
 
 ## Remaining Work
 
 - **Step 7: Engineer agent indicators** — visual badge on engineer agent cell, context menu options
-- **Default engineer action template** — `.loom/actions/engineer/orchestrate.yaml` with `is_clean` branching
+- **Default engineer action template** — `.torque/actions/engineer/orchestrate.yaml` with `is_clean` branching
 - **CLAUDE.md documentation** — document engineer concept, MCP tools, event push system, journal
 - **Journal pagination** — "Load more" button in journal tab (SQLite pagination exists, UI not wired)
 
@@ -1276,7 +1276,7 @@ When the engineer agent is removed, clear `GroupSettings.engineer_agent_id`. The
 - **Agent stop/kill tool** — The engineer can message agents but can't forcefully stop them. This prevents accidental work loss. The human handles stuck agents.
 - **Structured decision format** — The journal is free-text. Structured fields (e.g., `{"action": "dispatch", "task": "...", "rationale": "..."}`) would enable analytics but add complexity. Free-text is sufficient for context recovery.
 - **Token-based auto-checkpoint** — Beyond the advisory warning, we don't force checkpoints. The engineer action template should instruct periodic checkpointing.
-- **Event replay** — `engineer_events` returns raw events but doesn't support replaying them as if they were new pushes. Replay would require re-triggering the engineer's decision loop, which is the engineer's job, not Loom's.
+- **Event replay** — `engineer_events` returns raw events but doesn't support replaying them as if they were new pushes. Replay would require re-triggering the engineer's decision loop, which is the engineer's job, not Torque's.
 - **Designating existing agents as engineer** — The engineer must be created as a engineer (via "+ Create Engineer" or `add_agent` with `is_engineer: true`) because `--append-system-prompt-file` must be set on boot. Existing agents can't be retroactively designated.
 
 ---
@@ -1285,18 +1285,18 @@ When the engineer agent is removed, clear `GroupSettings.engineer_agent_id`. The
 
 | File | Change |
 |---|---|
-| `loom/state.py` | `EngineerSettings` dataclass (with `pending_question`), `ENGINEER_MANDATORY_EVENTS`, `engineer_agent_id` on `GroupSettings`, `pending_engineer_message` on `AgentCell`, engineer helpers on `MatrixState`, engineer settings in snapshot, cleanup on removal |
-| `loom/db.py` | `engineer_settings` table (with `pending_question`), `engineer_journal` table + index, `engineer_agent_id` migration, `pending_question` migration, CRUD methods |
-| `loom/engineer.py` | **New file.** `EngineerEventBuffer` (event buffering, idle-gated delivery, digest/heartbeat formatting, auto-clear `pending_question` on activity, periodic timer). Base system prompt text. `build_engineer_system_prompt()` assembler. |
-| `loom/events.py` | `on_event` callback on `PanelEventLog`, `_engineer_buffer` on `EventBus` with activity-change hook |
-| `loom/server.py` | New commands: `engineer_message`, `engineer_ask`, `engineer_reply`, `engineer_journal_append/read`, `engineer_update_settings`, `engineer_pause/resume`. `ai_report(action="reply")`. `add_agent` with `is_engineer` (system prompt file + `--append-system-prompt-file`). `remove_agent` engineer cleanup. `EngineerEventBuffer` init. |
-| `loom/mcp.py` | `loom_reply` tool definition + action mapping |
-| `loom/mcp_engineer.py` | Remove 3 tools, enrich `task_show` with chain, add 6 tools (`events`, `notifications`, `journal`, `journal_read`, `agent_message`, `ask`) |
-| `bin/loom` | `loom ai reply` subcommand, `loom engineer journal` subcommand |
+| `torque/state.py` | `EngineerSettings` dataclass (with `pending_question`), `ENGINEER_MANDATORY_EVENTS`, `engineer_agent_id` on `GroupSettings`, `pending_engineer_message` on `AgentCell`, engineer helpers on `MatrixState`, engineer settings in snapshot, cleanup on removal |
+| `torque/db.py` | `engineer_settings` table (with `pending_question`), `engineer_journal` table + index, `engineer_agent_id` migration, `pending_question` migration, CRUD methods |
+| `torque/engineer.py` | **New file.** `EngineerEventBuffer` (event buffering, idle-gated delivery, digest/heartbeat formatting, auto-clear `pending_question` on activity, periodic timer). Base system prompt text. `build_engineer_system_prompt()` assembler. |
+| `torque/events.py` | `on_event` callback on `PanelEventLog`, `_engineer_buffer` on `EventBus` with activity-change hook |
+| `torque/server.py` | New commands: `engineer_message`, `engineer_ask`, `engineer_reply`, `engineer_journal_append/read`, `engineer_update_settings`, `engineer_pause/resume`. `ai_report(action="reply")`. `add_agent` with `is_engineer` (system prompt file + `--append-system-prompt-file`). `remove_agent` engineer cleanup. `EngineerEventBuffer` init. |
+| `torque/mcp.py` | `torque_reply` tool definition + action mapping |
+| `torque/mcp_engineer.py` | Remove 3 tools, enrich `task_show` with chain, add 6 tools (`events`, `notifications`, `journal`, `journal_read`, `agent_message`, `ask`) |
+| `bin/torque` | `torque ai reply` subcommand, `torque engineer journal` subcommand |
 | `static/js/agent_panel.js` | **New file.** Tabbed panel (Journal/Settings), pending question banner with reply box, journal feed, settings with create button + custom instructions + notifications, `engineerCreate()` / `engineerReply()` / `engineerTogglePause()` |
 | `static/js/render.js` | Agent panel re-render on delta |
 | `static/js/ws.js` | `journal_append` + `engineer_settings_update` delta op handlers |
 | `static/js/main.js` | `panel-agent` in panel IDs, render hooks |
 | `static/style.css` | Agent panel styles: header, tabs, journal entries with type badges, ask banner (amber), reply textarea/button, settings sections, create button, event checkboxes |
 | `webview.html` | `panel-agent` div, taskbar button (⚖ Agent), `agent_panel.js` script tag |
-| `Makefile` | Add `loom/mcp_engineer.py` and `loom/engineer.py` to install target |
+| `Makefile` | Add `torque/mcp_engineer.py` and `torque/engineer.py` to install target |

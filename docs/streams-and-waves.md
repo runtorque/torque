@@ -1,6 +1,6 @@
 # Streams & Waves
 
-Loom now uses a **stream-centered orchestration model** for the designated engineer.
+Torque now uses a **stream-centered orchestration model** for the designated engineer.
 
 This page explains:
 
@@ -17,7 +17,7 @@ If you want the design rationale rather than the operator-facing explanation, se
 
 ## The short version
 
-Loom now distinguishes between two levels of orchestration:
+Torque now distinguishes between two levels of orchestration:
 
 - a **wave** is the set of work the designated engineer chooses to run in parallel
 - a **stream** is one branch/worktree execution lane that moves through implementation, review, blocker fixes, validation, and merge
@@ -33,7 +33,7 @@ That means the designated engineer no longer has to infer a branch's real status
 
 ## Why this model exists
 
-Before streams, Loom already tracked:
+Before streams, Torque already tracked:
 
 - tasks
 - agents
@@ -310,7 +310,7 @@ and represented as:
 
 Today’s implementation is a **computed read model**, not a persisted stream table.
 
-Loom synthesizes stream state from existing data such as:
+Torque synthesizes stream state from existing data such as:
 
 - branch/worktree boundaries
 - successor tasks
@@ -322,9 +322,9 @@ Loom synthesizes stream state from existing data such as:
 
 ### Main files
 
-- `loom/worktree_streams.py` — computed stream synthesis
-- `loom/server_dispatch.py` — stream auto-resume behavior
-- `loom/mcp_engineer.py` — Engineer stream tool exposure
+- `torque/worktree_streams.py` — computed stream synthesis
+- `torque/server_dispatch.py` — stream auto-resume behavior
+- `torque/mcp_engineer.py` — Engineer stream tool exposure
 - `static/js/engineer.js` — Open Streams UI
 
 ---
@@ -375,7 +375,7 @@ These are stream states, not task-lane states.
 
 ### Supporting substate fields
 
-To make the model more precise, Loom also computes:
+To make the model more precise, Torque also computes:
 
 #### `code_state`
 
@@ -456,8 +456,8 @@ Example shape:
 ```json
 {
   "gate_type": "review_blocker",
-  "blocking_task_id": "LOOM:333:5",
-  "source_task_id": "LOOM:333:4",
+  "blocking_task_id": "TORQUE:333:5",
+  "source_task_id": "TORQUE:333:4",
   "reason": "Self-dispatch priming regression must be fixed before queued work resumes",
   "clears_when": "review_passes"
 }
@@ -469,11 +469,11 @@ Example shape:
 
 Phase 2 added stream-owned auto-resume behavior.
 
-That means when a queue head becomes eligible again, Loom can automatically continue that stream’s next queued product task if the stream policy allows it.
+That means when a queue head becomes eligible again, Torque can automatically continue that stream’s next queued product task if the stream policy allows it.
 
 ### Current behavior
 
-Loom now handles cases such as:
+Torque now handles cases such as:
 
 - the current blocker-fix loop clears and the next queued task becomes runnable
 - dependencies clear
@@ -481,7 +481,7 @@ Loom now handles cases such as:
 
 This logic lives in:
 
-- `loom/server_dispatch.py`
+- `torque/server_dispatch.py`
 
 and uses the computed stream model rather than ad hoc queue rules.
 
@@ -587,7 +587,7 @@ This is the first user-facing surface of the stream model.
 ┌───────────────────────────────────────────────────────────────┐
 │ Stream: Engineer Events + Worklog                               │
 ├───────────────────────────────────────────────────────────────┤
-│ Branch        loom/add-events-tab-to-the-engineer-p-837241c     │
+│ Branch        torque/add-events-tab-to-the-engineer-p-837241c     │
 │ State         Awaiting human validation                        │
 │ Code          Reviewed clean                                   │
 │ Validation    Pending manual smoke                             │
@@ -596,7 +596,7 @@ This is the first user-facing surface of the stream model.
 │ Next action   Merge after validation                           │
 │ Latest commit fbcf26b                                          │
 │                                                               │
-│ Product       LOOM:333, LOOM:334, LOOM:342                    │
+│ Product       TORQUE:333, TORQUE:334, TORQUE:342                    │
 │ Workflow      review + blocker-fix lineage                    │
 │ Context       Engineer reprioritized blocker fix                │
 └───────────────────────────────────────────────────────────────┘
@@ -612,11 +612,11 @@ This is the first user-facing surface of the stream model.
 │ Gate          Review blocker                                  │
 │ Reason        Self-dispatch priming regression must be fixed  │
 │                                                               │
-│ Foreground    LOOM:333:5  Fix review blockers                 │
+│ Foreground    TORQUE:333:5  Fix review blockers                 │
 │                                                               │
 │ Queue                                                         │
-│   1. LOOM:334  Add Worklog tab          paused_by_blocker     │
-│   2. LOOM:342  Countdown update         queued                │
+│   1. TORQUE:334  Add Worklog tab          paused_by_blocker     │
+│   2. TORQUE:342  Countdown update         queued                │
 └───────────────────────────────────────────────────────────────┘
 ```
 
@@ -626,13 +626,13 @@ This is the first user-facing surface of the stream model.
 Before review passes
 --------------------
 State: fixing_blockers
-Queue head: LOOM:334 paused_by_blocker
+Queue head: TORQUE:334 paused_by_blocker
 
 After blocker fix review passes
 -------------------------------
 State: implementing
-Queue head: LOOM:334 ready_to_resume
-Action: Loom auto-dispatches LOOM:334 if policy allows
+Queue head: TORQUE:334 ready_to_resume
+Action: Torque auto-dispatches TORQUE:334 if policy allows
 ```
 
 ---
@@ -665,7 +665,7 @@ The current model is intentionally incomplete in a few areas:
 
 ### Waves are still mostly a planning concept
 
-Loom does not yet expose a first-class persisted wave object with dedicated history and UI.
+Torque does not yet expose a first-class persisted wave object with dedicated history and UI.
 
 Today, waves are still primarily:
 

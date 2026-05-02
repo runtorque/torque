@@ -12,8 +12,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from loom.pty_supervisor import PtySupervisor
-from loom.pty_supervisor_client import (
+from torque.pty_supervisor import PtySupervisor
+from torque.pty_supervisor_client import (
     PtySupervisorClient,
     SupervisorProtocolError,
     SupervisorUnavailable,
@@ -249,7 +249,7 @@ class VersionMismatchTests(unittest.IsolatedAsyncioTestCase):
             sock_path = Path(tmp.name) / "fake.sock"
 
             async def fake_handler(reader, writer):
-                from loom.pty_supervisor import read_frame, write_frame
+                from torque.pty_supervisor import read_frame, write_frame
                 msg = await read_frame(reader)
                 if msg and msg.get("op") == "ping":
                     await write_frame(writer, {

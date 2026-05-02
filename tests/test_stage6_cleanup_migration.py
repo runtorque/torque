@@ -11,10 +11,10 @@ try:
 except ModuleNotFoundError:
     from tests.helpers import install_aiohttp_stub
 
-from loom.db import LoomDB
+from torque.db import TorqueDB
 
 install_aiohttp_stub()
-from loom.state import AgentCell, BoardTask
+from torque.state import AgentCell, BoardTask
 
 
 class Stage6CleanupMigrationTests(unittest.TestCase):
@@ -27,7 +27,7 @@ class Stage6CleanupMigrationTests(unittest.TestCase):
 
     def _seed_stage5_db(self, filename: str) -> Path:
         path = self._path(filename)
-        db = LoomDB(path)
+        db = TorqueDB(path)
         db.init()
         db.save_agent(
             AgentCell(
@@ -75,7 +75,7 @@ class Stage6CleanupMigrationTests(unittest.TestCase):
 
     def _seed_pre_stage1_db(self, filename: str) -> Path:
         path = self._path(filename)
-        db = LoomDB(path)
+        db = TorqueDB(path)
         db.init()
         db.save_agent(
             AgentCell(
@@ -127,10 +127,10 @@ class Stage6CleanupMigrationTests(unittest.TestCase):
     def test_upgrade_from_stage5_drops_legacy_columns_and_preserves_data(self):
         path = self._seed_stage5_db("stage5-upgrade.db")
 
-        migrated = LoomDB(path)
+        migrated = TorqueDB(path)
         self.addCleanup(migrated.close)
 
-        with self.assertLogs("loom", level="WARNING") as cm:
+        with self.assertLogs("torque", level="WARNING") as cm:
             migrated.init()
 
         self.assertIn(
@@ -170,11 +170,11 @@ class Stage6CleanupMigrationTests(unittest.TestCase):
     def test_upgrade_guard_refuses_unmigrated_pre_stage1_rows(self):
         path = self._seed_pre_stage1_db("pre-stage1.db")
 
-        guarded = LoomDB(path)
+        guarded = TorqueDB(path)
         self.addCleanup(guarded.close)
         stderr = io.StringIO()
 
-        with self.assertLogs("loom", level="ERROR") as cm:
+        with self.assertLogs("torque", level="ERROR") as cm:
             with self.assertRaises(SystemExit) as exc:
                 with redirect_stderr(stderr):
                     guarded.init()
@@ -182,7 +182,7 @@ class Stage6CleanupMigrationTests(unittest.TestCase):
         self.assertNotEqual(exc.exception.code, 0)
         expected = (
             "ERROR: this version requires a prior kinds-refactor migration.\n"
-            "Install Loom 1.x first, boot once so the kinds-refactor migration runs, then upgrade to Loom 2.0.0.\n"
+            "Install Torque 1.x first, boot once so the kinds-refactor migration runs, then upgrade to Torque 2.0.0.\n"
             "Current DB has unmigrated rows with legacy columns populated."
         )
         self.assertEqual(stderr.getvalue().strip(), expected)
@@ -190,7 +190,7 @@ class Stage6CleanupMigrationTests(unittest.TestCase):
 
     def test_stage1_upgrade_preserves_agent_history_role_via_legacy_template(self):
         path = self._path("stage1-history-upgrade.db")
-        seeded = LoomDB(path)
+        seeded = TorqueDB(path)
         seeded.init()
         seeded.save_agent(
             AgentCell(
@@ -224,7 +224,7 @@ class Stage6CleanupMigrationTests(unittest.TestCase):
         conn.commit()
         conn.close()
 
-        upgraded = LoomDB(path)
+        upgraded = TorqueDB(path)
         self.addCleanup(upgraded.close)
         upgraded.init()
 
@@ -243,11 +243,11 @@ class Stage6CleanupMigrationTests(unittest.TestCase):
 
     def test_clean_v3_boot_skips_cleanup_and_emits_no_warnings(self):
         path = self._path("clean-v3.db")
-        seeded = LoomDB(path)
+        seeded = TorqueDB(path)
         seeded.init()
         seeded.close()
 
-        logger = logging.getLogger("loom")
+        logger = logging.getLogger("torque")
         captured = []
         handler = logging.Handler()
         handler.setLevel(logging.WARNING)
@@ -255,7 +255,7 @@ class Stage6CleanupMigrationTests(unittest.TestCase):
         old_level = logger.level
         logger.addHandler(handler)
         logger.setLevel(logging.WARNING)
-        rerun = LoomDB(path)
+        rerun = TorqueDB(path)
         self.addCleanup(rerun.close)
         stderr = io.StringIO()
         try:

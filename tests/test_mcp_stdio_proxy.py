@@ -13,7 +13,7 @@ def _frame(payload: bytes) -> bytes:
 
 class MCPStdioProxyTests(unittest.TestCase):
     def setUp(self):
-        self.proxy_mod = importlib.import_module("loom.mcp_stdio_proxy")
+        self.proxy_mod = importlib.import_module("torque.mcp_stdio_proxy")
         self.proxy_mod = importlib.reload(self.proxy_mod)
 
     def test_notification_with_empty_http_body_emits_no_stdio_frame(self):
@@ -101,11 +101,11 @@ class MCPStdioProxyTests(unittest.TestCase):
         ) as post_json, \
                 mock.patch.object(
                     self.proxy_mod,
-                    "LoomDB",
+                    "TorqueDB",
                     autospec=True,
-                ) as loom_db:
-            loom_db.return_value.init.return_value = None
-            loom_db.return_value.close.return_value = None
+                ) as torque_db:
+            torque_db.return_value.init.return_value = None
+            torque_db.return_value.close.return_value = None
             result = self.proxy_mod.asyncio.run(
                 self.proxy_mod._proxy_request(
                     payload,
@@ -119,7 +119,7 @@ class MCPStdioProxyTests(unittest.TestCase):
             post_json.call_args.kwargs["headers"],
             {
                 "Content-Type": "application/json",
-                "X-Loom-Cell-Id": "eng-3",
-                "X-Loom-MCP-Session-Id": "mcp-session-3",
+                "X-Torque-Cell-Id": "eng-3",
+                "X-Torque-MCP-Session-Id": "mcp-session-3",
             },
         )

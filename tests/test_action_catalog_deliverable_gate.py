@@ -1,6 +1,6 @@
 """End-to-end gate test for the action-catalog deliverable rollout.
 
-Walks the whole loom_done gate flow with the three catalog actions that
+Walks the whole torque_done gate flow with the three catalog actions that
 own a deliverable contract (`oneshot/investigate`, `oneshot/audit`,
 `feature/research`). For each one:
 
@@ -32,20 +32,20 @@ except ModuleNotFoundError:
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-CATALOG_DIR = REPO_ROOT / ".loom" / "actions"
+CATALOG_DIR = REPO_ROOT / ".torque" / "actions"
 
 
 class CatalogGateLiveValidationTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub()
         self.state_mod = importlib.reload(
-            importlib.import_module("loom.state")
+            importlib.import_module("torque.state")
         )
         self.actions_mod = importlib.reload(
-            importlib.import_module("loom.actions")
+            importlib.import_module("torque.actions")
         )
         self.server_mod = importlib.reload(
-            importlib.import_module("loom.server")
+            importlib.import_module("torque.server")
         )
 
     @staticmethod
@@ -171,7 +171,7 @@ class CatalogGateLiveValidationTests(unittest.IsolatedAsyncioTestCase):
         handle_command = self._extract_handle_command(
             state, action_mgr=action_mgr)
 
-        # 1. loom_done before uploading must be refused.
+        # 1. torque_done before uploading must be refused.
         result = await handle_command({
             "cmd": "ai_report",
             "cell_id": cell.id,
@@ -216,7 +216,7 @@ class CatalogGateLiveValidationTests(unittest.IsolatedAsyncioTestCase):
             contract["type"].lower(),
         )
 
-        # 3. loom_done now must succeed and move the task to Done.
+        # 3. torque_done now must succeed and move the task to Done.
         result = await handle_command({
             "cmd": "ai_report",
             "cell_id": cell.id,

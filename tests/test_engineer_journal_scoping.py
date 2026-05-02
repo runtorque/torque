@@ -13,36 +13,36 @@ except ModuleNotFoundError:
 class EngineerJournalScopingTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub()
-        self.db_mod = importlib.import_module("loom.db")
+        self.db_mod = importlib.import_module("torque.db")
         self.db_mod = importlib.reload(self.db_mod)
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
-        self.mcp_engineer_mod = importlib.import_module("loom.mcp_engineer")
+        self.mcp_engineer_mod = importlib.import_module("torque.mcp_engineer")
         self.mcp_engineer_mod = importlib.reload(self.mcp_engineer_mod)
 
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.db = self.db_mod.LoomDB(Path(self.tmp.name) / "loom.db")
+        self.db = self.db_mod.TorqueDB(Path(self.tmp.name) / "torque.db")
         self.db.init()
         self.addCleanup(self.db.close)
 
         self.state = self.state_mod.MatrixState(db=self.db)
         self.state.board_lanes = ["Backlog", "To Do", "In Progress", "Done", "Archived"]
-        self.state.groups["loom"] = []
+        self.state.groups["torque"] = []
 
     def _add_engineer(self, agent_id, name):
         engineer = self.state_mod.AgentCell(
             id=agent_id,
             name=name,
             slug=name.lower(),
-            group="loom",
+            group="torque",
             cell_type="agent",
             kind="engineer",
             status="running",
             persistent=True,
         )
         self.state.agents[agent_id] = engineer
-        self.state.groups["loom"].append(agent_id)
+        self.state.groups["torque"].append(agent_id)
         return engineer
 
     async def _unexpected_handle_command(self, payload):
@@ -52,13 +52,13 @@ class EngineerJournalScopingTests(unittest.IsolatedAsyncioTestCase):
         alice = self._add_engineer("eng-alice", "Alice")
         bob = self._add_engineer("eng-bob", "Bob")
         self.state.journal_append(
-            "loom",
+            "torque",
             "plan",
             "Alice's plan",
             author_cell_id=alice.id,
         )
         self.state.journal_append(
-            "loom",
+            "torque",
             "plan",
             "Bob's plan",
             author_cell_id=bob.id,
@@ -81,13 +81,13 @@ class EngineerJournalScopingTests(unittest.IsolatedAsyncioTestCase):
         alice = self._add_engineer("eng-alice", "Alice")
         bob = self._add_engineer("eng-bob", "Bob")
         self.state.journal_append(
-            "loom",
+            "torque",
             "plan",
             "Alice's plan",
             author_cell_id=alice.id,
         )
         self.state.journal_append(
-            "loom",
+            "torque",
             "decision",
             "Bob's decision",
             author_cell_id=bob.id,
@@ -116,13 +116,13 @@ class EngineerJournalScopingTests(unittest.IsolatedAsyncioTestCase):
         alice = self._add_engineer("eng-alice", "Alice")
         bob = self._add_engineer("eng-bob", "Bob")
         self.state.journal_append(
-            "loom",
+            "torque",
             "checkpoint",
             "Alice checkpoint",
             author_cell_id=alice.id,
         )
         self.state.journal_append(
-            "loom",
+            "torque",
             "checkpoint",
             "Bob checkpoint",
             author_cell_id=bob.id,

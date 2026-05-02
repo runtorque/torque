@@ -54,7 +54,7 @@ var _pendingDeltaSurfaceRenderFrame = 0;
 // microtask / rAF after the closing event so the browser delivers the
 // follow-up on the original target first, then deferred renders apply.
 var _userPressing = false;  // legacy name; covers pointer + keyboard interaction now
-// LOOM:264 follow-up: hover-defer for agent-card tooltips. Agent cards expose
+// TORQUE:264 follow-up: hover-defer for agent-card tooltips. Agent cards expose
 // their full status / activity / branch text via a CSS `:hover::after`
 // pseudo-element on `.agent-card-tooltip` (style.css:1142). When the user
 // hovers an active card and the worker fires events at firehose rate, the
@@ -90,10 +90,10 @@ function _schedulePostPressFlush() {
 // user's pointer is over them. Currently the agent-card tooltip is the only
 // CSS-pseudo-element-keyed surface in the grid; extend this list rather
 // than adding new flags if more `:hover`-driven surfaces appear.
-var _LOOM_HOVER_DEFER_SELECTOR = '.agent-card-tooltip';
+var _TORQUE_HOVER_DEFER_SELECTOR = '.agent-card-tooltip';
 function _eventTargetInHoverSurface(target) {
   if (!target || typeof target.closest !== 'function') return false;
-  return !!target.closest(_LOOM_HOVER_DEFER_SELECTOR);
+  return !!target.closest(_TORQUE_HOVER_DEFER_SELECTOR);
 }
 function _hoverEdgeIsBetweenTooltips(ev) {
   // pointerover / pointerout fire on every descendant transition. We only
@@ -101,11 +101,11 @@ function _hoverEdgeIsBetweenTooltips(ev) {
   // tooltip element itself — moving between two children of the same
   // tooltip must not toggle the flag (would thrash defer on/off mid-hover).
   if (!ev || !ev.target || typeof ev.target.closest !== 'function') return false;
-  var fromTooltip = ev.target.closest(_LOOM_HOVER_DEFER_SELECTOR);
+  var fromTooltip = ev.target.closest(_TORQUE_HOVER_DEFER_SELECTOR);
   if (!fromTooltip) return false;
   var related = ev.relatedTarget || null;
   if (related && typeof related.closest === 'function') {
-    var toTooltip = related.closest(_LOOM_HOVER_DEFER_SELECTOR);
+    var toTooltip = related.closest(_TORQUE_HOVER_DEFER_SELECTOR);
     if (toTooltip === fromTooltip) return false;
   }
   return true;
@@ -402,8 +402,8 @@ function _handleEngineerSessionMapMessage(msg) {
 
 function _applyRuntimeMode() {
   const embedded = !!(state && state.runtime && state.runtime.embedded_terminal);
-  const mode = (typeof _loomUiMode === 'function')
-    ? _loomUiMode()
+  const mode = (typeof _torqueUiMode === 'function')
+    ? _torqueUiMode()
     : (embedded ? 'standalone' : 'toolbelt');
   const standalone = mode === 'standalone' || mode === 'desktop';
   const iterm2 = mode === 'toolbelt';
@@ -412,7 +412,7 @@ function _applyRuntimeMode() {
   document.body.classList.toggle('standalone-mode', standalone);
   document.body.classList.toggle('iterm2-mode', iterm2);
   if (document.body.dataset) {
-    document.body.dataset.loomMode = mode;
+    document.body.dataset.torqueMode = mode;
   }
 }
 
@@ -659,7 +659,7 @@ function _flushDeltaSurfaceRenderBatch() {
   // If a press is in progress (e.g. an rAF was scheduled before the user
   // pressed), keep the batch queued and re-arm the rAF after release.
   // Otherwise the rAF would replace the DOM mid-press and suppress click.
-  // LOOM:264 follow-up: same gate also applies to active hover on
+  // TORQUE:264 follow-up: same gate also applies to active hover on
   // tooltip-keyed surfaces (see `_userHovering`).
   if (_userInteracting()) {
     _pendingDeltaSurfaceRenderFrame = 0;
@@ -719,10 +719,10 @@ function _markSurface(flags) {
 
 function _deltaSurfaceInvalidations(ops, hints) {
   const flags = _blankSurfaceInvalidations();
-  // LOOM:236 v13 instrumentation: when window.__loomDebugRender is true,
+  // TORQUE:236 v13 instrumentation: when window.__torqueDebugRender is true,
   // record which delta op type flipped flags.engineer to true so the
   // user's reproduction shows what's slipping through the gates.
-  const _debug = (typeof window !== 'undefined' && window.__loomDebugRender);
+  const _debug = (typeof window !== 'undefined' && window.__torqueDebugRender);
   let _engBefore = false;
   for (let i = 0; i < ops.length; i++) {
     const op = ops[i];
@@ -742,7 +742,7 @@ function _deltaSurfaceInvalidations(ops, hints) {
         _markSurface(flags, 'main', 'context', 'engineer');
         break;
       case 'focus_update':
-        // LOOM:236 v14: focus_update carries iTerm2 session/window focus
+        // TORQUE:236 v14: focus_update carries iTerm2 session/window focus
         // (`active_session_id` / `current_window_id`), NOT agent panel
         // selection state. The engineer panel renders from
         // `focusedItemId` / `selectedAgentId` (client-side); the only
@@ -770,7 +770,7 @@ function _deltaSurfaceInvalidations(ops, hints) {
         // Engineer panel only needs a full re-render when the append
         // belongs to the focused agent *and* the focused panel is displaying
         // the affected sub-surface. Cross-agent traffic (e.g. another worker
-        // firing loom_progress while the user is reading a different agent's
+        // firing torque_progress while the user is reading a different agent's
         // panel) used to clobber the focused panel's DOM — destroying any
         // in-progress textarea selection / scroll anchor — even though
         // nothing the panel displayed had changed.
@@ -916,7 +916,7 @@ function _deltaSurfaceInvalidations(ops, hints) {
           author_cell_id: op.author_cell_id || '',
           architect_id: op.architect_id || '',
         };
-        console.warn('[loom render] engineer-flag set by op:',
+        console.warn('[torque render] engineer-flag set by op:',
           JSON.stringify(_opSummary));
       } catch (_e) {}
     }
@@ -939,7 +939,7 @@ function _agentNextFromDelta(op, previous) {
 }
 
 function _stableDeltaValue(value) {
-  if (value === undefined) return '__loom_undefined__';
+  if (value === undefined) return '__torque_undefined__';
   if (value === null) return null;
   if (typeof value === 'object') {
     try {
@@ -1004,7 +1004,7 @@ function _taskHasHumanAskLabel(task) {
   return !!(
     task
     && Array.isArray(task.labels)
-    && task.labels.indexOf('loom:human') >= 0
+    && task.labels.indexOf('torque:human') >= 0
   );
 }
 
@@ -1481,7 +1481,7 @@ function _agentDeltaInvalidatesEngineer(previous, next, op) {
   // / cross-owner traffic in the same group used to refresh unconditionally
   // (the trailing `return true` here), which clobbered the focused panel's
   // textarea + scroll on every worker activity pulse — the dominant firehose
-  // surviving the LOOM:236 v4 mcp/event surface gate.
+  // surviving the TORQUE:236 v4 mcp/event surface gate.
   const focusedKind = _focusedEngineerAgentKind(focused);
   if (focusedKind === 'engineer' || focusedKind === 'architect') {
     const ownerPrev = previous ? String(previous.owner_engineer_id || '') : '';

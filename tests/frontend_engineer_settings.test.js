@@ -205,7 +205,7 @@ test('engineer Worklog tab renders dispatched tasks with live lane and status', 
     alpha: [
       {
         id: 4,
-        task_id: 'LOOM:9',
+        task_id: 'TORQUE:9',
         task_title: 'Add Worklog tab',
         agent_id: 'agent-1',
         agent_name: 'Worker One',
@@ -216,8 +216,8 @@ test('engineer Worklog tab renders dispatched tasks with live lane and status', 
     ],
   };
   sandbox.state.board_tasks = {
-    'LOOM:9': {
-      id: 'LOOM:9',
+    'TORQUE:9': {
+      id: 'TORQUE:9',
       task: 'Add Worklog tab',
       lane: 'In Progress',
       status: 'In review',
@@ -248,7 +248,7 @@ test('engineer Worklog tab hides non-owned rows when restrict_to_created_agents 
     alpha: [
       {
         id: 2,
-        task_id: 'LOOM:2',
+        task_id: 'TORQUE:2',
         task_title: 'Owned task',
         agent_id: 'agent-owned',
         agent_name: 'Owned Worker',
@@ -257,7 +257,7 @@ test('engineer Worklog tab hides non-owned rows when restrict_to_created_agents 
       },
       {
         id: 1,
-        task_id: 'LOOM:1',
+        task_id: 'TORQUE:1',
         task_title: 'Legacy task',
         agent_id: 'agent-legacy',
         agent_name: 'Legacy Worker',
@@ -301,10 +301,10 @@ test('engineer journal distinguishes blocking asks from non-blocking notes', () 
 test('engineer journal keeps chronology separate and shows a Session Map button', () => {
   const sandbox = createSandbox();
   sandbox.state.board_tasks = {
-    'LOOM:333': { id: 'LOOM:333', task: 'Add Events tab' },
-    'LOOM:342': { id: 'LOOM:342', task: 'Keep Engineer Events next-dispatch timing accurate' },
-    'LOOM:333:4': { id: 'LOOM:333:4', task: 'Review Events stream' },
-    'LOOM:342:1': { id: 'LOOM:342:1', task: 'Validate stream after smoke testing' },
+    'TORQUE:333': { id: 'TORQUE:333', task: 'Add Events tab' },
+    'TORQUE:342': { id: 'TORQUE:342', task: 'Keep Engineer Events next-dispatch timing accurate' },
+    'TORQUE:333:4': { id: 'TORQUE:333:4', task: 'Review Events stream' },
+    'TORQUE:342:1': { id: 'TORQUE:342:1', task: 'Validate stream after smoke testing' },
   };
   sandbox.state.engineer_streams = {
     alpha: {
@@ -312,8 +312,8 @@ test('engineer journal keeps chronology separate and shows a Session Map button'
       by_state: { awaiting_human_validation: 1 },
       items: [
         {
-          stream_id: 'stream:/repo::loom/events-panel',
-          branch: 'loom/events-panel',
+          stream_id: 'stream:/repo::torque/events-panel',
+          branch: 'torque/events-panel',
           foreground_task_title: 'Keep Engineer Events next-dispatch timing accurate',
           state: 'awaiting_human_validation',
           code_state: 'reviewed_clean',
@@ -322,19 +322,19 @@ test('engineer journal keeps chronology separate and shows a Session Map button'
           gate_reason: 'Run manual smoke',
           recommended_next_action: 'merge_after_validation',
           latest_reviewed_commit_sha: 'rev4561234567',
-          product_task_ids: ['LOOM:333', 'LOOM:342'],
-          workflow_task_ids: ['LOOM:333:4', 'LOOM:342:1'],
+          product_task_ids: ['TORQUE:333', 'TORQUE:342'],
+          workflow_task_ids: ['TORQUE:333:4', 'TORQUE:342:1'],
           recent_visibility_items: [
             {
               kind: 'agent_reply',
-              task_id: 'LOOM:9',
+              task_id: 'TORQUE:9',
               task_title: 'Engineer: reprioritize blocker fix',
               summary: 'Will handle blocker first',
               timestamp: '2026-04-07T11:12:00+00:00',
             },
             {
               kind: 'engineer_message',
-              task_id: 'LOOM:9',
+              task_id: 'TORQUE:9',
               task_title: 'Engineer: reprioritize blocker fix',
               summary: 'Reprioritized blocker fix before queued work',
               timestamp: '2026-04-07T11:11:00+00:00',
@@ -372,8 +372,8 @@ test('engineer session map renders deterministic stream and recovery sections', 
       streams: {
         items: [
           {
-            stream_id: 'stream:/repo::loom/modal-polish',
-            branch: 'loom/modal-polish',
+            stream_id: 'stream:/repo::torque/modal-polish',
+            branch: 'torque/modal-polish',
             foreground_task_title: 'Polish modal',
             state: 'awaiting_human_validation',
             validation_state: 'pending_human_validation',
@@ -381,8 +381,8 @@ test('engineer session map renders deterministic stream and recovery sections', 
             gate_reason: 'Run manual smoke',
             recommended_next_action: 'run_manual_validation',
             latest_reviewed_commit_sha: 'abc1234567',
-            product_task_ids: ['LOOM:1'],
-            workflow_task_ids: ['LOOM:1:1'],
+            product_task_ids: ['TORQUE:1'],
+            workflow_task_ids: ['TORQUE:1:1'],
             recent_visibility_items: [
               { kind: 'engineer_message', summary: 'Paused queued work until validation clears' },
             ],
@@ -390,21 +390,21 @@ test('engineer session map renders deterministic stream and recovery sections', 
         ],
       },
       asks: {
-        items: [{ id: 'ASK:1', title: 'Approve release plan', parent_task_id: 'LOOM:1' }],
+        items: [{ id: 'ASK:1', title: 'Approve release plan', parent_task_id: 'TORQUE:1' }],
       },
       human_gates: {
-        items: [{ stream_title: 'Polish modal', branch: 'loom/modal-polish', gate_reason: 'Run manual smoke' }],
+        items: [{ stream_title: 'Polish modal', branch: 'torque/modal-polish', gate_reason: 'Run manual smoke' }],
       },
       task_health: {
-        items: [{ id: 'LOOM:9', title: 'Investigate flaky smoke', health_state: 'blocked', via: '' }],
+        items: [{ id: 'TORQUE:9', title: 'Investigate flaky smoke', health_state: 'blocked', via: '' }],
       },
       verification: {
-        items: [{ id: 'LOOM:1', title: 'Polish modal', verification_state: 'pending', verification_mode: 'deploy', detail: 'Run manual smoke' }],
+        items: [{ id: 'TORQUE:1', title: 'Polish modal', verification_state: 'pending', verification_mode: 'deploy', detail: 'Run manual smoke' }],
       },
       branch_boundaries: {
         items: [{
           latest_boundary_task: 'Review modal polish',
-          branch: 'loom/modal-polish',
+          branch: 'torque/modal-polish',
           partial_review_safe: true,
           foreground_task_title: 'Polish modal',
           queued_followups: [{ title: 'Ship follow-up copy tweak' }],
@@ -416,8 +416,8 @@ test('engineer session map renders deterministic stream and recovery sections', 
       },
       queued_follow_up: {
         items: [
-          { source: 'stream_queue', task_id: 'LOOM:2', task_title: 'Ship follow-up copy tweak', queue_state: 'paused_by_validation', branch: 'loom/modal-polish', gate_reason: 'Run manual smoke' },
-          { source: 'dispatch_queue', task_id: 'LOOM:3', task_title: 'Prepare release notes', target_agent_name: 'Worker One' },
+          { source: 'stream_queue', task_id: 'TORQUE:2', task_title: 'Ship follow-up copy tweak', queue_state: 'paused_by_validation', branch: 'torque/modal-polish', gate_reason: 'Run manual smoke' },
+          { source: 'dispatch_queue', task_id: 'TORQUE:3', task_title: 'Prepare release notes', target_agent_name: 'Worker One' },
         ],
       },
       journal: {

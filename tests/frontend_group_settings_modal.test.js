@@ -232,7 +232,7 @@ test('architect settings markup removes paused control and renders checkpoint dr
   assert.match(html, /<label>Journal checkpoint cadence\s*<span class="hint-btn"/);
   assert.match(
     html,
-    /data-hint="How often Loom reminds the architect to write a `checkpoint` journal entry summarizing active engineers, open scope, pending hires, open decisions, and planned next moves\."/,
+    /data-hint="How often Torque reminds the architect to write a `checkpoint` journal entry summarizing active engineers, open scope, pending hires, open decisions, and planned next moves\."/,
   );
   assert.match(html, /<select id="gs-architect-journal-checkpoint"><\/select>/);
 });
@@ -273,7 +273,7 @@ test('system prompt preview popup sends unsaved form state and closes as nested 
   ensure('gs-engineer-boot-cmd').value = 'codex --engineer';
   ensure('gs-engineer-model').value = 'gpt-5.1';
   ensure('gs-engineer-reasoning-effort').value = 'xhigh';
-  ensure('gs-engineer-directory').value = '/repo/.loom/engineer';
+  ensure('gs-engineer-directory').value = '/repo/.torque/engineer';
   ensure('gs-engineer-profile').value = 'Ops';
   ensure('gs-engineer-shell').value = 'fish';
   ensure('gs-engineer-custom-instructions').value = 'UNSAVED engineer instructions';
@@ -420,7 +420,7 @@ test('architect system prompt preview uses architect form values', () => {
   ensure('gs-architect-boot-cmd').value = 'codex --architect';
   ensure('gs-architect-model').value = 'gpt-5.1-architect';
   ensure('gs-architect-reasoning-effort').value = 'high';
-  ensure('gs-architect-directory').value = '/repo/.loom/architect';
+  ensure('gs-architect-directory').value = '/repo/.torque/architect';
   ensure('gs-architect-profile').value = 'Ops';
   ensure('gs-architect-shell').value = 'zsh';
   ensure('gs-architect-custom-instructions').value = 'UNSAVED architect instructions';
@@ -511,7 +511,7 @@ test('group settings modal populates engineer fields and honors engineer tab dee
       engineer_boot_command: "codex --model gpt-5",
       engineer_model: "gpt-5.1-codex",
       engineer_reasoning_effort: "xhigh",
-      engineer_directory: "/repo/.loom/engineer",
+      engineer_directory: "/repo/.torque/engineer",
       engineer_profile: "Ops",
       engineer_shell: "fish",
       engineer_tab_color: "none",
@@ -534,7 +534,7 @@ test('group settings modal populates engineer fields and honors engineer tab dee
       architect_boot_command: "codex --architect",
       architect_model: "gpt-5.1-architect",
       architect_reasoning_effort: "high",
-      architect_directory: "/repo/.loom/architect",
+      architect_directory: "/repo/.torque/architect",
       architect_profile: "Ops",
       architect_shell: "fish",
       architect_tab_color: "none",
@@ -561,7 +561,7 @@ test('group settings modal populates engineer fields and honors engineer tab dee
   );
   assert.equal(ensure('gs-engineer-model').value, 'gpt-5.1-codex');
   assert.equal(ensure('gs-engineer-reasoning-effort').value, 'xhigh');
-  assert.equal(ensure('gs-engineer-directory').value, '/repo/.loom/engineer');
+  assert.equal(ensure('gs-engineer-directory').value, '/repo/.torque/engineer');
   assert.equal(ensure('gs-engineer-profile').value, 'Ops');
   assert.equal(ensure('gs-engineer-shell').value, 'fish');
   assert.deepEqual(
@@ -594,7 +594,7 @@ test('group settings modal populates engineer fields and honors engineer tab dee
   assert.equal(ensure('gs-architect-boot-cmd').value, 'codex --architect');
   assert.equal(ensure('gs-architect-model').value, 'gpt-5.1-architect');
   assert.equal(ensure('gs-architect-reasoning-effort').value, 'high');
-  assert.equal(ensure('gs-architect-directory').value, '/repo/.loom/architect');
+  assert.equal(ensure('gs-architect-directory').value, '/repo/.torque/architect');
   assert.equal(ensure('gs-architect-profile').value, 'Ops');
   assert.equal(ensure('gs-architect-shell').value, 'fish');
   assert.equal(ensure('gs-architect-custom-instructions').value, 'Own scope crisply.');
@@ -971,7 +971,7 @@ test('group settings marks iTerm2-only controls for standalone mode gating', () 
 
   assert.match(
     css,
-    /body\.standalone-mode \.iterm2-only,\s*body\[data-loom-mode="standalone"\] \.iterm2-only,\s*body\[data-loom-mode="desktop"\] \.iterm2-only\s*\{[^}]*display:\s*none\s*!important;/s,
+    /body\.standalone-mode \.iterm2-only,\s*body\[data-torque-mode="standalone"\] \.iterm2-only,\s*body\[data-torque-mode="desktop"\] \.iterm2-only\s*\{[^}]*display:\s*none\s*!important;/s,
   );
   assert.match(ws, /classList\.toggle\('standalone-mode',\s*standalone\)/);
   assert.match(ws, /classList\.toggle\('iterm2-mode',\s*iterm2\)/);
@@ -990,7 +990,7 @@ test('architect behavior sub-tab keeps policy fields without fallback review-gat
   assert.doesNotMatch(html, /Fallback review-gate thresholds/);
   assert.doesNotMatch(html, /gs-architect-review-/);
   assert.doesNotMatch(html, /gs-architect-deferred-section/);
-  assert.doesNotMatch(html, /storage only|wiring in LOOM:196|⊘/);
+  assert.doesNotMatch(html, /storage only|wiring in TORQUE:196|⊘/);
 });
 
 test('submitGroupSettings sends group, engineer, and architect updates separately', () => {
@@ -1012,7 +1012,7 @@ test('submitGroupSettings sends group, engineer, and architect updates separatel
   ensure('gs-agent-reasoning-effort').value = 'minimal';
   ensure('gs-engineer-model').value = 'gpt-5.1';
   ensure('gs-engineer-reasoning-effort').value = 'xhigh';
-  ensure('gs-engineer-directory').value = '/repo/.loom/engineer';
+  ensure('gs-engineer-directory').value = '/repo/.torque/engineer';
   ensure('gs-engineer-profile').value = 'Ops';
   ensure('gs-engineer-shell').value = 'fish';
   vm.runInContext(`_gsEngineerColor = 'none';`, context);
@@ -1034,7 +1034,7 @@ test('submitGroupSettings sends group, engineer, and architect updates separatel
   ensure('gs-architect-boot-cmd').value = 'codex --architect';
   ensure('gs-architect-model').value = 'gpt-5.1-architect';
   ensure('gs-architect-reasoning-effort').value = 'high';
-  ensure('gs-architect-directory').value = '/repo/.loom/architect';
+  ensure('gs-architect-directory').value = '/repo/.torque/architect';
   ensure('gs-architect-profile').value = 'Ops';
   ensure('gs-architect-shell').value = 'zsh';
   vm.runInContext(`_gsArchitectColor = 'none';`, context);
@@ -1064,7 +1064,7 @@ test('submitGroupSettings sends group, engineer, and architect updates separatel
   assert.equal(sandbox.sendCalls[1].engineer_boot_command, 'codex --model gpt-5');
   assert.equal(sandbox.sendCalls[1].engineer_model, 'gpt-5.1');
   assert.equal(sandbox.sendCalls[1].engineer_reasoning_effort, 'xhigh');
-  assert.equal(sandbox.sendCalls[1].engineer_directory, '/repo/.loom/engineer');
+  assert.equal(sandbox.sendCalls[1].engineer_directory, '/repo/.torque/engineer');
   assert.equal(sandbox.sendCalls[1].engineer_profile, 'Ops');
   assert.equal(sandbox.sendCalls[1].engineer_shell, 'fish');
   assert.equal(sandbox.sendCalls[1].engineer_tab_color, 'none');
@@ -1084,7 +1084,7 @@ test('submitGroupSettings sends group, engineer, and architect updates separatel
   assert.equal(sandbox.sendCalls[2].settings.architect_boot_command, 'codex --architect');
   assert.equal(sandbox.sendCalls[2].settings.architect_model, 'gpt-5.1-architect');
   assert.equal(sandbox.sendCalls[2].settings.architect_reasoning_effort, 'high');
-  assert.equal(sandbox.sendCalls[2].settings.architect_directory, '/repo/.loom/architect');
+  assert.equal(sandbox.sendCalls[2].settings.architect_directory, '/repo/.torque/architect');
   assert.equal(sandbox.sendCalls[2].settings.architect_profile, 'Ops');
   assert.equal(sandbox.sendCalls[2].settings.architect_shell, 'zsh');
   assert.equal(sandbox.sendCalls[2].settings.architect_tab_color, 'none');

@@ -36,9 +36,9 @@ class FakeWorktreeManager:
 class ServerAiReportMandatoryReviewGateTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub()
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
-        self.server_mod = importlib.import_module("loom.server")
+        self.server_mod = importlib.import_module("torque.server")
         self.server_mod = importlib.reload(self.server_mod)
 
     @staticmethod
@@ -209,7 +209,7 @@ class ServerAiReportMandatoryReviewGateTests(unittest.IsolatedAsyncioTestCase):
             result["message"],
         )
         self.assertIn(
-            'loom_derive(description="Review Implement mandatory gate", action="feature/review")',
+            'torque_derive(description="Review Implement mandatory gate", action="feature/review")',
             result["message"],
         )
         self.assertEqual(task.lane, "In Progress")
@@ -232,7 +232,7 @@ class ServerAiReportMandatoryReviewGateTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["type"], "error")
         self.assertIn(
-            'loom_derive(description="Review Implement mandatory gate", action="feature/review")',
+            'torque_derive(description="Review Implement mandatory gate", action="feature/review")',
             result["message"],
         )
         self.assertEqual(task.lane, "In Progress")

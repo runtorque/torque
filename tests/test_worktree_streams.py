@@ -26,9 +26,9 @@ def _ts(value: str) -> float:
 class WorktreeStreamTests(unittest.TestCase):
     def setUp(self):
         _install_aiohttp_stub()
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
-        self.streams_mod = importlib.import_module("loom.worktree_streams")
+        self.streams_mod = importlib.import_module("torque.worktree_streams")
         self.streams_mod = importlib.reload(self.streams_mod)
 
     def _make_state(self):
@@ -36,7 +36,7 @@ class WorktreeStreamTests(unittest.TestCase):
         state.groups["g"] = []
         return state
 
-    def _add_agent(self, state, *, agent_id="agent-1", branch="loom/worker",
+    def _add_agent(self, state, *, agent_id="agent-1", branch="torque/worker",
                    current_task_id="", status="running",
                    last_event_at="2026-04-07T12:00:00+00:00"):
         cell = self.state_mod.AgentCell(
@@ -46,7 +46,7 @@ class WorktreeStreamTests(unittest.TestCase):
             group="g",
             cell_type="agent",
             status=status,
-            worktree_path=f"/repo/.loom/worktrees/{agent_id}",
+            worktree_path=f"/repo/.torque/worktrees/{agent_id}",
             worktree_repo_root="/repo",
             worktree_branch=branch,
             git_root="/repo",
@@ -95,13 +95,13 @@ class WorktreeStreamTests(unittest.TestCase):
         worker = self._add_agent(state, status="idle")
 
         product = self._task(
-            "LOOM:1",
+            "TORQUE:1",
             "Add Events tab",
             agent_id=worker.id,
             updated_at="2026-04-07T10:30:00+00:00",
         )
         review = self._task(
-            "LOOM:1:1",
+            "TORQUE:1:1",
             "Review Events implementation",
             lane="Done",
             action_name="feature/review",
@@ -114,7 +114,7 @@ class WorktreeStreamTests(unittest.TestCase):
             boundary={
                 "version": "1",
                 "repo_root": "/repo",
-                "branch": "loom/worker",
+                "branch": "torque/worker",
                 "status": "open",
                 "recorded_at": "2026-04-07T11:30:00+00:00",
                 "commit_sha": "abc123",
@@ -127,7 +127,7 @@ class WorktreeStreamTests(unittest.TestCase):
         stream = self.streams_mod.compute_worktree_stream(
             state,
             repo_root="/repo",
-            branch="loom/worker",
+            branch="torque/worker",
         )
 
         self.assertEqual(stream["product_task_ids"], [product.id])
@@ -143,9 +143,9 @@ class WorktreeStreamTests(unittest.TestCase):
     def test_multiple_product_tasks_on_one_branch_collapse_into_one_stream(self):
         state = self._make_state()
 
-        product_one = self._task("LOOM:1", "Add Events tab")
+        product_one = self._task("TORQUE:1", "Add Events tab")
         review = self._task(
-            "LOOM:1:1",
+            "TORQUE:1:1",
             "Review Events implementation",
             action_name="feature/review",
             parent_task_id=product_one.id,
@@ -156,14 +156,14 @@ class WorktreeStreamTests(unittest.TestCase):
             boundary={
                 "version": "1",
                 "repo_root": "/repo",
-                "branch": "loom/worker",
+                "branch": "torque/worker",
                 "status": "open",
                 "recorded_at": "2026-04-07T11:30:00+00:00",
                 "commit_sha": "review123",
             },
         )
         product_two = self._task(
-            "LOOM:2",
+            "TORQUE:2",
             "Add Worklog tab",
             lane="To Do",
             created_at="2026-04-07T12:00:00+00:00",
@@ -201,14 +201,14 @@ class WorktreeStreamTests(unittest.TestCase):
         state = self._make_state()
 
         review = self._task(
-            "LOOM:1",
+            "TORQUE:1",
             "Review completed branch",
             lane="Done",
             action_name="feature/review",
             boundary={
                 "version": "1",
                 "repo_root": "/repo",
-                "branch": "loom/historical-review",
+                "branch": "torque/historical-review",
                 "status": "open",
                 "recorded_at": "2026-04-07T11:30:00+00:00",
                 "commit_sha": "abc123",
@@ -236,14 +236,14 @@ class WorktreeStreamTests(unittest.TestCase):
         state = self._make_state()
 
         review = self._task(
-            "LOOM:1",
+            "TORQUE:1",
             "Review completed branch",
             lane="Done",
             action_name="feature/review",
             boundary={
                 "version": "1",
                 "repo_root": "/repo",
-                "branch": "loom/dormant-review",
+                "branch": "torque/dormant-review",
                 "status": "open",
                 "recorded_at": "2026-04-07T11:30:00+00:00",
                 "commit_sha": "abc123",
@@ -269,19 +269,19 @@ class WorktreeStreamTests(unittest.TestCase):
         state = self._make_state()
         worker = self._add_agent(
             state,
-            current_task_id="LOOM:1:2",
+            current_task_id="TORQUE:1:2",
             status="running",
             last_event_at="2026-04-07T12:45:00+00:00",
         )
 
         product = self._task(
-            "LOOM:1",
+            "TORQUE:1",
             "Add Events tab",
             lane="Done",
             boundary={
                 "version": "1",
                 "repo_root": "/repo",
-                "branch": "loom/worker",
+                "branch": "torque/worker",
                 "status": "open",
                 "recorded_at": "2026-04-07T11:00:00+00:00",
                 "commit_sha": "impl123",
@@ -289,7 +289,7 @@ class WorktreeStreamTests(unittest.TestCase):
             },
         )
         review = self._task(
-            "LOOM:1:1",
+            "TORQUE:1:1",
             "Review Events implementation",
             lane="In Progress",
             action_name="feature/review",
@@ -301,7 +301,7 @@ class WorktreeStreamTests(unittest.TestCase):
             updated_at="2026-04-07T11:20:00+00:00",
         )
         blocker_fix = self._task(
-            "LOOM:1:2",
+            "TORQUE:1:2",
             "Fix the issues found",
             lane="In Progress",
             action_name="feature/implement",
@@ -320,7 +320,7 @@ class WorktreeStreamTests(unittest.TestCase):
         stream = self.streams_mod.compute_worktree_stream(
             state,
             repo_root="/repo",
-            branch="loom/worker",
+            branch="torque/worker",
         )
 
         self.assertEqual(stream["state"], "fixing_blockers")
@@ -333,20 +333,20 @@ class WorktreeStreamTests(unittest.TestCase):
         state = self._make_state()
 
         product = self._task(
-            "LOOM:1",
+            "TORQUE:1",
             "Add Events tab",
             lane="Done",
             boundary={
                 "version": "1",
                 "repo_root": "/repo",
-                "branch": "loom/worker",
+                "branch": "torque/worker",
                 "status": "open",
                 "recorded_at": "2026-04-07T11:00:00+00:00",
                 "commit_sha": "impl123",
             },
         )
         review = self._task(
-            "LOOM:1:1",
+            "TORQUE:1:1",
             "Review Events implementation",
             lane="In Progress",
             action_name="feature/review",
@@ -357,7 +357,7 @@ class WorktreeStreamTests(unittest.TestCase):
             updated_at="2026-04-07T11:20:00+00:00",
         )
         queued_next = self._task(
-            "LOOM:2",
+            "TORQUE:2",
             "Add Worklog tab",
             lane="To Do",
             created_at="2026-04-07T11:30:00+00:00",
@@ -371,7 +371,7 @@ class WorktreeStreamTests(unittest.TestCase):
         stream = self.streams_mod.compute_worktree_stream(
             state,
             repo_root="/repo",
-            branch="loom/worker",
+            branch="torque/worker",
         )
 
         self.assertEqual(stream["state"], "reviewing")
@@ -386,19 +386,19 @@ class WorktreeStreamTests(unittest.TestCase):
         state = self._make_state()
         worker = self._add_agent(
             state,
-            current_task_id="LOOM:1:2",
+            current_task_id="TORQUE:1:2",
             status="running",
             last_event_at="2026-04-07T12:45:00+00:00",
         )
 
         product = self._task(
-            "LOOM:1",
+            "TORQUE:1",
             "Add Events tab",
             lane="Done",
             boundary={
                 "version": "1",
                 "repo_root": "/repo",
-                "branch": "loom/worker",
+                "branch": "torque/worker",
                 "status": "open",
                 "recorded_at": "2026-04-07T11:00:00+00:00",
                 "commit_sha": "impl123",
@@ -406,7 +406,7 @@ class WorktreeStreamTests(unittest.TestCase):
             },
         )
         review = self._task(
-            "LOOM:1:1",
+            "TORQUE:1:1",
             "Review Events implementation",
             lane="In Progress",
             action_name="feature/review",
@@ -418,7 +418,7 @@ class WorktreeStreamTests(unittest.TestCase):
             updated_at="2026-04-07T11:20:00+00:00",
         )
         blocker_fix = self._task(
-            "LOOM:1:2",
+            "TORQUE:1:2",
             "Fix the issues found",
             lane="In Progress",
             action_name="feature/fix-review",
@@ -429,10 +429,10 @@ class WorktreeStreamTests(unittest.TestCase):
             created_at="2026-04-07T11:30:00+00:00",
             updated_at="2026-04-07T12:40:00+00:00",
             resume_after=product.id,
-            labels=["loom:derived", "review-fix"],
+            labels=["torque:derived", "review-fix"],
         )
         queued_next = self._task(
-            "LOOM:2",
+            "TORQUE:2",
             "Add Worklog tab",
             lane="To Do",
             created_at="2026-04-07T12:41:00+00:00",
@@ -447,7 +447,7 @@ class WorktreeStreamTests(unittest.TestCase):
         stream = self.streams_mod.compute_worktree_stream(
             state,
             repo_root="/repo",
-            branch="loom/worker",
+            branch="torque/worker",
         )
 
         self.assertEqual(stream["queue_gate"]["gate_type"], "review_blocker")
@@ -464,7 +464,7 @@ class WorktreeStreamTests(unittest.TestCase):
         state = self._make_state()
 
         product = self._task(
-            "LOOM:1",
+            "TORQUE:1",
             "Add Events tab",
             verification_state="pending",
             verification_summary={
@@ -473,7 +473,7 @@ class WorktreeStreamTests(unittest.TestCase):
             verification_updated_at="2026-04-07T11:45:00+00:00",
         )
         review = self._task(
-            "LOOM:1:1",
+            "TORQUE:1:1",
             "Review Events implementation",
             action_name="feature/review",
             parent_task_id=product.id,
@@ -484,7 +484,7 @@ class WorktreeStreamTests(unittest.TestCase):
             boundary={
                 "version": "1",
                 "repo_root": "/repo",
-                "branch": "loom/worker",
+                "branch": "torque/worker",
                 "status": "open",
                 "recorded_at": "2026-04-07T11:30:00+00:00",
                 "commit_sha": "review123",
@@ -496,7 +496,7 @@ class WorktreeStreamTests(unittest.TestCase):
         stream = self.streams_mod.compute_worktree_stream(
             state,
             repo_root="/repo",
-            branch="loom/worker",
+            branch="torque/worker",
         )
 
         self.assertEqual(stream["state"], "awaiting_human_validation")
@@ -512,7 +512,7 @@ class WorktreeStreamTests(unittest.TestCase):
         state = self._make_state()
 
         product = self._task(
-            "LOOM:1",
+            "TORQUE:1",
             "Add Events tab",
             lane="Done",
             verification_state="pending",
@@ -522,7 +522,7 @@ class WorktreeStreamTests(unittest.TestCase):
             verification_updated_at="2026-04-07T11:45:00+00:00",
         )
         review = self._task(
-            "LOOM:1:1",
+            "TORQUE:1:1",
             "Review Events implementation",
             lane="Done",
             action_name="feature/review",
@@ -534,14 +534,14 @@ class WorktreeStreamTests(unittest.TestCase):
             boundary={
                 "version": "1",
                 "repo_root": "/repo",
-                "branch": "loom/worker",
+                "branch": "torque/worker",
                 "status": "open",
                 "recorded_at": "2026-04-07T11:30:00+00:00",
                 "commit_sha": "review123",
             },
         )
         queued_next = self._task(
-            "LOOM:2",
+            "TORQUE:2",
             "Add Worklog tab",
             lane="To Do",
             created_at="2026-04-07T11:35:00+00:00",
@@ -555,7 +555,7 @@ class WorktreeStreamTests(unittest.TestCase):
         stream = self.streams_mod.compute_worktree_stream(
             state,
             repo_root="/repo",
-            branch="loom/worker",
+            branch="torque/worker",
         )
 
         self.assertEqual(stream["queue_gate"]["gate_type"], "human_validation")
@@ -570,14 +570,14 @@ class WorktreeStreamTests(unittest.TestCase):
         state = self._make_state()
         worker = self._add_agent(
             state,
-            current_task_id="LOOM:1:2",
+            current_task_id="TORQUE:1:2",
             status="running",
             last_event_at="2026-04-07T12:30:00+00:00",
         )
 
-        product = self._task("LOOM:1", "Add Events tab")
+        product = self._task("TORQUE:1", "Add Events tab")
         review = self._task(
-            "LOOM:1:1",
+            "TORQUE:1:1",
             "Review Events implementation",
             action_name="feature/review",
             parent_task_id=product.id,
@@ -588,7 +588,7 @@ class WorktreeStreamTests(unittest.TestCase):
             boundary={
                 "version": "1",
                 "repo_root": "/repo",
-                "branch": "loom/worker",
+                "branch": "torque/worker",
                 "status": "open",
                 "recorded_at": "2026-04-07T11:30:00+00:00",
                 "commit_sha": "review123",
@@ -596,7 +596,7 @@ class WorktreeStreamTests(unittest.TestCase):
             },
         )
         merge_fix = self._task(
-            "LOOM:1:2",
+            "TORQUE:1:2",
             "Resolve merge conflict in state.py",
             lane="In Progress",
             action_name="feature/implement",
@@ -615,7 +615,7 @@ class WorktreeStreamTests(unittest.TestCase):
         stream = self.streams_mod.compute_worktree_stream(
             state,
             repo_root="/repo",
-            branch="loom/worker",
+            branch="torque/worker",
         )
 
         self.assertEqual(stream["state"], "fixing_blockers")
@@ -630,24 +630,24 @@ class WorktreeStreamTests(unittest.TestCase):
         worker = self._add_agent(state, status="idle")
 
         product = self._task(
-            "LOOM:1",
+            "TORQUE:1",
             "Add Events tab",
             boundary={
                 "version": "1",
                 "repo_root": "/repo",
-                "branch": "loom/worker",
+                "branch": "torque/worker",
                 "status": "open",
                 "recorded_at": "2026-04-07T11:00:00+00:00",
                 "commit_sha": "impl123",
             },
         )
         visibility = self._task(
-            "LOOM:9",
+            "TORQUE:9",
             "Engineer: reprioritize blocker fix",
             lane="Done",
             action_name="",
             reply_agent_id=worker.id,
-            labels=["loom:engineer-message"],
+            labels=["torque:engineer-message"],
             created_at="2026-04-07T11:10:00+00:00",
             updated_at="2026-04-07T11:12:00+00:00",
             messages=[
@@ -671,7 +671,7 @@ class WorktreeStreamTests(unittest.TestCase):
         stream = self.streams_mod.compute_worktree_stream(
             state,
             repo_root="/repo",
-            branch="loom/worker",
+            branch="torque/worker",
         )
 
         self.assertEqual(stream["product_task_ids"], [product.id])
@@ -692,19 +692,19 @@ class WorktreeStreamTests(unittest.TestCase):
         agent_a = self._add_agent(
             state,
             agent_id="agent-a",
-            branch="loom/branch-a",
+            branch="torque/branch-a",
             status="idle",
         )
         agent_b = self._add_agent(
             state,
             agent_id="agent-b",
-            branch="loom/branch-b",
+            branch="torque/branch-b",
             status="idle",
         )
 
-        root = self._task("LOOM:1", "Shared product root")
+        root = self._task("TORQUE:1", "Shared product root")
         review_a = self._task(
-            "LOOM:1:1",
+            "TORQUE:1:1",
             "Review branch A",
             action_name="feature/review",
             parent_task_id=root.id,
@@ -715,7 +715,7 @@ class WorktreeStreamTests(unittest.TestCase):
             boundary={
                 "version": "1",
                 "repo_root": "/repo",
-                "branch": "loom/branch-a",
+                "branch": "torque/branch-a",
                 "status": "open",
                 "recorded_at": "2026-04-07T11:05:00+00:00",
                 "commit_sha": "aaa111",
@@ -723,14 +723,14 @@ class WorktreeStreamTests(unittest.TestCase):
             },
         )
         visibility_a = self._task(
-            "LOOM:1:2",
+            "TORQUE:1:2",
             "Engineer: branch A note",
             lane="Done",
             parent_task_id=root.id,
             pipeline_root_id=root.id,
             pipeline_depth=1,
             reply_agent_id=agent_a.id,
-            labels=["loom:engineer-message"],
+            labels=["torque:engineer-message"],
             created_at="2026-04-07T11:06:00+00:00",
             updated_at="2026-04-07T11:06:00+00:00",
             messages=[
@@ -743,7 +743,7 @@ class WorktreeStreamTests(unittest.TestCase):
             ],
         )
         review_b = self._task(
-            "LOOM:1:3",
+            "TORQUE:1:3",
             "Review branch B",
             action_name="feature/review",
             parent_task_id=root.id,
@@ -754,7 +754,7 @@ class WorktreeStreamTests(unittest.TestCase):
             boundary={
                 "version": "1",
                 "repo_root": "/repo",
-                "branch": "loom/branch-b",
+                "branch": "torque/branch-b",
                 "status": "open",
                 "recorded_at": "2026-04-07T12:05:00+00:00",
                 "commit_sha": "bbb222",
@@ -762,14 +762,14 @@ class WorktreeStreamTests(unittest.TestCase):
             },
         )
         visibility_b = self._task(
-            "LOOM:1:4",
+            "TORQUE:1:4",
             "Engineer: branch B note",
             lane="Done",
             parent_task_id=root.id,
             pipeline_root_id=root.id,
             pipeline_depth=1,
             reply_agent_id=agent_b.id,
-            labels=["loom:engineer-message"],
+            labels=["torque:engineer-message"],
             created_at="2026-04-07T12:06:00+00:00",
             updated_at="2026-04-07T12:06:00+00:00",
             messages=[
@@ -789,15 +789,15 @@ class WorktreeStreamTests(unittest.TestCase):
             for stream in self.streams_mod.compute_worktree_streams(state)
         }
 
-        self.assertEqual(set(streams), {"loom/branch-a", "loom/branch-b"})
-        self.assertEqual(streams["loom/branch-a"]["workflow_task_ids"], [review_a.id])
+        self.assertEqual(set(streams), {"torque/branch-a", "torque/branch-b"})
+        self.assertEqual(streams["torque/branch-a"]["workflow_task_ids"], [review_a.id])
         self.assertEqual(
-            [item["summary"] for item in streams["loom/branch-a"]["recent_visibility_items"]],
+            [item["summary"] for item in streams["torque/branch-a"]["recent_visibility_items"]],
             ["Branch A note"],
         )
-        self.assertEqual(streams["loom/branch-b"]["workflow_task_ids"], [review_b.id])
+        self.assertEqual(streams["torque/branch-b"]["workflow_task_ids"], [review_b.id])
         self.assertEqual(
-            [item["summary"] for item in streams["loom/branch-b"]["recent_visibility_items"]],
+            [item["summary"] for item in streams["torque/branch-b"]["recent_visibility_items"]],
             ["Branch B note"],
         )
 
@@ -806,21 +806,21 @@ class WorktreeStreamTests(unittest.TestCase):
         impl_agent = self._add_agent(
             state,
             agent_id="impl-agent",
-            branch="loom/worker",
+            branch="torque/worker",
             status="idle",
             last_event_at="2026-04-07T12:10:00+00:00",
         )
         review_agent = self._add_agent(
             state,
             agent_id="review-agent",
-            branch="loom/worker",
-            current_task_id="LOOM:1:1",
+            branch="torque/worker",
+            current_task_id="TORQUE:1:1",
             status="running",
             last_event_at="2026-04-07T12:20:00+00:00",
         )
 
         product = self._task(
-            "LOOM:1",
+            "TORQUE:1",
             "Add Events tab",
             lane="Done",
             agent_id=impl_agent.id,
@@ -828,7 +828,7 @@ class WorktreeStreamTests(unittest.TestCase):
             boundary={
                 "version": "1",
                 "repo_root": "/repo",
-                "branch": "loom/worker",
+                "branch": "torque/worker",
                 "status": "open",
                 "recorded_at": "2026-04-07T11:00:00+00:00",
                 "commit_sha": "impl123",
@@ -836,7 +836,7 @@ class WorktreeStreamTests(unittest.TestCase):
             },
         )
         review = self._task(
-            "LOOM:1:1",
+            "TORQUE:1:1",
             "Review Events implementation",
             lane="In Progress",
             action_name="feature/review",
@@ -853,7 +853,7 @@ class WorktreeStreamTests(unittest.TestCase):
         stream = self.streams_mod.compute_worktree_stream(
             state,
             repo_root="/repo",
-            branch="loom/worker",
+            branch="torque/worker",
         )
 
         self.assertEqual(stream["state"], "reviewing")

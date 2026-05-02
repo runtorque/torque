@@ -10,25 +10,25 @@ try:
 except ModuleNotFoundError:
     from tests.helpers import install_aiohttp_stub
 
-from loom.db import LoomDB
-from loom.doctor import build_doctor_report_for_db, format_doctor_report
+from torque.db import TorqueDB
+from torque.doctor import build_doctor_report_for_db, format_doctor_report
 
 install_aiohttp_stub()
-from loom.state import AgentCell, BoardTask, GroupSettings
+from torque.state import AgentCell, BoardTask, GroupSettings
 
 
-class LoomDoctorTests(unittest.TestCase):
+class TorqueDoctorTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.db_path = Path(self.tmp.name) / "loom.db"
-        self.db = LoomDB(self.db_path)
+        self.db_path = Path(self.tmp.name) / "torque.db"
+        self.db = TorqueDB(self.db_path)
         self.db.init()
         self.addCleanup(self.db.close)
 
     def _home_dir(self) -> Path:
         home = Path(self.tmp.name) / "home"
-        (home / ".loom" / "agents").mkdir(parents=True, exist_ok=True)
+        (home / ".torque" / "agents").mkdir(parents=True, exist_ok=True)
         return home
 
     def _save_engineer(self, engineer_id="engineer-1", name="Engineer"):
@@ -36,7 +36,7 @@ class LoomDoctorTests(unittest.TestCase):
             AgentCell(
                 id=engineer_id,
                 name=name,
-                group="loom",
+                group="torque",
                 slug=name.lower(),
                 cell_type="agent",
                 kind="engineer",
@@ -49,7 +49,7 @@ class LoomDoctorTests(unittest.TestCase):
             AgentCell(
                 id=architect_id,
                 name=name,
-                group="loom",
+                group="torque",
                 slug=name.lower(),
                 cell_type="agent",
                 kind="architect",
@@ -63,7 +63,7 @@ class LoomDoctorTests(unittest.TestCase):
             AgentCell(
                 id=worker_id,
                 name=name,
-                group="loom",
+                group="torque",
                 slug=name.lower().replace(" ", "-"),
                 cell_type="agent",
                 kind="worker",
@@ -87,16 +87,16 @@ class LoomDoctorTests(unittest.TestCase):
         self._save_engineer()
         self.db.save_board_task(
             BoardTask(
-                id="LOOM:51",
+                id="TORQUE:51",
                 task="Archived header task",
                 slug="archived-header-task",
-                group="loom",
+                group="torque",
                 lane="Archived",
                 archived_at="2026-04-07T00:00:00+00:00",
                 assigned_engineer_id="engineer-1",
             )
         )
-        self.db.save_task_id_alias("LOOM:51", "bcf3a475")
+        self.db.save_task_id_alias("TORQUE:51", "bcf3a475")
 
         with mock.patch.dict(os.environ, {"HOME": str(home)}):
             report = build_doctor_report_for_db(self.db_path)
@@ -109,7 +109,7 @@ class LoomDoctorTests(unittest.TestCase):
         self.assertEqual(aliases["missing_canonical_count"], 1)
         self.assertEqual(
             aliases["missing_canonical"][0]["legacy_id"],
-            "LOOM:51",
+            "TORQUE:51",
         )
         self.assertEqual(
             aliases["strategy"],
@@ -118,7 +118,7 @@ class LoomDoctorTests(unittest.TestCase):
         warning_names = [warning["name"] for warning in report["warnings"]]
         self.assertIn("task_aliases_missing_canonical", warning_names)
         self.assertIn("missing_canonical:             1", rendered)
-        self.assertIn("LOOM:51->bcf3a475", rendered)
+        self.assertIn("TORQUE:51->bcf3a475", rendered)
 
     def test_build_doctor_report_warns_when_no_engineer_exists(self):
         home = self._home_dir()
@@ -164,7 +164,7 @@ class LoomDoctorTests(unittest.TestCase):
             "no engineer exists; create one from the Agent panel before using engineer MCP tools",
             rendered,
         )
-        self.assertIn("roles_dir:                      ~/.loom/roles (0 files)", rendered)
+        self.assertIn("roles_dir:                      ~/.torque/roles (0 files)", rendered)
         self.assertIn("[stage_6_cleanup]", rendered)
         self.assertIn("legacy_template_files_ignored:  0", rendered)
         self.assertIn("[architects]", rendered)
@@ -177,7 +177,7 @@ class LoomDoctorTests(unittest.TestCase):
             AgentCell(
                 id="empty-worker",
                 name="Empty Worker",
-                group="loom",
+                group="torque",
                 slug="empty-worker",
                 cell_type="agent",
                 kind="",
@@ -189,7 +189,7 @@ class LoomDoctorTests(unittest.TestCase):
             "id": "empty-worker",
             "name": "Empty Worker",
             "slug": "empty-worker",
-            "group": "loom",
+            "group": "torque",
             "agent_type": "codex",
             "template": "",
             "created_at": time.time(),
@@ -219,13 +219,13 @@ class LoomDoctorTests(unittest.TestCase):
 
     def test_build_doctor_report_passes_for_fully_assigned_engineer_db(self):
         home = self._home_dir()
-        self.db_path.with_name("loom.db.pre-kinds.bak").write_bytes(b"backup")
+        self.db_path.with_name("torque.db.pre-kinds.bak").write_bytes(b"backup")
 
         self.db.save_agent(
             AgentCell(
                 id="engineer-1",
                 name="Engineer",
-                group="loom",
+                group="torque",
                 slug="engineer",
                 cell_type="agent",
                 kind="engineer",
@@ -310,7 +310,7 @@ class LoomDoctorTests(unittest.TestCase):
         self.assertEqual(report["stage_6_cleanup"]["legacy_template_files_ignored"], 0)
         self.assertFalse(report["stage_6_cleanup"]["legacy_columns_present"])
         self.assertFalse(report["stage_6_cleanup"]["engineer_tool_aliases_present"])
-        self.assertIn("Loom doctor — kinds refactor", rendered)
+        self.assertIn("Torque doctor — kinds refactor", rendered)
         self.assertIn("Result: PASS", rendered)
         self.assertIn("[engineers]", rendered)
         self.assertIn("[architects]", rendered)
@@ -369,7 +369,7 @@ class LoomDoctorTests(unittest.TestCase):
             "worker-custom",
             "Worker Custom",
             owner_engineer_id="eng-alice",
-            worktree_branch="loom/alice/feature-api-v2-face123",
+            worktree_branch="torque/alice/feature-api-v2-face123",
         )
 
         with mock.patch.dict(os.environ, {"HOME": str(home)}):
@@ -404,19 +404,19 @@ class LoomDoctorTests(unittest.TestCase):
             "worker-namespaced",
             "Worker Namespaced",
             owner_engineer_id="eng-alice",
-            worktree_branch="loom/alice/worker-namespaced-a1b2c3",
+            worktree_branch="torque/alice/worker-namespaced-a1b2c3",
         )
         self._save_worker(
             "worker-legacy",
             "Worker Legacy",
             owner_engineer_id="eng-alice",
-            worktree_branch="loom/worker-legacy-deadbee",
+            worktree_branch="torque/worker-legacy-deadbee",
         )
         self._save_worker(
             "worker-bad",
             "Worker Bad",
             owner_engineer_id="eng-alice",
-            worktree_branch="loom/alice/worker-bad",
+            worktree_branch="torque/alice/worker-bad",
         )
 
         with mock.patch.dict(os.environ, {"HOME": str(home)}):
@@ -436,7 +436,7 @@ class LoomDoctorTests(unittest.TestCase):
                         "id": "worker-bad",
                         "name": "Worker Bad",
                         "slug": "worker-bad",
-                        "branch": "loom/alice/worker-bad",
+                        "branch": "torque/alice/worker-bad",
                     }
                 ],
             },
@@ -452,7 +452,7 @@ class LoomDoctorTests(unittest.TestCase):
                             "id": "worker-bad",
                             "name": "Worker Bad",
                             "slug": "worker-bad",
-                            "branch": "loom/alice/worker-bad",
+                            "branch": "torque/alice/worker-bad",
                         }
                     ],
                 },
@@ -466,7 +466,7 @@ class LoomDoctorTests(unittest.TestCase):
         self.assertIn("legacy (pre-stage-5):  1", rendered)
         self.assertIn("nonconforming:         1", rendered)
         self.assertIn(
-            "worker worktree branches do not match stage-5 or legacy naming: loom/alice/worker-bad",
+            "worker worktree branches do not match stage-5 or legacy naming: torque/alice/worker-bad",
             rendered,
         )
 
@@ -478,7 +478,7 @@ class LoomDoctorTests(unittest.TestCase):
             AgentCell(
                 id="eng-bob",
                 name="bob",
-                group="loom",
+                group="torque",
                 slug="bob",
                 cell_type="agent",
                 kind="engineer",
@@ -608,12 +608,12 @@ class LoomDoctorTests(unittest.TestCase):
 
     def test_build_doctor_report_counts_roles_preamble_and_priorities(self):
         home = self._home_dir()
-        (home / ".loom" / "roles").mkdir(parents=True, exist_ok=True)
-        (home / ".loom" / "roles" / "careful.yaml").write_text(
+        (home / ".torque" / "roles").mkdir(parents=True, exist_ok=True)
+        (home / ".torque" / "roles" / "careful.yaml").write_text(
             "name: careful\npreamble: |\n  Be careful.\n",
             encoding="utf-8",
         )
-        (home / ".loom" / "roles" / "reviewer.yaml").write_text(
+        (home / ".torque" / "roles" / "reviewer.yaml").write_text(
             "name: reviewer\npriorities:\n  - ship small\n",
             encoding="utf-8",
         )
@@ -642,7 +642,7 @@ class LoomDoctorTests(unittest.TestCase):
         self.assertEqual(report["roles"]["roles_file_count"], 2)
         self.assertEqual(report["roles"]["roles_with_preamble"], 1)
         self.assertEqual(report["roles"]["roles_with_priorities"], 1)
-        self.assertIn("roles_dir:                      ~/.loom/roles (2 files)", rendered)
+        self.assertIn("roles_dir:                      ~/.torque/roles (2 files)", rendered)
         self.assertIn("roles_with_preamble:            1", rendered)
         self.assertIn("roles_with_priorities:          1", rendered)
 
@@ -652,7 +652,7 @@ class LoomDoctorTests(unittest.TestCase):
             AgentCell(
                 id="engineer-1",
                 name="Engineer",
-                group="loom",
+                group="torque",
                 slug="engineer",
                 cell_type="agent",
                 kind="engineer",
@@ -693,7 +693,7 @@ class LoomDoctorTests(unittest.TestCase):
             AgentCell(
                 id="eng-alice",
                 name="Alice",
-                group="loom",
+                group="torque",
                 slug="alice",
                 cell_type="agent",
                 kind="engineer",
@@ -704,7 +704,7 @@ class LoomDoctorTests(unittest.TestCase):
             AgentCell(
                 id="eng-bob",
                 name="Bob",
-                group="loom",
+                group="torque",
                 slug="bob",
                 cell_type="agent",
                 kind="engineer",
@@ -728,7 +728,7 @@ class LoomDoctorTests(unittest.TestCase):
             AgentCell(
                 id="eng-engineer",
                 name="Engineer",
-                group="loom",
+                group="torque",
                 slug="engineer",
                 cell_type="agent",
                 kind="engineer",
@@ -739,7 +739,7 @@ class LoomDoctorTests(unittest.TestCase):
             AgentCell(
                 id="eng-alice",
                 name="Alice",
-                group="loom",
+                group="torque",
                 slug="alice",
                 cell_type="agent",
                 kind="engineer",
@@ -833,7 +833,7 @@ class LoomDoctorTests(unittest.TestCase):
 
     def test_build_doctor_report_warns_for_ignored_legacy_templates(self):
         home = self._home_dir()
-        (home / ".loom" / "agents" / "shared.yaml").write_text(
+        (home / ".torque" / "agents" / "shared.yaml").write_text(
             "name: shared\ndescription: legacy\n",
             encoding="utf-8",
         )
@@ -853,7 +853,7 @@ class LoomDoctorTests(unittest.TestCase):
                     "status": "warn",
                     "details": {
                         "count": 1,
-                        "files": ["~/.loom/agents/shared.yaml"],
+                        "files": ["~/.torque/agents/shared.yaml"],
                         "hint": (
                             "legacy template files in agents/ are ignored; "
                             "move them into roles/"
@@ -875,7 +875,7 @@ class LoomDoctorTests(unittest.TestCase):
         )
         self.assertIn("Result: PASS (with warnings)", rendered)
         self.assertIn(
-            "legacy template files in agents/ are ignored; move them into roles/: ~/.loom/agents/shared.yaml",
+            "legacy template files in agents/ are ignored; move them into roles/: ~/.torque/agents/shared.yaml",
             rendered,
         )
         self.assertIn(

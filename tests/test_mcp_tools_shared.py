@@ -16,15 +16,15 @@ except ModuleNotFoundError:
 class MCPToolsSharedArchitectTests(unittest.TestCase):
     def setUp(self):
         install_aiohttp_stub()
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
-        self.shared_mod = importlib.import_module("loom.mcp_tools_shared")
+        self.shared_mod = importlib.import_module("torque.mcp_tools_shared")
         self.shared_mod = importlib.reload(self.shared_mod)
 
     def _make_state(self):
         state = self.state_mod.MatrixState()
         state.board_lanes = ["Backlog", "To Do", "In Progress", "Done", "Archived"]
-        state.groups["loom"] = []
+        state.groups["torque"] = []
         return state
 
     def _add_agent(self, state, agent_id, name, *, kind, hired_by_architect_id="", owner_engineer_id=""):
@@ -32,7 +32,7 @@ class MCPToolsSharedArchitectTests(unittest.TestCase):
             id=agent_id,
             name=name,
             slug=name.lower().replace(" ", "-"),
-            group="loom",
+            group="torque",
             cell_type="agent",
             kind=kind,
             hired_by_architect_id=hired_by_architect_id,
@@ -41,14 +41,14 @@ class MCPToolsSharedArchitectTests(unittest.TestCase):
             status="running",
         )
         state.agents[cell.id] = cell
-        state.groups["loom"].append(cell.id)
+        state.groups["torque"].append(cell.id)
         return cell
 
     def _add_task(self, state, task_id, title, **kwargs):
         task = self.state_mod.BoardTask(
             id=task_id,
             task=title,
-            group="loom",
+            group="torque",
             lane="Backlog",
             **kwargs,
         )
@@ -142,7 +142,7 @@ class MCPToolsSharedArchitectTests(unittest.TestCase):
 
         self.assertFalse(is_error)
         self.assertEqual(cell.id, architect.id)
-        self.assertEqual(group, "loom")
+        self.assertEqual(group, "torque")
         self.assertEqual(effective_kind, "architect")
         self.assertEqual(error_text, "")
 
@@ -155,7 +155,7 @@ class MCPToolsSharedArchitectTests(unittest.TestCase):
             kind="architect",
         )
         state.update_architect_settings(
-            "loom",
+            "torque",
             architect_provider="codex",
             architect_autonomy_mode="dispatch_freely",
         )
@@ -209,7 +209,7 @@ class MCPToolsSharedArchitectTests(unittest.TestCase):
 
     def test_architect_board_summary_json_trims_tasks_to_response_budget(self):
         summary = {
-            "group": "loom",
+            "group": "torque",
             "streams": {
                 "count": 1,
                 "items": [{"summary": "stream-context " * 500}],
@@ -247,7 +247,7 @@ class MCPToolsSharedArchitectTests(unittest.TestCase):
         )
 
     def test_architect_deploy_state_counts_commits_and_extracts_task_ids(self):
-        deploy_mod = importlib.import_module("loom.deploy_state")
+        deploy_mod = importlib.import_module("torque.deploy_state")
         deploy_mod = importlib.reload(deploy_mod)
         state = self._make_state()
         state.boot_timestamp = 100.0
@@ -266,8 +266,8 @@ class MCPToolsSharedArchitectTests(unittest.TestCase):
                 return "3"
             if args == ("log", "--format=%B", "--reverse", "boot-sha..main"):
                 return (
-                    "Merge LOOM:101\n\n"
-                    "Ship deploy state for LOOM:102 and LOOM:101\n"
+                    "Merge TORQUE:101\n\n"
+                    "Ship deploy state for TORQUE:102 and TORQUE:101\n"
                     "No task id here"
                 )
             raise AssertionError(f"unexpected git call: {args}")
@@ -275,7 +275,7 @@ class MCPToolsSharedArchitectTests(unittest.TestCase):
         with mock.patch.object(deploy_mod, "_run_git", side_effect=fake_git):
             payload = deploy_mod.architect_deploy_state_payload(
                 state,
-                "loom",
+                "torque",
                 now=160.0,
             )
 
@@ -285,14 +285,14 @@ class MCPToolsSharedArchitectTests(unittest.TestCase):
         self.assertEqual(payload["daemon_uptime_seconds"], 60)
         self.assertEqual(payload["pending_deploy"]["count"], 3)
         self.assertEqual(
-            payload["pending_deploy"]["loom_task_ids"],
-            ["LOOM:101", "LOOM:102"],
+            payload["pending_deploy"]["torque_task_ids"],
+            ["TORQUE:101", "TORQUE:102"],
         )
         self.assertNotIn("error", payload)
         self.assertEqual(calls[0], ("/repo", ("rev-parse", "--abbrev-ref", "HEAD")))
 
     def test_architect_deploy_state_fails_gracefully_for_detached_head(self):
-        deploy_mod = importlib.import_module("loom.deploy_state")
+        deploy_mod = importlib.import_module("torque.deploy_state")
         deploy_mod = importlib.reload(deploy_mod)
         state = self._make_state()
         state.boot_timestamp = 100.0
@@ -308,22 +308,22 @@ class MCPToolsSharedArchitectTests(unittest.TestCase):
         with mock.patch.object(deploy_mod, "_run_git", side_effect=fake_git):
             payload = deploy_mod.architect_deploy_state_payload(
                 state,
-                "loom",
+                "torque",
                 now=160.0,
             )
 
         self.assertEqual(payload["pending_deploy"]["count"], -1)
-        self.assertEqual(payload["pending_deploy"]["loom_task_ids"], [])
+        self.assertEqual(payload["pending_deploy"]["torque_task_ids"], [])
         self.assertIn("detached HEAD", payload["error"])
 
     def test_capture_deploy_boot_state_uses_installed_source_repo_metadata(self):
-        deploy_mod = importlib.import_module("loom.deploy_state")
+        deploy_mod = importlib.import_module("torque.deploy_state")
         deploy_mod = importlib.reload(deploy_mod)
         state = self._make_state()
 
         with tempfile.TemporaryDirectory() as tmp:
             script_dir = Path(tmp)
-            (script_dir / ".loom_source_repo_root").write_text(
+            (script_dir / ".torque_source_repo_root").write_text(
                 "/repo\n",
                 encoding="utf-8",
             )

@@ -1,4 +1,4 @@
-site_name: Loom
+site_name: Torque
 site_description: iTerm2 agent and terminal orchestration
 repo_url: https://github.com/aleksanderarruda/iterm2-agent-orchestration
 
@@ -41,7 +41,7 @@ nav:
       - Worktrees: worktrees.md
       - Schedules: schedules.md
       - Engineer: engineer.md
-  - Operate Loom:
+  - Operate Torque:
       - Operations: operations.md
       - Troubleshooting: troubleshooting.md
   - Reference:

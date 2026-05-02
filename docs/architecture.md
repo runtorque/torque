@@ -1,6 +1,6 @@
 # Architecture
 
-Loom is a local orchestration system built around a long-running Python daemon and a lightweight web UI.
+Torque is a local orchestration system built around a long-running Python daemon and a lightweight web UI.
 
 ## Major Components
 
@@ -16,14 +16,14 @@ The daemon:
 
 Primary modules:
 
-- `loom/server.py`
-- `loom/state.py`
-- `loom/db.py`
-- `loom/bridge.py`
-- `loom/actions.py`
-- `loom/worktree.py`
-- `loom/mcp.py`
-- `loom/mcp_engineer.py`
+- `torque/server.py`
+- `torque/state.py`
+- `torque/db.py`
+- `torque/bridge.py`
+- `torque/actions.py`
+- `torque/worktree.py`
+- `torque/mcp.py`
+- `torque/mcp_engineer.py`
 
 ### Frontend
 
@@ -59,11 +59,11 @@ UI or CLI action
   -> UI re-render
 ```
 
-For CLI writes, `bin/loom` sends `POST /api/cmd` requests. For many CLI reads, `bin/loom` reads SQLite directly.
+For CLI writes, `bin/torque` sends `POST /api/cmd` requests. For many CLI reads, `bin/torque` reads SQLite directly.
 
 ## Session Control
 
-Loom abstracts terminal control behind a terminal adapter interface. Today the concrete implementation is iTerm2-focused, but the design supports additional backends.
+Torque abstracts terminal control behind a terminal adapter interface. Today the concrete implementation is iTerm2-focused, but the design supports additional backends.
 
 Key session responsibilities:
 
@@ -74,17 +74,17 @@ Key session responsibilities:
 
 ## Action and Task Model
 
-Loom separates:
+Torque separates:
 
 - **agent templates**: who should do the work
 - **actions**: what the work prompt should say
 - **board tasks**: the concrete tracked unit of work
 
-During dispatch, Loom resolves settings, renders the action prompt with task and Loom context, links the task to an agent, and appends the reporting postscript that enables `loom ai` status transitions.
+During dispatch, Torque resolves settings, renders the action prompt with task and Torque context, links the task to an agent, and appends the reporting postscript that enables `torque ai` status transitions.
 
 ## Worktrees
 
-When enabled, Loom creates one git worktree per agent. The worktree manager handles:
+When enabled, Torque creates one git worktree per agent. The worktree manager handles:
 
 - creation
 - validation
@@ -97,9 +97,9 @@ See [Worktrees](worktrees.md) for the user workflow.
 
 ## Engineer and MCP
 
-Loom exposes two MCP-oriented surfaces:
+Torque exposes two MCP-oriented surfaces:
 
-- agent-facing Loom tools for reporting progress and deriving work
+- agent-facing Torque tools for reporting progress and deriving work
 - engineer-facing orchestration tools for board control, journaling, notifications, agent messaging, and worktree operations
 
 The engineer is implemented as a special per-group agent with persistent instructions and a journal-backed recovery path.

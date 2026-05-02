@@ -1,6 +1,6 @@
 import unittest
 
-from loom.artifacts import (
+from torque.artifacts import (
     artifact_prompt_block,
     legacy_image_prompt_block,
     normalize_artifact,

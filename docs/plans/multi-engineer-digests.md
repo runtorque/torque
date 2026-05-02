@@ -2,12 +2,12 @@
 
 ## Motivation
 
-Today's event digest system was built when there was exactly one "engineer" per group. `EventBuffer` in `loom/engineer.py` buffers panel events per group, then periodically injects a formatted digest into a single recipient — `group_settings.engineer_agent_id`. See `_flush` in `loom/engineer.py:865` and the timer loop in `_timer_tick` at line 1295.
+Today's event digest system was built when there was exactly one "engineer" per group. `EventBuffer` in `torque/engineer.py` buffers panel events per group, then periodically injects a formatted digest into a single recipient — `group_settings.engineer_agent_id`. See `_flush` in `torque/engineer.py:865` and the timer loop in `_timer_tick` at line 1295.
 
 The Agent Kinds refactor ([agent-kinds-refactor.md](agent-kinds-refactor.md)) replaced the single-engineer model with **multiple persistent engineers per group** plus **architects**, but the digest delivery path was never fanned out. Concretely, in any group that now has N engineers:
 
 - Only the one engineer whose id matches `group_settings.engineer_agent_id` receives digests.
-- The other N-1 engineers are deaf to Loom-managed event signals — they must poll `loom ai context` or the board to discover their workers' state.
+- The other N-1 engineers are deaf to Torque-managed event signals — they must poll `torque ai context` or the board to discover their workers' state.
 - Architects receive no digests at all. There is no code path that targets `kind == "architect"` for digest delivery.
 - The single group-keyed buffer (`state.engineer_sent_events[group]`, `state.engineer_buffer_stats[group]`, `state.engineer_settings[group]`) cannot represent per-engineer state, pause toggles, or verbosity preferences.
 
@@ -18,7 +18,7 @@ This plan fans the digest system out along the agent-kinds axis: **every enginee
 1. **One recipient, one scope.** Every digest targets exactly one agent and contains only events that agent is allowed to see. Engineers see their owned workers + their own events; architects see hired-engineers' state transitions. Workers never receive digests (they are event sources, not sinks).
 2. **Fan-out is additive, not cross-cutting.** An event may enqueue into multiple recipients' buffers (e.g. a worker finishes → both the owning engineer *and* the hiring architect see it, at their respective verbosity levels). Buffers are per-recipient, not per-group.
 3. **Per-recipient settings.** Pause, interval, verbosity, and enabled-event filters move from `EngineerSettings` (keyed by group) to `AgentDigestSettings` (keyed by `agent_id`). Engineers and architects have independent knobs.
-4. **Delivery reuses `inject_mcp_message`.** The fix we just shipped (`loom/server.py` `inject_mcp_message` command, `bridge.send_text` + session-resume behavior) is the right transport. No need to maintain a second bespoke injection path in `engineer.py`.
+4. **Delivery reuses `inject_mcp_message`.** The fix we just shipped (`torque/server.py` `inject_mcp_message` command, `bridge.send_text` + session-resume behavior) is the right transport. No need to maintain a second bespoke injection path in `engineer.py`.
 5. **Architect digests are coarse.** Raw worker tool calls would drown the architect. Architect digests contain only engineer-level transitions: `done`, `blocked`, `error`, `ask`, `derive`, pipeline completion, hire status. Worker-level events are summarized into counts, not enumerated.
 6. **Migration is automatic.** On first boot after the upgrade, the existing `engineer_agent_id` per group becomes the first engineer digest subscriber; its `EngineerSettings` become that engineer's `AgentDigestSettings`. No user action required.
 7. **No ghost engineers.** After migration, the `engineer_agent_id` field is retired and all `engineer_*` state keys are renamed or repurposed. This was flagged as a phase 2 follow-up in [agent-panel.md](agent-panel.md); this plan absorbs that work.
@@ -48,7 +48,7 @@ class AgentDigestSettings:
 ### SQLite schema
 
 - New table `agent_digest_settings` with primary key `agent_id`, columns mirroring the dataclass. Replaces `engineer_settings` (which is keyed by `group_name`).
-- Migration in `LoomDB.init()`:
+- Migration in `TorqueDB.init()`:
   1. Detect old `engineer_settings` table.
   2. For each row, look up `group_settings.engineer_agent_id` for that group. If present, insert into `agent_digest_settings` with `agent_id = <engineer_agent_id>` and `architect_digest = False`.
   3. Leave `engineer_settings` in place for one release for rollback safety; drop it in the release after.
@@ -84,7 +84,7 @@ New pure function `resolve_digest_recipients(state, event) -> list[AgentCell]`:
 
 ### Rewriting `on_panel_event`
 
-`on_panel_event` in `loom/engineer.py:708` becomes:
+`on_panel_event` in `torque/engineer.py:708` becomes:
 
 ```python
 def on_panel_event(self, event: dict):
@@ -119,7 +119,7 @@ When the recipient is an architect, `_format_digest` branches to a compact forma
 
 ### Panelsmith (engineer)
 - 3 worker events rolled up (done × 1, progress × 2)
-- Worker `4048538e` finished LOOM:61
+- Worker `4048538e` finished TORQUE:61
 
 ### Engineer (engineer)
 - Idle
@@ -141,7 +141,7 @@ await handle_command({
     "cmd": "inject_mcp_message",
     "agent_id": recipient.id,
     "message": digest_text,
-    "sender_name": "Loom",
+    "sender_name": "Torque",
     "sender_kind": "system",
     "message_id": f"digest-{recipient.id}-{int(time.time())}",
 })
@@ -171,27 +171,27 @@ Group Settings → Engineer tab is removed. The Group Settings panel now delegat
 New subcommands:
 
 ```
-loom digest list [--group GROUP]
+torque digest list [--group GROUP]
     Show digest subscription state per agent.
 
-loom digest pause AGENT
-loom digest resume AGENT
+torque digest pause AGENT
+torque digest resume AGENT
     Toggle delivery for one agent.
 
-loom digest send AGENT
+torque digest send AGENT
     Force a flush for one agent (replaces `engineer_buffer.request_manual_flush`).
 
-loom digest settings AGENT [--interval N] [--verbosity V] [--events LIST]
+torque digest settings AGENT [--interval N] [--verbosity V] [--events LIST]
     Inline settings update.
 ```
 
-The old `loom engineer *` subcommands (if any) are aliased to `loom digest *` for one release, then removed.
+The old `torque engineer *` subcommands (if any) are aliased to `torque digest *` for one release, then removed.
 
 ## Migration path
 
 Automatic, idempotent, runs once on first daemon boot after upgrade.
 
-**Step 1: schema.** `LoomDB.init()` creates `agent_digest_settings`. Old `engineer_settings` remains intact.
+**Step 1: schema.** `TorqueDB.init()` creates `agent_digest_settings`. Old `engineer_settings` remains intact.
 
 **Step 2: data.** For every row in `engineer_settings`:
 - Look up `group_settings.engineer_agent_id` for that `group_name`.
@@ -223,7 +223,7 @@ Automatic, idempotent, runs once on first daemon boot after upgrade.
 
 **Phase 3 — settings UI + CLI.**
 1. Per-agent Digest sub-tab in Agent Panel.
-2. `loom digest *` subcommands.
+2. `torque digest *` subcommands.
 3. Remove Group Settings → Engineer tab.
 
 **Phase 4 — cleanup.**

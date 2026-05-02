@@ -58,18 +58,18 @@ class ServerSelfDispatchTests(unittest.TestCase):
     def setUp(self):
         install_aiohttp_stub()
         install_iterm2_stub()
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
-        self.server_prompts_mod = importlib.import_module("loom.server_prompts")
+        self.server_prompts_mod = importlib.import_module("torque.server_prompts")
         self.server_prompts_mod = importlib.reload(self.server_prompts_mod)
-        self.server_agent_mod = importlib.import_module("loom.server_agent")
+        self.server_agent_mod = importlib.import_module("torque.server_agent")
         self.server_agent_mod = importlib.reload(self.server_agent_mod)
-        self.server_mod = importlib.import_module("loom.server")
+        self.server_mod = importlib.import_module("torque.server")
         self.server_mod = importlib.reload(self.server_mod)
 
     def _make_agent(self, agent_id, *, current_task_id="",
-                    worktree_path="/repo/.loom/worktrees/shared",
-                    worktree_branch="loom/shared",
+                    worktree_path="/repo/.torque/worktrees/shared",
+                    worktree_branch="torque/shared",
                     worktree_repo_root="/repo"):
         return self.state_mod.AgentCell(
             id=agent_id,
@@ -124,7 +124,7 @@ class ServerSelfDispatchTests(unittest.TestCase):
             engineer_can_override_worker_provider=False,
         )
 
-        with self.assertLogs("loom", level="WARNING") as logs:
+        with self.assertLogs("torque", level="WARNING") as logs:
             provider = self.server_mod._sanitize_engineer_worker_provider_override(
                 state,
                 "g",
@@ -223,7 +223,7 @@ class ServerSelfDispatchTests(unittest.TestCase):
     def test_resolve_task_id_accepts_alias_and_prefix(self):
         state = self.state_mod.MatrixState()
         task = self.state_mod.BoardTask(
-            id="LOOM:12",
+            id="TORQUE:12",
             task="Document the context flow",
             group="g",
             lane="Backlog",
@@ -236,14 +236,14 @@ class ServerSelfDispatchTests(unittest.TestCase):
             task.id,
         )
         self.assertEqual(
-            self.server_mod._resolve_task_id(state, "LOOM:1"),
+            self.server_mod._resolve_task_id(state, "TORQUE:1"),
             task.id,
         )
 
     def test_resolve_task_id_prefers_alias_over_archived_literal_collision(self):
         state = self.state_mod.MatrixState()
         archived = self.state_mod.BoardTask(
-            id="LOOM:51",
+            id="TORQUE:51",
             task="Archived task",
             group="g",
             lane="Archived",
@@ -260,11 +260,11 @@ class ServerSelfDispatchTests(unittest.TestCase):
         state.task_id_aliases[archived.id] = live.id
 
         self.assertEqual(
-            self.server_mod._resolve_task_id(state, "LOOM:51"),
+            self.server_mod._resolve_task_id(state, "TORQUE:51"),
             live.id,
         )
         self.assertEqual(
-            self.server_mod._resolve_task_id(state, "LOOM:5"),
+            self.server_mod._resolve_task_id(state, "TORQUE:5"),
             live.id,
         )
 
@@ -342,7 +342,7 @@ class ServerSelfDispatchTests(unittest.TestCase):
                 "deploy_attempted": True,
                 "verification_notes": "Deployed to staging",
             },
-            "loom-cli",
+            "torque-cli",
             lambda current: saved.append(current.id),
             timestamp="2026-04-07T18:00:00+00:00",
         )
@@ -352,7 +352,7 @@ class ServerSelfDispatchTests(unittest.TestCase):
         self.assertEqual(task.verification_state, "attempted")
         self.assertTrue(task.verification_summary["deploy_attempted"])
         self.assertEqual(task.verification_notes, "Deployed to staging")
-        self.assertEqual(task.verification_updated_by, "loom-cli")
+        self.assertEqual(task.verification_updated_by, "torque-cli")
         self.assertEqual(task.verification_updated_at, "2026-04-07T18:00:00+00:00")
         self.assertEqual(saved, ["task-1"])
         self.assertIn("state=attempted", message)
@@ -454,20 +454,20 @@ class ServerSelfDispatchTests(unittest.TestCase):
         self.assertIn("state=passed", message)
         self.assertIn("manual smoke done", message)
 
-    def test_loom_system_prompt_prefers_mcp_reporting_tools(self):
-        prompt = self.server_prompts_mod.build_loom_system_prompt()
+    def test_torque_system_prompt_prefers_mcp_reporting_tools(self):
+        prompt = self.server_prompts_mod.build_torque_system_prompt()
 
-        self.assertIn("Use the Loom MCP tools", prompt)
-        self.assertIn("loom_done(message=", prompt)
-        self.assertIn("loom_verify(state=", prompt)
+        self.assertIn("Use the Torque MCP tools", prompt)
+        self.assertIn("torque_done(message=", prompt)
+        self.assertIn("torque_verify(state=", prompt)
         self.assertIn("blocking human decision or approval", prompt)
         self.assertIn("For status updates, non-blocking observations, or optional", prompt)
-        self.assertIn("loom_context()", prompt)
+        self.assertIn("torque_context()", prompt)
         self.assertEqual(
-            prompt.count("`loom_ask(question=\"question\", description=\"details\")`"),
+            prompt.count("`torque_ask(question=\"question\", description=\"details\")`"),
             1,
         )
-        self.assertNotIn("loom_a-", prompt)
+        self.assertNotIn("torque_a-", prompt)
 
     def test_system_prompt_preview_uses_unsaved_engineer_form_values(self):
         state = self.state_mod.MatrixState()
@@ -523,7 +523,7 @@ class ServerSelfDispatchTests(unittest.TestCase):
             action_system_prompt="Architect template system prompt.",
         )
 
-        self.assertIn("# Loom Agent", prompt)
+        self.assertIn("# Torque Agent", prompt)
         self.assertIn("Architect template system prompt.", prompt)
         self.assertIn("Unsaved architect instructions.", prompt)
         self.assertNotIn("Saved architect instructions.", prompt)
@@ -546,19 +546,19 @@ class ServerSelfDispatchTests(unittest.TestCase):
             is_clean=True,
         )
 
-        self.assertIn("IMPORTANT: Finish this task by calling a Loom MCP tool below.", prompt)
+        self.assertIn("IMPORTANT: Finish this task by calling a Torque MCP tool below.", prompt)
         self.assertIn("Available completion paths for this task:", prompt)
-        self.assertIn("loom_derive(description=", prompt)
+        self.assertIn("torque_derive(description=", prompt)
         self.assertIn("continues in the same agent", prompt)
-        self.assertIn("loom_ask(question=\"title\", description=\"details\")", prompt)
-        self.assertIn("loom_done(message=\"brief summary\")", prompt)
+        self.assertIn("torque_ask(question=\"title\", description=\"details\")", prompt)
+        self.assertIn("torque_done(message=\"brief summary\")", prompt)
         self.assertIn("Other reporting tools when relevant:", prompt)
-        self.assertIn("loom_blocked(reason=", prompt)
-        self.assertIn("loom_error(message=", prompt)
-        self.assertIn("loom_verify(state=", prompt)
-        self.assertNotIn("Report your progress with these Loom MCP tools", prompt)
-        self.assertNotIn("loom_ready()", prompt)
-        self.assertNotIn("loom_progress(message=", prompt)
+        self.assertIn("torque_blocked(reason=", prompt)
+        self.assertIn("torque_error(message=", prompt)
+        self.assertIn("torque_verify(state=", prompt)
+        self.assertNotIn("Report your progress with these Torque MCP tools", prompt)
+        self.assertNotIn("torque_ready()", prompt)
+        self.assertNotIn("torque_progress(message=", prompt)
 
     def test_dispatch_postscript_abbreviated_variant_keeps_shared_fallback_tools(self):
         prompt = self.server_prompts_mod.build_dispatch_postscript(
@@ -579,15 +579,15 @@ class ServerSelfDispatchTests(unittest.TestCase):
         self.assertTrue(prompt.startswith("\n\n---\n"))
         self.assertIn("Available completion paths for this task:", prompt)
         self.assertIn("issues were found that need to be fixed", prompt)
-        self.assertIn("loom_done(message=\"brief summary\")", prompt)
+        self.assertIn("torque_done(message=\"brief summary\")", prompt)
         self.assertIn("Other reporting tools when relevant:", prompt)
-        self.assertIn("loom_blocked(reason=", prompt)
-        self.assertIn("loom_error(message=", prompt)
-        self.assertIn("loom_verify(state=", prompt)
+        self.assertIn("torque_blocked(reason=", prompt)
+        self.assertIn("torque_error(message=", prompt)
+        self.assertIn("torque_verify(state=", prompt)
         self.assertIn("This task is part of a pipeline", prompt)
         self.assertIn("Before reporting done, commit all your changes.", prompt)
-        self.assertNotIn("loom_ask(question=\"title\", description=\"details\")", prompt)
-        self.assertNotIn("loom_ready()", prompt)
+        self.assertNotIn("torque_ask(question=\"title\", description=\"details\")", prompt)
+        self.assertNotIn("torque_ready()", prompt)
 
     def test_dispatch_postscript_without_transitions_stays_compact(self):
         prompt = self.server_prompts_mod.build_dispatch_postscript(
@@ -596,14 +596,14 @@ class ServerSelfDispatchTests(unittest.TestCase):
         )
 
         self.assertIn("Available completion paths for this task:", prompt)
-        self.assertIn("loom_done(message=\"brief summary\")", prompt)
+        self.assertIn("torque_done(message=\"brief summary\")", prompt)
         self.assertIn("Other reporting tools when relevant:", prompt)
-        self.assertIn("loom_blocked(reason=", prompt)
-        self.assertIn("loom_error(message=", prompt)
-        self.assertIn("loom_verify(state=", prompt)
+        self.assertIn("torque_blocked(reason=", prompt)
+        self.assertIn("torque_error(message=", prompt)
+        self.assertIn("torque_verify(state=", prompt)
         self.assertNotIn("IMPORTANT:", prompt)
-        self.assertNotIn("loom_derive(description=", prompt)
-        self.assertNotIn("loom_ask(question=\"title\", description=\"details\")", prompt)
+        self.assertNotIn("torque_derive(description=", prompt)
+        self.assertNotIn("torque_ask(question=\"title\", description=\"details\")", prompt)
 
     def test_startup_prompt_for_new_codex_worker_uses_persistent_prompt(self):
         self.assertEqual(
@@ -873,13 +873,13 @@ class ServerSelfDispatchTests(unittest.TestCase):
         owner = self._make_agent(
             "agent-1",
             current_task_id="task-1",
-            worktree_path="/repo/.loom/worktrees/one",
-            worktree_branch="loom/shared-branch",
+            worktree_path="/repo/.torque/worktrees/one",
+            worktree_branch="torque/shared-branch",
         )
         target = self._make_agent(
             "agent-2",
-            worktree_path="/repo/.loom/worktrees/two",
-            worktree_branch="loom/shared-branch",
+            worktree_path="/repo/.torque/worktrees/two",
+            worktree_branch="torque/shared-branch",
         )
         state.agents = {owner.id: owner, target.id: target}
         state.board_tasks["task-1"] = self.state_mod.BoardTask(
@@ -1111,9 +1111,9 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub()
         install_iterm2_stub()
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
-        self.server_mod = importlib.import_module("loom.server")
+        self.server_mod = importlib.import_module("torque.server")
         self.server_mod = importlib.reload(self.server_mod)
 
     @staticmethod
@@ -1174,22 +1174,22 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
     async def test_board_verify_task_handler_accepts_minimal_payload(self):
         state = self.state_mod.MatrixState()
         state.add_group("g")
-        state.board_add_task("Verify deploy", "g", id="LOOM:160")
+        state.board_add_task("Verify deploy", "g", id="TORQUE:160")
         handle_command = self._extract_handle_command(state)
 
         result = await handle_command({
             "cmd": "board_verify_task",
-            "id": "LOOM:160",
+            "id": "TORQUE:160",
             "actor_name": "engineer-1",
             "verification_state": "passed",
         })
 
-        task = state.board_tasks["LOOM:160"]
+        task = state.board_tasks["TORQUE:160"]
         self.assertEqual(
             result,
             {
                 "type": "verification_updated",
-                "task_id": "LOOM:160",
+                "task_id": "TORQUE:160",
                 "message": "Verification updated: state=passed",
             },
         )
@@ -1203,13 +1203,13 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         root_task = state.board_add_task(
             "Release billing changes",
             "g",
-            id="LOOM:160",
+            id="TORQUE:160",
         )
         task = state.board_add_task(
             "Restart billing service",
             "g",
-            id="LOOM:160:1",
-            pipeline_root_id="LOOM:160",
+            id="TORQUE:160:1",
+            pipeline_root_id="TORQUE:160",
         )
         self.assertIsNotNone(root_task)
         self.assertIsNotNone(task)
@@ -1217,7 +1217,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
 
         result = await handle_command({
             "cmd": "board_verify_task",
-            "id": "LOOM:160:1",
+            "id": "TORQUE:160:1",
             "actor_name": "engineer-1",
             "verification_mode": "restart",
             "verification_notes": "Smoke failed on login redirect",
@@ -1233,10 +1233,10 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             "smoke_status": "failed",
         })
 
-        task = state.board_tasks["LOOM:160:1"]
-        root_task = state.board_tasks["LOOM:160"]
+        task = state.board_tasks["TORQUE:160:1"]
+        root_task = state.board_tasks["TORQUE:160"]
         self.assertEqual(result["type"], "verification_updated")
-        self.assertEqual(result["task_id"], "LOOM:160:1")
+        self.assertEqual(result["task_id"], "TORQUE:160:1")
         self.assertIn("state=failed", result["message"])
         self.assertIn("mode=restart", result["message"])
         self.assertIn("manual smoke done", result["message"])
@@ -1309,7 +1309,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             cell_type="agent",
             status="running",
             worktree_path="/tmp/worker",
-            worktree_branch="loom/worker",
+            worktree_branch="torque/worker",
             worktree_base_branch="main",
             worktree_repo_root="/repo",
         )
@@ -1319,7 +1319,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             "Ship merged change",
             "g",
             lane="In Progress",
-            id="LOOM:168",
+            id="TORQUE:168",
             agent_id=worker.id,
         )
         self.assertIsNotNone(task)
@@ -1406,7 +1406,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
                 old_sibling_gate
             )
 
-        task = state.board_tasks["LOOM:168"]
+        task = state.board_tasks["TORQUE:168"]
         self.assertEqual(result["type"], "worktree_merge")
         self.assertTrue(result["ok"])
         self.assertEqual(result["sha"], "abc123")
@@ -1419,9 +1419,9 @@ class ServerAutoCloseOnDoneTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub()
         install_iterm2_stub()
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
-        self.server_mod = importlib.import_module("loom.server")
+        self.server_mod = importlib.import_module("torque.server")
         self.server_mod = importlib.reload(self.server_mod)
 
     def _make_state(self):
@@ -1433,7 +1433,7 @@ class ServerAutoCloseOnDoneTests(unittest.IsolatedAsyncioTestCase):
                       auto_close_on_done=False) -> None:
         import os
 
-        action_path = os.path.join(base_dir, ".loom", "actions",
+        action_path = os.path.join(base_dir, ".torque", "actions",
                                    name + ".yaml")
         os.makedirs(os.path.dirname(action_path), exist_ok=True)
         with open(action_path, "w", encoding="utf-8") as handle:
@@ -1651,7 +1651,7 @@ class ServerAutoCloseOnDoneTests(unittest.IsolatedAsyncioTestCase):
             lane="Backlog",
             id="task-reply",
             reply_agent_id=reviewer.id,
-            labels=["loom:engineer-message"],
+            labels=["torque:engineer-message"],
             status="Awaiting Reply",
         )
 
@@ -1740,9 +1740,9 @@ class ServerReviewMergeCleanupTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub()
         install_iterm2_stub()
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
-        self.server_mod = importlib.import_module("loom.server")
+        self.server_mod = importlib.import_module("torque.server")
         self.server_mod = importlib.reload(self.server_mod)
 
     def _make_state(self, *, verdict_message):
@@ -1753,8 +1753,8 @@ class ServerReviewMergeCleanupTests(unittest.IsolatedAsyncioTestCase):
             name="Implementer",
             group="g",
             cell_type="agent",
-            worktree_path="/repo/.loom/worktrees/impl",
-            worktree_branch="loom/impl",
+            worktree_path="/repo/.torque/worktrees/impl",
+            worktree_branch="torque/impl",
             worktree_repo_root="/repo",
         )
         reviewer = self.state_mod.AgentCell(
@@ -1763,8 +1763,8 @@ class ServerReviewMergeCleanupTests(unittest.IsolatedAsyncioTestCase):
             group="g",
             cell_type="agent",
             session_id="review-session",
-            worktree_path="/repo/.loom/worktrees/review",
-            worktree_branch="loom/review",
+            worktree_path="/repo/.torque/worktrees/review",
+            worktree_branch="torque/review",
             worktree_repo_root="/repo",
         )
         state.agents = {impl.id: impl, reviewer.id: reviewer}
@@ -1919,11 +1919,11 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub()
         install_iterm2_stub()
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
-        self.server_agent_mod = importlib.import_module("loom.server_agent")
+        self.server_agent_mod = importlib.import_module("torque.server_agent")
         self.server_agent_mod = importlib.reload(self.server_agent_mod)
-        self.server_mod = importlib.import_module("loom.server")
+        self.server_mod = importlib.import_module("torque.server")
         self.server_mod = importlib.reload(self.server_mod)
 
     def _make_state(self):
@@ -2246,7 +2246,7 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
             if len(slept) >= 2:
                 raise asyncio.CancelledError()
 
-        server_dispatch = importlib.import_module("loom.server_dispatch")
+        server_dispatch = importlib.import_module("torque.server_dispatch")
         orig_pump = server_dispatch._pump_auto_dispatch_queue
         orig_sleep = server_dispatch.asyncio.sleep
         server_dispatch._pump_auto_dispatch_queue = boom
@@ -2317,7 +2317,7 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_new_agent_prompt_sequence_uses_default_nudge_when_initial_prompt_empty(self):
-        """LOOM:263 — empty initial_prompt + default_boot_nudge synthesizes the
+        """TORQUE:263 — empty initial_prompt + default_boot_nudge synthesizes the
         default kickoff so architect/engineer agents don't sit idle on boot."""
         cell = self.state_mod.AgentCell(
             id="eng-1",
@@ -2362,8 +2362,8 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
     async def test_new_agent_prompt_sequence_initial_prompt_overrides_default(self):
         """Configured initial_prompt must take precedence over default_boot_nudge.
 
-        Regression guard for LOOM:263 — the default must NOT fire when the role
-        config has set a real initial_prompt (LOOM:259/:261 must keep working).
+        Regression guard for TORQUE:263 — the default must NOT fire when the role
+        config has set a real initial_prompt (TORQUE:259/:261 must keep working).
         """
         cell = self.state_mod.AgentCell(
             id="eng-1",
@@ -2471,9 +2471,9 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
             group="g",
             cell_type="agent",
             status="idle",
-            worktree_path="/repo/.loom/worktrees/agent-1",
+            worktree_path="/repo/.torque/worktrees/agent-1",
             worktree_repo_root="/repo",
-            worktree_branch="loom/worker",
+            worktree_branch="torque/worker",
         )
         state.agents[owner.id] = owner
         state.groups["g"].append(owner.id)
@@ -2482,7 +2482,7 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
             "Add Events tab",
             "g",
             lane="Done",
-            id="LOOM:1",
+            id="TORQUE:1",
             agent_id=owner.id,
             action_name="feature/implement",
         )
@@ -2490,9 +2490,9 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
             "Review Events implementation",
             "g",
             lane="In Progress",
-            id="LOOM:1:1",
-            parent_task_id="LOOM:1",
-            pipeline_root_id="LOOM:1",
+            id="TORQUE:1:1",
+            parent_task_id="TORQUE:1",
+            pipeline_root_id="TORQUE:1",
             pipeline_depth=1,
             action_name="feature/review",
         )
@@ -2500,10 +2500,10 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
             "Add Worklog tab",
             "g",
             lane="To Do",
-            id="LOOM:2",
+            id="TORQUE:2",
             agent_id=owner.id,
             action_name="feature/implement",
-            resume_after_boundary_task_id="LOOM:1",
+            resume_after_boundary_task_id="TORQUE:1",
         )
         self.assertIsNotNone(product)
         self.assertIsNotNone(review)
@@ -2511,7 +2511,7 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
         product.worktree_boundary = {
             "version": "1",
             "repo_root": "/repo",
-            "branch": "loom/worker",
+            "branch": "torque/worker",
             "status": "open",
             "recorded_at": "2026-04-07T11:00:00+00:00",
             "commit_sha": "impl123",
@@ -2562,9 +2562,9 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
             group="g",
             cell_type="agent",
             status="idle",
-            worktree_path="/repo/.loom/worktrees/agent-1",
+            worktree_path="/repo/.torque/worktrees/agent-1",
             worktree_repo_root="/repo",
-            worktree_branch="loom/worker",
+            worktree_branch="torque/worker",
         )
         state.agents[owner.id] = owner
         state.groups["g"].append(owner.id)
@@ -2573,7 +2573,7 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
             "Add Events tab",
             "g",
             lane="Done",
-            id="LOOM:1",
+            id="TORQUE:1",
             agent_id=owner.id,
             action_name="feature/implement",
         )
@@ -2581,9 +2581,9 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
             "Review Events implementation",
             "g",
             lane="In Progress",
-            id="LOOM:1:1",
-            parent_task_id="LOOM:1",
-            pipeline_root_id="LOOM:1",
+            id="TORQUE:1:1",
+            parent_task_id="TORQUE:1",
+            pipeline_root_id="TORQUE:1",
             pipeline_depth=1,
             action_name="feature/review",
         )
@@ -2591,10 +2591,10 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
             "Add Worklog tab",
             "g",
             lane="To Do",
-            id="LOOM:2",
+            id="TORQUE:2",
             agent_id=owner.id,
             action_name="feature/implement",
-            resume_after_boundary_task_id="LOOM:1",
+            resume_after_boundary_task_id="TORQUE:1",
         )
         self.assertIsNotNone(product)
         self.assertIsNotNone(review)
@@ -2602,7 +2602,7 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
         product.worktree_boundary = {
             "version": "1",
             "repo_root": "/repo",
-            "branch": "loom/worker",
+            "branch": "torque/worker",
             "status": "open",
             "recorded_at": "2026-04-07T11:00:00+00:00",
             "commit_sha": "impl123",
@@ -2637,9 +2637,9 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
             group="g",
             cell_type="agent",
             status="idle",
-            worktree_path="/repo/.loom/worktrees/agent-1",
+            worktree_path="/repo/.torque/worktrees/agent-1",
             worktree_repo_root="/repo",
-            worktree_branch="loom/worker",
+            worktree_branch="torque/worker",
         )
         state.agents[owner.id] = owner
         state.groups["g"].append(owner.id)
@@ -2655,7 +2655,7 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
             "Add Events tab",
             "g",
             lane="Done",
-            id="LOOM:1",
+            id="TORQUE:1",
             agent_id=owner.id,
             action_name="feature/implement",
         )
@@ -2663,9 +2663,9 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
             "Review Events implementation",
             "g",
             lane="Done",
-            id="LOOM:1:1",
-            parent_task_id="LOOM:1",
-            pipeline_root_id="LOOM:1",
+            id="TORQUE:1:1",
+            parent_task_id="TORQUE:1",
+            pipeline_root_id="TORQUE:1",
             pipeline_depth=1,
             agent_id=owner.id,
             action_name="feature/review",
@@ -2674,10 +2674,10 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
             "Add Worklog tab",
             "g",
             lane="To Do",
-            id="LOOM:2",
+            id="TORQUE:2",
             agent_id=owner.id,
             action_name="feature/implement",
-            resume_after_boundary_task_id="LOOM:1:1",
+            resume_after_boundary_task_id="TORQUE:1:1",
             depends_on=["EXT:1"],
         )
         self.assertIsNotNone(external)
@@ -2687,7 +2687,7 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
         product.worktree_boundary = {
             "version": "1",
             "repo_root": "/repo",
-            "branch": "loom/worker",
+            "branch": "torque/worker",
             "status": "open",
             "recorded_at": "2026-04-07T10:00:00+00:00",
             "commit_sha": "impl123",
@@ -2696,7 +2696,7 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
         review.worktree_boundary = {
             "version": "1",
             "repo_root": "/repo",
-            "branch": "loom/worker",
+            "branch": "torque/worker",
             "status": "open",
             "recorded_at": "2026-04-07T11:00:00+00:00",
             "commit_sha": "rev456",
@@ -2754,9 +2754,9 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
             group="B",
             cell_type="agent",
             status="idle",
-            worktree_path="/repo/.loom/worktrees/agent-b",
+            worktree_path="/repo/.torque/worktrees/agent-b",
             worktree_repo_root="/repo",
-            worktree_branch="loom/worker-b",
+            worktree_branch="torque/worker-b",
         )
         state.agents[engineer_b.id] = engineer_b
         state.agents[owner_b.id] = owner_b
@@ -2776,7 +2776,7 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
             "Add Events tab",
             "B",
             lane="Done",
-            id="LOOM:1",
+            id="TORQUE:1",
             agent_id=owner_b.id,
             action_name="feature/implement",
         )
@@ -2784,9 +2784,9 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
             "Review Events implementation",
             "B",
             lane="Done",
-            id="LOOM:1:1",
-            parent_task_id="LOOM:1",
-            pipeline_root_id="LOOM:1",
+            id="TORQUE:1:1",
+            parent_task_id="TORQUE:1",
+            pipeline_root_id="TORQUE:1",
             pipeline_depth=1,
             agent_id=owner_b.id,
             action_name="feature/review",
@@ -2795,10 +2795,10 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
             "Add Worklog tab",
             "B",
             lane="To Do",
-            id="LOOM:2",
+            id="TORQUE:2",
             agent_id=owner_b.id,
             action_name="feature/implement",
-            resume_after_boundary_task_id="LOOM:1:1",
+            resume_after_boundary_task_id="TORQUE:1:1",
             depends_on=["EXT:1"],
         )
         self.assertIsNotNone(external)
@@ -2808,7 +2808,7 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
         product.worktree_boundary = {
             "version": "1",
             "repo_root": "/repo",
-            "branch": "loom/worker-b",
+            "branch": "torque/worker-b",
             "status": "open",
             "recorded_at": "2026-04-07T10:00:00+00:00",
             "commit_sha": "impl123",
@@ -2817,7 +2817,7 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
         review.worktree_boundary = {
             "version": "1",
             "repo_root": "/repo",
-            "branch": "loom/worker-b",
+            "branch": "torque/worker-b",
             "status": "open",
             "recorded_at": "2026-04-07T11:00:00+00:00",
             "commit_sha": "rev456",
@@ -2868,19 +2868,19 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
             "Review Events implementation",
             "g",
             lane="In Progress",
-            id="LOOM:1:1",
+            id="TORQUE:1:1",
             action_name="feature/review",
         )
         fix_task = state.board_add_task(
             "Fix review issues",
             "g",
             lane="To Do",
-            id="LOOM:1:2",
-            parent_task_id="LOOM:1:1",
-            pipeline_root_id="LOOM:1",
+            id="TORQUE:1:2",
+            parent_task_id="TORQUE:1:1",
+            pipeline_root_id="TORQUE:1",
             pipeline_depth=1,
             action_name="feature/fix-review",
-            labels=["loom:derived", "review-fix"],
+            labels=["torque:derived", "review-fix"],
         )
         self.assertIsNotNone(review)
         self.assertIsNotNone(fix_task)
@@ -2900,16 +2900,16 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
             "Review Events implementation",
             "g",
             lane="In Progress",
-            id="LOOM:1:1",
+            id="TORQUE:1:1",
             action_name="feature/review",
         )
         queued_product = state.board_add_task(
             "Add Worklog tab",
             "g",
             lane="To Do",
-            id="LOOM:2",
-            parent_task_id="LOOM:1:1",
-            pipeline_root_id="LOOM:1",
+            id="TORQUE:2",
+            parent_task_id="TORQUE:1:1",
+            pipeline_root_id="TORQUE:1",
             pipeline_depth=1,
             action_name="feature/implement",
         )
@@ -2933,7 +2933,7 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
             description="First review issue set",
             action_name="feature/fix-review",
             action_vars={"existing": "keep"},
-            labels=["loom:derived", "review-fix"],
+            labels=["torque:derived", "review-fix"],
         )
 
         self.server_mod._refresh_reused_derived_task(
@@ -2954,11 +2954,11 @@ class ServerAgentPromptDeliveryTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub()
         install_iterm2_stub()
-        self.bridge_mod = importlib.import_module("loom.bridge")
+        self.bridge_mod = importlib.import_module("torque.bridge")
         self.bridge_mod = importlib.reload(self.bridge_mod)
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
-        self.server_agent_mod = importlib.import_module("loom.server_agent")
+        self.server_agent_mod = importlib.import_module("torque.server_agent")
         self.server_agent_mod = importlib.reload(self.server_agent_mod)
 
     async def test_background_prompt_task_is_retained_until_send_completes(self):

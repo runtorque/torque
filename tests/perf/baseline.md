@@ -1,8 +1,8 @@
-# Loom perf profile harness report
+# Torque perf profile harness report
 
 - Mode: `baseline`
 - Generated: `2026-04-22T22:32:42.082076+00:00`
-- Repo: `loom/courier/perf-harness-n10-n20-n30-ac43a0c` @ `74470daae4a7`
+- Repo: `torque/courier/perf-harness-n10-n20-n30-ac43a0c` @ `74470daae4a7`
 - Matrix: `[10, 20, 30]`
 - Duration: `1.0` sec/run
 
@@ -25,11 +25,11 @@
 | 3 | 2.7183 | 2.7183 | 159 | `~:0(<method 'control' of 'select.kqueue' objects>)` |
 | 4 | 0.0579 | 0.0002 | 233 | `/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/events.py:92(_run)` |
 | 5 | 0.0576 | 0.0003 | 233 | `~:0(<method 'run' of '_contextvars.Context' objects>)` |
-| 6 | 0.0275 | 0.0005 | 39 | `/private/tmp/loom-perf-venv/lib/python3.14/site-packages/aiohttp/web_protocol.py:550(start)` |
+| 6 | 0.0275 | 0.0005 | 39 | `/private/tmp/torque-perf-venv/lib/python3.14/site-packages/aiohttp/web_protocol.py:550(start)` |
 | 7 | 0.0238 | 0.0003 | 379 | `/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/traceback.py:437(extract)` |
 | 8 | 0.0235 | 0.0063 | 379 | `/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/traceback.py:459(_extract_from_extended_frame_gen)` |
-| 9 | 0.0216 | 0.0002 | 29 | `/private/tmp/loom-perf-venv/lib/python3.14/site-packages/aiohttp/web_protocol.py:507(_handle_request)` |
-| 10 | 0.0197 | 0.0003 | 29 | `/private/tmp/loom-perf-venv/lib/python3.14/site-packages/aiohttp/web_app.py:527(_handle)` |
+| 9 | 0.0216 | 0.0002 | 29 | `/private/tmp/torque-perf-venv/lib/python3.14/site-packages/aiohttp/web_protocol.py:507(_handle_request)` |
+| 10 | 0.0197 | 0.0003 | 29 | `/private/tmp/torque-perf-venv/lib/python3.14/site-packages/aiohttp/web_app.py:527(_handle)` |
 
 ### N=20
 
@@ -40,11 +40,11 @@
 | 3 | 2.6927 | 2.6927 | 175 | `~:0(<method 'control' of 'select.kqueue' objects>)` |
 | 4 | 0.0844 | 0.0003 | 333 | `/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/events.py:92(_run)` |
 | 5 | 0.0841 | 0.0003 | 333 | `~:0(<method 'run' of '_contextvars.Context' objects>)` |
-| 6 | 0.0465 | 0.0007 | 74 | `/private/tmp/loom-perf-venv/lib/python3.14/site-packages/aiohttp/web_protocol.py:550(start)` |
-| 7 | 0.0357 | 0.0003 | 54 | `/private/tmp/loom-perf-venv/lib/python3.14/site-packages/aiohttp/web_protocol.py:507(_handle_request)` |
+| 6 | 0.0465 | 0.0007 | 74 | `/private/tmp/torque-perf-venv/lib/python3.14/site-packages/aiohttp/web_protocol.py:550(start)` |
+| 7 | 0.0357 | 0.0003 | 54 | `/private/tmp/torque-perf-venv/lib/python3.14/site-packages/aiohttp/web_protocol.py:507(_handle_request)` |
 | 8 | 0.0331 | 0.0004 | 564 | `/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/traceback.py:437(extract)` |
 | 9 | 0.0327 | 0.0088 | 564 | `/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/traceback.py:459(_extract_from_extended_frame_gen)` |
-| 10 | 0.0326 | 0.0004 | 54 | `/private/tmp/loom-perf-venv/lib/python3.14/site-packages/aiohttp/web_app.py:527(_handle)` |
+| 10 | 0.0326 | 0.0004 | 54 | `/private/tmp/torque-perf-venv/lib/python3.14/site-packages/aiohttp/web_app.py:527(_handle)` |
 
 ### N=30
 
@@ -55,10 +55,10 @@
 | 3 | 2.6657 | 2.6657 | 208 | `~:0(<method 'control' of 'select.kqueue' objects>)` |
 | 4 | 0.1211 | 0.0003 | 444 | `/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/events.py:92(_run)` |
 | 5 | 0.1208 | 0.0004 | 444 | `~:0(<method 'run' of '_contextvars.Context' objects>)` |
-| 6 | 0.0757 | 0.0012 | 116 | `/private/tmp/loom-perf-venv/lib/python3.14/site-packages/aiohttp/web_protocol.py:550(start)` |
-| 7 | 0.0582 | 0.0005 | 86 | `/private/tmp/loom-perf-venv/lib/python3.14/site-packages/aiohttp/web_protocol.py:507(_handle_request)` |
-| 8 | 0.0530 | 0.0007 | 86 | `/private/tmp/loom-perf-venv/lib/python3.14/site-packages/aiohttp/web_app.py:527(_handle)` |
-| 9 | 0.0483 | 0.0010 | 83 | `/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/ac43a0c9/loom/server.py:9740(handle_events)` |
+| 6 | 0.0757 | 0.0012 | 116 | `/private/tmp/torque-perf-venv/lib/python3.14/site-packages/aiohttp/web_protocol.py:550(start)` |
+| 7 | 0.0582 | 0.0005 | 86 | `/private/tmp/torque-perf-venv/lib/python3.14/site-packages/aiohttp/web_protocol.py:507(_handle_request)` |
+| 8 | 0.0530 | 0.0007 | 86 | `/private/tmp/torque-perf-venv/lib/python3.14/site-packages/aiohttp/web_app.py:527(_handle)` |
+| 9 | 0.0483 | 0.0010 | 83 | `/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/server.py:9740(handle_events)` |
 | 10 | 0.0439 | 0.0005 | 765 | `/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/traceback.py:437(extract)` |
 
 ## Py-spy artifacts

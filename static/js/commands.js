@@ -420,7 +420,7 @@ function quickAddTerminal(group, parentId) {
 }
 
 async function restartDaemon() {
-  if (await showConfirm('Restart Loom? Active cells will be marked as stopped.')) {
+  if (await showConfirm('Restart Torque? Active cells will be marked as stopped.')) {
     send({ cmd: 'restart' });
   }
 }

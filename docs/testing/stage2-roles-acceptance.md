@@ -3,7 +3,7 @@
 > Manual smoke for Stage 2 of the Agent Kinds Refactor: roles, worker
 > preambles, and the Roles UI. Run this after the stage-2 branch is deployed.
 
-This assumes an existing Loom install with at least one working group and one
+This assumes an existing Torque install with at least one working group and one
 worker-capable dispatch flow already available.
 
 ## Preflight
@@ -11,7 +11,7 @@ worker-capable dispatch flow already available.
 Record the current legacy template baseline:
 
 ```bash
-find "$HOME/.loom/agents" -type f \( -name '*.yaml' -o -name '*.yml' \) | wc -l
+find "$HOME/.torque/agents" -type f \( -name '*.yaml' -o -name '*.yml' \) | wc -l
 ```
 
 Expected: a numeric count. Keep it for comparison after deploy.
@@ -19,7 +19,7 @@ Expected: a numeric count. Keep it for comparison after deploy.
 If you already have a stage-2 smoke role from a prior run, remove it first:
 
 ```bash
-rm -f "$HOME/.loom/roles/careful-reviewer.yaml"
+rm -f "$HOME/.torque/roles/careful-reviewer.yaml"
 ```
 
 ## Deploy and restart
@@ -30,10 +30,10 @@ Deploy the build:
 make deploy
 ```
 
-Restart Loom from:
+Restart Torque from:
 
 ```text
-iTerm2 → Scripts → loom
+iTerm2 → Scripts → torque
 ```
 
 ## Verify the Roles UI surface
@@ -68,13 +68,13 @@ Expected:
 Verify the write path:
 
 ```bash
-cat "$HOME/.loom/roles/careful-reviewer.yaml"
+cat "$HOME/.torque/roles/careful-reviewer.yaml"
 ```
 
 Expected:
 
-- the file exists under `~/.loom/roles/`
-- no new file was written under `~/.loom/agents/`
+- the file exists under `~/.torque/roles/`
+- no new file was written under `~/.torque/agents/`
 - the YAML contains `preamble:` and `priorities:`
 
 ## Assign the role through group settings
@@ -108,7 +108,7 @@ Expected:
   ```
 
 - the action prompt appears below that block
-- the usual Loom postscript still appears at the end
+- the usual Torque postscript still appears at the end
 
 ## Verify action opt-out
 
@@ -122,7 +122,7 @@ Expected:
 
 - the preamble block is gone
 - the action prompt still renders
-- the Loom postscript is still present
+- the Torque postscript is still present
 
 Turn the checkbox back off before continuing if you do not want to keep the
 opt-out enabled.
@@ -140,12 +140,12 @@ Expected:
 - when opt-out is disabled, the role preamble is present at the top
 - when opt-out is enabled, the preamble is absent
 
-## Verify `loom doctor`
+## Verify `torque doctor`
 
 Run:
 
 ```bash
-loom doctor
+torque doctor
 ```
 
 Expected:
@@ -153,18 +153,18 @@ Expected:
 - exit code `0`
 - `Result: PASS`
 - a `[roles]` section is present
-- `roles_dir` points at `~/.loom/roles`
+- `roles_dir` points at `~/.torque/roles`
 - the role counts include the new role
 - warnings are empty unless you intentionally introduced a shadowed legacy file
 
 ## Verify persistence after restart
 
-Restart Loom again from the Scripts menu.
+Restart Torque again from the Scripts menu.
 
 Expected after restart:
 
 - `careful-reviewer` is still present in the Roles list
-- `loom doctor` still reports the roles section correctly
+- `torque doctor` still reports the roles section correctly
 - no migration rerun is required
 - dispatch preview behavior is unchanged after restart
 
@@ -174,18 +174,18 @@ To revert only the smoke-created role from this guide, remove that specific
 file:
 
 ```bash
-rm -f "$HOME/.loom/roles/careful-reviewer.yaml"
+rm -f "$HOME/.torque/roles/careful-reviewer.yaml"
 ```
 
 If you saved the smoke role in project scope instead of user scope, remove the
 matching project-local file instead:
 
 ```bash
-rm -f "<project>/.loom/roles/careful-reviewer.yaml"
+rm -f "<project>/.torque/roles/careful-reviewer.yaml"
 ```
 
-Only remove the entire `~/.loom/roles/` directory if you independently
+Only remove the entire `~/.torque/roles/` directory if you independently
 confirmed it contains no other roles you want to keep.
 
-Then restart Loom. Legacy templates under `~/.loom/agents/` remain available
+Then restart Torque. Legacy templates under `~/.torque/agents/` remain available
 through compatibility reads.

@@ -2,12 +2,12 @@
 
 ## Goal
 
-Make Loom run in both of these modes without forking the product:
+Make Torque run in both of these modes without forking the product:
 
 1. iTerm2-native mode
 2. full standalone mode with local terminals rendered through xterm.js
 
-The same Loom daemon, SQLite state model, board, worktree flow, agent hooks,
+The same Torque daemon, SQLite state model, board, worktree flow, agent hooks,
 and MCP/reporting behavior must work across both modes.
 
 ## Non-Goals
@@ -22,7 +22,7 @@ and MCP/reporting behavior must work across both modes.
 - The frontend is already browser-safe and multi-client capable.
 - The daemon is still tightly coupled to iTerm2 for session metadata,
   profile enumeration, toolbelt registration, and keybindings.
-- `loom/terminal_adapter.py` exists, but it does not yet cover everything
+- `torque/terminal_adapter.py` exists, but it does not yet cover everything
   `server.py`, `server_agent.py`, and `bridge.py` need.
 - Standalone browser mode today is UI-only; terminals still live in iTerm2.
 
@@ -53,7 +53,7 @@ Pros:
 - Dual-mode already mostly works
 
 Cons:
-- Not a true standalone Loom
+- Not a true standalone Torque
 - Linux app story is weak
 - xterm.js adds no value because iTerm2 is still the terminal runtime
 
@@ -69,7 +69,7 @@ Description:
 - Ship a desktop window through pywebview.
 
 Pros:
-- Reuses the existing Loom backend
+- Reuses the existing Torque backend
 - Works on macOS and Linux
 - Keeps the no-build-step frontend viable by vendoring xterm assets
 - Simplest path to a true standalone app
@@ -111,7 +111,7 @@ Pros:
 
 Cons:
 - Heavier app
-- Splits Loom across Python and Node runtimes
+- Splits Torque across Python and Node runtimes
 - Makes “same core supports iTerm2 and standalone” harder to maintain
 
 Decision:
@@ -125,7 +125,7 @@ Decision:
                          +----------+-----------+
                                     |
                            +--------v--------+
-                           |   Loom Daemon   |
+                           |   Torque Daemon   |
                            | aiohttp + MCP   |
                            +--------+--------+
                                     |
@@ -202,7 +202,7 @@ Objective:
   around it for routine session metadata.
 
 Work:
-- Expand `loom/terminal_adapter.py`
+- Expand `torque/terminal_adapter.py`
 - Add launch-context and capability dataclasses
 - Move profile listing, current-session inspection, and input-ready priming
   behind the adapter
@@ -217,7 +217,7 @@ Deliverables:
 ### Phase 1: Backend Registry
 
 Objective:
-- Let Loom instantiate terminal backends without hardcoding iTerm2 in
+- Let Torque instantiate terminal backends without hardcoding iTerm2 in
   `server.py`.
 
 Work:
@@ -233,7 +233,7 @@ Deliverables:
 ### Phase 2: Local PTY Runtime
 
 Objective:
-- Support true standalone sessions managed entirely by Loom.
+- Support true standalone sessions managed entirely by Torque.
 
 Work:
 - Implement `LocalPtyAdapter`
@@ -283,7 +283,7 @@ Deliverables:
 ### Phase 4: xterm.js Frontend Integration
 
 Objective:
-- Render standalone PTY sessions inside Loom.
+- Render standalone PTY sessions inside Torque.
 
 Work:
 - Vendor xterm.js and required addons into `static/vendor`
@@ -322,7 +322,7 @@ Preferred order:
 
 Work:
 - Add standalone launcher script
-- Open the Loom UI in a native webview window
+- Open the Torque UI in a native webview window
 - Start or connect to the daemon on a non-default app port
 - Ensure the shell can find agent CLIs in packaged environments
 
@@ -343,7 +343,7 @@ Deliverables:
 ### Phase 6: Distribution
 
 Objective:
-- Package standalone Loom for users.
+- Package standalone Torque for users.
 
 macOS:
 - `.app` bundle first

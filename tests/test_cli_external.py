@@ -11,9 +11,9 @@ from types import SimpleNamespace
 
 
 def _load_cli_module():
-    path = Path(__file__).resolve().parents[1] / "bin" / "loom"
-    loader = SourceFileLoader("loom_cli", str(path))
-    spec = importlib.util.spec_from_loader("loom_cli", loader)
+    path = Path(__file__).resolve().parents[1] / "bin" / "torque"
+    loader = SourceFileLoader("torque_cli", str(path))
+    spec = importlib.util.spec_from_loader("torque_cli", loader)
     mod = importlib.util.module_from_spec(spec)
     loader.exec_module(mod)
     return mod
@@ -33,13 +33,13 @@ class CliExternalTicketTests(unittest.TestCase):
                 check=True,
             )
             subprocess.run(
-                ["git", "-C", str(repo_root), "config", "user.name", "Loom Test"],
+                ["git", "-C", str(repo_root), "config", "user.name", "Torque Test"],
                 capture_output=True,
                 text=True,
                 check=True,
             )
             subprocess.run(
-                ["git", "-C", str(repo_root), "config", "user.email", "loom@example.com"],
+                ["git", "-C", str(repo_root), "config", "user.email", "torque@example.com"],
                 capture_output=True,
                 text=True,
                 check=True,
@@ -58,12 +58,12 @@ class CliExternalTicketTests(unittest.TestCase):
                 check=True,
             )
 
-            worktree_path = repo_root / ".loom" / "worktrees" / "worker"
+            worktree_path = repo_root / ".torque" / "worktrees" / "worker"
             worktree_path.parent.mkdir(parents=True, exist_ok=True)
             subprocess.run(
                 [
                     "git", "-C", str(repo_root),
-                    "worktree", "add", "-b", "loom/worker",
+                    "worktree", "add", "-b", "torque/worker",
                     str(worktree_path), "main",
                 ],
                 capture_output=True,
@@ -228,7 +228,7 @@ class CliExternalTicketTests(unittest.TestCase):
             calls[0][1],
             {
                 "id": "task-1",
-                "actor_name": "loom-cli",
+                "actor_name": "torque-cli",
                 "verification_mode": "deploy",
                 "verification_notes": "Smoke failed on login redirect",
                 "tests_run": "python3 -m unittest",
@@ -285,7 +285,7 @@ class CliExternalTicketTests(unittest.TestCase):
             calls[0][1],
             {
                 "id": "task-1",
-                "actor_name": "loom-cli",
+                "actor_name": "torque-cli",
                 "verification_mode": "",
                 "verification_state": "",
                 "verification_notes": "",
@@ -401,16 +401,16 @@ class CliExternalTicketTests(unittest.TestCase):
             ref="task-1",
         )
         out = io.StringIO()
-        prev = os.environ.get("LOOM_CELL_ID")
-        os.environ["LOOM_CELL_ID"] = "agent-1"
+        prev = os.environ.get("TORQUE_CELL_ID")
+        os.environ["TORQUE_CELL_ID"] = "agent-1"
         try:
             with contextlib.redirect_stdout(out):
                 self.cli.cmd_memory_link(args)
         finally:
             if prev is None:
-                os.environ.pop("LOOM_CELL_ID", None)
+                os.environ.pop("TORQUE_CELL_ID", None)
             else:
-                os.environ["LOOM_CELL_ID"] = prev
+                os.environ["TORQUE_CELL_ID"] = prev
 
         self.assertEqual(
             calls[0],
@@ -436,8 +436,8 @@ class CliExternalTicketTests(unittest.TestCase):
                 "data": {
                     "repo_root": "/repo",
                     "items": [{
-                        "branch": "loom/worker",
-                        "path": "/repo/.loom/worktrees/worker",
+                        "branch": "torque/worker",
+                        "path": "/repo/.torque/worktrees/worker",
                         "base_branch": "main",
                         "merged": True,
                         "dirty": False,
@@ -459,7 +459,7 @@ class CliExternalTicketTests(unittest.TestCase):
             calls[0],
             ("worktree_list", {"repo_root": "/repo"}),
         )
-        self.assertIn("loom/worker", out.getvalue())
+        self.assertIn("torque/worker", out.getvalue())
         self.assertIn("prunable", out.getvalue())
 
     def test_worktree_prune_calls_api_with_resolved_repo_root(self):
@@ -473,8 +473,8 @@ class CliExternalTicketTests(unittest.TestCase):
                 "data": {
                     "repo_root": "/repo",
                     "removed": [{
-                        "branch": "loom/worker",
-                        "path": "/repo/.loom/worktrees/worker",
+                        "branch": "torque/worker",
+                        "path": "/repo/.torque/worktrees/worker",
                         "prune_reason": "merged_clean",
                     }],
                     "skipped": [],
@@ -492,4 +492,4 @@ class CliExternalTicketTests(unittest.TestCase):
             ("worktree_prune", {"repo_root": "/repo"}),
         )
         self.assertIn("Removed:", out.getvalue())
-        self.assertIn("loom/worker", out.getvalue())
+        self.assertIn("torque/worker", out.getvalue())

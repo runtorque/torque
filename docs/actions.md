@@ -1,13 +1,13 @@
 # Actions & Roles
 
-Loom now separates reusable agent configuration from reusable task prompts:
+Torque now separates reusable agent configuration from reusable task prompts:
 
 For the day-to-day "how do I use these together?" view, see the [Workflow Guide](workflow-guide.md).
 
 - **Agent roles** define who does the work: provider, model, permissions, system prompt, worktree behavior, environment, and child terminals.
 - **Actions** define what work to do: the rendered prompt, labels, and pipeline transitions.
 
-When you dispatch a task, Loom resolves both pieces. The agent role creates the session, then the action prompt is rendered and sent to it.
+When you dispatch a task, Torque resolves both pieces. The agent role creates the session, then the action prompt is rendered and sent to it.
 
 ## Why actions?
 
@@ -31,18 +31,18 @@ Example:
 1. Create a task:
 
    ```bash
-   loom task create "Add auth middleware" -g backend -t feature/implement
+   torque task create "Add auth middleware" -g backend -t feature/implement
    ```
 
 2. Dispatch it from the board UI, or create and dispatch in one CLI step:
 
    ```bash
-   loom task dispatch "Add auth middleware" -g backend -t feature/implement
+   torque task dispatch "Add auth middleware" -g backend -t feature/implement
    ```
 
-3. Loom launches the agent, renders the action prompt, and sends the result.
+3. Torque launches the agent, renders the action prompt, and sends the result.
 
-4. If the action declares transitions, the agent can hand off the next step with `loom_derive(...)`.
+4. If the action declares transitions, the agent can hand off the next step with `torque_derive(...)`.
 
 The same action can be used in manual work, pipeline handoffs, or schedules. A schedule that fires a task with `-t feature/implement` goes through the same prompt-rendering path as a task you dispatched by hand.
 
@@ -108,7 +108,7 @@ prompt: |
 | **agent.tab_color** | string | no | Legacy inline field. Hex tab color (deprecated). |
 | **agent.env_vars** | object | no | Legacy inline field. Environment variables to set (deprecated). |
 | **worktree** | boolean | no | If `true`, create an isolated git worktree for the agent. |
-| **auto_close_on_done** | boolean | no | If `true`, Loom may auto-close the agent after `loom_done(...)`, but only when the pipeline root task is done and no queued or reply follow-up work remains. |
+| **auto_close_on_done** | boolean | no | If `true`, Torque may auto-close the agent after `torque_done(...)`, but only when the pipeline root task is done and no queued or reply follow-up work remains. |
 | **implementation_depth** | boolean | no | Marks the action as code-mutating implementation work. When true, direct completion is eligible for the LOC review gate. |
 | **review_required_above_loc** | integer | no | Non-test LOC threshold for auto-deriving `feature/review` on implementation-depth actions. Defaults to 150 when `implementation_depth` is true. |
 | **labels** | list | no | Labels applied to the task on the board. |
@@ -118,14 +118,14 @@ prompt: |
 
 ## Where actions live
 
-Loom searches two locations for action files. Project-local actions take precedence over global ones.
+Torque searches two locations for action files. Project-local actions take precedence over global ones.
 
 | Scope | Path | Version-controlled? |
 |-------|------|---------------------|
-| **Project** | `.loom/actions/` in your repo root | Yes (recommended) |
-| **User** | `~/.loom/actions/` in your home directory | No |
+| **Project** | `.torque/actions/` in your repo root | Yes (recommended) |
+| **User** | `~/.torque/actions/` in your home directory | No |
 
-Subdirectories create namespaces. The file `.loom/actions/feature/review.yaml` becomes the action `feature/review`.
+Subdirectories create namespaces. The file `.torque/actions/feature/review.yaml` becomes the action `feature/review`.
 
 If a project and user action have the same name, the project action wins. The user action is still visible in the UI (marked as "shadowed") but won't be used for dispatch.
 
@@ -135,10 +135,10 @@ The repo ships with example actions in `actions/`. Copy them to get started:
 
 ```bash
 # Project-local (recommended — commit them with your repo)
-cp -r actions/* .loom/actions/
+cp -r actions/* .torque/actions/
 
 # Or global (shared across all projects)
-cp -r actions/* ~/.loom/actions/
+cp -r actions/* ~/.torque/actions/
 ```
 
 ## The prompt field
@@ -170,7 +170,7 @@ Keep the diff focused.
 
 ### Custom variables
 
-You can add any variable to your prompt. Loom discovers them automatically from the Jinja2 template --- no declaration needed.
+You can add any variable to your prompt. Torque discovers them automatically from the Jinja2 template --- no declaration needed.
 
 ```yaml
 prompt: |
@@ -237,8 +237,8 @@ Agent roles live alongside actions but in a separate directory:
 
 | Scope | Path |
 |-------|------|
-| **Project** | `.loom/roles/` |
-| **User** | `~/.loom/roles/` |
+| **Project** | `.torque/roles/` |
+| **User** | `~/.torque/roles/` |
 
 These role files carry the same launch/runtime fields documented in the UI editor: provider, command override, model, permissions, system prompt, initial prompt, session resume, idle timeout, tab color, icon, worktree settings, environment variables, child terminals, plus optional worker `preamble` and `priorities`.
 
@@ -264,25 +264,25 @@ prompt: |
   {{ TASK }}
 ```
 
-## The `loom` context namespace
+## The `torque` context namespace
 
-When Loom dispatches a task, it injects a `loom` variable into the template context alongside `TASK` and your custom variables. This variable contains information about the agent, its history, the worktree, the current task, and available terminals.
+When Torque dispatches a task, it injects a `torque` variable into the template context alongside `TASK` and your custom variables. This variable contains information about the agent, its history, the worktree, the current task, and available terminals.
 
 This is particularly useful for writing prompts that adapt to whether the agent is starting fresh or continuing prior work.
 
-### `loom.context` --- dispatch history
+### `torque.context` --- dispatch history
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `loom.context.is_clean` | bool | `True` if this is the first task dispatched to this agent. `False` if the agent has processed tasks before. |
-| `loom.context.tasks_dispatched` | int | Number of tasks previously dispatched to this agent (0 on first dispatch). |
-| `loom.context.previous_tasks` | list | Tasks still linked to this agent. Each entry has `task`, `lane`, and `action` fields. |
+| `torque.context.is_clean` | bool | `True` if this is the first task dispatched to this agent. `False` if the agent has processed tasks before. |
+| `torque.context.tasks_dispatched` | int | Number of tasks previously dispatched to this agent (0 on first dispatch). |
+| `torque.context.previous_tasks` | list | Tasks still linked to this agent. Each entry has `task`, `lane`, and `action` fields. |
 
 **Example --- conditional system prompt:**
 
 ```yaml
 prompt: |
-  {% if loom.context.is_clean %}
+  {% if torque.context.is_clean %}
   You are a senior engineer. Review all code carefully and provide
   detailed, actionable feedback. Flag real problems, not style preferences.
 
@@ -294,15 +294,15 @@ prompt: |
 
 When the agent receives its first task, it gets the full system prompt with instructions. When a follow-up task is dispatched to the same agent (via `--self` or the UI), the agent already has the system prompt in context, so only the new task description is sent.
 
-### `loom.agent` --- agent identity
+### `torque.agent` --- agent identity
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `loom.agent.name` | string | Agent display name (e.g., `impl-add-auth`). |
-| `loom.agent.slug` | string | URL-friendly identifier (e.g., `impl-add-auth`). |
-| `loom.agent.type` | string | Agent type: `claude-code`, `codex`, `gemini-cli`, or empty. |
-| `loom.agent.group` | string | Group the agent belongs to. |
-| `loom.agent.directory` | string | Working directory. |
+| `torque.agent.name` | string | Agent display name (e.g., `impl-add-auth`). |
+| `torque.agent.slug` | string | URL-friendly identifier (e.g., `impl-add-auth`). |
+| `torque.agent.type` | string | Agent type: `claude-code`, `codex`, `gemini-cli`, or empty. |
+| `torque.agent.group` | string | Group the agent belongs to. |
+| `torque.agent.directory` | string | Working directory. |
 
 **Example --- agent-type-aware instructions:**
 
@@ -310,64 +310,64 @@ When the agent receives its first task, it gets the full system prompt with inst
 prompt: |
   {{ TASK }}
 
-  {% if loom.agent.type == "claude-code" %}
+  {% if torque.agent.type == "claude-code" %}
   Use Claude Code's built-in tools for file editing and searches.
   {% else %}
   Edit files directly. Use grep and find for navigation.
   {% endif %}
 ```
 
-### `loom.worktree` --- git worktree state
+### `torque.worktree` --- git worktree state
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `loom.worktree.active` | bool | Whether a worktree exists for this agent. |
-| `loom.worktree.path` | string | Absolute path to the worktree directory. |
-| `loom.worktree.branch` | string | Worktree branch name (e.g., `loom/impl-a1b2c3d4`). |
-| `loom.worktree.base_branch` | string | Branch the worktree was forked from (e.g., `main`). |
-| `loom.worktree.dirty` | bool | Whether there are uncommitted changes. |
-| `loom.worktree.diff` | object | Change stats: `files`, `insertions`, `deletions`. |
-| `loom.worktree.checkpoints` | int | Number of checkpoint commits on the worktree branch. |
+| `torque.worktree.active` | bool | Whether a worktree exists for this agent. |
+| `torque.worktree.path` | string | Absolute path to the worktree directory. |
+| `torque.worktree.branch` | string | Worktree branch name (e.g., `torque/impl-a1b2c3d4`). |
+| `torque.worktree.base_branch` | string | Branch the worktree was forked from (e.g., `main`). |
+| `torque.worktree.dirty` | bool | Whether there are uncommitted changes. |
+| `torque.worktree.diff` | object | Change stats: `files`, `insertions`, `deletions`. |
+| `torque.worktree.checkpoints` | int | Number of checkpoint commits on the worktree branch. |
 
 **Example --- worktree-aware review prompt:**
 
 ```yaml
 prompt: |
-  {% if loom.worktree.active %}
-  You're reviewing changes on branch `{{ loom.worktree.branch }}`,
-  forked from `{{ loom.worktree.base_branch }}`.
-  {% if loom.worktree.dirty %}
+  {% if torque.worktree.active %}
+  You're reviewing changes on branch `{{ torque.worktree.branch }}`,
+  forked from `{{ torque.worktree.base_branch }}`.
+  {% if torque.worktree.dirty %}
   Warning: there are uncommitted changes
-  ({{ loom.worktree.diff.files }} files,
-  +{{ loom.worktree.diff.insertions }}/-{{ loom.worktree.diff.deletions }}).
+  ({{ torque.worktree.diff.files }} files,
+  +{{ torque.worktree.diff.insertions }}/-{{ torque.worktree.diff.deletions }}).
   {% endif %}
   {% endif %}
 
   {{ TASK }}
 ```
 
-### `loom.task` --- current task metadata
+### `torque.task` --- current task metadata
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `loom.task.id` | string | Canonical task ID (`GROUP:<n>` or `GROUP:<root_n>:<child_n>`). |
-| `loom.task.depth` | int | Pipeline depth (0 for root tasks, increments per derivation). |
-| `loom.task.is_derived` | bool | Whether this task was created by `loom_derive(...)`. |
-| `loom.task.parent_task_id` | string | ID of the parent task (empty for root tasks). |
-| `loom.task.labels` | list | Task labels (e.g., `["derived", "feature"]`). |
-| `loom.task.group` | string | Task's group name. |
-| `loom.task.attachments` | list | Legacy image attachments with `path` and `filename`. |
-| `loom.task.artifacts` | list | Combined task artifacts, including synthetic image artifacts plus structured refs like logs, diffs, reports, snippets, docs, and file refs. |
-| `loom.task.upstream_artifacts` | list | Direct-parent handoff artifacts for derived tasks, including source-task metadata plus the same combined artifact payload and task-owned URLs used in MCP views. Empty for root tasks or when the parent has no artifacts. |
+| `torque.task.id` | string | Canonical task ID (`GROUP:<n>` or `GROUP:<root_n>:<child_n>`). |
+| `torque.task.depth` | int | Pipeline depth (0 for root tasks, increments per derivation). |
+| `torque.task.is_derived` | bool | Whether this task was created by `torque_derive(...)`. |
+| `torque.task.parent_task_id` | string | ID of the parent task (empty for root tasks). |
+| `torque.task.labels` | list | Task labels (e.g., `["derived", "feature"]`). |
+| `torque.task.group` | string | Task's group name. |
+| `torque.task.attachments` | list | Legacy image attachments with `path` and `filename`. |
+| `torque.task.artifacts` | list | Combined task artifacts, including synthetic image artifacts plus structured refs like logs, diffs, reports, snippets, docs, and file refs. |
+| `torque.task.upstream_artifacts` | list | Direct-parent handoff artifacts for derived tasks, including source-task metadata plus the same combined artifact payload and task-owned URLs used in MCP views. Empty for root tasks or when the parent has no artifacts. |
 
-When you inspect tasks through MCP (`loom_context` or `engineer_task_show`), Loom also returns a `task_artifacts` combined view with task linkage and derived file URLs for task-owned uploads.
+When you inspect tasks through MCP (`torque_context` or `engineer_task_show`), Torque also returns a `task_artifacts` combined view with task linkage and derived file URLs for task-owned uploads.
 
 **Example --- pipeline-aware instructions:**
 
 ```yaml
 prompt: |
-  {% if loom.task.is_derived %}
-  This is a follow-up task at depth {{ loom.task.depth }} in the pipeline.
+  {% if torque.task.is_derived %}
+  This is a follow-up task at depth {{ torque.task.depth }} in the pipeline.
   A previous agent handed off this work to you.
   {% endif %}
 
@@ -376,7 +376,7 @@ prompt: |
 
 ### Task artifact prompt shaping
 
-Loom appends task-owned artifact references after the rendered action prompt. This stays additive to the legacy image-attachment flow:
+Torque appends task-owned artifact references after the rendered action prompt. This stays additive to the legacy image-attachment flow:
 
 - legacy image attachments still render under `## Attached images`
 - structured non-image artifacts render under `## Task artifacts`
@@ -400,9 +400,9 @@ Each structured artifact record stores:
 - `provenance` (`source`, timestamps, optional agent/task origin)
 - `lifecycle` (`owner`, `cleanup`)
 
-Upstream handoff artifacts are intentionally narrow: Loom only forwards the direct parent task's combined artifact set, annotated with `source_task_id`, `source_task_label`, and `source_relation`. It does not dump every ancestor artifact into downstream prompts.
+Upstream handoff artifacts are intentionally narrow: Torque only forwards the direct parent task's combined artifact set, annotated with `source_task_id`, `source_task_label`, and `source_relation`. It does not dump every ancestor artifact into downstream prompts.
 
-### `loom.terminals` --- child terminal sessions
+### `torque.terminals` --- child terminal sessions
 
 A list of the agent's child terminals. Each entry has `name`, `slug`, `current_path`, `current_process`, and `current_branch`. Empty for newly created agents.
 
@@ -412,9 +412,9 @@ A list of the agent's child terminals. Each entry has `name`, `slug`, `current_p
 prompt: |
   {{ TASK }}
 
-  {% if loom.terminals %}
+  {% if torque.terminals %}
   You have these companion terminals available:
-  {% for t in loom.terminals %}
+  {% for t in torque.terminals %}
   - **{{ t.name }}**{% if t.current_process %} (running: {{ t.current_process }}){% endif %}
   {% endfor %}
   {% endif %}
@@ -422,7 +422,7 @@ prompt: |
 
 ### Preview behavior
 
-When you preview a prompt in the UI (before dispatching), there's no real agent or task yet. Loom uses safe defaults: `loom.context.is_clean` is `True`, all strings are empty, all lists are empty. This means previews always show the "full prompt" branch of your conditionals, which is the most informative view.
+When you preview a prompt in the UI (before dispatching), there's no real agent or task yet. Torque uses safe defaults: `torque.context.is_clean` is `True`, all strings are empty, all lists are empty. This means previews always show the "full prompt" branch of your conditionals, which is the most informative view.
 
 ## Dispatching tasks
 
@@ -435,24 +435,24 @@ There are three ways to dispatch a task with an action:
 3. Fill in any variables the action requires
 4. Click **Dispatch**
 
-Loom creates a new agent, renders the prompt, and sends it after the agent boots.
+Torque creates a new agent, renders the prompt, and sends it after the agent boots.
 
 ### From the CLI
 
 ```bash
 # One-liner: create + dispatch
-loom task dispatch "Add dark mode" -t feature/implement
+torque task dispatch "Add dark mode" -t feature/implement
 
 # With variables
-loom task dispatch "Fix the flaky test" -t oneshot/fix -v MODULE=auth -v TEST_COMMAND="pytest tests/auth"
+torque task dispatch "Fix the flaky test" -t oneshot/fix -v MODULE=auth -v TEST_COMMAND="pytest tests/auth"
 ```
 
 ### From an agent (pipeline derivation)
 
-An agent that's finished its task derives the next step with `loom_derive(...)`:
+An agent that's finished its task derives the next step with `torque_derive(...)`:
 
 ```text
-loom_derive(
+torque_derive(
   description="Review the implementation",
   action="feature/review",
 )
@@ -497,18 +497,18 @@ The `when` field is documentation --- it's included in the agent's postscript so
 
 ### How agents use transitions
 
-When Loom dispatches a task that has transitions, it appends a postscript to the prompt telling the agent which Loom MCP tools are available:
+When Torque dispatches a task that has transitions, it appends a postscript to the prompt telling the agent which Torque MCP tools are available:
 
 ```
-Report your progress with these Loom MCP tools:
-- `loom_done(message="brief summary")` — task complete, no follow-up needed
-- `loom_derive(description="description", action="feature/review")` — implementation is complete and ready for review
-- `loom_blocked(reason="reason")` — need user input
-- `loom_error(message="message")` — unrecoverable error
-- `loom_verify(state="passed", tests_run="...", notes="...")` — record manual deploy/restart/smoke verification details when relevant
+Report your progress with these Torque MCP tools:
+- `torque_done(message="brief summary")` — task complete, no follow-up needed
+- `torque_derive(description="description", action="feature/review")` — implementation is complete and ready for review
+- `torque_blocked(reason="reason")` — need user input
+- `torque_error(message="message")` — unrecoverable error
+- `torque_verify(state="passed", tests_run="...", notes="...")` — record manual deploy/restart/smoke verification details when relevant
 ```
 
-The agent reads these instructions and calls the appropriate MCP tool when it's done. The server validates that the transition is allowed before dispatching. The dedicated [CLI reference](cli.md#ai) still documents the equivalent `loom ai ...` commands for manual workflows and debugging.
+The agent reads these instructions and calls the appropriate MCP tool when it's done. The server validates that the transition is allowed before dispatching. The dedicated [CLI reference](cli.md#ai) still documents the equivalent `torque ai ...` commands for manual workflows and debugging.
 
 ### Transition LOC review gates
 
@@ -517,8 +517,8 @@ A transition to `feature/review` can carry a `loc_gate` block to tune the automa
 | Field | Type | Description |
 |-------|------|-------------|
 | `ship_direct_max` | integer | Non-test LOC count at or below which direct completion may ship without review. |
-| `review_default_above` | integer | Non-test LOC count above which Loom should auto-derive `feature/review`. |
-| `self_review_bypass_allowed` | boolean | Whether an explicit self-review bypass request may skip this gate. When `false`, Loom ignores the bypass request and derives review. |
+| `review_default_above` | integer | Non-test LOC count above which Torque should auto-derive `feature/review`. |
+| `self_review_bypass_allowed` | boolean | Whether an explicit self-review bypass request may skip this gate. When `false`, Torque ignores the bypass request and derives review. |
 
 The effective LOC threshold is the higher of `ship_direct_max` and `review_default_above`: diffs at or below that count may close directly; diffs above it trigger `feature/review`.
 
@@ -543,7 +543,7 @@ prompt: |
   {{ TASK }}
 ```
 
-When an implementation-depth task closes directly, Loom resolves the review policy in this order:
+When an implementation-depth task closes directly, Torque resolves the review policy in this order:
 
 1. `loc_gate` on the action's `feature/review` transition.
 2. The action-level `review_required_above_loc` threshold.
@@ -555,7 +555,7 @@ If none of those are set, the existing implementation-depth default still applie
 
 ### The `ask` transition
 
-The `ask` transition is a blocking human-in-the-loop gate, not a general notification path. Use it only when the agent cannot responsibly continue without a human decision or approval. When an agent calls `loom_ask(question="question")`, the derived task lands in the **Backlog** lane with a `loom:human` label instead of being dispatched automatically. A human reviews the question, optionally edits the task, and dispatches it manually.
+The `ask` transition is a blocking human-in-the-loop gate, not a general notification path. Use it only when the agent cannot responsibly continue without a human decision or approval. When an agent calls `torque_ask(question="question")`, the derived task lands in the **Backlog** lane with a `torque:human` label instead of being dispatched automatically. A human reviews the question, optionally edits the task, and dispatches it manually.
 
 ```yaml
 transitions:
@@ -571,26 +571,26 @@ Pipelines have a depth limit to prevent runaway chains. The default is 10 (confi
 max_depth: 5
 ```
 
-When the limit is reached, the agent gets an error, the agent is flagged for attention, and the task is labeled `loom:depth-limit`.
+When the limit is reached, the agent gets an error, the agent is flagged for attention, and the task is labeled `torque:depth-limit`.
 
 ### Viewing pipelines
 
 ```bash
 # List all pipelines discovered from action transitions
-loom pipeline list
+torque pipeline list
 
 # Show a specific pipeline's structure
-loom pipeline show feature/implement
+torque pipeline show feature/implement
 
 # Show the full task chain for a specific task
-loom task chain <task-slug>
+torque task chain <task-slug>
 ```
 
 In the board UI, derived tasks show a chain indicator (`↳ depth N · from: parent-task`). Right-click a task and select **View pipeline** to see the full chain.
 
 ## Transition-targeted routing
 
-By default, `loom_derive(...)` follows the selected transition's routing. If the transition omits a target, Loom creates a new agent. If the transition sets `target: self`, `target: parent`, or `target: root`, Loom routes the derived task to that existing agent context.
+By default, `torque_derive(...)` follows the selected transition's routing. If the transition omits a target, Torque creates a new agent. If the transition sets `target: self`, `target: parent`, or `target: root`, Torque routes the derived task to that existing agent context.
 
 ### `target: self` --- continue in the same agent
 
@@ -606,7 +606,7 @@ transitions:
     target: self
 
 prompt: |
-  {% if loom.context.is_clean %}
+  {% if torque.context.is_clean %}
   You are implementing a feature. Write clean code and commit when done.
   After implementation, you'll receive a follow-up task to add tests.
 
@@ -621,7 +621,7 @@ prompt: |
 With that transition in place, the agent just calls:
 
 ```text
-loom_derive(
+torque_derive(
   description="Now add tests for the validation",
   action="feature/implement",
 )
@@ -632,13 +632,13 @@ loom_derive(
 When Agent B (for example, a reviewer) finds issues, it can send the fix task back to Agent A (the original implementer) by declaring the transition target on the action. The MCP call stays the same:
 
 ```text
-loom_derive(
+torque_derive(
   description="Fix the 3 auth issues I found",
   action="feature/fix-review",
 )
 ```
 
-The new prompt is rendered with `loom.context.is_clean = False` since the target agent has processed tasks before. If you need an explicit one-off override to a named agent outside normal worker prompts, the CLI `loom ai derive --agent ...` and `--self` forms remain available; see [CLI Reference](cli.md#ai).
+The new prompt is rendered with `torque.context.is_clean = False` since the target agent has processed tasks before. If you need an explicit one-off override to a named agent outside normal worker prompts, the CLI `torque ai derive --agent ...` and `--self` forms remain available; see [CLI Reference](cli.md#ai).
 
 ### Worktree inheritance
 
@@ -673,21 +673,21 @@ prompt: |
 
 ### Use conditionals for context-aware prompts
 
-The most powerful pattern is using `loom.context.is_clean` to write prompts that work both as initial dispatches and as follow-ups:
+The most powerful pattern is using `torque.context.is_clean` to write prompts that work both as initial dispatches and as follow-ups:
 
 ```yaml
 prompt: |
-  {% if loom.context.is_clean %}
-  You are a senior engineer working on the {{ loom.worktree.base_branch | default("main") }} branch.
+  {% if torque.context.is_clean %}
+  You are a senior engineer working on the {{ torque.worktree.base_branch | default("main") }} branch.
   Your job is to implement features cleanly and ship them with tests.
 
   ## Environment
-  - Working directory: {{ loom.agent.directory }}
-  {% if loom.worktree.active %}
-  - Branch: `{{ loom.worktree.branch }}` (forked from `{{ loom.worktree.base_branch }}`)
+  - Working directory: {{ torque.agent.directory }}
+  {% if torque.worktree.active %}
+  - Branch: `{{ torque.worktree.branch }}` (forked from `{{ torque.worktree.base_branch }}`)
   {% endif %}
-  {% if loom.terminals %}
-  - Terminals: {{ loom.terminals | map(attribute="name") | join(", ") }}
+  {% if torque.terminals %}
+  - Terminals: {{ torque.terminals | map(attribute="name") | join(", ") }}
   {% endif %}
 
   ## Task
@@ -734,7 +734,7 @@ Before dispatching, use the preview button in the task modal to see the fully re
 From the CLI:
 
 ```bash
-loom task create "Add dark mode" -a feature/implement
+torque task create "Add dark mode" -a feature/implement
 # Then open the task in the UI and click Preview
 ```
 
@@ -754,18 +754,18 @@ The **Actions** panel (toggle with ++a++ or the panel button) provides a visual 
 ### From the CLI
 
 ```bash
-loom action list                    # list all actions
-loom action show feature/review     # show action details
-loom action create my-action        # create a new action
+torque action list                    # list all actions
+torque action show feature/review     # show action details
+torque action create my-action        # create a new action
 ```
 
 ### Creating actions manually
 
-Create a `.yaml` file in `.loom/actions/` (project) or `~/.loom/actions/` (global):
+Create a `.yaml` file in `.torque/actions/` (project) or `~/.torque/actions/` (global):
 
 ```bash
-mkdir -p .loom/actions
-cat > .loom/actions/quick-fix.yaml << 'EOF'
+mkdir -p .torque/actions
+cat > .torque/actions/quick-fix.yaml << 'EOF'
 name: quick-fix
 description: Quick targeted fix
 
@@ -785,7 +785,7 @@ prompt: |
 EOF
 ```
 
-Loom picks it up immediately --- no restart needed.
+Torque picks it up immediately --- no restart needed.
 
 ## Examples
 
@@ -827,7 +827,7 @@ prompt: |
 
 Three actions that form a review cycle:
 
-**`.loom/actions/feature/implement.yaml`:**
+**`.torque/actions/feature/implement.yaml`:**
 
 ```yaml
 name: feature/implement
@@ -857,7 +857,7 @@ prompt: |
   - Run the test suite before finishing
 ```
 
-**`.loom/actions/feature/review.yaml`:**
+**`.torque/actions/feature/review.yaml`:**
 
 ```yaml
 name: feature/review
@@ -879,7 +879,7 @@ transitions:
     when: changes look correct but need human sign-off
 
 prompt: |
-  {% if loom.context.is_clean %}
+  {% if torque.context.is_clean %}
   You are a code reviewer. A previous agent implemented changes and
   your job is to evaluate whether the work is correct, safe, and
   ready to merge.
@@ -907,7 +907,7 @@ prompt: |
   {% endif %}
 ```
 
-**`.loom/actions/feature/fix-review.yaml`:**
+**`.torque/actions/feature/fix-review.yaml`:**
 
 ```yaml
 name: feature/fix-review
@@ -926,7 +926,7 @@ transitions:
     when: all review issues have been addressed
 
 prompt: |
-  {% if loom.context.is_clean %}
+  {% if torque.context.is_clean %}
   You are fixing issues found by a code reviewer on this worktree
   branch. Address every critical and warning issue. Nits are optional.
 
@@ -954,16 +954,16 @@ agent:
   tab_color: "#58a6ff"
 
 prompt: |
-  {% if loom.context.is_clean %}
+  {% if torque.context.is_clean %}
   You are working on a multi-step task. You'll receive the first
   step now and follow-up steps as new messages.
 
   ## Environment
-  {% if loom.worktree.active %}
-  - Branch: `{{ loom.worktree.branch }}`
-  - Base: `{{ loom.worktree.base_branch }}`
+  {% if torque.worktree.active %}
+  - Branch: `{{ torque.worktree.branch }}`
+  - Base: `{{ torque.worktree.base_branch }}`
   {% endif %}
-  - Directory: {{ loom.agent.directory }}
+  - Directory: {{ torque.agent.directory }}
 
   ## Current step
   {{ TASK }}
@@ -982,13 +982,13 @@ Usage:
 
 ```text
 # First dispatch — full instructions
-loom task dispatch "Add the User model with email and name fields" -t iterative
+torque task dispatch "Add the User model with email and name fields" -t iterative
 
 # Agent finishes, then derives the next routed step
-loom_derive(description="Add the API endpoints for CRUD operations", action="iterative")
+torque_derive(description="Add the API endpoints for CRUD operations", action="iterative")
 
 # Agent finishes again, derives once more
-loom_derive(description="Add input validation and error handling", action="iterative")
+torque_derive(description="Add input validation and error handling", action="iterative")
 ```
 
 Each follow-up only sends the new step. The agent retains the full context of what it built in previous steps.

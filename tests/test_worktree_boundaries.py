@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 import unittest
 
-from loom.worktree_boundaries import (
+from torque.worktree_boundaries import (
     boundary_summary,
     branch_boundary_tasks,
     clear_stale_successor_references,
@@ -40,7 +40,7 @@ class WorktreeBoundaryTests(unittest.TestCase):
             "task-a",
             boundary={
                 "repo_root": "/repo",
-                "branch": "loom/worker",
+                "branch": "torque/worker",
                 "status": "open",
                 "recorded_at": "2026-04-07T10:00:00+00:00",
             },
@@ -49,7 +49,7 @@ class WorktreeBoundaryTests(unittest.TestCase):
             "task-b",
             boundary={
                 "repo_root": "/repo",
-                "branch": "loom/worker",
+                "branch": "torque/worker",
                 "status": "open",
                 "recorded_at": "2026-04-07T11:00:00+00:00",
             },
@@ -58,7 +58,7 @@ class WorktreeBoundaryTests(unittest.TestCase):
         latest = latest_boundary_task(
             [older, newer],
             repo_root="/repo",
-            branch="loom/worker",
+            branch="torque/worker",
             statuses={"open"},
         )
 
@@ -69,7 +69,7 @@ class WorktreeBoundaryTests(unittest.TestCase):
             "task-a",
             boundary={
                 "repo_root": "/repo",
-                "branch": "loom/worker",
+                "branch": "torque/worker",
                 "status": "open",
                 "recorded_at": "2026-04-07T10:00:00+00:00",
             },
@@ -95,7 +95,7 @@ class WorktreeBoundaryTests(unittest.TestCase):
             "task-a",
             boundary={
                 "repo_root": "/repo",
-                "branch": "loom/worker",
+                "branch": "torque/worker",
                 "status": "open",
                 "recorded_at": "2026-04-07T10:00:00+00:00",
                 "commit_sha": "abcdef0123456789",
@@ -114,7 +114,7 @@ class WorktreeBoundaryTests(unittest.TestCase):
             "task-a",
             boundary={
                 "repo_root": "/repo",
-                "branch": "loom/worker",
+                "branch": "torque/worker",
                 "status": "open",
                 "recorded_at": "2026-04-07T10:00:00+00:00",
             },
@@ -123,7 +123,7 @@ class WorktreeBoundaryTests(unittest.TestCase):
             "task-b",
             boundary={
                 "repo_root": "/repo",
-                "branch": "loom/worker",
+                "branch": "torque/worker",
                 "status": "merged",
                 "recorded_at": "2026-04-07T11:00:00+00:00",
             },
@@ -132,7 +132,7 @@ class WorktreeBoundaryTests(unittest.TestCase):
         tasks = branch_boundary_tasks(
             [open_task, merged_task],
             repo_root="/repo",
-            branch="loom/worker",
+            branch="torque/worker",
             statuses={"open"},
         )
 
@@ -143,7 +143,7 @@ class WorktreeBoundaryTests(unittest.TestCase):
             "task-a",
             boundary={
                 "repo_root": "/repo",
-                "branch": "loom/worker",
+                "branch": "torque/worker",
                 "base_branch": "develop",
                 "status": "merged",
                 "recorded_at": "2026-04-07T10:00:00+00:00",
@@ -153,7 +153,7 @@ class WorktreeBoundaryTests(unittest.TestCase):
             "task-b",
             boundary={
                 "repo_root": "/repo",
-                "branch": "loom/worker",
+                "branch": "torque/worker",
                 "base_branch": "main",
                 "status": "open",
                 "recorded_at": "2026-04-07T11:00:00+00:00",
@@ -163,7 +163,7 @@ class WorktreeBoundaryTests(unittest.TestCase):
         base_branch = latest_boundary_base_branch(
             [older, newer],
             repo_root="/repo",
-            branch="loom/worker",
+            branch="torque/worker",
         )
 
         self.assertEqual(base_branch, "main")
@@ -172,7 +172,7 @@ class WorktreeBoundaryTests(unittest.TestCase):
         base_branch = latest_boundary_base_branch(
             [],
             repo_root="/repo",
-            branch="loom/worker",
+            branch="torque/worker",
         )
 
         self.assertEqual(base_branch, "")
@@ -210,7 +210,7 @@ class WorktreeBoundaryTests(unittest.TestCase):
             "task-a",
             boundary={
                 "repo_root": "/repo",
-                "branch": "loom/worker",
+                "branch": "torque/worker",
                 "status": "open",
                 "recorded_at": "2026-04-07T10:00:00+00:00",
             },
@@ -219,7 +219,7 @@ class WorktreeBoundaryTests(unittest.TestCase):
             "task-b",
             boundary={
                 "repo_root": "/repo",
-                "branch": "loom/worker",
+                "branch": "torque/worker",
                 "status": "merged",
                 "recorded_at": "2026-04-07T11:00:00+00:00",
             },
@@ -242,7 +242,7 @@ class WorktreeBoundaryTests(unittest.TestCase):
             "task-a",
             boundary={
                 "repo_root": "/repo",
-                "branch": "loom/worker",
+                "branch": "torque/worker",
                 "status": "open",
                 "recorded_at": "2026-04-07T10:00:00+00:00",
                 "commit_sha": "old-head",
@@ -254,7 +254,7 @@ class WorktreeBoundaryTests(unittest.TestCase):
         refreshed = refresh_latest_boundary_after_rebase(
             [boundary_task, queued],
             repo_root="/repo",
-            branch="loom/worker",
+            branch="torque/worker",
             previous_head_sha="old-head",
             rebased_head_sha="new-head",
         )
@@ -272,7 +272,7 @@ class WorktreeBoundaryTests(unittest.TestCase):
             "task-a",
             boundary={
                 "repo_root": "/repo",
-                "branch": "loom/worker",
+                "branch": "torque/worker",
                 "status": "open",
                 "recorded_at": "2026-04-07T10:00:00+00:00",
                 "commit_sha": "old-head",
@@ -283,7 +283,7 @@ class WorktreeBoundaryTests(unittest.TestCase):
         refreshed = refresh_latest_boundary_after_rebase(
             [boundary_task, started],
             repo_root="/repo",
-            branch="loom/worker",
+            branch="torque/worker",
             previous_head_sha="old-head",
             rebased_head_sha="new-head",
         )
@@ -299,7 +299,7 @@ class WorktreeBoundaryTests(unittest.TestCase):
             "task-a",
             boundary={
                 "repo_root": "/repo",
-                "branch": "loom/worker",
+                "branch": "torque/worker",
                 "status": "open",
                 "recorded_at": "2026-04-07T10:00:00+00:00",
                 "commit_sha": "recorded-tip",
@@ -309,7 +309,7 @@ class WorktreeBoundaryTests(unittest.TestCase):
         refreshed = refresh_latest_boundary_after_rebase(
             [boundary_task],
             repo_root="/repo",
-            branch="loom/worker",
+            branch="torque/worker",
             previous_head_sha="different-old-head",
             rebased_head_sha="new-head",
         )
@@ -326,7 +326,7 @@ class WorktreeBoundaryTests(unittest.TestCase):
             labels=["ready"],
             boundary={
                 "repo_root": "/repo",
-                "branch": "loom/worker",
+                "branch": "torque/worker",
                 "status": "open",
                 "recorded_at": "2026-04-07T10:00:00+00:00",
                 "reason": "checkpoint_failed",
@@ -337,7 +337,7 @@ class WorktreeBoundaryTests(unittest.TestCase):
             labels=["merged", "reviewed"],
             boundary={
                 "repo_root": "/repo",
-                "branch": "loom/worker",
+                "branch": "torque/worker",
                 "status": "superseded",
                 "recorded_at": "2026-04-07T11:00:00+00:00",
                 "reason": "superseded_by_newer_task",
@@ -354,7 +354,7 @@ class WorktreeBoundaryTests(unittest.TestCase):
             labels=["ready"],
             boundary={
                 "repo_root": "/repo",
-                "branch": "loom/other",
+                "branch": "torque/other",
                 "status": "open",
                 "recorded_at": "2026-04-07T12:00:00+00:00",
             },
@@ -363,7 +363,7 @@ class WorktreeBoundaryTests(unittest.TestCase):
         updated = mark_branch_boundaries_merged(
             [open_task, superseded_task, queued_followup, other_branch],
             repo_root="/repo",
-            branch="loom/worker",
+            branch="torque/worker",
             merge_sha="abc123",
             merged_at="2026-04-07T13:00:00+00:00",
         )
@@ -395,7 +395,7 @@ class WorktreeBoundaryTests(unittest.TestCase):
             boundary={
                 "version": "1",
                 "repo_root": "/repo",
-                "branch": "loom/worker",
+                "branch": "torque/worker",
                 "base_branch": "main",
                 "commit_sha": "abc123",
                 "kind": "checkpoint",
@@ -411,7 +411,7 @@ class WorktreeBoundaryTests(unittest.TestCase):
         updated = mark_branch_boundaries_merged(
             [root, review, unrelated],
             repo_root="/repo",
-            branch="loom/worker",
+            branch="torque/worker",
             merge_sha="deadbeef",
             merged_at="2026-04-07T11:00:00+00:00",
         )
@@ -423,7 +423,7 @@ class WorktreeBoundaryTests(unittest.TestCase):
         self.assertEqual(root.labels, ["ready", "merged"])
         self.assertEqual(root.worktree_boundary["status"], "merged")
         self.assertEqual(root.worktree_boundary["repo_root"], "/repo")
-        self.assertEqual(root.worktree_boundary["branch"], "loom/worker")
+        self.assertEqual(root.worktree_boundary["branch"], "torque/worker")
         self.assertEqual(root.worktree_boundary["merge_commit_sha"], "deadbeef")
         self.assertEqual(
             root.worktree_boundary["merged_at"],

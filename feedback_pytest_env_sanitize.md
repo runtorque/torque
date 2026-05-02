@@ -1,18 +1,18 @@
 # feedback_pytest_env_sanitize
 
-Workers/engineers launched from standalone Loom inherit `LOOM_*` runtime
+Workers/engineers launched from standalone Torque inherit `TORQUE_*` runtime
 variables. Those vars leak into Python test processes and can retarget config
 paths, desktop defaults, or scoped CLI/MCP identity checks.
 
-As of LOOM:298, `make test` self-sanitizes inherited `LOOM_*` variables before
-running the suite; manual `env -u LOOM_* ...` prefixes are no longer required.
+As of TORQUE:298, `make test` self-sanitizes inherited `TORQUE_*` variables before
+running the suite; manual `env -u TORQUE_* ...` prefixes are no longer required.
 
-Audit notes for LOOM:298:
-- Observed failures: `LOOM_DATA_DIR`, `LOOM_DESKTOP_PROFILE`,
-  `LOOM_DESKTOP_PORT`, and `LOOM_DESKTOP_DATA_DIR`.
+Audit notes for TORQUE:298:
+- Observed failures: `TORQUE_DATA_DIR`, `TORQUE_DESKTOP_PROFILE`,
+  `TORQUE_DESKTOP_PORT`, and `TORQUE_DESKTOP_DATA_DIR`.
 - Also test-sensitive or identity/runtime-affecting:
-  `LOOM_PORT`, `LOOM_PROFILE`, `LOOM_STANDALONE`, `LOOM_DEFAULT_CMD`,
-  `LOOM_BIND_ALL`/`LOOM_BIND_HOST`, `LOOM_CELL_ID`, `LOOM_ENGINEER_ID`,
-  `LOOM_ARCHITECT_ID`, and `LOOM_DESKTOP_*` / standalone PTY variants.
-- The Makefile intentionally strips every inherited `LOOM_*` var for tests so
+  `TORQUE_PORT`, `TORQUE_PROFILE`, `TORQUE_STANDALONE`, `TORQUE_DEFAULT_CMD`,
+  `TORQUE_BIND_ALL`/`TORQUE_BIND_HOST`, `TORQUE_CELL_ID`, `TORQUE_ENGINEER_ID`,
+  `TORQUE_ARCHITECT_ID`, and `TORQUE_DESKTOP_*` / standalone PTY variants.
+- The Makefile intentionally strips every inherited `TORQUE_*` var for tests so
   future runtime env additions do not reintroduce this class of failure.

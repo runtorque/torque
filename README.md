@@ -1,19 +1,19 @@
-# Loom
+# Torque
 
-Loom is an iTerm2-first agent orchestration workspace for people who already live in the terminal. It gives you structured groups, managed agent sessions, companion terminals, worktrees, a task board, action-driven dispatch, and a semi-autonomous engineer, all backed by a local Python daemon and a web UI that runs in the Toolbelt, a browser, or a native desktop shell.
+Torque is an iTerm2-first agent orchestration workspace for people who already live in the terminal. It gives you structured groups, managed agent sessions, companion terminals, worktrees, a task board, action-driven dispatch, and a semi-autonomous engineer, all backed by a local Python daemon and a web UI that runs in the Toolbelt, a browser, or a native desktop shell.
 
-## What Loom Covers
+## What Torque Covers
 
 - Organize work into groups, agents, and terminals
 - Dispatch tasks from reusable actions and templates
 - Run isolated git worktrees per agent
 - Track work on a built-in task board with pipelines and human-review gates
 - Orchestrate work with a per-group engineer agent
-- Control Loom from the `loom` CLI
+- Control Torque from the `torque` CLI
 
 ## Start Here
 
-- New to Loom? Start with the [Getting Started guide](docs/getting-started.md).
+- New to Torque? Start with the [Getting Started guide](docs/getting-started.md).
 - Want the full docs map? Open the [documentation home](docs/index.md).
 - Need a quick mental model? Read [Concepts](docs/concepts.md).
 
@@ -21,11 +21,11 @@ Loom is an iTerm2-first agent orchestration workspace for people who already liv
 
 ### Set up and learn the basics
 
-- [Getting Started](docs/getting-started.md) — install Loom, run it, and create your first group, agent, and terminal
+- [Getting Started](docs/getting-started.md) — install Torque, run it, and create your first group, agent, and terminal
 - [Concepts](docs/concepts.md) — plain-language overview of groups, agents, terminals, and actions
 - [Agents & Sessions](docs/agents-and-sessions.md) — understand providers, boot commands, prompts, worktrees, resume, and runtime integration
 - [Group Settings](docs/group-settings.md) — configure defaults, overrides, windows, and session behavior
-- [Keyboard Shortcuts](docs/keyboard-shortcuts.md) — navigate Loom quickly from the terminal
+- [Keyboard Shortcuts](docs/keyboard-shortcuts.md) — navigate Torque quickly from the terminal
 
 ### Run agent workflows
 
@@ -34,12 +34,12 @@ Loom is an iTerm2-first agent orchestration workspace for people who already liv
 - [Task Lifecycle](docs/task-lifecycle.md) — understand how tasks move from backlog to completion
 - [Actions & Templates](docs/actions.md) — define reusable prompts, variables, and pipelines
 - [Agent Templates](docs/agent-templates.md) — save reusable agent launch presets
-- [Engineer](docs/engineer.md) — use Loom's orchestrator agent for semi-autonomous task management
+- [Engineer](docs/engineer.md) — use Torque's orchestrator agent for semi-autonomous task management
 - [Worktrees](docs/worktrees.md) — isolate agent changes in separate git worktrees
 
 ### Reference and project docs
 
-- [CLI Reference](docs/cli.md) — script Loom from the command line
+- [CLI Reference](docs/cli.md) — script Torque from the command line
 - [Testing](docs/testing.md) — regression matrix, suite structure, and how to run coverage locally
 - [Reference Guide](docs/reference-guide.md) — grouped operator reference for commands, shortcuts, settings, logs, and runtime paths
 - [Troubleshooting](docs/troubleshooting.md) — symptom-first recovery steps for startup, sessions, worktrees, merge issues, and stale state
@@ -58,9 +58,9 @@ make cli
 
 Then in iTerm2:
 
-1. Open **Scripts -> loom**
+1. Open **Scripts -> torque**
 2. Open **View -> Show Toolbelt**
-3. Enable **Loom** from the Toolbelt gear menu
+3. Enable **Torque** from the Toolbelt gear menu
 
 For a wider browser view alongside the Toolbelt:
 
@@ -79,14 +79,14 @@ For the native desktop shell:
 
 ```bash
 make desktop-deps   # installs pywebview into the iTerm2-managed Python runtime
-loom desktop        # spawn a desktop-owned standalone server on port 18933
+torque desktop        # spawn a desktop-owned standalone server on port 18933
 ```
 
 To attach the native window to an existing matching standalone server instead of
 spawning a child server:
 
 ```bash
-loom desktop --attach --profile desktop --port 18933
+torque desktop --attach --profile desktop --port 18933
 ```
 
 Desktop mode intentionally defaults to its own runtime values so it does not
@@ -94,15 +94,15 @@ accidentally attach to the live Toolbelt daemon:
 
 - profile: `desktop`
 - port: `18933`
-- data dir: `~/.loom/profiles/desktop`
+- data dir: `~/.torque/profiles/desktop`
 
 `pywebview` must be installed in the Python runtime that is actually launching
-the desktop shell. On a normal Loom install, that means the iTerm2-managed
+the desktop shell. On a normal Torque install, that means the iTerm2-managed
 runtime installed by `make desktop-deps`, not necessarily the `python3` on your
 current shell `PATH`.
 
 > Current operator support is macOS + iTerm2. The native shell was validated on
-> macOS. Linux and Windows remain follow-up targets because Loom still depends on
+> macOS. Linux and Windows remain follow-up targets because Torque still depends on
 > iTerm2 integration even though `pywebview` itself is cross-platform.
 
 ## Documentation
@@ -123,7 +123,7 @@ The docs are organized by job:
 
 ## Architecture
 
-Loom has two main parts:
+Torque has two main parts:
 
 - A Python daemon that manages state, sessions, worktrees, actions, schedules, MCP endpoints, and the HTTP/WebSocket API
 - A lightweight HTML/CSS/JS frontend served into the iTerm2 Toolbelt or a browser window
@@ -134,9 +134,9 @@ For the more detailed system view, see [docs/architecture.md](docs/architecture.
 
 ## Development Notes
 
-- Runtime entry point: [`loom.py`](loom.py)
-- Core package: [`loom/`](loom)
-- CLI: [`bin/loom`](bin/loom)
+- Runtime entry point: [`torque.py`](torque.py)
+- Core package: [`torque/`](torque)
+- CLI: [`bin/torque`](bin/torque)
 - Docs site config: [`mkdocs.yml`](mkdocs.yml)
 - Regression suite entrypoint: `make test`
 

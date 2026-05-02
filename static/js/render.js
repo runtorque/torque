@@ -3,7 +3,7 @@
 if (typeof taskIsEngineerMessageFollowup !== 'function') {
   var taskIsEngineerMessageFollowup = function(task) {
     var labels = (task && Array.isArray(task.labels)) ? task.labels : [];
-    return labels.indexOf('loom:engineer-message') >= 0;
+    return labels.indexOf('torque:engineer-message') >= 0;
   };
 }
 
@@ -229,10 +229,10 @@ function _agentFocusResizeEnd() {
 }
 
 var _activeGroupSurfaceStateByGroup = {};
-var _activeGroupStoragePrefix = 'loom.active_group';
+var _activeGroupStoragePrefix = 'torque.active_group';
 var _pendingActiveGroup = '';
 
-function _loomUiMode() {
+function _torqueUiMode() {
   const runtime = (state && state.runtime) || {};
   const explicit = String(runtime.mode || '').trim().toLowerCase();
   if (explicit) return explicit;
@@ -242,7 +242,7 @@ function _loomUiMode() {
 }
 
 function _singleGroupModeEnabled() {
-  const mode = _loomUiMode();
+  const mode = _torqueUiMode();
   return mode === 'standalone' || mode === 'desktop';
 }
 
@@ -989,7 +989,7 @@ function renderActivePanel() {
 
 function renderInvalidatedSurfaces(flags) {
   if (!flags) return;
-  // LOOM:236 v10: when the main flag fires, skip render()'s trailing
+  // TORQUE:236 v10: when the main flag fires, skip render()'s trailing
   // agent-panel refresh — the surfaces loop below already dispatches
   // `_renderSurface('engineer')` if the engineer flag is independently
   // set. This eliminates the redundant in-place panel refresh that
@@ -1095,7 +1095,7 @@ function _restoreSurfaceState(root, snapshot, opts) {
   // Skip the value/checked re-assignment when the element already holds the
   // captured value. Setting `el.value = ...` on a focused textarea resets the
   // browser's caret / selection range and briefly kills the visible cursor;
-  // under firehose render rates (LOOM:264) this stops the cursor from
+  // under firehose render rates (TORQUE:264) this stops the cursor from
   // rendering at all even though keystrokes still route to the element.
   // Idempotent renders that preserve DOM identity hit this path repeatedly.
   // We still re-assert focus + selection below — those are no-ops on
@@ -1551,7 +1551,7 @@ function _worktreeBranchShortName(branch) {
   if (!raw) return '';
   let text = raw;
   const parts = raw.split('/').filter(Boolean);
-  if (parts[0] === 'loom') {
+  if (parts[0] === 'torque') {
     if (parts.length >= 3) text = parts.slice(2).join('/');
     else if (parts.length >= 2) text = parts.slice(1).join('/');
   }
@@ -1647,7 +1647,7 @@ function _architectPendingAskTasks(architect) {
     const task = state.board_tasks[taskId];
     if (!task) continue;
     const labels = Array.isArray(task.labels) ? task.labels : [];
-    if (labels.indexOf('loom:human') < 0) continue;
+    if (labels.indexOf('torque:human') < 0) continue;
     if (String(task.lane || '') === 'Done') continue;
     const replyId = String(task.reply_agent_id || '').trim();
     const creatorId = String(task.created_by_architect_id || '').trim();
@@ -2473,36 +2473,36 @@ function _renderAgentGridAndFocus(main, gridHtml, opts) {
   const renderFocus = opts.renderFocus !== false;
   const focusHtml = renderFocus
     ? _renderAgentFocusPanelHtml()
-    : (main._loomLastFocusHtml || _renderAgentFocusPanelHtml());
+    : (main._torqueLastFocusHtml || _renderAgentFocusPanelHtml());
   const combined = _agentFocusShellHtml(gridHtml, focusHtml);
-  const gridChanged = main._loomLastGridHtml !== gridHtml;
+  const gridChanged = main._torqueLastGridHtml !== gridHtml;
   const parts = _agentFocusSplitParts(main);
-  const shellMissing = !main._loomHasAgentSplitShell;
+  const shellMissing = !main._torqueHasAgentSplitShell;
   if (shellMissing || (gridChanged && !parts)) {
     main.innerHTML = combined;
-    main._loomHasAgentSplitShell = true;
-    main._loomLastGridHtml = gridHtml;
-    main._loomLastFocusHtml = focusHtml;
-    main._loomLastHtml = combined;
+    main._torqueHasAgentSplitShell = true;
+    main._torqueLastGridHtml = gridHtml;
+    main._torqueLastFocusHtml = focusHtml;
+    main._torqueLastHtml = combined;
     _agentFocusApplyPersistedSplit();
     return { mainHtmlChanged: true, focusHtmlChanged: renderFocus };
   }
   if (gridChanged) {
     parts.grid.innerHTML = gridHtml || '';
-    main._loomLastGridHtml = gridHtml;
+    main._torqueLastGridHtml = gridHtml;
     const focusChanged = renderFocus
       ? renderAgentFocusPanel({ main, focusHtml })
       : false;
-    if (!renderFocus) main._loomLastFocusHtml = focusHtml;
-    main._loomLastHtml = _agentFocusShellHtml(
+    if (!renderFocus) main._torqueLastFocusHtml = focusHtml;
+    main._torqueLastHtml = _agentFocusShellHtml(
       gridHtml,
-      main._loomLastFocusHtml || focusHtml,
+      main._torqueLastFocusHtml || focusHtml,
     );
     return { mainHtmlChanged: true, focusHtmlChanged: focusChanged };
   }
-  main._loomLastHtml = combined;
+  main._torqueLastHtml = combined;
   if (renderFocus) renderAgentFocusPanel({ main, focusHtml });
-  return { mainHtmlChanged: false, focusHtmlChanged: renderFocus && main._loomLastFocusHtml !== focusHtml };
+  return { mainHtmlChanged: false, focusHtmlChanged: renderFocus && main._torqueLastFocusHtml !== focusHtml };
 }
 
 function renderAgentFocusPanel(opts) {
@@ -2513,30 +2513,30 @@ function renderAgentFocusPanel(opts) {
   const focusHtml = Object.prototype.hasOwnProperty.call(opts, 'focusHtml')
     ? opts.focusHtml
     : _renderAgentFocusPanelHtml();
-  if (main._loomLastFocusHtml === focusHtml) return false;
+  if (main._torqueLastFocusHtml === focusHtml) return false;
   const parts = _agentFocusSplitParts(main);
   if (!parts) {
-    const gridHtml = main._loomLastGridHtml || '';
+    const gridHtml = main._torqueLastGridHtml || '';
     main.innerHTML = _agentFocusShellHtml(gridHtml, focusHtml);
-    main._loomHasAgentSplitShell = true;
-    main._loomLastFocusHtml = focusHtml;
-    main._loomLastHtml = main.innerHTML;
+    main._torqueHasAgentSplitShell = true;
+    main._torqueLastFocusHtml = focusHtml;
+    main._torqueLastHtml = main.innerHTML;
     _agentFocusApplyPersistedSplit();
     _restoreActiveDetailInputFocus();
     return true;
   }
-  if (parts.focusScroll._loomLastHtml === focusHtml || main._loomLastFocusHtml === focusHtml) {
-    parts.focusScroll._loomLastHtml = focusHtml;
-    main._loomLastFocusHtml = focusHtml;
+  if (parts.focusScroll._torqueLastHtml === focusHtml || main._torqueLastFocusHtml === focusHtml) {
+    parts.focusScroll._torqueLastHtml = focusHtml;
+    main._torqueLastFocusHtml = focusHtml;
     return false;
   }
   const panelState = typeof _captureSurfaceState === 'function'
     ? _captureSurfaceState(parts.focusScroll, { scrollSelectors: [':root', '.mcp-log', '.detail-decisions-log'] })
     : null;
   parts.focusScroll.innerHTML = focusHtml;
-  parts.focusScroll._loomLastHtml = focusHtml;
-  main._loomLastFocusHtml = focusHtml;
-  main._loomLastHtml = _agentFocusShellHtml(main._loomLastGridHtml || '', focusHtml);
+  parts.focusScroll._torqueLastHtml = focusHtml;
+  main._torqueLastFocusHtml = focusHtml;
+  main._torqueLastHtml = _agentFocusShellHtml(main._torqueLastGridHtml || '', focusHtml);
   if (typeof _restoreSurfaceState === 'function') {
     _restoreSurfaceState(parts.focusScroll, panelState, { scrollSelectors: [':root', '.mcp-log', '.detail-decisions-log'] });
     _restoreActiveDetailInputFocus();
@@ -2570,7 +2570,7 @@ function refreshSelectedAgentFocus(prevSelectedId) {
 
 function render(opts) {
   if (typeof renderGroupSwitcher === 'function') renderGroupSwitcher();
-  if (_loomUiMode() === 'toolbelt') {
+  if (_torqueUiMode() === 'toolbelt') {
     return _renderMainGrid(opts, { singleGroup: false });
   }
   return _renderMainGrid(opts, { singleGroup: _singleGroupModeEnabled() });
@@ -2578,7 +2578,7 @@ function render(opts) {
 
 function _renderMainGrid(opts, renderMode) {
   const main = document.getElementById('main');
-  // LOOM:236 v10: when render() is invoked from a delta-driven invalidation
+  // TORQUE:236 v10: when render() is invoked from a delta-driven invalidation
   // and only the main surface was flagged (not engineer), skip the trailing
   // agent-panel refresh — the surfaces dispatch loop already calls
   // `_renderSurface('engineer')` independently when the engineer flag is
@@ -2777,17 +2777,17 @@ function _renderMainGrid(opts, renderMode) {
     }
   }
 
-  // LOOM:264 follow-up: byte-equality memoize the agent grid clobber. Each
+  // TORQUE:264 follow-up: byte-equality memoize the agent grid clobber. Each
   // delta op that flips `flags.main` (e.g. `agent_upsert` on every activity
   // tick) calls render(); the unconditional `main.innerHTML = html` blast
   // destroys + recreates every agent card on every tick, which kills the
   // user-visible :hover state on `.agent-card-tooltip` pseudo-elements
   // (style.css:1142) — produces fast tooltip flicker while a card is being
-  // hovered. Same `_loomLastHtml` pattern as the topbar/tabs cache from
+  // hovered. Same `_torqueLastHtml` pattern as the topbar/tabs cache from
   // `06611b8`. When the html is unchanged the FLIP animation + surface
   // restore are no-ops on identical DOM, so skip them too.
-  // The effective grid clobber is still guarded like `main._loomLastHtml !== html`;
-  // after a successful split write the aggregate cache is updated like `main._loomLastHtml = html`.
+  // The effective grid clobber is still guarded like `main._torqueLastHtml !== html`;
+  // after a successful split write the aggregate cache is updated like `main._torqueLastHtml = html`.
   // The split stores the grid fragment separately so focus-only refreshes do not rewrite it.
   const mainRenderResult = _renderAgentGridAndFocus(main, html, {
     renderFocus: !(opts && opts.skipFocusRefresh),
@@ -2821,7 +2821,7 @@ function _renderMainGrid(opts, renderMode) {
   if (!_skipPanelRefresh && typeof renderAgentPanel === 'function') {
     const surfaces = _currentPanelSurfaces();
     if (surfaces.includes('engineer')) {
-      // LOOM:236 v9: route through surgical-first instead of full
+      // TORQUE:236 v9: route through surgical-first instead of full
       // `renderAgentPanel()` clobber.
       if (typeof _agentPanelRefreshCurrentTab === 'function'
           && _agentPanelRefreshCurrentTab()) {
@@ -3859,7 +3859,7 @@ function renderAgentDetails(a) {
 
   /* Branch — worktree branch takes priority, then regular git branch */
   if (a.worktree_branch) {
-    const branch = a.worktree_branch.replace(/^loom\//, '');
+    const branch = a.worktree_branch.replace(/^torque\//, '');
     let branchExtra = '';
     if (a.worktree_merged) {
       const preservedDiff = _preservedMergeDiffForAgent(a);

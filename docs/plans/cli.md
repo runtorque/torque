@@ -2,29 +2,29 @@
 
 **Roadmap phase**: 3 — CLI & Remote Control
 **Status**: Planned
-**Goal**: Make Loom scriptable from the terminal. A `loom` CLI talks to the daemon over HTTP, enabling shell scripts, automation, and other agents to control Loom programmatically.
+**Goal**: Make Torque scriptable from the terminal. A `torque` CLI talks to the daemon over HTTP, enabling shell scripts, automation, and other agents to control Torque programmatically.
 
 ---
 
 ## The Problem
 
-Loom is currently only controllable from the Toolbelt webview. There's no way to:
+Torque is currently only controllable from the Toolbelt webview. There's no way to:
 
-- Script agent creation from a shell (`for issue in ...; do loom agent new ...`)
+- Script agent creation from a shell (`for issue in ...; do torque agent new ...`)
 - Send a command to an agent from another terminal
 - Check agent status from a CI pipeline or cron job
-- Compose Loom with other tools (pipes, `xargs`, `jq`, `watch`)
-- Let an agent inside Loom spawn sibling agents (self-scaling)
+- Compose Torque with other tools (pipes, `xargs`, `jq`, `watch`)
+- Let an agent inside Torque spawn sibling agents (self-scaling)
 
 The daemon already has all the command logic — it just only accepts commands over WebSocket from the webview. We need a second door.
 
 ## Design Principles
 
 1. **REST for commands, WS for streams** — CLI commands are request-response. Add a `POST /api/cmd` HTTP endpoint that accepts the same `{"cmd": ...}` payloads as the WS handler and returns JSON. No WebSocket needed in the CLI for most operations.
-2. **Single file, stdlib only** — The CLI is one Python script (`loom`) using only `urllib`, `json`, `sys`, `argparse`. No pip install, no venv. Runs on macOS system Python 3.
+2. **Single file, stdlib only** — The CLI is one Python script (`torque`) using only `urllib`, `json`, `sys`, `argparse`. No pip install, no venv. Runs on macOS system Python 3.
 3. **Same command vocabulary** — The REST endpoint dispatches through the same `handle_command` function as the WS handler. One code path, zero drift.
 4. **Machine-friendly output** — Default output is human-readable tables. `--json` flag on any command returns raw JSON for piping.
-5. **Progressive disclosure** — `loom status` just works. Power features (filters, JSON output, send-text) are there when needed but don't clutter the basics.
+5. **Progressive disclosure** — `torque status` just works. Power features (filters, JSON output, send-text) are there when needed but don't clutter the basics.
 
 ---
 
@@ -32,7 +32,7 @@ The daemon already has all the command logic — it just only accepts commands o
 
 ```
 ┌────────────────────────────────┐
-│        loom CLI (Python)       │
+│        torque CLI (Python)       │
 │     single file, stdlib only   │
 │                                │
 │   argparse → HTTP POST /api/cmd│
@@ -41,7 +41,7 @@ The daemon already has all the command logic — it just only accepts commands o
                │ HTTP (localhost:18932)
                ▼
 ┌──────────────────────────────────────┐
-│           Loom Daemon                │
+│           Torque Daemon                │
 │                                      │
 │  /api/cmd  ──→ handle_command()  ◄── /ws
 │  (new)         (existing logic)      (existing)
@@ -142,7 +142,7 @@ For `add_agent` and `add_terminal`: the handler already has the new cell's ID in
 ### Command structure
 
 ```
-loom <noun> <verb> [args] [flags]
+torque <noun> <verb> [args] [flags]
 
 Nouns: status, group, agent, terminal, worktree, send, logs
 ```
@@ -150,44 +150,44 @@ Nouns: status, group, agent, terminal, worktree, send, logs
 ### Full command reference
 
 ```
-loom status                              Show all groups and agents
-loom status -g <group>                   Show agents in a specific group
-loom status <id|name>                    Show detail for one agent
+torque status                              Show all groups and agents
+torque status -g <group>                   Show agents in a specific group
+torque status <id|name>                    Show detail for one agent
 
-loom group add <name>                    Create a group
-loom group remove <name>                 Remove a group (cascade deletes contents)
-loom group rename <old> <new>            Rename a group
-loom group settings <name>               Show group settings
-loom group settings <name> -s key=val    Update a group setting
+torque group add <name>                    Create a group
+torque group remove <name>                 Remove a group (cascade deletes contents)
+torque group rename <old> <new>            Rename a group
+torque group settings <name>               Show group settings
+torque group settings <name> -s key=val    Update a group setting
 
-loom agent add <name> -g <group>         Create an agent in a group
+torque agent add <name> -g <group>         Create an agent in a group
   [-c command] [-d directory]
   [--profile p] [--color #hex]
-loom agent remove <id|name>              Remove agent (cascade deletes children)
-loom agent focus <id|name>               Focus/switch to agent's iTerm2 session
-loom agent relaunch <id|name>            Restart a stopped agent
-loom agent move <id|name> -g <group>     Move agent to different group
-loom agent edit <id|name>                Update agent name or color
+torque agent remove <id|name>              Remove agent (cascade deletes children)
+torque agent focus <id|name>               Focus/switch to agent's iTerm2 session
+torque agent relaunch <id|name>            Restart a stopped agent
+torque agent move <id|name> -g <group>     Move agent to different group
+torque agent edit <id|name>                Update agent name or color
   [--name n] [--color #hex]
 
-loom terminal add <name> -p <parent>     Create child terminal under agent
+torque terminal add <name> -p <parent>     Create child terminal under agent
   [-c command] [-d directory]
   [--profile p] [--color #hex]
-loom terminal remove <id|name>           Remove terminal
-loom terminal reparent <id> -p <parent>  Attach terminal to different agent
-loom terminal reparent <id> --detach     Detach terminal from parent
+torque terminal remove <id|name>           Remove terminal
+torque terminal reparent <id> -p <parent>  Attach terminal to different agent
+torque terminal reparent <id> --detach     Detach terminal from parent
 
-loom send <id|name> <text>               Send text to a session
+torque send <id|name> <text>               Send text to a session
 
-loom worktree create <id|name>           Create worktree for agent
+torque worktree create <id|name>           Create worktree for agent
   [--relaunch]
-loom worktree remove <id|name>           Remove worktree
+torque worktree remove <id|name>           Remove worktree
   [--relaunch]
-loom worktree checkpoint <id|name>       Create checkpoint commit
-loom worktree history <id|name>          Show checkpoint history
-loom worktree rollback <id|name> <sha>   Rollback to checkpoint
+torque worktree checkpoint <id|name>       Create checkpoint commit
+torque worktree history <id|name>          Show checkpoint history
+torque worktree rollback <id|name> <sha>   Rollback to checkpoint
 
-loom logs [-f]                           Tail daemon log (doesn't hit API)
+torque logs [-f]                           Tail daemon log (doesn't hit API)
 
 Global flags:
   --json                                 Output raw JSON
@@ -207,13 +207,13 @@ This resolution happens in a shared `resolve_cell(state, identifier)` helper.
 
 ### Output formatting
 
-**`loom status`** (default, human-readable):
+**`torque status`** (default, human-readable):
 
 ```
 Backend (3 agents)
   ID        Name          Status    Activity         Branch
-  a1b2c3d4  code-agent    running   Editing server   loom/code-agent-a1b2
-  e5f6a7b8  test-agent    idle                       loom/test-agent-e5f6
+  a1b2c3d4  code-agent    running   Editing server   torque/code-agent-a1b2
+  e5f6a7b8  test-agent    idle                       torque/test-agent-e5f6
   c9d0e1f2  review-agent  stopped
 
 Frontend (1 agent)
@@ -221,7 +221,7 @@ Frontend (1 agent)
   11223344  ui-agent      running   Running: npm t
 ```
 
-**`loom status a1b2c3d4`** (single agent detail):
+**`torque status a1b2c3d4`** (single agent detail):
 
 ```
 Agent: code-agent (a1b2c3d4)
@@ -230,8 +230,8 @@ Agent: code-agent (a1b2c3d4)
   Activity:   Editing server.py
   Process:    claude
   Directory:  /Users/me/project
-  Branch:     loom/code-agent-a1b2
-  Worktree:   /Users/me/project/.loom/worktrees/code-agent-a1b2
+  Branch:     torque/code-agent-a1b2
+  Worktree:   /Users/me/project/.torque/worktrees/code-agent-a1b2
   Diff:       +42 -13 (3 files)
   Tokens:     12,340 in / 8,210 out
   Children:
@@ -248,12 +248,12 @@ Agent: code-agent (a1b2c3d4)
 ### Error handling
 
 ```
-$ loom agent focus nonexistent
+$ torque agent focus nonexistent
 Error: No agent matching "nonexistent"
 
-$ loom status
-Error: Cannot connect to Loom daemon on localhost:18932
-Is it running? Start with: make run (or Scripts menu → loom)
+$ torque status
+Error: Cannot connect to Torque daemon on localhost:18932
+Is it running? Start with: make run (or Scripts menu → torque)
 ```
 
 ---
@@ -262,7 +262,7 @@ Is it running? Start with: make run (or Scripts menu → loom)
 
 ### Step 1: Refactor `handle_command` to return results
 
-**File**: `loom/server.py`
+**File**: `torque/server.py`
 
 - Change `handle_command(data, ws)` signature to `handle_command(data)` → returns `dict | None`
 - Replace `await ws.send_str(json.dumps({...}))` with `return {...}` for direct-response commands (get_config, get_group_settings, worktree_history)
@@ -272,7 +272,7 @@ Is it running? Start with: make run (or Scripts menu → loom)
 
 ### Step 2: Add `POST /api/cmd` endpoint
 
-**File**: `loom/server.py`
+**File**: `torque/server.py`
 
 - Add `handle_api_cmd` async handler
 - Register route: `app_server.router.add_post("/api/cmd", handle_api_cmd)`
@@ -281,12 +281,12 @@ Is it running? Start with: make run (or Scripts menu → loom)
 
 ### Step 3: Write the CLI script
 
-**File**: `bin/loom` (executable, `#!/usr/bin/env python3`)
+**File**: `bin/torque` (executable, `#!/usr/bin/env python3`)
 
 Structure:
 
 ```
-bin/loom
+bin/torque
 ├── argparse setup (subparsers for each noun/verb)
 ├── api_call(cmd, **kwargs) → dict  (urllib POST to /api/cmd)
 ├── resolve_cell(state, identifier) → cell dict
@@ -298,14 +298,14 @@ bin/loom
 
 No classes needed. Flat functions, ~250-300 lines.
 
-### Step 4: Add `loom logs` command
+### Step 4: Add `torque logs` command
 
 This is the only command that doesn't hit the API — it tails the log file directly.
 
 ```python
 def cmd_logs(args):
     log_path = os.path.expanduser(
-        "~/Library/Application Support/iTerm2/Scripts/loom/loom/loom.log")
+        "~/Library/Application Support/iTerm2/Scripts/torque/torque/torque.log")
     if args.follow:
         os.execvp("tail", ["tail", "-f", log_path])
     else:
@@ -315,27 +315,27 @@ def cmd_logs(args):
 ### Step 5: Makefile target
 
 ```makefile
-## cli: Install the loom CLI to /usr/local/bin
+## cli: Install the torque CLI to /usr/local/bin
 cli:
-	@chmod +x bin/loom
-	@ln -sf "$(CURDIR)/bin/loom" /usr/local/bin/loom
-	@echo "Installed: loom → $(CURDIR)/bin/loom"
+	@chmod +x bin/torque
+	@ln -sf "$(CURDIR)/bin/torque" /usr/local/bin/torque
+	@echo "Installed: torque → $(CURDIR)/bin/torque"
 ```
 
 Also update `make install` to copy the CLI alongside the daemon files.
 
-### Step 6: `loom task` shortcut (stretch)
+### Step 6: `torque task` shortcut (stretch)
 
 A convenience command that combines multiple operations:
 
 ```
-loom task "Fix the login bug" -g Backend
+torque task "Fix the login bug" -g Backend
 ```
 
 Equivalent to:
-1. `loom agent add "Fix the login bug" -g Backend`
+1. `torque agent add "Fix the login bug" -g Backend`
 2. If group has worktrees enabled, waits for worktree creation
-3. `loom send <id> "Fix the login bug"`
+3. `torque send <id> "Fix the login bug"`
 
 This is a CLI-only composite — the server doesn't need a new command.
 
@@ -343,11 +343,11 @@ This is a CLI-only composite — the server doesn't need a new command.
 
 ## What We're NOT Building (Yet)
 
-- **WebSocket streaming in the CLI** — `loom watch` or `loom status --follow` would need a WS client. Defer to a later iteration. For now, `watch loom status` achieves the same thing.
+- **WebSocket streaming in the CLI** — `torque watch` or `torque status --follow` would need a WS client. Defer to a later iteration. For now, `watch torque status` achieves the same thing.
 - **Remote server mode** — The REST endpoint only binds to `127.0.0.1`. Network exposure, auth, and TLS are Phase 3 follow-ups per the roadmap.
 - **MCP server bridge** — Separate project that wraps the same REST API. Roadmap Phase 3 follow-up.
 - **Shell completions** — Nice to have, but not in v1. The command set is small enough to learn.
-- **Config file** — `--port` flag is sufficient for now. A `~/.loomrc` is premature.
+- **Config file** — `--port` flag is sufficient for now. A `~/.torquerc` is premature.
 
 ---
 
@@ -355,7 +355,7 @@ This is a CLI-only composite — the server doesn't need a new command.
 
 | File | Change |
 |---|---|
-| `loom/server.py` | Refactor `handle_command` return values, add `/api/cmd` route |
-| `bin/loom` | New file — CLI script (~300 lines) |
+| `torque/server.py` | Refactor `handle_command` return values, add `/api/cmd` route |
+| `bin/torque` | New file — CLI script (~300 lines) |
 | `Makefile` | Add `cli` target |
 | `docs/roadmap.md` | Update Phase 3 status |

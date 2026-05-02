@@ -2,15 +2,15 @@
 
 **Roadmap phase**: 5 — Task & Ticketing Integration
 **Status**: Implemented
-**Goal**: Add a built-in Kanban board to Loom's toolbelt so users can track tasks alongside their agents. The board lives in a collapsible bottom panel with a taskbar — an extensible dock for "panel apps" where the Kanban board is the first one.
+**Goal**: Add a built-in Kanban board to Torque's toolbelt so users can track tasks alongside their agents. The board lives in a collapsible bottom panel with a taskbar — an extensible dock for "panel apps" where the Kanban board is the first one.
 
 ---
 
 ## The Problem
 
-Loom manages agents and terminals but has no concept of _what work_ those agents are doing. Users track tasks externally (Linear, Jira, Notion, sticky notes) and manually coordinate between the task tracker and Loom. There's no way to see "what's in the backlog" and "which agent is working on what" in the same view.
+Torque manages agents and terminals but has no concept of _what work_ those agents are doing. Users track tasks externally (Linear, Jira, Notion, sticky notes) and manually coordinate between the task tracker and Torque. There's no way to see "what's in the backlog" and "which agent is working on what" in the same view.
 
-The goal is a lightweight, in-Loom task board that:
+The goal is a lightweight, in-Torque task board that:
 - Gives a quick overview of work status without leaving iTerm2
 - Can later sync with external trackers (Jira, Linear, GitHub Issues)
 - Links tasks to agents so you can see "Agent X is working on Task Y"
@@ -29,7 +29,7 @@ The goal is a lightweight, in-Loom task board that:
 
 ```
 ┌─────────────────────────────────┐
-│         LOOM TOOLBELT           │
+│         TORQUE TOOLBELT           │
 │                                 │
 │  ┌───────────────────────────┐  │
 │  │       Groups / Agents      │  │
@@ -75,7 +75,7 @@ User action (add task, move card, rename lane)
 
 ```
 ┌─────────────┐     ┌──────────────────┐     ┌────────────────┐
-│ Loom Board  │ ←── │ Provider Adapter  │ ←── │ External API   │
+│ Torque Board  │ ←── │ Provider Adapter  │ ←── │ External API   │
 │ (MatrixState)│ ──► │ (sync layer)     │ ──► │ (Jira/Linear)  │
 └─────────────┘     └──────────────────┘     └────────────────┘
 
@@ -294,7 +294,7 @@ These bindings activate only when the bottom panel is focused. The existing grou
 ## Provider Interface (not implemented, design only)
 
 ```python
-# loom/providers/base.py
+# torque/providers/base.py
 
 class TaskProvider(ABC):
     """Base class for external task providers."""
@@ -343,7 +343,7 @@ This is design-only. No provider code ships in v1.
 
 ## Implementation Steps
 
-### Step 1: Data model (`loom/state.py`)
+### Step 1: Data model (`torque/state.py`)
 
 - Add `BoardTask` dataclass
 - Add `board_lanes` and `board_tasks` fields to `MatrixState`
@@ -361,7 +361,7 @@ This is design-only. No provider code ships in v1.
 - Update `to_dict()` to include board state
 - Update `load()` to deserialize board state (with defaults for missing keys)
 
-### Step 2: Server commands (`loom/server.py`)
+### Step 2: Server commands (`torque/server.py`)
 
 - Add `board_*` command handlers in `handle_command()`
 - Each handler: validate input → call `state.board_*()` → `await state.broadcast()`
@@ -413,13 +413,13 @@ New file — the board "panel app":
 - Agent details panel: show linked task (if any) with a small badge
 - When agent is removed: unlink from any tasks (don't delete the task)
 
-### Step 8: CLI commands (`bin/loom`)
+### Step 8: CLI commands (`bin/torque`)
 
-- `loom board` / `loom board list` — show all tasks grouped by lane
-- `loom board add <title> [--lane LANE]` — add task
-- `loom board move <id-or-title> --lane LANE` — move task
-- `loom board rm <id-or-title>` — remove task
-- `loom board lanes` — list lanes
+- `torque board` / `torque board list` — show all tasks grouped by lane
+- `torque board add <title> [--lane LANE]` — add task
+- `torque board move <id-or-title> --lane LANE` — move task
+- `torque board rm <id-or-title>` — remove task
+- `torque board lanes` — list lanes
 
 ---
 
@@ -440,13 +440,13 @@ New file — the board "panel app":
 
 | File | Change |
 |---|---|
-| `loom/state.py` | Add `BoardTask` dataclass, board fields + methods on `MatrixState` |
-| `loom/server.py` | Add `board_*` command handlers |
+| `torque/state.py` | Add `BoardTask` dataclass, board fields + methods on `MatrixState` |
+| `torque/server.py` | Add `board_*` command handlers |
 | `webview.html` | Add `#bottom-panel`, `#taskbar` containers |
 | `static/style.css` | Taskbar, bottom panel, lane tabs, card styles |
 | `static/js/board.js` | **New** — board panel app (render, interactions, drag) |
 | `static/js/main.js` | Panel toggle logic, `K` shortcut, render integration |
 | `static/js/ws.js` | Ensure board state flows through (already handled by `state = msg`) |
 | `static/js/render.js` | Call `renderBoard()` after main render when panel is open |
-| `bin/loom` | Add `board` subcommand |
+| `bin/torque` | Add `board` subcommand |
 | `docs/roadmap.md` | Update Phase 5 status |

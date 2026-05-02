@@ -1,6 +1,6 @@
 # Plans Archive
 
-This section is the design archive for Loom. These pages are useful when you want implementation history, design rationale, or a deeper explanation of why a feature works the way it does today.
+This section is the design archive for Torque. These pages are useful when you want implementation history, design rationale, or a deeper explanation of why a feature works the way it does today.
 
 They are not the primary user-facing docs. For day-to-day usage, start from [Getting Started](../getting-started.md), [Sessions](../sessions.md), [Task Board](../board.md), or [CLI Reference](../cli.md).
 

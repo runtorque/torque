@@ -41,7 +41,7 @@ class _FakeState:
             agent_session_resume=True,
             agent_idle_timeout=5,
             git_worktree=git_worktree,
-            worktree_base_dir=".loom/worktrees",
+            worktree_base_dir=".torque/worktrees",
             worktree_base_branch="",
             worktree_auto_checkpoint=False,
             checkpoint_on_progress=False,
@@ -94,7 +94,7 @@ class _FakeBridge:
     async def get_launch_context(self):
         if self.fail:
             raise RuntimeError("bridge unavailable")
-        terminal_adapter = importlib.import_module("loom.terminal_adapter")
+        terminal_adapter = importlib.import_module("torque.terminal_adapter")
         return terminal_adapter.TerminalLaunchContext(
             current_path=self.current_path,
         )
@@ -128,9 +128,9 @@ class _FakeTemplateManager:
 class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub()
-        self.server_agent_mod = importlib.import_module("loom.server_agent")
+        self.server_agent_mod = importlib.import_module("torque.server_agent")
         self.server_agent_mod = importlib.reload(self.server_agent_mod)
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
 
     async def test_resolve_base_dir_prefers_group_directory(self):
@@ -217,7 +217,7 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
         service = self.server_agent_mod.AgentLaunchService(
             state=_FakeState(
                 agent_directory="/repo",
-                engineer_directory="/repo/.loom/engineer",
+                engineer_directory="/repo/.torque/engineer",
                 engineer_profile="Ops",
                 engineer_shell="fish",
                 engineer_tab_color="none",
@@ -230,7 +230,7 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
 
         resolved = service.resolve_engineer_launch_config("backend")
 
-        self.assertEqual(resolved["directory"], "/repo/.loom/engineer")
+        self.assertEqual(resolved["directory"], "/repo/.torque/engineer")
         self.assertEqual(resolved["profile"], "Ops")
         self.assertEqual(resolved["shell"], "fish")
         self.assertEqual(resolved["tab_color"], "")
@@ -298,7 +298,7 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
         service = self.server_agent_mod.AgentLaunchService(
             state=_FakeState(
                 agent_directory="/repo",
-                architect_directory="/repo/.loom/architect",
+                architect_directory="/repo/.torque/architect",
                 architect_profile="Ops",
                 architect_shell="fish",
                 architect_tab_color="none",
@@ -311,7 +311,7 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
 
         resolved = service.resolve_architect_launch_config("backend")
 
-        self.assertEqual(resolved["directory"], "/repo/.loom/architect")
+        self.assertEqual(resolved["directory"], "/repo/.torque/architect")
         self.assertEqual(resolved["profile"], "Ops")
         self.assertEqual(resolved["shell"], "fish")
         self.assertEqual(resolved["tab_color"], "")
@@ -397,7 +397,7 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
                 "command": "codex",
                 "directory": "/repo",
                 "worktree": True,
-                "worktree_base_dir": ".loom/worktrees",
+                "worktree_base_dir": ".torque/worktrees",
                 "worktree_base_branch": "main",
                 "worktree_name": "Feature API / v2",
             },
@@ -425,7 +425,7 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
                 "command": "codex",
                 "directory": "/tmp/project",
                 "tab_color": "",
-                "env_vars": {"LOOM_ENV": "1"},
+                "env_vars": {"TORQUE_ENV": "1"},
                 "env_file": "/tmp/project/.env",
                 "shell": "zsh",
                 "system_prompt": "Stay focused",
@@ -488,8 +488,8 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
             name="Implementer",
             group="backend",
             cell_type="agent",
-            worktree_path="/repo/.loom/worktrees/impl",
-            worktree_branch="loom/impl",
+            worktree_path="/repo/.torque/worktrees/impl",
+            worktree_branch="torque/impl",
             worktree_repo_root="/repo",
             worktree_base_branch="main",
             worktree_changed_files=["README.md"],
@@ -535,7 +535,7 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             env,
-            {"BASE": "1", "LOOM_ENGINEER_ID": "eng-1"},
+            {"BASE": "1", "TORQUE_ENGINEER_ID": "eng-1"},
         )
 
     def test_runtime_env_vars_for_architect_adds_binding(self):
@@ -551,7 +551,7 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             env,
-            {"BASE": "1", "LOOM_ARCHITECT_ID": "arch-1"},
+            {"BASE": "1", "TORQUE_ARCHITECT_ID": "arch-1"},
         )
 
     def test_mcp_entrypoint_for_cell_uses_kind_specific_entrypoint(self):

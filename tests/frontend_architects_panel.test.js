@@ -25,8 +25,8 @@ function baseSandbox() {
     console,
     Date: { now: () => Date.now() },
     state: {
-      groups: { loom: [] },
-      group_settings: { loom: {} },
+      groups: { torque: [] },
+      group_settings: { torque: {} },
       agents: {},
       board_tasks: {},
       children: {},
@@ -50,8 +50,8 @@ function baseSandbox() {
     },
     _cachedProviders: [],
     _esc(value) { return String(value); },
-    _currentGroup() { return 'loom'; },
-    _focusedGroup() { return 'loom'; },
+    _currentGroup() { return 'torque'; },
+    _focusedGroup() { return 'torque'; },
     _captureSurfaceState(_root, options) {
       return { scrollTop: (options && options.scrollSelectors ? content.scrollTop : 0) };
     },
@@ -94,7 +94,7 @@ function architect(id, name, createdAt) {
     name,
     slug: id,
     kind: 'architect',
-    group: 'loom',
+    group: 'torque',
     cell_type: 'agent',
     status: 'running',
     created_at: createdAt,
@@ -108,7 +108,7 @@ function engineer(id, name, createdAt, hiredByArchitectId = '') {
     slug: id,
     kind: 'engineer',
     hired_by_architect_id: hiredByArchitectId,
-    group: 'loom',
+    group: 'torque',
     cell_type: 'agent',
     status: 'running',
     created_at: createdAt,
@@ -121,7 +121,7 @@ function worker(id, name, ownerEngineerId, createdAt) {
     name,
     slug: id,
     owner_engineer_id: ownerEngineerId,
-    group: 'loom',
+    group: 'torque',
     cell_type: 'agent',
     status: 'running',
     created_at: createdAt,
@@ -135,7 +135,7 @@ test('focused architect panel shows decisions, hired engineers, messages, and ev
 
   context.renderAgentPanel();
 
-  assert.match(panel.innerHTML, /Architect: Productmind · Group: loom/);
+  assert.match(panel.innerHTML, /Architect: Productmind · Group: torque/);
   assert.match(panel.innerHTML, /Decisions/);
   assert.match(panel.innerHTML, /Hired engineers/);
   assert.match(panel.innerHTML, /Messages/);
@@ -154,7 +154,7 @@ test('focused architect hired-engineers tab nests hired engineers and workers on
   context.renderAgentPanel();
   context.agentPanelSelectTab('hired_engineers');
 
-  assert.match(panel.innerHTML, /Architect: Productmind · Group: loom/);
+  assert.match(panel.innerHTML, /Architect: Productmind · Group: torque/);
   assert.doesNotMatch(panel.innerHTML, /<div class="engineers-roster">[\s\S]*agent-panel-hierarchy-breadcrumb[\s\S]*<div class="engineers-roster-list/);
   assert.match(panel.innerHTML, /Hired engineers<\/span><span class="engineers-roster-count">1<\/span>/);
   assert.match(panel.innerHTML, /engineers-roster-header[\s\S]*<\/div><div class="engineers-roster-list/);

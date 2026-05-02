@@ -60,13 +60,13 @@ class ReviewCycleBranchIsolationTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub(include_json_helpers=True)
         _install_iterm2_stub()
-        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
-        self.server_mod = importlib.import_module("loom.server")
+        self.server_mod = importlib.import_module("torque.server")
         self.server_mod = importlib.reload(self.server_mod)
-        self.worktree_mod = importlib.import_module("loom.worktree")
+        self.worktree_mod = importlib.import_module("torque.worktree")
         self.worktree_mod = importlib.reload(self.worktree_mod)
-        self.mcp_engineer_mod = importlib.import_module("loom.mcp_engineer")
+        self.mcp_engineer_mod = importlib.import_module("torque.mcp_engineer")
         self.mcp_engineer_mod = importlib.reload(self.mcp_engineer_mod)
 
     async def asyncSetUp(self):
@@ -74,8 +74,8 @@ class ReviewCycleBranchIsolationTests(unittest.IsolatedAsyncioTestCase):
         self.repo_root = Path(self.tmp.name)
         self.worktree_mgr = self.worktree_mod.WorktreeManager()
         await self._git("init", "-b", "main")
-        await self._git("config", "user.name", "Loom Review Cycle Test")
-        await self._git("config", "user.email", "loom-review@example.com")
+        await self._git("config", "user.name", "Torque Review Cycle Test")
+        await self._git("config", "user.email", "torque-review@example.com")
         (self.repo_root / "README.md").write_text("base\n")
         await self._git("add", "README.md")
         await self._git("commit", "-m", "Initial commit")
@@ -271,8 +271,8 @@ class ReviewCycleBranchIsolationTests(unittest.IsolatedAsyncioTestCase):
             cell_type="agent",
             session_id="impl-session",
             status="running",
-            worktree_path="/repo/.loom/worktrees/impl",
-            worktree_branch="loom/shared",
+            worktree_path="/repo/.torque/worktrees/impl",
+            worktree_branch="torque/shared",
             worktree_repo_root="/repo",
         )
         reviewer = self.state_mod.AgentCell(
@@ -282,8 +282,8 @@ class ReviewCycleBranchIsolationTests(unittest.IsolatedAsyncioTestCase):
             cell_type="agent",
             session_id="review-session",
             status="running",
-            worktree_path="/repo/.loom/worktrees/impl",
-            worktree_branch="loom/shared",
+            worktree_path="/repo/.torque/worktrees/impl",
+            worktree_branch="torque/shared",
             worktree_repo_root="/repo",
         )
         state.agents = {implementer.id: implementer, reviewer.id: reviewer}
@@ -384,8 +384,8 @@ class ReviewCycleBranchIsolationTests(unittest.IsolatedAsyncioTestCase):
             cell_type="agent",
             session_id="review-2-session",
             status="running",
-            worktree_path="/repo/.loom/worktrees/impl",
-            worktree_branch="loom/shared",
+            worktree_path="/repo/.torque/worktrees/impl",
+            worktree_branch="torque/shared",
             worktree_repo_root="/repo",
         )
         state.agents[rereviewer.id] = rereviewer
@@ -414,12 +414,12 @@ class ReviewCycleBranchIsolationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_engineer_merge_passes_force_override_to_worktree_merge(self):
         state = self.state_mod.MatrixState()
-        state.groups["loom"] = []
+        state.groups["torque"] = []
         engineer = self.state_mod.AgentCell(
             id="eng-1",
             name="Engineer",
             slug="engineer",
-            group="loom",
+            group="torque",
             cell_type="agent",
             kind="engineer",
             status="running",
@@ -428,19 +428,19 @@ class ReviewCycleBranchIsolationTests(unittest.IsolatedAsyncioTestCase):
             id="worker-1",
             name="Worker",
             slug="worker",
-            group="loom",
+            group="torque",
             cell_type="agent",
             kind="worker",
             owner_engineer_id=engineer.id,
             created_by_engineer_id=engineer.id,
             status="idle",
             worktree_path="/tmp/worker",
-            worktree_branch="loom/worker",
+            worktree_branch="torque/worker",
             worktree_base_branch="main",
         )
         state.agents[engineer.id] = engineer
         state.agents[worker.id] = worker
-        state.groups["loom"].extend([engineer.id, worker.id])
+        state.groups["torque"].extend([engineer.id, worker.id])
         calls = []
 
         async def handle_command(payload):
@@ -481,12 +481,12 @@ class ReviewCycleBranchIsolationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_engineer_merge_passes_auto_move_override_to_worktree_merge(self):
         state = self.state_mod.MatrixState()
-        state.groups["loom"] = []
+        state.groups["torque"] = []
         engineer = self.state_mod.AgentCell(
             id="eng-1",
             name="Engineer",
             slug="engineer",
-            group="loom",
+            group="torque",
             cell_type="agent",
             kind="engineer",
             status="running",
@@ -495,19 +495,19 @@ class ReviewCycleBranchIsolationTests(unittest.IsolatedAsyncioTestCase):
             id="worker-1",
             name="Worker",
             slug="worker",
-            group="loom",
+            group="torque",
             cell_type="agent",
             kind="worker",
             owner_engineer_id=engineer.id,
             created_by_engineer_id=engineer.id,
             status="idle",
             worktree_path="/tmp/worker",
-            worktree_branch="loom/worker",
+            worktree_branch="torque/worker",
             worktree_base_branch="main",
         )
         state.agents[engineer.id] = engineer
         state.agents[worker.id] = worker
-        state.groups["loom"].extend([engineer.id, worker.id])
+        state.groups["torque"].extend([engineer.id, worker.id])
         calls = []
 
         async def handle_command(payload):

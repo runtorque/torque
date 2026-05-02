@@ -1,4 +1,4 @@
-"""Catalog-level tests for the deliverable contract rollout (LOOM:245).
+"""Catalog-level tests for the deliverable contract rollout (TORQUE:245).
 
 Confirms that:
 - ``oneshot/investigate`` and ``oneshot/audit`` ship a deliverable contract.
@@ -18,12 +18,12 @@ except ModuleNotFoundError:
 
 install_aiohttp_stub()
 
-from loom.actions import ActionManager
-from loom.server_prompts import build_dispatch_postscript
+from torque.actions import ActionManager
+from torque.server_prompts import build_dispatch_postscript
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-CATALOG_DIR = REPO_ROOT / ".loom" / "actions"
+CATALOG_DIR = REPO_ROOT / ".torque" / "actions"
 
 
 class CatalogDeliverableContractTests(unittest.TestCase):
@@ -79,7 +79,7 @@ class CatalogDeliverableContractTests(unittest.TestCase):
     def test_feature_research_preserves_existing_transitions(self):
         # The deliverable rollout MUST NOT clobber the existing pipeline
         # transitions: the engineer-approved feature/implement self-transition
-        # and the loom_ask user-approval path.
+        # and the torque_ask user-approval path.
         rendered = self._render("feature/research")
         transitions = rendered["transitions"]
         actions = [
@@ -88,7 +88,7 @@ class CatalogDeliverableContractTests(unittest.TestCase):
         self.assertIn("feature/implement", actions)
         self.assertTrue(
             any(tr.get("ask") for tr in transitions),
-            "feature/research must keep its loom_ask transition for "
+            "feature/research must keep its torque_ask transition for "
             "user-approval flows",
         )
 
@@ -101,7 +101,7 @@ class CatalogDeliverableContractTests(unittest.TestCase):
             "Phase 2: Plan",
             "Engineer approval is enough",
             "Human approval is required",
-            "loom_ask",
+            "torque_ask",
         ):
             self.assertIn(needle, prompt)
 
@@ -132,7 +132,7 @@ class CatalogDispatchPostscriptTests(unittest.TestCase):
     def test_oneshot_investigate_postscript_contains_contract(self):
         ps = self._postscript_for("oneshot/investigate")
         self.assertIn("Deliverable contract", ps)
-        self.assertIn("loom_task_upload_artifact", ps)
+        self.assertIn("torque_task_upload_artifact", ps)
         self.assertIn("Investigation report", ps)
         self.assertIn("report", ps)
         self.assertIn("markdown", ps)
@@ -141,7 +141,7 @@ class CatalogDispatchPostscriptTests(unittest.TestCase):
         ps = self._postscript_for("oneshot/audit")
         self.assertIn("Deliverable contract", ps)
         self.assertIn("Audit report", ps)
-        self.assertIn("loom_task_upload_artifact", ps)
+        self.assertIn("torque_task_upload_artifact", ps)
 
     def test_feature_research_postscript_contains_contract_and_transitions(self):
         ps = self._postscript_for("feature/research")
@@ -150,7 +150,7 @@ class CatalogDispatchPostscriptTests(unittest.TestCase):
         self.assertIn("Implementation plan", ps)
         self.assertIn("plan", ps)
         # ...AND the user-approval ask path is still wired through.
-        self.assertIn("loom_ask", ps)
+        self.assertIn("torque_ask", ps)
         # The block precedes the completion-paths section so the worker
         # reads the contract before deciding which path to take.
         self.assertLess(

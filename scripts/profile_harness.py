@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Loom perf-wave profile harness.
+"""Torque perf-wave profile harness.
 
-Runs a short-lived standalone Loom daemon, seeds synthetic in-memory agents, sends
+Runs a short-lived standalone Torque daemon, seeds synthetic in-memory agents, sends
 provider-free events through /events, and writes JSON/Markdown evidence for the
 N=10/20/30 closeout gate.
 """
@@ -37,7 +37,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from loom.profiling import percentile, summarize  # noqa: E402
+from torque.profiling import percentile, summarize  # noqa: E402
 
 DEFAULT_MATRIX = "10,20,30"
 DEFAULT_EVENT_RATE = 2.5
@@ -68,7 +68,7 @@ COMPARE_METRICS: list[tuple[str, str, bool]] = [
 def require_aiohttp() -> None:
     if aiohttp is None:  # pragma: no cover - depends on operator env
         raise SystemExit(
-            "profile_harness.py requires aiohttp (the same dependency used by Loom)."
+            "profile_harness.py requires aiohttp (the same dependency used by Torque)."
         ) from _AIOHTTP_IMPORT_ERROR
 
 
@@ -196,22 +196,22 @@ def start_daemon(data_dir: Path, *, port: int | None = None) -> DaemonHandle:
     stderr_path = data_dir / "daemon.stderr.log"
     env = os.environ.copy()
     env.update({
-        "LOOM_STANDALONE": "1",
-        "LOOM_PORT": str(port),
-        "LOOM_DATA_DIR": str(data_dir),
-        "LOOM_PROFILE": "perf-harness",
-        "LOOM_PERF_PROFILE": "1",
-        "LOOM_PROFILE_ENABLED": "1",
-        "LOOM_PROFILE_SKIP_PTY": "1",
-        "LOOM_PROFILE_SLOW_CALLBACK_MS": env.get(
-            "LOOM_PROFILE_SLOW_CALLBACK_MS", "25"),
-        "LOOM_DEFAULT_CMD": "synthetic-agent",
+        "TORQUE_STANDALONE": "1",
+        "TORQUE_PORT": str(port),
+        "TORQUE_DATA_DIR": str(data_dir),
+        "TORQUE_PROFILE": "perf-harness",
+        "TORQUE_PERF_PROFILE": "1",
+        "TORQUE_PROFILE_ENABLED": "1",
+        "TORQUE_PROFILE_SKIP_PTY": "1",
+        "TORQUE_PROFILE_SLOW_CALLBACK_MS": env.get(
+            "TORQUE_PROFILE_SLOW_CALLBACK_MS", "25"),
+        "TORQUE_DEFAULT_CMD": "synthetic-agent",
         "PYTHONPATH": f"{REPO_ROOT}{os.pathsep}{env.get('PYTHONPATH', '')}",
     })
     stdout = stdout_path.open("w", encoding="utf-8")
     stderr = stderr_path.open("w", encoding="utf-8")
     proc = subprocess.Popen(
-        [sys.executable, str(REPO_ROOT / "loom.py")],
+        [sys.executable, str(REPO_ROOT / "torque.py")],
         cwd=REPO_ROOT,
         env=env,
         stdout=stdout,
@@ -243,7 +243,7 @@ async def wait_for_daemon(handle: DaemonHandle, *, timeout: float = 20.0) -> Non
         while time.monotonic() < deadline:
             if handle.proc.poll() is not None:
                 raise RuntimeError(
-                    f"Loom daemon exited early with {handle.proc.returncode}. "
+                    f"Torque daemon exited early with {handle.proc.returncode}. "
                     f"stderr: {handle.stderr_path.read_text(errors='ignore')[-2000:]}"
                 )
             try:
@@ -289,7 +289,7 @@ def build_event_payload(event_type: str, *, agent_index: int, seq: int,
         "rendering task card",
     ]
     payload: dict[str, Any] = {
-        "source": "loom-profile-harness",
+        "source": "torque-profile-harness",
         "event_type": event_type,
         "event_id": f"agent-{agent_index}:{seq}",
         "timestamp": time.time(),
@@ -349,7 +349,7 @@ async def post_event(session: aiohttp.ClientSession, base_url: str, cell_id: str
         async with session.post(
             f"{base_url}/events",
             json=payload,
-            headers={"X-Loom-Cell-Id": cell_id},
+            headers={"X-Torque-Cell-Id": cell_id},
             timeout=5,
         ) as resp:
             await resp.read()
@@ -513,7 +513,7 @@ async def run_single_n(n: int, args: argparse.Namespace, *, artifact_dir: Path) 
         data_dir = data_parent / f"n{n}-{int(time.time())}"
         data_dir.mkdir(parents=True, exist_ok=True)
     else:
-        tmp_ctx = tempfile.TemporaryDirectory(prefix=f"loom-perf-n{n}-")
+        tmp_ctx = tempfile.TemporaryDirectory(prefix=f"torque-perf-n{n}-")
         data_dir = Path(tmp_ctx.name)
 
     handle = start_daemon(data_dir, port=args.port if len(args.matrix_values) == 1 else None)
@@ -681,7 +681,7 @@ def build_report(args: argparse.Namespace, runs: list[dict[str, Any]],
                  comparison: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "schema_version": 1,
-        "kind": "loom-perf-profile",
+        "kind": "torque-perf-profile",
         "mode": args.mode,
         "generated_at": utc_now(),
         "repo": {
@@ -713,7 +713,7 @@ def format_num(value: Any, digits: int = 2) -> str:
 
 def render_markdown(report: dict[str, Any]) -> str:
     lines = [
-        "# Loom perf profile harness report",
+        "# Torque perf profile harness report",
         "",
         f"- Mode: `{report.get('mode', '')}`",
         f"- Generated: `{report.get('generated_at', '')}`",

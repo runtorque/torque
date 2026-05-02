@@ -1,6 +1,6 @@
 import unittest
 
-from loom.actions import ActionManager
+from torque.actions import ActionManager
 
 
 class ActionAgentTemplateCompatTests(unittest.TestCase):

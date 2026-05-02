@@ -1,6 +1,6 @@
 ---
 description: Create a task and dispatch it to an agent
-allowed-tools: mcp__loom__engineer_task_create, mcp__loom__engineer_task_dispatch, mcp__loom__engineer_board_list, mcp__loom__engineer_agents_list
+allowed-tools: mcp__torque__engineer_task_create, mcp__torque__engineer_task_dispatch, mcp__torque__engineer_board_list, mcp__torque__engineer_agents_list
 argument-hint: <task description>
 ---
 

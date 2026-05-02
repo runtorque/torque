@@ -2,30 +2,30 @@
 
 ## Motivation
 
-Today, the only way Loom knows an agent finished its task is the appended dispatch postscript:
+Today, the only way Torque knows an agent finished its task is the appended dispatch postscript:
 
 ```
-When you are done, run `loom task move {slug} Done` to mark the task as complete.
+When you are done, run `torque task move {slug} Done` to mark the task as complete.
 ```
 
-This is brittle — it only covers the "done" case and gives the agent no structured way to report richer status like "I'm blocked on user input", "I opened a PR", or "I hit an unrecoverable error". The `loom ai` subcommand group gives agents a first-class reporting interface that updates both the agent cell and the linked board task in a single call.
+This is brittle — it only covers the "done" case and gives the agent no structured way to report richer status like "I'm blocked on user input", "I opened a PR", or "I hit an unrecoverable error". The `torque ai` subcommand group gives agents a first-class reporting interface that updates both the agent cell and the linked board task in a single call.
 
 ## Design principles
 
-1. **Zero-config identity** — agents never pass their own ID. The CLI resolves the calling agent from `LOOM_CELL_ID` (env var injected by bridge) or `ITERM_SESSION_ID` (iTerm2 session). Task is auto-resolved from the agent's linked `board_tasks` entry.
-2. **Single command, multiple effects** — each `loom ai` subcommand updates the agent cell (activity, needs_attention, error_message), the linked board task (lane, labels, external_url), and triggers a delta broadcast + notification in one shot.
-3. **Idempotent** — running the same command twice is safe (e.g. `loom ai done` on an already-Done task is a no-op with a warning).
-4. **Composable with existing CLI** — `loom ai` commands are sugar over existing primitives (`board_move_task`, `board_update_task`, agent field updates). Power users can still use the lower-level commands directly.
+1. **Zero-config identity** — agents never pass their own ID. The CLI resolves the calling agent from `TORQUE_CELL_ID` (env var injected by bridge) or `ITERM_SESSION_ID` (iTerm2 session). Task is auto-resolved from the agent's linked `board_tasks` entry.
+2. **Single command, multiple effects** — each `torque ai` subcommand updates the agent cell (activity, needs_attention, error_message), the linked board task (lane, labels, external_url), and triggers a delta broadcast + notification in one shot.
+3. **Idempotent** — running the same command twice is safe (e.g. `torque ai done` on an already-Done task is a no-op with a warning).
+4. **Composable with existing CLI** — `torque ai` commands are sugar over existing primitives (`board_move_task`, `board_update_task`, agent field updates). Power users can still use the lower-level commands directly.
 5. **Agent-type agnostic** — works for Claude Code, Codex, Gemini CLI, or any agent that can run shell commands.
 
 ## Command reference
 
-### `loom ai done`
+### `torque ai done`
 
 Agent signals task completion.
 
 ```
-loom ai done [-m MESSAGE] [TASK]
+torque ai done [-m MESSAGE] [TASK]
 ```
 
 **Effects:**
@@ -38,19 +38,19 @@ loom ai done [-m MESSAGE] [TASK]
 
 **Example:**
 ```bash
-loom ai done
-loom ai done -m "Implemented the feature, all tests pass"
-loom ai done fix-login-bug    # explicit task slug
+torque ai done
+torque ai done -m "Implemented the feature, all tests pass"
+torque ai done fix-login-bug    # explicit task slug
 ```
 
 ---
 
-### `loom ai blocked`
+### `torque ai blocked`
 
 Agent is stuck and needs human input.
 
 ```
-loom ai blocked REASON [TASK]
+torque ai blocked REASON [TASK]
 ```
 
 **Effects:**
@@ -61,18 +61,18 @@ loom ai blocked REASON [TASK]
 
 **Example:**
 ```bash
-loom ai blocked "Need credentials for staging database"
-loom ai blocked "Design decision: should we use REST or GraphQL?"
+torque ai blocked "Need credentials for staging database"
+torque ai blocked "Design decision: should we use REST or GraphQL?"
 ```
 
 ---
 
-### `loom ai error`
+### `torque ai error`
 
 Agent hit an unrecoverable error.
 
 ```
-loom ai error MESSAGE [TASK]
+torque ai error MESSAGE [TASK]
 ```
 
 **Effects:**
@@ -83,18 +83,18 @@ loom ai error MESSAGE [TASK]
 
 **Example:**
 ```bash
-loom ai error "Tests failing: 3 failures in auth_test.py"
-loom ai error "Merge conflict on main that I cannot auto-resolve"
+torque ai error "Tests failing: 3 failures in auth_test.py"
+torque ai error "Merge conflict on main that I cannot auto-resolve"
 ```
 
 ---
 
-### `loom ai progress`
+### `torque ai progress`
 
 Agent reports what it's currently doing. Lightweight status update — no lane changes.
 
 ```
-loom ai progress MESSAGE [TASK]
+torque ai progress MESSAGE [TASK]
 ```
 
 **Effects:**
@@ -104,18 +104,18 @@ loom ai progress MESSAGE [TASK]
 
 **Example:**
 ```bash
-loom ai progress "Running test suite"
-loom ai progress "Refactoring auth module — 3 of 5 files done"
+torque ai progress "Running test suite"
+torque ai progress "Refactoring auth module — 3 of 5 files done"
 ```
 
 ---
 
-### `loom ai ready`
+### `torque ai ready`
 
 Agent signals it's available for another task.
 
 ```
-loom ai ready [TASK]
+torque ai ready [TASK]
 ```
 
 **Effects:**
@@ -127,17 +127,17 @@ loom ai ready [TASK]
 
 **Example:**
 ```bash
-loom ai ready
+torque ai ready
 ```
 
 ---
 
-### `loom ai context`
+### `torque ai context`
 
 Dumps the agent's current context as structured output. Useful for agents that need to orient themselves (e.g. after resume).
 
 ```
-loom ai context [--json]
+torque ai context [--json]
 ```
 
 **Output:**
@@ -149,8 +149,8 @@ This is a **read-only** command — no state changes. Uses `detect_context()` + 
 
 **Example:**
 ```bash
-loom ai context
-loom ai context --json
+torque ai context
+torque ai context --json
 ```
 
 **Sample output:**
@@ -158,7 +158,7 @@ loom ai context --json
 Agent: fix-auth (fix-auth)
   Group:    Backend
   Status:   running
-  Worktree: .loom/worktrees/a1b2c3d4  (loom/fix-auth-a1b2c3d4)
+  Worktree: .torque/worktrees/a1b2c3d4  (torque/fix-auth-a1b2c3d4)
   Base:     main
 
 Task: Fix authentication timeout on staging
@@ -173,10 +173,10 @@ Task: Fix authentication timeout on staging
 ## Identity resolution flow
 
 ```
-loom ai <subcommand> [args]
+torque ai <subcommand> [args]
         │
         ▼
-  ┌─ Read LOOM_CELL_ID env var ──────────────────────┐
+  ┌─ Read TORQUE_CELL_ID env var ──────────────────────┐
   │  (injected by bridge.create_session for all cells)│
   └──────────────────────┬───────────────────────────┘
                          │
@@ -212,7 +212,7 @@ The explicit `TASK` positional arg (slug or ID) is always accepted as an overrid
 
 ### New command: `ai_report`
 
-A single server command handles all `loom ai` subcommands. The CLI translates each subcommand into a structured payload:
+A single server command handles all `torque ai` subcommands. The CLI translates each subcommand into a structured payload:
 
 ```json
 {
@@ -242,7 +242,7 @@ This keeps the CLI thin (just argument parsing + HTTP call) and the server autho
 Instead of a single `ai_report` command, the CLI could compose multiple existing API calls:
 
 ```python
-# loom ai done
+# torque ai done
 api_call("board_move_task", id=task_id, lane="Done")
 api_call("ai_update_agent", id=cell_id, activity="", needs_attention=False, ...)
 ```
@@ -267,12 +267,12 @@ All required state is already modeled:
 
 ### Label conventions
 
-The `loom ai` commands use structured labels with `:` separators for machine-readable status:
+The `torque ai` commands use structured labels with `:` separators for machine-readable status:
 
 - `blocked` — agent waiting for user input
 - `error` — agent encountered an error
-- `derived` — task was created by `loom ai derive`
-- `human` — task needs human review (from `loom ai ask`)
+- `derived` — task was created by `torque ai derive`
+- `human` — task needs human review (from `torque ai ask`)
 - `depth-limit` — pipeline depth limit reached
 
 These are additive (don't remove user-set labels).
@@ -296,7 +296,7 @@ Replace the current hardcoded postscript:
 
 ```python
 # Current
-prompt += f"\n\nWhen you are done, run `loom task move {task_ref} Done` to mark the task as complete."
+prompt += f"\n\nWhen you are done, run `torque task move {task_ref} Done` to mark the task as complete."
 ```
 
 With a richer instruction block:
@@ -310,46 +310,46 @@ The postscript is now dynamic — it only shows commands relevant to the action:
 For an action with no transitions (e.g. `oneshot/feature`), the postscript is:
 ```
 Report your progress with these commands:
-- `loom ai done` — task complete, no follow-up needed
-- `loom ai blocked "reason"` — need user input
-- `loom ai error "message"` — unrecoverable error
+- `torque ai done` — task complete, no follow-up needed
+- `torque ai blocked "reason"` — need user input
+- `torque ai error "message"` — unrecoverable error
 ```
 
 For a pipeline action like `feature/implement` (transitions to `feature/review`):
 ```
 Report your progress with these commands:
-- `loom ai done` — task complete, no follow-up needed
-- `loom ai derive "description" -t feature/review` — implementation is complete and ready for review
-- `loom ai blocked "reason"` — need user input
-- `loom ai error "message"` — unrecoverable error
+- `torque ai done` — task complete, no follow-up needed
+- `torque ai derive "description" -t feature/review` — implementation is complete and ready for review
+- `torque ai blocked "reason"` — need user input
+- `torque ai error "message"` — unrecoverable error
 ```
 
 ## CLI implementation
 
 ### File changes
 
-**`bin/loom`** — new subcommand group:
+**`bin/torque`** — new subcommand group:
 
 ```python
 # -- ai (agent reporting) ---------------------------------------------------
 
 def _resolve_self(port):
     """Resolve the calling agent's cell and linked task.
-    Uses LOOM_CELL_ID (preferred) or ITERM_SESSION_ID fallback.
+    Uses TORQUE_CELL_ID (preferred) or ITERM_SESSION_ID fallback.
     Returns (cell_dict, task_dict_or_None).
     """
-    cell_id = os.environ.get("LOOM_CELL_ID", "")
+    cell_id = os.environ.get("TORQUE_CELL_ID", "")
     state_data = get_state(port)
 
     if cell_id:
         cell = state_data.get("agents", {}).get(cell_id)
         if not cell:
-            die(f"LOOM_CELL_ID={cell_id} not found in state")
+            die(f"TORQUE_CELL_ID={cell_id} not found in state")
     else:
         cell, _parent, _group = detect_context(state_data)
         if not cell:
-            die("Cannot identify agent — not in a Loom-managed session\n"
-                "  (LOOM_CELL_ID not set and ITERM_SESSION_ID not matched)")
+            die("Cannot identify agent — not in a Torque-managed session\n"
+                "  (TORQUE_CELL_ID not set and ITERM_SESSION_ID not matched)")
         cell_id = cell["id"]
 
     # Find linked task(s)
@@ -374,7 +374,7 @@ def _resolve_self_and_task(args, require_task=True):
         if len(active) > 1:
             slugs = ", ".join(t.get("slug", t["id"][:6]) for t in active)
             die(f"Multiple active tasks for this agent: {slugs}\n"
-                "  Specify the task: loom ai done TASK_SLUG")
+                "  Specify the task: torque ai done TASK_SLUG")
         die("No active task linked to this agent")
 
     return cell, task
@@ -452,7 +452,7 @@ def cmd_ai_ready(args):
 
 
 def cmd_ai_context(args):
-    cell_id = os.environ.get("LOOM_CELL_ID", "")
+    cell_id = os.environ.get("TORQUE_CELL_ID", "")
     # Use local state (works offline)
     st = get_state_local(args.port)
 
@@ -462,7 +462,7 @@ def cmd_ai_context(args):
         cell, _, _ = detect_context(st)
 
     if not cell:
-        die("Cannot identify agent — not in a Loom-managed session")
+        die("Cannot identify agent — not in a Torque-managed session")
 
     if args.json:
         # Include linked task
@@ -604,10 +604,10 @@ def _remove_label(task, label):
 
 ### Phase 1 — Core commands (MVP)
 
-1. **`_resolve_self` + `_resolve_self_and_task`** in `bin/loom` — identity resolution
+1. **`_resolve_self` + `_resolve_self_and_task`** in `bin/torque` — identity resolution
 2. **`ai_report` handler** in `server.py` — single handler for all actions
 3. **CLI subcommands**: `done`, `blocked`, `error`, `progress`, `context`
-4. **Update dispatch postscript** — replace `loom task move` with `loom ai` instructions
+4. **Update dispatch postscript** — replace `torque task move` with `torque ai` instructions
 5. **Label helpers** in `server.py`
 
 ### Phase 2 — Pipeline commands
@@ -622,15 +622,15 @@ def _remove_label(task, label):
 
 ### Phase 4 — Polish
 
-11. **Configurable dispatch instructions** — group setting to control what `loom ai` instructions are appended to the dispatch prompt
-12. **`loom ai context` enrichment** — include recent event log, worktree diff summary, sibling agent status
+11. **Configurable dispatch instructions** — group setting to control what `torque ai` instructions are appended to the dispatch prompt
+12. **`torque ai context` enrichment** — include recent event log, worktree diff summary, sibling agent status
 
 ## Files touched
 
 ```
-bin/loom                  # ~200 lines: ai subcommand group, _resolve_self, 8 handlers
-loom/server.py            # ~80 lines: ai_report handler, label helpers
-loom/state.py             # 0 lines (no new fields)
+bin/torque                  # ~200 lines: ai subcommand group, _resolve_self, 8 handlers
+torque/server.py            # ~80 lines: ai_report handler, label helpers
+torque/state.py             # 0 lines (no new fields)
 static/js/board.js        # ~30 lines: PR badge, label indicators on cards
 static/style.css          # ~15 lines: badge styles
 CLAUDE.md                 # Document new commands
@@ -638,14 +638,14 @@ CLAUDE.md                 # Document new commands
 
 ## Compatibility notes
 
-- **Existing `loom task move X Done`** still works — agents using the old postscript won't break.
+- **Existing `torque task move X Done`** still works — agents using the old postscript won't break.
 - **`external_url`** field already exists on `BoardTask` but is unused — repurposing it for PR URLs requires no schema migration.
 - **Labels** are free-form strings — the `pr:*` / `blocked` / `error` conventions are just conventions, not enforced at the schema level.
-- **`LOOM_CELL_ID`** is already injected into every Loom-managed session — no bridge changes needed.
+- **`TORQUE_CELL_ID`** is already injected into every Torque-managed session — no bridge changes needed.
 
 ## Decisions
 
-1. **`loom ai done` auto-trigger worktree merge** — will be a group setting (not in MVP, added when the setting exists).
-2. **Daemon required** — yes, all `loom ai` commands (except `context`) require the daemon. No offline queueing.
+1. **`torque ai done` auto-trigger worktree merge** — will be a group setting (not in MVP, added when the setting exists).
+2. **Daemon required** — yes, all `torque ai` commands (except `context`) require the daemon. No offline queueing.
 3. **Notification customization** — not implementing per-action toggles now. Existing `notify_on_finish` / `notify_on_error` / `notify_on_attention` settings cover the cases.
-4. **`loom ai ready` auto-dispatch** — no. When pipelines are introduced, the user will decide what happens on ready.
+4. **`torque ai ready` auto-dispatch** — no. When pipelines are introduced, the user will decide what happens on ready.

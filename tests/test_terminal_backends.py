@@ -7,7 +7,7 @@ except ModuleNotFoundError:
 
 install_aiohttp_stub()
 
-from loom.state import MatrixState
+from torque.state import MatrixState
 
 
 class TerminalBackendStateTests(unittest.TestCase):
