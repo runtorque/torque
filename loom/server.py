@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import mimetypes
 import os
@@ -2873,6 +2874,40 @@ def _handle_engineer_flush_now_command(engineer_buffer, data: dict) -> dict:
     return {"type": "error", "message": message or "Unable to send queued events"}
 
 
+def _engineer_journal_source_key(prefix: str, *parts) -> str:
+    """Return a stable source key for idempotent system journal inserts."""
+    h = hashlib.sha256()
+    for part in parts:
+        h.update(str(part or "").encode("utf-8", "replace"))
+        h.update(b"\0")
+    return f"{prefix}:{h.hexdigest()[:32]}"
+
+
+def _append_engineer_journal_entry(
+    state: MatrixState,
+    group: str,
+    entry_type: str,
+    entry: str,
+    *,
+    author_cell_id: str = "",
+    timestamp: float | None = None,
+    source_key: str = "",
+) -> dict | None:
+    """Append a per-engineer journal entry with shared attribution semantics."""
+    group = str(group or "").strip()
+    entry = str(entry or "").strip()
+    if not group or not entry:
+        return None
+    return state.journal_append(
+        group,
+        str(entry_type or "").strip() or "observation",
+        entry,
+        author_cell_id=str(author_cell_id or "").strip(),
+        timestamp=timestamp,
+        source_key=str(source_key or "").strip(),
+    )
+
+
 async def _handle_engineer_dismiss_note_command(
     data: dict,
     state: MatrixState,
@@ -2885,9 +2920,37 @@ async def _handle_engineer_dismiss_note_command(
     note_kind = str(getattr(ws, "pending_note_kind", "") or "note").strip()
     if note_kind not in {"note", "question"}:
         note_kind = "note"
+    engineer = state.get_engineer_for_group(group)
+    author_cell_id = (
+        str(getattr(ws, "pending_note_actor_id", "") or "").strip()
+        or str(getattr(engineer, "id", "") or "").strip()
+    )
+    try:
+        note_timestamp = float(getattr(ws, "pending_note_set_at", 0) or 0)
+    except (TypeError, ValueError):
+        note_timestamp = 0.0
+    if not note_timestamp:
+        note_timestamp = time.time()
+
+    if pending_note:
+        _append_engineer_journal_entry(
+            state,
+            group,
+            "note_dismissed",
+            pending_note,
+            author_cell_id=author_cell_id,
+            timestamp=note_timestamp,
+            source_key=_engineer_journal_source_key(
+                "note_dismissed",
+                group,
+                author_cell_id,
+                note_timestamp,
+                note_kind,
+                pending_note,
+            ),
+        )
 
     if pending_note and panel_event:
-        engineer = state.get_engineer_for_group(group)
         event_kind = (
             "engineer_question_dismissed"
             if note_kind == "question"
@@ -2904,7 +2967,9 @@ async def _handle_engineer_dismiss_note_command(
     await state.update_engineer_settings_async(
         group,
         pending_note="",
-        pending_note_kind="")
+        pending_note_kind="",
+        pending_note_set_at=0.0,
+        pending_note_actor_id="")
     return {"type": "ok"}
 
 
@@ -3105,6 +3170,18 @@ async def _deliver_engineer_reply_and_resume(state: MatrixState, engineer, *,
                                            answer: str,
                                            send_prompt,
                                            engineer_buffer) -> dict:
+    ws = state.get_engineer_settings(group)
+    question = str(getattr(ws, "pending_question", "") or "").strip()
+    author_cell_id = (
+        str(getattr(ws, "pending_question_actor_id", "") or "").strip()
+        or str(getattr(engineer, "id", "") or "").strip()
+    )
+    try:
+        question_timestamp = float(
+            getattr(ws, "pending_question_set_at", 0) or 0
+        )
+    except (TypeError, ValueError):
+        question_timestamp = 0.0
     formatted = (
         "\n"
         "## Human Reply\n"
@@ -3125,6 +3202,21 @@ async def _deliver_engineer_reply_and_resume(state: MatrixState, engineer, *,
         _pending_question_actor_id=getattr(engineer, "id", "") or "",
     )
     engineer_buffer.on_delivery_resumed(group)
+    if question:
+        _append_engineer_journal_entry(
+            state,
+            group,
+            "qa",
+            f"Question:\n{question}\n\nAnswer:\n{str(answer or '').strip()}",
+            author_cell_id=author_cell_id,
+            source_key=_engineer_journal_source_key(
+                "qa",
+                group,
+                author_cell_id,
+                question_timestamp,
+                question,
+            ),
+        )
     state.journal_append(
         group,
         "observation",
@@ -12600,11 +12692,13 @@ async def main(connection=None):
                 entry_type = data.get("entry_type", "")
                 entry_text = data.get("entry", "")
                 if entry_type not in (
-                        "decision", "observation", "checkpoint", "plan"):
+                        "decision", "observation", "checkpoint", "plan",
+                        "note_dismissed", "qa"):
                     result = {"type": "error",
                               "message":
                                   "entry_type must be one of: decision, "
-                                  "observation, checkpoint, plan"}
+                                  "observation, checkpoint, plan, "
+                                  "note_dismissed, qa"}
                 elif not entry_text:
                     result = {"type": "error",
                               "message": "Entry text is required"}
@@ -12764,10 +12858,21 @@ async def main(connection=None):
                     result = {"type": "error",
                               "message": "kind must be 'note' or 'question'"}
                 else:
+                    engineer_id = str(
+                        data.get("engineer_id", "")
+                        or data.get("cell_id", "")
+                        or ""
+                    ).strip()
+                    if not engineer_id:
+                        engineer = state.get_engineer_for_group(group)
+                        engineer_id = str(
+                            getattr(engineer, "id", "") or ""
+                        ).strip()
                     await state.update_engineer_settings_async(
                         group,
                         pending_note=message,
-                        pending_note_kind=kind)
+                        pending_note_kind=kind,
+                        _pending_note_actor_id=engineer_id)
                     prefix = "Soft question" if kind == "question" else "Note"
                     state.journal_append(
                         group, "observation",

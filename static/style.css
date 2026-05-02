@@ -7832,6 +7832,8 @@ button.agent-panel-hierarchy-crumb:focus-visible {
 .agent-panel-badge-observation { background: rgba(139,148,158,0.2); color: var(--text-dim); }
 .agent-panel-badge-checkpoint  { background: rgba(63,185,80,0.2); color: var(--green); }
 .agent-panel-badge-plan        { background: rgba(210,153,34,0.2); color: var(--amber); }
+.agent-panel-badge-note_dismissed { background: rgba(139,148,158,0.16); color: var(--text-dim); }
+.agent-panel-badge-qa          { background: rgba(163,113,247,0.2); color: #a371f7; }
 .agent-panel-entry-time {
   font-size: 9px;
   color: var(--text-dim);

@@ -1392,6 +1392,8 @@ class LoomDBTests(unittest.TestCase):
                 "pending_question_actor_id": "eng-1",
                 "pending_note": "FYI: release notes are ready",
                 "pending_note_kind": "note",
+                "pending_note_set_at": 456.5,
+                "pending_note_actor_id": "eng-2",
                 "enabled_events": ["task_completed"],
                 "engineer_provider": "codex",
                 "engineer_boot_command": "codex --model gpt-5",
@@ -1414,6 +1416,8 @@ class LoomDBTests(unittest.TestCase):
         self.assertFalse(loaded["engineer_can_override_worker_provider"])
         self.assertEqual(loaded["pending_note"], "FYI: release notes are ready")
         self.assertEqual(loaded["pending_note_kind"], "note")
+        self.assertEqual(loaded["pending_note_set_at"], 456.5)
+        self.assertEqual(loaded["pending_note_actor_id"], "eng-2")
         self.assertEqual(loaded["enabled_events"], ["task_completed"])
         self.assertEqual(loaded["heartbeat_interval"], 180)
         self.assertEqual(loaded["default_worker_concurrency"], 4)
@@ -1440,6 +1444,31 @@ class LoomDBTests(unittest.TestCase):
             self.db.load_journal_entries("g", limit=10, entry_type="decision"),
             [entries[1]],
         )
+
+    def test_journal_source_key_makes_system_entries_idempotent(self):
+        first = self.db.save_journal_entry(
+            "g",
+            10.0,
+            "qa",
+            "Question:\nApprove?\n\nAnswer:\nYes",
+            author_cell_id="eng-1",
+            source_key="qa:g:eng-1:1",
+        )
+        second = self.db.save_journal_entry(
+            "g",
+            20.0,
+            "qa",
+            "Question:\nApprove?\n\nAnswer:\nYes again",
+            author_cell_id="eng-1",
+            source_key="qa:g:eng-1:1",
+        )
+
+        entries = self.db.load_journal_entries(
+            "g", limit=10, author_cell_id="eng-1")
+        self.assertEqual(second, first)
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["timestamp"], 10.0)
+        self.assertEqual(entries[0]["entry"], "Question:\nApprove?\n\nAnswer:\nYes")
 
     def test_init_migrates_legacy_engineer_journal_author_column_before_index(self):
         legacy_path = Path(self.tmp.name) / "legacy-journal.db"
@@ -1473,6 +1502,7 @@ class LoomDBTests(unittest.TestCase):
             ).fetchall()
         }
         self.assertIn("author_cell_id", cols)
+        self.assertIn("source_key", cols)
         self.assertIsNotNone(
             migrated._conn.execute(
                 "SELECT name FROM sqlite_master "
@@ -3487,6 +3517,8 @@ class LoomDBAsyncWriteTests(unittest.IsolatedAsyncioTestCase):
                 "pending_question_actor_id": "eng-1",
                 "pending_note": "FYI",
                 "pending_note_kind": "note",
+                "pending_note_set_at": 222.0,
+                "pending_note_actor_id": "eng-1",
                 "paused": True,
             },
         )
@@ -3495,6 +3527,8 @@ class LoomDBAsyncWriteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(engineer_settings["pending_question_actor_id"], "eng-1")
         self.assertEqual(engineer_settings["pending_note"], "FYI")
         self.assertEqual(engineer_settings["pending_note_kind"], "note")
+        self.assertEqual(engineer_settings["pending_note_set_at"], 222.0)
+        self.assertEqual(engineer_settings["pending_note_actor_id"], "eng-1")
         self.assertTrue(engineer_settings["paused"])
 
         self.db.defer_write(

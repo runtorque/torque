@@ -826,12 +826,15 @@ ENGINEER_TOOLS = [
                     "enum": [
                         "decision", "observation",
                         "checkpoint", "plan",
+                        "note_dismissed", "qa",
                     ],
                     "description": (
                         "Entry type: decision (action taken + "
                         "rationale), observation (something noted), "
                         "checkpoint (board state summary for context "
-                        "recovery), plan (intended next steps)."
+                        "recovery), plan (intended next steps), "
+                        "note_dismissed (preserved dismissed note), "
+                        "qa (human question/answer exchange)."
                     ),
                 },
                 "entry": {
@@ -867,6 +870,7 @@ ENGINEER_TOOLS = [
                     "enum": [
                         "decision", "observation",
                         "checkpoint", "plan",
+                        "note_dismissed", "qa",
                     ],
                     "description":
                         "Filter to a specific entry type.",

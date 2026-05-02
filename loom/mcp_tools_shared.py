@@ -59,7 +59,10 @@ _STREAM_STATES = (
     "merged",
 )
 _DECISION_STATUSES = {"proposed", "accepted", "revised", "rejected"}
-_JOURNAL_ENTRY_TYPES = {"decision", "observation", "checkpoint", "plan"}
+_JOURNAL_ENTRY_TYPES = {
+    "decision", "observation", "checkpoint", "plan",
+    "note_dismissed", "qa",
+}
 _HEALTH_SUMMARY_SILENT_AFTER_SECS = 5 * 60
 _HEALTH_SUMMARY_LIMIT = 120
 _ARCHITECT_BOARD_SUMMARY_TASK_LIMIT = 20
@@ -3867,7 +3870,8 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             entry_type = str(args.get("type", "") or "").strip()
             if entry_type not in _JOURNAL_ENTRY_TYPES:
                 return (
-                    "type must be one of: decision, observation, checkpoint, plan",
+                    "type must be one of: decision, observation, "
+                    "checkpoint, plan, note_dismissed, qa",
                     True,
                 )
             entry = str(args.get("entry", "") or "")
@@ -3937,7 +3941,8 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         type_filter = str(args.get("type_filter", "") or "").strip()
         if type_filter and type_filter not in _JOURNAL_ENTRY_TYPES:
             return (
-                "type_filter must be one of: decision, observation, checkpoint, plan",
+                "type_filter must be one of: decision, observation, "
+                "checkpoint, plan, note_dismissed, qa",
                 True,
             )
         try:
@@ -4196,6 +4201,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             "group": _engineer_group,
             "message": message,
             "kind": kind,
+            "engineer_id": str(caller_id or "").strip(),
         })
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
