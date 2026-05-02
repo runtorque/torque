@@ -25,7 +25,8 @@ var _standalonePanelFloatDrag = null;
 var _standalonePanelPointerDrag = null;
 var _standalonePanelSuppressClick = false;
 var _standalonePanelRoots = {};
-var _standalonePrimaryMinWidth = 240;
+var _standalonePrimaryMinWidth = 360;
+var _standaloneRightRailMinWidth = 320;
 
 function _standalonePanelsEnabled() {
   return typeof isEmbeddedTerminalMode === 'function' && isEmbeddedTerminalMode();
@@ -126,6 +127,10 @@ function _standaloneMainStackMinWidth() {
   return _standalonePrimaryMinWidth;
 }
 
+function _standaloneRightRailMinimumWidth() {
+  return _standaloneRightRailMinWidth;
+}
+
 function _standaloneMeasuredShellWidth() {
   var shell = document.getElementById('standalone-sidebar-shell');
   var width = 0;
@@ -163,7 +168,7 @@ function _standaloneShellWidth(shellWidth) {
 function _standaloneRightSizeBounds(shellWidth) {
   var width = _standaloneShellWidth(shellWidth);
   var max = Math.max(0, Math.floor(width - _standaloneMainStackMinWidth() - 8));
-  var min = Math.min(240, max);
+  var min = _standaloneRightRailMinimumWidth();
   return {
     min: min,
     max: Math.max(min, max),
@@ -180,6 +185,7 @@ function _standaloneMinimumShellWidthForLayout(raw) {
   }
   var rightSize = parseInt(right.size, 10);
   if (!Number.isFinite(rightSize) || rightSize < 0) rightSize = 0;
+  rightSize = Math.max(_standaloneRightRailMinimumWidth(), rightSize);
   return _standaloneMainStackMinWidth() + 8 + rightSize;
 }
 
@@ -824,8 +830,10 @@ function _standaloneRenderPanelWorkspace() {
   var panelRoots = _standaloneCapturePanelRoots();
   var placedRoots = {};
   var layout = _standalonePanelCurrentLayout();
+  var rightRailWidth = _standaloneZoneRenderedSize('right', layout.right) + 'px';
   _setStyleVar(shell, '--standalone-bottom-height', _standaloneZoneRenderedSize('bottom', layout.bottom) + 'px');
-  _setStyleVar(shell, '--standalone-right-rail-width', _standaloneZoneRenderedSize('right', layout.right) + 'px');
+  _setStyleVar(shell, '--standalone-right-rail-width', rightRailWidth);
+  _setStyleVar(document.documentElement || document.body, '--standalone-right-rail-width', rightRailWidth);
   if (bottomHandle && bottomHandle.classList) bottomHandle.classList.toggle('collapsed', !(layout.bottom.open && layout.bottom.active));
   if (railHandle && railHandle.classList) railHandle.classList.toggle('collapsed', !(layout.right.open && layout.right.active));
   _standaloneBuildZone('bottom', bottomRoot, panelRoots, placedRoots);

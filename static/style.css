@@ -17,6 +17,8 @@
                  "Liberation Mono", Menlo, Consolas, monospace;
   --radius:      6px;
   --standalone-sidebar-width: 340px;
+  --standalone-main-stack-min-width: 360px;
+  --standalone-right-rail-min-width: 320px;
 }
 
 /* ------------------------------------------------------------------ */
@@ -151,14 +153,14 @@ main {
 body.runtime-embedded #workspace-shell {
   display: grid;
   grid-template-columns:
-    max(var(--standalone-sidebar-width), calc(360px + 8px + var(--standalone-right-rail-width, 0px)))
+    max(var(--standalone-sidebar-width), calc(var(--standalone-main-stack-min-width) + 8px + var(--standalone-right-rail-width, var(--standalone-right-rail-min-width))))
     8px
     minmax(0, 1fr);
   min-height: 0;
 }
 body.runtime-embedded #standalone-sidebar-shell {
   display: grid;
-  grid-template-columns: minmax(360px, 1fr) 8px var(--standalone-right-rail-width, 320px);
+  grid-template-columns: minmax(var(--standalone-main-stack-min-width), 1fr) 8px var(--standalone-right-rail-width, var(--standalone-right-rail-min-width));
   grid-template-rows: minmax(0, 1fr) 8px var(--standalone-bottom-height, 280px);
   min-height: 0;
 }
@@ -176,6 +178,9 @@ body.runtime-embedded #standalone-rail-resize-handle {
 body.runtime-embedded #standalone-right-rail {
   grid-column: 3;
   grid-row: 1;
+}
+body.runtime-embedded #standalone-right-rail:not(.collapsed) {
+  min-width: var(--standalone-right-rail-min-width);
 }
 body.runtime-embedded #standalone-bottom-resize-handle {
   grid-column: 1 / -1;
