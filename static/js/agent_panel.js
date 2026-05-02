@@ -1500,12 +1500,7 @@ function _agentPanelArchitectDecisionList(agentId) {
       results.push(decision);
     }
   }
-  results.sort(function(a, b) {
-    var aTs = Number((a && (a.updated_at || a.created_at)) || 0);
-    var bTs = Number((b && (b.updated_at || b.created_at)) || 0);
-    if (aTs !== bTs) return bTs - aTs;
-    return String((a && a.id) || '').localeCompare(String((b && b.id) || ''));
-  });
+  results.sort(_engineerDecisionRecencySort);
   _agentPanelDecisionListCacheByArchitect[architectId] = {
     stores: stores.slice(),
     items: results,
@@ -3391,8 +3386,10 @@ function _engineerDecisionDisplayTimestamp(decision) {
 }
 
 function _engineerDecisionRecencySort(a, b) {
-  var aTs = _engineerDecisionTimestampSeconds(a && (a.updated_at || a.created_at));
-  var bTs = _engineerDecisionTimestampSeconds(b && (b.updated_at || b.created_at));
+  // Decision logs are a filing timeline: amendments update updated_at but
+  // should not move existing decisions ahead of newer filed decisions.
+  var aTs = _engineerDecisionTimestampSeconds(a && (a.created_at || a.updated_at));
+  var bTs = _engineerDecisionTimestampSeconds(b && (b.created_at || b.updated_at));
   if (aTs !== bTs) return bTs - aTs;
   return String((a && a.id) || '').localeCompare(String((b && b.id) || ''));
 }

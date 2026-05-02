@@ -4601,7 +4601,17 @@ test('renderAgentDetails shows architect pending hires and compact decisions', (
       status: 'approved',
       linked_task_ids: ['task-1'],
       linked_engineer_ids: ['eng-1', 'eng-2'],
-      updated_at: 1712345680,
+      created_at: 1712345600,
+      updated_at: 1712345900,
+    },
+    'decision-2': {
+      id: 'decision-2',
+      architect_id: 'arch-1',
+      title: 'Capture launch plan',
+      rationale: 'Newer decision created after the API cut line.',
+      status: 'proposed',
+      created_at: 1712345800,
+      updated_at: 1712345800,
     },
     'decision-hidden': {
       id: 'decision-hidden',
@@ -4625,6 +4635,11 @@ test('renderAgentDetails shows architect pending hires and compact decisions', (
   assert.match(html, /Decisions/);
   assert.match(html, /detail-decisions-log/);
   assert.match(html, /Define the API cut line/);
+  assert.match(html, /Capture launch plan/);
+  assert.ok(
+    html.indexOf('Capture launch plan') < html.indexOf('Define the API cut line'),
+    'compact architect decisions are sorted by created_at descending, not updated_at',
+  );
   assert.doesNotMatch(html, /Ship the API before the CLI/);
   assert.doesNotMatch(html, /Linked to 1 task/);
   assert.doesNotMatch(html, /2 engineers/);
@@ -12067,7 +12082,7 @@ test('architect messages and decisions use virtual windows for large histories',
   assert.match(panel.innerHTML, /1000/);
 });
 
-test('architect decision cards render timestamps and sort newest within status', () => {
+test('architect decision cards render timestamps and sort newest-created within status', () => {
   const { context, document } = createEngineerHarness();
   const panel = document.register('panel-agent');
   context.Date.now = () => Date.parse('2026-04-30T12:00:00Z');
@@ -12116,9 +12131,13 @@ test('architect decision cards render timestamps and sort newest within status',
   assert.match(panel.innerHTML, /architect-decision-meta-label">Created<\/span><span class="architect-decision-meta-value"><span class="architect-decision-ref-empty" title="2026-04-30T09:00:00Z">3h ago<\/span>/);
   assert.match(panel.innerHTML, /architect-decision-meta-label">Updated<\/span><span class="architect-decision-meta-value"><span class="architect-decision-ref-empty" title="2026-04-30T11:30:00Z">30m ago<\/span>/);
   assert.equal((panel.innerHTML.match(/architect-decision-meta-label">Updated/g) || []).length, 1);
+  assert.deepEqual(
+    jsonValue(context, `_agentPanelArchitectDecisionList('arch-1').map(function(decision) { return decision.id; })`),
+    ['fresh', 'edited'],
+  );
   assert.ok(
-    panel.innerHTML.indexOf('Older edited decision') < panel.innerHTML.indexOf('Fresh unedited decision'),
-    'accepted decisions are sorted by updated_at descending',
+    panel.innerHTML.indexOf('Fresh unedited decision') < panel.innerHTML.indexOf('Older edited decision'),
+    'accepted decisions are sorted by created_at descending even when an older decision was updated more recently',
   );
 });
 
