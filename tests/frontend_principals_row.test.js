@@ -644,8 +644,11 @@ test('principal nav ids are group-scoped so multi-group workspaces do not collid
   assert.equal(parsed['principal:alpha:user'].group, 'alpha');
   assert.equal(parsed['principal:beta:user'].group, 'beta');
 
-  // Arrow-down from alpha's user principal lands on alpha's engineer, not beta's.
+  // Arrow-down from alpha's user principal enters alpha's user-owned worker
+  // row, not beta's grid.
   vm.runInContext("focusedItemId = 'principal:alpha:user'; moveFocusDown();", context);
+  assert.equal(vm.runInContext('focusedItemId', context), 'grid-control:section-new-worker:alpha:user');
+  vm.runInContext('moveFocusDown();', context);
   assert.equal(vm.runInContext('focusedItemId', context), 'eng-a');
 });
 
