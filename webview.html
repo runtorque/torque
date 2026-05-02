@@ -490,14 +490,6 @@
         </label>
         <label>Idle timeout <span class="label-hint">minutes, 0 = disable</span></label>
         <input id="gs-agent-idle-timeout" type="number" min="0" max="60" value="5">
-        <label class="gs-checkbox">
-          <input id="gs-agent-always-custom" type="checkbox"> Always open custom dialog
-          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Show the full creation dialog when clicking New, instead of instantly creating an agent with default settings.">?</span>
-        </label>
-        <label class="gs-checkbox">
-          <input id="gs-dispatch-auto-terminals" type="checkbox"> Create terminals on dispatch
-          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Auto-create child terminals when dispatching a task. By default, dispatched agents launch without terminals.">?</span>
-        </label>
       </div>
 
       <!-- Terminals sub-tab -->

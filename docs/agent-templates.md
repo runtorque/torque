@@ -163,7 +163,7 @@ Roles integrate in four places:
 
 ### 1. New agent creation
 
-The `+ New` dropdown shows saved roles. Choosing a role creates a new agent with that role applied. If the group has `agent_always_custom_dialog` enabled, the custom dialog opens with the role pre-filled instead.
+The `+ New` dropdown shows saved roles. Choosing a role creates a new agent with that role applied.
 
 ### 2. Task dispatch
 

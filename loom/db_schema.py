@@ -99,7 +99,6 @@ CREATE TABLE IF NOT EXISTS group_settings (
     worktree_symlinks           TEXT NOT NULL DEFAULT '[]',
     agent_session_resume        INTEGER NOT NULL DEFAULT 1,
     agent_idle_timeout          INTEGER NOT NULL DEFAULT 0,
-    agent_always_custom_dialog  INTEGER NOT NULL DEFAULT 0,
     notifications               INTEGER NOT NULL DEFAULT 0,
     notify_on_finish            INTEGER NOT NULL DEFAULT 1,
     notify_on_error             INTEGER NOT NULL DEFAULT 1,
@@ -117,7 +116,6 @@ CREATE TABLE IF NOT EXISTS group_settings (
     terminal_always_custom_dialog INTEGER NOT NULL DEFAULT 0,
     terminal_close_on_disconnect INTEGER NOT NULL DEFAULT 0,
     dispatch_lane               TEXT NOT NULL DEFAULT 'In Progress',
-    dispatch_auto_terminals     INTEGER NOT NULL DEFAULT 0,
     board_default_labels        TEXT NOT NULL DEFAULT '[]',
     board_default_lane          TEXT NOT NULL DEFAULT '',
     board_default_action        TEXT NOT NULL DEFAULT '',
@@ -863,15 +861,6 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
                 f"ALTER TABLE {table} ADD COLUMN slug "
                 f"TEXT NOT NULL DEFAULT ''")
             conn.commit()
-    # Migrate: add dispatch_auto_terminals column
-    try:
-        conn.execute(
-            "SELECT dispatch_auto_terminals FROM group_settings LIMIT 0")
-    except sqlite3.OperationalError:
-        conn.execute(
-            "ALTER TABLE group_settings ADD COLUMN "
-            "dispatch_auto_terminals INTEGER NOT NULL DEFAULT 0")
-        conn.commit()
     # Migrate: add agent_provider column
     try:
         conn.execute(

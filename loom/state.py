@@ -1135,7 +1135,6 @@ class GroupSettings:
     worktree_symlinks: list[str] = field(default_factory=list)  # repo-relative paths or glob patterns to symlink from repo root
     agent_session_resume: bool = True  # resume session on relaunch
     agent_idle_timeout: int = 0  # minutes before flagging agent as stuck (0=disable)
-    agent_always_custom_dialog: bool = False
     # Agent notifications
     notifications: bool = False
     notify_on_finish: bool = True
@@ -1156,7 +1155,6 @@ class GroupSettings:
     terminal_close_on_disconnect: bool = False  # remove terminal from Loom when tab closed
     # Board / Dispatch
     dispatch_lane: str = "In Progress"  # lane for dispatched tasks
-    dispatch_auto_terminals: bool = False  # create child terminals on dispatch
     board_default_labels: list[str] = field(default_factory=list)  # default labels for new tasks
     board_default_lane: str = ""  # default lane for new tasks (empty = first lane)
     board_default_action: str = ""  # default action for new tasks
