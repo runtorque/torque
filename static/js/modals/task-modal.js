@@ -20,6 +20,9 @@ let _taskExternalUrl = '';
 let _taskModalDrafts = {};      // keyed by create/edit mode to survive reopen
 let _taskDraftScope = 'create'; // separates plain create drafts from clone flows
 var _labelDropdownIdx = -1;
+var _taskTitleLabelDropdownIdx = -1;
+var _taskTitleEscapedPercents = [];
+var _taskTitleLastValue = '';
 function _getAllLabels() {
   var labels = {};
   for (var id in state.board_tasks) {
@@ -29,6 +32,381 @@ function _getAllLabels() {
     });
   }
   return Object.keys(labels).sort(function(a, b) { return labels[b] - labels[a]; });
+}
+
+function _taskTitleLabelDropdown() {
+  return document.getElementById('task-title-label-dropdown');
+}
+
+function _taskTitleSetEscapedPercents(offsets, value) {
+  var seen = {};
+  var next = [];
+  value = typeof value === 'string' ? value : '';
+  for (var i = 0; i < (offsets || []).length; i++) {
+    var idx = offsets[i];
+    if (typeof idx !== 'number' || idx < 0 || idx >= value.length) continue;
+    if (value.charAt(idx) !== '%' || seen[idx]) continue;
+    seen[idx] = true;
+    next.push(idx);
+  }
+  next.sort(function(a, b) { return a - b; });
+  _taskTitleEscapedPercents = next;
+}
+
+function _taskTitleIsEscapedPercent(idx) {
+  return _taskTitleEscapedPercents.indexOf(idx) >= 0;
+}
+
+function _taskRebaseTitleEscapes(oldValue, newValue) {
+  oldValue = typeof oldValue === 'string' ? oldValue : '';
+  newValue = typeof newValue === 'string' ? newValue : '';
+  if (!_taskTitleEscapedPercents.length) return;
+  var prefix = 0;
+  while (
+    prefix < oldValue.length
+    && prefix < newValue.length
+    && oldValue.charAt(prefix) === newValue.charAt(prefix)
+  ) {
+    prefix++;
+  }
+  var oldEnd = oldValue.length - 1;
+  var newEnd = newValue.length - 1;
+  while (
+    oldEnd >= prefix
+    && newEnd >= prefix
+    && oldValue.charAt(oldEnd) === newValue.charAt(newEnd)
+  ) {
+    oldEnd--;
+    newEnd--;
+  }
+  var delta = newValue.length - oldValue.length;
+  var rebased = [];
+  for (var i = 0; i < _taskTitleEscapedPercents.length; i++) {
+    var idx = _taskTitleEscapedPercents[i];
+    var nextIdx = -1;
+    if (idx < prefix) nextIdx = idx;
+    else if (idx > oldEnd) nextIdx = idx + delta;
+    if (nextIdx >= 0) rebased.push(nextIdx);
+  }
+  _taskTitleSetEscapedPercents(rebased, newValue);
+}
+
+function _taskConsumeEscapedTitlePercents(el) {
+  if (!el || typeof el.value !== 'string') return;
+  var value = el.value;
+  var caretStart = typeof el.selectionStart === 'number' ? el.selectionStart : value.length;
+  var caretEnd = typeof el.selectionEnd === 'number' ? el.selectionEnd : caretStart;
+  for (var i = 1; i < value.length; i++) {
+    if (value.charAt(i) !== '%' || value.charAt(i - 1) !== '\\') continue;
+    if (_taskTitleIsEscapedPercent(i)) continue;
+    value = value.slice(0, i - 1) + value.slice(i);
+    var adjusted = [];
+    for (var j = 0; j < _taskTitleEscapedPercents.length; j++) {
+      var idx = _taskTitleEscapedPercents[j];
+      if (idx < i - 1) adjusted.push(idx);
+      else if (idx > i - 1) adjusted.push(idx - 1);
+    }
+    adjusted.push(i - 1);
+    _taskTitleSetEscapedPercents(adjusted, value);
+    if (caretStart >= i) caretStart--;
+    else if (caretStart > i - 1) caretStart = i - 1;
+    if (caretEnd >= i) caretEnd--;
+    else if (caretEnd > i - 1) caretEnd = i - 1;
+    i--;
+  }
+  if (el.value !== value) {
+    el.value = value;
+    try {
+      el.selectionStart = Math.max(0, caretStart);
+      el.selectionEnd = Math.max(0, caretEnd);
+    } catch (_e) {}
+  }
+}
+
+function _taskPrepareTitleValue(el) {
+  if (!el || typeof el.value !== 'string') return;
+  _taskRebaseTitleEscapes(_taskTitleLastValue, el.value);
+  _taskConsumeEscapedTitlePercents(el);
+  _taskTitleLastValue = el.value;
+}
+
+function _taskResetTitleLabelState(el) {
+  _taskTitleEscapedPercents = [];
+  _taskTitleLastValue = el && typeof el.value === 'string' ? el.value : '';
+  _taskPrepareTitleValue(el);
+}
+
+function _taskTitleIsLabelChar(ch) {
+  return /[A-Za-z0-9_-]/.test(ch || '');
+}
+
+function _taskFindActiveTitleLabel(value, caret) {
+  value = typeof value === 'string' ? value : '';
+  caret = typeof caret === 'number' ? caret : value.length;
+  var before = value.slice(0, caret);
+  var match = before.match(/(^|\s)%([A-Za-z0-9_-]*)$/);
+  if (!match) return null;
+  var start = caret - match[2].length - 1;
+  if (_taskTitleIsEscapedPercent(start)) return null;
+  return { start: start, end: caret, prefix: match[2] };
+}
+
+function _taskCollectTitleLabelTokens(value, opts) {
+  value = typeof value === 'string' ? value : '';
+  opts = opts || {};
+  var tokens = [];
+  for (var i = 0; i < value.length; i++) {
+    if (value.charAt(i) !== '%' || _taskTitleIsEscapedPercent(i)) continue;
+    if (i > 0 && !/\s/.test(value.charAt(i - 1))) continue;
+    var j = i + 1;
+    while (j < value.length && _taskTitleIsLabelChar(value.charAt(j))) j++;
+    if (j === i + 1) continue;
+    if (j < value.length && !/\s/.test(value.charAt(j))) continue;
+    if (
+      opts.forHighlight
+      && typeof opts.caret === 'number'
+      && opts.caret === j
+      && _taskFindActiveTitleLabel(value, opts.caret)
+    ) {
+      continue;
+    }
+    tokens.push({
+      start: i,
+      end: j,
+      text: value.slice(i, j),
+      label: value.slice(i + 1, j).toLowerCase(),
+    });
+  }
+  return tokens;
+}
+
+function _taskTitleHighlightText(value, caret) {
+  var tokens = _taskCollectTitleLabelTokens(value, { forHighlight: true, caret: caret });
+  var html = '';
+  var pos = 0;
+  for (var i = 0; i < tokens.length; i++) {
+    var token = tokens[i];
+    html += esc(value.slice(pos, token.start));
+    var color = typeof labelColor === 'function' ? labelColor(token.label) : '#58a6ff';
+    html += '<span class="task-title-label-token" style="background:' + color
+      + '22;color:' + color + '">' + esc(token.text) + '</span>';
+    pos = token.end;
+  }
+  html += esc(value.slice(pos));
+  if (!html.endsWith('\n')) html += '\n';
+  return html;
+}
+
+function _taskSyncTitleLabelHighlight(el) {
+  if (!el || el.id !== 'task-task-input') return;
+  var backdrop = document.getElementById('task-title-label-highlight');
+  if (!backdrop) return;
+  var caret = typeof el.selectionStart === 'number' ? el.selectionStart : el.value.length;
+  backdrop.innerHTML = _taskTitleHighlightText(el.value || '', caret);
+  if (el.style && el.style.height) backdrop.style.height = el.style.height;
+  backdrop.scrollTop = el.scrollTop || 0;
+  backdrop.scrollLeft = el.scrollLeft || 0;
+}
+
+function taskTitleScroll(el) {
+  _taskSyncTitleLabelHighlight(el);
+}
+
+function _taskHideTitleLabelDropdown() {
+  var dropdown = _taskTitleLabelDropdown();
+  if (dropdown) dropdown.style.display = 'none';
+  _taskTitleLabelDropdownIdx = -1;
+}
+
+function _taskSyncTitleLabelDropdown(el) {
+  var dropdown = _taskTitleLabelDropdown();
+  if (!dropdown || !el) return;
+  var caret = typeof el.selectionStart === 'number' ? el.selectionStart : el.value.length;
+  if (typeof el.selectionEnd === 'number' && el.selectionEnd !== caret) {
+    _taskHideTitleLabelDropdown();
+    return;
+  }
+  var active = _taskFindActiveTitleLabel(el.value || '', caret);
+  if (!active) {
+    _taskHideTitleLabelDropdown();
+    return;
+  }
+  var prefix = (active.prefix || '').toLowerCase();
+  var existing = {};
+  (_taskLabels || []).forEach(function(label) {
+    existing[String(label || '').toLowerCase()] = true;
+  });
+  _taskCollectTitleLabelTokens(el.value || '').forEach(function(token) {
+    existing[token.label] = true;
+  });
+  var all = _getAllLabels();
+  var html = '';
+  var count = 0;
+  for (var i = 0; i < all.length; i++) {
+    var label = all[i];
+    var key = String(label || '').toLowerCase();
+    if (existing[key]) continue;
+    if (key.indexOf(prefix) < 0) continue;
+    html += '<div class="deps-option" onmousedown="event.preventDefault()" onclick="taskPickTitleLabel(\''
+      + esc(label).replace(/'/g, "\\'") + '\')">' + esc(label) + '</div>';
+    count++;
+    if (count >= 8) break;
+  }
+  dropdown.innerHTML = html;
+  dropdown.style.display = count ? '' : 'none';
+  _taskTitleLabelDropdownIdx = -1;
+}
+
+function _highlightTitleLabelOption(idx) {
+  var dropdown = _taskTitleLabelDropdown();
+  var opts = dropdown ? dropdown.querySelectorAll('.deps-option') : [];
+  for (var i = 0; i < opts.length; i++) opts[i].classList.toggle('active', i === idx);
+  _taskTitleLabelDropdownIdx = idx;
+}
+
+function _taskSetTitleRange(el, start, end, replacement, caret) {
+  if (!el || typeof el.value !== 'string') return;
+  var oldValue = el.value;
+  var nextValue = oldValue.slice(0, start) + replacement + oldValue.slice(end);
+  var delta = replacement.length - (end - start);
+  var adjusted = [];
+  for (var i = 0; i < _taskTitleEscapedPercents.length; i++) {
+    var idx = _taskTitleEscapedPercents[i];
+    if (idx < start) adjusted.push(idx);
+    else if (idx >= end) adjusted.push(idx + delta);
+  }
+  el.value = nextValue;
+  _taskTitleSetEscapedPercents(adjusted, nextValue);
+  _taskTitleLastValue = nextValue;
+  caret = typeof caret === 'number' ? caret : (start + replacement.length);
+  try {
+    el.selectionStart = caret;
+    el.selectionEnd = caret;
+    if ('selectionDirection' in el) el.selectionDirection = 'none';
+  } catch (_e) {}
+}
+
+function _taskTitleLabelDeletionRange(value, caret) {
+  value = typeof value === 'string' ? value : '';
+  var before = value.slice(0, caret);
+  var match = before.match(/(^|\s)(%[A-Za-z0-9_-]+)(\s+)$/);
+  if (match) {
+    var start = caret - match[2].length - match[3].length;
+    if (!_taskTitleIsEscapedPercent(start)) return { start: start, end: caret };
+  }
+  match = before.match(/(^|\s)(%[A-Za-z0-9_-]+)$/);
+  if (match && caret < value.length && /\s/.test(value.charAt(caret))) {
+    var tokenStart = caret - match[2].length;
+    if (!_taskTitleIsEscapedPercent(tokenStart)) return { start: tokenStart, end: caret };
+  }
+  return null;
+}
+
+function _taskBackspaceTitleLabel(el) {
+  if (!el || typeof el.value !== 'string') return false;
+  if (typeof el.selectionStart !== 'number' || el.selectionStart !== el.selectionEnd) return false;
+  var range = _taskTitleLabelDeletionRange(el.value, el.selectionStart);
+  if (!range) return false;
+  _taskSetTitleRange(el, range.start, range.end, '', range.start);
+  _taskSyncTitleLabelDropdown(el);
+  _taskSyncTitleLabelHighlight(el);
+  taskAutoResize(el);
+  taskPersistDraft();
+  return true;
+}
+
+function taskPickTitleLabel(label) {
+  var el = document.getElementById('task-task-input');
+  if (!el) return;
+  _taskPrepareTitleValue(el);
+  var caret = typeof el.selectionStart === 'number' ? el.selectionStart : el.value.length;
+  var active = _taskFindActiveTitleLabel(el.value || '', caret);
+  if (!active) return;
+  _taskSetTitleRange(el, active.start, active.end, '%' + label + ' ', active.start + label.length + 2);
+  _taskHideTitleLabelDropdown();
+  _taskSyncTitleLabelHighlight(el);
+  taskAutoResize(el);
+  taskPersistDraft();
+  el.focus();
+}
+
+function taskTitleInput(el) {
+  _taskPrepareTitleValue(el);
+  _taskSyncTitleLabelDropdown(el);
+  _taskSyncTitleLabelHighlight(el);
+  taskAutoResize(el);
+  taskPersistDraft();
+}
+
+function taskTitleKeydown(e) {
+  var el = e.target && typeof e.target.value === 'string'
+    ? e.target
+    : document.getElementById('task-task-input');
+  var dropdown = _taskTitleLabelDropdown();
+  var visible = dropdown && dropdown.style.display !== 'none';
+  if (visible) {
+    var opts = dropdown.querySelectorAll('.deps-option');
+    if (e.key === 'ArrowDown' && opts.length) {
+      e.preventDefault();
+      _highlightTitleLabelOption((_taskTitleLabelDropdownIdx + 1) % opts.length);
+      return;
+    }
+    if (e.key === 'ArrowUp' && opts.length) {
+      e.preventDefault();
+      _highlightTitleLabelOption((_taskTitleLabelDropdownIdx - 1 + opts.length) % opts.length);
+      return;
+    }
+    if (e.key === 'Enter' && opts.length) {
+      e.preventDefault();
+      var idx = _taskTitleLabelDropdownIdx >= 0 ? _taskTitleLabelDropdownIdx : 0;
+      if (opts[idx]) opts[idx].click();
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      _taskHideTitleLabelDropdown();
+      return;
+    }
+  }
+  if (
+    e.key === 'Backspace'
+    && !e.altKey
+    && !e.ctrlKey
+    && !e.metaKey
+    && _taskBackspaceTitleLabel(el)
+  ) {
+    e.preventDefault();
+    return;
+  }
+  if (e.key === 'Escape') closeModals();
+}
+
+function _taskTitleOperatorBundle(el) {
+  if (el) _taskPrepareTitleValue(el);
+  var value = el && typeof el.value === 'string' ? el.value : '';
+  var tokens = _taskCollectTitleLabelTokens(value);
+  if (!tokens.length) return { task: value, labels: [] };
+  var labels = [];
+  var seen = {};
+  var clean = '';
+  var pos = 0;
+  for (var i = 0; i < tokens.length; i++) {
+    var token = tokens[i];
+    clean += value.slice(pos, token.start);
+    pos = token.end;
+    if (!seen[token.label]) {
+      seen[token.label] = true;
+      labels.push(token.label);
+    }
+  }
+  clean += value.slice(pos);
+  clean = clean
+    .replace(/[^\S\n]+/g, ' ')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n[ \t]+/g, '\n')
+    .trim();
+  return { task: clean, labels: labels };
 }
 
 function _cloneTaskAttachments(list) {
@@ -89,6 +467,7 @@ function _taskReadDraftFromDom() {
   return {
     lane: modal ? (modal.dataset.lane || '') : '',
     task: taskEl ? taskEl.value : '',
+    title_escaped_percents: _taskTitleEscapedPercents.slice(),
     description: descEl ? descEl.value : '',
     group: groupEl ? groupEl.value : '',
     action_name: actionEl ? (actionEl.value || _taskSelectedAction || '') : (_taskSelectedAction || ''),
@@ -260,8 +639,15 @@ function _taskOpenModal(config) {
   modal.classList.add('visible');
   var bodyEl = document.getElementById('task-modal-body');
   if (bodyEl) bodyEl.scrollTop = 0;
+  _taskResetTitleLabelState(taskEl);
+  if (draft && draft.title_escaped_percents) {
+    _taskTitleSetEscapedPercents(draft.title_escaped_percents, taskEl.value);
+    _taskTitleLastValue = taskEl.value;
+  }
   taskAutoResize(taskEl);
   taskAutoResize(descEl);
+  _taskSyncTitleLabelDropdown(taskEl);
+  _taskSyncTitleLabelHighlight(taskEl);
   taskEl.focus();
   if (config.selectTask) taskEl.select();
   taskPersistDraft();
@@ -602,7 +988,9 @@ function _populateTaskGroupSelect(defaultGroup) {
 }
 
 function submitTask() {
-  var task = document.getElementById('task-task-input').value.trim();
+  var taskEl = document.getElementById('task-task-input');
+  var titleBundle = _taskTitleOperatorBundle(taskEl);
+  var task = titleBundle.task.trim();
   var group = document.getElementById('task-group-select').value;
   if (!task || !group) {
     if (!task) document.getElementById('task-task-input').focus();
@@ -621,7 +1009,11 @@ function submitTask() {
   // Include any text still in the input as a label
   var pendingLabel = document.getElementById('task-labels-input').value.trim();
   if (pendingLabel && _taskLabels.indexOf(pendingLabel) < 0) _taskLabels.push(pendingLabel);
-  var labels = _taskLabels.concat(_taskSystemLabels);
+  var labels = _taskLabels.slice();
+  for (var li = 0; li < titleBundle.labels.length; li++) {
+    if (labels.indexOf(titleBundle.labels[li]) < 0) labels.push(titleBundle.labels[li]);
+  }
+  labels = labels.concat(_taskSystemLabels);
   var actionVars = _collectTaskActionVars();
 
   var schedVal = (document.getElementById('task-scheduled-input') || {}).value || '';
@@ -820,7 +1212,7 @@ function _collectTaskActionVars() {
 }
 
 function previewTaskPrompt() {
-  var task = document.getElementById('task-task-input').value.trim();
+  var task = _taskTitleOperatorBundle(document.getElementById('task-task-input')).task.trim();
   var description = document.getElementById('task-description-input').value.trim();
   var actionVars = _collectTaskActionVars();
   var msg = {
@@ -852,4 +1244,5 @@ function _handleTaskTemplateList(msg) {
 function taskAutoResize(el) {
   el.style.height = 'auto';
   el.style.height = el.scrollHeight + 'px';
+  _taskSyncTitleLabelHighlight(el);
 }

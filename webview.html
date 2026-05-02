@@ -1024,9 +1024,14 @@
     <label>Task <span class="label-req">*</span>
       <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="An actionable task description, e.g. 'Create a summary of last week's deploys' instead of 'Weekly deploy report'.">?</span>
     </label>
-    <textarea id="task-task-input" rows="1" autocomplete="off"
-              oninput="taskAutoResize(this);taskPersistDraft()"
-              onkeydown="if(event.key==='Escape')closeModals();"></textarea>
+    <div class="task-title-label-wrap">
+      <div id="task-title-label-highlight" class="task-title-label-backdrop"></div>
+      <textarea id="task-task-input" rows="1" autocomplete="off"
+                oninput="taskTitleInput(this)"
+                onkeydown="taskTitleKeydown(event)"
+                onscroll="taskTitleScroll(this)"></textarea>
+      <div id="task-title-label-dropdown" class="deps-dropdown" style="display:none"></div>
+    </div>
     <label>Description</label>
     <textarea id="task-description-input" rows="2" autocomplete="off"
               placeholder="Optional longer context or details..."
