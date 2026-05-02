@@ -203,6 +203,8 @@ test('agent card density CSS uses taller narrower cards in classic and runtime-e
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
   const gridRule = css.match(/\.agent-grid\s*\{[^}]*\}/);
   const workerFlexRule = css.match(/\.engineer-row-workers > \.cell,\s*\.loose-workers-strip > \.cell,\s*\.ghost-card--worker\s*\{[^}]*\}/);
+  const looseWorkersFullRowRule = css.match(/\.agent-grid \.engineer-row:not\(\.engineer-row--empty-workers\),\s*\.loose-workers-strip,\s*\.agent-section-controls-slot,\s*\.agent-section-empty-msg\s*\{[^}]*\}/);
+  const standaloneWorkerTileRule = css.match(/\.standalone-worker-card-new\s*\{[^}]*\}/);
   const principalRule = css.match(/\.principal-card\s*\{[^}]*\}/);
   const userPrincipalRule = css.match(/\.principal-card--user\s*\{[^}]*\}/);
   const cellRule = css.match(/^\.cell\s*\{[^}]*\}/m);
@@ -229,6 +231,8 @@ test('agent card density CSS uses taller narrower cards in classic and runtime-e
 
   assert.ok(gridRule, '.agent-grid rule exists');
   assert.ok(workerFlexRule, 'worker flex sizing rule exists');
+  assert.ok(looseWorkersFullRowRule, 'standalone worker strip full-row rule exists');
+  assert.ok(standaloneWorkerTileRule, 'standalone worker tile rule exists');
   assert.ok(principalRule, '.principal-card rule exists');
   assert.ok(userPrincipalRule, '.principal-card--user rule exists');
   assert.ok(cellRule, '.cell rule exists');
@@ -254,6 +258,9 @@ test('agent card density CSS uses taller narrower cards in classic and runtime-e
   assert.match(workerFlexRule[0], /flex:\s*0 1 var\(--agent-grid-card-basis\);/);
   assert.match(workerFlexRule[0], /min-width:\s*var\(--agent-grid-card-min\);/);
   assert.match(workerFlexRule[0], /max-width:\s*var\(--agent-grid-card-max\);/);
+  assert.match(looseWorkersFullRowRule[0], /grid-column:\s*1\s*\/\s*-1;/);
+  assert.match(standaloneWorkerTileRule[0], /height:\s*auto;/);
+  assert.match(standaloneWorkerTileRule[0], /min-height:\s*var\(--agent-worker-card-height,\s*96px\);/);
   assert.match(principalRule[0], /width:\s*var\(--agent-architect-column-width\);/);
   assert.match(principalRule[0], /min-height:\s*var\(--agent-principal-card-height,\s*96px\);/);
   assert.match(userPrincipalRule[0], /min-height:\s*var\(--agent-user-card-height,\s*74px\);/);
@@ -546,8 +553,9 @@ test('user view shows standalone Add Worker affordance', () => {
   vm.runInContext('render();', context);
 
   assert.match(mainEl.innerHTML, /\+ Add Worker/);
+  assert.match(mainEl.innerHTML, /standalone-worker-card-new/);
   assert.match(mainEl.innerHTML, /openAddWorkerForSection\(&quot;loom&quot;\)/);
-  assert.doesNotMatch(mainEl.innerHTML, /loose-workers-strip/);
+  assert.match(mainEl.innerHTML, /loose-workers-strip[\s\S]*\+ Add Worker/);
 });
 
 test('falls back to user principal when stored architect id no longer exists', () => {
@@ -636,8 +644,11 @@ test('principal nav ids are group-scoped so multi-group workspaces do not collid
   assert.equal(parsed['principal:alpha:user'].group, 'alpha');
   assert.equal(parsed['principal:beta:user'].group, 'beta');
 
-  // Arrow-down from alpha's user principal lands on alpha's engineer, not beta's.
+  // Arrow-down from alpha's user principal enters alpha's user-owned worker
+  // row, not beta's grid.
   vm.runInContext("focusedItemId = 'principal:alpha:user'; moveFocusDown();", context);
+  assert.equal(vm.runInContext('focusedItemId', context), 'grid-control:section-new-worker:alpha:user');
+  vm.runInContext('moveFocusDown();', context);
   assert.equal(vm.runInContext('focusedItemId', context), 'eng-a');
 });
 

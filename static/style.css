@@ -889,6 +889,7 @@ body.runtime-embedded .agent-focus-header {
   background: transparent;
 }
 .agent-grid .engineer-row:not(.engineer-row--empty-workers),
+.loose-workers-strip,
 .agent-section-controls-slot,
 .agent-section-empty-msg {
   grid-column: 1 / -1;
@@ -1202,9 +1203,17 @@ body.runtime-embedded .agent-focus-header {
   height: auto;
   min-height: var(--agent-card-height, 96px);
 }
+.standalone-worker-card-new {
+  align-self: stretch;
+  height: auto;
+  min-height: var(--agent-worker-card-height, 96px);
+}
 @media (max-width: 400px) {
   .principal-card-new {
     min-height: var(--agent-card-height, 96px);
+  }
+  .standalone-worker-card-new {
+    min-height: var(--agent-worker-card-height, 96px);
   }
 }
 .principal-card-controls {
