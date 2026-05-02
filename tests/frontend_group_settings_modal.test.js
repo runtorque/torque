@@ -193,6 +193,12 @@ function loadModals(context) {
   vm.runInContext(source, context, { filename });
 }
 
+function loadWs(context) {
+  const filename = path.join(repoRoot, 'static/js/ws.js');
+  const source = fs.readFileSync(filename, 'utf8');
+  vm.runInContext(source, context, { filename });
+}
+
 function loadEngineerLaunchModals(context) {
   loadModals(context);
   const filename = path.join(repoRoot, 'static/js/modals/engineer-launch.js');
@@ -310,6 +316,97 @@ test('system prompt preview popup sends unsaved form state and closes as nested 
   vm.runInContext('closeSystemPromptPreview()', context);
   assert.equal(ensure('modal-system-prompt-preview').classList.contains('visible'), false);
   assert.equal(ensure('modal-system-prompt-preview').classList.contains('modal-nested'), false);
+});
+
+test('system prompt preview popup surfaces backend errors and clears after success', () => {
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+  seedProviders(context, sandbox._cachedProviders);
+
+  vm.runInContext('_settingsGroup = "alpha";', context);
+  vm.runInContext('openGroupSystemPromptPreview("engineer")', context);
+  const call = sandbox.sendCalls[0];
+
+  vm.runInContext(
+    `_showSystemPromptPreviewError({
+      type: "error",
+      request_id: ${JSON.stringify(call.request_id)},
+      message: "Template syntax error"
+    })`,
+    context,
+  );
+
+  assert.equal(ensure('system-prompt-preview-content').textContent, '');
+  assert.equal(
+    ensure('system-prompt-preview-error').textContent,
+    'Failed to render system prompt: Template syntax error',
+  );
+  assert.equal(ensure('system-prompt-preview-error').style.display, '');
+  assert.equal(ensure('system-prompt-preview-copy-btn').disabled, true);
+
+  vm.runInContext(
+    `_showSystemPromptPreview({
+      type: "system_prompt_preview",
+      request_id: ${JSON.stringify(call.request_id)},
+      kind: "engineer",
+      group: "alpha",
+      prompt: "Rendered prompt after fixing the template"
+    })`,
+    context,
+  );
+
+  assert.equal(
+    ensure('system-prompt-preview-content').textContent,
+    'Rendered prompt after fixing the template',
+  );
+  assert.equal(ensure('system-prompt-preview-error').textContent, '');
+  assert.equal(ensure('system-prompt-preview-error').style.display, 'none');
+  assert.equal(ensure('system-prompt-preview-copy-btn').disabled, false);
+});
+
+test('system prompt preview popup consumes WebSocket error while render is pending', () => {
+  const { sandbox, ensure } = createSandbox();
+  let socket = null;
+  function FakeWebSocket(url) {
+    this.url = url;
+    this.readyState = FakeWebSocket.OPEN;
+    socket = this;
+  }
+  FakeWebSocket.OPEN = 1;
+  FakeWebSocket.prototype.send = function send() {};
+  FakeWebSocket.prototype.close = function close() {};
+  sandbox.WebSocket = FakeWebSocket;
+  sandbox.location = { host: 'localhost:18969' };
+  sandbox.setTimeout = function setTimeoutStub() {};
+  sandbox.toastCalls = [];
+  sandbox._showToast = function _showToast(message, level) {
+    sandbox.toastCalls.push({ message, level });
+  };
+
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+  seedProviders(context, sandbox._cachedProviders);
+
+  vm.runInContext('_settingsGroup = "alpha";', context);
+  vm.runInContext('openGroupSystemPromptPreview("engineer")', context);
+  loadWs(context);
+  vm.runInContext('connect()', context);
+
+  socket.onmessage({
+    data: JSON.stringify({
+      type: 'error',
+      message: 'Role template could not be resolved',
+    }),
+  });
+
+  assert.equal(
+    ensure('system-prompt-preview-error').textContent,
+    'Failed to render system prompt: Role template could not be resolved',
+  );
+  assert.equal(ensure('system-prompt-preview-error').style.display, '');
+  assert.equal(ensure('system-prompt-preview-content').textContent, '');
+  assert.deepEqual(sandbox.toastCalls, []);
 });
 
 test('architect system prompt preview uses architect form values', () => {

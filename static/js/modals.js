@@ -867,6 +867,61 @@ function _systemPromptPreviewTitle(kind) {
     : 'Engineer system prompt';
 }
 
+function _clearSystemPromptPreviewError() {
+  const errorEl = document.getElementById('system-prompt-preview-error');
+  if (!errorEl) return;
+  errorEl.textContent = '';
+  errorEl.style.display = 'none';
+}
+
+function _formatSystemPromptPreviewError(msg) {
+  const reason = String(
+    (msg && (msg.message || msg.error || msg.reason || msg.detail))
+      || 'Unknown error'
+  ).trim() || 'Unknown error';
+  if (reason.indexOf('Failed to render system prompt:') === 0) {
+    return reason;
+  }
+  return `Failed to render system prompt: ${reason}`;
+}
+
+function _systemPromptPreviewResponseIsCurrent(msg) {
+  return !(
+    msg
+    && msg.request_id
+    && _systemPromptPreviewRequestId
+    && msg.request_id !== _systemPromptPreviewRequestId
+  );
+}
+
+function _showSystemPromptPreviewError(msg) {
+  if (!_systemPromptPreviewResponseIsCurrent(msg)) return false;
+  const modal = document.getElementById('modal-system-prompt-preview');
+  const contentEl = document.getElementById('system-prompt-preview-content');
+  const errorEl = document.getElementById('system-prompt-preview-error');
+  if (!modal || !contentEl || !errorEl) return false;
+  const cmd = String((msg && (msg.cmd || msg.command || msg.request_cmd)) || '').trim();
+  const hasExplicitPreviewSignal = !!(
+    (msg && msg.request_id)
+    || cmd === 'preview_system_prompt'
+  );
+  const hasPreviewRequest = hasExplicitPreviewSignal
+    || !!(_systemPromptPreviewRequestId && contentEl.textContent === 'Loading…');
+  if (!hasPreviewRequest) return false;
+
+  contentEl.textContent = '';
+  document.getElementById('system-prompt-preview-summary').textContent =
+    'Unable to render system prompt.';
+  errorEl.textContent = _formatSystemPromptPreviewError(msg);
+  errorEl.style.display = '';
+  const copyBtn = document.getElementById('system-prompt-preview-copy-btn');
+  if (copyBtn) {
+    copyBtn.disabled = true;
+    copyBtn.textContent = 'Copy to clipboard';
+  }
+  return true;
+}
+
 function openGroupSystemPromptPreview(kind) {
   const previewKind = String(kind || '').trim().toLowerCase() === 'architect'
     ? 'architect'
@@ -881,9 +936,7 @@ function openGroupSystemPromptPreview(kind) {
   document.getElementById('system-prompt-preview-summary').textContent =
     `Rendering ${previewKind} prompt from the current unsaved form values…`;
   document.getElementById('system-prompt-preview-content').textContent = 'Loading…';
-  const errorEl = document.getElementById('system-prompt-preview-error');
-  errorEl.textContent = '';
-  errorEl.style.display = 'none';
+  _clearSystemPromptPreviewError();
   const copyBtn = document.getElementById('system-prompt-preview-copy-btn');
   if (copyBtn) {
     copyBtn.disabled = true;
@@ -923,10 +976,9 @@ function closeSystemPromptPreview() {
 
 function _showSystemPromptPreview(msg) {
   msg = msg || {};
-  if (
-      msg.request_id
-      && _systemPromptPreviewRequestId
-      && msg.request_id !== _systemPromptPreviewRequestId) {
+  if (!_systemPromptPreviewResponseIsCurrent(msg)) return;
+  if (msg.error || msg.message || msg.reason || msg.detail) {
+    _showSystemPromptPreviewError(msg);
     return;
   }
   const kind = String((msg && msg.kind) || '').trim().toLowerCase();
@@ -936,6 +988,7 @@ function _showSystemPromptPreview(msg) {
   }
   const prompt = (msg && msg.prompt) || '(empty)';
   document.getElementById('system-prompt-preview-content').textContent = prompt;
+  _clearSystemPromptPreviewError();
   const label = kind || 'system';
   document.getElementById('system-prompt-preview-summary').textContent =
     `Rendered ${label} prompt for ${msg.group || _settingsGroup || 'this group'}.`;
