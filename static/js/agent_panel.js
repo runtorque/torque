@@ -1591,11 +1591,6 @@ function _agentPanelInlineThreadMessageList(agent) {
   return messages;
 }
 
-function _agentPanelGroupWideNote(group) {
-  var label = group ? ('Group: ' + group + ' (group-wide)') : 'Group-wide';
-  return '<div class="agent-panel-worklog-note">' + _agentPanelEsc(label) + '</div>';
-}
-
 function _agentPanelMcpFilters(agentId) {
   agentId = String(agentId || '');
   if (!_agentPanelMcpFiltersByAgent[agentId]) {
@@ -2146,8 +2141,6 @@ function _renderEngineerWorklog(agent) {
 function _agentPanelTabRenderParts(agent, kind, activeTab) {
   var parts = { bodyHtml: '', headerRightHtml: '' };
   if (kind === 'engineer') {
-    var engineerGroup = String((agent && agent.group) || '');
-    parts.bodyHtml = _agentPanelGroupWideNote(engineerGroup);
     if (activeTab === 'events') {
       parts.headerRightHtml = _agentPanelDigestHeaderRight(agent);
       parts.bodyHtml += _renderEngineerEvents(agent);

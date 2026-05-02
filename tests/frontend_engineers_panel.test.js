@@ -92,7 +92,7 @@ test('focused engineer panel shows journal/events/worklog tabs with the engineer
   assert.match(panel.innerHTML, />Journal</);
   assert.match(panel.innerHTML, />Events</);
   assert.match(panel.innerHTML, />Worklog</);
-  assert.match(panel.innerHTML, /Group: loom \(group-wide\)/);
+  assert.doesNotMatch(panel.innerHTML, /Group: loom \(group-wide\)/);
 });
 
 test('focused engineer worklog tab renders the group worklog entries', () => {

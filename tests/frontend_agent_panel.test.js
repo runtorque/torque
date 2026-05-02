@@ -547,7 +547,7 @@ test('engineer panel renders journal for the focused engineer only', () => {
   context.renderAgentPanel();
   assert.match(panel.innerHTML, /Approved the refactor/);
   assert.doesNotMatch(panel.innerHTML, /Other engineer note/);
-  assert.match(panel.innerHTML, /Group: alpha \(group-wide\)/);
+  assert.doesNotMatch(panel.innerHTML, /Group: alpha \(group-wide\)/);
 
   context.agentPanelSelectTab('events');
   assert.match(panel.innerHTML, /id="agent-panel-pause-btn"/);
