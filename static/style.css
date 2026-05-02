@@ -5200,14 +5200,6 @@ body.runtime-embedded .board-empty-action:focus-visible {
   flex-wrap: wrap;
   flex: 1 1 100%;
 }
-.tpled-scope-pill {
-  font-size: 9px;
-  color: var(--text-dim);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 2px 7px;
-  background: var(--bg);
-}
 .tpled-select {
   flex: 1 1 180px; min-width: 0;
   font-size: 10px; padding: 3px 4px;

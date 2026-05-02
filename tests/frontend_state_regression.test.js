@@ -1765,6 +1765,22 @@ test('actions editor removes fallback threshold copy and renames transition LOC 
   assert.match(source, /Require this transition above N LOC/);
 });
 
+test('actions panel labels the pipeline graph tab as DAG', () => {
+  const { sandbox, document } = createSandbox({
+    _cachedAgentTemplates: [],
+  });
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/actions.js');
+  const panel = document.register('panel-actions');
+
+  context.renderTemplatesPanel();
+
+  assert.match(panel.innerHTML, /onclick="tplSwitchView\('editor'\)">Editor<\/button>/);
+  assert.match(panel.innerHTML, /onclick="tplSwitchView\('pipelines'\)">DAG<\/button>/);
+  assert.doesNotMatch(panel.innerHTML, />Pipelines<\/button>/);
+  assert.doesNotMatch(panel.innerHTML, /Group: alpha/);
+});
+
 test('actions editor save payload includes transition LOC gate overrides', () => {
   const { sandbox, document } = createSandbox({
     _showToast() {},
@@ -13671,6 +13687,7 @@ test('agents panel defaults to history view', () => {
 
   assert.match(panel.innerHTML, /Role Library/);
   assert.match(panel.innerHTML, /Live agents stay in the left column/);
+  assert.doesNotMatch(panel.innerHTML, /Group: alpha/);
   assert.match(panel.innerHTML, /History<\/button>/);
   assert.match(panel.innerHTML, /tpled-view-btn active[^"]*" onclick="agentsPanelSwitchView\('history'\)"/);
   assert.match(panel.innerHTML, /agent-history-container/);
@@ -16142,10 +16159,10 @@ test('Actions and Roles panels hide stale lists while loading the new active gro
 
   const actionsPanel = document.getElementById('panel-actions');
   const rolesPanel = document.getElementById('panel-templates');
-  assert.match(actionsPanel.innerHTML, /Group: beta/);
+  assert.doesNotMatch(actionsPanel.innerHTML, /Group: beta/);
   assert.doesNotMatch(actionsPanel.innerHTML, /AlphaAction/);
   assert.match(actionsEditor.innerHTML, /Loading actions/);
-  assert.match(rolesPanel.innerHTML, /Group: beta/);
+  assert.doesNotMatch(rolesPanel.innerHTML, /Group: beta/);
   assert.doesNotMatch(rolesPanel.innerHTML, /Alpha Role|AlphaRole/);
   assert.match(rolesEditor.innerHTML, /Loading roles/);
 });

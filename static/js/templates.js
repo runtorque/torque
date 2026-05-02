@@ -111,7 +111,6 @@ function renderAgentTemplatesPanel() {
   html += '<div class="tpled-header-copy">';
   html += '<div class="tpled-header-title-row">';
   html += '<span class="tpled-header-title">Role Library</span>';
-  if (scopeGroup) html += '<span class="tpled-scope-pill">Group: ' + esc(scopeGroup) + '</span>';
   html += '</div>';
   html += '<div class="tpled-header-subtitle">Roles and historical runs. Live agents stay in the left column.</div>';
   html += '</div>';

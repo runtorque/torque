@@ -114,7 +114,6 @@ function renderTemplatesPanel() {
   html += '<div class="tpled-header-copy">';
   html += '<div class="tpled-header-title-row">';
   html += '<span class="tpled-header-title">Actions</span>';
-  if (scopeGroup) html += '<span class="tpled-scope-pill">Group: ' + esc(scopeGroup) + '</span>';
   html += '</div>';
   html += '<div class="tpled-header-subtitle">Prompt templates, pipelines, and dispatch workflows.</div>';
   html += '</div>';
@@ -153,7 +152,7 @@ function renderTemplatesPanel() {
   // View toggle
   html += '<div class="tpled-view-toggle">';
   html += '<button class="tpled-view-btn' + (_tplPanelView === 'editor' ? ' active' : '') + '" onclick="tplSwitchView(\'editor\')">Editor</button>';
-  html += '<button class="tpled-view-btn' + (_tplPanelView === 'pipelines' ? ' active' : '') + '" onclick="tplSwitchView(\'pipelines\')">Pipelines</button>';
+  html += '<button class="tpled-view-btn' + (_tplPanelView === 'pipelines' ? ' active' : '') + '" onclick="tplSwitchView(\'pipelines\')">DAG</button>';
   html += '</div>';
   html += '</div>';
   html += '</div>';
