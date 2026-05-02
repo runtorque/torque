@@ -185,6 +185,43 @@ def _normalize_architect_task_list_label_filter(value) -> tuple[list[str], str]:
     return labels, ""
 
 
+async def _validate_task_update_action_name(
+        action_name: str,
+        group: str,
+        handle_command) -> str:
+    """Return an error message if an architect action binding is invalid."""
+    name = str(action_name or "").strip()
+    if not name:
+        return ""
+    result = await handle_command({
+        "cmd": "list_actions",
+        "group": str(group or "").strip(),
+    })
+    if isinstance(result, dict) and result.get("type") == "error":
+        return (
+            "Unable to validate action_name via ActionManager.list_actions(): "
+            f"{result.get('message', 'Unknown error')}"
+        )
+    actions = result.get("actions") if isinstance(result, dict) else None
+    if not isinstance(actions, list):
+        return (
+            "Unable to validate action_name via ActionManager.list_actions(): "
+            "list_actions returned an unexpected response"
+        )
+    action_names = {
+        str(item.get("name", "") if isinstance(item, dict) else item).strip()
+        for item in actions
+        if str(item.get("name", "") if isinstance(item, dict) else item).strip()
+    }
+    if name not in action_names:
+        return (
+            f"Unknown action_name '{name}' "
+            "(validated against ActionManager.list_actions() "
+            f"for group '{str(group or '').strip()}')"
+        )
+    return ""
+
+
 def _normalize_architect_task_list_limit(value) -> tuple[int, str]:
     if value in (None, ""):
         return _ARCHITECT_TASK_LIST_DEFAULT_LIMIT, ""
@@ -3104,10 +3141,35 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 seen_labels.add(label)
             patch["labels"] = normalized_labels
             updated_fields.append("labels")
+        if "action_name" in args:
+            action_name = str(args.get("action_name", "") or "").strip()
+            action_error = await _validate_task_update_action_name(
+                action_name,
+                _engineer_group,
+                handle_command,
+            )
+            if action_error:
+                return action_error, True
+            patch["action_name"] = action_name
+            updated_fields.append("action_name")
+        if "action_vars" in args:
+            action_vars = args.get("action_vars")
+            if action_vars is None:
+                action_vars = {}
+            if not isinstance(action_vars, dict):
+                return "action_vars must be an object", True
+            patch["action_vars"] = copy.deepcopy(action_vars)
+            updated_fields.append("action_vars")
         if not updated_fields:
             return "At least one editable field is required", True
 
-        real_state.board_update_task(tid, **patch)
+        update_result = await handle_command({
+            "cmd": "board_update_task",
+            "id": tid,
+            **patch,
+        })
+        if update_result and update_result.get("type") == "error":
+            return update_result.get("message", "Unknown error"), True
         return json.dumps({
             "type": "ok",
             "task_id": tid,

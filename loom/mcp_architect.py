@@ -304,12 +304,14 @@ _ARCHITECT_TOOL_SPECS = [
     {
         "name": "architect_task_update",
         "description": (
-            "Update title, description, and/or labels for a task in this "
-            "architect's group, provided the task was created by this "
-            "architect or by the user. Tasks created by other architects, "
+            "Update title, description, labels, and/or action binding for a "
+            "task in this architect's group, provided the task was created "
+            "by this architect or by the user. Tasks created by other architects, "
             "engineers, or system-derived (parent/pipeline) tasks remain "
             "off-limits. Omitted fields are left unchanged; labels use "
-            "replace semantics."
+            "replace semantics; action_vars also use replace semantics. "
+            "Non-empty action_name values are validated against "
+            "ActionManager.list_actions() for the architect's group."
         ),
         "inputSchema": {
             "type": "object",
@@ -325,6 +327,21 @@ _ARCHITECT_TOOL_SPECS = [
                     "items": {"type": "string"},
                     "description": (
                         "Replacement label list. Provide [] to clear labels."
+                    ),
+                },
+                "action_name": {
+                    "type": "string",
+                    "description": (
+                        "Replacement action name to bind to the task. Must "
+                        "exist in ActionManager.list_actions() for this group. "
+                        "Provide an empty string to clear the binding."
+                    ),
+                },
+                "action_vars": {
+                    "type": "object",
+                    "description": (
+                        "Replacement structured action variables. Provide {} "
+                        "to clear action variables."
                     ),
                 },
             },
