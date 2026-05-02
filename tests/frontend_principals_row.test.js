@@ -699,6 +699,7 @@ test('architect principal card renders pause + close controls (Bug 3)', () => {
   assert.match(archBlock, /principal-card-controls/);
   assert.match(archBlock, /principal-card-close/);
   assert.match(archBlock, /principal-card-pause/);
+  assert.equal((archBlock.match(/principal-card-pause/g) || []).length, 1);
   assert.match(archBlock, /principal-card-status/);
   // Close dispatches removeAgent for the architect id.
   assert.match(archBlock, /removeAgent\(&quot;arch-a&quot;\)/);
@@ -729,6 +730,7 @@ test('paused architect principal card renders resume icon + paused class (Bug 3)
   const archBlock = extractPrincipalCardHtml(mainEl.innerHTML, 'architect', 'arch-a');
   assert.ok(archBlock, 'architect principal card rendered');
   assert.match(archBlock, /principal-card-pause paused/);
+  assert.equal((archBlock.match(/principal-card-pause/g) || []).length, 1);
   assert.match(archBlock, /Resume event delivery/);
 });
 
