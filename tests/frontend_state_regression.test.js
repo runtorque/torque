@@ -570,7 +570,7 @@ function boardCardDivCount(html) {
 
 function htmlClassCount(html, className) {
   const escaped = String(className).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return (String(html).match(new RegExp('class="' + escaped + '(?:\\\\s|")', 'g')) || []).length;
+  return (String(html).match(new RegExp('class="' + escaped + '(?:\\s|")', 'g')) || []).length;
 }
 
 function decodeHtmlAttr(value) {
