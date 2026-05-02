@@ -352,8 +352,14 @@ function connect() {
     } else if (msg.type === 'memory_entry') {
       if (typeof handleContextEntry === 'function') handleContextEntry(msg);
     } else if (msg.type === 'error') {
-      if (typeof handleContextError === 'function') handleContextError(msg);
-      else if (typeof _showToast === 'function' && msg.message) _showToast(msg.message, 'error');
+      var systemPromptErrorHandled = false;
+      if (typeof _showSystemPromptPreviewError === 'function') {
+        systemPromptErrorHandled = _showSystemPromptPreviewError(msg);
+      }
+      if (!systemPromptErrorHandled) {
+        if (typeof handleContextError === 'function') handleContextError(msg);
+        else if (typeof _showToast === 'function' && msg.message) _showToast(msg.message, 'error');
+      }
     } else if (msg.type === 'events_page') {
       if (typeof handleEventsPage === 'function') handleEventsPage(msg);
     } else if (msg.type === 'cell_events') {
