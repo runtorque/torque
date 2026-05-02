@@ -8026,6 +8026,153 @@ test('clicking empty main-grid space clears focusedItemId and re-renders the age
   });
 });
 
+test('embedded terminal tabs render select and close controls for every cell', () => {
+  const { context } = createEmbeddedTerminalHarness();
+  context.__cells = [
+    {
+      id: 'agent-a',
+      name: 'Agent A',
+      group: 'alpha',
+      cell_type: 'agent',
+      session_id: 'sess-agent',
+      status: 'running',
+    },
+    {
+      id: 'term-b',
+      name: 'Term B',
+      group: 'alpha',
+      cell_type: 'terminal',
+      session_id: '',
+      status: 'stopped',
+    },
+  ];
+
+  const html = runInContext(context, `_renderTerminalTabs(__cells, 'agent-a');`);
+
+  assert.equal(htmlClassCount(html, 'terminal-tab'), 2);
+  assert.equal(htmlClassCount(html, 'terminal-tab-select'), 2);
+  assert.equal(htmlClassCount(html, 'terminal-tab-close'), 2);
+  assert.match(html, /<div class="terminal-tab active" data-cell-id="agent-a">/);
+  assert.match(html, /<div class="terminal-tab stopped" data-cell-id="term-b">/);
+  assert.match(html, /onclick="focusAgent\('agent-a'\)"/);
+  assert.match(html, /onclick="return closeTerminalTab\('term-b', event\)"/);
+  assert.match(html, /<span class="terminal-tab-kind">term<\/span>/);
+});
+
+test('embedded terminal workspace shows a closeable tab for one tombstoned cell', () => {
+  const { context, document, sandbox } = createEmbeddedTerminalHarness({
+    loadRenderHelpers: true,
+  });
+  const dom = attachTerminalWorkspaceDom(document);
+  sandbox.state.runtime = { embedded_terminal: true };
+  sandbox.state.groups = { alpha: ['term-dead'] };
+  sandbox.state.group_settings = { alpha: {} };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'term-dead': {
+      id: 'term-dead',
+      name: 'Dead Terminal',
+      group: 'alpha',
+      cell_type: 'terminal',
+      session_id: '',
+      status: 'stopped',
+      deleted_at: 123,
+    },
+  };
+
+  runInContext(context, `renderTerminalWorkspace();`);
+
+  assert.equal(dom.tabs.classList.contains('terminal-tabs-hidden'), false);
+  assert.equal(htmlClassCount(dom.tabs.innerHTML, 'terminal-tab'), 1);
+  assert.equal(htmlClassCount(dom.tabs.innerHTML, 'terminal-tab-close'), 1);
+  assert.match(dom.tabs.innerHTML, /onclick="return closeTerminalTab\('term-dead', event\)"/);
+});
+
+test('closing a tombstoned terminal tab purges without focusing or remove flow', () => {
+  const { context, sandbox } = createEmbeddedTerminalHarness();
+  sandbox.state.agents = {
+    'agent-dead': {
+      id: 'agent-dead',
+      name: 'Dead Agent',
+      group: 'alpha',
+      cell_type: 'agent',
+      deleted_at: 123,
+    },
+    'term-dead': {
+      id: 'term-dead',
+      name: 'Dead Terminal',
+      group: 'alpha',
+      cell_type: 'terminal',
+      parent_id: 'agent-dead',
+      deleted_at: 123,
+    },
+  };
+  const evt = {
+    preventDefaultCalled: false,
+    stopPropagationCalled: false,
+    preventDefault() { this.preventDefaultCalled = true; },
+    stopPropagation() { this.stopPropagationCalled = true; },
+  };
+  context.__evt = evt;
+  runInContext(context, `
+    var selectedTerminalId = 'term-dead';
+    var focusedItemId = 'term-dead';
+    selectedAgentId = 'agent-dead';
+    window.__focusCalls = [];
+    window.__removeCalls = [];
+    focusAgent = function(id) { window.__focusCalls.push(id); };
+    removeAgent = function(id) { window.__removeCalls.push(id); };
+  `);
+
+  const result = runInContext(context, `closeTerminalTab('agent-dead', __evt);`);
+
+  assert.equal(result, false);
+  assert.equal(evt.preventDefaultCalled, true);
+  assert.equal(evt.stopPropagationCalled, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [{
+    cmd: 'purge_agent_now',
+    id: 'agent-dead',
+  }]);
+  assert.deepEqual(jsonValue(context, 'window.__focusCalls'), []);
+  assert.deepEqual(jsonValue(context, 'window.__removeCalls'), []);
+  assert.equal(jsonValue(context, 'selectedAgentId'), null);
+  assert.equal(jsonValue(context, 'selectedTerminalId'), null);
+  assert.equal(jsonValue(context, 'focusedItemId'), null);
+});
+
+test('closing a live terminal tab delegates to removeAgent without purge', () => {
+  const { context, sandbox } = createEmbeddedTerminalHarness();
+  sandbox.state.agents = {
+    'term-live': {
+      id: 'term-live',
+      name: 'Live Terminal',
+      group: 'alpha',
+      cell_type: 'terminal',
+      session_id: 'sess-live',
+      deleted_at: 0,
+    },
+  };
+  const evt = {
+    preventDefaultCalled: false,
+    stopPropagationCalled: false,
+    preventDefault() { this.preventDefaultCalled = true; },
+    stopPropagation() { this.stopPropagationCalled = true; },
+  };
+  context.__evt = evt;
+  runInContext(context, `
+    window.__removeCalls = [];
+    removeAgent = function(id) { window.__removeCalls.push(id); };
+  `);
+
+  const result = runInContext(context, `closeTerminalTab('term-live', __evt);`);
+
+  assert.equal(result, false);
+  assert.equal(evt.preventDefaultCalled, true);
+  assert.equal(evt.stopPropagationCalled, true);
+  assert.deepEqual(jsonValue(context, 'window.__removeCalls'), ['term-live']);
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), []);
+});
+
 test('terminal workspace stays inert when embedded runtime is disabled', () => {
   const { context, document, sockets } = createEmbeddedTerminalHarness();
   const workspace = document.getElementById('terminal-workspace');
