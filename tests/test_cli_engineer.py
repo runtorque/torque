@@ -204,7 +204,10 @@ class CliEngineerTests(unittest.TestCase):
         args = SimpleNamespace(
             port=18932,
             group="loom",
-            set=["architect_paused=true", "architect_autonomy_mode=ask_always"],
+            set=[
+                "architect_autonomy_mode=ask_always",
+                "architect_digest_verbosity=verbose",
+            ],
             json=False,
         )
         with mock.patch.object(self.cli, "get_state", return_value=state), \

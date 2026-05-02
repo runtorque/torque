@@ -117,8 +117,7 @@ _GS_BOOL_FIELDS = {
     "dispatch_auto_terminals",
     "notifications", "notify_on_finish", "notify_on_error",
     "notify_on_attention", "terminal_always_custom_dialog",
-    "terminal_close_on_disconnect", "architect_paused",
-    "architect_suppress_empty_digests",
+    "terminal_close_on_disconnect", "architect_suppress_empty_digests",
 }
 
 def _serialize_agent_cell(cell):

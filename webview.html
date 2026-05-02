@@ -785,10 +785,10 @@
 
       <!-- General sub-tab -->
       <div class="gs-subpane active" data-subpane="architect-general">
-        <label>Boot command</label>
-        <input id="gs-architect-boot-cmd" placeholder="Use provider default" autocomplete="off">
         <label>Provider</label>
         <select id="gs-architect-provider" onchange="onGsArchitectProviderChange()"></select>
+        <label>Command override</label>
+        <input id="gs-architect-boot-cmd" placeholder="Use provider default" autocomplete="off">
         <label>Model</label>
         <input id="gs-architect-model" placeholder="Use provider default" autocomplete="off">
         <label>Reasoning effort</label>
@@ -803,10 +803,6 @@
           <option value="dispatch_after_confirm">Dispatch after confirm</option>
           <option value="ask_always">Ask always</option>
         </select>
-        <label class="gs-checkbox">
-          <input id="gs-architect-paused" type="checkbox"> Event delivery paused
-          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Pauses Loom Digest delivery to architect agents in this group. Resuming sends queued events when the architect is idle.">?</span>
-        </label>
         <label>Custom instructions</label>
         <textarea id="gs-architect-custom-instructions" rows="6" class="gs-autogrow" oninput="_autoGrowTextArea('gs-architect-custom-instructions')" placeholder="Instructions appended after Loom's built-in Architect policy..."></textarea>
         <div class="label-hint task-modal-section-intro">Configure architect digest verbosity and checkpoint policy.</div>
@@ -816,8 +812,10 @@
           <option value="balanced">Balanced</option>
           <option value="verbose">Verbose</option>
         </select>
-        <label>Journal checkpoint</label>
-        <input id="gs-architect-journal-checkpoint" placeholder="every_10_actions" autocomplete="off">
+        <label>Journal checkpoint cadence
+          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="How often Loom reminds the architect to write a `checkpoint` journal entry summarizing active engineers, open scope, pending hires, open decisions, and planned next moves.">?</span>
+        </label>
+        <select id="gs-architect-journal-checkpoint"></select>
       </div>
 
       <!-- Digests sub-tab -->

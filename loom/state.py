@@ -1170,7 +1170,6 @@ class GroupSettings:
     architect_reasoning_effort: str = ""
     architect_custom_instructions: str = ""
     architect_autonomy_mode: str = _DEFAULT_ARCHITECT_AUTONOMY_MODE
-    architect_paused: bool = False
     architect_digest_verbosity: str = _DEFAULT_ARCHITECT_DIGEST_VERBOSITY
     architect_push_interval: int = _DEFAULT_ARCHITECT_PUSH_INTERVAL
     architect_max_interval: int = _DEFAULT_ARCHITECT_MAX_INTERVAL
@@ -1199,7 +1198,6 @@ class ArchitectSettings:
     architect_reasoning_effort: str = ""
     architect_custom_instructions: str = ""
     architect_autonomy_mode: str = _DEFAULT_ARCHITECT_AUTONOMY_MODE
-    architect_paused: bool = False
     architect_digest_verbosity: str = _DEFAULT_ARCHITECT_DIGEST_VERBOSITY
     architect_push_interval: int = _DEFAULT_ARCHITECT_PUSH_INTERVAL
     architect_max_interval: int = _DEFAULT_ARCHITECT_MAX_INTERVAL
@@ -3054,7 +3052,7 @@ class MatrixState:
                     strict=strict,
                 )
             )
-        for bool_key in ("architect_paused", "architect_suppress_empty_digests"):
+        for bool_key in ("architect_suppress_empty_digests",):
             if bool_key in fields:
                 raw = fields[bool_key]
                 if isinstance(raw, str):
@@ -3123,7 +3121,6 @@ class MatrixState:
     def _sync_architect_digest_settings(self, group: str,
                                         fields: dict) -> None:
         digest_field_map = {
-            "architect_paused": "paused",
             "architect_push_interval": "push_interval",
             "architect_max_interval": "max_interval",
             "architect_heartbeat_interval": "heartbeat_interval",
@@ -3246,7 +3243,6 @@ class MatrixState:
             if not enabled:
                 enabled = list(_ARCHITECT_DIGEST_DEFAULT_ENABLED_EVENTS)
             kwargs["enabled_events"] = enabled
-            kwargs["paused"] = bool(arch.architect_paused)
             kwargs["push_interval"] = int(
                 arch.architect_push_interval
                 if arch.architect_push_interval is not None

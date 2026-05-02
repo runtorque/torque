@@ -1141,6 +1141,17 @@ const _ARCHITECT_DIGEST_DEFAULT_EVENTS = [
   'engineer_ask_resolved',
 ];
 
+const _ARCHITECT_JOURNAL_CHECKPOINT_OPTIONS = [
+  'every_5_actions',
+  'every_10_actions',
+  'every_15_actions',
+  'every_20_actions',
+  'every_20_minutes',
+  'every_30_minutes',
+  'every_60_minutes',
+  'manual_only',
+];
+
 function _defaultArchitectSettings() {
   return {
     architect_boot_command: '',
@@ -1149,7 +1160,6 @@ function _defaultArchitectSettings() {
     architect_reasoning_effort: '',
     architect_custom_instructions: '',
     architect_autonomy_mode: 'dispatch_after_confirm',
-    architect_paused: false,
     architect_digest_verbosity: 'balanced',
     architect_push_interval: 300,
     architect_max_interval: 600,
@@ -1158,6 +1168,34 @@ function _defaultArchitectSettings() {
     architect_enabled_events: _ARCHITECT_DIGEST_DEFAULT_EVENTS.slice(),
     architect_journal_checkpoint_frequency: 'every_10_actions',
   };
+}
+
+function _architectJournalCheckpointLabel(value) {
+  const raw = String(value || '').trim();
+  if (raw === 'manual_only') return 'Manual only';
+  const match = raw.match(/^every_([1-9]\d*)_(actions|minutes)$/);
+  if (match) {
+    const count = parseInt(match[1], 10);
+    const unit = match[2] === 'actions' ? 'action' : 'minute';
+    return `Every ${count} ${unit}${count === 1 ? '' : 's'}`;
+  }
+  return raw || 'Every 10 actions';
+}
+
+function _populateArchitectJournalCheckpointSelect(currentValue) {
+  const sel = document.getElementById('gs-architect-journal-checkpoint');
+  if (!sel) return;
+  const current = String(currentValue || 'every_10_actions').trim() || 'every_10_actions';
+  const values = _ARCHITECT_JOURNAL_CHECKPOINT_OPTIONS.slice();
+  if (values.indexOf(current) < 0) values.push(current);
+  sel.innerHTML = '';
+  values.forEach((value) => {
+    const opt = document.createElement('option');
+    opt.value = value;
+    opt.textContent = _architectJournalCheckpointLabel(value);
+    sel.appendChild(opt);
+  });
+  sel.value = current;
 }
 
 function _renderArchitectEventCheckboxes(enabled) {
@@ -1359,7 +1397,6 @@ function _showGroupSettings(group, data) {
     architectSettings.architect_autonomy_mode,
     'dispatch_after_confirm'
   );
-  document.getElementById('gs-architect-paused').checked = !!architectSettings.architect_paused;
   _setSelectValue(
     'gs-architect-digest-verbosity',
     architectSettings.architect_digest_verbosity,
@@ -1390,7 +1427,7 @@ function _showGroupSettings(group, data) {
     ? architectSettings.architect_enabled_events
     : _ARCHITECT_DIGEST_DEFAULT_EVENTS.slice();
   _renderArchitectEventCheckboxes(archEvents);
-  document.getElementById('gs-architect-journal-checkpoint').value = (
+  _populateArchitectJournalCheckpointSelect(
     architectSettings.architect_journal_checkpoint_frequency || 'every_10_actions'
   );
   onGsArchitectProviderChange();
@@ -1530,7 +1567,6 @@ function submitGroupSettings() {
     architect_reasoning_effort: document.getElementById('gs-architect-reasoning-effort').value,
     architect_custom_instructions: document.getElementById('gs-architect-custom-instructions').value,
     architect_autonomy_mode: document.getElementById('gs-architect-autonomy-mode').value,
-    architect_paused: document.getElementById('gs-architect-paused').checked,
     architect_digest_verbosity: document.getElementById('gs-architect-digest-verbosity').value,
     architect_push_interval: parseInt(document.getElementById('gs-architect-push-interval').value, 10) || 300,
     architect_max_interval: parseInt(document.getElementById('gs-architect-max-interval').value, 10) || 600,

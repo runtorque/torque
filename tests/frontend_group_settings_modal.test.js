@@ -203,6 +203,33 @@ function seedProviders(context, providers) {
   vm.runInContext(`_cachedProviders = ${JSON.stringify(providers)};`, context);
 }
 
+test('architect settings markup renders provider then command override', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  const match = html.match(
+    /<div class="gs-subpane active" data-subpane="architect-general">([\s\S]*?)<\/div>/,
+  );
+  assert.ok(match, 'architect general subpane should be present');
+  assert.match(
+    match[1],
+    /<label>Provider<\/label>\s*<select id="gs-architect-provider"[^>]*><\/select>\s*<label>Command override<\/label>\s*<input id="gs-architect-boot-cmd"/,
+  );
+  assert.doesNotMatch(match[1], /Boot command/);
+});
+
+test('architect settings markup removes paused control and renders checkpoint dropdown tooltip', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  const modalJs = fs.readFileSync(path.join(repoRoot, 'static/js/modals.js'), 'utf8');
+
+  assert.doesNotMatch(html, /gs-architect-paused|Event delivery paused/);
+  assert.doesNotMatch(modalJs, /gs-architect-paused|architect_paused/);
+  assert.match(html, /<label>Journal checkpoint cadence\s*<span class="hint-btn"/);
+  assert.match(
+    html,
+    /data-hint="How often Loom reminds the architect to write a `checkpoint` journal entry summarizing active engineers, open scope, pending hires, open decisions, and planned next moves\."/,
+  );
+  assert.match(html, /<select id="gs-architect-journal-checkpoint"><\/select>/);
+});
+
 test('group settings refreshes reasoning effort options when provider changes', () => {
   const { sandbox, ensure } = createSandbox();
   const context = vm.createContext(sandbox);
@@ -300,7 +327,6 @@ test('group settings modal populates engineer fields and honors engineer tab dee
       architect_reasoning_effort: "high",
       architect_custom_instructions: "Own scope crisply.",
       architect_autonomy_mode: "ask_always",
-      architect_paused: true,
       architect_digest_verbosity: "verbose",
       architect_journal_checkpoint_frequency: "every_15_actions",
       architect_review_gate_thresholds: {
@@ -357,11 +383,41 @@ test('group settings modal populates engineer fields and honors engineer tab dee
   assert.equal(ensure('gs-architect-reasoning-effort').value, 'high');
   assert.equal(ensure('gs-architect-custom-instructions').value, 'Own scope crisply.');
   assert.equal(ensure('gs-architect-autonomy-mode').value, 'ask_always');
-  assert.equal(ensure('gs-architect-paused').checked, true);
   assert.equal(ensure('gs-architect-digest-verbosity').value, 'verbose');
   assert.equal(ensure('gs-architect-journal-checkpoint').value, 'every_15_actions');
+  assert.ok(
+    ensure('gs-architect-journal-checkpoint').children.some(
+      (child) => child.value === 'every_15_actions'
+        && child.textContent === 'Every 15 actions',
+    ),
+  );
   assert.equal(ensure('gs-engineer-provider').focused, true);
   assert.equal(ensure('modal-group-settings').classList.contains('visible'), true);
+});
+
+test('architect checkpoint dropdown preserves custom persisted cadences', () => {
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+  seedProviders(context, sandbox._cachedProviders);
+
+  vm.runInContext(`_showGroupSettings("alpha", {
+    settings: {},
+    engineer_settings: {},
+    architect_settings: {
+      architect_journal_checkpoint_frequency: "every_37_actions"
+    },
+    profiles: ["Default"]
+  })`, context);
+
+  const select = ensure('gs-architect-journal-checkpoint');
+  assert.equal(select.value, 'every_37_actions');
+  assert.ok(
+    select.children.some(
+      (child) => child.value === 'every_37_actions'
+        && child.textContent === 'Every 37 actions',
+    ),
+  );
 });
 
 test('group settings resets Engineer and Architect sub-tabs to General when reopened', () => {
@@ -644,7 +700,6 @@ test('submitGroupSettings sends group, engineer, and architect updates separatel
   ensure('gs-architect-reasoning-effort').value = 'high';
   ensure('gs-architect-custom-instructions').value = 'Own scope';
   ensure('gs-architect-autonomy-mode').value = 'dispatch_freely';
-  ensure('gs-architect-paused').checked = true;
   ensure('gs-architect-digest-verbosity').value = 'terse';
   ensure('gs-architect-journal-checkpoint').value = 'every_20_minutes';
 
@@ -691,7 +746,13 @@ test('submitGroupSettings sends group, engineer, and architect updates separatel
   assert.equal(sandbox.sendCalls[2].settings.architect_reasoning_effort, 'high');
   assert.equal(sandbox.sendCalls[2].settings.architect_custom_instructions, 'Own scope');
   assert.equal(sandbox.sendCalls[2].settings.architect_autonomy_mode, 'dispatch_freely');
-  assert.equal(sandbox.sendCalls[2].settings.architect_paused, true);
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(
+      sandbox.sendCalls[2].settings,
+      'architect_paused',
+    ),
+    false,
+  );
   assert.equal(sandbox.sendCalls[2].settings.architect_digest_verbosity, 'terse');
   assert.equal(sandbox.sendCalls[2].settings.architect_journal_checkpoint_frequency, 'every_20_minutes');
   assert.equal(
