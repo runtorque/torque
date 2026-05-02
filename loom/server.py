@@ -3312,6 +3312,27 @@ def _handle_board_archive_command(state: MatrixState, data: dict) -> dict | None
     return None
 
 
+def _handle_board_archive_tasks_command(state: MatrixState, data: dict) -> dict:
+    """Archive multiple board tasks in one atomic batch."""
+    raw_ids = data.get("ids", data.get("task_ids", []))
+    if not isinstance(raw_ids, list):
+        return {"type": "error", "message": "ids must be an array"}
+    try:
+        archived_ids = state.board_archive_tasks(raw_ids)
+    except Exception as exc:
+        return {"type": "error", "message": str(exc)}
+
+    count = len(archived_ids)
+    if count == 0:
+        message = "No tasks archived"
+    else:
+        message = (
+            f"Archived {count} completed task"
+            f"{'' if count == 1 else 's'}"
+        )
+    return {"type": "toast", "level": "success", "message": message}
+
+
 def _handle_board_unarchive_command(state: MatrixState, data: dict) -> dict | None:
     """Unarchive one board task.
 
@@ -3341,6 +3362,7 @@ _CRITICAL_BOARD_COMMANDS = {
     "board_update_task",
     "board_move_task",
     "board_archive_task",
+    "board_archive_tasks",
     "board_unarchive_task",
     "board_verify_task",
     "board_remove_task",
@@ -9416,6 +9438,9 @@ async def main(connection=None):
             elif cmd == "board_archive_task":
                 result = _handle_board_archive_command(state, data)
 
+            elif cmd == "board_archive_tasks":
+                result = _handle_board_archive_tasks_command(state, data)
+
             elif cmd == "board_unarchive_task":
                 result = _handle_board_unarchive_command(state, data)
 
@@ -9718,6 +9743,9 @@ async def main(connection=None):
 
             elif cmd == "board_archive_task":
                 result = _handle_board_archive_command(state, data)
+
+            elif cmd == "board_archive_tasks":
+                result = _handle_board_archive_tasks_command(state, data)
 
             elif cmd == "board_unarchive_task":
                 result = _handle_board_unarchive_command(state, data)

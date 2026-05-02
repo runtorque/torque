@@ -495,6 +495,23 @@ prompt: |
         self.assertEqual(state.board_tasks[parent.id].lane, 'Archived')
         self.assertEqual(state.board_tasks[child.id].lane, 'Done')
 
+    def test_board_archive_tasks_command_archives_multiple_in_one_batch(self):
+        state = self.state_mod.MatrixState()
+        state.add_group('g')
+        first = state.board_add_task('Done one', 'g', lane='Done', id='task-1')
+        second = state.board_add_task('Done two', 'g', lane='Done', id='task-2')
+
+        result = self.server_mod._handle_board_archive_tasks_command(
+            state,
+            {'ids': [first.id, second.id]},
+        )
+
+        self.assertEqual(result['type'], 'toast')
+        self.assertEqual(result['level'], 'success')
+        self.assertEqual(result['message'], 'Archived 2 completed tasks')
+        self.assertEqual(state.board_tasks[first.id].lane, 'Archived')
+        self.assertEqual(state.board_tasks[second.id].lane, 'Archived')
+
     def test_board_unarchive_command_ignores_include_descendants_and_restores_one_task(self):
         state = self.state_mod.MatrixState()
         state.add_group('g')

@@ -6368,13 +6368,21 @@ test('board lane cache rerenders blocking badges when a dependent completes', ()
 test('boardArchiveSuggestedDone archives only stale completed tasks', () => {
   const { context } = createBoardHarness();
   context.state.board_tasks = {
-    stale: {
-      id: 'stale',
+    staleOlder: {
+      id: 'staleOlder',
+      group: 'alpha',
+      task: 'Older completed task',
+      lane: 'Done',
+      labels: ['bug'],
+      updated_at: '2000-01-01T00:00:00Z',
+    },
+    staleNewer: {
+      id: 'staleNewer',
       group: 'alpha',
       task: 'Old completed task',
       lane: 'Done',
       labels: ['bug'],
-      updated_at: '2000-01-01T00:00:00Z',
+      updated_at: '2000-01-02T00:00:00Z',
     },
     fresh: {
       id: 'fresh',
@@ -6393,13 +6401,25 @@ test('boardArchiveSuggestedDone archives only stale completed tasks', () => {
       updated_at: '2000-01-01T00:00:00Z',
     },
   };
+  runInContext(context, `
+    toastCalls = [];
+    _showToast = function(message, level) {
+      toastCalls.push({ message: message, level: level });
+    };
+  `);
 
   context.boardArchiveSuggestedDone();
 
   assert.deepEqual(jsonValue(context, 'sendCalls'), [
     {
-      cmd: 'board_archive_task',
-      id: 'stale',
+      cmd: 'board_archive_tasks',
+      ids: ['staleOlder', 'staleNewer'],
+    },
+  ]);
+  assert.deepEqual(jsonValue(context, 'toastCalls'), [
+    {
+      message: 'Archiving 2 stale completed tasks…',
+      level: 'info',
     },
   ]);
 });

@@ -3378,7 +3378,14 @@ function boardToggleArchived() {
 function boardArchiveSuggestedDone() {
   var ids = _boardStaleDoneTaskIds();
   if (!ids.length) return;
-  _boardArchiveTaskIds(ids, true);
+  if (typeof _showToast === 'function') {
+    _showToast('Archiving ' + ids.length + ' stale completed task'
+      + (ids.length === 1 ? '' : 's') + '…', 'info');
+  }
+  send({
+    cmd: 'board_archive_tasks',
+    ids: ids,
+  });
   renderBoard();
 }
 

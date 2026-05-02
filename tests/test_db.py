@@ -94,6 +94,29 @@ class LoomDBTests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(json.loads(row[0]), task.messages_thread)
 
+    def test_save_board_tasks_rolls_back_entire_batch_on_failure(self):
+        first = BoardTask(id="task-1", task="First", group="g", lane="Done")
+        second = BoardTask(id="task-2", task="Second", group="g", lane="Done")
+        original_insert = self.db._insert_board_task_row
+
+        def fail_on_second(executor, task):
+            if task.id == "task-2":
+                raise RuntimeError("synthetic insert failure")
+            return original_insert(executor, task)
+
+        with mock.patch.object(
+            self.db,
+            "_insert_board_task_row",
+            side_effect=fail_on_second,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "synthetic insert failure"):
+                self.db.save_board_tasks([first, second])
+
+        row_count = self.db._conn.execute(
+            "SELECT COUNT(*) FROM board_tasks"
+        ).fetchone()[0]
+        self.assertEqual(row_count, 0)
+
     def test_board_task_messages_thread_schema_migration_is_idempotent(self):
         legacy_path = Path(self.tmp.name) / "legacy-messages-thread.db"
         seeded = LoomDB(legacy_path)

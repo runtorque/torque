@@ -2584,6 +2584,43 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
         self.assertEqual(state.board_tasks[parent.id].archived_from_lane, "Done")
         self._assert_engineer_followup_expired(state, follow_up.id)
 
+    def test_batch_archive_rolls_back_when_batch_persist_fails(self):
+        state = self._make_state()
+        first = state.board_add_task(
+            "Completed one",
+            "g",
+            lane="Done",
+            id="task-done-one",
+        )
+        second = state.board_add_task(
+            "Completed two",
+            "g",
+            lane="Done",
+            id="task-done-two",
+        )
+        state._delta_ops.clear()
+
+        class FailingDB:
+            def save_board_tasks(self, tasks):
+                self.tasks = list(tasks)
+                raise RuntimeError("synthetic batch failure")
+
+        failing_db = FailingDB()
+        state.db = failing_db
+
+        with self.assertRaisesRegex(RuntimeError, "synthetic batch failure"):
+            state.board_archive_tasks([first.id, second.id])
+
+        self.assertEqual(state.board_tasks[first.id].lane, "Done")
+        self.assertEqual(state.board_tasks[second.id].lane, "Done")
+        self.assertEqual(state.board_tasks[first.id].archived_at, "")
+        self.assertEqual(state.board_tasks[second.id].archived_at, "")
+        self.assertEqual(state._delta_ops, [])
+        self.assertEqual(
+            sorted(task.id for task in failing_db.tasks),
+            [first.id, second.id],
+        )
+
     def test_retroactive_cleanup_expires_historical_engineer_message_ghosts(self):
         state = self._make_state()
         worker = self.state_mod.AgentCell(
