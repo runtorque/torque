@@ -18796,7 +18796,7 @@ test('standalone shell owns the full-width bottom dock rows and drag selector', 
 
   assert.match(
     css,
-    /body\.runtime-embedded #workspace-shell\s*\{[^}]*grid-template-columns:\s*max\(var\(--standalone-sidebar-width\),\s*calc\(360px\s*\+\s*8px\s*\+\s*var\(--standalone-right-rail-width,\s*0px\)\)\)\s+8px\s+minmax\(0,\s*1fr\);/s,
+    /body\.runtime-embedded #workspace-shell\s*\{[^}]*grid-template-columns:\s*max\(var\(--standalone-sidebar-width\),\s*calc\(var\(--standalone-main-stack-min-width\)\s*\+\s*8px\s*\+\s*var\(--standalone-right-rail-width,\s*var\(--standalone-right-rail-min-width\)\)\)\)\s+8px\s+minmax\(0,\s*1fr\);/s,
   );
   assert.match(
     html,
@@ -18804,7 +18804,11 @@ test('standalone shell owns the full-width bottom dock rows and drag selector', 
   );
   assert.match(
     css,
-    /body\.runtime-embedded #standalone-sidebar-shell\s*\{[^}]*grid-template-columns:\s*minmax\(360px,\s*1fr\)\s+8px\s+var\(--standalone-right-rail-width,\s*320px\);[^}]*grid-template-rows:\s*minmax\(0,\s*1fr\)\s+8px\s+var\(--standalone-bottom-height,\s*280px\);/s,
+    /body\.runtime-embedded #standalone-sidebar-shell\s*\{[^}]*grid-template-columns:\s*minmax\(var\(--standalone-main-stack-min-width\),\s*1fr\)\s+8px\s+var\(--standalone-right-rail-width,\s*var\(--standalone-right-rail-min-width\)\);[^}]*grid-template-rows:\s*minmax\(0,\s*1fr\)\s+8px\s+var\(--standalone-bottom-height,\s*280px\);/s,
+  );
+  assert.match(
+    css,
+    /body\.runtime-embedded #standalone-right-rail:not\(\.collapsed\)\s*\{[^}]*min-width:\s*var\(--standalone-right-rail-min-width\);/s,
   );
   assert.match(
     css,
@@ -18906,7 +18910,7 @@ test('standalone right resize preserves the main stack minimum width', () => {
   assert.equal(document.getElementById('standalone-sidebar-shell').style['--standalone-right-rail-width'], '320px');
 });
 
-test('standalone outer resize shrinks the right rail when the main stack is already at its minimum', () => {
+test('standalone outer resize stops before compressing the right rail below its minimum', () => {
   const { context, document } = createWorkspaceResizeHarness();
   document.body.classList.add('runtime-embedded');
   context.isEmbeddedTerminalMode = function() { return true; };
@@ -18937,23 +18941,24 @@ test('standalone outer resize shrinks the right rail when the main stack is alre
     clientY: 100,
   });
 
-  assert.equal(jsonValue(context, `_workspaceSidebarWidth`), 520);
-  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.size`), 272);
-  assert.equal(document.body.style['--standalone-sidebar-width'], '520px');
-  assert.equal(document.getElementById('standalone-sidebar-shell').style['--standalone-right-rail-width'], '272px');
+  assert.equal(jsonValue(context, `_workspaceSidebarWidth`), 688);
+  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.size`), 320);
+  assert.equal(document.body.style['--standalone-sidebar-width'], '688px');
+  assert.equal(document.getElementById('standalone-sidebar-shell').style['--standalone-right-rail-width'], '320px');
+  assert.equal(document.body.style['--standalone-right-rail-width'], '320px');
 
   document.listeners.mousemove({
     clientX: 440,
     clientY: 100,
   });
 
-  assert.equal(jsonValue(context, `_workspaceSidebarWidth`), 488);
-  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.size`), 240);
-  assert.equal(document.body.style['--standalone-sidebar-width'], '488px');
-  assert.equal(document.getElementById('standalone-sidebar-shell').style['--standalone-right-rail-width'], '240px');
+  assert.equal(jsonValue(context, `_workspaceSidebarWidth`), 688);
+  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.size`), 320);
+  assert.equal(document.body.style['--standalone-sidebar-width'], '688px');
+  assert.equal(document.getElementById('standalone-sidebar-shell').style['--standalone-right-rail-width'], '320px');
 });
 
-test('standalone rail drag shrinks immediately from the grabbed edge at the min boundary', () => {
+test('standalone rail drag does not shrink below the right rail minimum', () => {
   const { context, document } = createPanelManagerHarness();
   document.body.classList.add('runtime-embedded');
   context.isEmbeddedTerminalMode = function() { return true; };
@@ -18987,7 +18992,7 @@ test('standalone rail drag shrinks immediately from the grabbed edge at the min 
     clientY: 60,
   });
 
-  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.size`), 315);
+  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.size`), 320);
 });
 
 test('standalone first full-state restore persists responsive defaults once', () => {
@@ -19022,7 +19027,7 @@ test('standalone first full-state restore persists responsive defaults once', ()
       bottom: { open: true, size: 306, tabs: ['board'], active: 'board' },
       right: {
         open: true,
-        size: 298,
+        size: 320,
         tabs: ['actions', 'templates', 'context', 'events'],
         active: 'context',
       },
@@ -19054,7 +19059,7 @@ test('standalone startup preserves persisted layouts by widening the sidebar whe
     _restorePanelState();
   `);
 
-  assert.equal(jsonValue(context, `_workspaceSidebarWidth`), 568);
+  assert.equal(jsonValue(context, `_workspaceSidebarWidth`), 688);
   assert.equal(context.localStorage.getItem('loom.ide.sidebar_width'), null);
   assert.equal(jsonValue(context, `sendCalls.length`), 0);
   assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout()`), {
@@ -19087,8 +19092,8 @@ test('standalone startup widens a saved sidebar width that cannot fit the open r
     _restorePanelState();
   `);
 
-  assert.equal(jsonValue(context, `_workspaceSidebarWidth`), 568);
-  assert.equal(context.localStorage.getItem('loom.ide.sidebar_width'), '568');
+  assert.equal(jsonValue(context, `_workspaceSidebarWidth`), 688);
+  assert.equal(context.localStorage.getItem('loom.ide.sidebar_width'), '688');
   assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.size`), 320);
 });
 
@@ -19096,7 +19101,7 @@ test('standalone startup preserves a saved sidebar width', () => {
   const { context, document } = createPanelHarness();
   document.body.classList.add('runtime-embedded');
   context.isEmbeddedTerminalMode = function() { return true; };
-  context.localStorage.setItem('loom.ide.sidebar_width', '612');
+  context.localStorage.setItem('loom.ide.sidebar_width', '720');
 
   runInContext(context, `
     state = {
@@ -19112,8 +19117,8 @@ test('standalone startup preserves a saved sidebar width', () => {
     _restorePanelState();
   `);
 
-  assert.equal(jsonValue(context, `_workspaceSidebarWidth`), 612);
-  assert.equal(document.body.style['--standalone-sidebar-width'], '612px');
+  assert.equal(jsonValue(context, `_workspaceSidebarWidth`), 720);
+  assert.equal(document.body.style['--standalone-sidebar-width'], '720px');
   assert.equal(jsonValue(context, `sendCalls.length`), 0);
 });
 
@@ -19152,7 +19157,7 @@ test('restoreStandaloneLayoutDefaults resets width and ignores legacy state', ()
     bottom: { open: true, size: 306, tabs: ['board'], active: 'board' },
     right: {
       open: true,
-      size: 298,
+      size: 320,
       tabs: ['actions', 'templates', 'context', 'events'],
       active: 'context',
     },
@@ -19166,7 +19171,7 @@ test('restoreStandaloneLayoutDefaults resets width and ignores legacy state', ()
       bottom: { open: true, size: 306, tabs: ['board'], active: 'board' },
       right: {
         open: true,
-        size: 298,
+        size: 320,
         tabs: ['actions', 'templates', 'context', 'events'],
         active: 'context',
       },
