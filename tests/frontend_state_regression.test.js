@@ -619,6 +619,19 @@ function findChildByClassName(element, className) {
   return element.children.find((child) => child.classList && child.classList.contains(className)) || null;
 }
 
+function findDescendantsByClassName(element, className) {
+  const matches = [];
+  function visit(node) {
+    if (!node || !Array.isArray(node.children)) return;
+    node.children.forEach((child) => {
+      if (child.classList && child.classList.contains(className)) matches.push(child);
+      visit(child);
+    });
+  }
+  visit(element);
+  return matches;
+}
+
 function attachedStandalonePanelIds(document) {
   return PANEL_ROOT_IDS.filter((id) => !!document.getElementById(id));
 }
@@ -642,6 +655,12 @@ function standaloneFloatPanelIds(document) {
     });
   });
   return ids;
+}
+
+function standaloneFloatShell(document, app) {
+  const layer = document.getElementById('standalone-float-layer');
+  if (!layer || !Array.isArray(layer.children)) return null;
+  return layer.children.find((shell) => shell.dataset && shell.dataset.app === app) || null;
 }
 
 function parkedStandalonePanelIds(document) {
@@ -18965,6 +18984,21 @@ test('standalone keeps the legacy bottom panel parking host fully collapsed', ()
   );
 });
 
+test('standalone float resize handles define edge cursors and disable selection while resizing', () => {
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+
+  assert.match(css, /\.standalone-float-resize-handle\s*\{[^}]*position:\s*absolute;[^}]*pointer-events:\s*auto;/s);
+  assert.match(css, /\.standalone-float-resize-handle-n\s*\{[^}]*cursor:\s*n-resize;/s);
+  assert.match(css, /\.standalone-float-resize-handle-e\s*\{[^}]*cursor:\s*e-resize;/s);
+  assert.match(css, /\.standalone-float-resize-handle-s\s*\{[^}]*cursor:\s*s-resize;/s);
+  assert.match(css, /\.standalone-float-resize-handle-w\s*\{[^}]*cursor:\s*w-resize;/s);
+  assert.match(css, /\.standalone-float-resize-handle-ne\s*\{[^}]*cursor:\s*ne-resize;/s);
+  assert.match(css, /\.standalone-float-resize-handle-nw\s*\{[^}]*cursor:\s*nw-resize;/s);
+  assert.match(css, /\.standalone-float-resize-handle-se\s*\{[^}]*cursor:\s*se-resize;/s);
+  assert.match(css, /\.standalone-float-resize-handle-sw\s*\{[^}]*cursor:\s*sw-resize;/s);
+  assert.match(css, /body\.standalone-float-resizing\s*\{[^}]*user-select:\s*none;/s);
+});
+
 test('standalone layout restore migrates legacy panel state into bottom and right docks', () => {
   const { context, document } = createPanelHarness();
   document.body.classList.add('runtime-embedded');
@@ -19784,6 +19818,277 @@ test('standalone persisted float restore keeps floated panel roots attached', ()
   assert.deepEqual(standaloneFloatPanelIds(document), ['panel-actions']);
   assert.deepEqual(standaloneZoneBodyPanelIds(document, 'standalone-bottom-dock'), ['panel-board']);
   assert.deepEqual(standaloneZoneBodyPanelIds(document, 'standalone-right-rail'), ['panel-context']);
+});
+
+test('standalone floated panels render all eight resize handles', () => {
+  const { context, document } = createAttachedStandaloneWsSyncHarness();
+
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    state.standalone_panel_layout = {
+      version: 1,
+      bottom: { open: true, size: 280, tabs: ['board'], active: 'board' },
+      right: { open: true, size: 320, tabs: ['context'], active: 'context' },
+      floats: {
+        actions: { x: 48, y: 72, width: 420, height: 320, z: 2 },
+      },
+      last_active: 'actions',
+    };
+    _standalonePanelSetLayoutFromState(state.standalone_panel_layout, { fromServer: true });
+  `);
+
+  const shell = standaloneFloatShell(document, 'actions');
+  const handles = findDescendantsByClassName(shell, 'standalone-float-resize-handle');
+
+  assert.equal(handles.length, 8);
+  assert.deepEqual(
+    handles.map((handle) => handle.dataset.edge).sort(),
+    ['e', 'n', 'ne', 'nw', 's', 'se', 'sw', 'w'],
+  );
+});
+
+test('standalone southeast float resize updates inline shell style then persists frame cache on mouseup', () => {
+  const { context, document } = createAttachedStandaloneWsSyncHarness();
+
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    state.standalone_panel_layout = {
+      version: 1,
+      bottom: { open: true, size: 280, tabs: ['board'], active: 'board' },
+      right: { open: true, size: 320, tabs: ['context'], active: 'context' },
+      floats: {
+        actions: { x: 48, y: 72, width: 420, height: 320, z: 2 },
+      },
+      last_active: 'actions',
+    };
+    _standalonePanelSetLayoutFromState(state.standalone_panel_layout, { fromServer: true });
+    sendCalls = [];
+  `);
+
+  const shell = standaloneFloatShell(document, 'actions');
+  const handle = findDescendantsByClassName(shell, 'standalone-float-resize-handle-se')[0];
+  let stopped = false;
+  handle.onmousedown({
+    button: 0,
+    clientX: 468,
+    clientY: 392,
+    currentTarget: handle,
+    preventDefault() {},
+    stopPropagation() { stopped = true; },
+  });
+  document.listeners.mousemove({
+    clientX: 548,
+    clientY: 432,
+    preventDefault() {},
+  });
+
+  assert.equal(stopped, true);
+  assert.equal(document.body.classList.contains('standalone-float-resizing'), true);
+  assert.equal(shell.style.width, '500px');
+  assert.equal(shell.style.height, '360px');
+  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().floats.actions.width`), 420);
+
+  document.listeners.mouseup({
+    clientX: 548,
+    clientY: 432,
+    preventDefault() {},
+    stopPropagation() {},
+  });
+
+  assert.equal(document.body.classList.contains('standalone-float-resizing'), false);
+  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().floats.actions.width`), 500);
+  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().floats.actions.height`), 360);
+  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().float_frames.actions.width`), 500);
+  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().float_frames.actions.height`), 360);
+  assert.equal(jsonValue(context, `sendCalls.length`), 1);
+  assert.equal(jsonValue(context, `sendCalls[0].layout.float_frames.actions.width`), 500);
+});
+
+test('standalone northwest float resize preserves the opposite corner', () => {
+  const { context, document } = createAttachedStandaloneWsSyncHarness();
+
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    state.standalone_panel_layout = {
+      version: 1,
+      bottom: { open: true, size: 280, tabs: ['board'], active: 'board' },
+      right: { open: true, size: 320, tabs: ['context'], active: 'context' },
+      floats: {
+        actions: { x: 100, y: 120, width: 500, height: 400, z: 2 },
+      },
+      last_active: 'actions',
+    };
+    _standalonePanelSetLayoutFromState(state.standalone_panel_layout, { fromServer: true });
+    sendCalls = [];
+  `);
+
+  const shell = standaloneFloatShell(document, 'actions');
+  const handle = findDescendantsByClassName(shell, 'standalone-float-resize-handle-nw')[0];
+  handle.onmousedown({
+    button: 0,
+    clientX: 100,
+    clientY: 120,
+    currentTarget: handle,
+    preventDefault() {},
+    stopPropagation() {},
+  });
+  document.listeners.mousemove({
+    clientX: 160,
+    clientY: 160,
+    preventDefault() {},
+  });
+  document.listeners.mouseup({
+    clientX: 160,
+    clientY: 160,
+    preventDefault() {},
+    stopPropagation() {},
+  });
+
+  assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout().floats.actions`), {
+    x: 160,
+    y: 160,
+    width: 440,
+    height: 360,
+    z: 2,
+  });
+  assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout().float_frames.actions`), {
+    x: 160,
+    y: 160,
+    width: 440,
+    height: 360,
+    z: 2,
+  });
+});
+
+test('standalone float resize clamps to the minimum frame size', () => {
+  const { context, document } = createAttachedStandaloneWsSyncHarness();
+
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    state.standalone_panel_layout = {
+      version: 1,
+      bottom: { open: true, size: 280, tabs: ['board'], active: 'board' },
+      right: { open: true, size: 320, tabs: ['context'], active: 'context' },
+      floats: {
+        actions: { x: 80, y: 90, width: 420, height: 320, z: 2 },
+      },
+      last_active: 'actions',
+    };
+    _standalonePanelSetLayoutFromState(state.standalone_panel_layout, { fromServer: true });
+  `);
+
+  const shell = standaloneFloatShell(document, 'actions');
+  const handle = findDescendantsByClassName(shell, 'standalone-float-resize-handle-se')[0];
+  handle.onmousedown({
+    button: 0,
+    clientX: 500,
+    clientY: 410,
+    currentTarget: handle,
+    preventDefault() {},
+    stopPropagation() {},
+  });
+  document.listeners.mousemove({
+    clientX: -100,
+    clientY: -100,
+    preventDefault() {},
+  });
+  document.listeners.mouseup({
+    clientX: -100,
+    clientY: -100,
+    preventDefault() {},
+    stopPropagation() {},
+  });
+
+  assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout().floats.actions`), {
+    x: 80,
+    y: 90,
+    width: 360,
+    height: 260,
+    z: 2,
+  });
+});
+
+test('standalone dock then refloat reuses the cached float frame', () => {
+  const { context, document } = createAttachedStandaloneWsSyncHarness();
+
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    state.standalone_panel_layout = {
+      version: 1,
+      bottom: { open: true, size: 280, tabs: ['board'], active: 'board' },
+      right: { open: true, size: 320, tabs: ['context'], active: 'context' },
+      floats: {
+        actions: { x: 111, y: 122, width: 512, height: 333, z: 2 },
+      },
+      last_active: 'actions',
+    };
+    _standalonePanelSetLayoutFromState(state.standalone_panel_layout, { fromServer: true });
+    sendCalls = [];
+    _standaloneMovePanelToZone('actions', 'right');
+  `);
+
+  assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout().floats`), {});
+  assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout().float_frames.actions`), {
+    x: 111,
+    y: 122,
+    width: 512,
+    height: 333,
+    z: 2,
+  });
+  assert.deepEqual(standaloneZoneBodyPanelIds(document, 'standalone-right-rail'), ['panel-context', 'panel-actions']);
+
+  runInContext(context, `_standaloneMovePanelToZone('actions', 'float');`);
+
+  assert.deepEqual(jsonValue(context, `({
+    x: _standalonePanelCurrentLayout().floats.actions.x,
+    y: _standalonePanelCurrentLayout().floats.actions.y,
+    width: _standalonePanelCurrentLayout().floats.actions.width,
+    height: _standalonePanelCurrentLayout().floats.actions.height
+  })`), {
+    x: 111,
+    y: 122,
+    width: 512,
+    height: 333,
+  });
+  assert.deepEqual(standaloneFloatPanelIds(document), ['panel-actions']);
+});
+
+test('standalone float normalization clamps oversized and offscreen frames into the float layer', () => {
+  const { context, document } = createAttachedStandaloneWsSyncHarness();
+  const layer = document.getElementById('standalone-float-layer');
+  layer.getBoundingClientRect = () => ({ top: 44, bottom: 644, left: 0, right: 800, width: 800, height: 600 });
+
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    state.standalone_panel_layout = {
+      version: 1,
+      bottom: { open: true, size: 280, tabs: ['board'], active: 'board' },
+      right: { open: true, size: 320, tabs: ['context'], active: 'context' },
+      floats: {
+        actions: { x: 900, y: 700, width: 2000, height: 1000, z: 5 },
+      },
+      float_frames: {
+        templates: { x: 900, y: 700, width: 2000, height: 1000, z: 3 },
+      },
+      last_active: 'actions',
+    };
+    _standalonePanelSetLayoutFromState(state.standalone_panel_layout, { fromServer: true });
+  `);
+
+  assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout().floats.actions`), {
+    x: 12,
+    y: 12,
+    width: 776,
+    height: 576,
+    z: 5,
+  });
+  assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout().float_frames.templates`), {
+    x: 12,
+    y: 12,
+    width: 776,
+    height: 576,
+    z: 3,
+  });
 });
 
 test('opening Actions in standalone loads the actions editor', () => {
