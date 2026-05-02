@@ -1698,8 +1698,8 @@ function _architectDecisionListForCard(architectId) {
     }
   }
   results.sort(function(a, b) {
-    const av = _agentCardTimestampSeconds((a && (a.updated_at || a.created_at)) || 0);
-    const bv = _agentCardTimestampSeconds((b && (b.updated_at || b.created_at)) || 0);
+    const av = _agentCardTimestampSeconds((a && (a.created_at || a.updated_at)) || 0);
+    const bv = _agentCardTimestampSeconds((b && (b.created_at || b.updated_at)) || 0);
     if (av !== bv) return bv - av;
     return String((a && a.id) || '').localeCompare(String((b && b.id) || ''));
   });
@@ -3199,8 +3199,8 @@ function _architectDecisionsForAgent(agentId) {
   return Object.values(state.decisions).filter(function(decision) {
     return String((decision && decision.architect_id) || '') === architectId;
   }).sort(function(a, b) {
-    const aTs = Number((a && (a.updated_at || a.created_at)) || 0);
-    const bTs = Number((b && (b.updated_at || b.created_at)) || 0);
+    const aTs = _agentCardTimestampSeconds((a && (a.created_at || a.updated_at)) || 0);
+    const bTs = _agentCardTimestampSeconds((b && (b.created_at || b.updated_at)) || 0);
     if (aTs !== bTs) return bTs - aTs;
     return String((a && a.id) || '').localeCompare(String((b && b.id) || ''));
   });
