@@ -311,6 +311,8 @@ CREATE TABLE IF NOT EXISTS engineer_settings (
     pending_question   TEXT NOT NULL DEFAULT '',
     pending_note       TEXT NOT NULL DEFAULT '',
     pending_note_kind  TEXT NOT NULL DEFAULT '',
+    pending_note_set_at REAL NOT NULL DEFAULT 0,
+    pending_note_actor_id TEXT NOT NULL DEFAULT '',
     enabled_events     TEXT NOT NULL DEFAULT '["agent_started","task_dispatched","task_derived","task_health_alert"]',
     engineer_provider    TEXT NOT NULL DEFAULT '',
     engineer_boot_command TEXT NOT NULL DEFAULT '',
@@ -362,7 +364,8 @@ CREATE TABLE IF NOT EXISTS engineer_journal (
     timestamp   REAL NOT NULL,
     entry_type  TEXT NOT NULL,
     entry       TEXT NOT NULL,
-    author_cell_id TEXT NOT NULL DEFAULT ''
+    author_cell_id TEXT NOT NULL DEFAULT '',
+    source_key  TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_engineer_journal_group
     ON engineer_journal(group_name, id DESC);
@@ -838,6 +841,18 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_engineer_journal_group_author "
         "ON engineer_journal(group_name, author_cell_id, id DESC)")
+    try:
+        conn.execute("SELECT source_key FROM engineer_journal LIMIT 0")
+    except sqlite3.OperationalError:
+        conn.execute(
+            "ALTER TABLE engineer_journal ADD COLUMN "
+            "source_key TEXT NOT NULL DEFAULT ''")
+        conn.commit()
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS "
+        "idx_engineer_journal_source_key "
+        "ON engineer_journal(group_name, author_cell_id, source_key) "
+        "WHERE source_key <> ''")
     conn.commit()
     # Migrate: add slug columns to existing tables
     for table in ("agents", "groups", "board_tasks"):
@@ -1282,6 +1297,28 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
                 conn.commit()
             except sqlite3.OperationalError:
                 pass
+    try:
+        conn.execute(
+            "SELECT pending_note_set_at FROM engineer_settings LIMIT 0")
+    except sqlite3.OperationalError:
+        try:
+            conn.execute(
+                "ALTER TABLE engineer_settings ADD COLUMN "
+                "pending_note_set_at REAL NOT NULL DEFAULT 0")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+    try:
+        conn.execute(
+            "SELECT pending_note_actor_id FROM engineer_settings LIMIT 0")
+    except sqlite3.OperationalError:
+        try:
+            conn.execute(
+                "ALTER TABLE engineer_settings ADD COLUMN "
+                "pending_note_actor_id TEXT NOT NULL DEFAULT ''")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
     try:
         conn.execute(
             "SELECT restrict_to_created_agents FROM engineer_settings LIMIT 0")

@@ -1240,6 +1240,8 @@ class EngineerSettings:
     pending_question_actor_id: str = ""  # engineer who set pending_question
     pending_note: str = ""               # non-blocking note/question for the human
     pending_note_kind: str = ""          # "note" | "question" | ""
+    pending_note_set_at: float = 0.0     # unix timestamp when pending_note was set
+    pending_note_actor_id: str = ""      # engineer who set pending_note
     engineer_provider: str = ""            # adapter name override (empty = use group default)
     engineer_boot_command: str = ""        # boot command override (empty = use provider default)
     engineer_model: str = ""               # model override for the designated engineer
@@ -3446,12 +3448,12 @@ class MatrixState:
                 "restrict_to_created_agents",
                 "engineer_can_override_worker_provider"}:
             return bool(value)
-        if key == "pending_question_set_at":
+        if key in {"pending_question_set_at", "pending_note_set_at"}:
             try:
                 return float(value or 0)
             except (TypeError, ValueError):
                 return 0.0
-        if key == "pending_question_actor_id":
+        if key in {"pending_question_actor_id", "pending_note_actor_id"}:
             return str(value or "").strip()
         if key in {
                 "engineer_model", "engineer_reasoning_effort",
@@ -3466,6 +3468,9 @@ class MatrixState:
         pending_question_actor_id = str(
             fields.pop("_pending_question_actor_id", "") or ""
         ).strip()
+        pending_note_actor_id = str(
+            fields.pop("_pending_note_actor_id", "") or ""
+        ).strip()
         ws = self.engineer_settings.get(group)
         if ws is None:
             ws = EngineerSettings(group=group)
@@ -3475,6 +3480,12 @@ class MatrixState:
         )
         previous_pending_actor_id = str(
             getattr(ws, "pending_question_actor_id", "") or ""
+        ).strip()
+        previous_pending_note = str(
+            getattr(ws, "pending_note", "") or ""
+        )
+        previous_pending_note_actor_id = str(
+            getattr(ws, "pending_note_actor_id", "") or ""
         ).strip()
         valid = set(EngineerSettings.__dataclass_fields__)
         applied = {}
@@ -3516,6 +3527,35 @@ class MatrixState:
                 ws.pending_question_actor_id = ""
                 applied["pending_question_set_at"] = 0.0
                 applied["pending_question_actor_id"] = ""
+        if (
+                "pending_note" in applied
+                and "pending_note_set_at" not in applied):
+            current_pending_note = str(getattr(ws, "pending_note", "") or "")
+            if current_pending_note:
+                pending_note_actor_changed = bool(
+                    pending_note_actor_id
+                    and pending_note_actor_id != previous_pending_note_actor_id
+                )
+                pending_note_is_new = (
+                    current_pending_note != previous_pending_note
+                    or pending_note_actor_changed
+                )
+                if pending_note_is_new:
+                    ws.pending_note_set_at = time.time()
+                    applied["pending_note_set_at"] = ws.pending_note_set_at
+                    if (
+                            pending_note_actor_id
+                            or "pending_note_actor_id" not in applied):
+                        ws.pending_note_actor_id = pending_note_actor_id
+                        applied["pending_note_actor_id"] = pending_note_actor_id
+                if pending_note_actor_id:
+                    ws.pending_note_actor_id = pending_note_actor_id
+                    applied["pending_note_actor_id"] = pending_note_actor_id
+            elif previous_pending_note:
+                ws.pending_note_set_at = 0.0
+                ws.pending_note_actor_id = ""
+                applied["pending_note_set_at"] = 0.0
+                applied["pending_note_actor_id"] = ""
         d = asdict(ws)
         d.pop("group", None)
         self._emit("engineer_settings_update", group=group, **d)
@@ -3879,23 +3919,35 @@ class MatrixState:
         return cleaned
 
     def journal_append(self, group: str, entry_type: str,
-                       entry: str, author_cell_id: str = "") -> dict:
+                       entry: str, author_cell_id: str = "",
+                       timestamp: float | None = None,
+                       source_key: str = "") -> dict:
         """Append an entry to the engineer journal. Returns the entry dict."""
         import time
-        ts = time.time()
+        try:
+            ts = float(timestamp) if timestamp is not None else time.time()
+        except (TypeError, ValueError):
+            ts = time.time()
         entry_id = 0
+        inserted = True
         author_cell_id = str(author_cell_id or "").strip()
+        source_key = str(source_key or "").strip()
         if self.db:
-            entry_id = self.db.save_journal_entry(
+            entry_id, inserted = self.db.save_journal_entry(
                 group,
                 ts,
                 entry_type,
                 entry,
                 author_cell_id=author_cell_id,
+                source_key=source_key,
+                return_inserted=True,
             )
         evt = {"id": entry_id, "group": group, "timestamp": ts,
                "type": entry_type, "entry": entry,
                "author_cell_id": author_cell_id}
+        if not inserted:
+            evt["duplicate"] = True
+            return evt
         self._emit("journal_append", **evt)
         return evt
 

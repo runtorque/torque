@@ -2265,7 +2265,8 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                  paused,
                  custom_instructions, restrict_to_created_agents,
                  pending_question, pending_note,
-                 pending_note_kind, enabled_events,
+                 pending_note_kind, pending_note_set_at,
+                 pending_note_actor_id, enabled_events,
                  engineer_provider, engineer_boot_command,
                  engineer_model, engineer_reasoning_effort,
                  engineer_directory, engineer_profile,
@@ -2273,7 +2274,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                  pending_question_set_at,
                  pending_question_actor_id,
                  engineer_can_override_worker_provider)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             group_name,
             settings.get("push_interval", 60),
@@ -2292,6 +2293,8 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             settings.get("pending_question", ""),
             settings.get("pending_note", ""),
             settings.get("pending_note_kind", ""),
+            float(settings.get("pending_note_set_at", 0) or 0),
+            settings.get("pending_note_actor_id", ""),
             enabled_events,
             settings.get("engineer_provider", ""),
             settings.get("engineer_boot_command", ""),
@@ -2364,7 +2367,8 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "wave_size_preference, same_agent_follow_up_preference, "
             "digest_verbosity, escalation_style, paused, "
             "custom_instructions, restrict_to_created_agents, "
-            "pending_question, pending_note, pending_note_kind, enabled_events, "
+            "pending_question, pending_note, pending_note_kind, "
+            "pending_note_set_at, pending_note_actor_id, enabled_events, "
             "engineer_provider, engineer_boot_command, "
             "engineer_model, engineer_reasoning_effort, "
             "engineer_directory, engineer_profile, "
@@ -2377,7 +2381,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         if not row:
             return None
         try:
-            enabled = json.loads(row[16])
+            enabled = json.loads(row[18])
         except (json.JSONDecodeError, TypeError):
             enabled = [
                 "agent_started",
@@ -2408,19 +2412,21 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "pending_question": row[13],
             "pending_note": row[14],
             "pending_note_kind": row[15],
+            "pending_note_set_at": row[16] if len(row) > 16 else 0.0,
+            "pending_note_actor_id": row[17] if len(row) > 17 else "",
             "enabled_events": enabled,
-            "engineer_provider": row[17] if len(row) > 17 else "",
-            "engineer_boot_command": row[18] if len(row) > 18 else "",
-            "engineer_model": row[19] if len(row) > 19 else "",
-            "engineer_reasoning_effort": row[20] if len(row) > 20 else "",
-            "engineer_directory": row[21] if len(row) > 21 else "",
-            "engineer_profile": row[22] if len(row) > 22 else "",
-            "engineer_shell": row[23] if len(row) > 23 else "",
-            "engineer_tab_color": row[24] if len(row) > 24 else "",
-            "pending_question_set_at": row[25] if len(row) > 25 else 0.0,
-            "pending_question_actor_id": row[26] if len(row) > 26 else "",
+            "engineer_provider": row[19] if len(row) > 19 else "",
+            "engineer_boot_command": row[20] if len(row) > 20 else "",
+            "engineer_model": row[21] if len(row) > 21 else "",
+            "engineer_reasoning_effort": row[22] if len(row) > 22 else "",
+            "engineer_directory": row[23] if len(row) > 23 else "",
+            "engineer_profile": row[24] if len(row) > 24 else "",
+            "engineer_shell": row[25] if len(row) > 25 else "",
+            "engineer_tab_color": row[26] if len(row) > 26 else "",
+            "pending_question_set_at": row[27] if len(row) > 27 else 0.0,
+            "pending_question_actor_id": row[28] if len(row) > 28 else "",
             "engineer_can_override_worker_provider": (
-                bool(row[27]) if len(row) > 27 else True
+                bool(row[29]) if len(row) > 29 else True
             ),
         }
 
@@ -2490,7 +2496,8 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "wave_size_preference, same_agent_follow_up_preference, "
             "digest_verbosity, escalation_style, paused, "
             "custom_instructions, restrict_to_created_agents, "
-            "pending_question, pending_note, pending_note_kind, enabled_events, "
+            "pending_question, pending_note, pending_note_kind, "
+            "pending_note_set_at, pending_note_actor_id, enabled_events, "
             "engineer_provider, engineer_boot_command, "
             "engineer_model, engineer_reasoning_effort, "
             "engineer_directory, engineer_profile, "
@@ -2503,7 +2510,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         result = {}
         for row in rows:
             try:
-                enabled = json.loads(row[16])
+                enabled = json.loads(row[18])
             except (json.JSONDecodeError, TypeError):
                 enabled = [
                     "agent_started",
@@ -2534,19 +2541,21 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 "pending_question": row[13],
                 "pending_note": row[14],
                 "pending_note_kind": row[15],
+                "pending_note_set_at": row[16] if len(row) > 16 else 0.0,
+                "pending_note_actor_id": row[17] if len(row) > 17 else "",
                 "enabled_events": enabled,
-                "engineer_provider": row[17] if len(row) > 17 else "",
-                "engineer_boot_command": row[18] if len(row) > 18 else "",
-                "engineer_model": row[19] if len(row) > 19 else "",
-                "engineer_reasoning_effort": row[20] if len(row) > 20 else "",
-                "engineer_directory": row[21] if len(row) > 21 else "",
-                "engineer_profile": row[22] if len(row) > 22 else "",
-                "engineer_shell": row[23] if len(row) > 23 else "",
-                "engineer_tab_color": row[24] if len(row) > 24 else "",
-                "pending_question_set_at": row[25] if len(row) > 25 else 0.0,
-                "pending_question_actor_id": row[26] if len(row) > 26 else "",
+                "engineer_provider": row[19] if len(row) > 19 else "",
+                "engineer_boot_command": row[20] if len(row) > 20 else "",
+                "engineer_model": row[21] if len(row) > 21 else "",
+                "engineer_reasoning_effort": row[22] if len(row) > 22 else "",
+                "engineer_directory": row[23] if len(row) > 23 else "",
+                "engineer_profile": row[24] if len(row) > 24 else "",
+                "engineer_shell": row[25] if len(row) > 25 else "",
+                "engineer_tab_color": row[26] if len(row) > 26 else "",
+                "pending_question_set_at": row[27] if len(row) > 27 else 0.0,
+                "pending_question_actor_id": row[28] if len(row) > 28 else "",
                 "engineer_can_override_worker_provider": (
-                    bool(row[27]) if len(row) > 27 else True
+                    bool(row[29]) if len(row) > 29 else True
                 ),
             }
         return result
@@ -2589,16 +2598,33 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
 
     def save_journal_entry(self, group_name: str, timestamp: float,
                            entry_type: str, entry: str,
-                           author_cell_id: str = "") -> int:
+                           author_cell_id: str = "",
+                           source_key: str = "",
+                           return_inserted: bool = False):
         """Insert a engineer journal entry. Returns the new row ID."""
         author_cell_id = str(author_cell_id or "").strip()
+        source_key = str(source_key or "").strip()
+        inserted = True
         c = self._conn.execute(
-            "INSERT INTO engineer_journal "
-            "(group_name, timestamp, entry_type, entry, author_cell_id) "
-            "VALUES (?,?,?,?,?)",
-            (group_name, timestamp, entry_type, entry, author_cell_id))
+            "INSERT OR IGNORE INTO engineer_journal "
+            "(group_name, timestamp, entry_type, entry, author_cell_id, "
+            "source_key) VALUES (?,?,?,?,?,?)",
+            (group_name, timestamp, entry_type, entry, author_cell_id,
+             source_key))
+        if source_key and c.rowcount == 0:
+            inserted = False
+            row = self._conn.execute(
+                "SELECT id FROM engineer_journal WHERE group_name=? "
+                "AND author_cell_id=? AND source_key=?",
+                (group_name, author_cell_id, source_key),
+            ).fetchone()
+            entry_id = int(row[0]) if row else 0
+        else:
+            entry_id = int(c.lastrowid or 0)
         self._conn.commit()
-        return c.lastrowid
+        if return_inserted:
+            return entry_id, inserted
+        return entry_id
 
     def load_journal_entries(self, group_name: str, limit: int = 20,
                              entry_type: str = "",

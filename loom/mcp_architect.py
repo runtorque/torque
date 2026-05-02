@@ -560,7 +560,10 @@ _ARCHITECT_TOOL_SPECS = [
                 },
                 "type_filter": {
                     "type": "string",
-                    "enum": ["decision", "observation", "checkpoint", "plan"],
+                    "enum": [
+                        "decision", "observation", "checkpoint", "plan",
+                        "note_dismissed", "qa",
+                    ],
                     "description": "Optional journal entry type filter.",
                 },
             },

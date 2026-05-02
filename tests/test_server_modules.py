@@ -1028,7 +1028,10 @@ class ServerPromptQueueTests(unittest.IsolatedAsyncioTestCase):
             'g',
             pending_note='FYI: release branch is ready',
             pending_note_kind='note',
+            pending_note_set_at=123.0,
+            pending_note_actor_id=engineer.id,
         )
+        state._delta_ops.clear()
         events = []
 
         def panel_event(kind, cell_id, agent_name, group, message, task_id=''):
@@ -1041,6 +1044,15 @@ class ServerPromptQueueTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(result, {'type': 'ok'})
+        journal_ops = [
+            op for op in state._delta_ops
+            if op.get('op') == 'journal_append'
+        ]
+        self.assertEqual(len(journal_ops), 1)
+        self.assertEqual(journal_ops[0]['type'], 'note_dismissed')
+        self.assertEqual(journal_ops[0]['entry'], 'FYI: release branch is ready')
+        self.assertEqual(journal_ops[0]['author_cell_id'], 'engineer-1')
+        self.assertEqual(journal_ops[0]['timestamp'], 123.0)
         self.assertEqual(
             events,
             [(
@@ -1055,6 +1067,20 @@ class ServerPromptQueueTests(unittest.IsolatedAsyncioTestCase):
         ws = state.get_engineer_settings('g')
         self.assertEqual(ws.pending_note, '')
         self.assertEqual(ws.pending_note_kind, '')
+        self.assertEqual(ws.pending_note_set_at, 0.0)
+        self.assertEqual(ws.pending_note_actor_id, '')
+
+        result = await self.server_mod._handle_engineer_dismiss_note_command(
+            {'group': 'g'},
+            state,
+            panel_event,
+        )
+        self.assertEqual(result, {'type': 'ok'})
+        journal_ops = [
+            op for op in state._delta_ops
+            if op.get('op') == 'journal_append'
+        ]
+        self.assertEqual(len(journal_ops), 1)
 
     async def test_queue_cell_prompt_send_does_not_wait_for_slow_background_delivery(self):
         cell = self.state_mod.AgentCell(
@@ -1102,6 +1128,8 @@ class ServerPromptQueueTests(unittest.IsolatedAsyncioTestCase):
         state.update_engineer_settings(
             'g',
             pending_question='Need approval',
+            pending_question_set_at=456.0,
+            pending_question_actor_id='engineer-1',
             paused=True,
         )
         engineer = self.state_mod.AgentCell(
@@ -1111,6 +1139,7 @@ class ServerPromptQueueTests(unittest.IsolatedAsyncioTestCase):
             cell_type='agent',
             session_id='session-1',
         )
+        state._delta_ops.clear()
         sequence = []
         started = asyncio.Event()
         release = asyncio.Event()
@@ -1158,6 +1187,15 @@ class ServerPromptQueueTests(unittest.IsolatedAsyncioTestCase):
         ws = state.get_engineer_settings('g')
         self.assertFalse(ws.paused)
         self.assertEqual(ws.pending_question, '')
+        journal_ops = [
+            op for op in state._delta_ops
+            if op.get('op') == 'journal_append'
+        ]
+        qa_ops = [op for op in journal_ops if op.get('type') == 'qa']
+        self.assertEqual(len(qa_ops), 1)
+        self.assertEqual(qa_ops[0]['author_cell_id'], 'engineer-1')
+        self.assertIn('Question:\nNeed approval', qa_ops[0]['entry'])
+        self.assertIn('Answer:\nShip it', qa_ops[0]['entry'])
 
     def test_pending_question_reply_target_prefers_actor_owner(self):
         state = self.state_mod.MatrixState()
