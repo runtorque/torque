@@ -2216,6 +2216,8 @@ test('renderBoard uses a wide multi-lane layout only for embedded wide panels', 
   assert.equal((panel.innerHTML.match(/data-board-lane-column="1"/g) || []).length, 4);
   assert.match(panel.innerHTML, /board-wide-lane-name">Backlog/);
   assert.match(panel.innerHTML, /board-wide-lane-name">Done/);
+  assert.match(panel.innerHTML, /<section class="board-wide-lane active" data-lane="Backlog"/);
+  assert.doesNotMatch(panel.innerHTML, /board-wide-lane-badge/);
 
   panel.clientWidth = 820;
   context.renderBoard();

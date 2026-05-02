@@ -1682,7 +1682,6 @@ function _boardRenderWideLaneColumn(lane, model, filtersActive) {
   html += '<button class="board-wide-lane-select" onclick="boardSelectLane(\'' + escLane + '\')">';
   html += '<span class="board-wide-lane-name">' + esc(lane) + '</span>';
   html += '<span class="board-wide-lane-count">' + laneCount + '</span>';
-  if (active) html += '<span class="board-wide-lane-badge">Active</span>';
   html += '</button>';
   html += '<button class="board-wide-lane-toggle"'
     + ' onclick="boardToggleWideLane(event,\'' + escLane + '\')"'
