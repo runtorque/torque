@@ -80,10 +80,6 @@ When worktrees are enabled, these settings control the execution environment:
 
 See [Agents & Sessions](agents-and-sessions.md) for the end-to-end runtime model.
 
-### Always open custom dialog
-
-When enabled, clicking the "+ New" button always opens the full creation dialog instead of instantly creating an agent with defaults.
-
 ## Agents → Terminals
 
 These settings override the group defaults when creating terminals specifically. They live inside the **Agents** tab, immediately after **General**.
@@ -102,7 +98,7 @@ These settings override the group defaults when creating terminals specifically.
 
 ### Always open custom dialog
 
-Same as the agent version, but applies to the "+ New terminal" button.
+When enabled, clicking the "+ New terminal" button opens the full terminal creation dialog instead of instantly creating a terminal with defaults.
 
 ## Engineer tab
 

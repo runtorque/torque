@@ -652,6 +652,25 @@ class LoomDBTests(unittest.TestCase):
             "codex",
         )
 
+    def test_save_all_ignores_unknown_group_settings_fields(self):
+        self.db.save_all(
+            {
+                "groups": {"g": []},
+                "group_slugs": {"g": "g"},
+                "group_settings": {
+                    "g": {
+                        "notifications": True,
+                        "retired_toggle": True,
+                    },
+                },
+            }
+        )
+
+        loaded = self.db.load_all()
+
+        self.assertTrue(loaded["group_settings"]["g"]["notifications"])
+        self.assertNotIn("retired_toggle", loaded["group_settings"]["g"])
+
     def test_agent_activity_timestamp_migration_is_idempotent(self):
         cell = AgentCell(
             id="agent-activity",

@@ -395,22 +395,15 @@ function _nextName(prefix) {
   return prefix + ' ' + i;
 }
 function quickAddAgent(group) {
-  const gs = (state.group_settings || {})[group] || {};
   if (typeof isEmbeddedTerminalMode === 'function' && isEmbeddedTerminalMode()) {
     openAddAgent(group);
     return;
   }
-  if (gs.agent_always_custom_dialog) { openAddAgent(group); return; }
   send({ cmd: 'add_agent', name: _nextName('Agent'), group });
 }
 
 function newAgentFromTemplate(group, templateName) {
-  const gs = (state.group_settings || {})[group] || {};
   if (typeof isEmbeddedTerminalMode === 'function' && isEmbeddedTerminalMode()) {
-    openAddAgent(group, templateName || '');
-    return;
-  }
-  if (gs.agent_always_custom_dialog) {
     openAddAgent(group, templateName || '');
     return;
   }

@@ -10186,13 +10186,6 @@ async def main(connection=None):
                                         group, cell,
                                         terminals=launch_cfg["terminals"])
 
-                                # Auto-create child terminals (off by default for dispatch)
-                                gs = state.get_group_settings(group)
-                                if gs.dispatch_auto_terminals \
-                                        and gs.auto_terminals > 0:
-                                    await _create_child_terminals(
-                                        group, cell, count=gs.auto_terminals)
-
                         if cell and not result \
                                 and not _agent_can_receive_dispatch(cell):
                             result = {
