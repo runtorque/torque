@@ -264,7 +264,7 @@ class AgentLaunchService:
         tab_color = resolved.get("tab_color", "")
         if tab_color == "none":
             tab_color = ""
-        if not tab_color:
+        elif not tab_color:
             agent_tab_color = gs.agent_tab_color
             if agent_tab_color == "none":
                 tab_color = ""
