@@ -19863,6 +19863,7 @@ test('standalone southeast float resize updates inline shell style then persists
     };
     _standalonePanelSetLayoutFromState(state.standalone_panel_layout, { fromServer: true });
     sendCalls = [];
+    send = function(message) { sendCalls.push(message); };
   `);
 
   const shell = standaloneFloatShell(document, 'actions');
