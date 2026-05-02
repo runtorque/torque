@@ -1364,6 +1364,22 @@ class LoomDBTests(unittest.TestCase):
                     "z": 3,
                 },
             },
+            "float_frames": {
+                "actions": {
+                    "x": 40,
+                    "y": 50,
+                    "width": 420,
+                    "height": 320,
+                    "z": 3,
+                },
+                "templates": {
+                    "x": 80,
+                    "y": 90,
+                    "width": 460,
+                    "height": 340,
+                    "z": 4,
+                },
+            },
         }
         self.db.save_ui_state(
             "standalone_panel_layout",

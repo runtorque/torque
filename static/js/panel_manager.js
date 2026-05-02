@@ -22,11 +22,17 @@ var _standalonePanelLayout = null;
 var _standalonePanelSyncing = false;
 var _standalonePanelDragApp = '';
 var _standalonePanelFloatDrag = null;
+var _standalonePanelFloatResizeDrag = null;
 var _standalonePanelPointerDrag = null;
 var _standalonePanelSuppressClick = false;
 var _standalonePanelRoots = {};
 var _standalonePrimaryMinWidth = 360;
 var _standaloneRightRailMinWidth = 320;
+var _standaloneFloatMinWidth = 360;
+var _standaloneFloatMinHeight = 260;
+var _standaloneDefaultFloatWidth = 460;
+var _standaloneDefaultFloatHeight = 320;
+var _standaloneFloatMargin = 12;
 
 function _standalonePanelsEnabled() {
   return typeof isEmbeddedTerminalMode === 'function' && isEmbeddedTerminalMode();
@@ -254,6 +260,134 @@ function _standaloneDefaultRightSize() {
   return _standaloneClamp(preferred, bounds.min, bounds.max, 280);
 }
 
+function _standaloneViewportWidth() {
+  if (typeof window !== 'undefined' && typeof window.innerWidth === 'number') return window.innerWidth;
+  if (document && document.documentElement && typeof document.documentElement.clientWidth === 'number') {
+    if (document.documentElement.clientWidth >= (_standaloneFloatMinWidth + (_standaloneFloatMargin * 2))) {
+      return document.documentElement.clientWidth;
+    }
+  }
+  if (document && document.body && typeof document.body.clientWidth === 'number'
+      && document.body.clientWidth >= (_standaloneFloatMinWidth + (_standaloneFloatMargin * 2))) {
+    return document.body.clientWidth;
+  }
+  return 1400;
+}
+
+function _standaloneViewportHeight() {
+  if (typeof window !== 'undefined' && typeof window.innerHeight === 'number') return window.innerHeight;
+  if (document && document.documentElement && typeof document.documentElement.clientHeight === 'number') {
+    if (document.documentElement.clientHeight >= (_standaloneFloatMinHeight + (_standaloneFloatMargin * 2))) {
+      return document.documentElement.clientHeight;
+    }
+  }
+  if (document && document.body && typeof document.body.clientHeight === 'number'
+      && document.body.clientHeight >= (_standaloneFloatMinHeight + (_standaloneFloatMargin * 2))) {
+    return document.body.clientHeight;
+  }
+  return 900;
+}
+
+function _standaloneFloatLayerBounds() {
+  var minWidth = _standaloneFloatMinWidth + (_standaloneFloatMargin * 2);
+  var minHeight = _standaloneFloatMinHeight + (_standaloneFloatMargin * 2);
+  var viewportWidth = _standaloneViewportWidth();
+  var viewportHeight = _standaloneViewportHeight();
+  var bounds = {
+    left: 0,
+    top: 0,
+    width: viewportWidth,
+    height: viewportHeight,
+  };
+  var layer = document.getElementById('standalone-float-layer');
+  if (layer && typeof layer.getBoundingClientRect === 'function') {
+    var rect = layer.getBoundingClientRect();
+    if (rect) {
+      var rectWidth = Number.isFinite(rect.width) ? rect.width : (rect.right - rect.left);
+      var rectHeight = Number.isFinite(rect.height) ? rect.height : (rect.bottom - rect.top);
+      if (Number.isFinite(rect.left)) bounds.left = rect.left;
+      if (Number.isFinite(rect.top)) bounds.top = rect.top;
+      if (Number.isFinite(rectWidth) && rectWidth > 0) bounds.width = rectWidth;
+      if (Number.isFinite(rectHeight) && rectHeight > 0) bounds.height = rectHeight;
+    }
+  }
+  if (bounds.width < minWidth && viewportWidth > bounds.width) bounds.width = viewportWidth;
+  if (bounds.height < minHeight && viewportHeight > bounds.height) bounds.height = viewportHeight;
+  bounds.width = Math.max(minWidth, Math.floor(bounds.width || minWidth));
+  bounds.height = Math.max(minHeight, Math.floor(bounds.height || minHeight));
+  bounds.right = bounds.left + bounds.width;
+  bounds.bottom = bounds.top + bounds.height;
+  return bounds;
+}
+
+function _standaloneClampFloatFrame(frame, fallback) {
+  var source = frame && typeof frame === 'object' ? frame : {};
+  var base = fallback && typeof fallback === 'object' ? fallback : {};
+  var bounds = _standaloneFloatLayerBounds();
+  var maxWidth = Math.max(_standaloneFloatMinWidth, Math.floor(bounds.width - (_standaloneFloatMargin * 2)));
+  var maxHeight = Math.max(_standaloneFloatMinHeight, Math.floor(bounds.height - (_standaloneFloatMargin * 2)));
+  var width = _standaloneClamp(
+    source.width,
+    _standaloneFloatMinWidth,
+    maxWidth,
+    Number.isFinite(parseInt(base.width, 10)) ? parseInt(base.width, 10) : _standaloneDefaultFloatWidth
+  );
+  var height = _standaloneClamp(
+    source.height,
+    _standaloneFloatMinHeight,
+    maxHeight,
+    Number.isFinite(parseInt(base.height, 10)) ? parseInt(base.height, 10) : _standaloneDefaultFloatHeight
+  );
+  var maxX = Math.max(_standaloneFloatMargin, Math.floor(bounds.width - width - _standaloneFloatMargin));
+  var maxY = Math.max(_standaloneFloatMargin, Math.floor(bounds.height - height - _standaloneFloatMargin));
+  var x = _standaloneClamp(
+    source.x,
+    _standaloneFloatMargin,
+    maxX,
+    Number.isFinite(parseInt(base.x, 10)) ? parseInt(base.x, 10) : 56
+  );
+  var y = _standaloneClamp(
+    source.y,
+    _standaloneFloatMargin,
+    maxY,
+    Number.isFinite(parseInt(base.y, 10)) ? parseInt(base.y, 10) : 72
+  );
+  return {
+    x: x,
+    y: y,
+    width: width,
+    height: height,
+    z: _standaloneClamp(source.z, 1, 999, Number.isFinite(parseInt(base.z, 10)) ? parseInt(base.z, 10) : 1),
+  };
+}
+
+function _standaloneDefaultFloatFrame(zIndex) {
+  var z = _standaloneClamp(zIndex, 1, 999, 1);
+  var cascade = Math.max(0, z - 1) * 16;
+  return _standaloneClampFloatFrame({
+    x: 56 + cascade,
+    y: 72 + cascade,
+    width: _standaloneDefaultFloatWidth,
+    height: _standaloneDefaultFloatHeight,
+    z: z,
+  });
+}
+
+function _standaloneFloatFrameCache(layout, create) {
+  var target = layout && typeof layout === 'object' ? layout : _standalonePanelCurrentLayout();
+  if (!target.float_frames || typeof target.float_frames !== 'object' || Array.isArray(target.float_frames)) {
+    if (create === false) return {};
+    target.float_frames = {};
+  }
+  return target.float_frames;
+}
+
+function _standaloneRememberFloatFrame(layout, app, frame) {
+  if (_standalonePanelApps.indexOf(app) < 0 || !frame || typeof frame !== 'object') return;
+  var cache = _standaloneFloatFrameCache(layout, true);
+  cache[app] = _standaloneClampFloatFrame(frame, frame);
+}
+
 function _standaloneDefaultLayout() {
   return {
     version: _standalonePanelLayoutVersion,
@@ -336,14 +470,18 @@ function _normalizeStandalonePanelLayout(raw) {
     if (_standalonePanelApps.indexOf(appName) < 0 || placements[appName]) continue;
     var item = floats[appName] || {};
     placements[appName] = 'float';
-    normalized.floats[appName] = {
-      x: _standaloneClamp(item.x, 12, 1600, 48 + (z * 18)),
-      y: _standaloneClamp(item.y, 12, 1000, 72 + (z * 18)),
-      width: _standaloneClamp(item.width, 280, 1200, 420),
-      height: _standaloneClamp(item.height, 220, 900, 320),
-      z: _standaloneClamp(item.z, 1, 999, z),
-    };
+    normalized.floats[appName] = _standaloneClampFloatFrame(item, _standaloneDefaultFloatFrame(z));
+    normalized.floats[appName].z = _standaloneClamp(item.z, 1, 999, z);
+    _standaloneRememberFloatFrame(normalized, appName, normalized.floats[appName]);
     z++;
+  }
+
+  var floatFrames = layout.float_frames && typeof layout.float_frames === 'object' ? layout.float_frames : {};
+  for (var cachedApp in floatFrames) {
+    if (_standalonePanelApps.indexOf(cachedApp) < 0) continue;
+    if (normalized.floats[cachedApp]) continue;
+    var cachedFrame = floatFrames[cachedApp] || {};
+    _standaloneRememberFloatFrame(normalized, cachedApp, cachedFrame);
   }
 
   if (!placements.board) {
@@ -483,25 +621,28 @@ function _standaloneRemovePanelFromLayout(layout, app) {
     zone.tabs = zone.tabs.filter(function(item) { return item !== app; });
     if (zone.active === app) zone.active = zone.tabs[0] || '';
   });
-  if (layout.floats && layout.floats[app]) delete layout.floats[app];
+  if (layout.floats && layout.floats[app]) {
+    _standaloneRememberFloatFrame(layout, app, layout.floats[app]);
+    delete layout.floats[app];
+  }
 }
 
 function _standaloneMovePanelToZone(app, zoneName, opts) {
   if (_standalonePanelApps.indexOf(app) < 0) return;
   opts = opts || {};
-  var layout = _standaloneClone(_standalonePanelCurrentLayout());
+  var currentLayout = _standalonePanelCurrentLayout();
+  var layout = _standaloneClone(currentLayout);
+  var cachedFloatFrame = (currentLayout.floats && currentLayout.floats[app])
+    || (_standaloneFloatFrameCache(layout, false)[app])
+    || null;
   _standaloneRemovePanelFromLayout(layout, app);
   if (zoneName === 'float') {
-    var existing = _standalonePanelCurrentLayout().floats[app] || {};
     var z = 1;
     for (var key in layout.floats) z = Math.max(z, (layout.floats[key] && layout.floats[key].z) || 1);
-    layout.floats[app] = {
-      x: _standaloneClamp(existing.x, 12, 1600, 56 + z * 16),
-      y: _standaloneClamp(existing.y, 12, 1000, 72 + z * 16),
-      width: _standaloneClamp(existing.width, 280, 1200, 460),
-      height: _standaloneClamp(existing.height, 220, 900, 320),
-      z: z + 1,
-    };
+    var floatFrame = _standaloneClampFloatFrame(cachedFloatFrame || _standaloneDefaultFloatFrame(z + 1));
+    floatFrame.z = z + 1;
+    layout.floats[app] = floatFrame;
+    _standaloneRememberFloatFrame(layout, app, floatFrame);
   } else {
     if (zoneName !== 'bottom' && zoneName !== 'right') return;
     var zone = layout[zoneName];
@@ -785,6 +926,25 @@ function _standaloneFloatHeader(app) {
   return header;
 }
 
+function _standaloneFloatResizeHandle(app, edge) {
+  var handle = _makeStandaloneNode(
+    'div',
+    'standalone-float-resize-handle standalone-float-resize-handle-' + edge
+  );
+  handle.dataset.edge = edge;
+  handle.setAttribute('aria-hidden', 'true');
+  handle.onmousedown = function(event) {
+    standalonePanelStartFloatResize(event, app, edge);
+  };
+  return handle;
+}
+
+function _standaloneAppendFloatResizeHandles(shell, app) {
+  ['n', 'e', 's', 'w', 'ne', 'nw', 'se', 'sw'].forEach(function(edge) {
+    shell.appendChild(_standaloneFloatResizeHandle(app, edge));
+  });
+}
+
 function _standaloneBuildFloats(layer, roots, placed) {
   if (!layer) return;
   _clearElement(layer);
@@ -813,6 +973,7 @@ function _standaloneBuildFloats(layer, roots, placed) {
       if (placed) placed[app] = true;
       _setPanelHidden(panelRoot, false);
     }
+    _standaloneAppendFloatResizeHandles(shell, app);
     layer.appendChild(shell);
   }
 }
@@ -1018,6 +1179,7 @@ function standalonePanelClose(app) {
   if (!placement) return;
   if (placement === 'float') {
     var layout = _standaloneClone(_standalonePanelCurrentLayout());
+    if (layout.floats && layout.floats[app]) _standaloneRememberFloatFrame(layout, app, layout.floats[app]);
     delete layout.floats[app];
     layout.last_active = layout.right.active || layout.bottom.active || 'board';
     _standalonePanelSetLayout(layout);
@@ -1047,8 +1209,11 @@ function _standalonePanelOnFloatDrag(event) {
   var drag = _standalonePanelFloatDrag;
   var layout = _standaloneClone(_standalonePanelCurrentLayout());
   if (!layout.floats[drag.app]) return;
-  layout.floats[drag.app].x = Math.max(12, drag.left + (event.clientX - drag.startX));
-  layout.floats[drag.app].y = Math.max(12, drag.top + (event.clientY - drag.startY));
+  layout.floats[drag.app] = _standaloneClampFloatFrame(Object.assign({}, layout.floats[drag.app], {
+    x: drag.left + (event.clientX - drag.startX),
+    y: drag.top + (event.clientY - drag.startY),
+  }));
+  _standaloneRememberFloatFrame(layout, drag.app, layout.floats[drag.app]);
   _standalonePanelSetLayout(layout, { fromServer: true });
 }
 
@@ -1058,6 +1223,125 @@ function _standalonePanelStopFloatDrag() {
   document.removeEventListener('mouseup', _standalonePanelStopFloatDrag);
   _standalonePanelFloatDrag = null;
   _standalonePanelSaveLayout();
+}
+
+function _standaloneFloatResizeFrame(drag, clientX, clientY) {
+  var dx = clientX - drag.startX;
+  var dy = clientY - drag.startY;
+  var start = drag.frame;
+  var left = start.x;
+  var top = start.y;
+  var right = start.x + start.width;
+  var bottom = start.y + start.height;
+  var edge = drag.edge || '';
+  var bounds = _standaloneFloatLayerBounds();
+  var minLeft = _standaloneFloatMargin;
+  var minTop = _standaloneFloatMargin;
+  var maxRight = Math.max(minLeft + _standaloneFloatMinWidth, bounds.width - _standaloneFloatMargin);
+  var maxBottom = Math.max(minTop + _standaloneFloatMinHeight, bounds.height - _standaloneFloatMargin);
+
+  if (edge.indexOf('e') >= 0) {
+    right = _standaloneClamp(right + dx, left + _standaloneFloatMinWidth, maxRight, right);
+  }
+  if (edge.indexOf('s') >= 0) {
+    bottom = _standaloneClamp(bottom + dy, top + _standaloneFloatMinHeight, maxBottom, bottom);
+  }
+  if (edge.indexOf('w') >= 0) {
+    left = _standaloneClamp(left + dx, minLeft, right - _standaloneFloatMinWidth, left);
+  }
+  if (edge.indexOf('n') >= 0) {
+    top = _standaloneClamp(top + dy, minTop, bottom - _standaloneFloatMinHeight, top);
+  }
+
+  return _standaloneClampFloatFrame({
+    x: left,
+    y: top,
+    width: right - left,
+    height: bottom - top,
+    z: start.z,
+  }, start);
+}
+
+function _standaloneApplyFloatResizeFrame(shell, frame) {
+  if (!shell || !shell.style || !frame) return;
+  shell.style.left = frame.x + 'px';
+  shell.style.top = frame.y + 'px';
+  shell.style.width = frame.width + 'px';
+  shell.style.height = frame.height + 'px';
+  shell.style.zIndex = String(frame.z || 1);
+}
+
+function standalonePanelStartFloatResize(event, app, edge) {
+  if (!event || event.button !== 0) return;
+  var layout = _standalonePanelCurrentLayout();
+  var frame = layout.floats[app];
+  if (!frame) return;
+  if (typeof event.preventDefault === 'function') event.preventDefault();
+  if (typeof event.stopPropagation === 'function') event.stopPropagation();
+  var shell = event.currentTarget && event.currentTarget.closest
+    ? event.currentTarget.closest('.standalone-float-shell')
+    : null;
+  if (!shell && event.currentTarget && event.currentTarget.parentNode) {
+    shell = event.currentTarget.parentNode;
+  }
+  _standalonePanelFloatResizeDrag = {
+    app: app,
+    edge: edge,
+    shell: shell,
+    startX: event.clientX,
+    startY: event.clientY,
+    frame: _standaloneClampFloatFrame(frame, frame),
+    currentFrame: _standaloneClampFloatFrame(frame, frame),
+    changed: false,
+  };
+  if (document && document.body && document.body.classList) {
+    document.body.classList.add('standalone-float-resizing');
+  }
+  document.addEventListener('mousemove', _standalonePanelOnFloatResizeDrag);
+  document.addEventListener('mouseup', _standalonePanelStopFloatResizeDrag);
+}
+
+function _standalonePanelOnFloatResizeDrag(event) {
+  var drag = _standalonePanelFloatResizeDrag;
+  if (!drag) return;
+  if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  var clientX = event && Number.isFinite(event.clientX) ? event.clientX : drag.startX;
+  var clientY = event && Number.isFinite(event.clientY) ? event.clientY : drag.startY;
+  var frame = _standaloneFloatResizeFrame(drag, clientX, clientY);
+  drag.currentFrame = frame;
+  drag.changed = true;
+  _standaloneApplyFloatResizeFrame(drag.shell, frame);
+}
+
+function _standaloneClearFloatResizeDrag() {
+  document.removeEventListener('mousemove', _standalonePanelOnFloatResizeDrag);
+  document.removeEventListener('mouseup', _standalonePanelStopFloatResizeDrag);
+  if (document && document.body && document.body.classList) {
+    document.body.classList.remove('standalone-float-resizing');
+  }
+  _standalonePanelFloatResizeDrag = null;
+}
+
+function _standalonePanelStopFloatResizeDrag(event) {
+  var drag = _standalonePanelFloatResizeDrag;
+  if (!drag) return;
+  if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+  if (event && Number.isFinite(event.clientX) && Number.isFinite(event.clientY)) {
+    drag.currentFrame = _standaloneFloatResizeFrame(drag, event.clientX, event.clientY);
+    if (drag.changed) _standaloneApplyFloatResizeFrame(drag.shell, drag.currentFrame);
+  }
+  var app = drag.app;
+  var frame = drag.currentFrame;
+  var shouldCommit = !!drag.changed;
+  _standaloneClearFloatResizeDrag();
+  if (!shouldCommit) return;
+  var layout = _standaloneClone(_standalonePanelCurrentLayout());
+  if (!layout.floats || !layout.floats[app]) return;
+  frame.z = layout.floats[app].z || frame.z || 1;
+  layout.floats[app] = _standaloneClampFloatFrame(frame, layout.floats[app]);
+  _standaloneRememberFloatFrame(layout, app, layout.floats[app]);
+  _standalonePanelSetLayout(layout);
 }
 
 function standalonePanelResizeBottom(clientY) {

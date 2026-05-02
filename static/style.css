@@ -3468,6 +3468,82 @@ body.runtime-embedded.standalone-panel-dragging #standalone-right-rail {
   min-width: 0;
   overflow: hidden;
 }
+.standalone-float-resize-handle {
+  position: absolute;
+  z-index: 3;
+  pointer-events: auto;
+  touch-action: none;
+}
+.standalone-float-resize-handle-n,
+.standalone-float-resize-handle-s {
+  left: 12px;
+  right: 12px;
+  height: 8px;
+}
+.standalone-float-resize-handle-n {
+  top: 0;
+  cursor: n-resize;
+}
+.standalone-float-resize-handle-s {
+  bottom: 0;
+  cursor: s-resize;
+}
+.standalone-float-resize-handle-e,
+.standalone-float-resize-handle-w {
+  top: 12px;
+  bottom: 12px;
+  width: 8px;
+}
+.standalone-float-resize-handle-e {
+  right: 0;
+  cursor: e-resize;
+}
+.standalone-float-resize-handle-w {
+  left: 0;
+  cursor: w-resize;
+}
+.standalone-float-resize-handle-ne,
+.standalone-float-resize-handle-nw,
+.standalone-float-resize-handle-se,
+.standalone-float-resize-handle-sw {
+  width: 16px;
+  height: 16px;
+}
+.standalone-float-resize-handle-ne {
+  top: 0;
+  right: 0;
+  cursor: ne-resize;
+}
+.standalone-float-resize-handle-nw {
+  top: 0;
+  left: 0;
+  cursor: nw-resize;
+}
+.standalone-float-resize-handle-se {
+  right: 0;
+  bottom: 0;
+  cursor: se-resize;
+}
+.standalone-float-resize-handle-sw {
+  left: 0;
+  bottom: 0;
+  cursor: sw-resize;
+}
+.standalone-float-resize-handle-se::after {
+  content: '';
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 8px;
+  height: 8px;
+  border-right: 1px solid rgba(255,255,255,.24);
+  border-bottom: 1px solid rgba(255,255,255,.24);
+  opacity: .75;
+  pointer-events: none;
+}
+body.standalone-float-resizing {
+  user-select: none;
+}
 
 /* ------------------------------------------------------------------ */
 /* Bottom panel (collapsible, hosts panel apps)                        */
