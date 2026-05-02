@@ -2413,6 +2413,15 @@ body.runtime-embedded .term-row.term-add {
 .btn-green:hover { filter: brightness(1.15); }
 .hidden { display: none !important; }
 
+/* Runtime-gated iTerm2/iTerm2-toolbelt-only controls.  Standalone and
+ * desktop mode share the embedded terminal path, where these settings have
+ * no effect.  Keep toolbelt display untouched by only hiding in standalone. */
+body.standalone-mode .iterm2-only,
+body[data-loom-mode="standalone"] .iterm2-only,
+body[data-loom-mode="desktop"] .iterm2-only {
+  display: none !important;
+}
+
 /* Specializations picker */
 .specializations-picker {
   display: flex; flex-direction: column; gap: 6px;

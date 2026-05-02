@@ -407,8 +407,8 @@
       <div class="gs-subpane active" data-subpane="group-general">
       <label>Directory</label>
       <input id="gs-directory" placeholder="/path/to/project" autocomplete="off">
-      <label>Profile</label>
-      <select id="gs-profile"></select>
+      <label class="iterm2-only">Profile</label>
+      <select id="gs-profile" class="iterm2-only"></select>
       <label>Shell</label>
       <select id="gs-shell">
         <option value="">Default</option>
@@ -416,8 +416,8 @@
         <option value="bash">bash</option>
         <option value="fish">fish</option>
       </select>
-      <label>Tab color</label>
-      <div class="color-swatches" id="gs-color-swatches"></div>
+      <label class="iterm2-only">Tab color</label>
+      <div class="color-swatches iterm2-only" id="gs-color-swatches"></div>
       <label>Environment <span class="label-hint">KEY=VALUE per line</span></label>
       <textarea id="gs-env-vars" rows="3" placeholder="FOO=bar&#10;BAZ=qux"></textarea>
       <label>Env file <span class="label-hint">sourced on session start</span></label>
@@ -426,11 +426,11 @@
       <input id="gs-auto-terminals" type="number" min="0" max="10" value="0">
       <label>Max agents <span class="label-hint">0 = unlimited</span></label>
       <input id="gs-max-agents" type="number" min="0" max="100" value="0">
-      <label class="gs-checkbox">
+      <label class="gs-checkbox iterm2-only">
         <input id="gs-collapsed" type="checkbox"> Start collapsed on load
         <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Collapse this group automatically when the page loads. You can still expand it manually at any time.">?</span>
       </label>
-      <label class="gs-checkbox">
+      <label class="gs-checkbox iterm2-only">
         <input id="gs-filter-window" type="checkbox"> Pin to active window
         <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Only show this group in windows where it has active sessions. If all sessions are closed, the group appears in every window so you can relaunch.">?</span>
       </label>
@@ -457,8 +457,8 @@
       <div class="gs-subpane active" data-subpane="agent-general">
         <label>Directory</label>
         <input id="gs-agent-directory" placeholder="Same as group" autocomplete="off">
-        <label>Profile</label>
-        <select id="gs-agent-profile"></select>
+        <label class="iterm2-only">Profile</label>
+        <select id="gs-agent-profile" class="iterm2-only"></select>
         <label>Shell</label>
         <select id="gs-agent-shell">
           <option value="">Same as group</option>
@@ -466,8 +466,8 @@
           <option value="bash">bash</option>
           <option value="fish">fish</option>
         </select>
-        <label>Tab color</label>
-        <div class="color-swatches" id="gs-agent-color-swatches"></div>
+        <label class="iterm2-only">Tab color</label>
+        <div class="color-swatches iterm2-only" id="gs-agent-color-swatches"></div>
         <label>Agent CLI</label>
         <select id="gs-agent-provider" onchange="onGsProviderChange()"></select>
         <label>Default role</label>
@@ -512,8 +512,8 @@
         <input id="gs-terminal-init-script" placeholder="/path/to/script.sh" autocomplete="off">
         <label>Directory</label>
         <input id="gs-terminal-directory" placeholder="Same as group" autocomplete="off">
-        <label>Profile</label>
-        <select id="gs-terminal-profile"></select>
+        <label class="iterm2-only">Profile</label>
+        <select id="gs-terminal-profile" class="iterm2-only"></select>
         <label>Shell</label>
         <select id="gs-terminal-shell">
           <option value="">Same as group</option>
@@ -521,8 +521,8 @@
           <option value="bash">bash</option>
           <option value="fish">fish</option>
         </select>
-        <label>Tab color</label>
-        <div class="color-swatches" id="gs-terminal-color-swatches"></div>
+        <label class="iterm2-only">Tab color</label>
+        <div class="color-swatches iterm2-only" id="gs-terminal-color-swatches"></div>
         <label>Additional environment <span class="label-hint">KEY=VALUE per line</span></label>
         <textarea id="gs-terminal-env-vars" rows="3" placeholder="FOO=bar&#10;BAZ=qux"></textarea>
         <label>Env file</label>
@@ -531,7 +531,7 @@
           <input id="gs-terminal-always-custom" type="checkbox"> Always open custom dialog
           <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Show the full creation dialog when clicking New, instead of instantly creating a terminal with default settings.">?</span>
         </label>
-        <label class="gs-checkbox">
+        <label class="gs-checkbox iterm2-only">
           <input id="gs-terminal-close-on-disconnect" type="checkbox"> Close on disconnect
           <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Automatically delete the terminal from Loom when its iTerm2 tab is closed.">?</span>
         </label>
@@ -645,8 +645,8 @@
         <div class="label-hint task-modal-section-intro">Optional launch overrides for the designated Engineer only. Leave blank to inherit the usual agent/group defaults.</div>
         <label>Directory</label>
         <input id="gs-engineer-directory" placeholder="Same as agent/group" autocomplete="off">
-        <label>Profile</label>
-        <select id="gs-engineer-profile"></select>
+        <label class="iterm2-only">Profile</label>
+        <select id="gs-engineer-profile" class="iterm2-only"></select>
         <label>Shell</label>
         <select id="gs-engineer-shell">
           <option value="">Same as agent/group</option>
@@ -654,8 +654,8 @@
           <option value="bash">bash</option>
           <option value="fish">fish</option>
         </select>
-        <label>Tab color</label>
-        <div class="color-swatches" id="gs-engineer-color-swatches"></div>
+        <label class="iterm2-only">Tab color</label>
+        <div class="color-swatches iterm2-only" id="gs-engineer-color-swatches"></div>
       </div>
 
       <!-- Behavior sub-tab -->
