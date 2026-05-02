@@ -231,6 +231,117 @@ test('architect settings markup removes paused control and renders checkpoint dr
   assert.match(html, /<select id="gs-architect-journal-checkpoint"><\/select>/);
 });
 
+test('group settings renders system prompt preview controls for Engineer and Architect', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+
+  assert.match(
+    html,
+    /<textarea id="gs-engineer-custom-instructions"[\s\S]*?<\/textarea>\s*<div class="system-prompt-preview-row">\s*<button type="button" id="gs-engineer-view-system-prompt"[^>]*>View system prompt<\/button>/,
+  );
+  assert.match(
+    html,
+    /<textarea id="gs-architect-custom-instructions"[\s\S]*?<\/textarea>\s*<div class="system-prompt-preview-row">\s*<button type="button" id="gs-architect-view-system-prompt"[^>]*>View system prompt<\/button>/,
+  );
+  assert.match(html, /id="modal-system-prompt-preview"[\s\S]*class="modal modal-tall preview-popup"/);
+  assert.match(css, /body\.standalone-mode\s+\.preview-popup\s*{\s*max-width:\s*min\(80vw,\s*1180px\);/);
+});
+
+test('system prompt preview popup sends unsaved form state and closes as nested modal', () => {
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+  seedProviders(context, sandbox._cachedProviders);
+
+  vm.runInContext('_settingsGroup = "alpha"; _gsEngineerSpecs = ["ui"];', context);
+  ensure('gs-default-agent-template').value = 'default-template';
+  ensure('gs-agent-provider').value = 'codex';
+  ensure('gs-agent-boot-cmd').value = 'codex';
+  ensure('gs-agent-model').value = 'gpt-5';
+  ensure('gs-agent-reasoning-effort').value = 'high';
+  ensure('gs-agent-directory').value = '/repo';
+  ensure('gs-agent-profile').value = 'Ops';
+  ensure('gs-agent-shell').value = 'zsh';
+  ensure('gs-wt-merge-cleanup').value = 'close_remove';
+  ensure('gs-engineer-provider').value = 'codex';
+  ensure('gs-engineer-boot-cmd').value = 'codex --engineer';
+  ensure('gs-engineer-model').value = 'gpt-5.1';
+  ensure('gs-engineer-reasoning-effort').value = 'xhigh';
+  ensure('gs-engineer-directory').value = '/repo/.loom/engineer';
+  ensure('gs-engineer-profile').value = 'Ops';
+  ensure('gs-engineer-shell').value = 'fish';
+  ensure('gs-engineer-custom-instructions').value = 'UNSAVED engineer instructions';
+  ensure('gs-engineer-restrict-to-created-agents').checked = true;
+  ensure('gs-engineer-autonomy-mode').value = 'aggressive_auto_continue';
+  ensure('gs-engineer-default-worker-concurrency').value = '4';
+  ensure('gs-engineer-wave-size-preference').value = 'large';
+  ensure('gs-engineer-same-agent-follow-up-preference').value = 'prefer_same_agent';
+  ensure('gs-engineer-digest-verbosity').value = 'detailed';
+  ensure('gs-engineer-escalation-style').value = 'keep_moving';
+
+  vm.runInContext('openGroupSystemPromptPreview("engineer")', context);
+
+  assert.equal(sandbox.sendCalls.length, 1);
+  const call = sandbox.sendCalls[0];
+  assert.equal(call.cmd, 'preview_system_prompt');
+  assert.equal(call.kind, 'engineer');
+  assert.equal(call.group, 'alpha');
+  assert.equal(call.settings.custom_instructions, 'UNSAVED engineer instructions');
+  assert.equal(call.settings.autonomy_mode, 'aggressive_auto_continue');
+  assert.deepEqual(JSON.parse(JSON.stringify(call.group_settings.default_engineer_specializations)), ['ui']);
+  assert.equal(ensure('modal-system-prompt-preview').classList.contains('visible'), true);
+  assert.equal(ensure('modal-system-prompt-preview').classList.contains('modal-nested'), true);
+
+  vm.runInContext(
+    `_showSystemPromptPreview({
+      type: "system_prompt_preview",
+      request_id: ${JSON.stringify(call.request_id)},
+      kind: "engineer",
+      group: "alpha",
+      prompt: "Rendered prompt with UNSAVED engineer instructions"
+    })`,
+    context,
+  );
+  assert.equal(
+    ensure('system-prompt-preview-content').textContent,
+    'Rendered prompt with UNSAVED engineer instructions',
+  );
+
+  vm.runInContext('closeSystemPromptPreview()', context);
+  assert.equal(ensure('modal-system-prompt-preview').classList.contains('visible'), false);
+  assert.equal(ensure('modal-system-prompt-preview').classList.contains('modal-nested'), false);
+});
+
+test('architect system prompt preview uses architect form values', () => {
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+  seedProviders(context, sandbox._cachedProviders);
+
+  vm.runInContext('_settingsGroup = "alpha";', context);
+  ensure('gs-architect-provider').value = 'codex';
+  ensure('gs-architect-boot-cmd').value = 'codex --architect';
+  ensure('gs-architect-model').value = 'gpt-5.1-architect';
+  ensure('gs-architect-reasoning-effort').value = 'high';
+  ensure('gs-architect-directory').value = '/repo/.loom/architect';
+  ensure('gs-architect-profile').value = 'Ops';
+  ensure('gs-architect-shell').value = 'zsh';
+  ensure('gs-architect-custom-instructions').value = 'UNSAVED architect instructions';
+  ensure('gs-architect-autonomy-mode').value = 'ask_always';
+  ensure('gs-architect-digest-verbosity').value = 'verbose';
+  ensure('gs-architect-journal-checkpoint').value = 'manual_only';
+
+  vm.runInContext('openGroupSystemPromptPreview("architect")', context);
+
+  assert.equal(sandbox.sendCalls.length, 1);
+  const call = sandbox.sendCalls[0];
+  assert.equal(call.cmd, 'preview_system_prompt');
+  assert.equal(call.kind, 'architect');
+  assert.equal(call.settings.architect_custom_instructions, 'UNSAVED architect instructions');
+  assert.equal(call.settings.architect_autonomy_mode, 'ask_always');
+  assert.equal(call.settings.architect_journal_checkpoint_frequency, 'manual_only');
+});
+
 test('group settings refreshes reasoning effort options when provider changes', () => {
   const { sandbox, ensure } = createSandbox();
   const context = vm.createContext(sandbox);

@@ -801,6 +801,161 @@ function openGroupSettings(group, initialTab, initialSubtab) {
   send({ cmd: 'get_group_settings', group });
 }
 
+let _systemPromptPreviewSeq = 0;
+let _systemPromptPreviewRequestId = '';
+
+function _groupSettingsPromptPreviewPayload() {
+  return {
+    default_agent_template: document.getElementById('gs-default-agent-template').value,
+    agent_provider: _getProviderValue('gs-agent-provider'),
+    agent_boot_command: document.getElementById('gs-agent-boot-cmd').value.trim(),
+    agent_model: document.getElementById('gs-agent-model').value.trim(),
+    agent_reasoning_effort: document.getElementById('gs-agent-reasoning-effort').value,
+    agent_directory: document.getElementById('gs-agent-directory').value.trim(),
+    agent_profile: document.getElementById('gs-agent-profile').value,
+    agent_shell: document.getElementById('gs-agent-shell').value,
+    agent_tab_color: _gsAgentColor,
+    worktree_merge_cleanup: document.getElementById('gs-wt-merge-cleanup').value,
+    default_engineer_specializations: (_gsEngineerSpecs || []).slice(),
+  };
+}
+
+function _engineerSettingsPromptPreviewPayload() {
+  return {
+    engineer_provider: _getProviderValue('gs-engineer-provider'),
+    engineer_boot_command: document.getElementById('gs-engineer-boot-cmd').value.trim(),
+    engineer_model: document.getElementById('gs-engineer-model').value.trim(),
+    engineer_reasoning_effort: document.getElementById('gs-engineer-reasoning-effort').value,
+    engineer_directory: document.getElementById('gs-engineer-directory').value.trim(),
+    engineer_profile: document.getElementById('gs-engineer-profile').value,
+    engineer_shell: document.getElementById('gs-engineer-shell').value,
+    engineer_tab_color: _gsEngineerColor,
+    custom_instructions: document.getElementById('gs-engineer-custom-instructions').value,
+    restrict_to_created_agents: _getEngineerRestrictToCreatedAgentsFromPermission(),
+    autonomy_mode: document.getElementById('gs-engineer-autonomy-mode').value,
+    default_worker_concurrency: parseInt(
+      document.getElementById('gs-engineer-default-worker-concurrency').value,
+      10
+    ) || 2,
+    wave_size_preference: document.getElementById('gs-engineer-wave-size-preference').value,
+    same_agent_follow_up_preference: document.getElementById('gs-engineer-same-agent-follow-up-preference').value,
+    digest_verbosity: document.getElementById('gs-engineer-digest-verbosity').value,
+    escalation_style: document.getElementById('gs-engineer-escalation-style').value,
+  };
+}
+
+function _architectSettingsPromptPreviewPayload() {
+  return {
+    architect_provider: _getProviderValue('gs-architect-provider'),
+    architect_boot_command: document.getElementById('gs-architect-boot-cmd').value.trim(),
+    architect_model: document.getElementById('gs-architect-model').value.trim(),
+    architect_reasoning_effort: document.getElementById('gs-architect-reasoning-effort').value,
+    architect_directory: document.getElementById('gs-architect-directory').value.trim(),
+    architect_profile: document.getElementById('gs-architect-profile').value,
+    architect_shell: document.getElementById('gs-architect-shell').value,
+    architect_tab_color: _gsArchitectColor,
+    architect_custom_instructions: document.getElementById('gs-architect-custom-instructions').value,
+    architect_autonomy_mode: document.getElementById('gs-architect-autonomy-mode').value,
+    architect_digest_verbosity: document.getElementById('gs-architect-digest-verbosity').value,
+    architect_journal_checkpoint_frequency: document.getElementById('gs-architect-journal-checkpoint').value.trim() || 'every_10_actions',
+  };
+}
+
+function _systemPromptPreviewTitle(kind) {
+  return kind === 'architect'
+    ? 'Architect system prompt'
+    : 'Engineer system prompt';
+}
+
+function openGroupSystemPromptPreview(kind) {
+  const previewKind = String(kind || '').trim().toLowerCase() === 'architect'
+    ? 'architect'
+    : 'engineer';
+  const modal = document.getElementById('modal-system-prompt-preview');
+  if (!modal || !_settingsGroup) return;
+
+  const requestId = `system-prompt-preview-${Date.now()}-${++_systemPromptPreviewSeq}`;
+  _systemPromptPreviewRequestId = requestId;
+  document.getElementById('system-prompt-preview-title').textContent =
+    _systemPromptPreviewTitle(previewKind);
+  document.getElementById('system-prompt-preview-summary').textContent =
+    `Rendering ${previewKind} prompt from the current unsaved form values…`;
+  document.getElementById('system-prompt-preview-content').textContent = 'Loading…';
+  const errorEl = document.getElementById('system-prompt-preview-error');
+  errorEl.textContent = '';
+  errorEl.style.display = 'none';
+  const copyBtn = document.getElementById('system-prompt-preview-copy-btn');
+  if (copyBtn) {
+    copyBtn.disabled = true;
+    copyBtn.textContent = 'Copy to clipboard';
+  }
+
+  if (typeof openNestedModal === 'function') {
+    openNestedModal('modal-system-prompt-preview');
+  } else {
+    modal.classList.add('visible');
+  }
+
+  send({
+    cmd: 'preview_system_prompt',
+    request_id: requestId,
+    group: _settingsGroup,
+    kind: previewKind,
+    group_settings: _groupSettingsPromptPreviewPayload(),
+    settings: previewKind === 'architect'
+      ? _architectSettingsPromptPreviewPayload()
+      : _engineerSettingsPromptPreviewPayload(),
+  });
+}
+
+function closeSystemPromptPreview() {
+  _systemPromptPreviewRequestId = '';
+  if (typeof closeNestedModal === 'function'
+      && closeNestedModal('modal-system-prompt-preview')) {
+    return;
+  }
+  const modal = document.getElementById('modal-system-prompt-preview');
+  if (modal) {
+    modal.classList.remove('visible');
+    modal.classList.remove('modal-nested');
+  }
+}
+
+function _showSystemPromptPreview(msg) {
+  msg = msg || {};
+  if (
+      msg.request_id
+      && _systemPromptPreviewRequestId
+      && msg.request_id !== _systemPromptPreviewRequestId) {
+    return;
+  }
+  const kind = String((msg && msg.kind) || '').trim().toLowerCase();
+  if (kind) {
+    document.getElementById('system-prompt-preview-title').textContent =
+      _systemPromptPreviewTitle(kind);
+  }
+  const prompt = (msg && msg.prompt) || '(empty)';
+  document.getElementById('system-prompt-preview-content').textContent = prompt;
+  const label = kind || 'system';
+  document.getElementById('system-prompt-preview-summary').textContent =
+    `Rendered ${label} prompt for ${msg.group || _settingsGroup || 'this group'}.`;
+  const copyBtn = document.getElementById('system-prompt-preview-copy-btn');
+  if (copyBtn) copyBtn.disabled = false;
+}
+
+function copySystemPromptPreview() {
+  const text = document.getElementById('system-prompt-preview-content').textContent;
+  const btn = document.getElementById('system-prompt-preview-copy-btn');
+  if (typeof navigator === 'undefined'
+      || !navigator.clipboard
+      || !navigator.clipboard.writeText) return;
+  navigator.clipboard.writeText(text).then(function() {
+    if (!btn) return;
+    btn.textContent = 'Copied!';
+    setTimeout(function() { btn.textContent = 'Copy to clipboard'; }, 1500);
+  });
+}
+
 async function deleteSettingsGroup() {
   const group = _settingsGroup;
   if (!group || typeof removeGroup !== 'function') return;
