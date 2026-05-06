@@ -298,6 +298,49 @@ prompt: |
             self.server_mod._DAEMON_STOP_RESULT_TYPE,
         )
 
+    def test_daemon_stop_command_schedules_even_when_cleanup_fails(self):
+        stop_state = self.server_mod._DaemonStopState()
+        scheduled = []
+
+        class BadKeybindings:
+            async def remove(self, _connection, _displaced):
+                raise RuntimeError("keybinding boom")
+
+        class BadState:
+            agents = {"agent-1": types.SimpleNamespace(id="agent-1")}
+
+            def _db_save_agent(self, _cell):
+                raise RuntimeError("db boom")
+
+        def schedule_stop():
+            scheduled.append("scheduled")
+
+        with self.assertLogs(self.server_mod.log, level="ERROR") as logs:
+            result = asyncio.run(self.server_mod._handle_daemon_stop_command(
+                daemon_stop_state=stop_state,
+                schedule_daemon_stop=schedule_stop,
+                state=BadState(),
+                keybindings_module=BadKeybindings(),
+                connection=object(),
+                displaced=[["old-binding"]],
+                install_keybindings=True,
+            ))
+
+        self.assertTrue(self.server_mod._is_daemon_stop_result(result))
+        self.assertEqual(scheduled, ["scheduled"])
+        self.assertTrue(stop_state.should_reject_api_request("get_config"))
+        self.assertIn("Keybinding cleanup", "\n".join(logs.output))
+        self.assertIn("Failed to persist agent", "\n".join(logs.output))
+
+        scheduled.clear()
+        repeat = asyncio.run(self.server_mod._handle_daemon_stop_command(
+            daemon_stop_state=stop_state,
+            schedule_daemon_stop=schedule_stop,
+            state=BadState(),
+        ))
+        self.assertEqual(scheduled, ["scheduled"])
+        self.assertIn("already requested", repeat["message"])
+
     def test_stop_command_handler_is_present_but_deploy_v1_is_documented_absent(self):
         source = Path(self.server_mod.__file__).read_text()
 

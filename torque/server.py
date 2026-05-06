@@ -3147,6 +3147,46 @@ def _daemon_stop_rejection_payload() -> dict:
     }
 
 
+async def _handle_daemon_stop_command(
+    *,
+    daemon_stop_state: _DaemonStopState,
+    schedule_daemon_stop,
+    state,
+    keybindings_module=None,
+    connection=None,
+    displaced=None,
+    install_keybindings: bool = False,
+) -> dict:
+    already_requested = not daemon_stop_state.request()
+    if already_requested:
+        log.info("Stop requested while daemon stop already pending")
+    else:
+        log.info("Stop requested — draining requests and shutting down")
+        if install_keybindings and keybindings_module:
+            try:
+                await keybindings_module.remove(connection, (displaced or [[]])[0])
+            except Exception:
+                log.exception("Keybinding cleanup during daemon stop failed")
+        # Persist all agents (status etc.) before stop, mirroring restart.
+        # Helper daemons are intentionally left running for PID-file adoption
+        # by the next daemon; this matches current restart semantics and is
+        # audited by TORQUE:358.
+        for cell in list(state.agents.values()):
+            try:
+                state._db_save_agent(cell)
+            except Exception:
+                log.exception(
+                    "Failed to persist agent '%s' before daemon stop",
+                    getattr(cell, "id", ""),
+                )
+
+    # Schedule even after best-effort cleanup failures, and also on repeated
+    # stop requests so a prior failed/cleared stop task cannot strand the
+    # daemon in a requested-but-not-stopping state.
+    schedule_daemon_stop()
+    return _daemon_stop_result(already_requested=already_requested)
+
+
 async def _shutdown_daemon_runtime(
     *,
     terminal_clients,
@@ -13348,21 +13388,15 @@ async def main(connection=None):
                     engineer_buffer, data)
 
             elif cmd == "stop":
-                already_requested = not daemon_stop_state.request()
-                if already_requested:
-                    log.info("Stop requested while daemon stop already pending")
-                else:
-                    log.info("Stop requested — draining requests and shutting down")
-                    if _should_install_keybindings() and keybindings:
-                        await keybindings.remove(connection, _displaced[0])
-                    # Persist all agents (status etc.) before stop, mirroring
-                    # restart. Helper daemons are intentionally left running
-                    # for PID-file adoption by the next daemon; this matches
-                    # current restart semantics and is audited by TORQUE:358.
-                    for cell in state.agents.values():
-                        state._db_save_agent(cell)
-                    _schedule_daemon_stop()
-                result = _daemon_stop_result(already_requested=already_requested)
+                result = await _handle_daemon_stop_command(
+                    daemon_stop_state=daemon_stop_state,
+                    schedule_daemon_stop=_schedule_daemon_stop,
+                    state=state,
+                    keybindings_module=keybindings,
+                    connection=connection,
+                    displaced=_displaced,
+                    install_keybindings=_should_install_keybindings(),
+                )
 
             elif cmd == "restart":
                 log.info("Restart requested — cleaning up and re-executing")
