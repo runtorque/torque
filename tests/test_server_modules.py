@@ -280,6 +280,91 @@ prompt: |
         self.assertEqual(result["status"], 403)
         self.assertIn("worker-2", result["message"])
 
+    def test_daemon_stop_state_rejects_fresh_api_requests_after_stop(self):
+        stop_state = self.server_mod._DaemonStopState()
+
+        self.assertFalse(stop_state.should_reject_api_request("get_config"))
+        self.assertTrue(stop_state.request())
+        self.assertTrue(stop_state.should_reject_api_request("get_config"))
+        self.assertTrue(stop_state.should_reject_api_request("refresh"))
+        self.assertFalse(stop_state.should_reject_api_request("stop"))
+        self.assertFalse(stop_state.request())
+
+        result = self.server_mod._daemon_stop_result()
+        self.assertTrue(self.server_mod._is_daemon_stop_result(result))
+        self.assertFalse(self.server_mod._is_daemon_stop_result({"type": "ok"}))
+        self.assertEqual(
+            self.server_mod._daemon_stop_rejection_payload()["type"],
+            self.server_mod._DAEMON_STOP_RESULT_TYPE,
+        )
+
+    def test_stop_command_handler_is_present_but_deploy_v1_is_documented_absent(self):
+        source = Path(self.server_mod.__file__).read_text()
+
+        self.assertIn('elif cmd == "stop":', source)
+        self.assertIn("v1 does not implement a", source)
+        self.assertIn("_API_DAEMON_LIFECYCLE_COMMANDS", source)
+
+    def test_shutdown_daemon_runtime_drains_in_existing_order(self):
+        events = []
+
+        class FakeWs:
+            def __init__(self, name):
+                self.name = name
+
+            async def close(self):
+                events.append(f"{self.name}.close")
+
+        class AsyncMethod:
+            def __init__(self, name):
+                self.name = name
+
+            async def __call__(self):
+                events.append(self.name)
+
+        terminal_clients = {"cell-1": {FakeWs("terminal_ws")}}
+        ui_ws_clients = {FakeWs("ui_ws")}
+        panel_log = types.SimpleNamespace(aclose=AsyncMethod("panel_log.aclose"))
+        drainer = types.SimpleNamespace(stop=AsyncMethod("event_drainer.stop"))
+        ingest_client = types.SimpleNamespace(aclose=AsyncMethod("event_client.aclose"))
+        bridge = types.SimpleNamespace(shutdown=AsyncMethod("bridge.shutdown"))
+        runner = types.SimpleNamespace(cleanup=AsyncMethod("runner.cleanup"))
+        state = types.SimpleNamespace(
+            flush_db_writes=AsyncMethod("state.flush_db_writes"))
+
+        class FakeDb:
+            close_async_writes = AsyncMethod("db.close_async_writes")
+
+            def close(self):
+                events.append("db.close")
+
+        asyncio.run(self.server_mod._shutdown_daemon_runtime(
+            terminal_clients=terminal_clients,
+            ui_ws_clients=ui_ws_clients,
+            panel_log=panel_log,
+            event_ingest_drainer=drainer,
+            event_ingest_client=ingest_client,
+            bridge=bridge,
+            runner=runner,
+            state=state,
+            db=FakeDb(),
+        ))
+
+        self.assertEqual(events, [
+            "terminal_ws.close",
+            "ui_ws.close",
+            "panel_log.aclose",
+            "event_drainer.stop",
+            "event_client.aclose",
+            "bridge.shutdown",
+            "runner.cleanup",
+            "state.flush_db_writes",
+            "db.close_async_writes",
+            "db.close",
+        ])
+        self.assertEqual(terminal_clients, {})
+        self.assertEqual(ui_ws_clients, set())
+
     def test_task_detail_command_returns_full_task_shape(self):
         state = self.state_mod.MatrixState()
         state.groups['g'] = []

@@ -3047,7 +3047,108 @@ def _request_wants_compact_snapshot(request) -> bool:
     )
 
 
+# ``deploy`` is intentionally listed here even though v1 does not implement a
+# handler: the worker-context guard must still preemptively reject an in-daemon
+# deploy attempt until a future deploy API exists.
 _API_DAEMON_LIFECYCLE_COMMANDS = {"restart", "stop", "deploy"}
+_DAEMON_STOP_RESULT_TYPE = "daemon_stop"
+_DAEMON_STOP_TRIGGER_DELAY_SECONDS = 0.05
+
+
+class _DaemonStopState:
+    """Small shared state for graceful daemon-stop request draining."""
+
+    def __init__(self) -> None:
+        self.requested = False
+
+    def request(self) -> bool:
+        first_request = not self.requested
+        self.requested = True
+        return first_request
+
+    def should_reject_api_request(self, cmd: str) -> bool:
+        return self.requested and str(cmd or "").strip().lower() != "stop"
+
+
+def _daemon_stop_result(*, already_requested: bool = False) -> dict:
+    return {
+        "type": _DAEMON_STOP_RESULT_TYPE,
+        "message": (
+            "Torque daemon stop already requested"
+            if already_requested else
+            "Torque daemon stopping"
+        ),
+    }
+
+
+def _is_daemon_stop_result(result: dict | None) -> bool:
+    return isinstance(result, dict) and result.get("type") == _DAEMON_STOP_RESULT_TYPE
+
+
+def _daemon_stop_rejection_payload() -> dict:
+    return {
+        "ok": False,
+        "error": "Torque daemon is stopping",
+        "type": _DAEMON_STOP_RESULT_TYPE,
+    }
+
+
+async def _shutdown_daemon_runtime(
+    *,
+    terminal_clients,
+    ui_ws_clients,
+    panel_log,
+    event_ingest_drainer,
+    event_ingest_client,
+    bridge,
+    runner,
+    state,
+    db,
+) -> None:
+    """Run the daemon shutdown drain sequence in one shared place."""
+    for ws_clients in terminal_clients.values():
+        for ws_client in list(ws_clients):
+            try:
+                await ws_client.close()
+            except Exception:
+                pass
+    terminal_clients.clear()
+    for ws_client in list(ui_ws_clients):
+        try:
+            await ws_client.close()
+        except Exception:
+            pass
+    ui_ws_clients.clear()
+    try:
+        await panel_log.aclose()
+    except Exception:
+        log.exception("Panel event log shutdown flush failed")
+    try:
+        await event_ingest_drainer.stop()
+    except Exception:
+        log.exception("Event ingest drainer shutdown failed")
+    try:
+        await event_ingest_client.aclose()
+    except Exception:
+        log.exception("Event ingest client shutdown failed")
+    try:
+        await bridge.shutdown()
+    except Exception:
+        log.exception("Terminal adapter shutdown failed")
+    try:
+        await runner.cleanup()
+    except Exception:
+        log.exception("HTTP runner cleanup failed")
+    try:
+        await state.flush_db_writes()
+        await db.close_async_writes()
+    except Exception:
+        log.exception("Async SQLite write queue shutdown failed")
+    try:
+        db.close()
+    except Exception:
+        log.exception("SQLite database close failed")
+
 
 
 def _api_worker_context_guard(data: dict | None, headers=None,
@@ -6822,6 +6923,22 @@ async def main(connection=None):
         }
 
     terminal_clients: dict[str, set[web.WebSocketResponse]] = {}
+    daemon_stop_state = _DaemonStopState()
+    daemon_stop_event = asyncio.Event()
+    daemon_stop_task: asyncio.Task | None = None
+
+    def _schedule_daemon_stop() -> None:
+        nonlocal daemon_stop_task
+        if daemon_stop_event.is_set():
+            return
+        if daemon_stop_task and not daemon_stop_task.done():
+            return
+
+        async def _trigger_stop_after_response_grace() -> None:
+            await asyncio.sleep(_DAEMON_STOP_TRIGGER_DELAY_SECONDS)
+            daemon_stop_event.set()
+
+        daemon_stop_task = asyncio.create_task(_trigger_stop_after_response_grace())
 
     async def _broadcast_terminal_output(cell_id: str, session_id: str, text: str):
         if not text:
@@ -13197,6 +13314,23 @@ async def main(connection=None):
                 result = _handle_engineer_flush_now_command(
                     engineer_buffer, data)
 
+            elif cmd == "stop":
+                already_requested = not daemon_stop_state.request()
+                if already_requested:
+                    log.info("Stop requested while daemon stop already pending")
+                else:
+                    log.info("Stop requested — draining requests and shutting down")
+                    if _should_install_keybindings() and keybindings:
+                        await keybindings.remove(connection, _displaced[0])
+                    # Persist all agents (status etc.) before stop, mirroring
+                    # restart. Helper daemons are intentionally left running
+                    # for PID-file adoption by the next daemon; this matches
+                    # current restart semantics and is audited by TORQUE:358.
+                    for cell in state.agents.values():
+                        state._db_save_agent(cell)
+                    _schedule_daemon_stop()
+                result = _daemon_stop_result(already_requested=already_requested)
+
             elif cmd == "restart":
                 log.info("Restart requested — cleaning up and re-executing")
                 if _should_install_keybindings() and keybindings:
@@ -13676,6 +13810,8 @@ async def main(connection=None):
         if not cmd:
             return web.json_response(
                 {"ok": False, "error": "missing 'cmd'"}, status=400)
+        if daemon_stop_state.should_reject_api_request(cmd):
+            return web.json_response(_daemon_stop_rejection_payload(), status=503)
 
         guard = _api_worker_context_guard(
             data,
@@ -14107,47 +14243,16 @@ async def main(connection=None):
             log.info("Standalone mode — toolbelt registration skipped")
             log.info("Open http://127.0.0.1:%d/ in a browser", WS_PORT)
 
-        await asyncio.Future()
+        await daemon_stop_event.wait()
     finally:
-        for ws_clients in terminal_clients.values():
-            for ws_client in list(ws_clients):
-                try:
-                    await ws_client.close()
-                except Exception:
-                    pass
-        terminal_clients.clear()
-        for ws_client in list(state._ws_clients):
-            try:
-                await ws_client.close()
-            except Exception:
-                pass
-        state._ws_clients.clear()
-        try:
-            await panel_log.aclose()
-        except Exception:
-            log.exception("Panel event log shutdown flush failed")
-        try:
-            await event_ingest_drainer.stop()
-        except Exception:
-            log.exception("Event ingest drainer shutdown failed")
-        try:
-            await event_ingest_client.aclose()
-        except Exception:
-            log.exception("Event ingest client shutdown failed")
-        try:
-            await bridge.shutdown()
-        except Exception:
-            log.exception("Terminal adapter shutdown failed")
-        try:
-            await runner.cleanup()
-        except Exception:
-            log.exception("HTTP runner cleanup failed")
-        try:
-            await state.flush_db_writes()
-            await db.close_async_writes()
-        except Exception:
-            log.exception("Async SQLite write queue shutdown failed")
-        try:
-            db.close()
-        except Exception:
-            log.exception("SQLite database close failed")
+        await _shutdown_daemon_runtime(
+            terminal_clients=terminal_clients,
+            ui_ws_clients=state._ws_clients,
+            panel_log=panel_log,
+            event_ingest_drainer=event_ingest_drainer,
+            event_ingest_client=event_ingest_client,
+            bridge=bridge,
+            runner=runner,
+            state=state,
+            db=db,
+        )
