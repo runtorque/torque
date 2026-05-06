@@ -18,6 +18,10 @@ import time
 import urllib.error
 import urllib.request
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from torque.doctor import (
     build_doctor_report_for_db,
     format_doctor_report,
@@ -711,6 +715,130 @@ def check_ok(resp):
     if not resp.get("ok"):
         die(resp.get("error", "Unknown error"))
     return resp.get("data", {})
+
+
+# ---------------------------------------------------------------------------
+# Daemon status helpers
+# ---------------------------------------------------------------------------
+
+def _resolve_daemon_status_port(args):
+    if getattr(args, "daemon_port", None) is not None:
+        return int(args.daemon_port)
+    if _argv_has_flag("--port") and getattr(args, "port", None) is not None:
+        return int(args.port)
+    env_port = (os.environ.get("TORQUE_PORT", "") or "").strip()
+    return int(env_port or DESKTOP_DEFAULT_PORT)
+
+
+def _daemon_port_is_open(port):
+    try:
+        with socket.create_connection(("127.0.0.1", int(port)), timeout=0.5):
+            pass
+        return True
+    except OSError:
+        return False
+
+
+def _usable_pid(value, *, require_running=True):
+    text = str(value or "").strip()
+    try:
+        pid = int(text)
+    except (TypeError, ValueError):
+        return ""
+    if pid <= 0:
+        return ""
+    if require_running:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return ""
+        except PermissionError:
+            pass
+        except OSError:
+            return ""
+    return str(pid)
+
+
+def _read_text(path):
+    try:
+        return Path(path).read_text().strip()
+    except OSError:
+        return ""
+
+
+def _lsof_pid(port):
+    try:
+        out = subprocess.run(
+            ["lsof", "-ti", f"TCP:{int(port)}", "-sTCP:LISTEN"],
+            capture_output=True, text=True, timeout=2,
+        ).stdout
+    except (OSError, subprocess.SubprocessError, ValueError):
+        out = ""
+    for line in out.splitlines():
+        if pid := _usable_pid(line, require_running=False):
+            return pid
+    return ""
+
+
+def _daemon_pid(runtime, port):
+    pid = _usable_pid(runtime.get("pid"), require_running=False)
+    if pid:
+        return pid
+    data_dir = str(runtime.get("data_dir", "") or "").strip()
+    if data_dir:
+        pid_file = Path(os.path.expanduser(data_dir)) / "torque.pid"
+        if pid := _usable_pid(_read_text(pid_file)):
+            return pid
+    return _lsof_pid(port) or "(unknown)"
+
+
+def _read_version_file():
+    return _read_text(PROJECT_ROOT / "VERSION")
+
+
+def _format_uptime(started_at, now=None):
+    if started_at in (None, ""):
+        return ""
+    try:
+        started = float(started_at)
+    except (TypeError, ValueError):
+        try:
+            from datetime import datetime
+            started = datetime.fromisoformat(
+                str(started_at).strip().replace("Z", "+00:00")
+            ).timestamp()
+        except (TypeError, ValueError):
+            return ""
+    elapsed = max(0, int((time.time() if now is None else now) - started))
+    days, remainder = divmod(elapsed, 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    parts = (
+        ([f"{days}d"] if days else [])
+        + ([f"{hours}h"] if hours else [])
+        + ([f"{minutes}m"] if minutes else [])
+    ) or [f"{seconds}s"]
+    return " ".join(parts[:3])
+
+
+def _daemon_log_path(runtime):
+    for key in ("log_path", "log_file", "logs"):
+        path = str(runtime.get(key, "") or "").strip()
+        if path:
+            return path
+
+    data_dir = str(runtime.get("data_dir", "") or "").strip()
+    if not data_dir:
+        return ""
+    return str(Path(os.path.expanduser(data_dir)) / "torque.log")
+
+
+def _print_daemon_status_line(label, value):
+    prefix = f"{label}:"
+    if len(prefix) >= 8:
+        print(f"{prefix} {value}")
+    else:
+        print(f"{prefix:<8}{value}")
 
 
 # ---------------------------------------------------------------------------
@@ -1511,6 +1639,39 @@ def task_slug(description, max_len=20):
 # ---------------------------------------------------------------------------
 # Subcommand handlers
 # ---------------------------------------------------------------------------
+
+def cmd_daemon_status(args):
+    port = _resolve_daemon_status_port(args)
+    if not _daemon_port_is_open(port):
+        _print_daemon_status_line("Daemon", "not running")
+        sys.exit(1)
+
+    data = check_ok(api_call("get_config", port=port))
+    runtime = data.get("runtime", {}) or {}
+    runtime_port = runtime.get("port") or port
+    data_dir = str(runtime.get("data_dir", "") or "").strip()
+    profile = (
+        str(runtime.get("profile", "") or "").strip()
+        or str(data.get("current_profile", "") or "").strip()
+        or "(default)"
+    )
+    version = str(runtime.get("version", "") or "").strip() or _read_version_file()
+    uptime = _format_uptime(runtime.get("started_at"))
+    logs = _daemon_log_path(runtime)
+
+    _print_daemon_status_line("Daemon", "running")
+    _print_daemon_status_line("PID", _daemon_pid(runtime, runtime_port))
+    _print_daemon_status_line("Port", runtime_port)
+    _print_daemon_status_line("Profile", profile)
+    if data_dir:
+        _print_daemon_status_line("Data", data_dir)
+    if uptime:
+        _print_daemon_status_line("Uptime", uptime)
+    if version:
+        _print_daemon_status_line("Version", version)
+    if logs:
+        _print_daemon_status_line("Logs", logs)
+
 
 def cmd_status(args):
     state_data = get_state(args.port)
@@ -4620,6 +4781,17 @@ def build_parser():
     p.add_argument("--python",
                    help="Python executable to use for the desktop shell")
     p.set_defaults(func=cmd_desktop)
+
+    # -- daemon -------------------------------------------------------------
+    dmn = sub.add_parser("daemon", help="Daemon lifecycle commands")
+    dmn.set_defaults(func=None, _sub_parser=dmn)
+    dmn_sub = dmn.add_subparsers(dest="daemon_cmd")
+
+    p = dmn_sub.add_parser("status", help="Show daemon runtime status")
+    p.add_argument("--port", dest="daemon_port", type=int,
+                   help=f"Daemon port (default: {DESKTOP_DEFAULT_PORT}; "
+                        "honors TORQUE_PORT)")
+    p.set_defaults(func=cmd_daemon_status)
 
     # -- group --------------------------------------------------------------
     grp = sub.add_parser("group", aliases=["g"],
