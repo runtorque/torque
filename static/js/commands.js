@@ -1,5 +1,9 @@
 /* Commands — actions sent to the daemon */
 
+var _daemonStopRequestedByUser = false;
+var _daemonStopBannerShown = false;
+var _daemonStopBannerTimer = 0;
+
 /* Open a board task in the Board panel — used by clickable task IDs on
    worker / engineer / agent cards. Activates the board panel if needed
    then scrolls the matching card into view + adds a brief highlight.
@@ -47,6 +51,34 @@ function _applySystemBanner(banner) {
   el.hidden = false;
   el.setAttribute('data-kind', banner.kind || 'info');
   el.textContent = banner.message;
+}
+
+function _showDaemonStoppedBanner() {
+  if (_daemonStopBannerShown) return;
+  _daemonStopBannerShown = true;
+  _applySystemBanner({
+    kind: 'daemon_stopped',
+    message: 'Torque daemon stopped. Relaunch via `make standalone` to reconnect.',
+  });
+  if (typeof setTimeout === 'function') {
+    if (_daemonStopBannerTimer && typeof clearTimeout === 'function') {
+      clearTimeout(_daemonStopBannerTimer);
+    }
+    _daemonStopBannerTimer = setTimeout(function() {
+      _applySystemBanner(null);
+      _daemonStopBannerTimer = 0;
+    }, 60000);
+  }
+}
+
+function _clearDaemonStoppedBanner() {
+  _daemonStopRequestedByUser = false;
+  _daemonStopBannerShown = false;
+  if (_daemonStopBannerTimer && typeof clearTimeout === 'function') {
+    clearTimeout(_daemonStopBannerTimer);
+    _daemonStopBannerTimer = 0;
+  }
+  _applySystemBanner(null);
 }
 
 function _worktreeSharedWith(cell) {
@@ -420,8 +452,18 @@ function quickAddTerminal(group, parentId) {
 }
 
 async function restartDaemon() {
-  if (await showConfirm('Restart Torque? Active cells will be marked as stopped.')) {
+  if (await showConfirm('Restart Torque? Active cells will reconnect after ~15 seconds.')) {
     send({ cmd: 'restart' });
+  }
+}
+
+async function stopDaemon() {
+  const message = 'Stop Torque daemon? Active cells will be lost.\n\n'
+    + "You'll need to relaunch manually via `make standalone` (or your usual launcher).";
+  if (await showConfirm(message, { label: 'Stop Daemon', variant: 'btn-danger' })) {
+    _daemonStopRequestedByUser = true;
+    _showDaemonStoppedBanner();
+    send({ cmd: 'stop' });
   }
 }
 

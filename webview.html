@@ -921,6 +921,7 @@
     <div class="gs-tabs">
       <button class="gs-tab active" data-tab="gls-general" onclick="switchGlsTab('gls-general')">General</button>
       <button class="gs-tab" data-tab="gls-keybindings" onclick="switchGlsTab('gls-keybindings')">Keybindings</button>
+      <button class="gs-tab" data-tab="gls-system" onclick="switchGlsTab('gls-system')">System</button>
     </div>
 
     <!-- General tab -->
@@ -994,6 +995,40 @@
     <!-- Keybindings tab -->
     <div class="gs-pane" data-pane="gls-keybindings">
       <div id="gls-keybinding-list"></div>
+    </div>
+
+    <!-- System tab -->
+    <div class="gs-pane" data-pane="gls-system">
+      <section class="daemon-status" aria-labelledby="gls-daemon-heading">
+        <h3 id="gls-daemon-heading">Daemon</h3>
+        <div class="daemon-status-grid">
+          <div class="daemon-status-label">Status</div>
+          <div class="daemon-status-value daemon-status-state">
+            <span id="gls-daemon-status-dot" class="daemon-status-dot daemon-status-dot-offline" aria-hidden="true"></span>
+            <span id="gls-daemon-status-text">Disconnected</span>
+          </div>
+          <div class="daemon-status-label">Version</div>
+          <div id="gls-daemon-version" class="daemon-status-value">—</div>
+          <div class="daemon-status-label">PID</div>
+          <div id="gls-daemon-pid" class="daemon-status-value" title="Process ID of the Torque daemon">—</div>
+          <div class="daemon-status-label">Uptime</div>
+          <div id="gls-daemon-uptime" class="daemon-status-value">—</div>
+          <div class="daemon-status-label">Port</div>
+          <div id="gls-daemon-port" class="daemon-status-value">—</div>
+          <div class="daemon-status-label">Profile</div>
+          <div id="gls-daemon-profile" class="daemon-status-value">—</div>
+          <div class="daemon-status-label">Data dir</div>
+          <div id="gls-daemon-data-dir" class="daemon-status-value daemon-status-path">—</div>
+          <div class="daemon-status-label">Log file</div>
+          <div id="gls-daemon-log-path" class="daemon-status-value daemon-status-path">—</div>
+          <div class="daemon-status-label">Started</div>
+          <div id="gls-daemon-started-at" class="daemon-status-value" title="Time the daemon started">—</div>
+        </div>
+        <div class="daemon-actions">
+          <button type="button" id="gls-restart-daemon-btn" class="btn-secondary">↻ Restart Daemon</button>
+          <button type="button" id="gls-stop-daemon-btn" class="btn-danger">■ Stop Daemon</button>
+        </div>
+      </section>
     </div>
 
     <div class="modal-actions">

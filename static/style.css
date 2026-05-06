@@ -2796,6 +2796,68 @@ body.runtime-embedded #modal-group .modal-summary {
 }
 .gs-pane.active { display: block; }
 
+.daemon-status {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.daemon-status h3 {
+  margin: 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 700;
+}
+.daemon-status-grid {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  gap: 7px 12px;
+  align-items: start;
+}
+.daemon-status-label {
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+}
+.daemon-status-value {
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text);
+}
+.daemon-status-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.daemon-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--text-dim);
+}
+.daemon-status-dot-ok { background: var(--green); }
+.daemon-status-dot-offline { background: var(--text-dim); }
+.daemon-status-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.daemon-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 4px;
+}
+.daemon-actions button.disabled,
+.daemon-actions button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  filter: none;
+}
+
 /* Sub-tabs (underline style, nested inside a pane) */
 .gs-subtabs {
   display: flex; gap: 12px;
@@ -8823,6 +8885,11 @@ button.agent-panel-hierarchy-crumb:focus-visible {
   background: #5a3a1a;
   color: #ffe5c0;
   border-bottom-color: #7a5020;
+}
+#system-banner[data-kind="daemon_stopped"] {
+  background: #26324d;
+  color: #dce7ff;
+  border-bottom-color: #3d4f7a;
 }
 #pending-hire-banner {
   position: sticky;

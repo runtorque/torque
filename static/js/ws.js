@@ -196,6 +196,12 @@ function connect() {
   ws.onopen = () => {
     document.getElementById('conn-dot').classList.add('ok');
     document.getElementById('conn-dot').title = 'Connected';
+    if (typeof _clearDaemonStoppedBanner === 'function'
+        && typeof _daemonStopRequestedByUser !== 'undefined'
+        && _daemonStopRequestedByUser) {
+      _clearDaemonStoppedBanner();
+    }
+    if (typeof loadDaemonStatus === 'function') loadDaemonStatus();
   };
   ws.onclose = () => {
     _resyncPending = false;
@@ -205,6 +211,12 @@ function connect() {
     }
     document.getElementById('conn-dot').classList.remove('ok');
     document.getElementById('conn-dot').title = 'Disconnected';
+    if (typeof loadDaemonStatus === 'function') loadDaemonStatus();
+    if (typeof _daemonStopRequestedByUser !== 'undefined'
+        && _daemonStopRequestedByUser
+        && typeof _showDaemonStoppedBanner === 'function') {
+      _showDaemonStoppedBanner();
+    }
     setTimeout(connect, 2000);
   };
   ws.onerror = () => ws.close();
@@ -223,6 +235,7 @@ function connect() {
       if (msg.providers) _cachedProviders = msg.providers;
       if (msg.roles || msg.templates) _cachedAgentTemplates = _wsRoleList(msg);
       if (msg.runtime) state.runtime = msg.runtime;
+      if (msg.runtime && typeof loadDaemonStatus === 'function') loadDaemonStatus();
       if (_pendingModal) {
         _showAddModal(_pendingModal.mode, _pendingModal.group, msg);
         _pendingModal = null;
@@ -231,12 +244,19 @@ function connect() {
       if (msg.providers) _cachedProviders = msg.providers;
       if (msg.roles || msg.templates) _cachedAgentTemplates = _wsRoleList(msg);
       if (msg.runtime) state.runtime = msg.runtime;
+      if (msg.runtime && typeof loadDaemonStatus === 'function') loadDaemonStatus();
       _showGroupSettings(msg.group, msg);
     } else if (msg.type === 'toast') {
       _showToast(msg.message, msg.level);
     } else if (msg.type === 'system_banner') {
       if (typeof _applySystemBanner === 'function') {
         _applySystemBanner(msg.banner);
+      }
+    } else if (msg.type === 'daemon_stop') {
+      if (typeof _daemonStopRequestedByUser !== 'undefined'
+          && _daemonStopRequestedByUser
+          && typeof _showDaemonStoppedBanner === 'function') {
+        _showDaemonStoppedBanner();
       }
     } else if (msg.type === 'worktree_history') {
       _showWorktreeHistory(msg);
@@ -507,6 +527,7 @@ function _handleFullState(msg) {
   if (typeof _applyEmbeddedTerminalScrollbackFromSettings === 'function') {
     _applyEmbeddedTerminalScrollbackFromSettings();
   }
+  if (typeof loadDaemonStatus === 'function') loadDaemonStatus();
   _triggerDoneFlourishesFromTaskSnapshot(prevTasks, state.board_tasks || {});
   if (typeof _pruneAgentDoneFlourishes === 'function') {
     _pruneAgentDoneFlourishes(state.agents || {});

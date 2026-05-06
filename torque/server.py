@@ -165,6 +165,60 @@ from .server_prompts import (
 from .engineer_session_map import build_engineer_session_map
 
 
+def _read_torque_version() -> str:
+    candidates = [
+        torque_config.SCRIPT_DIR / "VERSION",
+        torque_config.SCRIPT_DIR.parent / "VERSION",
+        Path(__file__).resolve().parents[1] / "VERSION",
+    ]
+    for path in candidates:
+        try:
+            text = path.read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+        if text:
+            return text
+    return "unknown"
+
+
+_STARTED_AT: float = time.time()
+_TORQUE_VERSION: str = _read_torque_version()
+
+
+def _runtime_payload(*, bridge=None, state=None) -> dict:
+    runtime_mode = "toolbelt"
+    if STANDALONE:
+        runtime_mode = (
+            "desktop"
+            if os.environ.get("TORQUE_DESKTOP_MODE", "").strip()
+            else "standalone"
+        )
+    capabilities = getattr(bridge, "capabilities", None)
+    embedded_terminal = bool(
+        getattr(capabilities, "supports_embedded_terminal", False)
+    )
+    if state is not None and hasattr(state, "get_default_command"):
+        default_command = state.get_default_command()
+    else:
+        default_command = torque_config.DEFAULT_COMMAND
+    return {
+        "mode": runtime_mode,
+        "standalone": STANDALONE,
+        "embedded_terminal": embedded_terminal,
+        "layout": "ide" if embedded_terminal else "classic",
+        "terminal_backend": "pty" if STANDALONE else "iterm2",
+        "home_directory": str(Path.home()),
+        "profile": os.environ.get("TORQUE_PROFILE", "").strip(),
+        "data_dir": str(DATA_DIR),
+        "port": WS_PORT,
+        "default_command": default_command,
+        "version": _TORQUE_VERSION,
+        "pid": os.getpid(),
+        "started_at": _STARTED_AT,
+        "log_path": str(DATA_DIR / "torque.log"),
+    }
+
+
 def _should_install_keybindings() -> bool:
     """Keybindings/RPCs are only installed in iTerm2-hosted mode."""
     return not STANDALONE
@@ -6881,27 +6935,6 @@ async def main(connection=None):
     event_ingest_drainer.start()
     log.info("Durable event-ingest drainer started after EventBus callbacks")
 
-    def _runtime_payload() -> dict:
-        runtime_mode = "toolbelt"
-        if STANDALONE:
-            runtime_mode = (
-                "desktop"
-                if os.environ.get("TORQUE_DESKTOP_MODE", "").strip()
-                else "standalone"
-            )
-        return {
-            "mode": runtime_mode,
-            "standalone": STANDALONE,
-            "embedded_terminal": bridge.capabilities.supports_embedded_terminal,
-            "layout": "ide" if bridge.capabilities.supports_embedded_terminal else "classic",
-            "terminal_backend": "pty" if STANDALONE else "iterm2",
-            "home_directory": str(Path.home()),
-            "profile": os.environ.get("TORQUE_PROFILE", "").strip(),
-            "data_dir": str(DATA_DIR),
-            "port": WS_PORT,
-            "default_command": state.get_default_command(),
-        }
-
     async def _state_payload(*, compact: bool = False) -> dict:
         # Prefill the per-repo branch cache before legacy state.to_dict()
         # runs — otherwise the sync engineer-stream snapshot inside it would
@@ -6919,7 +6952,7 @@ async def main(connection=None):
             **state_payload,
             **engineer_buffer.export_state(),
             "providers": get_providers(),
-            "runtime": _runtime_payload(),
+            "runtime": _runtime_payload(bridge=bridge, state=state),
         }
 
     terminal_clients: dict[str, set[web.WebSocketResponse]] = {}
@@ -7690,7 +7723,7 @@ async def main(connection=None):
                 "playbooks": state.list_playbooks(group=group,
                                                    status="published",
                                                    limit=200),
-                "runtime": _runtime_payload(),
+                "runtime": _runtime_payload(bridge=bridge, state=state),
             }
 
         # get_group_settings: respond directly, no state mutation
@@ -7714,7 +7747,7 @@ async def main(connection=None):
                 "playbooks": state.list_playbooks(group=group,
                                                    status="published",
                                                    limit=200),
-                "runtime": _runtime_payload(),
+                "runtime": _runtime_payload(bridge=bridge, state=state),
             }
 
         if cmd == "get_architect_settings":

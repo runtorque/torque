@@ -2019,11 +2019,112 @@ function _parseGlsXtermScrollback() {
   return Math.floor(value);
 }
 
+function _formatDaemonDurationFromMs(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return '—';
+  var seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return seconds + ' second' + (seconds === 1 ? '' : 's');
+  var minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return minutes + ' minute' + (minutes === 1 ? '' : 's');
+  var hours = Math.floor(minutes / 60);
+  if (hours < 24) return hours + ' hour' + (hours === 1 ? '' : 's');
+  var days = Math.floor(hours / 24);
+  return days + ' day' + (days === 1 ? '' : 's');
+}
+
+function _formatDaemonRelativeTime(startedAtSeconds, nowMs) {
+  var started = Number(startedAtSeconds);
+  if (!Number.isFinite(started) || started <= 0) return '—';
+  var current = Number.isFinite(nowMs) ? nowMs : Date.now();
+  var elapsedMs = Math.max(0, current - (started * 1000));
+  if (elapsedMs < 5000) return 'just now';
+  return _formatDaemonDurationFromMs(elapsedMs) + ' ago';
+}
+
+function _formatDaemonAbsoluteTime(startedAtSeconds) {
+  var started = Number(startedAtSeconds);
+  if (!Number.isFinite(started) || started <= 0) return '';
+  return new Date(started * 1000).toLocaleString();
+}
+
+function _daemonDisplayValue(value, fallback) {
+  if (value === null || value === undefined || value === '') return fallback || '—';
+  return String(value);
+}
+
+function _setDaemonStatusText(id, value, title) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = value;
+  if (title) el.title = title;
+}
+
+function _daemonWsConnected() {
+  if (typeof ws !== 'undefined'
+      && typeof WebSocket !== 'undefined'
+      && ws
+      && ws.readyState === WebSocket.OPEN) {
+    return true;
+  }
+  var dot = document.getElementById('conn-dot');
+  return !!(dot && dot.classList && dot.classList.contains('ok'));
+}
+
+function _wireDaemonStatusActions() {
+  var restartBtn = document.getElementById('gls-restart-daemon-btn');
+  if (restartBtn && typeof restartDaemon === 'function') {
+    restartBtn.onclick = restartDaemon;
+  }
+  var stopBtn = document.getElementById('gls-stop-daemon-btn');
+  if (stopBtn) {
+    if (typeof stopDaemon === 'function') {
+      stopBtn.onclick = stopDaemon;
+      stopBtn.disabled = false;
+      stopBtn.classList.remove('disabled');
+      stopBtn.title = '';
+    } else {
+      stopBtn.onclick = null;
+      stopBtn.disabled = true;
+      stopBtn.classList.add('disabled');
+      stopBtn.title = 'Pending daemon stop endpoint (:353)';
+    }
+  }
+}
+
+function loadDaemonStatus() {
+  var runtime = (state && state.runtime) || {};
+  var connected = _daemonWsConnected();
+  var statusDot = document.getElementById('gls-daemon-status-dot');
+  if (statusDot) {
+    statusDot.classList.toggle('daemon-status-dot-ok', connected);
+    statusDot.classList.toggle('daemon-status-dot-offline', !connected);
+  }
+  _setDaemonStatusText(
+    'gls-daemon-status-text',
+    connected ? 'Running' : 'Disconnected'
+  );
+  _setDaemonStatusText('gls-daemon-version', _daemonDisplayValue(runtime.version, 'unknown'));
+  _setDaemonStatusText('gls-daemon-pid', _daemonDisplayValue(runtime.pid));
+  _setDaemonStatusText('gls-daemon-uptime', _formatDaemonDurationFromMs(
+    Date.now() - (Number(runtime.started_at) * 1000)
+  ));
+  _setDaemonStatusText('gls-daemon-port', _daemonDisplayValue(runtime.port));
+  _setDaemonStatusText('gls-daemon-profile', _daemonDisplayValue(runtime.profile, 'default'));
+  _setDaemonStatusText('gls-daemon-data-dir', _daemonDisplayValue(runtime.data_dir));
+  _setDaemonStatusText('gls-daemon-log-path', _daemonDisplayValue(runtime.log_path));
+  _setDaemonStatusText(
+    'gls-daemon-started-at',
+    _formatDaemonRelativeTime(runtime.started_at),
+    _formatDaemonAbsoluteTime(runtime.started_at) || 'Time the daemon started'
+  );
+  _wireDaemonStatusActions();
+}
+
 function switchGlsTab(name) {
   document.querySelectorAll('#modal-global-settings .gs-tab').forEach(t =>
     t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('#modal-global-settings .gs-pane').forEach(p =>
     p.classList.toggle('active', p.dataset.pane === name));
+  if (name === 'gls-system') loadDaemonStatus();
 }
 
 function switchGlsSubTab(btn) {
