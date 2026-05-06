@@ -718,16 +718,20 @@ def check_ok(resp):
 
 
 # ---------------------------------------------------------------------------
-# Daemon status helpers
+# Daemon lifecycle helpers
 # ---------------------------------------------------------------------------
 
-def _resolve_daemon_status_port(args):
+def _resolve_daemon_port(args):
     if getattr(args, "daemon_port", None) is not None:
         return int(args.daemon_port)
     if _argv_has_flag("--port") and getattr(args, "port", None) is not None:
         return int(args.port)
     env_port = (os.environ.get("TORQUE_PORT", "") or "").strip()
     return int(env_port or DESKTOP_DEFAULT_PORT)
+
+
+def _resolve_daemon_status_port(args):
+    return _resolve_daemon_port(args)
 
 
 def _daemon_port_is_open(port):
@@ -778,6 +782,72 @@ def _lsof_pid(port):
         if pid := _usable_pid(line, require_running=False):
             return pid
     return ""
+
+
+def _daemon_stop_pid_from_file(port):
+    seen = set()
+    directories = [_resolve_runtime_dir()]
+    if int(port) == DESKTOP_DEFAULT_PORT:
+        directories.append(_resolve_desktop_data_dir(_resolve_desktop_profile()))
+    if int(port) == DEFAULT_PORT:
+        directories.append(PROJECT_ROOT)
+    for directory in directories:
+        path = Path(directory).expanduser() / "torque.pid"
+        if path in seen:
+            continue
+        seen.add(path)
+        if pid := _usable_pid(_read_text(path)):
+            return pid
+    return ""
+
+
+def _daemon_stop_target_pid(port):
+    return _lsof_pid(port) or _daemon_stop_pid_from_file(port)
+
+
+def _wait_for_daemon_stop(port, *, timeout):
+    deadline = time.monotonic() + max(0.0, float(timeout))
+    while True:
+        if not _daemon_port_is_open(port):
+            return True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return not _daemon_port_is_open(port)
+        time.sleep(min(0.1, remaining))
+
+
+def _daemon_stop_error(message, code):
+    print(f"Error: {message}", file=sys.stderr)
+    sys.exit(code)
+
+
+def _force_stop_daemon(port, timeout):
+    pid = _daemon_stop_target_pid(port)
+    if not pid:
+        print(f"No daemon process found on port {port}.")
+        return
+
+    try:
+        os.kill(int(pid), signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    except PermissionError as exc:
+        _daemon_stop_error(
+            f"Permission denied sending SIGTERM to PID {pid}: {exc}",
+            3,
+        )
+    except (OSError, TypeError, ValueError) as exc:
+        _daemon_stop_error(f"Could not send SIGTERM to PID {pid}: {exc}", 3)
+    else:
+        print(f"Sent SIGTERM to PID {pid}.")
+
+    if _wait_for_daemon_stop(port, timeout=timeout):
+        print(f"Torque daemon stopped (port {port} freed).")
+        return
+    _daemon_stop_error(
+        f"Timed out waiting for Torque daemon to stop on port {port}.",
+        1,
+    )
 
 
 def _daemon_pid(runtime, port):
@@ -1671,6 +1741,52 @@ def cmd_daemon_status(args):
         _print_daemon_status_line("Version", version)
     if logs:
         _print_daemon_status_line("Logs", logs)
+
+
+def cmd_daemon_stop(args):
+    port = _resolve_daemon_port(args)
+    timeout = getattr(args, "timeout", 10.0)
+
+    if getattr(args, "force", False):
+        _force_stop_daemon(port, timeout)
+        return
+
+    if not _daemon_port_is_open(port):
+        _daemon_stop_error(
+            f"Cannot connect to Torque daemon on localhost:{port}",
+            2,
+        )
+
+    try:
+        resp = api_call("stop", port=port)
+    except SystemExit as exc:
+        # If the daemon accepted the stop but closed before urlopen completed,
+        # treat a freed port as success; otherwise normalize connection/API
+        # failures to this command's documented connection error exit code.
+        if not _daemon_port_is_open(port):
+            print(f"Torque daemon stopped (port {port} freed).")
+            return
+        code = exc.code if isinstance(exc.code, int) else 2
+        sys.exit(2 if code else 0)
+
+    if not resp:
+        _daemon_stop_error("Empty response from daemon", 2)
+    if not resp.get("ok"):
+        _daemon_stop_error(resp.get("error", "Unknown error"), 2)
+    data = resp.get("data", {}) or {}
+    message = str(data.get("message", "") or "").strip() if isinstance(data, dict) else ""
+    if message:
+        print(message)
+    else:
+        print("Torque daemon stopping")
+
+    if _wait_for_daemon_stop(port, timeout=timeout):
+        print(f"Torque daemon stopped (port {port} freed).")
+        return
+    _daemon_stop_error(
+        f"Timed out waiting for Torque daemon to stop on port {port}.",
+        1,
+    )
 
 
 def cmd_status(args):
@@ -4792,6 +4908,24 @@ def build_parser():
                    help=f"Daemon port (default: {DESKTOP_DEFAULT_PORT}; "
                         "honors TORQUE_PORT)")
     p.set_defaults(func=cmd_daemon_status)
+
+    p = dmn_sub.add_parser(
+        "stop",
+        help="Gracefully stop the daemon",
+        description=(
+            "Stop the Torque daemon via POST /api/cmd {cmd: 'stop'}, then "
+            "wait for the listening port to close. Exit codes: 0 stopped, "
+            "1 timeout, 2 connection/API error, 3 permission/system error."
+        ),
+    )
+    p.add_argument("--port", dest="daemon_port", type=int,
+                   help=f"Daemon port (default: {DESKTOP_DEFAULT_PORT}; "
+                        "honors TORQUE_PORT)")
+    p.add_argument("--timeout", type=float, default=10.0,
+                   help="Seconds to wait for daemon drain/port close (default: 10)")
+    p.add_argument("--force", action="store_true",
+                   help="Skip API and send SIGTERM directly using lsof/PID file")
+    p.set_defaults(func=cmd_daemon_stop)
 
     # -- group --------------------------------------------------------------
     grp = sub.add_parser("group", aliases=["g"],
