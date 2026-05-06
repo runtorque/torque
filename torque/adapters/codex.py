@@ -344,12 +344,20 @@ class CodexAdapter(AgentAdapter):
         return " ".join(shlex.quote(p) for p in cmd)
 
     def get_input_ready_policy(self) -> InputReadyPolicy:
-        """Wait for the Codex composer to fully initialize before first send."""
+        """Wait for the Codex composer to fully initialize before first send.
+
+        post_ready_delay=2.5s: the composer banner ('OpenAI Codex' + model
+        + directory + '›') can render before the input pump and MCP layer
+        are actually ready to consume the first prompt. A buffer after
+        screen-detection avoids dispatching into a half-initialized runtime
+        (the timing race observed in 2026-05).
+        """
         return InputReadyPolicy(
             enabled=True,
             timeout_seconds=8.0,
             poll_interval_seconds=0.25,
             stable_polls=2,
+            post_ready_delay=2.5,
         )
 
     def is_input_ready_screen(self, screen_text: str) -> bool:

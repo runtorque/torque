@@ -291,14 +291,19 @@ class ClaudeCodeAdapter(AgentAdapter):
         return f"{boot_cmd} --resume {shlex.quote(session_id)}"
 
     def get_input_ready_policy(self) -> InputReadyPolicy:
-        """Wait for the SessionStart hook before releasing the first send."""
+        """Wait for the SessionStart hook before releasing the first send.
+
+        post_ready_delay bumped 0.5 → 2.5s in 2026-05 after empirical evidence
+        the hook fires before Claude's input pump is ready to receive the first
+        prompt cleanly. The previous 0.5s was insufficient on slower environments.
+        """
         return InputReadyPolicy(
             enabled=True,
             hook_event=True,
             timeout_seconds=30.0,
             poll_interval_seconds=0.5,
             stable_polls=2,
-            post_ready_delay=0.5,
+            post_ready_delay=2.5,
         )
 
     def is_input_ready_screen(self, screen_text: str) -> bool:

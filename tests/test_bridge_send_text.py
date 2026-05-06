@@ -306,7 +306,9 @@ class BridgeSendTextTests(unittest.IsolatedAsyncioTestCase):
         ])
         self.assertEqual(first_reads, 3)
         self.assertEqual(session.screen_reads, first_reads)
-        self.assertEqual(delays, [0.25, 0.25, 0.3])
+        # delays: 2 poll-intervals to reach stable_polls=2,
+        # post_ready_delay (codex 2.5s), submit-key multiline delay (0.3).
+        self.assertEqual(delays, [0.25, 0.25, 2.5, 0.3])
 
     async def test_send_text_logs_warning_when_session_not_found(self):
         # TORQUE:165 observability — a missing iTerm2 session on dispatch

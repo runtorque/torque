@@ -841,6 +841,8 @@ class LocalPtyAdapter:
             if screen_text and adapter.is_input_ready_screen(screen_text):
                 stable_polls += 1
                 if stable_polls >= max(policy.stable_polls, 1):
+                    if policy.post_ready_delay > 0:
+                        await asyncio.sleep(policy.post_ready_delay)
                     self._input_ready_sessions.add(cell.session_id)
                     return
             else:

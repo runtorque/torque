@@ -243,7 +243,8 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(writes, [])
 
         adapter.signal_input_ready(cell.id)
-        await asyncio.wait_for(send_task, timeout=1)
+        # Timeout must exceed claude's post_ready_delay (2.5s) plus headroom.
+        await asyncio.wait_for(send_task, timeout=5)
 
         self.assertEqual(
             writes,
@@ -442,7 +443,9 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(first_reads, 3)
         self.assertEqual(screen_reads, first_reads)
-        self.assertEqual(delays, [0.25, 0.25, 0.3])
+        # delays: poll-interval (Loading→ready), poll-interval (ready→stable),
+        # post_ready_delay (codex 2.5s), submit-key multiline delay (0.3).
+        self.assertEqual(delays, [0.25, 0.25, 2.5, 0.3])
 
     async def test_send_text_claude_applies_post_ready_delay_after_hook_signal(self):
         state = self.state_mod.MatrixState()
@@ -487,7 +490,60 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
                 ("session-claude", "\r"),
             ],
         )
-        self.assertEqual(delays, [0.5])
+        self.assertEqual(delays, [2.5])
+
+    async def test_send_text_codex_applies_post_ready_delay_via_screen_path(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("Torque")
+        cell = state.add_agent(
+            name="Worker",
+            group="Torque",
+            terminal_backend="pty",
+            command="codex",
+            directory="/tmp",
+        )
+        cell.agent_type = "codex"
+        cell.session_id = "session-codex"
+        adapter = self.pty_mod.LocalPtyAdapter(state)
+        adapter._sessions[cell.session_id] = SimpleNamespace(
+            cell_id=cell.id,
+            session_id=cell.session_id,
+        )
+
+        async def fake_read_screen_text(session):
+            return "OpenAI Codex\nmodel: gpt-5\ndirectory: /tmp\n›"
+        adapter._read_screen_text = fake_read_screen_text
+
+        writes: list[tuple[str, str]] = []
+
+        async def fake_write_input(session_id, data):
+            writes.append((session_id, data))
+
+        delays = []
+
+        async def fake_sleep(delay):
+            delays.append(delay)
+
+        adapter.write_input = fake_write_input
+        orig_sleep = self.pty_mod.asyncio.sleep
+        self.pty_mod.asyncio.sleep = fake_sleep
+        try:
+            await adapter.send_text(cell.session_id, "First prompt")
+        finally:
+            self.pty_mod.asyncio.sleep = orig_sleep
+
+        self.assertEqual(
+            writes,
+            [
+                ("session-codex", "First prompt"),
+                ("session-codex", "\r"),
+            ],
+        )
+        # Codex policy: stable_polls=2, poll_interval=0.25, post_ready_delay=2.5.
+        # Both polls return ready (fake_read_screen_text returns ready always),
+        # so: 1 poll-interval sleep + 1 post_ready_delay. Single-line prompt
+        # skips the multiline submit-key delay.
+        self.assertEqual(delays, [0.25, 2.5])
 
     async def test_create_session_installs_hooks_in_resolved_cwd_when_directory_blank(self):
         state = self.state_mod.MatrixState()
