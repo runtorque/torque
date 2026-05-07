@@ -160,6 +160,7 @@ from .server_worktrees import (
 from .server_prompts import (
     build_dispatch_postscript,
     build_torque_system_prompt,
+    compute_commit_hint,
     deliverable_word,
 )
 from .engineer_session_map import build_engineer_session_map
@@ -7625,12 +7626,17 @@ async def main(connection=None):
             transitions = amgr.get_transitions(task.action_name,
                                                base_dir)
 
-        commit_hint = ""
-        if (cell and cell.worktree_branch
-                and not cell.worktree_auto_checkpoint
-                and not cell.checkpoint_on_progress):
-            commit_hint = ("Before reporting done, commit all your "
-                           "changes with a descriptive commit message.")
+        is_impl = bool(
+            task.action_name
+            and amgr.is_implementation_depth(task.action_name, base_dir)
+        )
+        commit_hint = compute_commit_hint(
+            has_worktree_branch=bool(cell and cell.worktree_branch),
+            is_implementation=is_impl,
+            auto_checkpoint=bool(cell and cell.worktree_auto_checkpoint),
+            checkpoint_on_progress=bool(
+                cell and cell.checkpoint_on_progress),
+        )
 
         # Pipeline context for derived tasks
         pipeline_context = ""

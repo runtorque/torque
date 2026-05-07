@@ -253,6 +253,47 @@ def _build_review_required_block(*,
     ]
 
 
+def compute_commit_hint(*,
+                        has_worktree_branch: bool,
+                        is_implementation: bool,
+                        auto_checkpoint: bool,
+                        checkpoint_on_progress: bool) -> str:
+    """Build the commit-discipline hint for the dispatch postscript.
+
+    Emits the "commit your changes" instruction when the worker is doing
+    committable implementation work and is not relying on Torque's
+    automatic checkpoint mechanism. The hint covers two paths:
+
+    - **Isolated worktree** (``has_worktree_branch`` truthy): the worker
+      has its own branch + working dir; a plain commit instruction is
+      enough because there is no shared-tree contention.
+    - **Shared working tree** (``has_worktree_branch`` falsy +
+      ``is_implementation`` truthy): typical of ``oneshot/*`` actions,
+      where multiple workers may operate on the same tree concurrently.
+      The hint adds a scope-your-``git add`` warning to prevent sweeping
+      sibling workers' uncommitted WIP into the commit.
+
+    Returns ``""`` when no commit instruction applies (review tasks
+    without committable work, auto-checkpointed cells, etc.).
+    """
+    if not (has_worktree_branch or is_implementation):
+        return ""
+    if auto_checkpoint or checkpoint_on_progress:
+        return ""
+    hint = (
+        "Before reporting done, commit all your changes with a "
+        "descriptive commit message."
+    )
+    if not has_worktree_branch:
+        hint += (
+            " You are not in an isolated worktree, so scope `git add` "
+            "to the specific files you modified — do not use "
+            "`git add -A`. Other workers may have uncommitted changes "
+            "in the same tree."
+        )
+    return hint
+
+
 def build_dispatch_postscript(*,
                               transitions: list[dict] | None = None,
                               is_clean: bool = True,
