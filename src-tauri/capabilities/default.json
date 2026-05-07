@@ -3,6 +3,9 @@
   "identifier": "torque-default",
   "description": "Torque desktop shell permissions for native menus, detached panels, logs, dialogs, and shell links.",
   "windows": ["*"],
+  "remote": {
+    "urls": ["http://127.0.0.1:*"]
+  },
   "permissions": [
     "core:default",
     "core:webview:allow-create-webview-window",
