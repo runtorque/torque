@@ -200,17 +200,6 @@ impl DaemonState {
         self.attached.load(Ordering::SeqCst)
     }
 
-    pub fn owned_child_id(&self) -> Option<u32> {
-        if self.is_attached() {
-            return None;
-        }
-        self.child
-            .lock()
-            .expect("daemon child lock poisoned")
-            .as_ref()
-            .map(Child::id)
-    }
-
     #[cfg(test)]
     fn has_child(&self) -> bool {
         self.child
