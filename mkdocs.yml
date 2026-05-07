@@ -39,8 +39,11 @@ nav:
       - Getting started: foundations/getting-started.md
       - Core concepts: foundations/core-concepts.md
   - The team:
-      - The team model: agents-and-sessions.md
-      - Engineer: engineer.md
+      - The team model: team/team-model.md
+      - Workers: team/workers.md
+      - Engineers: team/engineers.md
+      - Architects: team/architects.md
+      - MCP scoping: team/mcp-scoping.md
   - Tasks and pipelines:
       - Task board: board.md
       - Task lifecycle: task-lifecycle.md
@@ -59,6 +62,7 @@ nav:
   - Reference:
       - Reference Guide: reference-guide.md
       - CLI Reference: cli.md
+      - MCP tools: reference/mcp-tools.md
       - Testing: testing.md
   - Project:
       - Architecture: architecture.md
