@@ -91,36 +91,45 @@ starts a native window on its own profile and port. By default it uses the
 daemon on `18932`.
 
 For more install variants and runtime modes, see
-[Getting Started](docs/getting-started.md) and [Operations](docs/operations.md).
+[Getting Started](docs/foundations/getting-started.md) and
+[Operations](docs/operate/operations.md).
 
 ## Key concepts
 
 **Groups, agents, and terminals.** A group is a workspace for one project or one
 focus area. It contains agents, which are long-running coding sessions in their
 own worktrees, and terminals, which are regular shells for ad-hoc commands and
-inspection. See [Concepts](docs/concepts.md).
+inspection. See [Core concepts](docs/foundations/core-concepts.md).
 
 **Actions and tasks.** An action is a reusable prompt template: a Jinja2 file
 that takes a task description and renders the dispatch instructions for an
 agent. Tasks live on the board; you dispatch them by attaching an action and
-sending them to an agent. See [Actions & Templates](docs/actions.md) and
-[Task Board](docs/board.md).
+sending them to an agent. See [Actions](docs/tasks/actions.md) and
+[The board](docs/tasks/board.md).
 
 **The engineer.** Each group can have an embedded engineer agent that watches the
 board, plans the next wave, dispatches workers, monitors digests, and asks for
 human input when it hits a decision boundary. The engineer is opt-in; Torque
-works fine without one. See [Engineer](docs/engineer.md).
+works fine without one. See [Engineers](docs/team/engineers.md).
 
 ## Documentation
 
-- [Getting Started](docs/getting-started.md) — install and create your first
-  group, agent, and terminal.
-- [Concepts](docs/concepts.md) — vocabulary and mental model.
-- [Workflow Guide](docs/workflow-guide.md) — task, dispatch, and completion path.
-- [Actions & Templates](docs/actions.md) — define reusable prompts and pipelines.
-- [Engineer](docs/engineer.md) — orchestrator agent workflows.
-- [CLI Reference](docs/cli.md) — `torque` command reference.
-- [Troubleshooting](docs/troubleshooting.md) — symptom-first recovery.
+- [Getting Started](docs/foundations/getting-started.md) — install and create
+  your first group, agent, and terminal.
+- [Core concepts](docs/foundations/core-concepts.md) — vocabulary and mental
+  model.
+- [The team](docs/team/team-model.md) — Workers, Engineers, Architects, and how
+  MCP tools are scoped per role.
+- [Tasks and threads](docs/tasks/threads.md) — derivation as the unit of
+  progress.
+- [Actions](docs/tasks/actions.md), [Templates](docs/tasks/templates.md), and
+  [Pipelines](docs/tasks/pipelines.md) — reusable prompts that compose into
+  multi-step workflows.
+- [Workflow guide](docs/operate/workflow-guide.md) — the day-to-day operating
+  loop.
+- [CLI reference](docs/reference/cli.md) — `torque` command reference.
+- [Troubleshooting](docs/reference/troubleshooting.md) — symptom-first
+  recovery.
 
 [Full documentation map →](docs/index.md)
 

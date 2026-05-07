@@ -52,7 +52,6 @@ nav:
       - Templates: tasks/templates.md
       - Pipelines: tasks/pipelines.md
       - Worktrees: tasks/worktrees.md
-      - Agent Templates: agent-templates.md
   - Operate Torque:
       - Workflow Guide: operate/workflow-guide.md
       - Streams & Waves: operate/streams-and-waves.md
