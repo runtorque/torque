@@ -1038,6 +1038,13 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
+  if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey
+      && (e.key === '?' || e.key === '/')) {
+    e.preventDefault();
+    if (typeof openCheatsheet === 'function') openCheatsheet();
+    return;
+  }
+
   // Skip shortcuts when any input/select/textarea is focused
   const tag = document.activeElement && document.activeElement.tagName;
   if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;

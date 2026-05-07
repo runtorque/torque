@@ -181,7 +181,10 @@ pub fn detach_panel(
         .min_inner_size(420.0, 300.0)
         .visible(true);
 
-    if let Some(menu) = menu::build_detached_panel_menu(app).map_err(|error| error.to_string()).ok() {
+    if let Some(menu) = menu::build_detached_panel_menu(app)
+        .map_err(|error| error.to_string())
+        .ok()
+    {
         builder = builder.menu(menu);
     }
 
@@ -212,7 +215,10 @@ pub fn reattach_label(
 }
 
 pub fn window_bounds(window: &WebviewWindow) -> Result<WindowBounds, String> {
-    let position = window.outer_position().map_err(|error| error.to_string()).ok();
+    let position = window
+        .outer_position()
+        .map_err(|error| error.to_string())
+        .ok();
     let size = window.inner_size().map_err(|error| error.to_string())?;
     let display_id = window
         .current_monitor()
@@ -307,17 +313,32 @@ fn primary_monitor_frame(app: &AppHandle) -> Option<MonitorFrame> {
     })
 }
 
-pub fn clamp_bounds(bounds: Option<WindowBounds>, monitor: Option<MonitorFrame>) -> Option<WindowBounds> {
+pub fn clamp_bounds(
+    bounds: Option<WindowBounds>,
+    monitor: Option<MonitorFrame>,
+) -> Option<WindowBounds> {
     let mut bounds = bounds?;
     let Some(frame) = monitor else {
         return Some(bounds);
     };
-    let width = bounds.width.unwrap_or(900.0).max(420.0).min(frame.width.max(420.0));
-    let height = bounds.height.unwrap_or(640.0).max(300.0).min(frame.height.max(300.0));
+    let width = bounds
+        .width
+        .unwrap_or(900.0)
+        .max(420.0)
+        .min(frame.width.max(420.0));
+    let height = bounds
+        .height
+        .unwrap_or(640.0)
+        .max(300.0)
+        .min(frame.height.max(300.0));
     bounds.width = Some(width);
     bounds.height = Some(height);
-    let x = bounds.x.unwrap_or(frame.x + ((frame.width - width) / 2.0).max(0.0));
-    let y = bounds.y.unwrap_or(frame.y + ((frame.height - height) / 2.0).max(0.0));
+    let x = bounds
+        .x
+        .unwrap_or(frame.x + ((frame.width - width) / 2.0).max(0.0));
+    let y = bounds
+        .y
+        .unwrap_or(frame.y + ((frame.height - height) / 2.0).max(0.0));
     let center_x = x + width / 2.0;
     let center_y = y + height / 2.0;
     let inside = center_x >= frame.x

@@ -94,12 +94,9 @@ fn show_main_window(
         if first_run_required {
             target = format!("{}?onboarding=1", target.trim_end_matches('/'));
         }
-        let url = target.parse().map_err(|error| {
-            format!(
-                "Unable to parse Torque desktop URL '{}': {error}",
-                target
-            )
-        })?;
+        let url = target
+            .parse()
+            .map_err(|error| format!("Unable to parse Torque desktop URL '{}': {error}", target))?;
         window.navigate(url).map_err(|error| error.to_string())?;
     }
     window.show().map_err(|error| error.to_string())?;
@@ -178,7 +175,7 @@ fn handle_menu_event(app: &tauri::AppHandle, event: tauri::menu::MenuEvent) {
         menu::MENU_FORCE_RELOAD => eval_active(app, &window_state, "window.location.reload();"),
         menu::MENU_DEVTOOLS => {
             if let Some(window) = active_window(app, &window_state) {
-                #[cfg(any(debug_assertions, feature = "devtools"))]
+                #[cfg(debug_assertions)]
                 window.open_devtools();
             }
         }

@@ -87,7 +87,9 @@ where
     R: Runtime,
     M: Manager<R>,
 {
-    let accel = accelerator.map(str::to_string).or_else(|| accelerator_for(id));
+    let accel = accelerator
+        .map(str::to_string)
+        .or_else(|| accelerator_for(id));
     MenuItem::with_id(manager, id, text, true, accel)
 }
 
@@ -231,7 +233,10 @@ mod tests {
 
     #[test]
     fn accelerator_metadata_comes_from_cheatsheet_json() {
-        assert_eq!(accelerator_for(MENU_NEW_GROUP).as_deref(), Some("CmdOrCtrl+N"));
+        assert_eq!(
+            accelerator_for(MENU_NEW_GROUP).as_deref(),
+            Some("CmdOrCtrl+N")
+        );
         assert_eq!(
             accelerator_for(MENU_DETACH_ACTIVE_PANEL).as_deref(),
             Some("CmdOrCtrl+Alt+D")
@@ -248,7 +253,11 @@ mod tests {
         assert!(!specs.is_empty());
         let mut ids = std::collections::HashSet::new();
         for spec in specs {
-            assert!(ids.insert(spec.id.clone()), "duplicate shortcut id {}", spec.id);
+            assert!(
+                ids.insert(spec.id.clone()),
+                "duplicate shortcut id {}",
+                spec.id
+            );
         }
     }
 }
