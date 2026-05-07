@@ -1,81 +1,58 @@
-# Torque Docs
+# Torque
 
-Torque is an iTerm2 Toolbelt plugin for organizing AI agents and terminal sessions in a visual grid. This page is the front door to the docs: start with setup if you're new, then jump to the area that matches what you want to do.
+Torque is a single-user project management powerhouse for shipping software with AI agents. You sit at the center of a small team you built yourself — architects, engineers, and workers — running in iTerm2 tabs, coordinated by a local daemon, talking to each other through structured tasks instead of through your shoulder.
 
-## Start here
+![Torque's iTerm2 Toolbelt panel showing a User column at left, an Architect named Loomer, and a row of Engineers and Workers below.](images/grid.png)
 
-- [Getting Started](getting-started.md) — install Torque, launch it, and create your first group, agent, and terminal
-- [Concepts](concepts.md) — learn the basic vocabulary in plain language: groups, agents, terminals, and actions
-- [CLI Reference](cli.md) — use Torque from the command line once the UI basics are familiar
+## Where do you want to start?
 
-## Common paths
+<div class="grid cards" markdown>
 
-### I want to set up Torque and start using it
+-   **New to Torque?**
 
-- [Getting Started](getting-started.md)
-- [Concepts](concepts.md)
-- [Sessions](sessions.md)
-- [Agents & Sessions](agents-and-sessions.md)
-- [Group Settings](group-settings.md)
-- [Keyboard Shortcuts](keyboard-shortcuts.md)
+    Start with the pitch and the 60-second tour, then install.
 
-### I want to manage work across agents
+    - [What is Torque?](foundations/what-is-torque.md)
+    - [Why Torque exists](foundations/why-torque-exists.md)
+    - [Getting started](foundations/getting-started.md)
 
-- [Workflow Guide](workflow-guide.md) — follow the normal path from task creation to dispatch, handoffs, schedules, and completion
-- [Task Board](board.md) — create tasks, organize lanes, and dispatch work
-- [Task Lifecycle](task-lifecycle.md) — see how tasks move through Torque
-- [Streams & Waves](streams-and-waves.md) — understand Torque's branch-level execution model, stream states, queue gates, and how the designated engineer schedules work in waves
-- [Schedules](schedules.md) — understand recurring and one-shot dispatch entry points
-- [Worktrees](worktrees.md) — isolate changes per agent in separate git worktrees
+-   **Building something with it?**
 
-### I want reusable prompts, templates, or pipelines
+    Learn the team model, then the work model.
 
-- [Actions & Templates](actions.md) — define action prompts, variables, and transitions
-- [Agent Templates](agent-templates.md) — save reusable agent launch presets
+    - [The team model](team/team-model.md) — Architects, Engineers, Workers
+    - [Tasks and threads](tasks/threads.md) — how progress becomes history
+    - [Pipelines](tasks/pipelines.md) — DAGs that emerge from action transitions
 
-### I want Torque to coordinate the work for me
+-   **Operating it day to day?**
 
-- [Engineer](engineer.md) — Torque's orchestrator agent for dispatching work, tracking progress, and asking for human input when needed
+    The orchestration, scheduling, and notification surfaces.
 
-### I need commands, settings, or help fixing Torque
+    - [Workflow guide](operate/workflow-guide.md)
+    - [Streams and waves](operate/streams-and-waves.md)
+    - [Schedules](operate/schedules.md)
 
-- [Reference Guide](reference-guide.md) — grouped operator reference for commands, shortcuts, settings, logs, and runtime paths
-- [CLI Reference](cli.md) — full command reference
-- [Troubleshooting](troubleshooting.md) — symptom-first recovery steps for startup, sessions, worktrees, merge issues, and stale state
-- [Operations](operations.md) — runtime modes, deploy/update, logs, notifications, and other operator guidance
+-   **Looking up a command?**
 
-## Documentation map
+    Reference and recovery.
 
-### Basics
+    - [CLI reference](reference/cli.md)
+    - [MCP tool reference](reference/mcp-tools.md)
+    - [Troubleshooting](reference/troubleshooting.md)
 
-- [Getting Started](getting-started.md)
-- [Concepts](concepts.md)
-- [Sessions](sessions.md)
-- [Agents & Sessions](agents-and-sessions.md)
-- [Group Settings](group-settings.md)
-- [Keyboard Shortcuts](keyboard-shortcuts.md)
+</div>
 
-### Workflows
+## The shape of the docs
 
-- [Workflow Guide](workflow-guide.md)
-- [Task Board](board.md)
-- [Task Lifecycle](task-lifecycle.md)
-- [Streams & Waves](streams-and-waves.md)
-- [Actions & Templates](actions.md)
-- [Agent Templates](agent-templates.md)
-- [Engineer](engineer.md)
-- [Worktrees](worktrees.md)
-- [Schedules](schedules.md)
+The docs are organized around the mental model of Torque, not its UI.
 
-### Operate Torque
+| Section | What it covers |
+|---|---|
+| [**Foundations**](foundations/what-is-torque.md) | The pitch, the origin story, install, vocabulary primer. |
+| [**The team**](team/team-model.md) | Workers, Engineers, Architects, and how MCP tools are scoped to each. |
+| [**Tasks, threads, pipelines**](tasks/threads.md) | The board, derivation chains, actions, templates, pipelines, worktrees. |
+| [**Operate Torque**](operate/workflow-guide.md) | Day-to-day flow, streams and waves, schedules, notifications. |
+| [**Reference**](reference/cli.md) | CLI, MCP tools, settings, shortcuts, troubleshooting, architecture. |
+| [**Project**](roadmap.md) | Roadmap. |
 
-- [Operations](operations.md)
-- [Troubleshooting](troubleshooting.md)
-- [Reference Guide](reference-guide.md)
-- [CLI Reference](cli.md)
-
-### Architecture and internals
-
-- [Architecture](architecture.md)
-- [Roadmap](roadmap.md)
-- [Plans Archive](plans/index.md)
+If you'd rather read the docs in their original tutorial order, follow the four cards above top-to-bottom — they're sequenced.

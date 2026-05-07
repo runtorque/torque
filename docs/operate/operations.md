@@ -193,7 +193,7 @@ Common runtime variables:
 
 ## Related Docs
 
-- [Getting Started](getting-started.md)
+- [Getting Started](../foundations/getting-started.md)
 - [Group Settings](group-settings.md)
-- [CLI Reference](cli.md)
-- [Architecture](architecture.md)
+- [CLI Reference](../reference/cli.md)
+- [Architecture](../architecture.md)

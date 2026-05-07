@@ -50,7 +50,7 @@ These settings override the group defaults when creating agents specifically. Le
 
 When enabled, creating an agent automatically creates a new git worktree branched from the directory's repository. Each agent gets its own branch (`torque/{slug}-{short-id}`) and worktree path, so multiple agents can work on the same repo in parallel without conflicts. The worktree is cleaned up when the agent is removed.
 
-See [Worktrees](worktrees.md) for the full guide on checkpoints, rollback, and merge.
+See [Worktrees](../tasks/worktrees.md) for the full guide on checkpoints, rollback, and merge.
 
 !!! note
     The directory must be inside a git repository for this to work. If it's not, the setting is silently ignored.
@@ -78,7 +78,7 @@ When worktrees are enabled, these settings control the execution environment:
 - **Default model** and **Default reasoning effort** are only auto-applied when Torque is shaping the provider's normal command path. If you fully override the boot command, include any provider-specific flags yourself.
 - Session resume only works for adapters that expose a provider session ID. Claude Code and Codex support it; generic terminals do not.
 
-See [Agents & Sessions](agents-and-sessions.md) for the end-to-end runtime model.
+See [Agents & Sessions](../team/workers.md) for the end-to-end runtime model.
 
 ## Agents → Terminals
 

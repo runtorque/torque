@@ -10,7 +10,7 @@ This roadmap is organized into phases. Earlier phases lay the foundation that la
 
 Torque currently manages terminals. It doesn't know what the agents inside them are doing. This phase gives Torque eyes and ears.
 
-> **Status**: Core implemented. Claude Code has full integration (hooks, activity tracking, session resume, notifications). Other adapters are stubs. See [implementation plan](plans/agent-awareness.md) for details.
+> **Status**: Core implemented. Claude Code has full integration (hooks, activity tracking, session resume, notifications). Other adapters are stubs.
 
 ### Claude Code Hooks Integration ✅
 
@@ -47,7 +47,7 @@ Capture agent transcripts as structured logs. Every command, tool call, and outp
 
 Agents should work in isolation by default. This phase makes worktrees a first-class concept.
 
-> **Status**: Core implemented. See [implementation plan](plans/git-worktree-lifecycle.md) for details.
+> **Status**: Core implemented.
 
 ### Managed Worktrees ✅
 
@@ -73,7 +73,7 @@ Auto-checkpoint on agent stop (opt-in per group). Manual checkpoint via context 
 
 Torque shouldn't only be usable from the toolbelt. This phase adds programmatic access.
 
-> **Status**: CLI implemented. See [implementation plan](plans/cli.md) for details.
+> **Status**: CLI implemented.
 
 ### `torque` CLI ✅
 
@@ -115,7 +115,7 @@ Expose Torque as an MCP (Model Context Protocol) server. Any MCP-aware agent or 
 
 With awareness, worktrees, and programmatic access in place, Torque can start running work autonomously.
 
-> **Status**: Actions, dispatch, and pipelines implemented. See implementation plans for [actions](plans/workflow-automation.md) and [pipelines](plans/pipelines.md).
+> **Status**: Actions, dispatch, and pipelines implemented.
 
 ### Agent Actions ✅
 
@@ -201,7 +201,7 @@ Since `torque task dispatch` is scriptable, simple triggers work today via cron 
 
 Agents need to know what to work on. This phase connects Torque to where work is tracked.
 
-> **Status**: Task board implemented. See [implementation plan](plans/task-board.md) for details.
+> **Status**: Task board implemented.
 
 ### Built-in Task Board ✅
 

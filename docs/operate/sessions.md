@@ -6,7 +6,7 @@ Torque's core workspace model is simple:
 - An **agent** is an AI session in its own terminal tab.
 - A **terminal** is either a child terminal attached to an agent or a standalone terminal inside the group.
 
-If you only need the object model, see [Concepts](concepts.md). This page is about how those objects behave in practice.
+If you only need the object model, see [Concepts](../foundations/core-concepts.md). This page is about how those objects behave in practice.
 
 ## Groups
 

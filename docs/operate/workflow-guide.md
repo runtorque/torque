@@ -2,7 +2,7 @@
 
 This guide explains how work moves through Torque from the moment you capture a task to the moment the work is complete. It is the best place to start if you want to understand the day-to-day workflow without reading source code.
 
-For deeper reference, see [Task Board](board.md), [Task Lifecycle](task-lifecycle.md), [Actions & Roles](actions.md), [Agent Roles](agent-templates.md), [Worktrees](worktrees.md), and the [CLI Reference](cli.md).
+For deeper reference, see [Task Board](../tasks/board.md), [Task Lifecycle](../tasks/lifecycle.md), [Actions & Roles](../tasks/actions.md), [Agent Roles](../team/workers.md), [Worktrees](../tasks/worktrees.md), and the [CLI Reference](../reference/cli.md).
 
 ## The workflow at a glance
 
@@ -50,14 +50,14 @@ torque task create "Review auth middleware" \
   --depends-on add-auth-middleware
 ```
 
-For board mechanics and task fields, see [Task Board](board.md).
+For board mechanics and task fields, see [Task Board](../tasks/board.md).
 
 ## 2. Decide how the work should run
 
 Before dispatching, decide two separate things:
 
-- **What should the agent do?** Use an [action](actions.md).
-- **Who should do it, and with what runtime setup?** Use an [agent role](agent-templates.md).
+- **What should the agent do?** Use an [action](../tasks/actions.md).
+- **Who should do it, and with what runtime setup?** Use an [agent role](../team/workers.md).
 
 This split matters in daily use:
 
@@ -71,7 +71,7 @@ Example action + role pairing:
 
 If a task has no action, Torque can still dispatch it. In that case the task text is sent as raw text instead of a rendered prompt.
 
-For the full action format, examples, and variable system, see [Actions & Roles](actions.md). For launch presets, see [Agent Roles](agent-templates.md).
+For the full action format, examples, and variable system, see [Actions & Roles](../tasks/actions.md). For launch presets, see [Agent Roles](../team/workers.md).
 
 ## 3. Plan the board before dispatch
 
@@ -131,7 +131,7 @@ torque schedule create weekly-deps \
   -t maintenance/deps
 ```
 
-For schedule behavior and board UI details, see [Task Board](board.md#scheduled-work). For command syntax, see [CLI Reference](cli.md#schedule).
+For schedule behavior and board UI details, see [Task Board](../tasks/board.md#scheduled-work). For command syntax, see [CLI Reference](../reference/cli.md#schedule).
 
 ## 4. Dispatch the task
 
@@ -152,7 +152,7 @@ torque task dispatch "Add dark mode" -t feature/implement -g frontend
 
 If the task depends on unfinished tasks, dispatch is blocked. If the task is scheduled, Torque performs the same dispatch automatically when the scheduled time arrives.
 
-For the full dispatch reference, see [Task Board](board.md#dispatching).
+For the full dispatch reference, see [Task Board](../tasks/board.md#dispatching).
 
 ## 5. Work in progress: updates, blockers, and human input
 
@@ -172,7 +172,7 @@ When the checkpoint needs to be recorded by Torque itself instead of the active 
 
 `torque_ask` is not a general status or suggestion channel. If the agent can keep moving, it should keep moving and report context through `torque_progress`, `torque_done`, `torque_blocked`, or derived-task context instead of pausing the task.
 
-For the lane and completion model, see [Task Lifecycle](task-lifecycle.md).
+For the lane and completion model, see [Task Lifecycle](../tasks/lifecycle.md).
 
 ## 6. Hand work off with pipelines
 
@@ -210,7 +210,7 @@ What Torque does next:
 
 This is how Torque keeps the board forward-moving without reopening old tasks. The original task remains the top-level story; the derived tasks show the detailed handoff chain.
 
-For transition syntax and pipeline examples, see [Actions & Roles](actions.md#pipelines). For how completion cascades back up the chain, see [Task Lifecycle](task-lifecycle.md#cascade-completion).
+For transition syntax and pipeline examples, see [Actions & Roles](../tasks/actions.md#pipelines). For how completion cascades back up the chain, see [Task Lifecycle](../tasks/lifecycle.md#cascade-completion).
 
 ## 7. Complete the work
 
@@ -223,7 +223,7 @@ There are two common endings:
 
 If you use worktrees, completion is often followed by a git step such as review, merge, checkpoint cleanup, or worktree removal. That git flow is separate from the board flow, which is why the board can remain clean even when code review takes longer.
 
-See [Worktrees](worktrees.md) for the isolated-branch workflow.
+See [Worktrees](../tasks/worktrees.md) for the isolated-branch workflow.
 
 ## End-to-end example
 

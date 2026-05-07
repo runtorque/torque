@@ -6,12 +6,12 @@ This page is the operator-facing reference hub for Torque. Use it when you need 
 
 | If you need... | Go here |
 |---|---|
-| The normal day-to-day task flow | [Workflow Guide](workflow-guide.md) |
-| Board lanes, dispatch, and task movement | [Task Board](board.md) |
-| Action files, transitions, and pipelines | [Actions & Templates](actions.md) |
-| Agent launch, provider behavior, prompts, resume, and hooks | [Agents & Sessions](agents-and-sessions.md) |
-| Engineer orchestration and MCP tools | [Engineer](engineer.md) |
-| Git worktrees, checkpointing, and merge flow | [Worktrees](worktrees.md) |
+| The normal day-to-day task flow | [Workflow Guide](../operate/workflow-guide.md) |
+| Board lanes, dispatch, and task movement | [Task Board](../tasks/board.md) |
+| Action files, transitions, and pipelines | [Actions & Templates](../tasks/actions.md) |
+| Agent launch, provider behavior, prompts, resume, and hooks | [Agents & Sessions](../team/workers.md) |
+| Engineer orchestration and MCP tools | [Engineer](../team/engineers.md) |
+| Git worktrees, checkpointing, and merge flow | [Worktrees](../tasks/worktrees.md) |
 | Symptom-first recovery steps | [Troubleshooting](troubleshooting.md) |
 
 ## Command reference by job
@@ -32,7 +32,7 @@ The full command surface lives in [CLI Reference](cli.md). This table groups the
 
 ## Keyboard shortcuts
 
-See [Keyboard Shortcuts](keyboard-shortcuts.md) for the full list. The shortcuts most people use constantly are:
+See [Keyboard Shortcuts](../operate/keyboard-shortcuts.md) for the full list. The shortcuts most people use constantly are:
 
 | Shortcut | Action |
 |---|---|
@@ -49,9 +49,9 @@ Torque has a few settings surfaces. The details live in the linked pages; this s
 
 | Surface | Use it for |
 |---|---|
-| [Group Settings](group-settings.md) | Defaults for directories, boot commands, shells, windows, worktrees, terminal defaults, and Engineer behavior |
-| [Agent Templates](agent-templates.md) | Reusable launch presets with provider, model, prompt, worktree, and child terminal defaults |
-| [Actions & Templates](actions.md) | Prompt rendering, variables, transitions, and pipelines used by dispatch and derive |
+| [Group Settings](../operate/group-settings.md) | Defaults for directories, boot commands, shells, windows, worktrees, terminal defaults, and Engineer behavior |
+| [Agent Templates](../team/workers.md) | Reusable launch presets with provider, model, prompt, worktree, and child terminal defaults |
+| [Actions & Templates](../tasks/actions.md) | Prompt rendering, variables, transitions, and pipelines used by dispatch and derive |
 | Top-level README environment variable reference | Runtime defaults like `TORQUE_PORT`, `TORQUE_DEFAULT_CMD`, `TORQUE_STANDALONE`, `TORQUE_BIND_ALL`, and desktop-shell overrides such as `TORQUE_DESKTOP_MODE` |
 
 ### High-impact settings to remember

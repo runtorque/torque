@@ -89,6 +89,6 @@ When a schedule fires, Torque creates a new board task and, if configured, dispa
 
 ## Related Docs
 
-- [Task Board](board.md)
-- [Actions & Templates](actions.md)
-- [CLI Reference](cli.md#schedule)
+- [Task Board](../tasks/board.md)
+- [Actions & Templates](../tasks/actions.md)
+- [CLI Reference](../reference/cli.md#schedule)
