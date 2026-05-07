@@ -3,10 +3,22 @@
   "identifier": "torque-default",
   "description": "Torque desktop shell permissions for native menus, detached panels, logs, dialogs, and shell links.",
   "windows": ["*"],
+  "remote": {
+    "urls": ["http://127.0.0.1:*"]
+  },
   "permissions": [
     "core:default",
     "core:webview:allow-create-webview-window",
     "shell:allow-open",
-    "dialog:allow-confirm"
+    "dialog:allow-confirm",
+    "allow-detach",
+    "allow-focus-window",
+    "allow-reattach",
+    "allow-reattach-all",
+    "allow-list-detached",
+    "allow-current-window-bounds",
+    "allow-reveal-log-dir",
+    "allow-open-external",
+    "allow-runtime-config"
   ]
 }

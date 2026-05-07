@@ -1,0 +1,46 @@
+"$schema" = "schemas/schema.json"
+
+[[permission]]
+identifier = "allow-detach"
+description = "Allow the frontend to detach panels into separate OS windows."
+commands.allow = ["detach"]
+
+[[permission]]
+identifier = "allow-focus-window"
+description = "Allow the frontend to focus detached panel windows."
+commands.allow = ["focus_window"]
+
+[[permission]]
+identifier = "allow-reattach"
+description = "Allow the frontend to reattach a detached panel window."
+commands.allow = ["reattach"]
+
+[[permission]]
+identifier = "allow-reattach-all"
+description = "Allow the frontend to reattach all detached panel windows."
+commands.allow = ["reattach_all"]
+
+[[permission]]
+identifier = "allow-list-detached"
+description = "Allow the frontend to list detached panel windows."
+commands.allow = ["list_detached"]
+
+[[permission]]
+identifier = "allow-current-window-bounds"
+description = "Allow detached windows to report their native bounds."
+commands.allow = ["current_window_bounds"]
+
+[[permission]]
+identifier = "allow-reveal-log-dir"
+description = "Allow the frontend to reveal the Torque log directory."
+commands.allow = ["reveal_log_dir"]
+
+[[permission]]
+identifier = "allow-open-external"
+description = "Allow the frontend to open validated external HTTP(S) links."
+commands.allow = ["open_external"]
+
+[[permission]]
+identifier = "allow-runtime-config"
+description = "Allow the frontend to read native runtime configuration."
+commands.allow = ["runtime_config"]
