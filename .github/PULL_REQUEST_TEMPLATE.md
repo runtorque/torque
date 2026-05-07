@@ -4,25 +4,27 @@ Closes #
 
 ## Summary
 
-- 
+What changed and why?
+
+-
 
 ## Test plan
 
-- [ ] I ran the relevant automated tests.
-- [ ] I performed a manual smoke check, if applicable.
-- [ ] I updated documentation, if applicable.
+Describe what you verified and how. Run `make test` when applicable.
+
+- [ ] Automated tests run or not applicable.
+- [ ] Manual smoke check performed or not applicable.
+- [ ] Documentation updated or not applicable.
 
 ## Screenshots / recordings
 
 If this changes UI, add before/after screenshots or a short recording.
 
-## Breaking changes
+## Breaking change
 
-- [ ] This PR includes a breaking change.
-- [ ] This PR does not include a breaking change.
+- [ ] No breaking changes.
+- [ ] Breaking change; migration notes below.
 
-## Checklist
+Migration notes:
 
-- [ ] The change is focused and avoids unrelated cleanup.
-- [ ] User-visible behavior is documented or intentionally unchanged.
-- [ ] New issue templates / PR expectations are followed where applicable.
+-

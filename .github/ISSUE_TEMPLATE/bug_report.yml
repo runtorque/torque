@@ -13,28 +13,31 @@ body:
     id: torque-version
     attributes:
       label: Torque version
-      description: Paste the contents of the VERSION file from your checkout, or the release version you installed.
+      description: Run `cat VERSION` from the repo root, or check the bottom-left of the Torque UI (when surfaced) — currently `1.1.0`.
       placeholder: "1.1.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os-family
+    attributes:
+      label: OS family
+      options:
+        - macOS
+        - Linux
+        - Windows
+        - Other
     validations:
       required: true
 
   - type: input
     id: os-version
     attributes:
-      label: OS and version
-      description: Torque is currently macOS + iTerm2 focused; include the macOS version and any relevant environment details.
+      label: OS version
+      description: Include the exact OS version or distribution details.
       placeholder: "macOS 14.5"
     validations:
       required: true
-
-  - type: input
-    id: iterm-version
-    attributes:
-      label: iTerm2 version
-      description: If applicable, include your iTerm2 version.
-      placeholder: "iTerm2 3.5.0"
-    validations:
-      required: false
 
   - type: dropdown
     id: install-method
@@ -42,11 +45,11 @@ body:
       label: Install method
       description: How did you install or run Torque?
       options:
-        - make install
-        - make standalone
-        - torque desktop
-        - Source checkout / development worktree
-        - Other
+        - Toolbelt
+        - standalone-browser
+        - native-desktop
+        - dev-install
+        - other
     validations:
       required: true
 
@@ -81,7 +84,7 @@ body:
   - type: textarea
     id: logs-screenshots
     attributes:
-      label: Logs, screenshots, or terminal output
+      label: Logs / screenshots
       description: Attach screenshots or paste relevant logs. The daemon log is usually at `~/Library/Application Support/iTerm2/Scripts/torque/torque/torque.log`.
       render: shell
     validations:
