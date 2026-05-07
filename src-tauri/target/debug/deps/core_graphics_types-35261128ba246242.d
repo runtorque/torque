@@ -1,0 +1,9 @@
+/Users/aleksanderarruda/dev/personal/gh/torque/.torque/worktrees/87a743cb/src-tauri/target/debug/deps/core_graphics_types-35261128ba246242.d: /Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/core-graphics-types-0.2.0/src/lib.rs /Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/core-graphics-types-0.2.0/src/base.rs /Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/core-graphics-types-0.2.0/src/geometry.rs
+
+/Users/aleksanderarruda/dev/personal/gh/torque/.torque/worktrees/87a743cb/src-tauri/target/debug/deps/libcore_graphics_types-35261128ba246242.rlib: /Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/core-graphics-types-0.2.0/src/lib.rs /Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/core-graphics-types-0.2.0/src/base.rs /Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/core-graphics-types-0.2.0/src/geometry.rs
+
+/Users/aleksanderarruda/dev/personal/gh/torque/.torque/worktrees/87a743cb/src-tauri/target/debug/deps/libcore_graphics_types-35261128ba246242.rmeta: /Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/core-graphics-types-0.2.0/src/lib.rs /Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/core-graphics-types-0.2.0/src/base.rs /Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/core-graphics-types-0.2.0/src/geometry.rs
+
+/Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/core-graphics-types-0.2.0/src/lib.rs:
+/Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/core-graphics-types-0.2.0/src/base.rs:
+/Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/core-graphics-types-0.2.0/src/geometry.rs:

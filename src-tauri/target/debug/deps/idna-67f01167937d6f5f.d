@@ -1,0 +1,10 @@
+/Users/aleksanderarruda/dev/personal/gh/torque/.torque/worktrees/87a743cb/src-tauri/target/debug/deps/idna-67f01167937d6f5f.d: /Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/idna-1.1.0/src/lib.rs /Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/idna-1.1.0/src/deprecated.rs /Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/idna-1.1.0/src/punycode.rs /Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/idna-1.1.0/src/uts46.rs
+
+/Users/aleksanderarruda/dev/personal/gh/torque/.torque/worktrees/87a743cb/src-tauri/target/debug/deps/libidna-67f01167937d6f5f.rlib: /Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/idna-1.1.0/src/lib.rs /Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/idna-1.1.0/src/deprecated.rs /Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/idna-1.1.0/src/punycode.rs /Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/idna-1.1.0/src/uts46.rs
+
+/Users/aleksanderarruda/dev/personal/gh/torque/.torque/worktrees/87a743cb/src-tauri/target/debug/deps/libidna-67f01167937d6f5f.rmeta: /Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/idna-1.1.0/src/lib.rs /Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/idna-1.1.0/src/deprecated.rs /Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/idna-1.1.0/src/punycode.rs /Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/idna-1.1.0/src/uts46.rs
+
+/Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/idna-1.1.0/src/lib.rs:
+/Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/idna-1.1.0/src/deprecated.rs:
+/Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/idna-1.1.0/src/punycode.rs:
+/Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/idna-1.1.0/src/uts46.rs:

@@ -3,6 +3,7 @@ use std::env;
 use std::error::Error;
 use std::fmt;
 use std::fs;
+use std::io::Read;
 use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -96,18 +97,18 @@ impl DaemonSettings {
             None => DESKTOP_DEFAULT_PORT,
         };
 
+        let home = env_map
+            .get("HOME")
+            .map(PathBuf::from)
+            .or_else(|| env::var_os("HOME").map(PathBuf::from))
+            .unwrap_or_else(|| PathBuf::from("."));
         let data_dir = env_map
             .get("TORQUE_DESKTOP_DATA_DIR")
             .or_else(|| env_map.get("TORQUE_DATA_DIR"))
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty())
-            .map(expand_home)
+            .map(|value| expand_home_with(value, &home))
             .unwrap_or_else(|| {
-                let home = env_map
-                    .get("HOME")
-                    .map(PathBuf::from)
-                    .or_else(|| env::var_os("HOME").map(PathBuf::from))
-                    .unwrap_or_else(|| PathBuf::from("."));
                 home.join(".torque")
                     .join("profiles")
                     .join(slugify_profile(&profile))
@@ -145,7 +146,10 @@ impl DaemonSettings {
         env_map.insert("TORQUE_STANDALONE".into(), "1".into());
         env_map.insert("TORQUE_PROFILE".into(), self.profile.clone());
         env_map.insert("TORQUE_PORT".into(), self.port.to_string());
-        env_map.insert("TORQUE_DATA_DIR".into(), self.data_dir.display().to_string());
+        env_map.insert(
+            "TORQUE_DATA_DIR".into(),
+            self.data_dir.display().to_string(),
+        );
         env_map.insert("TORQUE_DESKTOP_PROFILE".into(), self.profile.clone());
         env_map.insert("TORQUE_DESKTOP_PORT".into(), self.port.to_string());
         env_map.insert(
@@ -155,12 +159,18 @@ impl DaemonSettings {
         env_map.insert("TORQUE_DESKTOP_MODE".into(), self.mode.as_str().into());
         env_map.insert(
             "TORQUE_DESKTOP_ATTACH".into(),
-            if self.mode == DaemonMode::Attach { "1" } else { "0" }.into(),
+            if self.mode == DaemonMode::Attach {
+                "1"
+            } else {
+                "0"
+            }
+            .into(),
         );
         env_map
     }
 }
 
+#[derive(Debug)]
 pub struct DaemonState {
     child: Mutex<Option<Child>>,
     attached: AtomicBool,
@@ -187,7 +197,10 @@ impl DaemonState {
 
     #[cfg(test)]
     fn has_child(&self) -> bool {
-        self.child.lock().expect("daemon child lock poisoned").is_some()
+        self.child
+            .lock()
+            .expect("daemon child lock poisoned")
+            .is_some()
     }
 }
 
@@ -246,7 +259,8 @@ pub fn probe_runtime(port: u16, timeout: Duration) -> Option<RuntimePayload> {
         .set("Content-Type", "application/json")
         .send_string(r#"{"cmd":"get_config"}"#)
         .ok()?;
-    let raw = response.into_string().ok()?;
+    let mut raw = String::new();
+    response.into_reader().read_to_string(&mut raw).ok()?;
     let payload: ApiResponse = serde_json::from_str(&raw).ok()?;
     if !payload.ok {
         return None;
@@ -309,7 +323,12 @@ pub fn ensure_server(settings: &DaemonSettings) -> Result<DaemonState, EnsureErr
     fs::create_dir_all(&settings.data_dir)?;
     let mut child = Command::new(&settings.python_executable)
         .arg(&settings.script_path)
-        .current_dir(settings.script_path.parent().unwrap_or_else(|| Path::new(".")))
+        .current_dir(
+            settings
+                .script_path
+                .parent()
+                .unwrap_or_else(|| Path::new(".")),
+        )
         .envs(settings.server_env())
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -393,11 +412,19 @@ fn wait_for_exit(child: &mut Child, timeout: Duration) -> bool {
     false
 }
 
-fn runtime_matches_target(runtime: &RuntimePayload, settings: &DaemonSettings) -> (bool, Vec<String>) {
+fn runtime_matches_target(
+    runtime: &RuntimePayload,
+    settings: &DaemonSettings,
+) -> (bool, Vec<String>) {
     let mut mismatches = Vec::new();
     let mut saw_identity = false;
 
-    if let Some(runtime_profile) = runtime.profile.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+    if let Some(runtime_profile) = runtime
+        .profile
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
         saw_identity = true;
         if runtime_profile != settings.profile {
             mismatches.push(format!(
@@ -407,7 +434,12 @@ fn runtime_matches_target(runtime: &RuntimePayload, settings: &DaemonSettings) -
         }
     }
 
-    if let Some(runtime_data_dir) = runtime.data_dir.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+    if let Some(runtime_data_dir) = runtime
+        .data_dir
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
         saw_identity = true;
         let actual = comparable_path(Path::new(runtime_data_dir));
         let expected = comparable_path(&settings.data_dir);
@@ -429,10 +461,20 @@ fn runtime_matches_target(runtime: &RuntimePayload, settings: &DaemonSettings) -
 
 fn describe_runtime(runtime: &RuntimePayload) -> String {
     let mut details = Vec::new();
-    if let Some(profile) = runtime.profile.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+    if let Some(profile) = runtime
+        .profile
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
         details.push(format!("profile={profile}"));
     }
-    if let Some(data_dir) = runtime.data_dir.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+    if let Some(data_dir) = runtime
+        .data_dir
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
         details.push(format!("data_dir={data_dir}"));
     }
     if details.is_empty() {
@@ -463,7 +505,12 @@ fn normalize_launch_mode(value: &str) -> Result<DaemonMode, EnsureError> {
 
 fn truthy(value: Option<&String>) -> bool {
     value
-        .map(|text| matches!(text.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .map(|text| {
+            matches!(
+                text.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
         .unwrap_or(false)
 }
 
@@ -488,13 +535,18 @@ fn slugify_profile(name: &str) -> String {
 }
 
 fn expand_home(value: String) -> PathBuf {
+    let home = env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("~"));
+    expand_home_with(value, &home)
+}
+
+fn expand_home_with(value: String, home: &Path) -> PathBuf {
     if value == "~" {
-        return env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(value));
+        return home.to_path_buf();
     }
     if let Some(suffix) = value.strip_prefix("~/") {
-        if let Some(home) = env::var_os("HOME") {
-            return PathBuf::from(home).join(suffix);
-        }
+        return home.join(suffix);
     }
     PathBuf::from(value)
 }
@@ -527,7 +579,7 @@ fn comparable_path(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{Read, Write};
+    use std::io::{BufRead, BufReader, Write};
     use std::net::TcpListener;
 
     fn temp_path(name: &str) -> PathBuf {
@@ -538,7 +590,12 @@ mod tests {
         ))
     }
 
-    fn settings_for(port: u16, mode: DaemonMode, profile: &str, data_dir: PathBuf) -> DaemonSettings {
+    fn settings_for(
+        port: u16,
+        mode: DaemonMode,
+        profile: &str,
+        data_dir: PathBuf,
+    ) -> DaemonSettings {
         DaemonSettings {
             mode,
             port,
@@ -553,14 +610,37 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
         let port = listener.local_addr().expect("test server addr").port();
         let handle = thread::spawn(move || {
-            if let Ok((mut stream, _)) = listener.accept() {
-                let mut buffer = [0_u8; 1024];
-                let _ = stream.read(&mut buffer);
-                let response = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                    body.len(), body
-                );
-                let _ = stream.write_all(response.as_bytes());
+            listener
+                .set_nonblocking(true)
+                .expect("set mock server nonblocking");
+            let deadline = Instant::now() + Duration::from_millis(750);
+            let mut served = 0;
+            while served < 4 && Instant::now() < deadline {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        {
+                            let mut reader = BufReader::new(&mut stream);
+                            let mut line = String::new();
+                            while reader.read_line(&mut line).unwrap_or(0) > 0 {
+                                if line == "\r\n" {
+                                    break;
+                                }
+                                line.clear();
+                            }
+                        }
+                        let response = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                            body.as_bytes().len(), body
+                        );
+                        let _ = stream.write_all(response.as_bytes());
+                        let _ = stream.flush();
+                        served += 1;
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(_) => break,
+                }
             }
         });
         (port, handle)
@@ -596,7 +676,10 @@ mod tests {
         assert_eq!(settings.mode, DaemonMode::Attach);
         assert_eq!(settings.profile, "Desk Top");
         assert_eq!(settings.port, 19001);
-        assert_eq!(settings.data_dir, PathBuf::from("/home/tester/torque desktop"));
+        assert_eq!(
+            settings.data_dir,
+            PathBuf::from("/home/tester/torque desktop")
+        );
         assert_eq!(settings.script_path, PathBuf::from("/repo/root/torque.py"));
         assert_eq!(settings.python_executable, PathBuf::from("/custom/python3"));
     }
@@ -612,7 +695,10 @@ mod tests {
 
         assert_eq!(settings.mode, DaemonMode::Spawn);
         assert_eq!(settings.port, DESKTOP_DEFAULT_PORT);
-        assert_eq!(settings.data_dir, PathBuf::from("/home/tester/.torque/profiles/feature-profile"));
+        assert_eq!(
+            settings.data_dir,
+            PathBuf::from("/home/tester/.torque/profiles/feature-profile")
+        );
     }
 
     #[test]
@@ -624,7 +710,10 @@ mod tests {
 
         assert!(runtime.standalone);
         assert_eq!(runtime.profile.as_deref(), Some("desktop"));
-        assert_eq!(runtime.data_dir.as_deref(), Some(data_dir.to_str().unwrap()));
+        assert_eq!(
+            runtime.data_dir.as_deref(),
+            Some(data_dir.to_str().unwrap())
+        );
         handle.join().expect("mock server should finish");
     }
 
@@ -647,7 +736,12 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").expect("reserve port");
         let port = listener.local_addr().expect("reserved addr").port();
         drop(listener);
-        let settings = settings_for(port, DaemonMode::Attach, "desktop", temp_path("attach-none"));
+        let settings = settings_for(
+            port,
+            DaemonMode::Attach,
+            "desktop",
+            temp_path("attach-none"),
+        );
 
         let error = ensure_server(&settings).expect_err("attach mode should refuse missing daemon");
 

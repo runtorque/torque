@@ -1,0 +1,10 @@
+/Users/aleksanderarruda/dev/personal/gh/torque/.torque/worktrees/87a743cb/src-tauri/target/debug/deps/time_core-c735054b06d83fde.d: /Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/time-core-0.1.8/src/lib.rs /Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/time-core-0.1.8/src/convert.rs /Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/time-core-0.1.8/src/hint.rs /Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/time-core-0.1.8/src/util.rs
+
+/Users/aleksanderarruda/dev/personal/gh/torque/.torque/worktrees/87a743cb/src-tauri/target/debug/deps/libtime_core-c735054b06d83fde.rlib: /Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/time-core-0.1.8/src/lib.rs /Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/time-core-0.1.8/src/convert.rs /Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/time-core-0.1.8/src/hint.rs /Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/time-core-0.1.8/src/util.rs
+
+/Users/aleksanderarruda/dev/personal/gh/torque/.torque/worktrees/87a743cb/src-tauri/target/debug/deps/libtime_core-c735054b06d83fde.rmeta: /Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/time-core-0.1.8/src/lib.rs /Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/time-core-0.1.8/src/convert.rs /Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/time-core-0.1.8/src/hint.rs /Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/time-core-0.1.8/src/util.rs
+
+/Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/time-core-0.1.8/src/lib.rs:
+/Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/time-core-0.1.8/src/convert.rs:
+/Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/time-core-0.1.8/src/hint.rs:
+/Users/aleksanderarruda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/time-core-0.1.8/src/util.rs:
