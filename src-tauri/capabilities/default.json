@@ -7,6 +7,15 @@
     "core:default",
     "core:webview:allow-create-webview-window",
     "shell:allow-open",
-    "dialog:allow-confirm"
+    "dialog:allow-confirm",
+    "allow-detach",
+    "allow-focus-window",
+    "allow-reattach",
+    "allow-reattach-all",
+    "allow-list-detached",
+    "allow-current-window-bounds",
+    "allow-reveal-log-dir",
+    "allow-open-external",
+    "allow-runtime-config"
   ]
 }
