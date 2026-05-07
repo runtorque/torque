@@ -1,0 +1,9 @@
+{
+  "$schema": "../gen/schemas/capabilities.json",
+  "identifier": "torque-default",
+  "description": "Minimal T1 capability set — webview-around-localhost only.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default"
+  ]
+}

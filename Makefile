@@ -24,7 +24,7 @@ PERF_PYTHON    ?= $(PERF_VENV)/bin/python
 # Test recipes must not inherit Torque runtime/agent env from worker shells.
 SANITIZE_TORQUE_TEST_ENV = env $$(env | sed -n 's/^\(TORQUE_[A-Za-z0-9_]*\)=.*/-u \1/p')
 
-.PHONY: install uninstall run deps desktop-deps check stop deploy autolaunch cli standalone standalone-bg desktop desktop-attach open test perf-deps perf-baseline perf-delta
+.PHONY: install uninstall run deps desktop-deps check stop deploy autolaunch cli standalone standalone-bg desktop desktop-attach tauri-dev tauri-build tauri-build-mac open test perf-deps perf-baseline perf-delta
 
 ## install: Set up the iTerm2 script project and copy all files
 install:
@@ -327,6 +327,45 @@ desktop-attach:
 		TORQUE_DATA_DIR="$$data_dir" \
 		TORQUE_DESKTOP_MODE="attach" \
 		"$(ITERM2_PYTHON)" "$(CURDIR)/torque_desktop.py"
+
+## tauri-dev: Run Tauri shell in dev mode (live reload, daemon spawned). Equivalent of `make desktop`.
+tauri-dev:
+	@profile="$(or $(TORQUE_PROFILE),desktop)"; \
+	port="$(or $(TORQUE_PORT),18933)"; \
+	if [ -n "$(TORQUE_DATA_DIR)" ]; then \
+		data_dir="$(TORQUE_DATA_DIR)"; \
+	else \
+		safe_profile=$$(printf '%s' "$$profile" \
+			| tr '[:upper:]' '[:lower:]' \
+			| sed -E 's/[^A-Za-z0-9._-]+/-/g; s/^[._-]+//; s/[._-]+$$//'); \
+		[ -n "$$safe_profile" ] || safe_profile=default; \
+		data_dir="$$HOME/.torque/profiles/$$safe_profile"; \
+	fi; \
+	python="$(or $(TORQUE_PYTHON_EXECUTABLE),$(ITERM2_PYTHON),python3)"; \
+	mode="$${TORQUE_DESKTOP_MODE:-spawn}"; \
+	echo "Starting Torque Tauri shell on http://127.0.0.1:$$port/"; \
+	echo "Using desktop profile: $$profile"; \
+	echo "Using desktop data dir: $$data_dir"; \
+	echo "Using Python executable: $$python"; \
+	cd src-tauri && env \
+		TORQUE_REPO_ROOT="$(CURDIR)" \
+		TORQUE_PYTHON_EXECUTABLE="$$python" \
+		TORQUE_DESKTOP_PORT="$$port" \
+		TORQUE_DESKTOP_PROFILE="$$profile" \
+		TORQUE_DESKTOP_DATA_DIR="$$data_dir" \
+		TORQUE_PORT="$$port" \
+		TORQUE_PROFILE="$$profile" \
+		TORQUE_DATA_DIR="$$data_dir" \
+		TORQUE_DESKTOP_MODE="$$mode" \
+		cargo tauri dev
+
+## tauri-build: Build production Tauri shell for current platform.
+tauri-build:
+	@cd src-tauri && env TORQUE_REPO_ROOT="$(CURDIR)" cargo tauri build
+
+## tauri-build-mac: Build macOS .app/.dmg (requires macOS host).
+tauri-build-mac:
+	@cd src-tauri && env TORQUE_REPO_ROOT="$(CURDIR)" cargo tauri build --bundles app,dmg
 
 ## open: Open the Torque UI in the default browser (works in dual or standalone mode)
 open:
