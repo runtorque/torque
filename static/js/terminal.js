@@ -110,7 +110,7 @@ function _terminalGroupCells(group) {
     const id = ids[i];
     if (seen[id]) continue;
     const cell = state.agents[id];
-    if (!cell) continue;
+    if (!cell || _terminalCellIsTombstoned(cell)) continue;
     seen[id] = true;
     out.push(cell);
     if (cell.cell_type === 'agent') {
@@ -119,7 +119,7 @@ function _terminalGroupCells(group) {
         const childId = kids[j];
         if (seen[childId]) continue;
         const child = state.agents[childId];
-        if (!child) continue;
+        if (!child || _terminalCellIsTombstoned(child)) continue;
         seen[childId] = true;
         out.push(child);
       }
@@ -878,6 +878,7 @@ function _findEmbeddedTerminalEntryForCell(cellId) {
   for (const key of Object.keys(_embeddedTerminalSessions)) {
     const entry = _embeddedTerminalSessions[key];
     if (!entry || entry.cellId !== cellId) continue;
+    if (state.agents[cellId] && _terminalCellIsTombstoned(state.agents[cellId])) continue;
     if (_embeddedTerminalSessionKey === entry.sessionKey) return entry;
     if (!fallback) fallback = entry;
   }
@@ -1308,7 +1309,7 @@ function _pruneEmbeddedTerminalSessions() {
   for (const key of Object.keys(_embeddedTerminalSessions)) {
     const entry = _embeddedTerminalSessions[key];
     const cell = entry && state.agents[entry.cellId];
-    if (!cell) {
+    if (!cell || _terminalCellIsTombstoned(cell)) {
       _disposeEmbeddedTerminalEntry(entry);
     }
   }
