@@ -169,6 +169,84 @@ A short list of things that will surprise you if you don't know them:
 - **Review gate thresholds are advisory.** They don't block ship. They're just guidance for the Architect's own reasoning.
 - **Workers are not directly visible.** The Architect sees them through Engineer journals and worklogs. Don't expect direct Worker controls in the Architect toolkit.
 
+## A day in the life of an Architect
+
+Concrete walkthrough of an Architect's working session, so the toolkit feels less abstract. Times are illustrative.
+
+**09:00 — Boot.** The Architect's tab opens. Its system prompt has it run the orientation sequence:
+
+```text
+architect_journal_read()           # last 20 entries — what was I thinking?
+architect_decision_list()          # decisions and their statuses
+architect_engineer_list()          # who's hired, who's dismissed
+architect_pending_hire_list()      # any approvals still waiting?
+architect_board_summary()          # board state by Engineer
+architect_events_recent()          # what happened while I was idle?
+```
+
+It writes a checkpoint journal entry summarizing the state it just reconstructed:
+
+```text
+architect_journal(
+  type="checkpoint",
+  text="Resuming. 2 hired engineers (Panelsmith, Courier), 1 dismissed
+  (BatchArchive, last week). Board: 18 in flight, 3 blocked. Open decision:
+  D-19 'use Postgres for memory' still proposed. No pending hires."
+)
+```
+
+**09:15 — Plan the day.** Reads the user's standing priorities. Drafts a wave: three new tasks, two for Panelsmith (UI work), one for Courier (transport layer). Writes one decision describing the priority shift since yesterday:
+
+```text
+architect_decision_create(
+  title="Prioritize transport reliability over UI polish this week",
+  rationale="Three production reports in two days. Polish backlog can wait.",
+  status="accepted",
+)
+```
+
+**09:25 — Create tasks.** Three `architect_task_create(...)` calls. Each task lands assigned to an Engineer with a `suggested_action` (non-binding) the Engineer can choose to use or override.
+
+**09:30 — Realize Courier is over-allocated.** The transport work is too much for one Engineer. Decides to hire a second transport-focused Engineer:
+
+```text
+architect_engineer_hire(
+  name="Conductor",
+  command="claude",
+  provider="claude-code",
+  directory="/repo",
+)
+# returns {id: "...", status: "pending"}
+```
+
+A board task appears asking the User for approval. The Architect waits, doing other work.
+
+**10:05 — Hire approved.** The Architect polls:
+
+```text
+architect_pending_hire_status(hire_id="...")
+# returns {status: "approved", engineer_id: "..."}
+```
+
+Sends the new Engineer a welcome message:
+
+```text
+architect_engineer_message(
+  engineer_id="...",
+  message="Welcome. You're owning transport reliability. Read the
+  hand-off task LOOM:401 first; the Courier journal has your
+  predecessor's open thread on retry semantics."
+)
+```
+
+Reassigns one of Courier's tasks to Conductor.
+
+**12:00 — Midday checkpoint.** Writes a journal checkpoint, glances at digests for blocked tasks, answers an `architect_engineer_message` thread from Panelsmith asking whether to ship a partial implementation behind a flag.
+
+**16:00 — End of day.** Reads `architect_events_recent` for the afternoon, marks the priority decision (D-20) as `accepted` if it played out, archives an obsolete decision from last week (`architect_decision_update(decision_id="D-12", archive=true)`), writes a final checkpoint with tomorrow's plan.
+
+The Architect's tab closes. State persists in SQLite. Tomorrow's Architect (the same one, after restart) reads the checkpoint and picks up from there.
+
 ## Where to next
 
 - [Engineers](engineers.md) — the layer the Architect coordinates with most.

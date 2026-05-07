@@ -181,6 +181,87 @@ The Engineer's system prompt steers it toward a few habits worth understanding (
 
 These are tuned in Group Settings → Engineer → Operating Style.
 
+## Recovering after `/clear` — a worked walkthrough
+
+The journal and the session map make recovery deterministic. Here's exactly what an Engineer does after `/clear` (or after a daemon restart, or after a long pause).
+
+**Step 1: Read the journal.** The journal is the Engineer's first stop. It contains the decisions and checkpoints that explain *why* the board looks the way it does.
+
+```text
+engineer_journal_read(limit=20)
+# returns: most recent 20 entries — checkpoints, decisions, observations, plans
+```
+
+A typical journal entry looks like:
+
+```text
+{
+  "ts": "2026-05-06T17:42:00Z",
+  "type": "checkpoint",
+  "text": "End of day. 3 streams in flight: auth-refactor (waiting on
+  review LOOM:412), retry-cleanup (queued behind auth-refactor), nav-bug
+  (in fix-review). Plan: tomorrow re-review LOOM:412 first thing.
+  Architect's D-19 (Postgres) still proposed — won't dispatch storage
+  tasks until that lands."
+}
+```
+
+After reading, the Engineer has the *intent* behind the current state.
+
+**Step 2: Read the session map.** The session map is the deterministic, structured snapshot of streams. It's what tells the Engineer *what's actually live right now*.
+
+```text
+engineer_session_map()
+# returns: streams summary, active asks, queued follow-ups,
+# per-stream NEXT/PRODUCT/WORKFLOW context
+```
+
+For each stream, the map tells the Engineer:
+
+- What stage it's in (`Implementing`, `Reviewing`, `Fixing review`, `Ready to merge`, etc.)
+- What the next action is (`NEXT: Wait for review`, `NEXT: Continue implementation`)
+- What the product context is (a one-line summary of what the stream is building)
+- What workflow context is relevant (which Engineer/Worker, which worktree, which task)
+
+The map plus the journal gives the Engineer a complete recovered picture. It hasn't loaded any chat history.
+
+**Step 3: Read recent events.** This catches the *changes* since the last checkpoint.
+
+```text
+engineer_events(limit=50)
+# returns: recent panel events — task_completed, agent_error, agent_blocked,
+# ask_created, etc.
+```
+
+If the journal said "auth-refactor waiting on review" and the events stream shows `task_completed: LOOM:412` happened an hour ago, the Engineer knows the review finished while it was offline. Now it can decide what to do next.
+
+**Step 4: Targeted reads only.** With the journal + map + events combined, the Engineer knows which tasks need deeper inspection. Only then does it call the heavier reads:
+
+```text
+engineer_task_show(task_id="LOOM:412")     # only this task, the one that changed
+engineer_diff(agent_id="...", summary_only=true)   # only the diff stats
+```
+
+It doesn't load the full board (`engineer_board_list`). It doesn't open every agent. It pulls only what it needs to make the next dispatch decision.
+
+**Step 5: Write a recovery checkpoint.** Before doing anything mutative, the Engineer journals what it just reconstructed:
+
+```text
+engineer_journal(
+  type="checkpoint",
+  text="Recovered after /clear. Picked up from yesterday's checkpoint.
+  LOOM:412 review completed overnight (1 fix needed, derived to 412:1).
+  Auth-refactor stream now waiting on fix; retry-cleanup is unblocked
+  and ready to dispatch."
+)
+```
+
+This makes the *next* recovery faster.
+
+**Step 6: Resume normal operating loop.** Now the Engineer is back in its standard cycle: read board summary → decide wave → dispatch → wait for digest.
+
+The whole sequence — journal, map, events, targeted reads, checkpoint — usually takes 4–6 MCP calls. That's why the journal/map split matters: each piece is doing a different job, and pulling them in the right order means the Engineer never has to read the whole board to recover.
+
 ## Where to next
 
 - [Streams and waves](../operate/streams-and-waves.md) — the model the Engineer reasons in.

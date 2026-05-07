@@ -45,11 +45,14 @@ nav:
       - Architects: team/architects.md
       - MCP scoping: team/mcp-scoping.md
   - Tasks and pipelines:
-      - Task board: board.md
-      - Task lifecycle: task-lifecycle.md
-      - Actions & Templates: actions.md
+      - Tasks and threads: tasks/threads.md
+      - The board: tasks/board.md
+      - Task lifecycle: tasks/lifecycle.md
+      - Actions: tasks/actions.md
+      - Templates: tasks/templates.md
+      - Pipelines: tasks/pipelines.md
+      - Worktrees: tasks/worktrees.md
       - Agent Templates: agent-templates.md
-      - Worktrees: worktrees.md
   - Operate Torque:
       - Workflow Guide: workflow-guide.md
       - Streams & Waves: streams-and-waves.md

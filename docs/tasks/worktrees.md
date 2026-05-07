@@ -1,0 +1,214 @@
+# Worktrees
+
+Git worktrees are how Torque keeps parallel Workers from trampling each other. Each Worker gets its own working copy of the repo on its own branch. Two implementers can both be writing code right now and neither one knows or cares.
+
+This page covers what worktrees are, how Torque manages their lifecycle (creation, checkpointing, merging, cleanup), and what you should know to operate them confidently.
+
+## Why worktrees
+
+Without worktrees, two agents working in the same repo would conflict — one's uncommitted changes would land on the other's index, and you'd spend more time untangling state than reviewing code.
+
+Worktrees give each agent its own working copy on a separate branch. The use cases:
+
+- **Parallel features** — multiple Workers implement different features at the same time.
+- **Review pipelines** — a reviewer Worker and a fix Worker work on the same branch in sequence without stepping on each other.
+- **Safe experimentation** — a Worker can refactor freely without touching `main`.
+
+When pipelines hand off across agents, the worktree is **inherited** — the reviewer sees the implementer's changes because it's on the same branch. → [Tasks and threads — Threads and worktrees](threads.md#threads-and-worktrees)
+
+## Enabling worktrees
+
+Worktrees are enabled per group in [Group settings](../operate/group-settings.md):
+
+1. Open Group Settings (gear icon on the group header).
+2. Go to the **Agents** tab.
+3. Check **Git worktree per agent**.
+
+Once enabled, every new agent created in that group gets its own worktree, and the agent's working directory is set to the worktree path.
+
+```bash
+torque group settings backend -s git_worktree=true
+torque group settings backend -s worktree_base_branch=main
+torque group settings backend -s worktree_auto_checkpoint=true
+torque group settings backend -s 'worktree_symlinks=["etl/**/node_modules",".venv"]'
+```
+
+### Settings reference
+
+| Setting | What it does |
+|---|---|
+| **Git worktree per agent** | Enable worktree creation. |
+| **Base directory** | Where worktrees live, relative to repo root. Default `.torque/worktrees`. |
+| **Base branch** | Branch to fork from. Default current HEAD. |
+| **Auto-checkpoint on stop** | Auto-commit changes when an agent's session ends. |
+| **Checkpoint on progress / done** | Throttled auto-checkpoints when the agent reports `torque_progress` or `torque_done`. |
+| **Squash on merge** | Use `git merge --squash` when merging back to base. Default on. |
+| **Default post-merge cleanup** | Default cleanup behavior after merge when no explicit choice is given. |
+| **Preserve merge diff by default** | Save the full pre-merge patch as a diff artifact on the latest open boundary task. |
+| **Symlink paths** | Repo-relative paths or globs to mirror into each worktree as symlinks (e.g. `etl/**/node_modules`). Useful for shared caches. |
+
+## How a worktree is created
+
+When a Worker is dispatched into a group with worktrees enabled:
+
+1. Torque creates a branch named `torque/<engineer-slug>/<worker-slug>-<shortid>` (or `torque/user/<worker-slug>-<shortid>` for User-spawned workers; engineer/architect worktrees stay flat as `torque/<slug>-<shortid>`).
+2. A worktree is checked out at `<repo-root>/.torque/worktrees/<agent-id>/`.
+3. The agent's working directory is set to the worktree path.
+4. The agent's terminal opens in the worktree.
+5. Torque installs adapter files (hooks, MCP config, persistent prompt files) into that worktree.
+
+`.torque/worktrees/` is auto-added to `.gitignore` so worktree directories don't pollute your main checkout. Torque also adds its injected runtime files to the repo's git exclude list so worktree-backed sessions don't make `git status` noisy:
+
+- `.mcp.json`
+- `.claude/settings.local.json`
+- `.claude/instructions.md`
+- `.claude/skills/torque-*/`
+- `.codex/config.toml`
+- `.codex/hooks.json`
+
+For Engineer and Worker worktrees, Torque writes `.claude/settings.local.json` with `autoMemoryEnabled: false` so one agent's auto-memory index can't bleed into another agent's identity context.
+
+!!! note "Repo requirement"
+    The group's working directory must be inside a git repository for worktrees to function. If it's not, the setting is silently ignored.
+
+## Worktree status in the UI
+
+The agent cell shows a live worktree summary:
+
+- **Branch badge** — the worktree branch name.
+- **Diff stats** — files changed, insertions, deletions relative to the base branch.
+- **Dirty indicator** — whether there are uncommitted changes.
+
+These update periodically (every 60 seconds) and after any checkpoint.
+
+![Live worktree diff stats on an agent cell: branch name, file count, line additions and deletions visible inline.](../images/worktree-diff.png)
+
+## Checkpoints
+
+Checkpoints are snapshot commits on the worktree branch. They let you save progress and roll back if needed.
+
+### Manual checkpoints
+
+**UI**: right-click an agent → **Checkpoint Worktree**.
+
+**CLI**:
+
+```bash
+torque worktree checkpoint impl-add-auth
+```
+
+Stages all changes (`git add -A`) and commits with the message `torque: checkpoint N — agent-name`.
+
+### Auto-checkpoints
+
+When **Auto-checkpoint on stop** is enabled, Torque commits whatever's in the working tree when an agent's session ends. This catches in-progress work if the agent crashes or is stopped unexpectedly.
+
+When **Checkpoint on progress / done** is enabled, Torque also creates checkpoints when the agent reports `torque_progress`, `torque_done`, or `torque_ready`. These are throttled so progress spam doesn't create a commit every few seconds.
+
+### Task boundary checkpoints
+
+When the same agent runs sequential tasks on a shared worktree, Torque records a **task-scoped boundary** when each worktree-backed task reaches `done` or `ready`:
+
+- If the worktree is dirty at completion, Torque creates a dedicated boundary commit.
+- If clean, Torque records a marker against the current `HEAD`.
+- Queued same-agent follow-up tasks point back via `resume_after_boundary_task_id`.
+
+This lets Torque identify the **latest clean mergeable task boundary** on a shared branch instead of treating the whole branch history as one undifferentiated unit. The Engineer's `engineer_agent_show` surfaces these boundaries so it can decide whether to merge now or wait for queued work to finish.
+
+### Viewing checkpoints
+
+```bash
+torque worktree history impl-add-auth
+```
+
+Shows all commits on the branch since fork, with SHA, timestamp, message, and diff stats.
+
+### Rolling back
+
+```bash
+torque worktree history impl-add-auth          # find the SHA
+torque worktree rollback impl-add-auth abc1234 # hard reset to that commit
+```
+
+This is a hard reset — changes after that checkpoint are discarded.
+
+## Merging
+
+When a Worker's branch is ready to ship, Torque merges it back to the base branch.
+
+**UI**: right-click the agent → **Merge Worktree**.
+
+**Engineer / CLI**: `engineer_merge(...)` (or `torque worktree merge ...`).
+
+Torque tracks the merge result and verifies it landed:
+
+- **Regular merge** — detected via `git merge-base --is-ancestor`.
+- **Squash merge** — detected by simulating with `git merge-tree --write-tree`, falling back to "did the base branch advance and pick up these file changes."
+
+![A worktree post-merge: the agent cell shows the merged status, branch indicator changes, queue resets for any follow-up work.](../images/merged.png)
+
+### Merge boundaries on shared sequential branches
+
+On shared same-agent branches (`target: self` chains, queue-of-tasks workflows), Torque merges only the **latest clean task boundary**:
+
+- Review and merge views show which completed task currently defines the merge boundary.
+- If a queued follow-up has already started, Torque blocks merge and reports that the older boundary is no longer cleanly mergeable.
+- If queued follow-up tasks still remain after a successful merge, Torque keeps the agent and worktree alive, resets the branch to the updated base branch, and leaves the queued tasks attached for the next wave.
+
+### Settings the merge respects
+
+- **Squash on merge** (default on) — uses `git merge --squash`. Keeps base history clean.
+- **Default post-merge cleanup** — keep / close session / remove worktree / close session and remove worktree.
+- **Preserve merge diff by default** — captures the full pre-merge patch and stores it as a diff artifact on the latest open boundary task.
+
+If the branch has queued same-agent follow-up tasks attached, Torque keeps the agent and worktree alive regardless of cleanup choice — the next wave continues on a freshly reset branch.
+
+### When merges conflict
+
+If `engineer_merge` detects a conflict, it returns conflict context instead of forcing the merge through. The Engineer can then run `engineer_rebase` against the latest base branch and retry. `engineer_rebase` aborts cleanly on conflict and returns enough detail for the Engineer to either fix the conflict (sometimes by re-dispatching to the Worker) or escalate to you.
+
+For shared sequential branches, both `engineer_merge` and `engineer_rebase` enforce the same merge-readiness checks before they run — the latest task boundary must still be cleanly mergeable.
+
+## Relaunch and recovery
+
+Worktrees persist independently of any live terminal session. On relaunch, Torque:
+
+- Reuses the existing worktree if it's still valid.
+- Clears stale worktree metadata if the path is gone.
+- Recreates a new worktree if config still says the agent should have one.
+
+This is why a stopped agent can often be relaunched back into the same isolated branch without manual setup.
+
+Task boundaries are reconstructed from persisted task metadata on restart. If the recorded boundary SHA no longer matches the branch tip, Torque treats it as non-clean and refuses to present it as a merge target until a new clean boundary is recorded.
+
+When Torque itself performs a successful rebase for a clean shared worktree, it re-anchors the latest clean boundary to the rebased tip — provided the worktree is clean, the boundary matched the pre-rebase tip, and no follow-up work has started from it.
+
+## Manual worktree operations
+
+```bash
+# Create a worktree for an existing agent
+torque worktree create impl-add-auth
+torque worktree create impl-add-auth --relaunch    # also relaunch the agent in it
+
+# Remove a worktree
+torque worktree remove impl-add-auth
+torque worktree remove impl-add-auth --relaunch    # relaunch in original repo
+```
+
+Removing a worktree deletes the directory and its branch. The agent's working directory reverts to the original repo root.
+
+!!! note "Auto-cleanup on agent removal"
+    When you remove an agent from Torque, its worktree is cleaned up automatically. Removing the agent also removes Torque-managed runtime files (hooks, MCP config, persistent prompt files) from the worktree directory.
+
+## Closing agents with active worktrees
+
+When you remove an agent that has an active worktree with uncommitted changes, Torque warns you about the state (dirty files, commit count) so you can checkpoint or merge before closing.
+
+If you've enabled **Auto-checkpoint on stop**, the warning is mostly informational — Torque will commit whatever's in the working tree before tearing down. If not, you should review and either checkpoint manually or accept that uncommitted changes will be lost.
+
+## Where to next
+
+- [Tasks and threads](threads.md) — how worktrees flow through pipeline derivations.
+- [Pipelines](pipelines.md) — `target` routing and worktree inheritance.
+- [Engineers](../team/engineers.md) — the role that handles merging and cleanup.
+- [CLI reference](../reference/cli.md) — every `torque worktree` subcommand.
