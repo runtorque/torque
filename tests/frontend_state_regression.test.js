@@ -436,6 +436,10 @@ function createEmbeddedTerminalHarness(overrides = {}) {
       };
     }
 
+    attachCustomKeyEventHandler(handler) {
+      this.customKeyEventHandler = handler;
+    }
+
     write(data) {
       this.writes.push(data);
     }
@@ -9173,6 +9177,45 @@ test('embedded terminal auto-focuses new sessions when standalone mode is active
   sockets[0].onopen();
 
   assert.equal(terminals[0].focusCount, 1);
+});
+
+test('embedded terminal Shift+Enter sends LF and consumes follow-up xterm key events', () => {
+  const { context, sockets, terminals } = createEmbeddedTerminalHarness();
+  const surface = new FakeElement('surface');
+  context.__surface = surface;
+
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    _connectEmbeddedTerminal({ id: 'term-1', session_id: 'session-1' }, __surface);
+  `);
+
+  sockets[0].onopen();
+
+  const handler = terminals[0].customKeyEventHandler;
+  assert.equal(typeof handler, 'function');
+  const shiftEnter = {
+    key: 'Enter',
+    shiftKey: true,
+    ctrlKey: false,
+    metaKey: false,
+    altKey: false,
+  };
+
+  assert.equal(handler(Object.assign({ type: 'keydown' }, shiftEnter)), false);
+  assert.deepEqual(sockets[0].sent.pop(), { type: 'input', data: '\n' });
+
+  assert.equal(handler(Object.assign({ type: 'keypress' }, shiftEnter)), false);
+  assert.equal(handler(Object.assign({ type: 'keyup' }, shiftEnter)), false);
+  assert.equal(sockets[0].sent.filter((msg) => msg.type === 'input').length, 0);
+
+  assert.equal(handler({
+    type: 'keydown',
+    key: 'Enter',
+    shiftKey: false,
+    ctrlKey: false,
+    metaKey: false,
+    altKey: false,
+  }), true);
 });
 
 test('embedded terminal initializes xterm scrollback from global settings', () => {
