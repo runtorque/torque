@@ -1203,18 +1203,19 @@ function _connectEmbeddedTerminal(cell, surface) {
   _setActiveEmbeddedTerminalEntry(entry);
   _attachEmbeddedTerminalDropHandlers(cell, surface, entry);
   try { entry.fit.fit(); } catch (e) { /* container not measurable yet */ }
-  // Shift+Enter → send ESC+CR so TUIs like Claude Code treat it as a
+  // Shift+Enter → send LF so TUIs like Codex and Claude Code treat it as a
   // soft newline instead of submitting. xterm.js default maps Shift+Enter
-  // to plain `\r` (same as Enter), which submits prematurely.
+  // to plain Enter; consume every matching key event so the follow-up keypress
+  // cannot emit a stray `\r`.
   if (typeof entry.terminal.attachCustomKeyEventHandler === 'function') {
     entry.terminal.attachCustomKeyEventHandler(function(e) {
-      if (e.type !== 'keydown') return true;
       if (e.key === 'Enter' && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (entry.ws && entry.ws.readyState === WebSocket.OPEN) {
-          entry.ws.send(JSON.stringify({ type: 'input', data: '\x1b\r' }));
+        if (e.type === 'keydown' && entry.ws && entry.ws.readyState === WebSocket.OPEN) {
+          entry.ws.send(JSON.stringify({ type: 'input', data: '\n' }));
         }
         return false;
       }
+      if (e.type !== 'keydown') return true;
       return true;
     });
   }
