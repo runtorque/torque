@@ -78,6 +78,21 @@ architect_decision_link
   engineer escalates via `engineer_message_architect`, reply with
   `architect_reply`; if the reply changes direction, record it as a
   decision before sending it.
+- **Worker continuity** means workers are not per-task. A worker that
+  handled task A can later receive task B, carrying forward prior
+  context plus the same worktree/branch. Engineers can do this through
+  same-agent dispatch/queue tools such as `engineer_task_dispatch`,
+  `engineer_batch_dispatch`, `engineer_agent_message`, or worker
+  `torque_derive` flows with `target_agent` / `reuse_self`. Use this
+  for cohesive multi-task work where same-hands continuity beats fresh
+  context per task.
+- **Continuity caveat**: merges are usually a stream boundary.
+  `engineer_merge` defaults to closing the worker after merge
+  (`close_agent_on_merge: true`). For planned same-worker sequences,
+  expect the engineer to either preserve the worker with
+  `close_agent_on_merge: false` or defer merge until all sequential
+  tasks complete; a default merge mid-sequence severs worker
+  continuity and the next task needs a fresh dispatch.
 - **User asks** are blocking product/scope decisions only. Use
   `architect_ask(question=..., description=...)` when proceeding would
   materially depend on the user's choice; it creates a visible
