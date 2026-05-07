@@ -5315,6 +5315,9 @@ class MatrixState:
         task.lane = lane
         task.archived_at = archived_at
         task.archived_from_lane = archived_from_lane
+        if lane == ARCHIVED_LANE:
+            task.health_state = "healthy"
+            task.health_since = now_iso
         if clear_attention:
             for label in ("torque:blocked", "torque:error"):
                 if label in task.labels:

@@ -1569,6 +1569,28 @@ class EngineerEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("health 1 stalled", summary)
         self.assertIn("Investigate stalled dispatch (stalled)", summary)
 
+    async def test_board_summary_ignores_stale_archived_task_health(self):
+        state, group, engineer = self._make_state()
+        archived = state.board_add_task(
+            "Detached panels open in separate OS windows",
+            group,
+            lane="Archived",
+            id="task-archived",
+            archived_at="2026-05-02T21:05:34.887564+00:00",
+            archived_from_lane="In Progress",
+            health_state="stalled",
+            health_since="2026-05-02T21:05:34.887564+00:00",
+        )
+        self.assertIsNotNone(archived)
+
+        bridge = FakeBridge()
+        buffer = self.engineer_mod.EngineerEventBuffer(state, bridge)
+        summary = buffer._board_summary(group)
+
+        self.assertIn("1 Archived", summary)
+        self.assertNotIn("health 1 stalled", summary)
+        self.assertNotIn("risk Detached panels", summary)
+
     async def test_board_summary_excludes_engineer_message_followups(self):
         state, group, engineer = self._make_state()
         real_task = state.board_add_task(
