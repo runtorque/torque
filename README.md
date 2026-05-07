@@ -1,56 +1,54 @@
 # Torque
 
-Torque is an iTerm2-first agent orchestration workspace for people who already live in the terminal. It gives you structured groups, managed agent sessions, companion terminals, worktrees, a task board, action-driven dispatch, and a semi-autonomous engineer, all backed by a local Python daemon and a web UI that runs in the Toolbelt, a browser, or a native desktop shell.
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-1.1.0-green.svg)](VERSION)
+[![Docs](https://img.shields.io/badge/docs-mkdocs-blue.svg)](docs/index.md)
 
-## What Torque Covers
+> Torque is a local agent-orchestration workspace for terminal-native
+> developers. Manage AI coding agents, run them in isolated git worktrees,
+> dispatch work from a task board, and let an embedded engineer coordinate the
+> wave from your iTerm2 Toolbelt, a browser, or a native desktop shell.
 
-- Organize work into groups, agents, and terminals
-- Dispatch tasks from reusable actions and templates
-- Run isolated git worktrees per agent
-- Track work on a built-in task board with pipelines and human-review gates
-- Orchestrate work with a per-group engineer agent
-- Control Torque from the `torque` CLI
+<!-- TODO(@architect): hero asset path -->
 
-## Start Here
+## Why Torque
 
-- New to Torque? Start with the [Getting Started guide](docs/getting-started.md).
-- Want the full docs map? Open the [documentation home](docs/index.md).
-- Need a quick mental model? Read [Concepts](docs/concepts.md).
+Coding agents are powerful but messy in practice. Each one wants its own
+session, its own branch, its own context window, and its own terminal history.
+Spinning up three at once can quickly turn into three terminals, three
+worktrees, three half-remembered prompts, and a lot of "where was I?" friction.
 
-## Documentation Map
+Torque puts a thin orchestration layer in front of that workflow. You define
+**groups**, drop **agents** and **terminals** into them, dispatch work through
+reusable **actions**, and watch tasks move across a built-in board. Every agent
+runs in its own isolated git worktree by default, so branch boundaries are
+enforced instead of merely hoped for.
 
-### Set up and learn the basics
+One step further: each group can have an **engineer**. The engineer is Torque's
+orchestrator agent: it sees the board, dispatches workers, watches digests, and
+coordinates the next wave. It is the same idea as a designated build engineer on
+a small team, but for a single-user OSS workspace.
 
-- [Getting Started](docs/getting-started.md) — install Torque, run it, and create your first group, agent, and terminal
-- [Concepts](docs/concepts.md) — plain-language overview of groups, agents, terminals, and actions
-- [Agents & Sessions](docs/agents-and-sessions.md) — understand providers, boot commands, prompts, worktrees, resume, and runtime integration
-- [Group Settings](docs/group-settings.md) — configure defaults, overrides, windows, and session behavior
-- [Keyboard Shortcuts](docs/keyboard-shortcuts.md) — navigate Torque quickly from the terminal
+What you get:
 
-### Run agent workflows
+- Visual group, agent, and terminal grid in iTerm2's Toolbelt sidebar, a
+  browser, or a native desktop window.
+- Per-agent isolated git worktrees with merge-boundary tracking.
+- Reusable action templates with Jinja-rendered prompts and pipeline
+  transitions.
+- A task board with lanes, dispatch, derived subtasks, and human-review gates.
+- An optional embedded engineer agent to coordinate work across an entire group.
+- A `torque` CLI for scripting from the command line.
 
-- [Workflow Guide](docs/workflow-guide.md) — follow the normal path from task creation to dispatch, pipelines, schedules, and completion
-- [Task Board](docs/board.md) — manage work in lanes and dispatch tasks to agents
-- [Task Lifecycle](docs/task-lifecycle.md) — understand how tasks move from backlog to completion
-- [Actions & Templates](docs/actions.md) — define reusable prompts, variables, and pipelines
-- [Agent Templates](docs/agent-templates.md) — save reusable agent launch presets
-- [Engineer](docs/engineer.md) — use Torque's orchestrator agent for semi-autonomous task management
-- [Worktrees](docs/worktrees.md) — isolate agent changes in separate git worktrees
+## Quickstart
 
-### Reference and project docs
+### iTerm2 Toolbelt mode (recommended)
 
-- [CLI Reference](docs/cli.md) — script Torque from the command line
-- [Testing](docs/testing.md) — regression matrix, suite structure, and how to run coverage locally
-- [Reference Guide](docs/reference-guide.md) — grouped operator reference for commands, shortcuts, settings, logs, and runtime paths
-- [Troubleshooting](docs/troubleshooting.md) — symptom-first recovery steps for startup, sessions, worktrees, merge issues, and stale state
-- [Operations](docs/operations.md) — runtime modes, deploy/update flow, logs, notifications, and operational guidance
-- [Architecture](docs/architecture.md) — system design and component responsibilities
-- [Roadmap](docs/roadmap.md) — planned work and direction
-- [Docs site](docs/) — browse the full documentation in MkDocs
+Requires macOS and iTerm2.
 
 ```bash
-git clone https://github.com/aleksanderarruda/iterm2-agent-orchestration.git
-cd iterm2-agent-orchestration
+git clone git@github.com:runtorque/torque.git
+cd torque
 make deps
 make install
 make cli
@@ -58,97 +56,90 @@ make cli
 
 Then in iTerm2:
 
-1. Open **Scripts -> torque**
-2. Open **View -> Show Toolbelt**
-3. Enable **Torque** from the Toolbelt gear menu
+1. Open **Scripts → torque** to launch the daemon.
+2. Open **View → Show Toolbelt**.
+3. Enable **Torque** from the Toolbelt gear menu.
 
-For a wider browser view alongside the Toolbelt:
+This is the canonical Torque experience: the daemon runs under iTerm2 and the UI
+lives beside your terminal sessions in the Toolbelt.
 
-```bash
-make open
-```
+### Standalone browser mode
 
-For standalone-only mode:
+From the cloned repo, after `make deps` has been run once:
 
 ```bash
 make standalone
 make open
 ```
 
-For the native desktop shell:
+Standalone mode launches the daemon without requiring the Toolbelt UI and opens
+Torque in your default browser. It is useful when you want a wider workspace or
+are not using the iTerm2 sidebar for the current session.
+
+### Native desktop shell
+
+From the cloned repo, after `make cli` has installed the `torque` command:
 
 ```bash
-make desktop-deps   # installs pywebview into the iTerm2-managed Python runtime
-torque desktop        # spawn a desktop-owned standalone server on port 18933
+make desktop-deps
+torque desktop
 ```
 
-To attach the native window to an existing matching standalone server instead of
-spawning a child server:
+The desktop shell installs `pywebview` into the iTerm2-managed Python runtime and
+starts a native window on its own profile and port. By default it uses the
+`desktop` profile and port `18933`, so it does not collide with the Toolbelt
+daemon on `18932`.
 
-```bash
-torque desktop --attach --profile desktop --port 18933
-```
+For more install variants and runtime modes, see
+[Getting Started](docs/getting-started.md) and [Operations](docs/operations.md).
 
-Desktop mode intentionally defaults to its own runtime values so it does not
-accidentally attach to the live Toolbelt daemon:
+## Key concepts
 
-- profile: `desktop`
-- port: `18933`
-- data dir: `~/.torque/profiles/desktop`
+**Groups, agents, and terminals.** A group is a workspace for one project or one
+focus area. It contains agents, which are long-running coding sessions in their
+own worktrees, and terminals, which are regular shells for ad-hoc commands and
+inspection. See [Concepts](docs/concepts.md).
 
-`pywebview` must be installed in the Python runtime that is actually launching
-the desktop shell. On a normal Torque install, that means the iTerm2-managed
-runtime installed by `make desktop-deps`, not necessarily the `python3` on your
-current shell `PATH`.
+**Actions and tasks.** An action is a reusable prompt template: a Jinja2 file
+that takes a task description and renders the dispatch instructions for an
+agent. Tasks live on the board; you dispatch them by attaching an action and
+sending them to an agent. See [Actions & Templates](docs/actions.md) and
+[Task Board](docs/board.md).
 
-> Current operator support is macOS + iTerm2. The native shell was validated on
-> macOS. Linux and Windows remain follow-up targets because Torque still depends on
-> iTerm2 integration even though `pywebview` itself is cross-platform.
+**The engineer.** Each group can have an embedded engineer agent that watches the
+board, plans the next wave, dispatches workers, monitors digests, and asks for
+human input when it hits a decision boundary. The engineer is opt-in; Torque
+works fine without one. See [Engineer](docs/engineer.md).
 
 ## Documentation
 
-The docs are organized by job:
+- [Getting Started](docs/getting-started.md) — install and create your first
+  group, agent, and terminal.
+- [Concepts](docs/concepts.md) — vocabulary and mental model.
+- [Workflow Guide](docs/workflow-guide.md) — task, dispatch, and completion path.
+- [Actions & Templates](docs/actions.md) — define reusable prompts and pipelines.
+- [Engineer](docs/engineer.md) — orchestrator agent workflows.
+- [CLI Reference](docs/cli.md) — `torque` command reference.
+- [Troubleshooting](docs/troubleshooting.md) — symptom-first recovery.
 
-- [Getting Started](docs/getting-started.md) for installation and first use
-- [Sessions](docs/sessions.md) for groups, agents, terminals, and day-to-day navigation
-- [Task Board](docs/board.md) for tasks, dispatch, attachments, artifacts, dependencies, and agent reporting
-- [Actions & Templates](docs/actions.md) for prompt templates, transitions, and pipelines
-- [Worktrees](docs/worktrees.md) for isolated branches and checkpoints
-- [Schedules](docs/schedules.md) for recurring and one-shot task dispatch
-- [Engineer](docs/engineer.md) for orchestrator workflows and tools
-- [Operations](docs/operations.md) for runtime modes, logs, deploy/update, and notifications
-- [Architecture](docs/architecture.md) for the high-level system design
-- [CLI Reference](docs/cli.md) for command-by-command reference
-- [Docs Home](docs/index.md) for the full documentation map
+[Full documentation map →](docs/index.md)
 
-## Architecture
+## Contributing
 
-Torque has two main parts:
+Issues and pull requests welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for
+development setup, test commands, and PR expectations. Bug reports and feature
+requests use the templates in [`.github/`](.github/).
 
-- A Python daemon that manages state, sessions, worktrees, actions, schedules, MCP endpoints, and the HTTP/WebSocket API
-- A lightweight HTML/CSS/JS frontend served into the iTerm2 Toolbelt or a browser window
+## Status
 
-State is persisted in SQLite. Read-only CLI commands can work directly from the database even when the daemon is stopped.
+Torque is single-user, local-first, and currently macOS + iTerm2 with a working
+standalone-browser fallback and a beta native desktop shell. Linux and Windows
+are follow-up targets: the daemon itself is portable, but the iTerm2 integration
+is the strongest dependency today.
 
-For the more detailed system view, see [docs/architecture.md](docs/architecture.md). Historical design material lives under [docs/plans/](docs/plans/).
-
-## Development Notes
-
-- Runtime entry point: [`torque.py`](torque.py)
-- Core package: [`torque/`](torque)
-- CLI: [`bin/torque`](bin/torque)
-- Docs site config: [`mkdocs.yml`](mkdocs.yml)
-- Regression suite entrypoint: `make test`
-
-## Testing
-
-```bash
-make test
-```
-
-The regression matrix, current suite layering, and remaining gaps live in
-[docs/testing.md](docs/testing.md).
+The project is on version `1.1.0`. See [Roadmap](docs/roadmap.md) for what's
+next.
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
