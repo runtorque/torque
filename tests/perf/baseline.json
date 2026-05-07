@@ -19,7 +19,7 @@
   "repo": {
     "branch": "torque/courier/perf-harness-n10-n20-n30-ac43a0c",
     "head": "74470daae4a72b148f5f5ee0364ebe47b55c13e1",
-    "root": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9",
+    "root": "<HOME>/dev/repo/.torque/worktrees/ac43a0c9",
     "status_short": ""
   },
   "runs": [
@@ -266,7 +266,7 @@
           {
             "calls": 26,
             "cumulative_sec": 0.017354752,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/server.py:9740(handle_events)",
+            "function": "<HOME>/dev/repo/.torque/worktrees/ac43a0c9/torque/server.py:9740(handle_events)",
             "per_call_cumulative_sec": 0.0006674904615384616,
             "per_call_total_sec": 1.3298076923076924e-05,
             "primitive_calls": 26,
@@ -275,7 +275,7 @@
           {
             "calls": 26,
             "cumulative_sec": 0.014883332,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/events.py:394(emit)",
+            "function": "<HOME>/dev/repo/.torque/worktrees/ac43a0c9/torque/events.py:394(emit)",
             "per_call_cumulative_sec": 0.0005724358461538461,
             "per_call_total_sec": 7.6875e-06,
             "primitive_calls": 26,
@@ -293,7 +293,7 @@
           {
             "calls": 53,
             "cumulative_sec": 0.012408163000000002,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/profiling.py:290(_loop_lag_probe)",
+            "function": "<HOME>/dev/repo/.torque/worktrees/ac43a0c9/torque/profiling.py:290(_loop_lag_probe)",
             "per_call_cumulative_sec": 0.00023411628301886795,
             "per_call_total_sec": 8.131264150943397e-06,
             "primitive_calls": 53,
@@ -365,7 +365,7 @@
           {
             "calls": 26,
             "cumulative_sec": 0.007890081,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/events.py:440(_apply)",
+            "function": "<HOME>/dev/repo/.torque/worktrees/ac43a0c9/torque/events.py:440(_apply)",
             "per_call_cumulative_sec": 0.00030346465384615385,
             "per_call_total_sec": 5.837730769230769e-06,
             "primitive_calls": 26,
@@ -374,7 +374,7 @@
           {
             "calls": 36,
             "cumulative_sec": 0.007418210000000001,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/state.py:1293(_db_save_agent)",
+            "function": "<HOME>/dev/repo/.torque/worktrees/ac43a0c9/torque/state.py:1293(_db_save_agent)",
             "per_call_cumulative_sec": 0.0002060613888888889,
             "per_call_total_sec": 5.475277777777779e-07,
             "primitive_calls": 36,
@@ -383,7 +383,7 @@
           {
             "calls": 36,
             "cumulative_sec": 0.007398499,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/db.py:448(save_agent)",
+            "function": "<HOME>/dev/repo/.torque/worktrees/ac43a0c9/torque/db.py:448(save_agent)",
             "per_call_cumulative_sec": 0.00020551386111111112,
             "per_call_total_sec": 2.748777777777778e-06,
             "primitive_calls": 36,
@@ -819,7 +819,7 @@
           {
             "calls": 51,
             "cumulative_sec": 0.029180622000000003,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/server.py:9740(handle_events)",
+            "function": "<HOME>/dev/repo/.torque/worktrees/ac43a0c9/torque/server.py:9740(handle_events)",
             "per_call_cumulative_sec": 0.0005721690588235295,
             "per_call_total_sec": 1.136480392156863e-05,
             "primitive_calls": 51,
@@ -828,7 +828,7 @@
           {
             "calls": 51,
             "cumulative_sec": 0.024913085,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/events.py:394(emit)",
+            "function": "<HOME>/dev/repo/.torque/worktrees/ac43a0c9/torque/events.py:394(emit)",
             "per_call_cumulative_sec": 0.0004884918627450981,
             "per_call_total_sec": 6.304803921568628e-06,
             "primitive_calls": 51,
@@ -873,7 +873,7 @@
           {
             "calls": 51,
             "cumulative_sec": 0.013352206,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/events.py:440(_apply)",
+            "function": "<HOME>/dev/repo/.torque/worktrees/ac43a0c9/torque/events.py:440(_apply)",
             "per_call_cumulative_sec": 0.00026180796078431373,
             "per_call_total_sec": 4.658509803921569e-06,
             "primitive_calls": 51,
@@ -891,7 +891,7 @@
           {
             "calls": 53,
             "cumulative_sec": 0.012356292000000001,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/profiling.py:290(_loop_lag_probe)",
+            "function": "<HOME>/dev/repo/.torque/worktrees/ac43a0c9/torque/profiling.py:290(_loop_lag_probe)",
             "per_call_cumulative_sec": 0.0002331375849056604,
             "per_call_total_sec": 7.837396226415095e-06,
             "primitive_calls": 53,
@@ -900,7 +900,7 @@
           {
             "calls": 71,
             "cumulative_sec": 0.011766382,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/state.py:1293(_db_save_agent)",
+            "function": "<HOME>/dev/repo/.torque/worktrees/ac43a0c9/torque/state.py:1293(_db_save_agent)",
             "per_call_cumulative_sec": 0.00016572369014084508,
             "per_call_total_sec": 4.0377464788732397e-07,
             "primitive_calls": 71,
@@ -909,7 +909,7 @@
           {
             "calls": 71,
             "cumulative_sec": 0.011737714000000002,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/db.py:448(save_agent)",
+            "function": "<HOME>/dev/repo/.torque/worktrees/ac43a0c9/torque/db.py:448(save_agent)",
             "per_call_cumulative_sec": 0.00016531991549295776,
             "per_call_total_sec": 2.271830985915493e-06,
             "primitive_calls": 71,
@@ -981,7 +981,7 @@
           {
             "calls": 42,
             "cumulative_sec": 0.006806122,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/events.py:205(append)",
+            "function": "<HOME>/dev/repo/.torque/worktrees/ac43a0c9/torque/events.py:205(append)",
             "per_call_cumulative_sec": 0.00016205052380952381,
             "per_call_total_sec": 2.089166666666667e-06,
             "primitive_calls": 42,
@@ -1354,7 +1354,7 @@
           {
             "calls": 83,
             "cumulative_sec": 0.048315165,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/server.py:9740(handle_events)",
+            "function": "<HOME>/dev/repo/.torque/worktrees/ac43a0c9/torque/server.py:9740(handle_events)",
             "per_call_cumulative_sec": 0.000582110421686747,
             "per_call_total_sec": 1.1737662650602409e-05,
             "primitive_calls": 83,
@@ -1381,7 +1381,7 @@
           {
             "calls": 83,
             "cumulative_sec": 0.041210538000000005,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/events.py:394(emit)",
+            "function": "<HOME>/dev/repo/.torque/worktrees/ac43a0c9/torque/events.py:394(emit)",
             "per_call_cumulative_sec": 0.0004965125060240965,
             "per_call_total_sec": 6.1389759036144576e-06,
             "primitive_calls": 83,
@@ -1399,7 +1399,7 @@
           {
             "calls": 83,
             "cumulative_sec": 0.020967583,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/events.py:440(_apply)",
+            "function": "<HOME>/dev/repo/.torque/worktrees/ac43a0c9/torque/events.py:440(_apply)",
             "per_call_cumulative_sec": 0.00025262148192771087,
             "per_call_total_sec": 4.600566265060241e-06,
             "primitive_calls": 83,
@@ -1417,7 +1417,7 @@
           {
             "calls": 114,
             "cumulative_sec": 0.02012933,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/state.py:1293(_db_save_agent)",
+            "function": "<HOME>/dev/repo/.torque/worktrees/ac43a0c9/torque/state.py:1293(_db_save_agent)",
             "per_call_cumulative_sec": 0.0001765730701754386,
             "per_call_total_sec": 4.356052631578947e-07,
             "primitive_calls": 114,
@@ -1426,7 +1426,7 @@
           {
             "calls": 114,
             "cumulative_sec": 0.020079671,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/db.py:448(save_agent)",
+            "function": "<HOME>/dev/repo/.torque/worktrees/ac43a0c9/torque/db.py:448(save_agent)",
             "per_call_cumulative_sec": 0.0001761374649122807,
             "per_call_total_sec": 2.3635877192982455e-06,
             "primitive_calls": 114,
@@ -1489,7 +1489,7 @@
           {
             "calls": 53,
             "cumulative_sec": 0.012438082000000001,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/profiling.py:290(_loop_lag_probe)",
+            "function": "<HOME>/dev/repo/.torque/worktrees/ac43a0c9/torque/profiling.py:290(_loop_lag_probe)",
             "per_call_cumulative_sec": 0.0002346807924528302,
             "per_call_total_sec": 8.034622641509435e-06,
             "primitive_calls": 53,
@@ -1516,7 +1516,7 @@
           {
             "calls": 64,
             "cumulative_sec": 0.010574461,
-            "function": "/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/events.py:205(append)",
+            "function": "<HOME>/dev/repo/.torque/worktrees/ac43a0c9/torque/events.py:205(append)",
             "per_call_cumulative_sec": 0.000165225953125,
             "per_call_total_sec": 2.0344531250000003e-06,
             "primitive_calls": 64,

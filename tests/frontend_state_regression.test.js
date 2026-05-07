@@ -8553,8 +8553,8 @@ test('terminal compose image drop uploads files and inserts returned paths at th
           return Promise.resolve({
             ok: true,
             data: [
-              { path: '/Users/aleksanderarruda/.torque/attachments/agent-1-first.png' },
-              { path: '/Users/aleksanderarruda/.torque/attachments/agent-1-second.jpg' },
+              { path: '/home/testuser/.torque/attachments/agent-1-first.png' },
+              { path: '/home/testuser/.torque/attachments/agent-1-second.jpg' },
             ],
           });
         },
@@ -8602,8 +8602,8 @@ test('terminal compose image drop uploads files and inserts returned paths at th
     ['file', imageOne],
     ['file', imageTwo],
   ]);
-  const inserted = '/Users/aleksanderarruda/.torque/attachments/agent-1-first.png'
-    + '\n/Users/aleksanderarruda/.torque/attachments/agent-1-second.jpg';
+  const inserted = '/home/testuser/.torque/attachments/agent-1-first.png'
+    + '\n/home/testuser/.torque/attachments/agent-1-second.jpg';
   assert.equal(input.value, 'prefix-' + inserted + ' suffix');
   assert.equal(input.selectionStart, 'prefix-'.length + inserted.length);
   assert.equal(input.selectionEnd, input.selectionStart);
@@ -15971,7 +15971,7 @@ test('standalone sidebar formats repo and home paths compactly', () => {
   const main = document.getElementById('main');
 
   sandbox._cachedAgentTemplates = [];
-  sandbox.state.runtime = { home_directory: '/Users/aleks' };
+  sandbox.state.runtime = { home_directory: '/home/testuser' };
   sandbox.state.groups = { alpha: ['agent-1', 'term-1'] };
   sandbox.state.group_settings = { alpha: { collapsed_default: false } };
   sandbox.state.children = {};
@@ -15986,9 +15986,9 @@ test('standalone sidebar formats repo and home paths compactly', () => {
       command: 'codex',
       status: 'idle',
       session_id: 'sess-1',
-      directory: '/Users/aleks/dev/personal/gh/iterm2-torque',
-      current_path: '/Users/aleks/dev/personal/gh/iterm2-torque/docs',
-      git_root: '/Users/aleks/dev/personal/gh/iterm2-torque',
+      directory: '/home/testuser/dev/personal/gh/iterm2-torque',
+      current_path: '/home/testuser/dev/personal/gh/iterm2-torque/docs',
+      git_root: '/home/testuser/dev/personal/gh/iterm2-torque',
     },
     'term-1': {
       id: 'term-1',
@@ -15996,7 +15996,7 @@ test('standalone sidebar formats repo and home paths compactly', () => {
       group: 'alpha',
       cell_type: 'terminal',
       current_process: 'bash',
-      current_path: '/Users/aleks/dev/personal/scratch',
+      current_path: '/home/testuser/dev/personal/scratch',
       status: 'idle',
       session_id: 'sess-2',
     },
@@ -16015,7 +16015,7 @@ test('standalone sidebar formats repo and home paths compactly', () => {
   assert.equal(
     jsonValue(
       context,
-      `_formatDisplayPath('/Users/aleks/dev/personal/gh/iterm2-torque/docs', '/Users/aleks/dev/personal/gh/iterm2-torque')`
+      `_formatDisplayPath('/home/testuser/dev/personal/gh/iterm2-torque/docs', '/home/testuser/dev/personal/gh/iterm2-torque')`
     ),
     'iterm2-torque/docs'
   );
@@ -16028,9 +16028,9 @@ test('standalone runtime metadata does not change embedded-runtime detection', (
     mode: 'standalone',
     embedded_terminal: true,
     profile: 'desktop',
-    data_dir: '/Users/aleks/.torque/profiles/desktop',
+    data_dir: '/home/testuser/.torque/profiles/desktop',
     port: 18933,
-    home_directory: '/Users/aleks',
+    home_directory: '/home/testuser',
   };
 
   assert.equal(jsonValue(context, `_embeddedRuntimeEnabled()`), true);
