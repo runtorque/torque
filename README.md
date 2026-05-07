@@ -126,10 +126,9 @@ works fine without one. See [Engineer](docs/engineer.md).
 
 ## Contributing
 
-Issues and pull requests are welcome. Until the contributing guide and issue
-templates land, include enough context for a maintainer to reproduce the issue
-or review the change. For code changes, use [Testing](docs/testing.md) and run
-`make test` before sending a PR.
+Issues and pull requests welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for
+development setup, test commands, and PR expectations. Bug reports and feature
+requests use the templates in [`.github/`](.github/).
 
 ## Status
 
