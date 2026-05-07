@@ -1,1 +1,0 @@
-{"torque-default":{"identifier":"torque-default","description":"Minimal T1 capability set — webview-around-localhost only.","local":true,"windows":["main"],"permissions":["core:default"]}}

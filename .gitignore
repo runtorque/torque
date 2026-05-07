@@ -25,3 +25,6 @@ state.json
 
 # perf harness run output
 tests/perf/runs/
+
+# Rust/Tauri build output
+src-tauri/target/

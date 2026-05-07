@@ -831,4 +831,69 @@ mod tests {
         );
         handle.join().expect("mock server should finish");
     }
+
+    #[test]
+    fn ensure_server_spawns_and_stop_server_terminates_owned_daemon() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("reserve spawn port");
+        let port = listener.local_addr().expect("spawn addr").port();
+        drop(listener);
+
+        let data_dir = temp_path("spawn-success-data");
+        let script_path = temp_path("spawn-success-server.py");
+        fs::write(
+            &script_path,
+            r#"
+import json
+import os
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+class Handler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        length = int(self.headers.get('Content-Length') or '0')
+        self.rfile.read(length)
+        body = json.dumps({
+            'ok': True,
+            'data': {
+                'runtime': {
+                    'standalone': True,
+                    'profile': os.environ['TORQUE_PROFILE'],
+                    'data_dir': os.environ['TORQUE_DATA_DIR'],
+                    'port': int(os.environ['TORQUE_PORT']),
+                }
+            }
+        }).encode('utf-8')
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *_args):
+        pass
+
+ThreadingHTTPServer(('127.0.0.1', int(os.environ['TORQUE_PORT'])), Handler).serve_forever()
+"#,
+        )
+        .expect("write fake daemon script");
+        let python = env::var_os("PYTHON")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("python3"));
+        let settings = DaemonSettings {
+            mode: DaemonMode::Spawn,
+            port,
+            profile: "desktop".to_string(),
+            data_dir,
+            script_path: script_path.clone(),
+            python_executable: python,
+        };
+
+        let state = ensure_server(&settings).expect("fake daemon should become ready");
+        assert!(!state.is_attached());
+        assert!(state.has_child());
+
+        stop_server(&state);
+        assert!(!state.has_child());
+        assert_eq!(probe_runtime(port, Duration::from_millis(100)), None);
+        let _ = fs::remove_file(script_path);
+    }
 }
