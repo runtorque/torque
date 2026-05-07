@@ -54,19 +54,19 @@ nav:
       - Worktrees: tasks/worktrees.md
       - Agent Templates: agent-templates.md
   - Operate Torque:
-      - Workflow Guide: workflow-guide.md
-      - Streams & Waves: streams-and-waves.md
-      - Schedules: schedules.md
-      - Sessions: sessions.md
-      - Group Settings: group-settings.md
-      - Keyboard Shortcuts: keyboard-shortcuts.md
-      - Operations: operations.md
-      - Troubleshooting: troubleshooting.md
+      - Workflow Guide: operate/workflow-guide.md
+      - Streams & Waves: operate/streams-and-waves.md
+      - Schedules: operate/schedules.md
+      - Sessions: operate/sessions.md
+      - Group Settings: operate/group-settings.md
+      - Keyboard Shortcuts: operate/keyboard-shortcuts.md
+      - Operations: operate/operations.md
   - Reference:
-      - Reference Guide: reference-guide.md
-      - CLI Reference: cli.md
+      - CLI Reference: reference/cli.md
       - MCP tools: reference/mcp-tools.md
-      - Testing: testing.md
+      - Reference Guide: reference/reference-guide.md
+      - Troubleshooting: reference/troubleshooting.md
+      - Testing: reference/testing.md
   - Project:
       - Architecture: architecture.md
       - Roadmap: roadmap.md

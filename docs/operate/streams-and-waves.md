@@ -11,7 +11,7 @@ This page explains:
 - what is **already implemented**
 - what is still a **future phase**
 
-If you want the design rationale rather than the operator-facing explanation, see the proposal in [`docs/proposals/stream-centered-orchestration.md`](proposals/stream-centered-orchestration.md).
+If you want the design rationale rather than the operator-facing explanation, see the proposal in [`docs/proposals/stream-centered-orchestration.md`](../proposals/stream-centered-orchestration.md).
 
 ---
 
@@ -732,9 +732,9 @@ Read it as:
 
 ## Related pages
 
-- [Engineer](engineer.md)
-- [Task Lifecycle](task-lifecycle.md)
-- [Worktrees](worktrees.md)
-- [Concepts](concepts.md)
-- [Reference Guide](reference-guide.md)
-- [Stream-Centered Orchestration Proposal](proposals/stream-centered-orchestration.md)
+- [Engineer](../team/engineers.md)
+- [Task Lifecycle](../tasks/lifecycle.md)
+- [Worktrees](../tasks/worktrees.md)
+- [Concepts](../foundations/core-concepts.md)
+- [Reference Guide](../reference/reference-guide.md)
+- [Stream-Centered Orchestration Proposal](../proposals/stream-centered-orchestration.md)

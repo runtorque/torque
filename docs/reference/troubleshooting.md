@@ -2,7 +2,7 @@
 
 This page is for operating Torque when something is wrong. Start with the symptom that matches what you see, then follow the smallest recovery step that fixes it.
 
-For command details, see [CLI Reference](cli.md). For the underlying behavior of agents, worktrees, and orchestration, use [Agents & Sessions](agents-and-sessions.md), [Worktrees](worktrees.md), and [Engineer](engineer.md).
+For command details, see [CLI Reference](cli.md). For the underlying behavior of agents, worktrees, and orchestration, use [Agents & Sessions](../team/workers.md), [Worktrees](../tasks/worktrees.md), and [Engineer](../team/engineers.md).
 
 ## First checks
 
@@ -225,7 +225,7 @@ This usually means the UI is connected to an old daemon instance or the daemon l
 4. Relaunch the designated engineer if the session itself stopped.
 5. Use the journal and recent event views in the engineer workflow to recover context before dispatching more work.
 
-See [Engineer](engineer.md) for the full operating model and MCP tool surface.
+See [Engineer](../team/engineers.md) for the full operating model and MCP tool surface.
 
 ## Broken or stale agent state recovery
 

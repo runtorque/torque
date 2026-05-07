@@ -504,7 +504,7 @@ Alias: `act`
 
 ## worktree
 
-Git worktree management. See [Worktrees](worktrees.md) for the full guide.
+Git worktree management. See [Worktrees](../tasks/worktrees.md) for the full guide.
 
 ### worktree create
 
@@ -619,7 +619,7 @@ torque ai context
 
 ### ai derive
 
-Create a derived task and dispatch it. See [Actions & Templates](actions.md#transition-targeted-routing) for details on `--agent` and `--self`.
+Create a derived task and dispatch it. See [Actions & Templates](../tasks/actions.md#transition-targeted-routing) for details on `--agent` and `--self`.
 
 ```bash
 torque ai derive "Review the implementation" -t feature/review

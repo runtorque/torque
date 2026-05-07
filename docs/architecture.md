@@ -1,122 +1,130 @@
 # Architecture
 
-Torque is a local orchestration system built around a long-running Python daemon and a lightweight web UI.
+Torque is a local orchestration system. A long-running Python daemon manages state, agents, and worktrees; a lightweight web UI in iTerm2's Toolbelt (or a browser, or a native desktop window) renders that state and dispatches commands; SQLite is the source of truth for persistence.
 
-## Major Components
+This page describes the major components and how they fit together. For the user-facing concepts (groups, agents, tasks, threads, pipelines), start with [What is Torque?](foundations/what-is-torque.md).
 
-### Python daemon
+## Major components
 
-The daemon:
+### Python daemon (`torque/`)
 
-- manages groups, agents, terminals, tasks, schedules, and engineer state
-- exposes HTTP and WebSocket endpoints
-- talks to iTerm2 through the Python API
-- persists state in SQLite
-- handles action rendering, task dispatch, worktrees, hooks, and MCP tools
+The daemon's responsibilities, by module:
 
-Primary modules:
-
-- `torque/server.py`
-- `torque/state.py`
-- `torque/db.py`
-- `torque/bridge.py`
-- `torque/actions.py`
-- `torque/worktree.py`
-- `torque/mcp.py`
-- `torque/mcp_engineer.py`
+| Module | Responsibility |
+|---|---|
+| `server.py` | aiohttp server. HTTP `/api/cmd`, WebSocket `/ws`, hook receiver `/events`, MCP endpoints. Periodic worktree diff updater, dispatch, render-action, save-action. |
+| `state.py` | `MatrixState` (in-memory + SQLite-backed), `AgentCell`, `BoardTask`, `GroupSettings`, `ArchitectSettings`, slug generation, delta accumulator + WebSocket broadcast. |
+| `db.py`, `db_board.py`, `db_memory.py`, `db_schema.py` | SQLite persistence layer with WAL mode. Targeted writes, schema migrations, JSON-encoded fields. |
+| `bridge.py`, `iterm2_bridge_core.py` | iTerm2 adapter — create / focus / close tabs, monitor prompt + variables, manage tab colors and ordering, surface session termination events. |
+| `terminal_adapter.py` | Provider-agnostic terminal interface, designed for future Ghostty support. |
+| `local_pty.py`, `pty_supervisor*.py` | Standalone-mode PTY ownership. Supervisor sidecar persists sessions across daemon restarts. |
+| `actions.py` | Action loading, Jinja2 rendering with `torque` context namespace, transition graph discovery, pipeline detection. |
+| `roles.py` | Worker / engineer / architect role file management. |
+| `worktree.py` | Git worktree lifecycle — create, validate, checkpoint, rollback, diff, merge detection, gitignore management. |
+| `mcp.py` | Worker MCP tools (`torque_*`). |
+| `mcp_engineer.py`, `mcp_engineer_tools/` | Engineer MCP tools (`engineer_*`). |
+| `mcp_architect.py` | Architect MCP tools (`architect_*`). |
+| `mcp_tools_shared.py` | Authorization (`authorize_caller`), scoped state views, caller-aware result filtering. |
+| `engineer.py`, `architect.py` | Role-specific system prompts, dispatch postscripts, journal/decision plumbing. |
+| `events.py`, `notifications.py`, `digest_routing.py` | Event bus, throttled broadcast, macOS notifications, digest assembly + idle-gated push. |
+| `keybindings.py` | Global iTerm2 key binding lifecycle. |
+| `cron.py` | Schedules (one-shot and recurring). |
+| `adapters/` | Provider integration: Claude Code, Codex, Gemini CLI, generic fallback. |
 
 ### Frontend
 
-The UI is plain HTML, CSS, and JavaScript with no build step. The same frontend runs in:
+Plain HTML, CSS, and JavaScript. No build step. The same frontend runs in:
 
-- the iTerm2 Toolbelt webview
-- a browser window in dual mode
-- a browser window in standalone-only mode
+- The iTerm2 Toolbelt webview
+- A browser window in dual mode
+- A browser window in standalone-only mode
+- The native desktop shell (`pywebview`)
 
-The frontend consumes a full snapshot on connect and then live delta updates over WebSocket.
+The frontend consumes a full snapshot on connect and live deltas after that. JS files are loaded in dependency order: `constants → ws → render → commands → modals → board → actions → main`. State is patched in place from delta messages, then re-rendered.
 
-### SQLite persistence
+### SQLite
 
-SQLite is the source of truth for persistent state, including:
+`torque.db` (WAL mode) is the source of truth for persistent state:
 
-- agents and groups
-- group settings
-- board tasks and lanes
+- agents, groups, group settings, group memberships
+- board tasks, lanes, dependencies
 - schedules
-- engineer settings and journal
+- engineer / architect settings, journal entries, decisions, pending hires
 - agent history
+- shared memory entries
 
-This is also what lets some CLI reads work without the daemon.
+Ephemeral fields — current activity, current process, current path, worktree diff stats, error message, needs_attention, last summary — live in memory only. They're cleared on restart. This is deliberate: those fields are derived from live observation and would be wrong if persisted.
 
-## High-Level Data Flow
+The CLI's read-only commands (`torque task list`, `torque board list`, `torque action show`) read SQLite directly so they work even when the daemon is stopped.
 
-```text
-UI or CLI action
-  -> daemon command handler
-  -> state mutation
-  -> SQLite write
-  -> WebSocket delta broadcast
-  -> UI re-render
+## High-level data flow
+
+```mermaid
+flowchart LR
+    UI[UI / CLI<br/>action]
+    Handler[Daemon command<br/>handler]
+    State[State mutation<br/>via MatrixState]
+    DB[(SQLite<br/>targeted write)]
+    WS[WebSocket<br/>delta broadcast]
+    Render[UI re-render]
+
+    UI --> Handler --> State --> DB
+    State --> WS --> Render
+
+    classDef io fill:#1a1d24,stroke:#58a6ff,color:#e6edf3
+    classDef daemon fill:#1a1d24,stroke:#3fb950,color:#e6edf3
+    classDef store fill:#1a1d24,stroke:#a371f7,color:#e6edf3
+    class UI,Render io
+    class Handler,State,WS daemon
+    class DB store
 ```
 
-For CLI writes, `bin/torque` sends `POST /api/cmd` requests. For many CLI reads, `bin/torque` reads SQLite directly.
+For CLI writes, `bin/torque` posts to `/api/cmd`. For CLI reads (where applicable), `bin/torque` reads SQLite directly.
 
-## Session Control
+## Action and task model
 
-Torque abstracts terminal control behind a terminal adapter interface. Today the concrete implementation is iTerm2-focused, but the design supports additional backends.
+Torque separates three things by design:
 
-Key session responsibilities:
+- **Roles** define *who does the work* — provider, model, system prompt, worktree behavior, environment, child terminals.
+- **Actions** define *what the work prompt says* — Jinja2-rendered prompts, labels, transitions, gates.
+- **Board tasks** are the concrete tracked unit of work — title, action binding, variables, lane, agent linkage, parent / pipeline metadata.
 
-- create/focus/close tabs
-- monitor prompt, process, and path changes
-- reconnect to existing sessions
-- apply tab colors and ordering
+During dispatch, Torque resolves all three: the role builds the agent, the action renders the prompt with the live `torque` context namespace, the task is linked to the agent, and the dispatch postscript appended to the prompt declares which MCP tools are available based on the action's transitions.
 
-## Action and Task Model
+→ [Tasks and threads](tasks/threads.md), [Actions](tasks/actions.md), [Templates](tasks/templates.md)
 
-Torque separates:
+## MCP scoping
 
-- **agent templates**: who should do the work
-- **actions**: what the work prompt should say
-- **board tasks**: the concrete tracked unit of work
+Three role-prefixed MCP tool surfaces — `torque_*`, `engineer_*`, `architect_*` — are filtered server-side by the caller's `kind`, resolved from the `X-Torque-Cell-Id` header. Tool list filtering happens at list time (hidden tools never appear); scoped state views filter the data each tool returns by group / by per-actor identity.
 
-During dispatch, Torque resolves settings, renders the action prompt with task and Torque context, links the task to an agent, and appends the reporting postscript that enables `torque ai` status transitions.
+→ [MCP scoping](team/mcp-scoping.md)
 
-## Worktrees
+## Worktree management
 
-When enabled, Torque creates one git worktree per agent. The worktree manager handles:
+When enabled per group, every Worker gets a git worktree at `.torque/worktrees/<agent-id>/` on a `torque/<engineer-slug>/<worker-slug>-<shortid>` branch. The worktree manager handles creation, validation, diff summary, manual + auto + task-boundary checkpoints, rollback, merge detection (regular and squash), and conflict-aware rebase.
 
-- creation
-- validation
-- diff summary
-- checkpoints
-- rollback
-- merge status
+→ [Worktrees](tasks/worktrees.md)
 
-See [Worktrees](worktrees.md) for the user workflow.
+## Runtime modes
 
-## Engineer and MCP
+The same daemon serves three deployment shapes:
 
-Torque exposes two MCP-oriented surfaces:
+- **Toolbelt only** — registered in iTerm2's Python API, UI rendered into the Toolbelt sidebar.
+- **Toolbelt + browser** — Toolbelt as primary UI, `make open` opens a browser window connected to the same daemon.
+- **Standalone (browser-only)** — daemon runs without Toolbelt registration, controls iTerm2 externally. Used to support other terminal emulators in future and to run headless development setups.
 
-- agent-facing Torque tools for reporting progress and deriving work
-- engineer-facing orchestration tools for board control, journaling, notifications, agent messaging, and worktree operations
+A native desktop shell (`pywebview`) launches a separate standalone-mode daemon on a different port (`18933`) with its own data directory (`~/.torque/profiles/desktop`) so it can't accidentally attach to the live Toolbelt instance.
 
-The engineer is implemented as a special per-group agent with persistent instructions and a journal-backed recovery path.
+→ [Operations](operate/operations.md)
 
-## Runtime Modes
+## State broadcast model
 
-The same daemon can serve:
+Every mutation calls `_emit()` to queue a delta op. `broadcast()` sends `{"type": "delta", "seq": N, "ops": [...]}` to WebSocket clients. Full state (`snapshot_msg()`) is sent only on initial connect or `resync` request.
 
-- Toolbelt only
-- Toolbelt plus browser
-- browser only
+There are 12 delta op types: `agent_upsert`, `agent_remove`, `group_update`, `group_remove`, `group_rename`, `groups_reorder`, `group_settings_update`, `global_settings_update`, `task_upsert`, `task_remove`, `lanes_update`, `ui_update`, `focus_update`. The frontend patches its in-memory state from these and re-renders affected surfaces.
 
-That works because the UI is already served over HTTP/WebSocket and is not tied to iTerm2-specific browser APIs.
+## Where to next
 
-## Related Docs
-
-- [Operations](operations.md)
-- [Actions & Templates](actions.md)
-- [Engineer](engineer.md)
-- [Plans Archive](plans/index.md)
+- [Operations](operate/operations.md) — runtime modes, deploy/update flow, logs.
+- [Roadmap](roadmap.md) — planned work.
+- [MCP tools reference](reference/mcp-tools.md) — every MCP tool, by role.
