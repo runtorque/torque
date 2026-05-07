@@ -46,7 +46,7 @@ The frontend is intentionally simple:
 - no build step
 - global state patched in place from WebSocket deltas
 
-Important constraint: script order in [webview.html](/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/cacfabe5/webview.html) is part of the architecture. Core files load first, then board/modal submodules, then feature panels.
+Important constraint: script order in [webview.html](webview.html) is part of the architecture. Core files load first, then board/modal submodules, then feature panels.
 
 Live-update constraint: most panels are re-rendered from WebSocket-driven state patches. Frontend changes must preserve operator state across routine rerenders unless the view intentionally navigates away. That includes scroll position, viewport anchor when new content is inserted above the user, hover/focus/caret, inline drafts, expanded sections, and selection/highlight state.
 

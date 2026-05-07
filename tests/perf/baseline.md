@@ -58,7 +58,7 @@
 | 6 | 0.0757 | 0.0012 | 116 | `/private/tmp/torque-perf-venv/lib/python3.14/site-packages/aiohttp/web_protocol.py:550(start)` |
 | 7 | 0.0582 | 0.0005 | 86 | `/private/tmp/torque-perf-venv/lib/python3.14/site-packages/aiohttp/web_protocol.py:507(_handle_request)` |
 | 8 | 0.0530 | 0.0007 | 86 | `/private/tmp/torque-perf-venv/lib/python3.14/site-packages/aiohttp/web_app.py:527(_handle)` |
-| 9 | 0.0483 | 0.0010 | 83 | `/Users/aleksanderarruda/dev/personal/gh/iterm2-torque/.torque/worktrees/ac43a0c9/torque/server.py:9740(handle_events)` |
+| 9 | 0.0483 | 0.0010 | 83 | `<HOME>/dev/repo/.torque/worktrees/ac43a0c9/torque/server.py:9740(handle_events)` |
 | 10 | 0.0439 | 0.0005 | 765 | `/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/traceback.py:437(extract)` |
 
 ## Py-spy artifacts
