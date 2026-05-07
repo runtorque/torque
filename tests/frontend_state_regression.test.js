@@ -8063,7 +8063,7 @@ test('embedded terminal tabs render select and close controls for every cell', (
   assert.match(html, /<span class="terminal-tab-kind">term<\/span>/);
 });
 
-test('embedded terminal workspace shows a closeable tab for one tombstoned cell', () => {
+test('embedded terminal workspace hides tombstoned cells from tabs', () => {
   const { context, document, sandbox } = createEmbeddedTerminalHarness({
     loadRenderHelpers: true,
   });
@@ -8086,10 +8086,10 @@ test('embedded terminal workspace shows a closeable tab for one tombstoned cell'
 
   runInContext(context, `renderTerminalWorkspace();`);
 
-  assert.equal(dom.tabs.classList.contains('terminal-tabs-hidden'), false);
-  assert.equal(htmlClassCount(dom.tabs.innerHTML, 'terminal-tab'), 1);
-  assert.equal(htmlClassCount(dom.tabs.innerHTML, 'terminal-tab-close'), 1);
-  assert.match(dom.tabs.innerHTML, /onclick="return closeTerminalTab\('term-dead', event\)"/);
+  assert.equal(dom.tabs.classList.contains('terminal-tabs-hidden'), true);
+  assert.equal(htmlClassCount(dom.tabs.innerHTML, 'terminal-tab'), 0);
+  assert.equal(htmlClassCount(dom.tabs.innerHTML, 'terminal-tab-close'), 0);
+  assert.doesNotMatch(dom.tabs.innerHTML, /term-dead/);
 });
 
 test('closing a tombstoned terminal tab purges without focusing or remove flow', () => {
@@ -9028,6 +9028,70 @@ test('embedded terminal prunes caches when cells are removed', () => {
   assert.equal(terminals[1].disposed, true);
   assert.equal(sockets[1].closeCalled, true);
   assert.deepEqual(jsonValue(context, 'Object.keys(_embeddedTerminalSessions)'), []);
+});
+
+test('embedded terminal prunes caches when cells are tombstoned', () => {
+  const { context, document, sandbox, sockets, terminals } = createEmbeddedTerminalHarness({
+    loadRenderHelpers: true,
+  });
+  attachTerminalWorkspaceDom(document);
+  sandbox.state.runtime = { embedded_terminal: true };
+  sandbox.state.groups = { alpha: ['worker-a'] };
+  sandbox.state.group_settings = { alpha: {} };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'worker-a': {
+      id: 'worker-a',
+      name: 'Worker A',
+      group: 'alpha',
+      kind: 'worker',
+      cell_type: 'agent',
+      session_id: 'sess-a',
+      status: 'running',
+      deleted_at: 0,
+    },
+  };
+
+  runInContext(context, `
+    selectedTerminalId = 'worker-a';
+    renderTerminalWorkspace();
+  `);
+  const surface = terminals[0].surface;
+  assert.deepEqual(jsonValue(context, 'Object.keys(_embeddedTerminalSessions)'), ['worker-a:sess-a']);
+
+  runInContext(context, `
+    state.agents['worker-a'] = Object.assign({}, state.agents['worker-a'], {
+      deleted_at: 123456,
+      permanent_delete_after: 234567,
+      session_id: null,
+      status: 'stopped'
+    });
+    _pruneEmbeddedTerminalSessions();
+  `);
+
+  assert.equal(terminals[0].disposed, true);
+  assert.equal(surface.removed, true);
+  assert.equal(sockets[0].closeCalled, true);
+  assert.deepEqual(jsonValue(context, 'Object.keys(_embeddedTerminalSessions)'), []);
+});
+
+test('embedded terminal group cells filter tombstoned cells', () => {
+  const { context, sandbox } = createEmbeddedTerminalHarness();
+  sandbox.state.groups = { alpha: ['worker-ok', 'worker-deleted', 'agent-a'] };
+  sandbox.state.children = { 'agent-a': ['term-ok', 'term-deleted'] };
+  sandbox.state.agents = {
+    'worker-ok': { id: 'worker-ok', name: 'Worker OK', group: 'alpha', kind: 'worker', cell_type: 'agent' },
+    'worker-deleted': { id: 'worker-deleted', name: 'Worker Deleted', group: 'alpha', kind: 'worker', cell_type: 'agent', deleted_at: 123456 },
+    'agent-a': { id: 'agent-a', name: 'Agent A', group: 'alpha', cell_type: 'agent' },
+    'term-ok': { id: 'term-ok', name: 'Term OK', group: 'alpha', cell_type: 'terminal', parent_id: 'agent-a' },
+    'term-deleted': { id: 'term-deleted', name: 'Term Deleted', group: 'alpha', cell_type: 'terminal', parent_id: 'agent-a', deleted_at: 123456 },
+  };
+
+  assert.deepEqual(jsonValue(context, `_terminalGroupCells('alpha').map(function(cell) { return cell.id; })`), [
+    'worker-ok',
+    'agent-a',
+    'term-ok',
+  ]);
 });
 
 test('embedded terminal rekey closes old websocket before opening the replacement socket', () => {
