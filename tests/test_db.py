@@ -1321,10 +1321,18 @@ class TorqueDBTests(unittest.TestCase):
 
         self.assertEqual(loaded["selected_principal_id"], "architect-7")
 
+    def test_load_all_restores_selected_agent_id(self):
+        self.db.save_ui_state("selected_agent_id", "agent-7")
+
+        loaded = self.db.load_all()
+
+        self.assertEqual(loaded["selected_agent_id"], "agent-7")
+
     def test_load_all_defaults_selected_principal_id_to_empty(self):
         loaded = self.db.load_all()
 
         self.assertEqual(loaded["selected_principal_id"], "")
+        self.assertEqual(loaded["selected_agent_id"], "")
 
     def test_load_all_restores_events_dismissed_attention(self):
         dismissed = {

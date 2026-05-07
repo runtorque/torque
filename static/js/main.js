@@ -310,6 +310,8 @@ function _restorePanelState() {
     });
     _loadPanelApp(detachedApp);
     if (detachedApp === 'board') renderBoard();
+    if (detachedApp === 'actions' && typeof renderTemplatesPanel === 'function') renderTemplatesPanel();
+    if (detachedApp === 'templates' && typeof renderAgentTemplatesPanel === 'function') renderAgentTemplatesPanel();
     if (detachedApp === 'context' && typeof renderContextPanel === 'function') renderContextPanel();
     if (detachedApp === 'events' && typeof renderEvents === 'function') renderEvents();
     if (detachedApp === 'engineer' && typeof renderAgentPanel === 'function') renderAgentPanel();
@@ -417,8 +419,14 @@ function _scheduleStandaloneBoardLayoutRender() {
     return;
   }
   if (typeof renderBoard !== 'function') return;
+  var detachedBoard = typeof _detachedWindowActive === 'function'
+    && _detachedWindowActive()
+    && typeof _detachedWindowInfo !== 'undefined'
+    && _detachedWindowInfo
+    && _detachedWindowInfo.panel === 'board';
   if (typeof _standalonePanelSurfaceVisible === 'function'
-      && !_standalonePanelSurfaceVisible('board')) {
+      && !_standalonePanelSurfaceVisible('board')
+      && !detachedBoard) {
     return;
   }
   if (_workspaceBoardRenderPending || typeof requestAnimationFrame !== 'function') return;

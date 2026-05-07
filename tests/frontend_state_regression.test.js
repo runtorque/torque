@@ -19629,6 +19629,117 @@ test('standalone startup restore keeps panel roots attached across the first dou
   );
 });
 
+test('standalone detach removes Board from the docked layout instead of re-adding the default board tab', async () => {
+  const { context, document } = createAttachedStandaloneWsSyncHarness();
+  document.body.classList.add('runtime-embedded');
+  context.isEmbeddedTerminalMode = function() { return true; };
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    state.detached_panels = {};
+    state.standalone_panel_layout = {
+      version: 1,
+      bottom: { open: true, size: 280, tabs: ['board'], active: 'board' },
+      right: { open: true, size: 320, tabs: ['context'], active: 'context' },
+      floats: {},
+      last_active: 'board',
+    };
+    window.nativeApi = {
+      available: function() { return true; },
+      detach: function(panel) {
+        nativeDetachCalls.push(panel);
+        return Promise.resolve('panel-' + panel + '-1');
+      },
+      focusWindow: function(label) {
+        nativeFocusCalls.push(label);
+        return Promise.resolve();
+      },
+    };
+    nativeDetachCalls = [];
+    nativeFocusCalls = [];
+    _standalonePanelSetLayoutFromState(state.standalone_panel_layout, { fromServer: true });
+  `);
+
+  await context._standaloneDetachPanel('board');
+
+  assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout().bottom.tabs`), []);
+  assert.equal(jsonValue(context, `_standalonePanelPlacement('board')`), '');
+  assert.deepEqual(standaloneZoneBodyPanelIds(document, 'standalone-bottom-dock'), []);
+  assert.equal(jsonValue(context, `state.detached_panels.board.label`), 'panel-board-1');
+});
+
+test('standalone tab selection focuses an already detached panel instead of redocking it', () => {
+  const { context } = createAttachedStandaloneWsSyncHarness();
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    state.detached_panels = { actions: { label: 'panel-actions-1' } };
+    state.standalone_panel_layout = {
+      version: 1,
+      bottom: { open: true, size: 280, tabs: ['board'], active: 'board' },
+      right: { open: true, size: 320, tabs: ['actions', 'context'], active: 'actions' },
+      floats: {},
+      last_active: 'actions',
+    };
+    nativeFocusCalls = [];
+    window.nativeApi = {
+      available: function() { return true; },
+      focusWindow: function(label) {
+        nativeFocusCalls.push(label);
+        return Promise.resolve();
+      },
+    };
+    _standalonePanelSetLayoutFromState(state.standalone_panel_layout, { fromServer: true });
+  `);
+
+  assert.equal(jsonValue(context, `_standalonePanelPlacement('actions')`), '');
+  assert.equal(context._standaloneSelectPanel('actions'), true);
+  assert.deepEqual(jsonValue(context, `nativeFocusCalls`), ['panel-actions-1']);
+  assert.equal(jsonValue(context, `_standalonePanelPlacement('actions')`), '');
+});
+
+test('detached board resize scheduling rerenders the board even without a standalone dock surface', () => {
+  const { context, document } = createWorkspaceResizeHarness();
+  document.body.classList.add('runtime-embedded');
+  document.body.classList.add('detached-window');
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    _detachedWindowInfo = { active: true, panel: 'board', label: 'panel-board-1' };
+    renderBoardCalls = 0;
+    renderBoard = function() { renderBoardCalls++; };
+    _scheduleStandaloneBoardLayoutRender();
+  `);
+
+  assert.equal(jsonValue(context, `renderBoardCalls`), 1);
+});
+
+test('full-state hydration mirrors persisted selected_agent_id for detached Agent panels', () => {
+  const { context } = createStandaloneWsSyncHarness();
+  runInContext(context, `
+    _panelStateRestored = false;
+    selectedAgentId = null;
+    focusedItemId = null;
+  `);
+
+  context._handleFullState({
+    seq: 1,
+    runtime: { embedded_terminal: true },
+    agents: {
+      'agent-1': { id: 'agent-1', name: 'Agent One', group: 'alpha', cell_type: 'agent' },
+      'agent-2': { id: 'agent-2', name: 'Agent Two', group: 'alpha', cell_type: 'agent', session_id: 'sess-2' },
+    },
+    groups: { alpha: ['agent-1', 'agent-2'] },
+    children: { 'agent-1': [], 'agent-2': [] },
+    board_lanes: ['Backlog'],
+    board_tasks: {},
+    panel_events: [],
+    active_session_id: 'sess-2',
+    selected_agent_id: 'agent-1',
+    standalone_panel_layout: {},
+  });
+
+  assert.equal(jsonValue(context, `selectedAgentId`), 'agent-1');
+  assert.equal(jsonValue(context, `focusedItemId`), 'agent-1');
+});
+
 test('standalone task deltas rerender only affected visible docked surfaces', () => {
   const { context, sandbox } = createWsRenderHarness();
 

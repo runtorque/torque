@@ -3534,6 +3534,7 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 "panel_active",
                 "board_panel_height",
                 "selected_principal_id",
+                "selected_agent_id",
                 "standalone_panel_layout",
                 "detached_panels",
                 "engineer_panel_split_fraction",
@@ -3825,6 +3826,9 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "board_panel_height": int(ui.get("board_panel_height", "0")),
             "selected_principal_id": str(
                 ui.get("selected_principal_id", "") or ""
+            ),
+            "selected_agent_id": str(
+                ui.get("selected_agent_id", "") or ""
             ),
             "standalone_panel_layout": (
                 json.loads(ui.get("standalone_panel_layout", "{}"))

@@ -8,6 +8,7 @@ let state = {
   children: {},
   active_session_id: null,
   selected_principal_id: '',
+  selected_agent_id: '',
   detached_panels: {},
   engineer_panel_split_fraction: 0.30,
 };
@@ -521,6 +522,21 @@ function _handleFullState(msg) {
   if (typeof state.selected_principal_id !== 'string') {
     state.selected_principal_id = '';
   }
+  if (typeof state.selected_agent_id !== 'string') {
+    state.selected_agent_id = '';
+  }
+  var restoredSelectedAgentId = '';
+  if (state.selected_agent_id
+      && state.agents
+      && state.agents[state.selected_agent_id]
+      && !(typeof _isTombstonedAgent === 'function'
+        && _isTombstonedAgent(state.agents[state.selected_agent_id]))) {
+    restoredSelectedAgentId = state.selected_agent_id;
+    selectedAgentId = restoredSelectedAgentId;
+    if (!focusedItemId) focusedItemId = restoredSelectedAgentId;
+  } else if (state.selected_agent_id) {
+    state.selected_agent_id = '';
+  }
   if (typeof state.engineer_panel_split_fraction !== 'number') {
     var _splitFraction = Number(state.engineer_panel_split_fraction);
     state.engineer_panel_split_fraction = Number.isFinite(_splitFraction) ? _splitFraction : 0.30;
@@ -547,7 +563,7 @@ function _handleFullState(msg) {
   }
   // Sync selection on first message (restore after restart/reconnect)
   // and whenever the active session changes
-  if (state.active_session_id &&
+  if (state.active_session_id && !restoredSelectedAgentId &&
       (!_firstStateReceived || state.active_session_id !== prevActive)) {
     _syncSelectionToActiveSession();
   }
@@ -1547,6 +1563,9 @@ function _applyUiSurfaceInvalidation(flags, key) {
   if (key === 'selected_principal_id') {
     _markSurface(flags, 'main');
   }
+  if (key === 'selected_agent_id') {
+    _markSurface(flags, 'main', 'focus', 'context', 'events', 'engineer');
+  }
 }
 
 function _collectSessionMapInvalidationGroups(ops, hints) {
@@ -1908,6 +1927,19 @@ function _applyDelta(ops) {
           ? _standaloneVisiblePanelApps().slice()
           : [];
         state[op.key] = op.value;
+        if (op.key === 'selected_agent_id') {
+          var nextSelectedAgentId = String(op.value || '');
+          if (nextSelectedAgentId
+              && state.agents
+              && state.agents[nextSelectedAgentId]
+              && !(typeof _isTombstonedAgent === 'function'
+                && _isTombstonedAgent(state.agents[nextSelectedAgentId]))) {
+            selectedAgentId = nextSelectedAgentId;
+            if (!focusedItemId) focusedItemId = nextSelectedAgentId;
+          } else if (!nextSelectedAgentId) {
+            selectedAgentId = null;
+          }
+        }
         if (op.key === 'standalone_panel_layout'
             && typeof _standalonePanelSetLayoutFromState === 'function') {
           _standalonePanelSetLayoutFromState(op.value || {}, { fromServer: true });
