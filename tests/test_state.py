@@ -2974,6 +2974,31 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
         self.assertFalse(state.agent_is_busy(agent.id))
         self.assertIsNone(state.agent_current_task(agent.id))
 
+    def test_archiving_task_resets_stale_health_state(self):
+        state = self._make_state()
+        stale_since = "2026-05-02T21:05:34.887564+00:00"
+        task = state.board_add_task(
+            "In-flight work",
+            "g",
+            lane="In Progress",
+            id="task-1",
+        )
+
+        self.assertIsNotNone(task)
+        task.health_state = "stalled"
+        task.health_since = stale_since
+
+        state.board_archive_task(task.id)
+
+        archived = state.board_tasks[task.id]
+        self.assertEqual(archived.lane, "Archived")
+        self.assertEqual(archived.health_state, "healthy")
+        self.assertNotEqual(archived.health_since, stale_since)
+        self.assertGreaterEqual(
+            datetime.fromisoformat(archived.health_since),
+            datetime.fromisoformat(archived.archived_at),
+        )
+
     def test_board_update_task_routes_archived_lane_through_archive_semantics(self):
         state = self._make_state()
         task = state.board_add_task("Ship release", "g", lane="Done", id="task-1")

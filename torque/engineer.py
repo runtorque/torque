@@ -18,6 +18,7 @@ from .digest_routing import (
     resolve_digest_recipients,
 )
 from .state import (
+    ARCHIVED_LANE,
     normalize_default_worker_concurrency,
     normalize_architect_digest_verbosity,
     normalize_architect_journal_checkpoint_frequency,
@@ -2041,11 +2042,16 @@ class EngineerEventBuffer:
         for t in self._state.board_tasks.values():
             if t.group != group:
                 continue
+            # Digest lane/health rollups treat engineer-message followups as
+            # opaque coordination noise. MCP archived_total includes archived
+            # followups as raw history; the divergence is presentational only.
             if task_is_engineer_message_followup(t):
                 continue
             counts[t.lane] = counts.get(t.lane, 0) + 1
             health_state = getattr(t, "health_state", "healthy") or "healthy"
-            if t.lane != "Done" and health_state != "healthy":
+            if (
+                    t.lane not in {"Done", ARCHIVED_LANE}
+                    and health_state != "healthy"):
                 unhealthy_counts[health_state] = (
                     unhealthy_counts.get(health_state, 0) + 1
                 )
