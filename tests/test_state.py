@@ -3416,3 +3416,44 @@ class SelectedPrincipalIdTests(unittest.TestCase):
         state.load()
 
         self.assertEqual(state.selected_principal_id, "")
+
+
+class DetachedPanelsStateTests(unittest.TestCase):
+    def setUp(self):
+        _install_aiohttp_stub()
+        self.state_mod = importlib.import_module("torque.state")
+        self.state_mod = importlib.reload(self.state_mod)
+
+    def test_defaults_to_empty_dict(self):
+        state = self.state_mod.MatrixState()
+        self.assertEqual(state.detached_panels, {})
+        self.assertEqual(state.to_dict()["detached_panels"], {})
+        self.assertEqual(state.to_dict_compact()["detached_panels"], {})
+
+    def test_persists_and_restores_detached_panels(self):
+        from torque.db import TorqueDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = TorqueDB(Path(tmp.name) / "torque.db")
+        db.init()
+        self.addCleanup(db.close)
+
+        db.save_groups({"g": []}, {"g": "g"})
+        db.save_ui_state(
+            "detached_panels",
+            json.dumps({
+                "engineer": {
+                    "label": "panel-engineer-abc123",
+                    "bounds": {"x": 10, "y": 20, "width": 900, "height": 640},
+                }
+            }),
+        )
+
+        state = self.state_mod.MatrixState(db=db)
+        state.load()
+
+        self.assertEqual(
+            state.detached_panels["engineer"]["label"],
+            "panel-engineer-abc123",
+        )

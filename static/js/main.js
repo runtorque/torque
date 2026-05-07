@@ -230,6 +230,15 @@ function _normalizePanelHeight(height) {
 }
 
 function togglePanel(appName) {
+  if (typeof _detachedWindowActive === 'function' && !_detachedWindowActive()
+      && typeof _detachedPanelEntry === 'function') {
+    var detachedEntry = _detachedPanelEntry(appName);
+    if (detachedEntry && detachedEntry.label
+        && window.nativeApi && window.nativeApi.available()) {
+      window.nativeApi.focusWindow(detachedEntry.label);
+      return true;
+    }
+  }
   if (typeof _standaloneTogglePanel === 'function'
       && _standalonePanelsEnabled()) {
     var handled = _standaloneTogglePanel(appName, { skipOpenHooks: true });
@@ -290,12 +299,33 @@ function _restorePanelState() {
   if (_panelStateRestored) return;
   _panelStateRestored = true;
 
+  if (typeof _detachedWindowActive === 'function' && _detachedWindowActive()) {
+    var detachedApp = (_detachedWindowInfo && _detachedWindowInfo.panel) || 'board';
+    _activePanelApp = detachedApp;
+    var detachedPanel = document.getElementById('bottom-panel');
+    if (detachedPanel) detachedPanel.classList.remove('collapsed');
+    _panelIds.forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) el.classList.toggle('panel-hidden', id !== _panelRootId(detachedApp));
+    });
+    _loadPanelApp(detachedApp);
+    if (detachedApp === 'board') renderBoard();
+    if (detachedApp === 'context' && typeof renderContextPanel === 'function') renderContextPanel();
+    if (detachedApp === 'events' && typeof renderEvents === 'function') renderEvents();
+    if (detachedApp === 'engineer' && typeof renderAgentPanel === 'function') renderAgentPanel();
+    if (typeof torqueDetachedWindowBoundsChanged === 'function') {
+      torqueDetachedWindowBoundsChanged();
+    }
+    return;
+  }
+
   if (typeof _restoreStandalonePanelState === 'function'
       && _standalonePanelsEnabled()) {
     _restoreStandaloneWorkspaceSidebarWidth({ persistResolved: true });
     _restoreStandalonePanelState({ persistResolved: true });
     _loadVisibleStandalonePanelApps();
     if (typeof renderActivePanel === 'function') renderActivePanel();
+    if (typeof _standaloneRestoreDetachedPanels === 'function') _standaloneRestoreDetachedPanels();
     return;
   }
 
@@ -330,6 +360,7 @@ function _restorePanelState() {
     if (active === 'events' && typeof renderEvents === 'function') renderEvents();
     if (active === 'engineer' && typeof renderAgentPanel === 'function') renderAgentPanel();
   }
+  if (typeof _standaloneRestoreDetachedPanels === 'function') _standaloneRestoreDetachedPanels();
 }
 
 /* -- Panel resize handle -------------------------------------------------- */
@@ -1004,6 +1035,13 @@ document.addEventListener('keydown', (e) => {
       else if (typeof _currentGroup === 'function') architectGroup = _currentGroup() || '';
       openAddArchitectModal(architectGroup);
     }
+    return;
+  }
+
+  if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey
+      && (e.key === '?' || e.key === '/')) {
+    e.preventDefault();
+    if (typeof openCheatsheet === 'function') openCheatsheet();
     return;
   }
 

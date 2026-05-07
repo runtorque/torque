@@ -6,6 +6,7 @@ import hashlib
 import json
 import mimetypes
 import os
+import re
 import shlex
 import shutil
 import sys
@@ -184,6 +185,13 @@ def _read_torque_version() -> str:
 
 _STARTED_AT: float = time.time()
 _TORQUE_VERSION: str = _read_torque_version()
+_LOG_LINE_RE = re.compile(
+    r"^(?P<clock>\d{2}:\d{2}:\d{2})\s+"
+    r"(?P<level>[A-Z]+)\s+"
+    r"(?P<message>.*)$"
+)
+_LOG_TAIL_BYTES = 256 * 1024
+_LOG_MAX_LINES = 500
 
 
 def _runtime_payload(*, bridge=None, state=None) -> dict:
@@ -217,6 +225,80 @@ def _runtime_payload(*, bridge=None, state=None) -> dict:
         "pid": os.getpid(),
         "started_at": _STARTED_AT,
         "log_path": str(DATA_DIR / "torque.log"),
+    }
+
+
+def _parse_log_line(line: str, *, today: datetime | None = None) -> dict:
+    today = today or datetime.now(timezone.utc)
+    text = line.rstrip("\n")
+    match = _LOG_LINE_RE.match(text)
+    if not match:
+        return {
+            "ts": 0.0,
+            "level": "",
+            "logger": "torque",
+            "message": text,
+            "raw": text,
+        }
+    hour, minute, second = [
+        int(part) for part in match.group("clock").split(":")
+    ]
+    stamped = today.replace(
+        hour=hour,
+        minute=minute,
+        second=second,
+        microsecond=0,
+    )
+    return {
+        "ts": stamped.timestamp(),
+        "level": match.group("level").strip(),
+        "logger": "torque",
+        "message": match.group("message"),
+        "raw": text,
+    }
+
+
+def _tail_log_entries(
+    log_path: Path,
+    *,
+    since: float = 0.0,
+    limit: int = _LOG_MAX_LINES,
+    tail_bytes: int = _LOG_TAIL_BYTES,
+) -> dict:
+    limit = max(1, min(int(limit or _LOG_MAX_LINES), 2000))
+    try:
+        stat = log_path.stat()
+    except FileNotFoundError:
+        return {
+            "lines": [],
+            "cursor": time.time(),
+            "size": 0,
+            "inode": "",
+            "path": str(log_path),
+        }
+    start = max(0, stat.st_size - max(4096, int(tail_bytes or _LOG_TAIL_BYTES)))
+    with log_path.open("rb") as handle:
+        handle.seek(start)
+        if start:
+            handle.readline()  # discard a partial first line
+        raw = handle.read()
+    today = datetime.now(timezone.utc)
+    entries = []
+    for raw_line in raw.decode("utf-8", "replace").splitlines():
+        entry = _parse_log_line(raw_line, today=today)
+        if since and entry["ts"] and entry["ts"] <= since:
+            continue
+        entries.append(entry)
+    if len(entries) > limit:
+        entries = entries[-limit:]
+    cursor = max([entry.get("ts", 0.0) for entry in entries] + [since, time.time()])
+    inode = str(getattr(stat, "st_ino", "") or "")
+    return {
+        "lines": entries,
+        "cursor": cursor,
+        "size": stat.st_size,
+        "inode": inode,
+        "path": str(log_path),
     }
 
 
@@ -11323,6 +11405,51 @@ async def main(connection=None):
                         json.dumps(state.standalone_panel_layout),
                     )
 
+            elif cmd == "ui_set_detached_panels":
+                detached_panels = data.get("detached_panels", {})
+                if not isinstance(detached_panels, dict):
+                    result = {
+                        "type": "error",
+                        "message": "Invalid detached panel state",
+                    }
+                else:
+                    normalized = {}
+                    for panel, raw in detached_panels.items():
+                        panel = str(panel or "").strip()
+                        if not panel or not isinstance(raw, dict):
+                            continue
+                        item = dict(raw)
+                        bounds = item.get("bounds")
+                        if bounds is not None and not isinstance(bounds, dict):
+                            item.pop("bounds", None)
+                        label = str(item.get("label", "") or "").strip()
+                        if label:
+                            item["label"] = label
+                        normalized[panel] = item
+                    state.detached_panels = normalized
+                    state._emit(
+                        "ui_update",
+                        key="detached_panels",
+                        value=state.detached_panels,
+                    )
+                    state._db_save_ui(
+                        "detached_panels",
+                        json.dumps(state.detached_panels),
+                    )
+
+            elif cmd == "first_run_complete":
+                sentinel = Path.home() / ".torque" / ".first_run_complete"
+                sentinel.parent.mkdir(parents=True, exist_ok=True)
+                sentinel.write_text(
+                    datetime.now(timezone.utc).isoformat(),
+                    encoding="utf-8",
+                )
+                result = {
+                    "type": "ok",
+                    "first_run_complete": True,
+                    "sentinel": str(sentinel),
+                }
+
             elif cmd == "ui_set_engineer_panel_split":
                 try:
                     fraction = float(data.get("fraction", 0.30))
@@ -14232,6 +14359,20 @@ async def main(connection=None):
                 {"ok": False, "error": "missing file"}, status=400)
         return web.json_response({"ok": True, "data": saved})
 
+    async def handle_logs(request):
+        """GET /logs — cursor-tail Torque's profile log for the in-app viewer."""
+        try:
+            since = float(request.query.get("since", "0") or 0)
+        except (TypeError, ValueError):
+            since = 0.0
+        try:
+            limit = int(request.query.get("limit", _LOG_MAX_LINES) or _LOG_MAX_LINES)
+        except (TypeError, ValueError):
+            limit = _LOG_MAX_LINES
+        payload = _tail_log_entries(DATA_DIR / "torque.log", since=since, limit=limit)
+        payload["follow"] = request.query.get("follow", "0") in {"1", "true", "yes"}
+        return web.json_response(payload)
+
     async def handle_serve_attachment(request):
         """GET /attachments/{task_id}/{filename} — serve attachment file."""
         task_id = request.match_info["task_id"]
@@ -14264,6 +14405,7 @@ async def main(connection=None):
     app_server.router.add_get("/", handle_index)
     app_server.router.add_get("/ws", handle_ws)
     app_server.router.add_get("/ws/terminal/{cell_id}", handle_terminal_ws)
+    app_server.router.add_get("/logs", handle_logs)
     app_server.router.add_post("/events", handle_events)
     app_server.router.add_post("/api/cmd", handle_api_cmd)
     if profiling.is_enabled():
