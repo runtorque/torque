@@ -459,6 +459,11 @@ function _normalizeStandalonePanelLayout(raw) {
   var layout = raw && typeof raw === 'object' ? _standaloneClone(raw) : {};
   var bottomBounds = _standaloneBottomSizeBounds();
   var rightBounds = _standaloneRightSizeBounds(_standalonePreferredShellWidth());
+  var detached = _detachedPanelsState();
+  function isDetached(app) {
+    var entry = detached && detached[app];
+    return !!(entry && typeof entry === 'object' && entry.label);
+  }
   var normalized = {
     version: _standalonePanelLayoutVersion,
     bottom: {
@@ -483,6 +488,7 @@ function _normalizeStandalonePanelLayout(raw) {
     var filtered = [];
     for (var i = 0; i < zone.tabs.length; i++) {
       var app = zone.tabs[i];
+      if (isDetached(app)) continue;
       if (placements[app]) continue;
       placements[app] = zoneName;
       filtered.push(app);
@@ -496,6 +502,10 @@ function _normalizeStandalonePanelLayout(raw) {
   var floats = layout.floats && typeof layout.floats === 'object' ? layout.floats : {};
   var z = 1;
   for (var appName in floats) {
+    if (isDetached(appName)) {
+      _standaloneRememberFloatFrame(normalized, appName, floats[appName]);
+      continue;
+    }
     if (_standalonePanelApps.indexOf(appName) < 0 || placements[appName]) continue;
     var item = floats[appName] || {};
     placements[appName] = 'float';
@@ -513,7 +523,7 @@ function _normalizeStandalonePanelLayout(raw) {
     _standaloneRememberFloatFrame(normalized, cachedApp, cachedFrame);
   }
 
-  if (!placements.board) {
+  if (!placements.board && !isDetached('board')) {
     normalized.bottom.tabs.unshift('board');
     placements.board = 'bottom';
   }
@@ -521,8 +531,10 @@ function _normalizeStandalonePanelLayout(raw) {
   if (normalized.bottom.tabs.indexOf(normalized.bottom.active) < 0) {
     normalized.bottom.active = normalized.bottom.tabs[0] || '';
   }
-  if (!normalized.last_active || _standalonePanelApps.indexOf(normalized.last_active) < 0) {
-    normalized.last_active = normalized.right.active || normalized.bottom.active || 'board';
+  if (!normalized.last_active
+      || _standalonePanelApps.indexOf(normalized.last_active) < 0
+      || isDetached(normalized.last_active)) {
+    normalized.last_active = normalized.right.active || normalized.bottom.active || '';
   }
   return normalized;
 }
@@ -695,6 +707,12 @@ function _standaloneRunPanelOpenHooks(app, opts) {
 function _standaloneSelectPanel(app, opts) {
   if (!_standalonePanelsEnabled()) return false;
   opts = opts || {};
+  var detachedEntry = _detachedPanelEntry(app);
+  if (detachedEntry && detachedEntry.label
+      && window.nativeApi && window.nativeApi.available()) {
+    window.nativeApi.focusWindow(detachedEntry.label);
+    return true;
+  }
   var layout = _standaloneClone(_standalonePanelCurrentLayout());
   var placement = _standalonePanelPlacement(app);
   if (!placement) {

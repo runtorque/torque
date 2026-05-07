@@ -1384,6 +1384,9 @@ class MatrixState:
         # default). When set to an architect id, the grid filters to that
         # architect's engineers + their workers.
         self.selected_principal_id: str = ""
+        # Browser-local selectedAgentId mirrored through ui_state so detached
+        # windows can hydrate the same Agent/Context panel focus.
+        self.selected_agent_id: str = ""
         self.standalone_panel_layout: dict = {}
         self.detached_panels: dict[str, dict] = {}
         self.engineer_panel_split_fraction: float = 0.30
@@ -1948,6 +1951,7 @@ class MatrixState:
             "panel_active": self.panel_active,
             "board_panel_height": self.board_panel_height,
             "selected_principal_id": self.selected_principal_id,
+            "selected_agent_id": self.selected_agent_id,
             "standalone_panel_layout": self.standalone_panel_layout,
             "detached_panels": self.detached_panels,
             "engineer_panel_split_fraction": self.engineer_panel_split_fraction,
@@ -2087,6 +2091,7 @@ class MatrixState:
             "panel_active": self.panel_active,
             "board_panel_height": self.board_panel_height,
             "selected_principal_id": self.selected_principal_id,
+            "selected_agent_id": self.selected_agent_id,
             "standalone_panel_layout": self.standalone_panel_layout,
             "detached_panels": self.detached_panels,
             "engineer_panel_split_fraction": self.engineer_panel_split_fraction,
@@ -2856,6 +2861,9 @@ class MatrixState:
             self.board_panel_height = data.get("board_panel_height", 0)
             self.selected_principal_id = str(
                 data.get("selected_principal_id", "") or ""
+            )
+            self.selected_agent_id = str(
+                data.get("selected_agent_id", "") or ""
             )
             self.standalone_panel_layout = data.get(
                 "standalone_panel_layout", {}

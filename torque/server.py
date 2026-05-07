@@ -8887,8 +8887,23 @@ async def main(connection=None):
                         "type": "error",
                         "message": "Agent is tombstoned and cannot be focused",
                     }
-                elif cell and cell.session_id:
-                    await bridge.focus_session(cell.session_id)
+                elif cell:
+                    selected_id = cell.parent_id if (
+                        cell.cell_type == "terminal" and cell.parent_id
+                    ) else cell.id
+                    if selected_id and selected_id in state.agents:
+                        state.selected_agent_id = selected_id
+                        state._emit(
+                            "ui_update",
+                            key="selected_agent_id",
+                            value=state.selected_agent_id,
+                        )
+                        state._db_save_ui(
+                            "selected_agent_id",
+                            state.selected_agent_id,
+                        )
+                    if cell.session_id:
+                        await bridge.focus_session(cell.session_id)
 
             elif cmd == "send_text":
                 cell = state.agents.get(data["id"])
@@ -11384,6 +11399,25 @@ async def main(connection=None):
                 state._db_save_ui(
                     "selected_principal_id",
                     state.selected_principal_id,
+                )
+
+            elif cmd in {"select_agent", "ui_select_agent"}:
+                raw_agent_id = str(data.get("id", "") or "").strip()
+                if raw_agent_id:
+                    target = state.agents.get(raw_agent_id)
+                    if not target or state.agent_is_tombstoned(target):
+                        raw_agent_id = ""
+                    elif target.cell_type == "terminal" and target.parent_id:
+                        raw_agent_id = target.parent_id
+                state.selected_agent_id = raw_agent_id
+                state._emit(
+                    "ui_update",
+                    key="selected_agent_id",
+                    value=state.selected_agent_id,
+                )
+                state._db_save_ui(
+                    "selected_agent_id",
+                    state.selected_agent_id,
                 )
 
             elif cmd == "standalone_set_panel_layout":

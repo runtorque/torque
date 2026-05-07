@@ -31,7 +31,7 @@ prompt: |
   - Keep the diff focused — if you notice unrelated issues, leave them for a separate change
   - Do NOT deploy the changes
   {% else %}
-  You have a new task. Follow the same approach as before — read the relevant code, implement cleanly in one pass, start with the narrowest relevant tests or checks, smoke-check user-visible changes when practical, and say what you did and did not verify. Say explicitly if live verification could not be performed. Do NOT deploy the changes.
+  You have a new task. Follow the same approach as before — read the relevant code, implement cleanly in one pass, start with the narrowest relevant tests or checks, smoke-check user-visible changes when practical, and say what you verified and what you did not verify. Say explicitly if live verification could not be performed. Do NOT deploy the changes.
 
   ## Task
 
