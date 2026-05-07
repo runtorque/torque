@@ -1,3 +1,5 @@
+use std::env;
+use std::ffi::OsString;
 use std::process;
 use std::sync::Arc;
 
@@ -5,6 +7,18 @@ use tauri::{Manager, RunEvent};
 use torque_desktop::daemon::{self, DaemonSettings};
 
 fn main() {
+    let args: Vec<OsString> = env::args_os().collect();
+    if args
+        .get(1)
+        .is_some_and(|arg| daemon::is_parent_death_guard_arg(arg))
+    {
+        if let Err(error) = run_daemon_guard_from_args(&args) {
+            eprintln!("Error: {error}");
+            process::exit(1);
+        }
+        return;
+    }
+
     if let Err(error) = run_app() {
         eprintln!("Error: {error}");
         process::exit(1);
@@ -16,7 +30,6 @@ fn run_app() -> Result<(), String> {
     let daemon_state =
         Arc::new(daemon::ensure_server(&settings).map_err(|error| error.to_string())?);
     let _cleanup = DaemonCleanupGuard::new(daemon_state.clone());
-    install_signal_cleanup(daemon_state.clone()).map_err(|error| error.to_string())?;
 
     let setup_settings = settings.clone();
     let setup_daemon_state = daemon_state.clone();
@@ -75,13 +88,6 @@ fn stop_managed_daemon(app_handle: &tauri::AppHandle) {
     }
 }
 
-fn install_signal_cleanup(state: Arc<daemon::DaemonState>) -> Result<(), ctrlc::Error> {
-    ctrlc::set_handler(move || {
-        daemon::stop_server(&state);
-        process::exit(130);
-    })
-}
-
 struct DaemonCleanupGuard {
     state: Arc<daemon::DaemonState>,
 }
@@ -96,4 +102,23 @@ impl Drop for DaemonCleanupGuard {
     fn drop(&mut self) {
         daemon::stop_server(&self.state);
     }
+}
+
+fn run_daemon_guard_from_args(args: &[OsString]) -> Result<(), String> {
+    let parent_pid = parse_guard_pid(args.get(2), "parent")?;
+    let child_pid = parse_guard_pid(args.get(3), "daemon child")?;
+    daemon::run_parent_death_guard(parent_pid, child_pid);
+    Ok(())
+}
+
+fn parse_guard_pid(value: Option<&OsString>, label: &str) -> Result<u32, String> {
+    let Some(value) = value else {
+        return Err(format!("Missing {label} pid for daemon guard"));
+    };
+    let value = value.to_string_lossy();
+    value
+        .parse::<u32>()
+        .ok()
+        .filter(|pid| *pid > 0)
+        .ok_or_else(|| format!("Invalid {label} pid '{value}' for daemon guard"))
 }

@@ -20,6 +20,8 @@ const STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
 const PROBE_TIMEOUT: Duration = Duration::from_millis(750);
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
 const STOP_TIMEOUT: Duration = Duration::from_secs(5);
+const DAEMON_GUARD_ARG: &str = "--torque-daemon-guard";
+const GUARD_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DaemonMode {
@@ -173,6 +175,7 @@ impl DaemonSettings {
 #[derive(Debug)]
 pub struct DaemonState {
     child: Mutex<Option<Child>>,
+    parent_death_guard: Mutex<Option<Child>>,
     attached: AtomicBool,
 }
 
@@ -180,19 +183,32 @@ impl DaemonState {
     fn attached() -> Self {
         Self {
             child: Mutex::new(None),
+            parent_death_guard: Mutex::new(None),
             attached: AtomicBool::new(true),
         }
     }
 
-    fn spawned(child: Child) -> Self {
+    fn spawned(child: Child, parent_death_guard: Option<Child>) -> Self {
         Self {
             child: Mutex::new(Some(child)),
+            parent_death_guard: Mutex::new(parent_death_guard),
             attached: AtomicBool::new(false),
         }
     }
 
     pub fn is_attached(&self) -> bool {
         self.attached.load(Ordering::SeqCst)
+    }
+
+    pub fn owned_child_id(&self) -> Option<u32> {
+        if self.is_attached() {
+            return None;
+        }
+        self.child
+            .lock()
+            .expect("daemon child lock poisoned")
+            .as_ref()
+            .map(Child::id)
     }
 
     #[cfg(test)]
@@ -334,20 +350,29 @@ pub fn ensure_server(settings: &DaemonSettings) -> Result<DaemonState, EnsureErr
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()?;
+    let mut parent_death_guard = match spawn_parent_death_guard(child.id()) {
+        Ok(guard) => guard,
+        Err(error) => {
+            terminate_child(&mut child);
+            return Err(error);
+        }
+    };
 
     let deadline = Instant::now() + STARTUP_TIMEOUT;
     while Instant::now() < deadline {
         if let Some(runtime) = probe_runtime(settings.port, PROBE_TIMEOUT) {
             if !runtime.standalone {
                 terminate_child(&mut child);
+                terminate_guard(&mut parent_death_guard);
                 return Err(EnsureError::Runtime(format!(
                     "Port {} became reachable, but it is not serving standalone Torque. Refusing to attach the desktop shell to a non-standalone server.",
                     settings.port
                 )));
             }
-            return Ok(DaemonState::spawned(child));
+            return Ok(DaemonState::spawned(child, parent_death_guard));
         }
         if child.try_wait()?.is_some() {
+            terminate_guard(&mut parent_death_guard);
             return Err(EnsureError::Runtime(format!(
                 "The standalone Torque server exited before it was ready. Check {} for details.",
                 settings.data_dir.join("torque.log").display()
@@ -357,6 +382,7 @@ pub fn ensure_server(settings: &DaemonSettings) -> Result<DaemonState, EnsureErr
     }
 
     terminate_child(&mut child);
+    terminate_guard(&mut parent_death_guard);
     Err(EnsureError::Runtime(format!(
         "Timed out waiting for the standalone Torque server to start. Check {} for details.",
         settings.data_dir.join("torque.log").display()
@@ -371,10 +397,69 @@ pub fn stop_server(state: &DaemonState) {
         Ok(guard) => guard,
         Err(_) => return,
     };
-    let Some(mut child) = guard.take() else {
+    if let Some(mut child) = guard.take() {
+        terminate_child(&mut child);
+    }
+    drop(guard);
+    if let Ok(mut parent_death_guard) = state.parent_death_guard.lock() {
+        terminate_guard(&mut parent_death_guard);
+    }
+}
+
+pub fn is_parent_death_guard_arg(value: &std::ffi::OsStr) -> bool {
+    value == std::ffi::OsStr::new(DAEMON_GUARD_ARG)
+}
+
+pub fn run_parent_death_guard(parent_pid: u32, child_pid: u32) {
+    loop {
+        if !pid_is_alive(child_pid) {
+            return;
+        }
+        if parent_is_gone(parent_pid) {
+            terminate_pid(child_pid);
+            return;
+        }
+        thread::sleep(GUARD_POLL_INTERVAL);
+    }
+}
+
+#[cfg(test)]
+fn spawn_parent_death_guard(_child_pid: u32) -> Result<Option<Child>, EnsureError> {
+    Ok(None)
+}
+
+#[cfg(not(test))]
+fn spawn_parent_death_guard(child_pid: u32) -> Result<Option<Child>, EnsureError> {
+    let executable = env::current_exe().map_err(|error| {
+        EnsureError::Runtime(format!(
+            "Unable to resolve Torque desktop executable for daemon guard: {error}"
+        ))
+    })?;
+    let guard = Command::new(executable)
+        .arg(DAEMON_GUARD_ARG)
+        .arg(std::process::id().to_string())
+        .arg(child_pid.to_string())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| {
+            EnsureError::Runtime(format!(
+                "Unable to start Torque desktop daemon guard: {error}"
+            ))
+        })?;
+    Ok(Some(guard))
+}
+
+fn terminate_guard(guard: &mut Option<Child>) {
+    let Some(mut guard) = guard.take() else {
         return;
     };
-    terminate_child(&mut child);
+    if guard.try_wait().ok().flatten().is_some() {
+        return;
+    }
+    let _ = guard.kill();
+    let _ = guard.wait();
 }
 
 fn terminate_child(child: &mut Child) {
@@ -405,6 +490,55 @@ fn wait_for_exit(child: &mut Child, timeout: Duration) -> bool {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
         if child.try_wait().ok().flatten().is_some() {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    false
+}
+
+#[cfg(unix)]
+fn parent_is_gone(parent_pid: u32) -> bool {
+    nix::unistd::getppid().as_raw() as u32 != parent_pid || !pid_is_alive(parent_pid)
+}
+
+#[cfg(not(unix))]
+fn parent_is_gone(parent_pid: u32) -> bool {
+    !pid_is_alive(parent_pid)
+}
+
+#[cfg(unix)]
+fn pid_is_alive(pid: u32) -> bool {
+    match nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid as i32), None) {
+        Ok(()) | Err(nix::errno::Errno::EPERM) => true,
+        Err(nix::errno::Errno::ESRCH) => false,
+        Err(_) => false,
+    }
+}
+
+#[cfg(not(unix))]
+fn pid_is_alive(_pid: u32) -> bool {
+    true
+}
+
+#[cfg(unix)]
+fn terminate_pid(pid: u32) {
+    let raw_pid = nix::unistd::Pid::from_raw(pid as i32);
+    let _ = nix::sys::signal::kill(raw_pid, nix::sys::signal::Signal::SIGTERM);
+    if wait_for_pid_exit(pid, STOP_TIMEOUT) {
+        return;
+    }
+    let _ = nix::sys::signal::kill(raw_pid, nix::sys::signal::Signal::SIGKILL);
+    let _ = wait_for_pid_exit(pid, STOP_TIMEOUT);
+}
+
+#[cfg(not(unix))]
+fn terminate_pid(_pid: u32) {}
+
+fn wait_for_pid_exit(pid: u32, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if !pid_is_alive(pid) {
             return true;
         }
         thread::sleep(Duration::from_millis(50));
