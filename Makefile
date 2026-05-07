@@ -357,15 +357,16 @@ tauri-dev:
 		TORQUE_PROFILE="$$profile" \
 		TORQUE_DATA_DIR="$$data_dir" \
 		TORQUE_DESKTOP_MODE="$$mode" \
+		PATH="$$HOME/.cargo/bin:$$PATH" \
 		cargo tauri dev
 
 ## tauri-build: Build production Tauri shell for current platform.
 tauri-build:
-	@cd src-tauri && env TORQUE_REPO_ROOT="$(CURDIR)" cargo tauri build
+	@cd src-tauri && env TORQUE_REPO_ROOT="$(CURDIR)" PATH="$$HOME/.cargo/bin:$$PATH" cargo tauri build
 
 ## tauri-build-mac: Build macOS .app/.dmg (requires macOS host).
 tauri-build-mac:
-	@cd src-tauri && env TORQUE_REPO_ROOT="$(CURDIR)" cargo tauri build --bundles app,dmg
+	@cd src-tauri && env TORQUE_REPO_ROOT="$(CURDIR)" PATH="$$HOME/.cargo/bin:$$PATH" cargo tauri build --bundles app,dmg
 
 ## open: Open the Torque UI in the default browser (works in dual or standalone mode)
 open:
