@@ -1,0 +1,99 @@
+name: Bug report
+description: Report a reproducible problem with Torque.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Torque. Please include enough detail for someone else to reproduce the issue.
+
+  - type: input
+    id: torque-version
+    attributes:
+      label: Torque version
+      description: Run `cat VERSION` from the repo root, or check the bottom-left of the Torque UI (when surfaced) — currently `1.1.0`.
+      placeholder: "1.1.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os-family
+    attributes:
+      label: OS family
+      options:
+        - macOS
+        - Linux
+        - Windows
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: os-version
+    attributes:
+      label: OS version
+      description: Include the exact OS version or distribution details.
+      placeholder: "macOS 14.5"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: Install method
+      description: How did you install or run Torque?
+      options:
+        - Toolbelt
+        - standalone-browser
+        - native-desktop
+        - dev-install
+        - other
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Provide the exact steps or commands that trigger the issue.
+      placeholder: |
+        1. Run `...`
+        2. Open `...`
+        3. Click `...`
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead? Include any error messages.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs-screenshots
+    attributes:
+      label: Logs / screenshots
+      description: Attach screenshots or paste relevant logs. The daemon log is usually at `~/Library/Application Support/iTerm2/Scripts/torque/torque/torque.log`.
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Anything else that might help diagnose the issue, such as recent config changes or worktree state.
+    validations:
+      required: false

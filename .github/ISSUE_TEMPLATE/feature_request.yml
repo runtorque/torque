@@ -1,0 +1,43 @@
+name: Feature request
+description: Suggest an improvement or new capability for Torque.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting an improvement. Please describe the workflow or problem so we can evaluate the right solution.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem being solved
+      description: What workflow, limitation, or pain point should this address?
+      placeholder: "I want to... because..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed solution
+      description: Describe the behavior, UI, command, or workflow you would like to see.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What workarounds or different approaches have you considered?
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add screenshots, links, examples, or related issues if useful.
+    validations:
+      required: false
