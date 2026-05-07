@@ -3535,11 +3535,12 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 "board_panel_height",
                 "selected_principal_id",
                 "standalone_panel_layout",
+                "detached_panels",
                 "engineer_panel_split_fraction",
             ):
                 val = state_dict.get(key)
                 if val is not None:
-                    if key == "standalone_panel_layout":
+                    if key in {"standalone_panel_layout", "detached_panels"}:
                         val = json.dumps(val)
                     c.execute(
                         "INSERT INTO ui_state (key, value) VALUES (?,?)",
@@ -3753,6 +3754,14 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 board_card_density_by_group = {}
         except Exception:
             board_card_density_by_group = {}
+        try:
+            detached_panels = json.loads(
+                ui.get("detached_panels", "{}") or "{}"
+            )
+            if not isinstance(detached_panels, dict):
+                detached_panels = {}
+        except Exception:
+            detached_panels = {}
 
         # Global settings
         global_settings = {}
@@ -3821,6 +3830,7 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 json.loads(ui.get("standalone_panel_layout", "{}"))
                 if ui.get("standalone_panel_layout") else {}
             ),
+            "detached_panels": detached_panels,
             "engineer_panel_split_fraction": float(
                 ui.get("engineer_panel_split_fraction", "0.30") or "0.30"
             ),

@@ -1385,6 +1385,7 @@ class MatrixState:
         # architect's engineers + their workers.
         self.selected_principal_id: str = ""
         self.standalone_panel_layout: dict = {}
+        self.detached_panels: dict[str, dict] = {}
         self.engineer_panel_split_fraction: float = 0.30
         self.events_dismissed_attention: dict[str, float] = {}
         self.board_filters_by_group: dict[str, dict] = {}
@@ -1948,6 +1949,7 @@ class MatrixState:
             "board_panel_height": self.board_panel_height,
             "selected_principal_id": self.selected_principal_id,
             "standalone_panel_layout": self.standalone_panel_layout,
+            "detached_panels": self.detached_panels,
             "engineer_panel_split_fraction": self.engineer_panel_split_fraction,
             "events_dismissed_attention": self.events_dismissed_attention,
             "board_filters_by_group": self.board_filters_by_group,
@@ -2086,6 +2088,7 @@ class MatrixState:
             "board_panel_height": self.board_panel_height,
             "selected_principal_id": self.selected_principal_id,
             "standalone_panel_layout": self.standalone_panel_layout,
+            "detached_panels": self.detached_panels,
             "engineer_panel_split_fraction": self.engineer_panel_split_fraction,
             "events_dismissed_attention": self.events_dismissed_attention,
             "board_filters_by_group": self.board_filters_by_group,
@@ -2857,6 +2860,7 @@ class MatrixState:
             self.standalone_panel_layout = data.get(
                 "standalone_panel_layout", {}
             ) or {}
+            self.detached_panels = data.get("detached_panels", {}) or {}
             try:
                 self.engineer_panel_split_fraction = float(
                     data.get("engineer_panel_split_fraction", 0.30) or 0.30

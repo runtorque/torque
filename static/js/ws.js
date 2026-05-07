@@ -8,6 +8,7 @@ let state = {
   children: {},
   active_session_id: null,
   selected_principal_id: '',
+  detached_panels: {},
   engineer_panel_split_fraction: 0.30,
 };
 let dragInProgress = false;
@@ -568,6 +569,7 @@ function _handleFullState(msg) {
   }
   // Restore board panel state on first load
   if (typeof _restorePanelState === 'function') _restorePanelState();
+  if (typeof maybeOpenWelcomeOnBoot === 'function') maybeOpenWelcomeOnBoot();
 }
 
 /* -- Delta patching ------------------------------------------------------- */

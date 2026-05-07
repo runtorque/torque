@@ -33,8 +33,37 @@ var _standaloneFloatMinHeight = 260;
 var _standaloneDefaultFloatWidth = 460;
 var _standaloneDefaultFloatHeight = 320;
 var _standaloneFloatMargin = 12;
+var _standaloneDetachedRestoreAttempted = false;
+var _detachedWindowInfo = _detectDetachedWindowInfo();
+
+function _detectDetachedWindowInfo() {
+  if (typeof URLSearchParams === 'undefined' || typeof location === 'undefined') {
+    return { active: false, panel: '', label: '' };
+  }
+  var params = new URLSearchParams(location.search || '');
+  var panel = String(params.get('panel') || '').trim();
+  var label = String(params.get('window') || '').trim();
+  return {
+    active: !!(panel && label),
+    panel: panel,
+    label: label,
+  };
+}
+
+if (_detachedWindowInfo.active && document && document.body && document.body.classList) {
+  document.body.classList.add('detached-window');
+  if (document.body.dataset) {
+    document.body.dataset.detachedPanel = _detachedWindowInfo.panel;
+    document.body.dataset.detachedWindow = _detachedWindowInfo.label;
+  }
+}
+
+function _detachedWindowActive() {
+  return !!(_detachedWindowInfo && _detachedWindowInfo.active);
+}
 
 function _standalonePanelsEnabled() {
+  if (_detachedWindowActive()) return false;
   return typeof isEmbeddedTerminalMode === 'function' && isEmbeddedTerminalMode();
 }
 
@@ -822,6 +851,10 @@ function _standalonePanelActionIcon(iconName) {
     addPath('M9.5 3.5H12.5V6.5');
     addPath('M12.5 3.5L7 9');
     addPath('M10.5 9.5V11.25C10.5 11.9404 9.9404 12.5 9.25 12.5H4.75C4.0596 12.5 3.5 11.9404 3.5 11.25V6.75C3.5 6.0596 4.0596 5.5 4.75 5.5H6.5');
+  } else if (iconName === 'detach') {
+    addPath('M3.5 4.75C3.5 4.0596 4.0596 3.5 4.75 3.5H11.25C11.9404 3.5 12.5 4.0596 12.5 4.75V11.25C12.5 11.9404 11.9404 12.5 11.25 12.5H4.75C4.0596 12.5 3.5 11.9404 3.5 11.25V4.75Z');
+    addPath('M6 6H10V10');
+    addPath('M10 6L5.75 10.25');
   } else if (iconName === 'dock') {
     addPath('M3.5 12.25H12.5');
     addPath('M5.75 8.75L8 11.25L10.25 8.75');
@@ -883,6 +916,10 @@ function _standaloneBuildZone(zoneName, rootEl, roots, placed) {
 
     var actions = _makeStandaloneNode('div', 'standalone-panel-zone-actions');
     if (zone.active) {
+      var detachBtn = _standalonePanelActionButton('Detach to OS window', 'detach', function(activeApp) {
+        return function() { _standaloneDetachPanel(activeApp); };
+      }(zone.active));
+      actions.appendChild(detachBtn);
       var floatBtn = _standalonePanelActionButton('Float', 'float', function(activeApp) {
         return function() { _standaloneMovePanelToZone(activeApp, 'float'); };
       }(zone.active));
@@ -916,6 +953,10 @@ function _standaloneFloatHeader(app) {
   var title = _makeStandaloneNode('div', 'standalone-float-title', _standalonePanelTitle(app));
   header.appendChild(title);
   var actions = _makeStandaloneNode('div', 'standalone-float-actions');
+  var detach = _standalonePanelActionButton('Detach to OS window', 'detach', function() {
+    _standaloneDetachPanel(app);
+  });
+  actions.appendChild(detach);
   var dockBottom = _standalonePanelActionButton('Dock', 'dock', function() {
     _standaloneMovePanelToZone(app, _standalonePanelDefaults[app] || 'bottom');
   });
@@ -1186,6 +1227,153 @@ function standalonePanelClose(app) {
   } else {
     _standaloneTogglePanel(app);
   }
+}
+
+function _detachedPanelsState() {
+  if (!state) return {};
+  if (!state.detached_panels || typeof state.detached_panels !== 'object') {
+    state.detached_panels = {};
+  }
+  return state.detached_panels;
+}
+
+function _saveDetachedPanels(next) {
+  if (state) state.detached_panels = next || {};
+  if (typeof send === 'function') {
+    send({ cmd: 'ui_set_detached_panels', detached_panels: state.detached_panels || {} });
+  }
+}
+
+function _detachedPanelEntry(app) {
+  var panels = _detachedPanelsState();
+  var entry = panels && panels[app];
+  return entry && typeof entry === 'object' ? entry : null;
+}
+
+function _detachedBoundsForPanel(app) {
+  var layout = _standalonePanelLayout || null;
+  if (!layout && _standalonePanelsEnabled()) layout = _standalonePanelCurrentLayout();
+  var frame = layout
+    ? ((layout.floats && layout.floats[app]) || (_standaloneFloatFrameCache(layout, false)[app]) || null)
+    : null;
+  if (frame) {
+    return {
+      x: frame.x,
+      y: frame.y,
+      width: Math.max(frame.width || _standaloneDefaultFloatWidth, 420),
+      height: Math.max(frame.height || _standaloneDefaultFloatHeight, 300),
+    };
+  }
+  return {
+    width: app === 'board' || app === 'engineer' ? 980 : 760,
+    height: app === 'board' || app === 'engineer' ? 680 : 560,
+  };
+}
+
+function _standaloneDetachPanel(app) {
+  if (!app || !window.nativeApi || !window.nativeApi.available()) {
+    if (typeof _showToast === 'function') _showToast('Detached OS windows are available in the Tauri desktop shell.', 'info');
+    return Promise.resolve('');
+  }
+  var existing = _detachedPanelEntry(app);
+  if (existing && existing.label) {
+    return window.nativeApi.focusWindow(existing.label).then(function() { return existing.label; });
+  }
+  var bounds = _detachedBoundsForPanel(app);
+  if (!_standalonePanelsEnabled()) {
+    return window.nativeApi.detach(app, bounds).then(function(label) {
+      var panels = Object.assign({}, _detachedPanelsState());
+      panels[app] = { label: label, bounds: bounds };
+      _saveDetachedPanels(panels);
+      if (typeof _activePanelApp !== 'undefined' && _activePanelApp === app) {
+        _activePanelApp = '';
+        var panelEl = document.getElementById('bottom-panel');
+        if (panelEl && panelEl.classList) panelEl.classList.add('collapsed');
+      }
+      return label;
+    });
+  }
+  return window.nativeApi.detach(app, bounds).then(function(label) {
+    var panels = Object.assign({}, _detachedPanelsState());
+    panels[app] = { label: label, bounds: bounds };
+    _saveDetachedPanels(panels);
+    var layout = _standaloneClone(_standalonePanelCurrentLayout());
+    _standaloneRemovePanelFromLayout(layout, app);
+    layout.last_active = layout.right.active || layout.bottom.active || 'board';
+    _standalonePanelSetLayout(layout);
+    return label;
+  });
+}
+
+function detachActivePanel() {
+  var app = '';
+  if (_detachedWindowActive()) return Promise.resolve('');
+  if (typeof _standalonePanelActiveApp === 'function' && _standalonePanelsEnabled()) {
+    app = _standalonePanelActiveApp();
+  } else if (typeof _activePanelApp !== 'undefined') {
+    app = _activePanelApp || 'board';
+  }
+  return _standaloneDetachPanel(app || 'board');
+}
+
+function _standaloneRestoreDetachedPanels() {
+  if (_standaloneDetachedRestoreAttempted || _detachedWindowActive()) return;
+  _standaloneDetachedRestoreAttempted = true;
+  if (!window.nativeApi || !window.nativeApi.available()) return;
+  var panels = _detachedPanelsState();
+  Object.keys(panels).forEach(function(app) {
+    var entry = panels[app];
+    if (!entry || typeof entry !== 'object') return;
+    window.nativeApi.detach(app, entry.bounds || null).then(function(label) {
+      if (label && label !== entry.label) {
+        var next = Object.assign({}, _detachedPanelsState());
+        next[app] = Object.assign({}, entry, { label: label });
+        _saveDetachedPanels(next);
+      }
+    }).catch(function() {});
+  });
+}
+
+function torqueDetachedWindowClosed(panel, label) {
+  var panels = Object.assign({}, _detachedPanelsState());
+  var entry = panels[panel];
+  if (entry && (!label || entry.label === label)) {
+    delete panels[panel];
+    _saveDetachedPanels(panels);
+  }
+  if (typeof _restoreStandalonePanelState === 'function'
+      && typeof _standalonePanelsEnabled === 'function'
+      && _standalonePanelsEnabled()) {
+    var layout = _standaloneClone(_standalonePanelCurrentLayout());
+    if (!_standalonePanelPlacement(panel)) {
+      var zone = _standalonePanelDefaults[panel] || 'bottom';
+      layout[zone].open = true;
+      layout[zone].tabs.push(panel);
+      layout[zone].tabs = _standaloneEnsureUniqueTabs(layout[zone].tabs);
+      layout[zone].active = panel;
+      layout.last_active = panel;
+      _standalonePanelSetLayout(layout);
+    }
+  }
+}
+
+function torqueDetachedWindowBoundsChanged() {
+  if (!_detachedWindowActive() || !window.nativeApi || !window.nativeApi.available()) return;
+  if (torqueDetachedWindowBoundsChanged._timer && typeof clearTimeout === 'function') {
+    clearTimeout(torqueDetachedWindowBoundsChanged._timer);
+  }
+  torqueDetachedWindowBoundsChanged._timer = setTimeout(function() {
+    window.nativeApi.currentWindowBounds().then(function(bounds) {
+      if (!bounds) return;
+      var panels = Object.assign({}, _detachedPanelsState());
+      var panel = _detachedWindowInfo.panel;
+      panels[panel] = Object.assign({}, panels[panel] || {}, {
+        label: _detachedWindowInfo.label,
+        bounds: bounds,
+      });
+      _saveDetachedPanels(panels);
+    }).catch(function() {});
+  }, 300);
 }
 
 function standalonePanelStartFloatDrag(event, app) {

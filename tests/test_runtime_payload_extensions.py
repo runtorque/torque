@@ -1,5 +1,6 @@
 import os
 import time
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -37,6 +38,31 @@ class RuntimePayloadExtensionTests(unittest.TestCase):
         self.assertLessEqual(payload["started_at"], time.time() + 1)
         self.assertEqual(payload["log_path"], str(server.DATA_DIR / "torque.log"))
         self.assertIsInstance(payload["log_path"], str)
+
+    def test_log_tail_parser_paginates_recent_entries(self):
+        install_aiohttp_stub()
+        from torque import server
+
+        with tempfile.TemporaryDirectory() as tmp:
+            log_path = Path(tmp) / "torque.log"
+            log_path.write_text(
+                "12:00:00 INFO    booted\n"
+                "12:00:01 WARNING slow path\n"
+                "12:00:02 ERROR   failed thing\n",
+                encoding="utf-8",
+            )
+
+            payload = server._tail_log_entries(log_path, since=0, limit=2, tail_bytes=4096)
+
+        self.assertEqual([line["level"] for line in payload["lines"]], ["WARNING", "ERROR"])
+        self.assertEqual(payload["lines"][-1]["message"], "failed thing")
+        self.assertGreater(payload["cursor"], 0)
+        raw = (
+            "12:00:00 INFO    booted\n"
+            "12:00:01 WARNING slow path\n"
+            "12:00:02 ERROR   failed thing\n"
+        )
+        self.assertEqual(payload["size"], len(raw.encode("utf-8")))
 
 
 if __name__ == "__main__":

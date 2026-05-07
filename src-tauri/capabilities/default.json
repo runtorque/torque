@@ -1,9 +1,12 @@
 {
   "$schema": "../gen/schemas/capabilities.json",
   "identifier": "torque-default",
-  "description": "Minimal T1 capability set — webview-around-localhost only.",
-  "windows": ["main"],
+  "description": "Torque desktop shell permissions for native menus, detached panels, logs, dialogs, and shell links.",
+  "windows": ["*"],
   "permissions": [
-    "core:default"
+    "core:default",
+    "core:webview:allow-create-webview-window",
+    "shell:allow-open",
+    "dialog:allow-confirm"
   ]
 }

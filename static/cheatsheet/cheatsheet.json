@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "categories": [
+    {
+      "id": "app",
+      "title": "App",
+      "items": [
+        { "id": "new_group", "title": "New Group", "accelerator": "CmdOrCtrl+N", "description": "Create a Torque group." },
+        { "id": "show_welcome", "title": "Show Welcome", "accelerator": "CmdOrCtrl+Shift+H", "description": "Open the first-run welcome guide." },
+        { "id": "keyboard_shortcuts", "title": "Keyboard Shortcuts", "accelerator": "CmdOrCtrl+Shift+/", "description": "Open this cheatsheet." }
+      ]
+    },
+    {
+      "id": "window",
+      "title": "Window",
+      "items": [
+        { "id": "close_window", "title": "Close Window", "accelerator": "CmdOrCtrl+W", "description": "Close or reattach the active window." },
+        { "id": "detach_active_panel", "title": "Detach Active Panel", "accelerator": "CmdOrCtrl+Alt+D", "description": "Move the active utility panel into a native OS window." },
+        { "id": "reattach_all", "title": "Reattach All Panels", "accelerator": "CmdOrCtrl+Shift+W", "description": "Return detached panels to the main window." }
+      ]
+    },
+    {
+      "id": "view",
+      "title": "View",
+      "items": [
+        { "id": "reload", "title": "Reload", "accelerator": "CmdOrCtrl+R", "description": "Reload the current Torque view." },
+        { "id": "force_reload", "title": "Force Reload", "accelerator": "CmdOrCtrl+Shift+R", "description": "Reload bypassing browser caches." },
+        { "id": "show_logs", "title": "Show Logs", "accelerator": "CmdOrCtrl+L", "description": "Open the live Torque log viewer." },
+        { "id": "devtools", "title": "Developer Tools", "accelerator": "CmdOrCtrl+Alt+I", "description": "Open webview developer tools in debug builds." }
+      ]
+    },
+    {
+      "id": "navigation",
+      "title": "Navigation",
+      "items": [
+        { "id": "focus_up", "title": "Move Focus Up", "accelerator": "ArrowUp", "description": "Move between agent cards or board cards." },
+        { "id": "focus_down", "title": "Move Focus Down", "accelerator": "ArrowDown", "description": "Move between agent cards or board cards." },
+        { "id": "open_focused", "title": "Open Focused Item", "accelerator": "Enter", "description": "Activate the focused agent, terminal, or board card." },
+        { "id": "delete_focused", "title": "Remove Focused Item", "accelerator": "Delete", "description": "Remove the focused item when allowed." }
+      ]
+    }
+  ]
+}
