@@ -638,6 +638,45 @@ test('focused engineer events tab renders server-merged cell events', () => {
   assert.match(panel.innerHTML, /Live tool call/);
 });
 
+test('architect Journal header keeps entry and decision counts grouped', () => {
+  const { context, panel } = createHarness();
+  context.state.agents = {
+    'arch-1': {
+      id: 'arch-1',
+      name: 'Planner',
+      kind: 'architect',
+      group: 'alpha',
+      cell_type: 'agent',
+    },
+  };
+  context.state.architect_journals = {
+    'arch-1': [
+      { id: 'j-2', architect_id: 'arch-1', type: 'observation', entry: 'Second journal entry', timestamp: 20 },
+      { id: 'j-1', architect_id: 'arch-1', type: 'observation', entry: 'First journal entry', timestamp: 10 },
+    ],
+  };
+  context.state.decisions = {
+    'decision-1': { id: 'decision-1', architect_id: 'arch-1', title: 'Adopt layout', status: 'accepted' },
+  };
+  context.focusedItemId = 'arch-1';
+  vm.runInContext(`_agentPanelLastSelectedTabByKind.architect = 'journal';`, context);
+
+  context.renderAgentPanel();
+
+  assert.match(panel.innerHTML, /data-agent-panel-kind="architect" data-agent-panel-tab="journal"/);
+  assert.match(
+    panel.innerHTML,
+    /<span class="agent-panel-worklog-title">Journal<\/span><span class="agent-panel-worklog-count" data-agent-panel-journal-count>2<\/span><span class="agent-panel-worklog-note"> · 1 decision<\/span>/
+  );
+
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  assert.match(
+    css,
+    /\.agent-panel-panel\[data-agent-panel-kind="architect"\]\[data-agent-panel-tab="journal"\] \.agent-panel-worklog-header\s*\{[^}]*justify-content:\s*flex-start;/
+  );
+  assert.match(css, /\.agent-panel-worklog-header\s*\{[^}]*justify-content:\s*space-between;/);
+});
+
 test('architect panel filters decisions, hired engineers, and messages to the focused architect', () => {
   const { context, panel } = createHarness();
   context.state.agents = {
