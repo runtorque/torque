@@ -169,7 +169,11 @@ function _resolveFocusedAgent() {
         );
       }
     }
-    return null;
+  }
+  if (typeof selectedAgentId !== 'undefined'
+      && selectedAgentId
+      && state.agents[selectedAgentId]) {
+    return _agentPanelAgentVisibleInCurrentMode(state.agents[selectedAgentId]);
   }
   return null;
 }

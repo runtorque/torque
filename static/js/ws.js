@@ -18,6 +18,55 @@ let selectedTerminalId = null;
 let focusedItemId = null;
 let _cachedAgentTemplates = [];
 
+function _selectedAgentRecord(agentId) {
+  agentId = String(agentId || '').trim();
+  if (!agentId || !state || !state.agents) return null;
+  var agent = state.agents[agentId] || null;
+  if (!agent) return null;
+  if (typeof _isTombstonedAgent === 'function' && _isTombstonedAgent(agent)) {
+    return null;
+  }
+  return agent;
+}
+
+function _selectedAgentFocusId(agent) {
+  if (!agent || !agent.id) return '';
+  // Architect agents render as principal cards in the main grid. Using the
+  // principal focus id keeps detached windows from having their focus reset to
+  // a grid control during the next render pass.
+  if ((agent.kind || '') === 'architect') {
+    return 'principal:' + (agent.group || '') + ':' + agent.id;
+  }
+  return agent.id || '';
+}
+
+function _syncActiveGroupToSelectedAgent(agent) {
+  if (!agent || !agent.group) return;
+  if (typeof _singleGroupModeEnabled === 'function'
+      && !_singleGroupModeEnabled()) return;
+  var group = String(agent.group || '').trim();
+  if (!group) return;
+  if (state) state.active_group = group;
+  if (typeof _pendingActiveGroup !== 'undefined') _pendingActiveGroup = '';
+  if (typeof _writeStoredActiveGroup === 'function') _writeStoredActiveGroup(group);
+}
+
+function _applySelectedAgentFromServer(agentId) {
+  var nextSelectedAgentId = String(agentId || '').trim();
+  var agent = _selectedAgentRecord(nextSelectedAgentId);
+  if (agent) {
+    if (state) state.selected_agent_id = nextSelectedAgentId;
+    selectedAgentId = nextSelectedAgentId;
+    focusedItemId = _selectedAgentFocusId(agent) || nextSelectedAgentId;
+    _syncActiveGroupToSelectedAgent(agent);
+    return nextSelectedAgentId;
+  }
+  if (state) state.selected_agent_id = '';
+  selectedAgentId = null;
+  focusedItemId = null;
+  return '';
+}
+
 function _wsRoleList(msg) {
   return (msg && (msg.roles || msg.templates)) || [];
 }
@@ -531,11 +580,9 @@ function _handleFullState(msg) {
       && state.agents[state.selected_agent_id]
       && !(typeof _isTombstonedAgent === 'function'
         && _isTombstonedAgent(state.agents[state.selected_agent_id]))) {
-    restoredSelectedAgentId = state.selected_agent_id;
-    selectedAgentId = restoredSelectedAgentId;
-    if (!focusedItemId) focusedItemId = restoredSelectedAgentId;
+    restoredSelectedAgentId = _applySelectedAgentFromServer(state.selected_agent_id);
   } else if (state.selected_agent_id) {
-    state.selected_agent_id = '';
+    _applySelectedAgentFromServer('');
   }
   if (typeof state.engineer_panel_split_fraction !== 'number') {
     var _splitFraction = Number(state.engineer_panel_split_fraction);
@@ -1928,17 +1975,7 @@ function _applyDelta(ops) {
           : [];
         state[op.key] = op.value;
         if (op.key === 'selected_agent_id') {
-          var nextSelectedAgentId = String(op.value || '');
-          if (nextSelectedAgentId
-              && state.agents
-              && state.agents[nextSelectedAgentId]
-              && !(typeof _isTombstonedAgent === 'function'
-                && _isTombstonedAgent(state.agents[nextSelectedAgentId]))) {
-            selectedAgentId = nextSelectedAgentId;
-            if (!focusedItemId) focusedItemId = nextSelectedAgentId;
-          } else if (!nextSelectedAgentId) {
-            selectedAgentId = null;
-          }
+          _applySelectedAgentFromServer(op.value || '');
         }
         if (op.key === 'standalone_panel_layout'
             && typeof _standalonePanelSetLayoutFromState === 'function') {
