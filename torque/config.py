@@ -3,6 +3,8 @@
 import logging
 import os
 import re
+import sys
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 WS_PORT = int(os.environ.get("TORQUE_PORT", 18932))
@@ -104,6 +106,11 @@ EVENT_INGEST_DB_FILE: Path = DATA_DIR / "event_ingest.db"
 EVENT_INGEST_LOG_FILE: Path = DATA_DIR / "event_ingest.log"
 EVENT_INGEST_MAX_ROWS: int = int(
     os.environ.get("TORQUE_EVENT_INGEST_MAX_ROWS", "50000"))
+LOG_ROTATION_MAX_BYTES: int = int(
+    os.environ.get("TORQUE_LOG_ROTATION_MAX_BYTES", str(10 * 1024 * 1024)))
+LOG_ROTATION_BACKUP_COUNT: int = int(
+    os.environ.get("TORQUE_LOG_ROTATION_BACKUP_COUNT", "5"))
+_STALE_PRE_KINDS_BACKUP_NAME = "torque.db.pre-kinds.bak"
 
 
 def init_paths(script_dir: Path):
@@ -125,6 +132,7 @@ def init_paths(script_dir: Path):
     _setup_logging()
     log.info("Logging initialized at %s", LOG_FILE)
     log.info("Runtime data directory: %s", DATA_DIR)
+    _cleanup_stale_pre_kinds_backup(DATA_DIR)
 
 
 log = logging.getLogger("torque")
@@ -136,10 +144,34 @@ def _managed_log_handlers():
             yield handler
 
 
+def _build_log_handler(target: Path) -> logging.Handler:
+    try:
+        return RotatingFileHandler(
+            str(target),
+            maxBytes=LOG_ROTATION_MAX_BYTES,
+            backupCount=LOG_ROTATION_BACKUP_COUNT,
+            encoding="utf-8",
+        )
+    except Exception as exc:  # pragma: no cover - exercised via fallback test
+        try:
+            handler = logging.FileHandler(target, encoding="utf-8")
+        except Exception:
+            handler = logging.StreamHandler(sys.stderr)
+        handler._torque_rotation_error = repr(exc)
+        return handler
+
+
 def _setup_logging():
     target = LOG_FILE.expanduser().resolve()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target_str = str(target)
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target_str = str(target)
+    except Exception as exc:
+        target_str = ""
+        target = None
+        setup_error = exc
+    else:
+        setup_error = None
 
     for handler in list(_managed_log_handlers()):
         if getattr(handler, "baseFilename", "") == target_str:
@@ -154,12 +186,33 @@ def _setup_logging():
 
     log.setLevel(logging.DEBUG)
     log.propagate = False
-    fh = logging.FileHandler(target, encoding="utf-8")
+    fh = _build_log_handler(target) if target is not None else logging.StreamHandler(sys.stderr)
     fh._torque_managed = True
     fh.setFormatter(logging.Formatter(
         "%(asctime)s %(levelname)-7s %(message)s", datefmt="%H:%M:%S"
     ))
     log.addHandler(fh)
+    if setup_error is not None:
+        log.warning("Logging path setup failed for %s: %s", LOG_FILE, setup_error)
+    elif getattr(fh, "_torque_rotation_error", None):
+        log.warning(
+            "Rotating log handler unavailable for %s; using fallback: %s",
+            target,
+            fh._torque_rotation_error,
+        )
+
+
+def _cleanup_stale_pre_kinds_backup(data_dir: Path | None = None) -> bool:
+    backup_path = Path(data_dir or DATA_DIR) / _STALE_PRE_KINDS_BACKUP_NAME
+    try:
+        backup_path.unlink()
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        log.warning("Could not remove stale pre-kinds backup %s: %s", backup_path, exc)
+        return False
+    log.info("Removed stale pre-kinds backup %s", backup_path)
+    return True
 
 
 _setup_logging()

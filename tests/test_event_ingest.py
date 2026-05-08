@@ -3,6 +3,7 @@
 import asyncio
 import contextlib
 import json
+import logging
 import os
 import signal
 import sqlite3
@@ -10,6 +11,7 @@ import tempfile
 import time
 import unittest
 import warnings
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from unittest import mock
 
@@ -466,6 +468,49 @@ class EventIngestProtocolTests(unittest.IsolatedAsyncioTestCase):
 
 
 class EventIngestLifecycleTests(unittest.TestCase):
+    def test_configure_logging_uses_rotating_handler_and_rolls_over(self):
+        logger = event_ingest_daemon.log
+        old_level = logger.level
+        old_propagate = logger.propagate
+        old_max_bytes = event_ingest_daemon.LOG_ROTATION_MAX_BYTES
+        old_backup_count = event_ingest_daemon.LOG_ROTATION_BACKUP_COUNT
+
+        try:
+            event_ingest_daemon.LOG_ROTATION_MAX_BYTES = 180
+            event_ingest_daemon.LOG_ROTATION_BACKUP_COUNT = 2
+            with tempfile.TemporaryDirectory() as tmp:
+                log_path = Path(tmp) / event_ingest_daemon.DEFAULT_LOG_FILE_NAME
+                event_ingest_daemon._configure_logging(log_path)
+
+                handlers = [
+                    handler for handler in logger.handlers
+                    if getattr(handler, "_torque_event_ingest_managed", False)
+                ]
+                self.assertEqual(len(handlers), 1)
+                handler = handlers[0]
+                self.assertIsInstance(handler, RotatingFileHandler)
+                self.assertEqual(handler.maxBytes, 180)
+                self.assertEqual(handler.backupCount, 2)
+
+                for idx in range(20):
+                    event_ingest_daemon.log.info(
+                        "event-ingest-rotation-test-%02d %s", idx, "x" * 80
+                    )
+                handler.flush()
+
+                self.assertTrue(log_path.exists())
+                self.assertTrue(log_path.with_name("event_ingest.log.1").exists())
+        finally:
+            event_ingest_daemon.LOG_ROTATION_MAX_BYTES = old_max_bytes
+            event_ingest_daemon.LOG_ROTATION_BACKUP_COUNT = old_backup_count
+            for handler in list(logger.handlers):
+                if getattr(handler, "_torque_event_ingest_managed", False):
+                    logger.removeHandler(handler)
+                    with contextlib.suppress(Exception):
+                        handler.close()
+            logger.setLevel(old_level)
+            logger.propagate = old_propagate
+
     def test_ensure_running_replaces_protocol_mismatch_sidecar(self):
         with tempfile.TemporaryDirectory() as tmp:
             data_dir = Path(tmp)
