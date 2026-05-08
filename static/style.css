@@ -7418,6 +7418,7 @@ button.agent-panel-hierarchy-crumb:focus-visible {
 .architect-decision-toggle {
   display: inline-flex;
   align-items: center;
+  flex: 1 1 auto;
   gap: 8px;
   background: none;
   border: none;

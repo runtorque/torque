@@ -1046,6 +1046,46 @@ test('focused architect decision rows render parseable click handlers and expand
   assert.match(panel.innerHTML, /d2/);
 });
 
+test('focused architect decision rows keep action buttons in a fixed right column', () => {
+  const { context, panel } = createHarness();
+  setFocusedAgent(context, {
+    id: 'arch-1',
+    name: 'Planner',
+    kind: 'architect',
+    group: 'alpha',
+    cell_type: 'agent',
+  });
+  context.state.decisions = {
+    d1: {
+      id: 'd1',
+      architect_id: 'arch-1',
+      title: 'A very long accepted decision title that should ellipsize before it can push buttons',
+      status: 'accepted',
+      updated_at: 40,
+    },
+    d2: {
+      id: 'd2',
+      architect_id: 'arch-1',
+      title: 'Short accepted decision',
+      status: 'accepted',
+      updated_at: 41,
+    },
+  };
+
+  context.renderAgentPanel();
+
+  assert.match(panel.innerHTML, /architect-decision-toggle/);
+  assert.match(panel.innerHTML, /detail-section-card-actions/);
+  assert.match(panel.innerHTML, /Edit/);
+  assert.match(panel.innerHTML, /Archive/);
+
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  assert.match(
+    css,
+    /\.architect-decision-toggle\s*\{[^}]*flex:\s*1 1 auto;/
+  );
+});
+
 test('focused architect decision edit sends the existing update command', () => {
   const { context, sendCalls } = createHarness();
   setFocusedAgent(context, {
