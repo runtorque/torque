@@ -17,6 +17,7 @@ let selectedAgentId = null;
 let selectedTerminalId = null;
 let focusedItemId = null;
 let _cachedAgentTemplates = [];
+var _selectedAgentGroupSyncedDuringDelta = false;
 
 function _selectedAgentRecord(agentId) {
   agentId = String(agentId || '').trim();
@@ -46,6 +47,9 @@ function _syncActiveGroupToSelectedAgent(agent) {
       && !_singleGroupModeEnabled()) return;
   var group = String(agent.group || '').trim();
   if (!group) return;
+  if (state && String(state.active_group || '') !== group) {
+    _selectedAgentGroupSyncedDuringDelta = true;
+  }
   if (state) state.active_group = group;
   if (typeof _pendingActiveGroup !== 'undefined') _pendingActiveGroup = '';
   if (typeof _writeStoredActiveGroup === 'function') _writeStoredActiveGroup(group);
@@ -653,7 +657,10 @@ function _handleDelta(msg) {
   const opGroupHints = _captureDeltaGroupHints(msg.ops);
   const invalidations = _deltaSurfaceInvalidations(msg.ops, opGroupHints);
   _expectedSeq = msg.seq + 1;
+  _selectedAgentGroupSyncedDuringDelta = false;
   _applyDelta(msg.ops);
+  const selectedAgentGroupSynced = _selectedAgentGroupSyncedDuringDelta;
+  _selectedAgentGroupSyncedDuringDelta = false;
   const taskDeltaChanges = _collectBoardTaskDeltaChanges(msg.ops, opGroupHints);
   if (taskDeltaChanges.length
       && typeof _agentPanelInvalidateWorkerTaskCacheForDeltas === 'function') {
@@ -676,6 +683,7 @@ function _handleDelta(msg) {
   if (prevGroup !== nextGroup
       && typeof _singleGroupModeEnabled === 'function'
       && _singleGroupModeEnabled()
+      && !selectedAgentGroupSynced
       && typeof _activeGroupTransition === 'function') {
     const transition = _activeGroupTransition(prevGroup, nextGroup);
     if (transition && transition.changed) return;

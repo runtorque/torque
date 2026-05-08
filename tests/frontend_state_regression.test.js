@@ -19773,6 +19773,19 @@ test('selected_agent_id deltas move detached Agent panel focus to the main selec
   assert.equal(jsonValue(context, `state.active_group`), 'beta');
   assert.match(panel.innerHTML, /Agent Two/);
   assert.doesNotMatch(panel.innerHTML, /Agent One/);
+
+  context._handleDelta({
+    seq: 2,
+    ops: [
+      { op: 'ui_update', key: 'selected_agent_id', value: 'agent-1' },
+    ],
+  });
+
+  assert.equal(jsonValue(context, `selectedAgentId`), 'agent-1');
+  assert.equal(jsonValue(context, `focusedItemId`), 'agent-1');
+  assert.equal(jsonValue(context, `state.active_group`), 'alpha');
+  assert.match(panel.innerHTML, /Agent One/);
+  assert.doesNotMatch(panel.innerHTML, /Agent Two/);
 });
 
 test('selected_agent_id deltas rescope detached Events panel to selected agent group', () => {
@@ -19813,6 +19826,18 @@ test('selected_agent_id deltas rescope detached Events panel to selected agent g
   assert.equal(jsonValue(context, `focusedItemId`), 'agent-2');
   assert.equal(jsonValue(context, `state.active_group`), 'beta');
   assert.match(panel.innerHTML, /recent activity for beta/);
+
+  context._handleDelta({
+    seq: 2,
+    ops: [
+      { op: 'ui_update', key: 'selected_agent_id', value: 'agent-1' },
+    ],
+  });
+
+  assert.equal(jsonValue(context, `selectedAgentId`), 'agent-1');
+  assert.equal(jsonValue(context, `focusedItemId`), 'agent-1');
+  assert.equal(jsonValue(context, `state.active_group`), 'alpha');
+  assert.match(panel.innerHTML, /recent activity for alpha/);
 });
 
 test('standalone task deltas rerender only affected visible docked surfaces', () => {
