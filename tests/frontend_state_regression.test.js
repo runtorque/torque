@@ -19740,6 +19740,106 @@ test('full-state hydration mirrors persisted selected_agent_id for detached Agen
   assert.equal(jsonValue(context, `focusedItemId`), 'agent-1');
 });
 
+test('selected_agent_id deltas move detached Agent panel focus to the main selection', () => {
+  const { context, document } = createEngineerWsHarness();
+  const panel = document.getElementById('panel-agent');
+
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    state.groups = { alpha: ['agent-1'], beta: ['agent-2'] };
+    state.active_group = 'alpha';
+    state.agents = {
+      'agent-1': { id: 'agent-1', name: 'Agent One', group: 'alpha', kind: 'worker', cell_type: 'agent' },
+      'agent-2': { id: 'agent-2', name: 'Agent Two', group: 'beta', kind: 'worker', cell_type: 'agent' },
+    };
+    selectedAgentId = 'agent-1';
+    focusedItemId = 'agent-1';
+    _activePanelApp = 'engineer';
+    _expectedSeq = 1;
+    renderAgentPanel();
+  `);
+
+  assert.match(panel.innerHTML, /Agent One/);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [
+      { op: 'ui_update', key: 'selected_agent_id', value: 'agent-2' },
+    ],
+  });
+
+  assert.equal(jsonValue(context, `selectedAgentId`), 'agent-2');
+  assert.equal(jsonValue(context, `focusedItemId`), 'agent-2');
+  assert.equal(jsonValue(context, `state.active_group`), 'beta');
+  assert.match(panel.innerHTML, /Agent Two/);
+  assert.doesNotMatch(panel.innerHTML, /Agent One/);
+
+  context._handleDelta({
+    seq: 2,
+    ops: [
+      { op: 'ui_update', key: 'selected_agent_id', value: 'agent-1' },
+    ],
+  });
+
+  assert.equal(jsonValue(context, `selectedAgentId`), 'agent-1');
+  assert.equal(jsonValue(context, `focusedItemId`), 'agent-1');
+  assert.equal(jsonValue(context, `state.active_group`), 'alpha');
+  assert.match(panel.innerHTML, /Agent One/);
+  assert.doesNotMatch(panel.innerHTML, /Agent Two/);
+});
+
+test('selected_agent_id deltas rescope detached Events panel to selected agent group', () => {
+  const { sandbox, document } = createSandbox();
+  document.register('main');
+  const panel = document.register('panel-events');
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/ws.js');
+  loadScript(context, 'static/js/render.js');
+  loadScript(context, 'static/js/modals/task-modal.js');
+  loadScript(context, 'static/js/events.js');
+  runInContext(context, `
+    render = function() {};
+    _activePanelApp = 'events';
+    state.runtime = { embedded_terminal: true };
+    state.groups = { alpha: ['agent-1'], beta: ['agent-2'] };
+    state.active_group = 'alpha';
+    state.agents = {
+      'agent-1': { id: 'agent-1', name: 'Agent One', group: 'alpha', kind: 'worker', cell_type: 'agent' },
+      'agent-2': { id: 'agent-2', name: 'Agent Two', group: 'beta', kind: 'worker', cell_type: 'agent' },
+    };
+    selectedAgentId = 'agent-1';
+    focusedItemId = 'agent-1';
+    _expectedSeq = 1;
+    renderEvents();
+  `);
+
+  assert.match(panel.innerHTML, /recent activity for alpha/);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [
+      { op: 'ui_update', key: 'selected_agent_id', value: 'agent-2' },
+    ],
+  });
+
+  assert.equal(jsonValue(context, `selectedAgentId`), 'agent-2');
+  assert.equal(jsonValue(context, `focusedItemId`), 'agent-2');
+  assert.equal(jsonValue(context, `state.active_group`), 'beta');
+  assert.match(panel.innerHTML, /recent activity for beta/);
+
+  context._handleDelta({
+    seq: 2,
+    ops: [
+      { op: 'ui_update', key: 'selected_agent_id', value: 'agent-1' },
+    ],
+  });
+
+  assert.equal(jsonValue(context, `selectedAgentId`), 'agent-1');
+  assert.equal(jsonValue(context, `focusedItemId`), 'agent-1');
+  assert.equal(jsonValue(context, `state.active_group`), 'alpha');
+  assert.match(panel.innerHTML, /recent activity for alpha/);
+});
+
 test('standalone task deltas rerender only affected visible docked surfaces', () => {
   const { context, sandbox } = createWsRenderHarness();
 
