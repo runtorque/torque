@@ -59,10 +59,17 @@ _STREAM_STATES = (
     "merged",
 )
 _DECISION_STATUSES = {"proposed", "accepted", "revised", "rejected"}
-_JOURNAL_ENTRY_TYPES = {
+_JOURNAL_ENTRY_TYPE_NAMES = (
     "decision", "observation", "checkpoint", "plan",
     "note_dismissed", "qa",
-}
+)
+_JOURNAL_ENTRY_TYPES = set(_JOURNAL_ENTRY_TYPE_NAMES)
+_ARCHITECT_AUTHORED_JOURNAL_ENTRY_TYPE_NAMES = (
+    "decision", "observation", "checkpoint", "plan",
+)
+_ARCHITECT_AUTHORED_JOURNAL_ENTRY_TYPES = set(
+    _ARCHITECT_AUTHORED_JOURNAL_ENTRY_TYPE_NAMES
+)
 _HEALTH_SUMMARY_SILENT_AFTER_SECS = 5 * 60
 _HEALTH_SUMMARY_LIMIT = 120
 _ARCHITECT_BOARD_SUMMARY_TASK_LIMIT = 20
@@ -3930,10 +3937,10 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
     if tool_name == "journal":
         if caller_kind == "architect":
             entry_type = str(args.get("type", "") or "").strip()
-            if entry_type not in _JOURNAL_ENTRY_TYPES:
+            if entry_type not in _ARCHITECT_AUTHORED_JOURNAL_ENTRY_TYPES:
                 return (
                     "type must be one of: decision, observation, "
-                    "checkpoint, plan, note_dismissed, qa",
+                    "checkpoint, plan",
                     True,
                 )
             entry = str(args.get("entry", "") or "")
