@@ -21,6 +21,7 @@ import struct
 import subprocess
 import sys
 import time
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional
 
@@ -36,6 +37,10 @@ DEFAULT_SOCKET_NAME = "event_ingest.sock"
 DEFAULT_PID_FILE_NAME = "event_ingest.pid"
 DEFAULT_LOG_FILE_NAME = "event_ingest.log"
 DEFAULT_DB_FILE_NAME = "event_ingest.db"
+LOG_ROTATION_MAX_BYTES = int(
+    os.environ.get("TORQUE_LOG_ROTATION_MAX_BYTES", str(10 * 1024 * 1024)))
+LOG_ROTATION_BACKUP_COUNT = int(
+    os.environ.get("TORQUE_LOG_ROTATION_BACKUP_COUNT", "5"))
 MAX_FRAME_BYTES = int(os.environ.get(
     "TORQUE_EVENT_INGEST_MAX_FRAME_BYTES",
     str(4 * 1024 * 1024),
@@ -373,44 +378,42 @@ def spawn_detached(data_dir: Path, *, max_rows: int | None = None) -> int:
     data_dir = Path(data_dir)
     data_dir.mkdir(parents=True, exist_ok=True)
     paths = _paths(data_dir)
-    log_fh = open(paths["log"], "ab", buffering=0)
-    try:
-        env = os.environ.copy()
-        pkg_root = Path(__file__).resolve().parent.parent
-        existing = env.get("PYTHONPATH", "")
-        if str(pkg_root) not in existing.split(os.pathsep):
-            env["PYTHONPATH"] = (
-                str(pkg_root) + (os.pathsep + existing if existing else "")
-            )
-        argv = [
-            sys.executable,
-            "-m",
-            "torque.event_ingest_daemon",
-            "--data-dir",
-            str(data_dir),
-        ]
-        if max_rows is not None:
-            argv.extend(["--max-rows", str(max_rows)])
-        max_age_days = env.get("TORQUE_EVENT_INGEST_MAX_AGE_DAYS", "")
-        if max_age_days:
-            argv.extend(["--max-age-days", str(max_age_days)])
-        args_capture = env.get("TORQUE_MCP_CALL_LOG_ARGS_CAPTURE", "")
-        if args_capture:
-            argv.extend(["--args-capture", str(args_capture)])
-        full_capture_tools = env.get("TORQUE_MCP_CALL_LOG_FULL_CAPTURE_TOOLS", "")
-        if full_capture_tools:
-            argv.extend(["--full-capture-tools", str(full_capture_tools)])
-        proc = subprocess.Popen(
-            argv,
-            stdin=subprocess.DEVNULL,
-            stdout=log_fh,
-            stderr=log_fh,
-            start_new_session=True,
-            close_fds=True,
-            env=env,
+    env = os.environ.copy()
+    pkg_root = Path(__file__).resolve().parent.parent
+    existing = env.get("PYTHONPATH", "")
+    if str(pkg_root) not in existing.split(os.pathsep):
+        env["PYTHONPATH"] = (
+            str(pkg_root) + (os.pathsep + existing if existing else "")
         )
-    finally:
-        log_fh.close()
+    argv = [
+        sys.executable,
+        "-m",
+        "torque.event_ingest_daemon",
+        "--data-dir",
+        str(data_dir),
+        "--log-file",
+        str(paths["log"]),
+    ]
+    if max_rows is not None:
+        argv.extend(["--max-rows", str(max_rows)])
+    max_age_days = env.get("TORQUE_EVENT_INGEST_MAX_AGE_DAYS", "")
+    if max_age_days:
+        argv.extend(["--max-age-days", str(max_age_days)])
+    args_capture = env.get("TORQUE_MCP_CALL_LOG_ARGS_CAPTURE", "")
+    if args_capture:
+        argv.extend(["--args-capture", str(args_capture)])
+    full_capture_tools = env.get("TORQUE_MCP_CALL_LOG_FULL_CAPTURE_TOOLS", "")
+    if full_capture_tools:
+        argv.extend(["--full-capture-tools", str(full_capture_tools)])
+    proc = subprocess.Popen(
+        argv,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+        close_fds=True,
+        env=env,
+    )
     return proc.pid
 
 
@@ -566,14 +569,56 @@ async def _graceful(
     stop_event.set()
 
 
+def _managed_log_handlers():
+    for handler in list(log.handlers):
+        if getattr(handler, "_torque_event_ingest_managed", False):
+            yield handler
+
+
+def _build_log_handler(log_path: Optional[Path]) -> logging.Handler:
+    if not log_path:
+        return logging.StreamHandler(sys.stderr)
+    path = Path(log_path).expanduser().resolve()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        return RotatingFileHandler(
+            str(path),
+            maxBytes=LOG_ROTATION_MAX_BYTES,
+            backupCount=LOG_ROTATION_BACKUP_COUNT,
+            encoding="utf-8",
+        )
+    except Exception as exc:  # pragma: no cover - exercised via fallback test
+        try:
+            handler = logging.FileHandler(path, encoding="utf-8")
+        except Exception:
+            handler = logging.StreamHandler(sys.stderr)
+        handler._torque_rotation_error = repr(exc)
+        return handler
+
+
 def _configure_logging(log_path: Optional[Path]) -> None:
     fmt = "%(asctime)s %(levelname)s %(name)s: %(message)s"
-    handlers: list[logging.Handler] = []
-    if log_path:
-        handlers.append(logging.FileHandler(str(log_path), encoding="utf-8"))
-    else:
-        handlers.append(logging.StreamHandler(sys.stderr))
-    logging.basicConfig(level=logging.INFO, format=fmt, handlers=handlers)
+    target = str(Path(log_path).expanduser().resolve()) if log_path else ""
+    for handler in list(_managed_log_handlers()):
+        if getattr(handler, "baseFilename", "") == target:
+            log.setLevel(logging.INFO)
+            log.propagate = False
+            return
+        log.removeHandler(handler)
+        with contextlib.suppress(Exception):
+            handler.close()
+    handler = _build_log_handler(log_path)
+    handler._torque_event_ingest_managed = True
+    handler.setFormatter(logging.Formatter(fmt))
+    log.setLevel(logging.INFO)
+    log.propagate = False
+    log.addHandler(handler)
+    if getattr(handler, "_torque_rotation_error", None):
+        log.warning(
+            "Rotating event-ingest log handler unavailable for %s; using fallback: %s",
+            log_path,
+            handler._torque_rotation_error,
+        )
 
 
 def main(argv: Optional[list] = None) -> int:
@@ -603,8 +648,9 @@ def main(argv: Optional[list] = None) -> int:
         "--full-capture-tools",
         default=os.environ.get("TORQUE_MCP_CALL_LOG_FULL_CAPTURE_TOOLS", ""),
     )
+    parser.add_argument("--log-file", type=Path)
     args = parser.parse_args(argv)
-    _configure_logging(None)  # stdout/stderr already redirected by spawn
+    _configure_logging(args.log_file or (args.data_dir / DEFAULT_LOG_FILE_NAME))
     try:
         full_capture_tools = [
             item.strip()
@@ -620,6 +666,9 @@ def main(argv: Optional[list] = None) -> int:
         ))
     except KeyboardInterrupt:
         pass
+    except Exception:
+        log.exception("Event-ingest daemon crashed")
+        return 1
     return 0
 
 

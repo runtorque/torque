@@ -3,6 +3,7 @@ import logging
 import os
 import tempfile
 import unittest
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from unittest import mock
 
@@ -54,6 +55,140 @@ class ConfigLoggingTests(unittest.TestCase):
                 for handler in config.log.handlers:
                     handler.flush()
                 self.assertIn("second target", second_file.read_text())
+        finally:
+            for handler in list(config.log.handlers):
+                config.log.removeHandler(handler)
+                try:
+                    handler.close()
+                except Exception:
+                    pass
+            for handler in original_handlers:
+                config.log.addHandler(handler)
+            config.log.setLevel(logging.DEBUG)
+            config.log.propagate = False
+
+    def test_init_paths_uses_rotating_log_handler_and_rolls_over(self):
+        config = importlib.import_module("torque.config")
+        config = importlib.reload(config)
+
+        original_handlers = list(config.log.handlers)
+        old_max_bytes = config.LOG_ROTATION_MAX_BYTES
+        old_backup_count = config.LOG_ROTATION_BACKUP_COUNT
+        for handler in list(original_handlers):
+            config.log.removeHandler(handler)
+            try:
+                handler.close()
+            except Exception:
+                pass
+
+        try:
+            config.LOG_ROTATION_MAX_BYTES = 180
+            config.LOG_ROTATION_BACKUP_COUNT = 2
+            with tempfile.TemporaryDirectory() as td:
+                runtime = Path(td) / "runtime"
+                config.init_paths(runtime)
+                handlers = [
+                    handler for handler in config.log.handlers
+                    if getattr(handler, "_torque_managed", False)
+                ]
+                self.assertEqual(len(handlers), 1)
+                handler = handlers[0]
+                self.assertIsInstance(handler, RotatingFileHandler)
+                self.assertEqual(handler.maxBytes, 180)
+                self.assertEqual(handler.backupCount, 2)
+
+                for idx in range(20):
+                    config.log.info("rotation-test-%02d %s", idx, "x" * 80)
+                for handler in config.log.handlers:
+                    handler.flush()
+
+                self.assertTrue((runtime / "torque.log").exists())
+                self.assertTrue((runtime / "torque.log.1").exists())
+        finally:
+            config.LOG_ROTATION_MAX_BYTES = old_max_bytes
+            config.LOG_ROTATION_BACKUP_COUNT = old_backup_count
+            for handler in list(config.log.handlers):
+                config.log.removeHandler(handler)
+                try:
+                    handler.close()
+                except Exception:
+                    pass
+            for handler in original_handlers:
+                config.log.addHandler(handler)
+            config.log.setLevel(logging.DEBUG)
+            config.log.propagate = False
+
+    def test_init_paths_removes_stale_pre_kinds_backup(self):
+        config = importlib.import_module("torque.config")
+        config = importlib.reload(config)
+
+        original_handlers = list(config.log.handlers)
+        for handler in list(original_handlers):
+            config.log.removeHandler(handler)
+            try:
+                handler.close()
+            except Exception:
+                pass
+
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                runtime = Path(td) / "runtime"
+                runtime.mkdir()
+                backup_path = runtime / "torque.db.pre-kinds.bak"
+                backup_path.write_bytes(b"stale backup")
+
+                config.init_paths(runtime)
+
+                self.assertFalse(backup_path.exists())
+                self.assertFalse(config._cleanup_stale_pre_kinds_backup(runtime))
+        finally:
+            for handler in list(config.log.handlers):
+                config.log.removeHandler(handler)
+                try:
+                    handler.close()
+                except Exception:
+                    pass
+            for handler in original_handlers:
+                config.log.addHandler(handler)
+            config.log.setLevel(logging.DEBUG)
+            config.log.propagate = False
+
+    def test_init_paths_falls_back_when_rotating_handler_fails(self):
+        config = importlib.import_module("torque.config")
+        config = importlib.reload(config)
+
+        original_handlers = list(config.log.handlers)
+        for handler in list(original_handlers):
+            config.log.removeHandler(handler)
+            try:
+                handler.close()
+            except Exception:
+                pass
+
+        try:
+            with tempfile.TemporaryDirectory() as td, mock.patch(
+                "torque.config.RotatingFileHandler",
+                side_effect=OSError("rotation unavailable"),
+            ):
+                runtime = Path(td) / "runtime"
+                config.init_paths(runtime)
+
+                managed = [
+                    handler for handler in config.log.handlers
+                    if getattr(handler, "_torque_managed", False)
+                ]
+                self.assertEqual(len(managed), 1)
+                self.assertIsInstance(managed[0], logging.FileHandler)
+                self.assertIn(
+                    "rotation unavailable",
+                    getattr(managed[0], "_torque_rotation_error", ""),
+                )
+                config.log.info("fallback still writes")
+                managed[0].flush()
+                self.assertIn(
+                    "fallback still writes",
+                    (runtime / "torque.log").read_text(encoding="utf-8"),
+                )
         finally:
             for handler in list(config.log.handlers):
                 config.log.removeHandler(handler)
