@@ -7861,6 +7861,9 @@ button.agent-panel-hierarchy-crumb:focus-visible {
   justify-content: space-between;
   gap: 8px;
 }
+.agent-panel-panel[data-agent-panel-kind="architect"][data-agent-panel-tab="journal"] .agent-panel-worklog-header {
+  justify-content: flex-start;
+}
 .agent-panel-worklog-title {
   font-size: 10px;
   font-weight: 600;
