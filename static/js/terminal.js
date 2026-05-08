@@ -1128,15 +1128,35 @@ function _scheduleEmbeddedTerminalFit(entry) {
   requestAnimationFrame(function() {
     if (!_isEmbeddedTerminalEntryActive(entry) || !entry.terminal || !entry.fit) return;
     entry.fit.fit();
+    const cols = entry.terminal.cols;
+    const rows = entry.terminal.rows;
+    if (entry.lastSentCols === cols && entry.lastSentRows === rows) return;
     if (entry.ws && entry.ws.readyState === WebSocket.OPEN) {
       entry.ws.send(JSON.stringify({
         type: 'resize',
-        cols: entry.terminal.cols,
-        rows: entry.terminal.rows,
+        cols: cols,
+        rows: rows,
       }));
       entry.ws.send(JSON.stringify({ type: 'focus' }));
+      entry.lastSentCols = cols;
+      entry.lastSentRows = rows;
     }
   });
+}
+
+function _embeddedTerminalObservedSizeChanged(entry, resizeEntries) {
+  var roEntry = resizeEntries && resizeEntries.length ? resizeEntries[0] : null;
+  var box = roEntry && roEntry.contentBoxSize;
+  if (Array.isArray(box)) box = box[0];
+  var width = box && typeof box.inlineSize === 'number'
+    ? box.inlineSize : roEntry && roEntry.contentRect && roEntry.contentRect.width;
+  var height = box && typeof box.blockSize === 'number'
+    ? box.blockSize : roEntry && roEntry.contentRect && roEntry.contentRect.height;
+  if (typeof width !== 'number' || typeof height !== 'number') return true;
+  var changed = entry.lastObservedWidth !== width || entry.lastObservedHeight !== height;
+  entry.lastObservedWidth = width;
+  entry.lastObservedHeight = height;
+  return changed;
 }
 
 // Max attempts to re-open the terminal WS after a drop (e.g. daemon
@@ -1225,7 +1245,8 @@ function _connectEmbeddedTerminal(cell, surface) {
       entry.ws.send(JSON.stringify({ type: 'input', data: data }));
     }
   });
-  entry.resizeObserver = new ResizeObserver(function() {
+  entry.resizeObserver = new ResizeObserver(function(entries) {
+    if (!_embeddedTerminalObservedSizeChanged(entry, entries)) return;
     _scheduleEmbeddedTerminalFit(entry);
   });
   entry.resizeObserver.observe(surface);
@@ -1238,6 +1259,8 @@ function _openEmbeddedTerminalSocket(cell, sessionKey, expectedSessionId, attemp
   if (_embeddedTerminalSessions[sessionKey] !== entry) return;
   var socket = new WebSocket(_embeddedTerminalUrl(cell));
   entry.ws = socket;
+  entry.lastSentCols = null;
+  entry.lastSentRows = null;
   if (_isEmbeddedTerminalEntryActive(entry)) _embeddedTerminalWs = socket;
   function isCurrentSessionMessage(msg) {
     if (_embeddedTerminalSessions[sessionKey] !== entry) return false;

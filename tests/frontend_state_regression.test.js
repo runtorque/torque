@@ -9239,6 +9239,75 @@ test('embedded terminal auto-focuses new sessions when standalone mode is active
   assert.equal(terminals[0].focusCount, 1);
 });
 
+test('embedded terminal resize observer ignores stable compositor invalidations', () => {
+  const { context, sockets, terminals } = createEmbeddedTerminalHarness();
+  const surface = new FakeElement('surface');
+  context.__surface = surface;
+
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    _connectEmbeddedTerminal({ id: 'term-1', session_id: 'session-1' }, __surface);
+  `);
+
+  const initialSent = sockets[0].sent.length;
+  const initialFitCalls = terminals[0].addon.fitCalls;
+  context.__sizeBox = {
+    target: surface,
+    contentBoxSize: [{ inlineSize: 640, blockSize: 320 }],
+  };
+  runInContext(context, `
+    _embeddedTerminalSessions['term-1:session-1'].resizeObserver.callback([__sizeBox]);
+  `);
+
+  assert.equal(sockets[0].sent.length, initialSent);
+  assert.equal(terminals[0].addon.fitCalls, initialFitCalls + 1);
+
+  const afterFirstObservedFit = terminals[0].addon.fitCalls;
+  context.__sameRect = {
+    target: surface,
+    contentRect: { width: 640, height: 320 },
+  };
+  runInContext(context, `
+    _embeddedTerminalSessions['term-1:session-1'].resizeObserver.callback([__sameRect]);
+  `);
+
+  assert.equal(sockets[0].sent.length, initialSent);
+  assert.equal(terminals[0].addon.fitCalls, afterFirstObservedFit);
+
+  terminals[0].cols = 100;
+  context.__changedRect = {
+    target: surface,
+    contentRect: { width: 900, height: 320 },
+  };
+  runInContext(context, `
+    _embeddedTerminalSessions['term-1:session-1'].resizeObserver.callback([__changedRect]);
+  `);
+
+  assert.equal(terminals[0].addon.fitCalls, afterFirstObservedFit + 1);
+  assert.deepEqual(sockets[0].sent.slice(-2), [
+    { type: 'resize', cols: 100, rows: 24 },
+    { type: 'focus' },
+  ]);
+});
+
+test('embedded terminal replacement sockets resend the current PTY size', () => {
+  const { context, sockets } = createEmbeddedTerminalHarness();
+  const surface = new FakeElement('surface');
+  context.__surface = surface;
+
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    _connectEmbeddedTerminal({ id: 'term-1', session_id: 'session-1' }, __surface);
+    _connectEmbeddedTerminal({ id: 'term-1', session_id: 'session-1' }, __surface);
+  `);
+
+  assert.equal(sockets.length, 2);
+  assert.deepEqual(sockets[1].sent.slice(0, 2), [
+    { type: 'resize', cols: 80, rows: 24 },
+    { type: 'focus' },
+  ]);
+});
+
 test('embedded terminal Shift+Enter sends LF and consumes follow-up xterm key events', () => {
   const { context, sockets, terminals } = createEmbeddedTerminalHarness();
   const surface = new FakeElement('surface');
