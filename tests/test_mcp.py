@@ -1258,6 +1258,87 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(entries), 1)
             self.assertEqual(entries[0]["entry"], "Session wake 2026-04-22")
 
+    async def test_architect_journal_gates_system_generated_entry_types(self):
+        state = self.state_mod.MatrixState()
+        architect = self.state_mod.AgentCell(
+            id="arch-1",
+            name="Architect",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+        )
+        state.agents[architect.id] = architect
+        state.groups["g"] = [architect.id]
+
+        architect_journal = next(
+            tool for tool in self.mcp_mod.ARCHITECT_TOOLS
+            if tool["name"] == "architect_journal"
+        )
+        self.assertEqual(
+            architect_journal["inputSchema"]["properties"]["type"]["enum"],
+            ["decision", "observation", "checkpoint", "plan"],
+        )
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        async def call(entry_type, idx):
+            body = {
+                "jsonrpc": "2.0",
+                "id": idx,
+                "method": "tools/call",
+                "params": {
+                    "name": "architect_journal",
+                    "arguments": {
+                        "type": entry_type,
+                        "entry": f"{entry_type} entry",
+                    },
+                },
+            }
+            return await self.mcp_mod.dispatch_mcp_rpc_body(
+                body,
+                cell_id=architect.id,
+                handle_command=fake_handle_command,
+                state=state,
+            )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with mock.patch.object(self.state_mod, "DATA_DIR", Path(tmpdir)):
+                for idx, entry_type in enumerate(
+                    ["decision", "observation", "checkpoint", "plan"],
+                    start=1,
+                ):
+                    payload, status = await call(entry_type, idx)
+                    self.assertEqual(status, 200)
+                    self.assertFalse(payload["result"]["isError"])
+                    result = json.loads(
+                        payload["result"]["content"][0]["text"]
+                    )
+                    self.assertEqual(result["type"], entry_type)
+
+                for idx, entry_type in enumerate(
+                    ["note_dismissed", "qa"],
+                    start=10,
+                ):
+                    payload, status = await call(entry_type, idx)
+                    self.assertEqual(status, 200)
+                    self.assertTrue(payload["result"]["isError"])
+                    self.assertEqual(
+                        payload["result"]["content"][0]["text"],
+                        (
+                            "type must be one of: decision, observation, "
+                            "checkpoint, plan"
+                        ),
+                    )
+
+                entries = state.architect_journal_read(architect.id, limit=10)
+
+        self.assertEqual(len(entries), 4)
+        self.assertCountEqual(
+            [entry["type"] for entry in entries],
+            ["decision", "observation", "checkpoint", "plan"],
+        )
+
     async def test_engineer_session_wake_includes_identity_and_repeats_for_new_session(self):
         state = self.state_mod.MatrixState()
         engineer = self.state_mod.AgentCell(
