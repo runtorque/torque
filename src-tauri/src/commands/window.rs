@@ -179,6 +179,10 @@ pub fn detach_panel(
             bounds.as_ref().and_then(|b| b.height).unwrap_or(640.0),
         )
         .min_inner_size(420.0, 300.0)
+        // Torque's frontend owns file drops with HTML5 drag/drop handlers
+        // (xterm, task attachments, and agent compose). Tauri's native drag
+        // handler consumes those DOM events before the page can see them.
+        .disable_drag_drop_handler()
         .visible(true);
 
     if let Some(menu) = menu::build_detached_panel_menu(app)
