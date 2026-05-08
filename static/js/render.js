@@ -488,7 +488,6 @@ function _captureActiveGroupUiState(group) {
         '.agents-grid-pane',
         '.agent-focus-panel-scroll',
         '.mcp-log',
-        '.detail-decisions-log',
         '.loose-workers-strip',
       ],
       captureFocusKey: typeof _captureMainFocusKey === 'function'
@@ -2531,14 +2530,14 @@ function renderAgentFocusPanel(opts) {
     return false;
   }
   const panelState = typeof _captureSurfaceState === 'function'
-    ? _captureSurfaceState(parts.focusScroll, { scrollSelectors: [':root', '.mcp-log', '.detail-decisions-log'] })
+    ? _captureSurfaceState(parts.focusScroll, { scrollSelectors: [':root', '.mcp-log'] })
     : null;
   parts.focusScroll.innerHTML = focusHtml;
   parts.focusScroll._torqueLastHtml = focusHtml;
   main._torqueLastFocusHtml = focusHtml;
   main._torqueLastHtml = _agentFocusShellHtml(main._torqueLastGridHtml || '', focusHtml);
   if (typeof _restoreSurfaceState === 'function') {
-    _restoreSurfaceState(parts.focusScroll, panelState, { scrollSelectors: [':root', '.mcp-log', '.detail-decisions-log'] });
+    _restoreSurfaceState(parts.focusScroll, panelState, { scrollSelectors: [':root', '.mcp-log'] });
     _restoreActiveDetailInputFocus();
   }
   return true;
@@ -3817,7 +3816,6 @@ function renderAgentDetails(a) {
 
   if (isArchitect) {
     const pendingHires = _architectPendingHiresForAgent(a.id);
-    const decisions = _architectDecisionsForAgent(a.id);
     if (pendingHires.length) {
       h += `<div class="detail-section"><div class="detail-section-head"><span class="detail-section-title">Pending hires</span><span class="detail-section-count">${pendingHires.length}</span></div><div class="detail-section-list">`;
       for (let i = 0; i < pendingHires.length; i++) {
@@ -3840,18 +3838,6 @@ function renderAgentDetails(a) {
         h += `<button type="button" class="detail-inline-editor-btn detail-inline-editor-btn-primary" data-focus-key="detail-pending-hire-approve:${esc(hire.id || '')}" onclick='event.stopPropagation();approvePendingHire(${hireIdJs})'>Approve</button>`;
         h += `<button type="button" class="detail-inline-editor-btn" data-focus-key="detail-pending-hire-reject:${esc(hire.id || '')}" onclick='event.stopPropagation();rejectPendingHire(${hireIdJs})'>Reject</button>`;
         h += `</div></div>`;
-      }
-      h += `</div></div>`;
-    }
-    if (decisions.length) {
-      h += `<div class="detail-row detail-row-mcp detail-row-decisions"><span class="detail-label">Decisions</span>`;
-      h += `<div class="mcp-log detail-decisions-log" aria-label="${decisions.length} architect decision${decisions.length === 1 ? '' : 's'}">`;
-      for (let i = 0; i < decisions.length; i++) {
-        const decision = decisions[i] || {};
-        const title = decision.title || 'Decision';
-        h += `<div class="mcp-entry" data-decision-id="${esc(decision.id || '')}">`;
-        h += `<span class="mcp-text" title="${esc(title)}">${esc(title)}</span>`;
-        h += `</div>`;
       }
       h += `</div></div>`;
     }
