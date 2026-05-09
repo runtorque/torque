@@ -475,6 +475,18 @@ function _handleEngineerSessionMapMessage(msg) {
   }
 }
 
+function _isTauriMode() {
+  const api = (typeof window !== 'undefined' && window.nativeApi)
+    || (typeof nativeApi !== 'undefined' && nativeApi)
+    || null;
+  if (!api || typeof api.available !== 'function') return false;
+  try {
+    return !!api.available();
+  } catch (_) {
+    return false;
+  }
+}
+
 function _applyRuntimeMode() {
   const embedded = !!(state && state.runtime && state.runtime.embedded_terminal);
   const mode = (typeof _torqueUiMode === 'function')
@@ -486,6 +498,7 @@ function _applyRuntimeMode() {
   document.body.classList.toggle('runtime-embedded', embedded);
   document.body.classList.toggle('standalone-mode', standalone);
   document.body.classList.toggle('iterm2-mode', iterm2);
+  document.body.classList.toggle('tauri-mode', _isTauriMode());
   if (document.body.dataset) {
     document.body.dataset.torqueMode = mode;
   }

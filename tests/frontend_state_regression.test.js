@@ -12639,7 +12639,7 @@ test('architect decision cards show acknowledge only for active proposed decisio
     engineerAcknowledgeDecision('arch-1', 'proposed');
   `);
 
-  assert.equal((panel.innerHTML.match(/>Acknowledge<\/button>/g) || []).length, 1);
+  assert.equal((panel.innerHTML.match(/aria-label="Acknowledge decision"/g) || []).length, 1);
   assert.deepEqual(JSON.parse(JSON.stringify(context.sendCalls[0])), {
     cmd: 'architect_decision_update',
     architect_id: 'arch-1',
@@ -12694,7 +12694,7 @@ test('dismissed architect decision panel hides mutators and blocks stale handler
 
   assert.match(panel.innerHTML, /Readable while the architect is dismissed/);
   assert.doesNotMatch(panel.innerHTML, />Edit<\/button>/);
-  assert.doesNotMatch(panel.innerHTML, />Acknowledge<\/button>/);
+  assert.doesNotMatch(panel.innerHTML, /aria-label="Acknowledge decision"/);
   assert.doesNotMatch(panel.innerHTML, />Archive<\/button>/);
   assert.doesNotMatch(panel.innerHTML, />Link task<\/button>/);
   assert.doesNotMatch(panel.innerHTML, /Link task…/);
@@ -15857,11 +15857,32 @@ test('full state toggles runtime body mode classes', () => {
   assert.equal(document.body.classList.contains('runtime-embedded'), true);
   assert.equal(document.body.classList.contains('standalone-mode'), true);
   assert.equal(document.body.classList.contains('iterm2-mode'), false);
+  assert.equal(document.body.classList.contains('tauri-mode'), false);
   assert.equal(document.body.dataset.torqueMode, 'standalone');
 
   runInContext(context, `
+    window.nativeApi = { available: function() { return true; } };
     _handleFullState({
       seq: 8,
+      groups: {},
+      agents: {},
+      board_lanes: [],
+      board_tasks: {},
+      panel_events: [],
+      runtime: { mode: 'desktop', embedded_terminal: true },
+    });
+  `);
+
+  assert.equal(document.body.classList.contains('runtime-embedded'), true);
+  assert.equal(document.body.classList.contains('standalone-mode'), true);
+  assert.equal(document.body.classList.contains('iterm2-mode'), false);
+  assert.equal(document.body.classList.contains('tauri-mode'), true);
+  assert.equal(document.body.dataset.torqueMode, 'desktop');
+
+  runInContext(context, `
+    window.nativeApi = { available: function() { return false; } };
+    _handleFullState({
+      seq: 9,
       groups: {},
       agents: {},
       board_lanes: [],
@@ -15874,6 +15895,7 @@ test('full state toggles runtime body mode classes', () => {
   assert.equal(document.body.classList.contains('runtime-embedded'), false);
   assert.equal(document.body.classList.contains('standalone-mode'), false);
   assert.equal(document.body.classList.contains('iterm2-mode'), true);
+  assert.equal(document.body.classList.contains('tauri-mode'), false);
   assert.equal(document.body.dataset.torqueMode, 'toolbelt');
 });
 

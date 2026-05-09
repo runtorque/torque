@@ -1046,7 +1046,7 @@ test('focused architect decision rows render parseable click handlers and expand
   assert.match(panel.innerHTML, /d2/);
 });
 
-test('focused architect decision rows keep action buttons in a fixed right column', () => {
+test('focused architect decision rows clamp titles and use compact secondary metadata/actions', () => {
   const { context, panel } = createHarness();
   setFocusedAgent(context, {
     id: 'arch-1',
@@ -1075,7 +1075,10 @@ test('focused architect decision rows keep action buttons in a fixed right colum
   context.renderAgentPanel();
 
   assert.match(panel.innerHTML, /architect-decision-toggle/);
+  assert.match(panel.innerHTML, /architect-decision-title/);
+  assert.match(panel.innerHTML, /architect-decision-summary-row/);
   assert.match(panel.innerHTML, /detail-section-card-actions/);
+  assert.match(panel.innerHTML, /architect-decision-action-btn/);
   assert.match(panel.innerHTML, /Edit/);
   assert.match(panel.innerHTML, /Archive/);
 
@@ -1083,6 +1086,18 @@ test('focused architect decision rows keep action buttons in a fixed right colum
   assert.match(
     css,
     /\.architect-decision-toggle\s*\{[^}]*flex:\s*1 1 auto;/
+  );
+  assert.match(
+    css,
+    /\.architect-decision-title\s*\{[^}]*-webkit-line-clamp:\s*2;/
+  );
+  assert.match(
+    css,
+    /\.architect-decision-summary-row\s*\{[^}]*display:\s*flex;/
+  );
+  assert.match(
+    css,
+    /\.architect-decision-action-btn\s*\{[^}]*font-size:\s*8px;/
   );
 });
 

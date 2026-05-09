@@ -3656,24 +3656,28 @@ function _agentPanelLegacyRenderDecisionRow(architectId, decision) {
   html += '<div class="detail-section-card-head">';
   html += '<button type="button" class="architect-decision-toggle" onclick="'
     + _agentPanelEventAttr('engineerToggleDecision(' + decisionIdJs + ')') + '">';
-  html += '<span class="detail-section-primary" title="' + _esc(decision.title || '') + '">' + _esc(decision.title || 'Decision') + '</span>';
+  html += '<span class="architect-decision-title-row">';
+  html += '<span class="detail-section-primary architect-decision-title" title="' + _esc(decision.title || '') + '">' + _esc(decision.title || 'Decision') + '</span>';
+  html += '<span class="detail-expand-caret">' + (ui.expanded ? '\u25BE' : '\u25B8') + '</span>';
+  html += '</span>';
+  html += '<span class="architect-decision-summary-row">';
   html += '<span class="detail-task-status">' + _esc(decision.status || 'proposed') + '</span>';
   if (headTimestampHtml) html += headTimestampHtml;
-  html += '<span class="detail-expand-caret">' + (ui.expanded ? '\u25BE' : '\u25B8') + '</span>';
+  html += '</span>';
   html += '</button>';
-  html += '<div class="detail-section-card-actions">';
+  html += '<div class="detail-section-card-actions architect-decision-actions">';
   if (!readOnly && !ui.editing) {
-    html += '<button type="button" class="detail-inline-editor-btn" onclick="'
+    html += '<button type="button" class="detail-inline-editor-btn architect-decision-action-btn" title="Edit decision" aria-label="Edit decision" onclick="'
       + _agentPanelEventAttr('event.stopPropagation();engineerStartDecisionEdit(' + decisionIdJs + ')')
       + '">Edit</button>';
     if (String(decision.status || 'proposed') === 'proposed' && !decision.archived) {
-      html += '<button type="button" class="detail-inline-editor-btn" onclick="'
+      html += '<button type="button" class="detail-inline-editor-btn architect-decision-action-btn" title="Acknowledge decision" aria-label="Acknowledge decision" onclick="'
         + _agentPanelEventAttr('event.stopPropagation();engineerAcknowledgeDecision(' + architectIdJs + ',' + decisionIdJs + ')')
-        + '">Acknowledge</button>';
+        + '">Ack</button>';
     }
   }
   if (!readOnly) {
-    html += '<button type="button" class="detail-inline-editor-btn" onclick="'
+    html += '<button type="button" class="detail-inline-editor-btn architect-decision-action-btn" title="Archive decision" aria-label="Archive decision" onclick="'
       + _agentPanelEventAttr('event.stopPropagation();engineerArchiveDecision(' + architectIdJs + ',' + decisionIdJs + ')')
       + '">Archive</button>';
   }
