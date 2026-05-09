@@ -48,6 +48,7 @@ var _boardSavedViewsByGroup = null; // saved view snapshots keyed by group
 var _boardLaneSortsByGroup = null; // persisted lane sort modes keyed by group
 var _boardCardDensityByGroup = null; // persisted card density keyed by group
 var _boardHiddenWideLanesByGroup = null; // local wide-layout lane collapse state keyed by group
+var _boardDefaultHiddenWideLanes = { 'To Do': true }; // fresh wide-layout lane defaults
 var _boardFilterStateGroup = '';
 var _boardShowSchedules = false; // true when "Schedules" tab is active
 var _boardShowArchived = false;  // include archived tasks in the active board view

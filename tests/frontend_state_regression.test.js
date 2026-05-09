@@ -2290,6 +2290,7 @@ test('wide embedded board lanes can be collapsed and persist locally', () => {
   context.renderBoard();
 
   assert.match(panel.innerHTML, /board-wide-grid/);
+  assert.match(panel.innerHTML, /board-wide-lane-collapsed" data-lane="To Do"/);
   assert.match(panel.innerHTML, /<div class="board-card">done<\/div>/);
   assert.doesNotMatch(panel.innerHTML, /board-wide-lane-collapsed" data-lane="Done"/);
 
@@ -2299,12 +2300,12 @@ test('wide embedded board lanes can be collapsed and persist locally', () => {
   }, 'Done');
 
   assert.match(panel.innerHTML, /board-wide-lane-collapsed" data-lane="Done"/);
-  assert.match(panel.innerHTML, /grid-template-columns:minmax\(220px, 1fr\) minmax\(220px, 1fr\) minmax\(220px, 1fr\) 32px/);
+  assert.match(panel.innerHTML, /grid-template-columns:minmax\(220px, 1fr\) 32px minmax\(220px, 1fr\) 32px/);
   assert.match(panel.innerHTML, /Show Done lane/);
   assert.doesNotMatch(panel.innerHTML, /<div class="board-card">done<\/div>/);
   assert.deepEqual(
     JSON.parse(context.localStorage.getItem('torque.board.hidden_wide_lanes_by_group')),
-    { alpha: { Done: true } },
+    { alpha: { 'To Do': true, Done: true } },
   );
 
   runInContext(context, `_boardHiddenWideLanesByGroup = null;`);
@@ -2313,12 +2314,49 @@ test('wide embedded board lanes can be collapsed and persist locally', () => {
 
   context.boardToggleWideLane(null, 'Done');
   assert.match(panel.innerHTML, /<div class="board-card">done<\/div>/);
-  assert.equal(context.localStorage.getItem('torque.board.hidden_wide_lanes_by_group'), null);
+  assert.deepEqual(
+    JSON.parse(context.localStorage.getItem('torque.board.hidden_wide_lanes_by_group')),
+    { alpha: { 'To Do': true } },
+  );
 
   panel.clientWidth = 820;
   context.boardToggleWideLane(null, 'Backlog');
   assert.doesNotMatch(panel.innerHTML, /board-wide-grid/);
   assert.match(panel.innerHTML, /class="board-lane-tab board-lane-drop-target/);
+});
+
+test('wide embedded board defaults To Do collapsed only without explicit persisted state', () => {
+  const { context, document } = createBoardHarness();
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+
+  context.state.board_lanes = ['Backlog', 'To Do', 'In Progress', 'Done'];
+  context.state.board_tasks = {
+    todo: { id: 'todo', group: 'alpha', task: 'To Do card', lane: 'To Do', position: 1 },
+  };
+  runInContext(context, `_boardSelectedLane = 'Backlog';`);
+
+  document.body.classList.add('runtime-embedded');
+  panel.clientWidth = 1200;
+  context.renderBoard();
+
+  assert.match(panel.innerHTML, /board-wide-lane-collapsed" data-lane="To Do"/);
+  assert.doesNotMatch(panel.innerHTML, /<div class="board-card">todo<\/div>/);
+  assert.equal(context.localStorage.getItem('torque.board.hidden_wide_lanes_by_group'), null);
+
+  context.boardToggleWideLane(null, 'To Do');
+  assert.doesNotMatch(panel.innerHTML, /board-wide-lane-collapsed" data-lane="To Do"/);
+  assert.match(panel.innerHTML, /<div class="board-card">todo<\/div>/);
+  assert.deepEqual(
+    JSON.parse(context.localStorage.getItem('torque.board.hidden_wide_lanes_by_group')),
+    { alpha: {} },
+  );
+
+  context.localStorage.setItem('torque.board.hidden_wide_lanes_by_group', JSON.stringify({ alpha: {} }));
+  runInContext(context, `_boardHiddenWideLanesByGroup = null; _boardLaneRenderCache = {};`);
+  context.renderBoard();
+  assert.doesNotMatch(panel.innerHTML, /board-wide-lane-collapsed" data-lane="To Do"/);
+  assert.match(panel.innerHTML, /<div class="board-card">todo<\/div>/);
 });
 
 test('renderBoard places recent, view, and schedules in the top toolbar for wide embedded layout', () => {
