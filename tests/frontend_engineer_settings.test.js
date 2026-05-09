@@ -49,7 +49,7 @@ function loadEngineer(context) {
   vm.runInContext(source, context, { filename });
 }
 
-test('focused engineer panel shows Journal, Events, and Worklog tabs without settings tabs', () => {
+test('focused engineer panel shows Journal, Events, Queued, and Completed tabs without settings tabs', () => {
   const sandbox = createSandbox();
   sandbox.focusedItemId = 'eng-alpha';
   sandbox.state.agents = {
@@ -70,7 +70,8 @@ test('focused engineer panel shows Journal, Events, and Worklog tabs without set
   assert.match(panel.innerHTML, /Engineer: Builder · Group: alpha/);
   assert.match(panel.innerHTML, />Journal</);
   assert.match(panel.innerHTML, />Events</);
-  assert.match(panel.innerHTML, />Worklog</);
+  assert.match(panel.innerHTML, />Queued</);
+  assert.match(panel.innerHTML, />Completed</);
   assert.match(panel.innerHTML, /agent-panel-tabs/);
   assert.doesNotMatch(panel.innerHTML, />Settings</);
 });
@@ -199,7 +200,7 @@ test('engineer Events tab disables send-now while paused', () => {
   assert.match(html, /disabled/);
 });
 
-test('engineer Worklog tab renders dispatched tasks with live lane and status', () => {
+test('engineer Completed tab renders worklog tasks with live lane and status', () => {
   const sandbox = createSandbox();
   sandbox.state.engineer_worklog = {
     alpha: [
@@ -235,14 +236,14 @@ test('engineer Worklog tab renders dispatched tasks with live lane and status', 
     context,
   );
 
-  assert.match(html, /Dispatched tasks/);
+  assert.match(html, /Completed tasks/);
   assert.match(html, /Add Worklog tab/);
   assert.match(html, /In Progress/);
   assert.match(html, /In review/);
   assert.match(html, /Worker One/);
 });
 
-test('engineer Worklog tab hides non-owned rows when restrict_to_created_agents is enabled', () => {
+test('engineer Completed tab hides non-owned rows when restrict_to_created_agents is enabled', () => {
   const sandbox = createSandbox();
   sandbox.state.engineer_worklog = {
     alpha: [

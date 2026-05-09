@@ -137,7 +137,8 @@ test('renderAgentPanel renders architect, engineer, worker, and terminal panels'
   assert.match(panel.innerHTML, /Engineer: Builder · Group: alpha/);
   assert.match(panel.innerHTML, /Journal/);
   assert.match(panel.innerHTML, /Events/);
-  assert.match(panel.innerHTML, /Worklog/);
+  assert.match(panel.innerHTML, /Queued/);
+  assert.match(panel.innerHTML, /Completed/);
 
   setFocusedAgent(context, {
     id: 'worker-1',
@@ -168,7 +169,7 @@ test('agent panel folds MCP into Events subtabs for standalone and toolbelt mode
   const { context, panel } = createHarness();
   const expectedSpecs = {
     architect: ['decisions', 'journal', 'hired_engineers', 'messages', 'events'],
-    engineer: ['journal', 'events', 'worklog'],
+    engineer: ['journal', 'events', 'queued', 'worklog'],
     worker: ['events', 'messages', 'worklog'],
   };
   const agents = {
@@ -535,6 +536,46 @@ test('engineer panel renders journal for the focused engineer only', () => {
     group: 'alpha',
     agent_id: 'eng-1',
   };
+  context.state.board_tasks['TORQUE:10'] = {
+    id: 'TORQUE:10',
+    task: 'Queued backlog item',
+    lane: 'Backlog',
+    status: 'Waiting',
+    group: 'alpha',
+    assigned_engineer_id: 'eng-1',
+    position: 1,
+  };
+  context.state.board_tasks['TORQUE:11'] = {
+    id: 'TORQUE:11',
+    task: 'Queued in-progress item',
+    lane: 'In Progress',
+    status: 'Running',
+    group: 'alpha',
+    assigned_engineer_id: 'eng-1',
+    position: 2,
+  };
+  context.state.board_tasks['TORQUE:12'] = {
+    id: 'TORQUE:12',
+    task: 'Finished item should be completed only',
+    lane: 'Done',
+    group: 'alpha',
+    assigned_engineer_id: 'eng-1',
+  };
+  context.state.board_tasks['TORQUE:13'] = {
+    id: 'TORQUE:13',
+    task: 'Other engineer item',
+    lane: 'Backlog',
+    group: 'alpha',
+    assigned_engineer_id: 'eng-2',
+  };
+  context.state.board_tasks['TORQUE:14'] = {
+    id: 'TORQUE:14',
+    task: 'Engineer message followup',
+    lane: 'To Do',
+    group: 'alpha',
+    assigned_engineer_id: 'eng-1',
+    labels: ['torque:engineer-message'],
+  };
 
   setFocusedAgent(context, {
     id: 'eng-1',
@@ -555,7 +596,17 @@ test('engineer panel renders journal for the focused engineer only', () => {
   assert.match(panel.innerHTML, /Already digested to Builder/);
   assert.match(panel.innerHTML, /Delivered digest item/);
 
+  context.agentPanelSelectTab('queued');
+  assert.match(panel.innerHTML, /id="agent-panel-tab-queued" class="agent-panel-tab active"/);
+  assert.match(panel.innerHTML, /Queued tasks/);
+  assert.match(panel.innerHTML, /Queued backlog item/);
+  assert.match(panel.innerHTML, /Queued in-progress item/);
+  assert.doesNotMatch(panel.innerHTML, /Finished item should be completed only/);
+  assert.doesNotMatch(panel.innerHTML, /Other engineer item/);
+  assert.doesNotMatch(panel.innerHTML, /Engineer message followup/);
+
   context.agentPanelSelectTab('worklog');
+  assert.match(panel.innerHTML, /Completed tasks/);
   assert.match(panel.innerHTML, /Ship engineer panel/);
   assert.match(panel.innerHTML, /Review/);
 });

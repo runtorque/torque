@@ -435,10 +435,43 @@ function _boardAgentStatus(agentId) {
   return agentStatusClass ? agentStatusClass(a) : '';
 }
 
+function _boardAgentForId(agentId) {
+  agentId = String(agentId || '').trim();
+  if (!agentId || !state || !state.agents) return null;
+  return state.agents[agentId] || null;
+}
+
 function _boardAgentName(agentId) {
-  if (!agentId || !state || !state.agents) return '';
-  var a = state.agents[agentId];
+  var a = _boardAgentForId(agentId);
   return a ? a.name : '';
+}
+
+function _boardAgentDisplayName(agentId) {
+  var a = _boardAgentForId(agentId);
+  if (!a) return '';
+  return a.name || a.slug || a.id || '';
+}
+
+function _boardAssignedEngineerBadgeHtml(task) {
+  var engineerId = String((task && task.assigned_engineer_id) || '').trim();
+  if (!engineerId) return '';
+  var engineer = _boardAgentForId(engineerId);
+  var displayName = _boardAgentDisplayName(engineerId) || engineerId;
+  var initial = String(displayName || '?').trim().charAt(0).toUpperCase() || '?';
+  var status = engineer ? (_boardAgentStatus(engineerId) || 'idle') : 'missing';
+  var cls = 'board-card-label board-card-assigned-engineer';
+  if (!engineer) cls += ' board-card-assigned-engineer-missing';
+  var attrs = ' data-assigned-engineer-id="' + esc(engineerId) + '"'
+    + ' title="' + esc('Assigned engineer: ' + displayName) + '"';
+  if (engineer) {
+    attrs += ' onclick="event.stopPropagation();boardFocusAgent(\''
+      + esc(engineerId).replace(/'/g, "\\'") + '\')"';
+  }
+  return '<span class="' + esc(cls) + '"' + attrs + '>'
+    + '<span class="board-card-assigned-engineer-avatar '
+      + esc(status) + '" aria-hidden="true">' + esc(initial) + '</span>'
+    + '<span class="board-card-assigned-engineer-name">' + esc(displayName) + '</span>'
+    + '</span>';
 }
 
 function _boardDepsBlocked(t) {
@@ -749,6 +782,7 @@ function _renderBoardCard(t, childrenOf, depth, renderState) {
   if (typeof _taskCreatedByBadgeHtml === 'function') {
     meta += _taskCreatedByBadgeHtml(t);
   }
+  meta += _boardAssignedEngineerBadgeHtml(t);
   var dispatchEligibility = _boardTaskDispatchEligibility(t);
   if (dispatchEligibility && dispatchEligibility.label !== dependencyBlockedLabel) {
     meta += '<span class="board-card-label ' + esc(dispatchEligibility.className)

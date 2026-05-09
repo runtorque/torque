@@ -1,5 +1,12 @@
 /* Agent panel — focused-agent router with per-kind renderers */
 
+if (typeof taskIsEngineerMessageFollowup !== 'function') {
+  var taskIsEngineerMessageFollowup = function(task) {
+    var labels = (task && Array.isArray(task.labels)) ? task.labels : [];
+    return labels.indexOf('torque:engineer-message') >= 0;
+  };
+}
+
 var _agentPanelLastSelectedTabByKind = {};
 var _agentPanelCellEventsById = {};
 var _agentPanelCellEventsLoadingById = {};
@@ -59,7 +66,8 @@ var _agentPanelTabSpecByKind = {
   engineer: [
     { key: 'journal', label: 'Journal' },
     { key: 'events', label: 'Events' },
-    { key: 'worklog', label: 'Worklog' },
+    { key: 'queued', label: 'Queued' },
+    { key: 'worklog', label: 'Completed' },
   ],
   worker: [
     { key: 'events', label: 'Events' },
@@ -2130,11 +2138,128 @@ function _renderArchitectEvents(agent) {
   return _renderAgentEventsWithInnerTabs(agent);
 }
 
+function _agentPanelQueuedLaneOrder(lane) {
+  lane = String(lane || '').trim();
+  if (lane === 'Backlog') return 0;
+  if (lane === 'To Do') return 1;
+  if (lane === 'In Progress') return 2;
+  return 99;
+}
+
+function _agentPanelTaskTimestampSeconds(task) {
+  task = task || {};
+  var raw = task.lane_entered_at || task.updated_at || task.started_at || task.created_at || 0;
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : 0;
+  if (raw == null || raw === '') return 0;
+  var numeric = Number(raw);
+  if (Number.isFinite(numeric) && String(raw).trim() !== '') return numeric;
+  var parsed = Date.parse(String(raw));
+  return Number.isFinite(parsed) ? Math.floor(parsed / 1000) : 0;
+}
+
+function _agentPanelTaskPosition(task) {
+  var pos = Number(task && task.position);
+  return Number.isFinite(pos) ? pos : 0;
+}
+
+function _agentPanelEngineerQueuedTaskEntries(agent) {
+  var engineerId = String((agent && agent.id) || '').trim();
+  var tasks = [];
+  if (!engineerId || !state || !state.board_tasks) return tasks;
+  for (var taskId in state.board_tasks) {
+    var task = state.board_tasks[taskId];
+    if (!task) continue;
+    if (typeof taskIsEngineerMessageFollowup === 'function'
+        && taskIsEngineerMessageFollowup(task)) continue;
+    if (String(task.assigned_engineer_id || '').trim() !== engineerId) continue;
+    var lane = String(task.lane || '').trim();
+    if (lane !== 'Backlog' && lane !== 'To Do' && lane !== 'In Progress') continue;
+    tasks.push(task);
+  }
+  tasks.sort(function(a, b) {
+    var laneDiff = _agentPanelQueuedLaneOrder(a && a.lane)
+      - _agentPanelQueuedLaneOrder(b && b.lane);
+    if (laneDiff) return laneDiff;
+    var posDiff = _agentPanelTaskPosition(a) - _agentPanelTaskPosition(b);
+    if (posDiff) return posDiff;
+    var tsDiff = _agentPanelTaskTimestampSeconds(b) - _agentPanelTaskTimestampSeconds(a);
+    if (tsDiff) return tsDiff;
+    return String((a && a.id) || '').localeCompare(String((b && b.id) || ''));
+  });
+  return tasks;
+}
+
+function _agentPanelTaskWorkerLabel(task) {
+  var workerId = String((task && task.agent_id) || '').trim();
+  if (!workerId || !state || !state.agents || !state.agents[workerId]) return '';
+  var worker = state.agents[workerId];
+  return worker.name || worker.slug || worker.id || '';
+}
+
+function _agentPanelRenderEngineerQueuedTaskItem(agent, task) {
+  var taskId = (task && task.id) || '';
+  var title = (task && (task.task || task.title)) || taskId || 'Task';
+  var lane = (task && task.lane) || 'Queued';
+  var status = task ? String(task.status || '').trim() : '';
+  var engineerName = _agentPanelAgentDisplayName(agent, 'Engineer');
+  var workerLabel = _agentPanelTaskWorkerLabel(task);
+  var ts = _agentPanelTaskTimestampSeconds(task);
+  var meta = ts ? ('updated ' + _agentPanelTimeAgo(ts)) : 'queued task';
+  if (workerLabel) meta = 'worker ' + workerLabel + ' · ' + meta;
+  var anchorKey = 'engineer-queued-task-' + String(taskId || title);
+
+  var html = '<div class="agent-panel-worklog-item agent-panel-queued-task" data-agent-panel-anchor="'
+    + _agentPanelEsc(anchorKey) + '">';
+  html += '<div class="agent-panel-worklog-item-header">';
+  html += '<div class="agent-panel-worklog-task">';
+  html += '<div class="agent-panel-worklog-task-title">' + _agentPanelEsc(title) + '</div>';
+  if (taskId) {
+    html += '<div class="agent-panel-worklog-task-id">' + _agentPanelEsc(taskId) + '</div>';
+  }
+  html += '</div>';
+  html += '<div class="agent-panel-worklog-lane">' + _agentPanelEsc(lane) + '</div>';
+  html += '</div>';
+  html += '<div class="agent-panel-worklog-meta-row">';
+  html += '<span class="agent-panel-worklog-agent">' + _agentPanelEsc(engineerName) + '</span>';
+  html += '<span class="agent-panel-worklog-meta">' + _agentPanelEsc(meta) + '</span>';
+  html += '</div>';
+  if (status) {
+    html += '<div class="agent-panel-worklog-status">' + _agentPanelEsc(status) + '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function _renderEngineerQueuedTasks(agent) {
+  var tasks = _agentPanelEngineerQueuedTaskEntries(agent);
+  var agentName = _agentPanelAgentDisplayName(agent, 'this engineer');
+  var html = '<div class="agent-panel-worklog-tab agent-panel-queued-tab">';
+  html += '<div class="agent-panel-worklog-header">';
+  html += '<span class="agent-panel-worklog-title">Queued tasks</span>';
+  html += '<span class="agent-panel-worklog-count">' + tasks.length + '</span>';
+  html += '</div>';
+  html += '<div class="agent-panel-worklog-note">Tasks assigned to '
+    + _agentPanelEsc(agentName)
+    + ' in Backlog, To Do, or In Progress.</div>';
+  if (!tasks.length) {
+    html += '<div class="agent-panel-event-empty">No queued tasks for this engineer.</div>';
+    html += '</div>';
+    return html;
+  }
+  html += '<div class="agent-panel-worklog-list">';
+  for (var i = 0; i < tasks.length; i++) {
+    html += _agentPanelRenderEngineerQueuedTaskItem(agent, tasks[i]);
+  }
+  html += '</div>';
+  html += '</div>';
+  return html;
+}
+
 function _renderEngineerWorklog(agent) {
   var group = String((agent && agent.group) || '');
   var ws = _agentPanelEngineerSettings(group);
   if (typeof _agentPanelLegacyRenderWorklog === 'function') return _agentPanelLegacyRenderWorklog(group, ws);
-  return '<div class="agent-panel-empty">No dispatched tasks yet.</div>';
+  return '<div class="agent-panel-empty">No completed tasks yet.</div>';
 }
 
 function _agentPanelTabRenderParts(agent, kind, activeTab) {
@@ -2143,6 +2268,8 @@ function _agentPanelTabRenderParts(agent, kind, activeTab) {
     if (activeTab === 'events') {
       parts.headerRightHtml = _agentPanelDigestHeaderRight(agent);
       parts.bodyHtml += _renderEngineerEvents(agent);
+    } else if (activeTab === 'queued') {
+      parts.bodyHtml += _renderEngineerQueuedTasks(agent);
     } else if (activeTab === 'worklog') {
       parts.bodyHtml += _renderEngineerWorklog(agent);
     } else {
@@ -2182,7 +2309,7 @@ function _renderEngineerPanel(agent) {
   var parts = _agentPanelTabRenderParts(agent, 'engineer', activeTab);
   return _agentPanelShell(
     'Engineer: ' + ((agent && (agent.name || agent.id)) || 'Unknown') + ' · Group: ' + (group || '—'),
-    'Journal, digest queue, and worklog for this engineer\'s group.',
+    'Journal, digest queue, assigned tasks, and completed work for this engineer\'s group.',
     'engineer',
     activeTab,
     parts.bodyHtml,
@@ -4128,7 +4255,7 @@ function renderLegacyGroupPanel() {
   html += '<span class="agent-panel-title">Agent';
   if (group) html += ' — ' + _esc(group);
   html += '</span>';
-  html += '<div class="agent-panel-subtitle">Architect roster, engineer hierarchy, orchestration journal, digest queue, worklog, and session map.</div>';
+  html += '<div class="agent-panel-subtitle">Architect roster, engineer hierarchy, orchestration journal, digest queue, queued assignments, completed work, and session map.</div>';
   html += '</div>';
   html += '<div class="agent-panel-header-right">';
   html += '<button type="button" class="agent-panel-add-engineer-btn" onclick="engineerOpenAddArchitect()">+ Add Architect</button>';
@@ -4155,6 +4282,8 @@ function renderLegacyGroupPanel() {
     html += '<div class="agent-panel-empty">' + _esc(emptyMessage) + '</div>';
   } else if (activeTab === 'events') {
     html += _agentPanelLegacyRenderEvents(group, ws, engineer, bstats);
+  } else if (activeTab === 'queued') {
+    html += _agentPanelLegacyRenderQueuedTasks(group, engineer);
   } else if (activeTab === 'worklog') {
     html += _agentPanelLegacyRenderWorklog(group, ws);
   } else {
@@ -4199,7 +4328,7 @@ function agentPanelTogglePauseForAgent(agentId) {
 function engineerSelectTab(tab, group) {
   group = group || _agentPanelCurrentGroup();
   if (!group) return;
-  if (tab !== 'events' && tab !== 'worklog') tab = 'journal';
+  if (tab !== 'events' && tab !== 'queued' && tab !== 'worklog') tab = 'journal';
   _engineerActiveTabByGroup[group] = tab;
   if (typeof _resolveFocusedAgent === 'function') {
     var focusedAgent = _resolveFocusedAgent();
@@ -4226,7 +4355,7 @@ function agentPanelSendNow(agentId) {
 function _engineerActiveTab(group) {
   if (!group) return 'journal';
   var tab = _engineerActiveTabByGroup[group] || 'journal';
-  if (tab === 'events' || tab === 'worklog') return tab;
+  if (tab === 'events' || tab === 'queued' || tab === 'worklog') return tab;
   return 'journal';
 }
 
@@ -4419,9 +4548,12 @@ function _agentPanelLegacyRenderTabs(group, activeTab) {
   html += '<button id="engineer-tab-events" class="agent-panel-tab'
     + (activeTab === 'events' ? ' active' : '')
     + '" onclick="engineerSelectTab(\'events\')">Events</button>';
+  html += '<button id="engineer-tab-queued" class="agent-panel-tab'
+    + (activeTab === 'queued' ? ' active' : '')
+    + '" onclick="engineerSelectTab(\'queued\')">Queued</button>';
   html += '<button id="engineer-tab-worklog" class="agent-panel-tab'
     + (activeTab === 'worklog' ? ' active' : '')
-    + '" onclick="engineerSelectTab(\'worklog\')">Worklog</button>';
+    + '" onclick="engineerSelectTab(\'worklog\')">Completed</button>';
   html += '</div>';
   return html;
 }
@@ -4722,6 +4854,23 @@ function _engineerRestoreScrollAnchor(container, snapshot) {
 
 // -- Worklog tab ----------------------------------------------------------
 
+function _agentPanelLegacyRenderQueuedTasks(group, engineer) {
+  if (!group) {
+    return '<div class="agent-panel-empty">No engineer configured for any group.</div>';
+  }
+  var focusedEngineer = engineer || _engineerGetAgent(group);
+  if (!focusedEngineer) {
+    return '<div class="agent-panel-worklog-tab agent-panel-queued-tab">'
+      + '<div class="agent-panel-worklog-header">'
+      + '<span class="agent-panel-worklog-title">Queued tasks</span>'
+      + '<span class="agent-panel-worklog-count">0</span>'
+      + '</div>'
+      + '<div class="agent-panel-event-empty">No engineer selected for this group.</div>'
+      + '</div>';
+  }
+  return _renderEngineerQueuedTasks(focusedEngineer);
+}
+
 function _agentPanelLegacyRenderWorklog(group, ws) {
   if (!group) {
     return '<div class="agent-panel-empty">No engineer configured for any group.</div>';
@@ -4743,17 +4892,17 @@ function _agentPanelLegacyRenderWorklog(group, ws) {
 
   var html = '<div class="agent-panel-worklog-tab">';
   html += '<div class="agent-panel-worklog-header">';
-  html += '<span class="agent-panel-worklog-title">Dispatched tasks</span>';
+  html += '<span class="agent-panel-worklog-title">Completed tasks</span>';
   html += '<span class="agent-panel-worklog-count">' + entries.length + '</span>';
   html += '</div>';
   if (ws && ws.restrict_to_created_agents) {
-    html += '<div class="agent-panel-worklog-note">Showing only tasks sent to Engineer-created agents.</div>';
+    html += '<div class="agent-panel-worklog-note">Showing completed work sent to Engineer-created agents.</div>';
   } else {
-    html += '<div class="agent-panel-worklog-note">Recent tasks this Engineer dispatched in this group.</div>';
+    html += '<div class="agent-panel-worklog-note">Recent completed work this Engineer dispatched in this group.</div>';
   }
 
   if (!entries.length) {
-    html += '<div class="agent-panel-event-empty">No dispatched tasks yet.</div>';
+    html += '<div class="agent-panel-event-empty">No completed tasks yet.</div>';
     html += '</div>';
     return html;
   }
