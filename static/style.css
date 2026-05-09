@@ -6379,6 +6379,12 @@ body[data-torque-mode="desktop"] #modal-task .modal {
   background: var(--bg-surface);
 }
 body.diff-view-open #diff-view-root { display: flex; }
+#diff-view-root.overlay {
+  flex: none;
+  min-height: auto;
+  background: rgba(0,0,0,.55);
+}
+#diff-view-root.overlay.visible { display: flex; }
 body.diff-view-open #workspace-shell,
 body.diff-view-open main,
 body.diff-view-open #standalone-bottom-dock,
@@ -6392,6 +6398,59 @@ body.diff-view-open #ctx-menu {
 .diff-view {
   display: flex; flex-direction: column;
   flex: 1; min-height: 0;
+}
+.diff-view-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(calc(100vw - 32px), 336px);
+  max-width: min(calc(100vw - 32px), 336px);
+  height: min(85vh, 760px);
+  padding: 0;
+  overflow: hidden;
+}
+@media (min-width: 400px) {
+  .diff-view-modal {
+    width: min(calc(100vw - 32px), 432px);
+    max-width: min(calc(100vw - 32px), 432px);
+  }
+}
+@media (min-width: 600px) {
+  .diff-view-modal {
+    width: min(calc(100vw - 32px), 528px);
+    max-width: min(calc(100vw - 32px), 528px);
+  }
+}
+@media (min-width: 900px) {
+  .diff-view-modal {
+    width: min(calc(100vw - 32px), 624px);
+    max-width: min(calc(100vw - 32px), 624px);
+  }
+}
+body[data-torque-mode="standalone"] .diff-view-modal,
+body[data-torque-mode="desktop"] .diff-view-modal {
+  width: min(calc(100vw - 32px), 504px);
+  max-width: min(calc(100vw - 32px), 504px);
+}
+@media (min-width: 400px) {
+  body[data-torque-mode="standalone"] .diff-view-modal,
+  body[data-torque-mode="desktop"] .diff-view-modal {
+    width: min(calc(100vw - 32px), 648px);
+    max-width: min(calc(100vw - 32px), 648px);
+  }
+}
+@media (min-width: 600px) {
+  body[data-torque-mode="standalone"] .diff-view-modal,
+  body[data-torque-mode="desktop"] .diff-view-modal {
+    width: min(calc(100vw - 32px), 792px);
+    max-width: min(calc(100vw - 32px), 792px);
+  }
+}
+@media (min-width: 900px) {
+  body[data-torque-mode="standalone"] .diff-view-modal,
+  body[data-torque-mode="desktop"] .diff-view-modal {
+    width: min(calc(100vw - 32px), 936px);
+    max-width: min(calc(100vw - 32px), 936px);
+  }
 }
 .diff-view-header {
   padding: 10px 12px 8px;

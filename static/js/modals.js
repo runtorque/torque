@@ -294,6 +294,26 @@ function closeNestedModal(id) {
   return true;
 }
 
+function setWorktreeDiffModalVisible(visible) {
+  const root = document.getElementById('diff-view-root');
+  if (!root) return null;
+  if (visible) {
+    root.classList.add('overlay');
+    root.classList.add('visible');
+    root.onclick = function(event) {
+      if (event && event.target === root && typeof hideDiffView === 'function') {
+        hideDiffView();
+      }
+    };
+  } else {
+    root.classList.remove('visible');
+    root.classList.remove('overlay');
+    root.classList.remove('modal-nested');
+    root.onclick = null;
+  }
+  return root;
+}
+
 function closeModals() {
   // Nested-modal stack: pop only the topmost when one is active so Cancel/
   // Escape doesn't dismiss the parent dialog underneath.
@@ -316,6 +336,26 @@ function closeModals() {
   if (typeof _taskHistoryOpen !== 'undefined' && _taskHistoryOpen
       && typeof hideTaskHistory === 'function') {
     hideTaskHistory();
+  }
+  var diffModalOpen = typeof _diffViewOpen !== 'undefined' && _diffViewOpen
+    && typeof _diffReadOnly !== 'undefined' && _diffReadOnly;
+  if (diffModalOpen) {
+    var closedOverlayAboveDiff = false;
+    document.querySelectorAll('.overlay').forEach(o => {
+      if (o && o.id === 'diff-view-root') return;
+      if (o && o.classList.contains('visible')) {
+        o.classList.remove('visible');
+        o.classList.remove('modal-nested');
+        closedOverlayAboveDiff = true;
+      }
+    });
+    document.querySelectorAll('.hint-pop').forEach(p => p.remove());
+    if (_confirmResolve) { _confirmResolve(false); _confirmResolve = null; }
+    if (closedOverlayAboveDiff) return;
+    if (typeof hideDiffView === 'function') {
+      hideDiffView();
+      return;
+    }
   }
   document.querySelectorAll('.overlay').forEach(o => {
     o.classList.remove('visible');
