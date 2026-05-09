@@ -72,41 +72,6 @@ body.tauri-mode header .app-wordmark {
   display: none;
 }
 .hdr-spacer { flex: 1; min-width: 0; }
-.group-switcher {
-  display: none;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  flex: 0 1 220px;
-}
-.group-switcher:not([hidden]) { display: flex; }
-.group-switcher-label {
-  color: var(--text-dim);
-  font-size: 10px;
-  white-space: nowrap;
-}
-.group-switcher-select {
-  min-width: 120px;
-  max-width: 220px;
-  flex: 1 1 120px;
-  width: auto;
-  padding: 3px 7px;
-  font-size: 10px;
-  background: var(--bg);
-}
-
-@media (min-width: 600px) {
-  .group-switcher { flex-basis: 292px; }
-}
-.group-switcher-menu-btn {
-  flex: 0 0 auto;
-  width: 22px; height: 22px;
-  color: var(--text-dim);
-  border-radius: 4px;
-}
-.group-switcher-menu-btn:hover { background: var(--bg-hover); color: var(--text); }
-.group-switcher-menu-btn:disabled { opacity: .4; cursor: default; }
-.group-switcher-menu-btn:disabled:hover { background: none; color: var(--text-dim); }
 .hdr-btn {
   font-size: 10px; padding: 3px 8px;
   border: 1px solid var(--border); border-radius: var(--radius);
@@ -756,6 +721,108 @@ main {
 }
 .agents-grid-pane > .empty {
   min-height: 100%;
+}
+.agent-group-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-bottom: 8px;
+  padding: 4px 0 7px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+}
+.agent-group-tabs-list {
+  /* Overflow choice: horizontal scroll is limited to tabs; actions stay fixed. */
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+.agent-group-tabs-empty {
+  flex: 0 0 auto;
+  color: var(--text-dim);
+  font-size: 10px;
+  padding: 4px 2px;
+}
+.agent-group-tab {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 150px;
+  padding: 4px 9px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--text-dim);
+  background: transparent;
+  font-size: 10px;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.agent-group-tab:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.agent-group-tab.active {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.agent-group-tab-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-group-tab-count {
+  flex: 0 0 auto;
+  min-width: 16px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  color: var(--text-dim);
+  background: var(--bg-surface);
+  font-size: 9px;
+  text-align: center;
+}
+.agent-group-tab-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.agent-group-tab-action {
+  flex: 0 0 auto;
+  min-height: 24px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  font-size: 10px;
+}
+.agent-group-tab-action:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+.agent-group-tab-action:disabled {
+  opacity: .4;
+  cursor: default;
+}
+.agent-group-tab-action:disabled:hover {
+  color: var(--text-dim);
+  border-color: var(--border);
+}
+.agent-group-tab-action-settings {
+  width: 26px;
+  padding-left: 0;
+  padding-right: 0;
 }
 .agent-focus-resizer {
   flex: 0 0 8px;

@@ -871,7 +871,7 @@ test('group settings Advanced sub-tab owns Delete group action', () => {
   assert.doesNotMatch(render, /oncontextmenu="onGroupContextMenu/);
   assert.doesNotMatch(render, /title="Delete group"/);
   assert.match(render, /title="Group settings"[^`]*\\u2699/);
-  assert.match(main, /openActiveGroupSettings\(event\)[\s\S]*&#9881;/);
+  assert.match(render, /openActiveGroupSettings\(event\)[\s\S]*&#9881;/);
   assert.doesNotMatch(main, /openActiveGroupMenu|&#8942;|Delete group/);
 });
 

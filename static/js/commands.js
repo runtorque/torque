@@ -124,6 +124,15 @@ function _updateSelectedAgentContext(id) {
   return changed;
 }
 
+function onGroupTabClick(group, event) {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  if (typeof setActiveGroup !== 'function') return;
+  setActiveGroup(group);
+}
+
 function focusAgent(id) {
   var prevSelectedId = selectedAgentId;
   focusedItemId = id;

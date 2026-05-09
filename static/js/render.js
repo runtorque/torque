@@ -370,6 +370,41 @@ function _activeGroupNamesForRender(names) {
   return active ? [active] : [];
 }
 
+function _renderAgentGroupTabsHtml() {
+  if (!_singleGroupModeEnabled()) return '';
+  const groups = _groupNamesSorted();
+  const active = _activeGroup() || '';
+  let html = '<div class="agent-group-tabs" data-agent-group-tabs>';
+  html += '<div class="agent-group-tabs-list" role="tablist" aria-label="Groups">';
+  if (!groups.length) {
+    html += '<span class="agent-group-tabs-empty">No groups</span>';
+  }
+  for (const group of groups) {
+    const selected = group === active;
+    const count = ((state.groups || {})[group] || []).length;
+    html += '<button type="button"'
+      + ' class="agent-group-tab' + (selected ? ' active' : '') + '"'
+      + ' role="tab"'
+      + ' aria-selected="' + (selected ? 'true' : 'false') + '"'
+      + ' title="' + esc(group) + '"'
+      + ' onclick="onGroupTabClick(' + _jsStringAttr(group) + ', event)">'
+      + '<span class="agent-group-tab-name">' + esc(group) + '</span>'
+      + '<span class="agent-group-tab-count">' + count + '</span>'
+      + '</button>';
+  }
+  html += '</div>';
+  html += '<div class="agent-group-tab-actions">';
+  html += '<button type="button" class="agent-group-tab-action agent-group-tab-action-new"'
+    + ' onclick="openAddGroup()">+ New Group</button>';
+  html += '<button type="button" class="agent-group-tab-action agent-group-tab-action-settings"'
+    + (active ? '' : ' disabled')
+    + ' title="Group settings" aria-label="Group settings"'
+    + ' onclick="openActiveGroupSettings(event)">&#9881;</button>';
+  html += '</div>';
+  html += '</div>';
+  return html;
+}
+
 function _agentBelongsToGroup(agentId, group) {
   if (!agentId || !state || !state.agents || !state.agents[agentId]) return false;
   return String(state.agents[agentId].group || '') === String(group || '');
@@ -2618,7 +2653,7 @@ function _renderMainGrid(opts, renderMode) {
         ${action}
       </div>`;
     const emptyState = _captureSurfaceState(main, { scrollSelectors: [':root', '.agents-grid-pane'] });
-    const result = _renderAgentGridAndFocus(main, emptyHtml, {
+    const result = _renderAgentGridAndFocus(main, _renderAgentGroupTabsHtml() + emptyHtml, {
       renderFocus: !(opts && opts.skipFocusRefresh),
     });
     if (result.mainHtmlChanged) _restoreSurfaceState(main, emptyState);
@@ -2803,7 +2838,7 @@ function _renderMainGrid(opts, renderMode) {
   // The effective grid clobber is still guarded like `main._torqueLastHtml !== html`;
   // after a successful split write the aggregate cache is updated like `main._torqueLastHtml = html`.
   // The split stores the grid fragment separately so focus-only refreshes do not rewrite it.
-  const mainRenderResult = _renderAgentGridAndFocus(main, html, {
+  const mainRenderResult = _renderAgentGridAndFocus(main, _renderAgentGroupTabsHtml() + html, {
     renderFocus: !(opts && opts.skipFocusRefresh),
   });
   const mainHtmlChanged = !!mainRenderResult.mainHtmlChanged;

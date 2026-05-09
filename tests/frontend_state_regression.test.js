@@ -16660,13 +16660,13 @@ test('server-driven active group deletion restores fallback group UI state', () 
   assert.equal(sandbox.agentTemplateEditorLoadCalls, 2);
 });
 
-test('header group switcher is hidden in toolbelt and switches active group in standalone', () => {
+test('agent grid group tabs render standalone controls and switch active group', () => {
   const { context, document, sandbox } = createMainHarness({
     renderTerminalWorkspace() {},
   });
-  const root = document.getElementById('group-switcher');
   const addGroupHeaderButton = document.getElementById('add-group-header-btn');
   loadScript(context, 'static/js/render.js');
+  loadScript(context, 'static/js/commands.js');
   runInContext(context, `
     var focusedItemId = null;
     var selectedTerminalId = null;
@@ -16675,20 +16675,23 @@ test('header group switcher is hidden in toolbelt and switches active group in s
   sandbox.state.runtime = { mode: 'toolbelt', embedded_terminal: false };
   sandbox.state.groups = { alpha: [], beta: [] };
   runInContext(context, `renderGroupSwitcher();`);
-  assert.equal(root.hidden, true);
   assert.equal(addGroupHeaderButton.hidden, false);
+  assert.equal(runInContext(context, `_renderAgentGroupTabsHtml()`), '');
 
   sandbox.state.runtime = { mode: 'standalone', embedded_terminal: true };
   runInContext(context, `renderGroupSwitcher();`);
-  assert.equal(root.hidden, false);
   assert.equal(addGroupHeaderButton.hidden, true);
-  assert.match(root.innerHTML, /Group:/);
-  assert.match(root.innerHTML, /<option value="alpha" selected>alpha<\/option>[\s\S]*<option value="beta"/);
-  assert.match(root.innerHTML, /\+ New group/);
-  assert.match(root.innerHTML, /title="Group settings"/);
-  assert.match(root.innerHTML, /openActiveGroupSettings\(event\)/);
-  assert.match(root.innerHTML, /&#9881;/);
-  assert.doesNotMatch(root.innerHTML, /openActiveGroupMenu|&#8942;|Delete group/);
+  let tabsHtml = runInContext(context, `_renderAgentGroupTabsHtml()`);
+  assert.match(tabsHtml, /class="agent-group-tabs"/);
+  assert.match(tabsHtml, /role="tablist" aria-label="Groups"/);
+  assert.match(tabsHtml, /class="agent-group-tab active"[\s\S]*title="alpha"[\s\S]*alpha/);
+  assert.match(tabsHtml, /onGroupTabClick\(&quot;alpha&quot;, event\)/);
+  assert.match(tabsHtml, /title="beta"[\s\S]*beta/);
+  assert.match(tabsHtml, /\+ New Group/);
+  assert.match(tabsHtml, /title="Group settings"/);
+  assert.match(tabsHtml, /openActiveGroupSettings\(event\)/);
+  assert.match(tabsHtml, /&#9881;/);
+  assert.doesNotMatch(tabsHtml, /<select|Group:|openActiveGroupMenu|&#8942;|Delete group/);
 
   sandbox.openedGroupSettings = [];
   sandbox.openGroupSettings = function(group) {
@@ -16703,68 +16706,51 @@ test('header group switcher is hidden in toolbelt and switches active group in s
   `);
   assert.deepEqual(sandbox.openedGroupSettings, ['alpha']);
 
-  runInContext(context, `onActiveGroupSelect('beta');`);
+  runInContext(context, `onGroupTabClick('beta');`);
   assert.equal(jsonValue(context, `state.active_group`), 'beta');
+  assert.equal(jsonValue(context, `_readStoredActiveGroup()`), 'beta');
+  tabsHtml = runInContext(context, `_renderAgentGroupTabsHtml()`);
+  assert.match(tabsHtml, /class="agent-group-tab active"[\s\S]*title="beta"[\s\S]*beta/);
 
   runInContext(context, `
     setActiveGroup('gamma', { allowPending: true });
     state.groups.gamma = [];
-    renderGroupSwitcher();
   `);
+  tabsHtml = runInContext(context, `_renderAgentGroupTabsHtml()`);
   assert.equal(jsonValue(context, `state.active_group`), 'gamma');
-  assert.match(root.innerHTML, /<option value="gamma" selected>gamma<\/option>/);
+  assert.match(tabsHtml, /class="agent-group-tab active"[\s\S]*title="gamma"[\s\S]*gamma/);
 });
 
-test('header group switcher resyncs stale browser select value after switch and cache hit', () => {
-  const rafCallbacks = [];
+test('legacy header group switcher clears removed dropdown chrome', () => {
   const { context, document } = createMainHarness({
     renderTerminalWorkspace() {},
-    requestAnimationFrame(fn) {
-      rafCallbacks.push(fn);
-      return rafCallbacks.length;
-    },
   });
   const root = document.getElementById('group-switcher');
-  const select = document.register('active-group-select');
+  const addGroupHeaderButton = document.getElementById('add-group-header-btn');
   loadScript(context, 'static/js/render.js');
   runInContext(context, `
     var focusedItemId = null;
     var selectedTerminalId = null;
-    state.runtime = {
-      mode: 'standalone',
-      embedded_terminal: true,
-      profile: 'switcher-desync-test',
-      port: 18955,
-    };
     state.groups = { alpha: [], beta: [] };
-    state.group_settings = {
-      alpha: { collapsed_default: false },
-      beta: { collapsed_default: false },
-    };
-    state.children = {};
-    renderGroupSwitcher();
   `);
 
-  assert.equal(select.value, 'alpha');
+  root.hidden = false;
+  root.innerHTML = '<select id="active-group-select"></select>';
+  root._torqueLastHtml = root.innerHTML;
+  runInContext(context, `
+    state.runtime = { mode: 'standalone', embedded_terminal: true };
+    renderGroupSwitcher();
+  `);
+  assert.equal(root.hidden, true);
+  assert.equal(root.innerHTML, '');
+  assert.equal(root._torqueLastHtml, '');
+  assert.equal(addGroupHeaderButton.hidden, true);
 
-  runInContext(context, `onActiveGroupSelect('beta');`);
-  assert.equal(jsonValue(context, `state.active_group`), 'beta');
-
-  // Real browsers can restore the select's live value after the change
-  // handler replaces the element; the rAF sync repairs that post-event
-  // stale visual state.
-  select.value = 'alpha';
-  while (rafCallbacks.length) rafCallbacks.shift()();
-  assert.equal(select.value, 'beta');
-
-  const cachedHtml = root._torqueLastHtml;
-  select.value = 'alpha';
-  runInContext(context, `onActiveGroupSelect('beta');`);
-
-  // Re-selecting the already-active group is a cache hit; the post-render
-  // sync must still run even though innerHTML is not rewritten.
-  assert.equal(root._torqueLastHtml, cachedHtml);
-  assert.equal(select.value, 'beta');
+  runInContext(context, `
+    state.runtime = { mode: 'toolbelt', embedded_terminal: false };
+    renderGroupSwitcher();
+  `);
+  assert.equal(addGroupHeaderButton.hidden, false);
 });
 
 test('active group changes reload visible group-scoped Actions and Roles panels', () => {
@@ -19475,8 +19461,8 @@ test('standalone shell owns the full-width bottom dock rows and drag selector', 
     css,
     /body\.runtime-embedded\.standalone-panel-dragging #standalone-bottom-dock,\s*body\.runtime-embedded\.standalone-panel-dragging #standalone-right-rail\s*\{/s,
   );
-  assert.match(css, /\.group-switcher-select\s*\{[^}]*flex:\s*1 1 120px;[^}]*width:\s*auto;/s);
-  assert.match(css, /@media \(min-width:\s*600px\)\s*\{\s*\.group-switcher\s*\{\s*flex-basis:\s*292px;/s);
+  assert.match(css, /\.agent-group-tabs-list\s*\{[^}]*overflow-x:\s*auto;[^}]*overflow-y:\s*hidden;/s);
+  assert.match(css, /\.agent-group-tab-actions\s*\{[^}]*flex:\s*0 0 auto;[^}]*margin-left:\s*auto;/s);
 });
 
 test('standalone keeps the legacy bottom panel parking host fully collapsed', () => {
