@@ -349,7 +349,7 @@ class AgentTemplateAdapterTests(unittest.TestCase):
         )
 
     def test_codex_hook_install_and_cleanup_preserve_user_entries(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as codex_home:
             adapter = CodexAdapter()
             hooks_file = Path(tmp) / ".codex" / "hooks.json"
             hooks_file.parent.mkdir(parents=True, exist_ok=True)
@@ -371,7 +371,11 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                 )
             )
 
-            with mock.patch.dict(os.environ, {"TORQUE_PORT": "18933"}, clear=False):
+            with mock.patch.dict(
+                os.environ,
+                {"TORQUE_PORT": "18933", "CODEX_HOME": codex_home},
+                clear=False,
+            ):
                 self.assertTrue(adapter.install_hooks(tmp))
 
             installed = json.loads(hooks_file.read_text())
@@ -389,7 +393,8 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             self.assertNotIn("> /dev/null", session_start_hook["command"])
             self.assertNotIn("http://localhost:18932/events", session_start_hook["command"])
 
-            adapter.uninstall_hooks(tmp)
+            with mock.patch.dict(os.environ, {"CODEX_HOME": codex_home}, clear=False):
+                adapter.uninstall_hooks(tmp)
 
             cleaned = json.loads(hooks_file.read_text())
             self.assertEqual(
@@ -562,7 +567,8 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                 3,
             )
 
-            adapter.uninstall_hooks(tmp)
+            with mock.patch.dict(os.environ, {"CODEX_HOME": codex_home}, clear=False):
+                adapter.uninstall_hooks(tmp)
 
             cleaned_hooks = json.loads(hooks_file.read_text())
             self.assertEqual(
