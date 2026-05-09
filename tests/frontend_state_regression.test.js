@@ -8001,7 +8001,7 @@ test('classic terminal selection keeps the current agent context on the toolbelt
   assert.equal(context.focusEmbeddedTerminalWorkspaceCalls, 0);
 });
 
-test('clicking empty main-grid space clears focusedItemId and re-renders the agent panel surface', () => {
+test('clicking empty main-grid space preserves focused and selected agent state', () => {
   const { sandbox, document } = createSandbox();
   sandbox.renderCalls = { main: 0, agent: 0 };
   const main = document.register('main');
@@ -8010,6 +8010,7 @@ test('clicking empty main-grid space clears focusedItemId and re-renders the age
   runInContext(context, `
     var dragInProgress = false;
     var focusedItemId = 'agent-1';
+    var selectedAgentId = 'agent-1';
     render = function() {
       renderCalls.main++;
       if (typeof renderAgentPanel === 'function') renderAgentPanel();
@@ -8018,16 +8019,19 @@ test('clicking empty main-grid space clears focusedItemId and re-renders the age
   `);
 
   context.setupDrag();
-  main.listeners.click({
-    target: {
-      closest() { return null; },
-    },
-  });
+  if (main.listeners.click) {
+    main.listeners.click({
+      target: {
+        closest() { return null; },
+      },
+    });
+  }
 
-  assert.equal(jsonValue(context, 'focusedItemId'), null);
+  assert.equal(jsonValue(context, 'focusedItemId'), 'agent-1');
+  assert.equal(jsonValue(context, 'selectedAgentId'), 'agent-1');
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
-    main: 1,
-    agent: 1,
+    main: 0,
+    agent: 0,
   });
 });
 
