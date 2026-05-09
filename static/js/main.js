@@ -13,10 +13,7 @@ var _workspaceSidebarDefaultWidth = 340;
 var _workspaceSidebarStorageKey = 'torque.ide.sidebar_width';
 
 function _syncGroupSwitcherSelectValue() {
-  var select = document.getElementById('active-group-select');
-  if (!select || typeof _activeGroup !== 'function') return;
-  var active = _activeGroup() || '';
-  if (select.value !== active) select.value = active;
+  // Legacy no-op: group selection now lives in the agents-grid tab bar.
 }
 
 function _scheduleGroupSwitcherSelectSync() {
@@ -37,41 +34,11 @@ function renderGroupSwitcher() {
     && _singleGroupModeEnabled();
   if (addGroupButton) addGroupButton.hidden = singleGroupMode;
   if (!root) return;
-  if (!singleGroupMode) {
-    root.hidden = true;
-    if (root._torqueLastHtml !== '') {
-      root.innerHTML = '';
-      root._torqueLastHtml = '';
-    }
-    return;
+  root.hidden = true;
+  if (root._torqueLastHtml !== '') {
+    root.innerHTML = '';
+    root._torqueLastHtml = '';
   }
-  var groups = (typeof _groupNamesSorted === 'function')
-    ? _groupNamesSorted()
-    : Object.keys((state && state.groups) || {}).sort();
-  var active = (typeof _activeGroup === 'function') ? (_activeGroup() || '') : '';
-  root.hidden = false;
-  var html = '<label class="group-switcher-label" for="active-group-select">Group:</label>';
-  html += '<select id="active-group-select" class="group-switcher-select"'
-    + ' onchange="onActiveGroupSelect(this.value)">';
-  if (!groups.length) {
-    html += '<option value="" selected disabled>No groups</option>';
-  }
-  for (var i = 0; i < groups.length; i++) {
-    var group = groups[i];
-    html += '<option value="' + esc(group) + '"'
-      + (group === active ? ' selected' : '')
-      + '>' + esc(group) + '</option>';
-  }
-  html += '<option value="__new_group__">+ New group</option>';
-  html += '</select>';
-  html += '<button type="button" class="group-switcher-menu-btn"'
-    + (active ? '' : ' disabled')
-    + ' title="Group settings" aria-label="Group settings" onclick="openActiveGroupSettings(event)">&#9881;</button>';
-  if (root._torqueLastHtml !== html) {
-    root.innerHTML = html;
-    root._torqueLastHtml = html;
-  }
-  _syncGroupSwitcherSelectValue();
 }
 
 function openActiveGroupSettings(event) {
@@ -86,9 +53,6 @@ function openActiveGroupSettings(event) {
 
 function onActiveGroupSelect(value) {
   if (value === '__new_group__') {
-    var select = document.getElementById('active-group-select');
-    if (select && typeof _activeGroup === 'function') select.value = _activeGroup() || '';
-    _scheduleGroupSwitcherSelectSync();
     if (typeof openAddGroup === 'function') openAddGroup();
     return;
   }
