@@ -184,6 +184,14 @@ function _boardPersistLaneSorts() {
 
 var _boardHiddenWideLanesStorageKey = 'torque.board.hidden_wide_lanes_by_group';
 
+function _boardDefaultHiddenWideLanesForGroup() {
+  var defaults = {};
+  for (var lane in (_boardDefaultHiddenWideLanes || {})) {
+    if (_boardDefaultHiddenWideLanes[lane]) defaults[lane] = true;
+  }
+  return defaults;
+}
+
 function _boardHydrateHiddenWideLanes() {
   if (_boardHiddenWideLanesByGroup) return;
   _boardHiddenWideLanesByGroup = {};
@@ -203,7 +211,13 @@ function _boardCurrentGroupHiddenWideLanes() {
   _boardHydrateHiddenWideLanes();
   var group = _currentGroup();
   if (!group) return {};
-  return _boardHiddenWideLanesByGroup[group] || {};
+  if (Object.prototype.hasOwnProperty.call(_boardHiddenWideLanesByGroup, group)) {
+    var groupLanes = _boardHiddenWideLanesByGroup[group];
+    return groupLanes && typeof groupLanes === 'object' && !Array.isArray(groupLanes)
+      ? groupLanes
+      : {};
+  }
+  return _boardDefaultHiddenWideLanesForGroup();
 }
 
 function _boardHiddenWideLanesSignature() {
@@ -234,11 +248,14 @@ function boardToggleWideLane(evt, lane) {
   _boardHydrateHiddenWideLanes();
   var group = _currentGroup();
   if (!group || !lane) return;
-  var groupLanes = _boardHiddenWideLanesByGroup[group] || {};
+  var currentLanes = _boardCurrentGroupHiddenWideLanes();
+  var groupLanes = {};
+  for (var currentLane in currentLanes) {
+    if (currentLanes[currentLane]) groupLanes[currentLane] = true;
+  }
   if (groupLanes[lane]) delete groupLanes[lane];
   else groupLanes[lane] = true;
-  if (Object.keys(groupLanes).length) _boardHiddenWideLanesByGroup[group] = groupLanes;
-  else delete _boardHiddenWideLanesByGroup[group];
+  _boardHiddenWideLanesByGroup[group] = groupLanes;
   _boardPersistHiddenWideLanes();
   _boardLaneRenderCache = {};
   renderBoard();

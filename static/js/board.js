@@ -48,6 +48,7 @@ var _boardSavedViewsByGroup = null; // saved view snapshots keyed by group
 var _boardLaneSortsByGroup = null; // persisted lane sort modes keyed by group
 var _boardCardDensityByGroup = null; // persisted card density keyed by group
 var _boardHiddenWideLanesByGroup = null; // local wide-layout lane collapse state keyed by group
+var _boardDefaultHiddenWideLanes = { 'To Do': true }; // fresh wide-layout lane defaults
 var _boardFilterStateGroup = '';
 var _boardShowSchedules = false; // true when "Schedules" tab is active
 var _boardShowArchived = false;  // include archived tasks in the active board view
@@ -676,7 +677,7 @@ function _boardHealthCountsFromTasks(pool) {
 /** Collect all labels with counts (before search/label/action filters). */
 function _boardAllLabelCounts(model) {
   if (model && model.labelCounts) return model.labelCounts;
-  return _boardLabelCountsFromTasks(_boardScopedTasks(_boardShowArchived));
+  return _boardLabelCountsFromTasks(_boardScopedTasks(false));
 }
 
 /** Collect all action names with counts from tasks. */
@@ -1276,7 +1277,7 @@ function _boardBuildRenderModel(lanes) {
     rootTasksByLane: {},
     laneCounts: {},
     lanePoolTasks: {},
-    labelCounts: _boardLabelCountsFromTasks(scopedTasks),
+    labelCounts: _boardLabelCountsFromTasks(scopedWithoutArchived),
     actionCounts: _boardActionCountsFromTasks(scopedTasks),
     agentCounts: _boardAgentCountsFromTasks(scopedTasks),
     healthCounts: _boardHealthCountsFromTasks(scopedWithArchived),

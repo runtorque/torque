@@ -23,10 +23,20 @@ var _labelDropdownIdx = -1;
 var _taskTitleLabelDropdownIdx = -1;
 var _taskTitleEscapedPercents = [];
 var _taskTitleLastValue = '';
+
+function _taskLabelSourceIsArchived(task) {
+  return !!(task && (
+    task.lane === 'Archived'
+    || ((task.labels || []).indexOf('torque:archived') >= 0)
+  ));
+}
+
 function _getAllLabels() {
   var labels = {};
-  for (var id in state.board_tasks) {
-    var t = state.board_tasks[id];
+  var tasks = (state && state.board_tasks) || {};
+  for (var id in tasks) {
+    var t = tasks[id];
+    if (_taskLabelSourceIsArchived(t)) continue;
     (t.labels || []).forEach(function(l) {
       if (!isSystemLabel(l)) labels[l] = (labels[l] || 0) + 1;
     });
