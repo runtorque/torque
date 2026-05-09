@@ -242,10 +242,22 @@ def _codex_home() -> Path:
 
 
 def _codex_absolute_path(path: Path) -> str:
-    # Match Codex's AbsolutePathBuf normalization: expand ~ and remove dot
-    # components without resolving symlinks (Path.resolve() canonicalizes
-    # /var to /private/var on macOS, which would change hook-state keys).
+    # Match Codex's AbsolutePathBuf hook source key for project config:
+    # expand ~ and remove dot components without resolving symlinked prefixes.
     return os.path.normpath(os.path.abspath(os.path.expanduser(str(path))))
+
+
+def _resolved_codex_absolute_path(path: Path) -> str:
+    return str(Path(path).expanduser().resolve(strict=False))
+
+
+def _codex_hook_source_paths(working_dir: str) -> list[str]:
+    hooks_path = Path(working_dir) / ".codex" / "hooks.json"
+    paths = [_codex_absolute_path(hooks_path)]
+    resolved_path = _resolved_codex_absolute_path(hooks_path)
+    if resolved_path not in paths:
+        paths.append(resolved_path)
+    return paths
 
 
 def _hook_trust_marker(source_path: str) -> str:
@@ -297,7 +309,8 @@ def _codex_command_hook_hash(
 
 
 def _codex_hook_trust_entries(working_dir: str, hooks: dict) -> tuple[str, list[tuple[str, str]]]:
-    source_path = _codex_absolute_path(Path(working_dir) / ".codex" / "hooks.json")
+    source_paths = _codex_hook_source_paths(working_dir)
+    source_path = source_paths[0]
     entries: list[tuple[str, str]] = []
     for event_name, groups in hooks.items():
         event_label = _CODEX_HOOK_EVENT_LABELS.get(event_name)
@@ -308,11 +321,10 @@ def _codex_hook_trust_entries(working_dir: str, hooks: dict) -> tuple[str, list[
             for handler_index, hook in enumerate(group.get("hooks", []) or []):
                 if hook.get("type") != "command" or not _is_torque_hook(hook):
                     continue
-                key = f"{source_path}:{event_label}:{group_index}:{handler_index}"
-                entries.append((
-                    key,
-                    _codex_command_hook_hash(event_label, matcher, hook),
-                ))
+                trusted_hash = _codex_command_hook_hash(event_label, matcher, hook)
+                for path in source_paths:
+                    key = f"{path}:{event_label}:{group_index}:{handler_index}"
+                    entries.append((key, trusted_hash))
     return source_path, entries
 
 
@@ -353,17 +365,19 @@ def _install_codex_hook_trust(working_dir: str, hooks: dict) -> bool:
     block = "\n".join(lines).rstrip() + "\n"
 
     def _update(content: str) -> str:
-        content = _remove_hook_trust_block(content, source_path).strip()
+        for path in _codex_hook_source_paths(working_dir):
+            content = _remove_hook_trust_block(content, path)
+        content = content.strip()
         return f"{content}\n\n{block}" if content else block
 
     return _update_codex_user_config(_update)
 
 
 def _uninstall_codex_hook_trust(working_dir: str) -> bool:
-    source_path = _codex_absolute_path(Path(working_dir) / ".codex" / "hooks.json")
-
     def _update(content: str) -> str:
-        return _remove_hook_trust_block(content, source_path)
+        for path in _codex_hook_source_paths(working_dir):
+            content = _remove_hook_trust_block(content, path)
+        return content
 
     return _update_codex_user_config(_update)
 

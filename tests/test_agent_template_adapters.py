@@ -552,6 +552,7 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             self.assertNotIn("http://localhost:18932/events", hooks_file.read_text())
 
             source = os.path.abspath(str(hooks_file))
+            source_paths = {source, str(hooks_file.expanduser().resolve(strict=False))}
             trust_config = user_config.read_text()
             self.assertIn('model = "gpt-5"', trust_config)
             self.assertIn(
@@ -564,7 +565,7 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             self.assertIn(f'[hooks.state."{source}:stop:1:0"]', trust_config)
             self.assertEqual(
                 len(re.findall(r'trusted_hash = "sha256:[0-9a-f]{64}"', trust_config)),
-                3,
+                3 * len(source_paths),
             )
 
             with mock.patch.dict(os.environ, {"CODEX_HOME": codex_home}, clear=False):
