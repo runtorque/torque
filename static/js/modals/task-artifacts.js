@@ -269,7 +269,7 @@ function _artifactPreviewCreateOverlay() {
   overlay.id = 'modal-artifact-preview';
   overlay.className = 'overlay artifact-preview-overlay visible';
   if (overlay.classList) overlay.classList.add('overlay', 'artifact-preview-overlay', 'visible');
-  overlay.addEventListener('click', function(e) {
+  overlay.addEventListener('mousedown', function(e) {
     if (e.target === overlay) closeTaskArtifactPreview();
   });
   _artifactPreviewKeyHandler = function(e) {

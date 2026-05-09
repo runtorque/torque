@@ -1132,7 +1132,7 @@ document.addEventListener('keydown', (e) => {
 
 document.addEventListener('click', () => { closeMenus(); closeContextMenu(); });
 document.querySelectorAll('.overlay').forEach(o => {
-  o.addEventListener('click', (e) => { if (e.target === o) closeModals(); });
+  o.addEventListener('mousedown', (e) => { if (e.target === o) closeModals(); });
 });
 
 ['add-name-input', 'add-cmd-input', 'add-dir-input',

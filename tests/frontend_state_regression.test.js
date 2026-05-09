@@ -15206,7 +15206,7 @@ test('openTaskArtifactById prefers filename and path when artifact ids are dupli
   assert.match(overlay.innerHTML, /diff --git/);
 });
 
-test('artifact preview popup renders png and svg images and click-outside closes it', () => {
+test('artifact preview popup renders png and svg images and mousedown-outside closes it', () => {
   const fetched = [];
   const { sandbox, document } = createSandbox({
     fetch(url) {
@@ -15251,7 +15251,7 @@ test('artifact preview popup renders png and svg images and click-outside closes
   assert.match(overlay.innerHTML, /\/attachments\/task-images\/screenshot\.png/);
   assert.deepEqual(fetched, []);
 
-  overlay.listeners.click({ target: overlay });
+  overlay.listeners.mousedown({ target: overlay });
   assert.equal(overlay.parentNode, null);
 
   assert.equal(runInContext(context, `openTaskArtifactById('task-images', 'svg-artifact')`), true);
