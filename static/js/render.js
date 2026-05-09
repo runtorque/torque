@@ -555,6 +555,7 @@ function _captureActiveGroupUiState(group) {
     'panel-context',
     'panel-events',
     'panel-agent',
+    'panel-supervisor',
   ];
   for (let i = 0; i < panelIds.length; i++) {
     const el = document.getElementById(panelIds[i]);
@@ -992,6 +993,7 @@ function _surfacePanelApp(surface) {
   if (surface === 'events') return 'events';
   if (surface === 'engineer') return 'engineer';
   if (surface === 'templates') return 'templates';
+  if (surface === 'supervisor') return 'supervisor';
   return '';
 }
 
@@ -1030,6 +1032,7 @@ function _renderSurface(surface) {
     }
   }
   if (surface === 'templates' && typeof renderAgentTemplatesPanel === 'function') renderAgentTemplatesPanel();
+  if (surface === 'supervisor' && typeof renderSupervisorPanel === 'function') renderSupervisorPanel({ force: true });
 }
 
 function renderActivePanel() {

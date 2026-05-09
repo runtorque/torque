@@ -317,6 +317,10 @@ function connect() {
       if (typeof _applySystemBanner === 'function') {
         _applySystemBanner(msg.banner);
       }
+    } else if (msg.type === 'supervisor_sessions') {
+      if (typeof supervisorReceiveSessions === 'function') {
+        supervisorReceiveSessions(msg);
+      }
     } else if (msg.type === 'daemon_stop') {
       if (typeof _daemonStopRequestedByUser !== 'undefined'
           && _daemonStopRequestedByUser

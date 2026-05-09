@@ -1,6 +1,6 @@
 /* Standalone-only panel workspace manager */
 
-var _standalonePanelApps = ['board', 'actions', 'templates', 'context', 'events', 'engineer'];
+var _standalonePanelApps = ['board', 'actions', 'templates', 'context', 'events', 'engineer', 'supervisor'];
 var _standalonePanelTitles = {
   board: 'Board',
   actions: 'Actions',
@@ -8,6 +8,7 @@ var _standalonePanelTitles = {
   context: 'Context',
   events: 'Events',
   engineer: 'Agent',
+  supervisor: 'Supervisor',
 };
 var _standalonePanelDefaults = {
   board: 'bottom',
@@ -16,6 +17,7 @@ var _standalonePanelDefaults = {
   context: 'right',
   events: 'right',
   engineer: 'bottom',
+  supervisor: 'right',
 };
 var _standalonePanelLayoutVersion = 1;
 var _standalonePanelLayout = null;
