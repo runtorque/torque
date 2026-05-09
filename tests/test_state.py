@@ -3378,6 +3378,32 @@ class SelectedPrincipalIdTests(unittest.TestCase):
         d = state.to_dict()
         self.assertEqual(d["selected_principal_id"], "architect-a")
 
+    def test_to_dict_includes_persisted_ui_state(self):
+        state = self.state_mod.MatrixState()
+        state.active_group = "beta"
+        state.window_bounds = {"main": {"width": 1200, "height": 800}}
+        state.workspace_sidebar_width = 720
+        state.context_panel_split_ratio = 0.44
+        state.board_selected_lanes_by_group = {"beta": "Done"}
+        state.board_hidden_wide_lanes_by_group = {
+            "beta": {"To Do": True}
+        }
+
+        d = state.to_dict()
+
+        self.assertEqual(d["active_group"], "beta")
+        self.assertEqual(d["window_bounds"], state.window_bounds)
+        self.assertEqual(d["workspace_sidebar_width"], 720)
+        self.assertEqual(d["context_panel_split_ratio"], 0.44)
+        self.assertEqual(
+            d["board_selected_lanes_by_group"],
+            {"beta": "Done"},
+        )
+        self.assertEqual(
+            d["board_hidden_wide_lanes_by_group"],
+            {"beta": {"To Do": True}},
+        )
+
     def test_to_dict_includes_selected_agent_id(self):
         state = self.state_mod.MatrixState()
         state.selected_agent_id = "agent-a"
@@ -3434,6 +3460,48 @@ class SelectedPrincipalIdTests(unittest.TestCase):
 
         self.assertEqual(state.selected_agent_id, "agent-42")
 
+    def test_persists_and_restores_window_group_and_board_lane_state(self):
+        from torque.db import TorqueDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = TorqueDB(Path(tmp.name) / "torque.db")
+        db.init()
+        self.addCleanup(db.close)
+
+        db.save_groups({"g": []}, {"g": "g"})
+        db.save_ui_state("active_group", "g")
+        db.save_ui_state(
+            "window_bounds",
+            json.dumps({"main": {"width": 1200, "height": 800}}),
+        )
+        db.save_ui_state("workspace_sidebar_width", "700")
+        db.save_ui_state("context_panel_split_ratio", "0.42")
+        db.save_ui_state(
+            "board_selected_lanes_by_group",
+            json.dumps({"g": "Done"}),
+        )
+        db.save_ui_state(
+            "board_hidden_wide_lanes_by_group",
+            json.dumps({"g": {"To Do": True}}),
+        )
+
+        state = self.state_mod.MatrixState(db=db)
+        state.load()
+
+        self.assertEqual(state.active_group, "g")
+        self.assertEqual(
+            state.window_bounds,
+            {"main": {"width": 1200, "height": 800}},
+        )
+        self.assertEqual(state.workspace_sidebar_width, 700)
+        self.assertEqual(state.context_panel_split_ratio, 0.42)
+        self.assertEqual(state.board_selected_lanes_by_group, {"g": "Done"})
+        self.assertEqual(
+            state.board_hidden_wide_lanes_by_group,
+            {"g": {"To Do": True}},
+        )
+
     def test_defaults_to_empty_when_ui_state_missing(self):
         from torque.db import TorqueDB
 
@@ -3448,6 +3516,11 @@ class SelectedPrincipalIdTests(unittest.TestCase):
 
         self.assertEqual(state.selected_principal_id, "")
         self.assertEqual(state.selected_agent_id, "")
+        self.assertEqual(state.active_group, "")
+        self.assertEqual(state.window_bounds, {})
+        self.assertEqual(state.workspace_sidebar_width, 0)
+        self.assertEqual(state.board_selected_lanes_by_group, {})
+        self.assertEqual(state.board_hidden_wide_lanes_by_group, {})
 
 
 class DetachedPanelsStateTests(unittest.TestCase):

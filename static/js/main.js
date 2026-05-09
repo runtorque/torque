@@ -41,6 +41,28 @@ function renderGroupSwitcher() {
   }
 }
 
+function torqueMainWindowBoundsChanged() {
+  if (typeof _detachedWindowActive === 'function' && _detachedWindowActive()) return;
+  if (!window.nativeApi || !window.nativeApi.available()) return;
+  if (torqueMainWindowBoundsChanged._timer && typeof clearTimeout === 'function') {
+    clearTimeout(torqueMainWindowBoundsChanged._timer);
+  }
+  torqueMainWindowBoundsChanged._timer = setTimeout(function() {
+    window.nativeApi.currentWindowBounds().then(function(bounds) {
+      if (!bounds) return;
+      if (state) {
+        if (!state.window_bounds || typeof state.window_bounds !== 'object') {
+          state.window_bounds = {};
+        }
+        state.window_bounds.main = bounds;
+      }
+      if (typeof send === 'function') {
+        send({ cmd: 'ui_set_window_bounds', window: 'main', bounds: bounds });
+      }
+    }).catch(function() {});
+  }, 300);
+}
+
 function openActiveGroupSettings(event) {
   if (event) {
     event.preventDefault();
@@ -432,6 +454,8 @@ function _workspaceSidebarWidthBounds(opts) {
 }
 
 function _readWorkspaceSidebarWidth() {
+  var serverWidth = parseInt((state && state.workspace_sidebar_width) || 0, 10);
+  if (Number.isFinite(serverWidth) && serverWidth > 0) return serverWidth;
   try {
     if (typeof localStorage !== 'undefined') {
       var saved = parseInt(localStorage.getItem(_workspaceSidebarStorageKey) || '', 10);
@@ -450,12 +474,20 @@ function _standalonePreferredSidebarWidth() {
   return Math.max(bounds.min, Math.min(bounds.max, preferred));
 }
 
-function _persistWorkspaceSidebarWidth(width) {
+function _persistWorkspaceSidebarWidth(width, opts) {
+  opts = opts || {};
+  var next = parseInt(width, 10);
+  if (!Number.isFinite(next) || next <= 0) next = 0;
+  if (state) state.workspace_sidebar_width = next;
   try {
     if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(_workspaceSidebarStorageKey, String(width));
+      if (next > 0) localStorage.setItem(_workspaceSidebarStorageKey, String(next));
+      else localStorage.removeItem(_workspaceSidebarStorageKey);
     }
   } catch (_) {}
+  if (!opts.fromServer && typeof send === 'function') {
+    send({ cmd: 'ui_set_workspace_sidebar_width', width: next });
+  }
 }
 
 function _applyWorkspaceSidebarWidth(width, opts) {

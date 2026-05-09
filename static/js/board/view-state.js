@@ -75,6 +75,48 @@ function _boardPersistFilterState() {
   }
 }
 
+function _boardHydrateSelectedLanes() {
+  if (_boardSelectedLanesByGroup) return;
+  _boardSelectedLanesByGroup = {};
+  var persisted = (state && state.board_selected_lanes_by_group) || {};
+  for (var group in persisted) {
+    var lane = String(persisted[group] || '').trim();
+    if (lane) _boardSelectedLanesByGroup[group] = lane;
+  }
+}
+
+function _boardSyncSelectedLaneForCurrentGroup(lanes) {
+  _boardHydrateSelectedLanes();
+  var group = _currentGroup() || '';
+  if (group === _boardSelectedLaneStateGroup) return;
+  _boardSelectedLaneStateGroup = group;
+  var persisted = group ? String(_boardSelectedLanesByGroup[group] || '') : '';
+  if (persisted && (!lanes || lanes.indexOf(persisted) >= 0)) {
+    _boardSelectedLane = persisted;
+  }
+}
+
+function _boardPersistSelectedLane() {
+  _boardHydrateSelectedLanes();
+  var group = _currentGroup();
+  if (!group) return;
+  var lane = String(_boardSelectedLane || '').trim();
+  if (lane) _boardSelectedLanesByGroup[group] = lane;
+  else delete _boardSelectedLanesByGroup[group];
+  if (state) {
+    state.board_selected_lanes_by_group = Object.assign(
+      {},
+      _boardSelectedLanesByGroup,
+    );
+  }
+  if (typeof send === 'function') {
+    send({
+      cmd: 'board_set_selected_lanes',
+      selected_lanes_by_group: _boardSelectedLanesByGroup,
+    });
+  }
+}
+
 function _boardNormalizeSavedView(raw) {
   raw = raw || {};
   var filters = _boardNormalizeFilterState(raw);
@@ -195,6 +237,18 @@ function _boardDefaultHiddenWideLanesForGroup() {
 function _boardHydrateHiddenWideLanes() {
   if (_boardHiddenWideLanesByGroup) return;
   _boardHiddenWideLanesByGroup = {};
+  var persisted = (state && state.board_hidden_wide_lanes_by_group) || {};
+  var hasPersisted = false;
+  for (var persistedGroup in persisted) {
+    var rawGroup = persisted[persistedGroup];
+    if (!rawGroup || typeof rawGroup !== 'object' || Array.isArray(rawGroup)) continue;
+    _boardHiddenWideLanesByGroup[persistedGroup] = {};
+    for (var lane in rawGroup) {
+      if (rawGroup[lane]) _boardHiddenWideLanesByGroup[persistedGroup][lane] = true;
+    }
+    hasPersisted = true;
+  }
+  if (hasPersisted) return;
   if (typeof localStorage === 'undefined') return;
   try {
     var raw = localStorage.getItem(_boardHiddenWideLanesStorageKey);
@@ -233,6 +287,18 @@ function _boardIsWideLaneCollapsed(lane) {
 }
 
 function _boardPersistHiddenWideLanes() {
+  if (state) {
+    state.board_hidden_wide_lanes_by_group = Object.assign(
+      {},
+      _boardHiddenWideLanesByGroup,
+    );
+  }
+  if (typeof send === 'function') {
+    send({
+      cmd: 'board_set_hidden_wide_lanes',
+      hidden_wide_lanes_by_group: _boardHiddenWideLanesByGroup,
+    });
+  }
   if (typeof localStorage === 'undefined') return;
   try {
     if (Object.keys(_boardHiddenWideLanesByGroup).length) {

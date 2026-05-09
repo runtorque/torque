@@ -231,6 +231,7 @@ function _agentFocusResizeEnd() {
 var _activeGroupSurfaceStateByGroup = {};
 var _activeGroupStoragePrefix = 'torque.active_group';
 var _pendingActiveGroup = '';
+var _lastPersistedActiveGroup = null;
 
 function _torqueUiMode() {
   const runtime = (state && state.runtime) || {};
@@ -286,6 +287,15 @@ function _writeStoredActiveGroup(group) {
   } catch (_e) {}
 }
 
+function _persistActiveGroup(group) {
+  const next = String(group || '').trim();
+  if (_lastPersistedActiveGroup === next) return;
+  _lastPersistedActiveGroup = next;
+  if (typeof send === 'function') {
+    send({ cmd: 'ui_select_group', group: next });
+  }
+}
+
 function _normalizeActiveGroup(group, names) {
   const available = _groupNamesSorted(names);
   if (!available.length) return '';
@@ -323,6 +333,7 @@ function _activeGroup() {
   if (_pendingActiveGroup && next === _pendingActiveGroup) _pendingActiveGroup = '';
   if (state) state.active_group = next;
   if (next && stored !== next) _writeStoredActiveGroup(next);
+  if (current && current !== next) _persistActiveGroup(next);
   return next;
 }
 
@@ -338,7 +349,11 @@ function _activeGroupTransition(prevGroup, nextGroup, opts) {
   if (state) state.active_group = next;
   if (_pendingActiveGroup && _pendingActiveGroup === next) _pendingActiveGroup = '';
   _writeStoredActiveGroup(next);
+  _persistActiveGroup(next);
   const saved = _applyActiveGroupUiState(next);
+  if (typeof _persistSelectedAgentFromLocal === 'function') {
+    _persistSelectedAgentFromLocal();
+  }
 
   if (typeof _reloadVisibleGroupScopedPanelApps === 'function') {
     _reloadVisibleGroupScopedPanelApps();
@@ -483,6 +498,8 @@ function _restoreBoardGroupUiState(saved) {
   if (typeof _boardCardsScrollTop !== 'undefined') _boardCardsScrollTop = saved.cardsScrollTop || 0;
   if (typeof _boardActiveViewKey !== 'undefined') _boardActiveViewKey = saved.activeViewKey || '';
   if (typeof _boardFilterStateGroup !== 'undefined') _boardFilterStateGroup = '';
+  if (typeof _boardSelectedLaneStateGroup !== 'undefined') _boardSelectedLaneStateGroup = '';
+  if (typeof _boardPersistSelectedLane === 'function') _boardPersistSelectedLane();
 }
 
 function _resetBoardGroupUiStateForFreshGroup() {
@@ -504,6 +521,7 @@ function _resetBoardGroupUiStateForFreshGroup() {
   if (typeof _boardCardsScrollTop !== 'undefined') _boardCardsScrollTop = 0;
   if (typeof _boardActiveViewKey !== 'undefined') _boardActiveViewKey = '';
   if (typeof _boardFilterStateGroup !== 'undefined') _boardFilterStateGroup = '';
+  if (typeof _boardSelectedLaneStateGroup !== 'undefined') _boardSelectedLaneStateGroup = '';
 }
 
 function _captureActiveGroupUiState(group) {

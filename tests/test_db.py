@@ -940,6 +940,23 @@ class TorqueDBTests(unittest.TestCase):
 
         self.assertEqual(loaded["board_filters_by_group"], filters)
 
+    def test_load_all_restores_board_lane_ui_state_by_group(self):
+        selected = {"alpha": "In Progress", "beta": "Done"}
+        hidden = {"alpha": {"To Do": True}, "beta": {}}
+        self.db.save_ui_state(
+            "board_selected_lanes_by_group",
+            json.dumps(selected),
+        )
+        self.db.save_ui_state(
+            "board_hidden_wide_lanes_by_group",
+            json.dumps(hidden),
+        )
+
+        loaded = self.db.load_all()
+
+        self.assertEqual(loaded["board_selected_lanes_by_group"], selected)
+        self.assertEqual(loaded["board_hidden_wide_lanes_by_group"], hidden)
+
     def test_save_all_preserves_kinds_fields(self):
         self.db.save_all(
             {
@@ -1321,6 +1338,13 @@ class TorqueDBTests(unittest.TestCase):
 
         self.assertEqual(loaded["selected_principal_id"], "architect-7")
 
+    def test_load_all_restores_active_group(self):
+        self.db.save_ui_state("active_group", "beta")
+
+        loaded = self.db.load_all()
+
+        self.assertEqual(loaded["active_group"], "beta")
+
     def test_load_all_restores_selected_agent_id(self):
         self.db.save_ui_state("selected_agent_id", "agent-7")
 
@@ -1397,6 +1421,26 @@ class TorqueDBTests(unittest.TestCase):
         loaded = self.db.load_all()
 
         self.assertEqual(loaded["standalone_panel_layout"], layout)
+
+    def test_load_all_restores_native_window_and_split_state(self):
+        bounds = {
+            "main": {
+                "x": 20,
+                "y": 40,
+                "width": 1280,
+                "height": 820,
+                "display_id": "main-display",
+            }
+        }
+        self.db.save_ui_state("window_bounds", json.dumps(bounds))
+        self.db.save_ui_state("workspace_sidebar_width", "732")
+        self.db.save_ui_state("context_panel_split_ratio", "0.44")
+
+        loaded = self.db.load_all()
+
+        self.assertEqual(loaded["window_bounds"], bounds)
+        self.assertEqual(loaded["workspace_sidebar_width"], 732)
+        self.assertEqual(loaded["context_panel_split_ratio"], 0.44)
 
     def test_panel_event_paging_and_trim_keep_recent_events(self):
         for i in range(1, 6):

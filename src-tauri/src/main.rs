@@ -2,8 +2,10 @@ use std::env;
 use std::ffi::OsString;
 use std::process;
 use std::sync::Arc;
+use std::time::Duration;
 
-use tauri::{Manager, RunEvent};
+use serde_json::json;
+use tauri::{Manager, PhysicalPosition, PhysicalSize, Position, RunEvent, Size};
 use torque_desktop::commands;
 use torque_desktop::commands::window::NativeWindowState;
 use torque_desktop::daemon::{self, DaemonSettings};
@@ -99,6 +101,7 @@ fn show_main_window(
             .map_err(|error| format!("Unable to parse Torque desktop URL '{}': {error}", target))?;
         window.navigate(url).map_err(|error| error.to_string())?;
     }
+    restore_main_window_bounds(&window, settings);
     window.show().map_err(|error| error.to_string())?;
     Ok(())
 }
@@ -110,6 +113,10 @@ fn handle_run_event(app_handle: &tauri::AppHandle, event: RunEvent) {
             event: tauri::WindowEvent::CloseRequested { .. },
             ..
         } if label == "main" => {
+            persist_all_native_window_bounds(app_handle);
+            if let Some(window_state) = app_handle.try_state::<NativeWindowState>() {
+                window_state.set_app_exiting(true);
+            }
             stop_managed_daemon(app_handle);
             app_handle.exit(0);
         }
@@ -126,11 +133,14 @@ fn handle_run_event(app_handle: &tauri::AppHandle, event: RunEvent) {
             label,
             event: tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_),
             ..
-        } if commands::window::panel_from_label(&label).is_some() => {
+        } if label == "main" || commands::window::panel_from_label(&label).is_some() => {
             if let Some(window) = app_handle.get_webview_window(&label) {
-                let _ = window.eval(
-                    "window.torqueDetachedWindowBoundsChanged && window.torqueDetachedWindowBoundsChanged();",
-                );
+                let script = if label == "main" {
+                    "window.torqueMainWindowBoundsChanged && window.torqueMainWindowBoundsChanged();"
+                } else {
+                    "window.torqueDetachedWindowBoundsChanged && window.torqueDetachedWindowBoundsChanged();"
+                };
+                let _ = window.eval(script);
             }
         }
         RunEvent::WindowEvent {
@@ -139,15 +149,117 @@ fn handle_run_event(app_handle: &tauri::AppHandle, event: RunEvent) {
             ..
         } if commands::window::panel_from_label(&label).is_some() => {
             if let Some(window_state) = app_handle.try_state::<NativeWindowState>() {
+                if window_state.app_exiting() {
+                    return;
+                }
                 if let Some(panel) = window_state.remove_detached_by_label(&label) {
                     notify_main_window_detached_closed(app_handle, &panel, &label);
                 }
             }
         }
-        RunEvent::ExitRequested { .. } | RunEvent::Exit => {
+        RunEvent::ExitRequested { .. } => {
+            persist_all_native_window_bounds(app_handle);
+            if let Some(window_state) = app_handle.try_state::<NativeWindowState>() {
+                window_state.set_app_exiting(true);
+            }
+            stop_managed_daemon(app_handle);
+        }
+        RunEvent::Exit => {
             stop_managed_daemon(app_handle);
         }
         _ => {}
+    }
+}
+
+fn restore_main_window_bounds(window: &tauri::WebviewWindow, settings: &DaemonSettings) {
+    let Some(bounds) = fetch_main_window_bounds(settings) else {
+        return;
+    };
+    if let (Some(width), Some(height)) = (bounds.width, bounds.height) {
+        let width = width.max(800.0).round() as u32;
+        let height = height.max(600.0).round() as u32;
+        let _ = window.set_size(Size::Physical(PhysicalSize::new(width, height)));
+    }
+    if let (Some(x), Some(y)) = (bounds.x, bounds.y) {
+        let _ = window.set_position(Position::Physical(PhysicalPosition::new(
+            x.round() as i32,
+            y.round() as i32,
+        )));
+    }
+}
+
+fn fetch_main_window_bounds(settings: &DaemonSettings) -> Option<commands::window::WindowBounds> {
+    let url = format!("{}api/ui_state", settings.url());
+    let response: serde_json::Value = ureq::AgentBuilder::new()
+        .timeout(Duration::from_millis(750))
+        .build()
+        .get(&url)
+        .call()
+        .ok()?
+        .into_json()
+        .ok()?;
+    serde_json::from_value(
+        response
+            .get("window_bounds")?
+            .get("main")?
+            .clone(),
+    )
+    .ok()
+}
+
+fn post_api_cmd(settings: &DaemonSettings, payload: serde_json::Value) {
+    let url = format!("{}api/cmd", settings.url());
+    let _ = ureq::AgentBuilder::new()
+        .timeout(Duration::from_millis(750))
+        .build()
+        .post(&url)
+        .send_json(payload);
+}
+
+fn persist_native_window_bounds(
+    settings: &DaemonSettings,
+    label: &str,
+    window: &tauri::WebviewWindow,
+) {
+    let Ok(bounds) = commands::window::window_bounds(window) else {
+        return;
+    };
+    if label == "main" {
+        post_api_cmd(
+            settings,
+            json!({
+                "cmd": "ui_set_window_bounds",
+                "window": "main",
+                "bounds": bounds,
+            }),
+        );
+    } else if let Some(panel) = commands::window::panel_from_label(label) {
+        post_api_cmd(
+            settings,
+            json!({
+                "cmd": "ui_set_detached_panel_bounds",
+                "panel": panel,
+                "label": label,
+                "bounds": bounds,
+            }),
+        );
+    }
+}
+
+fn persist_all_native_window_bounds(app_handle: &tauri::AppHandle) {
+    let Some(settings) = app_handle.try_state::<DaemonSettings>() else {
+        return;
+    };
+    if let Some(main) = app_handle.get_webview_window("main") {
+        persist_native_window_bounds(&settings, "main", &main);
+    }
+    let Some(window_state) = app_handle.try_state::<NativeWindowState>() else {
+        return;
+    };
+    for info in window_state.detached_infos() {
+        if let Some(window) = app_handle.get_webview_window(&info.label) {
+            persist_native_window_bounds(&settings, &info.label, &window);
+        }
     }
 }
 

@@ -1380,6 +1380,9 @@ class MatrixState:
         self.auto_dispatch_queues: dict[str, list[AutoDispatchQueueEntry]] = {}
         self.panel_active: str = ""  # '' | 'board' | 'actions' | 'events'
         self.board_panel_height: int = 0  # 0 = use CSS default
+        # Browser/Tauri UI state mirrored through ui_state so standalone,
+        # desktop, and detached-window sessions restore after daemon restart.
+        self.active_group: str = ""
         # Agent panel principals-row filter. Empty string means "user" (the
         # default). When set to an architect id, the grid filters to that
         # architect's engineers + their workers.
@@ -1389,9 +1392,14 @@ class MatrixState:
         self.selected_agent_id: str = ""
         self.standalone_panel_layout: dict = {}
         self.detached_panels: dict[str, dict] = {}
+        self.window_bounds: dict[str, dict] = {}
+        self.workspace_sidebar_width: int = 0
         self.engineer_panel_split_fraction: float = 0.30
+        self.context_panel_split_ratio: float = 0.38
         self.events_dismissed_attention: dict[str, float] = {}
         self.board_filters_by_group: dict[str, dict] = {}
+        self.board_selected_lanes_by_group: dict[str, str] = {}
+        self.board_hidden_wide_lanes_by_group: dict[str, dict] = {}
         self.board_saved_views_by_group: dict[str, list] = {}
         self.board_lane_sorts_by_group: dict[str, dict] = {}
         self.board_card_density_by_group: dict[str, str] = {}
@@ -1950,13 +1958,19 @@ class MatrixState:
             },
             "panel_active": self.panel_active,
             "board_panel_height": self.board_panel_height,
+            "active_group": self.active_group,
             "selected_principal_id": self.selected_principal_id,
             "selected_agent_id": self.selected_agent_id,
             "standalone_panel_layout": self.standalone_panel_layout,
             "detached_panels": self.detached_panels,
+            "window_bounds": self.window_bounds,
+            "workspace_sidebar_width": self.workspace_sidebar_width,
             "engineer_panel_split_fraction": self.engineer_panel_split_fraction,
+            "context_panel_split_ratio": self.context_panel_split_ratio,
             "events_dismissed_attention": self.events_dismissed_attention,
             "board_filters_by_group": self.board_filters_by_group,
+            "board_selected_lanes_by_group": self.board_selected_lanes_by_group,
+            "board_hidden_wide_lanes_by_group": self.board_hidden_wide_lanes_by_group,
             "board_saved_views_by_group": self.board_saved_views_by_group,
             "board_lane_sorts_by_group": self.board_lane_sorts_by_group,
             "board_card_density_by_group": self.board_card_density_by_group,
@@ -2090,13 +2104,19 @@ class MatrixState:
             },
             "panel_active": self.panel_active,
             "board_panel_height": self.board_panel_height,
+            "active_group": self.active_group,
             "selected_principal_id": self.selected_principal_id,
             "selected_agent_id": self.selected_agent_id,
             "standalone_panel_layout": self.standalone_panel_layout,
             "detached_panels": self.detached_panels,
+            "window_bounds": self.window_bounds,
+            "workspace_sidebar_width": self.workspace_sidebar_width,
             "engineer_panel_split_fraction": self.engineer_panel_split_fraction,
+            "context_panel_split_ratio": self.context_panel_split_ratio,
             "events_dismissed_attention": self.events_dismissed_attention,
             "board_filters_by_group": self.board_filters_by_group,
+            "board_selected_lanes_by_group": self.board_selected_lanes_by_group,
+            "board_hidden_wide_lanes_by_group": self.board_hidden_wide_lanes_by_group,
             "board_saved_views_by_group": self.board_saved_views_by_group,
             "board_lane_sorts_by_group": self.board_lane_sorts_by_group,
             "board_card_density_by_group": self.board_card_density_by_group,
@@ -2859,6 +2879,7 @@ class MatrixState:
                 pa = "board"
             self.panel_active = pa
             self.board_panel_height = data.get("board_panel_height", 0)
+            self.active_group = str(data.get("active_group", "") or "")
             self.selected_principal_id = str(
                 data.get("selected_principal_id", "") or ""
             )
@@ -2869,17 +2890,36 @@ class MatrixState:
                 "standalone_panel_layout", {}
             ) or {}
             self.detached_panels = data.get("detached_panels", {}) or {}
+            self.window_bounds = data.get("window_bounds", {}) or {}
+            try:
+                self.workspace_sidebar_width = int(
+                    data.get("workspace_sidebar_width", 0) or 0
+                )
+            except (TypeError, ValueError):
+                self.workspace_sidebar_width = 0
             try:
                 self.engineer_panel_split_fraction = float(
                     data.get("engineer_panel_split_fraction", 0.30) or 0.30
                 )
             except (TypeError, ValueError):
                 self.engineer_panel_split_fraction = 0.30
+            try:
+                self.context_panel_split_ratio = float(
+                    data.get("context_panel_split_ratio", 0.38) or 0.38
+                )
+            except (TypeError, ValueError):
+                self.context_panel_split_ratio = 0.38
             self.events_dismissed_attention = data.get(
                 "events_dismissed_attention", {}
             ) or {}
             self.board_filters_by_group = data.get(
                 "board_filters_by_group", {}
+            ) or {}
+            self.board_selected_lanes_by_group = data.get(
+                "board_selected_lanes_by_group", {}
+            ) or {}
+            self.board_hidden_wide_lanes_by_group = data.get(
+                "board_hidden_wide_lanes_by_group", {}
             ) or {}
             self.board_saved_views_by_group = data.get(
                 "board_saved_views_by_group", {}
@@ -4608,6 +4648,28 @@ class MatrixState:
                     "board_filters_by_group",
                     json.dumps(self.board_filters_by_group),
                 )
+            if self.active_group == name:
+                self.active_group = ""
+                self._emit("ui_update", key="active_group",
+                           value=self.active_group)
+                self._db_save_ui("active_group", self.active_group)
+            if name in self.board_selected_lanes_by_group:
+                del self.board_selected_lanes_by_group[name]
+                self._emit("ui_update", key="board_selected_lanes_by_group",
+                           value=self.board_selected_lanes_by_group)
+                self._db_save_ui(
+                    "board_selected_lanes_by_group",
+                    json.dumps(self.board_selected_lanes_by_group),
+                )
+            if name in self.board_hidden_wide_lanes_by_group:
+                del self.board_hidden_wide_lanes_by_group[name]
+                self._emit("ui_update",
+                           key="board_hidden_wide_lanes_by_group",
+                           value=self.board_hidden_wide_lanes_by_group)
+                self._db_save_ui(
+                    "board_hidden_wide_lanes_by_group",
+                    json.dumps(self.board_hidden_wide_lanes_by_group),
+                )
             if name in self.board_saved_views_by_group:
                 del self.board_saved_views_by_group[name]
                 self._emit("ui_update", key="board_saved_views_by_group",
@@ -4668,6 +4730,30 @@ class MatrixState:
                 self._db_save_ui(
                     "board_filters_by_group",
                     json.dumps(self.board_filters_by_group),
+                )
+            if self.active_group == old:
+                self.active_group = new
+                self._emit("ui_update", key="active_group",
+                           value=self.active_group)
+                self._db_save_ui("active_group", self.active_group)
+            if old in self.board_selected_lanes_by_group:
+                self.board_selected_lanes_by_group[new] = \
+                    self.board_selected_lanes_by_group.pop(old)
+                self._emit("ui_update", key="board_selected_lanes_by_group",
+                           value=self.board_selected_lanes_by_group)
+                self._db_save_ui(
+                    "board_selected_lanes_by_group",
+                    json.dumps(self.board_selected_lanes_by_group),
+                )
+            if old in self.board_hidden_wide_lanes_by_group:
+                self.board_hidden_wide_lanes_by_group[new] = \
+                    self.board_hidden_wide_lanes_by_group.pop(old)
+                self._emit("ui_update",
+                           key="board_hidden_wide_lanes_by_group",
+                           value=self.board_hidden_wide_lanes_by_group)
+                self._db_save_ui(
+                    "board_hidden_wide_lanes_by_group",
+                    json.dumps(self.board_hidden_wide_lanes_by_group),
                 )
             if old in self.board_saved_views_by_group:
                 self.board_saved_views_by_group[new] = \
