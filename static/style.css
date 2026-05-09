@@ -7488,11 +7488,16 @@ button.agent-panel-hierarchy-crumb:focus-visible {
 .architect-decision-card {
   margin-left: 12px;
 }
-.architect-decision-toggle {
-  display: inline-flex;
-  align-items: center;
-  flex: 1 1 auto;
+.architect-decision-card .detail-section-card-head {
+  align-items: flex-start;
   gap: 8px;
+}
+.architect-decision-toggle {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  flex: 1 1 auto;
+  gap: 4px;
   background: none;
   border: none;
   color: inherit;
@@ -7500,6 +7505,47 @@ button.agent-panel-hierarchy-crumb:focus-visible {
   padding: 0;
   min-width: 0;
   text-align: left;
+}
+.architect-decision-title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+.architect-decision-title {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: clip;
+  line-height: 1.28;
+  overflow-wrap: anywhere;
+}
+.architect-decision-title-row .detail-expand-caret {
+  padding-top: 1px;
+}
+.architect-decision-summary-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-dim);
+}
+.architect-decision-summary-row .detail-task-status {
+  margin-left: 0;
+}
+.architect-decision-actions {
+  flex: 0 0 auto;
+  align-items: flex-start;
+  gap: 4px;
+  margin-top: 0;
+}
+.architect-decision-action-btn {
+  min-height: 18px;
+  padding: 1px 6px;
+  font-size: 8px;
+  line-height: 1.25;
 }
 .architect-decision-body {
   display: flex;

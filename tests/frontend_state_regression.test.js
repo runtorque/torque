@@ -12639,7 +12639,7 @@ test('architect decision cards show acknowledge only for active proposed decisio
     engineerAcknowledgeDecision('arch-1', 'proposed');
   `);
 
-  assert.equal((panel.innerHTML.match(/>Acknowledge<\/button>/g) || []).length, 1);
+  assert.equal((panel.innerHTML.match(/aria-label="Acknowledge decision"/g) || []).length, 1);
   assert.deepEqual(JSON.parse(JSON.stringify(context.sendCalls[0])), {
     cmd: 'architect_decision_update',
     architect_id: 'arch-1',
@@ -12694,7 +12694,7 @@ test('dismissed architect decision panel hides mutators and blocks stale handler
 
   assert.match(panel.innerHTML, /Readable while the architect is dismissed/);
   assert.doesNotMatch(panel.innerHTML, />Edit<\/button>/);
-  assert.doesNotMatch(panel.innerHTML, />Acknowledge<\/button>/);
+  assert.doesNotMatch(panel.innerHTML, /aria-label="Acknowledge decision"/);
   assert.doesNotMatch(panel.innerHTML, />Archive<\/button>/);
   assert.doesNotMatch(panel.innerHTML, />Link task<\/button>/);
   assert.doesNotMatch(panel.innerHTML, /Link task…/);
