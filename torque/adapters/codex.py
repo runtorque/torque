@@ -1,5 +1,7 @@
 """Codex CLI adapter — full integration via command hooks and MCP."""
 
+import fcntl
+import hashlib
 import json
 import os
 import re
@@ -18,6 +20,8 @@ _FEATURE_MARKER = "# -- Torque Codex hooks feature (managed by Torque, do not ed
 _INSTRUCTIONS_MARKER = (
     "# -- Torque Codex model instructions (managed by Torque, do not edit) --"
 )
+_HOOK_TRUST_MARKER_PREFIX = "# -- Torque Codex hook trust:"
+_HOOK_TRUST_MARKER_SUFFIX = "(managed by Torque, do not edit) --"
 
 # Marker for Torque-managed AGENTS.md section (persistent system prompt)
 _LEGACY_AGENTS_MARKER = "<!-- Torque system prompt (managed by Torque, do not edit) -->"
@@ -40,17 +44,24 @@ _MCP_SECTION_RE = re.compile(
 _FEATURES_SECTION_RE = re.compile(
     r"(?ms)(^|\n)\[features\]\n(?P<body>(?:(?!\n\[).*\n?)*)"
 )
-_FEATURE_LINE_RE = re.compile(r"(?m)^codex_hooks\s*=.*(?:\n|$)")
+_FEATURE_LINE_RE = re.compile(r"(?m)^hooks\s*=.*(?:\n|$)")
 _MANAGED_FEATURE_BLOCK_RE = re.compile(
-    r"\n?" + re.escape(_FEATURE_MARKER) + r"\ncodex_hooks = true\n?"
+    r"\n?" + re.escape(_FEATURE_MARKER)
+    + r"\n(?:hooks|codex_hooks)\s*=\s*true\n?"
 )
 _MANAGED_FEATURE_SECTION_RE = re.compile(
-    r"\n?" + re.escape(_FEATURE_MARKER) + r"\n\[features\]\ncodex_hooks = true\n?"
+    r"\n?" + re.escape(_FEATURE_MARKER)
+    + r"\n\[features\]\n(?:hooks|codex_hooks)\s*=\s*true\n?"
 )
 _INSTRUCTIONS_BLOCK_RE = re.compile(
     r"\n?" + re.escape(_INSTRUCTIONS_MARKER) + r"\n"
     r'model_instructions_file = "(?:[^"\\]|\\.)*"\n?',
 )
+_CODEX_HOOK_EVENT_LABELS = {
+    "SessionStart": "session_start",
+    "PreToolUse": "pre_tool_use",
+    "Stop": "stop",
+}
 
 
 def _agents_marker(filename: str) -> str:
@@ -182,6 +193,16 @@ def _is_torque_hook(hook: dict) -> bool:
     return bool(_TORQUE_EVENT_URL_RE.search(cmd))
 
 
+def _remove_empty_features_sections(content: str) -> str:
+    """Remove a [features] table left empty by managed-line cleanup."""
+    def _replace(match: re.Match[str]) -> str:
+        if match.group("body").strip():
+            return match.group(0)
+        return match.group(1)
+
+    return _FEATURES_SECTION_RE.sub(_replace, content)
+
+
 def _ensure_codex_hooks_enabled(content: str) -> str:
     """Ensure config.toml enables Codex hooks for Torque-managed sessions."""
     content = _MANAGED_FEATURE_SECTION_RE.sub("", content)
@@ -189,13 +210,10 @@ def _ensure_codex_hooks_enabled(content: str) -> str:
     def _replace_features(match: re.Match[str]) -> str:
         prefix = match.group(1)
         body = _MANAGED_FEATURE_BLOCK_RE.sub("", match.group("body"))
-        body, replaced = _FEATURE_LINE_RE.subn(
-            f"{_FEATURE_MARKER}\ncodex_hooks = true\n", body, count=1
-        )
-        if not replaced:
+        if not _FEATURE_LINE_RE.search(body):
             if body and not body.endswith("\n"):
                 body += "\n"
-            body += f"{_FEATURE_MARKER}\ncodex_hooks = true\n"
+            body += f"{_FEATURE_MARKER}\nhooks = true\n"
         return f"{prefix}[features]\n{body}"
 
     updated, replaced = _FEATURES_SECTION_RE.subn(_replace_features, content, count=1)
@@ -205,7 +223,7 @@ def _ensure_codex_hooks_enabled(content: str) -> str:
     content = content.rstrip("\n")
     if content:
         content += "\n"
-    content += f"\n{_FEATURE_MARKER}\n[features]\ncodex_hooks = true\n"
+    content += f"\n{_FEATURE_MARKER}\n[features]\nhooks = true\n"
     return content
 
 
@@ -213,7 +231,155 @@ def _remove_codex_hooks_enabled(content: str) -> str:
     """Remove Torque-managed Codex hook feature config from config.toml."""
     content = _MANAGED_FEATURE_SECTION_RE.sub("", content)
     content = _MANAGED_FEATURE_BLOCK_RE.sub("", content)
-    return content
+    return _remove_empty_features_sections(content)
+
+
+def _codex_home() -> Path:
+    home = (os.environ.get("CODEX_HOME") or "").strip()
+    if home:
+        return Path(home).expanduser()
+    return Path.home() / ".codex"
+
+
+def _codex_absolute_path(path: Path) -> str:
+    # Match Codex's AbsolutePathBuf hook source key for project config:
+    # expand ~ and remove dot components without resolving symlinked prefixes.
+    return os.path.normpath(os.path.abspath(os.path.expanduser(str(path))))
+
+
+def _resolved_codex_absolute_path(path: Path) -> str:
+    return str(Path(path).expanduser().resolve(strict=False))
+
+
+def _codex_hook_source_paths(working_dir: str) -> list[str]:
+    hooks_path = Path(working_dir) / ".codex" / "hooks.json"
+    paths = [_codex_absolute_path(hooks_path)]
+    resolved_path = _resolved_codex_absolute_path(hooks_path)
+    if resolved_path not in paths:
+        paths.append(resolved_path)
+    return paths
+
+
+def _hook_trust_marker(source_path: str) -> str:
+    return (
+        f"{_HOOK_TRUST_MARKER_PREFIX} {source_path} "
+        f"{_HOOK_TRUST_MARKER_SUFFIX}"
+    )
+
+
+def _remove_hook_trust_block(content: str, source_path: str) -> str:
+    marker = _hook_trust_marker(source_path)
+    block_re = re.compile(
+        r"\n?" + re.escape(marker) + r"\n.*?\n" + re.escape(marker) + r"\n?",
+        re.DOTALL,
+    )
+    return block_re.sub("\n", content)
+
+
+def _codex_command_hook_hash(
+    event_label: str,
+    matcher: str | None,
+    hook: dict,
+) -> str:
+    """Return Codex v0.130 HookHandler current_hash for a command hook.
+
+    Codex trusts unmanaged hooks by comparing hooks.state[*].trusted_hash to
+    a SHA-256 over a normalized TOML-derived identity.  This mirrors
+    codex-rs/hooks/src/engine/discovery.rs::command_hook_hash.
+    """
+    timeout = int(hook.get("timeout") or 600)
+    normalized_hook = {
+        "async": bool(hook.get("async", False)),
+        "command": str(hook.get("command", "")),
+        "timeout": max(timeout, 1),
+        "type": "command",
+    }
+    status_message = hook.get("statusMessage")
+    if status_message is not None:
+        normalized_hook["statusMessage"] = status_message
+
+    identity = {
+        "event_name": event_label,
+        "hooks": [normalized_hook],
+    }
+    if matcher is not None:
+        identity["matcher"] = matcher
+    payload = json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
+    return "sha256:" + hashlib.sha256(payload).hexdigest()
+
+
+def _codex_hook_trust_entries(working_dir: str, hooks: dict) -> tuple[str, list[tuple[str, str]]]:
+    source_paths = _codex_hook_source_paths(working_dir)
+    source_path = source_paths[0]
+    entries: list[tuple[str, str]] = []
+    for event_name, groups in hooks.items():
+        event_label = _CODEX_HOOK_EVENT_LABELS.get(event_name)
+        if not event_label:
+            continue
+        for group_index, group in enumerate(groups or []):
+            matcher = group.get("matcher")
+            for handler_index, hook in enumerate(group.get("hooks", []) or []):
+                if hook.get("type") != "command" or not _is_torque_hook(hook):
+                    continue
+                trusted_hash = _codex_command_hook_hash(event_label, matcher, hook)
+                for path in source_paths:
+                    key = f"{path}:{event_label}:{group_index}:{handler_index}"
+                    entries.append((key, trusted_hash))
+    return source_path, entries
+
+
+def _update_codex_user_config(update) -> bool:
+    try:
+        codex_home = _codex_home()
+        codex_home.mkdir(parents=True, exist_ok=True)
+        config_file = codex_home / "config.toml"
+        lock_file = codex_home / ".torque-hooks.lock"
+        with open(lock_file, "a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            content = config_file.read_text() if config_file.exists() else ""
+            updated = update(content)
+            if updated.strip():
+                config_file.write_text(updated.strip() + "\n")
+            else:
+                config_file.unlink(missing_ok=True)
+            fcntl.flock(lock, fcntl.LOCK_UN)
+        return True
+    except Exception:
+        return False
+
+
+def _install_codex_hook_trust(working_dir: str, hooks: dict) -> bool:
+    source_path, entries = _codex_hook_trust_entries(working_dir, hooks)
+    if not entries:
+        return True
+
+    marker = _hook_trust_marker(source_path)
+    lines = [marker]
+    for key, trusted_hash in entries:
+        lines.extend([
+            f"[hooks.state.{json.dumps(key)}]",
+            f"trusted_hash = {json.dumps(trusted_hash)}",
+            "",
+        ])
+    lines.append(marker)
+    block = "\n".join(lines).rstrip() + "\n"
+
+    def _update(content: str) -> str:
+        for path in _codex_hook_source_paths(working_dir):
+            content = _remove_hook_trust_block(content, path)
+        content = content.strip()
+        return f"{content}\n\n{block}" if content else block
+
+    return _update_codex_user_config(_update)
+
+
+def _uninstall_codex_hook_trust(working_dir: str) -> bool:
+    def _update(content: str) -> str:
+        for path in _codex_hook_source_paths(working_dir):
+            content = _remove_hook_trust_block(content, path)
+        return content
+
+    return _update_codex_user_config(_update)
 
 
 def _set_model_instructions_file(content: str, path: str = "") -> str:
@@ -438,7 +604,7 @@ class CodexAdapter(AgentAdapter):
 
             existing["hooks"] = existing_hooks
             hooks_file.write_text(json.dumps(existing, indent=2))
-            return True
+            return _install_codex_hook_trust(working_dir, existing_hooks)
         except Exception:
             return False
 
@@ -449,12 +615,14 @@ class CodexAdapter(AgentAdapter):
         """
         hooks_file = Path(working_dir) / ".codex" / "hooks.json"
         if not hooks_file.exists():
+            _uninstall_codex_hook_trust(working_dir)
             return
 
         try:
             text = hooks_file.read_text().strip()
             if not text:
                 hooks_file.unlink(missing_ok=True)
+                _uninstall_codex_hook_trust(working_dir)
                 return
 
             existing = json.loads(text)
@@ -477,6 +645,7 @@ class CodexAdapter(AgentAdapter):
                 hooks_file.unlink(missing_ok=True)
             else:
                 hooks_file.write_text(json.dumps(existing, indent=2))
+            _uninstall_codex_hook_trust(working_dir)
         except Exception:
             pass  # Best-effort cleanup
 
