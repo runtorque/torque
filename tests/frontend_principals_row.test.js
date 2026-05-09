@@ -897,7 +897,8 @@ test('agents-grid v2 renders all kind shells with one-metric lines and required 
   assert.match(workerBlock, /cell-worker-task cell-worker-task--clickable[^"]*"[^>]*>TORQUE:216/);
   assert.match(workerBlock, /cell-worker-cycle">cycle: review/);
   assert.doesNotMatch(workerBlock, /TORQUE:216 · review/);
-  assert.match(workerBlock, /\+58\/-3 \(clean\)/);
+  assert.match(workerBlock, /\(\+58\/-3 committed\)/);
+  assert.doesNotMatch(workerBlock, /\+0\/-0| \(clean\)| \(dirty\)/);
   assert.match(workerBlock, /worktree: archite…/);
   assert.match(workerBlock, /cell-worker-activity[^>]*>editing cards/);
   assert.doesNotMatch(workerBlock, /last action 30s/);
@@ -1144,5 +1145,51 @@ test('agents-grid v2 rerender preserves main scroll while card bodies update', (
   vm.runInContext('render();', context);
 
   assert.equal(mainEl.scrollTop, 123);
-  assert.match(mainEl.innerHTML, /\+2\/-1 \(clean\)/);
+  assert.match(mainEl.innerHTML, /\(\+2\/-1 committed\)/);
+});
+
+test('worker card diff label separates committed and dirty legs and hides zero-line legs', () => {
+  const { context, sandbox } = createFullHarness();
+  sandbox.state.children = {};
+  sandbox.state.board_tasks = {};
+  const baseWorker = {
+    id: 'worker-diff',
+    name: 'Worker Diff',
+    slug: 'worker-diff',
+    kind: 'worker',
+    owner_engineer_id: 'eng-a',
+    group: 'torque',
+    cell_type: 'agent',
+    status: 'running',
+    current_task_id: 'TORQUE:216',
+    worktree_branch: 'torque/panelsmith/worker-diff-abc123',
+  };
+
+  const bothHtml = context.renderAgentCell({
+    ...baseWorker,
+    worktree_diff: { files: 2, insertions: 5, deletions: 1 },
+    worktree_dirty_diff: { files: 1, insertions: 2, deletions: 0 },
+    worktree_dirty: true,
+  });
+  assert.match(bothHtml, /\(\+5\/-1 committed\) \(\+2\/-0 dirty\)/);
+  assert.doesNotMatch(bothHtml, / \(clean\)| \(dirty\)<\/div>/);
+
+  const dirtyOnlyHtml = context.renderAgentCell({
+    ...baseWorker,
+    id: 'worker-dirty-only',
+    worktree_diff: { files: 0, insertions: 0, deletions: 0 },
+    worktree_dirty_diff: { files: 1, insertions: 0, deletions: 3 },
+    worktree_dirty: true,
+  });
+  assert.doesNotMatch(dirtyOnlyHtml, /\+0\/-0 committed/);
+  assert.match(dirtyOnlyHtml, /\(\+0\/-3 dirty\)/);
+
+  const zeroHtml = context.renderAgentCell({
+    ...baseWorker,
+    id: 'worker-zero',
+    worktree_diff: { files: 0, insertions: 0, deletions: 0 },
+    worktree_dirty: false,
+  });
+  assert.doesNotMatch(zeroHtml, /cell-worker-diff/);
+  assert.doesNotMatch(zeroHtml, /\+0\/-0/);
 });

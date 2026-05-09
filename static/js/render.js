@@ -1539,10 +1539,25 @@ function _taskCycleState(task, agent) {
 
 function _workerDiffLabel(agent) {
   const diff = (agent && agent.worktree_diff) || {};
-  const insertions = Number(diff.insertions || 0) || 0;
-  const deletions = Number(diff.deletions || 0) || 0;
-  const cleanState = agent && agent.worktree_dirty ? 'dirty' : 'clean';
-  return '+' + insertions + '/-' + deletions + ' (' + cleanState + ')';
+  const committedDiff = diff.committed || diff.committed_diff || diff;
+  const dirtyDiff = (agent && (
+    agent.worktree_dirty_diff
+    || agent.worktree_uncommitted_diff
+    || agent.uncommitted_diff
+    || agent.dirty_diff
+  )) || diff.dirty || diff.uncommitted || diff.working_tree || {};
+  const legs = [
+    _workerDiffLegLabel(committedDiff, 'committed'),
+    _workerDiffLegLabel(dirtyDiff, 'dirty'),
+  ].filter(Boolean);
+  return legs.join(' ');
+}
+
+function _workerDiffLegLabel(diff, label) {
+  const insertions = Number((diff && diff.insertions) || 0) || 0;
+  const deletions = Number((diff && diff.deletions) || 0) || 0;
+  if (insertions + deletions === 0) return '';
+  return '(+' + insertions + '/-' + deletions + ' ' + label + ')';
 }
 
 function _worktreeBranchShortName(branch) {
@@ -3565,7 +3580,10 @@ function _renderWorkerCardBody(a) {
   html += '<div class="agent-card-line cell-worker-cycle">'
     + esc('cycle: ' + cycle)
     + '</div>';
-  html += '<div class="agent-card-line cell-worker-diff">' + esc(_workerDiffLabel(a)) + '</div>';
+  const diffLabel = _workerDiffLabel(a);
+  if (diffLabel) {
+    html += '<div class="agent-card-line cell-worker-diff">' + esc(diffLabel) + '</div>';
+  }
   html += '<div class="agent-card-line cell-worker-branch">'
     + _agentCardTooltipHtml(branch, 18, 'cell-worker-branch-name', 'data-worktree-branch="' + esc(a.worktree_branch || a.current_branch || '') + '"')
     + '</div>';
