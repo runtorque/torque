@@ -1588,6 +1588,51 @@ test('board visible tasks combine group, search, label, action, and agent filter
   assert.deepEqual(jsonValue(context, 'Object.keys(_boardVisibleTasks()).sort()'), ['task-1']);
 });
 
+test('board label counts exclude labels that only exist on archived tasks', () => {
+  const { context } = createBoardHarness();
+  context.state.board_tasks = {
+    active: {
+      id: 'active',
+      group: 'alpha',
+      task: 'Active task',
+      lane: 'Backlog',
+      labels: ['fresh', 'shared'],
+    },
+    archivedLane: {
+      id: 'archivedLane',
+      group: 'alpha',
+      task: 'Archived lane task',
+      lane: 'Archived',
+      labels: ['stale', 'shared'],
+    },
+    archivedLabel: {
+      id: 'archivedLabel',
+      group: 'alpha',
+      task: 'Archived label task',
+      lane: 'Done',
+      labels: ['legacy', 'torque:archived'],
+    },
+    otherGroup: {
+      id: 'otherGroup',
+      group: 'beta',
+      task: 'Other group task',
+      lane: 'Backlog',
+      labels: ['beta-only'],
+    },
+  };
+
+  assert.deepEqual(jsonValue(context, '_boardAllLabelCounts()'), {
+    fresh: 1,
+    shared: 1,
+  });
+
+  runInContext(context, `_boardShowArchived = true;`);
+  assert.deepEqual(jsonValue(context, '_boardBuildRenderModel(_boardVisibleLanes()).labelCounts'), {
+    fresh: 1,
+    shared: 1,
+  });
+});
+
 test('engineer task health summary prioritizes severe unhealthy tasks', () => {
   const { context } = createEngineerHarness();
   context.state.board_tasks = {
@@ -14644,6 +14689,32 @@ test('task title label operator selection highlights and submits labels separate
     lane: 'Backlog',
     labels: ['release'],
   });
+});
+
+test('task label suggestions exclude labels that only exist on archived tasks', () => {
+  const { context } = createModalHarness();
+  context.state.board_tasks = {
+    active: {
+      id: 'active',
+      task: 'Active',
+      lane: 'Backlog',
+      labels: ['fresh', 'shared'],
+    },
+    archivedLane: {
+      id: 'archivedLane',
+      task: 'Archived lane',
+      lane: 'Archived',
+      labels: ['stale', 'shared'],
+    },
+    archivedLabel: {
+      id: 'archivedLabel',
+      task: 'Archived label',
+      lane: 'Done',
+      labels: ['legacy', 'torque:archived'],
+    },
+  };
+
+  assert.deepEqual(jsonValue(context, '_getAllLabels().sort()'), ['fresh', 'shared']);
 });
 
 test('openEditTask clears past scheduled times instead of showing stale dispatch state', () => {

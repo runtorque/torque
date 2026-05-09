@@ -677,7 +677,7 @@ function _boardHealthCountsFromTasks(pool) {
 /** Collect all labels with counts (before search/label/action filters). */
 function _boardAllLabelCounts(model) {
   if (model && model.labelCounts) return model.labelCounts;
-  return _boardLabelCountsFromTasks(_boardScopedTasks(_boardShowArchived));
+  return _boardLabelCountsFromTasks(_boardScopedTasks(false));
 }
 
 /** Collect all action names with counts from tasks. */
@@ -1277,7 +1277,7 @@ function _boardBuildRenderModel(lanes) {
     rootTasksByLane: {},
     laneCounts: {},
     lanePoolTasks: {},
-    labelCounts: _boardLabelCountsFromTasks(scopedTasks),
+    labelCounts: _boardLabelCountsFromTasks(scopedWithoutArchived),
     actionCounts: _boardActionCountsFromTasks(scopedTasks),
     agentCounts: _boardAgentCountsFromTasks(scopedTasks),
     healthCounts: _boardHealthCountsFromTasks(scopedWithArchived),
