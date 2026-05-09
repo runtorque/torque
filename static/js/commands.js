@@ -681,7 +681,7 @@ function _showWorktreeSubmenu(id) {
   if (!cell) return;
   let html = `<button class="ctx-label" disabled>Worktree</button>`;
   html += `<div class="ctx-sep"></div>`;
-  html += `<button onclick="closeContextMenu();showDiffView('${id}',true)">View Diff</button>`;
+  html += `<button onclick="closeContextMenu();worktreeViewDiff('${id}')">View Diff</button>`;
   html += `<button onclick="closeContextMenu();worktreeCheckpoint('${id}')">Checkpoint</button>`;
   html += `<button onclick="closeContextMenu();worktreeHistory('${id}')">History\u2026</button>`;
   html += `<button onclick="closeContextMenu();worktreeCreatePR('${id}')">Create PR</button>`;
@@ -704,6 +704,7 @@ async function worktreeCreate(id) {
   }
 }
 function worktreeCheckpoint(id) { send({ cmd: 'worktree_checkpoint', id }); }
+function worktreeViewDiff(id) { showDiffView(id, true); }
 function worktreeHistory(id) { send({ cmd: 'worktree_history', id }); }
 async function worktreeCreatePR(id) {
   const cell = state.agents[id];

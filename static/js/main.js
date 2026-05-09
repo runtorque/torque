@@ -1016,8 +1016,8 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  // The read-only diff viewer is a full-viewport popup outside the shared
-  // overlay stack, so it owns Escape while active.
+  // Backstop for older/non-modal diff render paths. The read-only diff
+  // viewer normally participates in the shared overlay stack above.
   if (typeof _diffViewOpen !== 'undefined' && _diffViewOpen
       && typeof _diffReadOnly !== 'undefined' && _diffReadOnly) {
     if (e.key === 'Escape' && typeof hideDiffView === 'function') {

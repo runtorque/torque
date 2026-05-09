@@ -1439,8 +1439,8 @@ function createDiffKeyHarness() {
   document.register('confirm-message');
   document.register('confirm-extras');
   document.register('confirm-yes-btn');
-  document.register('diff-view-root');
-  document.setSelectorAll('.overlay', [confirmOverlay]);
+  const diffRoot = document.register('diff-view-root');
+  document.setSelectorAll('.overlay', [confirmOverlay, diffRoot]);
   [
     'add-name-input',
     'add-cmd-input',
@@ -1463,7 +1463,7 @@ function createDiffKeyHarness() {
   loadModalScripts(context);
   loadScript(context, 'static/js/diff.js');
   loadScript(context, 'static/js/main.js');
-  return { context, document, sandbox, confirmOverlay };
+  return { context, document, sandbox, confirmOverlay, diffRoot };
 }
 
 function createTaskHistoryHarness(options = {}) {
@@ -15431,8 +15431,17 @@ test('diff review overlay hides the workspace shell so standalone merge review u
   assert.match(css, /body\.diff-view-open #workspace-shell,\s*body\.diff-view-open main,\s*body\.diff-view-open #standalone-bottom-dock,\s*body\.diff-view-open #standalone-right-rail,\s*body\.diff-view-open #standalone-float-layer,\s*body\.diff-view-open #bottom-panel,\s*body\.diff-view-open #taskbar,\s*body\.diff-view-open #ctx-menu\s*\{[^}]*display:\s*none\s*!important;/);
 });
 
-test('Escape closes the read-only diff viewer through the shared key handler', () => {
-  const { context, document } = createDiffKeyHarness();
+test('read-only diff modal tracks task modal breakpoints at twenty percent wider', () => {
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+
+  assert.match(css, /\.diff-view-modal\s*\{[^}]*336px/);
+  assert.match(css, /@media \(min-width:\s*600px\)\s*\{\s*\.diff-view-modal\s*\{[^}]*528px/);
+  assert.match(css, /body\[data-torque-mode="standalone"\] \.diff-view-modal,\s*body\[data-torque-mode="desktop"\] \.diff-view-modal\s*\{[^}]*504px/);
+  assert.match(css, /@media \(min-width:\s*900px\)\s*\{\s*body\[data-torque-mode="standalone"\] \.diff-view-modal,\s*body\[data-torque-mode="desktop"\] \.diff-view-modal\s*\{[^}]*936px/);
+});
+
+test('Escape closes the read-only diff viewer through the shared modal key handler', () => {
+  const { context, document, diffRoot } = createDiffKeyHarness();
 
   runInContext(context, `
     _diffViewOpen = true;
@@ -15448,6 +15457,11 @@ test('Escape closes the read-only diff viewer through the shared key handler', (
     renderDiffView();
   `);
 
+  assert.match(diffRoot.innerHTML, /diff-view-modal/);
+  assert.equal(diffRoot.classList.contains('overlay'), true);
+  assert.equal(diffRoot.classList.contains('visible'), true);
+  assert.equal(document.body.classList.contains('diff-view-open'), false);
+
   let prevented = false;
   document.listeners.keydown({
     key: 'Escape',
@@ -15455,9 +15469,11 @@ test('Escape closes the read-only diff viewer through the shared key handler', (
     shiftKey: false,
   });
 
-  assert.equal(prevented, true);
+  assert.equal(prevented, false);
   assert.equal(jsonValue(context, `_diffViewOpen`), false);
   assert.equal(document.getElementById('diff-view-root').innerHTML, '');
+  assert.equal(diffRoot.classList.contains('visible'), false);
+  assert.equal(diffRoot.classList.contains('overlay'), false);
   assert.equal(document.body.classList.contains('diff-view-open'), false);
 });
 
@@ -15488,7 +15504,8 @@ test('Escape prefers the active overlay over the underlying read-only diff viewe
   assert.equal(confirmOverlay.classList.contains('visible'), false);
   assert.equal(jsonValue(context, `_diffViewOpen`), true);
   assert.notEqual(document.getElementById('diff-view-root').innerHTML, '');
-  assert.equal(document.body.classList.contains('diff-view-open'), true);
+  assert.equal(document.getElementById('diff-view-root').classList.contains('visible'), true);
+  assert.equal(document.body.classList.contains('diff-view-open'), false);
 });
 
 test('task history opens in a visible modal overlay without taking over the whole body layout', () => {

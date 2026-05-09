@@ -10,6 +10,20 @@ var _diffCommitMsg = '';       // editable commit message
 var _diffMerging = false;      // true while merge request in flight
 var _diffReadOnly = false;     // true when opened from "View Diff" (no merge controls)
 
+function _diffRendersInModal() {
+  return !!_diffReadOnly;
+}
+
+function _diffShellOpen() {
+  return _diffRendersInModal()
+    ? '<div class="modal modal-tall diff-view-modal"><div class="diff-view">'
+    : '<div class="diff-view">';
+}
+
+function _diffShellClose() {
+  return _diffRendersInModal() ? '</div></div>' : '</div>';
+}
+
 function showDiffView(agentId, readOnly) {
   if (!agentId) return;
   _diffViewOpen = true;
@@ -442,13 +456,22 @@ function renderDiffView() {
   var root = document.getElementById('diff-view-root');
   if (!root) return;
 
-  document.body.classList.toggle('diff-view-open', _diffViewOpen);
+  var modal = _diffRendersInModal();
+  document.body.classList.toggle('diff-view-open', _diffViewOpen && !modal);
+  if (typeof setWorktreeDiffModalVisible === 'function') {
+    setWorktreeDiffModalVisible(_diffViewOpen && modal);
+  } else if (root.classList) {
+    root.classList.remove('overlay');
+    root.classList.remove('visible');
+    root.classList.remove('modal-nested');
+    root.onclick = null;
+  }
   if (!_diffViewOpen) {
     root.innerHTML = '';
     return;
   }
 
-  var html = '<div class="diff-view">';
+  var html = _diffShellOpen();
   if (!_diffViewData) {
     html += '<div class="diff-view-header">';
     html += '<div class="diff-view-title">Loading diff\u2026</div>';
@@ -458,7 +481,7 @@ function renderDiffView() {
     html += '<div class="diff-footer">';
     html += '<button class="btn-cancel" onclick="hideDiffView()">Cancel</button>';
     html += '</div>';
-    html += '</div>';
+    html += _diffShellClose();
     root.innerHTML = html;
     return;
   }
@@ -471,7 +494,7 @@ function renderDiffView() {
     html += '<div class="diff-footer">';
     html += '<button class="btn-cancel" onclick="hideDiffView()">Cancel</button>';
     html += '</div>';
-    html += '</div>';
+    html += _diffShellClose();
     root.innerHTML = html;
     return;
   }
@@ -506,7 +529,7 @@ function renderDiffView() {
     html += _renderMergeBanner();
     html += _renderDiffFooter();
   }
-  html += '</div>';
+  html += _diffShellClose();
 
   root.innerHTML = html;
 }
