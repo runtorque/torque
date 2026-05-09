@@ -4346,6 +4346,61 @@ body.runtime-embedded #panel-board .board-wide-lane-body {
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 15%, transparent);
 }
+.board-card-assigned-engineer {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 150px;
+  color: color-mix(in srgb, var(--accent) 88%, var(--text));
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  cursor: pointer;
+}
+.board-card-assigned-engineer:hover {
+  border-color: color-mix(in srgb, var(--accent) 44%, transparent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  text-decoration: none;
+}
+.board-card-assigned-engineer-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  color: var(--bg);
+  background: var(--accent);
+  font-size: 7px;
+  font-weight: 800;
+  line-height: 1;
+  text-transform: uppercase;
+}
+.board-card-assigned-engineer-avatar.working {
+  background: var(--green);
+}
+.board-card-assigned-engineer-avatar.attention {
+  background: var(--amber);
+  color: #1f1300;
+}
+.board-card-assigned-engineer-avatar.disconnected,
+.board-card-assigned-engineer-avatar.missing {
+  background: var(--red);
+  color: #fff;
+}
+.board-card-assigned-engineer-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.board-card-assigned-engineer-missing {
+  cursor: default;
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--text-dim) 10%, transparent);
+  border-color: color-mix(in srgb, var(--text-dim) 20%, transparent);
+  border-style: dashed;
+}
 .board-card-template {
   color: var(--fg-dim); font-style: italic;
   background: color-mix(in srgb, var(--fg-dim) 12%, transparent);

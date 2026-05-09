@@ -81,7 +81,7 @@ function engineer(id, name, createdAt) {
   };
 }
 
-test('focused engineer panel shows journal/events/worklog tabs with the engineer header', () => {
+test('focused engineer panel shows journal/events/queued/completed tabs with the engineer header', () => {
   const { context, panel, sandbox } = createHarness();
   sandbox.state.agents['eng-alice'] = engineer('eng-alice', 'Alice', 10);
   sandbox.focusedItemId = 'eng-alice';
@@ -91,11 +91,12 @@ test('focused engineer panel shows journal/events/worklog tabs with the engineer
   assert.match(panel.innerHTML, /Engineer: Alice · Group: torque/);
   assert.match(panel.innerHTML, />Journal</);
   assert.match(panel.innerHTML, />Events</);
-  assert.match(panel.innerHTML, />Worklog</);
+  assert.match(panel.innerHTML, />Queued</);
+  assert.match(panel.innerHTML, />Completed</);
   assert.doesNotMatch(panel.innerHTML, /Group: torque \(group-wide\)/);
 });
 
-test('focused engineer worklog tab renders the group worklog entries', () => {
+test('focused engineer completed tab renders the group worklog entries', () => {
   const { context, panel, sandbox } = createHarness();
   sandbox.state.agents['eng-alice'] = engineer('eng-alice', 'Alice', 10);
   sandbox.state.agents['worker-1'] = { id: 'worker-1', name: 'Worker One' };
@@ -125,7 +126,7 @@ test('focused engineer worklog tab renders the group worklog entries', () => {
   vm.runInContext(`_agentPanelLastSelectedTabByKind.engineer = 'worklog'; renderAgentPanel()`, context);
 
   assert.match(panel.innerHTML, /Engineer: Alice · Group: torque/);
-  assert.match(panel.innerHTML, /Dispatched tasks/);
+  assert.match(panel.innerHTML, /Completed tasks/);
   assert.match(panel.innerHTML, /Add Worklog tab/);
   assert.match(panel.innerHTML, /In Progress/);
   assert.match(panel.innerHTML, /In review/);

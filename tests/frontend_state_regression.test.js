@@ -3585,6 +3585,48 @@ test('board cards render created_by attribution badges and update across rerende
   assert.equal(cards.scrollTop, 72);
 });
 
+test('board cards render assigned engineer identity badges inline with metadata', () => {
+  const { context, document } = createBoardHarness({ stubCards: false });
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+  runInContext(context, `
+    agentStatusClass = function(agent) {
+      return agent && agent.id === 'eng-1' ? 'working' : 'idle';
+    };
+  `);
+  context.state.agents = {
+    'eng-1': {
+      id: 'eng-1',
+      name: 'Builder',
+      slug: 'builder',
+      kind: 'engineer',
+      group: 'alpha',
+    },
+  };
+  context.state.board_lanes = ['Backlog'];
+  context.state.board_tasks = {
+    queuedTask: {
+      id: 'queuedTask',
+      group: 'alpha',
+      task: 'Implement queued worklog tab',
+      lane: 'Backlog',
+      position: 1,
+      assigned_engineer_id: 'eng-1',
+      labels: ['ui'],
+    },
+  };
+
+  context.renderBoard();
+
+  assert.match(panel.innerHTML, /board-card-meta/);
+  assert.match(panel.innerHTML, /board-card-assigned-engineer/);
+  assert.match(panel.innerHTML, /data-assigned-engineer-id="eng-1"/);
+  assert.match(panel.innerHTML, /Assigned engineer: Builder/);
+  assert.match(panel.innerHTML, /board-card-assigned-engineer-avatar working/);
+  assert.match(panel.innerHTML, /board-card-assigned-engineer-name">Builder</);
+  assert.match(panel.innerHTML, /boardFocusAgent\('eng-1'\)/);
+});
+
 test('_boardTaskScheduleMeta distinguishes scheduled, due-soon, and overdue states', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);
@@ -12840,6 +12882,61 @@ test('ws task deltas avoid rerendering worker worklog for unrelated assigned tas
   assert.equal(sandbox.renderCalls.engineer, 0);
 });
 
+test('ws task deltas rerender the focused engineer Queued tab for assigned task changes', () => {
+  const { context, sandbox, flushRaf } = createStandaloneDeltaBatchHarness(['engineer']);
+  runInContext(context, `
+    _activePanelApp = 'engineer';
+    focusedItemId = 'eng-1';
+    state.agents = {
+      'eng-1': { id: 'eng-1', kind: 'engineer', group: 'alpha', cell_type: 'agent' },
+      'eng-2': { id: 'eng-2', kind: 'engineer', group: 'alpha', cell_type: 'agent' },
+    };
+    state.board_tasks = {
+      'queued-task': {
+        id: 'queued-task',
+        task: 'Queued work',
+        group: 'alpha',
+        assigned_engineer_id: 'eng-1',
+        lane: 'Backlog'
+      }
+    };
+    _currentGroup = function() { return 'alpha'; };
+    _resolveFocusedAgent = function() { return state.agents[focusedItemId] || null; };
+    _agentPanelKind = function(agent) { return (agent && agent.kind) || 'engineer'; };
+    _agentPanelActiveTab = function() { return 'queued'; };
+  `);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'task_upsert',
+      id: 'queued-task',
+      task: 'Queued work promoted',
+      group: 'alpha',
+      assigned_engineer_id: 'eng-1',
+      lane: 'To Do',
+    }],
+  });
+  flushRaf();
+
+  assert.equal(sandbox.renderCalls.engineer, 1);
+
+  context._handleDelta({
+    seq: 2,
+    ops: [{
+      op: 'task_upsert',
+      id: 'other-task',
+      task: 'Other engineer work',
+      group: 'alpha',
+      assigned_engineer_id: 'eng-2',
+      lane: 'Backlog',
+    }],
+  });
+  flushRaf();
+
+  assert.equal(sandbox.renderCalls.engineer, 1);
+});
+
 test('renderAgentPanel shows workflow breach events in engineer cell history', () => {
   const { context, document } = createEngineerHarness();
   const panel = document.register('panel-agent');
@@ -12963,7 +13060,7 @@ test('renderAgentPanel preserves the selected Worklog tab across rerenders', () 
   runInContext(context, `agentPanelSelectTab('worklog')`);
 
   assert.match(panel.innerHTML, /id="agent-panel-tab-worklog" class="agent-panel-tab active"/);
-  assert.match(panel.innerHTML, /Dispatched tasks/);
+  assert.match(panel.innerHTML, /Completed tasks/);
 
   context.renderAgentPanel();
 

@@ -1483,7 +1483,7 @@ function _taskDeltaInvalidatesEngineer(previous, next, op) {
     );
   }
   if (kind === 'engineer') {
-    if (tab && tab !== 'worklog') return false;
+    if (tab && tab !== 'worklog' && tab !== 'queued') return false;
     const focusedId = String(focused.id || '');
     return !!(
       focusedId
