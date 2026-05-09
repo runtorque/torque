@@ -891,6 +891,9 @@ function createTemplatesHarness() {
 }
 
 function createMainHarness(overrides = {}) {
+  const harnessOptions = overrides.__mainHarnessOptions || {};
+  const sandboxOverrides = Object.assign({}, overrides);
+  delete sandboxOverrides.__mainHarnessOptions;
   const taskbarButtons = ['board', 'actions', 'templates', 'context', 'events', 'engineer'].map((app) => {
     const button = new FakeElement();
     button.dataset.app = app;
@@ -918,7 +921,7 @@ function createMainHarness(overrides = {}) {
     quickAddTerminal() {},
     relaunchAgent() {},
     getFilterByWindow() { return false; },
-  }, overrides));
+  }, sandboxOverrides));
   [
     'standalone-sidebar-shell',
     'standalone-main-stack',
@@ -961,7 +964,7 @@ function createMainHarness(overrides = {}) {
   document.setSelector('.taskbar-app', taskbarButtons[0]);
   document.querySelectorAll = function(selector) {
     if (selector === '.taskbar-app') return taskbarButtons;
-    if (selector === '.overlay') return [];
+    if (selector === '.overlay') return harnessOptions.overlays || [];
     return [];
   };
   const context = vm.createContext(sandbox);
@@ -15676,6 +15679,34 @@ test('Cmd+Option+P opens the add architect modal through the shared key handler'
 
   assert.equal(prevented, true);
   assert.deepEqual(sandbox.addArchitectModalCalls, ['torque']);
+});
+
+test('modal outside close is driven by overlay mousedown, not selection-ending click', () => {
+  const overlay = new FakeElement('modal-task');
+  overlay.classList.add('overlay', 'visible');
+  const innerModal = new FakeElement('task-modal-inner');
+  overlay.appendChild(innerModal);
+  const { sandbox } = createMainHarness({
+    __mainHarnessOptions: { overlays: [overlay] },
+    closeModals() {
+      sandbox.closeCalls = (sandbox.closeCalls || 0) + 1;
+    },
+  });
+
+  assert.equal(typeof overlay.listeners.mousedown, 'function');
+  assert.equal(overlay.listeners.click, undefined);
+
+  // Browsers may dispatch a click at the common overlay ancestor when a drag
+  // selection begins inside the modal and mouseup lands outside. That must not
+  // be interpreted as an outside-close intent.
+  if (overlay.listeners.click) overlay.listeners.click({ target: overlay });
+  assert.equal(sandbox.closeCalls || 0, 0);
+
+  overlay.listeners.mousedown({ target: innerModal });
+  assert.equal(sandbox.closeCalls || 0, 0);
+
+  overlay.listeners.mousedown({ target: overlay });
+  assert.equal(sandbox.closeCalls, 1);
 });
 
 test('full state toggles runtime body mode classes', () => {
