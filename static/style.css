@@ -4568,19 +4568,30 @@ body.runtime-embedded #panel-board .board-wide-lane-body {
   margin-top: 8px;
 }
 .board-archive-suggestion {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: 8px;
-  padding: 8px 10px;
+  max-width: 100%;
+  margin-top: 4px;
+  padding: 3px 8px;
   border: 1px solid color-mix(in srgb, var(--status-green) 45%, var(--border));
-  border-radius: var(--radius);
+  border-radius: 999px;
   background: color-mix(in srgb, var(--status-green) 8%, var(--bg-card));
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 10px;
+  line-height: 1.2;
+  cursor: pointer;
+  text-align: left;
+}
+.board-archive-suggestion:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--status-green) 14%, var(--bg-card));
 }
 .board-archive-suggestion-copy {
-  font-size: 10px;
-  color: var(--text-dim);
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 /* Collapse toggle */
 .board-card-collapse-btn {
