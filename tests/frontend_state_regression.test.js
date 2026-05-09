@@ -2404,6 +2404,52 @@ test('wide embedded board defaults To Do collapsed only without explicit persist
   assert.match(panel.innerHTML, /<div class="board-card">todo<\/div>/);
 });
 
+test('board selected lane hydrates from server state and persists lane clicks', () => {
+  const { context, document } = createBoardHarness();
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+
+  context.state.board_lanes = ['Backlog', 'To Do', 'In Progress', 'Done'];
+  context.state.board_selected_lanes_by_group = { alpha: 'In Progress' };
+  context.state.board_tasks = {
+    active: { id: 'active', group: 'alpha', task: 'Active', lane: 'In Progress', position: 1 },
+    done: { id: 'done', group: 'alpha', task: 'Done', lane: 'Done', position: 1 },
+  };
+
+  context.renderBoard();
+  assert.match(panel.innerHTML, /class="board-lane-tab board-lane-drop-target active"[\s\S]*In Progress/);
+  assert.equal(jsonValue(context, `_boardSelectedLane`), 'In Progress');
+
+  context.boardSelectLane('Done');
+
+  assert.equal(jsonValue(context, `_boardSelectedLane`), 'Done');
+  assert.deepEqual(JSON.parse(JSON.stringify(context.sendCalls.at(-1))), {
+    cmd: 'board_set_selected_lanes',
+    selected_lanes_by_group: { alpha: 'Done' },
+  });
+});
+
+test('wide embedded board lane collapse hydrates from server state before local defaults', () => {
+  const { context, document } = createBoardHarness();
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+
+  context.state.board_lanes = ['Backlog', 'To Do', 'In Progress', 'Done'];
+  context.state.board_hidden_wide_lanes_by_group = { alpha: { Done: true } };
+  context.localStorage.setItem('torque.board.hidden_wide_lanes_by_group', JSON.stringify({ alpha: {} }));
+  context.state.board_tasks = {
+    todo: { id: 'todo', group: 'alpha', task: 'To Do card', lane: 'To Do', position: 1 },
+    done: { id: 'done', group: 'alpha', task: 'Done card', lane: 'Done', position: 1 },
+  };
+
+  document.body.classList.add('runtime-embedded');
+  panel.clientWidth = 1200;
+  context.renderBoard();
+
+  assert.match(panel.innerHTML, /board-wide-lane-collapsed" data-lane="Done"/);
+  assert.doesNotMatch(panel.innerHTML, /board-wide-lane-collapsed" data-lane="To Do"/);
+});
+
 test('renderBoard places recent, view, and schedules in the top toolbar for wide embedded layout', () => {
   const { context, document } = createBoardHarness();
   const panel = document.register('panel-board');
@@ -7852,6 +7898,31 @@ test('context panel uses a compact master-detail flow on narrow panels', () => {
 
   context.contextShowList();
   assert.match(panel.innerHTML, /context-list-compact/);
+});
+
+test('context panel split ratio hydrates from state and persists resize stop', () => {
+  const { context, document } = createContextHarness();
+  const panel = document.register('panel-context');
+  const browser = document.register('context-browser');
+  panel.clientWidth = 1000;
+  panel.getBoundingClientRect = () => ({ left: 0, width: 1000 });
+  browser.getBoundingClientRect = () => ({ left: 0, width: 1000 });
+  context.state.context_panel_split_ratio = 0.5;
+  context._captureSurfaceState = function() { return {}; };
+  context._restoreSurfaceState = function() {};
+  context._contextRequestEntries = function() {};
+
+  context.renderContextPanel();
+  assert.match(panel.innerHTML, /--context-list-width:50%;/);
+
+  context.contextStartResize({ preventDefault() {}, clientX: 420 });
+  context.contextDragResize({ clientX: 420 });
+  context.contextStopResize();
+
+  assert.deepEqual(JSON.parse(JSON.stringify(context.sendCalls.at(-1))), {
+    cmd: 'ui_set_context_panel_split',
+    ratio: 0.42,
+  });
 });
 
 test('agent clicks rescope the board to the clicked agent group immediately', () => {
@@ -19770,8 +19841,12 @@ test('standalone first full-state restore persists responsive defaults once', ()
 
   assert.equal(context.localStorage.getItem('torque.ide.sidebar_width'), '784');
   assert.equal(jsonValue(context, `_workspaceSidebarWidth`), 784);
-  assert.equal(jsonValue(context, `sendCalls.length`), 1);
+  assert.equal(jsonValue(context, `sendCalls.length`), 2);
   assert.deepEqual(jsonValue(context, `sendCalls[0]`), {
+    cmd: 'ui_set_workspace_sidebar_width',
+    width: 784,
+  });
+  assert.deepEqual(jsonValue(context, `sendCalls[1]`), {
     cmd: 'standalone_set_panel_layout',
     layout: {
       version: 1,
@@ -19873,6 +19948,32 @@ test('standalone startup preserves a saved sidebar width', () => {
   assert.equal(jsonValue(context, `sendCalls.length`), 0);
 });
 
+test('standalone startup restores sidebar width from server ui_state before localStorage', () => {
+  const { context, document } = createPanelHarness();
+  document.body.classList.add('runtime-embedded');
+  context.isEmbeddedTerminalMode = function() { return true; };
+  context.localStorage.setItem('torque.ide.sidebar_width', '720');
+
+  runInContext(context, `
+    state = {
+      runtime: { embedded_terminal: true },
+      workspace_sidebar_width: 760,
+      standalone_panel_layout: {
+        version: 1,
+        bottom: { open: true, size: 280, tabs: ['board'], active: 'board' },
+        right: { open: true, size: 320, tabs: ['context'], active: 'context' },
+        floats: {},
+        last_active: 'context',
+      },
+    };
+    _restorePanelState();
+  `);
+
+  assert.equal(jsonValue(context, `_workspaceSidebarWidth`), 760);
+  assert.equal(document.body.style['--standalone-sidebar-width'], '760px');
+  assert.equal(jsonValue(context, `sendCalls.length`), 0);
+});
+
 test('restoreStandaloneLayoutDefaults resets width and ignores legacy state', () => {
   const { context, document } = createPanelHarness();
   document.body.classList.add('runtime-embedded');
@@ -19915,21 +20016,27 @@ test('restoreStandaloneLayoutDefaults resets width and ignores legacy state', ()
     floats: {},
     last_active: 'board',
   });
-  assert.deepEqual(jsonValue(context, `sendCalls`), [{
-    cmd: 'standalone_set_panel_layout',
-    layout: {
-      version: 1,
-      bottom: { open: true, size: 306, tabs: ['board'], active: 'board' },
-      right: {
-        open: true,
-        size: 320,
-        tabs: ['actions', 'templates', 'context', 'events'],
-        active: 'context',
-      },
-      floats: {},
-      last_active: 'board',
+  assert.deepEqual(jsonValue(context, `sendCalls`), [
+    {
+      cmd: 'ui_set_workspace_sidebar_width',
+      width: 784,
     },
-  }]);
+    {
+      cmd: 'standalone_set_panel_layout',
+      layout: {
+        version: 1,
+        bottom: { open: true, size: 306, tabs: ['board'], active: 'board' },
+        right: {
+          open: true,
+          size: 320,
+          tabs: ['actions', 'templates', 'context', 'events'],
+          active: 'context',
+        },
+        floats: {},
+        last_active: 'board',
+      },
+    },
+  ]);
 });
 
 test('standalone startup restore keeps panel roots attached across the first double render', () => {
@@ -20071,6 +20178,40 @@ test('full-state hydration mirrors persisted selected_agent_id for detached Agen
 
   assert.equal(jsonValue(context, `selectedAgentId`), 'agent-1');
   assert.equal(jsonValue(context, `focusedItemId`), 'agent-1');
+});
+
+test('full-state hydration preserves persisted active group over stale selected agent', () => {
+  const { context } = createAttachedStandaloneWsSyncHarness();
+  runInContext(context, `
+    _panelStateRestored = false;
+    _currentGroup = function() { return _activeGroup() || ''; };
+  `);
+
+  context._handleFullState({
+    seq: 1,
+    runtime: { mode: 'standalone', embedded_terminal: true },
+    agents: {
+      'agent-1': { id: 'agent-1', name: 'Alpha', group: 'alpha', cell_type: 'agent', status: 'idle' },
+      'agent-2': { id: 'agent-2', name: 'Beta', group: 'beta', cell_type: 'agent', status: 'idle' },
+    },
+    groups: { alpha: ['agent-1'], beta: ['agent-2'] },
+    group_settings: {
+      alpha: { collapsed_default: false },
+      beta: { collapsed_default: false },
+    },
+    children: {},
+    board_tasks: {},
+    panel_events: [],
+    active_session_id: null,
+    active_group: 'beta',
+    selected_agent_id: 'agent-1',
+    standalone_panel_layout: {},
+  });
+
+  assert.equal(jsonValue(context, `state.active_group`), 'beta');
+  assert.equal(jsonValue(context, `_currentGroup()`), 'beta');
+  assert.equal(jsonValue(context, `selectedAgentId`), null);
+  assert.equal(jsonValue(context, `state.selected_agent_id`), '');
 });
 
 test('selected_agent_id deltas move detached Agent panel focus to the main selection', () => {

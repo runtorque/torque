@@ -171,6 +171,12 @@ function _contextClampSplitRatio(value) {
   return Math.min(0.62, Math.max(0.28, ratio));
 }
 
+function _contextApplyPersistedSplit() {
+  if (state && state.context_panel_split_ratio != null) {
+    _contextSplitRatio = _contextClampSplitRatio(state.context_panel_split_ratio);
+  }
+}
+
 function _contextPanelWidth(panel) {
   if (!panel) return 0;
   if (panel.clientWidth) return panel.clientWidth;
@@ -560,6 +566,7 @@ function _renderContextDetailPane(compact) {
 function renderContextPanel() {
   var panel = document.getElementById('panel-context');
   if (!panel) return;
+  _contextApplyPersistedSplit();
   var panelState = _captureSurfaceState(panel, {
     scrollSelectors: ['#context-list'],
   });
@@ -870,4 +877,8 @@ function contextStopResize() {
     document.removeEventListener('mouseup', contextStopResize);
   }
   _contextResizeDrag = null;
+  if (state) state.context_panel_split_ratio = _contextSplitRatio;
+  if (typeof send === 'function') {
+    send({ cmd: 'ui_set_context_panel_split', ratio: _contextSplitRatio });
+  }
 }

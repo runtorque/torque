@@ -11382,6 +11382,18 @@ async def main(connection=None):
                     state._db_save_ui("board_panel_height",
                                       state.board_panel_height)
 
+            elif cmd == "ui_select_group":
+                raw_group = str(data.get("group", "") or "").strip()
+                if raw_group and raw_group not in state.groups:
+                    raw_group = ""
+                state.active_group = raw_group
+                state._emit(
+                    "ui_update",
+                    key="active_group",
+                    value=state.active_group,
+                )
+                state._db_save_ui("active_group", state.active_group)
+
             elif cmd == "ui_select_principal":
                 raw_principal = str(data.get("principal_id", "") or "").strip()
                 # Empty string is "user" (the default principal).
@@ -11418,6 +11430,63 @@ async def main(connection=None):
                 state._db_save_ui(
                     "selected_agent_id",
                     state.selected_agent_id,
+                )
+
+            elif cmd == "ui_set_window_bounds":
+                raw_window = str(data.get("window", "") or "").strip()
+                bounds = data.get("bounds", {})
+                if not raw_window or not isinstance(bounds, dict):
+                    result = {
+                        "type": "error",
+                        "message": "Invalid window bounds state",
+                    }
+                else:
+                    normalized = {}
+                    for key in ("x", "y", "width", "height"):
+                        value = bounds.get(key)
+                        if value is None:
+                            continue
+                        try:
+                            normalized[key] = float(value)
+                        except (TypeError, ValueError):
+                            continue
+                    display_id = str(bounds.get("display_id", "") or "").strip()
+                    if display_id:
+                        normalized["display_id"] = display_id
+                    if normalized:
+                        next_bounds = dict(state.window_bounds or {})
+                        next_bounds[raw_window] = normalized
+                        state.window_bounds = next_bounds
+                    else:
+                        state.window_bounds = {
+                            key: value
+                            for key, value in (state.window_bounds or {}).items()
+                            if key != raw_window
+                        }
+                    state._emit(
+                        "ui_update",
+                        key="window_bounds",
+                        value=state.window_bounds,
+                    )
+                    state._db_save_ui(
+                        "window_bounds",
+                        json.dumps(state.window_bounds),
+                    )
+
+            elif cmd == "ui_set_workspace_sidebar_width":
+                try:
+                    width = int(data.get("width", 0) or 0)
+                except (TypeError, ValueError):
+                    width = 0
+                state.workspace_sidebar_width = max(0, width)
+                state._emit(
+                    "ui_update",
+                    key="workspace_sidebar_width",
+                    value=state.workspace_sidebar_width,
+                )
+                state._db_save_ui(
+                    "workspace_sidebar_width",
+                    state.workspace_sidebar_width,
                 )
 
             elif cmd == "standalone_set_panel_layout":
@@ -11471,6 +11540,47 @@ async def main(connection=None):
                         json.dumps(state.detached_panels),
                     )
 
+            elif cmd == "ui_set_detached_panel_bounds":
+                panel = str(data.get("panel", "") or "").strip()
+                label = str(data.get("label", "") or "").strip()
+                bounds = data.get("bounds", {})
+                if not panel or not isinstance(bounds, dict):
+                    result = {
+                        "type": "error",
+                        "message": "Invalid detached panel bounds state",
+                    }
+                else:
+                    normalized_bounds = {}
+                    for key in ("x", "y", "width", "height"):
+                        value = bounds.get(key)
+                        if value is None:
+                            continue
+                        try:
+                            normalized_bounds[key] = float(value)
+                        except (TypeError, ValueError):
+                            continue
+                    display_id = str(bounds.get("display_id", "") or "").strip()
+                    if display_id:
+                        normalized_bounds["display_id"] = display_id
+                    next_panels = dict(state.detached_panels or {})
+                    entry = dict(next_panels.get(panel) or {})
+                    if label:
+                        entry["label"] = label
+                    if normalized_bounds:
+                        entry["bounds"] = normalized_bounds
+                    if entry:
+                        next_panels[panel] = entry
+                    state.detached_panels = next_panels
+                    state._emit(
+                        "ui_update",
+                        key="detached_panels",
+                        value=state.detached_panels,
+                    )
+                    state._db_save_ui(
+                        "detached_panels",
+                        json.dumps(state.detached_panels),
+                    )
+
             elif cmd == "first_run_complete":
                 sentinel = Path.home() / ".torque" / ".first_run_complete"
                 sentinel.parent.mkdir(parents=True, exist_ok=True)
@@ -11499,6 +11609,23 @@ async def main(connection=None):
                 state._db_save_ui(
                     "engineer_panel_split_fraction",
                     state.engineer_panel_split_fraction,
+                )
+
+            elif cmd == "ui_set_context_panel_split":
+                try:
+                    ratio = float(data.get("ratio", 0.38))
+                except (TypeError, ValueError):
+                    ratio = 0.38
+                ratio = max(0.28, min(0.62, ratio))
+                state.context_panel_split_ratio = ratio
+                state._emit(
+                    "ui_update",
+                    key="context_panel_split_ratio",
+                    value=state.context_panel_split_ratio,
+                )
+                state._db_save_ui(
+                    "context_panel_split_ratio",
+                    state.context_panel_split_ratio,
                 )
 
             elif cmd == "events_dismiss":
@@ -11534,6 +11661,46 @@ async def main(connection=None):
                 state._db_save_ui(
                     "board_filters_by_group",
                     json.dumps(state.board_filters_by_group),
+                )
+
+            elif cmd == "board_set_selected_lanes":
+                raw_lanes = data.get("selected_lanes_by_group", {})
+                if isinstance(raw_lanes, dict):
+                    state.board_selected_lanes_by_group = {
+                        str(group or ""): str(lane or "")
+                        for group, lane in raw_lanes.items()
+                        if str(group or "") and str(lane or "")
+                    }
+                else:
+                    state.board_selected_lanes_by_group = {}
+                state._emit("ui_update", key="board_selected_lanes_by_group",
+                            value=state.board_selected_lanes_by_group)
+                state._db_save_ui(
+                    "board_selected_lanes_by_group",
+                    json.dumps(state.board_selected_lanes_by_group),
+                )
+
+            elif cmd == "board_set_hidden_wide_lanes":
+                raw_lanes = data.get("hidden_wide_lanes_by_group", {})
+                normalized = {}
+                if isinstance(raw_lanes, dict):
+                    for group, lanes in raw_lanes.items():
+                        group = str(group or "")
+                        if not group or not isinstance(lanes, dict):
+                            continue
+                        lane_state = {
+                            str(lane or ""): True
+                            for lane, hidden in lanes.items()
+                            if str(lane or "") and bool(hidden)
+                        }
+                        normalized[group] = lane_state
+                state.board_hidden_wide_lanes_by_group = normalized
+                state._emit("ui_update",
+                            key="board_hidden_wide_lanes_by_group",
+                            value=state.board_hidden_wide_lanes_by_group)
+                state._db_save_ui(
+                    "board_hidden_wide_lanes_by_group",
+                    json.dumps(state.board_hidden_wide_lanes_by_group),
                 )
 
             elif cmd == "board_set_saved_views":
@@ -14407,6 +14574,19 @@ async def main(connection=None):
         payload["follow"] = request.query.get("follow", "0") in {"1", "true", "yes"}
         return web.json_response(payload)
 
+    async def handle_ui_state(_request):
+        """GET /api/ui_state — lightweight state needed before first paint.
+
+        The Tauri shell uses this before showing the main window so native
+        window geometry can be restored without waiting for the WebSocket
+        snapshot.
+        """
+        return web.json_response({
+            "window_bounds": state.window_bounds or {},
+            "detached_panels": state.detached_panels or {},
+            "active_group": state.active_group or "",
+        })
+
     async def handle_serve_attachment(request):
         """GET /attachments/{task_id}/{filename} — serve attachment file."""
         task_id = request.match_info["task_id"]
@@ -14440,6 +14620,7 @@ async def main(connection=None):
     app_server.router.add_get("/ws", handle_ws)
     app_server.router.add_get("/ws/terminal/{cell_id}", handle_terminal_ws)
     app_server.router.add_get("/logs", handle_logs)
+    app_server.router.add_get("/api/ui_state", handle_ui_state)
     app_server.router.add_post("/events", handle_events)
     app_server.router.add_post("/api/cmd", handle_api_cmd)
     if profiling.is_enabled():

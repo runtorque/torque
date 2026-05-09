@@ -124,6 +124,12 @@ function _updateSelectedAgentContext(id) {
   return changed;
 }
 
+function _persistSelectedAgentFromLocal() {
+  if (typeof send === 'function') {
+    send({ cmd: 'ui_select_agent', id: selectedAgentId || '' });
+  }
+}
+
 function onGroupTabClick(group, event) {
   if (event) {
     event.preventDefault();

@@ -7,10 +7,14 @@ let state = {
   groups: {},
   children: {},
   active_session_id: null,
+  active_group: '',
   selected_principal_id: '',
   selected_agent_id: '',
   detached_panels: {},
+  window_bounds: {},
+  workspace_sidebar_width: 0,
   engineer_panel_split_fraction: 0.30,
+  context_panel_split_ratio: 0.38,
 };
 let dragInProgress = false;
 let selectedAgentId = null;
@@ -41,7 +45,9 @@ function _selectedAgentFocusId(agent) {
   return agent.id || '';
 }
 
-function _syncActiveGroupToSelectedAgent(agent) {
+function _syncActiveGroupToSelectedAgent(agent, opts) {
+  opts = opts || {};
+  if (opts.persist === undefined) opts.persist = true;
   if (!agent || !agent.group) return;
   if (typeof _singleGroupModeEnabled === 'function'
       && !_singleGroupModeEnabled()) return;
@@ -53,16 +59,20 @@ function _syncActiveGroupToSelectedAgent(agent) {
   if (state) state.active_group = group;
   if (typeof _pendingActiveGroup !== 'undefined') _pendingActiveGroup = '';
   if (typeof _writeStoredActiveGroup === 'function') _writeStoredActiveGroup(group);
+  if (opts.persist && typeof _persistActiveGroup === 'function') {
+    _persistActiveGroup(group);
+  }
 }
 
-function _applySelectedAgentFromServer(agentId) {
+function _applySelectedAgentFromServer(agentId, opts) {
+  opts = opts || {};
   var nextSelectedAgentId = String(agentId || '').trim();
   var agent = _selectedAgentRecord(nextSelectedAgentId);
   if (agent) {
     if (state) state.selected_agent_id = nextSelectedAgentId;
     selectedAgentId = nextSelectedAgentId;
     focusedItemId = _selectedAgentFocusId(agent) || nextSelectedAgentId;
-    _syncActiveGroupToSelectedAgent(agent);
+    if (opts.syncGroup !== false) _syncActiveGroupToSelectedAgent(agent, opts);
     return nextSelectedAgentId;
   }
   if (state) state.selected_agent_id = '';
@@ -569,10 +579,13 @@ function _handleFullState(msg) {
     }
   }
   if (typeof _boardFiltersByGroup !== 'undefined') _boardFiltersByGroup = null;
+  if (typeof _boardSelectedLanesByGroup !== 'undefined') _boardSelectedLanesByGroup = null;
+  if (typeof _boardHiddenWideLanesByGroup !== 'undefined') _boardHiddenWideLanesByGroup = null;
   if (typeof _boardSavedViewsByGroup !== 'undefined') _boardSavedViewsByGroup = null;
   if (typeof _boardLaneSortsByGroup !== 'undefined') _boardLaneSortsByGroup = null;
   if (typeof _boardCardDensityByGroup !== 'undefined') _boardCardDensityByGroup = null;
   if (typeof _boardFilterStateGroup !== 'undefined') _boardFilterStateGroup = '';
+  if (typeof _boardSelectedLaneStateGroup !== 'undefined') _boardSelectedLaneStateGroup = '';
   if (typeof _boardResetRenderCaches === 'function') _boardResetRenderCaches();
   if (msg.providers) _cachedProviders = msg.providers;
   if (!state.panel_events) state.panel_events = [];
@@ -585,6 +598,9 @@ function _handleFullState(msg) {
   if (!state.engineer_streams) state.engineer_streams = {};
   if (!state.engineer_session_maps) state.engineer_session_maps = {};
   if (!state.mcp_calls) state.mcp_calls = {};
+  if (typeof state.active_group !== 'string') {
+    state.active_group = '';
+  }
   if (typeof state.selected_principal_id !== 'string') {
     state.selected_principal_id = '';
   }
@@ -592,18 +608,45 @@ function _handleFullState(msg) {
     state.selected_agent_id = '';
   }
   var restoredSelectedAgentId = '';
+  var persistedActiveGroup = String(state.active_group || '').trim();
+  if (typeof _lastPersistedActiveGroup !== 'undefined') {
+    _lastPersistedActiveGroup = persistedActiveGroup;
+  }
+  if (persistedActiveGroup) {
+    if (typeof _pendingActiveGroup !== 'undefined') _pendingActiveGroup = '';
+    if (typeof _writeStoredActiveGroup === 'function') {
+      _writeStoredActiveGroup(persistedActiveGroup);
+    }
+  }
   if (state.selected_agent_id
       && state.agents
       && state.agents[state.selected_agent_id]
       && !(typeof _isTombstonedAgent === 'function'
-        && _isTombstonedAgent(state.agents[state.selected_agent_id]))) {
-    restoredSelectedAgentId = _applySelectedAgentFromServer(state.selected_agent_id);
+        && _isTombstonedAgent(state.agents[state.selected_agent_id]))
+      && (!persistedActiveGroup
+        || String(state.agents[state.selected_agent_id].group || '') === persistedActiveGroup)) {
+    restoredSelectedAgentId = _applySelectedAgentFromServer(
+      state.selected_agent_id,
+      { syncGroup: !persistedActiveGroup, persist: false },
+    );
   } else if (state.selected_agent_id) {
     _applySelectedAgentFromServer('');
+    if (persistedActiveGroup) state.active_group = persistedActiveGroup;
+  }
+  if (!state.window_bounds || typeof state.window_bounds !== 'object') {
+    state.window_bounds = {};
+  }
+  if (typeof state.workspace_sidebar_width !== 'number') {
+    var _workspaceWidth = Number(state.workspace_sidebar_width);
+    state.workspace_sidebar_width = Number.isFinite(_workspaceWidth) ? _workspaceWidth : 0;
   }
   if (typeof state.engineer_panel_split_fraction !== 'number') {
     var _splitFraction = Number(state.engineer_panel_split_fraction);
     state.engineer_panel_split_fraction = Number.isFinite(_splitFraction) ? _splitFraction : 0.30;
+  }
+  if (typeof state.context_panel_split_ratio !== 'number') {
+    var _contextSplitRatio = Number(state.context_panel_split_ratio);
+    state.context_panel_split_ratio = Number.isFinite(_contextSplitRatio) ? _contextSplitRatio : 0.38;
   }
   if (typeof _applyEmbeddedTerminalScrollbackFromSettings === 'function') {
     _applyEmbeddedTerminalScrollbackFromSettings();
@@ -1619,10 +1662,21 @@ function _applyUiSurfaceInvalidation(flags, key) {
   if (key === 'standalone_panel_layout') {
     _markSurface(flags, 'board', 'actions', 'context', 'events', 'engineer', 'templates');
   }
+  if (key === 'active_group') {
+    _markSurface(flags, 'main', 'board', 'actions', 'context', 'events', 'engineer', 'templates');
+  }
+  if (key === 'workspace_sidebar_width') {
+    _markSurface(flags, 'main', 'board', 'actions', 'context', 'events', 'engineer', 'templates');
+  }
+  if (key === 'context_panel_split_ratio') {
+    _markSurface(flags, 'context');
+  }
   if (key === 'events_dismissed_attention') {
     _markSurface(flags, 'events');
   }
   if (key === 'board_filters_by_group'
+      || key === 'board_selected_lanes_by_group'
+      || key === 'board_hidden_wide_lanes_by_group'
       || key === 'board_saved_views_by_group'
       || key === 'board_lane_sorts_by_group'
       || key === 'board_card_density_by_group') {
@@ -2005,11 +2059,45 @@ function _applyDelta(ops) {
             _syncVisibleStandalonePanelApps(prevStandaloneVisibleApps);
           }
         }
+        if (op.key === 'active_group') {
+          if (typeof _lastPersistedActiveGroup !== 'undefined') {
+            _lastPersistedActiveGroup = String(op.value || '');
+          }
+          if (typeof _writeStoredActiveGroup === 'function') {
+            _writeStoredActiveGroup(op.value || '');
+          }
+          if (typeof _pendingActiveGroup !== 'undefined'
+              && _pendingActiveGroup === String(op.value || '')) {
+            _pendingActiveGroup = '';
+          }
+        }
+        if (op.key === 'workspace_sidebar_width'
+            && typeof _applyWorkspaceSidebarWidth === 'function') {
+          _applyWorkspaceSidebarWidth(op.value || 0);
+        }
+        if (op.key === 'context_panel_split_ratio'
+            && typeof _contextApplyPersistedSplit === 'function') {
+          _contextApplyPersistedSplit();
+        }
         if (op.key === 'board_filters_by_group'
             && typeof _boardFiltersByGroup !== 'undefined') {
           _boardFiltersByGroup = null;
           if (typeof _boardFilterStateGroup !== 'undefined') {
             _boardFilterStateGroup = '';
+          }
+        }
+        if (op.key === 'board_selected_lanes_by_group'
+            && typeof _boardSelectedLanesByGroup !== 'undefined') {
+          _boardSelectedLanesByGroup = null;
+          if (typeof _boardSelectedLaneStateGroup !== 'undefined') {
+            _boardSelectedLaneStateGroup = '';
+          }
+        }
+        if (op.key === 'board_hidden_wide_lanes_by_group'
+            && typeof _boardHiddenWideLanesByGroup !== 'undefined') {
+          _boardHiddenWideLanesByGroup = null;
+          if (typeof _boardLaneRenderCache !== 'undefined') {
+            _boardLaneRenderCache = {};
           }
         }
         if (op.key === 'board_saved_views_by_group'

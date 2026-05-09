@@ -259,6 +259,9 @@ function boardFocusTask(id, evt) {
       && _boardWideLayoutActive(document.getElementById('panel-board'))
       && task.lane && task.lane !== _boardSelectedLane) {
     _boardSelectedLane = task.lane;
+    if (typeof _boardPersistSelectedLane === 'function') {
+      _boardPersistSelectedLane();
+    }
   }
   if (_boardQuickEditTask && _boardQuickEditTask !== id) {
     _boardQuickEditTask = '';
@@ -411,6 +414,9 @@ function boardNavigateToTask(taskId) {
   _boardResetBatchEdit();
   _boardEnsureRenderLimitForTask(task.id);
   _boardRevealFocusOnRender = true;
+  if (typeof _boardPersistSelectedLane === 'function') {
+    _boardPersistSelectedLane();
+  }
   _boardPersistFilterState();
 
   var boardVisible = typeof _panelAppVisible === 'function'

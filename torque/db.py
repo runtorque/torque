@@ -3533,15 +3533,23 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             for key in (
                 "panel_active",
                 "board_panel_height",
+                "active_group",
                 "selected_principal_id",
                 "selected_agent_id",
                 "standalone_panel_layout",
                 "detached_panels",
+                "window_bounds",
+                "workspace_sidebar_width",
                 "engineer_panel_split_fraction",
+                "context_panel_split_ratio",
             ):
                 val = state_dict.get(key)
                 if val is not None:
-                    if key in {"standalone_panel_layout", "detached_panels"}:
+                    if key in {
+                        "standalone_panel_layout",
+                        "detached_panels",
+                        "window_bounds",
+                    }:
                         val = json.dumps(val)
                     c.execute(
                         "INSERT INTO ui_state (key, value) VALUES (?,?)",
@@ -3562,6 +3570,24 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                         "board_filters_by_group",
                         json.dumps(state_dict.get("board_filters_by_group")
                                    or {}),
+                    ),
+                )
+            if state_dict.get("board_selected_lanes_by_group") is not None:
+                c.execute(
+                    "INSERT INTO ui_state (key, value) VALUES (?,?)",
+                    (
+                        "board_selected_lanes_by_group",
+                        json.dumps(state_dict.get(
+                            "board_selected_lanes_by_group") or {}),
+                    ),
+                )
+            if state_dict.get("board_hidden_wide_lanes_by_group") is not None:
+                c.execute(
+                    "INSERT INTO ui_state (key, value) VALUES (?,?)",
+                    (
+                        "board_hidden_wide_lanes_by_group",
+                        json.dumps(state_dict.get(
+                            "board_hidden_wide_lanes_by_group") or {}),
                     ),
                 )
             if state_dict.get("board_saved_views_by_group") is not None:
@@ -3732,6 +3758,22 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         except Exception:
             board_filters_by_group = {}
         try:
+            board_selected_lanes_by_group = json.loads(
+                ui.get("board_selected_lanes_by_group", "{}") or "{}"
+            )
+            if not isinstance(board_selected_lanes_by_group, dict):
+                board_selected_lanes_by_group = {}
+        except Exception:
+            board_selected_lanes_by_group = {}
+        try:
+            board_hidden_wide_lanes_by_group = json.loads(
+                ui.get("board_hidden_wide_lanes_by_group", "{}") or "{}"
+            )
+            if not isinstance(board_hidden_wide_lanes_by_group, dict):
+                board_hidden_wide_lanes_by_group = {}
+        except Exception:
+            board_hidden_wide_lanes_by_group = {}
+        try:
             board_saved_views_by_group = json.loads(
                 ui.get("board_saved_views_by_group", "{}") or "{}"
             )
@@ -3763,6 +3805,32 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 detached_panels = {}
         except Exception:
             detached_panels = {}
+        try:
+            window_bounds = json.loads(
+                ui.get("window_bounds", "{}") or "{}"
+            )
+            if not isinstance(window_bounds, dict):
+                window_bounds = {}
+        except Exception:
+            window_bounds = {}
+        try:
+            workspace_sidebar_width = int(
+                ui.get("workspace_sidebar_width", "0") or "0"
+            )
+        except (TypeError, ValueError):
+            workspace_sidebar_width = 0
+        try:
+            context_panel_split_ratio = float(
+                ui.get("context_panel_split_ratio", "0.38") or "0.38"
+            )
+        except (TypeError, ValueError):
+            context_panel_split_ratio = 0.38
+        try:
+            engineer_panel_split_fraction = float(
+                ui.get("engineer_panel_split_fraction", "0.30") or "0.30"
+            )
+        except (TypeError, ValueError):
+            engineer_panel_split_fraction = 0.30
 
         # Global settings
         global_settings = {}
@@ -3824,6 +3892,7 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 or ("board" if ui.get("board_panel_open", "False") == "True"
                     else ""),
             "board_panel_height": int(ui.get("board_panel_height", "0")),
+            "active_group": str(ui.get("active_group", "") or ""),
             "selected_principal_id": str(
                 ui.get("selected_principal_id", "") or ""
             ),
@@ -3835,14 +3904,17 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 if ui.get("standalone_panel_layout") else {}
             ),
             "detached_panels": detached_panels,
-            "engineer_panel_split_fraction": float(
-                ui.get("engineer_panel_split_fraction", "0.30") or "0.30"
-            ),
+            "window_bounds": window_bounds,
+            "workspace_sidebar_width": workspace_sidebar_width,
+            "engineer_panel_split_fraction": engineer_panel_split_fraction,
+            "context_panel_split_ratio": context_panel_split_ratio,
             "events_dismissed_attention": (
                 json.loads(ui.get("events_dismissed_attention", "{}"))
                 if ui.get("events_dismissed_attention") else {}
             ),
             "board_filters_by_group": board_filters_by_group,
+            "board_selected_lanes_by_group": board_selected_lanes_by_group,
+            "board_hidden_wide_lanes_by_group": board_hidden_wide_lanes_by_group,
             "board_saved_views_by_group": board_saved_views_by_group,
             "board_lane_sorts_by_group": board_lane_sorts_by_group,
             "board_card_density_by_group": board_card_density_by_group,

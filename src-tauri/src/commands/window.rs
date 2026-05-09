@@ -28,6 +28,7 @@ pub struct DetachedWindowInfo {
 pub struct NativeWindowState {
     active_label: Mutex<String>,
     detached_by_panel: Mutex<HashMap<String, String>>,
+    app_exiting: Mutex<bool>,
 }
 
 impl NativeWindowState {
@@ -42,6 +43,16 @@ impl NativeWindowState {
             .lock()
             .map(|label| label.clone())
             .unwrap_or_default()
+    }
+
+    pub fn set_app_exiting(&self, exiting: bool) {
+        if let Ok(mut value) = self.app_exiting.lock() {
+            *value = exiting;
+        }
+    }
+
+    pub fn app_exiting(&self) -> bool {
+        self.app_exiting.lock().map(|value| *value).unwrap_or(false)
     }
 
     pub fn remember_detached(&self, panel: impl Into<String>, label: impl Into<String>) {

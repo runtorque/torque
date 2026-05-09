@@ -44,12 +44,14 @@ var _boardViewMenuCleanup = null;
 var _boardViewMenuOpen = false;
 var _boardPreFilterLane = '';    // saved lane before search, restored on clear
 var _boardFiltersByGroup = null; // persisted filter state keyed by group
+var _boardSelectedLanesByGroup = null; // persisted selected lane keyed by group
 var _boardSavedViewsByGroup = null; // saved view snapshots keyed by group
 var _boardLaneSortsByGroup = null; // persisted lane sort modes keyed by group
 var _boardCardDensityByGroup = null; // persisted card density keyed by group
-var _boardHiddenWideLanesByGroup = null; // local wide-layout lane collapse state keyed by group
+var _boardHiddenWideLanesByGroup = null; // persisted wide-layout lane collapse state keyed by group
 var _boardDefaultHiddenWideLanes = { 'To Do': true }; // fresh wide-layout lane defaults
 var _boardFilterStateGroup = '';
+var _boardSelectedLaneStateGroup = '';
 var _boardShowSchedules = false; // true when "Schedules" tab is active
 var _boardShowArchived = false;  // include archived tasks in the active board view
 var _boardSavingView = false;    // inline saved-view naming control visibility
@@ -1741,6 +1743,9 @@ function renderBoard() {
   _boardSetQuickEditRefocus('', '');
   var queuedTaskDeltaBatch = _boardConsumeQueuedTaskDeltas();
   _boardSyncFiltersForCurrentGroup();
+  if (typeof _boardSyncSelectedLaneForCurrentGroup === 'function') {
+    _boardSyncSelectedLaneForCurrentGroup(_boardVisibleLanes());
+  }
   _boardHydrateSavedViews();
   _boardHydrateLaneSorts();
   _boardHydrateCardDensity();
@@ -1761,6 +1766,9 @@ function renderBoard() {
   }
 
   var lanes = _boardVisibleLanes();
+  if (typeof _boardSyncSelectedLaneForCurrentGroup === 'function') {
+    _boardSyncSelectedLaneForCurrentGroup(lanes);
+  }
   if (!lanes.length) {
     panel.innerHTML = '<div class="board-empty">No lanes configured</div>';
     _boardLastRenderShellKey = '';
@@ -2175,6 +2183,9 @@ function boardSelectLane(lane) {
   _boardSelectedTasks = {};
   _boardLastSelectedTask = '';
   renderBoard();
+  if (typeof _boardPersistSelectedLane === 'function') {
+    _boardPersistSelectedLane();
+  }
 }
 
 function boardSetLaneSort(mode) {
@@ -3698,6 +3709,9 @@ function boardClearFilters() {
   }
   renderBoard();
   _boardPersistFilterState();
+  if (typeof _boardPersistSelectedLane === 'function') {
+    _boardPersistSelectedLane();
+  }
 }
 
 function boardSaveCurrentView() {
