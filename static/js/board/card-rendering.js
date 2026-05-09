@@ -647,12 +647,15 @@ function _renderBoardArchiveSuggestion(lane, model) {
   if (_boardShowArchived || (lane || _boardSelectedLane) !== 'Done') return '';
   var staleIds = _boardStaleDoneTaskIds(model);
   if (!staleIds.length) return '';
-  return '<div class="board-archive-suggestion">'
+  var taskLabel = staleIds.length + ' completed task' + (staleIds.length === 1 ? '' : 's')
+    + ' inactive for ' + _boardArchiveStaleDays + '+ days';
+  var archiveLabel = 'Archive ' + taskLabel;
+  return '<button type="button" class="board-archive-suggestion"'
+    + ' onclick="event.stopPropagation();boardArchiveSuggestedDone()"'
+    + ' title="' + esc(archiveLabel) + '">'
     + '<span class="board-archive-suggestion-copy">'
-    + staleIds.length + ' completed task' + (staleIds.length === 1 ? '' : 's')
-    + ' inactive for ' + _boardArchiveStaleDays + '+ days</span>'
-    + '<button class="board-selection-btn" onclick="boardArchiveSuggestedDone()">Archive stale</button>'
-    + '</div>';
+    + esc(archiveLabel) + '</span>'
+    + '</button>';
 }
 
 /* ---- Card rendering ------------------------------------------------- */

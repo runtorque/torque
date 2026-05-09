@@ -5636,7 +5636,9 @@ test('renderBoard surfaces a stale completed-task archive suggestion on the Done
   runInContext(context, `_boardSelectedLane = 'Done';`);
   context.renderBoard();
 
-  assert.match(panel.innerHTML, /Archive stale/);
+  assert.match(panel.innerHTML, /<button[^>]+class="board-archive-suggestion"/);
+  assert.doesNotMatch(panel.innerHTML, /board-selection-btn/);
+  assert.match(panel.innerHTML, /Archive 1 completed task inactive for 7\+ days/);
   assert.match(panel.innerHTML, /inactive for 7\+ days/);
 });
 
