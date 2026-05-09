@@ -1095,6 +1095,9 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
             mcp_entrypoint=mcp_entrypoint,
         )
 
+    async def list_supervisor_sessions(self) -> list:
+        return await self._client.list_sessions()
+
     async def close_session(self, session_id: str) -> None:
         session = self._sessions.get(session_id)
         if not session or session.closed:

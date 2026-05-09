@@ -6,7 +6,7 @@ var _activePanelApp = '';   // '' = collapsed, 'board' = board open
 var _panelHeight = 0;       // persisted height in px (0 = use CSS default)
 var _panelStateRestored = false;  // true after first state message restores panel
 
-var _panelIds = ['panel-board', 'panel-actions', 'panel-templates', 'panel-context', 'panel-events', 'panel-agent'];
+var _panelIds = ['panel-board', 'panel-actions', 'panel-templates', 'panel-context', 'panel-events', 'panel-agent', 'panel-supervisor'];
 var _embeddedPanelMinHeight = 180;
 var _defaultPanelMinHeight = 80;
 var _workspaceSidebarDefaultWidth = 340;
@@ -112,6 +112,9 @@ function _loadPanelApp(appName) {
     } else if (typeof agentTemplateEditorLoad === 'function') {
       agentTemplateEditorLoad();
     }
+  }
+  if (appName === 'supervisor' && typeof supervisorEnsureLoaded === 'function') {
+    supervisorEnsureLoaded();
   }
 }
 
@@ -276,6 +279,7 @@ function togglePanel(appName) {
     if (appName === 'context' && typeof renderContextPanel === 'function') renderContextPanel();
     if (appName === 'events' && typeof renderEvents === 'function') renderEvents();
     if (appName === 'engineer' && typeof renderAgentPanel === 'function') renderAgentPanel();
+    if (appName === 'supervisor' && typeof renderSupervisorPanel === 'function') renderSupervisorPanel({ force: true });
   }
   // Persist panel state to server
   send({ cmd: 'board_set_panel', active: _activePanelApp || '' });
@@ -301,6 +305,7 @@ function _restorePanelState() {
     if (detachedApp === 'context' && typeof renderContextPanel === 'function') renderContextPanel();
     if (detachedApp === 'events' && typeof renderEvents === 'function') renderEvents();
     if (detachedApp === 'engineer' && typeof renderAgentPanel === 'function') renderAgentPanel();
+    if (detachedApp === 'supervisor' && typeof renderSupervisorPanel === 'function') renderSupervisorPanel({ force: true });
     if (typeof torqueDetachedWindowBoundsChanged === 'function') {
       torqueDetachedWindowBoundsChanged();
     }
@@ -347,6 +352,7 @@ function _restorePanelState() {
     if (active === 'context' && typeof renderContextPanel === 'function') renderContextPanel();
     if (active === 'events' && typeof renderEvents === 'function') renderEvents();
     if (active === 'engineer' && typeof renderAgentPanel === 'function') renderAgentPanel();
+    if (active === 'supervisor' && typeof renderSupervisorPanel === 'function') renderSupervisorPanel({ force: true });
   }
   if (typeof _standaloneRestoreDetachedPanels === 'function') _standaloneRestoreDetachedPanels();
 }

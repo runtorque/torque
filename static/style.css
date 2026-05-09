@@ -9354,3 +9354,233 @@ body.detached-window #bottom-panel > div:not(.panel-hidden):not(#panel-resize-ha
 .welcome-steps strong { display: block; margin-bottom: 4px; }
 .welcome-steps span { color: var(--text-dim); font-size: 11px; line-height: 1.45; }
 .welcome-actions { margin-top: 16px; }
+
+/* PTY Supervisor panel --------------------------------------------------- */
+.taskbar-app[data-app="supervisor"] { display: none; }
+body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex; }
+
+#panel-supervisor {
+  overflow: auto;
+  min-height: 0;
+  height: 100%;
+}
+.supervisor-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 100%;
+  padding: 12px;
+  color: var(--text);
+}
+.supervisor-header,
+.supervisor-toolbar,
+.supervisor-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.supervisor-header {
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.supervisor-header h2 {
+  margin: 0;
+  font-size: 15px;
+}
+.supervisor-header p {
+  margin: 2px 0 0;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.supervisor-status {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.supervisor-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--red);
+  box-shadow: 0 0 0 3px rgba(248, 81, 73, .12);
+}
+.supervisor-dot.connected {
+  background: var(--green);
+  box-shadow: 0 0 0 3px rgba(63, 185, 80, .12);
+}
+.supervisor-toolbar {
+  flex-wrap: wrap;
+}
+.supervisor-toolbar button,
+.supervisor-detail-toggle,
+.supervisor-sort {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-cell);
+  color: var(--text);
+  font-size: 11px;
+  padding: 4px 8px;
+}
+.supervisor-sort {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font-weight: 600;
+}
+.supervisor-auto {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.supervisor-updated {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.supervisor-banner {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+.supervisor-banner-unavailable,
+.supervisor-banner-error {
+  border-color: rgba(248, 81, 73, .35);
+  background: rgba(248, 81, 73, .08);
+  color: var(--text);
+}
+.supervisor-empty {
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--text-dim);
+  padding: 18px;
+  text-align: center;
+}
+.supervisor-table-wrap {
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.supervisor-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.supervisor-table th,
+.supervisor-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 7px 8px;
+  text-align: left;
+  vertical-align: middle;
+}
+.supervisor-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-surface);
+  color: var(--text-dim);
+}
+.supervisor-row { cursor: pointer; }
+.supervisor-row:hover,
+.supervisor-row.selected,
+.supervisor-card:hover,
+.supervisor-card.selected {
+  background: var(--bg-hover);
+}
+.supervisor-owner {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 120px;
+}
+.supervisor-owner span,
+.supervisor-card-meta,
+.supervisor-card-path {
+  color: var(--text-dim);
+  font-size: 10px;
+}
+.supervisor-command,
+.supervisor-path {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.supervisor-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 10px;
+  font-weight: 600;
+}
+.supervisor-pill-alive {
+  color: var(--green);
+  background: rgba(63, 185, 80, .12);
+}
+.supervisor-pill-exited {
+  color: var(--text-dim);
+  background: rgba(139, 148, 158, .14);
+}
+.supervisor-detail-row td {
+  background: rgba(255, 255, 255, .02);
+}
+.supervisor-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px 12px;
+  margin: 0;
+}
+.supervisor-detail-grid dt {
+  color: var(--text-dim);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.supervisor-detail-grid dd {
+  margin: 2px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.supervisor-detail-warning dd { color: var(--amber); }
+.supervisor-cards { display: none; }
+.supervisor-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  cursor: pointer;
+}
+.supervisor-card-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+}
+.supervisor-card-command {
+  margin-top: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.supervisor-card-path {
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.supervisor-card .supervisor-detail-toggle { margin-top: 8px; }
+.supervisor-card-details {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+@media (max-width: 760px) {
+  .supervisor-table-wrap { display: none; }
+  .supervisor-cards {
+    display: grid;
+    gap: 8px;
+  }
+}

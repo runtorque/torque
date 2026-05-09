@@ -152,6 +152,7 @@ from .server_dispatch import (
     _should_handoff_shared_worktree,
     _should_queue_existing_agent_dispatch,
 )
+from .server_supervisor import build_supervisor_sessions_payload
 from .server_worktrees import (
     _generate_merge_message,
     _worktree_diff_updater,
@@ -7969,6 +7970,10 @@ async def main(connection=None):
 
         if cmd == "doctor":
             return _handle_doctor_command(db)
+
+        if cmd == "supervisor_sessions_list":
+            return await build_supervisor_sessions_payload(
+                bridge, state, _runtime_payload)
 
         # get_events: paginated event log query
         if cmd == "get_events":
