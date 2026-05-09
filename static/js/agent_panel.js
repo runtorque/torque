@@ -1,5 +1,12 @@
 /* Agent panel — focused-agent router with per-kind renderers */
 
+if (typeof taskIsEngineerMessageFollowup !== 'function') {
+  var taskIsEngineerMessageFollowup = function(task) {
+    var labels = (task && Array.isArray(task.labels)) ? task.labels : [];
+    return labels.indexOf('torque:engineer-message') >= 0;
+  };
+}
+
 var _agentPanelLastSelectedTabByKind = {};
 var _agentPanelCellEventsById = {};
 var _agentPanelCellEventsLoadingById = {};
