@@ -15857,11 +15857,32 @@ test('full state toggles runtime body mode classes', () => {
   assert.equal(document.body.classList.contains('runtime-embedded'), true);
   assert.equal(document.body.classList.contains('standalone-mode'), true);
   assert.equal(document.body.classList.contains('iterm2-mode'), false);
+  assert.equal(document.body.classList.contains('tauri-mode'), false);
   assert.equal(document.body.dataset.torqueMode, 'standalone');
 
   runInContext(context, `
+    window.nativeApi = { available: function() { return true; } };
     _handleFullState({
       seq: 8,
+      groups: {},
+      agents: {},
+      board_lanes: [],
+      board_tasks: {},
+      panel_events: [],
+      runtime: { mode: 'desktop', embedded_terminal: true },
+    });
+  `);
+
+  assert.equal(document.body.classList.contains('runtime-embedded'), true);
+  assert.equal(document.body.classList.contains('standalone-mode'), true);
+  assert.equal(document.body.classList.contains('iterm2-mode'), false);
+  assert.equal(document.body.classList.contains('tauri-mode'), true);
+  assert.equal(document.body.dataset.torqueMode, 'desktop');
+
+  runInContext(context, `
+    window.nativeApi = { available: function() { return false; } };
+    _handleFullState({
+      seq: 9,
       groups: {},
       agents: {},
       board_lanes: [],
@@ -15874,6 +15895,7 @@ test('full state toggles runtime body mode classes', () => {
   assert.equal(document.body.classList.contains('runtime-embedded'), false);
   assert.equal(document.body.classList.contains('standalone-mode'), false);
   assert.equal(document.body.classList.contains('iterm2-mode'), true);
+  assert.equal(document.body.classList.contains('tauri-mode'), false);
   assert.equal(document.body.dataset.torqueMode, 'toolbelt');
 });
 

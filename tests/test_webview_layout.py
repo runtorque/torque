@@ -90,7 +90,7 @@ class WebviewHeaderLocationTests(unittest.TestCase):
         )
         self.assertRegex(
             html,
-            r'<header>[\s\S]*<h1>TORQUE</h1>[\s\S]*</header>',
+            r'<header>[\s\S]*<h1[^>]*class="[^"]*\bapp-wordmark\b[^"]*"[^>]*>TORQUE</h1>[\s\S]*</header>',
             "TORQUE branding missing from header",
         )
         self.assertRegex(

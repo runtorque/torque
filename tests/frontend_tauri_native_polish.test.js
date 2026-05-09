@@ -54,6 +54,21 @@ test('panel manager detects detached Tauri window URL mode', () => {
   assert.equal(body.dataset.detachedPanel, 'engineer');
 });
 
+test('Tauri mode hides redundant main bar wordmark without hiding browser standalone branding', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+
+  assert.match(
+    html,
+    /<header>[\s\S]*<h1[^>]*class="[^"]*\bapp-wordmark\b[^"]*"[^>]*>TORQUE<\/h1>[\s\S]*<\/header>/,
+  );
+  assert.match(
+    css,
+    /body\.tauri-mode\s+header\s+\.app-wordmark\s*\{[^}]*display:\s*none\s*;/s,
+  );
+  assert.doesNotMatch(css, /body\.standalone-mode\s+header\s+\.app-wordmark/);
+});
+
 test('cheatsheet renders platform-aware shortcut labels', () => {
   const context = vm.createContext({
     console,
