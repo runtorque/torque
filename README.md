@@ -9,7 +9,7 @@
 > dispatch work from a task board, and let an embedded engineer coordinate the
 > wave from your iTerm2 Toolbelt, a browser, or a native desktop shell.
 
-<!-- TODO(@architect): hero asset path -->
+![Torque workspace showing the agent grid, engineer workload, task board, and a live terminal session.](docs/images/main-screenshot.jpg)
 
 ## Why Torque
 
