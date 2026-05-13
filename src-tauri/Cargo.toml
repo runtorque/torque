@@ -1,6 +1,6 @@
 [package]
 name = "torque-desktop"
-version = "0.1.0"
+version = "1.1.0"
 description = "Torque Tauri desktop shell"
 authors = ["Torque contributors"]
 edition = "2021"

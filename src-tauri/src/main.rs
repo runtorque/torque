@@ -286,8 +286,8 @@ fn handle_menu_event(app: &tauri::AppHandle, event: tauri::menu::MenuEvent) {
         menu::MENU_RELOAD => eval_active(app, &window_state, "window.location.reload();"),
         menu::MENU_FORCE_RELOAD => eval_active(app, &window_state, "window.location.reload();"),
         menu::MENU_DEVTOOLS => {
+            #[cfg(debug_assertions)]
             if let Some(window) = active_window(app, &window_state) {
-                #[cfg(debug_assertions)]
                 window.open_devtools();
             }
         }

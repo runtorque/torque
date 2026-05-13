@@ -1,0 +1,303 @@
+name: Release macOS
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing git tag to release, for example v1.1.0"
+        required: true
+        type: string
+      draft:
+        description: "Create a draft release when the release does not exist"
+        required: true
+        default: true
+        type: boolean
+      prerelease:
+        description: "Mark a newly created release as a prerelease"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build macOS ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Apple Silicon
+            arch: aarch64
+            runner: macos-latest
+            target: aarch64-apple-darwin
+          - name: Intel
+            arch: x86_64
+            runner: macos-15-intel
+            target: x86_64-apple-darwin
+
+    steps:
+      - name: Check out release ref
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Resolve release metadata
+        id: metadata
+        env:
+          DISPATCH_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "${DISPATCH_TAG:-}" ]; then
+            release_tag="$DISPATCH_TAG"
+          else
+            release_tag="$GITHUB_REF_NAME"
+          fi
+
+          case "$release_tag" in
+            v[0-9]*.[0-9]*.[0-9]*)
+              version="${release_tag#v}"
+              ;;
+            *)
+              echo "Release tags must look like v1.2.3. Got: $release_tag" >&2
+              exit 1
+              ;;
+          esac
+
+          git rev-parse --verify --quiet "$release_tag^{commit}" >/dev/null
+
+          file_version="$(tr -d '[:space:]' < VERSION)"
+          cargo_version="$(awk -F' = ' '/^version = / { gsub(/"/, "", $2); print $2; exit }' src-tauri/Cargo.toml)"
+          tauri_version="$(python3 -c 'import json; print(json.load(open("src-tauri/tauri.conf.json"))["version"])')"
+
+          if [ "$version" != "$file_version" ]; then
+            echo "Tag $release_tag does not match VERSION ($file_version)." >&2
+            exit 1
+          fi
+          if [ "$version" != "$cargo_version" ]; then
+            echo "Tag $release_tag does not match src-tauri/Cargo.toml ($cargo_version)." >&2
+            exit 1
+          fi
+          if [ "$version" != "$tauri_version" ]; then
+            echo "Tag $release_tag does not match src-tauri/tauri.conf.json ($tauri_version)." >&2
+            exit 1
+          fi
+
+          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust stable
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
+          rustup default stable
+
+      - name: Install Tauri CLI
+        run: |
+          set -euo pipefail
+          tauri_version="$(awk '
+            $0 == "name = \"tauri\"" { in_tauri = 1; next }
+            in_tauri && /^version = / {
+              gsub(/"/, "", $3)
+              print $3
+              exit
+            }
+          ' src-tauri/Cargo.lock)"
+          if [ -z "$tauri_version" ]; then
+            echo "Unable to resolve Tauri version from src-tauri/Cargo.lock." >&2
+            exit 1
+          fi
+          cargo install tauri-cli --locked --version "$tauri_version"
+
+      - name: Resolve signing mode
+        id: signing
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+        run: |
+          set -euo pipefail
+          if [ -n "${APPLE_CERTIFICATE:-}" ]; then
+            echo "has_certificate=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_certificate=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Import Apple signing certificate
+        if: ${{ steps.signing.outputs.has_certificate == 'true' }}
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${APPLE_CERTIFICATE_PASSWORD:-}" ]; then
+            echo "APPLE_CERTIFICATE_PASSWORD is required when APPLE_CERTIFICATE is set." >&2
+            exit 1
+          fi
+
+          keychain_password="${KEYCHAIN_PASSWORD:-$(uuidgen)}"
+          certificate_path="$RUNNER_TEMP/torque-certificate.p12"
+          keychain_path="$RUNNER_TEMP/torque-signing.keychain-db"
+
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$certificate_path"
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security import "$certificate_path" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain_path"
+          security list-keychains -d user -s "$keychain_path"
+          security default-keychain -s "$keychain_path"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain_path"
+
+          signing_identity="$(security find-identity -v -p codesigning "$keychain_path" | awk -F'"' '/Developer ID Application|Apple Distribution|Apple Development/ { print $2; exit }')"
+          if [ -z "$signing_identity" ]; then
+            echo "No Apple code-signing identity found in imported certificate." >&2
+            exit 1
+          fi
+
+          echo "APPLE_SIGNING_IDENTITY=$signing_identity" >> "$GITHUB_ENV"
+
+      - name: Use ad-hoc signing without Apple certificate
+        if: ${{ steps.signing.outputs.has_certificate == 'false' }}
+        run: echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
+
+      - name: Build Tauri bundle
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TORQUE_REPO_ROOT: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          cd src-tauri
+          cargo tauri build --bundles app,dmg --target ${{ matrix.target }}
+
+      - name: Collect artifacts
+        env:
+          VERSION: ${{ steps.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          bundle_dir="src-tauri/target/${{ matrix.target }}/release/bundle"
+          dist_dir="dist/macos-${{ matrix.arch }}"
+          mkdir -p "$dist_dir"
+
+          dmg_path="$(find "$bundle_dir/dmg" -maxdepth 1 -name '*.dmg' -print -quit)"
+          app_path="$(find "$bundle_dir/macos" -maxdepth 1 -name '*.app' -type d -print -quit)"
+
+          if [ -z "$dmg_path" ]; then
+            echo "No DMG produced under $bundle_dir/dmg." >&2
+            exit 1
+          fi
+          if [ -z "$app_path" ]; then
+            echo "No .app bundle produced under $bundle_dir/macos." >&2
+            exit 1
+          fi
+
+          cp "$dmg_path" "$dist_dir/Torque-${VERSION}-macos-${{ matrix.arch }}.dmg"
+          ditto -c -k --sequesterRsrc --keepParent "$app_path" "$dist_dir/Torque-${VERSION}-macos-${{ matrix.arch }}.app.zip"
+
+          (
+            cd "$dist_dir"
+            shasum -a 256 * > "SHA256SUMS-macos-${{ matrix.arch }}.txt"
+          )
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: torque-macos-${{ matrix.arch }}
+          path: dist/macos-${{ matrix.arch }}/*
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: torque-macos-*
+          path: dist
+          merge-multiple: true
+
+      - name: Resolve release metadata
+        id: metadata
+        env:
+          DISPATCH_TAG: ${{ github.event.inputs.tag }}
+          DRAFT_INPUT: ${{ github.event.inputs.draft }}
+          PRERELEASE_INPUT: ${{ github.event.inputs.prerelease }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "${DISPATCH_TAG:-}" ]; then
+            release_tag="$DISPATCH_TAG"
+          else
+            release_tag="$GITHUB_REF_NAME"
+          fi
+
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            draft="${DRAFT_INPUT:-true}"
+            prerelease="${PRERELEASE_INPUT:-false}"
+          else
+            draft="false"
+            prerelease="false"
+          fi
+
+          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
+          echo "draft=$draft" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
+      - name: Add aggregate checksum file
+        run: |
+          set -euo pipefail
+          (
+            cd dist
+            find . -maxdepth 1 -type f ! -name 'SHA256SUMS*' -print0 \
+              | sort -z \
+              | xargs -0 shasum -a 256 > SHA256SUMS.txt
+          )
+
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.metadata.outputs.release_tag }}
+          RELEASE_DRAFT: ${{ steps.metadata.outputs.draft }}
+          RELEASE_PRERELEASE: ${{ steps.metadata.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+
+          mapfile -t assets < <(find dist -maxdepth 1 -type f -print | sort)
+          if [ "${#assets[@]}" -eq 0 ]; then
+            echo "No release assets found." >&2
+            exit 1
+          fi
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
+            exit 0
+          fi
+
+          args=(
+            "$RELEASE_TAG"
+            "${assets[@]}"
+            --title "Torque ${RELEASE_TAG}"
+            --generate-notes
+          )
+          if [ "$RELEASE_DRAFT" = "true" ]; then
+            args+=(--draft)
+          fi
+          if [ "$RELEASE_PRERELEASE" = "true" ]; then
+            args+=(--prerelease)
+          fi
+
+          gh release create "${args[@]}"
