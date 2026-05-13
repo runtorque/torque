@@ -315,8 +315,8 @@ jobs:
             exit 1
           fi
 
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber --repo "$GITHUB_REPOSITORY"
             exit 0
           fi
 
@@ -333,4 +333,4 @@ jobs:
             args+=(--prerelease)
           fi
 
-          gh release create "${args[@]}"
+          gh release create "${args[@]}" --repo "$GITHUB_REPOSITORY"
