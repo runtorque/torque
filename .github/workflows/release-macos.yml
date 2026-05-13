@@ -170,11 +170,44 @@ jobs:
         if: ${{ steps.signing.outputs.has_certificate == 'false' }}
         run: echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
 
+      - name: Resolve notarization credentials
+        env:
+          APPLE_ID_SECRET: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD_SECRET: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID_SECRET: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${APPLE_ID_SECRET:-}" ] \
+            && [ -z "${APPLE_PASSWORD_SECRET:-}" ] \
+            && [ -z "${APPLE_TEAM_ID_SECRET:-}" ]; then
+            echo "Apple notarization secrets are not configured; skipping notarization."
+            exit 0
+          fi
+
+          if [ -z "${APPLE_ID_SECRET:-}" ] \
+            || [ -z "${APPLE_PASSWORD_SECRET:-}" ] \
+            || [ "${#APPLE_TEAM_ID_SECRET}" -lt 3 ]; then
+            echo "Apple notarization secrets are incomplete; skipping notarization." >&2
+            echo "Set APPLE_ID, APPLE_PASSWORD, and APPLE_TEAM_ID to enable notarization." >&2
+            exit 0
+          fi
+
+          delimiter="$(uuidgen)"
+          {
+            echo "APPLE_ID<<$delimiter"
+            printf '%s\n' "$APPLE_ID_SECRET"
+            echo "$delimiter"
+            echo "APPLE_PASSWORD<<$delimiter"
+            printf '%s\n' "$APPLE_PASSWORD_SECRET"
+            echo "$delimiter"
+            echo "APPLE_TEAM_ID<<$delimiter"
+            printf '%s\n' "$APPLE_TEAM_ID_SECRET"
+            echo "$delimiter"
+          } >> "$GITHUB_ENV"
+
       - name: Build Tauri bundle
         env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           TORQUE_REPO_ROOT: ${{ github.workspace }}
         run: |
           set -euo pipefail
