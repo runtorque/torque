@@ -3384,6 +3384,7 @@ class SelectedPrincipalIdTests(unittest.TestCase):
         state.window_bounds = {"main": {"width": 1200, "height": 800}}
         state.workspace_sidebar_width = 720
         state.context_panel_split_ratio = 0.44
+        state.supervisor_panel_state = {"sortKey": "bytes"}
         state.board_selected_lanes_by_group = {"beta": "Done"}
         state.board_hidden_wide_lanes_by_group = {
             "beta": {"To Do": True}
@@ -3395,6 +3396,7 @@ class SelectedPrincipalIdTests(unittest.TestCase):
         self.assertEqual(d["window_bounds"], state.window_bounds)
         self.assertEqual(d["workspace_sidebar_width"], 720)
         self.assertEqual(d["context_panel_split_ratio"], 0.44)
+        self.assertEqual(d["supervisor_panel_state"], {"sortKey": "bytes"})
         self.assertEqual(
             d["board_selected_lanes_by_group"],
             {"beta": "Done"},
@@ -3478,6 +3480,10 @@ class SelectedPrincipalIdTests(unittest.TestCase):
         db.save_ui_state("workspace_sidebar_width", "700")
         db.save_ui_state("context_panel_split_ratio", "0.42")
         db.save_ui_state(
+            "supervisor_panel_state",
+            json.dumps({"sortKey": "bytes", "sortDirection": "desc"}),
+        )
+        db.save_ui_state(
             "board_selected_lanes_by_group",
             json.dumps({"g": "Done"}),
         )
@@ -3496,6 +3502,10 @@ class SelectedPrincipalIdTests(unittest.TestCase):
         )
         self.assertEqual(state.workspace_sidebar_width, 700)
         self.assertEqual(state.context_panel_split_ratio, 0.42)
+        self.assertEqual(
+            state.supervisor_panel_state,
+            {"sortKey": "bytes", "sortDirection": "desc"},
+        )
         self.assertEqual(state.board_selected_lanes_by_group, {"g": "Done"})
         self.assertEqual(
             state.board_hidden_wide_lanes_by_group,
@@ -3519,6 +3529,7 @@ class SelectedPrincipalIdTests(unittest.TestCase):
         self.assertEqual(state.active_group, "")
         self.assertEqual(state.window_bounds, {})
         self.assertEqual(state.workspace_sidebar_width, 0)
+        self.assertEqual(state.supervisor_panel_state, {})
         self.assertEqual(state.board_selected_lanes_by_group, {})
         self.assertEqual(state.board_hidden_wide_lanes_by_group, {})
 

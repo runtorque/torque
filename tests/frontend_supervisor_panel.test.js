@@ -29,7 +29,7 @@ class FakeElement {
   }
 }
 
-function createSandbox({ visible = true } = {}) {
+function createSandbox({ visible = true, persistedSupervisorState = null, withUiShim = false } = {}) {
   const elements = new Map();
   function ensure(id) {
     if (!elements.has(id)) elements.set(id, new FakeElement(id));
@@ -40,6 +40,9 @@ function createSandbox({ visible = true } = {}) {
   const cleared = [];
   const sandbox = {
     console,
+    state: {
+      supervisor_panel_state: persistedSupervisorState || {},
+    },
     document: {
       getElementById(id) { return ensure(id); },
     },
@@ -56,6 +59,20 @@ function createSandbox({ visible = true } = {}) {
     _panelAppVisible(app) { return app === 'supervisor' && visible; },
     __setVisible(next) { visible = !!next; },
   };
+  if (withUiShim) {
+    let persistedPanelState = persistedSupervisorState;
+    sandbox.registerPanelUiState = function(panel, adapter) {
+      sandbox.registeredPanelUiState = { panel, adapter };
+      if (persistedPanelState && adapter && typeof adapter.setState === 'function') {
+        adapter.setState(persistedPanelState);
+      }
+      return persistedPanelState;
+    };
+    sandbox.persistPanelUiState = function(panel, value) {
+      persistedPanelState = JSON.parse(JSON.stringify(value));
+      sandbox.persistedPanelState = { panel, value: persistedPanelState };
+    };
+  }
   sandbox.send = function(message) { sandbox.sendCalls.push(message); };
   sandbox.global = sandbox;
   sandbox.globalThis = sandbox;
@@ -143,14 +160,67 @@ test('opening supervisor panel sends list command and auto-refresh only schedule
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
     { cmd: 'supervisor_sessions_list' },
   ]);
-  assert.equal(sandbox.timers.length, 1);
-  assert.equal(sandbox.timers[0].delay, 2000);
+  assert.equal(sandbox.timers.length, 2);
+  assert.ok(sandbox.timers.some((timer) => timer.delay === 10000));
+  assert.ok(sandbox.timers.some((timer) => timer.delay === 2000));
 
   const hidden = createSandbox({ visible: false });
   const hiddenContext = vm.createContext(hidden.sandbox);
   loadSupervisor(hiddenContext);
   vm.runInContext('supervisorSetAutoRefresh(true)', hiddenContext);
   assert.equal(hidden.sandbox.timers.length, 0);
+});
+
+test('supervisor transient unavailable response preserves last successful sessions and backs off', () => {
+  const { sandbox, ensure } = createSandbox({ visible: true });
+  const context = vm.createContext(sandbox);
+  loadSupervisor(context);
+
+  vm.runInContext(`
+    supervisorReceiveSessions({
+      available: true,
+      refreshed_at: (Date.now() / 1000) - 120,
+      sessions: [{
+        session_id: 's1', cell_id: 'worker-a', pid: 1, alive: true,
+        cols: 100, rows: 30, total_bytes: 99, cwd: '/tmp',
+        display_command: 'codex',
+        owner: { name: 'worker-a', group: 'Torque', kind: 'worker', status: 'running' },
+      }],
+    });
+    supervisorReceiveSessions({
+      available: false,
+      sessions: [],
+      message: 'PTY supervisor is temporarily unavailable.',
+    });
+  `, context);
+
+  const html = ensure('panel-supervisor').innerHTML;
+  assert.match(html, /worker-a/);
+  assert.match(html, /PTY supervisor is temporarily unavailable/);
+  assert.match(html, /last update 2m ago/);
+  assert.ok(sandbox.timers.some((timer) => timer.delay === 5000));
+  assert.equal(vm.runInContext('supervisorState.sessions.length', context), 1);
+});
+
+test('supervisor auto refresh suppresses overlapping in-flight requests but manual refresh bypasses', () => {
+  const { sandbox } = createSandbox({ visible: true });
+  const context = vm.createContext(sandbox);
+  loadSupervisor(context);
+
+  vm.runInContext(`
+    supervisorRequestSessions(false);
+    supervisorRequestSessions(false);
+  `, context);
+
+  assert.equal(sandbox.sendCalls.length, 1);
+
+  vm.runInContext('supervisorRequestSessions(true)', context);
+  assert.equal(sandbox.sendCalls.length, 2);
+
+  const stall = sandbox.timers.find((timer) => timer.delay === 10000);
+  assert.ok(stall, 'request stall timeout should be armed');
+  stall.fn();
+  assert.equal(vm.runInContext('supervisorState.requestInFlight', context), false);
 });
 
 test('supervisorReceiveSessions preserves selected row, expanded row, and scroll position', () => {
@@ -177,6 +247,39 @@ test('supervisorReceiveSessions preserves selected row, expanded row, and scroll
   assert.equal(vm.runInContext('supervisorState.expandedSessionId', context), 's1');
   assert.equal(ensure('panel-supervisor').scrollTop, 88);
   assert.match(ensure('panel-supervisor').innerHTML, /supervisor-detail-row/);
+});
+
+test('supervisor panel persists UI state and restores sort state from snapshot', () => {
+  const first = createSandbox({ visible: true });
+  const firstContext = vm.createContext(first.sandbox);
+  loadSupervisor(firstContext);
+
+  vm.runInContext(`
+    supervisorSortBy('bytes');
+    supervisorSelectSession('s1');
+    supervisorToggleDetails('s1');
+    supervisorSetAutoRefresh(false);
+  `, firstContext);
+
+  const persistCalls = first.sandbox.sendCalls.filter((call) => call.cmd === 'ui_set_supervisor_panel_state');
+  assert.ok(persistCalls.length >= 1);
+  const persisted = first.sandbox.state.supervisor_panel_state;
+  assert.equal(persisted.sortKey, 'bytes');
+  assert.equal(persisted.sortDirection, 'desc');
+  assert.equal(persisted.selectedSessionId, 's1');
+  assert.equal(persisted.expandedSessionId, 's1');
+  assert.equal(persisted.autoRefresh, false);
+
+  const second = createSandbox({ visible: true, persistedSupervisorState: persisted });
+  const secondContext = vm.createContext(second.sandbox);
+  loadSupervisor(secondContext);
+  vm.runInContext('renderSupervisorPanel({ force: true })', secondContext);
+
+  assert.equal(vm.runInContext('supervisorState.sortKey', secondContext), 'bytes');
+  assert.equal(vm.runInContext('supervisorState.sortDirection', secondContext), 'desc');
+  assert.equal(vm.runInContext('supervisorState.selectedSessionId', secondContext), 's1');
+  assert.equal(vm.runInContext('supervisorState.expandedSessionId', secondContext), 's1');
+  assert.equal(vm.runInContext('supervisorState.autoRefresh', secondContext), false);
 });
 
 test('supervisor taskbar CSS and panel-manager registration are bounded to standalone', () => {

@@ -15,6 +15,7 @@ let state = {
   workspace_sidebar_width: 0,
   engineer_panel_split_fraction: 0.30,
   context_panel_split_ratio: 0.38,
+  supervisor_panel_state: {},
 };
 let dragInProgress = false;
 let selectedAgentId = null;
@@ -651,6 +652,9 @@ function _handleFullState(msg) {
   if (typeof state.context_panel_split_ratio !== 'number') {
     var _contextSplitRatio = Number(state.context_panel_split_ratio);
     state.context_panel_split_ratio = Number.isFinite(_contextSplitRatio) ? _contextSplitRatio : 0.38;
+  }
+  if (!state.supervisor_panel_state || typeof state.supervisor_panel_state !== 'object') {
+    state.supervisor_panel_state = {};
   }
   if (typeof _applyEmbeddedTerminalScrollbackFromSettings === 'function') {
     _applyEmbeddedTerminalScrollbackFromSettings();
@@ -1675,6 +1679,9 @@ function _applyUiSurfaceInvalidation(flags, key) {
   if (key === 'context_panel_split_ratio') {
     _markSurface(flags, 'context');
   }
+  if (key === 'supervisor_panel_state') {
+    _markSurface(flags, 'supervisor');
+  }
   if (key === 'events_dismissed_attention') {
     _markSurface(flags, 'events');
   }
@@ -2082,6 +2089,10 @@ function _applyDelta(ops) {
         if (op.key === 'context_panel_split_ratio'
             && typeof _contextApplyPersistedSplit === 'function') {
           _contextApplyPersistedSplit();
+        }
+        if (op.key === 'supervisor_panel_state'
+            && typeof supervisorApplyPersistedUiState === 'function') {
+          supervisorApplyPersistedUiState(op.value || {});
         }
         if (op.key === 'board_filters_by_group'
             && typeof _boardFiltersByGroup !== 'undefined') {

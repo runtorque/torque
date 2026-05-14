@@ -3542,6 +3542,7 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 "workspace_sidebar_width",
                 "engineer_panel_split_fraction",
                 "context_panel_split_ratio",
+                "supervisor_panel_state",
             ):
                 val = state_dict.get(key)
                 if val is not None:
@@ -3549,6 +3550,7 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                         "standalone_panel_layout",
                         "detached_panels",
                         "window_bounds",
+                        "supervisor_panel_state",
                     }:
                         val = json.dumps(val)
                     c.execute(
@@ -3831,6 +3833,14 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             )
         except (TypeError, ValueError):
             engineer_panel_split_fraction = 0.30
+        try:
+            supervisor_panel_state = json.loads(
+                ui.get("supervisor_panel_state", "{}") or "{}"
+            )
+            if not isinstance(supervisor_panel_state, dict):
+                supervisor_panel_state = {}
+        except Exception:
+            supervisor_panel_state = {}
 
         # Global settings
         global_settings = {}
@@ -3908,6 +3918,7 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "workspace_sidebar_width": workspace_sidebar_width,
             "engineer_panel_split_fraction": engineer_panel_split_fraction,
             "context_panel_split_ratio": context_panel_split_ratio,
+            "supervisor_panel_state": supervisor_panel_state,
             "events_dismissed_attention": (
                 json.loads(ui.get("events_dismissed_attention", "{}"))
                 if ui.get("events_dismissed_attention") else {}

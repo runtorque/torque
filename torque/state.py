@@ -1396,6 +1396,7 @@ class MatrixState:
         self.workspace_sidebar_width: int = 0
         self.engineer_panel_split_fraction: float = 0.30
         self.context_panel_split_ratio: float = 0.38
+        self.supervisor_panel_state: dict = {}
         self.events_dismissed_attention: dict[str, float] = {}
         self.board_filters_by_group: dict[str, dict] = {}
         self.board_selected_lanes_by_group: dict[str, str] = {}
@@ -1967,6 +1968,7 @@ class MatrixState:
             "workspace_sidebar_width": self.workspace_sidebar_width,
             "engineer_panel_split_fraction": self.engineer_panel_split_fraction,
             "context_panel_split_ratio": self.context_panel_split_ratio,
+            "supervisor_panel_state": self.supervisor_panel_state,
             "events_dismissed_attention": self.events_dismissed_attention,
             "board_filters_by_group": self.board_filters_by_group,
             "board_selected_lanes_by_group": self.board_selected_lanes_by_group,
@@ -2113,6 +2115,7 @@ class MatrixState:
             "workspace_sidebar_width": self.workspace_sidebar_width,
             "engineer_panel_split_fraction": self.engineer_panel_split_fraction,
             "context_panel_split_ratio": self.context_panel_split_ratio,
+            "supervisor_panel_state": self.supervisor_panel_state,
             "events_dismissed_attention": self.events_dismissed_attention,
             "board_filters_by_group": self.board_filters_by_group,
             "board_selected_lanes_by_group": self.board_selected_lanes_by_group,
@@ -2909,6 +2912,9 @@ class MatrixState:
                 )
             except (TypeError, ValueError):
                 self.context_panel_split_ratio = 0.38
+            self.supervisor_panel_state = data.get(
+                "supervisor_panel_state", {}
+            ) or {}
             self.events_dismissed_attention = data.get(
                 "events_dismissed_attention", {}
             ) or {}
