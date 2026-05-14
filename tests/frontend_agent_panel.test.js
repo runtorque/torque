@@ -1077,6 +1077,9 @@ test('focused architect decision rows render parseable click handlers and expand
 
   context.renderAgentPanel();
 
+  assert.match(panel.innerHTML, /role="button"/);
+  assert.match(panel.innerHTML, /tabindex="0"/);
+  assert.match(panel.innerHTML, /onkeydown="if\(event\.key===&#39;Enter&#39;\|\|event\.key===&#39; &#39;\)\{event\.preventDefault\(\);engineerToggleDecision\(&quot;d1&quot;\)\}"/);
   assert.match(panel.innerHTML, /onclick="engineerToggleDecision\(&quot;d1&quot;\)"/);
   assert.match(panel.innerHTML, /onclick="event\.stopPropagation\(\);engineerStartDecisionEdit\(&quot;d1&quot;\)"/);
   assert.doesNotMatch(panel.innerHTML, /onclick="engineerToggleDecision\("/);

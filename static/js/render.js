@@ -398,16 +398,19 @@ function _renderAgentGroupTabsHtml() {
   for (const group of groups) {
     const selected = group === active;
     const count = ((state.groups || {})[group] || []).length;
-    html += '<button type="button"'
+    const groupArg = _jsStringAttr(group);
+    html += '<div'
       + ' class="agent-group-tab' + (selected ? ' active' : '') + '"'
       + ' role="tab"'
+      + ' tabindex="0"'
       + ' aria-selected="' + (selected ? 'true' : 'false') + '"'
       + ' title="' + esc(group) + '"'
-      + ' onclick="onGroupTabClick(' + _jsStringAttr(group) + ', event)"'
-      + ' oncontextmenu="onGroupTabContextMenu(event, ' + _jsStringAttr(group) + ')">'
+      + ' onclick="onGroupTabClick(' + groupArg + ', event)"'
+      + ' onkeydown="if(event.key===\'Enter\'||event.key===\' \'){onGroupTabClick(' + groupArg + ', event)}"'
+      + ' oncontextmenu="onGroupTabContextMenu(event, ' + groupArg + ')">'
       + '<span class="agent-group-tab-name">' + esc(group) + '</span>'
       + '<span class="agent-group-tab-count">' + count + '</span>'
-      + '</button>';
+      + '</div>';
   }
   html += '</div>';
   html += '<div class="agent-group-tab-actions">';
