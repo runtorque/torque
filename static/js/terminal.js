@@ -13,6 +13,7 @@ let _embeddedTerminalDropDepth = 0;
 let _terminalComposeDrafts = Object.create(null);
 let _terminalComposeErrors = Object.create(null);
 let _terminalComposeRecall = Object.create(null);
+let _terminalComposeHistoryOpenCellId = '';
 let _lastAppliedXtermScrollback = null;
 
 var TERMINAL_COMPOSE_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
@@ -351,6 +352,14 @@ function _terminalComposeButtonId(cellId) {
   return 'terminal-compose-submit-' + _terminalComposeDomId(cellId);
 }
 
+function _terminalComposeHistoryButtonId(cellId) {
+  return 'terminal-compose-history-' + _terminalComposeDomId(cellId);
+}
+
+function _terminalComposeHistoryMenuId(cellId) {
+  return 'terminal-compose-history-menu-' + _terminalComposeDomId(cellId);
+}
+
 function _terminalComposeContainerFor(el) {
   for (let node = el; node; node = node.parentNode) {
     if (node.classList && node.classList.contains('terminal-compose')) {
@@ -399,6 +408,157 @@ function _terminalMessageHistoryEntries(cellId) {
   return history.filter(function(entry) {
     return entry && typeof entry.message === 'string' && entry.message.length;
   });
+}
+
+function _terminalComposeHistoryButtonFor(cellId) {
+  return document.getElementById
+    ? document.getElementById(_terminalComposeHistoryButtonId(cellId))
+    : null;
+}
+
+function _terminalComposeHistoryMenuFor(cellId) {
+  return document.getElementById
+    ? document.getElementById(_terminalComposeHistoryMenuId(cellId))
+    : null;
+}
+
+function _terminalComposeHistoryPreview(message) {
+  const text = String(message || '').replace(/\s+/g, ' ').trim();
+  if (text.length <= 160) return text || '(empty message)';
+  return text.slice(0, 157) + '\u2026';
+}
+
+function _terminalComposeHistoryRenderMenu(cellId) {
+  const id = String(cellId || '');
+  const menu = _terminalComposeHistoryMenuFor(id);
+  if (!menu) return;
+  const entries = _terminalMessageHistoryEntries(id).slice(0, 12);
+  let html = ''
+    + '<div class="terminal-compose-history-title">Recent messages</div>';
+  if (!entries.length) {
+    html += '<div class="terminal-compose-history-empty">'
+      + 'No sent messages yet.'
+      + '</div>';
+  } else {
+    html += '<div class="terminal-compose-history-list">';
+    for (let i = 0; i < entries.length; i++) {
+      const preview = _terminalComposeHistoryPreview(entries[i].message);
+      html += '<button type="button" class="terminal-compose-history-item"'
+        + ' role="option" data-cell-id="' + esc(id) + '" data-history-index="' + i + '"'
+        + ' onclick="return terminalComposeHistoryPick(event)"'
+        + ' title="' + esc(preview) + '">'
+        + esc(preview)
+        + '</button>';
+    }
+    html += '</div>';
+  }
+  html += '<div class="terminal-compose-history-hint">\u2191/\u2193 also recall history</div>';
+  menu.innerHTML = html;
+}
+
+function _terminalComposeHistoryIsOpen(cellId) {
+  const id = String(cellId || '');
+  const menu = _terminalComposeHistoryMenuFor(id);
+  return !!(id && _terminalComposeHistoryOpenCellId === id && menu && menu.hidden !== true);
+}
+
+function _terminalComposeHistoryClose(cellId, focusButton) {
+  const id = String(cellId || _terminalComposeHistoryOpenCellId || '');
+  if (!id) return;
+  const menu = _terminalComposeHistoryMenuFor(id);
+  if (menu) menu.hidden = true;
+  const button = _terminalComposeHistoryButtonFor(id);
+  if (button && typeof button.setAttribute === 'function') {
+    button.setAttribute('aria-expanded', 'false');
+  }
+  if (_terminalComposeHistoryOpenCellId === id) _terminalComposeHistoryOpenCellId = '';
+  if (focusButton && button && typeof button.focus === 'function') button.focus();
+}
+
+function _terminalComposeHistoryOpen(cellId) {
+  const id = String(cellId || '');
+  if (!id) return;
+  if (_terminalComposeHistoryOpenCellId && _terminalComposeHistoryOpenCellId !== id) {
+    _terminalComposeHistoryClose(_terminalComposeHistoryOpenCellId);
+  }
+  _terminalComposeHistoryRenderMenu(id);
+  const menu = _terminalComposeHistoryMenuFor(id);
+  if (!menu) return;
+  menu.hidden = false;
+  const button = _terminalComposeHistoryButtonFor(id);
+  if (button && typeof button.setAttribute === 'function') {
+    button.setAttribute('aria-expanded', 'true');
+  }
+  _terminalComposeHistoryOpenCellId = id;
+}
+
+function _terminalComposeHistoryHandleDocumentClick(evt) {
+  const id = _terminalComposeHistoryOpenCellId;
+  if (!id) return;
+  const target = evt ? evt.target : null;
+  const menu = _terminalComposeHistoryMenuFor(id);
+  const button = _terminalComposeHistoryButtonFor(id);
+  if (target && (
+      (menu && typeof menu.contains === 'function' && menu.contains(target))
+      || (button && (button === target
+        || (typeof button.contains === 'function' && button.contains(target)))))) {
+    return;
+  }
+  _terminalComposeHistoryClose(id);
+}
+
+function _terminalComposeHistoryHandleDocumentKeydown(evt) {
+  if (!_terminalComposeHistoryOpenCellId || !evt || evt.key !== 'Escape') return;
+  _terminalComposeHistoryClose(_terminalComposeHistoryOpenCellId, true);
+  if (typeof evt.preventDefault === 'function') evt.preventDefault();
+  if (typeof evt.stopPropagation === 'function') evt.stopPropagation();
+}
+
+if (typeof document !== 'undefined' && document.addEventListener) {
+  document.addEventListener('click', _terminalComposeHistoryHandleDocumentClick);
+  document.addEventListener('keydown', _terminalComposeHistoryHandleDocumentKeydown, true);
+}
+
+function terminalComposeHistoryToggle(evt, cellId) {
+  if (evt && typeof evt.preventDefault === 'function') evt.preventDefault();
+  if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
+  const id = String(cellId || '');
+  if (!id) return false;
+  if (_terminalComposeHistoryIsOpen(id)) {
+    _terminalComposeHistoryClose(id);
+  } else {
+    _terminalComposeHistoryOpen(id);
+  }
+  return false;
+}
+
+function terminalComposeHistoryPick(evt, cellId, index) {
+  if (evt && typeof evt.preventDefault === 'function') evt.preventDefault();
+  if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
+  const target = evt && evt.currentTarget ? evt.currentTarget : null;
+  const id = String(cellId || (target && target.dataset ? target.dataset.cellId : '') || '');
+  const entries = _terminalMessageHistoryEntries(id);
+  const rawIndex = index != null
+    ? index
+    : (target && target.dataset ? target.dataset.historyIndex : 0);
+  const idx = Math.max(0, Math.min(entries.length - 1, Number(rawIndex) || 0));
+  const entry = entries[idx];
+  if (!id || !entry) {
+    _terminalComposeHistoryClose(id);
+    return false;
+  }
+  const input = document.getElementById
+    ? document.getElementById(_terminalComposeInputId(id))
+    : null;
+  if (input) {
+    const recall = _terminalComposeRecallState(id);
+    recall.draft = String(input.value || '');
+    recall.index = idx;
+    _terminalComposeSetValue(input, id, entry.message);
+    if (typeof input.focus === 'function') input.focus();
+  }
+  _terminalComposeHistoryClose(id);
+  return false;
 }
 
 function _terminalComposeRecallState(cellId) {
@@ -642,6 +802,8 @@ function _renderTerminalCompose(root, cell) {
   const cellId = String(cell.id || '');
   const inputId = _terminalComposeInputId(cellId);
   const buttonId = _terminalComposeButtonId(cellId);
+  const historyButtonId = _terminalComposeHistoryButtonId(cellId);
+  const historyMenuId = _terminalComposeHistoryMenuId(cellId);
   const draft = Object.prototype.hasOwnProperty.call(_terminalComposeDrafts, cellId)
     ? _terminalComposeDrafts[cellId]
     : '';
@@ -693,6 +855,14 @@ function _renderTerminalCompose(root, cell) {
     + ' ondrop="terminalComposeDrop(event, \'' + esc(cellId) + '\')">' + esc(draft) + '</textarea>'
     + '  <div class="terminal-compose-error" aria-live="polite">' + esc(error) + '</div>'
     + '  </div>'
+    + '  <div class="terminal-compose-history-wrap">'
+    + '    <button id="' + esc(historyButtonId) + '" class="terminal-compose-history-toggle" type="button"'
+    + ' onclick="return terminalComposeHistoryToggle(event, \'' + esc(cellId) + '\')"'
+    + ' title="Message history (use \u2191/\u2193 to recall)" aria-label="Show message history"'
+    + ' aria-haspopup="listbox" aria-expanded="false" aria-controls="' + esc(historyMenuId) + '">History</button>'
+    + '    <div id="' + esc(historyMenuId) + '" class="terminal-compose-history-menu"'
+    + ' role="listbox" aria-label="Recent messages" hidden></div>'
+    + '  </div>'
     + '  <button id="' + esc(buttonId) + '" class="terminal-compose-submit" type="submit"'
     + (disabled ? ' disabled' : '')
     + ' title="Send message">Send</button>'
@@ -720,6 +890,7 @@ function terminalComposeClear(cellId) {
   const input = document.getElementById ? document.getElementById(_terminalComposeInputId(id)) : null;
   if (!input) return;
   _terminalComposeResetRecall(id);
+  _terminalComposeHistoryClose(id);
   input.value = '';
   if (id) _terminalComposeDrafts[id] = '';
   _terminalComposeAutoResize(input);
@@ -820,6 +991,12 @@ function terminalComposeSubmit(evt, cellId) {
 
 function terminalComposeKeydown(evt, cellId) {
   if (!evt) return;
+  if (evt.key === 'Escape' && _terminalComposeHistoryIsOpen(cellId)) {
+    if (typeof evt.preventDefault === 'function') evt.preventDefault();
+    if (typeof evt.stopPropagation === 'function') evt.stopPropagation();
+    _terminalComposeHistoryClose(cellId);
+    return;
+  }
   if ((evt.key === 'ArrowUp' || evt.key === 'ArrowDown')
       && !evt.shiftKey && !evt.ctrlKey && !evt.metaKey && !evt.altKey) {
     const input = evt.target && typeof evt.target.value === 'string'

@@ -8574,6 +8574,8 @@ test('embedded terminal compose renders only for standalone runtime and preserve
 
   assert.match(dom.compose.innerHTML, /class="terminal-compose"/);
   assert.match(dom.compose.innerHTML, /Send a message to Builder/);
+  assert.match(dom.compose.innerHTML, /terminal-compose-history-toggle/);
+  assert.match(dom.compose.innerHTML, />History<\/button>/);
 
   const input = document.register('terminal-compose-input-agent-1');
   input.classList.add('terminal-compose-input');
@@ -8792,6 +8794,121 @@ test('embedded terminal compose recalls message history per agent with arrows an
   context.__upOther = upOther;
   runInContext(context, `terminalComposeKeydown(__upOther, 'agent-2');`);
   assert.equal(other.value, 'other agent message');
+});
+
+test('embedded terminal compose history button opens per-agent menu and refills input', () => {
+  const { context, document, sandbox } = createEmbeddedTerminalHarness();
+  sandbox.state.agent_message_history = {
+    'agent-1': [
+      { id: 5, agent_id: 'agent-1', message: 'fifth message', sent_at: 5 },
+      { id: 4, agent_id: 'agent-1', message: 'fourth message', sent_at: 4 },
+      { id: 3, agent_id: 'agent-1', message: 'third message', sent_at: 3 },
+    ],
+    'agent-2': [
+      { id: 1, agent_id: 'agent-2', message: 'other agent message', sent_at: 1 },
+    ],
+  };
+
+  const form = new FakeElement('terminal-compose-form-agent-1');
+  form.classList.add('terminal-compose');
+  form.dataset.cellId = 'agent-1';
+  const input = document.register('terminal-compose-input-agent-1');
+  input.classList.add('terminal-compose-input');
+  input.dataset.cellId = 'agent-1';
+  input.value = 'draft before picker';
+  const historyButton = document.register('terminal-compose-history-agent-1');
+  historyButton.classList.add('terminal-compose-history-toggle');
+  const historyMenu = document.register('terminal-compose-history-menu-agent-1');
+  historyMenu.classList.add('terminal-compose-history-menu');
+  historyMenu.hidden = true;
+  const sendButton = document.register('terminal-compose-submit-agent-1');
+  sendButton.classList.add('terminal-compose-submit');
+  form.appendChild(input);
+  form.appendChild(historyButton);
+  form.appendChild(historyMenu);
+  form.appendChild(sendButton);
+  form.setQuerySelector('.terminal-compose-submit', sendButton);
+
+  const toggleEvt = {
+    preventDefaultCalled: false,
+    stopPropagationCalled: false,
+    preventDefault() { this.preventDefaultCalled = true; },
+    stopPropagation() { this.stopPropagationCalled = true; },
+  };
+  context.__toggleEvt = toggleEvt;
+  runInContext(context, `terminalComposeHistoryToggle(__toggleEvt, 'agent-1');`);
+
+  assert.equal(toggleEvt.preventDefaultCalled, true);
+  assert.equal(toggleEvt.stopPropagationCalled, true);
+  assert.equal(historyMenu.hidden, false);
+  assert.equal(historyButton.getAttribute('aria-expanded'), 'true');
+  assert.match(historyMenu.innerHTML, /fifth message/);
+  assert.match(historyMenu.innerHTML, /fourth message/);
+  assert.doesNotMatch(historyMenu.innerHTML, /other agent message/);
+
+  const pickEvt = {
+    preventDefaultCalled: false,
+    stopPropagationCalled: false,
+    preventDefault() { this.preventDefaultCalled = true; },
+    stopPropagation() { this.stopPropagationCalled = true; },
+  };
+  context.__pickEvt = pickEvt;
+  runInContext(context, `terminalComposeHistoryPick(__pickEvt, 'agent-1', 1);`);
+
+  assert.equal(pickEvt.preventDefaultCalled, true);
+  assert.equal(pickEvt.stopPropagationCalled, true);
+  assert.equal(input.value, 'fourth message');
+  assert.equal(input.focused, true);
+  assert.equal(historyMenu.hidden, true);
+  assert.equal(historyButton.getAttribute('aria-expanded'), 'false');
+  assert.equal(jsonValue(context, `_terminalComposeDrafts['agent-1']`), 'fourth message');
+
+  const escapeRecall = {
+    key: 'Escape',
+    target: input,
+    shiftKey: false,
+    ctrlKey: false,
+    metaKey: false,
+    altKey: false,
+    preventDefault() {},
+    stopPropagation() {},
+  };
+  context.__escapeRecall = escapeRecall;
+  runInContext(context, `terminalComposeKeydown(__escapeRecall, 'agent-1');`);
+  assert.equal(input.value, 'draft before picker');
+
+  input.value = 'do not clear this draft';
+  runInContext(context, `terminalComposeInput(document.getElementById('terminal-compose-input-agent-1'));`);
+  runInContext(context, `terminalComposeHistoryToggle(__toggleEvt, 'agent-1');`);
+  const escapeMenu = {
+    key: 'Escape',
+    target: input,
+    preventDefaultCalled: false,
+    stopPropagationCalled: false,
+    preventDefault() { this.preventDefaultCalled = true; },
+    stopPropagation() { this.stopPropagationCalled = true; },
+  };
+  context.__escapeMenu = escapeMenu;
+  runInContext(context, `terminalComposeKeydown(__escapeMenu, 'agent-1');`);
+  assert.equal(escapeMenu.preventDefaultCalled, true);
+  assert.equal(escapeMenu.stopPropagationCalled, true);
+  assert.equal(historyMenu.hidden, true);
+  assert.equal(input.value, 'do not clear this draft');
+
+  runInContext(context, `terminalComposeHistoryToggle(__toggleEvt, 'agent-1');`);
+  assert.equal(historyMenu.hidden, false);
+  const outside = new FakeElement('outside');
+  document.listeners.click({ target: outside });
+  assert.equal(historyMenu.hidden, true);
+
+  const otherButton = document.register('terminal-compose-history-agent-2');
+  const otherMenu = document.register('terminal-compose-history-menu-agent-2');
+  otherMenu.hidden = true;
+  runInContext(context, `terminalComposeHistoryToggle(__toggleEvt, 'agent-2');`);
+  assert.equal(otherMenu.hidden, false);
+  assert.match(otherMenu.innerHTML, /other agent message/);
+  assert.doesNotMatch(otherMenu.innerHTML, /fifth message/);
+  assert.equal(otherButton.getAttribute('aria-expanded'), 'true');
 });
 
 test('embedded terminal compose handles Home/End as textarea caret navigation', () => {
