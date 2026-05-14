@@ -3781,8 +3781,10 @@ function _agentPanelLegacyRenderDecisionRow(architectId, decision) {
   var html = '<div class="detail-section-card architect-decision-card" data-agent-panel-anchor="decision-'
     + _agentPanelEsc(decision.id || '') + '">';
   html += '<div class="detail-section-card-head">';
-  html += '<button type="button" class="architect-decision-toggle" onclick="'
-    + _agentPanelEventAttr('engineerToggleDecision(' + decisionIdJs + ')') + '">';
+  html += '<div class="architect-decision-toggle" role="button" tabindex="0" aria-expanded="'
+    + (ui.expanded ? 'true' : 'false') + '" onclick="'
+    + _agentPanelEventAttr('engineerToggleDecision(' + decisionIdJs + ')') + '" onkeydown="'
+    + _agentPanelEventAttr('if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();engineerToggleDecision(' + decisionIdJs + ')}') + '">';
   html += '<span class="architect-decision-title-row">';
   html += '<span class="detail-section-primary architect-decision-title" title="' + _esc(decision.title || '') + '">' + _esc(decision.title || 'Decision') + '</span>';
   html += '<span class="detail-expand-caret">' + (ui.expanded ? '\u25BE' : '\u25B8') + '</span>';
@@ -3791,7 +3793,7 @@ function _agentPanelLegacyRenderDecisionRow(architectId, decision) {
   html += '<span class="detail-task-status">' + _esc(decision.status || 'proposed') + '</span>';
   if (headTimestampHtml) html += headTimestampHtml;
   html += '</span>';
-  html += '</button>';
+  html += '</div>';
   html += '<div class="detail-section-card-actions architect-decision-actions">';
   if (!readOnly && !ui.editing) {
     html += '<button type="button" class="detail-inline-editor-btn architect-decision-action-btn" title="Edit decision" aria-label="Edit decision" onclick="'
