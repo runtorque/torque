@@ -238,6 +238,56 @@ class MatrixStateCleanupTests(unittest.TestCase):
         if self.state_mod.orjson is not None:
             self.assertNotIn(": ", raw)
 
+    def test_sync_ui_selection_to_session_selects_parent_agent_and_group(self):
+        state = self.state_mod.MatrixState()
+        state.groups = {"alpha": ["agent-1"], "beta": ["agent-2"]}
+        state.agents["agent-1"] = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Agent One",
+            group="alpha",
+            cell_type="agent",
+        )
+        state.agents["term-1"] = self.state_mod.AgentCell(
+            id="term-1",
+            name="Shell",
+            group="alpha",
+            cell_type="terminal",
+            parent_id="agent-1",
+            session_id="sess-term-1",
+        )
+        state.agents["agent-2"] = self.state_mod.AgentCell(
+            id="agent-2",
+            name="Agent Two",
+            group="beta",
+            cell_type="agent",
+            session_id="sess-agent-2",
+        )
+        state._children = {"agent-1": ["term-1"], "agent-2": []}
+        state.selected_agent_id = "agent-2"
+        state.active_group = "beta"
+        state._delta_ops.clear()
+
+        selected = state.sync_ui_selection_to_session(
+            "sess-term-1",
+            persist=False,
+        )
+
+        self.assertEqual(selected, "agent-1")
+        self.assertEqual(state.selected_agent_id, "agent-1")
+        self.assertEqual(state.active_group, "alpha")
+        self.assertEqual(
+            state._delta_ops,
+            [{
+                "op": "ui_update",
+                "key": "selected_agent_id",
+                "value": "agent-1",
+            }, {
+                "op": "ui_update",
+                "key": "active_group",
+                "value": "alpha",
+            }],
+        )
+
     def test_compact_snapshot_uses_task_summaries_and_excludes_archived_tasks(self):
         state = self.state_mod.MatrixState()
         state.groups["g"] = []

@@ -323,6 +323,7 @@ class LocalPtyAdapter:
             return False
         self.state.active_session_id = session_id
         self.state.current_window_id = "standalone"
+        self.state.sync_ui_selection_to_session(session_id)
         self.state._emit(
             "focus_update",
             active_session_id=self.state.active_session_id,

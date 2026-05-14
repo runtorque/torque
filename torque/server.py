@@ -7153,6 +7153,10 @@ async def main(connection=None):
     await bridge.start()
     log.info("Startup checkpoint: bridge started")
     await bridge.reconnect_orphans()
+    state.sync_ui_selection_to_session(
+        state.active_session_id or "",
+        emit=False,
+    )
     log.info("Startup checkpoint: orphan reconnect complete")
     asyncio.create_task(_worktree_diff_updater(state, worktree_mgr))
     log.info("Startup checkpoint: worktree diff updater scheduled")
