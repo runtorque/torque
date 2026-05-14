@@ -817,6 +817,21 @@ function copyAgentId(id) {
   navigator.clipboard.writeText(id).then(function() { closeContextMenu(); });
 }
 
+function onGroupTabContextMenu(e, group) {
+  if (e) {
+    if (typeof e.preventDefault === 'function') e.preventDefault();
+    if (typeof e.stopPropagation === 'function') e.stopPropagation();
+  }
+  const groupName = String(group || '').trim();
+  if (!groupName || !state || !state.groups
+      || !Object.prototype.hasOwnProperty.call(state.groups, groupName)) {
+    return;
+  }
+  showContextMenu(e ? e.clientX : 0, e ? e.clientY : 0, [
+    { label: 'Group settings', action: 'openGroupSettings(' + JSON.stringify(groupName) + ')' },
+  ]);
+}
+
 function onCellContextMenu(e, id) {
   e.preventDefault();
   e.stopPropagation();

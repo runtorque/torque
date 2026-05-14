@@ -16921,6 +16921,7 @@ test('agent grid group tabs render standalone controls and switch active group',
   assert.match(tabsHtml, /role="tablist" aria-label="Groups"/);
   assert.match(tabsHtml, /class="agent-group-tab active"[\s\S]*title="alpha"[\s\S]*alpha/);
   assert.match(tabsHtml, /onGroupTabClick\(&quot;alpha&quot;, event\)/);
+  assert.match(tabsHtml, /oncontextmenu="onGroupTabContextMenu\(event, &quot;alpha&quot;\)"/);
   assert.match(tabsHtml, /title="beta"[\s\S]*beta/);
   assert.match(tabsHtml, /\+ New Group/);
   assert.match(tabsHtml, /title="Group settings"/);
@@ -16954,6 +16955,86 @@ test('agent grid group tabs render standalone controls and switch active group',
   tabsHtml = runInContext(context, `_renderAgentGroupTabsHtml()`);
   assert.equal(jsonValue(context, `state.active_group`), 'gamma');
   assert.match(tabsHtml, /class="agent-group-tab active"[\s\S]*title="gamma"[\s\S]*gamma/);
+});
+
+test('group tab context menu offers settings for the clicked group', () => {
+  const { context, document } = createSelectionHarness();
+  const menu = document.register('ctx-menu');
+  context.window.innerWidth = 160;
+  context.window.innerHeight = 100;
+  menu.getBoundingClientRect = () => ({
+    top: 20,
+    bottom: 80,
+    left: 150,
+    right: 210,
+    width: 120,
+    height: 60,
+  });
+  context.state.groups = { alpha: [], beta: [] };
+  let prevented = false;
+  let stopped = false;
+
+  context.onGroupTabContextMenu({
+    preventDefault() { prevented = true; },
+    stopPropagation() { stopped = true; },
+    clientX: 150,
+    clientY: 20,
+  }, 'beta');
+
+  assert.equal(prevented, true);
+  assert.equal(stopped, true);
+  assert.equal(menu.classList.contains('open'), true);
+  assert.match(menu.innerHTML, /Group settings/);
+  assert.match(menu.innerHTML, /openGroupSettings\(&quot;beta&quot;\)/);
+  assert.equal(menu.style.left, '36px');
+  assert.equal(menu.style.top, '20px');
+
+  menu.classList.remove('open');
+  menu.innerHTML = '';
+  context.onGroupTabContextMenu({
+    preventDefault() {},
+    stopPropagation() {},
+    clientX: 12,
+    clientY: 24,
+  }, 'missing');
+  assert.equal(menu.classList.contains('open'), false);
+  assert.equal(menu.innerHTML, '');
+});
+
+test('standalone group tabs render above the agent grid scroll pane', () => {
+  const { context, document } = createMainHarness({
+    renderTerminalWorkspace() {},
+  });
+  const main = document.getElementById('main');
+  loadScript(context, 'static/js/render.js');
+  runInContext(context, `
+    var selectedAgentId = null;
+    var selectedTerminalId = null;
+    var focusedItemId = null;
+    state.runtime = { mode: 'standalone', embedded_terminal: true };
+    state.groups = { alpha: [], beta: [] };
+    state.group_settings = {
+      alpha: { collapsed_default: false },
+      beta: { collapsed_default: false },
+    };
+    state.children = {};
+    state.agents = {};
+    render();
+  `);
+
+  const html = main.innerHTML;
+  const hostIndex = html.indexOf('id="agent-group-tabs-host"');
+  const tabsIndex = html.indexOf('class="agent-group-tabs" data-agent-group-tabs');
+  const gridIndex = html.indexOf('id="agent-grid-pane"');
+
+  assert.ok(hostIndex >= 0, 'agent group tabs host should be present');
+  assert.ok(tabsIndex > hostIndex, 'tabs should render inside the hoisted host');
+  assert.ok(gridIndex > tabsIndex, 'grid scroll pane should render after the tabs host');
+  assert.equal(
+    html.slice(gridIndex).includes('class="agent-group-tabs" data-agent-group-tabs'),
+    false,
+    'group tabs should not be inside .agents-grid-pane',
+  );
 });
 
 test('legacy header group switcher clears removed dropdown chrome', () => {
@@ -19696,6 +19777,8 @@ test('standalone shell owns the full-width bottom dock rows and drag selector', 
     css,
     /body\.runtime-embedded\.standalone-panel-dragging #standalone-bottom-dock,\s*body\.runtime-embedded\.standalone-panel-dragging #standalone-right-rail\s*\{/s,
   );
+  assert.match(css, /\.agent-group-tabs-host\s*\{[^}]*flex:\s*0 0 auto;[^}]*padding:\s*8px 8px 0;/s);
+  assert.match(css, /body\.runtime-embedded \.agent-group-tabs-host\s*\{[^}]*padding:\s*12px 12px 0;/s);
   assert.match(css, /\.agent-group-tabs-list\s*\{[^}]*overflow-x:\s*auto;[^}]*overflow-y:\s*hidden;/s);
   assert.match(css, /\.agent-group-tab-actions\s*\{[^}]*flex:\s*0 0 auto;[^}]*margin-left:\s*auto;/s);
 });
