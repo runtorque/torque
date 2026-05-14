@@ -470,7 +470,7 @@ body.runtime-embedded .group-body-inner {
   height: 100%;
   min-width: 0;
   min-height: 0;
-  padding: 10px 8px;
+  padding: 0;
   border: 1px solid rgba(255,255,255,.06);
   border-radius: 12px;
   overflow: hidden;
@@ -479,8 +479,12 @@ body.runtime-embedded .group-body-inner {
   transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
 }
 .terminal-surface .xterm {
+  /* FitAddon measures the terminal's parent and subtracts padding from the
+     xterm element itself. Keep visual inset here (not on .terminal-surface)
+     so PTY rows match the actually visible viewport. */
+  box-sizing: border-box;
   height: 100%;
-  padding: 0;
+  padding: 10px 8px;
 }
 .terminal-surface.terminal-drop-target {
   border-color: var(--accent);
@@ -655,7 +659,7 @@ body.runtime-embedded .terminal-compose-slot {
   display: block;
 }
 body.runtime-embedded .terminal-surface {
-  padding: 10px 8px;
+  padding: 0;
   border-radius: 12px;
   background: rgba(0,0,0,.16);
   box-shadow:
@@ -663,7 +667,7 @@ body.runtime-embedded .terminal-surface {
     inset 0 1px 0 rgba(255,255,255,.03);
 }
 body.runtime-embedded .terminal-surface .xterm {
-  padding: 0;
+  padding: 10px 8px;
 }
 body.runtime-embedded #terminal-workspace:focus-within .terminal-surface {
   border-color: color-mix(in srgb, var(--accent) 40%, var(--border) 60%);
