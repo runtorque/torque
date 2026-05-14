@@ -112,6 +112,19 @@ class _CapturingBridge(_FakeBridge):
         })
 
 
+class _FailingCreateBridge(_FakeBridge):
+    async def create_session(self, cell, **kwargs):
+        raise RuntimeError("iterm session timeout")
+
+
+class _EmptyWorktreeManager:
+    async def get_repo_root(self, directory):
+        return "/repo"
+
+    async def create(self, *args, **kwargs):
+        return ""
+
+
 class _FakeTemplateManager:
     def resolve_agent_config(self, explicit_template, gs, overrides, *,
                              base_dir=""):
@@ -132,6 +145,18 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
         self.server_agent_mod = importlib.reload(self.server_agent_mod)
         self.state_mod = importlib.import_module("torque.state")
         self.state_mod = importlib.reload(self.state_mod)
+
+    def _launch_cfg(self, **extra):
+        cfg = {"profile": "Default", "command": "codex",
+               "directory": "/repo", "tab_color": ""}
+        cfg.update(extra)
+        return cfg
+
+    def _launch_service(self, state, bridge, worktree_mgr=None):
+        return self.server_agent_mod.AgentLaunchService(
+            state=state, connection=None, bridge=bridge,
+            worktree_mgr=worktree_mgr, template_mgr=_FakeTemplateManager(),
+        )
 
     async def test_resolve_base_dir_prefers_group_directory(self):
         service = self.server_agent_mod.AgentLaunchService(
@@ -521,6 +546,67 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
             bridge.create_session_calls[0]["cell"].directory,
             source.worktree_path,
         )
+
+    async def test_create_agent_with_config_logs_add_agent_none(self):
+        state = types.SimpleNamespace(add_agent=lambda **kw: None)
+        service = self._launch_service(state, _CapturingBridge())
+
+        with self.assertLogs("torque", level="WARNING") as logs:
+            cell = await service.create_agent_with_config(
+                "missing-group", "Worker", self._launch_cfg(),
+            )
+
+        self.assertIn("add_agent returned None for group=missing-group name=Worker",
+                      "\n".join(logs.output))
+
+    async def test_create_agent_with_config_logs_empty_worktree_create(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("backend")
+        bridge = _CapturingBridge(current_path="/repo")
+        service = self._launch_service(
+            state, bridge, worktree_mgr=_EmptyWorktreeManager())
+
+        with self.assertLogs("torque", level="WARNING") as logs:
+            cell = await service.create_agent_with_config(
+                "backend", "Worker", self._launch_cfg(worktree=True),
+            )
+
+        self.assertIn("worktree create failed silently for cell=worker repo=/repo",
+                      "\n".join(logs.output))
+
+    async def test_create_agent_with_config_logs_and_events_create_session_failure(self):
+        events_mod = importlib.import_module("torque.events")
+        events_mod = importlib.reload(events_mod)
+        state = self.state_mod.MatrixState()
+        state.add_group("backend")
+        state.panel_log = events_mod.PanelEventLog(max_size=10)
+        service = self._launch_service(state, _FailingCreateBridge())
+
+        with self.assertLogs("torque", level="WARNING") as logs:
+            with self.assertRaises(RuntimeError):
+                await service.create_agent_with_config(
+                    "backend", "Worker", self._launch_cfg(),
+                )
+
+        cell = next(iter(state.agents.values()))
+        event = state.panel_log.get_recent(1)[0]
+        self.assertEqual(event["kind"], "agent_error")
+        self.assertEqual(event["cell_id"], cell.id)
+        self.assertIn("iterm session timeout", event["message"])
+        self.assertIn("bridge.create_session failed for cell=worker group=backend",
+                      "\n".join(logs.output))
+
+        with self.assertLogs("torque", level="WARNING") as logs:
+            prompts = self.server_agent_mod._new_agent_prompt_sequence(
+                {"initial_prompt": ""},
+                cell=cell,
+                task_id="TORQUE:391",
+            )
+
+        self.assertEqual(prompts, [])
+        self.assertIn("dispatch_task: empty prompt sequence for cell=worker "
+                      "task=TORQUE:391 (startup=0, initial=0, final=0)",
+                      "\n".join(logs.output))
 
     def test_runtime_env_vars_for_engineer_adds_binding(self):
         cell = types.SimpleNamespace(

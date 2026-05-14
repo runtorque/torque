@@ -114,6 +114,7 @@ def _new_agent_prompt_sequence(launch_cfg: dict, *,
                                final_prompt: str = "",
                                cell=None,
                                default_boot_nudge: str = "",
+                               task_id: str = "",
                                ) -> list[tuple[str, dict]]:
     """Return prompts to send to a brand-new agent in order.
 
@@ -123,11 +124,14 @@ def _new_agent_prompt_sequence(launch_cfg: dict, *,
     kinds that should actually be nudged (architect/engineer); use
     :func:`resolve_default_boot_nudge` to derive it from state + cell.
     """
+    startup_len = len(startup_prompt or "")
+    final_len = len(final_prompt or "")
     prompts = []
     if startup_prompt:
         startup_prompt = prepend_agent_identity_anchor(startup_prompt, cell)
         prompts.append((startup_prompt, {}))
     initial_prompt = launch_cfg.get("initial_prompt", "") or ""
+    initial_len = len(initial_prompt or "")
     if not initial_prompt.strip() and default_boot_nudge:
         initial_prompt = default_boot_nudge
     if initial_prompt:
@@ -136,6 +140,16 @@ def _new_agent_prompt_sequence(launch_cfg: dict, *,
     if final_prompt:
         final_prompt = prepend_agent_identity_anchor(final_prompt, cell)
         prompts.append((final_prompt, {"background": True}))
+    if not prompts:
+        context = "dispatch_task" if task_id else "new_agent_prompt_sequence"
+        cell_ref = (getattr(cell, "slug", "") or getattr(cell, "name", "")
+                    or getattr(cell, "id", "") or "<unknown>")
+        log.warning(
+            "%s: empty prompt sequence for cell=%s task=%s "
+            "(startup=%d, initial=%d, final=%d)",
+            context, cell_ref, task_id or "<none>", startup_len, initial_len,
+            final_len,
+        )
     return prompts
 
 
@@ -518,6 +532,8 @@ class AgentLaunchService:
             icon=launch_cfg.get("icon", ""),
         )
         if not cell:
+            log.warning("add_agent returned None for group=%s name=%s",
+                        group, name)
             return None
         cell.session_resume = bool(launch_cfg.get("session_resume", True))
         cell.idle_timeout = int(launch_cfg.get("idle_timeout", 0) or 0)
@@ -578,24 +594,56 @@ class AgentLaunchService:
                     self.state.history_update_agent(
                         cell, worktree_branch=cell.worktree_branch
                     )
+                else:
+                    log.warning("worktree create failed silently for cell=%s repo=%s",
+                                cell.slug or cell.name or cell.id, repo_root)
 
         self.apply_persistent_prompt(cell, launch_cfg, persistent_prompt_text)
         self.state._emit_agent(cell)
         self.state._db_save_agent(cell)
 
-        await self.bridge.create_session(
-            cell,
-            env_vars=runtime_env_vars_for_cell(
-                cell, launch_cfg.get("env_vars")
-            ),
-            env_file=launch_cfg.get("env_file", ""),
-            shell=launch_cfg.get("shell", ""),
-            system_prompt=launch_cfg.get("system_prompt", ""),
-            mcp_entrypoint=mcp_entrypoint_for_cell(cell),
-            target_session_id=target_session_id,
-            target_window_id=target_window_id,
-            restore_focus_to_prev_tab=restore_focus_to_prev_tab,
-        )
+        try:
+            await self.bridge.create_session(
+                cell,
+                env_vars=runtime_env_vars_for_cell(
+                    cell, launch_cfg.get("env_vars")
+                ),
+                env_file=launch_cfg.get("env_file", ""),
+                shell=launch_cfg.get("shell", ""),
+                system_prompt=launch_cfg.get("system_prompt", ""),
+                mcp_entrypoint=mcp_entrypoint_for_cell(cell),
+                target_session_id=target_session_id,
+                target_window_id=target_window_id,
+                restore_focus_to_prev_tab=restore_focus_to_prev_tab,
+            )
+        except Exception as exc:
+            message = f"Agent session failed to start: {exc}"
+            log.warning(
+                "bridge.create_session failed for cell=%s group=%s: %s",
+                cell.slug or cell.name or cell.id,
+                cell.group,
+                exc,
+                exc_info=True,
+            )
+            try:
+                cell.error_message = message
+                cell.needs_attention = True
+                self.state._emit_agent(cell)
+                self.state._db_save_agent(cell)
+                panel_log = getattr(self.state, "panel_log", None)
+                if panel_log and hasattr(panel_log, "append"):
+                    pe = panel_log.append(
+                        kind="agent_error", cell_id=cell.id,
+                        agent_name=cell.name, group=cell.group,
+                        message=message,
+                    )
+                    self.state._emit("event_append", **pe)
+            except Exception:
+                log.exception(
+                    "Failed to emit create_session agent_error for cell=%s",
+                    getattr(cell, "id", "<unknown>"),
+                )
+            raise
         return cell
 
     async def send_agent_prompt(self, cell, prompt: str, *,

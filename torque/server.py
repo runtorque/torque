@@ -10917,7 +10917,8 @@ async def main(connection=None):
                                             startup_prompt=
                                             startup_prompt,
                                             final_prompt=final_prompt,
-                                            cell=cell):
+                                            cell=cell,
+                                            task_id=task.id):
                                     await _send_agent_prompt(
                                         cell,
                                         prompt_text,
