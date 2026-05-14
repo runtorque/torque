@@ -393,6 +393,14 @@ function supervisorToggleDetails(sessionId, event) {
   renderSupervisorPanel({ force: true });
 }
 
+function supervisorCollapseDetails(event) {
+  if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+  if (!supervisorState.expandedSessionId) return;
+  supervisorState.expandedSessionId = '';
+  _supervisorPersistUiState();
+  renderSupervisorPanel({ force: true });
+}
+
 function _supervisorDetailFieldsHtml(session) {
   var owner = session.owner || {};
   var shell = Array.isArray(session.shell_argv) ? session.shell_argv.join(' ') : '';
@@ -430,7 +438,7 @@ function _supervisorDetailFieldsHtml(session) {
 
 function _supervisorDetailHtml(session, colSpan) {
   if (supervisorState.expandedSessionId !== session.session_id) return '';
-  return '<tr class="supervisor-detail-row"><td colspan="' + colSpan + '">'
+  return '<tr class="supervisor-detail-row" onclick="event.stopPropagation()"><td colspan="' + colSpan + '">'
     + _supervisorDetailFieldsHtml(session) + '</td></tr>';
 }
 
@@ -564,8 +572,9 @@ function renderSupervisorPanel(opts) {
     + (lastUpdated ? '<span class="supervisor-updated">Updated ' + _supervisorEsc(lastUpdated) + '</span>' : '')
     + '</div>'
     + banner
+    + '<div class="supervisor-body" onclick="supervisorCollapseDetails(event)">'
     + _supervisorBodyHtml(rows)
-    + '</div>';
+    + '</div></div>';
   if (typeof root.scrollTop === 'number') root.scrollTop = supervisorState.scrollPos || 0;
 }
 
