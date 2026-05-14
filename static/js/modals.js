@@ -421,7 +421,7 @@ function openAddGroup() {
   if (summary) {
     const standalone = !!(state && state.runtime && state.runtime.embedded_terminal);
     summary.textContent = standalone
-      ? 'Create the workspace first — Torque will take you straight into agent setup next.'
+      ? 'Create the workspace first — Torque will open its settings next.'
       : '';
     summary.classList.toggle('hidden', !standalone);
   }
@@ -444,9 +444,8 @@ function submitGroup() {
     setActiveGroup(name, { allowPending: true });
   }
   send(payload);
-  const standalone = !!(state && state.runtime && state.runtime.embedded_terminal);
   closeModals();
-  if (standalone && typeof openAddAgent === 'function') openAddAgent(name);
+  if (typeof openGroupSettings === 'function') openGroupSettings(name, 'group');
 }
 
 /* -- Add Engineer ----------------------------------------------------- */
