@@ -2,14 +2,13 @@
 
 var SUPERVISOR_REFRESH_MS = 2000;
 var SUPERVISOR_BACKOFF_MS = 5000;
+var SUPERVISOR_STALL_TIMEOUT_MS = 10000;
 
-// TODO(TORQUE:396): register these fields with the panel UI-state
-// persistence shim once its per-panel adapter contract lands. Until then the
-// supervisor panel preserves state in-memory across rerenders.
 var supervisorState = {
   sessions: [],
   loading: false,
   requestInFlight: false,
+  requestTimeout: 0,
   requested: false,
   available: null,
   message: '',
@@ -23,6 +22,58 @@ var supervisorState = {
   expandedSessionId: '',
   scrollPos: 0,
 };
+var _supervisorUiStateRegistered = false;
+
+function _supervisorUiState() {
+  return {
+    autoRefresh: !!supervisorState.autoRefresh,
+    sortKey: supervisorState.sortKey || 'owner',
+    sortDirection: supervisorState.sortDirection === 'desc' ? 'desc' : 'asc',
+    selectedSessionId: supervisorState.selectedSessionId || '',
+    expandedSessionId: supervisorState.expandedSessionId || '',
+    scrollPos: Math.max(0, Number(supervisorState.scrollPos) || 0),
+  };
+}
+
+function _supervisorApplyUiState(raw) {
+  if (!raw || typeof raw !== 'object') return;
+  var sortKeys = { state: true, owner: true, session: true, pid: true, command: true, bytes: true, tty: true, path: true };
+  if (sortKeys[raw.sortKey]) supervisorState.sortKey = raw.sortKey;
+  if (raw.sortDirection === 'desc' || raw.sortDirection === 'asc') supervisorState.sortDirection = raw.sortDirection;
+  if (typeof raw.autoRefresh === 'boolean') supervisorState.autoRefresh = raw.autoRefresh;
+  supervisorState.selectedSessionId = String(raw.selectedSessionId || '');
+  supervisorState.expandedSessionId = String(raw.expandedSessionId || '');
+  supervisorState.scrollPos = Math.max(0, Number(raw.scrollPos) || 0);
+}
+
+function _supervisorUiShim(name) {
+  return (typeof window !== 'undefined' && typeof window[name] === 'function' && window[name])
+    || (typeof globalThis !== 'undefined' && typeof globalThis[name] === 'function' && globalThis[name])
+    || null;
+}
+
+function _supervisorRegisterUiState() {
+  if (_supervisorUiStateRegistered) return;
+  _supervisorUiStateRegistered = true;
+  var register = _supervisorUiShim('registerPanelUiState') || _supervisorUiShim('_registerPanelUiState');
+  if (!register) return;
+  var restored = register('supervisor', {
+    key: 'supervisor_panel_state',
+    getState: _supervisorUiState,
+    setState: _supervisorApplyUiState,
+  });
+  if (restored && typeof restored === 'object') _supervisorApplyUiState(restored);
+  var get = _supervisorUiShim('getPanelUiState') || _supervisorUiShim('_getPanelUiState');
+  if (get) _supervisorApplyUiState(get('supervisor'));
+}
+
+function _supervisorPersistUiState() {
+  _supervisorRegisterUiState();
+  var persist = _supervisorUiShim('persistPanelUiState') || _supervisorUiShim('_persistPanelUiState');
+  if (persist) persist('supervisor', _supervisorUiState());
+}
+
+_supervisorRegisterUiState();
 
 function _supervisorRoot() {
   return document.getElementById('panel-supervisor');
@@ -125,6 +176,24 @@ function _supervisorLastUpdatedText() {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
+function _supervisorLastUpdatedAgeText() {
+  if (!supervisorState.lastUpdated) return '';
+  var seconds = Math.max(0, Math.floor((Date.now() / 1000) - Number(supervisorState.lastUpdated || 0)));
+  if (seconds < 60) return seconds + 's ago';
+  var minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return minutes + 'm ago';
+  var hours = Math.floor(minutes / 60);
+  if (hours < 24) return hours + 'h ago';
+  return Math.floor(hours / 24) + 'd ago';
+}
+
+function _supervisorUnavailableBannerText() {
+  var base = supervisorState.error || supervisorState.message || 'PTY supervisor is unavailable.';
+  var age = _supervisorLastUpdatedAgeText();
+  if (age) return base + ' Showing last successful list; last update ' + age + '.';
+  return base;
+}
+
 function _supervisorSortButton(key, label) {
   var active = supervisorState.sortKey === key;
   var arrow = active ? (supervisorState.sortDirection === 'desc' ? ' ▼' : ' ▲') : '';
@@ -140,11 +209,13 @@ function supervisorSortBy(key) {
     supervisorState.sortKey = key;
     supervisorState.sortDirection = (key === 'bytes' || key === 'pid') ? 'desc' : 'asc';
   }
+  _supervisorPersistUiState();
   renderSupervisorPanel({ force: true });
 }
 
 function supervisorSelectSession(sessionId) {
   supervisorState.selectedSessionId = String(sessionId || '');
+  _supervisorPersistUiState();
   renderSupervisorPanel({ force: true });
 }
 
@@ -156,6 +227,7 @@ function supervisorToggleDetails(sessionId, event) {
   sessionId = String(sessionId || '');
   supervisorState.expandedSessionId = supervisorState.expandedSessionId === sessionId ? '' : sessionId;
   supervisorState.selectedSessionId = sessionId;
+  _supervisorPersistUiState();
   renderSupervisorPanel({ force: true });
 }
 
@@ -271,7 +343,10 @@ function renderSupervisorPanel(opts) {
   opts = opts || {};
   var root = _supervisorRoot();
   if (!root) return;
-  supervisorState.scrollPos = typeof root.scrollTop === 'number' ? root.scrollTop : supervisorState.scrollPos;
+  if (typeof root.scrollTop === 'number' && root.scrollTop !== supervisorState.scrollPos) {
+    supervisorState.scrollPos = root.scrollTop;
+    _supervisorPersistUiState();
+  }
   if (!opts.force && !_supervisorVisible()) return;
 
   var rows = _supervisorSortedSessions();
@@ -280,7 +355,7 @@ function renderSupervisorPanel(opts) {
   var banner = '';
   if (supervisorState.available === false) {
     banner = '<div class="supervisor-banner supervisor-banner-unavailable">'
-      + _supervisorEsc(supervisorState.message || supervisorState.error || 'PTY supervisor is unavailable.')
+      + _supervisorEsc(_supervisorUnavailableBannerText())
       + '</div>';
   } else if (supervisorState.error) {
     banner = '<div class="supervisor-banner supervisor-banner-error">' + _supervisorEsc(supervisorState.error) + '</div>';
@@ -311,6 +386,24 @@ function _supervisorClearTimer() {
   supervisorState.timer = 0;
 }
 
+function _supervisorClearRequestTimeout() {
+  if (supervisorState.requestTimeout && typeof clearTimeout === 'function') {
+    clearTimeout(supervisorState.requestTimeout);
+  }
+  supervisorState.requestTimeout = 0;
+}
+
+function _supervisorArmRequestTimeout() {
+  _supervisorClearRequestTimeout();
+  if (typeof setTimeout !== 'function') return;
+  supervisorState.requestTimeout = setTimeout(function() {
+    supervisorState.requestTimeout = 0;
+    supervisorState.requestInFlight = false;
+    supervisorState.loading = false;
+    if (_supervisorVisible()) renderSupervisorPanel({ force: true });
+  }, SUPERVISOR_STALL_TIMEOUT_MS);
+}
+
 function supervisorSchedulePolling() {
   _supervisorClearTimer();
   if (!supervisorState.autoRefresh || !_supervisorVisible()) return;
@@ -319,7 +412,7 @@ function supervisorSchedulePolling() {
   supervisorState.timer = setTimeout(function() {
     supervisorState.timer = 0;
     if (!supervisorState.autoRefresh || !_supervisorVisible()) return;
-    supervisorRequestSessions(true);
+    supervisorRequestSessions(false);
     supervisorSchedulePolling();
   }, delay);
 }
@@ -328,12 +421,22 @@ function supervisorRequestSessions(force) {
   if (supervisorState.requestInFlight && !force) return;
   supervisorState.requested = true;
   supervisorState.requestInFlight = true;
+  _supervisorArmRequestTimeout();
   supervisorState.loading = true;
   supervisorState.error = '';
   renderSupervisorPanel({ force: _supervisorVisible() });
   if (typeof send === 'function') {
-    send({ cmd: 'supervisor_sessions_list' });
+    try {
+      send({ cmd: 'supervisor_sessions_list' });
+    } catch (err) {
+      _supervisorClearRequestTimeout();
+      supervisorState.requestInFlight = false;
+      supervisorState.loading = false;
+      supervisorState.error = 'WebSocket command sender failed.';
+      renderSupervisorPanel({ force: _supervisorVisible() });
+    }
   } else {
+    _supervisorClearRequestTimeout();
     supervisorState.requestInFlight = false;
     supervisorState.loading = false;
     supervisorState.error = 'WebSocket command sender is unavailable.';
@@ -343,14 +446,18 @@ function supervisorRequestSessions(force) {
 
 function supervisorReceiveSessions(msg) {
   msg = msg || {};
+  _supervisorClearRequestTimeout();
   supervisorState.requestInFlight = false;
   supervisorState.loading = false;
   supervisorState.requested = true;
-  supervisorState.available = !!msg.available;
-  supervisorState.sessions = Array.isArray(msg.sessions) ? msg.sessions : [];
+  var unavailable = msg.available === false || !!msg.error;
+  supervisorState.available = unavailable ? false : !!msg.available;
   supervisorState.message = msg.message || '';
-  supervisorState.error = msg.error || (msg.available === false ? (msg.message || '') : '');
-  supervisorState.lastUpdated = Number(msg.refreshed_at || (Date.now() / 1000));
+  supervisorState.error = msg.error || (unavailable ? (msg.message || 'PTY supervisor is unavailable.') : '');
+  if (!unavailable) {
+    supervisorState.sessions = Array.isArray(msg.sessions) ? msg.sessions : [];
+    supervisorState.lastUpdated = Number(msg.refreshed_at || (Date.now() / 1000));
+  }
   if (_supervisorVisible()) renderSupervisorPanel({ force: true });
   supervisorSchedulePolling();
 }
@@ -362,6 +469,7 @@ function supervisorRefresh() {
 
 function supervisorSetAutoRefresh(checked) {
   supervisorState.autoRefresh = !!checked;
+  _supervisorPersistUiState();
   if (supervisorState.autoRefresh) {
     supervisorSchedulePolling();
   } else {
