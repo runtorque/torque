@@ -22,10 +22,26 @@ class FakeClassList {
 class FakeElement {
   constructor(id = '') {
     this.id = id;
-    this.innerHTML = '';
+    this._innerHTML = '';
+    this._selectors = new Map();
     this.scrollTop = 0;
+    this.scrollLeft = 0;
     this.classList = new FakeClassList();
     this.dataset = {};
+  }
+
+  get innerHTML() { return this._innerHTML; }
+
+  set innerHTML(value) {
+    this._innerHTML = String(value || '');
+    this._selectors = new Map();
+    if (this._innerHTML.indexOf('supervisor-table-wrap') >= 0) {
+      this._selectors.set('.supervisor-table-wrap', new FakeElement());
+    }
+  }
+
+  querySelector(selector) {
+    return this._selectors.get(selector) || null;
   }
 }
 
@@ -354,6 +370,43 @@ test('supervisorReceiveSessions preserves selected row, expanded row, and scroll
   assert.equal(vm.runInContext('supervisorState.expandedSessionId', context), 's1');
   assert.equal(ensure('panel-supervisor').scrollTop, 88);
   assert.match(ensure('panel-supervisor').innerHTML, /supervisor-detail-row/);
+});
+
+test('supervisorReceiveSessions preserves table scroll positions across refresh rerenders', () => {
+  const { sandbox, ensure } = createSandbox({ visible: true });
+  const context = vm.createContext(sandbox);
+  loadSupervisor(context);
+
+  const payload = `({
+    available: true,
+    sessions: Array.from({ length: 12 }, (_, idx) => ({
+      session_id: 's' + idx, cell_id: 'c' + idx, pid: 100 + idx, alive: true,
+      cols: 160, rows: 48, total_bytes: 99,
+      cwd: '/tmp/really/long/path/' + idx,
+      display_command: 'codex --wide-command --worker=' + idx,
+      owner: { name: 'worker-' + idx, group: 'Torque', kind: 'worker', status: 'running' },
+    })),
+  })`;
+
+  vm.runInContext(`supervisorReceiveSessions(${payload})`, context);
+  const root = ensure('panel-supervisor');
+  const firstWrap = root.querySelector('.supervisor-table-wrap');
+  assert.ok(firstWrap, 'table wrapper should exist after first render');
+  root.scrollTop = 88;
+  firstWrap.scrollLeft = 240;
+  firstWrap.scrollTop = 64;
+
+  vm.runInContext(`
+    supervisorReceiveSessions(${payload});
+    supervisorReceiveSessions(${payload});
+  `, context);
+
+  const nextWrap = root.querySelector('.supervisor-table-wrap');
+  assert.ok(nextWrap, 'table wrapper should exist after refresh rerender');
+  assert.notEqual(nextWrap, firstWrap, 'test fake should model DOM replacement');
+  assert.equal(root.scrollTop, 88);
+  assert.equal(nextWrap.scrollLeft, 240);
+  assert.equal(nextWrap.scrollTop, 64);
 });
 
 test('supervisor panel persists UI state and restores sort state from snapshot', () => {
