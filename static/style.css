@@ -136,6 +136,7 @@ body.tauri-mode header .app-wordmark {
 }
 #standalone-sidebar-shell {
   display: flex;
+  flex-direction: column;
   flex: 1;
   min-width: 0;
   min-height: 0;
@@ -175,34 +176,38 @@ body.runtime-embedded #workspace-shell {
 body.runtime-embedded #standalone-sidebar-shell {
   display: grid;
   grid-template-columns: minmax(var(--standalone-main-stack-min-width), 1fr) 8px var(--standalone-right-rail-width, var(--standalone-right-rail-min-width));
-  grid-template-rows: minmax(0, 1fr) 8px var(--standalone-bottom-height, 280px);
+  grid-template-rows: auto minmax(0, 1fr) 8px var(--standalone-bottom-height, 280px);
   min-height: 0;
+}
+body.runtime-embedded #app-group-tabs-host {
+  grid-column: 1 / -1;
+  grid-row: 1;
 }
 body.runtime-embedded #standalone-main-stack {
   display: flex;
   flex-direction: column;
   min-height: 0;
   grid-column: 1;
-  grid-row: 1;
+  grid-row: 2;
 }
 body.runtime-embedded #standalone-rail-resize-handle {
   grid-column: 2;
-  grid-row: 1;
+  grid-row: 2;
 }
 body.runtime-embedded #standalone-right-rail {
   grid-column: 3;
-  grid-row: 1;
+  grid-row: 2;
 }
 body.runtime-embedded #standalone-right-rail:not(.collapsed) {
   min-width: var(--standalone-right-rail-min-width);
 }
 body.runtime-embedded #standalone-bottom-resize-handle {
   grid-column: 1 / -1;
-  grid-row: 2;
+  grid-row: 3;
 }
 body.runtime-embedded #standalone-bottom-dock {
   grid-column: 1 / -1;
-  grid-row: 3;
+  grid-row: 4;
 }
 body.runtime-embedded main {
   padding: 12px 12px 10px;
