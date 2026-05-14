@@ -726,15 +726,21 @@ main {
 .agents-grid-pane > .empty {
   min-height: 100%;
 }
+.agent-group-tabs-host {
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: 8px 8px 0;
+}
+.agent-group-tabs-host:empty {
+  display: none;
+}
 .agent-group-tabs {
-  position: sticky;
-  top: 0;
+  position: relative;
   z-index: 5;
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
-  margin-bottom: 8px;
   padding: 4px 0 7px;
   border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg) 88%, transparent);
@@ -907,6 +913,9 @@ body.agent-focus-resizing {
 }
 body.runtime-embedded main {
   padding: 0;
+}
+body.runtime-embedded .agent-group-tabs-host {
+  padding: 12px 12px 0;
 }
 body.runtime-embedded .agents-grid-pane {
   padding: 12px 12px 10px;

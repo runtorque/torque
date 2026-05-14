@@ -102,12 +102,13 @@ function _agentFocusSplitParts(root) {
   root = root || document.getElementById('main');
   if (!root || typeof root.querySelector !== 'function') return null;
   const split = root.querySelector('[data-agent-split]');
+  const tabsHost = root.querySelector('[data-agent-group-tabs-host]');
   const grid = root.querySelector('[data-agent-grid-pane]');
   const handle = root.querySelector('[data-agent-focus-resizer]');
   const focus = root.querySelector('[data-agent-focus-panel]');
   const focusScroll = root.querySelector('[data-agent-focus-scroll]');
   if (!split || !grid || !handle || !focus || !focusScroll) return null;
-  return { root, split, grid, handle, focus, focusScroll };
+  return { root, split, tabsHost, grid, handle, focus, focusScroll };
 }
 
 function _agentFocusHandleHeight(parts) {
@@ -2522,8 +2523,11 @@ function _renderAgentFocusPanelHtml() {
   return html;
 }
 
-function _agentFocusShellHtml(gridHtml, focusHtml) {
+function _agentFocusShellHtml(gridHtml, focusHtml, tabsHtml) {
   return '<div class="agent-split" data-agent-split>'
+    + '<div id="agent-group-tabs-host" class="agent-group-tabs-host" data-agent-group-tabs-host>'
+    + (tabsHtml || '')
+    + '</div>'
     + '<div id="agent-grid-pane" class="agents-grid-pane" data-agent-grid-pane>'
     + (gridHtml || '')
     + '</div>'
@@ -2540,22 +2544,29 @@ function _agentFocusShellHtml(gridHtml, focusHtml) {
 
 function _renderAgentGridAndFocus(main, gridHtml, opts) {
   opts = opts || {};
+  const tabsHtml = opts.tabsHtml || '';
   const renderFocus = opts.renderFocus !== false;
   const focusHtml = renderFocus
     ? _renderAgentFocusPanelHtml()
     : (main._torqueLastFocusHtml || _renderAgentFocusPanelHtml());
-  const combined = _agentFocusShellHtml(gridHtml, focusHtml);
+  const combined = _agentFocusShellHtml(gridHtml, focusHtml, tabsHtml);
   const gridChanged = main._torqueLastGridHtml !== gridHtml;
+  const tabsChanged = main._torqueLastTabsHtml !== tabsHtml;
   const parts = _agentFocusSplitParts(main);
   const shellMissing = !main._torqueHasAgentSplitShell;
-  if (shellMissing || (gridChanged && !parts)) {
+  if (shellMissing || ((gridChanged || tabsChanged) && (!parts || (tabsChanged && !parts.tabsHost)))) {
     main.innerHTML = combined;
     main._torqueHasAgentSplitShell = true;
+    main._torqueLastTabsHtml = tabsHtml;
     main._torqueLastGridHtml = gridHtml;
     main._torqueLastFocusHtml = focusHtml;
     main._torqueLastHtml = combined;
     _agentFocusApplyPersistedSplit();
     return { mainHtmlChanged: true, focusHtmlChanged: renderFocus };
+  }
+  if (tabsChanged && parts.tabsHost) {
+    parts.tabsHost.innerHTML = tabsHtml || '';
+    main._torqueLastTabsHtml = tabsHtml;
   }
   if (gridChanged) {
     parts.grid.innerHTML = gridHtml || '';
@@ -2567,12 +2578,13 @@ function _renderAgentGridAndFocus(main, gridHtml, opts) {
     main._torqueLastHtml = _agentFocusShellHtml(
       gridHtml,
       main._torqueLastFocusHtml || focusHtml,
+      main._torqueLastTabsHtml || tabsHtml,
     );
     return { mainHtmlChanged: true, focusHtmlChanged: focusChanged };
   }
   main._torqueLastHtml = combined;
   if (renderFocus) renderAgentFocusPanel({ main, focusHtml });
-  return { mainHtmlChanged: false, focusHtmlChanged: renderFocus && main._torqueLastFocusHtml !== focusHtml };
+  return { mainHtmlChanged: tabsChanged, focusHtmlChanged: renderFocus && main._torqueLastFocusHtml !== focusHtml };
 }
 
 function renderAgentFocusPanel(opts) {
@@ -2587,7 +2599,8 @@ function renderAgentFocusPanel(opts) {
   const parts = _agentFocusSplitParts(main);
   if (!parts) {
     const gridHtml = main._torqueLastGridHtml || '';
-    main.innerHTML = _agentFocusShellHtml(gridHtml, focusHtml);
+    const tabsHtml = main._torqueLastTabsHtml || '';
+    main.innerHTML = _agentFocusShellHtml(gridHtml, focusHtml, tabsHtml);
     main._torqueHasAgentSplitShell = true;
     main._torqueLastFocusHtml = focusHtml;
     main._torqueLastHtml = main.innerHTML;
@@ -2606,7 +2619,7 @@ function renderAgentFocusPanel(opts) {
   parts.focusScroll.innerHTML = focusHtml;
   parts.focusScroll._torqueLastHtml = focusHtml;
   main._torqueLastFocusHtml = focusHtml;
-  main._torqueLastHtml = _agentFocusShellHtml(main._torqueLastGridHtml || '', focusHtml);
+  main._torqueLastHtml = _agentFocusShellHtml(main._torqueLastGridHtml || '', focusHtml, main._torqueLastTabsHtml || '');
   if (typeof _restoreSurfaceState === 'function') {
     _restoreSurfaceState(parts.focusScroll, panelState, { scrollSelectors: [':root', '.mcp-log'] });
     _restoreActiveDetailInputFocus();
@@ -2674,7 +2687,8 @@ function _renderMainGrid(opts, renderMode) {
         ${action}
       </div>`;
     const emptyState = _captureSurfaceState(main, { scrollSelectors: [':root', '.agents-grid-pane'] });
-    const result = _renderAgentGridAndFocus(main, _renderAgentGroupTabsHtml() + emptyHtml, {
+    const result = _renderAgentGridAndFocus(main, emptyHtml, {
+      tabsHtml: _renderAgentGroupTabsHtml(),
       renderFocus: !(opts && opts.skipFocusRefresh),
     });
     if (result.mainHtmlChanged) _restoreSurfaceState(main, emptyState);
@@ -2859,7 +2873,8 @@ function _renderMainGrid(opts, renderMode) {
   // The effective grid clobber is still guarded like `main._torqueLastHtml !== html`;
   // after a successful split write the aggregate cache is updated like `main._torqueLastHtml = html`.
   // The split stores the grid fragment separately so focus-only refreshes do not rewrite it.
-  const mainRenderResult = _renderAgentGridAndFocus(main, _renderAgentGroupTabsHtml() + html, {
+  const mainRenderResult = _renderAgentGridAndFocus(main, html, {
+    tabsHtml: _renderAgentGroupTabsHtml(),
     renderFocus: !(opts && opts.skipFocusRefresh),
   });
   const mainHtmlChanged = !!mainRenderResult.mainHtmlChanged;
