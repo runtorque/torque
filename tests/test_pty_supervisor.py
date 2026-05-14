@@ -102,8 +102,14 @@ class SupervisorLifecycleTests(unittest.IsolatedAsyncioTestCase):
             await write_frame(writer, {"op": "list"})
             lst = await read_frame(reader)
             self.assertEqual(lst.get("type"), "list")
+            self.assertIsInstance(lst.get("supervisor"), dict)
+            self.assertEqual(lst["supervisor"].get("pid"), os.getpid())
+            self.assertIsInstance(lst["supervisor"].get("started_at"), float)
             ids = [s["session_id"] for s in lst["sessions"]]
             self.assertIn("s1", ids)
+            listed = next(s for s in lst["sessions"] if s["session_id"] == "s1")
+            self.assertIsInstance(listed.get("started_at"), float)
+            self.assertGreater(listed.get("started_at"), 0)
 
             await write_frame(writer, {"op": "close", "session_id": "s1"})
             closed = await read_frame(reader)

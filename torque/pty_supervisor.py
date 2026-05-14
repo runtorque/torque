@@ -44,7 +44,7 @@ from .pty_core import (
     set_winsize,
 )
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 1  # started_at/list-supervisor metadata is additive.
 DEFAULT_SOCKET_NAME = "pty_supervisor.sock"
 DEFAULT_PID_FILE_NAME = "pty_supervisor.pid"
 DEFAULT_LOG_FILE_NAME = "pty_supervisor.log"
@@ -100,6 +100,7 @@ class SupervisorSession:
     cols: int
     rows: int
     bootstrap_dir: str = ""
+    started_at: float = 0.0
     buffer: bytearray = field(default_factory=bytearray)
     total_bytes: int = 0
     subscribers: set = field(default_factory=set)
@@ -118,6 +119,7 @@ class SupervisorSession:
             "rows": self.rows,
             "total_bytes": self.total_bytes,
             "bootstrap_dir": self.bootstrap_dir,
+            "started_at": float(self.started_at or 0.0),
             "shell_argv": list(self.shell_argv),
             "cwd": self.cwd,
         }
@@ -131,7 +133,14 @@ class PtySupervisor:
 
     def __init__(self):
         self.sessions: dict[str, SupervisorSession] = {}
+        self.started_at = time.time()
         self._lock = asyncio.Lock()
+
+    def supervisor_snapshot(self) -> dict:
+        return {
+            "pid": os.getpid(),
+            "started_at": float(self.started_at or 0.0),
+        }
 
     # -- client connections ------------------------------------------------
 
@@ -194,6 +203,7 @@ class PtySupervisor:
                 "type": "pong",
                 "version": PROTOCOL_VERSION,
                 "pid": os.getpid(),
+                "started_at": float(self.started_at or 0.0),
             })
         elif op == "create":
             await self._op_create(msg, writer)
@@ -206,6 +216,7 @@ class PtySupervisor:
         elif op == "list":
             await write_frame(writer, {
                 "type": "list",
+                "supervisor": self.supervisor_snapshot(),
                 "sessions": [s.snapshot() for s in self.sessions.values()],
             })
         elif op == "subscribe":
@@ -270,6 +281,7 @@ class PtySupervisor:
             "op": "create",
             "session_id": session_id,
             "pid": session.pid,
+            "started_at": float(session.started_at or 0.0),
         })
 
     async def _op_write(self, msg: dict, writer: asyncio.StreamWriter) -> None:
@@ -367,6 +379,7 @@ class PtySupervisor:
             "cols": sess.cols,
             "rows": sess.rows,
             "total_bytes": sess.total_bytes,
+            "started_at": float(sess.started_at or 0.0),
             "data": base64.b64encode(bytes(sess.buffer)).decode("ascii"),
         })
         if sess.closed and sess.exit_status is not None:
@@ -429,6 +442,7 @@ class PtySupervisor:
             cols=cols,
             rows=rows,
             bootstrap_dir=bootstrap_dir,
+            started_at=time.time(),
             process=process,
         )
 

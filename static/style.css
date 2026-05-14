@@ -9471,7 +9471,7 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   flex-wrap: wrap;
 }
 .supervisor-toolbar button,
-.supervisor-detail-toggle,
+.supervisor-terminate,
 .supervisor-sort {
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -9479,6 +9479,13 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   color: var(--text);
   font-size: 11px;
   padding: 4px 8px;
+}
+.supervisor-terminate {
+  color: var(--red);
+}
+.supervisor-terminate:disabled {
+  color: var(--text-dim);
+  opacity: .7;
 }
 .supervisor-sort {
   border: 0;
@@ -9548,6 +9555,18 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   color: var(--text-dim);
 }
 .supervisor-row { cursor: pointer; }
+.supervisor-row-self,
+.supervisor-card-self {
+  background: rgba(88, 166, 255, .05);
+}
+.supervisor-chevron {
+  display: inline-block;
+  width: 12px;
+  color: var(--text-dim);
+}
+.supervisor-muted {
+  color: var(--text-dim);
+}
 .supervisor-row:hover,
 .supervisor-row.selected,
 .supervisor-card:hover,
@@ -9636,7 +9655,9 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.supervisor-card .supervisor-detail-toggle { margin-top: 8px; }
+.supervisor-card-actions {
+  margin-top: 8px;
+}
 .supervisor-card-details {
   margin-top: 8px;
   padding-top: 8px;

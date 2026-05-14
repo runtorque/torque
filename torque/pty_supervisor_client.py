@@ -171,8 +171,22 @@ class PtySupervisorClient:
     async def close_session(self, session_id: str) -> dict:
         return await self.call("close", session_id=session_id)
 
-    async def list_sessions(self) -> list:
+    async def list_state(self) -> dict:
+        """Return the raw list-state payload from the supervisor.
+
+        ``list_sessions`` preserves the original list-only API for callers
+        that only care about PTY rows. Newer diagnostics also need the
+        top-level supervisor process metadata exposed by the same wire op.
+        """
         result = await self.call("list")
+        return {
+            "type": result.get("type"),
+            "supervisor": dict(result.get("supervisor") or {}),
+            "sessions": list(result.get("sessions") or []),
+        }
+
+    async def list_sessions(self) -> list:
+        result = await self.list_state()
         return list(result.get("sessions") or [])
 
     async def subscribe(
