@@ -66,6 +66,10 @@ class ITerm2BridgeCore:
                 tab = app.current_window.current_tab
                 if tab and tab.current_session:
                     self.state.active_session_id = tab.current_session.session_id
+                    self.state.sync_ui_selection_to_session(
+                        self.state.active_session_id,
+                        emit=False,
+                    )
         except Exception:
             log.debug("Could not seed current_window/session at startup")
 
@@ -1032,6 +1036,9 @@ class ITerm2BridgeCore:
                     if update.active_session_changed:
                         self.state.active_session_id = (
                             update.active_session_changed.session_id)
+                        self.state.sync_ui_selection_to_session(
+                            self.state.active_session_id,
+                        )
                         changed = True
                     if changed:
                         self.state._emit("focus_update",

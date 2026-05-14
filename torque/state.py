@@ -1461,6 +1461,56 @@ class MatrixState:
             return None
         return cell
 
+    def selected_agent_id_for_session(self, session_id: str) -> str:
+        """Return the selectable parent agent for a terminal session."""
+        sid = str(session_id or "").strip()
+        if not sid:
+            return ""
+        for cell in self.iter_active_agents():
+            if cell.session_id != sid:
+                continue
+            if cell.cell_type == "terminal":
+                parent = self.get_active_agent(cell.parent_id)
+                return parent.id if parent else ""
+            return cell.id
+        return ""
+
+    def sync_ui_selection_to_session(
+        self,
+        session_id: str,
+        *,
+        emit: bool = True,
+        persist: bool = True,
+    ) -> str:
+        """Mirror a known focused terminal session into persisted UI state."""
+        selected_id = self.selected_agent_id_for_session(session_id)
+        if not selected_id:
+            return ""
+        cell = self.get_active_agent(selected_id)
+        if not cell:
+            return ""
+        if self.selected_agent_id != selected_id:
+            self.selected_agent_id = selected_id
+            if emit:
+                self._emit(
+                    "ui_update",
+                    key="selected_agent_id",
+                    value=self.selected_agent_id,
+                )
+            if persist:
+                self._db_save_ui("selected_agent_id", self.selected_agent_id)
+        if cell.group and self.active_group != cell.group:
+            self.active_group = cell.group
+            if emit:
+                self._emit(
+                    "ui_update",
+                    key="active_group",
+                    value=self.active_group,
+                )
+            if persist:
+                self._db_save_ui("active_group", self.active_group)
+        return selected_id
+
     # -- Delta emission -----------------------------------------------------
 
     def _emit(self, op: str, **kwargs):

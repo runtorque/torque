@@ -20599,6 +20599,46 @@ test('full-state hydration mirrors persisted selected_agent_id for detached Agen
   assert.equal(jsonValue(context, `focusedItemId`), 'agent-1');
 });
 
+test('full-state hydration selects the parent agent for a restored child terminal session', () => {
+  const { context } = createStandaloneWsSyncHarness();
+  runInContext(context, `
+    _panelStateRestored = false;
+    selectedAgentId = null;
+    selectedTerminalId = null;
+    focusedItemId = null;
+  `);
+
+  context._handleFullState({
+    seq: 1,
+    runtime: { embedded_terminal: true },
+    agents: {
+      'agent-1': { id: 'agent-1', name: 'Agent One', group: 'alpha', cell_type: 'agent' },
+      'term-1': {
+        id: 'term-1',
+        name: 'Shell',
+        group: 'alpha',
+        cell_type: 'terminal',
+        parent_id: 'agent-1',
+        session_id: 'sess-term-1',
+      },
+      'agent-2': { id: 'agent-2', name: 'Agent Two', group: 'alpha', cell_type: 'agent' },
+    },
+    groups: { alpha: ['agent-1', 'term-1', 'agent-2'] },
+    children: { 'agent-1': ['term-1'], 'agent-2': [] },
+    board_lanes: ['Backlog'],
+    board_tasks: {},
+    panel_events: [],
+    active_session_id: 'sess-term-1',
+    selected_agent_id: 'agent-2',
+    standalone_panel_layout: {},
+  });
+
+  assert.equal(jsonValue(context, `selectedAgentId`), 'agent-1');
+  assert.equal(jsonValue(context, `focusedItemId`), 'term-1');
+  assert.equal(jsonValue(context, `selectedTerminalId`), 'term-1');
+  assert.equal(jsonValue(context, `state.selected_agent_id`), 'agent-1');
+});
+
 test('full-state hydration preserves persisted active group over stale selected agent', () => {
   const { context } = createAttachedStandaloneWsSyncHarness();
   runInContext(context, `

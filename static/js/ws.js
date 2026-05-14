@@ -36,6 +36,15 @@ function _selectedAgentRecord(agentId) {
   return agent;
 }
 
+function _selectedAgentRootRecord(cell) {
+  if (!cell) return null;
+  if (cell.cell_type === 'terminal') {
+    if (!cell.parent_id) return null;
+    return _selectedAgentRecord(cell.parent_id);
+  }
+  return _selectedAgentRecord(cell.id);
+}
+
 function _selectedAgentFocusId(agent) {
   if (!agent || !agent.id) return '';
   // Architect agents render as principal cards in the main grid. Using the
@@ -45,6 +54,25 @@ function _selectedAgentFocusId(agent) {
     return 'principal:' + (agent.group || '') + ':' + agent.id;
   }
   return agent.id || '';
+}
+
+function _selectedAgentSelectionForActiveSession() {
+  if (!state || !state.active_session_id || !state.agents) return null;
+  for (const [id, cell] of Object.entries(state.agents)) {
+    if (typeof _isTombstonedAgent === 'function' && _isTombstonedAgent(cell)) continue;
+    if (cell.session_id !== state.active_session_id) continue;
+    var root = _selectedAgentRootRecord(cell);
+    if (!root) return null;
+    return {
+      agentId: root.id || '',
+      terminalId: id,
+      cell: cell,
+      focusId: cell.cell_type === 'terminal'
+        ? id
+        : (_selectedAgentFocusId(root) || root.id || ''),
+    };
+  }
+  return null;
 }
 
 function _syncActiveGroupToSelectedAgent(agent, opts) {
@@ -68,12 +96,19 @@ function _syncActiveGroupToSelectedAgent(agent, opts) {
 
 function _applySelectedAgentFromServer(agentId, opts) {
   opts = opts || {};
-  var nextSelectedAgentId = String(agentId || '').trim();
-  var agent = _selectedAgentRecord(nextSelectedAgentId);
+  var requestedAgentId = String(agentId || '').trim();
+  var requestedCell = _selectedAgentRecord(requestedAgentId);
+  var agent = _selectedAgentRootRecord(requestedCell);
   if (agent) {
+    var nextSelectedAgentId = agent.id || '';
     if (state) state.selected_agent_id = nextSelectedAgentId;
     selectedAgentId = nextSelectedAgentId;
-    focusedItemId = _selectedAgentFocusId(agent) || nextSelectedAgentId;
+    if (requestedCell && requestedCell.cell_type === 'terminal') {
+      selectedTerminalId = requestedCell.id || requestedAgentId;
+      focusedItemId = requestedCell.id || (_selectedAgentFocusId(agent) || nextSelectedAgentId);
+    } else {
+      focusedItemId = _selectedAgentFocusId(agent) || nextSelectedAgentId;
+    }
     if (opts.syncGroup !== false) _syncActiveGroupToSelectedAgent(agent, opts);
     return nextSelectedAgentId;
   }
@@ -630,7 +665,19 @@ function _handleFullState(msg) {
       _writeStoredActiveGroup(persistedActiveGroup);
     }
   }
-  if (state.selected_agent_id
+  var activeSessionSelection = _selectedAgentSelectionForActiveSession();
+  var preferActiveTerminalSelection = !!(
+    activeSessionSelection
+    && activeSessionSelection.agentId
+    && activeSessionSelection.cell
+    && activeSessionSelection.cell.cell_type === 'terminal'
+  );
+  if (preferActiveTerminalSelection) {
+    restoredSelectedAgentId = _applySelectedAgentFromServer(
+      activeSessionSelection.terminalId || activeSessionSelection.agentId,
+      { syncGroup: true, persist: false },
+    );
+  } else if (state.selected_agent_id
       && state.agents
       && state.agents[state.selected_agent_id]
       && !(typeof _isTombstonedAgent === 'function'
