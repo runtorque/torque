@@ -16921,6 +16921,7 @@ test('agent grid group tabs render standalone controls and switch active group',
   assert.match(tabsHtml, /role="tablist" aria-label="Groups"/);
   assert.match(tabsHtml, /class="agent-group-tab active"[\s\S]*title="alpha"[\s\S]*alpha/);
   assert.match(tabsHtml, /onGroupTabClick\(&quot;alpha&quot;, event\)/);
+  assert.match(tabsHtml, /oncontextmenu="onGroupTabContextMenu\(event, &quot;alpha&quot;\)"/);
   assert.match(tabsHtml, /title="beta"[\s\S]*beta/);
   assert.match(tabsHtml, /\+ New Group/);
   assert.match(tabsHtml, /title="Group settings"/);
@@ -16954,6 +16955,50 @@ test('agent grid group tabs render standalone controls and switch active group',
   tabsHtml = runInContext(context, `_renderAgentGroupTabsHtml()`);
   assert.equal(jsonValue(context, `state.active_group`), 'gamma');
   assert.match(tabsHtml, /class="agent-group-tab active"[\s\S]*title="gamma"[\s\S]*gamma/);
+});
+
+test('group tab context menu offers settings for the clicked group', () => {
+  const { context, document } = createSelectionHarness();
+  const menu = document.register('ctx-menu');
+  context.window.innerWidth = 160;
+  context.window.innerHeight = 100;
+  menu.getBoundingClientRect = () => ({
+    top: 20,
+    bottom: 80,
+    left: 150,
+    right: 210,
+    width: 120,
+    height: 60,
+  });
+  context.state.groups = { alpha: [], beta: [] };
+  let prevented = false;
+  let stopped = false;
+
+  context.onGroupTabContextMenu({
+    preventDefault() { prevented = true; },
+    stopPropagation() { stopped = true; },
+    clientX: 150,
+    clientY: 20,
+  }, 'beta');
+
+  assert.equal(prevented, true);
+  assert.equal(stopped, true);
+  assert.equal(menu.classList.contains('open'), true);
+  assert.match(menu.innerHTML, /Group settings/);
+  assert.match(menu.innerHTML, /openGroupSettings\(&quot;beta&quot;\)/);
+  assert.equal(menu.style.left, '36px');
+  assert.equal(menu.style.top, '20px');
+
+  menu.classList.remove('open');
+  menu.innerHTML = '';
+  context.onGroupTabContextMenu({
+    preventDefault() {},
+    stopPropagation() {},
+    clientX: 12,
+    clientY: 24,
+  }, 'missing');
+  assert.equal(menu.classList.contains('open'), false);
+  assert.equal(menu.innerHTML, '');
 });
 
 test('standalone group tabs render above the agent grid scroll pane', () => {

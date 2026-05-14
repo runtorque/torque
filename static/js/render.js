@@ -403,7 +403,8 @@ function _renderAgentGroupTabsHtml() {
       + ' role="tab"'
       + ' aria-selected="' + (selected ? 'true' : 'false') + '"'
       + ' title="' + esc(group) + '"'
-      + ' onclick="onGroupTabClick(' + _jsStringAttr(group) + ', event)">'
+      + ' onclick="onGroupTabClick(' + _jsStringAttr(group) + ', event)"'
+      + ' oncontextmenu="onGroupTabContextMenu(event, ' + _jsStringAttr(group) + ')">'
       + '<span class="agent-group-tab-name">' + esc(group) + '</span>'
       + '<span class="agent-group-tab-count">' + count + '</span>'
       + '</button>';
