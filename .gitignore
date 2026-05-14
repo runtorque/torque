@@ -1,11 +1,8 @@
 __pycache__/
 *.pyc
-.torque/worktrees/
-.torque/torque-system-prompt-*.md
-.torque/engineer-system-prompt-*.md
-.torque/pty_supervisor.sock
-.torque/pty_supervisor.pid
-.torque/pty_supervisor.log
+.torque/*
+!.torque/actions/
+!.torque/actions/**
 *.log
 .DS_Store
 state.json
