@@ -810,6 +810,7 @@ main {
   color: var(--text-dim);
   background: transparent;
   font-size: 10px;
+  cursor: pointer;
   transition: background .15s, border-color .15s, color .15s;
 }
 .agent-group-tab:hover {
