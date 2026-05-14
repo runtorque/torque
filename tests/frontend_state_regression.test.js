@@ -15317,7 +15317,7 @@ test('rendered add-agent templates apply model and reasoning effort overrides', 
   assert.equal(document.getElementById('add-reasoning-effort').value, 'high');
 });
 
-test('standalone submitGroup immediately continues into add-agent setup', () => {
+test('standalone submitGroup immediately opens the new group settings', () => {
   const { context, document } = createModalHarness();
   document.register('group-name-input').value = 'Demo';
   document.register('modal-group');
@@ -15331,14 +15331,20 @@ test('standalone submitGroup immediately continues into add-agent setup', () => 
 
   context.submitGroup();
 
-  assert.deepEqual(jsonValue(context, 'sendCalls[0]'), {
-    cmd: 'add_group',
-    group: 'Demo',
-  });
-  assert.deepEqual(context.openAddAgentCalls, ['Demo']);
+  assert.deepEqual(JSON.parse(JSON.stringify(context.sendCalls)), [
+    {
+      cmd: 'add_group',
+      group: 'Demo',
+    },
+    {
+      cmd: 'get_group_settings',
+      group: 'Demo',
+    },
+  ]);
+  assert.deepEqual(context.openAddAgentCalls, []);
 });
 
-test('classic submitGroup keeps the existing single-step flow', () => {
+test('classic submitGroup immediately opens the new group settings', () => {
   const { context, document } = createModalHarness();
   document.register('group-name-input').value = 'Demo';
   document.register('modal-group');
@@ -15350,10 +15356,16 @@ test('classic submitGroup keeps the existing single-step flow', () => {
 
   context.submitGroup();
 
-  assert.deepEqual(jsonValue(context, 'sendCalls[0]'), {
-    cmd: 'add_group',
-    group: 'Demo',
-  });
+  assert.deepEqual(JSON.parse(JSON.stringify(context.sendCalls)), [
+    {
+      cmd: 'add_group',
+      group: 'Demo',
+    },
+    {
+      cmd: 'get_group_settings',
+      group: 'Demo',
+    },
+  ]);
   assert.deepEqual(context.openAddAgentCalls, []);
 });
 
