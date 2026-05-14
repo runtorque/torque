@@ -144,6 +144,7 @@ class ITerm2BridgeCore:
                     cell.status = "idle"
                 else:
                     cell.status = "running" if cell.command else "idle"
+                self._prime_reconnected_input_ready(cell)
                 log.info("Reconnected '%s' [%s] → session %s (window %s, "
                          "status=%s)",
                          cell.name, cell.group, sid, window.window_id,
@@ -266,6 +267,12 @@ class ITerm2BridgeCore:
         """Mark a session as ready for immediate input delivery."""
         if session_id:
             self._input_ready_sessions.add(session_id)
+
+    def _prime_reconnected_input_ready(self, cell: AgentCell) -> None:
+        sid = cell.session_id or ""
+        if sid and cell.agent_type:
+            self._input_ready_events.pop(cell.id, None)
+            self.prime_input_ready(sid)
 
     async def register_web_view_tool(self, *, display_name: str,
                                      identifier: str, url: str,
