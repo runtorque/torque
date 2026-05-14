@@ -459,7 +459,7 @@ test('supervisor taskbar CSS and panel-manager registration are bounded to stand
   assert.match(panelManager, /_standalonePanelApps = \[[^\]]*'supervisor'/);
   assert.match(panelManager, /supervisor:\s*'Supervisor'/);
   assert.match(panelManager, /supervisor:\s*'bottom'/);
-  assert.match(panelManager, /tabs:\s*\['actions', 'templates', 'context', 'events'\]/);
+  assert.match(panelManager, /tabs:\s*\['actions', 'templates', 'history', 'context', 'events'\]/);
   assert.match(main, /'panel-supervisor'/);
   assert.match(render, /surface === 'supervisor'/);
   assert.match(ws, /msg\.type === 'supervisor_sessions'[\s\S]*supervisorReceiveSessions\(msg\)/);

@@ -1,10 +1,11 @@
 /* Standalone-only panel workspace manager */
 
-var _standalonePanelApps = ['board', 'actions', 'templates', 'context', 'events', 'engineer', 'supervisor'];
+var _standalonePanelApps = ['board', 'actions', 'templates', 'history', 'context', 'events', 'engineer', 'supervisor'];
 var _standalonePanelTitles = {
   board: 'Board',
   actions: 'Actions',
   templates: 'Library',
+  history: 'History',
   context: 'Context',
   events: 'Events',
   engineer: 'Agent',
@@ -14,6 +15,7 @@ var _standalonePanelDefaults = {
   board: 'bottom',
   actions: 'right',
   templates: 'right',
+  history: 'right',
   context: 'right',
   events: 'right',
   engineer: 'bottom',
@@ -431,7 +433,7 @@ function _standaloneDefaultLayout() {
     right: {
       open: true,
       size: _standaloneDefaultRightSize(),
-      tabs: ['actions', 'templates', 'context', 'events'],
+      tabs: ['actions', 'templates', 'history', 'context', 'events'],
       active: 'context',
     },
     floats: {},

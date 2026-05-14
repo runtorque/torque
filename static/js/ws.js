@@ -1722,13 +1722,13 @@ function _applyAgentSurfaceInvalidation(flags, op, hint) {
 
 function _applyUiSurfaceInvalidation(flags, key) {
   if (key === 'standalone_panel_layout') {
-    _markSurface(flags, 'board', 'actions', 'context', 'events', 'engineer', 'templates');
+    _markSurface(flags, 'board', 'actions', 'context', 'events', 'engineer', 'templates', 'history');
   }
   if (key === 'active_group') {
-    _markSurface(flags, 'main', 'board', 'actions', 'context', 'events', 'engineer', 'templates');
+    _markSurface(flags, 'main', 'board', 'actions', 'context', 'events', 'engineer', 'templates', 'history');
   }
   if (key === 'workspace_sidebar_width') {
-    _markSurface(flags, 'main', 'board', 'actions', 'context', 'events', 'engineer', 'templates');
+    _markSurface(flags, 'main', 'board', 'actions', 'context', 'events', 'engineer', 'templates', 'history');
   }
   if (key === 'context_panel_split_ratio') {
     _markSurface(flags, 'context');

@@ -1019,6 +1019,7 @@ function _surfacePanelApp(surface) {
   if (surface === 'events') return 'events';
   if (surface === 'engineer') return 'engineer';
   if (surface === 'templates') return 'templates';
+  if (surface === 'history') return 'history';
   if (surface === 'supervisor') return 'supervisor';
   return '';
 }
@@ -1044,6 +1045,7 @@ function _renderSurface(surface) {
   if (surface === 'actions' && typeof renderTemplatesPanel === 'function') renderTemplatesPanel();
   if (surface === 'context' && typeof renderContextPanel === 'function') renderContextPanel();
   if (surface === 'events' && typeof renderEvents === 'function') renderEvents();
+  if (surface === 'history' && typeof renderHistoryPanel === 'function') renderHistoryPanel();
   if (surface === 'engineer' && typeof renderAgentPanel === 'function') {
     // Prefer the surgical in-place tab refresh — clobbers only
     // `.agent-panel-content` (with focus/selection capture+restore around
