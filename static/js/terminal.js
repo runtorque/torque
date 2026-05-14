@@ -328,6 +328,13 @@ function _renderTerminalTabs(cells, activeId) {
   return html;
 }
 
+function _terminalShouldShowTabs(cells) {
+  // Keep the tab bar visible even for a single session so New/Close tab
+  // affordances have a stable home and adding a second session does not shift
+  // the terminal layout. With zero live cells there is still nothing to tab.
+  return Array.isArray(cells) && cells.length > 0;
+}
+
 function _terminalComposeDomId(cellId) {
   const safe = String(cellId || '')
     .replace(/[^A-Za-z0-9_-]+/g, '-')
@@ -1430,7 +1437,7 @@ function renderTerminalWorkspace() {
     onclick: 'relaunchAgent(\'' + esc(cell.id) + '\')',
   } : null;
   const topbarAction = cell ? (cell.session_id ? primaryAction : relaunchAction) : null;
-  const showTabs = cells.length > 0;
+  const showTabs = _terminalShouldShowTabs(cells);
   const displayPath = _terminalDisplayPath(cell);
   const dom = _ensureTerminalWorkspaceDom(root);
   const workspaceState = _captureTerminalWorkspaceState(root, cell);
