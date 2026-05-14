@@ -11668,6 +11668,54 @@ async def main(connection=None):
                     state.context_panel_split_ratio,
                 )
 
+            elif cmd == "ui_set_supervisor_panel_state":
+                raw = data.get("state", {})
+                if not isinstance(raw, dict):
+                    result = {
+                        "type": "error",
+                        "message": "Invalid supervisor panel state",
+                    }
+                else:
+                    sort_key = str(raw.get("sortKey", "") or "")
+                    if sort_key not in {
+                        "state", "owner", "session", "pid",
+                        "command", "bytes", "tty", "path",
+                    }:
+                        sort_key = "owner"
+                    sort_direction = str(
+                        raw.get("sortDirection", "") or ""
+                    )
+                    if sort_direction not in {"asc", "desc"}:
+                        sort_direction = "asc"
+                    try:
+                        scroll_pos = max(
+                            0,
+                            int(float(raw.get("scrollPos", 0) or 0)),
+                        )
+                    except (TypeError, ValueError):
+                        scroll_pos = 0
+                    state.supervisor_panel_state = {
+                        "autoRefresh": bool(raw.get("autoRefresh", True)),
+                        "sortKey": sort_key,
+                        "sortDirection": sort_direction,
+                        "selectedSessionId": str(
+                            raw.get("selectedSessionId", "") or ""
+                        ),
+                        "expandedSessionId": str(
+                            raw.get("expandedSessionId", "") or ""
+                        ),
+                        "scrollPos": scroll_pos,
+                    }
+                    state._emit(
+                        "ui_update",
+                        key="supervisor_panel_state",
+                        value=state.supervisor_panel_state,
+                    )
+                    state._db_save_ui(
+                        "supervisor_panel_state",
+                        json.dumps(state.supervisor_panel_state),
+                    )
+
             elif cmd == "events_dismiss":
                 item_id = str(data.get("id", "") or "").strip()
                 if not item_id:

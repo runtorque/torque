@@ -23,6 +23,8 @@ var supervisorState = {
   scrollPos: 0,
 };
 var _supervisorUiStateRegistered = false;
+var _supervisorUiStateHydrated = false;
+var _supervisorSkipScrollCapture = false;
 
 function _supervisorUiState() {
   return {
@@ -36,7 +38,7 @@ function _supervisorUiState() {
 }
 
 function _supervisorApplyUiState(raw) {
-  if (!raw || typeof raw !== 'object') return;
+  if (!raw || typeof raw !== 'object') return false;
   var sortKeys = { state: true, owner: true, session: true, pid: true, command: true, bytes: true, tty: true, path: true };
   if (sortKeys[raw.sortKey]) supervisorState.sortKey = raw.sortKey;
   if (raw.sortDirection === 'desc' || raw.sortDirection === 'asc') supervisorState.sortDirection = raw.sortDirection;
@@ -44,6 +46,20 @@ function _supervisorApplyUiState(raw) {
   supervisorState.selectedSessionId = String(raw.selectedSessionId || '');
   supervisorState.expandedSessionId = String(raw.expandedSessionId || '');
   supervisorState.scrollPos = Math.max(0, Number(raw.scrollPos) || 0);
+  _supervisorUiStateHydrated = true;
+  _supervisorSkipScrollCapture = true;
+  return true;
+}
+
+function _supervisorPersistedUiState() {
+  if (typeof state !== 'undefined'
+      && state
+      && state.supervisor_panel_state
+      && typeof state.supervisor_panel_state === 'object'
+      && Object.keys(state.supervisor_panel_state).length > 0) {
+    return state.supervisor_panel_state;
+  }
+  return null;
 }
 
 function _supervisorUiShim(name) {
@@ -54,9 +70,9 @@ function _supervisorUiShim(name) {
 
 function _supervisorRegisterUiState() {
   if (_supervisorUiStateRegistered) return;
-  _supervisorUiStateRegistered = true;
   var register = _supervisorUiShim('registerPanelUiState') || _supervisorUiShim('_registerPanelUiState');
   if (!register) return;
+  _supervisorUiStateRegistered = true;
   var restored = register('supervisor', {
     key: 'supervisor_panel_state',
     getState: _supervisorUiState,
@@ -67,13 +83,28 @@ function _supervisorRegisterUiState() {
   if (get) _supervisorApplyUiState(get('supervisor'));
 }
 
-function _supervisorPersistUiState() {
+function _supervisorHydrateUiState() {
+  if (!_supervisorUiStateHydrated) _supervisorApplyUiState(_supervisorPersistedUiState());
   _supervisorRegisterUiState();
+}
+
+function _supervisorPersistUiState() {
+  var next = _supervisorUiState();
+  if (typeof state !== 'undefined' && state) state.supervisor_panel_state = next;
   var persist = _supervisorUiShim('persistPanelUiState') || _supervisorUiShim('_persistPanelUiState');
-  if (persist) persist('supervisor', _supervisorUiState());
+  if (persist) {
+    persist('supervisor', next);
+  } else if (typeof send === 'function') {
+    send({ cmd: 'ui_set_supervisor_panel_state', state: next });
+  }
 }
 
 _supervisorRegisterUiState();
+
+function supervisorApplyPersistedUiState(raw) {
+  _supervisorApplyUiState(raw);
+  if (_supervisorVisible()) renderSupervisorPanel({ force: true });
+}
 
 function _supervisorRoot() {
   return document.getElementById('panel-supervisor');
@@ -343,7 +374,10 @@ function renderSupervisorPanel(opts) {
   opts = opts || {};
   var root = _supervisorRoot();
   if (!root) return;
-  if (typeof root.scrollTop === 'number' && root.scrollTop !== supervisorState.scrollPos) {
+  _supervisorHydrateUiState();
+  if (_supervisorSkipScrollCapture) {
+    _supervisorSkipScrollCapture = false;
+  } else if (typeof root.scrollTop === 'number' && root.scrollTop !== supervisorState.scrollPos) {
     supervisorState.scrollPos = root.scrollTop;
     _supervisorPersistUiState();
   }
@@ -450,7 +484,7 @@ function supervisorReceiveSessions(msg) {
   supervisorState.requestInFlight = false;
   supervisorState.loading = false;
   supervisorState.requested = true;
-  var unavailable = msg.available === false || !!msg.error;
+  var unavailable = msg.available === false || !!msg.error || msg.type === 'error';
   supervisorState.available = unavailable ? false : !!msg.available;
   supervisorState.message = msg.message || '';
   supervisorState.error = msg.error || (unavailable ? (msg.message || 'PTY supervisor is unavailable.') : '');

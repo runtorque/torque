@@ -29,7 +29,7 @@ class FakeElement {
   }
 }
 
-function createSandbox({ visible = true, persistedSupervisorState = null } = {}) {
+function createSandbox({ visible = true, persistedSupervisorState = null, withUiShim = false } = {}) {
   const elements = new Map();
   function ensure(id) {
     if (!elements.has(id)) elements.set(id, new FakeElement(id));
@@ -38,9 +38,11 @@ function createSandbox({ visible = true, persistedSupervisorState = null } = {})
   ensure('panel-supervisor');
   const timers = [];
   const cleared = [];
-  let persistedPanelState = persistedSupervisorState;
   const sandbox = {
     console,
+    state: {
+      supervisor_panel_state: persistedSupervisorState || {},
+    },
     document: {
       getElementById(id) { return ensure(id); },
     },
@@ -56,18 +58,21 @@ function createSandbox({ visible = true, persistedSupervisorState = null } = {})
     clearTimeout(id) { cleared.push(id); },
     _panelAppVisible(app) { return app === 'supervisor' && visible; },
     __setVisible(next) { visible = !!next; },
-    registerPanelUiState(panel, adapter) {
+  };
+  if (withUiShim) {
+    let persistedPanelState = persistedSupervisorState;
+    sandbox.registerPanelUiState = function(panel, adapter) {
       sandbox.registeredPanelUiState = { panel, adapter };
       if (persistedPanelState && adapter && typeof adapter.setState === 'function') {
         adapter.setState(persistedPanelState);
       }
       return persistedPanelState;
-    },
-    persistPanelUiState(panel, value) {
+    };
+    sandbox.persistPanelUiState = function(panel, value) {
       persistedPanelState = JSON.parse(JSON.stringify(value));
       sandbox.persistedPanelState = { panel, value: persistedPanelState };
-    },
-  };
+    };
+  }
   sandbox.send = function(message) { sandbox.sendCalls.push(message); };
   sandbox.global = sandbox;
   sandbox.globalThis = sandbox;
@@ -244,7 +249,7 @@ test('supervisorReceiveSessions preserves selected row, expanded row, and scroll
   assert.match(ensure('panel-supervisor').innerHTML, /supervisor-detail-row/);
 });
 
-test('supervisor panel registers with UI-state persistence shim and restores sort state', () => {
+test('supervisor panel persists UI state and restores sort state from snapshot', () => {
   const first = createSandbox({ visible: true });
   const firstContext = vm.createContext(first.sandbox);
   loadSupervisor(firstContext);
@@ -256,8 +261,9 @@ test('supervisor panel registers with UI-state persistence shim and restores sor
     supervisorSetAutoRefresh(false);
   `, firstContext);
 
-  assert.equal(first.sandbox.registeredPanelUiState.panel, 'supervisor');
-  const persisted = first.sandbox.persistedPanelState.value;
+  const persistCalls = first.sandbox.sendCalls.filter((call) => call.cmd === 'ui_set_supervisor_panel_state');
+  assert.ok(persistCalls.length >= 1);
+  const persisted = first.sandbox.state.supervisor_panel_state;
   assert.equal(persisted.sortKey, 'bytes');
   assert.equal(persisted.sortDirection, 'desc');
   assert.equal(persisted.selectedSessionId, 's1');
@@ -267,6 +273,7 @@ test('supervisor panel registers with UI-state persistence shim and restores sor
   const second = createSandbox({ visible: true, persistedSupervisorState: persisted });
   const secondContext = vm.createContext(second.sandbox);
   loadSupervisor(secondContext);
+  vm.runInContext('renderSupervisorPanel({ force: true })', secondContext);
 
   assert.equal(vm.runInContext('supervisorState.sortKey', secondContext), 'bytes');
   assert.equal(vm.runInContext('supervisorState.sortDirection', secondContext), 'desc');
