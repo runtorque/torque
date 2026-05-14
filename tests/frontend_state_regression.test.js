@@ -8468,6 +8468,24 @@ test('terminal workspace stays inert when embedded runtime is disabled', () => {
   assert.equal(jsonValue(context, '_embeddedTerminalSessionKey'), '');
 });
 
+test('embedded terminal keeps visual inset on xterm so FitAddon rows match the visible viewport', () => {
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const surfaceRule = css.match(/^\.terminal-surface\s*\{[^}]*\}/m);
+  const xtermRule = css.match(/^\.terminal-surface \.xterm\s*\{[^}]*\}/m);
+  const runtimeSurfaceRule = css.match(/^body\.runtime-embedded \.terminal-surface\s*\{[^}]*\}/m);
+  const runtimeXtermRule = css.match(/^body\.runtime-embedded \.terminal-surface \.xterm\s*\{[^}]*\}/m);
+
+  assert.ok(surfaceRule, '.terminal-surface rule exists');
+  assert.ok(xtermRule, '.terminal-surface .xterm rule exists');
+  assert.ok(runtimeSurfaceRule, 'runtime .terminal-surface rule exists');
+  assert.ok(runtimeXtermRule, 'runtime .terminal-surface .xterm rule exists');
+  assert.match(surfaceRule[0], /padding:\s*0;/);
+  assert.match(xtermRule[0], /box-sizing:\s*border-box;/);
+  assert.match(xtermRule[0], /padding:\s*10px 8px;/);
+  assert.match(runtimeSurfaceRule[0], /padding:\s*0;/);
+  assert.match(runtimeXtermRule[0], /padding:\s*10px 8px;/);
+});
+
 test('embedded terminal compose renders only for standalone runtime and preserves drafts across rerenders', () => {
   const { context, document, sandbox } = createEmbeddedTerminalHarness({
     loadRenderHelpers: true,
