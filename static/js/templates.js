@@ -10,6 +10,34 @@ var _agentTplNew = false;
 var _agentTplScope = 'project';
 var _agentTplLoadedGroup = null;
 var _agentTplLoadingGroup = null;
+var _libraryActiveTab = 'roles';
+
+var _specializationList = [];
+var _specializationSelected = '';
+var _specializationData = null;
+var _specializationDirty = false;
+var _specializationNew = false;
+var _specializationScope = 'project';
+var _specializationLoadedGroup = null;
+var _specializationLoadingGroup = null;
+
+function _libraryTabsHtml() {
+  var rolesActive = _libraryActiveTab !== 'specializations';
+  return '<div class="tpled-view-toggle library-tab-toggle">'
+    + '<button class="tpled-view-btn' + (rolesActive ? ' active' : '') + '" onclick="librarySwitchTab(\'roles\')">Roles</button>'
+    + '<button class="tpled-view-btn' + (!rolesActive ? ' active' : '') + '" onclick="librarySwitchTab(\'specializations\')">Specializations</button>'
+    + '</div>';
+}
+
+function librarySwitchTab(tab) {
+  _libraryActiveTab = tab === 'specializations' ? 'specializations' : 'roles';
+  if (_libraryActiveTab === 'specializations') {
+    specializationLibraryEnsureLoaded();
+  } else {
+    agentTemplateEnsureLoaded();
+  }
+  renderAgentTemplatesPanel();
+}
 
 function _agentTplKey(t) {
   return (t.global ? 'user:' : 'project:') + t.name;
@@ -21,6 +49,10 @@ function _agentTplSelectedName() {
 }
 
 function agentTemplateEditorLoad() {
+  if (_libraryActiveTab === 'specializations') {
+    specializationLibraryLoad();
+    return;
+  }
   var group = _currentGroup();
   _agentTplLoadingGroup = group || '';
   send({ cmd: 'get_config', group: group });
@@ -28,6 +60,10 @@ function agentTemplateEditorLoad() {
 }
 
 function agentTemplateEnsureLoaded() {
+  if (_libraryActiveTab === 'specializations') {
+    specializationLibraryEnsureLoaded();
+    return;
+  }
   var group = _currentGroup() || '';
   if (_agentTplLoadedGroup === group || _agentTplLoadingGroup === group) return;
   agentTemplateEditorLoad();
@@ -42,6 +78,14 @@ function agentTemplateBeginGroupSwitch() {
     _agentTplDirty = false;
     _agentTplNew = false;
     _agentTplLoadedGroup = null;
+  }
+  if (_specializationLoadedGroup !== group) {
+    _specializationList = [];
+    _specializationSelected = '';
+    _specializationData = null;
+    _specializationDirty = false;
+    _specializationNew = false;
+    _specializationLoadedGroup = null;
   }
   agentTemplateEditorLoad();
   renderAgentTemplatesPanel();
@@ -65,6 +109,7 @@ function agentTemplateReceiveList(msg) {
     _agentTplSelected = '';
     _agentTplData = null;
   }
+  if (_libraryActiveTab === 'specializations') return;
   renderAgentTemplatesPanel();
   if (_agentTplSelected && !_agentTplNew) {
     send({
@@ -77,6 +122,7 @@ function agentTemplateReceiveList(msg) {
 }
 
 function agentTemplateReceiveDetail(msg) {
+  if (_libraryActiveTab === 'specializations') return;
   if (msg.name !== _agentTplSelectedName()) return;
   _agentTplData = msg.template || {};
   _agentTplDirty = false;
@@ -92,6 +138,11 @@ function agentsPanelSwitchView(view) {
     else if (typeof togglePanel === 'function') togglePanel('history');
     return;
   }
+  if (view === 'specializations') {
+    librarySwitchTab('specializations');
+    return;
+  }
+  _libraryActiveTab = 'roles';
   agentTemplateEnsureLoaded();
   renderAgentTemplatesPanel();
 }
@@ -99,6 +150,10 @@ function agentsPanelSwitchView(view) {
 function renderAgentTemplatesPanel() {
   var panel = document.getElementById('panel-templates');
   if (!panel) return;
+  if (_libraryActiveTab === 'specializations') {
+    renderSpecializationLibraryPanel();
+    return;
+  }
   var scopeGroup = (typeof _currentGroup === 'function' ? _currentGroup() : '') || '';
   var loadedForScope = _agentTplLoadedGroup === scopeGroup
     || (_agentTplLoadedGroup == null && _agentTplLoadingGroup !== scopeGroup);
@@ -110,6 +165,7 @@ function renderAgentTemplatesPanel() {
   html += '<div class="tpled-header-copy">';
   html += '<div class="tpled-header-title-row">';
   html += '<span class="tpled-header-title">Role Library</span>';
+  html += _libraryTabsHtml();
   html += '</div>';
   html += '<div class="tpled-header-subtitle">Roles for launching agents. Live agents stay in the left column.</div>';
   html += '</div>';
@@ -184,6 +240,31 @@ function agentTemplateNew() {
   if (inp) inp.focus();
 }
 
+function _librarySelectedMeta(list, key, scope) {
+  var idx = key.indexOf(':');
+  var name = idx >= 0 ? key.slice(idx + 1) : key;
+  var wantGlobal = scope === 'user';
+  for (var i = 0; i < (list || []).length; i++) {
+    var item = list[i] || {};
+    if (item.name === name && !!item.global === wantGlobal) return item;
+  }
+  return null;
+}
+
+function _librarySourcePathFromMeta(meta, fallbackName) {
+  meta = meta || {};
+  if (meta.path) return meta.path;
+  var dir = meta.dir || '';
+  var name = meta.name || fallbackName || '';
+  if (!dir || !name) return '';
+  return String(dir).replace(/\/+$/, '') + '/' + name + '.yaml';
+}
+
+function _agentTemplateSourcePath() {
+  var meta = _librarySelectedMeta(_agentTplList, _agentTplSelected, _agentTplScope);
+  return _librarySourcePathFromMeta(meta, _agentTplSelectedName());
+}
+
 function renderAgentTemplatesEditor() {
   var el = document.getElementById('agent-tpl-editor');
   if (!el) return;
@@ -215,6 +296,11 @@ function renderAgentTemplatesEditor() {
   html += '<option value="project"' + (_agentTplScope === 'project' ? ' selected' : '') + '>Project (.torque/roles/)</option>';
   html += '<option value="user"' + (_agentTplScope === 'user' ? ' selected' : '') + '>User (~/.torque/roles/)</option>';
   html += '</select>';
+  var sourcePath = _agentTemplateSourcePath();
+  if (sourcePath) {
+    html += '<label>Source path</label>';
+    html += '<input class="tpled-source-path" value="' + esc(sourcePath) + '" readonly>';
+  }
   html += '<label>Display name</label>';
   html += '<input id="agent-template-display" value="' + esc(d.display_name || '') + '" onchange="agentTemplateMarkDirty()" autocomplete="off">';
   html += '<label>Description</label>';
@@ -433,5 +519,290 @@ function agentTemplateDuplicate() {
   _agentTplDirty = true;
   renderAgentTemplatesPanel();
   var inp = document.getElementById('agent-template-name');
+  if (inp) { inp.focus(); inp.select(); }
+}
+
+function _specializationKey(s) {
+  return (s.global ? 'user:' : 'project:') + s.name;
+}
+
+function _specializationSelectedName() {
+  var idx = _specializationSelected.indexOf(':');
+  return idx >= 0 ? _specializationSelected.slice(idx + 1) : _specializationSelected;
+}
+
+function _specializationSourcePath() {
+  var meta = _librarySelectedMeta(
+    _specializationList,
+    _specializationSelected,
+    _specializationScope
+  );
+  return _librarySourcePathFromMeta(meta, _specializationSelectedName());
+}
+
+function specializationLibraryLoad() {
+  var group = _currentGroup();
+  _specializationLoadingGroup = group || '';
+  send({ cmd: 'list_specializations', group: group });
+}
+
+function specializationLibraryEnsureLoaded() {
+  var group = _currentGroup() || '';
+  if (_specializationLoadedGroup === group || _specializationLoadingGroup === group) return;
+  specializationLibraryLoad();
+}
+
+function specializationLibraryReceiveList(msg) {
+  var msgGroup = (msg && msg.group != null) ? (msg.group || '') : (_currentGroup() || '');
+  var currentGroup = _currentGroup() || '';
+  if (msgGroup !== currentGroup) {
+    if (_specializationLoadingGroup === msgGroup) _specializationLoadingGroup = null;
+    return;
+  }
+  _specializationLoadingGroup = null;
+  _specializationLoadedGroup = msgGroup;
+  _specializationList = msg.specializations || [];
+  if (msg.saved) {
+    var wantGlobal = _specializationScope === 'user';
+    var match = _specializationList.find(function(s) {
+      return s.name === msg.saved && !!s.global === wantGlobal;
+    }) || _specializationList.find(function(s) { return s.name === msg.saved; });
+    if (match) {
+      _specializationSelected = _specializationKey(match);
+      _specializationScope = match.global ? 'user' : 'project';
+    }
+  }
+  if (msg.deleted && _specializationSelectedName() === msg.deleted) {
+    _specializationSelected = '';
+    _specializationData = null;
+  }
+  if (_libraryActiveTab !== 'specializations') return;
+  renderAgentTemplatesPanel();
+  if (_specializationSelected && !_specializationNew) {
+    send({
+      cmd: 'get_specialization',
+      name: _specializationSelectedName(),
+      group: _currentGroup(),
+      scope: _specializationScope,
+    });
+  }
+}
+
+function specializationLibraryReceiveDetail(msg) {
+  if (_libraryActiveTab !== 'specializations') return;
+  if (msg.name !== _specializationSelectedName()) return;
+  _specializationData = msg.specialization || {};
+  _specializationDirty = false;
+  _specializationNew = false;
+  renderSpecializationLibraryEditor();
+}
+
+function renderSpecializationLibraryPanel() {
+  var panel = document.getElementById('panel-templates');
+  if (!panel) return;
+  var scopeGroup = (typeof _currentGroup === 'function' ? _currentGroup() : '') || '';
+  var loadedForScope = _specializationLoadedGroup === scopeGroup
+    || (_specializationLoadedGroup == null && _specializationLoadingGroup !== scopeGroup);
+  var listForScope = loadedForScope ? _specializationList : [];
+  var selectedForScope = loadedForScope ? _specializationSelected : '';
+
+  var html = '';
+  html += '<div class="tpled-header">';
+  html += '<div class="tpled-header-copy">';
+  html += '<div class="tpled-header-title-row">';
+  html += '<span class="tpled-header-title">Specializations</span>';
+  html += _libraryTabsHtml();
+  html += '</div>';
+  html += '<div class="tpled-header-subtitle">Engineer routing hints and preambles for architect-created tasks.</div>';
+  html += '</div>';
+  html += '<div class="tpled-header-controls">';
+  html += '<select class="tpled-select" id="specialization-select" onchange="specializationLibrarySelect(this.value)">';
+  html += '<option value="">Select\u2026</option>';
+  var project = listForScope.filter(function(s) { return !s.global; });
+  var user = listForScope.filter(function(s) { return s.global; });
+  if (project.length) {
+    html += '<optgroup label="Project">';
+    for (var i = 0; i < project.length; i++) {
+      var key = _specializationKey(project[i]);
+      html += '<option value="' + esc(key) + '"' + (key === selectedForScope ? ' selected' : '') + '>'
+        + esc(project[i].name) + '</option>';
+    }
+    html += '</optgroup>';
+  }
+  if (user.length) {
+    html += '<optgroup label="User">';
+    for (var j = 0; j < user.length; j++) {
+      var ukey = _specializationKey(user[j]);
+      var suffix = user[j].shadowed ? ' (overridden)' : '';
+      html += '<option value="' + esc(ukey) + '"' + (ukey === selectedForScope ? ' selected' : '') + '>'
+        + esc(user[j].name) + suffix + '</option>';
+    }
+    html += '</optgroup>';
+  }
+  html += '</select>';
+  html += '<button class="tpled-new-btn" onclick="specializationLibraryNew()" title="New specialization">+</button>';
+  html += '<button class="tpled-new-btn" onclick="specializationLibraryLoad()" title="Refresh">&#x21BB;</button>';
+  html += '</div>';
+  html += '</div>';
+  html += '<div class="tpled-editor" id="specialization-editor"></div>';
+
+  panel.innerHTML = html;
+  renderSpecializationLibraryEditor();
+}
+
+function specializationLibrarySelect(key) {
+  if (!key) {
+    _specializationSelected = '';
+    _specializationData = null;
+    _specializationNew = false;
+    _specializationDirty = false;
+    renderSpecializationLibraryEditor();
+    return;
+  }
+  _specializationSelected = key;
+  var parts = key.split(':');
+  _specializationScope = parts[0] === 'user' ? 'user' : 'project';
+  _specializationNew = false;
+  _specializationData = null;
+  _specializationDirty = false;
+  renderAgentTemplatesPanel();
+  send({
+    cmd: 'get_specialization',
+    name: parts.slice(1).join(':'),
+    group: _currentGroup(),
+    scope: _specializationScope,
+  });
+}
+
+function specializationLibraryNew() {
+  _specializationSelected = '';
+  _specializationNew = true;
+  _specializationDirty = true;
+  _specializationScope = 'project';
+  _specializationData = { name: '', description: '', preamble: '', priorities: [] };
+  renderAgentTemplatesPanel();
+  var inp = document.getElementById('specialization-name');
+  if (inp) inp.focus();
+}
+
+function renderSpecializationLibraryEditor() {
+  var el = document.getElementById('specialization-editor');
+  if (!el) return;
+  var scopeGroup = (typeof _currentGroup === 'function' ? _currentGroup() : '') || '';
+  var loadedForScope = _specializationLoadedGroup === scopeGroup
+    || (_specializationLoadedGroup == null && _specializationLoadingGroup !== scopeGroup);
+  var listForScope = loadedForScope ? _specializationList : [];
+  var dataForScope = loadedForScope ? _specializationData : null;
+  var newForScope = loadedForScope ? _specializationNew : false;
+  if (!loadedForScope) {
+    el.innerHTML = '<div class="tpled-empty">Loading specializations\u2026</div>';
+    return;
+  }
+  if (!dataForScope && !newForScope) {
+    if (listForScope.length === 0) {
+      el.innerHTML = '<div class="tpled-empty">No specializations found.<br>Click <b>+</b> to create one,<br>or add <code>.yaml</code> files to <code>.torque/specializations/</code>.</div>';
+    } else {
+      el.innerHTML = '<div class="tpled-empty">Pick a specialization from the library above.</div>';
+    }
+    return;
+  }
+
+  var d = dataForScope || {};
+  var sourcePath = _specializationSourcePath();
+  var priorities = (d.priorities || []).join('\n');
+  var html = '<div class="tpled-form">';
+  html += '<label>Name <span class="label-req">*</span></label>';
+  html += '<input id="specialization-name" value="' + esc(d.name || '') + '" onchange="specializationLibraryMarkDirty()" autocomplete="off">';
+  html += '<label>Scope</label>';
+  html += '<select id="specialization-scope" onchange="specializationLibraryMarkDirty()">';
+  html += '<option value="project"' + (_specializationScope === 'project' ? ' selected' : '') + '>Project (.torque/specializations/)</option>';
+  html += '<option value="user"' + (_specializationScope === 'user' ? ' selected' : '') + '>User (~/.torque/specializations/)</option>';
+  html += '</select>';
+  if (sourcePath) {
+    html += '<label>Source path</label>';
+    html += '<input class="tpled-source-path" value="' + esc(sourcePath) + '" readonly>';
+  }
+  html += '<label>Description</label>';
+  html += '<input id="specialization-description" value="' + esc(d.description || '') + '" onchange="specializationLibraryMarkDirty()" autocomplete="off">';
+  html += '<label>Preamble</label>';
+  html += '<textarea id="specialization-preamble" rows="5" oninput="_tplAutoResize(this)" onchange="specializationLibraryMarkDirty()" placeholder="Behavior guidance injected into engineer prompts that carry this specialization.">' + esc(d.preamble || '') + '</textarea>';
+  html += '<label>Priorities <span class="label-hint">one per line</span></label>';
+  html += '<textarea id="specialization-priorities" rows="4" oninput="_tplAutoResize(this)" onchange="specializationLibraryMarkDirty()" placeholder="rerender hygiene&#10;test first">' + esc(priorities) + '</textarea>';
+  html += '<div class="tpled-actions">';
+  html += '<button class="btn-primary" onclick="specializationLibrarySave()">Save</button>';
+  html += '<button class="btn-cancel" onclick="specializationLibraryDuplicate()">Duplicate</button>';
+  if (!_specializationNew) html += '<button class="btn-cancel btn-danger" onclick="specializationLibraryDelete()">Delete</button>';
+  html += '</div>';
+  html += '</div>';
+  el.innerHTML = html;
+  el.querySelectorAll('textarea').forEach(_tplAutoResize);
+}
+
+function specializationLibraryMarkDirty() {
+  _specializationDirty = true;
+}
+
+function _specializationLibraryReadForm() {
+  var prioritiesRaw = document.getElementById('specialization-priorities').value || '';
+  var priorities = prioritiesRaw.split(/\n+/).map(function(line) {
+    return line.trim();
+  }).filter(Boolean);
+  return {
+    name: (document.getElementById('specialization-name').value || '').trim(),
+    description: (document.getElementById('specialization-description').value || '').trim(),
+    preamble: document.getElementById('specialization-preamble').value || '',
+    priorities: priorities,
+  };
+}
+
+function specializationLibrarySave() {
+  var data = _specializationLibraryReadForm();
+  var name = (data.name || '').replace(/[^a-zA-Z0-9_/.-]/g, '-').toLowerCase();
+  if (!name) {
+    document.getElementById('specialization-name').focus();
+    return;
+  }
+  data.name = name;
+  var oldName = _specializationSelectedName();
+  var newScope = document.getElementById('specialization-scope').value || 'project';
+  var msg = {
+    cmd: 'save_specialization',
+    name: name,
+    data: data,
+    scope: newScope,
+    group: _currentGroup(),
+  };
+  if (!_specializationNew && oldName && (oldName !== name || newScope !== _specializationScope)) {
+    msg.old_name = oldName;
+    msg.old_scope = _specializationScope;
+  }
+  _specializationSelected = newScope + ':' + name;
+  _specializationScope = newScope;
+  _specializationDirty = false;
+  _specializationNew = false;
+  send(msg);
+}
+
+function specializationLibraryDelete() {
+  var name = _specializationSelectedName();
+  showConfirm('Delete specialization "' + name + '"?').then(function(yes) {
+    if (!yes) return;
+    send({
+      cmd: 'delete_specialization',
+      name: name,
+      scope: _specializationScope,
+      group: _currentGroup(),
+    });
+  });
+}
+
+function specializationLibraryDuplicate() {
+  _specializationData = _specializationLibraryReadForm();
+  _specializationData.name = (_specializationData.name || 'specialization') + '-copy';
+  _specializationSelected = '';
+  _specializationNew = true;
+  _specializationDirty = true;
+  renderAgentTemplatesPanel();
+  var inp = document.getElementById('specialization-name');
   if (inp) { inp.focus(); inp.select(); }
 }

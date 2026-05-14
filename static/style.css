@@ -5849,6 +5849,11 @@ body.runtime-embedded .board-empty-action:focus-visible {
   font-family: var(--mono, monospace);
   line-height: 1.4;
 }
+.tpled-form .tpled-source-path {
+  color: var(--text-dim);
+  font-family: var(--mono, monospace);
+  font-size: 9px;
+}
 .tpled-priority-row {
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr) 20px;
@@ -6083,6 +6088,9 @@ body.runtime-embedded .board-empty-action:focus-visible {
   display: flex; gap: 1px; margin-left: auto;
   background: var(--border); border-radius: var(--radius);
   overflow: hidden; flex-shrink: 0;
+}
+.library-tab-toggle {
+  margin-left: 0;
 }
 .tpled-view-btn {
   font-size: 9px; padding: 2px 8px;

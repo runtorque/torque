@@ -432,8 +432,18 @@ function connect() {
       if (typeof renderGsEngineerSpecializations === 'function') {
         renderGsEngineerSpecializations();
       }
+      if (((typeof _panelAppVisible === 'function' && _panelAppVisible('templates'))
+          || (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'templates'))
+          && typeof specializationLibraryReceiveList === 'function') {
+        specializationLibraryReceiveList(msg);
+      }
     } else if (msg.type === 'specialization_detail') {
       state.specialization_detail = msg.specialization || null;
+      if (((typeof _panelAppVisible === 'function' && _panelAppVisible('templates'))
+          || (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'templates'))
+          && typeof specializationLibraryReceiveDetail === 'function') {
+        specializationLibraryReceiveDetail(msg);
+      }
     } else if (msg.type === 'engineer_specializations') {
       const agents = state.agents || {};
       const cell = agents[msg.engineer_id];

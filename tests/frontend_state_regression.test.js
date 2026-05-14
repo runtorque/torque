@@ -14882,6 +14882,93 @@ test('roles panel renders role fields and saves via save_role with blank priorit
   ]);
 });
 
+test('Library Specializations tab renders scopes, details, and source path', () => {
+  const { context, document, sandbox } = createTemplatesHarness();
+  const panel = document.getElementById('panel-templates');
+  const editor = document.register('specialization-editor');
+
+  runInContext(context, `
+    _libraryActiveTab = 'specializations';
+    _specializationLoadedGroup = 'alpha';
+    _specializationList = [
+      {
+        name: 'ui-ux',
+        description: 'UI focused',
+        preamble: 'Design for operators.',
+        priorities: ['rerender hygiene', 'accessibility'],
+        global: false,
+        dir: '/repo/.torque/specializations',
+        path: '/repo/.torque/specializations/ui-ux.yaml',
+      },
+      {
+        name: 'security',
+        global: true,
+        dir: '/home/me/.torque/specializations',
+        path: '/home/me/.torque/specializations/security.yaml',
+      },
+    ];
+    _specializationSelected = 'project:ui-ux';
+    _specializationScope = 'project';
+    _specializationData = {
+      name: 'ui-ux',
+      description: 'UI focused',
+      preamble: 'Design for operators.',
+      priorities: ['rerender hygiene', 'accessibility'],
+    };
+    renderAgentTemplatesPanel();
+  `);
+
+  assert.match(panel.innerHTML, /Specializations/);
+  assert.match(panel.innerHTML, /Roles<\/button>/);
+  assert.match(panel.innerHTML, /optgroup label="Project"/);
+  assert.match(panel.innerHTML, /optgroup label="User"/);
+  assert.doesNotMatch(panel.innerHTML, /History<\/button>/);
+  assert.match(editor.innerHTML, /Source path/);
+  assert.match(editor.innerHTML, /\/repo\/\.torque\/specializations\/ui-ux\.yaml/);
+  assert.match(editor.innerHTML, /Design for operators\./);
+  assert.match(editor.innerHTML, /rerender hygiene[\s\S]*accessibility/);
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), []);
+});
+
+test('Library Specializations tab loads and saves via specialization commands', () => {
+  const { context, document, sandbox } = createTemplatesHarness();
+  document.register('specialization-editor');
+
+  context.librarySwitchTab('specializations');
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
+    { cmd: 'list_specializations', group: 'alpha' },
+  ]);
+  sandbox.sendCalls.length = 0;
+
+  document.register('specialization-name').value = 'UX Focus';
+  document.register('specialization-scope').value = 'user';
+  document.register('specialization-description').value = 'User-facing flows';
+  document.register('specialization-preamble').value = 'Care about layout.';
+  document.register('specialization-priorities').value = 'rerender hygiene\n\naccessibility';
+  runInContext(context, `
+    _libraryActiveTab = 'specializations';
+    _specializationNew = true;
+    _specializationSelected = '';
+    _specializationScope = 'project';
+    specializationLibrarySave();
+  `);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
+    {
+      cmd: 'save_specialization',
+      name: 'ux-focus',
+      data: {
+        name: 'ux-focus',
+        description: 'User-facing flows',
+        preamble: 'Care about layout.',
+        priorities: ['rerender hygiene', 'accessibility'],
+      },
+      scope: 'user',
+      group: 'alpha',
+    },
+  ]);
+});
+
 test('task modal and add-agent labels rename template UI to role UI', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   assert.match(html, /<label>Role<\/label>\s*<select id="add-template-select"/);

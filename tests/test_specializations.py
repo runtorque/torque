@@ -75,6 +75,8 @@ class SpecializationManagerTests(unittest.TestCase):
         self.assertEqual(len(security_entries), 2)
         project_entry = next(e for e in security_entries if not e["global"])
         self.assertEqual(project_entry["description"], "project")
+        self.assertEqual(project_entry["path"],
+                         str(self.project_specs / "security.yaml"))
 
     def test_delete_removes_file(self):
         self.mgr.save_specialization(
