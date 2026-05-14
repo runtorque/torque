@@ -1009,9 +1009,90 @@ function _boardShortcutsEnabled() {
   return _activePanelApp === 'board';
 }
 
+function _textShortcutEditingTarget(target) {
+  if (!target || typeof target !== 'object') return null;
+  var tag = String(target.tagName || '').toLowerCase();
+  if (tag === 'textarea') return target;
+  if (tag === 'input') {
+    var type = String(target.type || 'text').toLowerCase();
+    if (type === 'button' || type === 'submit' || type === 'reset'
+        || type === 'checkbox' || type === 'radio' || type === 'file'
+        || type === 'image' || type === 'hidden' || type === 'color'
+        || type === 'range') {
+      return null;
+    }
+    return target;
+  }
+  if (target.isContentEditable) return target;
+  return null;
+}
+
+function _textShortcutSelectAll(target) {
+  if (!target) return false;
+  var tag = String(target.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea') {
+    if (typeof target.select === 'function') {
+      try {
+        target.select();
+        return true;
+      } catch (err) {
+        // Some input types expose select() but reject selection ranges.
+      }
+    }
+    if (typeof target.setSelectionRange === 'function'
+        && typeof target.value === 'string') {
+      try {
+        target.setSelectionRange(0, target.value.length);
+        return true;
+      } catch (err) {
+        return false;
+      }
+    }
+    return false;
+  }
+  if (target.isContentEditable && window.getSelection && document.createRange) {
+    var selection = window.getSelection();
+    var range = document.createRange();
+    range.selectNodeContents(target);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    return true;
+  }
+  return false;
+}
+
+function _runTextShortcutCommand(command, target) {
+  if (command === 'selectAll') return _textShortcutSelectAll(target);
+  if (!document.execCommand) return false;
+  try {
+    return !!document.execCommand(command, false, null);
+  } catch (err) {
+    return false;
+  }
+}
+
+function _handleTextEditingShortcut(e) {
+  if (!e || !e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return false;
+  var target = _textShortcutEditingTarget(e.target)
+    || _textShortcutEditingTarget(document.activeElement);
+  if (!target) return false;
+
+  var key = String(e.key || '').toLowerCase();
+  var command = '';
+  if (key === 'a' && !e.shiftKey) command = 'selectAll';
+  else if (key === 'z') command = e.shiftKey ? 'redo' : 'undo';
+  if (!command) return false;
+
+  if (!_runTextShortcutCommand(command, target)) return false;
+  e.preventDefault();
+  return true;
+}
+
 /* -- Main keyboard handler ----------------------------------------------- */
 
 document.addEventListener('keydown', (e) => {
+  if (_handleTextEditingShortcut(e)) return;
+
   // If a modal is open, only handle Escape/Enter
   if (document.querySelector('.overlay.visible')) {
     if (e.key === 'Escape') closeModals();

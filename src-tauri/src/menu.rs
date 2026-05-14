@@ -114,9 +114,14 @@ where
         .build()?;
 
     let edit = SubmenuBuilder::new(manager, "Edit")
+        .undo()
+        .redo()
+        .separator()
         .cut()
         .copy()
         .paste()
+        .separator()
+        .select_all()
         .build()?;
 
     let reload = menu_item(manager, MENU_RELOAD, "Reload")?;
@@ -179,9 +184,14 @@ where
         .build()?;
 
     let edit = SubmenuBuilder::new(manager, "Edit")
+        .undo()
+        .redo()
+        .separator()
         .cut()
         .copy()
         .paste()
+        .separator()
+        .select_all()
         .build()?;
 
     let reload = menu_item(manager, MENU_RELOAD, "Reload")?;

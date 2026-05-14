@@ -86,3 +86,12 @@ test('cheatsheet renders platform-aware shortcut labels', () => {
   context.navigator.platform = 'Linux x86_64';
   assert.equal(context._displayShortcut('CmdOrCtrl+Shift+/'), 'Ctrl+Shift+/');
 });
+
+test('Tauri Edit menus include native text editing commands', () => {
+  const source = fs.readFileSync(path.join(repoRoot, 'src-tauri/src/menu.rs'), 'utf8');
+
+  assert.equal((source.match(/\.undo\(\)/g) || []).length, 2);
+  assert.equal((source.match(/\.redo\(\)/g) || []).length, 2);
+  assert.equal((source.match(/\.select_all\(\)/g) || []).length, 2);
+  assert.match(source, /SubmenuBuilder::new\(manager, "Edit"\)[\s\S]*?\.undo\(\)[\s\S]*?\.redo\(\)[\s\S]*?\.cut\(\)[\s\S]*?\.copy\(\)[\s\S]*?\.paste\(\)[\s\S]*?\.select_all\(\)[\s\S]*?\.build\(\)\?/);
+});
