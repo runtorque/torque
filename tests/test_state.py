@@ -618,6 +618,113 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertNotIn(child.id, state.agents)
         self.assertNotIn(agent.id, state.groups["g"])
 
+    def test_remove_agent_tombstone_marks_history_removed_once(self):
+        from torque.db import TorqueDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = TorqueDB(Path(tmp.name) / "torque.db")
+        db.init()
+        self.addCleanup(db.close)
+
+        state = self.state_mod.MatrixState(db=db)
+        state.groups["g"] = []
+        agent = state.add_agent(name="Worker", group="g")
+        agent.session_tokens_in = 7
+        agent.session_tokens_out = 11
+        state.history_record_agent(agent)
+
+        state.remove_agent(agent.id)
+
+        rec = db.load_agent_history_detail(agent.id)
+        self.assertEqual(rec["status"], "removed")
+        self.assertTrue(rec["removed_at"])
+        self.assertEqual(rec["total_tokens_in"], 7)
+        self.assertEqual(rec["total_tokens_out"], 11)
+
+        agent.permanent_delete_after = 1
+        state.purge_tombstoned_agents(now=2)
+
+        rec = db.load_agent_history_detail(agent.id)
+        self.assertEqual(rec["status"], "removed")
+        self.assertEqual(rec["total_tokens_in"], 7)
+        self.assertEqual(rec["total_tokens_out"], 11)
+
+    def test_remove_agent_tombstone_preserves_merged_history_status(self):
+        from torque.db import TorqueDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = TorqueDB(Path(tmp.name) / "torque.db")
+        db.init()
+        self.addCleanup(db.close)
+
+        state = self.state_mod.MatrixState(db=db)
+        state.groups["g"] = []
+        agent = state.add_agent(name="Merged Worker", group="g")
+        state.history_record_agent(agent)
+        db.update_agent_history(agent.id, status="merged")
+
+        state.remove_agent(agent.id)
+
+        rec = db.load_agent_history_detail(agent.id)
+        self.assertEqual(rec["status"], "merged")
+        self.assertTrue(rec["removed_at"])
+
+    def test_load_reconciles_tombstoned_agent_history_status(self):
+        from torque.db import TorqueDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = TorqueDB(Path(tmp.name) / "torque.db")
+        db.init()
+        self.addCleanup(db.close)
+
+        agent = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            deleted_at=123,
+            permanent_delete_after=456,
+        )
+        db.save_agent(agent)
+        db.save_groups_and_members({"g": [agent.id]}, {"g": "g"})
+        db.save_agent_history({
+            "id": agent.id,
+            "name": agent.name,
+            "group": agent.group,
+            "created_at": 1,
+            "status": "active",
+        })
+
+        state = self.state_mod.MatrixState(db=db)
+        state.load()
+
+        rec = db.load_agent_history_detail(agent.id)
+        self.assertEqual(rec["status"], "removed")
+        self.assertTrue(rec["removed_at"])
+
+    def test_remove_group_marks_agent_history_removed(self):
+        from torque.db import TorqueDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = TorqueDB(Path(tmp.name) / "torque.db")
+        db.init()
+        self.addCleanup(db.close)
+
+        state = self.state_mod.MatrixState(db=db)
+        state.groups["g"] = []
+        agent = state.add_agent(name="Worker", group="g")
+        state.history_record_agent(agent)
+
+        state.remove_group("g")
+
+        rec = db.load_agent_history_detail(agent.id)
+        self.assertEqual(rec["status"], "removed")
+        self.assertTrue(rec["removed_at"])
+
     def test_remove_direct_terminal_hard_deletes_without_tombstone(self):
         state = self.state_mod.MatrixState()
         state.groups["g"] = []

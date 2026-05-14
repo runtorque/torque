@@ -2745,13 +2745,21 @@ class MatrixState:
             rec = self.db.load_agent_history_detail(cell.id)
             prev_in = rec["total_tokens_in"] if rec else 0
             prev_out = rec["total_tokens_out"] if rec else 0
-            self.db.update_agent_history(
-                cell.id,
-                removed_at=time.time(),
-                status="removed",
-                total_tokens_in=prev_in + cell.session_tokens_in,
-                total_tokens_out=prev_out + cell.session_tokens_out,
-            )
+            already_removed = bool(rec and rec.get("removed_at"))
+            fields = {
+                "removed_at": (rec or {}).get("removed_at") or time.time(),
+                "total_tokens_in": (
+                    prev_in if already_removed
+                    else prev_in + cell.session_tokens_in
+                ),
+                "total_tokens_out": (
+                    prev_out if already_removed
+                    else prev_out + cell.session_tokens_out
+                ),
+            }
+            if (rec or {}).get("status") != "merged":
+                fields["status"] = "removed"
+            self.db.update_agent_history(cell.id, **fields)
         except Exception:
             log.exception("Failed to update agent history on remove %s",
                           cell.id)
@@ -2874,6 +2882,23 @@ class MatrixState:
             )
         except Exception:
             log.exception("Failed to snapshot tokens %s", cell.id)
+
+    def history_reconcile_tombstoned_agents(self) -> int:
+        """Correct legacy history rows for tombstoned agents."""
+        if not self.db:
+            return 0
+        reconciled = 0
+        for cell in list(self.agents.values()):
+            if cell.cell_type != "agent" or not self.agent_is_tombstoned(cell):
+                continue
+            rec = self.db.load_agent_history_detail(cell.id)
+            if not rec:
+                continue
+            if rec.get("removed_at") and rec.get("status") != "active":
+                continue
+            self.history_remove_agent(cell)
+            reconciled += 1
+        return reconciled
 
     def load(self):
         from .config import DB_FILE, STATE_FILE
@@ -3010,6 +3035,12 @@ class MatrixState:
             for aid, cell in self.agents.items():
                 cell.pending_engineer_message = bool(
                     self.agent_pending_engineer_reply_tasks(aid)
+                )
+            reconciled_history = self.history_reconcile_tombstoned_agents()
+            if reconciled_history:
+                log.info(
+                    "Reconciled %d tombstoned agent history rows.",
+                    reconciled_history,
                 )
             # panel_active: new key; backward compat from board_panel_open
             pa = data.get("panel_active", "")
@@ -4840,6 +4871,8 @@ class MatrixState:
             self.engineer_settings.pop(name, None)
             self.engineer_worklog.pop(name, None)
             for r in removed:
+                if r.cell_type == "agent":
+                    self.history_remove_agent(r)
                 self.delete_agent_digest_settings(r.id)
             if self.db:
                 self.db.delete_engineer_settings(name)
@@ -5160,6 +5193,8 @@ class MatrixState:
             self._prepare_tombstoned_cell(target, now)
             self._emit_agent(target)
             self._db_save_agent(target)
+            if target.cell_type == "agent":
+                self.history_remove_agent(target)
 
         # Existing hard-delete semantics detached tasks from the deleted cell.
         # Keep that irreversible transfer at tombstone time so active routing
