@@ -597,6 +597,12 @@ function _terminalComposeCaretAtFirstLine(input) {
   return input.value.lastIndexOf('\n', Math.max(0, caret - 1)) < 0;
 }
 
+function _terminalComposeCaretAtLastLine(input) {
+  if (!input || typeof input.value !== 'string') return true;
+  const caret = _terminalComposeActiveSelection(input);
+  return input.value.indexOf('\n', caret) < 0;
+}
+
 function _terminalComposeHistoryNavigate(input, cellId, direction) {
   const id = String(cellId || '');
   const entries = _terminalMessageHistoryEntries(id);
@@ -1006,8 +1012,10 @@ function terminalComposeKeydown(evt, cellId) {
     const recall = id ? _terminalComposeRecall[id] : null;
     const recallActive = !!(recall && recall.index >= 0);
     const direction = evt.key === 'ArrowUp' ? -1 : 1;
-    const shouldRecall = recallActive || (
-      direction < 0 && _terminalComposeCaretAtFirstLine(input)
+    const shouldRecall = (
+      direction < 0
+        ? _terminalComposeCaretAtFirstLine(input)
+        : recallActive && _terminalComposeCaretAtLastLine(input)
     );
     if (shouldRecall && _terminalComposeHistoryNavigate(input, id, direction)) {
       if (typeof evt.preventDefault === 'function') evt.preventDefault();
