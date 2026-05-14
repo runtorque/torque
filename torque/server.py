@@ -9664,13 +9664,13 @@ async def main(connection=None):
                                                 worktree_mgr,
                                             )
                                         )
-                                queued_followups = [
+                                pre_merge_queued_followups = [
                                     t for t in state.board_tasks.values()
                                     if t.agent_id == cell.id
                                     and t.lane in {"Backlog", "To Do"}
                                 ]
                                 merge_resume_targets = []
-                                for followup in queued_followups:
+                                for followup in pre_merge_queued_followups:
                                     merge_resume_targets.extend(
                                         _capture_auto_resume_targets(
                                             state,
@@ -9743,6 +9743,11 @@ async def main(connection=None):
                                                 ).worktree_merge_cleanup
                                             )
                                         )
+                                    queued_followups = [
+                                        t for t in state.board_tasks.values()
+                                        if t.agent_id == cell.id
+                                        and t.lane in {"Backlog", "To Do"}
+                                    ]
                                     if queued_followups:
                                         close_flag = False
                                         remove_flag = False
