@@ -38,19 +38,23 @@ class ServerSupervisorTests(unittest.IsolatedAsyncioTestCase):
         cell.status = "running"
 
         class Bridge:
-            async def list_supervisor_sessions(self):
-                return [{
-                    "session_id": "sess-1",
-                    "cell_id": "cell-1",
-                    "pid": 123,
-                    "alive": True,
-                    "cols": 120,
-                    "rows": 32,
-                    "total_bytes": 1234567,
-                    "cwd": "/repo",
-                    "shell_argv": ["/bin/zsh", "-il"],
-                    "bootstrap_dir": "/tmp/bootstrap",
-                }]
+            async def list_supervisor_state(self):
+                return {
+                    "supervisor": {"pid": 999, "started_at": 1778343000.0},
+                    "sessions": [{
+                        "session_id": "sess-1",
+                        "cell_id": "cell-1",
+                        "pid": 123,
+                        "alive": True,
+                        "cols": 120,
+                        "rows": 32,
+                        "total_bytes": 1234567,
+                        "cwd": "/repo",
+                        "shell_argv": ["/bin/zsh", "-il"],
+                        "bootstrap_dir": "/tmp/bootstrap",
+                        "started_at": 1778343600.0,
+                    }],
+                }
 
         payload = await self.server_supervisor.build_supervisor_sessions_payload(
             Bridge(), state, self._runtime)
@@ -59,16 +63,22 @@ class ServerSupervisorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["mode"], "standalone")
         self.assertEqual(payload["terminal_backend"], "pty")
         self.assertEqual(payload["missing_fields"], [
-            "started_at", "exit_status", "input_bytes",
+            "exit_status", "input_bytes",
         ])
-        row = payload["sessions"][0]
+        supervisor = payload["sessions"][0]
+        self.assertEqual(supervisor["row_type"], "supervisor")
+        self.assertEqual(supervisor["pid"], 999)
+        self.assertEqual(supervisor["started_at"], 1778343000.0)
+        self.assertFalse(supervisor["terminable"])
+        row = payload["sessions"][1]
         self.assertEqual(row["display_command"], "codex")
         self.assertEqual(row["current_path"], "/repo/worktree")
         self.assertFalse(row["orphan"])
         self.assertEqual(row["owner"]["name"], "Worker A")
         self.assertEqual(row["owner"]["kind"], "worker")
-        self.assertIsNone(row["started_at"])
-        self.assertIn("started_at", row["missing_fields"])
+        self.assertEqual(row["started_at"], 1778343600.0)
+        self.assertNotIn("started_at", row["missing_fields"])
+        self.assertTrue(row["terminable"])
 
     async def test_orphan_when_owner_missing_or_session_mismatches(self):
         state = self.MatrixState()
@@ -125,6 +135,30 @@ class ServerSupervisorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["sessions"], [])
         self.assertIn("failed", payload["message"])
         self.assertEqual(payload["error"], "socket exploded")
+
+    async def test_terminate_payload_delegates_and_refreshes(self):
+        state = self.MatrixState()
+        calls = []
+
+        class Bridge:
+            async def terminate_supervisor_session(self, session_id):
+                calls.append(("terminate", session_id))
+
+            async def list_supervisor_state(self):
+                calls.append(("list", None))
+                return {
+                    "supervisor": {"pid": 999, "started_at": 1778343000.0},
+                    "sessions": [],
+                }
+
+        payload = await self.server_supervisor.build_supervisor_terminate_payload(
+            Bridge(), state, self._runtime, "sess-gone")
+
+        self.assertTrue(payload["available"])
+        self.assertEqual(payload["terminate_session_id"], "sess-gone")
+        self.assertEqual(payload["terminated_session_id"], "sess-gone")
+        self.assertEqual(calls, [("terminate", "sess-gone"), ("list", None)])
+        self.assertEqual(payload["sessions"][0]["row_type"], "supervisor")
 
 
 if __name__ == "__main__":

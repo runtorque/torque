@@ -47,6 +47,7 @@ function createSandbox({ visible = true, persistedSupervisorState = null, withUi
       getElementById(id) { return ensure(id); },
     },
     sendCalls: [],
+    confirmCalls: [],
     timers,
     cleared,
     Date,
@@ -74,6 +75,10 @@ function createSandbox({ visible = true, persistedSupervisorState = null, withUi
     };
   }
   sandbox.send = function(message) { sandbox.sendCalls.push(message); };
+  sandbox.showConfirm = function(message, opts) {
+    sandbox.confirmCalls.push({ message, opts });
+    return Promise.resolve(true);
+  };
   sandbox.global = sandbox;
   sandbox.globalThis = sandbox;
   return { sandbox, ensure };
@@ -95,6 +100,15 @@ test('supervisor panel renders alive and exited rows with humanized bytes', () =
     refreshed_at: 1778344000,
     sessions: [
       {
+        row_type: 'supervisor',
+        session_id: '__supervisor__',
+        pid: 87000,
+        alive: true,
+        started_at: 1778343000,
+        display_command: 'PTY supervisor',
+        terminable: false,
+      },
+      {
         session_id: '6d645f307fe64d03875ef72e6787ba66',
         cell_id: 'worker-a',
         pid: 87321,
@@ -102,6 +116,7 @@ test('supervisor panel renders alive and exited rows with humanized bytes', () =
         cols: 120,
         rows: 32,
         total_bytes: 1234567,
+        started_at: 1778343600,
         current_path: '/repo/.torque/worktrees/worker-a',
         display_command: 'codex',
         owner: { name: 'worker-a', group: 'Torque', kind: 'worker', status: 'running' },
@@ -114,6 +129,7 @@ test('supervisor panel renders alive and exited rows with humanized bytes', () =
         cols: 80,
         rows: 24,
         total_bytes: 45056,
+        started_at: 1778340000,
         cwd: '/repo',
         display_command: 'claude',
         owner: { name: 'old-worker', group: 'Torque', kind: 'worker', status: 'stopped' },
@@ -123,12 +139,103 @@ test('supervisor panel renders alive and exited rows with humanized bytes', () =
 
   const html = ensure('panel-supervisor').innerHTML;
   assert.match(html, /Supervisor/);
+  assert.match(html, /PTY supervisor/);
+  assert.match(html, /Started/);
   assert.match(html, /Alive/);
   assert.match(html, /Exited/);
   assert.match(html, /worker-a/);
   assert.match(html, /codex/);
   assert.match(html, /1\.2 MB/);
   assert.match(html, /44 KB/);
+  assert.match(html, /Terminate/);
+  assert.doesNotMatch(html, /supervisor-detail-toggle/);
+  assert.doesNotMatch(html, />Details</);
+});
+
+
+test('supervisor terminate confirms with owner and sends terminate command', async () => {
+  const { sandbox } = createSandbox({ visible: true });
+  const context = vm.createContext(sandbox);
+  loadSupervisor(context);
+
+  vm.runInContext(`supervisorReceiveSessions({
+    type: 'supervisor_sessions',
+    available: true,
+    sessions: [
+      {
+        row_type: 'supervisor', session_id: '__supervisor__', pid: 87000,
+        alive: true, started_at: 1778343000, display_command: 'PTY supervisor',
+        terminable: false,
+      },
+      {
+        session_id: 's-terminate', cell_id: 'worker-a', pid: 87321, alive: true,
+        started_at: 1778343600, cols: 120, rows: 32, total_bytes: 10,
+        display_command: 'codex', owner: { name: 'worker-a', group: 'Torque', kind: 'worker' },
+      },
+    ],
+  })`, context);
+
+  const accepted = await vm.runInContext(`supervisorTerminateSession('s-terminate')`, context);
+
+  assert.equal(accepted, true);
+  assert.equal(sandbox.confirmCalls.length, 1);
+  assert.match(sandbox.confirmCalls[0].message, /worker-a/);
+  assert.match(sandbox.confirmCalls[0].message, /pid 87321/);
+  assert.equal(sandbox.confirmCalls[0].opts.label, 'Terminate');
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls[sandbox.sendCalls.length - 1])), {
+    cmd: 'supervisor_session_terminate',
+    session_id: 's-terminate',
+  });
+});
+
+
+test('supervisor terminated response hides the closed row during drop grace period', () => {
+  const { sandbox, ensure } = createSandbox({ visible: true });
+  const context = vm.createContext(sandbox);
+  loadSupervisor(context);
+
+  vm.runInContext(`
+    supervisorReceiveSessions({
+      type: 'supervisor_sessions', available: true,
+      sessions: [{ session_id: 's1', pid: 1, alive: true, cols: 80, rows: 24, owner: { name: 'worker-a' }, display_command: 'codex' }],
+    });
+    supervisorReceiveSessions({
+      type: 'supervisor_sessions', available: true,
+      terminate_session_id: 's1', terminated_session_id: 's1',
+      sessions: [{ session_id: 's1', pid: 1, alive: false, cols: 80, rows: 24, owner: { name: 'worker-a' }, display_command: 'codex' }],
+    });
+  `, context);
+
+  assert.equal(vm.runInContext(`supervisorState.sessions.some(s => s.session_id === 's1')`, context), false);
+  assert.doesNotMatch(ensure('panel-supervisor').innerHTML, /worker-a/);
+});
+
+test('supervisor self-row stays top sorted and cannot be terminated', () => {
+  const { sandbox, ensure } = createSandbox({ visible: true });
+  const context = vm.createContext(sandbox);
+  loadSupervisor(context);
+
+  vm.runInContext(`
+    supervisorReceiveSessions({
+      type: 'supervisor_sessions',
+      available: true,
+      sessions: [
+        { session_id: 'z-worker', pid: 2, alive: true, started_at: 20, cols: 80, rows: 24, owner: { name: 'z-worker' }, display_command: 'z' },
+        { row_type: 'supervisor', session_id: '__supervisor__', pid: 1, alive: true, started_at: 10, display_command: 'PTY supervisor', terminable: false },
+        { session_id: 'a-worker', pid: 3, alive: true, started_at: 30, cols: 80, rows: 24, owner: { name: 'a-worker' }, display_command: 'a' },
+      ],
+    });
+    supervisorSortBy('owner');
+  `, context);
+
+  const order = JSON.parse(JSON.stringify(vm.runInContext(`_supervisorSortedSessions().map(s => s.session_id)`, context)));
+  assert.deepEqual(order, ['__supervisor__', 'z-worker', 'a-worker']);
+  assert.equal(vm.runInContext(`_supervisorCanTerminate(_supervisorFindSession('__supervisor__'))`, context), false);
+  const html = ensure('panel-supervisor').innerHTML;
+  const selfIndex = html.indexOf('__supervisor__');
+  const firstTerminate = html.indexOf('Terminate');
+  assert.ok(selfIndex >= 0);
+  assert.ok(firstTerminate === -1 || firstTerminate > selfIndex);
 });
 
 test('supervisor panel renders unavailable banner without throwing', () => {

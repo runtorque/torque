@@ -57,13 +57,43 @@ class SupervisedPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
                 calls.append("list")
                 return [{"session_id": "sess-delegated"}]
 
+            async def list_state(self):
+                calls.append("state")
+                return {
+                    "supervisor": {"pid": 999, "started_at": 10},
+                    "sessions": [{"session_id": "sess-delegated"}],
+                }
+
         adapter._client = FakeClient()
 
         self.assertEqual(
             await adapter.list_supervisor_sessions(),
             [{"session_id": "sess-delegated"}],
         )
-        self.assertEqual(calls, ["list"])
+        self.assertEqual(
+            await adapter.list_supervisor_state(),
+            {
+                "supervisor": {"pid": 999, "started_at": 10},
+                "sessions": [{"session_id": "sess-delegated"}],
+            },
+        )
+        self.assertEqual(calls, ["list", "state"])
+
+    async def test_terminate_supervisor_session_delegates_untracked_session(self):
+        state = self.state_mod.MatrixState()
+        adapter = self.pty_mod.SupervisedPtyAdapter(state, self.sock_path)
+        calls = []
+
+        class FakeClient:
+            async def close_session(self, session_id):
+                calls.append(session_id)
+                return {"type": "ok", "op": "close"}
+
+        adapter._client = FakeClient()
+
+        await adapter.terminate_supervisor_session("orphan-session")
+
+        self.assertEqual(calls, ["orphan-session"])
 
     async def test_create_session_spawns_via_supervisor_and_emits_output(self):
         state, adapter = await self._make_adapter()

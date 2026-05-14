@@ -1098,6 +1098,42 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
     async def list_supervisor_sessions(self) -> list:
         return await self._client.list_sessions()
 
+    async def list_supervisor_state(self) -> dict:
+        return await self._client.list_state()
+
+    async def terminate_supervisor_session(self, session_id: str) -> None:
+        """Terminate a supervisor-owned PTY session by raw session id.
+
+        Unlike ``close_session``, this is allowed to target sessions that the
+        current daemon has not adopted into ``self._sessions`` yet. That keeps
+        the diagnostics panel useful for stale/orphan rows after a restart.
+        """
+        session_id = str(session_id or "").strip()
+        if not session_id:
+            raise ValueError("session_id is required")
+        session = self._sessions.get(session_id)
+        if session and not session.closed:
+            session.closed = True
+            self._input_ready_sessions.discard(session_id)
+            self._input_ready_events.pop(session.cell_id, None)
+            result = await self._client.close_session(session_id)
+            if result.get("type") == "error":
+                raise RuntimeError(
+                    result.get("message") or result.get("code")
+                    or "supervisor close failed")
+            asyncio.create_task(
+                self._finalize_local_after_timeout(session_id, 3.0))
+            return
+        result = await self._client.close_session(session_id)
+        if result.get("type") == "error":
+            raise RuntimeError(result.get("message") or result.get("code")
+                               or "supervisor close failed")
+        for cell in list(self.state.iter_active_agents()):
+            if cell.session_id == session_id:
+                await self._mark_session_stopped(
+                    cell, session_id, announce=True)
+                break
+
     async def close_session(self, session_id: str) -> None:
         session = self._sessions.get(session_id)
         if not session or session.closed:

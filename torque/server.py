@@ -152,7 +152,10 @@ from .server_dispatch import (
     _should_handoff_shared_worktree,
     _should_queue_existing_agent_dispatch,
 )
-from .server_supervisor import build_supervisor_sessions_payload
+from .server_supervisor import (
+    build_supervisor_sessions_payload,
+    build_supervisor_terminate_payload,
+)
 from .server_worktrees import (
     _generate_merge_message,
     _worktree_diff_updater,
@@ -7974,6 +7977,12 @@ async def main(connection=None):
         if cmd == "supervisor_sessions_list":
             return await build_supervisor_sessions_payload(
                 bridge, state, _runtime_payload)
+
+        if cmd == "supervisor_session_terminate":
+            return await build_supervisor_terminate_payload(
+                bridge, state, _runtime_payload,
+                str(data.get("session_id") or ""),
+            )
 
         # get_events: paginated event log query
         if cmd == "get_events":

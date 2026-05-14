@@ -75,9 +75,14 @@ class PtySupervisorClientTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(ok.get("type"), "ok")
             self.assertEqual(ok.get("op"), "create")
 
+            state = await client.list_state()
+            self.assertIsInstance(state.get("supervisor"), dict)
+            self.assertGreater(state["supervisor"].get("started_at"), 0)
             sessions = await client.list_sessions()
             ids = [s["session_id"] for s in sessions]
             self.assertIn("c1", ids)
+            listed = next(s for s in sessions if s["session_id"] == "c1")
+            self.assertGreater(listed.get("started_at"), 0)
 
             write_ok = await client.write_input("c1", b"ignored\n")
             self.assertEqual(write_ok.get("type"), "ok")
