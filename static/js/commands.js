@@ -508,8 +508,102 @@ async function removeGroup(group) {
  */
 let _dragId = null;
 let _dragType = null;
+let _textSelectionDragBypassInstalled = false;
+
+const TEXT_SELECTION_DRAG_SELECTORS = [
+  '.agent-card-line',
+  '.agent-card-trunc',
+  '.group-name',
+  '.group-count',
+  '.term-name',
+  '.term-path',
+  '.board-card-id',
+  '.board-card-last-transition',
+  '.board-card-title',
+  '.board-card-task-id',
+  '.board-card-lane-entered',
+  '.board-card-label',
+  '.board-card-lane-badge',
+  '.board-card-created-by-label',
+  '.board-card-assigned-engineer-name',
+  '.board-card-agent',
+  '.board-card-verification-note',
+  '.board-card-chain',
+  '.board-card-activity',
+];
+
+const TEXT_SELECTION_DRAG_CONTROL_SELECTORS = [
+  '.cell-header-controls',
+  '.term-actions',
+  '.board-card-menu-btn',
+  '.board-card-collapse-btn',
+  '.board-card-quick-controls',
+];
+const TEXT_SELECTION_DRAG_CONTROL_TAGS = new Set(['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA']);
+
+function _matchesSimpleSelectionSelector(el, selector) {
+  if (!el || !selector) return false;
+  if (selector[0] === '.') {
+    return !!(el.classList && el.classList.contains(selector.slice(1)));
+  }
+  if (selector === '[draggable="true"]') {
+    return typeof el.getAttribute === 'function' && el.getAttribute('draggable') === 'true';
+  }
+  return String(el.tagName || '').toUpperCase() === selector.toUpperCase();
+}
+
+function _closestSelectionMatch(el, selectors) {
+  for (let node = el; node; node = node.parentElement || node.parentNode) {
+    for (const selector of selectors) {
+      if (_matchesSimpleSelectionSelector(node, selector)) return node;
+    }
+  }
+  return null;
+}
+
+function _closestSelectionControl(el) {
+  for (let node = el; node; node = node.parentElement || node.parentNode) {
+    if (TEXT_SELECTION_DRAG_CONTROL_TAGS.has(String(node.tagName || '').toUpperCase())) return node;
+    for (const selector of TEXT_SELECTION_DRAG_CONTROL_SELECTORS) {
+      if (_matchesSimpleSelectionSelector(node, selector)) return node;
+    }
+  }
+  return null;
+}
+
+function _restoreSelectionDragSource(el) {
+  if (!el || typeof el.getAttribute !== 'function') return;
+  if (el.getAttribute('data-selection-drag-disabled') !== 'true') return;
+  el.setAttribute('draggable', 'true');
+  if (typeof el.removeAttribute === 'function') el.removeAttribute('data-selection-drag-disabled');
+  else el.setAttribute('data-selection-drag-disabled', '');
+}
+
+function _setupTextSelectionDragBypass() {
+  if (_textSelectionDragBypassInstalled || typeof document === 'undefined') return;
+  _textSelectionDragBypassInstalled = true;
+  document.addEventListener('mousedown', (e) => {
+    if (!e || e.button !== 0 || e.defaultPrevented) return;
+    let target = e.target || null;
+    if (target && target.nodeType === 3) target = target.parentElement || target.parentNode;
+    if (!target || _closestSelectionControl(target)) return;
+    if (!_closestSelectionMatch(target, TEXT_SELECTION_DRAG_SELECTORS)) return;
+    const draggable = _closestSelectionMatch(target, ['[draggable="true"]']);
+    if (!draggable) return;
+    draggable.setAttribute('data-selection-drag-disabled', 'true');
+    draggable.setAttribute('draggable', 'false');
+    const restore = () => {
+      _restoreSelectionDragSource(draggable);
+      document.removeEventListener('mouseup', restore, true);
+      document.removeEventListener('mouseleave', restore, true);
+    };
+    document.addEventListener('mouseup', restore, true);
+    document.addEventListener('mouseleave', restore, true);
+  }, true);
+}
 
 function setupDrag() {
+  _setupTextSelectionDragBypass();
   const main = document.getElementById('main');
 
   main.addEventListener('dragstart', (e) => {

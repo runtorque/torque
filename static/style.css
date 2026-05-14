@@ -31,7 +31,8 @@ html, body {
   color: var(--text);
   font: 11px/1.4 var(--font);
   overflow-x: hidden;
-  -webkit-user-select: none; user-select: none;
+  -webkit-user-select: text;
+  user-select: text;
 }
 body {
   display: flex; flex-direction: column;
@@ -47,6 +48,51 @@ input, select {
   outline: none; width: 100%;
 }
 input:focus, select:focus { border-color: var(--accent); }
+
+/* Text selection defaults to on; only drag/chrome surfaces opt out. */
+button,
+select,
+summary,
+.cell,
+.term-row,
+.group-hdr,
+.board-card,
+.ghost-card,
+.pl-canvas-wrap {
+  -webkit-user-select: none;
+  user-select: none;
+}
+input,
+textarea,
+[contenteditable="true"],
+.agent-card-line,
+.agent-card-trunc,
+.principal-card-body,
+.principal-card-kind,
+.agent-section-user-name,
+.agent-section-user-badge,
+.group-name,
+.group-count,
+.term-name,
+.term-path,
+.agent-group-tab-name,
+.agent-group-tab-count,
+.board-card-id,
+.board-card-last-transition,
+.board-card-title,
+.board-card-task-id,
+.board-card-lane-entered,
+.board-card-label,
+.board-card-lane-badge,
+.board-card-created-by-label,
+.board-card-assigned-engineer-name,
+.board-card-agent,
+.board-card-verification-note,
+.board-card-chain,
+.board-card-activity {
+  -webkit-user-select: text;
+  user-select: text;
+}
 
 /* ------------------------------------------------------------------ */
 /* Header                                                              */

@@ -18977,6 +18977,35 @@ test('main grid drag reorders agents within a hierarchical row without changing 
   });
 });
 
+test('readable text inside draggable cards temporarily opts out of drag startup', () => {
+  const { context, document } = createMainGridDragHarness();
+  const main = document.getElementById('main');
+  runInContext(context, `setupDrag();`);
+
+  const card = createDragDomElement({
+    dragId: 'worker-1',
+    dragType: 'agent',
+    dragGroup: 'torque',
+    classNames: ['cell'],
+    parent: main,
+  });
+  card.setAttribute('draggable', 'true');
+  const readable = createDragDomElement({
+    classNames: ['agent-card-line'],
+    parent: card,
+  });
+
+  document.listeners.mousedown({ button: 0, target: readable });
+  assert.equal(card.getAttribute('draggable'), 'false');
+  assert.equal(card.getAttribute('data-selection-drag-disabled'), 'true');
+
+  document.listeners.mouseup();
+  assert.equal(card.getAttribute('draggable'), 'true');
+
+  document.listeners.mousedown({ button: 0, target: card });
+  assert.equal(card.getAttribute('draggable'), 'true');
+});
+
 test('terminal drag moves between an agent drawer and standalone while preserving session and worktree fields', () => {
   const { context, document, sandbox } = createMainGridDragHarness();
   const main = document.getElementById('main');
@@ -19655,6 +19684,15 @@ test('standalone float resize handles define edge cursors and disable selection 
   assert.match(css, /\.standalone-float-resize-handle-se\s*\{[^}]*cursor:\s*se-resize;/s);
   assert.match(css, /\.standalone-float-resize-handle-sw\s*\{[^}]*cursor:\s*sw-resize;/s);
   assert.match(css, /body\.standalone-float-resizing\s*\{[^}]*user-select:\s*none;/s);
+});
+
+test('app css defaults to selectable text while draggable chrome opts out', () => {
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+
+  assert.match(css, /html,\s*body\s*\{[^}]*-webkit-user-select:\s*text;[^}]*user-select:\s*text;/s);
+  assert.doesNotMatch(css, /html,\s*body\s*\{[^}]*user-select:\s*none;/s);
+  assert.match(css, /\.cell,\s*[\s\S]*?\.board-card,\s*[\s\S]*?\.ghost-card,\s*[\s\S]*?\.pl-canvas-wrap\s*\{[^}]*user-select:\s*none;/s);
+  assert.match(css, /\.agent-card-line,\s*[\s\S]*?\.board-card-title,\s*[\s\S]*?\.board-card-activity\s*\{[^}]*user-select:\s*text;/s);
 });
 
 test('standalone layout restore migrates legacy panel state into bottom and right docks', () => {
