@@ -9494,6 +9494,12 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   color: var(--text-dim);
   font-size: 11px;
 }
+.supervisor-auto input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: auto;
+  margin: 0;
+  padding: 0;
+}
 .supervisor-updated {
   color: var(--text-dim);
   font-size: 11px;

@@ -19943,6 +19943,31 @@ test('standalone layout restore migrates legacy panel state into bottom and righ
   assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.open`), true);
 });
 
+test('standalone opens unplaced Supervisor panel in the bottom dock by default', () => {
+  const { context, document, sandbox } = createPanelHarness();
+  document.body.classList.add('runtime-embedded');
+  context.isEmbeddedTerminalMode = function() { return true; };
+
+  runInContext(context, `
+    state = {
+      runtime: { embedded_terminal: true },
+      standalone_panel_layout: {},
+    };
+    _restoreStandalonePanelState();
+    sendCalls = [];
+  `);
+
+  context.togglePanel('supervisor');
+
+  assert.equal(jsonValue(context, `_standalonePanelPlacement('supervisor')`), 'bottom');
+  assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout().bottom.tabs`), ['board', 'supervisor']);
+  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().bottom.active`), 'supervisor');
+  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.tabs.includes('supervisor')`), false);
+  assert.equal(sandbox.sendCalls.length, 1);
+  assert.equal(sandbox.sendCalls[0].cmd, 'standalone_set_panel_layout');
+  assert.equal(sandbox.sendCalls[0].layout.bottom.active, 'supervisor');
+});
+
 test('standalone bottom resize uses shell bounds and updates the shell height var', () => {
   const { context, document } = createPanelHarness();
   document.body.classList.add('runtime-embedded');

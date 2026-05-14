@@ -17,7 +17,7 @@ var _standalonePanelDefaults = {
   context: 'right',
   events: 'right',
   engineer: 'bottom',
-  supervisor: 'right',
+  supervisor: 'bottom',
 };
 var _standalonePanelLayoutVersion = 1;
 var _standalonePanelLayout = null;
