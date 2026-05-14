@@ -8796,6 +8796,82 @@ test('embedded terminal compose recalls message history per agent with arrows an
   assert.equal(other.value, 'other agent message');
 });
 
+test('embedded terminal compose only recalls arrow history at textarea edge lines', () => {
+  const { context, document, sandbox } = createEmbeddedTerminalHarness();
+  sandbox.state.agent_message_history = {
+    'agent-1': [
+      { id: 2, agent_id: 'agent-1', message: 'latest one\nlatest two\nlatest three', sent_at: 2 },
+      { id: 1, agent_id: 'agent-1', message: 'older one\nolder two\nolder three', sent_at: 1 },
+    ],
+  };
+
+  const input = document.register('terminal-compose-input-agent-1');
+  input.classList.add('terminal-compose-input');
+  input.dataset.cellId = 'agent-1';
+  const button = document.register('terminal-compose-submit-agent-1');
+  button.classList.add('terminal-compose-submit');
+
+  function keyEvent(key) {
+    return {
+      key,
+      target: input,
+      shiftKey: false,
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      preventDefaultCalled: false,
+      stopPropagationCalled: false,
+      preventDefault() { this.preventDefaultCalled = true; },
+      stopPropagation() { this.stopPropagationCalled = true; },
+    };
+  }
+
+  input.value = 'draft one\ndraft two';
+  input.selectionStart = 0;
+  input.selectionEnd = 0;
+  runInContext(context, `terminalComposeInput(document.getElementById('terminal-compose-input-agent-1'));`);
+
+  const upAtFirstLine = keyEvent('ArrowUp');
+  context.__upAtFirstLine = upAtFirstLine;
+  runInContext(context, `terminalComposeKeydown(__upAtFirstLine, 'agent-1');`);
+  assert.equal(upAtFirstLine.preventDefaultCalled, true);
+  assert.equal(input.value, 'latest one\nlatest two\nlatest three');
+
+  input.selectionStart = input.value.indexOf('latest two');
+  input.selectionEnd = input.selectionStart;
+  const upAtMiddleLine = keyEvent('ArrowUp');
+  context.__upAtMiddleLine = upAtMiddleLine;
+  runInContext(context, `terminalComposeKeydown(__upAtMiddleLine, 'agent-1');`);
+  assert.equal(upAtMiddleLine.preventDefaultCalled, false);
+  assert.equal(upAtMiddleLine.stopPropagationCalled, false);
+  assert.equal(input.value, 'latest one\nlatest two\nlatest three');
+
+  input.selectionStart = 0;
+  input.selectionEnd = 0;
+  const upAtFirstLineAgain = keyEvent('ArrowUp');
+  context.__upAtFirstLineAgain = upAtFirstLineAgain;
+  runInContext(context, `terminalComposeKeydown(__upAtFirstLineAgain, 'agent-1');`);
+  assert.equal(upAtFirstLineAgain.preventDefaultCalled, true);
+  assert.equal(input.value, 'older one\nolder two\nolder three');
+
+  input.selectionStart = input.value.indexOf('older two');
+  input.selectionEnd = input.selectionStart;
+  const downAtMiddleLine = keyEvent('ArrowDown');
+  context.__downAtMiddleLine = downAtMiddleLine;
+  runInContext(context, `terminalComposeKeydown(__downAtMiddleLine, 'agent-1');`);
+  assert.equal(downAtMiddleLine.preventDefaultCalled, false);
+  assert.equal(downAtMiddleLine.stopPropagationCalled, false);
+  assert.equal(input.value, 'older one\nolder two\nolder three');
+
+  input.selectionStart = input.value.length;
+  input.selectionEnd = input.value.length;
+  const downAtLastLine = keyEvent('ArrowDown');
+  context.__downAtLastLine = downAtLastLine;
+  runInContext(context, `terminalComposeKeydown(__downAtLastLine, 'agent-1');`);
+  assert.equal(downAtLastLine.preventDefaultCalled, true);
+  assert.equal(input.value, 'latest one\nlatest two\nlatest three');
+});
+
 test('embedded terminal compose history button opens per-agent menu and refills input', () => {
   const { context, document, sandbox } = createEmbeddedTerminalHarness();
   sandbox.state.agent_message_history = {
