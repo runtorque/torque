@@ -2680,8 +2680,7 @@ function _agentPanelMessagesHtml(agent, messages, note) {
 function _agentPanelArchitectMessages(agent) {
   return _agentPanelMessagesHtml(
     agent,
-    _agentPanelArchitectMessageList(agent),
-    'Reply composer lands in a later task.'
+    _agentPanelArchitectMessageList(agent)
   );
 }
 

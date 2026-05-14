@@ -784,7 +784,7 @@ test('architect panel filters decisions, hired engineers, and messages to the fo
 
   context.agentPanelSelectTab('messages');
   assert.match(panel.innerHTML, /Need a follow-up worker/);
-  assert.match(panel.innerHTML, /Reply composer lands in a later task\./);
+  assert.doesNotMatch(panel.innerHTML, /agent-panel-message-note/);
 });
 
 test('architect Messages tab renders full-height message cards instead of the compact MCP preview', () => {
