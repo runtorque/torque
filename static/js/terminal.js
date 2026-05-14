@@ -12,6 +12,7 @@ let _embeddedTerminalDropHandlers = null;
 let _embeddedTerminalDropDepth = 0;
 let _terminalComposeDrafts = Object.create(null);
 let _terminalComposeErrors = Object.create(null);
+let _terminalComposeRecall = Object.create(null);
 let _lastAppliedXtermScrollback = null;
 
 var TERMINAL_COMPOSE_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
@@ -389,6 +390,89 @@ function _terminalComposeSetButtonState(input) {
   if (button) button.disabled = !String(input.value || '').trim();
 }
 
+function _terminalMessageHistoryEntries(cellId) {
+  const id = String(cellId || '');
+  const history = state && state.agent_message_history
+    ? state.agent_message_history[id]
+    : null;
+  if (!Array.isArray(history)) return [];
+  return history.filter(function(entry) {
+    return entry && typeof entry.message === 'string' && entry.message.length;
+  });
+}
+
+function _terminalComposeRecallState(cellId) {
+  const id = String(cellId || '');
+  if (!_terminalComposeRecall[id]) {
+    _terminalComposeRecall[id] = { index: -1, draft: '' };
+  }
+  return _terminalComposeRecall[id];
+}
+
+function _terminalComposeResetRecall(cellId) {
+  const id = String(cellId || '');
+  if (id) delete _terminalComposeRecall[id];
+}
+
+function _terminalComposeSetValue(input, cellId, value) {
+  if (!input) return;
+  const id = String(cellId || (input.dataset ? input.dataset.cellId : '') || '');
+  input.value = String(value || '');
+  if (id) _terminalComposeDrafts[id] = input.value;
+  const end = input.value.length;
+  if (typeof input.setSelectionRange === 'function') {
+    input.setSelectionRange(end, end);
+  } else {
+    input.selectionStart = end;
+    input.selectionEnd = end;
+    if ('selectionDirection' in input) input.selectionDirection = 'none';
+  }
+  _terminalComposeAutoResize(input);
+  _terminalComposeSetButtonState(input);
+}
+
+function _terminalComposeCaretAtFirstLine(input) {
+  if (!input || typeof input.value !== 'string') return true;
+  const caret = _terminalComposeActiveSelection(input);
+  return input.value.lastIndexOf('\n', Math.max(0, caret - 1)) < 0;
+}
+
+function _terminalComposeHistoryNavigate(input, cellId, direction) {
+  const id = String(cellId || '');
+  const entries = _terminalMessageHistoryEntries(id);
+  if (!input || !id || !entries.length) return false;
+  const recall = _terminalComposeRecallState(id);
+  if (recall.index < 0) {
+    if (direction > 0) return false;
+    recall.draft = String(input.value || '');
+    recall.index = 0;
+  } else if (direction < 0) {
+    recall.index = Math.min(entries.length - 1, recall.index + 1);
+  } else {
+    recall.index -= 1;
+  }
+
+  if (recall.index < 0) {
+    const draft = recall.draft || '';
+    _terminalComposeResetRecall(id);
+    _terminalComposeSetValue(input, id, draft);
+    return true;
+  }
+
+  _terminalComposeSetValue(input, id, entries[recall.index].message);
+  return true;
+}
+
+function _terminalComposeRestoreRecallDraft(input, cellId) {
+  const id = String(cellId || '');
+  const recall = _terminalComposeRecall[id];
+  if (!recall || recall.index < 0) return false;
+  const draft = recall.draft || '';
+  _terminalComposeResetRecall(id);
+  _terminalComposeSetValue(input, id, draft);
+  return true;
+}
+
 function _terminalComposeErrorElement(input) {
   const container = _terminalComposeContainerFor(input);
   return container && container.querySelector
@@ -624,6 +708,7 @@ function _renderTerminalCompose(root, cell) {
 function terminalComposeInput(el) {
   if (!el) return;
   const cellId = el.dataset ? (el.dataset.cellId || '') : '';
+  if (cellId) _terminalComposeResetRecall(cellId);
   if (cellId) _terminalComposeDrafts[cellId] = String(el.value || '');
   if (cellId && _terminalComposeErrors[cellId]) _terminalComposeSetError(el, '');
   _terminalComposeAutoResize(el);
@@ -634,6 +719,7 @@ function terminalComposeClear(cellId) {
   const id = String(cellId || '');
   const input = document.getElementById ? document.getElementById(_terminalComposeInputId(id)) : null;
   if (!input) return;
+  _terminalComposeResetRecall(id);
   input.value = '';
   if (id) _terminalComposeDrafts[id] = '';
   _terminalComposeAutoResize(input);
@@ -734,6 +820,24 @@ function terminalComposeSubmit(evt, cellId) {
 
 function terminalComposeKeydown(evt, cellId) {
   if (!evt) return;
+  if ((evt.key === 'ArrowUp' || evt.key === 'ArrowDown')
+      && !evt.shiftKey && !evt.ctrlKey && !evt.metaKey && !evt.altKey) {
+    const input = evt.target && typeof evt.target.value === 'string'
+      ? evt.target
+      : (document.getElementById ? document.getElementById(_terminalComposeInputId(cellId)) : null);
+    const id = String(cellId || (input && input.dataset ? input.dataset.cellId : '') || '');
+    const recall = id ? _terminalComposeRecall[id] : null;
+    const recallActive = !!(recall && recall.index >= 0);
+    const direction = evt.key === 'ArrowUp' ? -1 : 1;
+    const shouldRecall = recallActive || (
+      direction < 0 && _terminalComposeCaretAtFirstLine(input)
+    );
+    if (shouldRecall && _terminalComposeHistoryNavigate(input, id, direction)) {
+      if (typeof evt.preventDefault === 'function') evt.preventDefault();
+      if (typeof evt.stopPropagation === 'function') evt.stopPropagation();
+      return;
+    }
+  }
   if ((evt.key === 'Home' || evt.key === 'End') && !evt.altKey) {
     const input = evt.target && typeof evt.target.value === 'string'
       ? evt.target
@@ -745,6 +849,12 @@ function terminalComposeKeydown(evt, cellId) {
   if (evt.key === 'Escape') {
     if (typeof evt.preventDefault === 'function') evt.preventDefault();
     if (typeof evt.stopPropagation === 'function') evt.stopPropagation();
+    const input = evt.target && typeof evt.target.value === 'string'
+      ? evt.target
+      : (document.getElementById ? document.getElementById(_terminalComposeInputId(cellId)) : null);
+    if (_terminalComposeRestoreRecallDraft(input, cellId)) {
+      return;
+    }
     terminalComposeClear(cellId);
     return;
   }

@@ -50,6 +50,7 @@ ARCHIVED_LANE = "Archived"
 _RESERVED_LANES = ("Backlog", "To Do", "In Progress", "Done", ARCHIVED_LANE)
 _DEFAULT_LANES = list(_RESERVED_LANES)
 AGENT_TOMBSTONE_RETENTION_SECONDS = 7 * 86400
+AGENT_MESSAGE_HISTORY_LIMIT = 100
 _VERIFICATION_MODES = {"", "deploy", "restart"}
 _VERIFICATION_STATES = {"", "pending", "attempted", "passed", "failed"}
 _ENGINEER_AUTONOMY_MODES = {
@@ -1409,6 +1410,10 @@ class MatrixState:
         self.engineer_settings: dict[str, EngineerSettings] = {}
         self.agent_digest_settings: dict[str, AgentDigestSettings] = {}
         self.engineer_worklog: dict[str, list[dict]] = {}
+        # Newest-first per-agent user message recall cache. The durable source
+        # of truth is SQLite; this cache is intentionally bounded for live
+        # deltas and snapshot assembly.
+        self.agent_message_history: dict[str, list[dict]] = {}
         # Delta broadcast accumulator
         self._delta_ops: list[dict] = []
         self._seq: int = 0
@@ -1988,6 +1993,7 @@ class MatrixState:
                 agent_id: asdict(settings)
                 for agent_id, settings in self.agent_digest_settings.items()
             },
+            "agent_message_history": self.agent_message_history_snapshot(),
             # Engineer journal rows are stored with author_cell_id; expose the
             # UI snapshot cache with the same author key so focusing one
             # engineer never renders another engineer's group-mate entries.
@@ -2135,6 +2141,7 @@ class MatrixState:
                 agent_id: asdict(settings)
                 for agent_id, settings in self.agent_digest_settings.items()
             },
+            "agent_message_history": self.agent_message_history_snapshot(),
         }
 
     # -- Targeted persistence helpers ----------------------------------------
@@ -2579,6 +2586,84 @@ class MatrixState:
         return len(updated)
 
     # -- Agent history helpers -----------------------------------------------
+
+    def _normalize_agent_message_history_entry(self, entry: dict) -> dict:
+        return {
+            "id": int(_safe_float(entry.get("id"), 0)),
+            "agent_id": str(entry.get("agent_id", "") or "").strip(),
+            "message": str(entry.get("message", "") or ""),
+            "sent_at": _safe_float(entry.get("sent_at")),
+        }
+
+    def agent_message_history_read(
+            self, agent_id: str,
+            limit: int = AGENT_MESSAGE_HISTORY_LIMIT) -> list[dict]:
+        """Return newest-first user message recall entries for one agent."""
+        aid = str(agent_id or "").strip()
+        if not aid:
+            return []
+        try:
+            limit = max(1, min(int(limit or AGENT_MESSAGE_HISTORY_LIMIT), 1000))
+        except (TypeError, ValueError):
+            limit = AGENT_MESSAGE_HISTORY_LIMIT
+        if self.db:
+            try:
+                rows = self.db.load_agent_message_history(aid, limit=limit)
+                history = [
+                    self._normalize_agent_message_history_entry(row)
+                    for row in rows
+                ]
+                self.agent_message_history[aid] = history[
+                    :AGENT_MESSAGE_HISTORY_LIMIT
+                ]
+                return history
+            except Exception:
+                log.exception("Failed to load message history for %s", aid)
+        return [
+            self._normalize_agent_message_history_entry(row)
+            for row in self.agent_message_history.get(aid, [])[:limit]
+        ]
+
+    def agent_message_history_snapshot(
+            self, limit: int = AGENT_MESSAGE_HISTORY_LIMIT) -> dict[str, list[dict]]:
+        """Return bounded newest-first recall history for cells in state."""
+        snapshot: dict[str, list[dict]] = {}
+        for aid in self.agents:
+            entries = self.agent_message_history_read(aid, limit=limit)
+            if entries:
+                snapshot[aid] = entries
+        return snapshot
+
+    def record_message_history(self, agent_id: str, message: str) -> dict | None:
+        """Persist and publish a user-sent message for per-agent recall."""
+        aid = str(agent_id or "").strip()
+        text = str(message or "")
+        if not aid or not text.strip():
+            return None
+        ts = time.time()
+        entry = {
+            "id": int(ts * 1000000),
+            "agent_id": aid,
+            "message": text,
+            "sent_at": ts,
+        }
+        if self.db:
+            try:
+                entry = self.db.save_agent_message_history(entry)
+            except Exception:
+                log.exception("Failed to record message history for %s", aid)
+                return None
+        entry = self._normalize_agent_message_history_entry(entry)
+        history = self.agent_message_history.setdefault(aid, [])
+        history.insert(0, entry)
+        del history[AGENT_MESSAGE_HISTORY_LIMIT:]
+        self._emit(
+            "agent_message_history_append",
+            agent_id=aid,
+            entry=entry,
+            limit=AGENT_MESSAGE_HISTORY_LIMIT,
+        )
+        return entry
 
     def history_record_agent(self, cell: AgentCell):
         """Record a new agent in the history table."""

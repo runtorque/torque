@@ -8655,6 +8655,88 @@ test('embedded terminal compose submits on Enter, allows Shift+Enter, and clears
   assert.equal(button.disabled, true);
 });
 
+test('embedded terminal compose recalls message history per agent with arrows and restores draft on Escape', () => {
+  const { context, document, sandbox } = createEmbeddedTerminalHarness();
+  sandbox.state.agent_message_history = {
+    'agent-1': [
+      { id: 5, agent_id: 'agent-1', message: 'fifth message', sent_at: 5 },
+      { id: 4, agent_id: 'agent-1', message: 'fourth message', sent_at: 4 },
+      { id: 3, agent_id: 'agent-1', message: 'third message', sent_at: 3 },
+    ],
+    'agent-2': [
+      { id: 1, agent_id: 'agent-2', message: 'other agent message', sent_at: 1 },
+    ],
+  };
+
+  const input = document.register('terminal-compose-input-agent-1');
+  input.classList.add('terminal-compose-input');
+  input.dataset.cellId = 'agent-1';
+  const button = document.register('terminal-compose-submit-agent-1');
+  button.classList.add('terminal-compose-submit');
+
+  function keyEvent(key, target = input) {
+    return {
+      key,
+      target,
+      shiftKey: false,
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      preventDefaultCalled: false,
+      stopPropagationCalled: false,
+      preventDefault() { this.preventDefaultCalled = true; },
+      stopPropagation() { this.stopPropagationCalled = true; },
+    };
+  }
+
+  input.value = 'draft before recall';
+  input.selectionStart = input.value.length;
+  input.selectionEnd = input.value.length;
+  runInContext(context, `terminalComposeInput(document.getElementById('terminal-compose-input-agent-1'));`);
+
+  const up1 = keyEvent('ArrowUp');
+  context.__up1 = up1;
+  runInContext(context, `terminalComposeKeydown(__up1, 'agent-1');`);
+  assert.equal(up1.preventDefaultCalled, true);
+  assert.equal(up1.stopPropagationCalled, true);
+  assert.equal(input.value, 'fifth message');
+
+  const up2 = keyEvent('ArrowUp');
+  context.__up2 = up2;
+  runInContext(context, `terminalComposeKeydown(__up2, 'agent-1');`);
+  assert.equal(input.value, 'fourth message');
+
+  const down1 = keyEvent('ArrowDown');
+  context.__down1 = down1;
+  runInContext(context, `terminalComposeKeydown(__down1, 'agent-1');`);
+  assert.equal(input.value, 'fifth message');
+
+  const down2 = keyEvent('ArrowDown');
+  context.__down2 = down2;
+  runInContext(context, `terminalComposeKeydown(__down2, 'agent-1');`);
+  assert.equal(input.value, 'draft before recall');
+
+  const up3 = keyEvent('ArrowUp');
+  context.__up3 = up3;
+  runInContext(context, `terminalComposeKeydown(__up3, 'agent-1');`);
+  assert.equal(input.value, 'fifth message');
+  const escape = keyEvent('Escape');
+  context.__escapeRecall = escape;
+  runInContext(context, `terminalComposeKeydown(__escapeRecall, 'agent-1');`);
+  assert.equal(input.value, 'draft before recall');
+
+  const other = document.register('terminal-compose-input-agent-2');
+  other.classList.add('terminal-compose-input');
+  other.dataset.cellId = 'agent-2';
+  other.value = '';
+  other.selectionStart = 0;
+  other.selectionEnd = 0;
+  const upOther = keyEvent('ArrowUp', other);
+  context.__upOther = upOther;
+  runInContext(context, `terminalComposeKeydown(__upOther, 'agent-2');`);
+  assert.equal(other.value, 'other agent message');
+});
+
 test('embedded terminal compose handles Home/End as textarea caret navigation', () => {
   const { context, document } = createEmbeddedTerminalHarness();
   const input = document.register('terminal-compose-input-agent-1');
@@ -10864,6 +10946,40 @@ test('standalone event_append deltas batch events rendering and keep log state i
     actions: 0,
     context: 0,
     events: 1,
+    engineer: 0,
+    templates: 0,
+  });
+});
+
+test('agent_message_history_append delta updates recall cache without rerendering panels', () => {
+  const { context, sandbox, flushRaf } = createStandaloneDeltaBatchHarness(['engineer']);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'agent_message_history_append',
+      agent_id: 'agent-1',
+      entry: {
+        id: 1,
+        agent_id: 'agent-1',
+        message: 'remember me',
+        sent_at: 10,
+      },
+      limit: 100,
+    }],
+  });
+  flushRaf();
+
+  assert.equal(
+    jsonValue(context, `state.agent_message_history['agent-1'][0].message`),
+    'remember me',
+  );
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 0,
+    board: 0,
+    actions: 0,
+    context: 0,
+    events: 0,
     engineer: 0,
     templates: 0,
   });

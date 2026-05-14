@@ -16,6 +16,7 @@ let state = {
   engineer_panel_split_fraction: 0.30,
   context_panel_split_ratio: 0.38,
   supervisor_panel_state: {},
+  agent_message_history: {},
 };
 let dragInProgress = false;
 let selectedAgentId = null;
@@ -456,6 +457,11 @@ function connect() {
       if (typeof agentPanelReceiveCellEvents === 'function') agentPanelReceiveCellEvents(msg);
     } else if (msg.type === 'mcp_calls') {
       if (typeof agentPanelReceiveMcpCalls === 'function') agentPanelReceiveMcpCalls(msg);
+    } else if (msg.type === 'agent_message_history') {
+      if (!state.agent_message_history) state.agent_message_history = {};
+      state.agent_message_history[msg.agent_id] = Array.isArray(msg.history)
+        ? msg.history
+        : [];
     } else if (msg.type === 'architect_journal_entries') {
       if (typeof agentPanelReceiveArchitectJournal === 'function') agentPanelReceiveArchitectJournal(msg);
     } else if (msg.type === 'agent_history_list') {
@@ -603,6 +609,7 @@ function _handleFullState(msg) {
   if (!state.engineer_streams) state.engineer_streams = {};
   if (!state.engineer_session_maps) state.engineer_session_maps = {};
   if (!state.mcp_calls) state.mcp_calls = {};
+  if (!state.agent_message_history) state.agent_message_history = {};
   if (typeof state.active_group !== 'string') {
     state.active_group = '';
   }
@@ -1869,6 +1876,7 @@ function _applyDelta(ops) {
         if (state.agent_digest_settings) delete state.agent_digest_settings[op.id];
         if (state.digest_buffer_stats) delete state.digest_buffer_stats[op.id];
         if (state.digest_sent_events) delete state.digest_sent_events[op.id];
+        if (state.agent_message_history) delete state.agent_message_history[op.id];
         // Selection/focus globals are browser-local — the server doesn't know
         // about them. Selections can be cleared immediately; focusedItemId is
         // left intact until render() can use previous grid-row metadata to pick
@@ -1886,6 +1894,24 @@ function _applyDelta(ops) {
           _clearAgentDoneFlourish(op.id);
         }
         break;
+
+      case 'agent_message_history_append': {
+        if (!state.agent_message_history) state.agent_message_history = {};
+        var historyAgentId = String(op.agent_id || '');
+        var historyEntry = op.entry || null;
+        if (historyAgentId && historyEntry) {
+          if (!Array.isArray(state.agent_message_history[historyAgentId])) {
+            state.agent_message_history[historyAgentId] = [];
+          }
+          state.agent_message_history[historyAgentId].unshift(historyEntry);
+          var historyLimit = Number(op.limit || 100);
+          if (!Number.isFinite(historyLimit) || historyLimit < 1) historyLimit = 100;
+          if (state.agent_message_history[historyAgentId].length > historyLimit) {
+            state.agent_message_history[historyAgentId].length = historyLimit;
+          }
+        }
+        break;
+      }
 
       case 'group_update':
         state.groups[op.name] = op.agents;
