@@ -3912,6 +3912,14 @@ function _boardOpenFilterDropdown(wrapId, kind, names, counts, selectedArr) {
   list.className = 'board-filter-dropdown-list';
   dd.appendChild(list);
 
+  function selectedValues() {
+    if (kind === 'label') return _boardFilterLabels;
+    if (kind === 'agent') return _boardFilterAgents;
+    if (kind === 'health') return _boardFilterHealth;
+    if (kind === 'action') return _boardFilterActions;
+    return selectedArr || [];
+  }
+
   function buildList(query) {
     list.innerHTML = '';
     var q = (query || '').toLowerCase();
@@ -3928,7 +3936,7 @@ function _boardOpenFilterDropdown(wrapId, kind, names, counts, selectedArr) {
       row.className = 'board-filter-dropdown-item';
       var cb = document.createElement('input');
       cb.type = 'checkbox';
-      cb.checked = selectedArr.indexOf(name) >= 0;
+      cb.checked = selectedValues().indexOf(name) >= 0;
       (function(n) {
         cb.addEventListener('change', function() {
           if (kind === 'label') boardToggleLabel(n);

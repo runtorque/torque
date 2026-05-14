@@ -2816,6 +2816,62 @@ test('board filters restore per group and persist updates independently', () => 
   assert.deepEqual(jsonValue(context, '_boardFilterLabels'), ['bug']);
 });
 
+test('board label filter dropdown refreshes checkbox state after unchecking final label', () => {
+  const { context, document } = createBoardHarness();
+
+  const wrap = document.register('board-label-filter-wrap');
+  const button = new FakeElement('board-label-filter-button');
+  wrap.setQuerySelector('.board-filter-btn', button);
+
+  runInContext(context, `
+    _boardFilterLabels = ['alpha'];
+    _boardFilterActions = [];
+    _boardFilterAgents = [];
+    _boardFilterHealth = [];
+    renderBoard = function() {};
+    _boardOpenFilterDropdown(
+      'board-label-filter-wrap',
+      'label',
+      ['alpha', 'beta'],
+      { alpha: 1, beta: 1 },
+      _boardFilterLabels
+    );
+  `);
+
+  function labelRows() {
+    const dropdown = document.body.children.find(
+      (child) => child.id === 'board-filter-dropdown-active',
+    );
+    assert.ok(dropdown, 'dropdown should be open');
+    const list = dropdown.children.find(
+      (child) => child.className === 'board-filter-dropdown-list',
+    );
+    assert.ok(list, 'dropdown list should exist');
+    return list.children.filter((child) => child.tagName === 'LABEL');
+  }
+
+  function checkboxFor(label) {
+    const row = labelRows().find(
+      (item) => item.children[1] && item.children[1].textContent === label,
+    );
+    assert.ok(row, `${label} row should exist`);
+    return row.children[0];
+  }
+
+  const alpha = checkboxFor('alpha');
+  assert.equal(alpha.checked, true);
+
+  // A persisted-filter websocket update can replace the global filter array
+  // after the dropdown captures its initially selected array. Rebuilds must use
+  // the current filter state, not that stale captured array.
+  runInContext(context, `_boardFilterLabels = ['alpha'];`);
+  alpha.checked = false;
+  alpha.listeners.change();
+  assert.deepEqual(jsonValue(context, '_boardFilterLabels'), []);
+
+  assert.equal(checkboxFor('alpha').checked, false);
+});
+
 test('board saved views persist per group and apply without extra hidden state', () => {
   const { context, document } = createBoardHarness();
   const panel = document.register('panel-board');
