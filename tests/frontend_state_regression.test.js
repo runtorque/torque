@@ -8264,6 +8264,55 @@ test('embedded terminal tabs render select and close controls for every cell', (
   assert.match(html, /<span class="terminal-tab-kind">term<\/span>/);
 });
 
+test('embedded terminal tab bar stays visible with one session', () => {
+  const { context, document, sandbox } = createEmbeddedTerminalHarness({
+    loadRenderHelpers: true,
+  });
+  const dom = attachTerminalWorkspaceDom(document);
+  sandbox.state.runtime = { embedded_terminal: true };
+  sandbox.state.groups = { alpha: ['term-a'] };
+  sandbox.state.group_settings = { alpha: {} };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'term-a': {
+      id: 'term-a',
+      name: 'A',
+      group: 'alpha',
+      cell_type: 'terminal',
+      session_id: 'sess-a',
+      status: 'running',
+    },
+  };
+
+  runInContext(context, `
+    selectedTerminalId = 'term-a';
+    renderTerminalWorkspace();
+  `);
+
+  assert.equal(dom.tabs.classList.contains('terminal-tabs-hidden'), false);
+  assert.equal(htmlClassCount(dom.tabs.innerHTML, 'terminal-tab'), 1);
+  assert.equal(htmlClassCount(dom.tabs.innerHTML, 'terminal-tab-close'), 1);
+
+  sandbox.state.groups.alpha.push('term-b');
+  sandbox.state.agents['term-b'] = {
+    id: 'term-b',
+    name: 'B',
+    group: 'alpha',
+    cell_type: 'terminal',
+    session_id: 'sess-b',
+    status: 'running',
+  };
+  runInContext(context, `renderTerminalWorkspace();`);
+  assert.equal(dom.tabs.classList.contains('terminal-tabs-hidden'), false);
+  assert.equal(htmlClassCount(dom.tabs.innerHTML, 'terminal-tab'), 2);
+
+  sandbox.state.groups.alpha = ['term-a'];
+  delete sandbox.state.agents['term-b'];
+  runInContext(context, `renderTerminalWorkspace();`);
+  assert.equal(dom.tabs.classList.contains('terminal-tabs-hidden'), false);
+  assert.equal(htmlClassCount(dom.tabs.innerHTML, 'terminal-tab'), 1);
+});
+
 test('embedded terminal workspace hides tombstoned cells from tabs', () => {
   const { context, document, sandbox } = createEmbeddedTerminalHarness({
     loadRenderHelpers: true,
