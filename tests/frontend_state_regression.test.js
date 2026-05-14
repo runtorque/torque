@@ -20429,15 +20429,20 @@ test('standalone shell owns the full-width bottom dock rows and drag selector', 
 
   assert.match(
     css,
-    /body\.runtime-embedded #workspace-shell\s*\{[^}]*grid-template-columns:\s*max\(var\(--standalone-sidebar-width\),\s*calc\(var\(--standalone-main-stack-min-width\)\s*\+\s*8px\s*\+\s*var\(--standalone-right-rail-width,\s*var\(--standalone-right-rail-min-width\)\)\)\)\s+8px\s+minmax\(0,\s*1fr\);[^}]*grid-template-rows:\s*auto\s+minmax\(0,\s*1fr\);/s,
+    /body\.runtime-embedded #workspace-shell\s*\{[^}]*grid-template-columns:\s*max\(var\(--standalone-sidebar-width\),\s*calc\(var\(--standalone-main-stack-min-width\)\s*\+\s*8px\s*\+\s*var\(--standalone-right-rail-width,\s*var\(--standalone-right-rail-min-width\)\)\)\)\s+8px\s+minmax\(0,\s*1fr\);[^}]*grid-template-rows:\s*minmax\(0,\s*1fr\);/s,
   );
   assert.match(
     html,
-    /<div id="workspace-shell">\s*<div id="app-group-tabs-host" class="agent-group-tabs-host app-group-tabs-host" data-agent-group-tabs-host><\/div>\s*<div id="standalone-sidebar-shell">\s*<div id="standalone-main-stack">[\s\S]*?<main id="main"><\/main>\s*<\/div>\s*<div id="standalone-rail-resize-handle"[^>]*><\/div>\s*<aside id="standalone-right-rail"><\/aside>\s*<div id="standalone-bottom-resize-handle"[^>]*><\/div>\s*<section id="standalone-bottom-dock"><\/section>\s*<\/div>/s,
+    /<div id="workspace-shell">\s*<div id="standalone-sidebar-shell">\s*<div id="standalone-main-stack">[\s\S]*?<header>[\s\S]*?<\/header>\s*<div id="app-group-tabs-host" class="agent-group-tabs-host app-group-tabs-host" data-agent-group-tabs-host><\/div>\s*<main id="main"><\/main>\s*<\/div>\s*<div id="standalone-rail-resize-handle"[^>]*><\/div>\s*<aside id="standalone-right-rail"><\/aside>\s*<div id="standalone-bottom-resize-handle"[^>]*><\/div>\s*<section id="standalone-bottom-dock"><\/section>\s*<\/div>/s,
+  );
+  assert.doesNotMatch(
+    html,
+    /<div id="workspace-shell">\s*<div id="app-group-tabs-host"/,
+    'group tabs must not be the topmost workspace row above the app status bar',
   );
   assert.match(
     css,
-    /#app-group-tabs-host\s*\{[^}]*grid-column:\s*1\s*\/\s*-1;[^}]*grid-row:\s*1;/s,
+    /body\.runtime-embedded #app-group-tabs-host\s*\{[^}]*position:\s*relative;[^}]*z-index:\s*15;[^}]*width:\s*max\(var\(--standalone-sidebar-width\),\s*calc\(var\(--standalone-main-stack-min-width\)\s*\+\s*8px\s*\+\s*var\(--standalone-right-rail-width,\s*var\(--standalone-right-rail-min-width\)\)\)\);/s,
   );
   assert.match(
     css,
@@ -20454,6 +20459,10 @@ test('standalone shell owns the full-width bottom dock rows and drag selector', 
   assert.match(
     css,
     /body\.runtime-embedded #standalone-bottom-dock\s*\{[^}]*grid-column:\s*1\s*\/\s*-1;[^}]*grid-row:\s*3;/s,
+  );
+  assert.match(
+    css,
+    /body\.runtime-embedded #standalone-right-rail \.standalone-panel-zone-body\s*\{[^}]*padding-top:\s*51px;/s,
   );
   assert.match(
     css,
