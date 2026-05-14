@@ -492,6 +492,71 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(delays, [2.5])
 
+    async def test_adopt_supervisor_session_primes_awareness_input_ready(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("Torque")
+        cell = state.add_agent(
+            name="Engineer",
+            group="Torque",
+            terminal_backend="pty",
+            command="claude",
+            directory="",
+        )
+        cell.agent_type = "claude-code"
+        cell.session_id = "session-adopted"
+        cell.status = "stopped"
+        adapter = self.pty_mod.SupervisedPtyAdapter(
+            state, "/tmp/torque-test-supervisor.sock")
+        subscribed: list[str] = []
+
+        class FakeClient:
+            async def subscribe(self, session_id, *, on_output, on_exit):
+                del on_output, on_exit
+                subscribed.append(session_id)
+
+        adapter._client = FakeClient()
+        adapter._input_ready_events[cell.id] = self.pty_mod.asyncio.Event()
+
+        await adapter._adopt_supervisor_session(cell, {
+            "session_id": "session-adopted",
+            "cols": 120,
+            "rows": 32,
+            "bootstrap_dir": "",
+            "pid": 0,
+            "alive": True,
+        })
+
+        self.assertEqual(subscribed, ["session-adopted"])
+        self.assertIn("session-adopted", adapter._input_ready_sessions)
+        self.assertNotIn(cell.id, adapter._input_ready_events)
+
+        writes: list[tuple[str, str]] = []
+
+        async def fake_write_input(session_id, data):
+            writes.append((session_id, data))
+
+        async def fail_wait_for(awaitable, timeout):
+            if hasattr(awaitable, "close"):
+                awaitable.close()
+            raise AssertionError(
+                f"adopted session should not wait for readiness ({timeout})")
+
+        adapter.write_input = fake_write_input
+        orig_wait_for = self.pty_mod.asyncio.wait_for
+        self.pty_mod.asyncio.wait_for = fail_wait_for
+        try:
+            await adapter.send_text("session-adopted", "hello")
+        finally:
+            self.pty_mod.asyncio.wait_for = orig_wait_for
+
+        self.assertEqual(
+            writes,
+            [
+                ("session-adopted", "hello"),
+                ("session-adopted", "\r"),
+            ],
+        )
+
     async def test_send_text_codex_applies_post_ready_delay_via_screen_path(self):
         state = self.state_mod.MatrixState()
         state.add_group("Torque")

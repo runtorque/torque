@@ -882,6 +882,12 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
         # "reconnected", "fresh_instance".
         self.on_supervisor_event = None
 
+    def _prime_reconnected_input_ready(self, cell: AgentCell) -> None:
+        sid = cell.session_id or ""
+        if sid and cell.agent_type:
+            self._input_ready_events.pop(cell.id, None)
+            self.prime_input_ready(sid)
+
     # -- lifecycle ---------------------------------------------------------
 
     async def start(self) -> None:
@@ -992,6 +998,7 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
             on_output=self._make_output_handler(session),
             on_exit=self._make_exit_handler(session),
         )
+        self._prime_reconnected_input_ready(cell)
         cell.window_id = "standalone"
         if cell.agent_type:
             cell.status = "idle"

@@ -336,6 +336,49 @@ class BridgeSendTextTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("claude-code", joined)
         self.assertEqual(session.sent, [])  # no writes to any session
 
+    async def test_reconnect_orphans_primes_awareness_input_ready(self):
+        session = FakeSession("session-relinked")
+        bridge, state = await self._make_bridge(session)
+        cell = self.state_mod.AgentCell(
+            id="agent-relinked",
+            name="engineer",
+            group="g",
+            cell_type="agent",
+            session_id="session-relinked",
+            status="stopped",
+            agent_type="claude-code",
+            command="claude",
+        )
+        state.agents[cell.id] = cell
+        bridge._input_ready_events[cell.id] = self.bridge_mod.asyncio.Event()
+        bridge._start_prompt_monitor = lambda cell: None
+
+        async def noop_resolve(cell):
+            pass
+
+        bridge._resolve_git_info = noop_resolve
+
+        await bridge.reconnect_orphans()
+
+        self.assertEqual(cell.status, "idle")
+        self.assertIn("session-relinked", bridge._input_ready_sessions)
+        self.assertNotIn(cell.id, bridge._input_ready_events)
+
+        async def fail_wait_for(awaitable, timeout):
+            if hasattr(awaitable, "close"):
+                awaitable.close()
+            raise AssertionError(
+                f"relinked session should not wait for readiness ({timeout})")
+
+        orig_wait_for = self.bridge_mod.asyncio.wait_for
+        self.bridge_mod.asyncio.wait_for = fail_wait_for
+        try:
+            await bridge.send_text("session-relinked", "hello")
+        finally:
+            self.bridge_mod.asyncio.wait_for = orig_wait_for
+
+        self.assertEqual(session.sent, ["hello", "\r"])
+
     async def test_send_text_claude_does_not_release_on_startup_banner(self):
         session = FakeSession(
             "session-3",
