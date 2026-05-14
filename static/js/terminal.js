@@ -444,8 +444,8 @@ function _terminalComposeHistoryRenderMenu(cellId) {
     for (let i = 0; i < entries.length; i++) {
       const preview = _terminalComposeHistoryPreview(entries[i].message);
       html += '<button type="button" class="terminal-compose-history-item"'
-        + ' role="option" data-history-index="' + i + '"'
-        + ' onclick="return terminalComposeHistoryPick(event, \'' + esc(id) + '\', ' + i + ')"'
+        + ' role="option" data-cell-id="' + esc(id) + '" data-history-index="' + i + '"'
+        + ' onclick="return terminalComposeHistoryPick(event)"'
         + ' title="' + esc(preview) + '">'
         + esc(preview)
         + '</button>';
@@ -535,9 +535,13 @@ function terminalComposeHistoryToggle(evt, cellId) {
 function terminalComposeHistoryPick(evt, cellId, index) {
   if (evt && typeof evt.preventDefault === 'function') evt.preventDefault();
   if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
-  const id = String(cellId || '');
+  const target = evt && evt.currentTarget ? evt.currentTarget : null;
+  const id = String(cellId || (target && target.dataset ? target.dataset.cellId : '') || '');
   const entries = _terminalMessageHistoryEntries(id);
-  const idx = Math.max(0, Math.min(entries.length - 1, Number(index) || 0));
+  const rawIndex = index != null
+    ? index
+    : (target && target.dataset ? target.dataset.historyIndex : 0);
+  const idx = Math.max(0, Math.min(entries.length - 1, Number(rawIndex) || 0));
   const entry = entries[idx];
   if (!id || !entry) {
     _terminalComposeHistoryClose(id);
