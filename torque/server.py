@@ -9664,6 +9664,20 @@ async def main(connection=None):
                                                 worktree_mgr,
                                             )
                                         )
+                                queued_followups = [
+                                    t for t in state.board_tasks.values()
+                                    if t.agent_id == cell.id
+                                    and t.lane in {"Backlog", "To Do"}
+                                ]
+                                merge_resume_targets = []
+                                for followup in queued_followups:
+                                    merge_resume_targets.extend(
+                                        _capture_auto_resume_targets(
+                                            state,
+                                            task=followup,
+                                            group=cell.group,
+                                        )
+                                    )
                                 merge_result = \
                                     await worktree_mgr.server_merge(
                                         cell, msg, squash=squash)
@@ -9729,11 +9743,6 @@ async def main(connection=None):
                                                 ).worktree_merge_cleanup
                                             )
                                         )
-                                    queued_followups = [
-                                        t for t in state.board_tasks.values()
-                                        if t.agent_id == cell.id
-                                        and t.lane in {"Backlog", "To Do"}
-                                    ]
                                     if queued_followups:
                                         close_flag = False
                                         remove_flag = False
@@ -9830,6 +9839,20 @@ async def main(connection=None):
                                         "cleanup": cleanup,
                                     }
                                     _attach_stale_base(result, stale_base)
+                                    if queued_followups:
+                                        await _maybe_auto_resume_targets(
+                                            state,
+                                            handle_command,
+                                            _panel_event,
+                                            targets=merge_resume_targets,
+                                            group=cell.group,
+                                        )
+                                        await _pump_auto_dispatch_queue(
+                                            state,
+                                            handle_command,
+                                            _panel_event,
+                                            group=cell.group,
+                                        )
                                 else:
                                     result = {
                                         "type": "worktree_merge",

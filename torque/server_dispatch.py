@@ -13,6 +13,8 @@ from .worktree_streams import (
     compute_worktree_stream_for_task,
 )
 
+_AUTO_DISPATCH_EMPTY_QUEUE_LOGGED: set[tuple[int, str]] = set()
+
 
 def _should_queue_existing_agent_dispatch(active_task, *,
                                           target_task_id: str,
@@ -118,6 +120,7 @@ def _stream_became_ready_to_resume(previous_stream: dict | None,
 def _stream_resume_target_agent_id(state: MatrixState, stream: dict,
                                    task) -> str:
     candidate_ids = []
+    reasons = {}
     for agent_id in (
         str(stream.get("agent_id", "") or "").strip(),
         str(getattr(task, "agent_id", "") or "").strip(),
@@ -128,13 +131,26 @@ def _stream_resume_target_agent_id(state: MatrixState, stream: dict,
     for agent_id in candidate_ids:
         cell = state.agents.get(agent_id)
         if not cell or cell.cell_type != "agent":
+            reasons[agent_id] = "missing_or_non_agent"
             continue
         if cell.group != getattr(task, "group", ""):
+            reasons[agent_id] = f"group_mismatch:{cell.group}"
             continue
         current_task = state.agent_current_task(agent_id)
         if current_task and getattr(current_task, "id", "") != getattr(task, "id", ""):
+            reasons[agent_id] = (
+                f"busy_with:{getattr(current_task, 'id', '')}"
+            )
             continue
         return agent_id
+    if not candidate_ids:
+        reasons["<none>"] = "no_candidates"
+    log.info(
+        "stream auto-resume: no eligible target for task=%s candidates=%s reasons=%s",
+        getattr(task, "id", "") or "",
+        candidate_ids,
+        reasons,
+    )
     return ""
 
 
@@ -142,11 +158,33 @@ def _stream_resume_allowed(settings, *,
                            previous_stream: dict | None,
                            current_stream: dict | None) -> bool:
     autonomy_mode = str(getattr(settings, "autonomy_mode", "") or "").strip()
+    previous_head = _stream_head_queue_item(previous_stream)
+    current_head = _stream_head_queue_item(current_stream)
     if autonomy_mode == "suggest_only":
+        log.info(
+            "stream auto-resume: not allowed reason=autonomy_suggest_only "
+            "autonomy_mode=%s previous_queue_state=%s current_queue_state=%s "
+            "current_task=%s",
+            autonomy_mode,
+            previous_head.get("queue_state", ""),
+            current_head.get("queue_state", ""),
+            current_head.get("task_id", ""),
+        )
         return False
     if autonomy_mode == "aggressive_auto_continue":
         return True
-    return _stream_became_ready_to_resume(previous_stream, current_stream)
+    allowed = _stream_became_ready_to_resume(previous_stream, current_stream)
+    if not allowed:
+        log.info(
+            "stream auto-resume: not allowed reason=no_ready_transition "
+            "autonomy_mode=%s previous_queue_state=%s current_queue_state=%s "
+            "current_task=%s",
+            autonomy_mode,
+            previous_head.get("queue_state", ""),
+            current_head.get("queue_state", ""),
+            current_head.get("task_id", ""),
+        )
+    return allowed
 
 
 async def _maybe_auto_resume_stream(state: MatrixState, handle_command,
@@ -155,8 +193,25 @@ async def _maybe_auto_resume_stream(state: MatrixState, handle_command,
                                     previous_stream: dict | None = None,
                                     group: str = "") -> dict | None:
     """Auto-resume the next ready product task for a computed stream."""
-    if not task and not previous_stream:
+    def _skip(reason: str, *,
+              current_stream: dict | None = None,
+              ready_task_id: str = "",
+              ready_task=None,
+              stream_group: str = "") -> None:
+        log.info(
+            "stream auto-resume: skipped reason=%s task=%s stream=%s "
+            "ready_task=%s ready_lane=%s group=%s",
+            reason,
+            getattr(task, "id", "") or "",
+            (current_stream or {}).get("stream_id", ""),
+            ready_task_id or getattr(ready_task, "id", "") or "",
+            getattr(ready_task, "lane", "") if ready_task else "",
+            stream_group or group,
+        )
         return None
+
+    if not task and not previous_stream:
+        return _skip("missing_task_and_previous_stream")
 
     current_stream = None
     if task:
@@ -177,18 +232,36 @@ async def _maybe_auto_resume_stream(state: MatrixState, handle_command,
             )
 
     if not current_stream:
-        return None
+        return _skip("no_current_stream")
 
     ready_task_id = _stream_ready_to_resume_task_id(current_stream)
     if not ready_task_id:
-        return None
+        return _skip("no_ready_task", current_stream=current_stream)
     ready_task = state.board_tasks.get(ready_task_id)
-    if not ready_task or task_is_closed(ready_task):
-        return None
+    if not ready_task:
+        return _skip(
+            "ready_task_missing",
+            current_stream=current_stream,
+            ready_task_id=ready_task_id,
+        )
+    if task_is_closed(ready_task):
+        return _skip(
+            "ready_task_closed",
+            current_stream=current_stream,
+            ready_task=ready_task,
+        )
     if ready_task.lane not in {"Backlog", "To Do"}:
-        return None
+        return _skip(
+            "ready_task_not_actionable",
+            current_stream=current_stream,
+            ready_task=ready_task,
+        )
     if not state.board_deps_met(ready_task):
-        return None
+        return _skip(
+            "deps_not_met",
+            current_stream=current_stream,
+            ready_task=ready_task,
+        )
 
     stream_group = (
         str(current_stream.get("group", "") or "").strip()
@@ -196,13 +269,22 @@ async def _maybe_auto_resume_stream(state: MatrixState, handle_command,
         or group
     )
     if not stream_group:
-        return None
+        return _skip(
+            "missing_stream_group",
+            current_stream=current_stream,
+            ready_task=ready_task,
+        )
     settings = state.get_engineer_settings(stream_group)
     if not _stream_resume_allowed(
             settings,
             previous_stream=previous_stream,
             current_stream=current_stream):
-        return None
+        return _skip(
+            "resume_not_allowed",
+            current_stream=current_stream,
+            ready_task=ready_task,
+            stream_group=stream_group,
+        )
 
     target_agent_id = _stream_resume_target_agent_id(
         state,
@@ -210,7 +292,12 @@ async def _maybe_auto_resume_stream(state: MatrixState, handle_command,
         ready_task,
     )
     if not target_agent_id:
-        return None
+        return _skip(
+            "no_target_agent",
+            current_stream=current_stream,
+            ready_task=ready_task,
+            stream_group=stream_group,
+        )
 
     result = await handle_command({
         "cmd": "dispatch_task",
@@ -303,6 +390,22 @@ async def _pump_auto_dispatch_queue(state: MatrixState, handle_command,
         while True:
             queue = state.auto_dispatch_queues.get(group_name, [])
             if not queue:
+                key = (id(state), group_name)
+                if key not in _AUTO_DISPATCH_EMPTY_QUEUE_LOGGED:
+                    bound_followups = [
+                        task.id for task in state.board_tasks.values()
+                        if task.group == group_name
+                        and task.agent_id
+                        and task.lane in {"Backlog", "To Do"}
+                    ]
+                    if bound_followups:
+                        _AUTO_DISPATCH_EMPTY_QUEUE_LOGGED.add(key)
+                        log.info(
+                            "auto-dispatch queue empty for group=%s with "
+                            "queued followups bound to agents: tasks=%s",
+                            group_name,
+                            bound_followups,
+                        )
                 break
             entry = queue[0]
             task = state.board_tasks.get(entry.task_id)
@@ -335,6 +438,14 @@ async def _pump_auto_dispatch_queue(state: MatrixState, handle_command,
             if target_agent_id:
                 needs_capacity = not _is_busy_agent(state, target_agent_id)
             if needs_capacity and len(active_agents) >= entry.max_concurrent:
+                log.info(
+                    "auto-dispatch queue capacity reached for group=%s: "
+                    "%d/%d, deferring task=%s",
+                    group_name,
+                    len(active_agents),
+                    entry.max_concurrent,
+                    entry.task_id,
+                )
                 break
 
             payload = {"cmd": "dispatch_task", "id": task.id}

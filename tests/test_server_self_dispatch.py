@@ -1414,6 +1414,142 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(task.status, "")
         self.assertEqual(task.agent_id, "")
 
+    async def test_worktree_merge_drains_bound_followup_queue_immediately(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        worker = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            status="running",
+            worktree_path="/tmp/worker",
+            worktree_branch="torque/worker",
+            worktree_base_branch="main",
+            worktree_repo_root="/repo",
+        )
+        state.agents[worker.id] = worker
+        state.groups["g"].append(worker.id)
+        shipped = state.board_add_task(
+            "Shipped first task",
+            "g",
+            lane="Done",
+            id="TORQUE:392",
+            agent_id=worker.id,
+        )
+        queued = state.board_add_task(
+            "Queued followup",
+            "g",
+            lane="To Do",
+            id="TORQUE:393",
+            agent_id=worker.id,
+        )
+        self.assertIsNotNone(shipped)
+        self.assertIsNotNone(queued)
+        state.auto_dispatch_queue_add(
+            "g",
+            queued.id,
+            target_agent_id=worker.id,
+            max_concurrent=1,
+        )
+        calls = []
+
+        class FakeWorktreeManager:
+            async def has_uncommitted_changes(self, _cell):
+                return False
+
+            async def stale_base_info(self, _cell):
+                return {"stale": False}
+
+            async def check_merge_conflicts(self, _cell):
+                return {"clean": True, "tree_sha": "tree-sha"}
+
+            async def merge_untracked_overwrite_paths(
+                self, _repo_root, _base_branch, _tree_sha
+            ):
+                return []
+
+            async def server_merge(self, _cell, _msg, squash=True):
+                return {"ok": True, "sha": "abc123"}
+
+            async def validate(self, _cell):
+                return True
+
+            async def reset_to_base(self, _cell):
+                return True
+
+            async def count_commits(self, _cell):
+                return 0
+
+        async def fake_broadcast_toast(*_args, **_kwargs):
+            return None
+
+        async def fake_latest_boundary_state(_cell):
+            return {"latest": None, "clean": True, "reason": ""}
+
+        async def fake_reviewer_cleanup(*_args, **_kwargs):
+            return {"agents": [], "agent_closed": 0, "worktree_removed": 0, "errors": []}
+
+        async def fake_sibling_gate(*_args, **_kwargs):
+            return None
+
+        async def nested_dispatch(payload):
+            calls.append(dict(payload))
+            if payload["cmd"] != "dispatch_task":
+                self.fail(f"Unexpected nested command: {payload}")
+            task = state.board_tasks[payload["id"]]
+            task.agent_id = payload.get("agent_id", "")
+            task.lane = "In Progress"
+            worker.current_task_id = task.id
+            return {
+                "type": "ok",
+                "task_id": task.id,
+                "agent_id": task.agent_id,
+            }
+
+        old_reviewer_cleanup = (
+            self.server_mod._cleanup_shipped_reviewers_for_merged_cell
+        )
+        old_sibling_gate = (
+            self.server_mod._sibling_branch_divergence_gate_for_merge
+        )
+        self.server_mod._cleanup_shipped_reviewers_for_merged_cell = (
+            fake_reviewer_cleanup
+        )
+        self.server_mod._sibling_branch_divergence_gate_for_merge = (
+            fake_sibling_gate
+        )
+        try:
+            handle_command = self._extract_handle_command(
+                state,
+                _broadcast_toast=fake_broadcast_toast,
+                _latest_boundary_state_for_cell=fake_latest_boundary_state,
+                _mark_branch_boundaries_merged=lambda *_args, **_kwargs: None,
+                handle_command=nested_dispatch,
+                worktree_mgr=FakeWorktreeManager(),
+            )
+
+            result = await handle_command({
+                "cmd": "worktree_merge",
+                "id": worker.id,
+                "message": "Merge worker branch",
+            })
+        finally:
+            self.server_mod._cleanup_shipped_reviewers_for_merged_cell = (
+                old_reviewer_cleanup
+            )
+            self.server_mod._sibling_branch_divergence_gate_for_merge = (
+                old_sibling_gate
+            )
+
+        self.assertEqual(result["type"], "worktree_merge")
+        self.assertTrue(result["ok"])
+        self.assertEqual([call["cmd"] for call in calls], ["dispatch_task"])
+        self.assertEqual(calls[0]["id"], queued.id)
+        self.assertEqual(calls[0]["agent_id"], worker.id)
+        self.assertEqual(state.board_tasks[queued.id].lane, "In Progress")
+        self.assertNotIn("g", state.auto_dispatch_queues)
+
 
 class ServerAutoCloseOnDoneTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
