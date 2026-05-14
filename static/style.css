@@ -130,15 +130,9 @@ body.tauri-mode header .app-wordmark {
 /* Main scroll area                                                    */
 /* ------------------------------------------------------------------ */
 #workspace-shell {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: auto minmax(0, 1fr);
+  display: flex;
   flex: 1;
   min-height: 0;
-}
-#app-group-tabs-host {
-  grid-column: 1 / -1;
-  grid-row: 1;
 }
 #standalone-sidebar-shell {
   display: flex;
@@ -146,8 +140,6 @@ body.tauri-mode header .app-wordmark {
   flex: 1;
   min-width: 0;
   min-height: 0;
-  grid-column: 1;
-  grid-row: 2;
 }
 #standalone-main-stack {
   display: flex;
@@ -179,7 +171,7 @@ body.runtime-embedded #workspace-shell {
     max(var(--standalone-sidebar-width), calc(var(--standalone-main-stack-min-width) + 8px + var(--standalone-right-rail-width, var(--standalone-right-rail-min-width))))
     8px
     minmax(0, 1fr);
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   min-height: 0;
 }
 body.runtime-embedded #standalone-sidebar-shell {
@@ -188,7 +180,7 @@ body.runtime-embedded #standalone-sidebar-shell {
   grid-template-rows: minmax(0, 1fr) 8px var(--standalone-bottom-height, 280px);
   min-height: 0;
   grid-column: 1;
-  grid-row: 2;
+  grid-row: 1;
 }
 body.runtime-embedded #standalone-main-stack {
   display: flex;
@@ -196,6 +188,11 @@ body.runtime-embedded #standalone-main-stack {
   min-height: 0;
   grid-column: 1;
   grid-row: 1;
+}
+body.runtime-embedded #app-group-tabs-host {
+  position: relative;
+  z-index: 15;
+  width: max(var(--standalone-sidebar-width), calc(var(--standalone-main-stack-min-width) + 8px + var(--standalone-right-rail-width, var(--standalone-right-rail-min-width))));
 }
 body.runtime-embedded #standalone-rail-resize-handle {
   grid-column: 2;
@@ -248,7 +245,7 @@ body.runtime-embedded #workspace-resize-handle {
   position: relative;
   background: rgba(255,255,255,.02);
   grid-column: 2;
-  grid-row: 2;
+  grid-row: 1;
 }
 body.runtime-embedded #workspace-resize-handle::before {
   content: '';
@@ -268,7 +265,7 @@ body.workspace-resizing #workspace-resize-handle::before {
 body.runtime-embedded #terminal-workspace {
   display: block;
   grid-column: 3;
-  grid-row: 2;
+  grid-row: 1;
   min-width: 0;
   min-height: 0;
   background:
@@ -3612,6 +3609,10 @@ body.runtime-embedded #standalone-bottom-dock {
 }
 body.runtime-embedded #standalone-right-rail {
   border-left-color: rgba(255,255,255,.08);
+}
+body.runtime-embedded #standalone-right-rail .standalone-panel-zone-body {
+  /* The app-wide group tabs are positioned by the left stack but span this rail. */
+  padding-top: 51px;
 }
 .standalone-panel-zone-header {
   display: flex;
