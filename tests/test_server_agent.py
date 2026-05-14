@@ -113,16 +113,13 @@ class _CapturingBridge(_FakeBridge):
 
 
 class _FailingCreateBridge(_FakeBridge):
-    async def create_session(self, cell, **kwargs):
-        raise RuntimeError("iterm session timeout")
+    async def create_session(self, cell, **kwargs): raise RuntimeError("iterm session timeout")
 
 
 class _EmptyWorktreeManager:
-    async def get_repo_root(self, directory):
-        return "/repo"
+    async def get_repo_root(self, directory): return "/repo"
 
-    async def create(self, *args, **kwargs):
-        return ""
+    async def create(self, *args, **kwargs): return ""
 
 
 class _FakeTemplateManager:
@@ -147,15 +144,14 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
         self.state_mod = importlib.reload(self.state_mod)
 
     def _launch_cfg(self, **extra):
-        cfg = {"profile": "Default", "command": "codex",
-               "directory": "/repo", "tab_color": ""}
+        cfg = {"profile": "Default", "command": "codex", "directory": "/repo", "tab_color": ""}
         cfg.update(extra)
         return cfg
 
     def _launch_service(self, state, bridge, worktree_mgr=None):
         return self.server_agent_mod.AgentLaunchService(
-            state=state, connection=None, bridge=bridge,
-            worktree_mgr=worktree_mgr, template_mgr=_FakeTemplateManager(),
+            state=state, connection=None, bridge=bridge, worktree_mgr=worktree_mgr,
+            template_mgr=_FakeTemplateManager(),
         )
 
     async def test_resolve_base_dir_prefers_group_directory(self):
@@ -552,7 +548,7 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
         service = self._launch_service(state, _CapturingBridge())
 
         with self.assertLogs("torque", level="WARNING") as logs:
-            cell = await service.create_agent_with_config(
+            await service.create_agent_with_config(
                 "missing-group", "Worker", self._launch_cfg(),
             )
 
@@ -567,7 +563,7 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
             state, bridge, worktree_mgr=_EmptyWorktreeManager())
 
         with self.assertLogs("torque", level="WARNING") as logs:
-            cell = await service.create_agent_with_config(
+            await service.create_agent_with_config(
                 "backend", "Worker", self._launch_cfg(worktree=True),
             )
 
@@ -576,7 +572,6 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_create_agent_with_config_logs_and_events_create_session_failure(self):
         events_mod = importlib.import_module("torque.events")
-        events_mod = importlib.reload(events_mod)
         state = self.state_mod.MatrixState()
         state.add_group("backend")
         state.panel_log = events_mod.PanelEventLog(max_size=10)
