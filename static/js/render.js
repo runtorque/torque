@@ -102,13 +102,34 @@ function _agentFocusSplitParts(root) {
   root = root || document.getElementById('main');
   if (!root || typeof root.querySelector !== 'function') return null;
   const split = root.querySelector('[data-agent-split]');
-  const tabsHost = root.querySelector('[data-agent-group-tabs-host]');
+  const tabsHost = _agentGroupTabsHost(root);
   const grid = root.querySelector('[data-agent-grid-pane]');
   const handle = root.querySelector('[data-agent-focus-resizer]');
   const focus = root.querySelector('[data-agent-focus-panel]');
   const focusScroll = root.querySelector('[data-agent-focus-scroll]');
   if (!split || !grid || !handle || !focus || !focusScroll) return null;
   return { root, split, tabsHost, grid, handle, focus, focusScroll };
+}
+
+function _agentGroupTabsHost(root) {
+  const doc = (root && root.ownerDocument)
+    || (typeof document !== 'undefined' ? document : null);
+  if (!doc || typeof doc.getElementById !== 'function') return null;
+  return doc.getElementById('app-group-tabs-host')
+    || doc.getElementById('agent-group-tabs-host')
+    || (root && typeof root.querySelector === 'function'
+      ? root.querySelector('[data-agent-group-tabs-host]')
+      : null);
+}
+
+function _renderAgentGroupTabsHost(tabsHtml) {
+  const host = _agentGroupTabsHost();
+  if (!host) return false;
+  const nextHtml = tabsHtml || '';
+  if (host._torqueLastHtml === nextHtml && host.innerHTML === nextHtml) return false;
+  host.innerHTML = nextHtml;
+  host._torqueLastHtml = nextHtml;
+  return true;
 }
 
 function _agentFocusHandleHeight(parts) {
@@ -2529,9 +2550,6 @@ function _renderAgentFocusPanelHtml() {
 
 function _agentFocusShellHtml(gridHtml, focusHtml, tabsHtml) {
   return '<div class="agent-split" data-agent-split>'
-    + '<div id="agent-group-tabs-host" class="agent-group-tabs-host" data-agent-group-tabs-host>'
-    + (tabsHtml || '')
-    + '</div>'
     + '<div id="agent-grid-pane" class="agents-grid-pane" data-agent-grid-pane>'
     + (gridHtml || '')
     + '</div>'
@@ -2558,7 +2576,8 @@ function _renderAgentGridAndFocus(main, gridHtml, opts) {
   const tabsChanged = main._torqueLastTabsHtml !== tabsHtml;
   const parts = _agentFocusSplitParts(main);
   const shellMissing = !main._torqueHasAgentSplitShell;
-  if (shellMissing || ((gridChanged || tabsChanged) && (!parts || (tabsChanged && !parts.tabsHost)))) {
+  const tabsHostChanged = _renderAgentGroupTabsHost(tabsHtml);
+  if (shellMissing || (gridChanged && !parts)) {
     main.innerHTML = combined;
     main._torqueHasAgentSplitShell = true;
     main._torqueLastTabsHtml = tabsHtml;
@@ -2568,8 +2587,7 @@ function _renderAgentGridAndFocus(main, gridHtml, opts) {
     _agentFocusApplyPersistedSplit();
     return { mainHtmlChanged: true, focusHtmlChanged: renderFocus };
   }
-  if (tabsChanged && parts.tabsHost) {
-    parts.tabsHost.innerHTML = tabsHtml || '';
+  if (tabsChanged) {
     main._torqueLastTabsHtml = tabsHtml;
   }
   if (gridChanged) {
@@ -2588,7 +2606,7 @@ function _renderAgentGridAndFocus(main, gridHtml, opts) {
   }
   main._torqueLastHtml = combined;
   if (renderFocus) renderAgentFocusPanel({ main, focusHtml });
-  return { mainHtmlChanged: tabsChanged, focusHtmlChanged: renderFocus && main._torqueLastFocusHtml !== focusHtml };
+  return { mainHtmlChanged: false, tabsHostChanged, focusHtmlChanged: renderFocus && main._torqueLastFocusHtml !== focusHtml };
 }
 
 function renderAgentFocusPanel(opts) {
@@ -2605,6 +2623,7 @@ function renderAgentFocusPanel(opts) {
     const gridHtml = main._torqueLastGridHtml || '';
     const tabsHtml = main._torqueLastTabsHtml || '';
     main.innerHTML = _agentFocusShellHtml(gridHtml, focusHtml, tabsHtml);
+    _renderAgentGroupTabsHost(tabsHtml);
     main._torqueHasAgentSplitShell = true;
     main._torqueLastFocusHtml = focusHtml;
     main._torqueLastHtml = main.innerHTML;

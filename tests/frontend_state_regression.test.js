@@ -924,6 +924,7 @@ function createMainHarness(overrides = {}) {
   }, sandboxOverrides));
   [
     'standalone-sidebar-shell',
+    'app-group-tabs-host',
     'standalone-main-stack',
     'standalone-bottom-dock',
     'standalone-right-rail',
@@ -17268,6 +17269,7 @@ test('standalone group tabs render above the agent grid scroll pane', () => {
     renderTerminalWorkspace() {},
   });
   const main = document.getElementById('main');
+  const tabsHost = document.getElementById('app-group-tabs-host');
   loadScript(context, 'static/js/render.js');
   runInContext(context, `
     var selectedAgentId = null;
@@ -17285,17 +17287,15 @@ test('standalone group tabs render above the agent grid scroll pane', () => {
   `);
 
   const html = main.innerHTML;
-  const hostIndex = html.indexOf('id="agent-group-tabs-host"');
-  const tabsIndex = html.indexOf('class="agent-group-tabs" data-agent-group-tabs');
+  const tabsHtml = tabsHost.innerHTML;
   const gridIndex = html.indexOf('id="agent-grid-pane"');
 
-  assert.ok(hostIndex >= 0, 'agent group tabs host should be present');
-  assert.ok(tabsIndex > hostIndex, 'tabs should render inside the hoisted host');
-  assert.ok(gridIndex > tabsIndex, 'grid scroll pane should render after the tabs host');
+  assert.match(tabsHtml, /class="agent-group-tabs" data-agent-group-tabs/);
+  assert.ok(gridIndex >= 0, 'grid scroll pane should render in the main surface');
   assert.equal(
-    html.slice(gridIndex).includes('class="agent-group-tabs" data-agent-group-tabs'),
+    html.includes('class="agent-group-tabs" data-agent-group-tabs'),
     false,
-    'group tabs should not be inside .agents-grid-pane',
+    'group tabs should render in the app-wide host, not inside the main grid shell',
   );
 });
 
@@ -20042,11 +20042,15 @@ test('standalone shell owns the full-width bottom dock rows and drag selector', 
 
   assert.match(
     css,
-    /body\.runtime-embedded #workspace-shell\s*\{[^}]*grid-template-columns:\s*max\(var\(--standalone-sidebar-width\),\s*calc\(var\(--standalone-main-stack-min-width\)\s*\+\s*8px\s*\+\s*var\(--standalone-right-rail-width,\s*var\(--standalone-right-rail-min-width\)\)\)\)\s+8px\s+minmax\(0,\s*1fr\);/s,
+    /body\.runtime-embedded #workspace-shell\s*\{[^}]*grid-template-columns:\s*max\(var\(--standalone-sidebar-width\),\s*calc\(var\(--standalone-main-stack-min-width\)\s*\+\s*8px\s*\+\s*var\(--standalone-right-rail-width,\s*var\(--standalone-right-rail-min-width\)\)\)\)\s+8px\s+minmax\(0,\s*1fr\);[^}]*grid-template-rows:\s*auto\s+minmax\(0,\s*1fr\);/s,
   );
   assert.match(
     html,
-    /<div id="standalone-sidebar-shell">\s*<div id="standalone-main-stack">[\s\S]*?<main id="main"><\/main>\s*<\/div>\s*<div id="standalone-rail-resize-handle"[^>]*><\/div>\s*<aside id="standalone-right-rail"><\/aside>\s*<div id="standalone-bottom-resize-handle"[^>]*><\/div>\s*<section id="standalone-bottom-dock"><\/section>\s*<\/div>/s,
+    /<div id="workspace-shell">\s*<div id="app-group-tabs-host" class="agent-group-tabs-host app-group-tabs-host" data-agent-group-tabs-host><\/div>\s*<div id="standalone-sidebar-shell">\s*<div id="standalone-main-stack">[\s\S]*?<main id="main"><\/main>\s*<\/div>\s*<div id="standalone-rail-resize-handle"[^>]*><\/div>\s*<aside id="standalone-right-rail"><\/aside>\s*<div id="standalone-bottom-resize-handle"[^>]*><\/div>\s*<section id="standalone-bottom-dock"><\/section>\s*<\/div>/s,
+  );
+  assert.match(
+    css,
+    /#app-group-tabs-host\s*\{[^}]*grid-column:\s*1\s*\/\s*-1;[^}]*grid-row:\s*1;/s,
   );
   assert.match(
     css,
