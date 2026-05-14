@@ -16046,6 +16046,84 @@ test('Cmd+Option+P opens the add architect modal through the shared key handler'
   assert.deepEqual(sandbox.addArchitectModalCalls, ['torque']);
 });
 
+test('macOS undo and redo shortcuts run inside modal text inputs', () => {
+  const overlay = new FakeElement('modal-task');
+  overlay.classList.add('overlay', 'visible');
+  const { document, sandbox } = createMainHarness({
+    __mainHarnessOptions: { overlays: [overlay] },
+    closeModals() {
+      sandbox.closeCalls = (sandbox.closeCalls || 0) + 1;
+    },
+  });
+  const input = new FakeElement('task-description-input');
+  input.tagName = 'TEXTAREA';
+  input.value = 'Draft text';
+  document.activeElement = input;
+  const commands = [];
+  document.execCommand = function(command, showUi, value) {
+    commands.push({ command, showUi, value });
+    return true;
+  };
+
+  function fire(key, shiftKey = false) {
+    const event = {
+      key,
+      metaKey: true,
+      shiftKey,
+      altKey: false,
+      ctrlKey: false,
+      target: input,
+      preventDefault() { this.defaultPrevented = true; },
+    };
+    document.listeners.keydown(event);
+    return event;
+  }
+
+  assert.equal(fire('z').defaultPrevented, true);
+  assert.equal(fire('Z', true).defaultPrevented, true);
+  assert.deepEqual(commands, [
+    { command: 'undo', showUi: false, value: null },
+    { command: 'redo', showUi: false, value: null },
+  ]);
+  assert.equal(sandbox.closeCalls || 0, 0);
+});
+
+test('macOS select-all shortcut selects the active text input', () => {
+  const { document } = createMainHarness();
+  const input = new FakeElement('board-search-input');
+  input.tagName = 'INPUT';
+  input.type = 'text';
+  input.value = 'search query';
+  input.selectionStart = input.selectionEnd = input.value.length;
+  let selectCalls = 0;
+  input.select = function() {
+    selectCalls += 1;
+    this.selectionStart = 0;
+    this.selectionEnd = this.value.length;
+  };
+  document.activeElement = input;
+  document.execCommand = function(command) {
+    throw new Error('Cmd+A should use the focused input selection API, not ' + command);
+  };
+
+  const event = {
+    key: 'a',
+    metaKey: true,
+    shiftKey: false,
+    altKey: false,
+    ctrlKey: false,
+    target: input,
+    preventDefault() { this.defaultPrevented = true; },
+  };
+
+  document.listeners.keydown(event);
+
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(selectCalls, 1);
+  assert.equal(input.selectionStart, 0);
+  assert.equal(input.selectionEnd, input.value.length);
+});
+
 test('modal outside close is driven by overlay mousedown, not selection-ending click', () => {
   const overlay = new FakeElement('modal-task');
   overlay.classList.add('overlay', 'visible');
