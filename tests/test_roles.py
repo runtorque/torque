@@ -60,6 +60,7 @@ class RoleManagerTests(unittest.TestCase):
         demo = next(item for item in listed if item["name"] == "demo")
         self.assertEqual(demo["preamble"], "Be careful.\nShip small.")
         self.assertEqual(demo["priorities"], ["ship small", "test first"])
+        self.assertEqual(demo["path"], str(self.user_roles / "demo.yaml"))
 
     def test_legacy_template_is_ignored_with_warning(self):
         legacy_path = self.user_templates / "bar.yaml"

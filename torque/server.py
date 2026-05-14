@@ -8269,11 +8269,17 @@ async def main(connection=None):
             if payload is None:
                 payload = data.get("specialization", {})
             old_name = str(data.get("old_name", "") or "").strip()
-            if old_name and old_name != name:
-                specialization_mgr.delete_specialization(
-                    old_name, base_dir=base_dir)
-                specialization_mgr.delete_specialization(
-                    old_name, scope="user", base_dir=base_dir)
+            old_scope = str(data.get("old_scope", "") or "").strip()
+            if old_name and (old_name != name or (
+                    old_scope and old_scope != scope)):
+                if old_scope:
+                    specialization_mgr.delete_specialization(
+                        old_name, scope=old_scope, base_dir=base_dir)
+                else:
+                    specialization_mgr.delete_specialization(
+                        old_name, base_dir=base_dir)
+                    specialization_mgr.delete_specialization(
+                        old_name, scope="user", base_dir=base_dir)
             try:
                 specialization_mgr.save_specialization(
                     name, payload or {}, scope=scope, base_dir=base_dir)

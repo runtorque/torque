@@ -211,6 +211,7 @@ class SpecializationManager:
                     "priorities": list(meta.get("priorities", [])),
                     "global": is_global,
                     "dir": root_dir,
+                    "path": path,
                     "shadowed": shadowed,
                 })
                 if not is_global:
