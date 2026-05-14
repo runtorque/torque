@@ -3629,9 +3629,6 @@ class SelectedPrincipalIdTests(unittest.TestCase):
         db.init()
         self.addCleanup(db.close)
 
-        # A group is required for MatrixState.load() to exit its fast-path
-        # early return for empty databases.
-        db.save_groups({"g": []}, {"g": "g"})
         db.save_ui_state("selected_principal_id", "architect-42")
 
         state = self.state_mod.MatrixState(db=db)
@@ -3648,15 +3645,45 @@ class SelectedPrincipalIdTests(unittest.TestCase):
         db.init()
         self.addCleanup(db.close)
 
-        # A group is required for MatrixState.load() to exit its fast-path
-        # early return for empty databases.
-        db.save_groups({"g": []}, {"g": "g"})
         db.save_ui_state("selected_agent_id", "agent-42")
 
         state = self.state_mod.MatrixState(db=db)
         state.load()
 
         self.assertEqual(state.selected_agent_id, "agent-42")
+
+    def test_restores_standalone_panel_layout_without_agents_or_groups(self):
+        from torque.db import TorqueDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = TorqueDB(Path(tmp.name) / "torque.db")
+        db.init()
+        self.addCleanup(db.close)
+
+        layout = {
+            "version": 1,
+            "bottom": {
+                "open": True,
+                "size": 280,
+                "tabs": ["board"],
+                "active": "board",
+            },
+            "right": {
+                "open": True,
+                "size": 320,
+                "tabs": ["actions", "templates", "history", "context"],
+                "active": "history",
+            },
+            "floats": {},
+            "last_active": "history",
+        }
+        db.save_ui_state("standalone_panel_layout", json.dumps(layout))
+
+        state = self.state_mod.MatrixState(db=db)
+        state.load()
+
+        self.assertEqual(state.standalone_panel_layout, layout)
 
     def test_persists_and_restores_window_group_and_board_lane_state(self):
         from torque.db import TorqueDB

@@ -2910,8 +2910,6 @@ class MatrixState:
             self.db.migrate_from_json(STATE_FILE)
 
         data = self.db.load_all()
-        if not data.get("agents") and not data.get("groups"):
-            return  # empty DB, nothing to load
 
         try:
             fields = set(AgentCell.__dataclass_fields__)
