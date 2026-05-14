@@ -20,6 +20,7 @@ var _specializationNew = false;
 var _specializationScope = 'project';
 var _specializationLoadedGroup = null;
 var _specializationLoadingGroup = null;
+var _specializationSkipNextDraftCapture = false;
 
 function _libraryTabsHtml() {
   var rolesActive = _libraryActiveTab !== 'specializations';
@@ -86,6 +87,7 @@ function agentTemplateBeginGroupSwitch() {
     _specializationDirty = false;
     _specializationNew = false;
     _specializationLoadedGroup = null;
+    _specializationSkipNextDraftCapture = true;
   }
   agentTemplateEditorLoad();
   renderAgentTemplatesPanel();
@@ -573,12 +575,14 @@ function specializationLibraryReceiveList(msg) {
     }
   }
   if (msg.deleted && _specializationSelectedName() === msg.deleted) {
+    _specializationSkipNextDraftCapture = true;
     _specializationSelected = '';
     _specializationData = null;
+    _specializationDirty = false;
   }
   if (_libraryActiveTab !== 'specializations') return;
   renderAgentTemplatesPanel();
-  if (_specializationSelected && !_specializationNew) {
+  if (_specializationSelected && !_specializationNew && !_specializationDirty) {
     send({
       cmd: 'get_specialization',
       name: _specializationSelectedName(),
@@ -591,6 +595,7 @@ function specializationLibraryReceiveList(msg) {
 function specializationLibraryReceiveDetail(msg) {
   if (_libraryActiveTab !== 'specializations') return;
   if (msg.name !== _specializationSelectedName()) return;
+  if (_specializationDirty && document.getElementById('specialization-name')) return;
   _specializationData = msg.specialization || {};
   _specializationDirty = false;
   _specializationNew = false;
@@ -600,6 +605,13 @@ function specializationLibraryReceiveDetail(msg) {
 function renderSpecializationLibraryPanel() {
   var panel = document.getElementById('panel-templates');
   if (!panel) return;
+  var restoreState = _specializationSkipNextDraftCapture
+    ? null
+    : _specializationCaptureEditorUiState();
+  _specializationSkipNextDraftCapture = false;
+  if (restoreState && restoreState.form) {
+    _specializationApplyEditorDraft(restoreState.form);
+  }
   var scopeGroup = (typeof _currentGroup === 'function' ? _currentGroup() : '') || '';
   var loadedForScope = _specializationLoadedGroup === scopeGroup
     || (_specializationLoadedGroup == null && _specializationLoadingGroup !== scopeGroup);
@@ -647,7 +659,7 @@ function renderSpecializationLibraryPanel() {
   html += '<div class="tpled-editor" id="specialization-editor"></div>';
 
   panel.innerHTML = html;
-  renderSpecializationLibraryEditor();
+  renderSpecializationLibraryEditor(restoreState);
 }
 
 function specializationLibrarySelect(key) {
@@ -665,6 +677,7 @@ function specializationLibrarySelect(key) {
   _specializationNew = false;
   _specializationData = null;
   _specializationDirty = false;
+  _specializationSkipNextDraftCapture = true;
   renderAgentTemplatesPanel();
   send({
     cmd: 'get_specialization',
@@ -680,12 +693,13 @@ function specializationLibraryNew() {
   _specializationDirty = true;
   _specializationScope = 'project';
   _specializationData = { name: '', description: '', preamble: '', priorities: [] };
+  _specializationSkipNextDraftCapture = true;
   renderAgentTemplatesPanel();
   var inp = document.getElementById('specialization-name');
   if (inp) inp.focus();
 }
 
-function renderSpecializationLibraryEditor() {
+function renderSpecializationLibraryEditor(restoreState) {
   var el = document.getElementById('specialization-editor');
   if (!el) return;
   var scopeGroup = (typeof _currentGroup === 'function' ? _currentGroup() : '') || '';
@@ -712,7 +726,7 @@ function renderSpecializationLibraryEditor() {
   var priorities = (d.priorities || []).join('\n');
   var html = '<div class="tpled-form">';
   html += '<label>Name <span class="label-req">*</span></label>';
-  html += '<input id="specialization-name" value="' + esc(d.name || '') + '" onchange="specializationLibraryMarkDirty()" autocomplete="off">';
+  html += '<input id="specialization-name" value="' + esc(d.name || '') + '" oninput="specializationLibraryMarkDirty()" onchange="specializationLibraryMarkDirty()" autocomplete="off">';
   html += '<label>Scope</label>';
   html += '<select id="specialization-scope" onchange="specializationLibraryMarkDirty()">';
   html += '<option value="project"' + (_specializationScope === 'project' ? ' selected' : '') + '>Project (.torque/specializations/)</option>';
@@ -723,11 +737,11 @@ function renderSpecializationLibraryEditor() {
     html += '<input class="tpled-source-path" value="' + esc(sourcePath) + '" readonly>';
   }
   html += '<label>Description</label>';
-  html += '<input id="specialization-description" value="' + esc(d.description || '') + '" onchange="specializationLibraryMarkDirty()" autocomplete="off">';
+  html += '<input id="specialization-description" value="' + esc(d.description || '') + '" oninput="specializationLibraryMarkDirty()" onchange="specializationLibraryMarkDirty()" autocomplete="off">';
   html += '<label>Preamble</label>';
-  html += '<textarea id="specialization-preamble" rows="5" oninput="_tplAutoResize(this)" onchange="specializationLibraryMarkDirty()" placeholder="Behavior guidance injected into engineer prompts that carry this specialization.">' + esc(d.preamble || '') + '</textarea>';
+  html += '<textarea id="specialization-preamble" rows="5" oninput="_tplAutoResize(this);specializationLibraryMarkDirty()" onchange="specializationLibraryMarkDirty()" placeholder="Behavior guidance injected into engineer prompts that carry this specialization.">' + esc(d.preamble || '') + '</textarea>';
   html += '<label>Priorities <span class="label-hint">one per line</span></label>';
-  html += '<textarea id="specialization-priorities" rows="4" oninput="_tplAutoResize(this)" onchange="specializationLibraryMarkDirty()" placeholder="rerender hygiene&#10;test first">' + esc(priorities) + '</textarea>';
+  html += '<textarea id="specialization-priorities" rows="4" oninput="_tplAutoResize(this);specializationLibraryMarkDirty()" onchange="specializationLibraryMarkDirty()" placeholder="rerender hygiene&#10;test first">' + esc(priorities) + '</textarea>';
   html += '<div class="tpled-actions">';
   html += '<button class="btn-primary" onclick="specializationLibrarySave()">Save</button>';
   html += '<button class="btn-cancel" onclick="specializationLibraryDuplicate()">Duplicate</button>';
@@ -735,18 +749,137 @@ function renderSpecializationLibraryEditor() {
   html += '</div>';
   html += '</div>';
   el.innerHTML = html;
+  _specializationRestoreEditorUiState(el, restoreState);
   el.querySelectorAll('textarea').forEach(_tplAutoResize);
 }
 
 function specializationLibraryMarkDirty() {
   _specializationDirty = true;
+  _specializationSkipNextDraftCapture = false;
+}
+
+function _specializationEditorField(id) {
+  return document.getElementById ? document.getElementById(id) : null;
+}
+
+function _specializationPrioritiesFromText(value) {
+  return String(value || '').split(/\n+/).map(function(line) {
+    return line.trim();
+  }).filter(Boolean);
+}
+
+function _specializationCaptureEditorUiState() {
+  var snapshot = { form: null, focus: null };
+  var nameEl = _specializationEditorField('specialization-name');
+  var scopeEl = _specializationEditorField('specialization-scope');
+  var descriptionEl = _specializationEditorField('specialization-description');
+  var preambleEl = _specializationEditorField('specialization-preamble');
+  var prioritiesEl = _specializationEditorField('specialization-priorities');
+  if (nameEl && scopeEl && descriptionEl && preambleEl && prioritiesEl) {
+    snapshot.form = {
+      name: nameEl.value || '',
+      scope: scopeEl.value || _specializationScope || 'project',
+      description: descriptionEl.value || '',
+      preamble: preambleEl.value || '',
+      prioritiesText: prioritiesEl.value || '',
+    };
+  }
+  var root = document.getElementById('specialization-editor')
+    || document.getElementById('panel-templates');
+  var active = document.activeElement;
+  if (active && root && typeof root.contains === 'function' && root.contains(active)) {
+    var focusKey = active.id || (active.dataset ? active.dataset.focusKey : '');
+    if (focusKey) {
+      snapshot.focus = {
+        key: focusKey,
+        byId: !!active.id,
+        value: ('value' in active) ? active.value : null,
+        checked: ('checked' in active) ? !!active.checked : null,
+        selectionStart: typeof active.selectionStart === 'number' ? active.selectionStart : null,
+        selectionEnd: typeof active.selectionEnd === 'number' ? active.selectionEnd : null,
+        selectionDirection: active.selectionDirection || 'none',
+      };
+    }
+  }
+  return snapshot;
+}
+
+function _specializationApplyEditorDraft(form) {
+  if (!form) return;
+  var next = {
+    name: String(form.name || ''),
+    description: String(form.description || ''),
+    preamble: String(form.preamble || ''),
+    priorities: _specializationPrioritiesFromText(form.prioritiesText),
+  };
+  var nextScope = form.scope === 'user' ? 'user' : 'project';
+  var current = _specializationData || {};
+  var currentPriorities = Array.isArray(current.priorities)
+    ? current.priorities
+    : [];
+  var prioritiesChanged = currentPriorities.length !== next.priorities.length
+    || currentPriorities.some(function(item, idx) {
+      return item !== next.priorities[idx];
+    });
+  if (
+    String(current.name || '') !== next.name
+    || String(current.description || '') !== next.description
+    || String(current.preamble || '') !== next.preamble
+    || prioritiesChanged
+    || _specializationScope !== nextScope
+  ) {
+    _specializationDirty = true;
+  }
+  _specializationData = next;
+  _specializationScope = nextScope;
+}
+
+function _specializationRestoreEditorUiState(root, snapshot) {
+  if (!root || !snapshot) return;
+  var form = snapshot.form || null;
+  if (form) {
+    var fields = {
+      'specialization-name': form.name || '',
+      'specialization-scope': form.scope || _specializationScope || 'project',
+      'specialization-description': form.description || '',
+      'specialization-preamble': form.preamble || '',
+      'specialization-priorities': form.prioritiesText || '',
+    };
+    Object.keys(fields).forEach(function(id) {
+      var el = _specializationEditorField(id);
+      if (el && 'value' in el) el.value = fields[id];
+    });
+  }
+  if (!snapshot.focus) return;
+  var focus = snapshot.focus;
+  var focusEl = null;
+  if (focus.byId && document.getElementById) {
+    focusEl = document.getElementById(focus.key);
+  }
+  if (!focusEl && root.querySelector) {
+    focusEl = root.querySelector('[data-focus-key="' + focus.key + '"]');
+  }
+  if (!focusEl) return;
+  if (focus.value != null && 'value' in focusEl) focusEl.value = focus.value;
+  if (focus.checked != null && 'checked' in focusEl) focusEl.checked = focus.checked;
+  if (typeof focusEl.focus === 'function') {
+    try { focusEl.focus({ preventScroll: true }); }
+    catch (_e) { focusEl.focus(); }
+  }
+  if (typeof focus.selectionStart === 'number' && 'selectionStart' in focusEl) {
+    focusEl.selectionStart = focus.selectionStart;
+  }
+  if (typeof focus.selectionEnd === 'number' && 'selectionEnd' in focusEl) {
+    focusEl.selectionEnd = focus.selectionEnd;
+  }
+  if (focus.selectionDirection && 'selectionDirection' in focusEl) {
+    focusEl.selectionDirection = focus.selectionDirection;
+  }
 }
 
 function _specializationLibraryReadForm() {
   var prioritiesRaw = document.getElementById('specialization-priorities').value || '';
-  var priorities = prioritiesRaw.split(/\n+/).map(function(line) {
-    return line.trim();
-  }).filter(Boolean);
+  var priorities = _specializationPrioritiesFromText(prioritiesRaw);
   return {
     name: (document.getElementById('specialization-name').value || '').trim(),
     description: (document.getElementById('specialization-description').value || '').trim(),
@@ -778,8 +911,10 @@ function specializationLibrarySave() {
   }
   _specializationSelected = newScope + ':' + name;
   _specializationScope = newScope;
+  _specializationData = data;
   _specializationDirty = false;
   _specializationNew = false;
+  _specializationSkipNextDraftCapture = true;
   send(msg);
 }
 

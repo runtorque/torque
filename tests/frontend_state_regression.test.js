@@ -14969,6 +14969,82 @@ test('Library Specializations tab loads and saves via specialization commands', 
   ]);
 });
 
+test('Library Specializations list refresh preserves unsaved editor draft and caret', () => {
+  const { context, document, sandbox } = createTemplatesHarness();
+  const editor = document.register('specialization-editor');
+  const name = document.register('specialization-name');
+  const scope = document.register('specialization-scope');
+  const description = document.register('specialization-description');
+  const preamble = document.register('specialization-preamble');
+  const priorities = document.register('specialization-priorities');
+
+  name.value = 'ui-ux-draft';
+  scope.value = 'user';
+  description.value = 'Draft description';
+  preamble.value = 'Draft preamble keeps operator text.';
+  priorities.value = 'draft priority\naccessibility';
+  preamble.selectionStart = 6;
+  preamble.selectionEnd = 14;
+  preamble.selectionDirection = 'forward';
+  editor.appendChild(preamble);
+  document.activeElement = preamble;
+
+  runInContext(context, `
+    _libraryActiveTab = 'specializations';
+    _specializationLoadedGroup = 'alpha';
+    _specializationLoadingGroup = null;
+    _specializationList = [{
+      name: 'ui-ux',
+      description: 'Loaded description',
+      preamble: 'Loaded preamble.',
+      priorities: ['loaded priority'],
+      global: false,
+      path: '/repo/.torque/specializations/ui-ux.yaml',
+    }];
+    _specializationSelected = 'project:ui-ux';
+    _specializationScope = 'project';
+    _specializationData = {
+      name: 'ui-ux',
+      description: 'Loaded description',
+      preamble: 'Loaded preamble.',
+      priorities: ['loaded priority'],
+    };
+    _specializationDirty = false;
+    _specializationNew = false;
+    specializationLibraryReceiveList({
+      type: 'specializations',
+      group: 'alpha',
+      specializations: [{
+        name: 'ui-ux',
+        description: 'Loaded description from refresh',
+        preamble: 'Loaded preamble from refresh.',
+        priorities: ['loaded priority from refresh'],
+        global: false,
+        path: '/repo/.torque/specializations/ui-ux.yaml',
+      }],
+    });
+  `);
+
+  assert.deepEqual(jsonValue(context, '_specializationData'), {
+    name: 'ui-ux-draft',
+    description: 'Draft description',
+    preamble: 'Draft preamble keeps operator text.',
+    priorities: ['draft priority', 'accessibility'],
+  });
+  assert.equal(jsonValue(context, '_specializationScope'), 'user');
+  assert.equal(jsonValue(context, '_specializationDirty'), true);
+  assert.match(editor.innerHTML, /ui-ux-draft/);
+  assert.match(editor.innerHTML, /Draft description/);
+  assert.match(editor.innerHTML, /Draft preamble keeps operator text\./);
+  assert.match(editor.innerHTML, /draft priority[\s\S]*accessibility/);
+  assert.equal(preamble.focused, true);
+  assert.equal(preamble.value, 'Draft preamble keeps operator text.');
+  assert.equal(preamble.selectionStart, 6);
+  assert.equal(preamble.selectionEnd, 14);
+  assert.equal(preamble.selectionDirection, 'forward');
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), []);
+});
+
 test('task modal and add-agent labels rename template UI to role UI', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   assert.match(html, /<label>Role<\/label>\s*<select id="add-template-select"/);
