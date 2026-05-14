@@ -281,6 +281,15 @@ CREATE TABLE IF NOT EXISTS agent_messages (
 CREATE INDEX IF NOT EXISTS idx_agent_messages_agent ON agent_messages (agent_id);
 CREATE INDEX IF NOT EXISTS idx_agent_messages_task ON agent_messages (task_id);
 
+CREATE TABLE IF NOT EXISTS agent_message_history (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id  TEXT NOT NULL,
+    message   TEXT NOT NULL,
+    sent_at   REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_message_history_agent_recent
+    ON agent_message_history(agent_id, sent_at DESC, id DESC);
+
 CREATE TABLE IF NOT EXISTS engineer_task_log (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     group_name  TEXT NOT NULL,

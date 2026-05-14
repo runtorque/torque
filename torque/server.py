@@ -3445,6 +3445,7 @@ async def _handle_send_user_message_command(data, state: MatrixState,
     state.mark_agent_progress(cell, emit=False)
     state._emit_agent(cell)
     await bridge.send_text(cell.session_id, text)
+    state.record_message_history(cell.id, text)
     return True
 
 
@@ -5259,6 +5260,26 @@ def _handle_task_detail_command(data: dict, state: MatrixState) -> dict:
         "type": "task_detail",
         "id": task["id"],
         "task": task,
+    }
+
+
+def _handle_agent_message_history_command(
+        data: dict, state: MatrixState) -> dict:
+    """Return per-agent user-message recall history, newest first."""
+    agent_id = str(
+        data.get("agent_id", "") or data.get("cell_id", "") or data.get("id", "")
+        or ""
+    ).strip()
+    if not agent_id:
+        return {"type": "error", "message": "agent_id required"}
+    try:
+        limit = min(int(data.get("limit", 100)), 1000)
+    except (TypeError, ValueError):
+        limit = 100
+    return {
+        "type": "agent_message_history",
+        "agent_id": agent_id,
+        "history": state.agent_message_history_read(agent_id, limit=limit),
     }
 
 
@@ -7993,6 +8014,9 @@ async def main(connection=None):
 
         if cmd == "task_detail":
             return _handle_task_detail_command(data, state)
+
+        if cmd == "get_agent_message_history":
+            return _handle_agent_message_history_command(data, state)
 
         if cmd == "decisions_snapshot":
             return _handle_decisions_snapshot_command(data, state)

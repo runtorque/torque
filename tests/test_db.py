@@ -162,6 +162,49 @@ class TorqueDBTests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(json.loads(row[0]), [])
 
+    def test_agent_message_history_round_trips_newest_first_and_cascades(self):
+        agent = AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+        )
+        self.db.save_agent(agent)
+
+        first = self.db.save_agent_message_history({
+            "agent_id": agent.id,
+            "message": "first",
+            "sent_at": 1.0,
+        })
+        second = self.db.save_agent_message_history({
+            "agent_id": agent.id,
+            "message": "second",
+            "sent_at": 2.0,
+        })
+
+        self.assertGreater(second["id"], first["id"])
+        self.assertEqual(
+            [
+                entry["message"]
+                for entry in self.db.load_agent_message_history(agent.id)
+            ],
+            ["second", "first"],
+        )
+        self.assertEqual(
+            [
+                entry["message"]
+                for entry in self.db.load_agent_message_history(
+                    agent.id,
+                    limit=1,
+                )
+            ],
+            ["second"],
+        )
+
+        self.db.delete_agent(agent.id)
+
+        self.assertEqual(self.db.load_agent_message_history(agent.id), [])
+
     def _seed_stage1a_db(
         self,
         filename: str,

@@ -807,6 +807,10 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             created_at = float(receipt_row[0]) if receipt_row else now
 
             for agent_id in sorted(deleted_agents or ()):
+                cursor.execute(
+                    "DELETE FROM agent_message_history WHERE agent_id=?",
+                    (agent_id,),
+                )
                 cursor.execute("DELETE FROM agents WHERE id=?", (agent_id,))
                 cursor.execute(
                     "DELETE FROM group_members WHERE agent_id=?",
@@ -1351,6 +1355,9 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             self._async_writer = None
 
     def _delete_agent_sync(self, agent_id: str):
+        self._conn.execute(
+            "DELETE FROM agent_message_history WHERE agent_id=?",
+            (agent_id,))
         self._conn.execute("DELETE FROM agents WHERE id=?", (agent_id,))
         self._conn.execute(
             "DELETE FROM group_members WHERE agent_id=?", (agent_id,))
@@ -3123,6 +3130,38 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
              record["timestamp"], record["action"],
              record.get("message", "")))
         self._conn.commit()
+
+    def save_agent_message_history(self, record: dict) -> dict:
+        """Insert a persisted user-message recall entry for one agent."""
+        agent_id = str(record.get("agent_id", "") or "").strip()
+        message = str(record.get("message", "") or "")
+        sent_at = float(record.get("sent_at", time.time()) or time.time())
+        cur = self._conn.execute(
+            "INSERT INTO agent_message_history "
+            "(agent_id, message, sent_at) VALUES (?,?,?)",
+            (agent_id, message, sent_at),
+        )
+        self._conn.commit()
+        return {
+            "id": cur.lastrowid,
+            "agent_id": agent_id,
+            "message": message,
+            "sent_at": sent_at,
+        }
+
+    def load_agent_message_history(self, agent_id: str,
+                                   limit: int = 100) -> list[dict]:
+        """Load user-message recall entries for an agent, newest first."""
+        agent_id = str(agent_id or "").strip()
+        limit = max(1, min(int(limit or 100), 1000))
+        rows = self._conn.execute(
+            "SELECT id, agent_id, message, sent_at "
+            "FROM agent_message_history WHERE agent_id=? "
+            "ORDER BY sent_at DESC, id DESC LIMIT ?",
+            (agent_id, limit),
+        ).fetchall()
+        cols = ["id", "agent_id", "message", "sent_at"]
+        return [dict(zip(cols, row)) for row in rows]
 
     def load_agent_history(self, status_filter: str = "",
                            limit: int = 50, offset: int = 0

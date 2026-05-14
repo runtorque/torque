@@ -1853,6 +1853,45 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
         state.groups["g"] = []
         return state
 
+    def test_agent_message_history_persists_across_state_reload(self):
+        from torque.db import TorqueDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = TorqueDB(Path(tmp.name) / "torque.db")
+        db.init()
+        self.addCleanup(db.close)
+
+        worker = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            session_id="session-1",
+        )
+        db.save_group("g", 0)
+        db.save_agent(worker)
+
+        state = self.state_mod.MatrixState(db=db)
+        state.groups["g"] = [worker.id]
+        state.agents[worker.id] = worker
+
+        entry = state.record_message_history(worker.id, "hello across restart")
+
+        self.assertIsNotNone(entry)
+        self.assertEqual(
+            state.to_dict()["agent_message_history"][worker.id][0]["message"],
+            "hello across restart",
+        )
+
+        reloaded = self.state_mod.MatrixState(db=db)
+        reloaded.load()
+
+        self.assertEqual(
+            reloaded.to_dict()["agent_message_history"][worker.id][0]["message"],
+            "hello across restart",
+        )
+
     def _add_engineer_followup(
             self, state, parent, task_id, *, lane="Backlog",
             depth=1, reply_agent_id="", status="Awaiting Reply",

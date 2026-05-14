@@ -2004,6 +2004,17 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(delivered)
         self.assertEqual(sent, [('session-1', 'line one\nline two')])
         self.assertEqual(worker.status, 'running')
+        self.assertEqual(
+            [
+                entry['message']
+                for entry in state.agent_message_history_read(worker.id)
+            ],
+            ['line one\nline two'],
+        )
+        self.assertIn(
+            'agent_message_history_append',
+            [op.get('op') for op in state._delta_ops],
+        )
 
         ignored = await self.server_mod._handle_send_user_message_command(
             {
@@ -2017,6 +2028,7 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(ignored)
         self.assertEqual(sent, [('session-1', 'line one\nline two')])
+        self.assertEqual(len(state.agent_message_history_read(worker.id)), 1)
 
     def test_handle_engineer_reply_completes_follow_up_only_and_preserves_parent_state(self):
         state = self._make_state()
