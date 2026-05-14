@@ -298,6 +298,7 @@ const PANEL_ROOT_IDS = [
   'panel-board',
   'panel-actions',
   'panel-templates',
+  'panel-history',
   'panel-context',
   'panel-events',
   'panel-agent',
@@ -775,6 +776,7 @@ function createAgentHistoryHarness() {
   loadScript(context, 'static/js/render.js');
   loadBoardScripts(context);
   loadScript(context, 'static/js/templates.js');
+  loadScript(context, 'static/js/history.js');
   runInContext(context, `
     _renderBoardSelectionBar = function() { return ''; };
     _boardScheduleCount = function() { return 0; };
@@ -894,7 +896,7 @@ function createMainHarness(overrides = {}) {
   const harnessOptions = overrides.__mainHarnessOptions || {};
   const sandboxOverrides = Object.assign({}, overrides);
   delete sandboxOverrides.__mainHarnessOptions;
-  const taskbarButtons = ['board', 'actions', 'templates', 'context', 'events', 'engineer'].map((app) => {
+  const taskbarButtons = ['board', 'actions', 'templates', 'history', 'context', 'events', 'engineer'].map((app) => {
     const button = new FakeElement();
     button.dataset.app = app;
     return button;
@@ -939,6 +941,7 @@ function createMainHarness(overrides = {}) {
     'panel-board',
     'panel-actions',
     'panel-templates',
+    'panel-history',
     'panel-context',
     'panel-events',
     'panel-agent',
@@ -14754,21 +14757,30 @@ test('full state hydrates engineer streams for the journal tab', () => {
   });
 });
 
-test('agents panel defaults to history view', () => {
+test('Library panel renders role library without a History tab', () => {
   const { context, document } = createTemplatesHarness();
   const panel = document.getElementById('panel-templates');
-
-  assert.equal(jsonValue(context, '_agentsPanelView'), 'history');
-  assert.equal(jsonValue(context, '_agentHistoryFilter'), 'merged');
 
   context.renderAgentTemplatesPanel();
 
   assert.match(panel.innerHTML, /Role Library/);
   assert.match(panel.innerHTML, /Live agents stay in the left column/);
   assert.doesNotMatch(panel.innerHTML, /Group: alpha/);
-  assert.match(panel.innerHTML, /History<\/button>/);
-  assert.match(panel.innerHTML, /tpled-view-btn active[^"]*" onclick="agentsPanelSwitchView\('history'\)"/);
+  assert.doesNotMatch(panel.innerHTML, /History<\/button>/);
+  assert.doesNotMatch(panel.innerHTML, /agent-history-container/);
+});
+
+test('History renders as a separate panel with the merged filter selected', () => {
+  const { context, document } = createAgentHistoryHarness();
+  const panel = document.register('panel-history');
+  const container = document.register('agent-history-container');
+
+  context.renderHistoryPanel();
+
+  assert.match(panel.innerHTML, /<span class="tpled-header-title">History<\/span>/);
   assert.match(panel.innerHTML, /agent-history-container/);
+  assert.match(container.innerHTML, /ah-filter-btn active[^>]*>Merged<\/button>/);
+  assert.doesNotMatch(panel.innerHTML, /Role Library/);
 });
 
 test('roles panel renders role fields and saves via save_role with blank priorities discarded', () => {
@@ -14777,7 +14789,6 @@ test('roles panel renders role fields and saves via save_role with blank priorit
   const editor = document.register('agent-tpl-editor');
 
   runInContext(context, `
-    _agentsPanelView = 'templates';
     _agentTplData = {
       name: 'reviewer',
       display_name: 'Reviewer',
@@ -14791,7 +14802,7 @@ test('roles panel renders role fields and saves via save_role with blank priorit
     renderAgentTemplatesPanel();
   `);
 
-  assert.match(panel.innerHTML, /Roles<\/button>/);
+  assert.doesNotMatch(panel.innerHTML, /History<\/button>/);
   assert.match(editor.innerHTML, /Preamble \(behavior\)/);
   assert.match(editor.innerHTML, /Behavior guidance for workers with this role/);
   assert.match(editor.innerHTML, /Priorities/);
@@ -14881,12 +14892,14 @@ test('task modal and add-agent labels rename template UI to role UI', () => {
 test('standalone panel titles use current operator-facing names', () => {
   const { context } = createPanelHarness();
   assert.equal(jsonValue(context, `_standalonePanelTitle('templates')`), 'Library');
+  assert.equal(jsonValue(context, `_standalonePanelTitle('history')`), 'History');
   assert.equal(jsonValue(context, `_standalonePanelTitle('engineer')`), 'Agent');
 });
 
 test('taskbar labels the selected-agent panel as Agent', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   assert.match(html, /<button class="taskbar-app" data-app="engineer" onclick="togglePanel\('engineer'\)">&#x2696; Agent<\/button>/);
+  assert.match(html, /<button class="taskbar-app" data-app="history" onclick="togglePanel\('history'\)">&#8635; History<\/button>/);
   assert.doesNotMatch(html, /&#x2696; Architects<\/button>/);
 });
 
@@ -14901,34 +14914,46 @@ test('renderAgentPanel shows the focused-agent empty state when nothing is focus
   assert.doesNotMatch(panel.innerHTML, /agent-panel-tab-/);
 });
 
-test('opening agents panel requests history when history is the active view', () => {
-  const { context, sandbox, taskbarButtons } = createMainHarness({
-    _agentsPanelView: 'history',
-  });
+test('opening History panel requests history while Library requests roles', () => {
+  const { context, sandbox, taskbarButtons } = createMainHarness();
   sandbox.historyLoads = 0;
   sandbox.templateLoads = 0;
   context.agentHistoryLoad = function() { sandbox.historyLoads++; };
   context.agentTemplateEditorLoad = function() { sandbox.templateLoads++; };
 
+  context.togglePanel('history');
+
+  assert.equal(sandbox._activePanelApp, 'history');
+  assert.equal(sandbox.historyLoads, 1);
+  assert.equal(sandbox.templateLoads, 0);
+  assert.equal(taskbarButtons[3].classList.contains('active'), true);
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
+    { cmd: 'board_set_panel', active: 'history' },
+  ]);
+
   context.togglePanel('templates');
 
   assert.equal(sandbox._activePanelApp, 'templates');
   assert.equal(sandbox.historyLoads, 1);
-  assert.equal(sandbox.templateLoads, 0);
+  assert.equal(sandbox.templateLoads, 1);
   assert.equal(taskbarButtons[2].classList.contains('active'), true);
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
+    { cmd: 'board_set_panel', active: 'history' },
     { cmd: 'board_set_panel', active: 'templates' },
   ]);
 });
 
-test('switching Library from History to Roles requests roles once', () => {
+test('stale Library History switch opens the separate History panel', () => {
   const { context, sandbox } = createTemplatesHarness();
+  sandbox.historyOpens = 0;
+  context.openHistoryPanel = function() { sandbox.historyOpens++; };
 
   context.renderAgentTemplatesPanel();
+  context.agentsPanelSwitchView('history');
   context.agentsPanelSwitchView('templates');
   context.agentsPanelSwitchView('templates');
 
-  assert.equal(jsonValue(context, '_agentsPanelView'), 'templates');
+  assert.equal(sandbox.historyOpens, 1);
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
     { cmd: 'get_config', group: 'alpha' },
     { cmd: 'list_roles', group: 'alpha' },
@@ -17535,6 +17560,10 @@ test('active group changes reload visible group-scoped Actions and Roles panels'
       if (!sandbox.roleLoadGroups) sandbox.roleLoadGroups = [];
       sandbox.roleLoadGroups.push(sandbox.state.active_group || '');
     },
+    agentHistoryLoad() {
+      if (!sandbox.historyLoadGroups) sandbox.historyLoadGroups = [];
+      sandbox.historyLoadGroups.push(sandbox.state.active_group || '');
+    },
     renderTemplatesPanel() {},
     renderAgentTemplatesPanel() {},
   });
@@ -17553,10 +17582,13 @@ test('active group changes reload visible group-scoped Actions and Roles panels'
     setActiveGroup('beta');
     _activePanelApp = 'templates';
     setActiveGroup('alpha');
+    _activePanelApp = 'history';
+    setActiveGroup('beta');
   `);
 
   assert.deepEqual(sandbox.actionLoadGroups, ['beta']);
   assert.deepEqual(sandbox.roleLoadGroups, ['alpha']);
+  assert.deepEqual(sandbox.historyLoadGroups, ['beta']);
 });
 
 test('Actions and Roles panels hide stale lists while loading the new active group', () => {
@@ -17586,7 +17618,6 @@ test('Actions and Roles panels hide stale lists while loading the new active gro
     _tplEditorData = { name: 'AlphaAction', prompt: 'alpha' };
     renderTemplatesPanel();
 
-    _agentsPanelView = 'templates';
     _agentTplLoadedGroup = 'alpha';
     _agentTplList = [{ name: 'AlphaRole', display_name: 'Alpha Role', global: false }];
     _agentTplSelected = 'project:AlphaRole';
@@ -20526,7 +20557,7 @@ test('standalone first full-state restore persists responsive defaults once', ()
       right: {
         open: true,
         size: 320,
-        tabs: ['actions', 'templates', 'context', 'events'],
+        tabs: ['actions', 'templates', 'history', 'context', 'events'],
         active: 'context',
       },
       floats: {},
@@ -20682,7 +20713,7 @@ test('restoreStandaloneLayoutDefaults resets width and ignores legacy state', ()
     right: {
       open: true,
       size: 320,
-      tabs: ['actions', 'templates', 'context', 'events'],
+      tabs: ['actions', 'templates', 'history', 'context', 'events'],
       active: 'context',
     },
     floats: {},
@@ -20701,7 +20732,7 @@ test('restoreStandaloneLayoutDefaults resets width and ignores legacy state', ()
         right: {
           open: true,
           size: 320,
-          tabs: ['actions', 'templates', 'context', 'events'],
+          tabs: ['actions', 'templates', 'history', 'context', 'events'],
           active: 'context',
         },
         floats: {},
@@ -20727,7 +20758,7 @@ test('standalone startup restore keeps panel roots attached across the first dou
     standalone_panel_layout: {
       version: 1,
       bottom: { open: true, size: 280, tabs: ['board', 'engineer'], active: 'board' },
-      right: { open: true, size: 320, tabs: ['actions', 'templates', 'context', 'events'], active: 'context' },
+      right: { open: true, size: 320, tabs: ['actions', 'templates', 'history', 'context', 'events'], active: 'context' },
       floats: {},
       last_active: 'context',
     },
@@ -20737,7 +20768,7 @@ test('standalone startup restore keeps panel roots attached across the first dou
   assert.deepEqual(standaloneZoneBodyPanelIds(document, 'standalone-bottom-dock'), ['panel-board', 'panel-agent']);
   assert.deepEqual(
     standaloneZoneBodyPanelIds(document, 'standalone-right-rail'),
-    ['panel-actions', 'panel-templates', 'panel-context', 'panel-events']
+    ['panel-actions', 'panel-templates', 'panel-history', 'panel-context', 'panel-events']
   );
 });
 
@@ -21173,7 +21204,7 @@ test('standalone full-state rerender keeps panel roots attached', () => {
 
   assert.deepEqual(attachedStandalonePanelIds(document), PANEL_ROOT_IDS);
   assert.deepEqual(standaloneZoneBodyPanelIds(document, 'standalone-right-rail'), ['panel-actions', 'panel-context']);
-  assert.deepEqual(parkedStandalonePanelIds(document), ['panel-templates', 'panel-events', 'panel-agent']);
+  assert.deepEqual(parkedStandalonePanelIds(document), ['panel-templates', 'panel-history', 'panel-events', 'panel-agent']);
 });
 
 test('standalone layout ui_update loads and rerenders newly visible Actions', () => {
@@ -21257,7 +21288,7 @@ test('standalone layout ui_update keeps panel roots attached across rerenders', 
 
   assert.deepEqual(attachedStandalonePanelIds(document), PANEL_ROOT_IDS);
   assert.deepEqual(standaloneZoneBodyPanelIds(document, 'standalone-right-rail'), ['panel-actions', 'panel-context']);
-  assert.deepEqual(parkedStandalonePanelIds(document), ['panel-templates', 'panel-events', 'panel-agent']);
+  assert.deepEqual(parkedStandalonePanelIds(document), ['panel-templates', 'panel-history', 'panel-events', 'panel-agent']);
 });
 
 test('standalone bottom-dock drop moves a panel to the shell-owned dock and preserves roots across rerenders', () => {
