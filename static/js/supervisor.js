@@ -23,6 +23,8 @@ var supervisorState = {
   selectedSessionId: '',
   expandedSessionId: '',
   scrollPos: 0,
+  tableScrollLeft: 0,
+  tableScrollTop: 0,
 };
 var _supervisorUiStateRegistered = false;
 var _supervisorUiStateHydrated = false;
@@ -99,6 +101,43 @@ function _supervisorPersistUiState() {
   } else if (typeof send === 'function') {
     send({ cmd: 'ui_set_supervisor_panel_state', state: next });
   }
+}
+
+function _supervisorTableWrap(root) {
+  if (!root || typeof root.querySelector !== 'function') return null;
+  return root.querySelector('.supervisor-table-wrap');
+}
+
+function _supervisorStoredScrollState() {
+  return {
+    rootTop: Math.max(0, Number(supervisorState.scrollPos) || 0),
+    tableLeft: Math.max(0, Number(supervisorState.tableScrollLeft) || 0),
+    tableTop: Math.max(0, Number(supervisorState.tableScrollTop) || 0),
+  };
+}
+
+function _supervisorCaptureScrollState(root) {
+  var next = _supervisorStoredScrollState();
+  if (root && typeof root.scrollTop === 'number') next.rootTop = Math.max(0, root.scrollTop || 0);
+  var wrap = _supervisorTableWrap(root);
+  if (wrap && typeof wrap.scrollLeft === 'number') next.tableLeft = Math.max(0, wrap.scrollLeft || 0);
+  if (wrap && typeof wrap.scrollTop === 'number') next.tableTop = Math.max(0, wrap.scrollTop || 0);
+  return next;
+}
+
+function _supervisorRememberScrollState(next) {
+  next = next || _supervisorStoredScrollState();
+  supervisorState.scrollPos = Math.max(0, Number(next.rootTop) || 0);
+  supervisorState.tableScrollLeft = Math.max(0, Number(next.tableLeft) || 0);
+  supervisorState.tableScrollTop = Math.max(0, Number(next.tableTop) || 0);
+}
+
+function _supervisorRestoreScrollState(root, next) {
+  next = next || _supervisorStoredScrollState();
+  if (root && typeof root.scrollTop === 'number') root.scrollTop = Math.max(0, Number(next.rootTop) || 0);
+  var wrap = _supervisorTableWrap(root);
+  if (wrap && typeof wrap.scrollLeft === 'number') wrap.scrollLeft = Math.max(0, Number(next.tableLeft) || 0);
+  if (wrap && typeof wrap.scrollTop === 'number') wrap.scrollTop = Math.max(0, Number(next.tableTop) || 0);
 }
 
 _supervisorRegisterUiState();
@@ -536,10 +575,16 @@ function renderSupervisorPanel(opts) {
   var root = _supervisorRoot();
   if (!root) return;
   _supervisorHydrateUiState();
-  if (_supervisorSkipScrollCapture) {
-    _supervisorSkipScrollCapture = false;
-  } else if (typeof root.scrollTop === 'number' && root.scrollTop !== supervisorState.scrollPos) {
-    supervisorState.scrollPos = root.scrollTop;
+  var skipScrollCapture = _supervisorSkipScrollCapture;
+  var previousRootScroll = Math.max(0, Number(supervisorState.scrollPos) || 0);
+  var scrollState = _supervisorCaptureScrollState(root);
+  if (skipScrollCapture) {
+    var storedScrollState = _supervisorStoredScrollState();
+    scrollState.rootTop = storedScrollState.rootTop;
+  }
+  _supervisorSkipScrollCapture = false;
+  _supervisorRememberScrollState(scrollState);
+  if (!skipScrollCapture && scrollState.rootTop !== previousRootScroll) {
     _supervisorPersistUiState();
   }
   if (!opts.force && !_supervisorVisible()) return;
@@ -575,7 +620,7 @@ function renderSupervisorPanel(opts) {
     + '<div class="supervisor-body" onclick="supervisorCollapseDetails(event)">'
     + _supervisorBodyHtml(rows)
     + '</div></div>';
-  if (typeof root.scrollTop === 'number') root.scrollTop = supervisorState.scrollPos || 0;
+  _supervisorRestoreScrollState(root, scrollState);
 }
 
 function _supervisorClearTimer() {
