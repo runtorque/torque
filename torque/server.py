@@ -10827,6 +10827,12 @@ async def main(connection=None):
                                     )
 
                             if not result and not final_prompt:
+                                initial_prompt = launch_cfg.get("initial_prompt", "") or ""
+                                if not startup_prompt and not initial_prompt.strip():
+                                    log.warning(
+                                        "dispatch_task: empty prompt sequence for cell=%s task=%s (startup=%d, initial=%d, final=%d)",
+                                        cell.slug or cell.name or cell.id, task.id,
+                                        len(startup_prompt or ""), len(initial_prompt), len(final_prompt or ""))
                                 result = {
                                     "type": "error",
                                     "message": "Dispatch prompt unavailable",
@@ -10917,7 +10923,8 @@ async def main(connection=None):
                                             startup_prompt=
                                             startup_prompt,
                                             final_prompt=final_prompt,
-                                            cell=cell):
+                                            cell=cell,
+                                            task_id=task.id):
                                     await _send_agent_prompt(
                                         cell,
                                         prompt_text,
