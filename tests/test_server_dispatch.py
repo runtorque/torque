@@ -74,22 +74,28 @@ class ServerDispatchObservabilityTests(unittest.IsolatedAsyncioTestCase):
         scenarios = []
 
         state = self._state()
-        scenarios.append((state, None, "no_current_stream"))
+        scenarios.append((state, None, "no_current_stream", "g"))
 
         state = self._state()
         scenarios.append((
             state,
             {"stream_id": "stream:g", "group": "g", "queue_items": []},
             "no_ready_task",
+            "g",
         ))
 
         state = self._state()
         state.board_tasks["ready"] = self._task("ready", lane="Done")
-        scenarios.append((state, self._ready_stream(), "ready_task_closed"))
+        scenarios.append((state, self._ready_stream(), "ready_task_closed", "g"))
 
         state = self._state()
         state.board_tasks["ready"] = self._task("ready", lane="In Progress")
-        scenarios.append((state, self._ready_stream(), "ready_task_not_actionable"))
+        scenarios.append((
+            state,
+            self._ready_stream(),
+            "ready_task_not_actionable",
+            "g",
+        ))
 
         state = self._state()
         state.board_tasks["dep"] = self._task("dep", lane="In Progress")
@@ -98,7 +104,7 @@ class ServerDispatchObservabilityTests(unittest.IsolatedAsyncioTestCase):
             lane="To Do",
             depends_on=["dep"],
         )
-        scenarios.append((state, self._ready_stream(), "deps_not_met"))
+        scenarios.append((state, self._ready_stream(), "deps_not_met", "g"))
 
         state = self._state()
         state.board_tasks["ready"] = self._task("ready", group="", lane="To Do")
@@ -110,13 +116,14 @@ class ServerDispatchObservabilityTests(unittest.IsolatedAsyncioTestCase):
                 "deps_met": True,
             }]},
             "missing_stream_group",
+            "",
         ))
 
         async def handle_command(payload):
             raise AssertionError(f"dispatch should not fire: {payload}")
 
-        for state, stream, expected_reason in scenarios:
-            probe = self._task("probe", group="g")
+        for state, stream, expected_reason, group in scenarios:
+            probe = self._task("probe", group=group or "g")
             with mock.patch.object(
                 self.dispatch_mod,
                 "compute_worktree_stream_for_task",
@@ -128,7 +135,7 @@ class ServerDispatchObservabilityTests(unittest.IsolatedAsyncioTestCase):
                         handle_command,
                         lambda *args, **kwargs: None,
                         task=probe,
-                        group="g",
+                        group=group,
                     )
             self.assertIsNone(result)
             self.assertIn(
