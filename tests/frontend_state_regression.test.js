@@ -20442,7 +20442,12 @@ test('standalone shell owns the full-width bottom dock rows and drag selector', 
   );
   assert.match(
     css,
-    /body\.runtime-embedded #app-group-tabs-host\s*\{[^}]*position:\s*relative;[^}]*z-index:\s*15;[^}]*width:\s*max\(var\(--standalone-sidebar-width\),\s*calc\(var\(--standalone-main-stack-min-width\)\s*\+\s*8px\s*\+\s*var\(--standalone-right-rail-width,\s*var\(--standalone-right-rail-min-width\)\)\)\);/s,
+    /body\.runtime-embedded #app-group-tabs-host\s*\{[^}]*position:\s*relative;[^}]*z-index:\s*15;[^}]*\}/s,
+  );
+  assert.doesNotMatch(
+    css,
+    /body\.runtime-embedded #app-group-tabs-host\s*\{[^}]*width:\s*max\(/s,
+    'group tabs host must NOT stretch beyond the agent main stack column into the right rail',
   );
   assert.match(
     css,
@@ -20460,9 +20465,10 @@ test('standalone shell owns the full-width bottom dock rows and drag selector', 
     css,
     /body\.runtime-embedded #standalone-bottom-dock\s*\{[^}]*grid-column:\s*1\s*\/\s*-1;[^}]*grid-row:\s*3;/s,
   );
-  assert.match(
+  assert.doesNotMatch(
     css,
     /body\.runtime-embedded #standalone-right-rail \.standalone-panel-zone-body\s*\{[^}]*padding-top:\s*51px;/s,
+    'right rail body should not need 51px compensating padding now that the tabs host stays within the agent stack column',
   );
   assert.match(
     css,

@@ -192,7 +192,6 @@ body.runtime-embedded #standalone-main-stack {
 body.runtime-embedded #app-group-tabs-host {
   position: relative;
   z-index: 15;
-  width: max(var(--standalone-sidebar-width), calc(var(--standalone-main-stack-min-width) + 8px + var(--standalone-right-rail-width, var(--standalone-right-rail-min-width))));
 }
 body.runtime-embedded #standalone-rail-resize-handle {
   grid-column: 2;
@@ -3609,10 +3608,6 @@ body.runtime-embedded #standalone-bottom-dock {
 }
 body.runtime-embedded #standalone-right-rail {
   border-left-color: rgba(255,255,255,.08);
-}
-body.runtime-embedded #standalone-right-rail .standalone-panel-zone-body {
-  /* The app-wide group tabs are positioned by the left stack but span this rail. */
-  padding-top: 51px;
 }
 .standalone-panel-zone-header {
   display: flex;
