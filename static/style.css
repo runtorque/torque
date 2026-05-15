@@ -117,6 +117,22 @@ header h1 {
 body.tauri-mode header .app-wordmark {
   display: none;
 }
+/* Desktop client: header (status dot + reload + settings + wordmark) lives in the
+   OS menu bar and bottom taskbar instead. Standalone (browser) UI keeps it. */
+body.tauri-mode header {
+  display: none;
+}
+#taskbar-conn-dot {
+  display: none;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--red); flex-shrink: 0;
+  transition: background .3s;
+  margin-left: 8px;
+}
+#taskbar-conn-dot.ok { background: var(--green); }
+body.tauri-mode #taskbar-conn-dot {
+  display: inline-block;
+}
 .hdr-spacer { flex: 1; min-width: 0; }
 .hdr-btn {
   font-size: 10px; padding: 3px 8px;

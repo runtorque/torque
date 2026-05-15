@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use tauri::menu::{Menu, MenuBuilder, MenuItem, SubmenuBuilder};
+use tauri::menu::{AboutMetadata, Menu, MenuBuilder, MenuItem, SubmenuBuilder};
 use tauri::{Manager, Runtime};
 
 pub const MENU_NEW_GROUP: &str = "new_group";
@@ -16,6 +16,8 @@ pub const MENU_REVEAL_LOGS: &str = "reveal_logs";
 pub const MENU_DOCUMENTATION: &str = "documentation";
 pub const MENU_KEYBOARD_SHORTCUTS: &str = "keyboard_shortcuts";
 pub const MENU_SHOW_WELCOME: &str = "show_welcome";
+pub const MENU_RESTART_DAEMON: &str = "restart_daemon";
+pub const MENU_OPEN_SETTINGS: &str = "open_settings";
 
 const CHEATSHEET_JSON: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -98,6 +100,28 @@ where
     R: Runtime,
     M: Manager<R>,
 {
+    let settings = menu_item_with_accel(
+        manager,
+        MENU_OPEN_SETTINGS,
+        "Settings\u{2026}",
+        Some("CmdOrCtrl+,"),
+    )?;
+    let restart_daemon = menu_item(manager, MENU_RESTART_DAEMON, "Restart Daemon")?;
+    let torque_app = SubmenuBuilder::new(manager, "Torque")
+        .about(Some(AboutMetadata::default()))
+        .separator()
+        .item(&settings)
+        .item(&restart_daemon)
+        .separator()
+        .services()
+        .separator()
+        .hide()
+        .hide_others()
+        .show_all()
+        .separator()
+        .quit()
+        .build()?;
+
     let new_group = menu_item(manager, MENU_NEW_GROUP, "New Group")?;
     let new_architect = menu_item_with_accel(
         manager,
@@ -164,6 +188,7 @@ where
         .build()?;
 
     MenuBuilder::new(manager)
+        .item(&torque_app)
         .item(&file)
         .item(&edit)
         .item(&view)
@@ -177,6 +202,28 @@ where
     R: Runtime,
     M: Manager<R>,
 {
+    let settings = menu_item_with_accel(
+        manager,
+        MENU_OPEN_SETTINGS,
+        "Settings\u{2026}",
+        Some("CmdOrCtrl+,"),
+    )?;
+    let restart_daemon = menu_item(manager, MENU_RESTART_DAEMON, "Restart Daemon")?;
+    let torque_app = SubmenuBuilder::new(manager, "Torque")
+        .about(Some(AboutMetadata::default()))
+        .separator()
+        .item(&settings)
+        .item(&restart_daemon)
+        .separator()
+        .services()
+        .separator()
+        .hide()
+        .hide_others()
+        .show_all()
+        .separator()
+        .quit()
+        .build()?;
+
     // Detached panels intentionally omit main-window creation commands.
     let close_window = menu_item(manager, MENU_CLOSE_WINDOW, "Close Window")?;
     let file = SubmenuBuilder::new(manager, "File")
@@ -229,6 +276,7 @@ where
         .build()?;
 
     MenuBuilder::new(manager)
+        .item(&torque_app)
         .item(&file)
         .item(&edit)
         .item(&view)

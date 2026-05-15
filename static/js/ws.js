@@ -287,6 +287,21 @@ if (typeof document !== 'undefined' && typeof document.addEventListener === 'fun
   }
 }
 
+function _setConnDotState(connected) {
+  var ids = ['conn-dot', 'taskbar-conn-dot'];
+  for (var i = 0; i < ids.length; i++) {
+    var el = document.getElementById(ids[i]);
+    if (!el) continue;
+    if (connected) {
+      el.classList.add('ok');
+      el.title = 'Connected';
+    } else {
+      el.classList.remove('ok');
+      el.title = 'Disconnected';
+    }
+  }
+}
+
 function connect() {
   _firstStateReceived = false;
   _resyncPending = false;
@@ -296,8 +311,7 @@ function connect() {
     : WS_URL;
   ws = new WebSocket(url);
   ws.onopen = () => {
-    document.getElementById('conn-dot').classList.add('ok');
-    document.getElementById('conn-dot').title = 'Connected';
+    _setConnDotState(true);
     if (typeof _clearDaemonStoppedBanner === 'function'
         && typeof _daemonStopRequestedByUser !== 'undefined'
         && _daemonStopRequestedByUser) {
@@ -311,8 +325,7 @@ function connect() {
     if (typeof _engineerResetSessionMapMeta === 'function') {
       _engineerResetSessionMapMeta({ clearStale: false });
     }
-    document.getElementById('conn-dot').classList.remove('ok');
-    document.getElementById('conn-dot').title = 'Disconnected';
+    _setConnDotState(false);
     if (typeof loadDaemonStatus === 'function') loadDaemonStatus();
     if (typeof _daemonStopRequestedByUser !== 'undefined'
         && _daemonStopRequestedByUser
