@@ -871,7 +871,8 @@ main {
 .agent-group-tabs-host {
   flex: 0 0 auto;
   min-width: 0;
-  padding: 8px 8px 0;
+  padding: 6px 8px 0;
+  border-bottom: 1px solid var(--border);
 }
 .agent-group-tabs-host:empty {
   display: none;
@@ -883,8 +884,7 @@ main {
   align-items: center;
   gap: 8px;
   min-width: 0;
-  padding: 4px 0 7px;
-  border-bottom: 1px solid var(--border);
+  padding: 2px 0 4px;
   background: color-mix(in srgb, var(--bg) 88%, transparent);
 }
 .agent-group-tabs-list {
@@ -1058,7 +1058,7 @@ body.runtime-embedded main {
   padding: 0;
 }
 body.runtime-embedded .agent-group-tabs-host {
-  padding: 12px 12px 0;
+  padding: 8px 12px 0;
 }
 body.runtime-embedded .agents-grid-pane {
   padding: 12px 12px 10px;

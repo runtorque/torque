@@ -20474,8 +20474,8 @@ test('standalone shell owns the full-width bottom dock rows and drag selector', 
     css,
     /body\.runtime-embedded\.standalone-panel-dragging #standalone-bottom-dock,\s*body\.runtime-embedded\.standalone-panel-dragging #standalone-right-rail\s*\{/s,
   );
-  assert.match(css, /\.agent-group-tabs-host\s*\{[^}]*flex:\s*0 0 auto;[^}]*padding:\s*8px 8px 0;/s);
-  assert.match(css, /body\.runtime-embedded \.agent-group-tabs-host\s*\{[^}]*padding:\s*12px 12px 0;/s);
+  assert.match(css, /\.agent-group-tabs-host\s*\{[^}]*flex:\s*0 0 auto;[^}]*padding:\s*6px 8px 0;[^}]*border-bottom:\s*1px solid var\(--border\);/s);
+  assert.match(css, /body\.runtime-embedded \.agent-group-tabs-host\s*\{[^}]*padding:\s*8px 12px 0;/s);
   assert.match(css, /\.agent-group-tabs-list\s*\{[^}]*overflow-x:\s*auto;[^}]*overflow-y:\s*hidden;/s);
   assert.match(css, /\.agent-group-tab-actions\s*\{[^}]*flex:\s*0 0 auto;[^}]*margin-left:\s*auto;/s);
 });
