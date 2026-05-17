@@ -2678,6 +2678,17 @@ function refreshSelectedAgentFocus(prevSelectedId) {
 
 function render(opts) {
   if (typeof renderGroupSwitcher === 'function') renderGroupSwitcher();
+  if (typeof _torqueAgentViewMode === 'function'
+      && _torqueAgentViewMode() === 'canvas'
+      && typeof _torqueRenderAgentCanvas === 'function') {
+    if (typeof _torqueRefreshViewToggleButtons === 'function') {
+      _torqueRefreshViewToggleButtons('canvas');
+    }
+    return _torqueRenderAgentCanvas(opts);
+  }
+  if (typeof _torqueRefreshViewToggleButtons === 'function') {
+    _torqueRefreshViewToggleButtons('grid');
+  }
   if (_torqueUiMode() === 'toolbelt') {
     return _renderMainGrid(opts, { singleGroup: false });
   }

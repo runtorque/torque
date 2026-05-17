@@ -27,6 +27,12 @@
         <button class="hdr-btn" onclick="restartDaemon()" title="Restart Torque">&#x21BB;</button>
         <button class="hdr-btn" onclick="openGlobalSettings()" title="Settings">&#9881;</button>
         <div class="hdr-spacer"></div>
+        <div class="agent-view-toggle" role="group" aria-label="Agent view">
+          <button type="button" class="agent-view-toggle-btn is-active" data-agent-view-toggle="grid"
+                  onclick="_torqueSetAgentViewMode('grid')" title="Grid view">Grid</button>
+          <button type="button" class="agent-view-toggle-btn" data-agent-view-toggle="canvas"
+                  onclick="_torqueSetAgentViewMode('canvas')" title="Canvas view (tree)">Canvas</button>
+        </div>
         <button id="add-group-header-btn" class="hdr-btn" onclick="openAddGroup()">+ Group</button>
       </header>
       <div id="app-group-tabs-host" class="agent-group-tabs-host app-group-tabs-host" data-agent-group-tabs-host></div>
@@ -1416,6 +1422,7 @@
 <script src="/static/js/compact.js"></script>
 <script src="/static/js/ws.js"></script>
 <script src="/static/js/render.js"></script>
+<script src="/static/js/canvas.js"></script>
 <script src="/static/js/commands.js"></script>
 <script src="/static/js/native_api.js"></script>
 <script src="/static/vendor/xterm/xterm.js"></script>

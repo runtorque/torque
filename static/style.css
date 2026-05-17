@@ -9791,3 +9791,235 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
     gap: 8px;
   }
 }
+
+/* ---- Agent view toggle (header) ---- */
+.agent-view-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-right: 6px;
+}
+.agent-view-toggle-btn {
+  background: transparent;
+  color: var(--text-dim);
+  border: 0;
+  border-right: 1px solid var(--border);
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 10px;
+  cursor: pointer;
+  letter-spacing: 0.02em;
+}
+.agent-view-toggle-btn:last-child { border-right: 0; }
+.agent-view-toggle-btn:hover { background: var(--bg-hover); color: var(--text); }
+.agent-view-toggle-btn.is-active {
+  background: var(--bg-cell);
+  color: var(--text);
+}
+
+/* ---- Canvas (alternate agents view) ---- */
+.agent-canvas {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  background:
+    radial-gradient(circle, rgba(255,255,255,0.03) 1px, transparent 1px) 0 0 / 22px 22px,
+    var(--bg);
+  position: relative;
+}
+.agent-canvas-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+  padding: 28px 28px 80px 28px;
+  min-width: max-content;
+}
+.canvas-empty {
+  margin: 60px auto;
+  text-align: center;
+  color: var(--text-dim);
+}
+.canvas-empty-title { font-size: 14px; margin-bottom: 6px; color: var(--text); }
+.canvas-empty-hint  { font-size: 12px; }
+
+/* Tree = one architect (or Standalone) + its branches */
+.canvas-tree {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+  min-width: max-content;
+}
+.canvas-tree-spine-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 0 0 auto;
+  width: 180px;
+}
+.canvas-spine {
+  width: 2px;
+  flex: 1 0 auto;
+  align-self: center;
+  background: var(--border);
+  min-height: 24px;
+  margin-top: -2px;
+}
+.canvas-tree-branches {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 12px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.canvas-tree-empty {
+  margin-top: 8px;
+}
+
+/* Engineer row = spur from spine + engineer card + worker manifold */
+.canvas-eng-row {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  min-height: 84px;
+}
+.canvas-spur {
+  width: 36px;
+  height: 2px;
+  background: var(--border);
+  flex: 0 0 36px;
+  margin-left: -1px; /* meet the spine */
+}
+.canvas-spur--loose {
+  background: repeating-linear-gradient(90deg, var(--border) 0 4px, transparent 4px 8px);
+}
+.canvas-loose-label {
+  color: var(--text-dim);
+  font-size: 11px;
+  margin: 0 12px;
+  letter-spacing: 0.04em;
+}
+
+/* Worker manifold = trunk going down off engineer + horizontal bar of workers */
+.canvas-worker-manifold {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-left: 24px;
+}
+.canvas-manifold-trunk {
+  width: 24px;
+  height: 2px;
+  background: var(--border);
+  flex: 0 0 24px;
+}
+.canvas-manifold-trunk--loose {
+  background: repeating-linear-gradient(90deg, var(--border) 0 4px, transparent 4px 8px);
+}
+.canvas-worker-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-left: 8px;
+}
+
+/* Cards */
+.canvas-card {
+  background: var(--bg-cell);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  position: relative;
+  transition: border-color 0.12s ease, background 0.12s ease, transform 0.08s ease;
+}
+.canvas-card:hover {
+  background: var(--bg-hover);
+  border-color: #4d5765;
+}
+.canvas-card-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text);
+}
+.canvas-card-glyph { color: var(--text-dim); font-size: 11px; }
+.canvas-card-name {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+.canvas-card-meta {
+  font-size: 10px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.canvas-card-status-dot {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-dim);
+}
+.canvas-card.is-running .canvas-card-status-dot { background: var(--green); }
+.canvas-card.is-error   .canvas-card-status-dot { background: var(--red); }
+.canvas-card.is-idle    .canvas-card-status-dot { background: var(--amber); }
+.canvas-card.is-stopped .canvas-card-status-dot { background: #57606a; }
+
+.canvas-card-architect {
+  min-width: 156px;
+  border-left: 3px solid var(--accent);
+}
+.canvas-card-engineer {
+  min-width: 152px;
+  border-left: 3px solid #a371f7;
+}
+.canvas-card-worker {
+  min-width: 132px;
+  border-left: 3px solid #79c0ff;
+}
+.canvas-card-standalone {
+  min-width: 156px;
+  border-left: 3px dashed var(--text-dim);
+  background: transparent;
+  opacity: 0.95;
+}
+
+/* Inline add affordances */
+.canvas-add-worker, .canvas-add-inline {
+  background: transparent;
+  border: 1px dashed var(--border);
+  color: var(--text-dim);
+  border-radius: var(--radius);
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.canvas-add-worker {
+  padding: 4px 9px;
+  font-size: 13px;
+  line-height: 1;
+}
+.canvas-add-worker:hover, .canvas-add-inline:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.canvas-add-worker--first {
+  margin-left: 24px;
+  padding: 6px 12px;
+  font-size: 11px;
+}
