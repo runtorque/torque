@@ -9792,13 +9792,15 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   }
 }
 
-/* ---- Agent view toggle (header) ---- */
+/* ---- Agent view toggle (lives in the group-tabs action row) ---- */
 .agent-view-toggle {
   display: inline-flex;
+  align-items: stretch;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
   margin-right: 6px;
+  height: 22px;
 }
 .agent-view-toggle-btn {
   background: transparent;
@@ -9807,9 +9809,10 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   border-right: 1px solid var(--border);
   font: inherit;
   font-size: 11px;
-  padding: 3px 10px;
+  padding: 0 10px;
   cursor: pointer;
   letter-spacing: 0.02em;
+  line-height: 1;
 }
 .agent-view-toggle-btn:last-child { border-right: 0; }
 .agent-view-toggle-btn:hover { background: var(--bg-hover); color: var(--text); }

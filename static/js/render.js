@@ -435,6 +435,17 @@ function _renderAgentGroupTabsHtml() {
   }
   html += '</div>';
   html += '<div class="agent-group-tab-actions">';
+  if (typeof _torqueAgentViewMode === 'function') {
+    const vm = _torqueAgentViewMode();
+    html += '<div class="agent-view-toggle agent-view-toggle--tabs" role="group" aria-label="Agent view">';
+    html += '<button type="button" class="agent-view-toggle-btn' + (vm === 'grid' ? ' is-active' : '') + '"'
+      + ' data-agent-view-toggle="grid"'
+      + ' onclick="_torqueSetAgentViewMode(\'grid\')" title="Grid view">Grid</button>';
+    html += '<button type="button" class="agent-view-toggle-btn' + (vm === 'canvas' ? ' is-active' : '') + '"'
+      + ' data-agent-view-toggle="canvas"'
+      + ' onclick="_torqueSetAgentViewMode(\'canvas\')" title="Canvas view (tree)">Canvas</button>';
+    html += '</div>';
+  }
   html += '<button type="button" class="agent-group-tab-action agent-group-tab-action-new"'
     + ' onclick="openAddGroup()">+ New Group</button>';
   html += '<button type="button" class="agent-group-tab-action agent-group-tab-action-settings"'
