@@ -57,6 +57,10 @@ function _canvasIsTombstoned(agent) {
 }
 
 function _canvasGroupName() {
+  if (typeof _activeGroup === 'function') {
+    const g = _activeGroup();
+    if (g) return g;
+  }
   const groups = (state && state.groups) || {};
   const names = Object.keys(groups);
   if (names.length === 0) return '';
@@ -200,25 +204,26 @@ function _canvasRenderTree(tree) {
   let html = '';
   html += `<div class="canvas-tree" data-canvas-tree="${esc(arch.id)}">`;
 
-  html += `<div class="canvas-tree-spine-col">`;
+  html += `<div class="canvas-tree-head">`;
   html += _canvasRenderArchitectCard(arch);
-  if (hasEngineers) {
-    html += `<div class="canvas-spine canvas-spine-architect"></div>`;
-  }
   html += `</div>`;
 
-  html += `<div class="canvas-tree-branches">`;
+  html += `<div class="canvas-tree-body">`;
+  html += `<div class="canvas-spine-track"><div class="canvas-spine"></div></div>`;
+  html += `<div class="canvas-rows">`;
   if (hasEngineers) {
     for (const row of tree.engineers) {
       html += _canvasRenderEngineerRow(row);
     }
   } else {
     html += `<div class="canvas-tree-empty" data-canvas-arch-id="${esc(arch.id)}">`;
+    html += `<div class="canvas-spur"></div>`;
     html += `<button type="button" class="canvas-add-inline" `
          + `onclick="_canvasAddEngineerForArchitect('${esc(arch.id)}')">`
          + `+ Engineer</button>`;
     html += `</div>`;
   }
+  html += `</div>`;
   html += `</div>`;
 
   html += `</div>`;
@@ -256,14 +261,13 @@ function _canvasRenderStandalone(standalone) {
   let html = '';
   html += `<div class="canvas-tree canvas-tree-standalone" data-canvas-tree="__standalone__">`;
 
-  html += `<div class="canvas-tree-spine-col">`;
+  html += `<div class="canvas-tree-head">`;
   html += _canvasRenderStandaloneCard(standalone);
-  if (standalone.engineers.length > 0) {
-    html += `<div class="canvas-spine canvas-spine-architect"></div>`;
-  }
   html += `</div>`;
 
-  html += `<div class="canvas-tree-branches">`;
+  html += `<div class="canvas-tree-body">`;
+  html += `<div class="canvas-spine-track canvas-spine-track--loose"><div class="canvas-spine canvas-spine--loose"></div></div>`;
+  html += `<div class="canvas-rows">`;
 
   for (const row of standalone.engineers) {
     html += _canvasRenderEngineerRow(row);
@@ -282,7 +286,9 @@ function _canvasRenderStandalone(standalone) {
     html += `</div></div></div>`;
   }
 
-  html += `</div></div>`;
+  html += `</div>`;
+  html += `</div>`;
+  html += `</div>`;
   return html;
 }
 

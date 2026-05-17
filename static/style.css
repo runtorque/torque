@@ -9846,38 +9846,54 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 .canvas-empty-title { font-size: 14px; margin-bottom: 6px; color: var(--text); }
 .canvas-empty-hint  { font-size: 12px; }
 
-/* Tree = one architect (or Standalone) + its branches */
+/* Tree = architect on top, two-column body (spine + engineer rows) below */
 .canvas-tree {
   display: flex;
-  align-items: flex-start;
-  gap: 0;
+  flex-direction: column;
   min-width: max-content;
 }
-.canvas-tree-spine-col {
+.canvas-tree-head {
+  /* architect card sits at the top of the tree, slightly indented so the
+     spine that drops below it appears to emerge from within its footprint */
+  padding-left: 8px;
+}
+.canvas-tree-body {
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  flex: 0 0 auto;
-  width: 180px;
+  align-items: stretch;
+}
+/* Spine track: narrow column with the vertical line at x=16. Stretches
+   to the full height of the engineer-rows column (align-items: stretch
+   on the body). */
+.canvas-spine-track {
+  flex: 0 0 32px;
+  display: flex;
+  padding-left: 16px;
+  align-self: stretch;
 }
 .canvas-spine {
   width: 2px;
-  flex: 1 0 auto;
-  align-self: center;
   background: var(--border);
+  align-self: stretch;
   min-height: 24px;
-  margin-top: -2px;
 }
-.canvas-tree-branches {
+.canvas-spine--loose {
+  background: repeating-linear-gradient(0deg, var(--border) 0 4px, transparent 4px 8px);
+}
+.canvas-spine-track--loose .canvas-spine {
+  background: repeating-linear-gradient(0deg, var(--border) 0 4px, transparent 4px 8px);
+}
+.canvas-rows {
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  margin-top: 12px;
-  flex: 1 1 auto;
+  gap: 12px;
+  padding-top: 8px;
   min-width: 0;
 }
 .canvas-tree-empty {
-  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  min-height: 36px;
 }
 
 /* Engineer row = spur from spine + engineer card + worker manifold */
@@ -9885,14 +9901,17 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   display: flex;
   align-items: center;
   gap: 0;
-  min-height: 84px;
+  min-height: 60px;
 }
+/* The spur reaches LEFT from the rows column into the spine track to
+   meet the spine at x=16 (rows column starts at x=32; spine is at x=16
+   absolute = -16px from rows-column left edge). */
 .canvas-spur {
-  width: 36px;
+  width: 32px;
   height: 2px;
   background: var(--border);
-  flex: 0 0 36px;
-  margin-left: -1px; /* meet the spine */
+  flex: 0 0 32px;
+  margin-left: -16px;
 }
 .canvas-spur--loose {
   background: repeating-linear-gradient(90deg, var(--border) 0 4px, transparent 4px 8px);
