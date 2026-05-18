@@ -155,6 +155,22 @@ function _canvasIsWorker(cell) {
 function _torqueRenderAgentCanvas(opts) {
   const main = document.getElementById('main');
   if (!main) return;
+  // Inject the group tabs bar — its host lives outside #main and
+  // carries the group pills, + New Group, settings gear, AND the
+  // Grid/Canvas toggle. Without this call, switching to canvas
+  // hides the group switcher entirely.
+  if (typeof _renderAgentGroupTabsHost === 'function'
+      && typeof _renderAgentGroupTabsHtml === 'function') {
+    _renderAgentGroupTabsHost(_renderAgentGroupTabsHtml());
+  }
+  // Canvas owns #main while active; clear the grid path's split-shell
+  // sentinels so toggling back rebuilds the grid from scratch.
+  main._torqueHasAgentSplitShell = false;
+  main._torqueLastGridHtml = null;
+  main._torqueLastTabsHtml = null;
+  main._torqueLastFocusHtml = null;
+  main._torqueLastHtml = null;
+
   const groupName = _canvasGroupName();
   const groups = (state && state.groups) || {};
   if (Object.keys(groups).length === 0) {
@@ -294,11 +310,23 @@ function _canvasRenderStandalone(standalone) {
 
 function _canvasStatusClass(cell) {
   const status = String(cell && cell.status || '').toLowerCase();
-  if (status === 'error') return 'is-error';
-  if (status === 'stopped' || status === 'dismissed') return 'is-stopped';
-  if (status === 'running') return 'is-running';
-  if (status === 'idle') return 'is-idle';
-  return 'is-unknown';
+  const classes = [];
+  if (status === 'error') classes.push('is-error');
+  else if (status === 'stopped' || status === 'dismissed') classes.push('is-stopped');
+  else if (status === 'running') classes.push('is-running');
+  else if (status === 'idle') classes.push('is-idle');
+  else classes.push('is-unknown');
+  if (cell && typeof selectedAgentId !== 'undefined'
+      && selectedAgentId
+      && cell.id === selectedAgentId) {
+    classes.push('is-selected');
+  }
+  if (cell && typeof focusedItemId !== 'undefined'
+      && focusedItemId
+      && cell.id === focusedItemId) {
+    classes.push('is-focused');
+  }
+  return classes.join(' ');
 }
 
 function _canvasActivityLine(cell) {
@@ -389,8 +417,19 @@ function _canvasAttachInteractions(groupName) {
     if (!card) return;
     const id = card.getAttribute('data-canvas-card-id');
     if (!id) return;
-    if (typeof selectAgent === 'function') {
-      selectAgent(id);
+    if (typeof onAgentClick === 'function') {
+      onAgentClick(id);
+    } else if (typeof focusAgent === 'function') {
+      focusAgent(id);
+    }
+  });
+  root.addEventListener('dblclick', function(e) {
+    const card = e.target.closest && e.target.closest('[data-canvas-card-id]');
+    if (!card) return;
+    const id = card.getAttribute('data-canvas-card-id');
+    if (!id) return;
+    if (typeof focusAgent === 'function') {
+      focusAgent(id);
     }
   });
 }
@@ -411,22 +450,22 @@ function _canvasShowCardMenu(x, y, kind, id, groupName) {
   if (kind === 'architect') {
     items.push({ label: '+ Engineer here', action: `openAddEngineerForSection('${g}', '${safeId}')` });
     items.push({ separator: true });
-    items.push({ label: 'Focus', action: `selectAgent('${safeId}')` });
+    items.push({ label: 'Focus', action: `focusAgent('${safeId}')` });
     items.push({ label: 'Rename…', action: `openEditCell('${safeId}')` });
     items.push({ separator: true });
-    items.push({ label: 'Remove', action: `removeCell('${safeId}')`, danger: true });
+    items.push({ label: 'Remove', action: `removeAgent('${safeId}')`, danger: true });
   } else if (kind === 'engineer') {
     items.push({ label: '+ Worker here', action: `_canvasAddWorkerForEngineer('${safeId}')` });
     items.push({ separator: true });
-    items.push({ label: 'Focus', action: `selectAgent('${safeId}')` });
+    items.push({ label: 'Focus', action: `focusAgent('${safeId}')` });
     items.push({ label: 'Rename…', action: `openEditCell('${safeId}')` });
     items.push({ separator: true });
-    items.push({ label: 'Remove', action: `removeCell('${safeId}')`, danger: true });
+    items.push({ label: 'Remove', action: `removeAgent('${safeId}')`, danger: true });
   } else if (kind === 'worker') {
-    items.push({ label: 'Focus', action: `selectAgent('${safeId}')` });
+    items.push({ label: 'Focus', action: `focusAgent('${safeId}')` });
     items.push({ label: 'Rename…', action: `openEditCell('${safeId}')` });
     items.push({ separator: true });
-    items.push({ label: 'Remove', action: `removeCell('${safeId}')`, danger: true });
+    items.push({ label: 'Remove', action: `removeAgent('${safeId}')`, danger: true });
   } else if (kind === 'standalone') {
     items.push({ label: 'New engineer (standalone)', action: `openAddEngineerForSection('${g}', '')` });
     items.push({ label: 'New worker (standalone)', action: `openAddWorkerForSection('${g}')` });

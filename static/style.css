@@ -9964,6 +9964,14 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   background: var(--bg-hover);
   border-color: #4d5765;
 }
+.canvas-card.is-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+.canvas-card.is-focused {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
 .canvas-card-row {
   display: flex;
   align-items: center;
