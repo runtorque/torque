@@ -10107,9 +10107,9 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 }
 .canvas-card-stat--diff { font-family: var(--font); }
 
-.canvas-card-architect { border-left: 3px solid var(--accent); }
-.canvas-card-engineer  { border-left: 3px solid #a371f7; }
-.canvas-card-worker    { border-left: 3px solid #79c0ff; }
+.canvas-card-architect { border-left: 3px solid var(--amber); }   /* yellow */
+.canvas-card-engineer  { border-left: 3px solid var(--accent); }  /* blue */
+.canvas-card-worker    { border-left: 3px solid var(--green); }   /* green */
 .canvas-card-name {
   /* Override the old fixed cap so names use the full row width. */
   max-width: none;
