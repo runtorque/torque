@@ -444,7 +444,7 @@ function _canvasPauseState(cell) {
   return { applicable: true, paused, toggleAction };
 }
 
-function _canvasRenderHeader(cell, kind) {
+function _canvasRenderHeader(cell, kind, headerStatsHtml) {
   const name = esc(cell.name || cell.slug || cell.id);
   const kindLabel = _canvasKindLabel(kind);
   const pause = _canvasPauseState(cell);
@@ -456,6 +456,7 @@ function _canvasRenderHeader(cell, kind) {
     + '<span class="canvas-card-role">' + esc(kindLabel) + '</span>'
     + '<span class="canvas-card-name" title="' + name + '">' + name + '</span>'
     + '<span class="canvas-card-header-spacer"></span>'
+    + (headerStatsHtml || '')
     + pauseBadge
     + '<span class="canvas-card-status-dot"></span>'
     + '</div>';
@@ -479,13 +480,13 @@ function _canvasRenderArchitectCard(cell) {
     ? (_architectEngineersForCard(cell.id) || []).length
     : 0;
   const engLabel = engineerCount === 1 ? 'engineer' : 'engineers';
+  const headerStats = '<span class="canvas-card-header-stats">'
+    + esc(engineerCount + ' ' + engLabel)
+    + '</span>';
   let html = '<div class="canvas-card canvas-card-architect ' + statusCls + '"'
     + ' data-canvas-card-id="' + esc(cell.id) + '"'
     + ' data-canvas-card-kind="architect">';
-  html += _canvasRenderHeader(cell, 'architect');
-  html += '<div class="canvas-card-meta">'
-    + '<span class="canvas-card-stat">' + esc(engineerCount + ' ' + engLabel) + '</span>'
-    + '</div>';
+  html += _canvasRenderHeader(cell, 'architect', headerStats);
   html += _canvasRenderStatusRow(cell);
   html += _canvasRenderProviderBadge(cell);
   html += '</div>';
@@ -501,15 +502,15 @@ function _canvasRenderEngineerCard(cell) {
     ? _engineerQueueDepth(cell.id)
     : 0;
   const workerLabel = workers.length === 1 ? 'worker' : 'workers';
+  const headerStats = '<span class="canvas-card-header-stats">'
+    + esc(workers.length + ' ' + workerLabel)
+    + '<span class="canvas-card-sep">·</span>'
+    + esc('queue ' + queueDepth)
+    + '</span>';
   let html = '<div class="canvas-card canvas-card-engineer ' + statusCls + '"'
     + ' data-canvas-card-id="' + esc(cell.id) + '"'
     + ' data-canvas-card-kind="engineer">';
-  html += _canvasRenderHeader(cell, 'engineer');
-  html += '<div class="canvas-card-meta">'
-    + '<span class="canvas-card-stat">' + esc(workers.length + ' ' + workerLabel) + '</span>'
-    + '<span class="canvas-card-sep">·</span>'
-    + '<span class="canvas-card-stat">' + esc('queue ' + queueDepth) + '</span>'
-    + '</div>';
+  html += _canvasRenderHeader(cell, 'engineer', headerStats);
   html += _canvasRenderStatusRow(cell);
   html += _canvasRenderProviderBadge(cell);
   html += '</div>';

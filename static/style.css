@@ -10033,6 +10033,22 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   padding-right: 42px; /* room for the provider badge in the corner */
 }
 .canvas-card-header-spacer { flex: 1 1 auto; min-width: 8px; }
+/* Inline stats anchored to the right side of the header — e.g.
+   '2 engineers' for an architect, '4 workers · queue 1' for an
+   engineer. Same dimmed italic treatment as the role label. */
+.canvas-card-header-stats {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-style: italic;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.canvas-card-header-stats .canvas-card-sep {
+  font-style: normal;
+}
 .canvas-card-pause {
   display: inline-flex;
   align-items: center;
@@ -10081,9 +10097,10 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 .canvas-card-stat--muted { opacity: 0.6; font-style: italic; }
 .canvas-card-stat--branch {
   font-family: var(--font);
-  max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
+  flex: 0 1 auto;
 }
 .canvas-card-stat--diff { font-family: var(--font); }
 
