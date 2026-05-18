@@ -9791,3 +9791,345 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
     gap: 8px;
   }
 }
+
+/* ---- Agent view toggle (lives in the group-tabs action row) ---- */
+.agent-view-toggle {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-right: 6px;
+  height: 22px;
+}
+.agent-view-toggle-btn {
+  background: transparent;
+  color: var(--text-dim);
+  border: 0;
+  border-right: 1px solid var(--border);
+  font: inherit;
+  font-size: 11px;
+  padding: 0 8px;
+  cursor: pointer;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+}
+.agent-view-toggle-btn svg { display: block; }
+.agent-view-toggle-btn:last-child { border-right: 0; }
+.agent-view-toggle-btn:hover { background: var(--bg-hover); color: var(--text); }
+.agent-view-toggle-btn.is-active {
+  background: var(--bg-cell);
+  color: var(--text);
+}
+
+/* ---- Canvas (alternate agents view) ---- */
+.agent-canvas {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  background:
+    radial-gradient(circle, rgba(255,255,255,0.03) 1px, transparent 1px) 0 0 / 22px 22px,
+    var(--bg);
+  position: relative;
+}
+.agent-canvas-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 20px 24px 80px 24px;
+}
+.canvas-empty {
+  margin: 60px auto;
+  text-align: center;
+  color: var(--text-dim);
+}
+.canvas-empty-title { font-size: 14px; margin-bottom: 6px; color: var(--text); }
+.canvas-empty-hint  { font-size: 12px; }
+
+/* Tree = a vertical stack of rows. Each row has a stack of guide
+   cells on the left (one per ancestor depth) followed by the card
+   itself. The guides do all the line-drawing via pseudo-elements,
+   and the card flexes to fill the remaining width. */
+.agent-canvas-inner,
+.canvas-tree {
+  --canvas-row-gap: 4px;
+}
+.canvas-tree {
+  display: flex;
+  flex-direction: column;
+  gap: var(--canvas-row-gap);
+}
+.canvas-row {
+  display: flex;
+  align-items: stretch;
+  min-height: 34px;
+}
+.canvas-row > .canvas-card,
+.canvas-row > [data-canvas-row-host] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.canvas-row > [data-canvas-row-host] {
+  display: flex;
+}
+.canvas-row > [data-canvas-row-host] > .canvas-card {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Guide cell — one per ancestor depth, plus optionally one for the
+   current row's own connector. All four variants share the same
+   geometry: a vertical line at x=16 from top of cell, optionally
+   capped at vertical center; a horizontal stub at the center going
+   right to the card. The card sits flush against the guide, so the
+   horizontal stub ends exactly at the card's left edge. */
+.canvas-guide {
+  flex: 0 0 32px;
+  align-self: stretch;
+  position: relative;
+}
+.canvas-guide::before,
+.canvas-guide::after {
+  content: '';
+  position: absolute;
+  background: var(--border);
+}
+/* "through" — vertical line all the way through; ancestor's spine
+   continues past this row. No horizontal stub. The line is extended
+   BELOW the row by --canvas-row-gap so it bridges the flex gap to
+   the next row's pseudo-element (otherwise the gap shows up as a
+   visible discontinuity in the spine). */
+.canvas-guide--through::before {
+  left: 16px;
+  top: 0;
+  bottom: calc(0px - var(--canvas-row-gap, 4px));
+  width: 2px;
+}
+/* "tee" — vertical line all the way through + horizontal stub at
+   center. Used when this row's own parent has more siblings after
+   this row. Same gap-bridging extension as --through. */
+.canvas-guide--tee::before {
+  left: 16px;
+  top: 0;
+  bottom: calc(0px - var(--canvas-row-gap, 4px));
+  width: 2px;
+}
+.canvas-guide--tee::after {
+  left: 16px;
+  top: 50%;
+  right: 0;
+  height: 2px;
+  transform: translateY(-1px);
+}
+/* "corner" — vertical line from top to center only + horizontal
+   stub at center. Used for the LAST child at this row's depth, so
+   the spine stops exactly at the bend. */
+.canvas-guide--corner::before {
+  left: 16px;
+  top: 0;
+  height: 50%;
+  width: 2px;
+}
+.canvas-guide--corner::after {
+  left: 16px;
+  top: 50%;
+  right: 0;
+  height: 2px;
+  transform: translateY(-1px);
+}
+/* "empty" — no line. Used when the ancestor's spine ended before
+   reaching this row (ancestor was the last child at its depth). */
+.canvas-guide--empty {}
+
+/* Inline "+ Add" button rendered inside a row when a parent has no
+   children yet. Sits in place of a card and has the same flex
+   behavior so it fills the remaining width. */
+.canvas-row > .canvas-add-inline {
+  flex: 1 1 auto;
+  min-width: 0;
+  align-self: center;
+  min-height: 0;
+}
+
+/* Cards: two-row layout.
+   Row 1 (header): name | kind | provider | (spacer) | status dot
+   Row 2 (meta):   kind-specific stats, separated by middle dots */
+.canvas-card {
+  background: var(--bg-cell);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px 8px 5px 8px;
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  position: relative;
+  transition: border-color 0.12s ease, background 0.12s ease;
+  line-height: 1.25;
+}
+.canvas-card-header + * {
+  margin-top: 3px;
+}
+.canvas-card:hover {
+  background: var(--bg-hover);
+  border-color: #4d5765;
+}
+.canvas-card.is-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+.canvas-card.is-focused {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+.canvas-card-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text);
+  min-width: 0;
+}
+.canvas-card-name {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+/* Role text in the header — italic, dimmed, just the kind (provider
+   moves to a corner badge). e.g. 'Architect' / 'Engineer' / 'Worker'. */
+.canvas-card-role {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-style: italic;
+  flex: 0 0 auto;
+}
+/* Provider badge in the card's bottom-right corner. */
+.canvas-card-provider-badge {
+  position: absolute;
+  right: 6px;
+  bottom: 4px;
+  font-size: 8px;
+  font-style: italic;
+  color: var(--text-dim);
+  opacity: 0.75;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+}
+/* Third-row run-state line — 'idle', 'Running: <detail>',
+   'stopped', or 'Error: <msg>'. Always present, even when empty,
+   so card vertical rhythm stays consistent. */
+.canvas-card-status-line {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-right: 42px; /* room for the provider badge in the corner */
+}
+.canvas-card-header-spacer { flex: 1 1 auto; min-width: 8px; }
+/* Inline stats anchored to the right side of the header — e.g.
+   '2 engineers' for an architect, '4 workers · queue 1' for an
+   engineer. Same dimmed italic treatment as the role label. */
+.canvas-card-header-stats {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-style: italic;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.canvas-card-header-stats .canvas-card-sep {
+  font-style: normal;
+}
+.canvas-card-pause {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  color: var(--amber);
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+}
+.canvas-card-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  flex: 0 0 6px;
+}
+.canvas-card.is-running .canvas-card-status-dot { background: var(--green); }
+.canvas-card.is-error   .canvas-card-status-dot { background: var(--red); }
+.canvas-card.is-idle    .canvas-card-status-dot { background: var(--amber); }
+.canvas-card.is-stopped .canvas-card-status-dot { background: #57606a; }
+
+.canvas-card-meta {
+  font-size: 10px;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  overflow: hidden;
+  min-width: 0;
+}
+.canvas-card-meta > * {
+  flex: 0 0 auto;
+}
+.canvas-card-sep {
+  color: var(--border);
+  opacity: 0.7;
+}
+.canvas-card-stat--task {
+  cursor: pointer;
+  font-family: var(--font);
+  color: var(--accent);
+}
+.canvas-card-stat--task:hover { text-decoration: underline; }
+.canvas-card-stat--muted { opacity: 0.6; font-style: italic; }
+.canvas-card-stat--branch {
+  font-family: var(--font);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+.canvas-card-stat--diff { font-family: var(--font); }
+
+.canvas-card-architect { border-left: 3px solid var(--accent); }
+.canvas-card-engineer  { border-left: 3px solid #a371f7; }
+.canvas-card-worker    { border-left: 3px solid #79c0ff; }
+.canvas-card-name {
+  /* Override the old fixed cap so names use the full row width. */
+  max-width: none;
+}
+/* Inline add affordance — a row with no card, just a dashed-border
+   button rendered with the same guide/corner connector as a real
+   child row. */
+.canvas-add-inline {
+  background: transparent;
+  border: 1px dashed var(--border);
+  color: var(--text-dim);
+  border-radius: var(--radius);
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+  text-align: left;
+}
+.canvas-add-inline:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}

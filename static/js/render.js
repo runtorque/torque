@@ -435,6 +435,28 @@ function _renderAgentGroupTabsHtml() {
   }
   html += '</div>';
   html += '<div class="agent-group-tab-actions">';
+  if (typeof _torqueAgentViewMode === 'function') {
+    const vm = _torqueAgentViewMode();
+    const gridIcon = '<svg viewBox="0 0 12 12" width="12" height="12" fill="currentColor" aria-hidden="true">'
+      + '<rect x="0" y="0" width="5" height="5" rx="1"/>'
+      + '<rect x="7" y="0" width="5" height="5" rx="1"/>'
+      + '<rect x="0" y="7" width="5" height="5" rx="1"/>'
+      + '<rect x="7" y="7" width="5" height="5" rx="1"/>'
+      + '</svg>';
+    const canvasIcon = '<svg viewBox="0 0 12 12" width="12" height="12" fill="currentColor" aria-hidden="true">'
+      + '<rect x="0" y="1" width="12" height="2" rx="0.5"/>'
+      + '<rect x="3" y="5" width="9" height="2" rx="0.5"/>'
+      + '<rect x="6" y="9" width="6" height="2" rx="0.5"/>'
+      + '</svg>';
+    html += '<div class="agent-view-toggle agent-view-toggle--tabs" role="group" aria-label="Agent view">';
+    html += '<button type="button" class="agent-view-toggle-btn' + (vm === 'grid' ? ' is-active' : '') + '"'
+      + ' data-agent-view-toggle="grid"'
+      + ' onclick="_torqueSetAgentViewMode(\'grid\')" title="Grid view" aria-label="Grid view">' + gridIcon + '</button>';
+    html += '<button type="button" class="agent-view-toggle-btn' + (vm === 'canvas' ? ' is-active' : '') + '"'
+      + ' data-agent-view-toggle="canvas"'
+      + ' onclick="_torqueSetAgentViewMode(\'canvas\')" title="Canvas view (tree)" aria-label="Canvas view">' + canvasIcon + '</button>';
+    html += '</div>';
+  }
   html += '<button type="button" class="agent-group-tab-action agent-group-tab-action-new"'
     + ' onclick="openAddGroup()">+ New Group</button>';
   html += '<button type="button" class="agent-group-tab-action agent-group-tab-action-settings"'
@@ -2678,6 +2700,17 @@ function refreshSelectedAgentFocus(prevSelectedId) {
 
 function render(opts) {
   if (typeof renderGroupSwitcher === 'function') renderGroupSwitcher();
+  if (typeof _torqueAgentViewMode === 'function'
+      && _torqueAgentViewMode() === 'canvas'
+      && typeof _torqueRenderAgentCanvas === 'function') {
+    if (typeof _torqueRefreshViewToggleButtons === 'function') {
+      _torqueRefreshViewToggleButtons('canvas');
+    }
+    return _torqueRenderAgentCanvas(opts);
+  }
+  if (typeof _torqueRefreshViewToggleButtons === 'function') {
+    _torqueRefreshViewToggleButtons('grid');
+  }
   if (_torqueUiMode() === 'toolbelt') {
     return _renderMainGrid(opts, { singleGroup: false });
   }
