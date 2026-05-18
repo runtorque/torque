@@ -229,7 +229,6 @@ function _canvasRenderTree(tree) {
   html += `</div>`;
 
   html += `<div class="canvas-tree-body">`;
-  html += `<div class="canvas-spine-track"><div class="canvas-spine"></div></div>`;
   html += `<div class="canvas-rows">`;
   if (hasEngineers) {
     for (const row of tree.engineers) {
@@ -237,7 +236,7 @@ function _canvasRenderTree(tree) {
     }
   } else {
     html += `<div class="canvas-tree-empty" data-canvas-arch-id="${esc(arch.id)}">`;
-    html += `<div class="canvas-spur"></div>`;
+    html += `<div class="canvas-connector canvas-connector--last"></div>`;
     html += `<button type="button" class="canvas-add-inline" `
          + `onclick="_canvasAddEngineerForArchitect('${esc(arch.id)}')">`
          + `+ Engineer</button>`;
@@ -255,7 +254,7 @@ function _canvasRenderEngineerRow(row) {
   const workers = row.workers || [];
   let html = '';
   html += `<div class="canvas-eng-row" data-canvas-engineer="${esc(eng.id)}">`;
-  html += `<div class="canvas-spur"></div>`;
+  html += `<div class="canvas-connector"></div>`;
   html += _canvasRenderEngineerCard(eng);
 
   if (workers.length > 0) {
@@ -285,8 +284,7 @@ function _canvasRenderStandalone(standalone) {
   html += _canvasRenderStandaloneCard(standalone);
   html += `</div>`;
 
-  html += `<div class="canvas-tree-body">`;
-  html += `<div class="canvas-spine-track canvas-spine-track--loose"><div class="canvas-spine canvas-spine--loose"></div></div>`;
+  html += `<div class="canvas-tree-body canvas-tree-body--loose">`;
   html += `<div class="canvas-rows">`;
 
   for (const row of standalone.engineers) {
@@ -295,7 +293,7 @@ function _canvasRenderStandalone(standalone) {
 
   if (standalone.workers.length > 0) {
     html += `<div class="canvas-eng-row canvas-eng-row--loose">`;
-    html += `<div class="canvas-spur canvas-spur--loose"></div>`;
+    html += `<div class="canvas-connector canvas-connector--loose"></div>`;
     html += `<div class="canvas-loose-label">Workers</div>`;
     html += `<div class="canvas-worker-manifold">`;
     html += `<div class="canvas-manifold-trunk canvas-manifold-trunk--loose"></div>`;

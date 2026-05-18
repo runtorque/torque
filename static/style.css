@@ -9861,59 +9861,72 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   display: flex;
   align-items: stretch;
 }
-/* Spine track: narrow column with the vertical line at x=16. Stretches
-   to the full height of the engineer-rows column (align-items: stretch
-   on the body). */
-.canvas-spine-track {
-  flex: 0 0 32px;
-  display: flex;
-  padding-left: 16px;
-  align-self: stretch;
-}
-.canvas-spine {
-  width: 2px;
-  background: var(--border);
-  align-self: stretch;
-  min-height: 24px;
-}
-.canvas-spine--loose {
-  background: repeating-linear-gradient(0deg, var(--border) 0 4px, transparent 4px 8px);
-}
-.canvas-spine-track--loose .canvas-spine {
-  background: repeating-linear-gradient(0deg, var(--border) 0 4px, transparent 4px 8px);
-}
 .canvas-rows {
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding-top: 8px;
+  gap: 0;
   min-width: 0;
 }
 .canvas-tree-empty {
   display: flex;
   align-items: center;
-  min-height: 36px;
+  min-height: 48px;
 }
 
-/* Engineer row = spur from spine + engineer card + worker manifold */
+/* Engineer row = connector (vertical+spur drawn via pseudo-elements)
+   + engineer card + worker manifold. Spine and spur are NOT separate
+   structural elements anymore — each row owns the segment of spine
+   that passes through it, and the :last-child row truncates its
+   vertical segment at the bend (no line below the last engineer). */
 .canvas-eng-row {
   display: flex;
   align-items: center;
   gap: 0;
-  min-height: 60px;
+  min-height: 72px;
+  position: relative;
 }
-/* The spur reaches LEFT from the rows column into the spine track to
-   meet the spine at x=16 (rows column starts at x=32; spine is at x=16
-   absolute = -16px from rows-column left edge). */
-.canvas-spur {
-  width: 32px;
+.canvas-connector {
+  flex: 0 0 48px;
+  align-self: stretch;
+  position: relative;
+}
+/* Vertical line: from top of row down. Extends through the full row
+   for non-last rows so adjacent rows visually connect. */
+.canvas-connector::before {
+  content: '';
+  position: absolute;
+  left: 16px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--border);
+}
+/* Horizontal spur: at vertical center, going right toward the
+   engineer card. */
+.canvas-connector::after {
+  content: '';
+  position: absolute;
+  left: 16px;
+  top: 50%;
+  width: 28px;
   height: 2px;
   background: var(--border);
-  flex: 0 0 32px;
-  margin-left: -16px;
+  transform: translateY(-1px);
 }
-.canvas-spur--loose {
+/* Last row in the rows column — and the explicit --last variant used
+   by the empty-state placeholder — truncates the vertical segment at
+   the spur Y, so the spine stops at the bend instead of continuing
+   below the final engineer. */
+.canvas-eng-row:last-child .canvas-connector::before,
+.canvas-connector--last::before {
+  bottom: 50%;
+}
+/* Loose / dashed variants for the Standalone pseudo-tree. */
+.canvas-connector--loose::before {
+  background: repeating-linear-gradient(0deg, var(--border) 0 4px, transparent 4px 8px);
+}
+.canvas-connector--loose::after {
   background: repeating-linear-gradient(90deg, var(--border) 0 4px, transparent 4px 8px);
 }
 .canvas-loose-label {
