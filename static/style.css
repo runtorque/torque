@@ -9999,18 +9999,37 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   min-width: 0;
   flex: 0 1 auto;
 }
-/* Role/provider line: italic text instead of pill badges, e.g.
-   "Architect · Claude" or "Worker · Codex". */
+/* Role text in the header — italic, dimmed, just the kind (provider
+   moves to a corner badge). e.g. 'Architect' / 'Engineer' / 'Worker'. */
 .canvas-card-role {
   font-size: 11px;
   color: var(--text-dim);
   font-style: italic;
   flex: 0 0 auto;
 }
-.canvas-card-role-sep {
-  font-style: normal;
-  opacity: 0.7;
-  margin: 0 1px;
+/* Provider badge in the card's bottom-right corner. */
+.canvas-card-provider-badge {
+  position: absolute;
+  right: 8px;
+  bottom: 5px;
+  font-size: 9px;
+  font-style: italic;
+  color: var(--text-dim);
+  opacity: 0.75;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+}
+/* Third-row run-state line — 'idle', 'Running: <detail>',
+   'stopped', or 'Error: <msg>'. Always present, even when empty,
+   so card vertical rhythm stays consistent. */
+.canvas-card-status-line {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-right: 64px; /* room for the provider badge in the corner */
 }
 .canvas-card-header-spacer { flex: 1 1 auto; min-width: 8px; }
 .canvas-card-pause {
@@ -10047,13 +10066,6 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 }
 .canvas-card-meta > * {
   flex: 0 0 auto;
-}
-.canvas-card-activity {
-  flex: 0 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-  color: var(--text);
 }
 .canvas-card-sep {
   color: var(--border);

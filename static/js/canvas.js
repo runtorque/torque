@@ -357,7 +357,7 @@ function _canvasStatusClass(cell) {
   return classes.join(' ');
 }
 
-function _canvasActivityLine(cell) {
+function _canvasActivityDetail(cell) {
   if (!cell) return '';
   const detail = String(cell.activity_detail || '').trim();
   if (detail) return detail;
@@ -366,9 +366,23 @@ function _canvasActivityLine(cell) {
     if (a) return a;
   }
   const activity = String(cell.activity || '').trim();
-  if (activity) return activity;
-  if (cell.status === 'idle' || cell.status === 'stopped') return cell.status;
+  if (activity && activity.toLowerCase() !== 'idle') return activity;
   return '';
+}
+
+/* Third-row status line, formatted as 'idle', 'Running: <detail>',
+ * 'stopped', or 'Error: <msg>'. */
+function _canvasStatusLine(cell) {
+  if (!cell) return 'idle';
+  const status = String(cell.status || '').toLowerCase();
+  if (status === 'stopped' || status === 'dismissed') return 'stopped';
+  if (status === 'error') {
+    const err = String(cell.error_message || '').trim();
+    return err ? 'Error: ' + err : 'Error';
+  }
+  const detail = _canvasActivityDetail(cell);
+  if (detail) return 'Running: ' + detail;
+  return 'idle';
 }
 
 function _canvasKindLabel(kind) {
@@ -416,10 +430,6 @@ function _canvasPauseState(cell) {
 function _canvasRenderHeader(cell, kind) {
   const name = esc(cell.name || cell.slug || cell.id);
   const kindLabel = _canvasKindLabel(kind);
-  const providerLabel = _canvasProviderLabel(cell);
-  let rolePart = '<span class="canvas-card-role">' + esc(kindLabel);
-  if (providerLabel) rolePart += ' <span class="canvas-card-role-sep">·</span> ' + esc(providerLabel);
-  rolePart += '</span>';
   const pause = _canvasPauseState(cell);
   let pauseBadge = '';
   if (pause.applicable && pause.paused) {
@@ -427,11 +437,23 @@ function _canvasRenderHeader(cell, kind) {
   }
   return '<div class="canvas-card-header">'
     + '<span class="canvas-card-name" title="' + name + '">' + name + '</span>'
-    + rolePart
+    + '<span class="canvas-card-role">' + esc(kindLabel) + '</span>'
     + '<span class="canvas-card-header-spacer"></span>'
     + pauseBadge
     + '<span class="canvas-card-status-dot"></span>'
     + '</div>';
+}
+
+function _canvasRenderProviderBadge(cell) {
+  const label = _canvasProviderLabel(cell);
+  if (!label) return '';
+  return '<span class="canvas-card-provider-badge">' + esc(label) + '</span>';
+}
+
+function _canvasRenderStatusRow(cell) {
+  const line = _canvasStatusLine(cell);
+  const safe = esc(line);
+  return '<div class="canvas-card-status-line" title="' + safe + '">' + safe + '</div>';
 }
 
 function _canvasRenderArchitectCard(cell) {
@@ -440,15 +462,15 @@ function _canvasRenderArchitectCard(cell) {
     ? (_architectEngineersForCard(cell.id) || []).length
     : 0;
   const engLabel = engineerCount === 1 ? 'engineer' : 'engineers';
-  const activity = _canvasActivityLine(cell);
   let html = '<div class="canvas-card canvas-card-architect ' + statusCls + '"'
     + ' data-canvas-card-id="' + esc(cell.id) + '"'
     + ' data-canvas-card-kind="architect">';
   html += _canvasRenderHeader(cell, 'architect');
   html += '<div class="canvas-card-meta">'
     + '<span class="canvas-card-stat">' + esc(engineerCount + ' ' + engLabel) + '</span>'
-    + (activity ? '<span class="canvas-card-sep">·</span><span class="canvas-card-activity" title="' + esc(activity) + '">' + esc(activity) + '</span>' : '')
     + '</div>';
+  html += _canvasRenderStatusRow(cell);
+  html += _canvasRenderProviderBadge(cell);
   html += '</div>';
   return html;
 }
@@ -462,7 +484,6 @@ function _canvasRenderEngineerCard(cell) {
     ? _engineerQueueDepth(cell.id)
     : 0;
   const workerLabel = workers.length === 1 ? 'worker' : 'workers';
-  const activity = _canvasActivityLine(cell);
   let html = '<div class="canvas-card canvas-card-engineer ' + statusCls + '"'
     + ' data-canvas-card-id="' + esc(cell.id) + '"'
     + ' data-canvas-card-kind="engineer">';
@@ -471,8 +492,9 @@ function _canvasRenderEngineerCard(cell) {
     + '<span class="canvas-card-stat">' + esc(workers.length + ' ' + workerLabel) + '</span>'
     + '<span class="canvas-card-sep">·</span>'
     + '<span class="canvas-card-stat">' + esc('queue ' + queueDepth) + '</span>'
-    + (activity ? '<span class="canvas-card-sep">·</span><span class="canvas-card-activity" title="' + esc(activity) + '">' + esc(activity) + '</span>' : '')
     + '</div>';
+  html += _canvasRenderStatusRow(cell);
+  html += _canvasRenderProviderBadge(cell);
   html += '</div>';
   return html;
 }
@@ -486,7 +508,6 @@ function _canvasRenderWorkerCard(cell) {
   const diff = (typeof _workerDiffLabel === 'function')
     ? String(_workerDiffLabel(cell) || '').trim()
     : '';
-  const activity = _canvasActivityLine(cell);
   let html = '<div class="canvas-card canvas-card-worker ' + statusCls + '"'
     + ' data-canvas-card-id="' + esc(cell.id) + '"'
     + ' data-canvas-card-kind="worker">';
@@ -507,11 +528,9 @@ function _canvasRenderWorkerCard(cell) {
     parts.push('<span class="canvas-card-sep">·</span>'
       + '<span class="canvas-card-stat canvas-card-stat--diff">' + esc(diff) + '</span>');
   }
-  if (activity) {
-    parts.push('<span class="canvas-card-sep">·</span>'
-      + '<span class="canvas-card-activity" title="' + esc(activity) + '">' + esc(activity) + '</span>');
-  }
   html += '<div class="canvas-card-meta">' + parts.join('') + '</div>';
+  html += _canvasRenderStatusRow(cell);
+  html += _canvasRenderProviderBadge(cell);
   html += '</div>';
   return html;
 }
