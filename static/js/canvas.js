@@ -595,8 +595,8 @@ function _canvasShowEmptyMenu(x, y, groupName) {
   const g = esc(groupName);
   showContextMenu(x, y, [
     { label: 'New architect', action: `openAddArchitectForGroup('${g}')` },
-    { label: 'New engineer (standalone)', action: `openAddEngineerForSection('${g}', '')` },
-    { label: 'New worker (standalone)', action: `openAddWorkerForSection('${g}')` },
+    { label: 'New engineer', action: `openAddEngineerForSection('${g}', '')` },
+    { label: 'New worker', action: `openAddWorkerForSection('${g}')` },
   ]);
 }
 
