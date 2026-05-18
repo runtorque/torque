@@ -438,6 +438,124 @@ asyncio.run(main())
         self.assertEqual(seen, ["agent-1"])
         self.assertEqual(event_log.get(cell.id)[0].event_type, "session_start")
 
+    def test_worker_boot_doa_escalates_when_worker_posts_no_activity(self):
+        state = self._make_state()
+        cell = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            kind="worker",
+            status="running",
+            current_task_id="task-1",
+            owner_engineer_id="eng-1",
+        )
+        task = self.state_mod.BoardTask(
+            id="task-1",
+            task="Implement feature",
+            group="g",
+            lane="In Progress",
+            agent_id=cell.id,
+        )
+        state.agents[cell.id] = cell
+        state.board_tasks[task.id] = task
+        event_log = self.events_mod.EventLog()
+        panel_log = self.events_mod.PanelEventLog()
+        event_log.append(
+            self.base_mod.AgentEvent(
+                cell_id=cell.id,
+                timestamp=100.0,
+                event_type="session_start",
+                data={},
+            )
+        )
+        panel_log.append(
+            kind="agent_started",
+            cell_id=cell.id,
+            agent_name=cell.name,
+            group=cell.group,
+            message="",
+        )
+        panel_log.append(
+            kind="task_dispatched",
+            cell_id=cell.id,
+            agent_name=cell.name,
+            group=cell.group,
+            message=task.task,
+            task_id=task.id,
+        )
+
+        changed = self.events_mod.emit_worker_boot_doa_if_inactive(
+            state,
+            event_log,
+            panel_log,
+            cell,
+            started_at=100.0,
+            timeout_seconds=60.0,
+            now=161.0,
+        )
+
+        self.assertTrue(changed)
+        self.assertTrue(cell.needs_attention)
+        self.assertIn("Worker boot DOA", cell.error_message)
+        events = panel_log.get_recent()
+        self.assertEqual(events[-1]["kind"], "worker_boot_doa")
+        self.assertEqual(events[-1]["cell_id"], cell.id)
+        self.assertEqual(events[-1]["task_id"], task.id)
+
+    def test_worker_boot_doa_suppressed_after_post_boot_activity(self):
+        state = self._make_state()
+        cell = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            kind="worker",
+            status="running",
+            current_task_id="task-1",
+        )
+        task = self.state_mod.BoardTask(
+            id="task-1",
+            task="Implement feature",
+            group="g",
+            lane="In Progress",
+            agent_id=cell.id,
+        )
+        state.agents[cell.id] = cell
+        state.board_tasks[task.id] = task
+        event_log = self.events_mod.EventLog()
+        panel_log = self.events_mod.PanelEventLog()
+        event_log.append(
+            self.base_mod.AgentEvent(
+                cell_id=cell.id,
+                timestamp=100.0,
+                event_type="session_start",
+                data={},
+            )
+        )
+        event_log.append(
+            self.base_mod.AgentEvent(
+                cell_id=cell.id,
+                timestamp=120.0,
+                event_type="tool_start",
+                data={"detail": "Running tests"},
+            )
+        )
+
+        changed = self.events_mod.emit_worker_boot_doa_if_inactive(
+            state,
+            event_log,
+            panel_log,
+            cell,
+            started_at=100.0,
+            timeout_seconds=60.0,
+            now=161.0,
+        )
+
+        self.assertFalse(changed)
+        self.assertFalse(cell.needs_attention)
+        self.assertEqual(panel_log.get_recent(), [])
+
     async def test_session_end_marks_agent_idle_and_persists_status(self):
         state = self._make_state()
         cell = self.state_mod.AgentCell(

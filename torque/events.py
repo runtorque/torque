@@ -1,6 +1,7 @@
 """EventBus, EventLog, PanelEventLog, and health monitoring."""
 
 import asyncio
+import os
 import time
 from datetime import datetime
 from collections import deque
@@ -14,6 +15,16 @@ from . import profiling
 
 
 PERSISTENT_CELL_EVENT_KINDS = {"architect", "engineer"}
+WORKER_BOOT_DOA_EVENT = "worker_boot_doa"
+WORKER_BOOT_DOA_DEFAULT_SECONDS = 90.0
+WORKER_BOOT_DOA_ENV = "TORQUE_WORKER_BOOT_DOA_SECONDS"
+WORKER_BOOT_DOA_IGNORED_AGENT_EVENTS = {"session_start", "heartbeat"}
+WORKER_BOOT_DOA_IGNORED_PANEL_EVENTS = {
+    "agent_started",
+    "task_dispatched",
+    "task_queued",
+    WORKER_BOOT_DOA_EVENT,
+}
 PROGRESS_EVENT_TYPES = {
     "tool_start",
     "tool_end",
@@ -69,6 +80,145 @@ def _effective_owner_engineer_id(cell) -> str:
     if owner_id:
         return owner_id
     return str(getattr(cell, "created_by_engineer_id", "") or "").strip()
+
+
+def worker_boot_doa_timeout_seconds() -> float:
+    """Return the boot-DOA watchdog delay, or 0 when disabled."""
+    raw = os.environ.get(WORKER_BOOT_DOA_ENV, "")
+    if not raw:
+        return WORKER_BOOT_DOA_DEFAULT_SECONDS
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        log.warning(
+            "Invalid %s=%r; using %.0fs",
+            WORKER_BOOT_DOA_ENV,
+            raw,
+            WORKER_BOOT_DOA_DEFAULT_SECONDS,
+        )
+        return WORKER_BOOT_DOA_DEFAULT_SECONDS
+    return max(0.0, value)
+
+
+def worker_has_post_boot_activity(event_log: "EventLog", panel_log, *,
+                                  cell_id: str, started_at: float) -> bool:
+    """Return True if a worker posted any meaningful signal after boot.
+
+    Dispatch bookkeeping (``task_dispatched``) and the boot signal itself do
+    not count: the failure mode is a worker whose TUI started but never
+    produced hook/MCP output after Torque attempted to send the prompt.
+    """
+    for event in event_log.get(cell_id, since=started_at):
+        if event.event_type not in WORKER_BOOT_DOA_IGNORED_AGENT_EVENTS:
+            return True
+
+    if not panel_log:
+        return False
+    try:
+        recent = panel_log.get_recent(getattr(panel_log, "_max_size", 500))
+    except Exception:
+        log.exception("Failed to inspect panel events for boot-DOA activity")
+        return False
+    for evt in recent:
+        if str(evt.get("cell_id", "") or "") != cell_id:
+            continue
+        try:
+            ts = float(evt.get("timestamp", 0) or 0)
+        except (TypeError, ValueError):
+            ts = 0.0
+        if ts <= started_at:
+            continue
+        kind = str(evt.get("kind", "") or "")
+        if kind not in WORKER_BOOT_DOA_IGNORED_PANEL_EVENTS:
+            return True
+    return False
+
+
+def _task_is_open_for_boot_doa(task) -> bool:
+    if not task:
+        return False
+    lane = str(getattr(task, "lane", "") or "").strip()
+    if lane in {"Done", "Archived"}:
+        return False
+    status = str(getattr(task, "status", "") or "").strip().lower()
+    return status not in {"done", "closed", "archived"}
+
+
+def emit_worker_boot_doa_if_inactive(state, event_log: "EventLog", panel_log,
+                                     cell, *, started_at: float,
+                                     timeout_seconds: float | None = None,
+                                     now: float | None = None) -> bool:
+    """Emit a safe escalation for booted workers that posted no activity.
+
+    Recovery tradeoff: Torque deliberately does **not** retry the dispatch
+    prompt or auto-close/relaunch here. A duplicate prompt can corrupt a slow
+    but healthy worker's turn, and auto-redispatch has the same false-positive
+    risk. The safe default is to surface ``worker_boot_doa`` to the owning
+    engineer so they can inspect and relaunch/re-dispatch deliberately.
+    """
+    if not cell or _cell_kind(cell) != "worker":
+        return False
+    if str(getattr(cell, "status", "") or "") != "running":
+        return False
+
+    timeout = (worker_boot_doa_timeout_seconds() if timeout_seconds is None
+               else float(timeout_seconds or 0.0))
+    if timeout <= 0:
+        return False
+    current = time.time() if now is None else float(now)
+    if current - float(started_at or 0.0) < timeout:
+        return False
+
+    task_id = str(getattr(cell, "current_task_id", "") or "").strip()
+    task = state.board_tasks.get(task_id) if task_id else None
+    if not _task_is_open_for_boot_doa(task):
+        return False
+    if str(getattr(task, "agent_id", "") or "").strip() not in {"", cell.id}:
+        return False
+    if worker_has_post_boot_activity(
+            event_log,
+            panel_log,
+            cell_id=cell.id,
+            started_at=float(started_at or 0.0),
+    ):
+        return False
+
+    if not panel_log:
+        log.warning(
+            "worker boot DOA detected but no panel log is available: "
+            "cell=%s task=%s",
+            cell.id,
+            task_id,
+        )
+        return False
+
+    message = (
+        f"Worker boot DOA: {cell.name} started {int(timeout)}s ago "
+        "but posted no activity after boot. Inspect the worker and "
+        "re-dispatch or relaunch if needed."
+    )
+    log.warning(
+        "worker boot DOA detected: cell=%s task=%s owner=%s timeout=%.1fs",
+        cell.id,
+        task_id,
+        _effective_owner_engineer_id(cell) or "<none>",
+        timeout,
+    )
+    pe = panel_log.append(
+        kind=WORKER_BOOT_DOA_EVENT,
+        cell_id=cell.id,
+        agent_name=cell.name,
+        group=cell.group,
+        message=message,
+        task_id=task_id,
+    )
+    state._emit("event_append", **pe)
+    cell.needs_attention = True
+    cell.error_message = message
+    cell.last_event_text = WORKER_BOOT_DOA_EVENT
+    state._emit_agent(cell)
+    state._db_save_agent(cell)
+    return True
 
 
 def engineer_has_queue_work(state, engineer) -> bool:
@@ -587,6 +737,7 @@ class EventBus:
         self._panel_log = panel_log
         self._engineer_buffer = None  # EngineerEventBuffer, set from server.py
         self._timers: dict[str, asyncio.TimerHandle] = {}
+        self._boot_doa_timers: dict[str, asyncio.TimerHandle] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
         self.on_session_start = None  # callback(cell) — agent TUI ready
         self.on_session_end = None  # async callback(cell) — agent finished turn
@@ -621,6 +772,8 @@ class EventBus:
         if cell.status != prev_status or clocks_changed:
             self._state._db_save_agent(cell)
         self._log.append(event)
+        if event.event_type == "session_start":
+            self._schedule_worker_boot_doa_check(cell, event.timestamp)
         log.info("Event: cell='%s' type=%s activity='%s' detail='%s'",
                  cell.name, event.event_type, cell.activity,
                  cell.activity_detail[:50] if cell.activity_detail else "")
@@ -640,6 +793,47 @@ class EventBus:
                 log.exception("on_session_end callback failed for '%s'",
                               cell.name)
         self._schedule_broadcast()
+
+    def _schedule_worker_boot_doa_check(self, cell, started_at: float):
+        """Schedule the safe boot-DOA escalation check for worker sessions."""
+        if _cell_kind(cell) != "worker":
+            return
+        timeout = worker_boot_doa_timeout_seconds()
+        if timeout <= 0:
+            return
+        loop = self._loop
+        if loop is None:
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                return
+        existing = self._boot_doa_timers.pop(cell.id, None)
+        if existing:
+            existing.cancel()
+        self._boot_doa_timers[cell.id] = loop.call_later(
+            timeout,
+            self._run_worker_boot_doa_check,
+            cell.id,
+            float(started_at or 0.0),
+            timeout,
+        )
+
+    def _run_worker_boot_doa_check(self, cell_id: str, started_at: float,
+                                   timeout: float):
+        self._boot_doa_timers.pop(cell_id, None)
+        cell = self._state.agents.get(cell_id)
+        if not cell:
+            return
+        changed = emit_worker_boot_doa_if_inactive(
+            self._state,
+            self._log,
+            self._panel_log,
+            cell,
+            started_at=started_at,
+            timeout_seconds=timeout,
+        )
+        if changed and self._loop and not self._loop.is_closed():
+            self._loop.create_task(self._do_broadcast())
 
     def _apply(self, event: AgentEvent, cell):
         """Update AgentCell fields based on event type."""
@@ -858,6 +1052,9 @@ class EventBus:
     def cleanup_cell(self, cell_id: str):
         """Clean up when a cell is removed."""
         self._log.clear(cell_id)
+        handle = self._boot_doa_timers.pop(cell_id, None)
+        if handle:
+            handle.cancel()
 
 
 # -- Durable event-ingest drainer -----------------------------------------
