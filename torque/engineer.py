@@ -250,6 +250,8 @@ Operational rules:
    - agent_error / agent_blocked → investigate and help or escalate
    - agent_reply → incorporate the information and continue
    - ask_created → review and resolve or escalate to the human
+   - worker_boot_doa → inspect the worker, then re-dispatch/relaunch if
+     the prompt never landed
    - task_verification_updated → review pending/failed verification before sending the next wave
 
 7. **Context recovery** — After a /clear or restart, your first actions

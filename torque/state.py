@@ -1285,6 +1285,7 @@ class AgentDigestSettings:
 ENGINEER_MANDATORY_EVENTS = frozenset({
     "task_completed", "agent_reply", "agent_error",
     "agent_blocked", "ask_created", "task_verification_updated",
+    "worker_boot_doa",
 })
 
 

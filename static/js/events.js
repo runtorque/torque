@@ -163,7 +163,7 @@ function _eventsDateLabel(ts) {
 }
 
 var _eventsKindGroups = {
-  errors: ['agent_error', 'agent_blocked', 'task_health_alert'],
+  errors: ['agent_error', 'agent_blocked', 'task_health_alert', 'worker_boot_doa'],
   tasks: ['task_dispatched', 'task_completed', 'task_derived', 'ask_created', 'ask_resolved', 'task_health_alert', 'task_verification_updated'],
   lifecycle: ['agent_started', 'agent_finished', 'agent_renamed', 'agent_waiting', 'agent_progress', 'engineer_note_dismissed', 'engineer_question_dismissed']
 };
@@ -231,6 +231,7 @@ function _eventsKindIcon(kind) {
     case 'agent_error':    return '\u2716';  // x
     case 'agent_blocked':  return '\u26D4';  // no entry
     case 'task_health_alert': return '\u26A0'; // warning
+    case 'worker_boot_doa': return '\u26A0'; // warning
     case 'task_dispatched': return '\u2192'; // arrow
     case 'task_completed': return '\u2714';  // check
     case 'task_derived':   return '\u2934';  // curve arrow
@@ -254,7 +255,7 @@ function _eventsIsDismissedEngineerNoteKind(kind) {
 
 function _eventsKindClass(kind) {
   if (kind === 'agent_error') return 'events-kind-error';
-  if (kind === 'agent_blocked' || kind === 'agent_idle' || kind === 'agent_waiting' || kind === 'task_health_alert') return 'events-kind-blocked';
+  if (kind === 'agent_blocked' || kind === 'agent_idle' || kind === 'agent_waiting' || kind === 'task_health_alert' || kind === 'worker_boot_doa') return 'events-kind-blocked';
   if (kind === 'ask_created') return 'events-kind-ask';
   if (kind === 'task_completed' || kind === 'ask_resolved' || kind === 'agent_finished') return 'events-kind-done';
   if (_eventsIsDismissedEngineerNoteKind(kind)) return 'events-kind-dismissed-note';

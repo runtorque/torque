@@ -6791,6 +6791,15 @@ test('event filtering respects the selected kind group and search query', () => 
     runInContext(context, `_eventsMatchesFilters({ kind: 'agent_error', message: 'All clear', agent_name: 'worker' })`),
     false,
   );
+  assert.equal(
+    runInContext(context, `_eventsMatchesFilters({ kind: 'worker_boot_doa', message: 'Worker is stuck', agent_name: 'worker' })`),
+    true,
+  );
+  assert.equal(runInContext(context, `_eventsKindIcon('worker_boot_doa')`), '⚠');
+  assert.equal(
+    runInContext(context, `_eventsKindClass('worker_boot_doa')`),
+    'events-kind-blocked',
+  );
 });
 
 test('events board coalesces inline task message threads into event rows', () => {
