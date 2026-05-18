@@ -9866,7 +9866,7 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 .canvas-row {
   display: flex;
   align-items: stretch;
-  min-height: 42px;
+  min-height: 34px;
 }
 .canvas-row > .canvas-card,
 .canvas-row > [data-canvas-row-host] {
@@ -9962,14 +9962,15 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   background: var(--bg-cell);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 6px 10px;
+  padding: 4px 8px 5px 8px;
   cursor: pointer;
   user-select: none;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
   position: relative;
   transition: border-color 0.12s ease, background 0.12s ease;
+  line-height: 1.25;
 }
 .canvas-card:hover {
   background: var(--bg-hover);
@@ -9986,8 +9987,8 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 .canvas-card-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 12px;
+  gap: 6px;
+  font-size: 11px;
   color: var(--text);
   min-width: 0;
 }
@@ -10002,7 +10003,7 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 /* Role text in the header — italic, dimmed, just the kind (provider
    moves to a corner badge). e.g. 'Architect' / 'Engineer' / 'Worker'. */
 .canvas-card-role {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-dim);
   font-style: italic;
   flex: 0 0 auto;
@@ -10010,9 +10011,9 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 /* Provider badge in the card's bottom-right corner. */
 .canvas-card-provider-badge {
   position: absolute;
-  right: 8px;
-  bottom: 5px;
-  font-size: 9px;
+  right: 6px;
+  bottom: 4px;
+  font-size: 8px;
   font-style: italic;
   color: var(--text-dim);
   opacity: 0.75;
@@ -10023,31 +10024,31 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
    'stopped', or 'Error: <msg>'. Always present, even when empty,
    so card vertical rhythm stays consistent. */
 .canvas-card-status-line {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-dim);
   font-style: italic;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  padding-right: 48px; /* room for the provider badge in the corner */
+  padding-right: 42px; /* room for the provider badge in the corner */
 }
 .canvas-card-header-spacer { flex: 1 1 auto; min-width: 8px; }
 .canvas-card-pause {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
+  font-size: 9px;
   color: var(--amber);
   flex: 0 0 auto;
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
 }
 .canvas-card-status-dot {
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: var(--text-dim);
-  flex: 0 0 7px;
+  flex: 0 0 6px;
 }
 .canvas-card.is-running .canvas-card-status-dot { background: var(--green); }
 .canvas-card.is-error   .canvas-card-status-dot { background: var(--red); }
@@ -10055,11 +10056,11 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 .canvas-card.is-stopped .canvas-card-status-dot { background: #57606a; }
 
 .canvas-card-meta {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-dim);
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   white-space: nowrap;
   overflow: hidden;
   min-width: 0;
