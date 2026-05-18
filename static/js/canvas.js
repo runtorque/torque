@@ -155,37 +155,41 @@ function _canvasIsWorker(cell) {
 function _torqueRenderAgentCanvas(opts) {
   const main = document.getElementById('main');
   if (!main) return;
-  // Inject the group tabs bar — its host lives outside #main and
-  // carries the group pills, + New Group, settings gear, AND the
-  // Grid/Canvas toggle. Without this call, switching to canvas
-  // hides the group switcher entirely.
-  if (typeof _renderAgentGroupTabsHost === 'function'
-      && typeof _renderAgentGroupTabsHtml === 'function') {
-    _renderAgentGroupTabsHost(_renderAgentGroupTabsHtml());
-  }
-  // Canvas owns #main while active; clear the grid path's split-shell
-  // sentinels so toggling back rebuilds the grid from scratch.
-  main._torqueHasAgentSplitShell = false;
-  main._torqueLastGridHtml = null;
-  main._torqueLastTabsHtml = null;
-  main._torqueLastFocusHtml = null;
-  main._torqueLastHtml = null;
 
   const groupName = _canvasGroupName();
   const groups = (state && state.groups) || {};
+  let canvasHtml;
   if (Object.keys(groups).length === 0) {
-    main.innerHTML = `
-      <div class="empty">
-        <div class="empty-icon">⬢</div>
-        No groups yet.<br>Create one to get started.
-        <br><button type="button" class="empty-action" onclick="openAddGroup()">+ New group</button>
-      </div>`;
-    return;
+    canvasHtml = '<div class="empty">'
+      + '<div class="empty-icon">⬢</div>'
+      + 'No groups yet.<br>Create one to get started.'
+      + '<br><button type="button" class="empty-action" onclick="openAddGroup()">+ New group</button>'
+      + '</div>';
+  } else {
+    const model = _canvasBuildTrees(groupName);
+    canvasHtml = _canvasRenderHtml(groupName, model);
   }
 
-  const model = _canvasBuildTrees(groupName);
-  const html = _canvasRenderHtml(groupName, model);
-  main.innerHTML = html;
+  // Route through the same split-shell the grid uses, so the agent
+  // focus panel + resizer + tabs host all keep working unchanged.
+  // _renderAgentGridAndFocus injects the tabs host, builds the
+  // grid/focus split shell inside #main, and tracks sentinel state
+  // for byte-equality memoization across rerenders.
+  const tabsHtml = (typeof _renderAgentGroupTabsHtml === 'function')
+    ? _renderAgentGroupTabsHtml()
+    : '';
+  if (typeof _renderAgentGridAndFocus === 'function') {
+    _renderAgentGridAndFocus(main, canvasHtml, {
+      tabsHtml: tabsHtml,
+      renderFocus: !(opts && opts.skipFocusRefresh),
+    });
+  } else {
+    if (typeof _renderAgentGroupTabsHost === 'function') {
+      _renderAgentGroupTabsHost(tabsHtml);
+    }
+    main.innerHTML = canvasHtml;
+  }
+
   _canvasAttachInteractions(groupName);
 }
 
