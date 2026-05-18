@@ -359,56 +359,123 @@ function _canvasStatusClass(cell) {
 function _canvasActivityLine(cell) {
   if (!cell) return '';
   const detail = String(cell.activity_detail || '').trim();
-  const activity = String(cell.activity || '').trim();
   if (detail) return detail;
+  if (typeof _agentCardCurrentOrLastActionLabel === 'function') {
+    const a = _agentCardCurrentOrLastActionLabel(cell);
+    if (a) return a;
+  }
+  const activity = String(cell.activity || '').trim();
   if (activity) return activity;
   if (cell.status === 'idle' || cell.status === 'stopped') return cell.status;
   return '';
 }
 
+function _canvasKindLabel(kind) {
+  if (kind === 'architect') return 'architect';
+  if (kind === 'engineer') return 'engineer';
+  if (kind === 'worker') return 'worker';
+  return kind || 'agent';
+}
+
+function _canvasProviderBadge(cell) {
+  if (typeof _renderAgentProviderBadge === 'function') {
+    const html = _renderAgentProviderBadge(cell.agent_type, 'canvas-card-provider');
+    if (html) return html;
+  }
+  return '';
+}
+
+function _canvasRenderHeader(cell, kind) {
+  const name = esc(cell.name || cell.slug || cell.id);
+  return '<div class="canvas-card-header">'
+    + '<span class="canvas-card-name" title="' + name + '">' + name + '</span>'
+    + '<span class="canvas-card-kind">' + esc(_canvasKindLabel(kind)) + '</span>'
+    + _canvasProviderBadge(cell)
+    + '<span class="canvas-card-header-spacer"></span>'
+    + '<span class="canvas-card-status-dot"></span>'
+    + '</div>';
+}
+
 function _canvasRenderArchitectCard(cell) {
   const statusCls = _canvasStatusClass(cell);
-  const activity = esc(_canvasActivityLine(cell));
-  return `<div class="canvas-card canvas-card-architect ${statusCls}" `
-    + `data-canvas-card-id="${esc(cell.id)}" `
-    + `data-canvas-card-kind="architect">`
-    + `<div class="canvas-card-row">`
-    + `<span class="canvas-card-glyph">◆</span>`
-    + `<span class="canvas-card-name">${esc(cell.name || cell.slug || cell.id)}</span>`
-    + `</div>`
-    + `<div class="canvas-card-meta">architect${activity ? ' · ' + activity : ''}</div>`
-    + `<div class="canvas-card-status-dot"></div>`
-    + `</div>`;
+  const engineerCount = (typeof _architectEngineersForCard === 'function')
+    ? (_architectEngineersForCard(cell.id) || []).length
+    : 0;
+  const engLabel = engineerCount === 1 ? 'engineer' : 'engineers';
+  const activity = _canvasActivityLine(cell);
+  let html = '<div class="canvas-card canvas-card-architect ' + statusCls + '"'
+    + ' data-canvas-card-id="' + esc(cell.id) + '"'
+    + ' data-canvas-card-kind="architect">';
+  html += _canvasRenderHeader(cell, 'architect');
+  html += '<div class="canvas-card-meta">'
+    + '<span class="canvas-card-stat">' + esc(engineerCount + ' ' + engLabel) + '</span>'
+    + (activity ? '<span class="canvas-card-sep">·</span><span class="canvas-card-activity" title="' + esc(activity) + '">' + esc(activity) + '</span>' : '')
+    + '</div>';
+  html += '</div>';
+  return html;
 }
 
 function _canvasRenderEngineerCard(cell) {
   const statusCls = _canvasStatusClass(cell);
-  const activity = esc(_canvasActivityLine(cell));
-  return `<div class="canvas-card canvas-card-engineer ${statusCls}" `
-    + `data-canvas-card-id="${esc(cell.id)}" `
-    + `data-canvas-card-kind="engineer">`
-    + `<div class="canvas-card-row">`
-    + `<span class="canvas-card-glyph">◇</span>`
-    + `<span class="canvas-card-name">${esc(cell.name || cell.slug || cell.id)}</span>`
-    + `</div>`
-    + `<div class="canvas-card-meta">engineer${activity ? ' · ' + activity : ''}</div>`
-    + `<div class="canvas-card-status-dot"></div>`
-    + `</div>`;
+  const workers = (typeof _workersForEngineer === 'function')
+    ? (_workersForEngineer(cell.id) || [])
+    : [];
+  const queueDepth = (typeof _engineerQueueDepth === 'function')
+    ? _engineerQueueDepth(cell.id)
+    : 0;
+  const workerLabel = workers.length === 1 ? 'worker' : 'workers';
+  const activity = _canvasActivityLine(cell);
+  let html = '<div class="canvas-card canvas-card-engineer ' + statusCls + '"'
+    + ' data-canvas-card-id="' + esc(cell.id) + '"'
+    + ' data-canvas-card-kind="engineer">';
+  html += _canvasRenderHeader(cell, 'engineer');
+  html += '<div class="canvas-card-meta">'
+    + '<span class="canvas-card-stat">' + esc(workers.length + ' ' + workerLabel) + '</span>'
+    + '<span class="canvas-card-sep">·</span>'
+    + '<span class="canvas-card-stat">' + esc('queue ' + queueDepth) + '</span>'
+    + (activity ? '<span class="canvas-card-sep">·</span><span class="canvas-card-activity" title="' + esc(activity) + '">' + esc(activity) + '</span>' : '')
+    + '</div>';
+  html += '</div>';
+  return html;
 }
 
 function _canvasRenderWorkerCard(cell) {
   const statusCls = _canvasStatusClass(cell);
-  const activity = esc(_canvasActivityLine(cell));
-  return `<div class="canvas-card canvas-card-worker ${statusCls}" `
-    + `data-canvas-card-id="${esc(cell.id)}" `
-    + `data-canvas-card-kind="worker">`
-    + `<div class="canvas-card-row">`
-    + `<span class="canvas-card-glyph">○</span>`
-    + `<span class="canvas-card-name">${esc(cell.name || cell.slug || cell.id)}</span>`
-    + `</div>`
-    + `<div class="canvas-card-meta">${activity || 'worker'}</div>`
-    + `<div class="canvas-card-status-dot"></div>`
-    + `</div>`;
+  const taskId = String(cell.current_task_id || '').trim();
+  const branch = (typeof _workerBranchLabel === 'function')
+    ? String(_workerBranchLabel(cell) || '').trim()
+    : '';
+  const diff = (typeof _workerDiffLabel === 'function')
+    ? String(_workerDiffLabel(cell) || '').trim()
+    : '';
+  const activity = _canvasActivityLine(cell);
+  let html = '<div class="canvas-card canvas-card-worker ' + statusCls + '"'
+    + ' data-canvas-card-id="' + esc(cell.id) + '"'
+    + ' data-canvas-card-kind="worker">';
+  html += _canvasRenderHeader(cell, 'worker');
+  const parts = [];
+  if (taskId) {
+    parts.push('<span class="canvas-card-stat canvas-card-stat--task" '
+      + 'onclick="event.stopPropagation(); if (typeof openTaskInBoard===\'function\') openTaskInBoard(\'' + esc(taskId) + '\');" '
+      + 'title="' + esc(taskId + ' — open in board') + '">' + esc(taskId) + '</span>');
+  } else {
+    parts.push('<span class="canvas-card-stat canvas-card-stat--muted">no task</span>');
+  }
+  if (branch) {
+    parts.push('<span class="canvas-card-sep">·</span>'
+      + '<span class="canvas-card-stat canvas-card-stat--branch" title="' + esc(branch) + '">' + esc(branch) + '</span>');
+  }
+  if (diff) {
+    parts.push('<span class="canvas-card-sep">·</span>'
+      + '<span class="canvas-card-stat canvas-card-stat--diff">' + esc(diff) + '</span>');
+  }
+  if (activity) {
+    parts.push('<span class="canvas-card-sep">·</span>'
+      + '<span class="canvas-card-activity" title="' + esc(activity) + '">' + esc(activity) + '</span>');
+  }
+  html += '<div class="canvas-card-meta">' + parts.join('') + '</div>';
+  html += '</div>';
+  return html;
 }
 
 /* -- Interactions ------------------------------------------------------- */
