@@ -469,6 +469,23 @@ class ServerSelfDispatchTests(unittest.TestCase):
         )
         self.assertNotIn("torque_a-", prompt)
 
+    def test_torque_system_prompt_includes_shared_memory_guidance(self):
+        prompt = self.server_prompts_mod.build_torque_system_prompt()
+
+        self.assertIn("## Shared memory", prompt)
+        self.assertIn("torque_memory_publish", prompt)
+        self.assertIn('entry_type="warning"', prompt)
+        self.assertIn('entry_type="decision"', prompt)
+        self.assertIn('entry_type="handoff"', prompt)
+        self.assertIn('entry_type="finding"', prompt)
+        self.assertIn('scope_kind="task"', prompt)
+        self.assertIn('scope_kind="pipeline"', prompt)
+        self.assertIn('scope_kind="group"', prompt)
+        self.assertIn('scope_kind="project"', prompt)
+        self.assertIn("top 5", prompt)
+        self.assertIn("Do not publish routine progress", prompt)
+        self.assertIn("MEMORY.md", prompt)
+
     def test_system_prompt_preview_uses_unsaved_engineer_form_values(self):
         state = self.state_mod.MatrixState()
         state.add_group("g")
@@ -501,6 +518,7 @@ class ServerSelfDispatchTests(unittest.TestCase):
             "Default post-merge cleanup: Close agent session and remove worktree",
             prompt,
         )
+        self.assertEqual(prompt.count("## Shared memory"), 1)
 
     def test_system_prompt_preview_uses_unsaved_architect_form_values(self):
         state = self.state_mod.MatrixState()
@@ -529,6 +547,7 @@ class ServerSelfDispatchTests(unittest.TestCase):
         self.assertNotIn("Saved architect instructions.", prompt)
         self.assertIn("Autonomy mode: Ask always", prompt)
         self.assertIn("Journal checkpoint cadence: manual_only", prompt)
+        self.assertEqual(prompt.count("## Shared memory"), 1)
 
     def test_dispatch_postscript_clean_variant_is_compact_and_transition_aware(self):
         prompt = self.server_prompts_mod.build_dispatch_postscript(

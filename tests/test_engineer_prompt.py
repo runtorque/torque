@@ -152,6 +152,19 @@ class EngineerPromptTests(unittest.TestCase):
         self.assertIn("non-trivial product or scope decision", prompt)
         self.assertIn("If you are user-owned", prompt)
 
+    def test_engineer_prompt_includes_shared_memory_guidance(self):
+        prompt = self.engineer_mod.build_engineer_system_prompt("Torque")
+
+        self.assertIn("## Shared memory", prompt)
+        self.assertIn("torque_memory_publish", prompt)
+        self.assertIn('entry_type="warning"', prompt)
+        self.assertIn('entry_type="decision"', prompt)
+        self.assertIn('entry_type="handoff"', prompt)
+        self.assertIn('entry_type="finding"', prompt)
+        self.assertIn("Scope narrowly", prompt)
+        self.assertIn("top 5", prompt)
+        self.assertIn("Do not publish routine progress", prompt)
+
     def test_prompt_includes_specializations_block(self):
         preamble = (
             "Specializations: ui-ux (primary), security\n\n"

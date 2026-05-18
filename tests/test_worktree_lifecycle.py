@@ -365,6 +365,25 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(settings.get("autoMemoryEnabled"), False)
         self.assertEqual(await self._git("status", "--porcelain", cwd=wt_path), "")
 
+    async def test_architect_worktree_disables_claude_auto_memory(self):
+        architect = self._make_cell(agent_id="fade1234", name="Productmind")
+        architect.kind = "architect"
+        architect.slug = "productmind"
+
+        wt_path = await self.mgr.create(
+            architect,
+            str(self.repo_root),
+            base_branch="main",
+            state=self._make_state(architect),
+        )
+
+        self.assertIsNotNone(wt_path)
+        settings_path = Path(wt_path) / ".claude" / "settings.local.json"
+        self.assertTrue(settings_path.exists())
+        settings = json.loads(settings_path.read_text())
+        self.assertIs(settings.get("autoMemoryEnabled"), False)
+        self.assertEqual(await self._git("status", "--porcelain", cwd=wt_path), "")
+
     async def test_claude_settings_merge_preserves_existing_keys(self):
         settings_path = self.repo_root / ".claude" / "settings.local.json"
         settings_path.parent.mkdir()

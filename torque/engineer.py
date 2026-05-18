@@ -35,6 +35,7 @@ from .engineer_hints import (
     ENGINEER_HINT_RESEND_COOLDOWN_SECS,
     compute_engineer_hints,
 )
+from .server_prompts import build_shared_memory_guidance
 
 log = logging.getLogger("torque")
 
@@ -563,10 +564,14 @@ def _build_engineer_base_system_prompt(group: str, engineer_settings=None,
                                        ) -> str:
     """Assemble the base system prompt for an engineer agent.
 
-    Concatenates: base identity → action system_prompt → structured policy
-    section → specialization preamble → custom instructions.
+    Concatenates: base identity → shared memory guidance → action
+    system_prompt → structured policy section → specialization preamble →
+    custom instructions.
     """
-    parts = [_BASE_SYSTEM_PROMPT.format(group=group)]
+    parts = [
+        _BASE_SYSTEM_PROMPT.format(group=group),
+        build_shared_memory_guidance(),
+    ]
 
     if action_system_prompt:
         parts.append(action_system_prompt.rstrip())

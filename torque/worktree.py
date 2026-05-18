@@ -19,12 +19,13 @@ TORQUE_EXCLUDE_ENTRIES = [
     ".codex/config.toml",
     ".codex/hooks.json",
     ".codex/AGENTS.md",
+    ".torque/claude-auto-memory-original.json",
     ".torque/torque-system-prompt-*.md",
 ]
 
 _CLAUDE_CODE_SETTINGS_DIR = ".claude"
 _CLAUDE_CODE_SETTINGS_FILE = "settings.local.json"
-_CLAUDE_CODE_AUTO_MEMORY_DISABLED_KINDS = {"engineer", "worker"}
+_CLAUDE_CODE_AUTO_MEMORY_DISABLED_KINDS = {"architect", "engineer", "worker"}
 _HIGH_CHURN_THRESHOLD = 200
 _LOCKFILE_NAMES = {
     "package-lock.json",
@@ -1162,7 +1163,7 @@ class WorktreeManager:
             await self._ensure_gitignore(repo_root)
 
             # Keep Claude Code's opportunistic auto-memory out of isolated
-            # engineer/worker worktrees; the file is covered by git exclude.
+            # Torque agent worktrees; the file is covered by git exclude.
             _configure_claude_code_worktree_settings(cell, wt_path)
 
             # Create configured symlinks
