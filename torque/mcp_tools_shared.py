@@ -4330,8 +4330,10 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             return "Agent has no worktree", True
 
         # First check for conflicts / merge boundary eligibility
-        force_stale_base = bool(args.get("force_stale_base"))
         force_sibling_divergence = bool(args.get("force"))
+        force_stale_base = bool(
+            args.get("force_stale_base") or args.get("force")
+        )
         result, error_text, blocked = await _run_worktree_merge_check_with_options(
             handle_command,
             agent_id,

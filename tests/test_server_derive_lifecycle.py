@@ -288,7 +288,8 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
             directory="/repo",
         )
 
-    def _extract_handle_command(self, state, dispatch_handler):
+    def _extract_handle_command(self, state, dispatch_handler,
+                                worktree_mgr=None):
         main_code = self.server_mod.main.__code__
         handle_code = next(
             const
@@ -328,6 +329,7 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
                 resolve_agent_config=lambda *args, **kwargs: {},
                 list_templates=lambda *args, **kwargs: [],
             ),
+            "worktree_mgr": worktree_mgr,
         })
         closure = tuple(
             self._make_cell(closure_values[name])
@@ -370,6 +372,22 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
             }
 
         return calls, dispatch
+
+    class _StaleWorktreeManager:
+        async def stale_base_info(self, _cell):
+            return {
+                "stale": True,
+                "branch": "torque/impl",
+                "base_branch": "main",
+                "fork_point": "1111111111111111111111111111111111111111",
+                "base_head": "2222222222222222222222222222222222222222",
+                "branch_head": "3333333333333333333333333333333333333333",
+                "fork_point_subject": "old base",
+                "base_head_subject": "new base",
+                "commits_on_base": 2,
+                "files_changed_on_base": 3,
+                "warning": "⚠ STALE BASE: torque/impl forked behind main",
+            }
 
     def _add_second_review_cycle_chain(self, state, *,
                                        reviewer_status="idle",
@@ -438,6 +456,39 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["agent_id"], reviewer.id)
         self.assertEqual(calls[0]["agent_id"], reviewer.id)
         self.assertNotIn("create_agent", calls[0])
+
+    async def test_feature_review_derive_refuses_stale_base_before_dispatch(self):
+        state = self._make_state()
+        implementer, _reviewer, _root, fix = (
+            self._add_second_review_cycle_chain(state)
+        )
+        implementer.worktree_path = "/repo/.torque/worktrees/impl"
+        implementer.worktree_branch = "torque/impl"
+        implementer.worktree_base_branch = "main"
+        calls, dispatch = self._recording_dispatch(state)
+        handle_command = self._extract_handle_command(
+            state,
+            dispatch,
+            worktree_mgr=self._StaleWorktreeManager(),
+        )
+
+        result = await handle_command({
+            "cmd": "ai_report",
+            "cell_id": implementer.id,
+            "action": "derive",
+            "action_name": "feature/review",
+            "message": "Review the fixes",
+        })
+
+        self.assertEqual(result["type"], "error")
+        self.assertEqual(result["code"], "stale_base")
+        self.assertIn("STALE BASE", result["message"])
+        self.assertIn("worktree_rebase", result["message"])
+        self.assertEqual(result["suggested_command"],
+                         f"worktree_rebase id={implementer.id}")
+        self.assertTrue(result["stale_base"]["stale"])
+        self.assertEqual(calls, [])
+        self.assertEqual(fix.status, "")
 
     async def test_feature_review_derive_creates_agent_when_prior_reviewer_closed(self):
         state = self._make_state()
