@@ -280,15 +280,16 @@ function _canvasRenderTree(tree) {
 function _canvasRenderChildren(rows, parentId, ancestorContinues, kind) {
   let html = '';
   if (rows.length === 0) {
-    // Empty state: a single + button row, rendered as the last (and
-    // only) child so it shows the L-corner connector.
-    const guides = ancestorContinues.slice();
-    const label = (kind === 'engineer') ? '+ Engineer' : '+ Worker';
-    const action = (kind === 'engineer')
-      ? `_canvasAddEngineerForArchitect('${esc(parentId)}')`
-      : `_canvasAddWorkerForEngineer('${esc(parentId)}')`;
-    const btnHtml = `<button type="button" class="canvas-add-inline" onclick="${action}">${label}</button>`;
-    html += _canvasRenderRow(guides, true, true, btnHtml);
+    // Architects with no engineers show an empty-state '+ Engineer'
+    // row. Engineers with no workers show NOTHING — workers are
+    // created by the engineer itself via task dispatch, not by the
+    // user from the canvas.
+    if (kind === 'engineer') {
+      const guides = ancestorContinues.slice();
+      const action = `_canvasAddEngineerForArchitect('${esc(parentId)}')`;
+      const btnHtml = `<button type="button" class="canvas-add-inline" onclick="${action}">+ Engineer</button>`;
+      html += _canvasRenderRow(guides, true, true, btnHtml);
+    }
     return html;
   }
   for (let i = 0; i < rows.length; i++) {
@@ -371,27 +372,64 @@ function _canvasActivityLine(cell) {
 }
 
 function _canvasKindLabel(kind) {
-  if (kind === 'architect') return 'architect';
-  if (kind === 'engineer') return 'engineer';
-  if (kind === 'worker') return 'worker';
-  return kind || 'agent';
+  if (kind === 'architect') return 'Architect';
+  if (kind === 'engineer') return 'Engineer';
+  if (kind === 'worker') return 'Worker';
+  return 'Agent';
 }
 
-function _canvasProviderBadge(cell) {
-  if (typeof _renderAgentProviderBadge === 'function') {
-    const html = _renderAgentProviderBadge(cell.agent_type, 'canvas-card-provider');
-    if (html) return html;
-  }
+function _canvasProviderLabel(cell) {
+  const labels = (typeof AGENT_TYPE_LABELS !== 'undefined') ? AGENT_TYPE_LABELS : null;
+  const at = String((cell && cell.agent_type) || '').trim();
+  if (labels && at && labels[at] && labels[at].label) return labels[at].label;
   return '';
+}
+
+function _canvasPauseState(cell) {
+  if (!cell || !state) return { applicable: false, paused: false, toggleAction: '' };
+  const kind = cell.kind || '';
+  if (kind !== 'engineer' && kind !== 'architect') {
+    return { applicable: false, paused: false, toggleAction: '' };
+  }
+  const group = String(cell.group || '');
+  const id = String(cell.id || '');
+  const gs = (state.group_settings || {})[group] || {};
+  const isDesignated = (kind === 'engineer' && gs.engineer_agent_id === id);
+  const engineerWs = (isDesignated && state.engineer_settings)
+    ? state.engineer_settings[group] : null;
+  const digestSettings = (state.agent_digest_settings || {})[id] || null;
+  let paused = false;
+  let toggleAction = '';
+  if (isDesignated) {
+    paused = !!(engineerWs && engineerWs.paused);
+    if (digestSettings) paused = !!digestSettings.paused;
+    toggleAction = digestSettings
+      ? `toggleDigestPauseForAgent('${esc(id)}')`
+      : `engineerTogglePauseForGroup('${esc(group)}')`;
+  } else {
+    paused = !!(digestSettings && digestSettings.paused);
+    toggleAction = `toggleDigestPauseForAgent('${esc(id)}')`;
+  }
+  return { applicable: true, paused, toggleAction };
 }
 
 function _canvasRenderHeader(cell, kind) {
   const name = esc(cell.name || cell.slug || cell.id);
+  const kindLabel = _canvasKindLabel(kind);
+  const providerLabel = _canvasProviderLabel(cell);
+  let rolePart = '<span class="canvas-card-role">' + esc(kindLabel);
+  if (providerLabel) rolePart += ' <span class="canvas-card-role-sep">·</span> ' + esc(providerLabel);
+  rolePart += '</span>';
+  const pause = _canvasPauseState(cell);
+  let pauseBadge = '';
+  if (pause.applicable && pause.paused) {
+    pauseBadge = '<span class="canvas-card-pause" title="Event delivery paused" aria-label="Paused">&#x23F8;</span>';
+  }
   return '<div class="canvas-card-header">'
     + '<span class="canvas-card-name" title="' + name + '">' + name + '</span>'
-    + '<span class="canvas-card-kind">' + esc(_canvasKindLabel(kind)) + '</span>'
-    + _canvasProviderBadge(cell)
+    + rolePart
     + '<span class="canvas-card-header-spacer"></span>'
+    + pauseBadge
     + '<span class="canvas-card-status-dot"></span>'
     + '</div>';
 }
@@ -529,18 +567,32 @@ function _canvasShowCardMenu(x, y, kind, id, groupName) {
   const items = [];
   const g = esc(groupName);
   const safeId = esc(id);
+  const cell = state.agents ? state.agents[id] : null;
+  const pause = cell ? _canvasPauseState(cell) : { applicable: false, paused: false, toggleAction: '' };
   if (kind === 'architect') {
     items.push({ label: '+ Engineer here', action: `openAddEngineerForSection('${g}', '${safeId}')` });
     items.push({ separator: true });
     items.push({ label: 'Focus', action: `focusAgent('${safeId}')` });
     items.push({ label: 'Rename…', action: `openEditCell('${safeId}')` });
+    if (pause.applicable) {
+      items.push({
+        label: pause.paused ? 'Resume event delivery' : 'Pause event delivery',
+        action: pause.toggleAction,
+      });
+    }
     items.push({ separator: true });
     items.push({ label: 'Remove', action: `removeAgent('${safeId}')`, danger: true });
   } else if (kind === 'engineer') {
-    items.push({ label: '+ Worker here', action: `_canvasAddWorkerForEngineer('${safeId}')` });
-    items.push({ separator: true });
+    // Engineers create workers themselves via task dispatch; no
+    // user-facing '+ Worker here' option.
     items.push({ label: 'Focus', action: `focusAgent('${safeId}')` });
     items.push({ label: 'Rename…', action: `openEditCell('${safeId}')` });
+    if (pause.applicable) {
+      items.push({
+        label: pause.paused ? 'Resume event delivery' : 'Pause event delivery',
+        action: pause.toggleAction,
+      });
+    }
     items.push({ separator: true });
     items.push({ label: 'Remove', action: `removeAgent('${safeId}')`, danger: true });
   } else if (kind === 'worker') {
@@ -560,19 +612,3 @@ function _canvasAddEngineerForArchitect(architectId) {
   }
 }
 
-function _canvasAddWorkerForEngineer(engineerId) {
-  // Note: user-detached workers do not currently accept owner_engineer_id
-  // server-side. Prototype: open the standard worker modal; the worker
-  // will be created standalone for now. Wiring engineer ownership at
-  // creation time is a follow-up.
-  const group = _canvasGroupName();
-  if (typeof openAddWorkerForSection === 'function') {
-    openAddWorkerForSection(group);
-  }
-  if (typeof _showToast === 'function') {
-    _showToast(
-      'Prototype: worker will be created as standalone (engineer-owned creation is a follow-up).',
-      'info'
-    );
-  }
-}
