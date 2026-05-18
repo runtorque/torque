@@ -9809,11 +9809,16 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   border-right: 1px solid var(--border);
   font: inherit;
   font-size: 11px;
-  padding: 0 10px;
+  padding: 0 8px;
   cursor: pointer;
   letter-spacing: 0.02em;
   line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
 }
+.agent-view-toggle-btn svg { display: block; }
 .agent-view-toggle-btn:last-child { border-right: 0; }
 .agent-view-toggle-btn:hover { background: var(--bg-hover); color: var(--text); }
 .agent-view-toggle-btn.is-active {
