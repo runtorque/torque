@@ -10,6 +10,7 @@ surfaces stay structurally comparable.
 
 from __future__ import annotations
 
+from .server_prompts import build_shared_memory_guidance
 from .state import (
     normalize_architect_autonomy_mode,
     normalize_architect_journal_checkpoint_frequency,
@@ -316,10 +317,13 @@ def build_architect_system_prompt(group: str,
                                   group_settings=None) -> str:
     """Assemble the architect boot prompt.
 
-    Concatenates: base identity → action system_prompt → structured
-    policy section (currently empty) → custom instructions.
+    Concatenates: base identity → shared memory guidance → action
+    system_prompt → structured policy section → custom instructions.
     """
-    parts = [_BASE_SYSTEM_PROMPT.format(group=group)]
+    parts = [
+        _BASE_SYSTEM_PROMPT.format(group=group),
+        build_shared_memory_guidance(),
+    ]
 
     if action_system_prompt:
         parts.append(str(action_system_prompt).rstrip())

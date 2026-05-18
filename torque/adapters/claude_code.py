@@ -18,6 +18,9 @@ _TORQUE_EVENT_URL_RE = re.compile(r"http://(?:localhost|127\.0\.0\.1):\d+/events
 
 # Skill directory prefix used to identify Torque-managed skills during cleanup
 TORQUE_SKILL_PREFIX = "torque-"
+_AUTO_MEMORY_ORIGINAL_REL_PATH = Path(
+    ".torque/claude-auto-memory-original.json"
+)
 
 # ---------------------------------------------------------------------------
 # Slash command (skill) definitions — injected into .claude/skills/
@@ -117,6 +120,50 @@ def _atomic_write_mcp_json(mcp_file: Path, data: dict):
         except OSError:
             pass
         raise
+
+
+def _auto_memory_original_file(working_dir: str) -> Path:
+    return Path(working_dir) / _AUTO_MEMORY_ORIGINAL_REL_PATH
+
+
+def _remember_and_disable_auto_memory(working_dir: str, settings: dict) -> None:
+    """Disable Claude Code auto-memory while preserving the user's setting."""
+    marker = _auto_memory_original_file(working_dir)
+    try:
+        if not marker.exists():
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            marker.write_text(
+                json.dumps(
+                    {
+                        "present": "autoMemoryEnabled" in settings,
+                        "value": settings.get("autoMemoryEnabled"),
+                    },
+                    indent=2,
+                )
+                + "\n"
+            )
+    except Exception:
+        # Hook installation should still succeed; failing to write the
+        # restoration marker only means cleanup will leave the safer disabled
+        # value behind.
+        pass
+    settings["autoMemoryEnabled"] = False
+
+
+def _restore_auto_memory_setting(working_dir: str, settings: dict) -> None:
+    """Restore the auto-memory setting saved by install_hooks, if present."""
+    marker = _auto_memory_original_file(working_dir)
+    if not marker.exists():
+        return
+    try:
+        data = json.loads(marker.read_text() or "{}")
+        if data.get("present"):
+            settings["autoMemoryEnabled"] = data.get("value")
+        else:
+            settings.pop("autoMemoryEnabled", None)
+        marker.unlink(missing_ok=True)
+    except Exception:
+        pass
 
 
 # Tool name → human-readable activity detail
@@ -399,6 +446,11 @@ class ClaudeCodeAdapter(AgentAdapter):
                 if text:
                     existing = json.loads(text)
 
+            # Torque shared memory is the durable memory surface. Disable
+            # Claude Code's provider-local MEMORY.md auto-memory for every
+            # Torque-spawned Claude session while hooks are installed.
+            _remember_and_disable_auto_memory(working_dir, existing)
+
             # Remove any stale Torque hooks first
             existing_hooks = existing.get("hooks", {})
             for event in list(existing_hooks):
@@ -454,6 +506,8 @@ class ClaudeCodeAdapter(AgentAdapter):
                 existing["hooks"] = hooks
             else:
                 existing.pop("hooks", None)
+
+            _restore_auto_memory_setting(working_dir, existing)
 
             # If nothing left, delete the file
             if not existing:

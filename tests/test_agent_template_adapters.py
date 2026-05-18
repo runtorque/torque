@@ -110,6 +110,7 @@ class AgentTemplateAdapterTests(unittest.TestCase):
 
             installed = json.loads(settings_file.read_text())
             self.assertEqual(installed["theme"], "dark")
+            self.assertIs(installed.get("autoMemoryEnabled"), False)
             self.assertEqual(len(installed["hooks"]["Stop"]), 2)
             self.assertEqual(
                 installed["hooks"]["Stop"][0]["hooks"][0]["url"],
@@ -136,6 +137,30 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                     }]
                 },
             })
+            self.assertFalse(
+                (Path(tmp) / ".torque" / "claude-auto-memory-original.json").exists()
+            )
+
+    def test_claude_hook_cleanup_restores_user_auto_memory_setting(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            adapter = ClaudeCodeAdapter()
+            settings_file = Path(tmp) / ".claude" / "settings.local.json"
+            settings_file.parent.mkdir(parents=True, exist_ok=True)
+            settings_file.write_text(json.dumps({
+                "theme": "dark",
+                "autoMemoryEnabled": True,
+            }))
+
+            self.assertTrue(adapter.install_hooks(tmp))
+
+            installed = json.loads(settings_file.read_text())
+            self.assertIs(installed.get("autoMemoryEnabled"), False)
+
+            adapter.uninstall_hooks(tmp)
+
+            cleaned = json.loads(settings_file.read_text())
+            self.assertEqual(cleaned.get("theme"), "dark")
+            self.assertIs(cleaned.get("autoMemoryEnabled"), True)
 
     def test_claude_parse_session_end_event(self):
         adapter = ClaudeCodeAdapter()

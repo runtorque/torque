@@ -634,11 +634,51 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
                 settings_file = Path(resolved_tmpdir) / ".claude" / "settings.local.json"
                 self.assertEqual(os.path.realpath(cell.directory), resolved_tmpdir)
                 self.assertTrue(settings_file.exists())
-                self.assertIn("http://localhost:18933/events", settings_file.read_text())
+                settings = json.loads(settings_file.read_text())
+                self.assertIs(settings.get("autoMemoryEnabled"), False)
+                self.assertIn(
+                    "http://localhost:18933/events",
+                    settings_file.read_text(),
+                )
             finally:
                 os.chdir(prev_cwd)
                 if cell.session_id:
                     await adapter.close_session(cell.session_id)
+
+    async def test_claude_agent_directory_disables_auto_memory_for_roles(self):
+        for kind in ("engineer", "architect"):
+            state = self.state_mod.MatrixState()
+            state.add_group("Torque")
+            with tempfile.TemporaryDirectory() as tmpdir:
+                settings_file = (
+                    Path(tmpdir) / ".claude" / "settings.local.json"
+                )
+                settings_file.parent.mkdir(parents=True, exist_ok=True)
+                settings_file.write_text(json.dumps({
+                    "theme": "dark",
+                    "autoMemoryEnabled": True,
+                }))
+                cell = state.add_agent(
+                    name=kind.title(),
+                    group="Torque",
+                    terminal_backend="pty",
+                    command="",
+                    directory=tmpdir,
+                )
+                cell.agent_type = "claude-code"
+                cell.kind = kind
+                adapter = self.pty_mod.LocalPtyAdapter(state)
+
+                await adapter.start()
+                await adapter.create_session(cell)
+                try:
+                    settings = json.loads(settings_file.read_text())
+                    self.assertEqual(settings.get("theme"), "dark")
+                    self.assertIs(settings.get("autoMemoryEnabled"), False)
+                    self.assertIn("hooks", settings)
+                finally:
+                    if cell.session_id:
+                        await adapter.close_session(cell.session_id)
 
     def test_session_environment_scrubs_iterm_markers_and_sets_standalone_defaults(self):
         state = self.state_mod.MatrixState()

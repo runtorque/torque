@@ -30,9 +30,45 @@ _FALLBACK_LINES = [
 ]
 
 
-def build_torque_system_prompt() -> str:
+_SHARED_MEMORY_GUIDANCE = dedent("""\
+    ## Shared memory
+
+    Torque's Shared Context panel is populated by `torque_memory_publish`,
+    `torque_memory_pin`, and `torque_memory_link`. Use it for high-signal
+    durable knowledge that future agents should discover; do not rely on
+    provider-local files such as `MEMORY.md` for durable memory.
+
+    Publish only when the item will likely prevent repeated work, wrong turns,
+    or lost handoffs. Do not publish routine progress, obvious observations,
+    transient test output, or details that already belong only in the task
+    completion summary.
+
+    Publish with concrete entry types:
+    - A non-obvious gotcha discovered while debugging → `entry_type="warning"`
+    - A cross-task decision that future agents will need → `entry_type="decision"`
+    - A handoff note when one agent hands work to another → `entry_type="handoff"`
+    - A finding specific to a pipeline or task scope → `entry_type="finding"`
+
+    Scope narrowly:
+    - `scope_kind="task"` for the current task only.
+    - `scope_kind="pipeline"` for a derived-task chain or work stream.
+    - `scope_kind="group"` for this group's workflow, conventions, or repo area.
+    - `scope_kind="project"` only for stable project-wide constraints or gotchas.
+
+    Pin only the most load-bearing entries — roughly the top 5 items whose
+    absence would likely cause repeated mistakes, bad architecture, or unsafe
+    handoffs. Do not pin ordinary findings or status notes.
+""").strip()
+
+
+def build_shared_memory_guidance() -> str:
+    """Return the shared-memory adoption guidance used by agent prompts."""
+    return _SHARED_MEMORY_GUIDANCE
+
+
+def build_torque_system_prompt(*, include_shared_memory: bool = True) -> str:
     """Build the persistent Torque system prompt for dispatched agents."""
-    return dedent("""\
+    sections = [dedent("""\
         # Torque Agent
 
         You are running inside Torque, an AI agent orchestration system.
@@ -52,7 +88,12 @@ def build_torque_system_prompt() -> str:
         - `torque_derive(description="title", action="action-name", context="details")` — create a subtask and dispatch it according to the allowed transition
         - `torque_ask(question="question", description="details")` — request a blocking human decision or approval when the task cannot continue safely without it
         - `torque_context()` — view your current task, agent info, and pipeline state
+    """).rstrip()]
 
+    if include_shared_memory:
+        sections.append(build_shared_memory_guidance())
+
+    sections.append(dedent("""\
         ## Important
 
         Always signal completion via one of the tools above.
@@ -65,7 +106,9 @@ def build_torque_system_prompt() -> str:
         `torque_progress`, `torque_done`, `torque_blocked`, or derived-task
         context instead of pausing the task.
         When in doubt, call `torque_context()` to see your current state.
-    """)
+    """).rstrip())
+
+    return "\n\n".join(sections) + "\n"
 
 
 def _derive_line(transition: dict) -> str:

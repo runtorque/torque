@@ -4827,7 +4827,10 @@ def _architect_persistent_prompt_text(group: str = "",
         group_settings=group_settings,
     ).rstrip()
 
-    return build_torque_system_prompt().rstrip() + "\n\n" + architect_body + "\n"
+    torque_preamble = build_torque_system_prompt(
+        include_shared_memory=False,
+    ).rstrip()
+    return torque_preamble + "\n\n" + architect_body + "\n"
 
 
 def _snapshot_dataclass_like(obj) -> dict:
@@ -4946,7 +4949,10 @@ def _build_group_system_prompt_preview(
             action_system_prompt=action_system_prompt,
             group_settings=group_settings,
         ).rstrip()
-        return build_torque_system_prompt().rstrip() + "\n\n" + architect_body + "\n"
+        torque_preamble = build_torque_system_prompt(
+            include_shared_memory=False,
+        ).rstrip()
+        return torque_preamble + "\n\n" + architect_body + "\n"
 
     raise ValueError("kind must be 'engineer' or 'architect'")
 

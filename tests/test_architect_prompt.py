@@ -96,3 +96,16 @@ class ArchitectPromptTests(unittest.TestCase):
         self.assertIn("Journal checkpoint cadence: manual_only", prompt)
         self.assertIn("will not add automatic checkpoint reminders", prompt)
         self.assertIn("after major scope shifts", prompt)
+
+    def test_prompt_includes_shared_memory_guidance(self):
+        prompt = self.architect_mod.build_architect_system_prompt("Torque")
+
+        self.assertIn("## Shared memory", prompt)
+        self.assertIn("torque_memory_publish", prompt)
+        self.assertIn('entry_type="warning"', prompt)
+        self.assertIn('entry_type="decision"', prompt)
+        self.assertIn('entry_type="handoff"', prompt)
+        self.assertIn('entry_type="finding"', prompt)
+        self.assertIn("Scope narrowly", prompt)
+        self.assertIn("top 5", prompt)
+        self.assertIn("MEMORY.md", prompt)
