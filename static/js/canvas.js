@@ -191,6 +191,15 @@ function _torqueRenderAgentCanvas(opts) {
   }
 
   _canvasAttachInteractions(groupName);
+
+  // The grid path ends with a renderTerminalWorkspace() call so the
+  // terminal column refreshes when the selected agent / focused item
+  // changes. Without this, the canvas mode showed no terminal after
+  // a fresh app boot — even though `selectedAgentId` had been
+  // restored from server state.
+  if (typeof renderTerminalWorkspace === 'function') {
+    renderTerminalWorkspace();
+  }
 }
 
 function _canvasRenderHtml(groupName, model) {

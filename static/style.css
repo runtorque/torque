@@ -9849,10 +9849,14 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
    cells on the left (one per ancestor depth) followed by the card
    itself. The guides do all the line-drawing via pseudo-elements,
    and the card flexes to fill the remaining width. */
+.agent-canvas-inner,
+.canvas-tree {
+  --canvas-row-gap: 4px;
+}
 .canvas-tree {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--canvas-row-gap);
 }
 .canvas-row {
   display: flex;
@@ -9890,20 +9894,23 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   background: var(--border);
 }
 /* "through" — vertical line all the way through; ancestor's spine
-   continues past this row. No horizontal stub. */
+   continues past this row. No horizontal stub. The line is extended
+   BELOW the row by --canvas-row-gap so it bridges the flex gap to
+   the next row's pseudo-element (otherwise the gap shows up as a
+   visible discontinuity in the spine). */
 .canvas-guide--through::before {
   left: 16px;
   top: 0;
-  bottom: 0;
+  bottom: calc(0px - var(--canvas-row-gap, 4px));
   width: 2px;
 }
 /* "tee" — vertical line all the way through + horizontal stub at
    center. Used when this row's own parent has more siblings after
-   this row. */
+   this row. Same gap-bridging extension as --through. */
 .canvas-guide--tee::before {
   left: 16px;
   top: 0;
-  bottom: 0;
+  bottom: calc(0px - var(--canvas-row-gap, 4px));
   width: 2px;
 }
 .canvas-guide--tee::after {
