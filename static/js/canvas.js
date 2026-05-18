@@ -370,8 +370,17 @@ function _canvasActivityDetail(cell) {
   return '';
 }
 
-/* Third-row status line, formatted as 'idle', 'Running: <detail>',
- * 'stopped', or 'Error: <msg>'. */
+/* Third-row status line. The 'Running:' prefix is reserved for live
+ * activity (status=running AND there's an activity_detail). Past
+ * events like 'Session ended (10m)' come back from the action-label
+ * helper with a relative-time suffix — show them as-is, no prefix.
+ *
+ *   running + activity_detail   -> 'Running: <detail>'
+ *   stopped / dismissed         -> 'stopped'
+ *   error                       -> 'Error: <msg>' (uses error_message)
+ *   idle / unknown + last event -> '<last event text (Nm)>'
+ *   nothing                     -> 'idle'
+ */
 function _canvasStatusLine(cell) {
   if (!cell) return 'idle';
   const status = String(cell.status || '').toLowerCase();
@@ -380,8 +389,13 @@ function _canvasStatusLine(cell) {
     const err = String(cell.error_message || '').trim();
     return err ? 'Error: ' + err : 'Error';
   }
-  const detail = _canvasActivityDetail(cell);
-  if (detail) return 'Running: ' + detail;
+  const liveDetail = String(cell.activity_detail || '').trim();
+  if (status === 'running' && liveDetail) return 'Running: ' + liveDetail;
+  if (typeof _agentCardCurrentOrLastActionLabel === 'function') {
+    const a = _agentCardCurrentOrLastActionLabel(cell);
+    if (a) return a;
+  }
+  if (status === 'running') return 'Running';
   return 'idle';
 }
 
