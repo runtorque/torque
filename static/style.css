@@ -9972,6 +9972,9 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   transition: border-color 0.12s ease, background 0.12s ease;
   line-height: 1.25;
 }
+.canvas-card-header + * {
+  margin-top: 3px;
+}
 .canvas-card:hover {
   background: var(--bg-hover);
   border-color: #4d5765;
