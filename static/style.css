@@ -10029,7 +10029,7 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  padding-right: 64px; /* room for the provider badge in the corner */
+  padding-right: 48px; /* room for the provider badge in the corner */
 }
 .canvas-card-header-spacer { flex: 1 1 auto; min-width: 8px; }
 .canvas-card-pause {

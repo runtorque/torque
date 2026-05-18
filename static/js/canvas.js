@@ -370,16 +370,19 @@ function _canvasActivityDetail(cell) {
   return '';
 }
 
-/* Third-row status line. The 'Running:' prefix is reserved for live
- * activity (status=running AND there's an activity_detail). Past
- * events like 'Session ended (10m)' come back from the action-label
- * helper with a relative-time suffix — show them as-is, no prefix.
+/* Third-row status line. The Claude Code / Codex adapters already
+ * prefix activity_detail with a verb ('Editing render.js',
+ * 'Running: ls -la', 'Reading file.py') so showing them through a
+ * second 'Running: ' prefix would just double-prefix AND eat the
+ * width that the actual detail (filename/command) needs. Show
+ * activity_detail as-is for the running case.
  *
- *   running + activity_detail   -> 'Running: <detail>'
- *   stopped / dismissed         -> 'stopped'
- *   error                       -> 'Error: <msg>' (uses error_message)
- *   idle / unknown + last event -> '<last event text (Nm)>'
- *   nothing                     -> 'idle'
+ *   running + activity_detail  -> '<detail>'          (adapter-prefixed)
+ *   stopped / dismissed        -> 'stopped'
+ *   error                      -> 'Error: <msg>'
+ *   idle + recent action label -> '<label> (Nm)'      (past-event helper)
+ *   running, no detail         -> 'Working'
+ *   nothing                    -> 'idle'
  */
 function _canvasStatusLine(cell) {
   if (!cell) return 'idle';
@@ -390,12 +393,12 @@ function _canvasStatusLine(cell) {
     return err ? 'Error: ' + err : 'Error';
   }
   const liveDetail = String(cell.activity_detail || '').trim();
-  if (status === 'running' && liveDetail) return 'Running: ' + liveDetail;
+  if (status === 'running' && liveDetail) return liveDetail;
   if (typeof _agentCardCurrentOrLastActionLabel === 'function') {
     const a = _agentCardCurrentOrLastActionLabel(cell);
     if (a) return a;
   }
-  if (status === 'running') return 'Running';
+  if (status === 'running') return 'Working';
   return 'idle';
 }
 
