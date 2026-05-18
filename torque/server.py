@@ -546,12 +546,40 @@ def _untracked_overwrite_message(paths: list[str], *,
     )
 
 
-def _stale_base_warning(stale_base: dict | None) -> str:
+def _stale_base_warning(stale_base: dict | None, *,
+                        rebase_command: str = "") -> str:
     stale_base = stale_base or {}
     if not stale_base.get("stale"):
         return ""
+    if rebase_command:
+        return format_stale_base_warning(
+            stale_base,
+            rebase_command=rebase_command,
+        )
     return str(stale_base.get("warning", "") or "").strip() \
         or format_stale_base_warning(stale_base)
+
+
+def _stale_base_rebase_command(aid: str) -> str:
+    aid = str(aid or "").strip()
+    return f"worktree_rebase id={aid}" if aid else "worktree_rebase"
+
+
+def _stale_base_suggestion(aid: str, *, retry_action: str) -> str:
+    command = _stale_base_rebase_command(aid)
+    retry_action = str(retry_action or "retry").strip() or "retry"
+    return f"Run `{command}` then {retry_action}."
+
+
+def _attach_stale_base_guidance(result: dict, aid: str, *,
+                                retry_action: str) -> dict:
+    result["code"] = "stale_base"
+    result["suggested_command"] = _stale_base_rebase_command(aid)
+    result["suggestion"] = _stale_base_suggestion(
+        aid,
+        retry_action=retry_action,
+    )
+    return result
 
 
 def _attach_stale_base(result: dict, stale_base: dict | None) -> dict:
@@ -565,7 +593,7 @@ def _attach_stale_base(result: dict, stale_base: dict | None) -> dict:
 def _stale_base_check_merge_result(aid: str,
                                    stale_base: dict | None) -> dict:
     warning = _stale_base_warning(stale_base)
-    return {
+    return _attach_stale_base_guidance({
         "type": "worktree_check_merge",
         "id": aid,
         "clean": False,
@@ -574,23 +602,90 @@ def _stale_base_check_merge_result(aid: str,
         "error": warning,
         "stale_base": stale_base,
         "stale_base_warning": warning,
-    }
+    }, aid, retry_action="retry merge readiness check")
 
 
 def _stale_base_merge_result(aid: str, stale_base: dict | None) -> dict:
     warning = _stale_base_warning(stale_base)
     force_hint = (
-        "Pass force_stale_base=true only if you intentionally accept this "
-        "risk; otherwise rebase and re-run the diff first."
+        "Pass force=true only if you intentionally accept this risk; "
+        "otherwise rebase and re-run the diff first."
     )
-    return {
+    suggestion = _stale_base_suggestion(
+        aid,
+        retry_action="re-run diff/review and retry merge",
+    )
+    return _attach_stale_base_guidance({
         "type": "worktree_merge",
         "id": aid,
         "ok": False,
-        "error": f"{warning}\n\n{force_hint}" if warning else force_hint,
+        "error": (
+            f"{warning}\n\nSuggested command: "
+            f"`{_stale_base_rebase_command(aid)}`.\n{force_hint}"
+            if warning else f"{suggestion}\n{force_hint}"
+        ),
         "stale_base": stale_base,
         "stale_base_warning": warning,
-    }
+    }, aid, retry_action="re-run diff/review and retry merge")
+
+
+def _stale_base_review_derive_result(aid: str,
+                                     stale_base: dict | None) -> dict:
+    warning = _stale_base_warning(
+        stale_base,
+        rebase_command=_stale_base_rebase_command(aid),
+    )
+    suggestion = _stale_base_suggestion(
+        aid,
+        retry_action="re-run diff and derive feature/review",
+    )
+    message = (
+        "Cannot derive feature/review from a stale worktree base.\n\n"
+        f"{warning}\n\n"
+        f"Suggested command: `{_stale_base_rebase_command(aid)}`."
+    ) if warning else (
+        "Cannot derive feature/review from a stale worktree base.\n\n"
+        f"{suggestion}"
+    )
+    return _attach_stale_base_guidance({
+        "type": "error",
+        "message": message,
+        "stale_base": stale_base,
+        "stale_base_warning": warning,
+    }, aid, retry_action="re-run diff and derive feature/review")
+
+
+def _stale_base_force_enabled(data: dict | None) -> bool:
+    data = data or {}
+    return bool(data.get("force") or data.get("force_stale_base"))
+
+
+async def _maybe_reject_stale_base_review_derive(
+    worktree_mgr,
+    cell,
+    action_name: str,
+) -> dict | None:
+    if str(action_name or "").strip().lower() != "feature/review":
+        return None
+    if not (cell and getattr(cell, "worktree_path", "")):
+        return None
+    stale_info = getattr(worktree_mgr, "stale_base_info", None)
+    if not callable(stale_info):
+        return None
+    try:
+        stale_base = await stale_info(cell)
+    except Exception:
+        log.exception(
+            "stale-base preflight failed before review derive for '%s'",
+            getattr(cell, "name", "") or getattr(cell, "id", ""),
+        )
+        return None
+    if not (stale_base or {}).get("stale"):
+        return None
+    return _stale_base_review_derive_result(
+        getattr(cell, "id", "") or "",
+        stale_base,
+    )
 
 
 def _pipeline_root_id_for_task(task) -> str:
@@ -778,6 +873,7 @@ async def _sibling_branch_divergence_gate_for_merge(
 _WORKFLOW_BREACH_SUBKINDS = frozenset({
     "escape_clause_skip",
     "stale_base_catch",
+    "stale_base_override",
     "manual",
 })
 _WORKFLOW_BREACH_SOURCES = frozenset({"auto", "operator"})
@@ -988,6 +1084,27 @@ def _emit_stale_base_catch_workflow_breach(state: MatrixState, panel_event,
         context=(
             "Stale-base warning was followed by "
             f"rebase: {warning}"
+        ),
+    )
+
+
+def _emit_stale_base_override_workflow_breach(state: MatrixState, panel_event,
+                                             cell,
+                                             stale_base: dict | None):
+    warning = _stale_base_warning(stale_base)
+    if not warning:
+        return None
+    breach_task = _workflow_breach_active_task_for_worker(state, cell)
+    return _emit_workflow_breach_event(
+        state,
+        panel_event,
+        subkind="stale_base_override",
+        source="operator",
+        task=breach_task,
+        worker=cell,
+        context=(
+            "Stale-base merge gate was bypassed with force=true: "
+            f"{warning}"
         ),
     )
 
@@ -9301,7 +9418,10 @@ async def main(connection=None):
                     else:
                         stale_base = await worktree_mgr.stale_base_info(cell)
                         if stale_base.get("stale") \
-                                and not data.get("allow_stale_base"):
+                                and not (
+                                    data.get("allow_stale_base")
+                                    or _stale_base_force_enabled(data)
+                                ):
                             result = _stale_base_check_merge_result(
                                 aid, stale_base
                             )
@@ -9597,6 +9717,7 @@ async def main(connection=None):
             elif cmd == "worktree_merge":
                 cell = state.agents.get(data.get("id", ""))
                 aid = data.get("id", "")
+                stale_base_override_event = None
                 if cell and cell.worktree_path and cell.worktree_branch:
                     boundary_state = await _latest_boundary_state_for_cell(
                         cell
@@ -9637,11 +9758,21 @@ async def main(connection=None):
                             return result
                         stale_base = await worktree_mgr.stale_base_info(cell)
                         if stale_base.get("stale") \
-                                and not data.get("force_stale_base"):
+                                and not _stale_base_force_enabled(data):
                             result = _stale_base_merge_result(
                                 aid, stale_base
                             )
                             return result
+                        if stale_base.get("stale") \
+                                and _stale_base_force_enabled(data):
+                            stale_base_override_event = (
+                                _emit_stale_base_override_workflow_breach(
+                                    state,
+                                    _panel_event,
+                                    cell,
+                                    stale_base,
+                                )
+                            )
                         precheck = await worktree_mgr.check_merge_conflicts(
                             cell
                         )
@@ -9915,6 +10046,8 @@ async def main(connection=None):
                         "ok": False,
                         "error": "Agent has no worktree.",
                     }
+                if stale_base_override_event and isinstance(result, dict):
+                    result["workflow_breach"] = stale_base_override_event
 
             # -- Board commands (Phase 5) --
             elif cmd == "board_add_task":
@@ -12686,6 +12819,15 @@ async def main(connection=None):
                                     or state.global_settings
                                         .max_pipeline_depth
                                     or 0)
+                                stale_base_rejection = None
+                                if not (max_d and new_depth > max_d):
+                                    stale_base_rejection = (
+                                        await _maybe_reject_stale_base_review_derive(
+                                            worktree_mgr,
+                                            cell,
+                                            act_name,
+                                        )
+                                    )
                                 if max_d and new_depth > max_d:
                                     cell.needs_attention = True
                                     state._emit_agent(cell)
@@ -12698,6 +12840,8 @@ async def main(connection=None):
                                         "message":
                                             f"Pipeline depth limit "
                                             f"({max_d}) reached"}
+                                elif stale_base_rejection:
+                                    result = stale_base_rejection
                                 else:
                                     # Keep parent in In Progress;
                                     # update its status from transition

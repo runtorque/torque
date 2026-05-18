@@ -386,6 +386,47 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
             ["worktree_check_merge", "worktree_merge"],
         )
 
+        force_alias_calls = []
+
+        async def force_alias_handle_command(payload):
+            force_alias_calls.append(dict(payload))
+            if payload["cmd"] == "worktree_check_merge":
+                self.assertTrue(payload.get("allow_stale_base"))
+                return {
+                    "type": "worktree_check_merge",
+                    "id": worker.id,
+                    "clean": True,
+                    "conflicts": [],
+                    "stale_base": {"stale": True},
+                    "stale_base_warning": warning,
+                }
+            if payload["cmd"] == "worktree_merge":
+                self.assertTrue(payload.get("force"))
+                self.assertTrue(payload.get("force_stale_base"))
+                return {
+                    "type": "worktree_merge",
+                    "id": worker.id,
+                    "ok": True,
+                    "sha": "def456",
+                    "cleanup": {"errors": []},
+                }
+            self.fail(f"Unexpected command: {payload}")
+
+        alias_text, alias_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_merge",
+            {"agent": worker.id, "force": True},
+            force_alias_handle_command,
+            state,
+            caller_id=alice.id,
+        )
+
+        self.assertFalse(alias_error, alias_text)
+        self.assertEqual(json.loads(alias_text)["sha"], "def456")
+        self.assertEqual(
+            [call["cmd"] for call in force_alias_calls],
+            ["worktree_check_merge", "worktree_merge"],
+        )
+
     async def test_engineer_rebase_allows_stale_base_precheck_to_clear_gate(self):
         state = self._make_state()
         alice = self._add_engineer(state, "eng-alice", "Alice")

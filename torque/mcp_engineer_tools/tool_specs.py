@@ -1076,16 +1076,19 @@ ENGINEER_TOOLS = [
                         "Bypass the stale-base merge safety gate. Use only "
                         "after intentionally accepting that the branch forked "
                         "before the current base and re-running review is not "
-                        "desired."
+                        "desired. `force=true` is the preferred override and "
+                        "also bypasses this gate."
                     ),
                 },
                 "force": {
                     "type": "boolean",
                     "description": (
-                        "Bypass the sibling-branch divergence safety gate. "
-                        "Use only after diffing sibling review/implement "
-                        "branches and intentionally accepting any commits "
-                        "not present on the merge target."
+                        "Bypass the stale-base and sibling-branch divergence "
+                        "safety gates. Use only after rebasing or otherwise "
+                        "intentionally accepting stale-base risk, and after "
+                        "diffing sibling review/implement branches and "
+                        "accepting any commits not present on the merge "
+                        "target."
                     ),
                 },
             },
