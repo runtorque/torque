@@ -450,8 +450,8 @@ function _canvasRenderHeader(cell, kind) {
     pauseBadge = '<span class="canvas-card-pause" title="Event delivery paused" aria-label="Paused">&#x23F8;</span>';
   }
   return '<div class="canvas-card-header">'
-    + '<span class="canvas-card-name" title="' + name + '">' + name + '</span>'
     + '<span class="canvas-card-role">' + esc(kindLabel) + '</span>'
+    + '<span class="canvas-card-name" title="' + name + '">' + name + '</span>'
     + '<span class="canvas-card-header-spacer"></span>'
     + pauseBadge
     + '<span class="canvas-card-status-dot"></span>'
