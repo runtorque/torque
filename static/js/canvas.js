@@ -225,97 +225,104 @@ function _canvasRenderHtml(groupName, model) {
   return html;
 }
 
+/* Standard tree-rendering guide model.
+ *
+ * Each row has `ancestorContinues` — an array, one entry per ancestor
+ * depth, where true means "draw a vertical line through this column
+ * because the corresponding ancestor still has more siblings below
+ * this row." Plus `isLast`, which decides whether this row's own
+ * connector is a T-junction (more siblings to come) or an L-corner
+ * (last child). Architect rows have zero ancestors; engineer rows
+ * have one; worker rows have two.
+ */
+function _canvasRenderRow(ancestorContinues, isLast, hasOwnConnector, cardHtml) {
+  let html = '<div class="canvas-row">';
+  for (const cont of ancestorContinues) {
+    html += '<div class="canvas-guide canvas-guide--'
+         + (cont ? 'through' : 'empty')
+         + '"></div>';
+  }
+  if (hasOwnConnector) {
+    html += '<div class="canvas-guide canvas-guide--'
+         + (isLast ? 'corner' : 'tee')
+         + '"></div>';
+  }
+  html += cardHtml;
+  html += '</div>';
+  return html;
+}
+
 function _canvasRenderTree(tree) {
   const arch = tree.architect;
-  const hasEngineers = tree.engineers && tree.engineers.length > 0;
+  const engineers = tree.engineers || [];
   let html = '';
   html += `<div class="canvas-tree" data-canvas-tree="${esc(arch.id)}">`;
-
-  html += `<div class="canvas-tree-head">`;
-  html += _canvasRenderArchitectCard(arch);
-  html += `</div>`;
-
-  html += `<div class="canvas-tree-body">`;
-  html += `<div class="canvas-rows">`;
-  if (hasEngineers) {
-    for (const row of tree.engineers) {
-      html += _canvasRenderEngineerRow(row);
-    }
-  } else {
-    html += `<div class="canvas-tree-empty" data-canvas-arch-id="${esc(arch.id)}">`;
-    html += `<div class="canvas-connector canvas-connector--last"></div>`;
-    html += `<button type="button" class="canvas-add-inline" `
-         + `onclick="_canvasAddEngineerForArchitect('${esc(arch.id)}')">`
-         + `+ Engineer</button>`;
-    html += `</div>`;
-  }
-  html += `</div>`;
-  html += `</div>`;
-
+  // Architect row (depth 0, no guides)
+  html += _canvasRenderRow([], false, false, _canvasRenderArchitectCard(arch));
+  html += _canvasRenderChildren(engineers, arch.id, [], 'engineer');
   html += `</div>`;
   return html;
 }
 
-function _canvasRenderEngineerRow(row) {
-  const eng = row.engineer;
-  const workers = row.workers || [];
+/* Render the children of a parent under the given ancestor-continues
+ * stack. `kind` selects the child renderer ('engineer' under an
+ * architect, 'worker' under an engineer). For engineers, recurses
+ * into workers at depth+1. */
+function _canvasRenderChildren(rows, parentId, ancestorContinues, kind) {
   let html = '';
-  html += `<div class="canvas-eng-row" data-canvas-engineer="${esc(eng.id)}">`;
-  html += `<div class="canvas-connector"></div>`;
-  html += _canvasRenderEngineerCard(eng);
-
-  if (workers.length > 0) {
-    html += `<div class="canvas-worker-manifold">`;
-    html += `<div class="canvas-manifold-trunk"></div>`;
-    html += `<div class="canvas-worker-bar">`;
-    for (const w of workers) {
-      html += _canvasRenderWorkerCard(w);
-    }
-    html += `<button type="button" class="canvas-add-worker" `
-         + `onclick="_canvasAddWorkerForEngineer('${esc(eng.id)}')" `
-         + `title="Add worker">+</button>`;
-    html += `</div></div>`;
-  } else {
-    html += `<button type="button" class="canvas-add-worker canvas-add-worker--first" `
-         + `onclick="_canvasAddWorkerForEngineer('${esc(eng.id)}')">+ Worker</button>`;
+  if (rows.length === 0) {
+    // Empty state: a single + button row, rendered as the last (and
+    // only) child so it shows the L-corner connector.
+    const guides = ancestorContinues.slice();
+    const label = (kind === 'engineer') ? '+ Engineer' : '+ Worker';
+    const action = (kind === 'engineer')
+      ? `_canvasAddEngineerForArchitect('${esc(parentId)}')`
+      : `_canvasAddWorkerForEngineer('${esc(parentId)}')`;
+    const btnHtml = `<button type="button" class="canvas-add-inline" onclick="${action}">${label}</button>`;
+    html += _canvasRenderRow(guides, true, true, btnHtml);
+    return html;
   }
-  html += `</div>`;
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const isLast = (i === rows.length - 1);
+    if (kind === 'engineer') {
+      const eng = row.engineer;
+      const workers = row.workers || [];
+      const cardHtml = `<div data-canvas-row-host="${esc(eng.id)}">${_canvasRenderEngineerCard(eng)}</div>`;
+      html += _canvasRenderRow(ancestorContinues, isLast, true, cardHtml);
+      // Recurse into workers at depth+1. Architect-level continues if
+      // this engineer is NOT the last (i.e., there are more engineers
+      // after this).
+      const childAncestors = ancestorContinues.concat([!isLast]);
+      html += _canvasRenderChildren(workers, eng.id, childAncestors, 'worker');
+    } else if (kind === 'worker') {
+      const w = row;
+      const cardHtml = _canvasRenderWorkerCard(w);
+      html += _canvasRenderRow(ancestorContinues, isLast, true, cardHtml);
+    }
+  }
   return html;
 }
 
 function _canvasRenderLooseEngineer(row) {
+  // Render the orphan engineer as a depth-0 row (no architect spine
+  // above it), then its workers as depth-1 children.
   const eng = row.engineer;
   const workers = row.workers || [];
   let html = '';
-  html += `<div class="canvas-loose-engineer" data-canvas-engineer="${esc(eng.id)}">`;
-  html += _canvasRenderEngineerCard(eng);
-
-  if (workers.length > 0) {
-    html += `<div class="canvas-worker-manifold">`;
-    html += `<div class="canvas-manifold-trunk"></div>`;
-    html += `<div class="canvas-worker-bar">`;
-    for (const w of workers) {
-      html += _canvasRenderWorkerCard(w);
-    }
-    html += `<button type="button" class="canvas-add-worker" `
-         + `onclick="_canvasAddWorkerForEngineer('${esc(eng.id)}')" `
-         + `title="Add worker">+</button>`;
-    html += `</div></div>`;
-  } else {
-    html += `<button type="button" class="canvas-add-worker canvas-add-worker--first" `
-         + `onclick="_canvasAddWorkerForEngineer('${esc(eng.id)}')">+ Worker</button>`;
-  }
+  html += `<div class="canvas-tree canvas-tree-loose">`;
+  html += _canvasRenderRow([], false, false, _canvasRenderEngineerCard(eng));
+  html += _canvasRenderChildren(workers, eng.id, [], 'worker');
   html += `</div>`;
   return html;
 }
 
 function _canvasRenderLooseWorkersBar(workers) {
+  // Orphan workers (no engineer): each is its own depth-0 row.
   let html = '';
-  html += `<div class="canvas-loose-workers">`;
   for (const w of workers) {
-    html += _canvasRenderWorkerCard(w);
+    html += _canvasRenderRow([], false, false, _canvasRenderWorkerCard(w));
   }
-  html += `</div>`;
   return html;
 }
 

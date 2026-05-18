@@ -9834,9 +9834,8 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 .agent-canvas-inner {
   display: flex;
   flex-direction: column;
-  gap: 32px;
-  padding: 28px 28px 80px 28px;
-  min-width: max-content;
+  gap: 4px;
+  padding: 20px 24px 80px 24px;
 }
 .canvas-empty {
   margin: 60px auto;
@@ -9846,122 +9845,102 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 .canvas-empty-title { font-size: 14px; margin-bottom: 6px; color: var(--text); }
 .canvas-empty-hint  { font-size: 12px; }
 
-/* Tree = architect on top, two-column body (spine + engineer rows) below */
+/* Tree = a vertical stack of rows. Each row has a stack of guide
+   cells on the left (one per ancestor depth) followed by the card
+   itself. The guides do all the line-drawing via pseudo-elements,
+   and the card flexes to fill the remaining width. */
 .canvas-tree {
   display: flex;
   flex-direction: column;
-  min-width: max-content;
+  gap: 4px;
 }
-.canvas-tree-head {
-  /* architect card sits at the top of the tree, slightly indented so the
-     spine that drops below it appears to emerge from within its footprint */
-  padding-left: 8px;
-}
-.canvas-tree-body {
+.canvas-row {
   display: flex;
   align-items: stretch;
+  min-height: 56px;
 }
-.canvas-rows {
+.canvas-row > .canvas-card,
+.canvas-row > [data-canvas-row-host] {
   flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 0;
   min-width: 0;
 }
-.canvas-tree-empty {
+.canvas-row > [data-canvas-row-host] {
   display: flex;
-  align-items: center;
-  min-height: 48px;
+}
+.canvas-row > [data-canvas-row-host] > .canvas-card {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
-/* Engineer row = connector (vertical+spur drawn via pseudo-elements)
-   + engineer card + worker manifold. Spine and spur are NOT separate
-   structural elements anymore — each row owns the segment of spine
-   that passes through it, and the :last-child row truncates its
-   vertical segment at the bend (no line below the last engineer). */
-.canvas-eng-row {
-  display: flex;
-  align-items: center;
-  gap: 0;
-  min-height: 72px;
-  position: relative;
-}
-.canvas-connector {
-  flex: 0 0 48px;
+/* Guide cell — one per ancestor depth, plus optionally one for the
+   current row's own connector. All four variants share the same
+   geometry: a vertical line at x=16 from top of cell, optionally
+   capped at vertical center; a horizontal stub at the center going
+   right to the card. The card sits flush against the guide, so the
+   horizontal stub ends exactly at the card's left edge. */
+.canvas-guide {
+  flex: 0 0 32px;
   align-self: stretch;
   position: relative;
 }
-/* Vertical line: from top of row down. Extends through the full row
-   for non-last rows so adjacent rows visually connect. */
-.canvas-connector::before {
+.canvas-guide::before,
+.canvas-guide::after {
   content: '';
   position: absolute;
+  background: var(--border);
+}
+/* "through" — vertical line all the way through; ancestor's spine
+   continues past this row. No horizontal stub. */
+.canvas-guide--through::before {
   left: 16px;
   top: 0;
   bottom: 0;
   width: 2px;
-  background: var(--border);
 }
-/* Horizontal spur: at vertical center, going right toward the
-   engineer card. */
-.canvas-connector::after {
-  content: '';
-  position: absolute;
+/* "tee" — vertical line all the way through + horizontal stub at
+   center. Used when this row's own parent has more siblings after
+   this row. */
+.canvas-guide--tee::before {
+  left: 16px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+}
+.canvas-guide--tee::after {
   left: 16px;
   top: 50%;
-  width: 28px;
+  right: 0;
   height: 2px;
-  background: var(--border);
   transform: translateY(-1px);
 }
-/* Last row in the rows column — and the explicit --last variant used
-   by the empty-state placeholder — truncates the vertical segment at
-   the spur Y, so the spine stops at the bend instead of continuing
-   below the final engineer. */
-.canvas-eng-row:last-child .canvas-connector::before,
-.canvas-connector--last::before {
-  bottom: 50%;
+/* "corner" — vertical line from top to center only + horizontal
+   stub at center. Used for the LAST child at this row's depth, so
+   the spine stops exactly at the bend. */
+.canvas-guide--corner::before {
+  left: 16px;
+  top: 0;
+  height: 50%;
+  width: 2px;
 }
-/* Loose / dashed variants for the Standalone pseudo-tree. */
-.canvas-connector--loose::before {
-  background: repeating-linear-gradient(0deg, var(--border) 0 4px, transparent 4px 8px);
-}
-.canvas-connector--loose::after {
-  background: repeating-linear-gradient(90deg, var(--border) 0 4px, transparent 4px 8px);
-}
-
-/* Worker manifold = horizontal trunk that connects the engineer card
-   directly to the worker bar. The trunk butts up against both edges
-   (no flex gap, no margin/padding insets) so the line visually joins
-   the engineer to the workers instead of floating between them. */
-.canvas-worker-manifold {
-  display: flex;
-  align-items: center;
-}
-.canvas-manifold-trunk {
-  width: 28px;
+.canvas-guide--corner::after {
+  left: 16px;
+  top: 50%;
+  right: 0;
   height: 2px;
-  background: var(--border);
-  flex: 0 0 28px;
+  transform: translateY(-1px);
 }
-.canvas-worker-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
+/* "empty" — no line. Used when the ancestor's spine ended before
+   reaching this row (ancestor was the last child at its depth). */
+.canvas-guide--empty {}
 
-/* Loose engineers and loose workers — unparented, no spine, just sit
-   on the canvas alongside the architect trees. */
-.canvas-loose-engineer {
-  display: flex;
-  align-items: center;
-  min-height: 72px;
-}
-.canvas-loose-workers {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
+/* Inline "+ Add" button rendered inside a row when a parent has no
+   children yet. Sits in place of a card and has the same flex
+   behavior so it fills the remaining width. */
+.canvas-row > .canvas-add-inline {
+  flex: 1 1 auto;
+  min-width: 0;
+  align-self: center;
+  min-height: 0;
 }
 
 /* Cards */
@@ -10026,20 +10005,17 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 .canvas-card.is-idle    .canvas-card-status-dot { background: var(--amber); }
 .canvas-card.is-stopped .canvas-card-status-dot { background: #57606a; }
 
-.canvas-card-architect {
-  min-width: 156px;
-  border-left: 3px solid var(--accent);
+.canvas-card-architect { border-left: 3px solid var(--accent); }
+.canvas-card-engineer  { border-left: 3px solid #a371f7; }
+.canvas-card-worker    { border-left: 3px solid #79c0ff; }
+.canvas-card-name {
+  /* Override the old fixed cap so names use the full row width. */
+  max-width: none;
 }
-.canvas-card-engineer {
-  min-width: 152px;
-  border-left: 3px solid #a371f7;
-}
-.canvas-card-worker {
-  min-width: 132px;
-  border-left: 3px solid #79c0ff;
-}
-/* Inline add affordances */
-.canvas-add-worker, .canvas-add-inline {
+/* Inline add affordance — a row with no card, just a dashed-border
+   button rendered with the same guide/corner connector as a real
+   child row. */
+.canvas-add-inline {
   background: transparent;
   border: 1px dashed var(--border);
   color: var(--text-dim);
@@ -10049,18 +10025,9 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   font-size: 11px;
   cursor: pointer;
   white-space: nowrap;
+  text-align: left;
 }
-.canvas-add-worker {
-  padding: 4px 9px;
-  font-size: 13px;
-  line-height: 1;
-}
-.canvas-add-worker:hover, .canvas-add-inline:hover {
+.canvas-add-inline:hover {
   border-color: var(--accent);
   color: var(--text);
-}
-.canvas-add-worker--first {
-  margin-left: 24px;
-  padding: 6px 12px;
-  font-size: 11px;
 }
