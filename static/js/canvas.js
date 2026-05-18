@@ -209,8 +209,15 @@ function _canvasRenderHtml(groupName, model) {
     for (const tree of model.trees) {
       html += _canvasRenderTree(tree);
     }
-    if (model.standalone.engineers.length || model.standalone.workers.length) {
-      html += _canvasRenderStandalone(model.standalone);
+    // Loose engineers (no architect): render each as its own node on
+    // the canvas, with its workers attached to the right. No spine,
+    // no wrapper card — just an unparented engineer + its workers.
+    for (const row of model.standalone.engineers) {
+      html += _canvasRenderLooseEngineer(row);
+    }
+    // Loose workers (no engineer): plain row of worker cards.
+    if (model.standalone.workers.length > 0) {
+      html += _canvasRenderLooseWorkersBar(model.standalone.workers);
     }
   }
 
@@ -276,36 +283,38 @@ function _canvasRenderEngineerRow(row) {
   return html;
 }
 
-function _canvasRenderStandalone(standalone) {
+function _canvasRenderLooseEngineer(row) {
+  const eng = row.engineer;
+  const workers = row.workers || [];
   let html = '';
-  html += `<div class="canvas-tree canvas-tree-standalone" data-canvas-tree="__standalone__">`;
+  html += `<div class="canvas-loose-engineer" data-canvas-engineer="${esc(eng.id)}">`;
+  html += _canvasRenderEngineerCard(eng);
 
-  html += `<div class="canvas-tree-head">`;
-  html += _canvasRenderStandaloneCard(standalone);
-  html += `</div>`;
-
-  html += `<div class="canvas-tree-body canvas-tree-body--loose">`;
-  html += `<div class="canvas-rows">`;
-
-  for (const row of standalone.engineers) {
-    html += _canvasRenderEngineerRow(row);
-  }
-
-  if (standalone.workers.length > 0) {
-    html += `<div class="canvas-eng-row canvas-eng-row--loose">`;
-    html += `<div class="canvas-connector canvas-connector--loose"></div>`;
-    html += `<div class="canvas-loose-label">Workers</div>`;
+  if (workers.length > 0) {
     html += `<div class="canvas-worker-manifold">`;
-    html += `<div class="canvas-manifold-trunk canvas-manifold-trunk--loose"></div>`;
+    html += `<div class="canvas-manifold-trunk"></div>`;
     html += `<div class="canvas-worker-bar">`;
-    for (const w of standalone.workers) {
+    for (const w of workers) {
       html += _canvasRenderWorkerCard(w);
     }
-    html += `</div></div></div>`;
+    html += `<button type="button" class="canvas-add-worker" `
+         + `onclick="_canvasAddWorkerForEngineer('${esc(eng.id)}')" `
+         + `title="Add worker">+</button>`;
+    html += `</div></div>`;
+  } else {
+    html += `<button type="button" class="canvas-add-worker canvas-add-worker--first" `
+         + `onclick="_canvasAddWorkerForEngineer('${esc(eng.id)}')">+ Worker</button>`;
   }
+  html += `</div>`;
+  return html;
+}
 
-  html += `</div>`;
-  html += `</div>`;
+function _canvasRenderLooseWorkersBar(workers) {
+  let html = '';
+  html += `<div class="canvas-loose-workers">`;
+  for (const w of workers) {
+    html += _canvasRenderWorkerCard(w);
+  }
   html += `</div>`;
   return html;
 }
@@ -386,18 +395,6 @@ function _canvasRenderWorkerCard(cell) {
     + `</div>`;
 }
 
-function _canvasRenderStandaloneCard(standalone) {
-  const count = standalone.engineers.length + standalone.workers.length;
-  return `<div class="canvas-card canvas-card-standalone" `
-    + `data-canvas-card-kind="standalone">`
-    + `<div class="canvas-card-row">`
-    + `<span class="canvas-card-glyph">◇</span>`
-    + `<span class="canvas-card-name">Standalone</span>`
-    + `</div>`
-    + `<div class="canvas-card-meta">unowned · ${count}</div>`
-    + `</div>`;
-}
-
 /* -- Interactions ------------------------------------------------------- */
 
 function _canvasAttachInteractions(groupName) {
@@ -468,9 +465,6 @@ function _canvasShowCardMenu(x, y, kind, id, groupName) {
     items.push({ label: 'Rename…', action: `openEditCell('${safeId}')` });
     items.push({ separator: true });
     items.push({ label: 'Remove', action: `removeAgent('${safeId}')`, danger: true });
-  } else if (kind === 'standalone') {
-    items.push({ label: 'New engineer (standalone)', action: `openAddEngineerForSection('${g}', '')` });
-    items.push({ label: 'New worker (standalone)', action: `openAddWorkerForSection('${g}')` });
   }
   if (items.length === 0) return;
   showContextMenu(x, y, items);

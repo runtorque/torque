@@ -9929,34 +9929,39 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 .canvas-connector--loose::after {
   background: repeating-linear-gradient(90deg, var(--border) 0 4px, transparent 4px 8px);
 }
-.canvas-loose-label {
-  color: var(--text-dim);
-  font-size: 11px;
-  margin: 0 12px;
-  letter-spacing: 0.04em;
-}
 
-/* Worker manifold = trunk going down off engineer + horizontal bar of workers */
+/* Worker manifold = horizontal trunk that connects the engineer card
+   directly to the worker bar. The trunk butts up against both edges
+   (no flex gap, no margin/padding insets) so the line visually joins
+   the engineer to the workers instead of floating between them. */
 .canvas-worker-manifold {
-  position: relative;
   display: flex;
   align-items: center;
-  margin-left: 24px;
 }
 .canvas-manifold-trunk {
-  width: 24px;
+  width: 28px;
   height: 2px;
   background: var(--border);
-  flex: 0 0 24px;
-}
-.canvas-manifold-trunk--loose {
-  background: repeating-linear-gradient(90deg, var(--border) 0 4px, transparent 4px 8px);
+  flex: 0 0 28px;
 }
 .canvas-worker-bar {
   display: flex;
   align-items: center;
+  gap: 8px;
+}
+
+/* Loose engineers and loose workers — unparented, no spine, just sit
+   on the canvas alongside the architect trees. */
+.canvas-loose-engineer {
+  display: flex;
+  align-items: center;
+  min-height: 72px;
+}
+.canvas-loose-workers {
+  display: flex;
+  flex-wrap: wrap;
   gap: 10px;
-  padding-left: 8px;
+  align-items: center;
 }
 
 /* Cards */
@@ -10033,13 +10038,6 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
   min-width: 132px;
   border-left: 3px solid #79c0ff;
 }
-.canvas-card-standalone {
-  min-width: 156px;
-  border-left: 3px dashed var(--text-dim);
-  background: transparent;
-  opacity: 0.95;
-}
-
 /* Inline add affordances */
 .canvas-add-worker, .canvas-add-inline {
   background: transparent;
