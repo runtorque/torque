@@ -52,6 +52,9 @@ _DEFAULT_LANES = list(_RESERVED_LANES)
 AGENT_TOMBSTONE_RETENTION_SECONDS = 7 * 86400
 AGENT_MESSAGE_HISTORY_LIMIT = 100
 PEER_MESSAGE_CACHE_LIMIT = 20
+ENGINEER_DISPATCH_SHAPE_EVENT_LIMIT = 100
+_ENGINEER_DISPATCH_SHAPE_ORDER = ("serial", "batch", "warm_cluster")
+_ENGINEER_DISPATCH_SHAPES = set(_ENGINEER_DISPATCH_SHAPE_ORDER)
 _VERIFICATION_MODES = {"", "deploy", "restart"}
 _VERIFICATION_STATES = {"", "pending", "attempted", "passed", "failed"}
 _ENGINEER_AUTONOMY_MODES = {
@@ -1502,6 +1505,11 @@ class MatrixState:
         self.engineer_settings: dict[str, EngineerSettings] = {}
         self.agent_digest_settings: dict[str, AgentDigestSettings] = {}
         self.engineer_worklog: dict[str, list[dict]] = {}
+        # In-memory only per-Engineer dispatch-shape ring buffer. This is an
+        # advisory read model for live dispatch-affordance metrics; it is not
+        # persisted and intentionally does not appear in snapshots.
+        self.engineer_dispatch_shapes: dict[str, list[dict]] = {}
+        self._engineer_dispatch_shape_seq: int = 0
         # Newest-first per-agent user message recall cache. The durable source
         # of truth is SQLite; this cache is intentionally bounded for live
         # deltas and snapshot assembly.
@@ -2215,6 +2223,155 @@ class MatrixState:
                     author_cell_id=engineer_id,
                 )
         return snapshot
+
+    def record_engineer_dispatch_shape(
+            self,
+            engineer_id: str,
+            *,
+            group: str = "",
+            source_tool: str = "",
+            shape: str = "",
+            task_ids: Optional[list[str]] = None,
+            task_count: Optional[int] = None,
+            outcome: str = "",
+            hintable: bool = False,
+            metadata: Optional[dict] = None,
+            timestamp: str = "") -> dict:
+        """Record one in-memory dispatch-shape metric event.
+
+        Events are newest-first and capped per Engineer. This read model is
+        intentionally volatile and used only for recent affordance metrics.
+        """
+        engineer_id = str(engineer_id or "").strip()
+        if not engineer_id:
+            return {}
+        normalized_shape = str(shape or "").strip()
+        if normalized_shape not in _ENGINEER_DISPATCH_SHAPES:
+            raise ValueError(f"invalid engineer dispatch shape: {shape!r}")
+        normalized_source = str(source_tool or "").strip()
+        if not normalized_source:
+            raise ValueError("source_tool is required")
+        normalized_task_ids = [
+            str(tid or "").strip()
+            for tid in (task_ids or [])
+            if str(tid or "").strip()
+        ]
+        if task_count is None:
+            normalized_task_count = len(normalized_task_ids)
+        else:
+            try:
+                normalized_task_count = max(0, int(task_count))
+            except (TypeError, ValueError):
+                normalized_task_count = len(normalized_task_ids)
+        self._engineer_dispatch_shape_seq += 1
+        record = {
+            "id": self._engineer_dispatch_shape_seq,
+            "timestamp": (
+                str(timestamp or "").strip()
+                or datetime.now(timezone.utc).isoformat()
+            ),
+            "engineer_id": engineer_id,
+            "group": str(group or "").strip(),
+            "source_tool": normalized_source,
+            "shape": normalized_shape,
+            "task_ids": normalized_task_ids,
+            "task_count": normalized_task_count,
+            "outcome": str(outcome or "").strip() or "ok",
+            "hintable": bool(hintable),
+            "metadata": copy.deepcopy(metadata)
+            if isinstance(metadata, dict)
+            else {},
+        }
+        events = self.engineer_dispatch_shapes.setdefault(engineer_id, [])
+        events.insert(0, record)
+        del events[ENGINEER_DISPATCH_SHAPE_EVENT_LIMIT:]
+        return copy.deepcopy(record)
+
+    def engineer_dispatch_shape_events(
+            self,
+            engineer_id: str,
+            group: str = "",
+            limit: int = 20,
+            include_derives: bool = True) -> list[dict]:
+        """Return recent dispatch-shape events for an Engineer."""
+        engineer_id = str(engineer_id or "").strip()
+        if not engineer_id:
+            return []
+        group = str(group or "").strip()
+        try:
+            limit_int = int(limit)
+        except (TypeError, ValueError):
+            limit_int = 20
+        if limit_int == 0:
+            return []
+        events = []
+        for event in self.engineer_dispatch_shapes.get(engineer_id, []):
+            if group and str(event.get("group", "") or "") != group:
+                continue
+            if (
+                    not include_derives
+                    and str(event.get("source_tool", "") or "")
+                    == "torque_derive"):
+                continue
+            events.append(copy.deepcopy(event))
+            if limit_int >= 0 and len(events) >= limit_int:
+                break
+        return events
+
+    def engineer_dispatch_shape_summary(
+            self,
+            engineer_id: str,
+            group: str = "",
+            window: int = 20) -> dict:
+        """Return compact recent dispatch-shape counts for an Engineer."""
+        try:
+            window_int = max(0, int(window))
+        except (TypeError, ValueError):
+            window_int = 20
+        events = self.engineer_dispatch_shape_events(
+            engineer_id,
+            group=group,
+            limit=ENGINEER_DISPATCH_SHAPE_EVENT_LIMIT,
+            include_derives=True,
+        )
+        direct_events = [
+            event for event in events
+            if str(event.get("source_tool", "") or "") != "torque_derive"
+        ][:window_int]
+        derive_events = [
+            event for event in events
+            if str(event.get("source_tool", "") or "") == "torque_derive"
+        ][:window_int]
+        counts = {shape: 0 for shape in _ENGINEER_DISPATCH_SHAPE_ORDER}
+        derives_by_shape = {
+            shape: 0 for shape in _ENGINEER_DISPATCH_SHAPE_ORDER
+        }
+        for event in direct_events:
+            shape = str(event.get("shape", "") or "")
+            if shape in counts:
+                counts[shape] += 1
+        for event in derive_events:
+            shape = str(event.get("shape", "") or "")
+            if shape in derives_by_shape:
+                derives_by_shape[shape] += 1
+        summary = {
+            "window": window_int,
+            "total": len(direct_events),
+            "counts": counts,
+            "hintable_serial": sum(
+                1 for event in direct_events
+                if event.get("shape") == "serial" and event.get("hintable")
+            ),
+            "derives_total": len(derive_events),
+            "derives_by_shape": derives_by_shape,
+        }
+        selected_events = events[:window_int] if window_int else []
+        if selected_events:
+            summary["last_event_at"] = selected_events[0].get("timestamp", "")
+            summary["oldest_event_at"] = selected_events[-1].get(
+                "timestamp", ""
+            )
+        return summary
 
     def to_dict_compact(self) -> dict:
         """Return an opt-in compact snapshot for new lazy-loading clients.

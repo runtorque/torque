@@ -3940,3 +3940,167 @@ class DetachedPanelsStateTests(unittest.TestCase):
             state.detached_panels["engineer"]["label"],
             "panel-engineer-abc123",
         )
+
+
+class EngineerDispatchShapeStateTests(unittest.TestCase):
+    def setUp(self):
+        _install_aiohttp_stub()
+        self.state_mod = importlib.import_module("torque.state")
+        self.state_mod = importlib.reload(self.state_mod)
+
+    def test_records_newest_first_and_caps_per_engineer_without_snapshot(self):
+        state = self.state_mod.MatrixState()
+
+        for idx in range(105):
+            state.record_engineer_dispatch_shape(
+                "engineer-1",
+                group="g",
+                source_tool="engineer_task_dispatch",
+                shape="serial",
+                task_ids=[f"task-{idx}"],
+                hintable=True,
+            )
+        state.record_engineer_dispatch_shape(
+            "engineer-2",
+            group="g",
+            source_tool="engineer_task_dispatch",
+            shape="batch",
+            task_ids=["other-task"],
+            task_count=1,
+        )
+
+        events = state.engineer_dispatch_shape_events(
+            "engineer-1",
+            limit=200,
+        )
+        self.assertEqual(len(events), 100)
+        self.assertEqual(events[0]["task_ids"], ["task-104"])
+        self.assertEqual(events[-1]["task_ids"], ["task-5"])
+        self.assertEqual(
+            state.engineer_dispatch_shape_events("engineer-2")[0]["shape"],
+            "batch",
+        )
+        self.assertNotIn("engineer_dispatch_shapes", state.to_dict())
+        self.assertNotIn("engineer_dispatch_shapes", state.to_dict_compact())
+
+    def test_summary_counts_direct_dispatches_separately_from_derives(self):
+        state = self.state_mod.MatrixState()
+        state.record_engineer_dispatch_shape(
+            "engineer-1",
+            group="g",
+            source_tool="engineer_task_dispatch",
+            shape="serial",
+            task_ids=["serial-1"],
+            hintable=True,
+        )
+        state.record_engineer_dispatch_shape(
+            "engineer-1",
+            group="g",
+            source_tool="engineer_task_dispatch",
+            shape="serial",
+            task_ids=["serial-override"],
+            hintable=False,
+            metadata={"has_launch_overrides": True},
+        )
+        state.record_engineer_dispatch_shape(
+            "engineer-1",
+            group="g",
+            source_tool="engineer_batch_dispatch",
+            shape="batch",
+            task_ids=["batch-1", "batch-2"],
+            task_count=2,
+        )
+        state.record_engineer_dispatch_shape(
+            "engineer-1",
+            group="g",
+            source_tool="engineer_task_dispatch",
+            shape="warm_cluster",
+            task_ids=["warm-1"],
+        )
+        state.record_engineer_dispatch_shape(
+            "engineer-1",
+            group="g",
+            source_tool="torque_derive",
+            shape="serial",
+            task_ids=["derive-serial"],
+        )
+        state.record_engineer_dispatch_shape(
+            "engineer-1",
+            group="g",
+            source_tool="torque_derive",
+            shape="warm_cluster",
+            task_ids=["derive-warm"],
+        )
+        state.record_engineer_dispatch_shape(
+            "engineer-1",
+            group="other",
+            source_tool="engineer_task_dispatch",
+            shape="serial",
+            task_ids=["other-group"],
+            hintable=True,
+        )
+
+        summary = state.engineer_dispatch_shape_summary(
+            "engineer-1",
+            group="g",
+            window=20,
+        )
+
+        self.assertEqual(summary["total"], 4)
+        self.assertEqual(
+            summary["counts"],
+            {"serial": 2, "batch": 1, "warm_cluster": 1},
+        )
+        self.assertEqual(summary["hintable_serial"], 1)
+        self.assertEqual(summary["derives_total"], 2)
+        self.assertEqual(
+            summary["derives_by_shape"],
+            {"serial": 1, "batch": 0, "warm_cluster": 1},
+        )
+        direct_events = state.engineer_dispatch_shape_events(
+            "engineer-1",
+            group="g",
+            limit=20,
+            include_derives=False,
+        )
+        self.assertEqual(
+            {event["source_tool"] for event in direct_events},
+            {"engineer_task_dispatch", "engineer_batch_dispatch"},
+        )
+
+    def test_record_rejects_unknown_shape(self):
+        state = self.state_mod.MatrixState()
+
+        with self.assertRaises(ValueError):
+            state.record_engineer_dispatch_shape(
+                "engineer-1",
+                source_tool="engineer_task_dispatch",
+                shape="parallelish",
+            )
+
+    def test_dispatch_shape_events_are_not_persisted_on_reload(self):
+        from torque.db import TorqueDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = TorqueDB(Path(tmp.name) / "torque.db")
+        db.init()
+        self.addCleanup(db.close)
+
+        state = self.state_mod.MatrixState(db=db)
+        state.record_engineer_dispatch_shape(
+            "engineer-1",
+            group="g",
+            source_tool="engineer_task_dispatch",
+            shape="serial",
+            task_ids=["task-1"],
+            hintable=True,
+        )
+
+        reloaded = self.state_mod.MatrixState(db=db)
+        reloaded.load()
+
+        self.assertEqual(
+            reloaded.engineer_dispatch_shape_events("engineer-1"),
+            [],
+        )

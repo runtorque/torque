@@ -82,6 +82,19 @@ _ARCHITECT_EVENTS_RECENT_MESSAGE_LIMIT = 120
 _ARCHITECT_EVENTS_RECENT_RESPONSE_LIMIT = 10_000
 _ARCHITECT_TASK_CHAIN_NODE_LIMIT = 50
 _ARCHITECT_TASK_LIST_DEFAULT_LIMIT = 100
+_DISPATCH_SHAPE_VALID_BATCH_STATUSES = {
+    "dispatched",
+    "queued",
+    "deferred",
+    "cap_raised",
+}
+_TASK_DISPATCH_LAUNCH_OVERRIDE_ARGS = (
+    "name",
+    "agent_type",
+    "command",
+    "model",
+    "reasoning_effort",
+)
 
 # ---------------------------------------------------------------------------
 # Shared scoping helpers
@@ -100,6 +113,62 @@ def normalize_tool_name(name: str, tool_prefix: str) -> str:
     if prefix and str(name or "").startswith(prefix):
         return str(name)[len(prefix):]
     return str(name or "")
+
+
+def _record_engineer_dispatch_shape(state, **kwargs):
+    recorder = getattr(state, "record_engineer_dispatch_shape", None)
+    if not callable(recorder):
+        return None
+    try:
+        return recorder(**kwargs)
+    except Exception:
+        log.exception("Failed to record engineer dispatch shape metric")
+        return None
+
+
+def _has_task_dispatch_launch_overrides(args: dict) -> bool:
+    return any(
+        bool(str(args.get(key, "") or "").strip())
+        for key in _TASK_DISPATCH_LAUNCH_OVERRIDE_ARGS
+    )
+
+
+def _batch_dispatch_shape(valid_entries: list[dict]) -> tuple[str, dict]:
+    agent_group_counts: dict[str, int] = {}
+    statuses: dict[str, int] = {}
+    task_ids: list[str] = []
+    for entry in valid_entries:
+        status = str(entry.get("status", "") or "").strip()
+        if status:
+            statuses[status] = statuses.get(status, 0) + 1
+        task_id = str(entry.get("task_id", "") or "").strip()
+        if task_id:
+            task_ids.append(task_id)
+        agent_group = str(entry.get("agent_group", "") or "").strip()
+        if agent_group:
+            agent_group_counts[agent_group] = (
+                agent_group_counts.get(agent_group, 0) + 1
+            )
+    clustered_entry_count = sum(
+        count for count in agent_group_counts.values()
+        if count > 1
+    )
+    valid_entry_count = len(valid_entries)
+    shape = (
+        "warm_cluster"
+        if clustered_entry_count
+        else "batch"
+        if valid_entry_count > 1
+        else "serial"
+    )
+    metadata = {
+        "entry_count": valid_entry_count,
+        "statuses": statuses,
+        "agent_group_counts": agent_group_counts,
+        "clustered_entry_count": clustered_entry_count,
+        "independent_entry_count": valid_entry_count - clustered_entry_count,
+    }
+    return shape, {"task_ids": task_ids, "metadata": metadata}
 
 
 def tool_name_with_prefix(tool_prefix: str, suffix: str) -> str:
@@ -3429,6 +3498,36 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         result = await handle_command(payload)
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
+        result_type = str((result or {}).get("type", "") or "ok")
+        if (
+                caller_kind == "engineer"
+                and result_type != "dispatch_action_missing"):
+            has_launch_overrides = _has_task_dispatch_launch_overrides(args)
+            existing_agent = bool(agent_ident)
+            shape = "warm_cluster" if existing_agent else "serial"
+            task_ids = [
+                str((result or {}).get("task_id", "") or tid).strip()
+            ]
+            _record_engineer_dispatch_shape(
+                real_state,
+                engineer_id=_engineer_cell.id,
+                group=_engineer_group,
+                source_tool="engineer_task_dispatch",
+                shape=shape,
+                task_ids=task_ids,
+                task_count=1,
+                outcome=result_type,
+                hintable=(
+                    shape == "serial"
+                    and not existing_agent
+                    and not has_launch_overrides
+                ),
+                metadata={
+                    "existing_agent": existing_agent,
+                    "has_launch_overrides": has_launch_overrides,
+                    "target_agent_id": str(payload.get("agent_id", "") or ""),
+                },
+            )
         return json.dumps(result) if result else '{"type":"ok"}', False
 
     if tool_name == "batch_dispatch":
@@ -3733,6 +3832,34 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             "active_after": len(active_agents),
             "results": results,
         }
+        valid_entries = [
+            item for item in results
+            if str(item.get("status", "") or "")
+            in _DISPATCH_SHAPE_VALID_BATCH_STATUSES
+        ]
+        if caller_kind == "engineer" and valid_entries:
+            shape, shape_data = _batch_dispatch_shape(valid_entries)
+            metadata = dict(shape_data.get("metadata", {}))
+            metadata.update({
+                "raw_entry_count": len(raw_tasks),
+                "result_count": len(results),
+                "max_concurrent": max_concurrent,
+                "active_before": active_before,
+                "active_after": len(active_agents),
+                "provider": provider,
+            })
+            _record_engineer_dispatch_shape(
+                real_state,
+                engineer_id=_engineer_cell.id,
+                group=_engineer_group,
+                source_tool="engineer_batch_dispatch",
+                shape=shape,
+                task_ids=shape_data.get("task_ids", []),
+                task_count=len(valid_entries),
+                outcome="ok",
+                hintable=False,
+                metadata=metadata,
+            )
         return json.dumps(payload), False
 
     if tool_name == "task_resolve":

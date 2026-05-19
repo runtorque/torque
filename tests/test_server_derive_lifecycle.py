@@ -542,13 +542,16 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_first_feature_review_derive_creates_new_agent(self):
         state = self._make_state()
+        engineer = self._make_agent("engineer-1")
+        engineer.kind = "engineer"
         implementer = self._make_agent(
             "impl-1",
             status="running",
             current_task_id="task-root",
         )
+        state.agents[engineer.id] = engineer
         state.agents[implementer.id] = implementer
-        state.groups["g"].append(implementer.id)
+        state.groups["g"].extend([engineer.id, implementer.id])
         state.board_add_task(
             "Implement feature",
             "g",
@@ -556,6 +559,7 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
             id="task-root",
             action_name="feature/implement",
             agent_id=implementer.id,
+            assigned_engineer_id=engineer.id,
         )
         calls, dispatch = self._recording_dispatch(state)
         handle_command = self._extract_handle_command(state, dispatch)
@@ -572,3 +576,52 @@ class ServerReviewAgentReuseDeriveTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(result["agent_id"], implementer.id)
         self.assertTrue(calls[0]["create_agent"])
         self.assertNotIn("agent_id", calls[0])
+        summary = state.engineer_dispatch_shape_summary(engineer.id)
+        self.assertEqual(summary["total"], 0)
+        self.assertEqual(summary["derives_by_shape"]["serial"], 1)
+        event = state.engineer_dispatch_shape_events(engineer.id)[0]
+        self.assertEqual(event["source_tool"], "torque_derive")
+        self.assertEqual(event["shape"], "serial")
+        self.assertFalse(event["hintable"])
+        self.assertEqual(event["metadata"]["parent_task_id"], "task-root")
+
+    async def test_reuse_self_derive_records_warm_cluster_shape(self):
+        state = self._make_state()
+        engineer = self._make_agent("engineer-1")
+        engineer.kind = "engineer"
+        implementer = self._make_agent(
+            "impl-1",
+            status="running",
+            current_task_id="task-root",
+        )
+        state.agents[engineer.id] = engineer
+        state.agents[implementer.id] = implementer
+        state.groups["g"].extend([engineer.id, implementer.id])
+        state.board_add_task(
+            "Implement feature",
+            "g",
+            lane="In Progress",
+            id="task-root",
+            action_name="feature/adhoc",
+            agent_id=implementer.id,
+            assigned_engineer_id=engineer.id,
+        )
+        calls, dispatch = self._recording_dispatch(state)
+        handle_command = self._extract_handle_command(state, dispatch)
+
+        result = await handle_command({
+            "cmd": "ai_report",
+            "cell_id": implementer.id,
+            "action": "derive",
+            "message": "Self-review this small change",
+            "reuse_self": True,
+        })
+
+        self.assertEqual(result["type"], "ok")
+        self.assertEqual(result["agent_id"], implementer.id)
+        self.assertEqual(calls[0]["agent_id"], implementer.id)
+        event = state.engineer_dispatch_shape_events(engineer.id)[0]
+        self.assertEqual(event["source_tool"], "torque_derive")
+        self.assertEqual(event["shape"], "warm_cluster")
+        self.assertEqual(event["metadata"]["target_agent_id"], implementer.id)
+        self.assertTrue(event["metadata"]["reuse_self"])
