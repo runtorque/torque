@@ -587,13 +587,14 @@ ENGINEER_TOOLS = [
             "Boot N workers simultaneously for independent tasks. Use when "
             "tasks have no inter-dependencies and parallel velocity > "
             "review-boundary granularity. Independent entries start separate "
-            "workers up to `max_concurrent`, this batch's active-worker cap; "
-            "excess entries persistently queue and auto-dispatch as slots "
-            "open. Use shared `agent_group` for a warm-cluster queue on one "
-            "agent instead. Example: batch three disjoint research or test "
-            "hardening tasks; prefer serial `engineer_task_dispatch` for "
-            "implement→review→fix checkpoints, or a warm cluster for tightly "
-            "coupled follow-ups that should share one branch."
+            "workers up to `max_concurrent`, this batch's engineer-group "
+            "active-worker cap; excess entries persistently queue and "
+            "auto-dispatch as slots open. Use shared `agent_group` for a "
+            "warm-cluster queue on one agent instead. Example: batch three "
+            "disjoint research or test hardening tasks; prefer serial "
+            "`engineer_task_dispatch` for implement→review→fix checkpoints, "
+            "or a warm cluster for tightly coupled follow-ups that should "
+            "share one branch."
         ),
         "inputSchema": {
             "type": "object",
@@ -604,8 +605,10 @@ ENGINEER_TOOLS = [
                         "Ordered task entries. Each item must include "
                         "a task ID or legacy alias and may include an "
                         "agent_group string to keep related tasks on "
-                        "the same agent. Deferred entries keep their "
-                        "order across restart."
+                        "the same agent. Independent entries without a "
+                        "shared agent_group can launch in parallel up to "
+                        "max_concurrent. Deferred entries keep their order "
+                        "across restart."
                     ),
                     "items": {
                         "type": "object",
@@ -617,10 +620,12 @@ ENGINEER_TOOLS = [
                             "agent_group": {
                                 "type": "string",
                                 "description": (
-                                    "Optional warm-cluster affinity key. "
-                                    "Entries with the same value share a "
-                                    "single agent within this batch instead "
-                                    "of booting independent workers."
+                                    "Optional warm-cluster same-agent "
+                                    "affinity key. Entries with the same "
+                                    "value share a single agent within this "
+                                    "batch instead of booting independent "
+                                    "workers; this is not a capacity or "
+                                    "concurrency group."
                                 ),
                             },
                         },
@@ -631,9 +636,10 @@ ENGINEER_TOOLS = [
                     "type": "integer",
                     "description": (
                         "Per-batch active-worker cap, applied against the "
-                        "engineer group's currently active workers. If "
-                        "omitted, Torque uses the group's stored Engineer "
-                        "default."
+                        "engineer group's currently active non-engineer "
+                        "workers. This is not an agent_group affinity cap. "
+                        "If omitted, Torque uses the group's stored "
+                        "Engineer default."
                     ),
                 },
                 "provider": {

@@ -1115,6 +1115,33 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertEqual(dep.archived_at, "2026-04-07T10:00:00+00:00")
         self.assertFalse(state.board_deps_met(state.board_tasks["task-1"]))
 
+    def test_auto_dispatch_queue_raise_max_concurrent_only_raises(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        state.board_add_task("Queued", "g", id="task-queued")
+        entry = state.auto_dispatch_queue_add(
+            "g", "task-queued", max_concurrent=1
+        )
+
+        raised_entry, changed = state.auto_dispatch_queue_raise_max_concurrent(
+            "g", "task-queued", 3
+        )
+
+        self.assertTrue(changed)
+        self.assertIs(raised_entry, entry)
+        self.assertEqual(entry.max_concurrent, 3)
+        lower_entry, changed = state.auto_dispatch_queue_raise_max_concurrent(
+            "g", "task-queued", 2
+        )
+        self.assertFalse(changed)
+        self.assertIs(lower_entry, entry)
+        self.assertEqual(entry.max_concurrent, 3)
+        missing_entry, changed = state.auto_dispatch_queue_raise_max_concurrent(
+            "other", "task-queued", 4
+        )
+        self.assertFalse(changed)
+        self.assertIsNone(missing_entry)
+
     def test_load_restores_auto_dispatch_queue_and_busy_agents(self):
         from torque.db import TorqueDB
 
