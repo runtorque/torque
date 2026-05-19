@@ -3158,8 +3158,7 @@ function _agentPanelArchitectMessages(agent) {
   return _agentPanelMessagesHtml(
     agent,
     _agentPanelArchitectMessageList(agent),
-    '',
-    { composeHtml: _agentPanelArchitectPeerComposeHtml(agent) }
+    ''
   );
 }
 

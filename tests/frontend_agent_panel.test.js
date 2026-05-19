@@ -934,7 +934,7 @@ test('architect Messages tab renders peer-message affordances and context refs',
   assert.match(panel.innerHTML, /decision-1 · Use direct peer messages/);
 });
 
-test('architect Messages compose sends peer message with ack-required and context attachments', () => {
+test('architect Messages tab does not render peer compose controls or request peer list', () => {
   const { context, panel, sendCalls } = createHarness();
   context.state.agents = {
     'arch-1': {
@@ -955,36 +955,21 @@ test('architect Messages compose sends peer message with ack-required and contex
   };
   context.focusedItemId = 'arch-1';
   context.agentPanelSelectTab('messages');
-  assert.match(panel.innerHTML, /Send peer message/);
 
-  context.agentPanelPeerComposeInput('arch-1', 'peer_id', 'arch-2');
-  context.agentPanelPeerComposeInput('arch-1', 'message', 'Please review the API boundary.');
-  context.agentPanelPeerComposeToggle('arch-1', true);
-  context.agentPanelPeerComposeInput('arch-1', 'context_task_ids', 'TORQUE:1, TORQUE:2');
-  context.agentPanelPeerComposeInput('arch-1', 'context_engineer_ids', 'eng-1');
-  context.agentPanelPeerComposeInput('arch-1', 'context_decision_ids', 'decision-1');
-  context.agentPanelPeerComposeInput('arch-1', 'context_summary', 'Ownership is ambiguous.');
-  context.agentPanelPeerComposeSubmit({
-    preventDefault() {},
-    stopPropagation() {},
-  }, 'arch-1');
-
-  const peerMessageCalls = sendCalls.filter((call) => call.cmd === 'architect_peer_message');
-  assert.equal(peerMessageCalls.length, 1);
-  const sent = JSON.parse(JSON.stringify(peerMessageCalls[0]));
-  assert.equal(sent.sender_architect_id, 'arch-1');
-  assert.equal(sent.architect_id, 'arch-2');
-  assert.equal(sent.message, 'Please review the API boundary.');
-  assert.equal(sent.ack_required, true);
-  assert.deepEqual(sent.context_task_ids, ['TORQUE:1', 'TORQUE:2']);
-  assert.deepEqual(sent.context_engineer_ids, ['eng-1']);
-  assert.deepEqual(sent.context_decision_ids, ['decision-1']);
-  assert.equal(sent.context_summary, 'Ownership is ambiguous.');
-  assert.ok(/^ui-peer-arch-1-/.test(sent.idempotency_key));
+  assert.doesNotMatch(panel.innerHTML, /agent-panel-peer-compose/);
+  assert.doesNotMatch(panel.innerHTML, /agent-panel-peer-select/);
+  assert.doesNotMatch(panel.innerHTML, /agent-panel-peer-compose-body/);
+  assert.doesNotMatch(panel.innerHTML, /agent-panel-peer-compose-ack/);
+  assert.doesNotMatch(panel.innerHTML, /agent-panel-peer-context/);
+  assert.doesNotMatch(panel.innerHTML, /agent-panel-peer-send/);
+  assert.doesNotMatch(panel.innerHTML, /Send peer message/);
+  assert.doesNotMatch(panel.innerHTML, /Attach context/);
+  assert.equal(sendCalls.some((call) => call.cmd === 'architect_peer_list'), false);
+  assert.equal(sendCalls.some((call) => call.cmd === 'architect_peer_message'), false);
 });
 
-test('architect Messages compose draft survives peer-message rerenders', () => {
-  const { context, panel } = createHarness();
+test('architect Messages peer-message rerenders remain display-only', () => {
+  const { context, panel, sendCalls } = createHarness();
   context.state.agents = {
     'arch-1': {
       id: 'arch-1',
@@ -1004,9 +989,6 @@ test('architect Messages compose draft survives peer-message rerenders', () => {
   };
   context.focusedItemId = 'arch-1';
   context.agentPanelSelectTab('messages');
-  context.agentPanelPeerComposeInput('arch-1', 'peer_id', 'arch-2');
-  context.agentPanelPeerComposeInput('arch-1', 'message', 'Draft survives deltas');
-  context.agentPanelPeerComposeToggle('arch-1', true);
 
   context.state.agents['arch-1'].mcp_messages = [
     {
@@ -1015,15 +997,20 @@ test('architect Messages compose draft survives peer-message rerenders', () => {
       message: 'Fresh peer update',
       timestamp: 200,
       peer_id: 'arch-2',
+      peer_kind: 'architect',
       direction: 'received',
+      ack_required: true,
     },
   ];
   context.renderAgentPanel();
 
-  assert.match(panel.innerHTML, /Draft survives deltas/);
-  assert.match(panel.innerHTML, /value="arch-2" selected/);
-  assert.match(panel.innerHTML, /agent-panel-peer-ack-arch-1" type="checkbox" checked/);
   assert.match(panel.innerHTML, /Fresh peer update/);
+  assert.match(panel.innerHTML, /Peer Architect · alpha/);
+  assert.match(panel.innerHTML, /Ack required/);
+  assert.doesNotMatch(panel.innerHTML, /agent-panel-peer-compose/);
+  assert.doesNotMatch(panel.innerHTML, /Send peer message/);
+  assert.equal(sendCalls.some((call) => call.cmd === 'architect_peer_list'), false);
+  assert.equal(sendCalls.some((call) => call.cmd === 'architect_peer_message'), false);
 });
 
 test('worker Messages tab renders inline task thread entries', () => {
