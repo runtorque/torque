@@ -2363,8 +2363,6 @@ function _renderOrphanEngineersStrata(groupName, userSection, renderCell, opts) 
     + ' data-section-key="user">';
   if (rows.length) {
     for (const row of rows) html += _renderEngineerRow(row, renderCell);
-  } else {
-    html += '<div class="agent-section-empty-msg">No orphan engineers.</div>';
   }
   html += _renderSectionControlsSlot(groupName, userSection, opts);
   html += '</div>';
@@ -2390,9 +2388,6 @@ function _renderOrphanWorkersStrata(groupName, userSection, renderCell, opts) {
   html += '<div class="agent-band-body agent-band-body--orphan-workers agent-section-body"'
     + ' data-agent-section-column="body"'
     + ' data-section-key="workers">';
-  if (!workers.length) {
-    html += '<div class="agent-section-empty-msg">No orphan workers.</div>';
-  }
   html += _renderStandaloneWorkersStrip(userSection, renderCell, opts);
   html += '</div>';
   html += '</section>';

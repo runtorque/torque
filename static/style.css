@@ -1218,7 +1218,7 @@ body.runtime-embedded .agent-focus-header {
   display: grid;
   grid-template-columns: var(--agent-architect-column-width) minmax(var(--agent-engineer-column-width), 1fr);
   column-gap: 7px;
-  align-items: stretch;
+  align-items: start;
 }
 .agent-band--orphan-engineers,
 .agent-band--orphan-workers {
@@ -1226,13 +1226,13 @@ body.runtime-embedded .agent-focus-header {
 }
 .agent-band-anchor--architect {
   display: flex;
-  align-items: stretch;
+  align-items: flex-start;
   width: var(--agent-architect-column-width);
   min-width: 0;
 }
 .agent-band-anchor--architect > .cell {
   width: 100%;
-  min-height: 100%;
+  min-height: var(--agent-card-height, 96px);
   box-sizing: border-box;
 }
 .agent-band-body {
@@ -1285,7 +1285,7 @@ body.runtime-embedded .agent-focus-header {
 .agent-band--architect {
   display: grid;
   grid-template-columns: var(--agent-architect-column-width) minmax(var(--agent-engineer-column-width), 1fr);
-  align-items: stretch;
+  align-items: start;
 }
 .agent-band--orphan-engineers,
 .agent-band--orphan-workers {

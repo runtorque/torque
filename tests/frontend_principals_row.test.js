@@ -172,14 +172,16 @@ test('stratified grid renders architects, orphan engineers, and orphan workers r
   assert.match(mainEl.innerHTML, /data-agent-strata="workers"[\s\S]*loose-workers-strip[\s\S]*Loose Worker[\s\S]*\+ Add Worker/);
 });
 
-test('empty strata still render headings, empty copy, and creation controls', () => {
+test('empty strata render headings and creation controls without orphan empty copy', () => {
   const { context, mainEl } = createHarness();
 
   vm.runInContext('render();', context);
 
   assert.match(mainEl.innerHTML, /data-agent-strata="architects"[\s\S]*No architects yet\.[\s\S]*\+ New Architect/);
-  assert.match(mainEl.innerHTML, /data-agent-strata="engineers"[\s\S]*No orphan engineers\.[\s\S]*\+ New Engineer/);
-  assert.match(mainEl.innerHTML, /data-agent-strata="workers"[\s\S]*No orphan workers\.[\s\S]*\+ Add Worker/);
+  assert.match(mainEl.innerHTML, /data-agent-strata="engineers"[\s\S]*\+ New Engineer/);
+  assert.match(mainEl.innerHTML, /data-agent-strata="workers"[\s\S]*\+ Add Worker/);
+  assert.doesNotMatch(mainEl.innerHTML, /No orphan engineers\./);
+  assert.doesNotMatch(mainEl.innerHTML, /No orphan workers\./);
   assert.match(mainEl.innerHTML, /openAddArchitectForGroup\(&quot;torque&quot;\)/);
   assert.match(mainEl.innerHTML, /openAddEngineerForSection\(&quot;torque&quot;,&quot;&quot;\)/);
   assert.match(mainEl.innerHTML, /openAddWorkerForSection\(&quot;torque&quot;\)/);
@@ -247,6 +249,15 @@ test('stratified grid CSS defines strata, architect bands, wrapping workers, and
   assert.match(css, /\.agent-strata\s*\{[\s\S]*flex-direction:\s*column;/);
   assert.match(css, /\.agent-strata-heading\s*\{[\s\S]*text-transform:\s*uppercase;/);
   assert.match(css, /\.agent-band--architect\s*\{[\s\S]*grid-template-columns:\s*var\(--agent-architect-column-width\)\s+minmax\(var\(--agent-engineer-column-width\),\s*1fr\)/);
+  const architectBandBlocks = [...css.matchAll(/\.agent-band--architect\s*\{[^}]*\}/g)].map(match => match[0]);
+  assert.ok(architectBandBlocks.length >= 1, 'architect band CSS should be present');
+  for (const block of architectBandBlocks) {
+    assert.match(block, /align-items:\s*start;/);
+    assert.doesNotMatch(block, /align-items:\s*stretch;/);
+  }
+  assert.match(css, /\.agent-band-anchor--architect\s*\{[^}]*align-items:\s*flex-start;/s);
+  assert.match(css, /\.agent-band-anchor--architect > \.cell\s*\{[^}]*min-height:\s*var\(--agent-card-height,\s*96px\);/s);
+  assert.doesNotMatch(css, /\.agent-band-anchor--architect > \.cell\s*\{[^}]*min-height:\s*100%;/s);
   assert.match(css, /\.agent-band-body\.agent-section-body\s*\{[\s\S]*display:\s*flex;[\s\S]*flex-direction:\s*column;/);
   assert.match(css, /\.agent-grid \.engineer-row\s*\{[\s\S]*align-items:\s*stretch;/);
   assert.match(css, /\.engineer-row-workers,\s*\.loose-workers-strip\s*\{[\s\S]*flex-wrap:\s*wrap;/);

@@ -17995,7 +17995,9 @@ test('user section + New Engineer ghost submits a user-hired engineer without ar
   runInContext(context, `render();`);
 
   assert.match(main.innerHTML, /data-agent-section="user"/);
-  assert.match(main.innerHTML, /data-agent-strata="engineers"[\s\S]*No orphan engineers/);
+  assert.match(main.innerHTML, /data-agent-strata="engineers"[\s\S]*\+ New Engineer/);
+  assert.doesNotMatch(main.innerHTML, /No orphan engineers\./);
+  assert.doesNotMatch(main.innerHTML, /No orphan workers\./);
   assert.match(main.innerHTML, /agent-section-body[\s\S]*class="ghost-card ghost-card--engineer"/);
   assert.match(main.innerHTML, /class="ghost-card ghost-card--engineer"/);
   assert.match(main.innerHTML, /data-hired-by-architect-id=""/);
@@ -18142,6 +18144,8 @@ test('orphan Workers stratum Add Worker affordance survives delta rerenders and 
   );
   assert.match(main.innerHTML, /class="ghost-card ghost-card--engineer[\s\S]*\+ New Engineer/);
   assert.match(main.innerHTML, /class="ghost-card ghost-card--worker standalone-worker-card-new[\s\S]*\+ Add Worker/);
+  assert.doesNotMatch(main.innerHTML, /No orphan engineers\./);
+  assert.doesNotMatch(main.innerHTML, /No orphan workers\./);
 });
 
 test('stratified grid renders Architects stratum + architect card + New Architect anchor', () => {
@@ -18175,6 +18179,16 @@ test('stratified grid renders Architects stratum + architect card + New Architec
 
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
   assert.match(css, /\.agent-band--architect\s*\{[\s\S]*grid-template-columns:\s*var\(--agent-architect-column-width\)/);
+
+  const architectBandBlocks = [...css.matchAll(/\.agent-band--architect\s*\{[^}]*\}/g)].map(match => match[0]);
+  assert.ok(architectBandBlocks.length >= 1, 'architect band CSS should be present');
+  for (const block of architectBandBlocks) {
+    assert.match(block, /align-items:\s*start;/);
+    assert.doesNotMatch(block, /align-items:\s*stretch;/);
+  }
+  assert.match(css, /\.agent-band-anchor--architect\s*\{[^}]*align-items:\s*flex-start;/s);
+  assert.match(css, /\.agent-band-anchor--architect > \.cell\s*\{[^}]*min-height:\s*var\(--agent-card-height,\s*96px\);/s);
+  assert.doesNotMatch(css, /\.agent-band-anchor--architect > \.cell\s*\{[^}]*min-height:\s*100%;/s);
 });
 
 test('user-section + New Architect ghost opens the group-scoped architect modal', () => {
