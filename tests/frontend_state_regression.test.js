@@ -16993,6 +16993,29 @@ test('agent focus split auto-sizes to content until the viewport cap', () => {
     'auto mode caps the panel near 45vh so large details do not push out the grid');
 });
 
+test('agent focus split auto-size measures intrinsic content below current scroll viewport', () => {
+  const { context, document } = createMainRenderHarness();
+  const main = document.getElementById('main');
+  const parts = attachAgentSplitDom(main, document, '');
+  const header = new FakeElement('agent-focus-header');
+  const body = new FakeElement('agent-focus-body');
+  header.getBoundingClientRect = () => ({ top: 0, bottom: 30, left: 0, right: 320, width: 320, height: 30 });
+  body.getBoundingClientRect = () => ({ top: 30, bottom: 110, left: 0, right: 320, width: 320, height: 80 });
+  parts.focusScroll.appendChild(header);
+  parts.focusScroll.appendChild(body);
+  parts.focusScroll.clientHeight = 274;
+  parts.focusScroll.offsetHeight = 274;
+  parts.focusScroll.scrollHeight = 274;
+  parts.focus.style.flexBasis = '274px';
+  parts.focus.style.height = '274px';
+
+  runInContext(context, `_agentFocusApplyPersistedSplit();`);
+
+  assert.equal(parts.focus.style.flexBasis, '120px',
+    'content shorter than the current 100%-height scroll viewport should shrink to the minimum');
+  assert.equal(parts.focus.style.height, '120px');
+});
+
 test('agent focus split collapse persists and the handle reopens at content-fit height', () => {
   const { context, document } = createMainRenderHarness();
   const main = document.getElementById('main');

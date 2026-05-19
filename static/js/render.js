@@ -220,8 +220,32 @@ function _agentFocusAutoMaxHeight(totalHeight, handleHeight) {
   return Math.max(AGENT_FOCUS_MIN_HEIGHT, cap);
 }
 
+function _agentFocusStylePx(el, prop) {
+  if (!el || typeof getComputedStyle !== 'function') return 0;
+  const raw = getComputedStyle(el)[prop];
+  const value = parseFloat(raw);
+  return Number.isFinite(value) ? value : 0;
+}
+
 function _agentFocusContentHeight(parts) {
   if (!parts || !parts.focusScroll) return AGENT_FOCUS_MIN_HEIGHT;
+  const children = parts.focusScroll.children || [];
+  if (children.length) {
+    let measured = _agentFocusStylePx(parts.focusScroll, 'paddingTop')
+      + _agentFocusStylePx(parts.focusScroll, 'paddingBottom');
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i];
+      if (!child) continue;
+      const rect = child.getBoundingClientRect ? child.getBoundingClientRect() : null;
+      const childHeight = rect && rect.height
+        ? rect.height
+        : (Number(child.offsetHeight) || Number(child.scrollHeight) || Number(child.clientHeight) || 0);
+      measured += Math.max(0, childHeight)
+        + _agentFocusStylePx(child, 'marginTop')
+        + _agentFocusStylePx(child, 'marginBottom');
+    }
+    if (measured > 0) return Math.max(AGENT_FOCUS_MIN_HEIGHT, Math.ceil(measured));
+  }
   const scroll = Number(parts.focusScroll.scrollHeight) || 0;
   const offset = Number(parts.focusScroll.offsetHeight) || 0;
   const client = Number(parts.focusScroll.clientHeight) || 0;
