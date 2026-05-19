@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Verify every Tauri generate_handler command has a matching local permission."""
+import json
 import re
 import sys
 from pathlib import Path
@@ -79,6 +80,16 @@ def iter_permission_entries(permissions_dir):
                     yield identifier.group(1), command
 
 
+def iter_capability_permissions(capabilities_dir):
+    for json_file in sorted(capabilities_dir.rglob("*.json")):
+        payload = json.loads(json_file.read_text(encoding="utf-8"))
+        for entry in payload.get("permissions", []):
+            if isinstance(entry, str):
+                yield entry, json_file
+            elif isinstance(entry, dict) and isinstance(entry.get("identifier"), str):
+                yield entry["identifier"], json_file
+
+
 def expected_identifier(command):
     return f"allow-{command.replace('_', '-')}"
 
@@ -90,20 +101,40 @@ def main():
         handlers.setdefault(command, []).append((path, line))
 
     permissions = set(iter_permission_entries(repo / "src-tauri" / "permissions"))
-    missing = [cmd for cmd in sorted(handlers) if (expected_identifier(cmd), cmd) not in permissions]
-    if not missing:
+    capabilities = {}
+    for identifier, path in iter_capability_permissions(repo / "src-tauri" / "capabilities"):
+        capabilities.setdefault(identifier, []).append(path)
+
+    missing_permissions = [
+        cmd for cmd in sorted(handlers) if (expected_identifier(cmd), cmd) not in permissions
+    ]
+    missing_capabilities = [
+        cmd for cmd in sorted(handlers) if expected_identifier(cmd) not in capabilities
+    ]
+    if not missing_permissions and not missing_capabilities:
         print(f"Tauri permissions lint passed ({len(handlers)} command handlers checked).")
         return 0
 
-    print("Missing Tauri command permissions:", file=sys.stderr)
-    for command in missing:
-        locations = ", ".join(f"{p.relative_to(repo)}:{line}" for p, line in handlers[command])
-        print(f"  - {command} ({locations})", file=sys.stderr)
-        print(
-            f'    expected [[permission]] identifier = "{expected_identifier(command)}" '
-            f'with commands.allow = ["{command}"] under src-tauri/permissions/*.toml',
-            file=sys.stderr,
-        )
+    if missing_permissions:
+        print("Missing Tauri command permissions:", file=sys.stderr)
+        for command in missing_permissions:
+            locations = ", ".join(f"{p.relative_to(repo)}:{line}" for p, line in handlers[command])
+            print(f"  - {command} ({locations})", file=sys.stderr)
+            print(
+                f'    expected [[permission]] identifier = "{expected_identifier(command)}" '
+                f'with commands.allow = ["{command}"] under src-tauri/permissions/*.toml',
+                file=sys.stderr,
+            )
+    if missing_capabilities:
+        print("Missing Tauri capability references:", file=sys.stderr)
+        for command in missing_capabilities:
+            locations = ", ".join(f"{p.relative_to(repo)}:{line}" for p, line in handlers[command])
+            print(f"  - {command} ({locations})", file=sys.stderr)
+            print(
+                f'    expected "{expected_identifier(command)}" in '
+                "src-tauri/capabilities/*.json permissions",
+                file=sys.stderr,
+            )
     return 1
 
 
