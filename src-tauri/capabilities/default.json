@@ -15,10 +15,13 @@
     "allow-focus-window",
     "allow-reattach",
     "allow-reattach-all",
+    "allow-close-window",
     "allow-list-detached",
     "allow-current-window-bounds",
     "allow-reveal-log-dir",
     "allow-open-external",
+    "allow-open-cheatsheet",
+    "allow-confirm",
     "allow-runtime-config"
   ]
 }

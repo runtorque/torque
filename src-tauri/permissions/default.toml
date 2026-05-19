@@ -21,6 +21,11 @@ description = "Allow the frontend to reattach all detached panel windows."
 commands.allow = ["reattach_all"]
 
 [[permission]]
+identifier = "allow-close-window"
+description = "Allow the frontend to close or reattach the active native window."
+commands.allow = ["close_window"]
+
+[[permission]]
 identifier = "allow-list-detached"
 description = "Allow the frontend to list detached panel windows."
 commands.allow = ["list_detached"]
@@ -39,6 +44,16 @@ commands.allow = ["reveal_log_dir"]
 identifier = "allow-open-external"
 description = "Allow the frontend to open validated external HTTP(S) links."
 commands.allow = ["open_external"]
+
+[[permission]]
+identifier = "allow-open-cheatsheet"
+description = "Allow the frontend to open the native cheatsheet view."
+commands.allow = ["open_cheatsheet"]
+
+[[permission]]
+identifier = "allow-confirm"
+description = "Allow the frontend to use Torque's native confirmation seam."
+commands.allow = ["confirm"]
 
 [[permission]]
 identifier = "allow-runtime-config"

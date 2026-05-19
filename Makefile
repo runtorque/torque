@@ -24,7 +24,7 @@ PERF_PYTHON    ?= $(PERF_VENV)/bin/python
 # Test recipes must not inherit Torque runtime/agent env from worker shells.
 SANITIZE_TORQUE_TEST_ENV = env $$(env | sed -n 's/^\(TORQUE_[A-Za-z0-9_]*\)=.*/-u \1/p')
 
-.PHONY: install uninstall run deps desktop-deps check stop deploy autolaunch cli standalone standalone-bg desktop desktop-attach tauri-dev tauri-build tauri-build-mac open test perf-deps perf-baseline perf-delta
+.PHONY: install uninstall run deps desktop-deps check stop deploy autolaunch cli standalone standalone-bg desktop desktop-attach tauri-dev tauri-build tauri-build-mac open lint lint-tauri-permissions test perf-deps perf-baseline perf-delta
 
 ## install: Set up the iTerm2 script project and copy all files
 install:
@@ -396,8 +396,15 @@ check:
 		&& echo "Installed:    yes" \
 		|| echo "Installed:    no (run: make install)"
 
+## lint: Run repository lint checks
+lint: lint-tauri-permissions
+
+## lint-tauri-permissions: Ensure every registered Tauri command has a local permission
+lint-tauri-permissions:
+	@python3 scripts/lint_tauri_permissions.py
+
 ## test: Run the automated regression suite
-test:
+test: lint
 	@$(SANITIZE_TORQUE_TEST_ENV) python3 -m unittest discover -s tests -v
 
 ## perf-deps: Prepare the cached Python environment used by perf harness targets
