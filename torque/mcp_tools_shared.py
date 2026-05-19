@@ -22,7 +22,11 @@ from datetime import datetime, timezone
 from .config import log
 from .deploy_state import architect_deploy_state_payload
 from .digest_routing import resolve_digest_recipients
-from .mcp_retry import derive_idempotency_key
+from .mcp_retry import (
+    derive_idempotency_key,
+    is_mcp_pr_phase,
+    is_mcp_pr_phase_retryable,
+)
 from .mcp_engineer_tools.shared import (
     active_worker_ids as _active_worker_ids,
     blocked_dependency_titles as _blocked_dependency_titles,
@@ -2820,11 +2824,135 @@ def _resolve_stream_payload(streams: list[dict], *, stream_ident: str = "",
     )
 
 
+def _worktree_result_pr_url(result: dict | None) -> str:
+    result = result or {}
+    pr = result.get("pr")
+    if not isinstance(pr, dict):
+        pr = {}
+    return str(
+        result.get("pr_url")
+        or result.get("url")
+        or pr.get("url")
+        or ""
+    ).strip()
+
+
+def _worktree_result_phase(result: dict | None) -> str:
+    result = result or {}
+    phase = str(result.get("phase") or "").strip()
+    if phase:
+        return phase
+    pr = result.get("pr")
+    if isinstance(pr, dict):
+        return str(pr.get("phase") or "").strip()
+    return ""
+
+
+def _worktree_result_error(result: dict | None, fallback: str = "") -> str:
+    result = result or {}
+    return str(
+        result.get("error")
+        or result.get("message")
+        or fallback
+        or "Merge failed"
+    ).strip()
+
+
+def _format_worktree_pr_error(result: dict | None,
+                              fallback: str = "Merge failed"
+                              ) -> tuple[str, bool | None]:
+    """Return an MCP-facing error string plus optional cacheability.
+
+    ``False`` cacheability marks transient PR transport/API phases as
+    retryable through the MCP idempotency layer; ``None`` preserves the
+    normal cache policy for deterministic errors.
+    """
+    result = result or {}
+    error = _worktree_result_error(result, fallback)
+    phase = _worktree_result_phase(result)
+    pr_url = _worktree_result_pr_url(result)
+    retryable = (
+        is_mcp_pr_phase_retryable(phase, error)
+        if is_mcp_pr_phase(phase)
+        else False
+    )
+    context = []
+    if phase:
+        context.append(f"phase={phase}")
+    if pr_url:
+        context.append(f"pr_url={pr_url}")
+    if phase and is_mcp_pr_phase(phase):
+        context.append(f"retryable={'true' if retryable else 'false'}")
+    if context:
+        error = f"{error}\n\nPR context: " + ", ".join(context)
+    return error, False if retryable else None
+
+
+def _worktree_merge_success_payload(result: dict | None, cell) -> dict:
+    result = result or {}
+    cleanup = result.get("cleanup", {})
+    if not isinstance(cleanup, dict):
+        cleanup = {}
+    mode = str(result.get("mode") or "direct").strip() or "direct"
+    pending = bool(result.get("pending"))
+    pr_url = _worktree_result_pr_url(result)
+    payload = {
+        "type": "ok",
+        "message": str(result.get("message") or "").strip(),
+        "mode": mode,
+        "pr_url": pr_url,
+        "pending": pending,
+        "sha": str(result.get("sha") or "").strip(),
+        "cleanup": cleanup,
+    }
+    if not payload["message"]:
+        if mode == "pull_request":
+            if pending:
+                payload["message"] = (
+                    "Pull request is open with auto-merge pending."
+                )
+            else:
+                payload["message"] = (
+                    f"Squash-merged {cell.worktree_branch} into "
+                    f"{cell.worktree_base_branch}"
+                )
+        else:
+            payload["message"] = (
+                f"Merged {cell.worktree_branch} into "
+                f"{cell.worktree_base_branch}"
+            )
+    if "merged" in result:
+        payload["merged"] = bool(result.get("merged"))
+    elif mode == "pull_request":
+        payload["merged"] = bool(payload["sha"]) and not pending
+    if "url" in result:
+        payload["url"] = str(result.get("url") or "").strip()
+    if isinstance(result.get("pr"), dict):
+        payload["pr"] = result["pr"]
+    if "force_direct" in result:
+        payload["force_direct"] = bool(result.get("force_direct"))
+    if result.get("warning"):
+        payload["warning"] = str(result.get("warning") or "")
+    if isinstance(result.get("workflow_breach"), dict):
+        payload["workflow_breach"] = result["workflow_breach"]
+    if isinstance(result.get("stale_base"), dict):
+        payload["stale_base"] = result["stale_base"]
+    if result.get("stale_base_warning"):
+        payload["stale_base_warning"] = str(
+            result.get("stale_base_warning") or ""
+        )
+    return payload
+
+
 async def dispatch_scoped_tool(name, args, handle_command, state, *,
                                tool_prefix: str, caller_kind: str,
                                caller_id: str,
                                idempotency_key: str = ""):
-    """Execute a scoped orchestration tool call and return (text, is_error)."""
+    """Execute a scoped tool call.
+
+    Returns ``(text, is_error)`` or ``(text, is_error, cacheable)`` when the
+    MCP idempotency layer should not cache a recoverable refusal.
+    """
 
     _engineer_cell, _engineer_group, caller_kind, auth_error, auth_structured = authorize_caller(
         state, caller_kind=caller_kind, caller_id=caller_id
@@ -5563,13 +5691,15 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             payload["auto_move_to_done"] = bool(
                 args.get("auto_move_to_done")
             )
+        if "force_direct" in args:
+            payload["force_direct"] = bool(args.get("force_direct"))
         if force_stale_base:
             payload["force_stale_base"] = True
         if force_sibling_divergence:
             payload["force"] = True
         result = await handle_command(payload)
         if result and result.get("ok") is False:
-            error = result.get("error", "Merge failed")
+            error, cacheable = _format_worktree_pr_error(result, "Merge failed")
             if "conflict" in error.lower():
                 fresh_check, _, _ = await _run_worktree_merge_check(
                     handle_command, agent_id
@@ -5589,6 +5719,8 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                     f"{tool_name_with_prefix(tool_prefix, 'merge')}. "
                     "Ask the human only if the rebase still fails."
                 ), True
+            if cacheable is False:
+                return error, True, False
             return error, True
         cleanup = result.get("cleanup", {}) if result else {}
         cleanup_errors = cleanup.get("errors", [])
@@ -5598,13 +5730,9 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 f"{cell.worktree_base_branch}, but cleanup failed:\n"
                 + "\n".join(f"  - {err}" for err in cleanup_errors)
             ), True
-        return json.dumps({
-            "type": "ok",
-            "message": f"Merged {cell.worktree_branch} into "
-                       f"{cell.worktree_base_branch}",
-            "sha": result.get("sha", ""),
-            "cleanup": cleanup,
-        }), False
+        return json.dumps(
+            _worktree_merge_success_payload(result, cell)
+        ), False
 
     if tool_name == "rebase":
         agent_ident = args.get("agent", "")
@@ -5686,12 +5814,26 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             payload["body"] = body
         result = await handle_command(payload)
         if result and result.get("error"):
-            return result["error"], True
-        return json.dumps({
+            error, cacheable = _format_worktree_pr_error(
+                result,
+                "Failed to create pull request",
+            )
+            if cacheable is False:
+                return error, True, False
+            return error, True
+        pr_url = _worktree_result_pr_url(result)
+        payload = {
             "type": "ok",
-            "url": result.get("url", ""),
-            "message": result.get("message", "PR created"),
-        }), False
+            "url": pr_url,
+            "pr_url": pr_url,
+            "message": (result or {}).get("message", "PR created"),
+        }
+        phase = _worktree_result_phase(result)
+        if phase:
+            payload["phase"] = phase
+        if isinstance((result or {}).get("pr"), dict):
+            payload["pr"] = result["pr"]
+        return json.dumps(payload), False
 
     if tool_name == "diff":
         agent_ident = args.get("agent", "")

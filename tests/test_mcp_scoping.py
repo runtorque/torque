@@ -427,6 +427,108 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
             ["worktree_check_merge", "worktree_merge"],
         )
 
+    async def test_engineer_merge_returns_pr_pending_success_shape(self):
+        state = self._make_state()
+        alice = self._add_engineer(state, "eng-alice", "Alice")
+        worker = self._add_worker(state, "worker-a", "Alice Worker", alice.id)
+        worker.worktree_path = "/tmp/worker-a"
+        worker.worktree_branch = "torque/alice/worker-a"
+        worker.worktree_base_branch = "main"
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            if payload["cmd"] == "worktree_check_merge":
+                return {
+                    "type": "worktree_check_merge",
+                    "id": worker.id,
+                    "clean": True,
+                    "conflicts": [],
+                }
+            if payload["cmd"] == "worktree_merge":
+                self.assertNotIn("force_direct", payload)
+                return {
+                    "type": "worktree_merge",
+                    "id": worker.id,
+                    "ok": True,
+                    "mode": "pull_request",
+                    "pending": True,
+                    "merged": False,
+                    "pr_url": "https://github.com/acme/repo/pull/7",
+                    "url": "https://github.com/acme/repo/pull/7",
+                    "pr": {
+                        "url": "https://github.com/acme/repo/pull/7",
+                        "number": 7,
+                        "status": "pending",
+                    },
+                    "message": "Pull request is open with auto-merge pending.",
+                }
+            self.fail(f"Unexpected command: {payload}")
+
+        text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_merge",
+            {"agent": worker.id},
+            fake_handle_command,
+            state,
+            caller_id=alice.id,
+        )
+
+        self.assertFalse(is_error, text)
+        payload = json.loads(text)
+        self.assertEqual(payload["type"], "ok")
+        self.assertEqual(payload["mode"], "pull_request")
+        self.assertEqual(payload["pr_url"], "https://github.com/acme/repo/pull/7")
+        self.assertTrue(payload["pending"])
+        self.assertFalse(payload["merged"])
+        self.assertEqual(payload["sha"], "")
+        self.assertEqual(payload["pr"]["number"], 7)
+        self.assertEqual(
+            [call["cmd"] for call in calls],
+            ["worktree_check_merge", "worktree_merge"],
+        )
+
+    async def test_engineer_merge_pr_error_includes_phase_and_url(self):
+        state = self._make_state()
+        alice = self._add_engineer(state, "eng-alice", "Alice")
+        worker = self._add_worker(state, "worker-a", "Alice Worker", alice.id)
+        worker.worktree_path = "/tmp/worker-a"
+        worker.worktree_branch = "torque/alice/worker-a"
+        worker.worktree_base_branch = "main"
+
+        async def fake_handle_command(payload):
+            if payload["cmd"] == "worktree_check_merge":
+                return {
+                    "type": "worktree_check_merge",
+                    "id": worker.id,
+                    "clean": True,
+                    "conflicts": [],
+                }
+            if payload["cmd"] == "worktree_merge":
+                return {
+                    "type": "worktree_merge",
+                    "id": worker.id,
+                    "ok": False,
+                    "mode": "pull_request",
+                    "phase": "pr_merge",
+                    "pr_url": "https://github.com/acme/repo/pull/7",
+                    "error": "GitHub reported the PR is not mergeable.",
+                }
+            self.fail(f"Unexpected command: {payload}")
+
+        text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_merge",
+            {"agent": worker.id},
+            fake_handle_command,
+            state,
+            caller_id=alice.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertIn("not mergeable", text)
+        self.assertIn("phase=pr_merge", text)
+        self.assertIn("pr_url=https://github.com/acme/repo/pull/7", text)
+        self.assertIn("retryable=false", text)
+
     async def test_engineer_rebase_allows_stale_base_precheck_to_clear_gate(self):
         state = self._make_state()
         alice = self._add_engineer(state, "eng-alice", "Alice")

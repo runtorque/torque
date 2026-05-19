@@ -479,6 +479,77 @@ class ReviewCycleBranchIsolationTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(calls[-1].get("force"))
 
+    async def test_engineer_merge_passes_force_direct_to_worktree_merge(self):
+        state = self.state_mod.MatrixState()
+        state.groups["torque"] = []
+        engineer = self.state_mod.AgentCell(
+            id="eng-1",
+            name="Engineer",
+            slug="engineer",
+            group="torque",
+            cell_type="agent",
+            kind="engineer",
+            status="running",
+        )
+        worker = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker",
+            slug="worker",
+            group="torque",
+            cell_type="agent",
+            kind="worker",
+            owner_engineer_id=engineer.id,
+            created_by_engineer_id=engineer.id,
+            status="idle",
+            worktree_path="/tmp/worker",
+            worktree_branch="torque/worker",
+            worktree_base_branch="main",
+        )
+        state.agents[engineer.id] = engineer
+        state.agents[worker.id] = worker
+        state.groups["torque"].extend([engineer.id, worker.id])
+        calls = []
+
+        async def handle_command(payload):
+            calls.append(dict(payload))
+            if payload["cmd"] == "worktree_check_merge":
+                return {
+                    "type": "worktree_check_merge",
+                    "id": worker.id,
+                    "clean": True,
+                    "conflicts": [],
+                }
+            if payload["cmd"] == "worktree_merge":
+                self.assertTrue(payload.get("force_direct"))
+                return {
+                    "type": "worktree_merge",
+                    "id": worker.id,
+                    "ok": True,
+                    "sha": "abc123",
+                    "cleanup": {"errors": []},
+                    "force_direct": True,
+                }
+            self.fail(f"Unexpected command: {payload}")
+
+        text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_merge",
+            {"agent": worker.id, "force_direct": True},
+            handle_command,
+            state,
+            caller_id=engineer.id,
+        )
+
+        self.assertFalse(is_error, text)
+        payload = json.loads(text)
+        self.assertEqual(payload["sha"], "abc123")
+        self.assertEqual(payload["mode"], "direct")
+        self.assertTrue(payload["force_direct"])
+        self.assertEqual(
+            [call["cmd"] for call in calls],
+            ["worktree_check_merge", "worktree_merge"],
+        )
+        self.assertTrue(calls[-1].get("force_direct"))
+
     async def test_engineer_merge_passes_auto_move_override_to_worktree_merge(self):
         state = self.state_mod.MatrixState()
         state.groups["torque"] = []

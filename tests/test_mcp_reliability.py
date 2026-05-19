@@ -21,6 +21,7 @@ from torque.mcp_retry import (
     ensure_mcp_payload_idempotency,
     is_api_write_command,
     is_mcp_write_tool,
+    is_mcp_pr_phase_retryable,
     replay_failed_writes,
     retry_async,
 )
@@ -56,6 +57,36 @@ class MCPRetryHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(attempts, [1, 2, 3, 4])
         self.assertEqual(retries, [(1, "TimeoutError"), (2, "TimeoutError"), (3, "TimeoutError")])
         self.assertEqual(sleeps, [0.5, 1.5, 3.0])
+
+    def test_pr_phase_retry_classification(self):
+        transient_error = "network timeout while contacting GitHub"
+        expected = {
+            "github_preflight": False,
+            "github_remote": True,
+            "remote_base_sync": True,
+            "push_branch": True,
+            "pr_create": True,
+            "pr_merge": True,
+        }
+        for phase, retryable in expected.items():
+            with self.subTest(phase=phase):
+                self.assertEqual(
+                    is_mcp_pr_phase_retryable(phase, transient_error),
+                    retryable,
+                )
+
+        self.assertFalse(
+            is_mcp_pr_phase_retryable(
+                "pr_merge",
+                "GitHub reported a merge conflict.",
+            )
+        )
+        self.assertFalse(
+            is_mcp_pr_phase_retryable(
+                "remote_base_sync",
+                "Local main cannot be fast-forwarded; resolve divergence.",
+            )
+        )
 
     def test_architect_task_update_is_scoped_write_tool(self):
         self.assertTrue(is_mcp_write_tool("architect_task_update"))
@@ -239,6 +270,113 @@ class MCPIdempotencyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(calls), 1)
         health = self.db.load_mcp_health_summary(since=0)
         self.assertEqual(health["totals"].get("dedupe"), 1)
+
+    async def test_engineer_merge_pr_phase_errors_cache_only_non_retryable(self):
+        engineer = AgentCell(
+            id="eng-1",
+            name="Engineer",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+        )
+        worker = AgentCell(
+            id="worker-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            kind="worker",
+            owner_engineer_id=engineer.id,
+            created_by_engineer_id=engineer.id,
+            worktree_path="/tmp/worker",
+            worktree_branch="torque/worker",
+            worktree_base_branch="main",
+        )
+        self.state.groups["g"] = [engineer.id, worker.id]
+        self.state.agents[engineer.id] = engineer
+        self.state.agents[worker.id] = worker
+
+        phases = {
+            "github_preflight": False,
+            "github_remote": True,
+            "remote_base_sync": True,
+            "push_branch": True,
+            "pr_create": True,
+            "pr_merge": True,
+        }
+        for phase, retryable in phases.items():
+            calls = []
+
+            async def handle_command(payload, *, phase=phase):
+                calls.append(dict(payload))
+                if payload["cmd"] == "worktree_check_merge":
+                    return {
+                        "type": "worktree_check_merge",
+                        "id": worker.id,
+                        "clean": True,
+                        "conflicts": [],
+                    }
+                if payload["cmd"] == "worktree_merge":
+                    return {
+                        "type": "worktree_merge",
+                        "id": worker.id,
+                        "ok": False,
+                        "mode": "pull_request",
+                        "phase": phase,
+                        "pr_url": "https://github.com/acme/repo/pull/7",
+                        "error": f"network timeout during {phase}",
+                    }
+                raise AssertionError(f"unexpected payload: {payload}")
+
+            body = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "engineer_merge",
+                    "arguments": {
+                        "agent": worker.id,
+                        IDEMPOTENCY_ARG: f"pr-phase-{phase}",
+                    },
+                },
+            }
+            first, status = await self.mcp.dispatch_mcp_rpc_body(
+                body,
+                cell_id=engineer.id,
+                handle_command=handle_command,
+                state=self.state,
+            )
+            self.assertEqual(status, 200)
+            self.assertTrue(first["result"]["isError"])
+            first_text = first["result"]["content"][0]["text"]
+            self.assertIn(f"phase={phase}", first_text)
+            self.assertIn(f"retryable={'true' if retryable else 'false'}", first_text)
+
+            retry_body = json.loads(json.dumps(body))
+            retry_body["id"] = 2
+            second, status = await self.mcp.dispatch_mcp_rpc_body(
+                retry_body,
+                cell_id=engineer.id,
+                handle_command=handle_command,
+                state=self.state,
+            )
+            self.assertEqual(status, 200)
+            self.assertTrue(second["result"]["isError"])
+            merge_calls = [
+                call for call in calls
+                if call.get("cmd") == "worktree_merge"
+            ]
+            if retryable:
+                self.assertEqual(len(merge_calls), 2, phase)
+                self.assertIsNone(
+                    self.db.load_mcp_idempotency(f"pr-phase-{phase}"),
+                    phase,
+                )
+            else:
+                self.assertEqual(len(merge_calls), 1, phase)
+                self.assertIsNotNone(
+                    self.db.load_mcp_idempotency(f"pr-phase-{phase}"),
+                    phase,
+                )
 
     async def test_architect_peer_message_retry_does_not_duplicate_row(self):
         arch_a = AgentCell(
