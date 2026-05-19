@@ -103,13 +103,23 @@ class SystemHealthMetricsTests(unittest.TestCase):
                 parent_task_id="root-clean",
                 created_at=_iso(now - 4000),
             ),
+            BoardTask(id="root-followup", task="Root with follow-up", group="g", created_at=_iso(now - 5000)),
+            BoardTask(
+                id="review-before-fix",
+                task="Review before fix",
+                group="g",
+                action_name="feature/review",
+                pipeline_root_id="root-followup",
+                parent_task_id="root-followup",
+                created_at=_iso(now - 3900),
+            ),
             BoardTask(
                 id="fix-after-single-review",
                 task="Follow-up fix without re-review",
                 group="g",
                 action_name="feature/fix-review",
-                pipeline_root_id="root-clean",
-                parent_task_id="review-clean",
+                pipeline_root_id="root-followup",
+                parent_task_id="review-before-fix",
                 created_at=_iso(now - 3500),
             ),
             BoardTask(id="root-fix", task="Root 2", group="g", created_at=_iso(now - 5000)),
@@ -146,11 +156,19 @@ class SystemHealthMetricsTests(unittest.TestCase):
         payload = state.system_health_metrics(window="24h", group="g", now=now)
 
         review = payload["summary"]["review_cycles"]
-        self.assertEqual(review["roots_count"], 2)
-        self.assertEqual(review["review_tasks"], 3)
+        self.assertEqual(review["roots_count"], 3)
+        self.assertEqual(review["review_tasks"], 4)
         self.assertEqual(review["first_pass_clean_count"], 1)
+        self.assertEqual(review["first_pass_clean_pct"], 1 / 3)
         self.assertEqual(review["fix_rounds"], 2)
-        self.assertEqual(sum(payload["series"]["reviews"]), 3)
+        by_root = {
+            item["pipeline_root_id"]: item
+            for item in payload["distributions"]["review_cycles"]
+        }
+        self.assertTrue(by_root["root-clean"]["first_pass_clean"])
+        self.assertFalse(by_root["root-followup"]["first_pass_clean"])
+        self.assertFalse(by_root["root-fix"]["first_pass_clean"])
+        self.assertEqual(sum(payload["series"]["reviews"]), 4)
 
     def test_merge_aggregation_uses_worktree_boundary_and_ignores_bad_times(self):
         now = 1_000_000.0

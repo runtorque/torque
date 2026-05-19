@@ -2048,7 +2048,7 @@ class MatrixState:
                 ):
                     fix_rounds += 1
             rounds = len(reviews)
-            is_clean = rounds == 1
+            is_clean = rounds == 1 and fix_rounds == 0
             if is_clean:
                 first_pass_clean += 1
             total_rounds += rounds
