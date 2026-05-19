@@ -1303,6 +1303,55 @@ def _normalize_worktree_boundary(boundary) -> dict:
         value = value.strip()
         if value:
             out[key] = value
+    pr = boundary.get("pr")
+    if not isinstance(pr, dict):
+        pr = boundary.get("pull_request")
+    if isinstance(pr, dict):
+        normalized_pr = {}
+        pr_text_keys = (
+            "provider",
+            "remote",
+            "base_branch",
+            "head_branch",
+            "head_sha",
+            "url",
+            "state",
+            "merge_state",
+            "created_at",
+            "updated_at",
+            "merged_at",
+            "merge_commit_sha",
+        )
+        for key in pr_text_keys:
+            value = pr.get(key, "")
+            if key == "head_branch" and not value:
+                value = pr.get("branch", "")
+            if value is None:
+                value = ""
+            if not isinstance(value, str):
+                value = str(value)
+            value = value.strip()
+            if value:
+                normalized_pr[key] = value
+        if pr.get("number") not in {"", None}:
+            try:
+                normalized_pr["number"] = int(pr.get("number"))
+            except (TypeError, ValueError):
+                normalized_pr["number"] = pr.get("number")
+        requested_cleanup = pr.get("requested_cleanup", {})
+        if isinstance(requested_cleanup, dict):
+            cleanup = {}
+            for key in (
+                    "close_agent_on_merge",
+                    "remove_worktree_on_merge",
+                    "auto_move_to_done",
+                    "preserve_merge_diff"):
+                if key in requested_cleanup:
+                    cleanup[key] = bool(requested_cleanup[key])
+            if cleanup:
+                normalized_pr["requested_cleanup"] = cleanup
+        if normalized_pr:
+            out["pr"] = normalized_pr
     return out
 
 

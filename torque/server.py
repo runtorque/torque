@@ -704,6 +704,34 @@ def _capture_worktree_merge_resume_targets(
     return merge_resume_targets
 
 
+def _worktree_merge_requested_cleanup(
+    state: MatrixState,
+    cell,
+    data: dict,
+    *,
+    preserve_merge_diff: bool,
+) -> dict:
+    legacy_close_flag = bool(data.get("close_on_merge"))
+    explicit_close = "close_agent_on_merge" in data
+    explicit_remove = "remove_worktree_on_merge" in data
+    if explicit_close or explicit_remove:
+        close_flag = bool(data.get("close_agent_on_merge"))
+        remove_flag = bool(data.get("remove_worktree_on_merge"))
+    elif legacy_close_flag:
+        close_flag = True
+        remove_flag = True
+    else:
+        close_flag, remove_flag = merge_cleanup_flags(
+            state.get_group_settings(cell.group).worktree_merge_cleanup
+        )
+    return {
+        "close_agent_on_merge": close_flag,
+        "remove_worktree_on_merge": remove_flag,
+        "auto_move_to_done": bool(data.get("auto_move_to_done", True)),
+        "preserve_merge_diff": bool(preserve_merge_diff),
+    }
+
+
 async def _finalize_successful_worktree_merge(
     *,
     state: MatrixState,
@@ -912,6 +940,12 @@ async def _run_direct_worktree_merge(
         )
     )
     merge_resume_targets = _capture_worktree_merge_resume_targets(state, cell)
+    requested_cleanup = _worktree_merge_requested_cleanup(
+        state,
+        cell,
+        data,
+        preserve_merge_diff=preserve_merge_diff,
+    )
     merge_result = await worktree_mgr.server_merge(cell, msg, squash=squash)
     if merge_result.get("ok"):
         result = await _finalize_successful_worktree_merge(
@@ -1044,6 +1078,12 @@ async def _run_pr_worktree_merge(
         )
     )
     merge_resume_targets = _capture_worktree_merge_resume_targets(state, cell)
+    requested_cleanup = _worktree_merge_requested_cleanup(
+        state,
+        cell,
+        data,
+        preserve_merge_diff=preserve_merge_diff,
+    )
 
     pushed = await worktree_mgr.github_push_branch(wt, remote, branch)
     if not pushed.get("ok"):
@@ -1082,7 +1122,12 @@ async def _run_pr_worktree_merge(
         branch=branch,
         status="created",
     )
-    _record_pr_metadata_on_latest_boundary(state, cell, pr_metadata)
+    _record_pr_metadata_on_latest_boundary(
+        state,
+        cell,
+        pr_metadata,
+        requested_cleanup=requested_cleanup,
+    )
 
     head_sha = str(pr_result.get("head_sha") or "").strip()
     if not head_sha:
@@ -1125,7 +1170,12 @@ async def _run_pr_worktree_merge(
             else "pending" if pending else "merge_failed"
         ),
     )
-    _record_pr_metadata_on_latest_boundary(state, cell, pr_metadata)
+    _record_pr_metadata_on_latest_boundary(
+        state,
+        cell,
+        pr_metadata,
+        requested_cleanup=requested_cleanup,
+    )
 
     if pending:
         result = {

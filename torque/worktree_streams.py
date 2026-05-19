@@ -18,6 +18,7 @@ from typing import Any, Iterable
 from .state import board_task_is_closed
 from .task_ids import parse_task_id
 from .worktree_boundaries import (
+    boundary_pr_metadata,
     branch_boundary_tasks,
     branch_key,
     queued_successor_tasks,
@@ -749,6 +750,11 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
 
     group_value = _stream_group(stream_tasks, owner_agent)
     latest_boundary_info = task_boundary(latest_boundary) if latest_boundary else {}
+    latest_boundary_pr = boundary_pr_metadata(latest_boundary_info)
+    latest_merged_commit_sha = (
+        str(latest_boundary_info.get("merge_commit_sha", "") or "").strip()
+        or str(latest_boundary_pr.get("merge_commit_sha", "") or "").strip()
+    )
     branch_exists_locally = _branch_exists_locally(
         repo_root,
         branch,
@@ -791,6 +797,11 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
         ),
         "latest_boundary_status": latest_boundary_info.get("status", "") or "",
         "latest_reviewed_commit_sha": latest_reviewed_commit_sha,
+        "latest_merged_commit_sha": latest_merged_commit_sha,
+        "pr": latest_boundary_pr,
+        "pr_url": latest_boundary_pr.get("url", ""),
+        "pr_state": latest_boundary_pr.get("state", ""),
+        "pr_head_sha": latest_boundary_pr.get("head_sha", ""),
         "active_review_task_id": getattr(active_review_task, "id", "") or "",
         "active_blocker_task_id": getattr(active_blocker_task, "id", "") or "",
         "state": stream_state,

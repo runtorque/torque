@@ -1857,7 +1857,15 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         boundary = task.worktree_boundary
         self.assertEqual(boundary["status"], "merged")
         self.assertEqual(boundary["merge_commit_sha"], "squash789")
-        self.assertEqual(boundary["pull_request"]["status"], "merged")
+        self.assertNotIn("pull_request", boundary)
+        self.assertEqual(boundary["pr"]["state"], "merged")
+        self.assertEqual(boundary["pr"]["merge_commit_sha"], "squash789")
+        self.assertEqual(boundary["pr"]["requested_cleanup"], {
+            "close_agent_on_merge": True,
+            "remove_worktree_on_merge": True,
+            "auto_move_to_done": True,
+            "preserve_merge_diff": False,
+        })
         self.assertEqual(task.lane, "Done")
         self.assertEqual(task.agent_id, "")
         self.assertEqual(worktree_mgr.sync_calls, 2)
@@ -1950,9 +1958,20 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(queued.lane, "To Do")
         boundary = task.worktree_boundary
         self.assertEqual(boundary["status"], "open")
-        self.assertEqual(boundary["pr_url"], "https://github.com/acme/repo/pull/7")
-        self.assertTrue(boundary["pr_pending"])
-        self.assertEqual(boundary["pull_request"]["status"], "pending")
+        self.assertNotIn("pull_request", boundary)
+        self.assertNotIn("pr_url", boundary)
+        self.assertEqual(
+            boundary["pr"]["url"],
+            "https://github.com/acme/repo/pull/7",
+        )
+        self.assertEqual(boundary["pr"]["state"], "auto_merge_enabled")
+        self.assertEqual(boundary["pr"]["merge_state"], "BLOCKED")
+        self.assertEqual(boundary["pr"]["requested_cleanup"], {
+            "close_agent_on_merge": True,
+            "remove_worktree_on_merge": True,
+            "auto_move_to_done": True,
+            "preserve_merge_diff": False,
+        })
         self.assertEqual(worktree_mgr.sync_calls, 1)
         merge_calls = [call for call in worktree_mgr.calls
                        if call[0] == "merge_pr"]
@@ -2007,7 +2026,9 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         boundary = task.worktree_boundary
         self.assertEqual(boundary["status"], "open")
         self.assertEqual(boundary["merge_commit_sha"], "")
-        self.assertEqual(boundary["pull_request"]["status"], "merge_failed")
+        self.assertNotIn("pull_request", boundary)
+        self.assertEqual(boundary["pr"]["state"], "blocked")
+        self.assertEqual(boundary["pr"]["merge_state"], "DIRTY")
         merge_calls = [call for call in worktree_mgr.calls
                        if call[0] == "merge_pr"]
         self.assertEqual([call[4] for call in merge_calls], [False])
