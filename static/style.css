@@ -3648,20 +3648,25 @@ body.runtime-embedded #standalone-right-rail {
 body.runtime-embedded .standalone-panel-zone-body > #panel-board,
 body.runtime-embedded .standalone-panel-zone-body > #panel-actions,
 body.runtime-embedded .standalone-panel-zone-body > #panel-templates,
+body.runtime-embedded .standalone-panel-zone-body > #panel-history,
 body.runtime-embedded .standalone-panel-zone-body > #panel-context,
 body.runtime-embedded .standalone-panel-zone-body > #panel-events,
 body.runtime-embedded .standalone-panel-zone-body > #panel-agent,
+body.runtime-embedded .standalone-panel-zone-body > #panel-supervisor,
 body.runtime-embedded .standalone-panel-zone-body > #panel-health,
 body.runtime-embedded .standalone-float-body > #panel-board,
 body.runtime-embedded .standalone-float-body > #panel-actions,
 body.runtime-embedded .standalone-float-body > #panel-templates,
+body.runtime-embedded .standalone-float-body > #panel-history,
 body.runtime-embedded .standalone-float-body > #panel-context,
 body.runtime-embedded .standalone-float-body > #panel-events,
 body.runtime-embedded .standalone-float-body > #panel-agent,
+body.runtime-embedded .standalone-float-body > #panel-supervisor,
 body.runtime-embedded .standalone-float-body > #panel-health {
   height: 100%;
   width: 100%;
   min-height: 0;
+  min-width: 0;
 }
 body.runtime-embedded.standalone-panel-dragging #standalone-bottom-dock,
 body.runtime-embedded.standalone-panel-dragging #standalone-right-rail {
@@ -6094,8 +6099,20 @@ body.runtime-embedded .board-empty-action:focus-visible {
 /* ------------------------------------------------------------------ */
 /* Agent history view                                                  */
 /* ------------------------------------------------------------------ */
+#panel-history {
+  display: flex;
+  flex-direction: column;
+  height: calc(100% - 5px);
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
 .agent-history-container {
-  flex: 1; overflow-y: auto; padding: 4px 6px;
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  overflow-y: auto;
+  padding: 4px 6px;
 }
 .ah-toolbar {
   display: flex; gap: 6px; align-items: center;
@@ -9588,13 +9605,17 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 #panel-supervisor {
   overflow: auto;
   min-height: 0;
+  min-width: 0;
   height: 100%;
+  width: 100%;
 }
 .supervisor-panel {
   display: flex;
   flex-direction: column;
   gap: 10px;
   min-height: 100%;
+  min-width: 0;
+  width: 100%;
   padding: 12px;
   color: var(--text);
 }
