@@ -632,6 +632,32 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("agent_type", await props_for("engineer_task_dispatch"))
         self.assertIn("provider", await props_for("engineer_batch_dispatch"))
 
+    async def test_engineer_batch_dispatch_schema_frames_parallel_waves(self):
+        tool = next(
+            t for t in self.mcp_mod.ENGINEER_TOOLS
+            if t["name"] == "engineer_batch_dispatch"
+        )
+        description = tool["description"]
+        props = tool["inputSchema"]["properties"]
+
+        self.assertIn("Boot N workers simultaneously", description)
+        self.assertIn(
+            "parallel velocity > review-boundary granularity",
+            description,
+        )
+        self.assertIn("this batch's active-worker cap", description)
+        self.assertIn("warm-cluster queue", description)
+        self.assertIn("prefer serial `engineer_task_dispatch`", description)
+        self.assertIn("implement→review→fix checkpoints", description)
+        agent_group_desc = (
+            props["tasks"]["items"]["properties"]["agent_group"]["description"]
+        )
+        self.assertIn("warm-cluster affinity key", agent_group_desc)
+        self.assertIn(
+            "Per-batch active-worker cap",
+            props["max_concurrent"]["description"],
+        )
+
     async def test_engineer_batch_dispatch_provider_reaches_dispatch_payload(self):
         state = self.state_mod.MatrixState()
         engineer = self.state_mod.AgentCell(

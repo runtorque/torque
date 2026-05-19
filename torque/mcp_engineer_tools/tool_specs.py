@@ -584,9 +584,16 @@ ENGINEER_TOOLS = [
     {
         "name": "engineer_batch_dispatch",
         "description": (
-            "Dispatch tasks in order with a concurrency cap; excess entries "
-            "persistently queue and auto-dispatch as slots open. Same "
-            "`agent_group` values share one agent."
+            "Boot N workers simultaneously for independent tasks. Use when "
+            "tasks have no inter-dependencies and parallel velocity > "
+            "review-boundary granularity. Independent entries start separate "
+            "workers up to `max_concurrent`, this batch's active-worker cap; "
+            "excess entries persistently queue and auto-dispatch as slots "
+            "open. Use shared `agent_group` for a warm-cluster queue on one "
+            "agent instead. Example: batch three disjoint research or test "
+            "hardening tasks; prefer serial `engineer_task_dispatch` for "
+            "implement→review→fix checkpoints, or a warm cluster for tightly "
+            "coupled follow-ups that should share one branch."
         ),
         "inputSchema": {
             "type": "object",
@@ -610,9 +617,10 @@ ENGINEER_TOOLS = [
                             "agent_group": {
                                 "type": "string",
                                 "description": (
-                                    "Optional grouping key. Entries "
-                                    "with the same value share a "
-                                    "single agent within this batch."
+                                    "Optional warm-cluster affinity key. "
+                                    "Entries with the same value share a "
+                                    "single agent within this batch instead "
+                                    "of booting independent workers."
                                 ),
                             },
                         },
@@ -622,8 +630,8 @@ ENGINEER_TOOLS = [
                 "max_concurrent": {
                     "type": "integer",
                     "description": (
-                        "Maximum number of active worker agents "
-                        "allowed in the group after this call. If "
+                        "Per-batch active-worker cap, applied against the "
+                        "engineer group's currently active workers. If "
                         "omitted, Torque uses the group's stored Engineer "
                         "default."
                     ),
