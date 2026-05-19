@@ -238,6 +238,123 @@ class MatrixStateCleanupTests(unittest.TestCase):
         if self.state_mod.orjson is not None:
             self.assertNotIn(": ", raw)
 
+    def test_load_seeds_architect_peer_message_caches_from_db(self):
+        from torque.db import TorqueDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = TorqueDB(Path(tmp.name) / "torque.db")
+        db.init()
+        self.addCleanup(db.close)
+
+        arch_a = self.state_mod.AgentCell(
+            id="arch-a",
+            name="Architect A",
+            group="g",
+            kind="architect",
+            cell_type="agent",
+        )
+        arch_b = self.state_mod.AgentCell(
+            id="arch-b",
+            name="Architect B",
+            group="g",
+            kind="architect",
+            cell_type="agent",
+        )
+        db.save_groups_and_members({"g": [arch_a.id, arch_b.id]}, {"g": "g"})
+        db.save_agent(arch_a)
+        db.save_agent(arch_b)
+        db.save_agent_peer_message({
+            "id": "msg-peer-1",
+            "thread_id": "msg-peer-1",
+            "group_name": "g",
+            "sender_id": arch_a.id,
+            "sender_kind": "architect",
+            "recipient_id": arch_b.id,
+            "recipient_kind": "architect",
+            "message": "Can you sanity-check this?",
+            "created_at": 123.0,
+            "ack_required": True,
+            "context_task_ids": ["TORQUE:1"],
+            "context_snapshot": {"tasks": [{"id": "TORQUE:1"}]},
+        })
+
+        state = self.state_mod.MatrixState(db=db)
+        state.load()
+
+        sender_entry = state.agents[arch_a.id].mcp_messages[0]
+        recipient_entry = state.agents[arch_b.id].mcp_messages[0]
+        self.assertEqual(sender_entry["id"], "msg-peer-1")
+        self.assertEqual(sender_entry["action"], "architect_peer_message")
+        self.assertEqual(sender_entry["direction"], "sent")
+        self.assertEqual(sender_entry["peer_id"], arch_b.id)
+        self.assertEqual(recipient_entry["direction"], "received")
+        self.assertEqual(recipient_entry["peer_id"], arch_a.id)
+        self.assertTrue(recipient_entry["ack_required"])
+        self.assertEqual(recipient_entry["context_task_ids"], ["TORQUE:1"])
+        self.assertEqual(
+            recipient_entry["context"]["snapshot"]["tasks"][0]["id"],
+            "TORQUE:1",
+        )
+
+    def test_save_peer_message_updates_caches_and_delivery_deltas(self):
+        from torque.db import TorqueDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = TorqueDB(Path(tmp.name) / "torque.db")
+        db.init()
+        self.addCleanup(db.close)
+
+        state = self.state_mod.MatrixState(db=db)
+        state.agents["arch-a"] = self.state_mod.AgentCell(
+            id="arch-a",
+            name="Architect A",
+            group="g",
+            kind="architect",
+            cell_type="agent",
+        )
+        state.agents["arch-b"] = self.state_mod.AgentCell(
+            id="arch-b",
+            name="Architect B",
+            group="g",
+            kind="architect",
+            cell_type="agent",
+        )
+
+        saved = state.save_peer_message({
+            "id": "msg-peer-2",
+            "thread_id": "msg-peer-2",
+            "group_name": "g",
+            "sender_id": "arch-a",
+            "recipient_id": "arch-b",
+            "message": "FYI",
+            "created_at": 200.0,
+        })
+
+        self.assertEqual(saved["id"], "msg-peer-2")
+        self.assertEqual(state.agents["arch-a"].mcp_messages[0]["direction"], "sent")
+        self.assertEqual(
+            state.agents["arch-b"].mcp_messages[0]["direction"],
+            "received",
+        )
+        self.assertEqual(
+            [op["op"] for op in state._delta_ops],
+            ["agent_upsert", "agent_upsert"],
+        )
+
+        updated = state.update_peer_message_delivery(
+            "msg-peer-2",
+            "delivered",
+            delivered_at=250.0,
+        )
+
+        self.assertEqual(updated["delivery_state"], "delivered")
+        recipient_entry = state.agents["arch-b"].mcp_messages[0]
+        self.assertTrue(recipient_entry["delivered"])
+        self.assertFalse(recipient_entry["buffered"])
+        self.assertEqual(recipient_entry["delivered_at"], 250.0)
+
     def test_sync_ui_selection_to_session_selects_parent_agent_and_group(self):
         state = self.state_mod.MatrixState()
         state.groups = {"alpha": ["agent-1"], "beta": ["agent-2"]}

@@ -205,6 +205,205 @@ class TorqueDBTests(unittest.TestCase):
 
         self.assertEqual(self.db.load_agent_message_history(agent.id), [])
 
+    def test_agent_peer_messages_schema_has_table_and_indexes(self):
+        columns = [
+            row[1]
+            for row in self.db._conn.execute(
+                "PRAGMA table_info(agent_peer_messages)"
+            ).fetchall()
+        ]
+        self.assertEqual(columns, [
+            "id",
+            "thread_id",
+            "reply_to_id",
+            "group_name",
+            "sender_id",
+            "sender_kind",
+            "recipient_id",
+            "recipient_kind",
+            "message",
+            "created_at",
+            "ack_required",
+            "context_task_ids",
+            "context_engineer_ids",
+            "context_decision_ids",
+            "context_summary",
+            "context_snapshot",
+            "delivery_state",
+            "delivery_reason",
+            "delivered_at",
+            "archived_at",
+        ])
+        indexes = {
+            row[1]
+            for row in self.db._conn.execute(
+                "PRAGMA index_list(agent_peer_messages)"
+            ).fetchall()
+        }
+        self.assertTrue({
+            "idx_agent_peer_messages_recipient_recent",
+            "idx_agent_peer_messages_sender_recent",
+            "idx_agent_peer_messages_thread",
+            "idx_agent_peer_messages_group_recent",
+        }.issubset(indexes))
+
+    def test_agent_peer_messages_migration_is_idempotent(self):
+        legacy_path = Path(self.tmp.name) / "legacy-peer-messages.db"
+        seeded = TorqueDB(legacy_path)
+        seeded.init()
+        seeded.close()
+
+        conn = sqlite3.connect(str(legacy_path))
+        conn.execute("DROP TABLE agent_peer_messages")
+        conn.commit()
+        conn.close()
+
+        migrated = TorqueDB(legacy_path)
+        migrated.init()
+        migrated.close()
+        migrated_again = TorqueDB(legacy_path)
+        self.addCleanup(migrated_again.close)
+        migrated_again.init()
+
+        tables = {
+            row[0]
+            for row in migrated_again._conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        self.assertIn("agent_peer_messages", tables)
+        indexes = [
+            row[1]
+            for row in migrated_again._conn.execute(
+                "PRAGMA index_list(agent_peer_messages)"
+            ).fetchall()
+            if str(row[1]).startswith("idx_agent_peer_messages_")
+        ]
+        self.assertEqual(len(indexes), len(set(indexes)))
+
+    def test_agent_peer_messages_round_trip_query_and_delivery_helpers(self):
+        base = {
+            "group_name": "g",
+            "sender_kind": "architect",
+            "recipient_kind": "architect",
+            "context_task_ids": ["TORQUE:1", "TORQUE:1:2"],
+            "context_engineer_ids": ["eng-1"],
+            "context_decision_ids": ["decision-1"],
+            "context_summary": "Context summary",
+            "context_snapshot": {
+                "tasks": [{"id": "TORQUE:1", "title": "Plan"}],
+            },
+        }
+        self.db.save_agent_peer_message({
+            **base,
+            "id": "msg-1",
+            "thread_id": "thread-1",
+            "sender_id": "arch-a",
+            "recipient_id": "arch-b",
+            "message": "first",
+            "created_at": 1.0,
+            "ack_required": True,
+        })
+        self.db.save_agent_peer_message({
+            **base,
+            "id": "msg-2",
+            "thread_id": "thread-1",
+            "reply_to_id": "msg-1",
+            "sender_id": "arch-b",
+            "recipient_id": "arch-a",
+            "message": "second",
+            "created_at": 2.0,
+        })
+        self.db.save_agent_peer_message({
+            **base,
+            "id": "msg-3",
+            "thread_id": "thread-3",
+            "sender_id": "arch-a",
+            "recipient_id": "arch-c",
+            "message": "third",
+            "created_at": 3.0,
+        })
+
+        loaded = self.db.load_agent_peer_message("msg-1")
+        self.assertTrue(loaded["ack_required"])
+        self.assertEqual(loaded["context_task_ids"], ["TORQUE:1", "TORQUE:1:2"])
+        self.assertEqual(loaded["context_engineer_ids"], ["eng-1"])
+        self.assertEqual(loaded["context_decision_ids"], ["decision-1"])
+        self.assertEqual(loaded["context_summary"], "Context summary")
+        self.assertEqual(
+            loaded["context_snapshot"]["tasks"][0]["title"],
+            "Plan",
+        )
+
+        self.assertEqual(
+            [
+                row["id"]
+                for row in self.db.load_agent_peer_messages_for_agent("arch-a")
+            ],
+            ["msg-3", "msg-2", "msg-1"],
+        )
+        self.assertEqual(
+            [
+                row["id"]
+                for row in self.db.load_peer_messages_for_architect(
+                    "arch-a",
+                    peer_id="arch-b",
+                )
+            ],
+            ["msg-2", "msg-1"],
+        )
+        self.assertEqual(
+            [
+                row["id"]
+                for row in self.db.load_agent_peer_messages_for_thread(
+                    "thread-1",
+                    agent_id="arch-a",
+                )
+            ],
+            ["msg-1", "msg-2"],
+        )
+
+        delivered = self.db.mark_peer_message_delivered(
+            "msg-2",
+            delivered_at=10.0,
+        )
+        self.assertEqual(delivered["delivery_state"], "delivered")
+        self.assertEqual(delivered["delivered_at"], 10.0)
+        self.assertEqual(
+            [
+                row["id"]
+                for row in self.db.load_buffered_agent_peer_messages("arch-a")
+            ],
+            [],
+        )
+
+    def test_agent_peer_messages_deterministic_ids_are_idempotent(self):
+        row = {
+            "id": "msg-deterministic",
+            "thread_id": "msg-deterministic",
+            "group_name": "g",
+            "sender_id": "arch-a",
+            "recipient_id": "arch-b",
+            "message": "first write wins",
+            "created_at": 1.0,
+        }
+        first = self.db.save_peer_message(row)
+        second = self.db.save_peer_message({
+            **row,
+            "message": "retry payload should not overwrite",
+            "created_at": 2.0,
+        })
+
+        self.assertEqual(first["message"], "first write wins")
+        self.assertEqual(second["message"], "first write wins")
+        self.assertEqual(
+            self.db._conn.execute(
+                "SELECT COUNT(*) FROM agent_peer_messages WHERE id=?",
+                ("msg-deterministic",),
+            ).fetchone()[0],
+            1,
+        )
+
     def _seed_stage1a_db(
         self,
         filename: str,

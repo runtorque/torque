@@ -131,6 +131,180 @@ _GS_BOOL_FIELDS = {
     "terminal_close_on_disconnect", "architect_suppress_empty_digests",
 }
 
+_AGENT_PEER_MESSAGE_COLUMNS = [
+    "id",
+    "thread_id",
+    "reply_to_id",
+    "group_name",
+    "sender_id",
+    "sender_kind",
+    "recipient_id",
+    "recipient_kind",
+    "message",
+    "created_at",
+    "ack_required",
+    "context_task_ids",
+    "context_engineer_ids",
+    "context_decision_ids",
+    "context_summary",
+    "context_snapshot",
+    "delivery_state",
+    "delivery_reason",
+    "delivered_at",
+    "archived_at",
+]
+_AGENT_PEER_MESSAGE_JSON_LIST_FIELDS = (
+    "context_task_ids",
+    "context_engineer_ids",
+    "context_decision_ids",
+)
+_AGENT_PEER_MESSAGE_DELIVERY_STATES = {"buffered", "delivered", "failed"}
+
+
+def _json_text_list(value) -> list[str]:
+    if isinstance(value, str):
+        try:
+            decoded = json.loads(value or "[]")
+        except (json.JSONDecodeError, TypeError):
+            decoded = []
+    else:
+        decoded = value
+    if not isinstance(decoded, list):
+        return []
+    out: list[str] = []
+    for item in decoded:
+        text = str(item or "").strip()
+        if text:
+            out.append(text)
+    return out
+
+
+def _json_text_dict(value) -> dict:
+    if isinstance(value, str):
+        try:
+            decoded = json.loads(value or "{}")
+        except (json.JSONDecodeError, TypeError):
+            decoded = {}
+    else:
+        decoded = value
+    return decoded if isinstance(decoded, dict) else {}
+
+
+def _peer_float(value, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default or 0.0)
+
+
+def _peer_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes", "on"}:
+            return True
+        if lowered in {"0", "false", "no", "off", ""}:
+            return False
+    try:
+        return bool(int(value))
+    except (TypeError, ValueError):
+        return bool(value)
+
+
+def _normalize_agent_peer_message_record(record: dict) -> dict:
+    source = dict(record or {})
+    message_id = str(source.get("id", "") or "").strip()
+    if not message_id:
+        raise ValueError("id is required")
+    message = str(source.get("message", "") or "")
+    if not message:
+        raise ValueError("message is required")
+    sender_id = str(source.get("sender_id", "") or "").strip()
+    recipient_id = str(source.get("recipient_id", "") or "").strip()
+    if not sender_id:
+        raise ValueError("sender_id is required")
+    if not recipient_id:
+        raise ValueError("recipient_id is required")
+    created_at = _peer_float(
+        source.get("created_at", source.get("timestamp", time.time())),
+        time.time(),
+    )
+    delivery_state = str(
+        source.get("delivery_state", "buffered") or "buffered"
+    ).strip()
+    if delivery_state not in _AGENT_PEER_MESSAGE_DELIVERY_STATES:
+        delivery_state = "buffered"
+    thread_id = str(source.get("thread_id", "") or "").strip() or message_id
+    group_name = str(
+        source.get("group_name", source.get("group", "")) or ""
+    ).strip()
+    context_snapshot = _json_text_dict(source.get("context_snapshot", {}))
+    return {
+        "id": message_id,
+        "thread_id": thread_id,
+        "reply_to_id": str(source.get("reply_to_id", "") or "").strip(),
+        "group_name": group_name,
+        "sender_id": sender_id,
+        "sender_kind": str(
+            source.get("sender_kind", "architect") or "architect"
+        ).strip(),
+        "recipient_id": recipient_id,
+        "recipient_kind": str(
+            source.get("recipient_kind", "architect") or "architect"
+        ).strip(),
+        "message": message,
+        "created_at": created_at,
+        "ack_required": _peer_bool(source.get("ack_required", False)),
+        "context_task_ids": _json_text_list(
+            source.get("context_task_ids", [])
+        ),
+        "context_engineer_ids": _json_text_list(
+            source.get("context_engineer_ids", [])
+        ),
+        "context_decision_ids": _json_text_list(
+            source.get("context_decision_ids", [])
+        ),
+        "context_summary": str(source.get("context_summary", "") or ""),
+        "context_snapshot": context_snapshot,
+        "delivery_state": delivery_state,
+        "delivery_reason": str(source.get("delivery_reason", "") or ""),
+        "delivered_at": _peer_float(source.get("delivered_at", 0), 0),
+        "archived_at": _peer_float(source.get("archived_at", 0), 0),
+    }
+
+
+def _agent_peer_message_insert_values(record: dict) -> tuple:
+    normalized = _normalize_agent_peer_message_record(record)
+    values = []
+    for column in _AGENT_PEER_MESSAGE_COLUMNS:
+        value = normalized[column]
+        if column in _AGENT_PEER_MESSAGE_JSON_LIST_FIELDS:
+            value = json.dumps(value, separators=(",", ":"))
+        elif column == "context_snapshot":
+            value = json.dumps(value, separators=(",", ":"), sort_keys=True)
+        elif column == "ack_required":
+            value = int(bool(value))
+        values.append(value)
+    return tuple(values)
+
+
+def _decode_agent_peer_message_row(row, cols=None) -> dict:
+    cols = cols or _AGENT_PEER_MESSAGE_COLUMNS
+    decoded = dict(zip(cols, row))
+    for field in _AGENT_PEER_MESSAGE_JSON_LIST_FIELDS:
+        decoded[field] = _json_text_list(decoded.get(field, "[]"))
+    decoded["context_snapshot"] = _json_text_dict(
+        decoded.get("context_snapshot", "{}")
+    )
+    decoded["ack_required"] = _peer_bool(decoded.get("ack_required", 0))
+    decoded["created_at"] = _peer_float(decoded.get("created_at", 0), 0)
+    decoded["delivered_at"] = _peer_float(decoded.get("delivered_at", 0), 0)
+    decoded["archived_at"] = _peer_float(decoded.get("archived_at", 0), 0)
+    decoded["timestamp"] = decoded["created_at"]
+    return decoded
+
+
 def _serialize_agent_cell(cell):
     d = asdict(cell) if not isinstance(cell, dict) else dict(cell)
     group_name = d.pop("group", d.pop("group_name", ""))
@@ -481,6 +655,7 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self._maybe_backup_pre_kinds_db()
         self._conn = sqlite3.connect(str(self.db_path))
         initialize_database(self._conn, self.backfill_agent_history)
+        self._ensure_agent_peer_messages_schema()
         self._ensure_board_task_engineer_provenance_column()
         self._ensure_agent_queue_empty_emitted_column()
         self._migrate_agent_activity_timestamps_if_needed()
@@ -540,6 +715,83 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 "TEXT NOT NULL DEFAULT '[]'"
             )
             self._conn.commit()
+
+    def _ensure_agent_peer_messages_schema(self):
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS agent_peer_messages (
+                id                   TEXT PRIMARY KEY,
+                thread_id            TEXT NOT NULL,
+                reply_to_id          TEXT NOT NULL DEFAULT '',
+                group_name           TEXT NOT NULL DEFAULT '',
+                sender_id            TEXT NOT NULL,
+                sender_kind          TEXT NOT NULL,
+                recipient_id         TEXT NOT NULL,
+                recipient_kind       TEXT NOT NULL,
+                message              TEXT NOT NULL,
+                created_at           REAL NOT NULL,
+                ack_required         INTEGER NOT NULL DEFAULT 0,
+                context_task_ids     TEXT NOT NULL DEFAULT '[]',
+                context_engineer_ids TEXT NOT NULL DEFAULT '[]',
+                context_decision_ids TEXT NOT NULL DEFAULT '[]',
+                context_summary      TEXT NOT NULL DEFAULT '',
+                context_snapshot     TEXT NOT NULL DEFAULT '{}',
+                delivery_state       TEXT NOT NULL DEFAULT 'buffered',
+                delivery_reason      TEXT NOT NULL DEFAULT '',
+                delivered_at         REAL NOT NULL DEFAULT 0,
+                archived_at          REAL NOT NULL DEFAULT 0
+            )
+            """
+        )
+        existing = {
+            row[1]
+            for row in self._conn.execute(
+                "PRAGMA table_info(agent_peer_messages)"
+            ).fetchall()
+        }
+        column_defs = {
+            "thread_id": "TEXT NOT NULL DEFAULT ''",
+            "reply_to_id": "TEXT NOT NULL DEFAULT ''",
+            "group_name": "TEXT NOT NULL DEFAULT ''",
+            "sender_id": "TEXT NOT NULL DEFAULT ''",
+            "sender_kind": "TEXT NOT NULL DEFAULT 'architect'",
+            "recipient_id": "TEXT NOT NULL DEFAULT ''",
+            "recipient_kind": "TEXT NOT NULL DEFAULT 'architect'",
+            "message": "TEXT NOT NULL DEFAULT ''",
+            "created_at": "REAL NOT NULL DEFAULT 0",
+            "ack_required": "INTEGER NOT NULL DEFAULT 0",
+            "context_task_ids": "TEXT NOT NULL DEFAULT '[]'",
+            "context_engineer_ids": "TEXT NOT NULL DEFAULT '[]'",
+            "context_decision_ids": "TEXT NOT NULL DEFAULT '[]'",
+            "context_summary": "TEXT NOT NULL DEFAULT ''",
+            "context_snapshot": "TEXT NOT NULL DEFAULT '{}'",
+            "delivery_state": "TEXT NOT NULL DEFAULT 'buffered'",
+            "delivery_reason": "TEXT NOT NULL DEFAULT ''",
+            "delivered_at": "REAL NOT NULL DEFAULT 0",
+            "archived_at": "REAL NOT NULL DEFAULT 0",
+        }
+        for column in _AGENT_PEER_MESSAGE_COLUMNS:
+            if column == "id" or column in existing:
+                continue
+            self._conn.execute(
+                "ALTER TABLE agent_peer_messages ADD COLUMN "
+                f"{column} {column_defs[column]}"
+            )
+        for sql in (
+            "CREATE INDEX IF NOT EXISTS "
+            "idx_agent_peer_messages_recipient_recent "
+            "ON agent_peer_messages(recipient_id, created_at DESC, id DESC)",
+            "CREATE INDEX IF NOT EXISTS "
+            "idx_agent_peer_messages_sender_recent "
+            "ON agent_peer_messages(sender_id, created_at DESC, id DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_agent_peer_messages_thread "
+            "ON agent_peer_messages(thread_id, created_at ASC, id ASC)",
+            "CREATE INDEX IF NOT EXISTS "
+            "idx_agent_peer_messages_group_recent "
+            "ON agent_peer_messages(group_name, created_at DESC, id DESC)",
+        ):
+            self._conn.execute(sql)
+        self._conn.commit()
 
     def _ensure_board_task_suggested_specialization_column(self):
         try:
@@ -1840,6 +2092,31 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         ):
             _rewrite_single_ref(table, column)
 
+        try:
+            peer_rows = self._conn.execute(
+                "SELECT id, context_task_ids FROM agent_peer_messages"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            peer_rows = []
+        for message_id, task_ids_json in peer_rows:
+            try:
+                task_ids = json.loads(task_ids_json or "[]")
+            except (json.JSONDecodeError, TypeError):
+                task_ids = []
+            if not isinstance(task_ids, list):
+                continue
+            rewritten = [
+                id_map.get(str(task_id or ""), str(task_id or ""))
+                for task_id in task_ids
+                if str(task_id or "")
+            ]
+            if rewritten != task_ids:
+                self._conn.execute(
+                    "UPDATE agent_peer_messages SET context_task_ids=? "
+                    "WHERE id=?",
+                    (json.dumps(rewritten, separators=(",", ":")), message_id),
+                )
+
         memory_rows = self._conn.execute(
             "SELECT rowid, scope_kind, scope_ref FROM memory_entries"
         ).fetchall()
@@ -3130,6 +3407,232 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
              record["timestamp"], record["action"],
              record.get("message", "")))
         self._conn.commit()
+
+    def save_agent_peer_message(self, record: dict) -> dict:
+        """Persist one canonical peer message.
+
+        The message ID is the idempotency boundary. Re-saving the same
+        deterministic ID is a no-op and returns the first stored row rather
+        than overwriting delivery/thread metadata.
+        """
+        normalized = _normalize_agent_peer_message_record(record)
+        values = _agent_peer_message_insert_values(normalized)
+        placeholders = ",".join(["?"] * len(_AGENT_PEER_MESSAGE_COLUMNS))
+        columns = ", ".join(_AGENT_PEER_MESSAGE_COLUMNS)
+        self._conn.execute(
+            "INSERT OR IGNORE INTO agent_peer_messages "
+            f"({columns}) VALUES ({placeholders})",
+            values,
+        )
+        self._conn.commit()
+        return self.load_agent_peer_message(normalized["id"]) or {}
+
+    def save_peer_message(self, record: dict) -> dict:
+        """Compatibility alias for durable peer-message persistence."""
+        return self.save_agent_peer_message(record)
+
+    def load_agent_peer_message(self, message_id: str) -> dict | None:
+        """Load one canonical peer message by ID."""
+        message_id = str(message_id or "").strip()
+        if not message_id:
+            return None
+        row = self._conn.execute(
+            "SELECT " + ", ".join(_AGENT_PEER_MESSAGE_COLUMNS) + " "
+            "FROM agent_peer_messages WHERE id=?",
+            (message_id,),
+        ).fetchone()
+        if not row:
+            return None
+        return _decode_agent_peer_message_row(row)
+
+    def load_peer_message(self, message_id: str) -> dict | None:
+        """Compatibility alias for loading one peer message."""
+        return self.load_agent_peer_message(message_id)
+
+    def load_agent_peer_messages_for_agent(
+        self,
+        agent_id: str,
+        *,
+        limit: int = 100,
+        since: float = 0,
+        peer_id: str = "",
+        thread_id: str = "",
+        include_archived: bool = False,
+    ) -> list[dict]:
+        """Load recent peer messages involving one agent, newest first."""
+        agent_id = str(agent_id or "").strip()
+        if not agent_id:
+            return []
+        limit = max(1, min(int(limit or 100), 1000))
+        where = ["(sender_id=? OR recipient_id=?)"]
+        params: list = [agent_id, agent_id]
+        peer_id = str(peer_id or "").strip()
+        if peer_id:
+            where.append(
+                "((sender_id=? AND recipient_id=?) OR "
+                "(sender_id=? AND recipient_id=?))"
+            )
+            params.extend([agent_id, peer_id, peer_id, agent_id])
+        thread_id = str(thread_id or "").strip()
+        if thread_id:
+            where.append("thread_id=?")
+            params.append(thread_id)
+        since_value = _peer_float(since, 0)
+        if since_value > 0:
+            where.append("created_at>?")
+            params.append(since_value)
+        if not include_archived:
+            where.append("archived_at=0")
+        params.append(limit)
+        rows = self._conn.execute(
+            "SELECT " + ", ".join(_AGENT_PEER_MESSAGE_COLUMNS) + " "
+            "FROM agent_peer_messages WHERE "
+            + " AND ".join(where)
+            + " ORDER BY created_at DESC, id DESC LIMIT ?",
+            tuple(params),
+        ).fetchall()
+        return [_decode_agent_peer_message_row(row) for row in rows]
+
+    def load_peer_messages_for_architect(
+        self,
+        architect_id: str,
+        *,
+        limit: int = 100,
+        since: float = 0,
+        peer_id: str = "",
+        thread_id: str = "",
+        include_archived: bool = False,
+    ) -> list[dict]:
+        """Load recent persisted peer messages for one Architect."""
+        return self.load_agent_peer_messages_for_agent(
+            architect_id,
+            limit=limit,
+            since=since,
+            peer_id=peer_id,
+            thread_id=thread_id,
+            include_archived=include_archived,
+        )
+
+    def load_agent_peer_messages_for_thread(
+        self,
+        thread_id: str,
+        *,
+        agent_id: str = "",
+        limit: int = 1000,
+        include_archived: bool = False,
+    ) -> list[dict]:
+        """Load a peer-message thread oldest first."""
+        thread_id = str(thread_id or "").strip()
+        if not thread_id:
+            return []
+        limit = max(1, min(int(limit or 1000), 5000))
+        where = ["thread_id=?"]
+        params: list = [thread_id]
+        agent_id = str(agent_id or "").strip()
+        if agent_id:
+            where.append("(sender_id=? OR recipient_id=?)")
+            params.extend([agent_id, agent_id])
+        if not include_archived:
+            where.append("archived_at=0")
+        params.append(limit)
+        rows = self._conn.execute(
+            "SELECT " + ", ".join(_AGENT_PEER_MESSAGE_COLUMNS) + " "
+            "FROM agent_peer_messages WHERE "
+            + " AND ".join(where)
+            + " ORDER BY created_at ASC, id ASC LIMIT ?",
+            tuple(params),
+        ).fetchall()
+        return [_decode_agent_peer_message_row(row) for row in rows]
+
+    def load_buffered_agent_peer_messages(
+        self,
+        recipient_id: str,
+        *,
+        limit: int = 100,
+    ) -> list[dict]:
+        """Load undelivered peer messages for replay, oldest first."""
+        recipient_id = str(recipient_id or "").strip()
+        if not recipient_id:
+            return []
+        limit = max(1, min(int(limit or 100), 1000))
+        rows = self._conn.execute(
+            "SELECT " + ", ".join(_AGENT_PEER_MESSAGE_COLUMNS) + " "
+            "FROM agent_peer_messages "
+            "WHERE recipient_id=? AND delivery_state='buffered' "
+            "AND archived_at=0 "
+            "ORDER BY created_at ASC, id ASC LIMIT ?",
+            (recipient_id, limit),
+        ).fetchall()
+        return [_decode_agent_peer_message_row(row) for row in rows]
+
+    def load_recent_agent_peer_messages_for_group(
+        self,
+        group_name: str,
+        *,
+        limit: int = 100,
+        include_archived: bool = False,
+    ) -> list[dict]:
+        """Load recent peer messages in a group, newest first."""
+        group_name = str(group_name or "").strip()
+        if not group_name:
+            return []
+        limit = max(1, min(int(limit or 100), 1000))
+        where = ["group_name=?"]
+        params: list = [group_name]
+        if not include_archived:
+            where.append("archived_at=0")
+        params.append(limit)
+        rows = self._conn.execute(
+            "SELECT " + ", ".join(_AGENT_PEER_MESSAGE_COLUMNS) + " "
+            "FROM agent_peer_messages WHERE "
+            + " AND ".join(where)
+            + " ORDER BY created_at DESC, id DESC LIMIT ?",
+            tuple(params),
+        ).fetchall()
+        return [_decode_agent_peer_message_row(row) for row in rows]
+
+    def update_agent_peer_message_delivery(
+        self,
+        message_id: str,
+        delivery_state: str,
+        *,
+        reason: str = "",
+        delivered_at: float | None = None,
+    ) -> dict | None:
+        """Persist delivery state for one peer message."""
+        message_id = str(message_id or "").strip()
+        if not message_id:
+            return None
+        state = str(delivery_state or "").strip()
+        if state not in _AGENT_PEER_MESSAGE_DELIVERY_STATES:
+            raise ValueError("delivery_state must be delivered, buffered, or failed")
+        if delivered_at is None:
+            delivered_value = time.time() if state == "delivered" else 0.0
+        else:
+            delivered_value = _peer_float(delivered_at, 0)
+        self._conn.execute(
+            "UPDATE agent_peer_messages SET delivery_state=?, "
+            "delivery_reason=?, delivered_at=? WHERE id=?",
+            (state, str(reason or ""), delivered_value, message_id),
+        )
+        self._conn.commit()
+        return self.load_agent_peer_message(message_id)
+
+    def mark_peer_message_delivered(
+        self,
+        message_id: str,
+        *,
+        delivered: bool = True,
+        reason: str = "",
+        delivered_at: float | None = None,
+    ) -> dict | None:
+        """Convenience wrapper for delivered/failed peer-message states."""
+        return self.update_agent_peer_message_delivery(
+            message_id,
+            "delivered" if delivered else "failed",
+            reason="" if delivered else reason,
+            delivered_at=delivered_at,
+        )
 
     def save_agent_message_history(self, record: dict) -> dict:
         """Insert a persisted user-message recall entry for one agent."""

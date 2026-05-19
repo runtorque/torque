@@ -281,6 +281,37 @@ CREATE TABLE IF NOT EXISTS agent_messages (
 CREATE INDEX IF NOT EXISTS idx_agent_messages_agent ON agent_messages (agent_id);
 CREATE INDEX IF NOT EXISTS idx_agent_messages_task ON agent_messages (task_id);
 
+CREATE TABLE IF NOT EXISTS agent_peer_messages (
+    id                   TEXT PRIMARY KEY,
+    thread_id            TEXT NOT NULL,
+    reply_to_id          TEXT NOT NULL DEFAULT '',
+    group_name           TEXT NOT NULL DEFAULT '',
+    sender_id            TEXT NOT NULL,
+    sender_kind          TEXT NOT NULL,
+    recipient_id         TEXT NOT NULL,
+    recipient_kind       TEXT NOT NULL,
+    message              TEXT NOT NULL,
+    created_at           REAL NOT NULL,
+    ack_required         INTEGER NOT NULL DEFAULT 0,
+    context_task_ids     TEXT NOT NULL DEFAULT '[]',
+    context_engineer_ids TEXT NOT NULL DEFAULT '[]',
+    context_decision_ids TEXT NOT NULL DEFAULT '[]',
+    context_summary      TEXT NOT NULL DEFAULT '',
+    context_snapshot     TEXT NOT NULL DEFAULT '{}',
+    delivery_state       TEXT NOT NULL DEFAULT 'buffered',
+    delivery_reason      TEXT NOT NULL DEFAULT '',
+    delivered_at         REAL NOT NULL DEFAULT 0,
+    archived_at          REAL NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_agent_peer_messages_recipient_recent
+    ON agent_peer_messages(recipient_id, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_peer_messages_sender_recent
+    ON agent_peer_messages(sender_id, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_peer_messages_thread
+    ON agent_peer_messages(thread_id, created_at ASC, id ASC);
+CREATE INDEX IF NOT EXISTS idx_agent_peer_messages_group_recent
+    ON agent_peer_messages(group_name, created_at DESC, id DESC);
+
 CREATE TABLE IF NOT EXISTS agent_message_history (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
     agent_id  TEXT NOT NULL,
