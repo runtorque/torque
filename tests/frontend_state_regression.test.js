@@ -11925,7 +11925,7 @@ test('new agent upserts without a focus_update preserve the active selection', (
   assert.equal(jsonValue(context, 'focusedItemId'), 'agent-2');
 });
 
-test('focus_update on an architect agent focuses the principal card, not the agent id', () => {
+test('focus_update on an architect agent focuses the architect card agent id', () => {
   const { context } = createWsRenderHarness();
   runInContext(context, `
     state.agents = {
@@ -11965,10 +11965,9 @@ test('focus_update on an architect agent focuses the principal card, not the age
 
   assert.equal(jsonValue(context, 'selectedAgentId'), 'arch-1');
   assert.equal(jsonValue(context, 'selectedTerminalId'), 'arch-1');
-  // Architects render as principal cards, so focusedItemId must use the
-  // principal-row nav id — using the bare agent id falls through
-  // _resolveFocusedItemForGridRender to the first engineer.
-  assert.equal(jsonValue(context, 'focusedItemId'), 'principal:torque:arch-1');
+  // Architects now render as real agent cards in the Architects stratum,
+  // so the focused item is the architect agent id.
+  assert.equal(jsonValue(context, 'focusedItemId'), 'arch-1');
 });
 
 test('standalone task invalidation is scoped by group and active context selection', () => {
@@ -17928,7 +17927,7 @@ test('architect section + New Engineer ghost opens a scoped modal and submits ar
   runInContext(context, `render();`);
 
   assert.match(main.innerHTML, /data-agent-section="architect:arch-a"/);
-  assert.match(main.innerHTML, /data-principal-card="architect"[^>]*data-principal-id="arch-a"/);
+  assert.match(main.innerHTML, /data-drag-id="arch-a"[\s\S]*cell-body--architect/);
   assert.match(main.innerHTML, /agent-section-body[\s\S]*class="ghost-card ghost-card--engineer"/);
   assert.match(main.innerHTML, /class="ghost-card ghost-card--engineer"/);
   assert.match(main.innerHTML, /data-hired-by-architect-id="arch-a"/);
@@ -17971,7 +17970,7 @@ test('user section + New Engineer ghost submits a user-hired engineer without ar
   runInContext(context, `render();`);
 
   assert.match(main.innerHTML, /data-agent-section="user"/);
-  assert.match(main.innerHTML, /principal-card--user[\s\S]*User/);
+  assert.match(main.innerHTML, /data-agent-strata="engineers"[\s\S]*No orphan engineers/);
   assert.match(main.innerHTML, /agent-section-body[\s\S]*class="ghost-card ghost-card--engineer"/);
   assert.match(main.innerHTML, /class="ghost-card ghost-card--engineer"/);
   assert.match(main.innerHTML, /data-hired-by-architect-id=""/);
@@ -17993,7 +17992,7 @@ test('user section + New Engineer ghost submits a user-hired engineer without ar
   assert.equal(Object.prototype.hasOwnProperty.call(sendCalls[0], 'hired_by_architect_id'), false);
 });
 
-test('user principal Add Worker affordance survives delta rerenders and uses standalone worker flow', () => {
+test('orphan Workers stratum Add Worker affordance survives delta rerenders and uses standalone worker flow', () => {
   const { sandbox, document } = createSandbox({
     _currentGroup() { return 'torque'; },
     renderTerminalWorkspace() {},
@@ -18035,7 +18034,7 @@ test('user principal Add Worker affordance survives delta rerenders and uses sta
     });
   `);
 
-  assert.match(main.innerHTML, /principal-card--user[^"]*selected/);
+  assert.doesNotMatch(main.innerHTML, /principals-row/);
   assert.match(main.innerHTML, /class="ghost-card ghost-card--engineer[\s\S]*\+ New Engineer/);
   assert.match(main.innerHTML, /class="ghost-card ghost-card--worker[\s\S]*\+ Add Worker/);
   main.scrollTop = 37;
@@ -18052,8 +18051,8 @@ test('user principal Add Worker affordance survives delta rerenders and uses sta
 
   assert.match(main.innerHTML, /class="ghost-card ghost-card--engineer[\s\S]*\+ New Engineer/);
   assert.match(main.innerHTML, /class="ghost-card ghost-card--worker[\s\S]*\+ Add Worker/);
-  assert.equal(jsonValue(context, `focusedItemId`), 'principal:torque:user');
-  assert.equal(jsonValue(context, `state.selected_principal_id`), '');
+  assert.equal(jsonValue(context, `focusedItemId`), 'eng-a');
+  assert.equal(jsonValue(context, `String(state.selected_principal_id || '')`), '');
   assert.equal(main.scrollTop, 37);
 
   runInContext(context, `openAddWorkerForSection('torque');`);
@@ -18113,14 +18112,14 @@ test('user principal Add Worker affordance survives delta rerenders and uses sta
   assert.match(main.innerHTML, /loose-workers-strip[\s\S]*Standalone Worker[\s\S]*\+ Add Worker/);
   assert.ok(
     main.innerHTML.indexOf('class="loose-workers-strip"')
-      < main.innerHTML.indexOf('data-engineer-id="eng-a"'),
-    'standalone workers row should render before user-owned engineer rows',
+      > main.innerHTML.indexOf('data-engineer-id="eng-a"'),
+    'orphan workers stratum should render after orphan engineer rows',
   );
   assert.match(main.innerHTML, /class="ghost-card ghost-card--engineer[\s\S]*\+ New Engineer/);
   assert.match(main.innerHTML, /class="ghost-card ghost-card--worker standalone-worker-card-new[\s\S]*\+ Add Worker/);
 });
 
-test('principals row renders User + architects + + New Architect anchor', () => {
+test('stratified grid renders Architects stratum + architect card + New Architect anchor', () => {
   const { context, document, sandbox } = createMainRenderHarness();
   const main = document.getElementById('main');
 
@@ -18142,30 +18141,15 @@ test('principals row renders User + architects + + New Architect anchor', () => 
 
   runInContext(context, `render();`);
 
-  // Only one + New Architect affordance (in the principals row).
+  // Only one + New Architect affordance in the Architects stratum.
   assert.equal((main.innerHTML.match(/ghost-card ghost-card--architect/g) || []).length, 1);
-  assert.match(main.innerHTML, /class="principals-row"/);
-  assert.match(
-    main.innerHTML,
-    /principals-row[\s\S]*principal-card--user[\s\S]*principal-card--architect[\s\S]*\+ New Architect/
-  );
-  assert.match(
-    main.innerHTML,
-    /principal-card--architect[\s\S]*class="principal-card-kind principal-card-kind--architect">Architect<\/span>/
-  );
-  assert.doesNotMatch(main.innerHTML, /class="principal-card-kind[^"]*">arch<\/span>/);
-  // The principals row precedes the engineer grid.
-  assert.ok(
-    main.innerHTML.indexOf('class="principals-row"')
-      < main.innerHTML.indexOf('class="agent-grid')
-  );
+  assert.doesNotMatch(main.innerHTML, /class="principals-row"/);
+  assert.match(main.innerHTML, /data-agent-strata="architects"[\s\S]*data-drag-id="arch-a"[\s\S]*Architect A[\s\S]*\+ New Architect/);
+  assert.match(main.innerHTML, /class="agent-card-kind cell-architect-badge">Architect<\/div>/);
   assert.doesNotMatch(main.innerHTML, /agent-grid-new-architect-row/);
 
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
-  assert.match(
-    css,
-    /\.principal-card--architect \.principal-card-kind\s*\{[^}]*var\(--amber\)/s
-  );
+  assert.match(css, /\.agent-band--architect\s*\{[\s\S]*grid-template-columns:\s*var\(--agent-architect-column-width\)/);
 });
 
 test('user-section + New Architect ghost opens the group-scoped architect modal', () => {
@@ -18194,8 +18178,9 @@ test('user-section + New Architect ghost opens the group-scoped architect modal'
 
   assert.match(main.innerHTML, /class="ghost-card ghost-card--architect/);
   assert.match(main.innerHTML, /openAddArchitectForGroup\(&quot;torque&quot;\)/);
-  // + New Architect now lives in the principals row alongside User + architects.
-  assert.match(main.innerHTML, /principals-row[\s\S]*principal-card--user[\s\S]*Architect A[\s\S]*\+ New Architect/);
+  // + New Architect now lives in the Architects stratum alongside architect cards.
+  assert.match(main.innerHTML, /data-agent-strata="architects"[\s\S]*Architect A[\s\S]*\+ New Architect/);
+  assert.doesNotMatch(main.innerHTML, /principals-row/);
   assert.doesNotMatch(main.innerHTML, /agent-grid-new-architect-row/);
   assert.doesNotMatch(main.innerHTML, /cell cell-add/);
 
@@ -18353,10 +18338,8 @@ test('agents-grid v1.6 uses one-line metrics, action threshold labels, empty-row
   runInContext(context, `render();`);
 
   assert.equal(main.scrollTop, 144);
-  assert.match(main.innerHTML, /principal-card-line--engineers">0 engineers/);
-  assert.match(main.innerHTML, /principal-card-line--backlog">1 backlog/);
-  assert.match(main.innerHTML, /principal-card-line--engineers">2 engineers/);
-  assert.match(main.innerHTML, /principal-card-line--action"[^>]*>dispatching :220/);
+  assert.match(main.innerHTML, /data-drag-id="arch-a"[\s\S]*cell-architect-stats">2 engineers/);
+  assert.match(main.innerHTML, /data-drag-id="arch-a"[\s\S]*cell-architect-activity"[^>]*>dispatching :220/);
   assert.doesNotMatch(main.innerHTML, /decisions/);
   assert.doesNotMatch(main.innerHTML, /last decision/);
 
@@ -18520,14 +18503,14 @@ test('main render renders engineer rows under the user principal and exposes row
   runInContext(context, `render();`);
 
   assert.deepEqual(jsonValue(context, `window._navAgents`), [
-    'agent-user',
     'eng-a',
     'worker-a',
     'eng-b',
     'worker-b',
+    'agent-user',
   ]);
-  assert.match(main.innerHTML, /User Worker[\s\S]*Alice[\s\S]*Worker A[\s\S]*Bob[\s\S]*Worker B/);
-  assert.match(main.innerHTML, /principals-row/);
+  assert.match(main.innerHTML, /Alice[\s\S]*Worker A[\s\S]*Bob[\s\S]*Worker B[\s\S]*User Worker/);
+  assert.doesNotMatch(main.innerHTML, /principals-row/);
   assert.match(main.innerHTML, /agent-section-body/);
   assert.doesNotMatch(main.innerHTML, /architect-header-row|agent-section-header-row/);
   assert.match(main.innerHTML, /loose-workers-strip/);
@@ -18630,15 +18613,15 @@ test('main render falls back to state.groups ordering within hierarchy buckets w
   runInContext(context, `render();`);
 
   assert.deepEqual(jsonValue(context, `window._navAgents`), [
-    'agent-user',
     'eng-b',
     'worker-b-2',
     'worker-b-1',
     'eng-a',
     'worker-a-2',
     'worker-a-1',
+    'agent-user',
   ]);
-  assert.match(main.innerHTML, /User Worker[\s\S]*Bob[\s\S]*Worker B2[\s\S]*Worker B1[\s\S]*Alice[\s\S]*Worker A2[\s\S]*Worker A1/);
+  assert.match(main.innerHTML, /Bob[\s\S]*Worker B2[\s\S]*Worker B1[\s\S]*Alice[\s\S]*Worker A2[\s\S]*Worker A1[\s\S]*User Worker/);
 });
 
 test('main render orders sections user-first then architect creation order', () => {
@@ -18749,16 +18732,19 @@ test('main render orders sections user-first then architect creation order', () 
 
   runInContext(context, `render();`);
 
-  // Default filter = user principal; standalone workers render before
-  // user-section engineers + workers.
+  // The full stratified layout renders architects first, then orphan engineers, then orphan workers.
   assert.deepEqual(jsonValue(context, `window._navAgents`), [
-    'worker-user',
+    'arch-b',
+    'eng-hired-b',
+    'arch-a',
+    'eng-hired-a',
+    'worker-hired-a',
     'eng-user',
     'worker-user-owned',
+    'worker-user',
   ]);
-  assert.match(main.innerHTML, /Loose[\s\S]*Bob[\s\S]*Worker B/);
-  // Principals row renders all architects alongside the user principal card.
-  assert.match(main.innerHTML, /principals-row[\s\S]*Architect B[\s\S]*Architect A/);
+  assert.match(main.innerHTML, /Architect B[\s\S]*Alice B[\s\S]*Architect A[\s\S]*Alice A[\s\S]*Worker A[\s\S]*Bob[\s\S]*Worker B[\s\S]*Loose Worker/);
+  assert.doesNotMatch(main.innerHTML, /principals-row/);
 });
 
 test('main render uses containment primitives and retires cell hierarchy indentation classes', () => {
@@ -18825,11 +18811,11 @@ test('main render uses containment primitives and retires cell hierarchy indenta
     hiredWorker[1],
     new RegExp('\\barchitect-' + 'owned-worker\\b|\\bengineer-' + 'owned-worker\\b'),
   );
-  assert.doesNotMatch(main.innerHTML, /data-drag-id="orphan"/);
-  assert.match(main.innerHTML, /principals-row/);
+  assert.match(main.innerHTML, /data-drag-id="orphan"/);
+  assert.doesNotMatch(main.innerHTML, /principals-row/);
   assert.match(main.innerHTML, /agent-section-body/);
   assert.doesNotMatch(main.innerHTML, /architect-header-row|agent-section-header-row/);
-  assert.doesNotMatch(main.innerHTML, /loose-workers-strip/);
+  assert.match(main.innerHTML, /loose-workers-strip/);
   assert.match(main.innerHTML, /engineer-row/);
 
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
@@ -18928,11 +18914,8 @@ test('main render anchors each architect once in a fixed left column with engine
   const end = main.innerHTML.indexOf('</section>', start);
   const sectionHtml = main.innerHTML.slice(start, end);
   assert.ok(start >= 0 && end > start, 'architect section should render');
-  // Architect card is now in the principals row, not inside the section.
-  assert.match(
-    main.innerHTML,
-    /principal-card--architect[\s\S]*Productmind/,
-  );
+  // Architect card is rendered as the real architect agent cell in the band anchor.
+  assert.match(sectionHtml, /agent-band-anchor--architect[\s\S]*data-drag-id="arch-a"[\s\S]*Productmind/);
   assert.equal((sectionHtml.match(/class="[^"]*\bengineer-row\b[^"]*\bagent-grid-engineer-row\b[^"]*"/g) || []).length, 3);
   assert.match(sectionHtml, /agent-section-body[\s\S]*Engineer One[\s\S]*Engineer Two[\s\S]*Engineer Three[\s\S]*\+ New Engineer/);
   assert.doesNotMatch(sectionHtml, /architect-header-row|agent-section-header-row/);
@@ -19002,7 +18985,7 @@ test('main render keeps wrapped workers inside their engineer row and fixes arch
   assert.match(css, /--agent-architect-column-width:\s*77px/);
   assert.match(css, /\.agent-section\s*\{[^}]*grid-template-columns:\s*var\(--agent-architect-column-width\)\s+minmax\(0,\s*1fr\)/s);
   assert.match(css, /\.agent-grid \.engineer-row\s*\{[^}]*display:\s*flex/s);
-  assert.match(css, /\.agent-grid \.engineer-row\.engineer-row--empty-workers\s*\{[^}]*display:\s*block/s);
+  assert.doesNotMatch(css, /\.agent-grid \.engineer-row\.engineer-row--empty-workers\s*\{[^}]*display:\s*block/s);
   assert.match(css, /\.engineer-row-workers,\s*\.loose-workers-strip\s*\{[^}]*flex-wrap:\s*wrap/s);
 });
 
@@ -19140,10 +19123,10 @@ test('main render shows dismissed architect badge and architect rehire control',
   runInContext(context, `render();`);
 
   assert.match(main.innerHTML, /Paused Architect/);
-  assert.match(main.innerHTML, /principal-card[^"]*principal-card--architect[^"]*dismissed/);
-  assert.match(main.innerHTML, /principal-card-status dismissed/);
-  assert.match(main.innerHTML, /principal-card-kind--dismissed/);
-  assert.match(main.innerHTML, /rehireArchitect\(&quot;arch-dismissed&quot;\)/);
+  assert.match(main.innerHTML, /class="cell[^"]*architect[^"]*dismissed"[^>]*data-drag-id="arch-dismissed"/);
+  assert.match(main.innerHTML, /cell-status dismissed/);
+  assert.match(main.innerHTML, /cell-dismissed-badge/);
+  assert.match(main.innerHTML, /rehireArchitect\('arch-dismissed'\)/);
   assert.doesNotMatch(main.innerHTML, /rehireEngineer\('arch-dismissed'\)/);
 });
 
@@ -19216,9 +19199,9 @@ test('main render restores scroll when a section rerenders with a new engineer r
 
   assert.equal(renderCount, 2);
   assert.equal(main.scrollTop, 135);
-  // Architect card lives in the principals row; only the architect's engineers show in the grid.
-  assert.deepEqual(jsonValue(context, `window._navAgents`), ['eng-a', 'eng-b']);
-  assert.match(main.innerHTML, /principal-card--architect[\s\S]*Architect A/);
+  // Architect card is a real card in the Architects stratum.
+  assert.deepEqual(jsonValue(context, `window._navAgents`), ['arch-a', 'eng-a', 'eng-b']);
+  assert.match(main.innerHTML, /data-drag-id="arch-a"[\s\S]*Architect A/);
   assert.match(main.innerHTML, /Alice[\s\S]*Bob/);
 });
 
@@ -19314,10 +19297,8 @@ test('main render indexes board task lookups for subtitles and branch boundary d
 });
 
 test('main hierarchy row shapes preserve focused controls across rerenders', () => {
-  // Loose-workers strip case and architect-column case retired as part of the
-  // principals-row refactor — the architect card now lives in the principals
-  // row instead of the in-section architect column, and its markup is hand-
-  // rolled rather than via renderAgentCell (no agent-close focus target).
+  // Keep the engineer-row focus restoration case; architect and worker
+  // controls are covered by the stratified grid/control-specific tests below.
   const cases = [
     { label: 'engineer row', focusKey: 'agent-close:eng-1', principal: 'arch-1' },
   ];
@@ -19497,8 +19478,8 @@ test('add engineer modal draft survives agent grid rerender during websocket del
   assert.equal(modalDom.nameInput.selectionStart, 6);
   assert.equal(modalDom.nameInput.selectionEnd, 14);
   assert.equal(document.activeElement, modalDom.nameInput);
-  // Architect lives in the principals row; selected architect shows the engineer in the grid below.
-  assert.match(document.getElementById('main').innerHTML, /principal-card--architect[\s\S]*Architect A/);
+  // Architect lives in the Architects stratum as a real agent card.
+  assert.match(document.getElementById('main').innerHTML, /data-drag-id="arch-a"[\s\S]*Architect A/);
   assert.match(document.getElementById('main').innerHTML, /Engineer A/);
   assert.deepEqual(jsonValue(context, `sendCalls`), []);
 });
@@ -19771,17 +19752,19 @@ test('main hierarchy ordering is stable when multiple agent deltas arrive in one
     });
   `);
 
-  // Default filter = user principal. User-owned standalone workers render before
-  // user-section engineers + workers.
+  // Full stratified ordering is stable: architects first, then orphan engineers, then orphan workers.
   assert.deepEqual(jsonValue(context, `window._navAgents`), [
-    'loose',
+    'arch-b',
+    'eng-b',
+    'arch-a',
+    'eng-a',
     'eng-user',
     'worker-user',
+    'loose',
   ]);
   const mainHtml = document.getElementById('main').innerHTML;
-  assert.match(mainHtml, /Loose[\s\S]*User Engineer[\s\S]*User Worker/);
-  // Principals row renders user + both architects.
-  assert.match(mainHtml, /principals-row[\s\S]*Architect B[\s\S]*Architect A/);
+  assert.match(mainHtml, /Architect B[\s\S]*Engineer B[\s\S]*Architect A[\s\S]*Engineer A[\s\S]*User Engineer[\s\S]*User Worker[\s\S]*Loose/);
+  assert.doesNotMatch(mainHtml, /principals-row/);
 });
 
 
@@ -20140,8 +20123,8 @@ test('agent drag across an architect section boundary preserves ownership instea
     workerRow: 'user:engineer:eng-user',
     workerOwner: 'eng-user',
     engineerArchitect: 'arch-a',
-    // Default filter = user principal; architect engineers hide in the filtered grid.
-    navAgents: ['eng-user', 'worker-user'],
+    // Stratified grid keeps architect and orphan sections visible together.
+    navAgents: ['arch-a', 'eng-a', 'eng-user', 'worker-user'],
   });
 });
 
@@ -20229,16 +20212,17 @@ test('main grid keyboard navigation traverses logical rows across sections', () 
 
   runInContext(context, `focusedItemId = 'eng-user-a'; render();`);
 
-  // Default filter = user principal. Principals row (user + arch-a + arch-b +
-  // + New Architect) is row 0; then standalone workers, user-section engineer
-  // rows, then + New Engineer/+ Add Worker controls. Architects' engineers are
-  // hidden unless filtered in.
+  // Full stratified nav rows: architect bands first, then creation, orphan engineers, and orphan workers.
   assert.deepEqual(jsonValue(context, `window._navGridRows.map(function(row) { return { type: row.rowType, items: row.items.map(function(item) { return item.id; }) }; })`), [
-    { type: 'principals-row', items: ['principal:torque:user', 'principal:torque:arch-a', 'principal:torque:arch-b', 'grid-control:agent-new-architect:torque'] },
-    { type: 'standalone-workers-row', items: ['loose-1', 'loose-2', 'grid-control:section-new-worker:torque:user'] },
+    { type: 'engineer-row', items: ['arch-a', 'eng-a', 'worker-a1', 'worker-a2'] },
+    { type: 'section-creation-row', items: ['grid-control:section-new-engineer:torque:architect:arch-a'] },
+    { type: 'engineer-row', items: ['arch-b', 'eng-b', 'worker-b1'] },
+    { type: 'section-creation-row', items: ['grid-control:section-new-engineer:torque:architect:arch-b'] },
+    { type: 'architect-creation-row', items: ['grid-control:agent-new-architect:torque'] },
     { type: 'engineer-row', items: ['eng-user-a', 'worker-user-a1', 'worker-user-a2'] },
     { type: 'engineer-row', items: ['eng-user-b', 'worker-user-b1'] },
     { type: 'section-creation-row', items: ['grid-control:section-new-engineer:torque:user'] },
+    { type: 'standalone-workers-row', items: ['loose-1', 'loose-2', 'grid-control:section-new-worker:torque:user'] },
   ]);
 
   runInContext(context, `moveFocusHorizontal(1);`);
@@ -20250,21 +20234,20 @@ test('main grid keyboard navigation traverses logical rows across sections', () 
   runInContext(context, `moveFocusDown();`);
   assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:section-new-engineer:torque:user');
 
-  // Arrow-up from first engineer lands on standalone workers, then the
-  // selected principal (user).
+  // Arrow-up from the first orphan engineer traverses the preceding creation rows.
   runInContext(context, `focusedItemId = 'eng-user-a'; render();`);
   runInContext(context, `moveFocusUp();`);
-  assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:section-new-worker:torque:user');
+  assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:agent-new-architect:torque');
   runInContext(context, `moveFocusUp();`);
-  assert.equal(jsonValue(context, `focusedItemId`), 'principal:torque:user');
+  assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:section-new-engineer:torque:architect:arch-b');
 
-  // Arrow-right across principals row switches the filter to arch-a;
-  // arrow-down lands on arch-a's engineer.
+  // Architect cards are real row items; horizontal navigation enters their engineer row.
+  runInContext(context, `focusedItemId = 'arch-a'; render();`);
   runInContext(context, `moveFocusHorizontal(1);`);
-  assert.equal(jsonValue(context, `focusedItemId`), 'principal:torque:arch-a');
-  assert.equal(jsonValue(context, `state.selected_principal_id`), 'arch-a');
-  runInContext(context, `moveFocusDown();`);
   assert.equal(jsonValue(context, `focusedItemId`), 'eng-a');
+  runInContext(context, `moveFocusDown();`);
+  assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:section-new-engineer:torque:architect:arch-a');
+  assert.equal(jsonValue(context, `String(state.selected_principal_id || '')`), '');
 });
 
 test('main grid keyboard navigation keeps wrapped worker rows in logical order', () => {

@@ -47,12 +47,6 @@ function _selectedAgentRootRecord(cell) {
 
 function _selectedAgentFocusId(agent) {
   if (!agent || !agent.id) return '';
-  // Architect agents render as principal cards in the main grid. Using the
-  // principal focus id keeps detached windows from having their focus reset to
-  // a grid control during the next render pass.
-  if ((agent.kind || '') === 'architect') {
-    return 'principal:' + (agent.group || '') + ':' + agent.id;
-  }
   return agent.id || '';
 }
 
@@ -2473,14 +2467,7 @@ function _syncSelectionToActiveSession() {
     selectedTerminalId = id;
     if (cell.cell_type === 'agent') {
       selectedAgentId = id;
-      // Architects are rendered as principal cards, not as grid agent cells,
-      // so their agent id is not a valid nav item — focusing it would land
-      // on the first engineer after the next grid render.
-      if ((cell.kind || '') === 'architect') {
-        focusedItemId = 'principal:' + (cell.group || '') + ':' + id;
-      } else {
-        focusedItemId = id;
-      }
+      focusedItemId = id;
     } else if (cell.parent_id) {
       selectedAgentId = cell.parent_id;
       focusedItemId = id;
