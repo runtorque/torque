@@ -170,17 +170,17 @@ default worker-role mapping.
 
 ## Architect tools (`architect_*`)
 
-Visible only to agents with `kind: architect`. Group-scoped, with further per-Architect scoping on decisions, hires, and journal.
+Visible only to agents with `kind: architect`. Group-scoped, with further per-Architect scoping on decisions, hires, journal, and peer threads.
 
 ### Board reads
 
 | Tool | What it does |
 |---|---|
-| `architect_board_summary` | Compact board overview with task excerpts and `created_by` attribution. |
+| `architect_board_summary` | Compact board overview with task excerpts, `created_by` attribution, and peer-message counts. |
 | `architect_task_list` | Tasks with label/lane/engineer/creator/archived filters. AND semantics on labels. |
 | `architect_task_show` | Full details for one task. |
 | `architect_task_chain` | Full derived-task tree for a pipeline with summary stats. |
-| `architect_events_recent` | Recent coarse architect-scoped panel events (`task_done`, `agent_error`, `engineer_hired`, etc.). |
+| `architect_events_recent` | Recent coarse architect-scoped panel events (`task_done`, `agent_error`, `engineer_hired`, peer messages, etc.). |
 | `architect_mcp_calls` | Recent MCP call history filtered to the Architect's scope. |
 | `architect_deploy_state` | Read-only daemon git state and pending commit count. |
 | `architect_get_architect_settings` | Read persisted architect settings for the group. |
@@ -220,8 +220,84 @@ The Architect can update only tasks it created itself or that the user created. 
 | Tool | What it does |
 |---|---|
 | `architect_engineer_message` | Direct message to a hired Engineer. |
-| `architect_reply` | Reply to an existing Architect ↔ Engineer thread. |
+| `architect_peer_list` | List same-group Architect peers that can receive direct messages. |
+| `architect_peer_message` | Send a durable same-group direct message to one Architect, optionally with context snapshots. |
+| `architect_peer_inbox` | Read durable Architect peer message threads, including reply-required filters. |
+| `architect_reply` | Reply to an existing Architect ↔ Engineer or Architect ↔ Architect thread. |
 | `architect_ask` | Blocking question to the human. Creates a Backlog task with `human` label. |
+
+#### Architect peer messaging signatures
+
+Peer messages are same-group only. They do not grant access to another Architect's journal, decision log, hired-Engineer controls, or cross-group state. Dismissed recipients buffer delivery; tombstoned/deleted recipients reject new sends.
+
+**`architect_peer_list(include_dismissed?: boolean = false)`**
+
+Example call: `{}`
+
+Returns `type`, the caller `architect_id`, and an `architects` list with each peer's id, name, status, dismissal timestamp, and current task summary.
+
+**`architect_peer_message(architect_id: string, message: string, ack_required?: boolean = false, context_task_ids?: string[], context_engineer_ids?: string[], context_decision_ids?: string[], context_summary?: string)`**
+
+```json
+{
+  "architect_id": "arch-ui",
+  "message": "Can you sanity-check whether this belongs in your panel scope?",
+  "ack_required": true,
+  "context_task_ids": ["TORQUE:443"],
+  "context_engineer_ids": ["eng-panels"],
+  "context_decision_ids": ["D-20"],
+  "context_summary": "I am deciding where to route the peer-message UI follow-up."
+}
+```
+
+Returns `message_id`, `thread_id`, `recipient_architect_id`, `ack_required`, and delivery `state`/`reason`.
+
+Context references are optional. Task references must be visible same-group tasks; Engineer references must resolve to visible same-group Engineers; decision references must belong to the sending Architect. The message plus `context_summary` is capped at 16 KiB.
+
+**`architect_peer_inbox(peer_architect_id?: string, thread_id?: string, requires_reply?: boolean = false, since?: number = 0, limit?: integer = 20)`**
+
+Example call: `{"requires_reply": true, "limit": 10}`
+
+```json
+{
+  "type": "architect_peer_inbox",
+  "threads": [
+    {
+      "thread_id": "msg-abc123",
+      "peer_architect_id": "arch-ui",
+      "peer_name": "UI Architect",
+      "last_message_at": 1779140000.0,
+      "requires_reply": true,
+      "messages": [
+        {
+          "id": "msg-abc123",
+          "direction": "received",
+          "action": "architect_peer_message",
+          "message": "Can you sanity-check whether this belongs in your panel scope?",
+          "ack_required": true,
+          "context_task_ids": ["TORQUE:443"]
+        }
+      ]
+    }
+  ]
+}
+```
+
+`requires_reply` is computed per thread: an incoming `ack_required=true` message requires reply until the caller sends a later message in that thread.
+
+**`architect_reply(message_id: string, message: string, ack_required?: boolean = false)`**
+
+```json
+{
+  "message_id": "msg-abc123",
+  "message": "Yes — route the panel rendering follow-up to my UI Engineer.",
+  "ack_required": false
+}
+```
+
+Returns `{ "type": "ok", "message_id": "...", "thread_id": "..." }`.
+
+For Architect ↔ Engineer threads, `architect_reply` preserves the existing hired-Engineer scope checks. For Architect ↔ Architect threads, it preserves the original peer thread and `ack_required` can request another answer.
 
 ### Decisions
 

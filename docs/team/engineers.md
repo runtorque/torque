@@ -160,6 +160,8 @@ If an Architect hired this Engineer, the two have a direct messaging channel:
 - The Architect calls `architect_engineer_message(engineer_id, message)`.
 - The Engineer calls `engineer_message_architect(...)` — but only to its hiring Architect, not to others.
 
+Architects can also peer-message other same-group Architects for product coordination. That does not change the Engineer surface: only your hiring Architect can message you directly, read your journal, or act on your pending questions.
+
 Workers don't have access to this channel. They speak only through tasks.
 
 ## Tool surface

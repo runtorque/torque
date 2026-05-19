@@ -60,11 +60,13 @@ Visibility filtering applies not just to the tool list but to **the data each to
 | Tool | Worker call | Engineer call | Architect call |
 |---|---|---|---|
 | `engineer_board_summary` | not visible | only tasks in caller's group, with caller's assigned tasks highlighted | not visible |
-| `architect_board_summary` | not visible | not visible | only tasks in caller's group, with `created_by` attribution |
+| `architect_board_summary` | not visible | not visible | only tasks in caller's group, with `created_by` attribution and caller-involved peer-message counts |
 | `engineer_journal_read` | not visible | only this Engineer's journal entries | not visible |
 | `architect_journal_read` | not visible | not visible | only this Architect's own journal |
 | `architect_decision_list` | not visible | not visible | only this Architect's decisions |
 | `architect_engineer_journal_read` | not visible | not visible | only journals of Engineers this Architect hired |
+| `architect_peer_inbox` | not visible | not visible | only same-group Architect peer threads involving this Architect |
+| `architect_peer_message` | not visible | not visible | only one non-self, non-tombstoned Architect in the same group |
 
 The pattern: every tool builds a **scoped state view** before it does any reading. The scoped view filters by group for the role-prefixed tools, and further by ownership/creation for the per-actor stores like decisions and journals.
 
