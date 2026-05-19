@@ -835,6 +835,33 @@ test('architect Messages tab renders full-height message cards instead of the co
   assert.doesNotMatch(panel.innerHTML, /class="mcp-text"/);
 });
 
+test('architect Messages tab labels outgoing, incoming, and three-engineer messages', () => {
+  const { context, panel } = createHarness();
+  context.state.agents = {
+    'arch-1': { id: 'arch-1', name: 'Planner', kind: 'architect', group: 'alpha', cell_type: 'agent',
+      mcp_messages: [
+        { id: 'msg-c', action: 'engineer_message_architect', message: 'Need a decision.', timestamp: 300,
+          sender_id: 'eng-c', sender_kind: 'engineer', peer_id: 'eng-c', peer_kind: 'engineer', direction: 'received' },
+        { id: 'msg-b', action: 'architect_message', message: 'Please verify.', timestamp: 200,
+          sender_id: 'arch-1', sender_kind: 'architect', peer_id: 'eng-b', peer_kind: 'engineer', direction: 'sent' },
+        { id: 'msg-a', action: 'architect_message', message: 'Please build.', timestamp: 100,
+          sender_id: 'arch-1', sender_kind: 'architect', peer_id: 'eng-a', peer_kind: 'engineer', direction: 'sent' },
+      ] },
+    'eng-a': { id: 'eng-a', name: 'Builder', kind: 'engineer', group: 'alpha', cell_type: 'agent' },
+    'eng-b': { id: 'eng-b', name: 'Verifier', kind: 'engineer', group: 'alpha', cell_type: 'agent' },
+    'eng-c': { id: 'eng-c', name: 'Debugger', kind: 'engineer', group: 'alpha', cell_type: 'agent' },
+  };
+  context.focusedItemId = 'arch-1';
+
+  context.agentPanelSelectTab('messages');
+
+  assert.match(panel.innerHTML, /agent-panel-message-attribution-in/);
+  assert.match(panel.innerHTML, /agent-panel-message-attribution-out/);
+  assert.match(panel.innerHTML, /From:<\/span><span class="agent-panel-message-attribution-name">Debugger/);
+  assert.match(panel.innerHTML, /To:<\/span><span class="agent-panel-message-attribution-name">Verifier/);
+  assert.match(panel.innerHTML, /To:<\/span><span class="agent-panel-message-attribution-name">Builder/);
+});
+
 test('architect Messages tab renders peer-message affordances and context refs', () => {
   const { context, panel } = createHarness();
   context.state.agents = {
