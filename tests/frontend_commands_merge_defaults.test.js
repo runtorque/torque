@@ -79,12 +79,25 @@ test('confirmWorktreeMerge preselects cleanup flags from group defaults', async 
 
   assert.equal(merged, true);
   assert.equal(sandbox.confirmCalls.length, 1);
+  assert.match(
+    sandbox.confirmCalls[0].message,
+    /^Create PR and squash-merge "Worker" into main\?/
+  );
+  assert.match(
+    sandbox.confirmCalls[0].message,
+    /Cleanup options run only after the PR merges, not when the PR is created\./
+  );
+  assert.equal(sandbox.confirmCalls[0].opts.label, 'Create PR + Merge');
   const checkboxMap = Object.fromEntries(
     sandbox.confirmCalls[0].opts.checkboxes.map((checkbox) => [checkbox.key, checkbox])
   );
   assert.equal(checkboxMap.close_agent_on_merge.checked, true);
   assert.equal(checkboxMap.remove_worktree_on_merge.checked, true);
   assert.equal(checkboxMap.preserve_merge_diff.checked, true);
+  assert.equal(checkboxMap.force_direct.checked, false);
+  assert.match(checkboxMap.close_agent_on_merge.label, /after PR merge/);
+  assert.match(checkboxMap.remove_worktree_on_merge.label, /after PR merge/);
+  assert.match(checkboxMap.force_direct.label, /force direct local merge/);
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
     {
       cmd: 'worktree_merge',
@@ -94,6 +107,40 @@ test('confirmWorktreeMerge preselects cleanup flags from group defaults', async 
       remove_worktree_on_merge: true,
       preserve_merge_diff: true,
       clear_context: false,
+    },
+  ]);
+});
+
+test('confirmWorktreeMerge sends force_direct only when the advanced escape is selected', async () => {
+  const sandbox = createSandbox();
+  sandbox.showConfirm = function(message, opts) {
+    sandbox.confirmCalls.push({ message, opts });
+    return Promise.resolve({
+      close_agent_on_merge: false,
+      remove_worktree_on_merge: true,
+      preserve_merge_diff: false,
+      clear_context: false,
+      force_direct: true,
+    });
+  };
+  const context = vm.createContext(sandbox);
+  loadCommands(context);
+
+  const merged = await vm.runInContext(`_confirmWorktreeMerge('agent-1', 'Ship it')`, context);
+
+  assert.equal(merged, true);
+  assert.equal(sandbox.confirmCalls.length, 1);
+  assert.match(sandbox.confirmCalls[0].message, /^Create PR and squash-merge "Worker" into main\?/);
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
+    {
+      cmd: 'worktree_merge',
+      id: 'agent-1',
+      message: 'Ship it',
+      close_agent_on_merge: false,
+      remove_worktree_on_merge: true,
+      preserve_merge_diff: false,
+      clear_context: false,
+      force_direct: true,
     },
   ]);
 });

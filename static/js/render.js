@@ -3086,6 +3086,106 @@ function _taskBoundarySortValue(task) {
   return String(boundary.recorded_at || task.updated_at || task.created_at || '');
 }
 
+function _worktreePrNormalizeState(value, pending) {
+  let state = String(value || '').trim().toLowerCase();
+  if (!state && pending === true) return 'auto_merge_enabled';
+  const aliases = {
+    created: 'open',
+    failed: 'blocked',
+    merge_failed: 'blocked',
+    pending: 'auto_merge_enabled',
+  };
+  return aliases[state] || state;
+}
+
+function _worktreePrMetadataFromBoundary(boundary) {
+  if (!boundary || typeof boundary !== 'object') return {};
+  let raw = boundary.pr;
+  if (!raw || typeof raw !== 'object') raw = boundary.pull_request;
+  if (!raw || typeof raw !== 'object') raw = {};
+
+  let pending = null;
+  if (Object.prototype.hasOwnProperty.call(raw, 'pending')) pending = !!raw.pending;
+  else if (Object.prototype.hasOwnProperty.call(boundary, 'pr_pending')) pending = !!boundary.pr_pending;
+
+  const rawState = _worktreePrNormalizeState(raw.state, pending);
+  const statusState = _worktreePrNormalizeState(
+    raw.status || boundary.pr_status,
+    pending
+  );
+  let state = rawState || statusState || _worktreePrNormalizeState(boundary.pr_state, pending);
+  if ((statusState === 'auto_merge_enabled' || statusState === 'blocked' || statusState === 'merged')
+      && (!rawState || rawState === 'open')) {
+    state = statusState;
+  }
+
+  const pr = {
+    url: String(raw.url || boundary.pr_url || '').trim(),
+    number: raw.number != null && raw.number !== ''
+      ? raw.number
+      : (boundary.pr_number != null && boundary.pr_number !== '' ? boundary.pr_number : ''),
+    state,
+    merge_state: String(raw.merge_state || boundary.pr_merge_state || '').trim(),
+    head_sha: String(raw.head_sha || boundary.pr_head_sha || '').trim(),
+  };
+
+  const hasMetadata = pr.url || pr.number !== '' || pr.state || pr.merge_state || pr.head_sha;
+  return hasMetadata ? pr : {};
+}
+
+function _worktreePrStateLabel(pr) {
+  const state = _worktreePrNormalizeState(pr && pr.state, pr && pr.pending);
+  const labels = {
+    auto_merge_enabled: 'Auto-merge pending',
+    open: 'PR open',
+    blocked: 'PR blocked',
+    merged: 'PR merged',
+    closed: 'PR closed',
+    draft: 'PR draft',
+  };
+  if (labels[state]) return labels[state];
+  if (!state && pr && (pr.url || pr.number !== '')) return 'PR open';
+  if (!state) return '';
+  return 'PR ' + state.replace(/[_-]+/g, ' ');
+}
+
+function _worktreePrStateClass(pr) {
+  const state = _worktreePrNormalizeState(pr && pr.state, pr && pr.pending);
+  if (state === 'auto_merge_enabled') return 'pending';
+  if (state === 'merged') return 'merged';
+  if (state === 'blocked' || state === 'closed') return 'blocked';
+  if (state === 'open' || state === 'draft') return 'open';
+  return 'unknown';
+}
+
+function _worktreePrLinkLabel(pr) {
+  if (pr && pr.number !== '' && pr.number != null) return '#' + pr.number;
+  return 'Pull request';
+}
+
+function _renderWorktreePrInline(pr) {
+  if (!pr || typeof pr !== 'object') return '';
+  if (!pr.url && pr.number === '' && !pr.state && !pr.merge_state && !pr.head_sha) return '';
+  const label = _worktreePrLinkLabel(pr);
+  const stateLabel = _worktreePrStateLabel(pr);
+  let html = '<span class="detail-pr-inline">';
+  if (pr.url) {
+    html += '<a class="detail-pr-link" href="' + esc(pr.url)
+      + '" target="_blank" rel="noopener noreferrer"'
+      + ' onclick="event.stopPropagation()" title="' + esc(pr.url) + '">'
+      + esc(label) + '</a>';
+  } else {
+    html += '<span class="detail-pr-link-muted">' + esc(label) + '</span>';
+  }
+  if (stateLabel) {
+    const cls = _worktreePrStateClass(pr);
+    html += '<span class="detail-wt-tag detail-pr-state detail-pr-state-'
+      + esc(cls) + '">' + esc(stateLabel) + '</span>';
+  }
+  html += '</span>';
+  return html;
+}
+
 function _branchBoundaryOverviewForContext(repoRoot, branch) {
   if (!repoRoot || !branch || !state || !state.board_tasks) return null;
   const branchKey = repoRoot + '::' + branch;
@@ -3882,6 +3982,12 @@ function renderAgentDetails(a) {
       ? 'Branch advanced'
       : 'Safe review point';
     h += `<div class="detail-row"><span class="detail-label">Review point</span><span class="detail-val detail-task" title="${esc(boundaryTask.task)}">${formatCode(boundaryTask.task)}<span class="detail-task-status">${esc(boundaryBadge)}</span></span></div>`;
+    const prHtml = _renderWorktreePrInline(
+      _worktreePrMetadataFromBoundary(_taskBoundaryMeta(boundaryTask))
+    );
+    if (prHtml) {
+      h += `<div class="detail-row"><span class="detail-label">PR</span><span class="detail-val detail-pr">${prHtml}</span></div>`;
+    }
     if (boundaryOverview.queued_followers.length) {
       h += `<div class="detail-row"><span class="detail-label">Queued next</span><span class="detail-val">${esc(boundaryOverview.queued_followers.map(function(task) { return task.task; }).join(', '))}</span></div>`;
     }

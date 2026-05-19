@@ -431,7 +431,7 @@ function _renderDiffFooter() {
   var canMerge = _diffMergeCheck && _diffMergeCheck.clean && !_diffMerging;
   html += '<button class="btn-green"' + (canMerge ? '' : ' disabled')
     + ' onclick="proceedDiffMerge()">'
-    + (_diffMerging ? 'Merging\u2026' : 'Proceed to Merge') + '</button>';
+    + (_diffMerging ? 'Creating PR\u2026' : 'Create PR & Merge') + '</button>';
   html += '</div></div>';
   return html;
 }
