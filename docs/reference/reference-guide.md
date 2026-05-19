@@ -8,7 +8,7 @@ This page is the operator-facing reference hub for Torque. Use it when you need 
 |---|---|
 | The normal day-to-day task flow | [Workflow Guide](../operate/workflow-guide.md) |
 | Board lanes, dispatch, and task movement | [Task Board](../tasks/board.md) |
-| Action files, transitions, and pipelines | [Actions & Templates](../tasks/actions.md) |
+| Action files, transitions, and pipelines | [Actions & Templates](../tasks/actions.md); exact schema: [Action YAML format](action-yaml-format.md) |
 | Agent launch, provider behavior, prompts, resume, and hooks | [Agents & Sessions](../team/workers.md) |
 | Engineer orchestration and MCP tools | [Engineer](../team/engineers.md) |
 | Git worktrees, checkpointing, and merge flow | [Worktrees](../tasks/worktrees.md) |

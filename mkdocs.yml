@@ -63,6 +63,7 @@ nav:
   - Reference:
       - CLI Reference: reference/cli.md
       - MCP tools: reference/mcp-tools.md
+      - Action YAML format: reference/action-yaml-format.md
       - Reference Guide: reference/reference-guide.md
       - Troubleshooting: reference/troubleshooting.md
       - Testing: reference/testing.md
