@@ -51,6 +51,7 @@ _RESERVED_LANES = ("Backlog", "To Do", "In Progress", "Done", ARCHIVED_LANE)
 _DEFAULT_LANES = list(_RESERVED_LANES)
 AGENT_TOMBSTONE_RETENTION_SECONDS = 7 * 86400
 AGENT_MESSAGE_HISTORY_LIMIT = 100
+PEER_MESSAGE_CACHE_LIMIT = 20
 _VERIFICATION_MODES = {"", "deploy", "restart"}
 _VERIFICATION_STATES = {"", "pending", "attempted", "passed", "failed"}
 _ENGINEER_AUTONOMY_MODES = {
@@ -887,6 +888,96 @@ def _unique_slug(base: str, existing: set) -> str:
 def _safe_journal_filename(value: str) -> str:
     token = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value or "").strip())
     return token or "architect"
+
+
+def _peer_message_timestamp(row: dict) -> float:
+    try:
+        return float(row.get("created_at", row.get("timestamp", 0)) or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _peer_message_action(row: dict) -> str:
+    return (
+        "architect_peer_reply"
+        if str(row.get("reply_to_id", "") or "").strip()
+        else "architect_peer_message"
+    )
+
+
+def _peer_message_cache_entry(row: dict, agent_id: str) -> dict | None:
+    """Project a canonical peer-message row into AgentCell.mcp_messages."""
+    if not isinstance(row, dict):
+        return None
+    agent_id = str(agent_id or "").strip()
+    sender_id = str(row.get("sender_id", "") or "").strip()
+    recipient_id = str(row.get("recipient_id", "") or "").strip()
+    if not agent_id or agent_id not in {sender_id, recipient_id}:
+        return None
+    sender_kind = str(row.get("sender_kind", "") or "").strip() or "architect"
+    recipient_kind = (
+        str(row.get("recipient_kind", "") or "").strip() or "architect"
+    )
+    direction = "sent" if agent_id == sender_id else "received"
+    peer_id = recipient_id if direction == "sent" else sender_id
+    peer_kind = recipient_kind if direction == "sent" else sender_kind
+    delivery_state = str(row.get("delivery_state", "") or "").strip()
+    if not delivery_state:
+        delivery_state = "buffered"
+    context = {
+        "task_ids": list(row.get("context_task_ids", []) or []),
+        "engineer_ids": list(row.get("context_engineer_ids", []) or []),
+        "decision_ids": list(row.get("context_decision_ids", []) or []),
+        "summary": str(row.get("context_summary", "") or ""),
+        "snapshot": dict(row.get("context_snapshot", {}) or {}),
+    }
+    return {
+        "id": str(row.get("id", "") or "").strip(),
+        "thread_id": str(row.get("thread_id", "") or "").strip(),
+        "reply_to_id": str(row.get("reply_to_id", "") or "").strip(),
+        "action": _peer_message_action(row),
+        "message": str(row.get("message", "") or ""),
+        "timestamp": _peer_message_timestamp(row),
+        "group": str(row.get("group_name", row.get("group", "")) or ""),
+        "sender_id": sender_id,
+        "sender_kind": sender_kind,
+        "recipient_id": recipient_id,
+        "recipient_kind": recipient_kind,
+        "peer_id": peer_id,
+        "peer_kind": peer_kind,
+        "direction": direction,
+        "ack_required": bool(row.get("ack_required", False)),
+        "context_task_ids": context["task_ids"],
+        "context_engineer_ids": context["engineer_ids"],
+        "context_decision_ids": context["decision_ids"],
+        "context_summary": context["summary"],
+        "context_snapshot": context["snapshot"],
+        "context": context,
+        "delivery_state": delivery_state,
+        "delivery_reason": str(row.get("delivery_reason", "") or ""),
+        "delivered": delivery_state == "delivered",
+        "buffered": delivery_state == "buffered",
+        "delivered_at": _safe_float(row.get("delivered_at", 0)),
+        "archived_at": _safe_float(row.get("archived_at", 0)),
+    }
+
+
+def _is_peer_message_cache_entry(entry: dict) -> bool:
+    return str((entry or {}).get("action", "") or "").strip() in {
+        "architect_peer_message",
+        "architect_peer_reply",
+    }
+
+
+def _sort_mcp_message_cache(entries: list[dict]) -> list[dict]:
+    return sorted(
+        entries,
+        key=lambda item: (
+            _safe_float((item or {}).get("timestamp", 0)),
+            str((item or {}).get("id", "") or ""),
+        ),
+        reverse=True,
+    )
 
 
 @dataclass
@@ -2655,6 +2746,213 @@ class MatrixState:
             self.recompute_task_health()
         return len(updated)
 
+    # -- Peer message cache helpers -----------------------------------------
+
+    def _upsert_peer_message_cache_entry(
+        self,
+        cell: AgentCell,
+        entry: dict,
+        *,
+        limit: int = PEER_MESSAGE_CACHE_LIMIT,
+    ) -> bool:
+        if not cell or not entry or not entry.get("id"):
+            return False
+        message_id = str(entry.get("id", "") or "").strip()
+        before = [dict(item) for item in (cell.mcp_messages or [])]
+        kept = [
+            dict(item)
+            for item in (cell.mcp_messages or [])
+            if str((item or {}).get("id", "") or "").strip() != message_id
+        ]
+        kept.append(dict(entry))
+        cell.mcp_messages = _sort_mcp_message_cache(kept)[:max(1, limit)]
+        return before != cell.mcp_messages
+
+    def refresh_peer_message_cache_for_agent(
+        self,
+        agent_id: str,
+        *,
+        limit: int = PEER_MESSAGE_CACHE_LIMIT,
+        emit: bool = True,
+    ) -> list[dict]:
+        """Rebuild one agent's bounded peer-message UI cache from SQLite."""
+        aid = str(agent_id or "").strip()
+        cell = self.agents.get(aid)
+        if not aid or not cell:
+            return []
+        if not self.db:
+            return [
+                dict(entry)
+                for entry in (cell.mcp_messages or [])
+                if _is_peer_message_cache_entry(entry)
+            ][:limit]
+        rows = self.db.load_agent_peer_messages_for_agent(aid, limit=limit)
+        peer_entries = [
+            entry
+            for entry in (
+                _peer_message_cache_entry(row, aid) for row in rows
+            )
+            if entry
+        ]
+        non_peer_entries = [
+            dict(entry)
+            for entry in (cell.mcp_messages or [])
+            if not _is_peer_message_cache_entry(entry)
+        ]
+        before = [dict(item) for item in (cell.mcp_messages or [])]
+        cell.mcp_messages = _sort_mcp_message_cache(
+            peer_entries + non_peer_entries
+        )[:max(1, limit)]
+        if emit and before != cell.mcp_messages:
+            self._emit_agent(cell)
+        return peer_entries
+
+    def seed_peer_message_caches(
+        self,
+        *,
+        limit: int = PEER_MESSAGE_CACHE_LIMIT,
+        emit: bool = False,
+    ) -> int:
+        """Seed recent Architect peer messages after restart/load."""
+        seeded = 0
+        for cell in list(self.agents.values()):
+            if str(getattr(cell, "kind", "") or "").strip() != "architect":
+                continue
+            entries = self.refresh_peer_message_cache_for_agent(
+                cell.id,
+                limit=limit,
+                emit=emit,
+            )
+            if entries:
+                seeded += 1
+        return seeded
+
+    def append_peer_message_to_caches(
+        self,
+        row: dict,
+        *,
+        emit: bool = True,
+        limit: int = PEER_MESSAGE_CACHE_LIMIT,
+    ) -> list[str]:
+        """Project a canonical peer-message row into participant caches."""
+        changed: list[str] = []
+        for agent_id in (
+            str((row or {}).get("sender_id", "") or "").strip(),
+            str((row or {}).get("recipient_id", "") or "").strip(),
+        ):
+            if not agent_id or agent_id in changed:
+                continue
+            cell = self.agents.get(agent_id)
+            entry = _peer_message_cache_entry(row or {}, agent_id)
+            if not cell or not entry:
+                continue
+            if self._upsert_peer_message_cache_entry(
+                cell,
+                entry,
+                limit=limit,
+            ):
+                changed.append(agent_id)
+                if emit:
+                    self._emit_agent(cell)
+        return changed
+
+    def save_peer_message(
+        self,
+        row: dict,
+        *,
+        emit: bool = True,
+    ) -> dict | None:
+        """Persist a peer message and update bounded live UI caches."""
+        if not self.db:
+            return None
+        saved = self.db.save_agent_peer_message(row)
+        if saved:
+            self.append_peer_message_to_caches(saved, emit=emit)
+        return saved
+
+    def load_peer_messages_for_architect(
+        self,
+        architect_id: str,
+        *,
+        limit: int = 100,
+        since: float = 0,
+        peer_id: str = "",
+        thread_id: str = "",
+        include_archived: bool = False,
+    ) -> list[dict]:
+        if not self.db:
+            return []
+        return self.db.load_peer_messages_for_architect(
+            architect_id,
+            limit=limit,
+            since=since,
+            peer_id=peer_id,
+            thread_id=thread_id,
+            include_archived=include_archived,
+        )
+
+    def mark_peer_message_delivered(
+        self,
+        message_id: str,
+        *,
+        delivered: bool = True,
+        reason: str = "",
+        delivered_at: float | None = None,
+        emit: bool = True,
+    ) -> dict | None:
+        """Persist delivery state and update the recipient cache entry."""
+        if not self.db:
+            return None
+        saved = self.db.mark_peer_message_delivered(
+            message_id,
+            delivered=delivered,
+            reason=reason,
+            delivered_at=delivered_at,
+        )
+        if not saved:
+            return None
+        recipient_id = str(saved.get("recipient_id", "") or "").strip()
+        cell = self.agents.get(recipient_id)
+        entry = _peer_message_cache_entry(saved, recipient_id)
+        if cell and entry and self._upsert_peer_message_cache_entry(
+            cell,
+            entry,
+        ):
+            if emit:
+                self._emit_agent(cell)
+        return saved
+
+    def update_peer_message_delivery(
+        self,
+        message_id: str,
+        delivery_state: str,
+        *,
+        reason: str = "",
+        delivered_at: float | None = None,
+        emit: bool = True,
+    ) -> dict | None:
+        """Persist an explicit peer-message delivery state."""
+        if not self.db:
+            return None
+        saved = self.db.update_agent_peer_message_delivery(
+            message_id,
+            delivery_state,
+            reason=reason,
+            delivered_at=delivered_at,
+        )
+        if not saved:
+            return None
+        recipient_id = str(saved.get("recipient_id", "") or "").strip()
+        cell = self.agents.get(recipient_id)
+        entry = _peer_message_cache_entry(saved, recipient_id)
+        if cell and entry and self._upsert_peer_message_cache_entry(
+            cell,
+            entry,
+        ):
+            if emit:
+                self._emit_agent(cell)
+        return saved
+
     # -- Agent history helpers -----------------------------------------------
 
     def _normalize_agent_message_history_entry(self, entry: dict) -> dict:
@@ -3054,6 +3352,7 @@ class MatrixState:
                 cell.pending_engineer_message = bool(
                     self.agent_pending_engineer_reply_tasks(aid)
                 )
+            self.seed_peer_message_caches(emit=False)
             reconciled_history = self.history_reconcile_tombstoned_agents()
             if reconciled_history:
                 log.info(
