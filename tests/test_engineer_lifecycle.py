@@ -182,6 +182,31 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             question_prompt,
         )
 
+        peer_status_prompt = self.server_mod._format_injected_mcp_message_prompt(
+            message="FYI only.",
+            sender_name="Peer",
+            sender_kind="architect",
+            recipient_kind="architect",
+            message_id="msg-peer-status",
+        )
+        self.assertIn(
+            'Optional reply: mcp__torque__architect_reply(message_id="msg-peer-status"',
+            peer_status_prompt,
+        )
+
+        peer_ack_prompt = self.server_mod._format_injected_mcp_message_prompt(
+            message="Please ack.",
+            sender_name="Peer",
+            sender_kind="architect",
+            recipient_kind="architect",
+            message_id="msg-peer-ack",
+            ack_required=True,
+        )
+        self.assertIn(
+            'Ack required. Reply with: mcp__torque__architect_reply(message_id="msg-peer-ack"',
+            peer_ack_prompt,
+        )
+
         engineer_prompt = self.server_mod._format_injected_mcp_message_prompt(
             message="Please confirm.",
             sender_name="Productmind",

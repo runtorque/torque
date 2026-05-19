@@ -354,6 +354,10 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertTrue(recipient_entry["delivered"])
         self.assertFalse(recipient_entry["buffered"])
         self.assertEqual(recipient_entry["delivered_at"], 250.0)
+        sender_entry = state.agents["arch-a"].mcp_messages[0]
+        self.assertTrue(sender_entry["delivered"])
+        self.assertFalse(sender_entry["buffered"])
+        self.assertEqual(sender_entry["delivered_at"], 250.0)
 
     def test_sync_ui_selection_to_session_selects_parent_agent_and_group(self):
         state = self.state_mod.MatrixState()
