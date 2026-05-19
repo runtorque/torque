@@ -131,9 +131,14 @@ The Engineer tab in Group Settings is where you tune the Engineer's behavior:
 
 - **Agent** — the current Engineer, or a button to create one.
 - **Launch controls** — provider, boot command, model, reasoning effort, custom instructions.
+- **Specializations** — ordered Engineer focus areas from `.torque/specializations/` or `~/.torque/specializations/`; the first slug is primary and its preamble is injected into the Engineer system prompt.
 - **Operating style** — autonomy mode (`Suggest only`, `Dispatch when clear`, `Aggressive auto-continue`) and default Worker concurrency.
 - **Digest details** — push interval, max interval, heartbeat interval, optional event types.
 - **Expert overrides** — provider/boot/model overrides that apply only to this Engineer instead of the group default.
+
+The project taxonomy defines seven specialization slugs and matching default
+Worker roles. See [Roles and specializations](../reference/specializations.md)
+for the routing table.
 
 ## What an Engineer can and can't do
 
