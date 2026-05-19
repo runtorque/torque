@@ -2019,6 +2019,28 @@ function _architectStatsForCard(architect, section) {
   };
 }
 
+function _renderAgentGridNewToolbar(groupName, disabled) {
+  const group = String(groupName || '').trim();
+  if (!group) return '';
+  const groupArg = _jsStringAttr(group);
+  return '<div class="agent-grid-toolbar" data-agent-grid-toolbar>'
+    + '<button type="button" class="agent-grid-new-btn" data-agent-grid-new-button'
+    + ' data-group="' + esc(group) + '"'
+    + (disabled ? ' disabled aria-disabled="true" title="Agent limit reached"' : ' aria-haspopup="menu" aria-expanded="false" title="Create a standalone agent"')
+    + (disabled ? '' : ' onclick="openAgentGridNewMenu(event,' + groupArg + ')"')
+    + '>+ New</button>'
+    + '</div>';
+}
+
+function _agentGridNewToolbarForContexts(groupContexts) {
+  const contexts = Array.isArray(groupContexts) ? groupContexts.filter(Boolean) : [];
+  if (!contexts.length) return '';
+  const active = (typeof _activeGroup === 'function') ? String(_activeGroup() || '') : '';
+  let target = active ? contexts.find(ctx => ctx && ctx.gname === active) : null;
+  if (!target) target = contexts.find(ctx => ctx && !ctx.collapsed) || contexts[0];
+  return _renderAgentGridNewToolbar(target.gname || '', !!target.atAgentCap);
+}
+
 function _renderArchitectBand(groupName, section, renderCell, opts) {
   opts = opts || {};
   if (!section || !section.architect) return '';

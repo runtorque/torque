@@ -301,6 +301,8 @@ test('stratified grid CSS defines strata, architect bands, wrapping workers, and
   assert.match(css, /\.agent-band-anchor--architect > \.cell\s*\{[^}]*min-height:\s*var\(--agent-card-height,\s*96px\);/s);
   assert.doesNotMatch(css, /\.agent-band-anchor--architect > \.cell\s*\{[^}]*min-height:\s*100%;/s);
   assert.match(css, /\.agent-band-body\.agent-section-body\s*\{[\s\S]*display:\s*flex;[\s\S]*flex-direction:\s*column;/);
+  assert.match(css, /\.agent-card-body\s*\{[\s\S]*flex-direction:\s*column;/);
+  assert.match(css, /\.agent-card-line\s*\{[\s\S]*text-overflow:\s*ellipsis;/);
   assert.match(css, /\.agent-grid \.engineer-row\s*\{[\s\S]*align-items:\s*stretch;/);
   assert.match(css, /\.engineer-row-workers,\s*\.loose-workers-strip\s*\{[\s\S]*flex-wrap:\s*wrap;/);
   assert.doesNotMatch(css, /\.agent-grid \.engineer-row\.engineer-row--empty-workers\s*\{[^}]*display:\s*block/s);
