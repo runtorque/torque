@@ -19,7 +19,7 @@ var _AGENT_PANEL_VIRTUAL_THRESHOLD = 80;
 var _AGENT_PANEL_VIRTUAL_OVERSCAN = 6;
 var _AGENT_PANEL_VIRTUAL_DEFAULT_VIEWPORT = 520;
 var _AGENT_PANEL_WORKLOG_ROW_HEIGHT = 70;
-var _AGENT_PANEL_MESSAGE_ROW_HEIGHT = 92;
+var _AGENT_PANEL_MESSAGE_ROW_HEIGHT = 104;
 var _AGENT_PANEL_DECISION_ROW_HEIGHT = 116;
 var _AGENT_PANEL_JOURNAL_ROW_HEIGHT = 96;
 var _AGENT_PANEL_JOURNAL_REFRESH_MS = 1500;
@@ -327,6 +327,56 @@ function _agentPanelAgentForId(agentId) {
   agentId = String(agentId || '').trim();
   if (!agentId || !state || !state.agents) return null;
   return state.agents[agentId] || null;
+}
+
+function _agentPanelMessagePeerId(agent, message, direction) {
+  message = message || {};
+  var agentId = String((agent && agent.id) || '').trim();
+  var peerId = String(message.peer_id || '').trim();
+  if (peerId) return peerId;
+  var senderId = String(message.sender_id || message.sender_agent_id || '').trim();
+  var recipientId = String(message.recipient_id || message.recipient_agent_id || '').trim();
+  if (direction === 'out' && recipientId && recipientId !== agentId) return recipientId;
+  if (direction === 'in' && senderId && senderId !== agentId) return senderId;
+  if (senderId && senderId !== agentId) return senderId;
+  if (recipientId && recipientId !== agentId) return recipientId;
+  return '';
+}
+
+function _agentPanelMessagePeerKind(agent, message, direction, senderKind) {
+  message = message || {};
+  var peer = _agentPanelAgentForId(_agentPanelMessagePeerId(agent, message, direction));
+  if (peer && peer.kind) return peer.kind;
+  if (message.peer_kind) return String(message.peer_kind || '').trim();
+  if (direction === 'out' && message.recipient_kind) return String(message.recipient_kind || '').trim();
+  if (direction === 'in' && message.sender_kind) return String(message.sender_kind || '').trim();
+  var action = String(message.action || '').trim();
+  if (action === 'architect_peer_message' || action === 'architect_peer_reply') return 'architect';
+  if (action === 'architect_message' || action === 'architect_reply') return 'engineer';
+  if (action === 'engineer_message_architect' || action === 'engineer_reply') return 'engineer';
+  return direction === 'in' ? String(senderKind || '').trim() : '';
+}
+
+function _agentPanelMessageAttributionHtml(agent, message, direction, senderKind) {
+  message = message || {};
+  var peerId = _agentPanelMessagePeerId(agent, message, direction);
+  var explicitName = String(
+    (direction === 'out'
+      ? (message.recipient_name || message.peer_name)
+      : (message.sender_name || message.peer_name)) || ''
+  ).trim();
+  var peer = _agentPanelAgentForId(peerId);
+  var peerKind = _agentPanelMessagePeerKind(agent, message, direction, senderKind);
+  var name = peerId
+    ? _agentPanelAgentDisplayName(peer, peerId)
+    : (explicitName || (peerKind ? _agentPanelMessageKindLabel(peerKind) : ''));
+  if (!name) return '';
+  var label = direction === 'out' ? 'To' : 'From';
+  var cls = 'agent-panel-message-attribution agent-panel-message-attribution-' + direction;
+  return '<span class="' + cls + '">'
+    + '<span class="agent-panel-message-attribution-label">' + label + ':</span>'
+    + '<span class="agent-panel-message-attribution-name">' + _agentPanelEsc(name) + '</span>'
+    + '</span>';
 }
 
 function _agentPanelMessageDirection(agent, message) {
@@ -3082,6 +3132,7 @@ function _agentPanelMessagesHtml(agent, messages, note, options) {
         + '" data-agent-panel-anchor="' + _agentPanelAttr(anchorKey) + '">';
       rowHtml += '<div class="agent-panel-message-card-header">';
       rowHtml += '<div class="agent-panel-message-meta">';
+      rowHtml += _agentPanelMessageAttributionHtml(agent, message, direction, senderKind);
       rowHtml += '<span class="agent-panel-message-sender">'
         + _agentPanelEsc(_agentPanelMessageKindLabel(senderKind)) + '</span>';
       rowHtml += '<span class="agent-panel-message-direction">'

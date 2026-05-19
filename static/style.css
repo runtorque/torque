@@ -8439,10 +8439,29 @@ button.agent-panel-hierarchy-crumb:focus-visible {
 .agent-panel-message-sender,
 .agent-panel-message-direction,
 .agent-panel-message-action,
+.agent-panel-message-attribution,
 .agent-panel-message-peer,
 .agent-panel-message-ack {
   font-size: 9px;
   line-height: 1.4;
+}
+.agent-panel-message-attribution {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  font-weight: 700;
+  padding: 1px 7px;
+}
+.agent-panel-message-attribution-in {
+  border-color: color-mix(in srgb, var(--amber) 38%, transparent);
+  background: color-mix(in srgb, var(--amber) 12%, transparent);
+}
+.agent-panel-message-attribution-label {
+  color: var(--text-dim);
 }
 .agent-panel-message-sender {
   font-weight: 700;
