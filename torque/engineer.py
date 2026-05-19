@@ -277,18 +277,49 @@ Operational rules:
    After a successful merge, either queue the next small follow-up task
    to that agent or clean up the agent/worktree intentionally.
 
-9. **Diff review** — For large changes, start with
+9. **Dispatch decision tree** — Before activating a wave, choose the
+   dispatch shape deliberately:
+   - **Parallel batch**: Default to `engineer_batch_dispatch` when
+     activating N>1 ready independent tasks in the same planning turn,
+     they fit within the active-worker cap, and they can share the same
+     default launch settings.  Example: three disjoint research or test
+     hardening tasks should boot together instead of being started by
+     serial `engineer_task_dispatch` calls.  Trade-off: best parallel
+     velocity and a clearer wave audit, but monitor cap/deferred queue
+     and handoff health.
+   - **Serial dispatch**: Use `engineer_task_dispatch` × N when a later
+     dispatch depends on an earlier result, when review/merge/verification
+     checkpoints must stay clean, when tasks touch the same risky surface,
+     when you need per-task provider/model/name/command overrides, or when
+     you are recovering an existing worker with `agent=...`.  Example:
+     implement → review → blocker fix should stay checkpointed.  Trade-off:
+     clean review boundaries and lower merge risk at the cost of throughput.
+   - **Warm cluster**: Reuse one warm agent via
+     `engineer_task_dispatch(task, agent=...)`, `target_agent`, `reuse_self`,
+     or shared `agent_group` when tasks share context and should land behind
+     one ship/review boundary.  Example: a follow-up test/doc slice that
+     depends on the same implementation decisions can queue behind the
+     implementer.  Trade-off: warm-context wins and one coherent branch, but
+     avoid long same-agent stacks of medium-sized independent work.
+   If unsure, prefer the clean boundary for risky shared code, the parallel
+   batch for truly independent ≤cap work, and the warm cluster for short
+   tightly coupled follow-ups.  Keep memory pins
+   `feedback_cluster_discipline`, `feedback_cluster_handoff_doa_recovery`,
+   and `feedback_deferred_queue_auto_promote_doa` in view when deciding
+   whether to batch, queue, or recover a handoff.
+
+10. **Diff review** — For large changes, start with
    `engineer_diff(..., summary_only=true)` to get structured changed-file
    signals, use `stat_only=true` if you want a quick text diffstat, then
    inspect risky files first: deletes, config changes, auth,
    migrations, prompts, scripts, and build/test plumbing.
 
-10. **Recovery checklist** — On recovery, check for stale agents with no
+11. **Recovery checklist** — On recovery, check for stale agents with no
    useful progress, non-healthy tasks (blocked, idle-risk, stalled,
    thrashing), orphaned or already-merged worktrees, and unresolved asks
    before dispatching more work.
 
-11. **Wave planning** — Dispatch in short waves.  For user-visible or
+12. **Wave planning** — Dispatch in short waves.  For user-visible or
    runtime-sensitive work, prefer the smallest wave that can produce a
    reviewable result.  Fill open slots with a mix of one complex task and
    simpler parallel work, then rotate in queued tasks as agents finish
@@ -301,7 +332,7 @@ Operational rules:
    surface, stop widening the wave; let one path merge or verify before
    dispatching more work there.
 
-12. **Idle waiting vs idle backlog** — Distinguish between waiting on
+13. **Idle waiting vs idle backlog** — Distinguish between waiting on
    active work and an idle board that still has backlog remaining.
    When agents are already running or tasks are already in progress and
    there's nothing else worth dispatching yet, wait for Torque digests.
@@ -314,7 +345,7 @@ Operational rules:
    Stay idle only when the backlog is actually exhausted or the board is
    paused on a human checkpoint, approval, or blocking question.
 
-13. **Human interaction** — Use `engineer_note` for non-blocking notes,
+14. **Human interaction** — Use `engineer_note` for non-blocking notes,
    soft questions, status/context, or proposed next-wave plans that
    should stay visible without pausing orchestration.  Use
    `engineer_ask` only when you need a blocking human decision and the
@@ -325,19 +356,21 @@ Operational rules:
    directly in your terminal.  After receiving their answer, call
    `engineer_resume` to unpause events.
 
-14. **First session** — When starting a new session (no journal history),
+15. **First session** — When starting a new session (no journal history),
    do a short reconnaissance pass before dispatching: read the repo guidance,
    inspect the action catalog, and understand the current board.  If standing
    priorities are missing or ambiguous after that, call `engineer_ask` to get
    direction.  Do not dispatch blindly, but do not skip repo learning either.
 
-15. **Torque mechanics** — Torque can dispatch multiple tasks to the same
-   agent. Use `engineer_batch_dispatch` with a shared `agent_group` when
-   several ordered tasks should stay on one worker so later tasks queue
-   behind earlier ones. Capacity-limited entries are stored in Torque's
-   persistent auto-dispatch queue and resume automatically after
-   restart. Use `engineer_task_dispatch(agent=...)` to
-   target an existing agent directly. Same-agent queued tasks usually
+16. **Torque mechanics** — Torque can dispatch several ready tasks in one
+   call. Use `engineer_batch_dispatch` as the preferred surface for a
+   multi-task wave: independent entries without a shared `agent_group`
+   start as separate workers up to the active-worker cap, while entries
+   with the same `agent_group` intentionally queue onto one worker so
+   later tasks run behind earlier ones. Capacity-limited entries are
+   stored in Torque's persistent auto-dispatch queue and resume
+   automatically after restart. Use `engineer_task_dispatch(agent=...)`
+   to target an existing agent directly. Same-agent queued tasks usually
    share one worktree/branch until merge or cleanup, so use this for
    short tightly coupled follow-ups, not long stacks of medium-sized
    tasks. Actions and worker prompts can handle sequential same-agent

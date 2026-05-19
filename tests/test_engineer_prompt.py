@@ -97,6 +97,25 @@ class EngineerPromptTests(unittest.TestCase):
         self.assertIn("share one worktree/branch until merge or cleanup", prompt)
         self.assertIn("Actions and worker prompts can handle sequential same-agent", prompt)
 
+    def test_prompt_includes_dispatch_decision_tree(self):
+        prompt = self.engineer_mod.build_engineer_system_prompt("Torque")
+
+        self.assertIn("**Dispatch decision tree**", prompt)
+        self.assertIn("Default to `engineer_batch_dispatch`", prompt)
+        self.assertIn("N>1 ready independent tasks", prompt)
+        self.assertIn("serial `engineer_task_dispatch` calls", prompt)
+        self.assertIn("**Serial dispatch**", prompt)
+        self.assertIn("review/merge/verification", prompt)
+        self.assertIn("per-task provider/model/name/command overrides", prompt)
+        self.assertIn("recovering an existing worker with `agent=...`", prompt)
+        self.assertIn("**Warm cluster**", prompt)
+        self.assertIn("`target_agent`, `reuse_self`", prompt)
+        self.assertIn("shared `agent_group`", prompt)
+        self.assertIn("truly independent ≤cap work", prompt)
+        self.assertIn("`feedback_cluster_discipline`", prompt)
+        self.assertIn("`feedback_cluster_handoff_doa_recovery`", prompt)
+        self.assertIn("`feedback_deferred_queue_auto_promote_doa`", prompt)
+
     def test_prompt_includes_structured_policy_overrides(self):
         prompt = self.engineer_mod.build_engineer_system_prompt(
             "Torque",
