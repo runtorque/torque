@@ -169,22 +169,69 @@ test('stratified grid renders architects, orphan engineers, and orphan workers r
   }
   assert.match(mainEl.innerHTML, /data-agent-section="architect:arch-a"[\s\S]*class="cell architect"[\s\S]*Productmind/);
   assert.match(mainEl.innerHTML, /data-agent-strata="engineers"[\s\S]*Orphan Engineer[\s\S]*Orphan Engineer Worker/);
-  assert.match(mainEl.innerHTML, /data-agent-strata="workers"[\s\S]*loose-workers-strip[\s\S]*Loose Worker[\s\S]*\+ Add Worker/);
+  assert.match(mainEl.innerHTML, /data-agent-strata="workers"[\s\S]*loose-workers-strip[\s\S]*Loose Worker/);
+  assert.doesNotMatch(mainEl.innerHTML, /agent-strata-heading/);
+  assert.doesNotMatch(mainEl.innerHTML, /\+ Add Worker|\+ New Engineer|\+ New Architect/);
+  assert.match(mainEl.innerHTML, /data-agent-grid-toolbar[\s\S]*data-agent-grid-new-button[\s\S]*>\+ New<\/button>/);
 });
 
-test('empty strata render headings and creation controls without orphan empty copy', () => {
+test('empty strata are hidden while the grid-level new menu remains', () => {
   const { context, mainEl } = createHarness();
 
   vm.runInContext('render();', context);
 
-  assert.match(mainEl.innerHTML, /data-agent-strata="architects"[\s\S]*No architects yet\.[\s\S]*\+ New Architect/);
-  assert.match(mainEl.innerHTML, /data-agent-strata="engineers"[\s\S]*\+ New Engineer/);
-  assert.match(mainEl.innerHTML, /data-agent-strata="workers"[\s\S]*\+ Add Worker/);
+  assert.doesNotMatch(mainEl.innerHTML, /data-agent-strata=/);
+  assert.doesNotMatch(mainEl.innerHTML, /<section class="agent-strata/);
+  assert.doesNotMatch(mainEl.innerHTML, /agent-strata-heading/);
+  assert.doesNotMatch(mainEl.innerHTML, /\+ New Architect|\+ New Engineer|\+ Add Worker/);
   assert.doesNotMatch(mainEl.innerHTML, /No orphan engineers\./);
   assert.doesNotMatch(mainEl.innerHTML, /No orphan workers\./);
-  assert.match(mainEl.innerHTML, /openAddArchitectForGroup\(&quot;torque&quot;\)/);
-  assert.match(mainEl.innerHTML, /openAddEngineerForSection\(&quot;torque&quot;,&quot;&quot;\)/);
-  assert.match(mainEl.innerHTML, /openAddWorkerForSection\(&quot;torque&quot;\)/);
+  assert.match(mainEl.innerHTML, /data-agent-grid-toolbar[\s\S]*openAgentGridNewMenu\(event,&quot;torque&quot;\)/);
+});
+
+test('grid-level + New menu opens standalone architect, engineer, and worker flows', () => {
+  const { context, mainEl } = createHarness();
+  const menuCalls = [];
+  context.showContextMenu = function(x, y, items) {
+    menuCalls.push({ x, y, items });
+  };
+
+  vm.runInContext(`
+    var modalCalls = [];
+    openAddArchitectForGroup = function(group) { modalCalls.push({ type: 'architect', group: group }); };
+    openAddEngineerForSection = function(group, architectId) { modalCalls.push({ type: 'engineer', group: group, architectId: architectId || '' }); };
+    openAddWorkerForSection = function(group) { modalCalls.push({ type: 'worker', group: group }); };
+    render();
+  `, context);
+
+  assert.match(mainEl.innerHTML, /class="agent-grid-new-btn"/);
+  context.openAgentGridNewMenu({
+    preventDefault() {},
+    stopPropagation() {},
+    clientX: 10,
+    clientY: 20,
+    currentTarget: {
+      getBoundingClientRect() { return { left: 100, bottom: 40 }; },
+    },
+  }, 'torque');
+
+  assert.equal(menuCalls.length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(menuCalls[0].items.map(item => item.label))), [
+    'New architect',
+    'New engineer',
+    'New worker',
+  ]);
+  assert.equal(menuCalls[0].x, 100);
+  assert.equal(menuCalls[0].y, 44);
+
+  for (const item of menuCalls[0].items) {
+    vm.runInContext(item.action, context);
+  }
+  assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(modalCalls)', context)), [
+    { type: 'architect', group: 'torque' },
+    { type: 'engineer', group: 'torque', architectId: '' },
+    { type: 'worker', group: 'torque' },
+  ]);
 });
 
 test('navigation model has no principals row and includes all visible strata in visual order', () => {
@@ -201,21 +248,14 @@ test('navigation model has no principals row and includes all visible strata in 
   assert.equal(rows.some(row => row.rowType === 'principals-row'), false);
   assert.deepEqual(rows, [
     { rowKey: 'architect:arch-a:engineer:eng-arch', rowType: 'engineer-row', sectionKey: 'architect:arch-a', items: ['arch-a', 'eng-arch', 'worker-arch'] },
-    { rowKey: 'architect:arch-a:section-new-engineer', rowType: 'section-creation-row', sectionKey: 'architect:arch-a', items: ['grid-control:section-new-engineer:torque:architect:arch-a'] },
-    { rowKey: 'architects:agent-new-architect', rowType: 'architect-creation-row', sectionKey: 'architects', items: ['grid-control:agent-new-architect:torque'] },
     { rowKey: 'user:engineer:eng-user', rowType: 'engineer-row', sectionKey: 'user', items: ['eng-user', 'worker-user'] },
-    { rowKey: 'user:section-new-engineer', rowType: 'section-creation-row', sectionKey: 'user', items: ['grid-control:section-new-engineer:torque:user'] },
-    { rowKey: 'workers:standalone-workers', rowType: 'standalone-workers-row', sectionKey: 'workers', items: ['loose-worker', 'grid-control:section-new-worker:torque:user'] },
+    { rowKey: 'workers:standalone-workers', rowType: 'standalone-workers-row', sectionKey: 'workers', items: ['loose-worker'] },
   ]);
   assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(window._navAgents)', context)), [
     'arch-a', 'eng-arch', 'worker-arch', 'eng-user', 'worker-user', 'loose-worker',
   ]);
-  assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(window._navCreationControls.map(function(c) { return c.id; }))', context)), [
-    'grid-control:section-new-engineer:torque:architect:arch-a',
-    'grid-control:agent-new-architect:torque',
-    'grid-control:section-new-engineer:torque:user',
-    'grid-control:section-new-worker:torque:user',
-  ]);
+  assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(window._navCreationControls.map(function(c) { return c.id; }))', context)), []);
+  assert.equal(JSON.parse(vm.runInContext('JSON.stringify(window._navGridRows.some(function(row) { return /creation/.test(row.rowType); }))', context)), false);
 });
 
 test('legacy selectPrincipal persists compatibility state without filtering the grid', () => {
@@ -247,7 +287,9 @@ test('stratified grid CSS defines strata, architect bands, wrapping workers, and
 
   assert.match(css, /\.agent-grid-stratified\s*\{[\s\S]*overflow-x:\s*auto;/);
   assert.match(css, /\.agent-strata\s*\{[\s\S]*flex-direction:\s*column;/);
-  assert.match(css, /\.agent-strata-heading\s*\{[\s\S]*text-transform:\s*uppercase;/);
+  assert.doesNotMatch(css, /\.agent-strata-heading\s*\{/);
+  assert.match(css, /\.agent-grid-toolbar\s*\{[\s\S]*justify-content:\s*flex-end;/);
+  assert.match(css, /\.agent-grid-new-btn\s*\{[\s\S]*border-radius:\s*999px;/);
   assert.match(css, /\.agent-band--architect\s*\{[\s\S]*grid-template-columns:\s*var\(--agent-architect-column-width\)\s+minmax\(var\(--agent-engineer-column-width\),\s*1fr\)/);
   const architectBandBlocks = [...css.matchAll(/\.agent-band--architect\s*\{[^}]*\}/g)].map(match => match[0]);
   assert.ok(architectBandBlocks.length >= 1, 'architect band CSS should be present');

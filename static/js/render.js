@@ -2244,22 +2244,6 @@ function _renderPrincipalNewArchitectGhost(groupName, disabled) {
     + '>+ New Architect</button>';
 }
 
-function _renderNewArchitectControl(groupName, opts) {
-  opts = opts || {};
-  const groupArg = _jsStringAttr(groupName);
-  const disabled = !!opts.disabled;
-  const navId = _gridNavControlId('agent-new-architect', groupName, '');
-  const focusKey = _gridNavControlFocusKey('agent-new-architect', groupName, 'user');
-  return '<button type="button" class="ghost-card ghost-card--architect agent-new-architect-card' + _gridNavFocusedClass(navId) + '"'
-    + ' data-action="new-architect"'
-    + ' data-nav-id="' + esc(navId) + '"'
-    + ' data-group="' + esc(groupName) + '"'
-    + ' data-focus-key="' + esc(focusKey) + '"'
-    + (disabled ? ' disabled aria-disabled="true" title="Agent limit reached"' : ' title="Create a new architect in this group"')
-    + (disabled ? '' : ' onclick="event.stopPropagation();openAddArchitectForGroup(' + groupArg + ')"')
-    + '>+ New Architect</button>';
-}
-
 function _renderAgentGridNewToolbar(groupName, disabled) {
   const group = String(groupName || '').trim();
   if (!group) return '';
@@ -2302,16 +2286,6 @@ function _renderPrincipalsRow(groupName, sections, selectedPrincipalId, opts) {
   html += _renderPrincipalNewArchitectGhost(groupName, disabled);
   html += '</div>';
   return html;
-}
-
-function _renderAgentStrataHeader(label, count, extraClass) {
-  const classes = ['agent-strata-heading'];
-  if (extraClass) classes.push(extraClass);
-  const countText = String(Number(count || 0) || 0);
-  return '<div class="' + esc(classes.join(' ')) + '">'
-    + '<span class="agent-strata-heading-label">' + esc(label || '') + '</span>'
-    + '<span class="agent-strata-heading-count">' + esc(countText) + '</span>'
-    + '</div>';
 }
 
 function _renderArchitectBand(groupName, section, renderCell, opts) {
@@ -2522,12 +2496,6 @@ function _buildAgentGridNavigationModel(groupContexts) {
     model.focusableItems.push(item.id);
   };
 
-  const addCreationControl = function(control) {
-    if (!control || !control.id) return;
-    model.creationControls.push(control);
-    if (!model.itemMeta[control.id]) addMeta(control, null, null, control.sort);
-  };
-
   const addRow = function(row) {
     if (!row || !row.items || row.items.length === 0) return;
     row.rowIndex = model.gridRows.length;
@@ -2565,38 +2533,6 @@ function _buildAgentGridNavigationModel(groupContexts) {
       type: 'agent',
       agentKind: kind || agent.kind || 'agent',
     };
-  };
-
-  const engineerControlForSection = function(ctx, section, sectionKey) {
-    if (!ctx || ctx.atAgentCap) return null;
-    const architectId = section && section.architect ? (section.architect.id || '') : '';
-    const controlId = _gridNavControlId('section-new-engineer', ctx.gname, sectionKey);
-    return {
-      id: controlId,
-      type: 'control',
-      controlType: 'section-new-engineer',
-      group: ctx.gname,
-      sectionKey,
-      architectId,
-      focusKey: _gridNavControlFocusKey('section-new-engineer', ctx.gname, sectionKey),
-    };
-  };
-
-  const addControlRow = function(ctx, sectionKey, rowKey, rowType, controls, extra) {
-    controls = (Array.isArray(controls) ? controls : []).filter(Boolean);
-    if (!controls.length) return;
-    addRow(Object.assign({
-      group: ctx.gname,
-      sectionKey,
-      rowKey,
-      rowType,
-      items: controls,
-    }, extra || {}));
-    for (const control of controls) {
-      addCreationControl(Object.assign({}, control, {
-        sort: model.itemMeta[control.id] ? model.itemMeta[control.id].sort : sortOrder++,
-      }));
-    }
   };
 
   for (const ctx of groupContexts) {
@@ -2791,47 +2727,6 @@ function _resolveFocusedItemForGridRender(currentFocusedId, navModel) {
 
 function _jsStringAttr(value) {
   return esc(JSON.stringify(String(value || '')));
-}
-
-function _renderSectionControlsSlot(groupName, section, opts) {
-  opts = opts || {};
-  const sectionKey = _agentGridSectionKey(section);
-  const architectId = section && section.architect ? String(section.architect.id || '') : '';
-  const groupArg = _jsStringAttr(groupName);
-  const architectArg = _jsStringAttr(architectId);
-  const disabled = !!opts.disabled;
-  const navId = _gridNavControlId('section-new-engineer', groupName, sectionKey);
-  const focusKey = _gridNavControlFocusKey('section-new-engineer', groupName, sectionKey);
-  return '<div class="agent-section-controls-slot"'
-    + ' data-section-controls-for="' + esc(sectionKey) + '">'
-    + '<button type="button" class="ghost-card ghost-card--engineer' + _gridNavFocusedClass(navId) + '"'
-    + ' data-action="new-engineer"'
-    + ' data-nav-id="' + esc(navId) + '"'
-    + ' data-group="' + esc(groupName) + '"'
-    + ' data-hired-by-architect-id="' + esc(architectId) + '"'
-    + ' data-focus-key="' + esc(focusKey) + '"'
-    + (disabled ? ' disabled aria-disabled="true" title="Agent limit reached"' : ' title="Create an engineer in this section"')
-    + (disabled ? '' : ' onclick="event.stopPropagation();openAddEngineerForSection(' + groupArg + ',' + architectArg + ')"')
-    + '>+ New Engineer</button>'
-    + '</div>';
-}
-
-function _renderStandaloneWorkerGhost(groupName, section, opts) {
-  opts = opts || {};
-  if (!section || section.type !== 'user') return '';
-  const sectionKey = _agentGridSectionKey(section);
-  const groupArg = _jsStringAttr(groupName);
-  const disabled = !!opts.disabled;
-  const navId = _gridNavControlId('section-new-worker', groupName, sectionKey);
-  const focusKey = _gridNavControlFocusKey('section-new-worker', groupName, sectionKey);
-  return '<button type="button" class="ghost-card ghost-card--worker standalone-worker-card-new' + _gridNavFocusedClass(navId) + '"'
-    + ' data-action="new-worker"'
-    + ' data-nav-id="' + esc(navId) + '"'
-    + ' data-group="' + esc(groupName) + '"'
-    + ' data-focus-key="' + esc(focusKey) + '"'
-    + (disabled ? ' disabled aria-disabled="true" title="Agent limit reached"' : ' title="Create a user-owned standalone worker"')
-    + (disabled ? '' : ' onclick="event.stopPropagation();openAddWorkerForSection(' + groupArg + ')"')
-    + '>+ Add Worker</button>';
 }
 
 function _renderStandaloneWorkersStrip(section, renderCell, opts) {
