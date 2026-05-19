@@ -1037,6 +1037,89 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             [op.get("op") for op in state._delta_ops],
         )
 
+    async def test_rehire_architect_replays_buffered_peer_messages_from_db_after_cache_loss(self):
+        db_mod = importlib.import_module("torque.db")
+        db_mod = importlib.reload(db_mod)
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        temp_dir = tmp.name
+        db = db_mod.TorqueDB(Path(temp_dir) / "torque.db")
+        db.init()
+        self.addCleanup(db.close)
+        state = self.state_mod.MatrixState(db=db)
+        state.add_group("torque")
+        sender = self.state_mod.AgentCell(
+            id="arch-sender",
+            name="Sender",
+            slug="sender",
+            group="torque",
+            cell_type="agent",
+            kind="architect",
+            status="running",
+            persistent=True,
+        )
+        architect = self.state_mod.AgentCell(
+            id="arch-target",
+            name="Target",
+            slug="target",
+            group="torque",
+            cell_type="agent",
+            kind="architect",
+            status="stopped",
+            dismissed_at=123,
+            persistent=True,
+            agent_type="codex",
+            directory=temp_dir,
+        )
+        state.agents[sender.id] = sender
+        state.agents[architect.id] = architect
+        state.groups["torque"] = [sender.id, architect.id]
+        state._db_save_agent(sender)
+        state._db_save_agent(architect)
+        state._db_save_groups()
+        db.save_agent_peer_message({
+            "id": "msg-peer-buffered",
+            "thread_id": "msg-peer-buffered",
+            "group_name": "torque",
+            "sender_id": sender.id,
+            "sender_kind": "architect",
+            "recipient_id": architect.id,
+            "recipient_kind": "architect",
+            "message": "Recover this peer message after rehire.",
+            "created_at": 10.0,
+            "ack_required": True,
+            "delivery_state": "buffered",
+            "delivery_reason": "recipient_dismissed",
+        })
+        architect.mcp_messages = []
+        bridge = _CapturingBridge()
+
+        result = await self.server_mod._handle_architect_rehire_command(
+            {"architect_id": architect.id},
+            state,
+            bridge=bridge,
+            worktree_mgr=_FakeWorktreeManager(),
+            resolve_base_dir=lambda group: temp_dir,
+            resolve_agent_launch_config=lambda *a, **k: {},
+            resolve_engineer_launch_config=lambda *a, **k: {},
+            resolve_architect_launch_config=lambda *a, **k: self._launch_config(temp_dir),
+            apply_persistent_prompt=lambda *a, **k: None,
+            build_cell_persistent_prompt=lambda *a, **k: "persistent",
+            persistent_prompt_filename=lambda cell: f"{cell.id}.md",
+            is_designated_engineer=lambda cell: False,
+        )
+
+        self.assertEqual(result["type"], "ok")
+        self.assertEqual(result["replayed_messages"], 1)
+        self.assertEqual(len(bridge.sent_text), 1)
+        replayed_prompt = bridge.sent_text[0][1]
+        self.assertIn("## Message from Sender (architect)", replayed_prompt)
+        self.assertIn("Recover this peer message after rehire.", replayed_prompt)
+        persisted = db.load_agent_peer_message("msg-peer-buffered")
+        self.assertEqual(persisted["delivery_state"], "delivered")
+        self.assertTrue(architect.mcp_messages[0]["delivered"])
+        self.assertFalse(architect.mcp_messages[0]["buffered"])
+
     async def test_rename_engineer_updates_name_slug_and_preserves_kind(self):
         state = self._make_state()
         engineer = self._add_engineer_cell(state, "eng-alice", "Alice")

@@ -86,6 +86,7 @@ _ARCHITECT_TASK_LIST_DEFAULT_LIMIT = 100
 _ARCHITECT_PEER_MESSAGE_LENGTH_LIMIT = 16 * 1024
 _ARCHITECT_PEER_INBOX_DEFAULT_LIMIT = 20
 _ARCHITECT_PEER_INBOX_MAX_LIMIT = 100
+_ARCHITECT_PEER_SUMMARY_LOAD_LIMIT = 1000
 _DISPATCH_SHAPE_VALID_BATCH_STATUSES = {
     "dispatched",
     "queued",
@@ -1011,6 +1012,265 @@ def _load_recent_panel_events(state) -> list[dict]:
     return []
 
 
+def _peer_row_created_at(row: dict) -> float:
+    try:
+        return float((row or {}).get("created_at", (row or {}).get("timestamp", 0)) or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _load_recent_architect_peer_rows(
+        state,
+        architect_id: str,
+        *,
+        limit: int = _ARCHITECT_PEER_SUMMARY_LOAD_LIMIT,
+        since: float = 0.0) -> list[dict]:
+    """Load recent canonical peer-message rows involving one Architect."""
+    architect_id = str(architect_id or "").strip()
+    if not architect_id:
+        return []
+    limit = max(1, min(int(limit or _ARCHITECT_PEER_SUMMARY_LOAD_LIMIT), 1000))
+    db = getattr(state, "db", None)
+    if db and hasattr(db, "load_agent_peer_messages_for_agent"):
+        return db.load_agent_peer_messages_for_agent(
+            architect_id,
+            limit=limit,
+            since=since,
+        )
+    cell = getattr(state, "agents", {}).get(architect_id)
+    rows = []
+    for entry in list(getattr(cell, "mcp_messages", []) or []):
+        if str((entry or {}).get("action", "") or "").strip() not in {
+            "architect_peer_message",
+            "architect_peer_reply",
+        }:
+            continue
+        timestamp = _peer_row_created_at(entry)
+        if since and timestamp < since:
+            continue
+        row = dict(entry)
+        row.setdefault("created_at", timestamp)
+        row.setdefault("group_name", row.get("group", ""))
+        rows.append(row)
+    rows.sort(
+        key=lambda row: (
+            _peer_row_created_at(row),
+            str((row or {}).get("id", "") or ""),
+        ),
+        reverse=True,
+    )
+    return rows[:limit]
+
+
+def _peer_thread_pending_reply_info(messages: list[dict],
+                                    caller_id: str) -> tuple[bool, float]:
+    """Return whether a thread needs caller reply plus the pending ack time."""
+    latest_outgoing = 0.0
+    latest_incoming_ack = 0.0
+    caller_id = str(caller_id or "").strip()
+    for row in messages:
+        ts = _peer_row_created_at(row)
+        if str((row or {}).get("sender_id", "") or "").strip() == caller_id:
+            latest_outgoing = max(latest_outgoing, ts)
+        elif bool((row or {}).get("ack_required", False)):
+            latest_incoming_ack = max(latest_incoming_ack, ts)
+    return latest_incoming_ack > latest_outgoing, latest_incoming_ack
+
+
+def _architect_peer_message_summary(state, architect_id: str) -> dict:
+    rows = _load_recent_architect_peer_rows(
+        state,
+        architect_id,
+        limit=_ARCHITECT_PEER_SUMMARY_LOAD_LIMIT,
+    )
+    architect_id = str(architect_id or "").strip()
+    grouped: dict[str, list[dict]] = {}
+    sent_count = 0
+    received_count = 0
+    unread_count = 0
+    latest_message_at = 0.0
+    for row in rows:
+        sender_id = str((row or {}).get("sender_id", "") or "").strip()
+        recipient_id = str((row or {}).get("recipient_id", "") or "").strip()
+        timestamp = _peer_row_created_at(row)
+        latest_message_at = max(latest_message_at, timestamp)
+        if sender_id == architect_id:
+            sent_count += 1
+        if recipient_id == architect_id:
+            received_count += 1
+            delivery_state = str(
+                (row or {}).get("delivery_state", "") or "buffered"
+            ).strip()
+            if delivery_state != "delivered":
+                unread_count += 1
+        thread_id = str((row or {}).get("thread_id", "") or "").strip()
+        if thread_id:
+            grouped.setdefault(thread_id, []).append(row)
+
+    requires_reply_count = 0
+    pending_times = []
+    for messages in grouped.values():
+        messages.sort(
+            key=lambda row: (
+                _peer_row_created_at(row),
+                str((row or {}).get("id", "") or ""),
+            )
+        )
+        requires_reply, pending_at = _peer_thread_pending_reply_info(
+            messages,
+            architect_id,
+        )
+        if requires_reply:
+            requires_reply_count += 1
+            if pending_at:
+                pending_times.append(pending_at)
+
+    return {
+        "recent_count": len(rows),
+        "sent_count": sent_count,
+        "received_count": received_count,
+        "unread_count": unread_count,
+        "ack_required_pending_count": requires_reply_count,
+        "requires_reply_count": requires_reply_count,
+        "oldest_unanswered_at": min(pending_times) if pending_times else 0.0,
+        "latest_message_at": latest_message_at,
+        "truncated": len(rows) >= _ARCHITECT_PEER_SUMMARY_LOAD_LIMIT,
+    }
+
+
+def _peer_row_context(row: dict) -> dict:
+    summary = str((row or {}).get("context_summary", "") or "")
+    if len(summary) > 240:
+        summary = summary[:239].rstrip() + "…"
+    return {
+        "task_ids": list((row or {}).get("context_task_ids", []) or []),
+        "engineer_ids": list((row or {}).get("context_engineer_ids", []) or []),
+        "decision_ids": list((row or {}).get("context_decision_ids", []) or []),
+        "summary": summary,
+    }
+
+
+def _peer_row_involves_engineer(state, row: dict, engineer_id: str) -> bool:
+    engineer_id = str(engineer_id or "").strip()
+    if not engineer_id:
+        return False
+    if engineer_id in {
+        str(item or "").strip()
+        for item in ((row or {}).get("context_engineer_ids", []) or [])
+    }:
+        return True
+    for task_id in (row or {}).get("context_task_ids", []) or []:
+        task = getattr(state, "board_tasks", {}).get(str(task_id or "").strip())
+        if task and _effective_assigned_engineer_id(task) == engineer_id:
+            return True
+    return False
+
+
+def _architect_peer_message_event(state, row: dict, architect_id: str,
+                                  requires_reply: bool) -> dict:
+    entry = _agent_peer_message_row_to_entry(row, architect_id)
+    sender = getattr(state, "agents", {}).get(entry["sender_id"])
+    peer = getattr(state, "agents", {}).get(entry["peer_id"])
+    context = _peer_row_context(row)
+    task_id = context["task_ids"][0] if context["task_ids"] else ""
+    assigned_engineer_id = ""
+    if task_id:
+        task = getattr(state, "board_tasks", {}).get(task_id)
+        assigned_engineer_id = _effective_assigned_engineer_id(task) if task else ""
+    if not assigned_engineer_id and context["engineer_ids"]:
+        assigned_engineer_id = context["engineer_ids"][0]
+    return {
+        "id": entry["id"],
+        "kind": entry["action"],
+        "timestamp": float(entry.get("timestamp", 0) or 0),
+        "cell_id": entry["sender_id"],
+        "agent_name": str(getattr(sender, "name", "") or "").strip()
+        or entry["sender_id"],
+        "agent_kind": entry["sender_kind"],
+        "group": str((row or {}).get("group_name", (row or {}).get("group", "")) or ""),
+        "task_id": task_id,
+        "assigned_engineer_id": assigned_engineer_id,
+        "created_by_architect_id": entry["sender_id"],
+        "owner_engineer_id": "",
+        "message": _clip_event_message(entry.get("message", "") or ""),
+        "digest_recipients": [],
+        "message_id": entry["id"],
+        "thread_id": entry["thread_id"],
+        "reply_to_id": entry["reply_to_id"],
+        "direction": entry["direction"],
+        "peer_architect_id": entry["peer_id"],
+        "peer_name": str(getattr(peer, "name", "") or "").strip()
+        or entry["peer_id"],
+        "ack_required": bool(entry.get("ack_required", False)),
+        "requires_reply": bool(requires_reply),
+        "delivery_state": entry["delivery_state"],
+        "context": context,
+    }
+
+
+def _recent_architect_peer_message_events(
+        state,
+        architect_id: str,
+        architect_group: str,
+        *,
+        kind_filter: str = "",
+        engineer_filter: str = "",
+        since: float = 0.0) -> list[dict]:
+    rows = _load_recent_architect_peer_rows(
+        state,
+        architect_id,
+        limit=_ARCHITECT_EVENTS_RECENT_LOAD_LIMIT,
+        since=since,
+    )
+    rows = [
+        row for row in rows
+        if str((row or {}).get("group_name", (row or {}).get("group", "")) or "").strip()
+        == str(architect_group or "").strip()
+    ]
+    grouped: dict[str, list[dict]] = {}
+    for row in rows:
+        grouped.setdefault(
+            str((row or {}).get("thread_id", "") or "").strip(),
+            [],
+        ).append(row)
+    requires_by_thread: dict[str, bool] = {}
+    for thread_id, messages in grouped.items():
+        messages.sort(
+            key=lambda row: (
+                _peer_row_created_at(row),
+                str((row or {}).get("id", "") or ""),
+            )
+        )
+        requires_by_thread[thread_id] = _peer_thread_pending_reply_info(
+            messages,
+            architect_id,
+        )[0]
+
+    events = []
+    for row in rows:
+        action = (
+            "architect_peer_reply"
+            if str((row or {}).get("reply_to_id", "") or "").strip()
+            else "architect_peer_message"
+        )
+        if kind_filter and kind_filter != action:
+            continue
+        if engineer_filter and not _peer_row_involves_engineer(
+            state,
+            row,
+            engineer_filter,
+        ):
+            continue
+        thread_id = str((row or {}).get("thread_id", "") or "").strip()
+        events.append(_architect_peer_message_event(
+            state,
+            row,
+            architect_id,
+            requires_by_thread.get(thread_id, False),
+        ))
+    return events
+
+
 def _architect_events_recent_json(state, architect_id: str, architect_group: str,
                                   args: dict) -> tuple[str, bool]:
     limit, limit_error = _normalize_architect_events_limit(args.get("limit"))
@@ -1058,6 +1318,21 @@ def _architect_events_recent_json(state, architect_id: str, architect_group: str
             "digest_recipients": resolve_digest_recipients(state, event),
         })
 
+    events.extend(_recent_architect_peer_message_events(
+        state,
+        architect_id,
+        architect_group,
+        kind_filter=kind_filter,
+        engineer_filter=engineer_filter,
+        since=since,
+    ))
+    events.sort(
+        key=lambda event: (
+            float((event or {}).get("timestamp", 0) or 0),
+            str((event or {}).get("id", "") or ""),
+        ),
+        reverse=True,
+    )
     truncated = len(events) > limit
     payload_events = events[:limit]
     while True:
@@ -2979,6 +3254,11 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 "truncated": len(boundary_items) > 10,
             },
         }
+        if include_created_by:
+            summary["peer_messages"] = _architect_peer_message_summary(
+                real_state,
+                caller_id,
+            )
         hints = compute_engineer_hints(
             summary_state,
             _engineer_group,

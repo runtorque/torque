@@ -136,6 +136,9 @@ async def _emit_session_wake_entry(state, *, cell_id: str, caller_kind: str,
         return
 
     if caller_kind == "architect":
+        refresh_peer_cache = getattr(state, "refresh_peer_message_cache_for_agent", None)
+        if callable(refresh_peer_cache):
+            refresh_peer_cache(cell.id, emit=True)
         latest_entries = state.architect_journal_read(cell.id, limit=1)
         last_entry_ts = _extract_entry_timestamp(
             latest_entries[0] if latest_entries else None
