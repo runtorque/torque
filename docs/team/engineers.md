@@ -206,6 +206,19 @@ background PR poller, so the Engineer should not treat that as shipped: wait for
 GitHub, then rerun `engineer_merge` (or inspect the PR) to finalize base sync,
 boundary state, and cleanup. Cleanup is post-merge only, never post-PR-create.
 
+#### Writing PR titles and bodies
+
+When you call `engineer_merge`, write a clear `pr_title` and `pr_body` unless
+the change is a textbook ≤30 LOC fix. The title should be a short imperative
+summary of what landed, for example "Fix history panel search-box focus loss
+and add architect filter"; avoid generic titles like "Merge worker branch" or
+task-id-only labels.
+
+The body can use Markdown. Keep it to 1-3 paragraphs that cover what changed at
+a high level, why it addresses the linked task(s), and what was tested.
+Reference Torque task IDs such as `TORQUE:123` where applicable. Skip
+implementation minutiae; reviewers can read those in the diff.
+
 ### Dispatch-shape affordance
 
 Torque also gives the Engineer a soft batch-affordance hint when its recent

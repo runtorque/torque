@@ -487,6 +487,61 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
             ["worktree_check_merge", "worktree_merge"],
         )
 
+    async def test_engineer_merge_passes_pr_title_body_to_worktree_merge(self):
+        state = self._make_state()
+        alice = self._add_engineer(state, "eng-alice", "Alice")
+        worker = self._add_worker(state, "worker-a", "Alice Worker", alice.id)
+        worker.worktree_path = "/tmp/worker-a"
+        worker.worktree_branch = "torque/alice/worker-a"
+        worker.worktree_base_branch = "main"
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            if payload["cmd"] == "worktree_check_merge":
+                return {
+                    "type": "worktree_check_merge",
+                    "id": worker.id,
+                    "clean": True,
+                    "conflicts": [],
+                }
+            if payload["cmd"] == "worktree_merge":
+                self.assertEqual(
+                    payload["pr_title"],
+                    "Document engineer-authored PR metadata",
+                )
+                self.assertEqual(
+                    payload["pr_body"],
+                    "Covers TORQUE:497 and records test coverage.",
+                )
+                return {
+                    "type": "worktree_merge",
+                    "id": worker.id,
+                    "ok": True,
+                    "sha": "abc123",
+                    "cleanup": {"errors": []},
+                }
+            self.fail(f"Unexpected command: {payload}")
+
+        text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_merge",
+            {
+                "agent": worker.id,
+                "pr_title": "Document engineer-authored PR metadata",
+                "pr_body": "Covers TORQUE:497 and records test coverage.",
+            },
+            fake_handle_command,
+            state,
+            caller_id=alice.id,
+        )
+
+        self.assertFalse(is_error, text)
+        self.assertEqual(json.loads(text)["sha"], "abc123")
+        self.assertEqual(
+            [call["cmd"] for call in calls],
+            ["worktree_check_merge", "worktree_merge"],
+        )
+
     async def test_engineer_merge_pr_error_includes_phase_and_url(self):
         state = self._make_state()
         alice = self._add_engineer(state, "eng-alice", "Alice")

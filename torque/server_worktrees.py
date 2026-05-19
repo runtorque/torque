@@ -268,6 +268,18 @@ def _split_merge_message_for_pr(message: str, *,
     return title, body
 
 
+def _append_pr_url_to_squash_body(body: str, pr_url: str) -> str:
+    """Append the PR URL to the squash commit body without duplicating it."""
+    body = str(body or "").strip()
+    pr_url = str(pr_url or "").strip()
+    if not pr_url or pr_url in body:
+        return body
+    suffix = f"PR: {pr_url}"
+    if body:
+        return f"{body}\n\n{suffix}"
+    return suffix
+
+
 def _pr_result_metadata(
     *,
     pr_result: dict | None = None,
