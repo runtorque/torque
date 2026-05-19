@@ -926,6 +926,34 @@ function onGroupTabContextMenu(e, group) {
   ]);
 }
 
+function _agentGridNewMenuItems(group) {
+  const groupName = String(group || '').trim();
+  if (!groupName) return [];
+  return [
+    { label: 'New architect', action: 'openAddArchitectForGroup(' + JSON.stringify(groupName) + ')' },
+    { label: 'New engineer', action: 'openAddEngineerForSection(' + JSON.stringify(groupName) + ', "")' },
+    { label: 'New worker', action: 'openAddWorkerForSection(' + JSON.stringify(groupName) + ')' },
+  ];
+}
+
+function openAgentGridNewMenu(e, group) {
+  if (e) {
+    if (typeof e.preventDefault === 'function') e.preventDefault();
+    if (typeof e.stopPropagation === 'function') e.stopPropagation();
+  }
+  const items = _agentGridNewMenuItems(group);
+  if (!items.length) return;
+  let x = e && typeof e.clientX === 'number' ? e.clientX : 0;
+  let y = e && typeof e.clientY === 'number' ? e.clientY : 0;
+  const target = e && (e.currentTarget || e.target);
+  if (target && typeof target.getBoundingClientRect === 'function') {
+    const rect = target.getBoundingClientRect();
+    x = rect.left;
+    y = rect.bottom + 4;
+  }
+  showContextMenu(x, y, items);
+}
+
 function _cellContextMenuItems(id) {
   const cell = state.agents[id];
   if (!cell) return [];
@@ -939,6 +967,18 @@ function _cellContextMenuItems(id) {
     { label: 'Edit\u2026', action: `openEditCell('${id}')` },
     { label: 'Focus', action: `focusAgent('${id}')` },
   ];
+  if (cell.cell_type === 'agent'
+      && (cell.kind || '') === 'architect'
+      && !isDismissedLifecycleCell) {
+    items.push({
+      label: 'New engineer',
+      action: 'openAddEngineerForSection('
+        + JSON.stringify(cell.group || '')
+        + ', '
+        + JSON.stringify(id)
+        + ')',
+    });
+  }
   if (cell.status === 'stopped' && !isDismissedLifecycleCell) {
     items.push({
       label: isDesignatedEngineer ? 'Restart Engineer\u2026' : 'Relaunch',

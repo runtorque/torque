@@ -884,6 +884,37 @@ main {
 .agents-grid-pane > .empty {
   min-height: 100%;
 }
+.agent-grid-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  min-width: 0;
+  padding: 0 0 6px;
+}
+.agent-grid-new-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 3px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 46%, var(--border) 54%);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+.agent-grid-new-btn:hover:not(:disabled),
+.agent-grid-new-btn:focus-visible {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+.agent-grid-new-btn:disabled {
+  cursor: default;
+  opacity: .45;
+}
 .agent-group-tabs-host {
   flex: 0 0 auto;
   min-width: 0;
@@ -1174,42 +1205,6 @@ body.runtime-embedded .agent-focus-header {
 .agent-strata:last-child {
   border-bottom: none;
   padding-bottom: 0;
-}
-.agent-strata-heading {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 18px;
-  color: var(--text-dim);
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: .08em;
-  line-height: 1;
-  text-transform: uppercase;
-}
-.agent-strata-heading-count {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 16px;
-  height: 14px;
-  padding: 0 5px;
-  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
-  border-radius: 999px;
-  box-sizing: border-box;
-  color: var(--text-dim);
-  font-size: 8px;
-  letter-spacing: 0;
-}
-.agent-strata-empty {
-  padding: 3px 0 2px;
-}
-.agent-strata-controls {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 8px;
-  min-width: 0;
 }
 .agent-band {
   min-width: 0;
