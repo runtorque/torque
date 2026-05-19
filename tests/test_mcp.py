@@ -645,18 +645,188 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             "parallel velocity > review-boundary granularity",
             description,
         )
-        self.assertIn("this batch's active-worker cap", description)
+        self.assertIn("this batch's engineer-group", description)
         self.assertIn("warm-cluster queue", description)
         self.assertIn("prefer serial `engineer_task_dispatch`", description)
         self.assertIn("implement→review→fix checkpoints", description)
         agent_group_desc = (
             props["tasks"]["items"]["properties"]["agent_group"]["description"]
         )
-        self.assertIn("warm-cluster affinity key", agent_group_desc)
-        self.assertIn(
-            "Per-batch active-worker cap",
-            props["max_concurrent"]["description"],
+        self.assertIn("warm-cluster same-agent affinity key", agent_group_desc)
+        self.assertIn("not a capacity", agent_group_desc)
+        max_desc = props["max_concurrent"]["description"]
+        self.assertIn("Per-batch active-worker cap", max_desc)
+        self.assertIn("engineer group's currently active", max_desc)
+        self.assertIn("not an agent_group", max_desc)
+
+    async def test_engineer_batch_dispatch_deferral_reports_group_and_refreshes_cap(self):
+        state = self.state_mod.MatrixState()
+        engineer = self.state_mod.AgentCell(
+            id="engineer-1",
+            name="Engineer",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
         )
+        worker = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            created_by_engineer_id=engineer.id,
+            owner_engineer_id=engineer.id,
+            current_task_id="active",
+        )
+        state.agents[engineer.id] = engineer
+        state.agents[worker.id] = worker
+        state.groups["g"] = [engineer.id, worker.id]
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            engineer_agent_id=engineer.id
+        )
+        state.board_lanes = ["Backlog", "To Do", "In Progress", "Done"]
+        state.board_add_task(
+            "Active",
+            "g",
+            lane="In Progress",
+            id="active",
+            agent_id=worker.id,
+        )
+        queued = state.board_add_task("Queued", "g", lane="Backlog", id="queued")
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected dispatch while at cap: {payload}")
+
+        handler = self.mcp_mod.create_mcp_handler(fake_handle_command, state)
+
+        async def call_batch(max_concurrent):
+            response = await handler(
+                FakeRequest(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": max_concurrent,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "engineer_batch_dispatch",
+                            "arguments": {
+                                "tasks": [{"task": queued.id}],
+                                "max_concurrent": max_concurrent,
+                            },
+                        },
+                    },
+                    headers={"X-Torque-Cell-Id": engineer.id},
+                )
+            )
+            self.assertFalse(response.payload["result"]["isError"])
+            return json.loads(response.payload["result"]["content"][0]["text"])
+
+        deferred = await call_batch(1)
+        item = deferred["results"][0]
+        self.assertEqual(item["status"], "deferred")
+        self.assertEqual(item["reason"], "max_concurrent_reached")
+        self.assertEqual(item["engineer_group"], "g")
+        self.assertEqual(item["active_count"], 1)
+        self.assertEqual(item["cap"], 1)
+        self.assertIn("engineer group 'g'", item["message"])
+        self.assertIn("1/1", item["message"])
+
+        raised = await call_batch(3)
+        item = raised["results"][0]
+        self.assertEqual(item["status"], "cap_raised")
+        self.assertEqual(item["previous_max_concurrent"], 1)
+        self.assertEqual(item["max_concurrent"], 3)
+        self.assertEqual(state.auto_dispatch_queues["g"][0].max_concurrent, 3)
+
+        lowered = await call_batch(2)
+        item = lowered["results"][0]
+        self.assertEqual(item["status"], "failed")
+        self.assertEqual(item["reason"], "already_queued")
+        self.assertEqual(item["current_max_concurrent"], 3)
+        self.assertEqual(item["requested_max_concurrent"], 2)
+        self.assertEqual(state.auto_dispatch_queues["g"][0].max_concurrent, 3)
+
+    async def test_engineer_batch_dispatch_deferred_entry_auto_promotes_after_slot_frees(self):
+        state = self.state_mod.MatrixState()
+        engineer = self.state_mod.AgentCell(
+            id="engineer-1",
+            name="Engineer",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+        )
+        state.agents[engineer.id] = engineer
+        state.groups["g"] = [engineer.id]
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            engineer_agent_id=engineer.id
+        )
+        state.board_lanes = ["Backlog", "To Do", "In Progress", "Done"]
+        first = state.board_add_task("First", "g", lane="Backlog", id="first")
+        second = state.board_add_task("Second", "g", lane="Backlog", id="second")
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            task = state.board_tasks[payload["id"]]
+            agent_id = f"worker-{len(calls)}"
+            agent = self.state_mod.AgentCell(
+                id=agent_id,
+                name=f"Worker {len(calls)}",
+                group="g",
+                cell_type="agent",
+                created_by_engineer_id=engineer.id,
+                owner_engineer_id=engineer.id,
+                current_task_id=task.id,
+            )
+            state.agents[agent.id] = agent
+            state.groups["g"].append(agent.id)
+            task.agent_id = agent.id
+            task.lane = "In Progress"
+            return {"type": "ok"}
+
+        handler = self.mcp_mod.create_mcp_handler(fake_handle_command, state)
+        response = await handler(
+            FakeRequest(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "engineer_batch_dispatch",
+                        "arguments": {
+                            "tasks": [{"task": first.id}, {"task": second.id}],
+                            "max_concurrent": 1,
+                        },
+                    },
+                },
+                headers={"X-Torque-Cell-Id": engineer.id},
+            )
+        )
+        self.assertFalse(response.payload["result"]["isError"])
+        payload = json.loads(response.payload["result"]["content"][0]["text"])
+        self.assertEqual(
+            [item["status"] for item in payload["results"]],
+            ["dispatched", "deferred"],
+        )
+        self.assertEqual(state.board_tasks[second.id].lane, "Backlog")
+        self.assertEqual(state.auto_dispatch_queues["g"][0].task_id, second.id)
+
+        state.agents["worker-1"].current_task_id = ""
+        state.board_tasks[first.id].lane = "Done"
+        dispatch_mod = importlib.reload(
+            importlib.import_module("torque.server_dispatch")
+        )
+        panel_events = []
+        dispatched = await dispatch_mod._pump_auto_dispatch_queue(
+            state,
+            fake_handle_command,
+            lambda *args, **kwargs: panel_events.append((args, kwargs)),
+            group="g",
+        )
+
+        self.assertEqual(dispatched[0]["task_id"], second.id)
+        self.assertEqual(state.board_tasks[second.id].lane, "In Progress")
+        self.assertNotIn("g", state.auto_dispatch_queues)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(panel_events[0][0][0], "task_auto_dispatched")
 
     async def test_engineer_batch_dispatch_provider_reaches_dispatch_payload(self):
         state = self.state_mod.MatrixState()

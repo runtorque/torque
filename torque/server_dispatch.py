@@ -460,10 +460,48 @@ async def _pump_auto_dispatch_queue(state: MatrixState, handle_command,
                     payload["agent_type"] = entry.provider
                 if entry.engineer_owner_id:
                     payload["_created_by_engineer_id"] = entry.engineer_owner_id
-            result = await handle_command(payload)
+            try:
+                result = await handle_command(payload)
+            except Exception as exc:
+                log.exception(
+                    "auto-dispatch failed for group=%s task=%s; "
+                    "keeping queued entry for retry",
+                    group_name,
+                    task.id,
+                )
+                panel_event(
+                    "task_auto_dispatch_failed",
+                    target_agent_id,
+                    "",
+                    group_name,
+                    (
+                        "Auto-dispatch failed for queued task "
+                        f"'{task.task[:60]}'; keeping it queued: {exc}"
+                    ),
+                    task_id=task.id,
+                )
+                break
             if result and result.get("type") in {"error", "dispatch_action_missing"}:
-                state.auto_dispatch_queue_remove_task(task.id)
-                continue
+                message = result.get("message") or result.get("error") or result.get("type")
+                log.warning(
+                    "auto-dispatch failed for group=%s task=%s result=%s; "
+                    "keeping queued entry for retry",
+                    group_name,
+                    task.id,
+                    result,
+                )
+                panel_event(
+                    "task_auto_dispatch_failed",
+                    target_agent_id,
+                    "",
+                    group_name,
+                    (
+                        "Auto-dispatch failed for queued task "
+                        f"'{task.task[:60]}'; keeping it queued: {message}"
+                    ),
+                    task_id=task.id,
+                )
+                break
 
             task_after = state.board_tasks.get(task.id)
             resolved_agent_id = task_after.agent_id if task_after else ""

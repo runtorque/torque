@@ -2536,6 +2536,25 @@ class MatrixState:
         group, idx, _entry = self.auto_dispatch_queue_find(task_id)
         return bool(group and idx >= 0)
 
+    def auto_dispatch_queue_raise_max_concurrent(
+            self, group: str, task_id: str, max_concurrent: int):
+        """Raise a queued task's cap without lowering or reordering it.
+
+        Returns ``(entry, changed)`` when the task is already queued in
+        ``group``; returns ``(None, False)`` when it is not.  Retried
+        batch dispatches use this to refresh stale deferred entries after
+        the engineer intentionally raises the engineer-group capacity cap.
+        """
+        found_group, _idx, entry = self.auto_dispatch_queue_find(task_id)
+        if not entry or found_group != group:
+            return None, False
+        requested = max(1, int(max_concurrent or 1))
+        if requested <= entry.max_concurrent:
+            return entry, False
+        entry.max_concurrent = requested
+        self._db_save_auto_dispatch_queue(group)
+        return entry, True
+
     def auto_dispatch_queue_add(self, group: str, task_id: str, *,
                                 agent_group: str = "",
                                 max_concurrent: int = 1,

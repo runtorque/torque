@@ -217,6 +217,32 @@ class ServerDispatchObservabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("1/1", text)
         self.assertIn("deferring task=queued", text)
 
+    async def test_auto_dispatch_queue_keeps_entry_and_emits_failure_on_dispatch_error(self):
+        state = self._state()
+        state.board_add_task("Queued", "g", lane="To Do", id="queued")
+        state.auto_dispatch_queue_add("g", "queued", max_concurrent=1)
+        panel_events = []
+
+        async def handle_command(payload):
+            return {"type": "error", "message": "transient dispatch failure"}
+
+        with self.assertLogs("torque", level="WARNING") as logs:
+            dispatched = await self.dispatch_mod._pump_auto_dispatch_queue(
+                state,
+                handle_command,
+                lambda *args, **kwargs: panel_events.append((args, kwargs)),
+                group="g",
+            )
+
+        self.assertEqual(dispatched, [])
+        self.assertEqual(state.auto_dispatch_queues["g"][0].task_id, "queued")
+        text = "\n".join(logs.output)
+        self.assertIn("auto-dispatch failed for group=g task=queued", text)
+        self.assertIn("keeping queued entry for retry", text)
+        self.assertEqual(panel_events[0][0][0], "task_auto_dispatch_failed")
+        self.assertEqual(panel_events[0][1]["task_id"], "queued")
+        self.assertIn("keeping it queued", panel_events[0][0][4])
+
     async def test_auto_dispatch_queue_logs_empty_queue_with_bound_followups_once(self):
         state = self._state()
         state.board_add_task(

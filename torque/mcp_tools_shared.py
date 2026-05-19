@@ -3443,7 +3443,11 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             )
         elif not isinstance(raw_max_concurrent, int) \
                 or raw_max_concurrent < 1:
-            return "max_concurrent must be an integer >= 1", True
+            return (
+                "max_concurrent must be an integer >= 1; it is the "
+                "engineer-group active worker cap for this batch, not an "
+                "agent_group affinity cap."
+            ), True
         else:
             max_concurrent = raw_max_concurrent
 
@@ -3502,9 +3506,72 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                       "Task appears more than once in this batch.", tid)
                 continue
             seen_task_ids.add(tid)
-            if state.auto_dispatch_queue_contains(tid):
-                _fail(idx, task_ident, "already_queued",
-                      "Task is already queued for auto-dispatch.", tid)
+            queued_group, queued_idx, queued_entry = \
+                state.auto_dispatch_queue_find(tid)
+            if queued_entry:
+                if queued_group != _engineer_group:
+                    _fail(
+                        idx,
+                        task_ident,
+                        "already_queued",
+                        (
+                            "Task is already queued for auto-dispatch in "
+                            f"engineer group '{queued_group}'."
+                        ),
+                        tid,
+                    )
+                    continue
+                prior_cap = int(queued_entry.max_concurrent or 1)
+                refreshed_entry, cap_raised = (
+                    state.auto_dispatch_queue_raise_max_concurrent(
+                        _engineer_group, tid, max_concurrent
+                    )
+                )
+                queue = state.auto_dispatch_queues.get(_engineer_group, [])
+                queue_position = queued_idx + 1 if queued_idx >= 0 else len(queue)
+                if cap_raised and refreshed_entry:
+                    item = {
+                        "index": idx,
+                        "task": task_ident,
+                        "task_id": tid,
+                        "status": "cap_raised",
+                        "reason": "already_queued_cap_raised",
+                        "message": (
+                            "Task was already deferred for engineer group "
+                            f"'{_engineer_group}'; raised stored "
+                            "max_concurrent (engineer-group active worker "
+                            f"cap) from {prior_cap} to {max_concurrent}."
+                        ),
+                        "queue_position": queue_position,
+                        "previous_max_concurrent": prior_cap,
+                        "max_concurrent": max_concurrent,
+                        "queued_at": refreshed_entry.enqueued_at,
+                    }
+                    if refreshed_entry.agent_group:
+                        item["agent_group"] = refreshed_entry.agent_group
+                    results.append(item)
+                    continue
+                item = {
+                    "index": idx,
+                    "task": task_ident,
+                    "task_id": tid,
+                    "status": "failed",
+                    "reason": "already_queued",
+                    "message": (
+                        "Task is already queued for auto-dispatch in "
+                        f"engineer group '{_engineer_group}' with "
+                        f"max_concurrent={prior_cap}; requested "
+                        f"max_concurrent={max_concurrent} does not raise "
+                        "the engineer-group active worker cap, so the "
+                        "queued entry was left unchanged."
+                    ),
+                    "queue_position": queue_position,
+                    "current_max_concurrent": prior_cap,
+                    "requested_max_concurrent": max_concurrent,
+                }
+                if queued_entry.agent_group:
+                    item["agent_group"] = queued_entry.agent_group
+                results.append(item)
                 continue
 
             task = state.board_tasks.get(tid)
@@ -3569,8 +3636,16 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                     "status": "deferred",
                     "reason": "max_concurrent_reached",
                     "message": (
-                        "Dispatch would exceed max_concurrent for the group."
+                        "Dispatch would exceed max_concurrent for engineer "
+                        f"group '{_engineer_group}' "
+                        f"({len(active_agents)}/{max_concurrent} active "
+                        "worker slots in use). max_concurrent is the "
+                        "engineer-group active worker cap for this batch; "
+                        "agent_group only controls same-agent affinity."
                     ),
+                    "engineer_group": _engineer_group,
+                    "active_count": len(active_agents),
+                    "cap": max_concurrent,
                     "queue_position": len(queue),
                     "queued_at": (
                         queue_entry.enqueued_at if queue_entry else ""
