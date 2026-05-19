@@ -2666,8 +2666,14 @@ def _format_injected_mcp_message_prompt(
     if sender_kind_key == "engineer" and recipient_kind_key == "architect":
         include_reply_hint = bool(ack_required)
     if include_reply_hint:
+        if ack_required:
+            hint_prefix = "Ack required. Reply with:"
+        elif sender_kind_key == "architect" and recipient_kind_key == "architect":
+            hint_prefix = "Optional reply:"
+        else:
+            hint_prefix = "Reply with:"
         blocks.append(
-            f'Reply with: {reply_tool}(message_id="{message_id}", '
+            f'{hint_prefix} {reply_tool}(message_id="{message_id}", '
             'message="your response")'
         )
     prefix = "" if anchor else "\n"
@@ -2700,6 +2706,69 @@ async def _replay_buffered_cross_kind_messages(
     if not target or not getattr(target, "session_id", ""):
         return 0
     replayed = 0
+    replayed_ids: set[str] = set()
+
+    # Architect peer messages are canonicalized in SQLite.  Read buffered rows
+    # directly instead of trusting AgentCell.mcp_messages, which is an
+    # ephemeral/bounded UI cache and may have been cleared by /clear or lost
+    # during daemon restart before the Architect wakes again.
+    if (
+        str(getattr(target, "kind", "") or "").strip() == "architect"
+        and getattr(state, "db", None)
+    ):
+        for row in state.db.load_buffered_agent_peer_messages(target.id):
+            if str((row or {}).get("recipient_id", "") or "").strip() != target.id:
+                continue
+            if str((row or {}).get("recipient_kind", "") or "").strip() not in {
+                "",
+                "architect",
+            }:
+                continue
+            message_id = str((row or {}).get("id", "") or "").strip()
+            message_text = str((row or {}).get("message", "") or "")
+            if not message_id or not message_text:
+                continue
+            sender_id = str((row or {}).get("sender_id", "") or "").strip()
+            sender = state.agents.get(sender_id)
+            sender_name = (
+                str(getattr(sender, "name", "") or "").strip()
+                or str((row or {}).get("sender_kind", "") or "").strip()
+                or "peer"
+            )
+            sender_kind = (
+                str(getattr(sender, "kind", "") or "").strip()
+                or str((row or {}).get("sender_kind", "") or "").strip()
+                or "architect"
+            )
+            formatted = _format_injected_mcp_message_prompt(
+                message=message_text,
+                sender_name=sender_name,
+                sender_kind=sender_kind,
+                recipient_kind=str(getattr(target, "kind", "") or ""),
+                message_id=message_id,
+                ack_required=bool((row or {}).get("ack_required", False)),
+            )
+            try:
+                if hasattr(bridge, "prime_input_ready"):
+                    bridge.prime_input_ready(target.session_id)
+                await bridge.send_text(target.session_id, formatted)
+            except Exception:
+                log.exception(
+                    "Failed to replay buffered Architect peer message %s to %s",
+                    message_id,
+                    target.id,
+                )
+                state.update_peer_message_delivery(
+                    message_id,
+                    "buffered",
+                    reason="replay_failed",
+                )
+                replayed_ids.add(message_id)
+                continue
+            state.update_peer_message_delivery(message_id, "delivered")
+            replayed_ids.add(message_id)
+            replayed += 1
+
     entries = list(getattr(target, "mcp_messages", []) or [])
     for entry in reversed(entries):
         if str((entry or {}).get("direction", "") or "") != "received":
@@ -2707,6 +2776,8 @@ async def _replay_buffered_cross_kind_messages(
         if entry.get("delivered") is not False:
             continue
         message_id = str(entry.get("id", "") or "").strip()
+        if message_id in replayed_ids:
+            continue
         message_text = str(entry.get("message", "") or "")
         if not message_id or not message_text:
             continue
@@ -7259,8 +7330,28 @@ async def main(connection=None):
     if hasattr(bridge, "on_supervisor_event"):
         bridge.on_supervisor_event = _on_supervisor_event
 
+    def _on_agent_session_start(cell):
+        """Signal terminal readiness and recover buffered Architect peers."""
+        bridge.signal_input_ready(cell.id)
+        if (
+            str(getattr(cell, "kind", "") or "").strip() != "architect"
+            or _agent_dismissed_at(cell)
+        ):
+            return
+
+        async def _recover_architect_peer_messages():
+            try:
+                await _replay_buffered_cross_kind_messages(state, bridge, cell)
+            except Exception:
+                log.exception(
+                    "Failed to recover buffered Architect peer messages for %s",
+                    getattr(cell, "id", ""),
+                )
+
+        asyncio.create_task(_recover_architect_peer_messages())
+
     # Signal bridge when agent TUI is ready (hook-based session_start)
-    event_bus.on_session_start = lambda cell: bridge.signal_input_ready(cell.id)
+    event_bus.on_session_start = _on_agent_session_start
     # Handle agent turn completion (hook-based session_end)
     event_bus.on_session_end = _on_agent_session_end
     # Also checkpoint when the terminal session is actually closed (tab closed)

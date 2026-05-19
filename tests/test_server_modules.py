@@ -2082,6 +2082,135 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent, [('session-1', 'line one\nline two')])
         self.assertEqual(len(state.agent_message_history_read(worker.id)), 1)
 
+    async def test_replay_buffered_architect_peer_messages_reads_db_after_cache_loss(self):
+        state = self._make_state()
+        sender = self.state_mod.AgentCell(
+            id='arch-a',
+            name='Architect A',
+            group='g',
+            cell_type='agent',
+            kind='architect',
+        )
+        recipient = self.state_mod.AgentCell(
+            id='arch-b',
+            name='Architect B',
+            group='g',
+            cell_type='agent',
+            kind='architect',
+            session_id='session-b',
+        )
+        state.agents[sender.id] = sender
+        state.agents[recipient.id] = recipient
+        state.groups['g'] = [sender.id, recipient.id]
+        state.save_peer_message({
+            'id': 'msg-peer-buffered',
+            'thread_id': 'msg-peer-buffered',
+            'group_name': 'g',
+            'sender_id': sender.id,
+            'sender_kind': 'architect',
+            'recipient_id': recipient.id,
+            'recipient_kind': 'architect',
+            'message': 'Please ack this after restart.',
+            'created_at': 123.0,
+            'ack_required': True,
+            'delivery_state': 'buffered',
+            'delivery_reason': 'recipient_dismissed',
+        })
+        sender.mcp_messages = []
+        recipient.mcp_messages = []
+
+        primed = []
+        sent = []
+
+        class FakeBridge:
+            def prime_input_ready(self, session_id):
+                primed.append(session_id)
+
+            async def send_text(self, session_id, text):
+                sent.append((session_id, text))
+
+        replayed = await self.server_mod._replay_buffered_cross_kind_messages(
+            state,
+            FakeBridge(),
+            recipient,
+        )
+
+        self.assertEqual(replayed, 1)
+        self.assertEqual(primed, ['session-b'])
+        self.assertEqual(sent[0][0], 'session-b')
+        self.assertIn('## Message from Architect A (architect)', sent[0][1])
+        self.assertIn('Ack required. Reply with:', sent[0][1])
+        self.assertIn(
+            'mcp__torque__architect_reply(message_id="msg-peer-buffered"',
+            sent[0][1],
+        )
+        persisted = self.db.load_agent_peer_message('msg-peer-buffered')
+        self.assertEqual(persisted['delivery_state'], 'delivered')
+        self.assertEqual(persisted['delivery_reason'], '')
+        self.assertTrue(recipient.mcp_messages[0]['delivered'])
+        self.assertFalse(recipient.mcp_messages[0]['buffered'])
+        self.assertTrue(sender.mcp_messages[0]['delivered'])
+
+    async def test_replay_buffered_architect_peer_message_failure_stays_buffered(self):
+        state = self._make_state()
+        sender = self.state_mod.AgentCell(
+            id='arch-a',
+            name='Architect A',
+            group='g',
+            cell_type='agent',
+            kind='architect',
+        )
+        recipient = self.state_mod.AgentCell(
+            id='arch-b',
+            name='Architect B',
+            group='g',
+            cell_type='agent',
+            kind='architect',
+            session_id='session-b',
+        )
+        state.agents[sender.id] = sender
+        state.agents[recipient.id] = recipient
+        state.groups['g'] = [sender.id, recipient.id]
+        state.save_peer_message({
+            'id': 'msg-peer-fail',
+            'thread_id': 'msg-peer-fail',
+            'group_name': 'g',
+            'sender_id': sender.id,
+            'sender_kind': 'architect',
+            'recipient_id': recipient.id,
+            'recipient_kind': 'architect',
+            'message': 'Retry me later.',
+            'created_at': 124.0,
+            'delivery_state': 'buffered',
+            'delivery_reason': 'no_session',
+        })
+        sender.mcp_messages = []
+        recipient.mcp_messages = []
+
+        class FailingBridge:
+            def prime_input_ready(self, _session_id):
+                pass
+
+            async def send_text(self, _session_id, _text):
+                raise RuntimeError('terminal unavailable')
+
+        replayed = await self.server_mod._replay_buffered_cross_kind_messages(
+            state,
+            FailingBridge(),
+            recipient,
+        )
+
+        self.assertEqual(replayed, 0)
+        persisted = self.db.load_agent_peer_message('msg-peer-fail')
+        self.assertEqual(persisted['delivery_state'], 'buffered')
+        self.assertEqual(persisted['delivery_reason'], 'replay_failed')
+        self.assertFalse(recipient.mcp_messages[0]['delivered'])
+        self.assertTrue(recipient.mcp_messages[0]['buffered'])
+        self.assertEqual(
+            recipient.mcp_messages[0]['delivery_reason'],
+            'replay_failed',
+        )
+
     def test_handle_engineer_reply_completes_follow_up_only_and_preserves_parent_state(self):
         state = self._make_state()
         parent = state.board_add_task(

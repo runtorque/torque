@@ -2438,7 +2438,9 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(architect.mcp_messages[0]["action"], "architect_peer_message")
         self.assertEqual(architect.mcp_messages[0]["direction"], "sent")
+        self.assertTrue(architect.mcp_messages[0]["delivered"])
         self.assertEqual(peer.mcp_messages[0]["direction"], "received")
+        self.assertTrue(peer.mcp_messages[0]["delivered"])
         self.assertTrue(peer.mcp_messages[0]["ack_required"])
         injects = [
             call for call in self.handle_calls

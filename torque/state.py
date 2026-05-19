@@ -3727,7 +3727,7 @@ class MatrixState:
         delivered_at: float | None = None,
         emit: bool = True,
     ) -> dict | None:
-        """Persist delivery state and update the recipient cache entry."""
+        """Persist delivery state and update participant cache entries."""
         if not self.db:
             return None
         saved = self.db.mark_peer_message_delivered(
@@ -3738,15 +3738,7 @@ class MatrixState:
         )
         if not saved:
             return None
-        recipient_id = str(saved.get("recipient_id", "") or "").strip()
-        cell = self.agents.get(recipient_id)
-        entry = _peer_message_cache_entry(saved, recipient_id)
-        if cell and entry and self._upsert_peer_message_cache_entry(
-            cell,
-            entry,
-        ):
-            if emit:
-                self._emit_agent(cell)
+        self.append_peer_message_to_caches(saved, emit=emit)
         return saved
 
     def update_peer_message_delivery(
@@ -3758,7 +3750,7 @@ class MatrixState:
         delivered_at: float | None = None,
         emit: bool = True,
     ) -> dict | None:
-        """Persist an explicit peer-message delivery state."""
+        """Persist an explicit peer-message delivery state in participant caches."""
         if not self.db:
             return None
         saved = self.db.update_agent_peer_message_delivery(
@@ -3769,15 +3761,7 @@ class MatrixState:
         )
         if not saved:
             return None
-        recipient_id = str(saved.get("recipient_id", "") or "").strip()
-        cell = self.agents.get(recipient_id)
-        entry = _peer_message_cache_entry(saved, recipient_id)
-        if cell and entry and self._upsert_peer_message_cache_entry(
-            cell,
-            entry,
-        ):
-            if emit:
-                self._emit_agent(cell)
+        self.append_peer_message_to_caches(saved, emit=emit)
         return saved
 
     # -- Agent history helpers -----------------------------------------------
