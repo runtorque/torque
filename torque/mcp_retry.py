@@ -86,6 +86,95 @@ _SCOPED_WRITE_SUFFIXES = {
     "specialization_delete",
 }
 
+
+_PR_PHASES = frozenset({
+    "github_preflight",
+    "github_remote",
+    "remote_base_sync",
+    "push_branch",
+    "pr_create",
+    "pr_merge",
+})
+_PR_NON_RETRYABLE_PHASES = frozenset({"github_preflight"})
+_PR_TRANSIENT_ERROR_FRAGMENTS = (
+    "temporary",
+    "transient",
+    "timeout",
+    "timed out",
+    "try again",
+    "retry",
+    "connection reset",
+    "connection refused",
+    "connection aborted",
+    "connection closed",
+    "server disconnected",
+    "network",
+    "dns",
+    "could not resolve host",
+    "failed to resolve",
+    "econnreset",
+    "etimedout",
+    "econnrefused",
+    "eaddrnotavail",
+    "rate limit",
+    "too many requests",
+    "internal server error",
+    "bad gateway",
+    "service unavailable",
+    "gateway timeout",
+    "http 429",
+    "http 500",
+    "http 502",
+    "http 503",
+    "http 504",
+)
+_PR_NON_RETRYABLE_ERROR_FRAGMENTS = (
+    "not installed",
+    "not executable",
+    "authentication failed",
+    "not a github repository",
+    "requires a github remote",
+    "none found",
+    "cannot be fast-forwarded",
+    "resolve divergence",
+    "merge conflict",
+    "conflict on github",
+    "not mergeable",
+    "dirty",
+    "would be overwritten",
+    "no commits ahead",
+    "required",
+    "invalid",
+)
+
+
+def is_mcp_pr_phase(phase: str) -> bool:
+    """Return true when *phase* is part of Torque's PR merge pipeline."""
+    return str(phase or "").strip() in _PR_PHASES
+
+
+def is_mcp_pr_phase_retryable(phase: str, error: str = "") -> bool:
+    """Classify whether a PR-phase tool error should be retried.
+
+    GitHub preflight failures are configuration/authentication problems in
+    Torque's flow and must not be retried. Other PR phases are retried only
+    when the error text looks transport/transient (network, timeout, rate
+    limiting, service unavailable, explicit retry hint, etc.) so deterministic
+    merge conflicts or local branch-divergence errors do not get masked.
+    """
+    phase = str(phase or "").strip()
+    if not phase or phase in _PR_NON_RETRYABLE_PHASES:
+        return False
+    if phase not in _PR_PHASES:
+        return False
+    lowered = str(error or "").lower()
+    if any(
+        fragment in lowered
+        for fragment in _PR_NON_RETRYABLE_ERROR_FRAGMENTS
+    ):
+        return False
+    return any(fragment in lowered for fragment in _PR_TRANSIENT_ERROR_FRAGMENTS)
+
 _API_READ_COMMANDS = {
     "refresh",
     "get_config",

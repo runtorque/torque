@@ -1047,9 +1047,13 @@ ENGINEER_TOOLS = [
     {
         "name": "engineer_merge",
         "description": (
-            "Merge agent worktree branch into base. Non-interactive; on "
-            "conflicts, run engineer_rebase then retry. Targets must be "
-            "owned when ownership restriction is on."
+            "Push an agent worktree branch, create or reuse a GitHub PR, "
+            "and request a squash merge into the base branch. "
+            "Non-interactive; on conflicts, run engineer_rebase then "
+            "retry. Pass force_direct=true only for the explicit local "
+            "direct-merge fallback, which still honors the normal safety "
+            "gates unless force/force_stale_base are also supplied. "
+            "Targets must be owned when ownership restriction is on."
         ),
         "inputSchema": {
             "type": "object",
@@ -1083,6 +1087,17 @@ ENGINEER_TOOLS = [
                         "When merge cleanup closes or removes the worker "
                         "context, also move the sole linked active board "
                         "task to Done. Defaults to true."
+                    ),
+                },
+                "force_direct": {
+                    "type": "boolean",
+                    "description": (
+                        "Bypass the default GitHub PR/squash-merge flow "
+                        "and use the direct local worktree merge path. This "
+                        "does not bypass stale-base or sibling-divergence "
+                        "safety gates; combine with force or "
+                        "force_stale_base only when intentionally accepting "
+                        "those risks."
                     ),
                 },
                 "force_stale_base": {

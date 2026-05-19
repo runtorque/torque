@@ -1153,11 +1153,15 @@ async def dispatch_mcp_rpc_body(
                     "isError": True,
                 }
             else:
-                text, is_error = await _dispatch_engineer_tool(
+                _ret = await _dispatch_engineer_tool(
                     tool_name, arguments, handle_command, state,
                     caller_id=cell_id,
                     idempotency_key=idempotency_key,
                 )
+                text = _ret[0]
+                is_error = _ret[1]
+                if len(_ret) > 2 and _ret[2] is False:
+                    cacheable = False
                 result = {
                     "content": [{"type": "text", "text": text}],
                     "isError": is_error,
@@ -1187,11 +1191,15 @@ async def dispatch_mcp_rpc_body(
                     "isError": True,
                 }
             else:
-                text, is_error = await _dispatch_architect_tool(
+                _ret = await _dispatch_architect_tool(
                     tool_name, arguments, handle_command, state,
                     caller_id=cell_id,
                     idempotency_key=idempotency_key,
                 )
+                text = _ret[0]
+                is_error = _ret[1]
+                if len(_ret) > 2 and _ret[2] is False:
+                    cacheable = False
                 result = {
                     "content": [{"type": "text", "text": text}],
                     "isError": is_error,
