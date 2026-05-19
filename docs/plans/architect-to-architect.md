@@ -1,8 +1,12 @@
 # Architect-to-Architect Communication Surface
 
-Status: research plan  
+Status: V1 shipped; original research plan retained for design history
 Task: `TORQUE:443` / `feature/research`  
 Date: 2026-05-18
+
+> V1 is now documented in [Architects](../team/architects.md#messaging) and
+> [MCP tools reference](../reference/mcp-tools.md#architect-peer-messaging-signatures).
+> This file remains the design artifact behind that shipped surface.
 
 ## Scope and recommendation
 

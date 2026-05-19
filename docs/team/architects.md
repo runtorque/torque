@@ -12,7 +12,8 @@ An Architect runs in its own iTerm2 tab, persistent, with the `architect_*` MCP 
 2. **A private journal** — checkpoints, observations, plans. Same shape as an Engineer's journal but architect-scoped.
 3. **An engineer roster** — which Engineers it has hired, which are dismissed, which are pending approval.
 4. **A board read** at the group level — every task, every assignee, every label, every attribution.
-5. **An ask channel** to you for blocking product/scope questions.
+5. **A peer-message inbox** — durable same-group Architect threads, including reply obligations.
+6. **An ask channel** to you for blocking product/scope questions.
 
 The Architect doesn't dispatch Workers directly. It creates tasks, assigns them to Engineers, and lets Engineers handle the Worker-level orchestration. That separation is what keeps the Architect free to plan instead of orchestrate.
 
@@ -34,12 +35,13 @@ When the Architect boots (or recovers after `/clear`), its system prompt walks i
 
 1. `architect_journal_read` — its prior checkpoints, observations, plans.
 2. `architect_decision_list` — every decision and its current status.
-3. `architect_engineer_list` — hired and visible Engineers, with their `dismissed_at` timestamps and current state.
-4. `architect_pending_hire_list` — any hires that haven't been approved yet.
-5. `architect_board_summary` — board state by Engineer.
-6. `architect_events_recent` — coarse-grained events from while it was idle.
+3. `architect_peer_inbox(requires_reply=true)` — unanswered peer-Architect messages.
+4. `architect_engineer_list` — hired and visible Engineers, with their `dismissed_at` timestamps and current state.
+5. `architect_pending_hire_list` — any hires that haven't been approved yet.
+6. `architect_board_summary` — board state by Engineer, including peer-message counts.
+7. `architect_events_recent` — coarse-grained events from while it was idle.
 
-By the end of step 6, the Architect has reconstructed enough state to make decisions without replaying chat history. This is the Architect equivalent of the Engineer's recovery sequence.
+By the end of step 7, the Architect has reconstructed enough state to make decisions without replaying chat history. This is the Architect equivalent of the Engineer's recovery sequence.
 
 ## Hiring Engineers
 
@@ -105,11 +107,11 @@ Architect scope is asymmetric and worth memorizing:
 - **Engineers in its group**: The Architect sees both **hired** Engineers (with `hired_by_architect_id == architect.id`) and **visible** Engineers (no architect ownership) in the same group. It can fully control hired Engineers (message, dismiss, rehire, reassign tasks); for visible ones it has read-only board awareness.
 - **Tasks**: Reads all tasks in the group, with full `created_by` attribution. Edits only tasks created by itself or the User. Cannot edit other Architects' tasks, Engineer-created tasks, or system-derived parent tasks. Can move any visible task between lanes.
 - **Workers**: Indirect visibility only — through their owning Engineer's worklog and journal entries. The Architect doesn't directly control Workers.
-- **Other Architects**: Minimal cross-Architect visibility. Decision logs and journals are per-Architect, not shared. Pending hires are per-Architect. Architects in the same group cannot see each other's hired Engineers in normal listing.
+- **Other Architects**: Same-group Architects can discover and direct-message each other. The message may include explicit task, Engineer, or decision snapshots, but it does **not** grant access to the sender's private journal, decision log, hired-Engineer controls, or cross-group state. Pending hires remain per-Architect.
 
 The boundary isn't a convention — it's enforced server-side. → [MCP scoping](mcp-scoping.md)
 
-## Architect-to-Engineer messaging
+## Messaging
 
 Architects and the Engineers they hired have a direct, audited messaging channel:
 
@@ -118,9 +120,18 @@ Architects and the Engineers they hired have a direct, audited messaging channel
 
 Engineers reply through `engineer_message_architect(...)` (only to their hiring Architect, not to other Architects).
 
-There is **no Architect ↔ Architect channel**. Cross-Architect coordination always goes through the User.
-
 If you message a dismissed Engineer, the message buffers. When you rehire, buffered messages are delivered. This makes async hand-offs safe.
+
+Same-group Architects also have durable peer messaging:
+
+- `architect_peer_list(include_dismissed=false)` — discover other non-tombstoned Architects in the group.
+- `architect_peer_message(architect_id, message, ack_required=false, ...)` — send one named Architect a direct message. Optional context references snapshot visible tasks, visible Engineers, and the sender's own decisions into the message.
+- `architect_peer_inbox(requires_reply=true)` — recover unanswered peer threads after `/clear`, daemon restart, dismissal, or rehire.
+- `architect_reply(message_id, message, ack_required=false)` — continue either an Architect ↔ Engineer thread or an Architect ↔ Architect peer thread. `ack_required` applies to peer-Architect replies.
+
+Use peer messaging for coordination between product surfaces: "does this task belong to your area?", "can you sanity-check this boundary?", "FYI, I am cutting scope X." Use `ack_required=true` only when the other Architect must answer. Do **not** use it for broadcast announcements, formal task handoff, Engineer ownership transfer, or shared decision ownership; those remain deferred/non-goal V1 behaviors. Durable outcomes from the conversation should still be written to the relevant Architect's own decision log.
+
+Messages to a dismissed peer Architect are saved as buffered and replay when that Architect is re-hired. Tombstoned/deleted Architects cannot receive new peer messages.
 
 ## Asking the user
 
@@ -136,10 +147,10 @@ You can run more than one Architect — for instance, one focused on backend pro
 
 - Each Architect's decision log, journal, pending hires, and engineer roster is **separate**.
 - Both Architects see all tasks in the group, but each can only edit tasks they created (or tasks created by the User).
-- Architects cannot message each other.
-- Two Architects can coexist in the same group without interfering, but they also can't trivially coordinate. The User has to mediate.
+- Same-group Architects can message each other directly, but those messages do not change task ownership, Engineer ownership, or decision ownership.
+- Two Architects can coexist in the same group without interfering. The User still mediates cross-group coordination and formal ownership changes.
 
-This is by design. The cross-cutting hand-off mechanism is *the User answering questions both Architects ask*, not a back-channel between them.
+This is by design. Peer messaging is a coordination channel, not an authority-transfer mechanism.
 
 ## Architect settings
 
@@ -168,6 +179,8 @@ A short list of things that will surprise you if you don't know them:
 - **Suggested actions don't auto-bind.** When the Architect creates a task with a `suggested_action`, the Engineer is free to choose a different action when dispatching. The suggestion is non-binding.
 - **Review gate thresholds are advisory.** They don't block ship. They're just guidance for the Architect's own reasoning.
 - **Workers are not directly visible.** The Architect sees them through Engineer journals and worklogs. Don't expect direct Worker controls in the Architect toolkit.
+- **Peer-message context is a snapshot, not a scope grant.** Referencing another Architect's task, Engineer, or decision in a message does not let the recipient edit that task, message that Engineer, or read the sender's private decision log/journal.
+- **`ack_required` is advisory.** It makes a peer thread show up as requiring reply; it does not lock the board or create a human ask task.
 
 ## A day in the life of an Architect
 
@@ -178,6 +191,7 @@ Concrete walkthrough of an Architect's working session, so the toolkit feels les
 ```text
 architect_journal_read()           # last 20 entries — what was I thinking?
 architect_decision_list()          # decisions and their statuses
+architect_peer_inbox(requires_reply=true)  # peer threads I owe
 architect_engineer_list()          # who's hired, who's dismissed
 architect_pending_hire_list()      # any approvals still waiting?
 architect_board_summary()          # board state by Engineer

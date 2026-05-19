@@ -64,13 +64,14 @@ There's no fifth kind. Everything else in Torque (tasks, actions, pipelines, wor
 
 ## How they coordinate
 
-The team coordinates through three channels, in decreasing order of formality:
+The team coordinates through four channels, in decreasing order of formality:
 
 1. **Tasks on the board.** Every meaningful piece of work is a task. Architects create tasks for Engineers. Engineers dispatch tasks to Workers. Workers derive follow-up tasks (review, fix, validate) that become the historical thread of the work. → [Tasks and threads](../tasks/threads.md)
 2. **Architect ↔ Engineer messaging.** A direct, audited message channel between an Architect and the Engineers they hired. Used for clarifying scope, escalating blockers, and bidirectional Q&A. Workers don't have access to this — they speak only through tasks.
-3. **Engineer digests.** The Engineer doesn't poll. Torque pushes idle-gated event digests into its terminal so it stays situationally aware without burning context. → [Engineers](engineers.md)
+3. **Architect ↔ Architect peer messaging.** Same-group Architects can direct-message each other for product coordination. It is not a broadcast channel and does not transfer task, Engineer, journal, or decision ownership. → [Architects](architects.md#messaging)
+4. **Engineer digests.** The Engineer doesn't poll. Torque pushes idle-gated event digests into its terminal so it stays situationally aware without burning context. → [Engineers](engineers.md)
 
-There is **no Engineer ↔ Engineer messaging** and **no Architect ↔ Architect messaging**. Cross-group coordination always goes through the User. This is by design — it keeps responsibility scoped and prevents back-channel decisions that don't show up in the journal or decision log.
+There is **no Engineer ↔ Engineer messaging** and **no cross-group Architect messaging**. Cross-group coordination and formal ownership transfer still go through the User. This is by design — it keeps responsibility scoped and prevents back-channel decisions that don't show up in the journal or decision log.
 
 ## What each role can and can't see
 
