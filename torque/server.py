@@ -2698,6 +2698,52 @@ def _mark_cross_kind_message_delivery(cell, message_id: str, *,
         return
 
 
+def _peer_message_row_replay_entry(row: dict, target_id: str) -> dict | None:
+    """Project a buffered canonical peer message into replay prompt fields."""
+    target_id = str(target_id or "").strip()
+    if (
+        not row
+        or not target_id
+        or str(row.get("recipient_id", "") or "").strip() != target_id
+    ):
+        return None
+    sender_id = str(row.get("sender_id", "") or "").strip()
+    recipient_kind = str(row.get("recipient_kind", "") or "").strip() or "architect"
+    sender_kind = str(row.get("sender_kind", "") or "").strip() or "architect"
+    delivery_state = str(row.get("delivery_state", "") or "").strip() or "buffered"
+    return {
+        "id": str(row.get("id", "") or "").strip(),
+        "thread_id": str(row.get("thread_id", "") or "").strip(),
+        "reply_to_id": str(row.get("reply_to_id", "") or "").strip(),
+        "action": (
+            "architect_peer_reply"
+            if str(row.get("reply_to_id", "") or "").strip()
+            else "architect_peer_message"
+        ),
+        "message": str(row.get("message", "") or ""),
+        "timestamp": float(row.get("created_at", row.get("timestamp", 0)) or 0),
+        "sender_id": sender_id,
+        "sender_kind": sender_kind,
+        "recipient_id": target_id,
+        "recipient_kind": recipient_kind,
+        "peer_id": sender_id,
+        "peer_kind": sender_kind,
+        "direction": "received",
+        "ack_required": bool(row.get("ack_required", False)),
+        "delivered": delivery_state == "delivered",
+        "buffered": delivery_state == "buffered",
+        "delivery_state": delivery_state,
+        "delivery_reason": str(row.get("delivery_reason", "") or ""),
+    }
+
+
+def _is_canonical_peer_replay_entry(entry: dict) -> bool:
+    return str((entry or {}).get("action", "") or "").strip() in {
+        "architect_peer_message",
+        "architect_peer_reply",
+    }
+
+
 async def _replay_buffered_cross_kind_messages(
         state: MatrixState,
         bridge,
@@ -2706,78 +2752,36 @@ async def _replay_buffered_cross_kind_messages(
     if not target or not getattr(target, "session_id", ""):
         return 0
     replayed = 0
-    replayed_ids: set[str] = set()
-
-    # Architect peer messages are canonicalized in SQLite.  Read buffered rows
-    # directly instead of trusting AgentCell.mcp_messages, which is an
-    # ephemeral/bounded UI cache and may have been cleared by /clear or lost
-    # during daemon restart before the Architect wakes again.
-    if (
-        str(getattr(target, "kind", "") or "").strip() == "architect"
-        and getattr(state, "db", None)
-    ):
-        for row in state.db.load_buffered_agent_peer_messages(target.id):
-            if str((row or {}).get("recipient_id", "") or "").strip() != target.id:
-                continue
-            if str((row or {}).get("recipient_kind", "") or "").strip() not in {
-                "",
-                "architect",
-            }:
-                continue
-            message_id = str((row or {}).get("id", "") or "").strip()
-            message_text = str((row or {}).get("message", "") or "")
-            if not message_id or not message_text:
-                continue
-            sender_id = str((row or {}).get("sender_id", "") or "").strip()
-            sender = state.agents.get(sender_id)
-            sender_name = (
-                str(getattr(sender, "name", "") or "").strip()
-                or str((row or {}).get("sender_kind", "") or "").strip()
-                or "peer"
-            )
-            sender_kind = (
-                str(getattr(sender, "kind", "") or "").strip()
-                or str((row or {}).get("sender_kind", "") or "").strip()
-                or "architect"
-            )
-            formatted = _format_injected_mcp_message_prompt(
-                message=message_text,
-                sender_name=sender_name,
-                sender_kind=sender_kind,
-                recipient_kind=str(getattr(target, "kind", "") or ""),
-                message_id=message_id,
-                ack_required=bool((row or {}).get("ack_required", False)),
-            )
-            try:
-                if hasattr(bridge, "prime_input_ready"):
-                    bridge.prime_input_ready(target.session_id)
-                await bridge.send_text(target.session_id, formatted)
-            except Exception:
-                log.exception(
-                    "Failed to replay buffered Architect peer message %s to %s",
-                    message_id,
-                    target.id,
-                )
-                state.update_peer_message_delivery(
-                    message_id,
-                    "buffered",
-                    reason="replay_failed",
-                )
-                replayed_ids.add(message_id)
-                continue
-            state.update_peer_message_delivery(message_id, "delivered")
-            replayed_ids.add(message_id)
-            replayed += 1
-
-    entries = list(getattr(target, "mcp_messages", []) or [])
-    for entry in reversed(entries):
+    replay_candidates: dict[str, dict] = {}
+    for entry in list(getattr(target, "mcp_messages", []) or []):
         if str((entry or {}).get("direction", "") or "") != "received":
             continue
         if entry.get("delivered") is not False:
             continue
         message_id = str(entry.get("id", "") or "").strip()
-        if message_id in replayed_ids:
-            continue
+        if message_id:
+            replay_candidates[message_id] = dict(entry)
+
+    db = getattr(state, "db", None)
+    if db and hasattr(db, "load_buffered_agent_peer_messages"):
+        for row in db.load_buffered_agent_peer_messages(target.id, limit=1000):
+            entry = _peer_message_row_replay_entry(row, target.id)
+            if not entry or not entry.get("id"):
+                continue
+            replay_candidates[entry["id"]] = entry
+            append_to_caches = getattr(state, "append_peer_message_to_caches", None)
+            if callable(append_to_caches):
+                append_to_caches(row, emit=False)
+
+    entries = sorted(
+        replay_candidates.values(),
+        key=lambda item: (
+            float((item or {}).get("timestamp", 0) or 0),
+            str((item or {}).get("id", "") or ""),
+        ),
+    )
+    for entry in entries:
+        message_id = str(entry.get("id", "") or "").strip()
         message_text = str(entry.get("message", "") or "")
         if not message_id or not message_text:
             continue
@@ -2817,14 +2821,29 @@ async def _replay_buffered_cross_kind_messages(
                 message_id,
                 target.id,
             )
-            _mark_cross_kind_message_delivery(
-                target,
-                message_id,
-                delivered=False,
-                reason="replay_failed",
-            )
+            if _is_canonical_peer_replay_entry(entry):
+                state.update_peer_message_delivery(
+                    message_id,
+                    "buffered",
+                    reason="replay_failed",
+                    emit=False,
+                )
+            else:
+                _mark_cross_kind_message_delivery(
+                    target,
+                    message_id,
+                    delivered=False,
+                    reason="replay_failed",
+                )
             continue
-        _mark_cross_kind_message_delivery(target, message_id, delivered=True)
+        if _is_canonical_peer_replay_entry(entry):
+            state.update_peer_message_delivery(
+                message_id,
+                "delivered",
+                emit=False,
+            )
+        else:
+            _mark_cross_kind_message_delivery(target, message_id, delivered=True)
         replayed += 1
     if replayed:
         state._emit_agent(target)
@@ -6827,6 +6846,8 @@ async def _handle_restart_agent_command(
     cell.tasks_dispatched = 0
     cell.current_task_id = ""
     cell.mcp_messages = []
+    if str(getattr(cell, "kind", "") or "").strip() == "architect":
+        state.refresh_peer_message_cache_for_agent(cell.id, emit=False)
 
     base_dir = cell.worktree_repo_root or cell.directory \
         or await resolve_base_dir(cell.group)
@@ -9319,6 +9340,11 @@ async def main(connection=None):
                     cell.agent_session_id = ""
                     cell.current_task_id = ""
                     cell.mcp_messages = []
+                    if str(getattr(cell, "kind", "") or "").strip() == "architect":
+                        state.refresh_peer_message_cache_for_agent(
+                            cell.id,
+                            emit=False,
+                        )
                     state._emit_agent(cell)
                     state._db_save_agent(cell)
 

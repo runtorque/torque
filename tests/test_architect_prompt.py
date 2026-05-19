@@ -110,6 +110,15 @@ class ArchitectPromptTests(unittest.TestCase):
         self.assertIn("top 5", prompt)
         self.assertIn("MEMORY.md", prompt)
 
+    def test_prompt_includes_peer_message_wake_protocol(self):
+        prompt = self.architect_mod.build_architect_system_prompt("Torque")
+
+        self.assertIn("architect_peer_list", prompt)
+        self.assertIn("architect_peer_inbox(requires_reply=true)", prompt)
+        self.assertIn("architect_peer_message", prompt)
+        self.assertIn("peer-message counts", prompt)
+        self.assertIn("cross-Architect coordination", prompt)
+
     def test_prompt_includes_specialization_routing_taxonomy(self):
         prompt = self.architect_mod.build_architect_system_prompt("Torque")
 

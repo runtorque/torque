@@ -36,7 +36,7 @@ _ARCHITECT_TOOL_SPECS = [
         "description": (
             "Return a compact board overview for this architect's group, "
             "including task creator attribution and a bounded lightweight "
-            "task summary excerpt."
+            "task summary excerpt plus peer-message attention counts."
         ),
         "inputSchema": {
             "type": "object",
@@ -57,7 +57,8 @@ _ARCHITECT_TOOL_SPECS = [
         "name": "architect_events_recent",
         "description": (
             "Return recent architect-scoped coarse panel events with task, "
-            "engineer, worker-owner, creator, and digest-recipient attribution."
+            "engineer, worker-owner, creator, digest-recipient, and "
+            "peer-message attribution."
         ),
         "inputSchema": {
             "type": "object",

@@ -419,6 +419,91 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([event["id"] for event in payload["events"]], ["4"])
         self.assertEqual(payload["events"][0]["message"], "matching event")
 
+    async def test_architect_events_recent_merges_peer_messages_without_leaking(self):
+        architect = self._add_architect("arch-1", "Architect")
+        peer = self._add_architect("arch-2", "Peer")
+        unrelated = self._add_architect("arch-3", "Unrelated")
+        self.db.save_agent_peer_message({
+            "id": "msg-visible-peer",
+            "thread_id": "msg-visible-peer",
+            "group_name": "torque",
+            "sender_id": peer.id,
+            "sender_kind": "architect",
+            "recipient_id": architect.id,
+            "recipient_kind": "architect",
+            "message": "Can you review the handoff?",
+            "created_at": 50.0,
+            "ack_required": True,
+            "context_task_ids": ["TORQUE:501"],
+            "context_summary": "Handoff needs owner confirmation.",
+            "delivery_state": "delivered",
+        })
+        self.db.save_agent_peer_message({
+            "id": "msg-hidden-peer",
+            "thread_id": "msg-hidden-peer",
+            "group_name": "torque",
+            "sender_id": peer.id,
+            "sender_kind": "architect",
+            "recipient_id": unrelated.id,
+            "recipient_kind": "architect",
+            "message": "Hidden from the caller.",
+            "created_at": 60.0,
+            "ack_required": True,
+            "delivery_state": "buffered",
+        })
+        self._save_panel_event(
+            1,
+            "agent_error",
+            cell_id=architect.id,
+            agent_name=architect.name,
+            message="Visible panel event",
+            timestamp=40.0,
+        )
+
+        text, is_error = await self._call(
+            "architect_events_recent",
+            {"limit": 10},
+            architect.id,
+        )
+
+        self.assertFalse(is_error, text)
+        events = json.loads(text)["events"]
+        self.assertEqual([event["id"] for event in events], ["msg-visible-peer", "1"])
+        peer_event = events[0]
+        self.assertEqual(peer_event["kind"], "architect_peer_message")
+        self.assertEqual(peer_event["direction"], "received")
+        self.assertEqual(peer_event["peer_architect_id"], peer.id)
+        self.assertEqual(peer_event["peer_name"], peer.name)
+        self.assertTrue(peer_event["ack_required"])
+        self.assertTrue(peer_event["requires_reply"])
+        self.assertEqual(peer_event["context"]["task_ids"], ["TORQUE:501"])
+        self.assertEqual(
+            peer_event["context"]["summary"],
+            "Handoff needs owner confirmation.",
+        )
+
+        filtered_text, filtered_error = await self._call(
+            "architect_events_recent",
+            {"kind_filter": "architect_peer_message"},
+            architect.id,
+        )
+        self.assertFalse(filtered_error, filtered_text)
+        filtered = json.loads(filtered_text)["events"]
+        self.assertEqual([event["id"] for event in filtered], ["msg-visible-peer"])
+
+        inbox_text, inbox_error = await self._call(
+            "architect_peer_inbox",
+            {},
+            architect.id,
+        )
+        self.assertFalse(inbox_error, inbox_text)
+        inbox_ids = {
+            msg["id"]
+            for thread in json.loads(inbox_text)["threads"]
+            for msg in thread["messages"]
+        }
+        self.assertEqual(inbox_ids, {"msg-visible-peer"})
+
     async def test_architect_events_recent_shows_torque108_attribution_and_recipients(self):
         architect = self._add_architect("arch-1", "Architect")
         assigned = self._add_engineer(
@@ -1069,6 +1154,92 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             {item["id"] for item in included["tasks"]},
             {real_task.id, followup.id},
         )
+
+    async def test_architect_board_summary_reports_peer_message_counts_for_caller(self):
+        architect = self._add_architect("arch-1", "Architect")
+        peer = self._add_architect("arch-2", "Peer")
+        unrelated = self._add_architect("arch-3", "Unrelated")
+        self.db.save_agent_peer_message({
+            "id": "msg-answered-question",
+            "thread_id": "thread-answered",
+            "group_name": "torque",
+            "sender_id": peer.id,
+            "sender_kind": "architect",
+            "recipient_id": architect.id,
+            "recipient_kind": "architect",
+            "message": "Please confirm the rollout plan.",
+            "created_at": 10.0,
+            "ack_required": True,
+            "delivery_state": "delivered",
+        })
+        self.db.save_agent_peer_message({
+            "id": "msg-answer",
+            "thread_id": "thread-answered",
+            "reply_to_id": "msg-answered-question",
+            "group_name": "torque",
+            "sender_id": architect.id,
+            "sender_kind": "architect",
+            "recipient_id": peer.id,
+            "recipient_kind": "architect",
+            "message": "Confirmed.",
+            "created_at": 20.0,
+            "delivery_state": "delivered",
+        })
+        self.db.save_agent_peer_message({
+            "id": "msg-pending-question",
+            "thread_id": "thread-pending",
+            "group_name": "torque",
+            "sender_id": peer.id,
+            "sender_kind": "architect",
+            "recipient_id": architect.id,
+            "recipient_kind": "architect",
+            "message": "Need your API boundary decision.",
+            "created_at": 30.0,
+            "ack_required": True,
+            "delivery_state": "delivered",
+        })
+        self.db.save_agent_peer_message({
+            "id": "msg-buffered-fyi",
+            "thread_id": "thread-buffered",
+            "group_name": "torque",
+            "sender_id": peer.id,
+            "sender_kind": "architect",
+            "recipient_id": architect.id,
+            "recipient_kind": "architect",
+            "message": "FYI for your next wake.",
+            "created_at": 40.0,
+            "delivery_state": "buffered",
+        })
+        self.db.save_agent_peer_message({
+            "id": "msg-unrelated",
+            "thread_id": "thread-unrelated",
+            "group_name": "torque",
+            "sender_id": peer.id,
+            "sender_kind": "architect",
+            "recipient_id": unrelated.id,
+            "recipient_kind": "architect",
+            "message": "Hidden from arch-1.",
+            "created_at": 50.0,
+            "ack_required": True,
+            "delivery_state": "buffered",
+        })
+
+        text, is_error = await self._call(
+            "architect_board_summary",
+            {},
+            architect.id,
+        )
+
+        self.assertFalse(is_error, text)
+        peer_messages = json.loads(text)["peer_messages"]
+        self.assertEqual(peer_messages["recent_count"], 4)
+        self.assertEqual(peer_messages["sent_count"], 1)
+        self.assertEqual(peer_messages["received_count"], 3)
+        self.assertEqual(peer_messages["unread_count"], 1)
+        self.assertEqual(peer_messages["ack_required_pending_count"], 1)
+        self.assertEqual(peer_messages["requires_reply_count"], 1)
+        self.assertEqual(peer_messages["oldest_unanswered_at"], 30.0)
+        self.assertEqual(peer_messages["latest_message_at"], 40.0)
 
     async def test_architect_board_summary_bounds_large_task_excerpt(self):
         architect = self._add_architect("arch-1", "Architect")
