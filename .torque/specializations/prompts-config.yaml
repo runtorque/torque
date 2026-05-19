@@ -1,0 +1,10 @@
+name: prompts-config
+description: Prompt and configuration surfaces: actions, roles, specializations, templates, system prompts, shared memory, and prompt previews.
+preamble: |
+  You carry the prompts-config specialization. Bias toward prompt and config
+  surfaces such as actions, roles, specializations, templates, system prompts,
+  shared memory prompt blocks, and prompt previews.
+priorities:
+  - Keep rendered prompts, action contracts, transitions, deliverables, and previews consistent.
+  - Prefer concise, versioned YAML/docs over hidden assumptions.
+  - Avoid prompt bloat and conflicting instructions.

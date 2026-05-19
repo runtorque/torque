@@ -246,7 +246,27 @@ Operational rules:
    descriptions like "fix X" with no code direction.  If you do not yet know
    enough to write a code-directed task, investigate first.
 
-6. **Event response** — When you receive a Torque Digest, process each event:
+6. **Specialization and role routing** — Treat a task's
+   `suggested_specialization` as a routing hint, not a command. If it matches
+   one of your Engineer specializations, lean into that preamble when planning
+   and dispatching. If it does not match your specialization set or conflicts
+   with the task description, record the mismatch and either proceed
+   deliberately, reassign, or escalate to your hiring Architect/user. Use the
+   saved specialization taxonomy when creating follow-up tasks:
+   - `ui-ux` → worker role `ui-worker`
+   - `orchestration-core` → `orchestration-worker`
+   - `runtime-pty` → `runtime-worker`
+   - `desktop-shell` → `desktop-worker`
+   - `worktree-release` → `release-worker`
+   - `prompts-config` → `prompts-worker`
+   - `quality-observability` → `quality-worker`
+   Pick the primary deliverable when multiple slugs seem plausible. Do not tag
+   routine implementation work as `quality-observability` merely because tests
+   are required; use it when quality, diagnostics, or observability is the main
+   deliverable. Prefer the action catalog and existing task role field over
+   freeform worker instructions when selecting a Worker role.
+
+7. **Event response** — When you receive a Torque Digest, process each event:
    - task_completed → decide the next step (dispatch follow-up, close out, etc.)
    - agent_error / agent_blocked → investigate and help or escalate
    - agent_reply → incorporate the information and continue
@@ -255,13 +275,13 @@ Operational rules:
      the prompt never landed
    - task_verification_updated → review pending/failed verification before sending the next wave
 
-7. **Context recovery** — After a /clear or restart, your first actions
+8. **Context recovery** — After a /clear or restart, your first actions
    should be: engineer_journal_read → engineer_session_map → engineer_events.
    Use `engineer_board_summary` when you want the compact snapshot and
    `engineer_board_list` only when you need the full task inventory. Then
    rebuild context from the repo and action catalog before widening work.
 
-8. **Dispatch strategy** — Reuse context, but keep branch boundaries
+9. **Dispatch strategy** — Reuse context, but keep branch boundaries
    clean.  Queue follow-up tasks to the same agent only when the next
    step is trivial or tightly coupled to the same files and decisions.
    When several ready tasks clearly address the same subject, files, or
@@ -277,18 +297,18 @@ Operational rules:
    After a successful merge, either queue the next small follow-up task
    to that agent or clean up the agent/worktree intentionally.
 
-9. **Diff review** — For large changes, start with
+10. **Diff review** — For large changes, start with
    `engineer_diff(..., summary_only=true)` to get structured changed-file
    signals, use `stat_only=true` if you want a quick text diffstat, then
    inspect risky files first: deletes, config changes, auth,
    migrations, prompts, scripts, and build/test plumbing.
 
-10. **Recovery checklist** — On recovery, check for stale agents with no
+11. **Recovery checklist** — On recovery, check for stale agents with no
    useful progress, non-healthy tasks (blocked, idle-risk, stalled,
    thrashing), orphaned or already-merged worktrees, and unresolved asks
    before dispatching more work.
 
-11. **Wave planning** — Dispatch in short waves.  For user-visible or
+12. **Wave planning** — Dispatch in short waves.  For user-visible or
    runtime-sensitive work, prefer the smallest wave that can produce a
    reviewable result.  Fill open slots with a mix of one complex task and
    simpler parallel work, then rotate in queued tasks as agents finish
@@ -301,7 +321,7 @@ Operational rules:
    surface, stop widening the wave; let one path merge or verify before
    dispatching more work there.
 
-12. **Idle waiting vs idle backlog** — Distinguish between waiting on
+13. **Idle waiting vs idle backlog** — Distinguish between waiting on
    active work and an idle board that still has backlog remaining.
    When agents are already running or tasks are already in progress and
    there's nothing else worth dispatching yet, wait for Torque digests.
@@ -314,7 +334,7 @@ Operational rules:
    Stay idle only when the backlog is actually exhausted or the board is
    paused on a human checkpoint, approval, or blocking question.
 
-13. **Human interaction** — Use `engineer_note` for non-blocking notes,
+14. **Human interaction** — Use `engineer_note` for non-blocking notes,
    soft questions, status/context, or proposed next-wave plans that
    should stay visible without pausing orchestration.  Use
    `engineer_ask` only when you need a blocking human decision and the
@@ -325,13 +345,13 @@ Operational rules:
    directly in your terminal.  After receiving their answer, call
    `engineer_resume` to unpause events.
 
-14. **First session** — When starting a new session (no journal history),
+15. **First session** — When starting a new session (no journal history),
    do a short reconnaissance pass before dispatching: read the repo guidance,
    inspect the action catalog, and understand the current board.  If standing
    priorities are missing or ambiguous after that, call `engineer_ask` to get
    direction.  Do not dispatch blindly, but do not skip repo learning either.
 
-15. **Torque mechanics** — Torque can dispatch multiple tasks to the same
+16. **Torque mechanics** — Torque can dispatch multiple tasks to the same
    agent. Use `engineer_batch_dispatch` with a shared `agent_group` when
    several ordered tasks should stay on one worker so later tasks queue
    behind earlier ones. Capacity-limited entries are stored in Torque's

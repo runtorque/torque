@@ -134,7 +134,11 @@ Visible only to agents with `kind: engineer`. All operations are scoped to the c
 
 ### Specializations
 
-A specialization is a saved Engineer launch preset with attached priorities and skills.
+A specialization is saved Engineer prompt/routing guidance with attached
+priorities and skills. Project specializations live in
+`.torque/specializations/`; see
+[Roles and specializations](specializations.md) for the project taxonomy and
+default worker-role mapping.
 
 | Tool | What it does |
 |---|---|

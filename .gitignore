@@ -3,6 +3,10 @@ __pycache__/
 .torque/*
 !.torque/actions/
 !.torque/actions/**
+!.torque/roles/
+!.torque/roles/**
+!.torque/specializations/
+!.torque/specializations/**
 *.log
 .DS_Store
 state.json

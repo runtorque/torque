@@ -70,6 +70,12 @@ prompt: |
 
 Roles are also where the Architect's hire/dismiss flow plugs in — when an Architect hires an Engineer, it's choosing a role and a boot configuration. → [Architects](architects.md)
 
+Torque's project taxonomy keeps Worker roles aligned with Engineer
+specializations without collapsing the two concepts. See
+[Roles and specializations](../reference/specializations.md) for the default
+`ui-worker`, `orchestration-worker`, `runtime-worker`, `desktop-worker`,
+`release-worker`, `prompts-worker`, and `quality-worker` mapping.
+
 ## What a Worker actually receives at boot
 
 If you're debugging a Worker's behavior, it helps to know exactly what landed in its context window.

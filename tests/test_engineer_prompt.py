@@ -194,3 +194,20 @@ class EngineerPromptTests(unittest.TestCase):
             specializations_preamble="",
         )
         self.assertNotIn("## Specializations", prompt)
+
+    def test_prompt_includes_specialization_to_worker_role_mapping(self):
+        prompt = self.engineer_mod.build_engineer_system_prompt("Torque")
+
+        self.assertIn("`suggested_specialization`", prompt)
+        for slug, role in (
+            ("ui-ux", "ui-worker"),
+            ("orchestration-core", "orchestration-worker"),
+            ("runtime-pty", "runtime-worker"),
+            ("desktop-shell", "desktop-worker"),
+            ("worktree-release", "release-worker"),
+            ("prompts-config", "prompts-worker"),
+            ("quality-observability", "quality-worker"),
+        ):
+            self.assertIn(slug, prompt)
+            self.assertIn(role, prompt)
+        self.assertIn("Pick the primary deliverable", prompt)

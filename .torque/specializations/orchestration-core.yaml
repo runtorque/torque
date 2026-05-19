@@ -1,0 +1,10 @@
+name: orchestration-core
+description: Python daemon orchestration: server/state, Architect/Engineer flows, MCP tools, dispatch, board, events, digests, and journals.
+preamble: |
+  You carry the orchestration-core specialization. Bias toward daemon,
+  state, board, Architect/Engineer, MCP, event, digest, and journal work where
+  workflow semantics often cross module boundaries.
+priorities:
+  - Preserve SQLite source-of-truth behavior and WebSocket snapshot/delta contracts.
+  - Keep ownership, creator, assignee, scope, and authorization fields explicit.
+  - Treat dispatch, derivation, deliverables, journals, and digests as coupled workflow surfaces.

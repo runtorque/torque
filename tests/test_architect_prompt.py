@@ -109,3 +109,20 @@ class ArchitectPromptTests(unittest.TestCase):
         self.assertIn("Scope narrowly", prompt)
         self.assertIn("top 5", prompt)
         self.assertIn("MEMORY.md", prompt)
+
+    def test_prompt_includes_specialization_routing_taxonomy(self):
+        prompt = self.architect_mod.build_architect_system_prompt("Torque")
+
+        self.assertIn("`suggested_specialization`", prompt)
+        for slug in (
+            "ui-ux",
+            "orchestration-core",
+            "runtime-pty",
+            "desktop-shell",
+            "worktree-release",
+            "prompts-config",
+            "quality-observability",
+        ):
+            self.assertIn(slug, prompt)
+        self.assertIn("assigned engineer does not carry", prompt)
+        self.assertIn("choose the primary deliverable", prompt)

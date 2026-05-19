@@ -79,7 +79,7 @@ If you change persisted state or object shape, you usually need to update all of
 
 - Prefer code and tests over prose docs when they disagree. `CLAUDE.md` is useful, but some parts are stale; for example, the repo now has an automated test suite.
 - Action prompts are Jinja2 templates, but only the `prompt` field is rendered. Actions must include `{{ TASK }}` or `{{ torque.task.title }}`.
-- Project-local `.torque/actions/` and `.torque/agents/` override user-global definitions under `~/.torque/`.
+- Project-local `.torque/actions/`, `.torque/roles/`, and `.torque/specializations/` override user-global definitions under `~/.torque/`. Legacy `.torque/agents/` role files are ignored.
 - Worktree support is a core feature. Changes in task dispatch, merge flow, or agent reuse often also affect worktree inheritance and boundary tracking.
 - Engineer behavior is not isolated to one file. Changes often span `engineer.py`, `mcp_engineer.py`, server command handling, board/event UI, and tests.
 - Runtime-generated Torque files inside repos/worktrees are intentional. Be careful around `.claude/`, `.codex/`, `.mcp.json`, and `.torque/worktrees/` behavior.
