@@ -1012,24 +1012,25 @@ function onCellContextMenu(e, id) {
   showContextMenu(e.clientX, e.clientY, items);
 }
 
-/* Principal selector — top-row filter for the agent grid.
-   `principalId` is an architect id, or '' to select the user principal.
-   `groupName` scopes the focus target so multi-group workspaces don't
-   collide on nav ids (selection itself is global state). */
+/* Legacy principal selector compatibility shim.
+   The grid no longer filters by principal; state.selected_principal_id is
+   still persisted/sent so older clients/servers can round-trip the field.
+   Architect ids focus/select that real architect card. The user principal
+   leaves the current agent selection alone and focuses a useful orphan
+   section item/control when one is available. */
 function selectPrincipal(principalId, groupName) {
   const id = String(principalId || '').trim();
   const current = String((state && state.selected_principal_id) || '');
   const group = String(groupName || _principalFocusGroupFallback() || '').trim();
-  focusedItemId = _principalRowFocusId(group, id);
   const prevSelectedId = typeof selectedAgentId !== 'undefined' ? selectedAgentId : null;
-  /* Architect principal: also make the architect the focused agent so the
-     detail view (renderAgentDetails) surfaces in the panel body, AND focus
-     its terminal — clicking a principal is a deliberate "go here" act, not
-     a passive scan, so we always focus on click (not just on second click).
-     User principal is not an agent — leave selectedAgentId alone. */
-  const isArchitect = !!(id && state && state.agents && state.agents[id]);
+  const isArchitect = !!(id
+    && state
+    && state.agents
+    && state.agents[id]
+    && (state.agents[id].kind || '') === 'architect');
   let selectionChanged = false;
   if (isArchitect) {
+    focusedItemId = id;
     if (selectedAgentId !== id) {
       selectedAgentId = id;
       selectionChanged = true;
@@ -1037,6 +1038,11 @@ function selectPrincipal(principalId, groupName) {
     }
     selectedTerminalId = id;
     send({ cmd: 'focus_agent', id: id });
+  } else if (!id) {
+    const userFocus = _principalLegacyUserFocusId(group);
+    if (userFocus) focusedItemId = userFocus;
+  } else if (state && state.agents && state.agents[id]) {
+    focusedItemId = id;
   }
   if (id !== current) {
     state.selected_principal_id = id;
@@ -1052,6 +1058,29 @@ function selectPrincipal(principalId, groupName) {
   if (selectionChanged && typeof _syncPanelsAfterSelectionChange === 'function') {
     _syncPanelsAfterSelectionChange(prevSelectedId);
   }
+}
+
+function _principalLegacyUserFocusId(groupName) {
+  const group = String(groupName || '').trim();
+  const rows = (typeof window !== 'undefined' && Array.isArray(window._navGridRows))
+    ? window._navGridRows
+    : [];
+  const wantedSections = ['user', 'workers'];
+  for (const sectionKey of wantedSections) {
+    for (const row of rows) {
+      if (!row || (group && row.group !== group) || row.sectionKey !== sectionKey) continue;
+      for (const item of row.items || []) {
+        if (item && (item.type === 'agent' || item.type === 'control')) return item.id;
+      }
+    }
+  }
+  for (const row of rows) {
+    if (!row || (group && row.group !== group)) continue;
+    for (const item of row.items || []) {
+      if (item && item.type === 'control') return item.id;
+    }
+  }
+  return '';
 }
 
 function _principalRowFocusId(groupName, principalId) {

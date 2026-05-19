@@ -1056,8 +1056,53 @@ function _buildHierarchicalAgentSections(agents) {
   };
 }
 
+function _buildStratifiedAgentGridModel(agents) {
+  const base = _buildHierarchicalAgentSections(agents);
+  let userSection = null;
+  const architects = [];
+  for (const section of base.sections || []) {
+    if (!section) continue;
+    if (section.type === 'user') userSection = section;
+    else if (section.architect) architects.push(section);
+  }
+  if (!userSection) {
+    userSection = {
+      key: 'user',
+      type: 'user',
+      architect: null,
+      looseWorkers: [],
+      rows: [],
+    };
+  }
+
+  const ordered = [];
+  for (const section of architects) {
+    if (section.architect) ordered.push(section.architect);
+    for (const row of section.rows || []) {
+      if (row && row.engineer) ordered.push(row.engineer);
+      for (const worker of (row && row.workers) || []) ordered.push(worker);
+    }
+  }
+  for (const row of userSection.rows || []) {
+    if (row && row.engineer) ordered.push(row.engineer);
+    for (const worker of (row && row.workers) || []) ordered.push(worker);
+  }
+  for (const worker of userSection.looseWorkers || []) ordered.push(worker);
+
+  return {
+    sections: base.sections,
+    architects,
+    engineers: userSection.rows || [],
+    workers: userSection.looseWorkers || [],
+    userSection,
+    orderedAgents: ordered,
+    visibleAgentById: base.visibleAgentById,
+    visibleEngineerIds: base.visibleEngineerIds,
+  };
+}
+
 function _sortAgentsHierarchically(agents) {
-  return _buildHierarchicalAgentSections(agents).orderedAgents;
+  return _buildStratifiedAgentGridModel(agents).orderedAgents;
 }
 
 function _taskCreatedByValue(task) {
@@ -2197,6 +2242,22 @@ function _renderPrincipalNewArchitectGhost(groupName, disabled) {
     + '>+ New Architect</button>';
 }
 
+function _renderNewArchitectControl(groupName, opts) {
+  opts = opts || {};
+  const groupArg = _jsStringAttr(groupName);
+  const disabled = !!opts.disabled;
+  const navId = _gridNavControlId('agent-new-architect', groupName, '');
+  const focusKey = _gridNavControlFocusKey('agent-new-architect', groupName, 'user');
+  return '<button type="button" class="ghost-card ghost-card--architect agent-new-architect-card' + _gridNavFocusedClass(navId) + '"'
+    + ' data-action="new-architect"'
+    + ' data-nav-id="' + esc(navId) + '"'
+    + ' data-group="' + esc(groupName) + '"'
+    + ' data-focus-key="' + esc(focusKey) + '"'
+    + (disabled ? ' disabled aria-disabled="true" title="Agent limit reached"' : ' title="Create a new architect in this group"')
+    + (disabled ? '' : ' onclick="event.stopPropagation();openAddArchitectForGroup(' + groupArg + ')"')
+    + '>+ New Architect</button>';
+}
+
 function _renderPrincipalsRow(groupName, sections, selectedPrincipalId, opts) {
   opts = opts || {};
   const disabled = !!opts.disabled;
@@ -2215,6 +2276,137 @@ function _renderPrincipalsRow(groupName, sections, selectedPrincipalId, opts) {
     html += _renderPrincipalArchitectCard(groupName, section, selectedPrincipalId);
   }
   html += _renderPrincipalNewArchitectGhost(groupName, disabled);
+  html += '</div>';
+  return html;
+}
+
+function _renderAgentStrataHeader(label, count, extraClass) {
+  const classes = ['agent-strata-heading'];
+  if (extraClass) classes.push(extraClass);
+  const countText = String(Number(count || 0) || 0);
+  return '<div class="' + esc(classes.join(' ')) + '">'
+    + '<span class="agent-strata-heading-label">' + esc(label || '') + '</span>'
+    + '<span class="agent-strata-heading-count">' + esc(countText) + '</span>'
+    + '</div>';
+}
+
+function _renderArchitectBand(groupName, section, renderCell, opts) {
+  opts = opts || {};
+  if (!section || !section.architect) return '';
+  const sectionKey = _agentGridSectionKey(section);
+  const rows = Array.isArray(section.rows) ? section.rows : [];
+  const bandClasses = [
+    'agent-band',
+    'agent-band--architect',
+    'agent-section',
+    'agent-section-architect',
+  ];
+  if (!rows.length) bandClasses.push('agent-band--empty');
+  let html = '<section class="' + esc(bandClasses.join(' ')) + '"'
+    + ' data-agent-section="' + esc(sectionKey) + '">';
+  html += '<div class="agent-band-anchor agent-band-anchor--architect">'
+    + renderCell(section.architect)
+    + '</div>';
+  html += '<div class="agent-band-body agent-section-body"'
+    + ' data-agent-section-column="body"'
+    + ' data-section-key="' + esc(sectionKey) + '">';
+  if (rows.length) {
+    for (const row of rows) html += _renderEngineerRow(row, renderCell);
+  } else {
+    html += '<div class="agent-section-empty-msg">No engineers yet.</div>';
+  }
+  html += _renderSectionControlsSlot(groupName, section, opts);
+  html += '</div>';
+  html += '</section>';
+  return html;
+}
+
+function _renderArchitectsStrata(groupName, model, renderCell, opts) {
+  opts = opts || {};
+  const architectSections = (model && Array.isArray(model.architects))
+    ? model.architects
+    : [];
+  let html = '<section class="agent-strata agent-strata--architects" data-agent-strata="architects">';
+  html += _renderAgentStrataHeader('Architects', architectSections.length);
+  if (!architectSections.length) {
+    html += '<div class="agent-strata-empty agent-section-empty-msg">No architects yet.</div>';
+  } else {
+    for (const section of architectSections) {
+      html += _renderArchitectBand(groupName, section, renderCell, opts);
+    }
+  }
+  html += '<div class="agent-strata-controls">'
+    + _renderNewArchitectControl(groupName, opts)
+    + '</div>';
+  html += '</section>';
+  return html;
+}
+
+function _renderOrphanEngineersStrata(groupName, userSection, renderCell, opts) {
+  opts = opts || {};
+  userSection = userSection || {
+    key: 'user',
+    type: 'user',
+    architect: null,
+    looseWorkers: [],
+    rows: [],
+  };
+  const rows = Array.isArray(userSection.rows) ? userSection.rows : [];
+  let html = '<section class="agent-strata agent-strata--engineers" data-agent-strata="engineers">';
+  html += _renderAgentStrataHeader('Engineers', rows.length);
+  html += '<section class="agent-band agent-band--orphan-engineers agent-section agent-section-user"'
+    + ' data-agent-section="user">';
+  html += '<div class="agent-band-body agent-band-body--orphan-engineers agent-section-body"'
+    + ' data-agent-section-column="body"'
+    + ' data-section-key="user">';
+  if (rows.length) {
+    for (const row of rows) html += _renderEngineerRow(row, renderCell);
+  } else {
+    html += '<div class="agent-section-empty-msg">No orphan engineers.</div>';
+  }
+  html += _renderSectionControlsSlot(groupName, userSection, opts);
+  html += '</div>';
+  html += '</section>';
+  html += '</section>';
+  return html;
+}
+
+function _renderOrphanWorkersStrata(groupName, userSection, renderCell, opts) {
+  opts = Object.assign({}, opts || {}, { groupName });
+  userSection = userSection || {
+    key: 'user',
+    type: 'user',
+    architect: null,
+    looseWorkers: [],
+    rows: [],
+  };
+  const workers = Array.isArray(userSection.looseWorkers) ? userSection.looseWorkers : [];
+  let html = '<section class="agent-strata agent-strata--workers" data-agent-strata="workers">';
+  html += _renderAgentStrataHeader('Workers', workers.length);
+  html += '<section class="agent-band agent-band--orphan-workers agent-section agent-section-workers"'
+    + ' data-agent-section="workers">';
+  html += '<div class="agent-band-body agent-band-body--orphan-workers agent-section-body"'
+    + ' data-agent-section-column="body"'
+    + ' data-section-key="workers">';
+  if (!workers.length) {
+    html += '<div class="agent-section-empty-msg">No orphan workers.</div>';
+  }
+  html += _renderStandaloneWorkersStrip(userSection, renderCell, opts);
+  html += '</div>';
+  html += '</section>';
+  html += '</section>';
+  return html;
+}
+
+function _renderStratifiedAgentGrid(groupName, model, renderCell, opts) {
+  opts = Object.assign({}, opts || {}, { groupName });
+  const userSection = (model && model.userSection) || null;
+  let html = '<div class="agent-grid agent-grid-stratified"'
+    + ' data-drop-group="' + esc(groupName) + '"'
+    + ' data-drop-type="agent">';
+  html += _renderArchitectsStrata(groupName, model, renderCell, opts);
+  html += _renderOrphanEngineersStrata(groupName, userSection, renderCell, opts);
+  html += _renderOrphanWorkersStrata(groupName, userSection, renderCell, opts);
   html += '</div>';
   return html;
 }
@@ -2306,7 +2498,6 @@ function _buildAgentGridNavigationModel(groupContexts) {
   };
 
   let sortOrder = 0;
-  const registeredRowIndexes = new Set();
 
   const addMeta = function(item, row, colIndex, sortValue) {
     if (!item || !item.id) return;
@@ -2359,155 +2550,171 @@ function _buildAgentGridNavigationModel(groupContexts) {
     }
   };
 
+  const agentItem = function(agent, kind) {
+    if (!agent || !agent.id) return null;
+    return {
+      id: agent.id,
+      type: 'agent',
+      agentKind: kind || agent.kind || 'agent',
+    };
+  };
+
+  const engineerControlForSection = function(ctx, section, sectionKey) {
+    if (!ctx || ctx.atAgentCap) return null;
+    const architectId = section && section.architect ? (section.architect.id || '') : '';
+    const controlId = _gridNavControlId('section-new-engineer', ctx.gname, sectionKey);
+    return {
+      id: controlId,
+      type: 'control',
+      controlType: 'section-new-engineer',
+      group: ctx.gname,
+      sectionKey,
+      architectId,
+      focusKey: _gridNavControlFocusKey('section-new-engineer', ctx.gname, sectionKey),
+    };
+  };
+
+  const addControlRow = function(ctx, sectionKey, rowKey, rowType, controls, extra) {
+    controls = (Array.isArray(controls) ? controls : []).filter(Boolean);
+    if (!controls.length) return;
+    addRow(Object.assign({
+      group: ctx.gname,
+      sectionKey,
+      rowKey,
+      rowType,
+      items: controls,
+    }, extra || {}));
+    for (const control of controls) {
+      addCreationControl(Object.assign({}, control, {
+        sort: model.itemMeta[control.id] ? model.itemMeta[control.id].sort : sortOrder++,
+      }));
+    }
+  };
+
   for (const ctx of groupContexts) {
     model.navGroupOrder.push(ctx.gname);
     const groupNav = [];
     if (!ctx.collapsed) {
-      const selectedPrincipalId = ctx.selectedPrincipalId || '';
+      const firstRowIndex = model.gridRows.length;
+      const layout = ctx.agentLayout || {};
 
-      // Principals row: user card + architects + + New Architect.
-      const principalsRowItems = [];
-      const userPrincipalNavId = _principalCardNavId(ctx.gname, '');
-      const userPrincipalItem = {
-        id: userPrincipalNavId,
-        type: 'principal',
-        principalId: '',
-        group: ctx.gname,
-        focusKey: userPrincipalNavId,
-      };
-      principalsRowItems.push(userPrincipalItem);
-
-      for (const section of ctx.agentLayout.sections) {
+      for (const section of layout.architects || []) {
         if (!section || !section.architect) continue;
-        const archId = String(section.architect.id || '');
-        const navId = _principalCardNavId(ctx.gname, archId);
-        principalsRowItems.push({
-          id: navId,
-          type: 'principal',
-          principalId: archId,
-          group: ctx.gname,
-          focusKey: navId,
-        });
-      }
-
-      if (!ctx.atAgentCap) {
-        const newArchitectControlId = _gridNavControlId('agent-new-architect', ctx.gname, '');
-        const newArchitectControl = {
-          id: newArchitectControlId,
-          type: 'control',
-          controlType: 'agent-new-architect',
-          group: ctx.gname,
-          sectionKey: 'user',
-          focusKey: _gridNavControlFocusKey('agent-new-architect', ctx.gname, 'user'),
-        };
-        principalsRowItems.push(newArchitectControl);
-        addCreationControl(Object.assign({}, newArchitectControl, {
-          sort: sortOrder++,
-        }));
-      }
-
-      addRow({
-        group: ctx.gname,
-        sectionKey: 'principals',
-        rowKey: 'principals:' + ctx.gname,
-        rowType: 'principals-row',
-        items: principalsRowItems,
-      });
-
-      // Grid: only the section matching the selected principal.
-      for (const section of ctx.agentLayout.sections) {
-        if (!_principalSectionMatches(section, selectedPrincipalId)) continue;
         const sectionKey = _agentGridSectionKey(section);
-        const looseWorkerItems = section.type === 'user'
-          ? (section.looseWorkers || []).map(worker => ({
-            id: worker.id,
-            type: 'agent',
-            agentKind: 'worker',
-          }))
-          : [];
-        const workerControl = (section.type === 'user' && !ctx.atAgentCap)
-          ? {
-            id: _gridNavControlId('section-new-worker', ctx.gname, sectionKey),
-            type: 'control',
-            controlType: 'section-new-worker',
-            group: ctx.gname,
-            sectionKey,
-            architectId: '',
-            focusKey: _gridNavControlFocusKey('section-new-worker', ctx.gname, sectionKey),
+        const rows = Array.isArray(section.rows) ? section.rows : [];
+        if (rows.length) {
+          for (let sectionRowIndex = 0; sectionRowIndex < rows.length; sectionRowIndex++) {
+            const row = rows[sectionRowIndex];
+            if (!row || !row.engineer) continue;
+            const rowItems = [];
+            if (sectionRowIndex === 0) rowItems.push(agentItem(section.architect, 'architect'));
+            rowItems.push(agentItem(row.engineer, 'engineer'));
+            for (const worker of row.workers || []) rowItems.push(agentItem(worker, 'worker'));
+            addRow({
+              group: ctx.gname,
+              sectionKey,
+              rowKey: sectionKey + ':engineer:' + String(row.engineer.id || ''),
+              rowType: 'engineer-row',
+              architectId: section.architect.id || '',
+              engineerId: row.engineer.id,
+              items: rowItems,
+            });
           }
-          : null;
-
-        if (looseWorkerItems.length || workerControl) {
+          const engineerControl = engineerControlForSection(ctx, section, sectionKey);
+          addControlRow(ctx, sectionKey, sectionKey + ':section-new-engineer', 'section-creation-row', [engineerControl], {
+            architectId: section.architect.id || '',
+          });
+        } else {
+          const engineerControl = engineerControlForSection(ctx, section, sectionKey);
+          const rowItems = [agentItem(section.architect, 'architect')];
+          if (engineerControl) rowItems.push(engineerControl);
           addRow({
             group: ctx.gname,
             sectionKey,
-            rowKey: sectionKey + ':standalone-workers',
-            rowType: 'standalone-workers-row',
-            items: workerControl ? looseWorkerItems.concat([workerControl]) : looseWorkerItems,
+            rowKey: sectionKey + ':empty',
+            rowType: 'architect-empty-row',
+            architectId: section.architect.id || '',
+            items: rowItems,
           });
-        }
-        if (workerControl) {
-          addCreationControl(Object.assign({}, workerControl, {
-            sort: model.itemMeta[workerControl.id] ? model.itemMeta[workerControl.id].sort : sortOrder++,
-          }));
-        }
-
-        for (let sectionRowIndex = 0; sectionRowIndex < section.rows.length; sectionRowIndex++) {
-          const row = section.rows[sectionRowIndex];
-          const workerItems = (row.workers || []).map(worker => ({
-            id: worker.id,
-            type: 'agent',
-            agentKind: 'worker',
-          }));
-          const rowItems = [];
-          rowItems.push({
-            id: row.engineer.id,
-            type: 'agent',
-            agentKind: 'engineer',
-          });
-          addRow({
-            group: ctx.gname,
-            sectionKey,
-            rowKey: sectionKey + ':engineer:' + String(row.engineer.id || ''),
-            rowType: 'engineer-row',
-            architectId: section.architect ? section.architect.id : '',
-            engineerId: row.engineer.id,
-            items: rowItems.concat(workerItems),
-          });
-        }
-
-        if (!ctx.atAgentCap) {
-          const engineerControlId = _gridNavControlId('section-new-engineer', ctx.gname, sectionKey);
-          const controls = [{
-            id: engineerControlId,
-            type: 'control',
-            controlType: 'section-new-engineer',
-            group: ctx.gname,
-            sectionKey,
-            architectId: section.architect ? (section.architect.id || '') : '',
-            focusKey: _gridNavControlFocusKey('section-new-engineer', ctx.gname, sectionKey),
-          }];
-          addRow({
-            group: ctx.gname,
-            sectionKey,
-            rowKey: sectionKey + ':section-new-engineer',
-            rowType: 'section-creation-row',
-            architectId: section.architect ? (section.architect.id || '') : '',
-            items: controls,
-          });
-          for (const control of controls) {
-            addCreationControl(Object.assign({}, control, {
-              sort: model.itemMeta[control.id] ? model.itemMeta[control.id].sort : sortOrder++,
+          if (engineerControl) {
+            addCreationControl(Object.assign({}, engineerControl, {
+              sort: model.itemMeta[engineerControl.id]
+                ? model.itemMeta[engineerControl.id].sort
+                : sortOrder++,
             }));
           }
         }
       }
 
-      for (let rowIndex = 0; rowIndex < model.gridRows.length; rowIndex++) {
-        if (registeredRowIndexes.has(rowIndex)) continue;
+      const newArchitectControl = !ctx.atAgentCap
+        ? {
+          id: _gridNavControlId('agent-new-architect', ctx.gname, ''),
+          type: 'control',
+          controlType: 'agent-new-architect',
+          group: ctx.gname,
+          sectionKey: 'architects',
+          focusKey: _gridNavControlFocusKey('agent-new-architect', ctx.gname, 'user'),
+        }
+        : null;
+      addControlRow(ctx, 'architects', 'architects:agent-new-architect', 'architect-creation-row', [newArchitectControl]);
+
+      const userSection = layout.userSection || {
+        key: 'user',
+        type: 'user',
+        architect: null,
+        looseWorkers: [],
+        rows: [],
+      };
+      for (const row of userSection.rows || []) {
+        if (!row || !row.engineer) continue;
+        const workerItems = (row.workers || []).map(worker => agentItem(worker, 'worker'));
+        const rowItems = [agentItem(row.engineer, 'engineer')].concat(workerItems);
+        addRow({
+          group: ctx.gname,
+          sectionKey: 'user',
+          rowKey: 'user:engineer:' + String(row.engineer.id || ''),
+          rowType: 'engineer-row',
+          architectId: '',
+          engineerId: row.engineer.id,
+          items: rowItems,
+        });
+      }
+      const userEngineerControl = engineerControlForSection(ctx, userSection, 'user');
+      addControlRow(ctx, 'user', 'user:section-new-engineer', 'section-creation-row', [userEngineerControl], {
+        architectId: '',
+      });
+
+      const looseWorkerItems = (userSection.looseWorkers || []).map(worker => agentItem(worker, 'worker'));
+      const workerControl = !ctx.atAgentCap
+        ? {
+          id: _gridNavControlId('section-new-worker', ctx.gname, 'user'),
+          type: 'control',
+          controlType: 'section-new-worker',
+          group: ctx.gname,
+          sectionKey: 'workers',
+          architectId: '',
+          focusKey: _gridNavControlFocusKey('section-new-worker', ctx.gname, 'user'),
+        }
+        : null;
+
+      if (looseWorkerItems.length || workerControl) {
+        addRow({
+          group: ctx.gname,
+          sectionKey: 'workers',
+          rowKey: 'workers:standalone-workers',
+          rowType: 'standalone-workers-row',
+          items: workerControl ? looseWorkerItems.concat([workerControl]) : looseWorkerItems,
+        });
+      }
+      if (workerControl) {
+        addCreationControl(Object.assign({}, workerControl, {
+          sort: model.itemMeta[workerControl.id] ? model.itemMeta[workerControl.id].sort : sortOrder++,
+        }));
+      }
+
+      for (let rowIndex = firstRowIndex; rowIndex < model.gridRows.length; rowIndex++) {
         const row = model.gridRows[rowIndex];
         if (row.group !== ctx.gname) continue;
-        registeredRowIndexes.add(rowIndex);
         for (const item of row.items) {
           if (item.type === 'agent') addAgentNav(ctx, groupNav, item.id);
         }
@@ -2542,11 +2749,39 @@ function _navModelFirstAgentItemInRows(rows, predicate) {
   return '';
 }
 
+function _legacyPrincipalFocusTarget(currentFocusedId, navModel) {
+  const raw = String(currentFocusedId || '');
+  if (!raw || raw.indexOf('principal:') !== 0 || !navModel) return '';
+  const lastColon = raw.lastIndexOf(':');
+  if (lastColon <= 'principal:'.length - 1) return '';
+  const group = raw.slice('principal:'.length, lastColon);
+  const tail = raw.slice(lastColon + 1);
+  if (tail && tail !== 'user' && navModel.itemMeta[tail]) return tail;
+  const groupRows = (navModel.gridRows || []).filter(row => row.group === group);
+  const userAgent = _navModelFirstAgentItemInRows(groupRows, row =>
+    row.sectionKey === 'user');
+  if (userAgent) return userAgent;
+  const workerAgent = _navModelFirstAgentItemInRows(groupRows, row =>
+    row.sectionKey === 'workers');
+  if (workerAgent) return workerAgent;
+  for (const key of [
+    _gridNavControlId('section-new-engineer', group, 'user'),
+    _gridNavControlId('section-new-worker', group, 'user'),
+    _gridNavControlId('agent-new-architect', group, ''),
+  ]) {
+    if (key && navModel.itemMeta[key]) return key;
+  }
+  return '';
+}
+
 function _resolveFocusedItemForGridRender(currentFocusedId, navModel) {
   if (!currentFocusedId || !navModel) return currentFocusedId || null;
   if (navModel.itemMeta[currentFocusedId] || navModel.navItems.includes(currentFocusedId)) {
     return currentFocusedId;
   }
+
+  const legacyPrincipalTarget = _legacyPrincipalFocusTarget(currentFocusedId, navModel);
+  if (legacyPrincipalTarget) return legacyPrincipalTarget;
 
   const previousMeta = window._navGridItemMeta
     ? window._navGridItemMeta[currentFocusedId]
@@ -2968,8 +3203,7 @@ function _renderMainGrid(opts, renderMode) {
     const gsLocal = (state.group_settings || {})[gname] || {};
     _ensureGroupCollapsedInitialized(gname, gsLocal);
     const collapsed = collapsedGroups.has(gname);
-    const agentLayout = _buildHierarchicalAgentSections(cells.agents);
-    const selectedPrincipalId = _resolveSelectedPrincipalId(agentLayout.sections);
+    const agentLayout = _buildStratifiedAgentGridModel(cells.agents);
     groupContexts.push({
       gname,
       aids: cells.aids,
@@ -2979,7 +3213,6 @@ function _renderMainGrid(opts, renderMode) {
       gsLocal,
       collapsed,
       agentLayout,
-      selectedPrincipalId,
       atAgentCap: gsLocal.max_agents > 0 && cells.agents.length >= gsLocal.max_agents,
     });
   }
@@ -3012,67 +3245,15 @@ function _renderMainGrid(opts, renderMode) {
     const agentLayout = ctx.agentLayout;
     const visibleAgentById = agentLayout.visibleAgentById;
     const visibleEngineerIds = agentLayout.visibleEngineerIds;
-    const selectedPrincipalId = ctx.selectedPrincipalId || '';
-
-    /* Principals row: User + architects + + New Architect, wraps when narrow. */
-    html += _renderPrincipalsRow(
-      gname,
-      agentLayout.sections,
-      selectedPrincipalId,
-      { disabled: ctx.atAgentCap },
-    );
-
-    html += `<div class="agent-grid agent-grid-hierarchical" data-drop-group="${esc(gname)}" data-drop-type="agent">`;
     const renderCellForGrid = function(a) {
       return renderAgentCell(a, { visibleEngineerIds, visibleAgentById });
     };
-    let renderedAnySection = false;
-    for (let sectionIndex = 0; sectionIndex < agentLayout.sections.length; sectionIndex++) {
-      const section = agentLayout.sections[sectionIndex];
-      if (!_principalSectionMatches(section, selectedPrincipalId)) continue;
-      const sectionKey = _agentGridSectionKey(section);
-      const sectionClasses = [
-        'agent-section',
-        'agent-section--filtered',
-        section.type === 'user' ? 'agent-section-user' : 'agent-section-architect',
-      ];
-      if (!section.rows || section.rows.length === 0) {
-        sectionClasses.push('agent-section--empty');
-      }
-      html += '<section class="' + sectionClasses.join(' ') + '"'
-        + ' data-agent-section="' + esc(sectionKey) + '">';
-      html += '<div class="agent-section-body"'
-        + ' data-agent-section-column="body"'
-        + ' data-section-key="' + esc(sectionKey) + '">';
-      const hasStandaloneWorkerCards = section.type === 'user'
-        && section.looseWorkers
-        && section.looseWorkers.length > 0;
-      html += _renderStandaloneWorkersStrip(section, renderCellForGrid, {
-        groupName: gname,
-        disabled: ctx.atAgentCap,
-      });
-      if (!section.rows || section.rows.length === 0) {
-        if (!hasStandaloneWorkerCards) {
-          html += '<div class="agent-section-empty-msg">No engineers yet.</div>';
-        }
-      } else {
-        for (const row of section.rows) html += _renderEngineerRow(row, renderCellForGrid);
-      }
-      html += _renderSectionControlsSlot(gname, section, { disabled: ctx.atAgentCap });
-      html += '</div>';
-      html += '</section>';
-      renderedAnySection = true;
-    }
-    if (!renderedAnySection) {
-      // Stored principal id does not match any section (e.g. architect
-      // deleted and fallback resolution missed). Shouldn't happen in
-      // practice because _resolveSelectedPrincipalId falls back to user.
-      html += '<div class="agent-section agent-section--empty"'
-        + ' data-agent-section="empty">'
-        + '<div class="agent-section-empty-msg">No engineers yet.</div>'
-        + '</div>';
-    }
-    html += `</div>`;
+    html += _renderStratifiedAgentGrid(
+      gname,
+      agentLayout,
+      renderCellForGrid,
+      { disabled: ctx.atAgentCap },
+    );
 
     if (standaloneTerms.length) {
       html += `<div class="terminal-drawer">`;

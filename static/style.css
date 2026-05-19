@@ -1160,6 +1160,88 @@ body.runtime-embedded .agent-focus-header {
   gap: 8px;
   padding: 6px 8px;
 }
+.agent-grid-stratified {
+  overflow-x: auto;
+}
+.agent-strata {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 0 0 9px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 58%, transparent);
+}
+.agent-strata:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+.agent-strata-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 18px;
+  color: var(--text-dim);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+.agent-strata-heading-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 14px;
+  padding: 0 5px;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 999px;
+  box-sizing: border-box;
+  color: var(--text-dim);
+  font-size: 8px;
+  letter-spacing: 0;
+}
+.agent-strata-empty {
+  padding: 3px 0 2px;
+}
+.agent-strata-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+.agent-band {
+  min-width: 0;
+}
+.agent-band--architect {
+  display: grid;
+  grid-template-columns: var(--agent-architect-column-width) minmax(var(--agent-engineer-column-width), 1fr);
+  column-gap: 7px;
+  align-items: stretch;
+}
+.agent-band--orphan-engineers,
+.agent-band--orphan-workers {
+  display: block;
+}
+.agent-band-anchor--architect {
+  display: flex;
+  align-items: stretch;
+  width: var(--agent-architect-column-width);
+  min-width: 0;
+}
+.agent-band-anchor--architect > .cell {
+  width: 100%;
+  min-height: 100%;
+  box-sizing: border-box;
+}
+.agent-band-body {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+  min-width: 0;
+}
 .agent-section {
   display: grid;
   grid-template-columns: var(--agent-architect-column-width) minmax(0, 1fr);
@@ -1200,10 +1282,25 @@ body.runtime-embedded .agent-focus-header {
   align-content: start;
   min-width: 0;
 }
+.agent-band--architect {
+  display: grid;
+  grid-template-columns: var(--agent-architect-column-width) minmax(var(--agent-engineer-column-width), 1fr);
+  align-items: stretch;
+}
+.agent-band--orphan-engineers,
+.agent-band--orphan-workers {
+  display: block;
+}
+.agent-band-body.agent-section-body {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+}
 .agent-grid .engineer-row {
   display: flex;
   gap: 6px;
-  align-items: start;
+  align-items: stretch;
   min-width: 0;
 }
 .agent-grid .engineer-row {
@@ -1234,12 +1331,6 @@ body.runtime-embedded .agent-focus-header {
 .engineer-row-anchor {
   flex: 0 0 var(--agent-engineer-column-width);
   min-width: 0;
-}
-.agent-grid .engineer-row.engineer-row--empty-workers {
-  display: block;
-}
-.agent-grid .engineer-row.engineer-row--empty-workers .engineer-row-anchor {
-  width: 100%;
 }
 .agent-grid .engineer-row.engineer-row--empty-workers .engineer-row-workers {
   display: none;
