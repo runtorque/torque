@@ -98,6 +98,12 @@ function _ahActionIcon(action) {
   return icons[action] || '\u2022';
 }
 
+function _ahKindLabel(kind) {
+  var text = String(kind || '').trim();
+  if (!text) return '';
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 function agentHistorySetFilter(f) {
   _agentHistoryFilter = f;
   agentHistoryLoad();
@@ -138,12 +144,20 @@ function agentHistoryOpenTask(taskId) {
 function renderAgentHistoryView() {
   var container = document.getElementById('agent-history-container');
   if (!container) return;
+  var surfaceState = (typeof _captureSurfaceState === 'function')
+    ? _captureSurfaceState(container, { scrollSelectors: [':root'] })
+    : null;
+  var restoreSurface = function() {
+    if (typeof _restoreSurfaceState === 'function') {
+      _restoreSurfaceState(container, surfaceState);
+    }
+  };
 
   var html = '';
 
   // Search + filter bar
   html += '<div class="ah-toolbar">';
-  html += '<input class="ah-search" type="text" placeholder="Search agents\u2026" '
+  html += '<input id="agent-history-search" class="ah-search" type="text" placeholder="Search agents\u2026" '
     + 'value="' + esc(_agentHistorySearch) + '" '
     + 'oninput="agentHistoryOnSearch(this.value)">';
   var filters = [
@@ -165,10 +179,12 @@ function renderAgentHistoryView() {
     records = records.filter(function(r) { return r.group === grp; });
   }
   if (_agentHistorySearch) {
+    var query = _agentHistorySearch.toLowerCase();
     records = records.filter(function(r) {
-      return r.name.toLowerCase().indexOf(_agentHistorySearch) >= 0
-        || (r.group || '').toLowerCase().indexOf(_agentHistorySearch) >= 0
-        || (r.agent_type || '').toLowerCase().indexOf(_agentHistorySearch) >= 0;
+      return (r.name || '').toLowerCase().indexOf(query) >= 0
+        || (r.group || '').toLowerCase().indexOf(query) >= 0
+        || (r.agent_type || '').toLowerCase().indexOf(query) >= 0
+        || (r.kind || '').toLowerCase().indexOf(query) >= 0;
     });
   }
 
@@ -179,6 +195,7 @@ function renderAgentHistoryView() {
     else if (_agentHistoryFilter === 'active') empty = 'No active agent runs match this filter.';
     html += '<div class="ah-empty">' + empty + '<br>Live agents stay in the left column.</div>';
     container.innerHTML = html;
+    restoreSurface();
     return;
   }
 
@@ -197,6 +214,7 @@ function renderAgentHistoryView() {
       var typeLabel = (typeInfo && typeInfo.label) || r.agent_type;
       html += '<span class="ah-type-badge">' + esc(typeLabel) + '</span>';
     }
+    if (r.kind) html += '<span class="ah-type-badge">' + esc(_ahKindLabel(r.kind)) + '</span>';
     if (r.group) html += '<span class="ah-group">' + esc(r.group) + '</span>';
     html += _ahStatusBadge(r.status);
     html += '<span class="ah-meta">' + _ahFmtTs(r.created_at) + '</span>';
@@ -226,6 +244,7 @@ function renderAgentHistoryView() {
   html += '</div>';
 
   container.innerHTML = html;
+  restoreSurface();
 
   // If we have detail, render it
   if (_agentHistoryExpanded && _agentHistoryDetail) {

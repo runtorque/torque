@@ -14897,6 +14897,76 @@ test('History renders as a separate panel with the merged filter selected', () =
   assert.doesNotMatch(panel.innerHTML, /Role Library/);
 });
 
+test('agent history search preserves focus and caret across rerenders', () => {
+  const { context, document } = createAgentHistoryHarness();
+  const container = document.register('agent-history-container');
+  container._detachChildrenOnInnerHTMLClear = true;
+  const input = document.register('agent-history-search');
+  input.value = 'Torqly';
+  input.selectionStart = 2;
+  input.selectionEnd = 5;
+  container.appendChild(input);
+  document.activeElement = input;
+
+  runInContext(context, `
+    _agentHistoryFilter = 'active';
+    _agentHistoryRecords = [{
+      id: 'arch-1',
+      name: 'Torqly',
+      group: 'alpha',
+      agent_type: 'claude-code',
+      kind: 'architect',
+      status: 'active',
+      created_at: 1,
+      total_tasks: 0,
+    }];
+  `);
+
+  context.agentHistoryOnSearch('Torqly');
+
+  assert.equal(input.focused, true);
+  assert.equal(input.value, 'Torqly');
+  assert.equal(input.selectionStart, 2);
+  assert.equal(input.selectionEnd, 5);
+});
+
+test('agent history search includes fixture architect agents by kind', () => {
+  const { context, document } = createAgentHistoryHarness();
+  const container = document.register('agent-history-container');
+
+  runInContext(context, `
+    _agentHistoryFilter = 'active';
+    _agentHistorySearch = 'architect';
+    _agentHistoryRecords = [
+      {
+        id: 'arch-1',
+        name: 'Torqly',
+        group: 'alpha',
+        agent_type: 'claude-code',
+        kind: 'architect',
+        status: 'active',
+        created_at: 1,
+        total_tasks: 0,
+      },
+      {
+        id: 'eng-1',
+        name: 'Panelsmith',
+        group: 'alpha',
+        agent_type: 'claude-code',
+        kind: 'engineer',
+        status: 'active',
+        created_at: 2,
+        total_tasks: 0,
+      },
+    ];
+    renderAgentHistoryView();
+  `);
+
+  assert.match(container.innerHTML, /Torqly/);
+  assert.match(container.innerHTML, /Architect/);
+  assert.doesNotMatch(container.innerHTML, /Panelsmith/);
+});
+
 test('roles panel renders role fields and saves via save_role with blank priorities discarded', () => {
   const { context, document, sandbox } = createTemplatesHarness();
   const panel = document.getElementById('panel-templates');
