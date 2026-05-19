@@ -1,6 +1,37 @@
 /* First-run welcome/onboarding flow. */
 var _welcomeOpenedAutomatically = false;
 
+function _welcomeSurfaceCards() {
+  var cards = [
+    [
+      'Groups & views',
+      'Start in a group tab, then switch Grid/Canvas: Grid for live terminals, Canvas for the agent tree.'
+    ],
+    [
+      'Agent workflow',
+      'Architects scope work, Engineers coordinate, and Workers execute focused tasks in isolated worktrees.'
+    ],
+    [
+      'Board & actions',
+      'Use Board lanes to plan, dispatch, review, and finish tasks; use Actions for reusable prompts and pipelines.'
+    ],
+    [
+      'Shared Context',
+      'Publish durable findings, decisions, warnings, and handoffs so future agents do not rediscover them.'
+    ],
+    [
+      'Routing library',
+      'Roles shape Worker prompts; Specializations advertise Engineer focus so tasks land with the right teammate.'
+    ],
+  ];
+  var html = '<ol class="welcome-steps">';
+  for (var i = 0; i < cards.length; i++) {
+    html += '<li><strong>' + cards[i][0] + '</strong><span>' + cards[i][1] + '</span></li>';
+  }
+  html += '</ol>';
+  return html;
+}
+
 function _ensureWelcomeModal() {
   var existing = document.getElementById('modal-welcome');
   if (existing) return existing;
@@ -8,17 +39,11 @@ function _ensureWelcomeModal() {
   overlay.className = 'overlay';
   overlay.id = 'modal-welcome';
   overlay.innerHTML = ''
-    + '<div class="modal modal-wide welcome-modal">'
+    + '<div class="modal modal-wide welcome-modal" role="dialog" aria-modal="true" aria-labelledby="welcome-title">'
     + '  <div class="welcome-eyebrow">Welcome to Torque</div>'
-    + '  <h2>Run agent teams from one local workspace</h2>'
-    + '  <p class="welcome-lede">Torque coordinates architects, engineers, workers, terminals, and board tasks while SQLite keeps the source of truth local.</p>'
-    + '  <ol class="welcome-steps">'
-    + '    <li><strong>Groups</strong><span>collect agents and tasks for one project or stream.</span></li>'
-    + '    <li><strong>Architects</strong><span>scope and dispatch work.</span></li>'
-    + '    <li><strong>Engineers</strong><span>coordinate workers and review implementation flow.</span></li>'
-    + '    <li><strong>Workers</strong><span>execute focused tasks in safe worktrees.</span></li>'
-    + '    <li><strong>Board tasks</strong><span>track what is queued, running, reviewing, and done.</span></li>'
-    + '  </ol>'
+    + '  <h2 id="welcome-title">Orient your local agent workspace</h2>'
+    + '  <p class="welcome-lede">Torque keeps agent teams, tasks, prompts, and shared context together while SQLite stays the local source of truth.</p>'
+    + _welcomeSurfaceCards()
     + '  <div class="welcome-actions">'
     + '    <button class="btn-secondary" type="button" onclick="welcomeCreateSampleGroup()">Create sample group</button>'
     + '    <button class="btn-cancel" type="button" onclick="closeWelcome({ complete: false })">Show later</button>'
