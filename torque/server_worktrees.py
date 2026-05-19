@@ -5,9 +5,16 @@ from __future__ import annotations
 import asyncio
 import shlex
 
+from dataclasses import asdict
+from datetime import datetime, timezone
+
 from .config import log
 from .state import task_counts_as_done
-from .worktree_boundaries import branch_boundary_tasks
+from .worktree_boundaries import (
+    branch_boundary_tasks,
+    latest_boundary_task,
+    task_boundary,
+)
 
 
 def _parse_diff_git_paths(line: str) -> tuple[str, str]:
@@ -247,3 +254,128 @@ async def _generate_merge_message(cell, worktree_mgr, squash: bool,
             return "\n".join(lines)
 
     return header
+
+
+def _split_merge_message_for_pr(message: str, *,
+                                fallback_title: str) -> tuple[str, str]:
+    """Split a generated merge message into GitHub PR title/body parts."""
+    lines = str(message or "").strip().splitlines()
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    if not lines:
+        return fallback_title, ""
+    title = lines[0].strip() or fallback_title
+    body = "\n".join(lines[1:]).strip()
+    return title, body
+
+
+def _pr_result_metadata(
+    *,
+    pr_result: dict | None = None,
+    merge_result: dict | None = None,
+    remote: str = "",
+    base_branch: str = "",
+    branch: str = "",
+    pending: bool = False,
+    status: str = "",
+) -> dict:
+    """Normalize GitHub PR helper output for command results/boundaries."""
+    pr_result = pr_result or {}
+    merge_result = merge_result or {}
+    pr_status = merge_result.get("pr_status")
+    if isinstance(pr_status, dict) and pr_status.get("ok"):
+        source = {**pr_result, **pr_status, **merge_result}
+    else:
+        source = {**pr_result, **merge_result}
+    url = str(source.get("url") or pr_result.get("url") or "").strip()
+    number = source.get("number", pr_result.get("number"))
+    head_sha = str(
+        source.get("head_sha") or pr_result.get("head_sha") or ""
+    ).strip()
+    metadata = {
+        "url": url,
+        "number": number,
+        "head_sha": head_sha,
+        "base_branch": str(base_branch or "").strip(),
+        "branch": str(branch or "").strip(),
+        "remote": str(remote or "").strip(),
+        "state": str(
+            source.get("state") or pr_result.get("state") or ""
+        ).strip(),
+        "merge_state": str(
+            source.get("merge_state") or pr_result.get("merge_state") or ""
+        ).strip(),
+        "merge_commit_sha": str(
+            source.get("merge_commit_sha")
+            or pr_result.get("merge_commit_sha")
+            or ""
+        ).strip(),
+        "pending": bool(pending),
+        "status": str(status or "").strip(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if "existing" in pr_result:
+        metadata["existing"] = bool(pr_result.get("existing"))
+    if source.get("review_decision") is not None:
+        metadata["review_decision"] = source.get("review_decision")
+    return metadata
+
+
+def _record_pr_metadata_on_latest_boundary(state, cell,
+                                           pr_metadata: dict) -> dict | None:
+    """Attach PR state to the latest open branch boundary without closing it."""
+    if not state or not cell or not pr_metadata:
+        return None
+    repo_root = cell.worktree_repo_root or cell.git_root or ""
+    latest = latest_boundary_task(
+        state.board_tasks.values(),
+        repo_root=repo_root,
+        branch=cell.worktree_branch or "",
+        statuses={"open"},
+    )
+    if not latest:
+        return None
+
+    boundary = dict(task_boundary(latest))
+    boundary["pull_request"] = dict(pr_metadata)
+    # Duplicate the high-signal fields at the boundary top level so the next
+    # frontend pass can consume them without having to understand the full
+    # GitHub helper payload.
+    boundary["pr_url"] = pr_metadata.get("url", "")
+    boundary["pr_number"] = pr_metadata.get("number")
+    boundary["pr_head_sha"] = pr_metadata.get("head_sha", "")
+    boundary["pr_state"] = pr_metadata.get("state", "")
+    boundary["pr_merge_state"] = pr_metadata.get("merge_state", "")
+    boundary["pr_pending"] = bool(pr_metadata.get("pending"))
+    boundary["pr_status"] = pr_metadata.get("status", "")
+    boundary["pr_updated_at"] = pr_metadata.get("updated_at", "")
+    latest.worktree_boundary = boundary
+    latest.updated_at = datetime.now(timezone.utc).isoformat()
+    state._emit("task_upsert", **asdict(latest))
+    state._db_save_task(latest)
+    return boundary
+
+
+def _pr_merge_failure_allows_auto(merge_result: dict) -> bool:
+    """Return true when an immediate PR merge failure can fall back to --auto."""
+    if not isinstance(merge_result, dict) or merge_result.get("ok"):
+        return False
+    if merge_result.get("pending"):
+        return False
+    status = merge_result.get("pr_status")
+    if not isinstance(status, dict):
+        status = {}
+    state_text = str(
+        merge_result.get("state") or status.get("state") or ""
+    ).upper()
+    merge_state = str(
+        merge_result.get("merge_state") or status.get("merge_state") or ""
+    ).upper()
+    if state_text and state_text != "OPEN":
+        return False
+    if merge_state in {"DIRTY", "UNKNOWN"}:
+        return False
+    # GitHub uses a few different merge-state labels for protected branches
+    # and pending checks/reviews. If the PR is still open and not dirty, asking
+    # GitHub to enable auto-merge is the safest default follow-up.
+    return True

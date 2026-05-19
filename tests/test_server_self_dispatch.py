@@ -1413,6 +1413,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             result = await handle_command({
                 "cmd": "worktree_merge",
                 "id": worker.id,
+                "force_direct": True,
                 "message": "Merge worker branch",
                 "close_agent_on_merge": True,
                 "remove_worktree_on_merge": True,
@@ -1429,6 +1430,12 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["type"], "worktree_merge")
         self.assertTrue(result["ok"])
         self.assertEqual(result["sha"], "abc123")
+        self.assertTrue(result["force_direct"])
+        self.assertIn("Direct local worktree merge", result["warning"])
+        self.assertEqual(
+            result["workflow_breach"]["subkind"],
+            "force_direct_merge",
+        )
         self.assertEqual(task.lane, "Done")
         self.assertEqual(task.status, "")
         self.assertEqual(task.agent_id, "")
@@ -1551,6 +1558,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             result = await handle_command({
                 "cmd": "worktree_merge",
                 "id": worker.id,
+                "force_direct": True,
                 "message": "Merge worker branch",
             })
         finally:
@@ -1568,6 +1576,441 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls[0]["agent_id"], worker.id)
         self.assertEqual(state.board_tasks[queued.id].lane, "In Progress")
         self.assertNotIn("g", state.auto_dispatch_queues)
+
+    def _make_pr_merge_state(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        worker = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            status="running",
+            worktree_path="/tmp/worker",
+            worktree_branch="torque/worker",
+            worktree_base_branch="main",
+            worktree_repo_root="/repo",
+        )
+        state.agents[worker.id] = worker
+        state.groups["g"].append(worker.id)
+        task = state.board_add_task(
+            "Ship PR merged change",
+            "g",
+            lane="In Progress",
+            id="TORQUE:490",
+            agent_id=worker.id,
+        )
+        task.worktree_boundary = {
+            "version": "1",
+            "branch": worker.worktree_branch,
+            "repo_root": worker.worktree_repo_root,
+            "base_branch": worker.worktree_base_branch,
+            "commit_sha": "head123",
+            "kind": "marker",
+            "status": "open",
+            "recorded_at": "2026-05-19T18:00:00+00:00",
+            "recorded_by_agent_id": worker.id,
+            "message": "",
+            "superseded_by_task_id": "",
+            "merged_at": "",
+            "merge_commit_sha": "",
+            "reason": "",
+        }
+        return state, worker, task
+
+    def _mark_boundaries_for_state(self, state):
+        from torque.worktree_boundaries import mark_branch_boundaries_merged
+
+        def _mark(cell, merge_sha):
+            for branch_task in mark_branch_boundaries_merged(
+                state.board_tasks.values(),
+                repo_root=cell.worktree_repo_root or cell.git_root or "",
+                branch=cell.worktree_branch or "",
+                merge_sha=merge_sha,
+            ):
+                state._emit(
+                    "task_upsert",
+                    **self.server_mod.asdict(branch_task),
+                )
+                state._db_save_task(branch_task)
+
+        return _mark
+
+    def _pr_handle_command(self, state, worker, worktree_mgr,
+                           cleanup_after_merge, *, nested_dispatch=None):
+        async def fake_broadcast_toast(*_args, **_kwargs):
+            return None
+
+        async def fake_latest_boundary_state(_cell):
+            task = state.board_tasks["TORQUE:490"]
+            summary = {
+                "task_id": task.id,
+                "task_title": task.task,
+                "boundary": dict(task.worktree_boundary),
+                "clean_mergeable": True,
+            }
+            return {"latest": summary, "clean": summary, "reason": ""}
+
+        async def fake_reviewer_cleanup(*_args, **_kwargs):
+            return {
+                "agents": [],
+                "agent_closed": 0,
+                "worktree_removed": 0,
+                "errors": [],
+            }
+
+        async def fake_sibling_gate(*_args, **_kwargs):
+            return None
+
+        old_reviewer_cleanup = (
+            self.server_mod._cleanup_shipped_reviewers_for_merged_cell
+        )
+        old_sibling_gate = (
+            self.server_mod._sibling_branch_divergence_gate_for_merge
+        )
+        self.server_mod._cleanup_shipped_reviewers_for_merged_cell = (
+            fake_reviewer_cleanup
+        )
+        self.server_mod._sibling_branch_divergence_gate_for_merge = (
+            fake_sibling_gate
+        )
+
+        def restore():
+            self.server_mod._cleanup_shipped_reviewers_for_merged_cell = (
+                old_reviewer_cleanup
+            )
+            self.server_mod._sibling_branch_divergence_gate_for_merge = (
+                old_sibling_gate
+            )
+
+        return (
+            self._extract_handle_command(
+                state,
+                _broadcast_toast=fake_broadcast_toast,
+                _cleanup_after_merge=cleanup_after_merge,
+                _latest_boundary_state_for_cell=fake_latest_boundary_state,
+                _mark_branch_boundaries_merged=(
+                    self._mark_boundaries_for_state(state)
+                ),
+                handle_command=nested_dispatch,
+                worktree_mgr=worktree_mgr,
+            ),
+            restore,
+        )
+
+    class _FakePrWorktreeManager:
+        def __init__(self, merge_result):
+            self.merge_result = merge_result
+            self.calls = []
+            self.sync_calls = 0
+
+        async def github_preflight(self, worktree_path):
+            self.calls.append(("preflight", worktree_path))
+            return {"ok": True, "phase": "github_preflight"}
+
+        async def github_select_remote(self, worktree_path):
+            self.calls.append(("select_remote", worktree_path))
+            return {
+                "ok": True,
+                "phase": "github_remote",
+                "remote": "origin",
+            }
+
+        async def github_sync_remote_base(
+            self,
+            worktree_path,
+            repo_root,
+            remote,
+            base_branch,
+        ):
+            self.sync_calls += 1
+            self.calls.append(
+                ("sync_base", self.sync_calls, worktree_path, repo_root,
+                 remote, base_branch)
+            )
+            return {
+                "ok": True,
+                "phase": "remote_base_sync",
+                "synced": self.sync_calls > 1,
+            }
+
+        async def has_uncommitted_changes(self, _cell):
+            self.calls.append(("dirty",))
+            return False
+
+        async def stale_base_info(self, _cell):
+            self.calls.append(("stale_base",))
+            return {"stale": False}
+
+        async def check_merge_conflicts(self, _cell):
+            self.calls.append(("check_merge",))
+            return {"clean": True, "tree_sha": "tree-sha"}
+
+        async def merge_untracked_overwrite_paths(
+            self,
+            _repo_root,
+            _base_branch,
+            _tree_sha,
+        ):
+            self.calls.append(("untracked_overwrite",))
+            return []
+
+        async def list_checkpoints(self, _cell):
+            self.calls.append(("list_checkpoints",))
+            return [{"message": "Implement worker change", "body": ""}]
+
+        async def github_push_branch(self, worktree_path, remote, branch):
+            self.calls.append(("push", worktree_path, remote, branch))
+            return {"ok": True, "phase": "push_branch"}
+
+        async def github_create_or_reuse_pr(
+            self,
+            worktree_path,
+            branch,
+            base_branch,
+            title="",
+            body="",
+        ):
+            self.calls.append(
+                ("create_pr", worktree_path, branch, base_branch, title, body)
+            )
+            return {
+                "ok": True,
+                "phase": "pr_create",
+                "url": "https://github.com/acme/repo/pull/7",
+                "number": 7,
+                "head_sha": "head123",
+                "state": "OPEN",
+                "merge_state": "CLEAN",
+                "existing": False,
+            }
+
+        async def github_request_squash_merge(
+            self,
+            worktree_path,
+            pr_number,
+            head_sha,
+            subject="",
+            body="",
+            auto=False,
+            url="",
+        ):
+            self.calls.append(
+                ("merge_pr", worktree_path, pr_number, head_sha, auto)
+            )
+            if callable(self.merge_result):
+                return self.merge_result(auto)
+            return dict(self.merge_result)
+
+    async def test_worktree_merge_pr_success_finalizes_with_github_squash_sha(self):
+        state, worker, task = self._make_pr_merge_state()
+        cleanup_calls = []
+        worktree_mgr = self._FakePrWorktreeManager({
+            "ok": True,
+            "phase": "pr_merge",
+            "url": "https://github.com/acme/repo/pull/7",
+            "number": 7,
+            "head_sha": "head123",
+            "merge_commit_sha": "squash789",
+            "merge_state": "CLEAN",
+            "pending": False,
+            "pr_status": {"ok": True, "state": "MERGED"},
+        })
+
+        async def fake_cleanup_after_merge(
+            _cell,
+            *,
+            close_agent=False,
+            remove_worktree=False,
+        ):
+            cleanup_calls.append((close_agent, remove_worktree))
+            return {
+                "close_agent": close_agent,
+                "remove_worktree": remove_worktree,
+                "agent_closed": close_agent,
+                "worktree_removed": remove_worktree,
+                "errors": [],
+            }
+
+        handle_command, restore = self._pr_handle_command(
+            state,
+            worker,
+            worktree_mgr,
+            fake_cleanup_after_merge,
+        )
+        try:
+            result = await handle_command({
+                "cmd": "worktree_merge",
+                "id": worker.id,
+                "close_agent_on_merge": True,
+                "remove_worktree_on_merge": True,
+            })
+        finally:
+            restore()
+
+        self.assertEqual(result["type"], "worktree_merge")
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["mode"], "pull_request")
+        self.assertEqual(result["sha"], "squash789")
+        self.assertEqual(result["pr_url"], "https://github.com/acme/repo/pull/7")
+        self.assertEqual(cleanup_calls, [(True, True)])
+        boundary = task.worktree_boundary
+        self.assertEqual(boundary["status"], "merged")
+        self.assertEqual(boundary["merge_commit_sha"], "squash789")
+        self.assertEqual(boundary["pull_request"]["status"], "merged")
+        self.assertEqual(task.lane, "Done")
+        self.assertEqual(task.agent_id, "")
+        self.assertEqual(worktree_mgr.sync_calls, 2)
+
+    async def test_worktree_merge_pr_pending_stores_metadata_without_cleanup(self):
+        state, worker, task = self._make_pr_merge_state()
+        queued = state.board_add_task(
+            "Queued followup",
+            "g",
+            lane="To Do",
+            id="TORQUE:491",
+            agent_id=worker.id,
+        )
+        state.auto_dispatch_queue_add(
+            "g",
+            queued.id,
+            target_agent_id=worker.id,
+            max_concurrent=1,
+        )
+        cleanup_calls = []
+        dispatch_calls = []
+
+        def merge_result(auto):
+            if not auto:
+                return {
+                    "ok": False,
+                    "phase": "pr_merge",
+                    "error": "merge blocked by required checks",
+                    "url": "https://github.com/acme/repo/pull/7",
+                    "number": 7,
+                    "head_sha": "head123",
+                    "merge_state": "BLOCKED",
+                    "pending": False,
+                    "pr_status": {
+                        "ok": True,
+                        "state": "OPEN",
+                        "merge_state": "BLOCKED",
+                    },
+                }
+            return {
+                "ok": True,
+                "phase": "pr_merge",
+                "url": "https://github.com/acme/repo/pull/7",
+                "number": 7,
+                "head_sha": "head123",
+                "merge_state": "BLOCKED",
+                "pending": True,
+                "pr_status": {
+                    "ok": True,
+                    "state": "OPEN",
+                    "merge_state": "BLOCKED",
+                },
+            }
+
+        worktree_mgr = self._FakePrWorktreeManager(merge_result)
+
+        async def fake_cleanup_after_merge(*_args, **_kwargs):
+            cleanup_calls.append(dict(_kwargs))
+            return {}
+
+        async def nested_dispatch(payload):
+            dispatch_calls.append(dict(payload))
+            return {"type": "ok"}
+
+        handle_command, restore = self._pr_handle_command(
+            state,
+            worker,
+            worktree_mgr,
+            fake_cleanup_after_merge,
+            nested_dispatch=nested_dispatch,
+        )
+        try:
+            result = await handle_command({
+                "cmd": "worktree_merge",
+                "id": worker.id,
+                "close_agent_on_merge": True,
+                "remove_worktree_on_merge": True,
+            })
+        finally:
+            restore()
+
+        self.assertEqual(result["type"], "worktree_merge")
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["pending"])
+        self.assertFalse(result["merged"])
+        self.assertEqual(cleanup_calls, [])
+        self.assertEqual(dispatch_calls, [])
+        self.assertEqual(task.lane, "In Progress")
+        self.assertEqual(task.agent_id, worker.id)
+        self.assertEqual(queued.lane, "To Do")
+        boundary = task.worktree_boundary
+        self.assertEqual(boundary["status"], "open")
+        self.assertEqual(boundary["pr_url"], "https://github.com/acme/repo/pull/7")
+        self.assertTrue(boundary["pr_pending"])
+        self.assertEqual(boundary["pull_request"]["status"], "pending")
+        self.assertEqual(worktree_mgr.sync_calls, 1)
+        merge_calls = [call for call in worktree_mgr.calls
+                       if call[0] == "merge_pr"]
+        self.assertEqual([call[4] for call in merge_calls], [False, True])
+
+    async def test_worktree_merge_pr_failure_keeps_boundary_and_returns_url(self):
+        state, worker, task = self._make_pr_merge_state()
+        cleanup_calls = []
+        worktree_mgr = self._FakePrWorktreeManager({
+            "ok": False,
+            "phase": "pr_merge",
+            "error": "merge conflict on GitHub",
+            "url": "https://github.com/acme/repo/pull/7",
+            "number": 7,
+            "head_sha": "head123",
+            "merge_state": "DIRTY",
+            "pending": False,
+            "pr_status": {
+                "ok": True,
+                "state": "OPEN",
+                "merge_state": "DIRTY",
+            },
+        })
+
+        async def fake_cleanup_after_merge(*_args, **_kwargs):
+            cleanup_calls.append(dict(_kwargs))
+            return {}
+
+        handle_command, restore = self._pr_handle_command(
+            state,
+            worker,
+            worktree_mgr,
+            fake_cleanup_after_merge,
+        )
+        try:
+            result = await handle_command({
+                "cmd": "worktree_merge",
+                "id": worker.id,
+                "close_agent_on_merge": True,
+                "remove_worktree_on_merge": True,
+            })
+        finally:
+            restore()
+
+        self.assertEqual(result["type"], "worktree_merge")
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["mode"], "pull_request")
+        self.assertEqual(result["url"], "https://github.com/acme/repo/pull/7")
+        self.assertIn("merge conflict", result["error"])
+        self.assertEqual(cleanup_calls, [])
+        self.assertEqual(worker.worktree_path, "/tmp/worker")
+        boundary = task.worktree_boundary
+        self.assertEqual(boundary["status"], "open")
+        self.assertEqual(boundary["merge_commit_sha"], "")
+        self.assertEqual(boundary["pull_request"]["status"], "merge_failed")
+        merge_calls = [call for call in worktree_mgr.calls
+                       if call[0] == "merge_pr"]
+        self.assertEqual([call[4] for call in merge_calls], [False])
 
 
 class ServerAutoCloseOnDoneTests(unittest.IsolatedAsyncioTestCase):
