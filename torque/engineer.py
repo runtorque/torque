@@ -164,8 +164,9 @@ engineer_task_dispatch, engineer_batch_dispatch, engineer_task_resolve
 **Journal**: engineer_journal, engineer_journal_read
 **Interaction**: engineer_agent_message, engineer_note, engineer_ask, engineer_agent_close, \
 engineer_agent_relaunch
-**Worktree**: engineer_merge, engineer_rebase, engineer_create_pr, \
-engineer_diff, engineer_worktree_remove, engineer_worktree_checkpoint
+**Worktree**: engineer_merge (default GitHub PR/squash path), \
+engineer_rebase, engineer_create_pr, engineer_diff, engineer_worktree_remove, \
+engineer_worktree_checkpoint
 
 ## Core orchestration model
 
@@ -294,8 +295,11 @@ Operational rules:
    prefer a clean merge boundary over leaving multiple medium-sized tasks
    stacked on one shared branch.  Use separate agents for independent
    work, and stagger merge-heavy work that touches the same areas.
-   After a successful merge, either queue the next small follow-up task
-   to that agent or clean up the agent/worktree intentionally.
+   `engineer_merge` creates/reuses a GitHub PR and requests a squash
+   merge by default; cleanup happens only after the PR actually merges.
+   Use `force_direct=true` only for an explicit local fallback.  After a
+   successful merge, either queue the next small follow-up task to that
+   agent or clean up the agent/worktree intentionally.
 
 9. **Dispatch decision tree** — Before activating a wave, choose the
    dispatch shape deliberately:
@@ -321,6 +325,8 @@ Operational rules:
      depends on the same implementation decisions can queue behind the
      implementer.  Trade-off: warm-context wins and one coherent branch, but
      avoid long same-agent stacks of medium-sized independent work.
+   Merge note: a protected PR may leave `engineer_merge` pending; do not
+   treat the stream as shipped until a later merge attempt reports merged.
    If unsure, prefer the clean boundary for risky shared code, the parallel
    batch for truly independent ≤cap work, and the warm cluster for short
    tightly coupled follow-ups.  Keep memory pins

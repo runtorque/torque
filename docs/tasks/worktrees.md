@@ -42,8 +42,8 @@ torque group settings backend -s 'worktree_symlinks=["etl/**/node_modules",".ven
 | **Base branch** | Branch to fork from. Default current HEAD. |
 | **Auto-checkpoint on stop** | Auto-commit changes when an agent's session ends. |
 | **Checkpoint on progress / done** | Throttled auto-checkpoints when the agent reports `torque_progress` or `torque_done`. |
-| **Squash on merge** | Use `git merge --squash` when merging back to base. Default on. |
-| **Default post-merge cleanup** | Default cleanup behavior after merge when no explicit choice is given. |
+| **Squash on merge** | Use `git merge --squash` for the explicit direct-local merge fallback. The default PR merge path always requests a GitHub squash merge. |
+| **Default post-merge cleanup** | Default cleanup behavior after the branch is actually merged when no explicit choice is given. |
 | **Preserve merge diff by default** | Save the full pre-merge patch as a diff artifact on the latest open boundary task. |
 | **Symlink paths** | Repo-relative paths or globs to mirror into each worktree as symlinks (e.g. `etl/**/node_modules`). Useful for shared caches. |
 
@@ -134,16 +134,26 @@ This is a hard reset — changes after that checkpoint are discarded.
 
 ## Merging
 
-When a Worker's branch is ready to ship, Torque merges it back to the base branch.
+When a Worker's branch is ready to ship, Torque's default path is PR-based:
+it pushes the worktree branch, creates or reuses a GitHub pull request, and
+requests a squash merge into the base branch. Torque then verifies the merged
+base commit locally before it runs cleanup.
 
 **UI**: right-click the agent → **Merge Worktree**.
 
 **Engineer / CLI**: `engineer_merge(...)` (or `torque worktree merge ...`).
 
+Torque still has an explicit direct-local fallback for repositories or moments
+where the GitHub PR flow is not appropriate. Pass `force_direct=true` to
+`engineer_merge` to bypass PR creation and run the legacy local merge path. That
+fallback still honors the normal clean-worktree, task-boundary, conflict,
+sibling-divergence, and stale-base safety gates unless you also pass the
+separate force flags.
+
 Torque tracks the merge result and verifies it landed:
 
 - **Regular merge** — detected via `git merge-base --is-ancestor`.
-- **Squash merge** — detected by simulating with `git merge-tree --write-tree`, falling back to "did the base branch advance and pick up these file changes."
+- **Squash merge** — default for PR merges; direct-local squash fallback is detected by simulating with `git merge-tree --write-tree`, falling back to "did the base branch advance and pick up these file changes."
 
 ![A worktree post-merge: the agent cell shows the merged status, branch indicator changes, queue resets for any follow-up work.](../images/merged.png)
 
@@ -155,13 +165,34 @@ On shared same-agent branches (`target: self` chains, queue-of-tasks workflows),
 - If a queued follow-up has already started, Torque blocks merge and reports that the older boundary is no longer cleanly mergeable.
 - If queued follow-up tasks still remain after a successful merge, Torque keeps the agent and worktree alive, resets the branch to the updated base branch, and leaves the queued tasks attached for the next wave.
 
+Boundary commit fields intentionally distinguish the reviewed branch commit
+from the final base commit. `latest_reviewed_commit_sha` (and the boundary
+`commit_sha`) points at the pre-squash branch commit that passed review. After
+the PR is actually merged, `merge_commit_sha` / `latest_merged_commit_sha`
+points at GitHub's final squash commit on the base branch, so it will usually
+be a different SHA.
+
 ### Settings the merge respects
 
-- **Squash on merge** (default on) — uses `git merge --squash`. Keeps base history clean.
-- **Default post-merge cleanup** — keep / close session / remove worktree / close session and remove worktree.
+- **Squash on merge** (default on) — applies to `force_direct=true` direct-local merges. The default PR path always requests a squash merge.
+- **Default post-merge cleanup** — keep / close session / remove worktree / close session and remove worktree. Cleanup runs only after a confirmed PR merge or direct merge, never when a PR is merely created or left pending.
 - **Preserve merge diff by default** — captures the full pre-merge patch and stores it as a diff artifact on the latest open boundary task.
 
 If the branch has queued same-agent follow-up tasks attached, Torque keeps the agent and worktree alive regardless of cleanup choice — the next wave continues on a freshly reset branch.
+
+### Pending PRs and branch protection
+
+If GitHub blocks the squash merge because required checks, reviews, or branch
+protection are still pending, `engineer_merge` records the PR metadata on the
+latest open boundary and returns `pending: true`. Requested cleanup flags are
+stored with that PR metadata, but Torque does not close the worker, remove the
+worktree, move tasks to Done, reset the local branch, or mark the boundary
+merged until an actual merge is confirmed.
+
+V1 intentionally does **not** run background PR polling. Watch GitHub or rerun
+`engineer_merge` after the checks/reviews pass; the rerun reuses the open PR,
+refreshes metadata, and finalizes local base sync plus cleanup only after the
+PR reports a merge commit SHA.
 
 ### When merges conflict
 

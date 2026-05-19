@@ -343,6 +343,9 @@ The exact payload may evolve, but the Phase 1/2 model includes fields like:
 - `recent_visibility_items`
 - `latest_boundary_task_id`
 - `latest_reviewed_commit_sha`
+- `latest_merged_commit_sha`
+- `pr`
+- `pr_url`
 - `active_review_task_id`
 - `active_blocker_task_id`
 - `state`
@@ -355,6 +358,11 @@ The exact payload may evolve, but the Phase 1/2 model includes fields like:
 - `can_auto_resume`
 - `gate_reason`
 - `recommended_next_action`
+
+`latest_reviewed_commit_sha` is the reviewed pre-squash branch commit from the
+latest review boundary. After a PR squash merge lands, `latest_merged_commit_sha`
+and boundary/PR `merge_commit_sha` identify the final commit on the base branch;
+those SHAs are expected to differ.
 
 ---
 
