@@ -917,6 +917,233 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("agent_type", calls[0])
         self.assertIn("falling back to group default", "\n".join(logs.output))
 
+    async def test_engineer_task_dispatch_records_simple_serial_hintable_shape(self):
+        state = self.state_mod.MatrixState()
+        engineer = self.state_mod.AgentCell(
+            id="engineer-1",
+            name="Engineer",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+        )
+        state.agents[engineer.id] = engineer
+        state.groups["g"] = [engineer.id]
+        state.board_lanes = ["Backlog", "To Do", "In Progress", "Done"]
+        task = state.board_add_task("Simple serial dispatch", "g", lane="Backlog")
+
+        async def fake_handle_command(payload):
+            return {
+                "type": "ok",
+                "task_id": payload["id"],
+                "agent_id": "worker-1",
+            }
+
+        handler = self.mcp_mod.create_mcp_handler(fake_handle_command, state)
+        response = await handler(
+            FakeRequest(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "engineer_task_dispatch",
+                        "arguments": {"task": task.id},
+                    },
+                },
+                headers={"X-Torque-Cell-Id": engineer.id},
+            )
+        )
+
+        self.assertFalse(response.payload["result"]["isError"])
+        events = state.engineer_dispatch_shape_events(engineer.id)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["source_tool"], "engineer_task_dispatch")
+        self.assertEqual(events[0]["shape"], "serial")
+        self.assertTrue(events[0]["hintable"])
+        self.assertEqual(events[0]["task_ids"], [task.id])
+        self.assertFalse(events[0]["metadata"]["has_launch_overrides"])
+
+    async def test_engineer_task_dispatch_records_overrides_and_existing_agent_as_not_hintable(self):
+        state = self.state_mod.MatrixState()
+        engineer = self.state_mod.AgentCell(
+            id="engineer-1",
+            name="Engineer",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+        )
+        worker = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            owner_engineer_id=engineer.id,
+        )
+        state.agents[engineer.id] = engineer
+        state.agents[worker.id] = worker
+        state.groups["g"] = [engineer.id, worker.id]
+        state.board_lanes = ["Backlog", "To Do", "In Progress", "Done"]
+        override_task = state.board_add_task("Override dispatch", "g", lane="Backlog")
+        warm_task = state.board_add_task("Existing agent dispatch", "g", lane="Backlog")
+
+        async def fake_handle_command(payload):
+            return {
+                "type": "ok",
+                "task_id": payload["id"],
+                "agent_id": payload.get("agent_id", "worker-created"),
+            }
+
+        handler = self.mcp_mod.create_mcp_handler(fake_handle_command, state)
+        for request_id, arguments in (
+            (1, {"task": override_task.id, "name": "custom-worker"}),
+            (2, {"task": warm_task.id, "agent": worker.id}),
+        ):
+            response = await handler(
+                FakeRequest(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "engineer_task_dispatch",
+                            "arguments": arguments,
+                        },
+                    },
+                    headers={"X-Torque-Cell-Id": engineer.id},
+                )
+            )
+            self.assertFalse(response.payload["result"]["isError"])
+
+        events = state.engineer_dispatch_shape_events(engineer.id)
+        self.assertEqual([event["shape"] for event in events],
+                         ["warm_cluster", "serial"])
+        self.assertFalse(events[0]["hintable"])
+        self.assertTrue(events[0]["metadata"]["existing_agent"])
+        self.assertFalse(events[1]["hintable"])
+        self.assertTrue(events[1]["metadata"]["has_launch_overrides"])
+
+    async def test_engineer_task_dispatch_skips_dispatch_action_missing_metric(self):
+        state = self.state_mod.MatrixState()
+        engineer = self.state_mod.AgentCell(
+            id="engineer-1",
+            name="Engineer",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+        )
+        state.agents[engineer.id] = engineer
+        state.groups["g"] = [engineer.id]
+        task = state.board_add_task("Missing action", "g", lane="Backlog")
+
+        async def fake_handle_command(_payload):
+            return {
+                "type": "dispatch_action_missing",
+                "action_name": "feature/review",
+            }
+
+        handler = self.mcp_mod.create_mcp_handler(fake_handle_command, state)
+        response = await handler(
+            FakeRequest(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "engineer_task_dispatch",
+                        "arguments": {"task": task.id},
+                    },
+                },
+                headers={"X-Torque-Cell-Id": engineer.id},
+            )
+        )
+
+        self.assertFalse(response.payload["result"]["isError"])
+        self.assertEqual(state.engineer_dispatch_shape_events(engineer.id), [])
+
+    async def test_engineer_batch_dispatch_records_batch_and_warm_cluster_shapes(self):
+        async def run_batch(agent_groups):
+            state = self.state_mod.MatrixState()
+            engineer = self.state_mod.AgentCell(
+                id="engineer-1",
+                name="Engineer",
+                group="g",
+                cell_type="agent",
+                kind="engineer",
+            )
+            state.agents[engineer.id] = engineer
+            state.groups["g"] = [engineer.id]
+            state.board_lanes = ["Backlog", "To Do", "In Progress", "Done"]
+            tasks = [
+                state.board_add_task(f"Batch {idx}", "g", lane="Backlog")
+                for idx in range(len(agent_groups))
+            ]
+            calls = []
+
+            async def fake_handle_command(payload):
+                calls.append(dict(payload))
+                task = state.board_tasks[payload["id"]]
+                agent_id = payload.get("agent_id") or f"worker-{len(calls)}"
+                if agent_id not in state.agents:
+                    state.agents[agent_id] = self.state_mod.AgentCell(
+                        id=agent_id,
+                        name=agent_id,
+                        group="g",
+                        cell_type="agent",
+                        owner_engineer_id=engineer.id,
+                        current_task_id=task.id,
+                    )
+                    state.groups["g"].append(agent_id)
+                task.agent_id = agent_id
+                task.lane = "In Progress"
+                return {
+                    "type": "ok",
+                    "task_id": task.id,
+                    "agent_id": agent_id,
+                }
+
+            handler = self.mcp_mod.create_mcp_handler(
+                fake_handle_command,
+                state,
+            )
+            entries = []
+            for task, agent_group in zip(tasks, agent_groups):
+                entry = {"task": task.id}
+                if agent_group:
+                    entry["agent_group"] = agent_group
+                entries.append(entry)
+            response = await handler(
+                FakeRequest(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "engineer_batch_dispatch",
+                            "arguments": {
+                                "tasks": entries,
+                                "max_concurrent": 5,
+                            },
+                        },
+                    },
+                    headers={"X-Torque-Cell-Id": engineer.id},
+                )
+            )
+            self.assertFalse(response.payload["result"]["isError"])
+            return state.engineer_dispatch_shape_events(engineer.id)[0]
+
+        batch_event = await run_batch(["", ""])
+        self.assertEqual(batch_event["shape"], "batch")
+        self.assertFalse(batch_event["hintable"])
+        self.assertEqual(batch_event["task_count"], 2)
+        self.assertEqual(batch_event["metadata"]["independent_entry_count"], 2)
+        self.assertEqual(batch_event["metadata"]["clustered_entry_count"], 0)
+
+        warm_event = await run_batch(["cluster-a", "cluster-a", ""])
+        self.assertEqual(warm_event["shape"], "warm_cluster")
+        self.assertEqual(warm_event["task_count"], 3)
+        self.assertEqual(warm_event["metadata"]["clustered_entry_count"], 2)
+        self.assertEqual(warm_event["metadata"]["independent_entry_count"], 1)
+
     async def test_engineer_architect_message_tools_require_hiring_architect(self):
         state = self.state_mod.MatrixState()
         architect = self.state_mod.AgentCell(

@@ -1210,6 +1210,68 @@ def _derive_handoff_accepted(dispatch_result) -> bool:
     }
 
 
+def _record_engineer_dispatch_shape_metric(state: MatrixState, **kwargs):
+    recorder = getattr(state, "record_engineer_dispatch_shape", None)
+    if not callable(recorder):
+        return None
+    try:
+        return recorder(**kwargs)
+    except Exception:
+        log.exception("Failed to record engineer dispatch shape metric")
+        return None
+
+
+def _record_derive_dispatch_shape_metric(
+        state: MatrixState,
+        *,
+        engineer_id: str,
+        group: str,
+        result: dict,
+        new_task,
+        derive_parent_task_id: str,
+        action_name: str,
+        target_id: str,
+        target_agent: str,
+        reuse_self: bool,
+        transition_target: str,
+        reused_existing_task: bool):
+    result_type = str((result or {}).get("type", "") or "").strip()
+    if result_type not in {"ok", "queued"}:
+        return None
+    engineer_id = str(engineer_id or "").strip()
+    if not engineer_id or not new_task:
+        return None
+    target_agent_id = str(
+        target_id or (result or {}).get("agent_id", "") or ""
+    ).strip()
+    warm_cluster = bool(
+        reuse_self
+        or target_id
+        or target_agent
+        or (reused_existing_task and getattr(new_task, "agent_id", ""))
+    )
+    return _record_engineer_dispatch_shape_metric(
+        state,
+        engineer_id=engineer_id,
+        group=group,
+        source_tool="torque_derive",
+        shape="warm_cluster" if warm_cluster else "serial",
+        task_ids=[new_task.id],
+        task_count=1,
+        outcome=result_type,
+        hintable=False,
+        metadata={
+            "parent_task_id": derive_parent_task_id,
+            "action_name": action_name,
+            "target_agent_id": target_agent_id,
+            "target_agent": target_agent,
+            "reuse_self": bool(reuse_self),
+            "transition_target": transition_target,
+            "reused_existing_task": bool(reused_existing_task),
+        },
+    )
+
+
 def _ai_derive_parent_task(state: MatrixState, task):
     """Return the structural parent for a newly derived ``torque ai`` task.
 
@@ -13259,6 +13321,45 @@ async def main(connection=None):
                                                         new_task.id,
                                                     "agent_id":
                                                         agent_id_result}
+                                        owner_engineer_id = (
+                                            _ownership_engineer_id_for_dispatch_source(
+                                                cell
+                                            )
+                                            or str(
+                                                getattr(
+                                                    task,
+                                                    "assigned_engineer_id",
+                                                    "",
+                                                )
+                                                or ""
+                                            ).strip()
+                                            or str(
+                                                getattr(
+                                                    new_task,
+                                                    "assigned_engineer_id",
+                                                    "",
+                                                )
+                                                or ""
+                                            ).strip()
+                                        )
+                                        _record_derive_dispatch_shape_metric(
+                                            state,
+                                            engineer_id=owner_engineer_id,
+                                            group=grp,
+                                            result=result,
+                                            new_task=new_task,
+                                            derive_parent_task_id=(
+                                                derive_parent_task_id
+                                            ),
+                                            action_name=act_name,
+                                            target_id=target_id or "",
+                                            target_agent=target_agent,
+                                            reuse_self=bool(reuse_self),
+                                            transition_target=tr_target,
+                                            reused_existing_task=bool(
+                                                reused_existing_task
+                                            ),
+                                        )
                                     else:
                                         result = {
                                             "type": "error",
