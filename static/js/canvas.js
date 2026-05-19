@@ -621,25 +621,16 @@ function _canvasInsertAfterFirst(items, label, item) {
 function _canvasShowCardMenu(x, y, kind, id, groupName) {
   const cell = state.agents ? state.agents[id] : null;
   if (!cell) return;
-  const cellKind = cell.kind || kind || '';
   const items = (typeof _cellContextMenuItems === 'function')
     ? _cellContextMenuItems(id).slice()
     : _canvasFallbackCardMenuItems(id);
   if (items.length === 0) return;
 
-  const g = esc(groupName || cell.group || '');
-  const safeId = esc(id);
   const pause = cell ? _canvasPauseState(cell) : { applicable: false, paused: false, toggleAction: '' };
   const dismissed = (typeof _isLifecycleDismissedCell === 'function')
     ? _isLifecycleDismissedCell(cell)
     : false;
 
-  if (cellKind === 'architect') {
-    items.unshift(
-      { label: '+ Engineer here', action: `openAddEngineerForSection('${g}', '${safeId}')` },
-      { separator: true }
-    );
-  }
   if (pause.applicable && !dismissed) {
     _canvasInsertAfterFirst(items, 'Focus', {
       label: pause.paused ? 'Resume event delivery' : 'Pause event delivery',

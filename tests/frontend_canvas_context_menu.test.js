@@ -144,7 +144,9 @@ test('canvas menu gates architect-only actions by cell.kind from state', () => {
   const items = showCanvasMenu(context, 'worker', 'arch-1');
   const itemLabels = labels(items);
 
-  assert.equal(itemLabels[0], '+ Engineer here');
+  assert.equal(itemLabels.includes('New engineer'), true);
   assert.equal(itemLabels.includes('Pause event delivery'), true);
   assert.equal(itemLabels.includes('Dismiss…'), true);
+  const newEngineerItem = items.find((item) => item.label === 'New engineer');
+  assert.equal(newEngineerItem.action, 'openAddEngineerForSection("alpha", "arch-1")');
 });

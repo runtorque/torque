@@ -8176,6 +8176,8 @@ test('architect context menu exposes dismiss and rehire controls', async () => {
   };
 
   context.onCellContextMenu(evt, 'arch-a');
+  assert.match(menu.innerHTML, /New engineer/);
+  assert.match(menu.innerHTML, /openAddEngineerForSection\(&quot;alpha&quot;, &quot;arch-a&quot;\)/);
   assert.match(menu.innerHTML, /Dismiss/);
   assert.doesNotMatch(menu.innerHTML, /Rehire/);
 
@@ -17151,9 +17153,8 @@ test('embedded runtime reuses the shared group, cell, and terminal UI', () => {
   assert.match(main.innerHTML, /Shell Root/);
   assert.match(main.innerHTML, /class="cell[^"]*selected/);
   assert.match(main.innerHTML, /class="term-row/);
-  assert.match(main.innerHTML, /ghost-card ghost-card--worker[\s\S]*openAddWorkerForSection\(&quot;alpha&quot;\)/);
-  assert.match(main.innerHTML, /ghost-card ghost-card--engineer[\s\S]*openAddEngineerForSection\(&quot;alpha&quot;,&quot;&quot;\)/);
-  assert.match(main.innerHTML, /ghost-card ghost-card--architect[\s\S]*openAddArchitectForGroup\(&quot;alpha&quot;\)/);
+  assert.match(main.innerHTML, /data-agent-grid-toolbar[\s\S]*data-agent-grid-new-button[\s\S]*openAgentGridNewMenu\(event,&quot;alpha&quot;\)/);
+  assert.doesNotMatch(main.innerHTML, /ghost-card ghost-card--worker|ghost-card ghost-card--engineer|ghost-card ghost-card--architect/);
   assert.doesNotMatch(main.innerHTML, /quickAddAgent\('alpha'\)/);
   assert.doesNotMatch(main.innerHTML, /openAddAgentAdvanced\('alpha'\)/);
   assert.match(main.innerHTML, /quickAddTerminal\('alpha','agent-1'\)/);
@@ -17217,9 +17218,9 @@ test('main agent grid omits the retired legacy creation dropdown', () => {
   assert.doesNotMatch(main.innerHTML, /cell-add-drop/);
   assert.doesNotMatch(main.innerHTML, /agent-grid-global-add-row/);
   assert.doesNotMatch(main.innerHTML, /agent-add-menu/);
-  assert.match(main.innerHTML, /ghost-card ghost-card--worker[\s\S]*\+ Add Worker/);
-  assert.match(main.innerHTML, /ghost-card ghost-card--engineer[\s\S]*\+ New Engineer/);
-  assert.match(main.innerHTML, /ghost-card ghost-card--architect[\s\S]*\+ New Architect/);
+  assert.match(main.innerHTML, /data-agent-grid-toolbar[\s\S]*data-agent-grid-new-button[\s\S]*>\+ New<\/button>/);
+  assert.doesNotMatch(main.innerHTML, /ghost-card ghost-card--worker|ghost-card ghost-card--engineer|ghost-card ghost-card--architect/);
+  assert.doesNotMatch(main.innerHTML, /\+ Add Worker|\+ New Engineer|\+ New Architect/);
 });
 
 test('standalone sidebar formats repo and home paths compactly', () => {
@@ -17926,9 +17927,10 @@ test('Actions and Roles panels hide stale lists while loading the new active gro
 });
 
 
-test('architect section + New Engineer ghost opens a scoped modal and submits architect hire context', () => {
+test('architect context menu New engineer opens a scoped modal and submits architect hire context', () => {
   const { context, document, sandbox } = createMainRenderHarness();
   const modalDom = registerEngineerModalDom(document);
+  loadScript(context, 'static/js/commands.js');
   loadModalScripts(context);
   const main = document.getElementById('main');
 
@@ -17953,18 +17955,14 @@ test('architect section + New Engineer ghost opens a scoped modal and submits ar
 
   assert.match(main.innerHTML, /data-agent-section="architect:arch-a"/);
   assert.match(main.innerHTML, /data-drag-id="arch-a"[\s\S]*cell-body--architect/);
-  assert.match(main.innerHTML, /agent-section-body[\s\S]*class="ghost-card ghost-card--engineer"/);
-  assert.match(main.innerHTML, /class="ghost-card ghost-card--engineer"/);
-  assert.match(main.innerHTML, /data-hired-by-architect-id="arch-a"/);
-  assert.match(main.innerHTML, /openAddEngineerForSection\(&quot;torque&quot;,&quot;arch-a&quot;\)/);
+  assert.doesNotMatch(main.innerHTML, /class="ghost-card ghost-card--engineer"|data-hired-by-architect-id="arch-a"/);
   assert.doesNotMatch(main.innerHTML, /architect-header-row|agent-section-header-row/);
 
-  const click = main.innerHTML.match(/onclick="([^"]*openAddEngineerForSection\(&quot;torque&quot;,&quot;arch-a&quot;\)[^"]*)"/);
-  assert.ok(click, 'new-engineer ghost should have a scoped click handler');
-  runInContext(context, `
-    var event = { stopPropagation() {} };
-    ${click[1].replace(/&quot;/g, '"')};
-  `);
+  const menuItem = context._cellContextMenuItems('arch-a')
+    .find((item) => item && item.label === 'New engineer');
+  assert.ok(menuItem, 'architect context menu should expose New engineer');
+  assert.equal(menuItem.action, 'openAddEngineerForSection("torque", "arch-a")');
+  vm.runInContext(menuItem.action, context);
   assert.equal(modalDom.modal.classList.contains('visible'), true);
   assert.equal(modalDom.summary.textContent, 'Create a persistent engineer session hired by Productmind in torque.');
   modalDom.nameInput.value = 'Casey';
@@ -17981,9 +17979,10 @@ test('architect section + New Engineer ghost opens a scoped modal and submits ar
   }]);
 });
 
-test('user section + New Engineer ghost submits a user-hired engineer without architect context', () => {
+test('grid-level New engineer submits a user-hired engineer without architect context', () => {
   const { context, document, sandbox } = createMainRenderHarness();
   const modalDom = registerEngineerModalDom(document);
+  loadScript(context, 'static/js/commands.js');
   loadModalScripts(context);
   const main = document.getElementById('main');
 
@@ -17994,17 +17993,17 @@ test('user section + New Engineer ghost submits a user-hired engineer without ar
 
   runInContext(context, `render();`);
 
-  assert.match(main.innerHTML, /data-agent-section="user"/);
-  assert.match(main.innerHTML, /data-agent-strata="engineers"[\s\S]*\+ New Engineer/);
+  assert.doesNotMatch(main.innerHTML, /data-agent-section="user"|data-agent-strata="engineers"/);
   assert.doesNotMatch(main.innerHTML, /No orphan engineers\./);
   assert.doesNotMatch(main.innerHTML, /No orphan workers\./);
-  assert.match(main.innerHTML, /agent-section-body[\s\S]*class="ghost-card ghost-card--engineer"/);
-  assert.match(main.innerHTML, /class="ghost-card ghost-card--engineer"/);
-  assert.match(main.innerHTML, /data-hired-by-architect-id=""/);
-  assert.match(main.innerHTML, /openAddEngineerForSection\(&quot;torque&quot;,&quot;&quot;\)/);
+  assert.doesNotMatch(main.innerHTML, /class="ghost-card ghost-card--engineer"|data-hired-by-architect-id=""/);
+  assert.match(main.innerHTML, /data-agent-grid-toolbar[\s\S]*openAgentGridNewMenu\(event,&quot;torque&quot;\)/);
   assert.doesNotMatch(main.innerHTML, /architect-header-row|agent-section-header-row/);
 
-  runInContext(context, `openAddEngineerForSection('torque', '');`);
+  const menuItem = context._agentGridNewMenuItems('torque')
+    .find((item) => item && item.label === 'New engineer');
+  assert.ok(menuItem, 'grid + New menu should expose standalone engineer creation');
+  vm.runInContext(menuItem.action, context);
   assert.equal(modalDom.summary.textContent, 'Create a persistent user-hired engineer session in torque.');
   modalDom.nameInput.value = 'User Engineer';
 
@@ -18019,7 +18018,7 @@ test('user section + New Engineer ghost submits a user-hired engineer without ar
   assert.equal(Object.prototype.hasOwnProperty.call(sendCalls[0], 'hired_by_architect_id'), false);
 });
 
-test('orphan Workers stratum Add Worker affordance survives delta rerenders and uses standalone worker flow', () => {
+test('grid-level New worker affordance survives delta rerenders and uses standalone worker flow', () => {
   const { sandbox, document } = createSandbox({
     _currentGroup() { return 'torque'; },
     renderTerminalWorkspace() {},
@@ -18062,8 +18061,8 @@ test('orphan Workers stratum Add Worker affordance survives delta rerenders and 
   `);
 
   assert.doesNotMatch(main.innerHTML, /principals-row/);
-  assert.match(main.innerHTML, /class="ghost-card ghost-card--engineer[\s\S]*\+ New Engineer/);
-  assert.match(main.innerHTML, /class="ghost-card ghost-card--worker[\s\S]*\+ Add Worker/);
+  assert.match(main.innerHTML, /data-agent-grid-toolbar[\s\S]*>\+ New<\/button>/);
+  assert.doesNotMatch(main.innerHTML, /class="ghost-card ghost-card--engineer|class="ghost-card ghost-card--worker|\+ New Engineer|\+ Add Worker/);
   main.scrollTop = 37;
 
   runInContext(context, `
@@ -18076,8 +18075,8 @@ test('orphan Workers stratum Add Worker affordance survives delta rerenders and 
     });
   `);
 
-  assert.match(main.innerHTML, /class="ghost-card ghost-card--engineer[\s\S]*\+ New Engineer/);
-  assert.match(main.innerHTML, /class="ghost-card ghost-card--worker[\s\S]*\+ Add Worker/);
+  assert.match(main.innerHTML, /data-agent-grid-toolbar[\s\S]*>\+ New<\/button>/);
+  assert.doesNotMatch(main.innerHTML, /class="ghost-card ghost-card--engineer|class="ghost-card ghost-card--worker|\+ New Engineer|\+ Add Worker/);
   assert.equal(jsonValue(context, `focusedItemId`), 'eng-a');
   assert.equal(jsonValue(context, `String(state.selected_principal_id || '')`), '');
   assert.equal(main.scrollTop, 37);
@@ -18136,19 +18135,19 @@ test('orphan Workers stratum Add Worker affordance survives delta rerenders and 
     });
   `);
 
-  assert.match(main.innerHTML, /loose-workers-strip[\s\S]*Standalone Worker[\s\S]*\+ Add Worker/);
+  assert.match(main.innerHTML, /loose-workers-strip[\s\S]*Standalone Worker/);
+  assert.doesNotMatch(main.innerHTML, /\+ Add Worker/);
   assert.ok(
     main.innerHTML.indexOf('class="loose-workers-strip"')
       > main.innerHTML.indexOf('data-engineer-id="eng-a"'),
     'orphan workers stratum should render after orphan engineer rows',
   );
-  assert.match(main.innerHTML, /class="ghost-card ghost-card--engineer[\s\S]*\+ New Engineer/);
-  assert.match(main.innerHTML, /class="ghost-card ghost-card--worker standalone-worker-card-new[\s\S]*\+ Add Worker/);
+  assert.doesNotMatch(main.innerHTML, /class="ghost-card ghost-card--engineer|class="ghost-card ghost-card--worker standalone-worker-card-new|\+ New Engineer|\+ Add Worker/);
   assert.doesNotMatch(main.innerHTML, /No orphan engineers\./);
   assert.doesNotMatch(main.innerHTML, /No orphan workers\./);
 });
 
-test('stratified grid renders Architects stratum + architect card + New Architect anchor', () => {
+test('stratified grid renders Architects stratum and architect card without inline New Architect anchor', () => {
   const { context, document, sandbox } = createMainRenderHarness();
   const main = document.getElementById('main');
 
@@ -18170,10 +18169,11 @@ test('stratified grid renders Architects stratum + architect card + New Architec
 
   runInContext(context, `render();`);
 
-  // Only one + New Architect affordance in the Architects stratum.
-  assert.equal((main.innerHTML.match(/ghost-card ghost-card--architect/g) || []).length, 1);
+  assert.equal((main.innerHTML.match(/ghost-card ghost-card--architect/g) || []).length, 0);
   assert.doesNotMatch(main.innerHTML, /class="principals-row"/);
-  assert.match(main.innerHTML, /data-agent-strata="architects"[\s\S]*data-drag-id="arch-a"[\s\S]*Architect A[\s\S]*\+ New Architect/);
+  assert.match(main.innerHTML, /data-agent-strata="architects"[\s\S]*data-drag-id="arch-a"[\s\S]*Architect A/);
+  assert.doesNotMatch(main.innerHTML, /\+ New Architect|agent-new-architect-card/);
+  assert.match(main.innerHTML, /data-agent-grid-toolbar[\s\S]*>\+ New<\/button>/);
   assert.match(main.innerHTML, /class="agent-card-kind cell-architect-badge">Architect<\/div>/);
   assert.doesNotMatch(main.innerHTML, /agent-grid-new-architect-row/);
 
@@ -18191,9 +18191,10 @@ test('stratified grid renders Architects stratum + architect card + New Architec
   assert.doesNotMatch(css, /\.agent-band-anchor--architect > \.cell\s*\{[^}]*min-height:\s*100%;/s);
 });
 
-test('user-section + New Architect ghost opens the group-scoped architect modal', () => {
+test('grid-level New architect opens the group-scoped architect modal', () => {
   const { context, document, sandbox } = createMainRenderHarness();
   const modalDom = registerArchitectModalDom(document);
+  loadScript(context, 'static/js/commands.js');
   loadModalScripts(context);
   const main = document.getElementById('main');
 
@@ -18215,20 +18216,17 @@ test('user-section + New Architect ghost opens the group-scoped architect modal'
 
   runInContext(context, `render();`);
 
-  assert.match(main.innerHTML, /class="ghost-card ghost-card--architect/);
-  assert.match(main.innerHTML, /openAddArchitectForGroup\(&quot;torque&quot;\)/);
-  // + New Architect now lives in the Architects stratum alongside architect cards.
-  assert.match(main.innerHTML, /data-agent-strata="architects"[\s\S]*Architect A[\s\S]*\+ New Architect/);
+  assert.doesNotMatch(main.innerHTML, /class="ghost-card ghost-card--architect|\+ New Architect/);
+  assert.match(main.innerHTML, /data-agent-grid-toolbar[\s\S]*openAgentGridNewMenu\(event,&quot;torque&quot;\)/);
+  assert.match(main.innerHTML, /data-agent-strata="architects"[\s\S]*Architect A/);
   assert.doesNotMatch(main.innerHTML, /principals-row/);
   assert.doesNotMatch(main.innerHTML, /agent-grid-new-architect-row/);
   assert.doesNotMatch(main.innerHTML, /cell cell-add/);
 
-  const click = main.innerHTML.match(/onclick="([^"]*openAddArchitectForGroup\(&quot;torque&quot;\)[^"]*)"/);
-  assert.ok(click, 'new-architect ghost should have a click handler');
-  runInContext(context, `
-    var event = { stopPropagation() {} };
-    ${click[1].replace(/&quot;/g, '"')};
-  `);
+  const menuItem = context._agentGridNewMenuItems('torque')
+    .find((item) => item && item.label === 'New architect');
+  assert.ok(menuItem, 'grid + New menu should expose standalone architect creation');
+  vm.runInContext(menuItem.action, context);
   assert.equal(modalDom.modal.classList.contains('visible'), true);
   assert.equal(modalDom.summary.textContent, 'Create a persistent architect session for torque.');
   modalDom.nameInput.value = 'Second Architect';
@@ -18244,7 +18242,7 @@ test('user-section + New Architect ghost opens the group-scoped architect modal'
   }]);
 });
 
-test('hierarchical creation controls render full-card standalone worker tile and scoped labels', () => {
+test('grid-level creation toolbar replaces hierarchical creation controls', () => {
   const { context, document, sandbox } = createMainRenderHarness();
   const main = document.getElementById('main');
 
@@ -18255,19 +18253,16 @@ test('hierarchical creation controls render full-card standalone worker tile and
 
   runInContext(context, `render();`);
 
-  assert.match(main.innerHTML, /class="ghost-card ghost-card--worker standalone-worker-card-new[\s\S]*\+ Add Worker/);
-  assert.match(main.innerHTML, /class="ghost-card ghost-card--engineer[\s\S]*\+ New Engineer/);
-  assert.match(main.innerHTML, /class="ghost-card ghost-card--architect[\s\S]*\+ New Architect/);
+  assert.match(main.innerHTML, /data-agent-grid-toolbar[\s\S]*class="agent-grid-new-btn"[\s\S]*>\+ New<\/button>/);
+  assert.doesNotMatch(main.innerHTML, /class="ghost-card ghost-card--worker|class="ghost-card ghost-card--engineer|class="ghost-card ghost-card--architect/);
+  assert.doesNotMatch(main.innerHTML, /\+ Add Worker|\+ New Engineer|\+ New Architect/);
+  assert.doesNotMatch(main.innerHTML, /data-agent-strata=/);
 
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
   assert.match(css, /--agent-grid-card-height:\s*96px;/);
   assert.match(css, /--agent-grid-card-basis:\s*var\(--agent-engineer-column-width\);/);
-  assert.match(css, /--agent-ghost-card-height:\s*calc\(var\(--agent-grid-card-height\) \/ 4\);/);
-  assert.match(css, /\.ghost-card\s*\{[\s\S]*height:\s*var\(--agent-ghost-card-height\)/);
-  assert.match(css, /\.ghost-card--architect\s*\{[\s\S]*width:\s*var\(--agent-architect-column-width\)/);
-  assert.match(css, /\.ghost-card--engineer\s*\{[\s\S]*width:\s*var\(--agent-engineer-column-width\)/);
-  assert.match(css, /\.ghost-card--worker\s*\{[\s\S]*flex:\s*0 1 var\(--agent-grid-card-basis\)/);
-  assert.match(css, /\.standalone-worker-card-new\s*\{[\s\S]*height:\s*auto;[\s\S]*min-height:\s*var\(--agent-worker-card-height,\s*96px\);/);
+  assert.match(css, /\.agent-grid-toolbar\s*\{[\s\S]*justify-content:\s*flex-end;/);
+  assert.match(css, /\.agent-grid-new-btn\s*\{[\s\S]*border-radius:\s*999px;/);
   assert.match(css, /body\.runtime-embedded \.agent-grid\s*\{[\s\S]*--agent-grid-card-height:\s*108px;/);
   assert.match(css, /\.agent-grid\s*\{[\s\S]*--agent-worker-card-height:\s*var\(--agent-card-height\);/);
   assert.match(css, /body\.runtime-embedded \.agent-grid\s*\{[\s\S]*--agent-worker-card-height:\s*var\(--agent-card-height\);/);
@@ -18956,7 +18951,8 @@ test('main render anchors each architect once in a fixed left column with engine
   // Architect card is rendered as the real architect agent cell in the band anchor.
   assert.match(sectionHtml, /agent-band-anchor--architect[\s\S]*data-drag-id="arch-a"[\s\S]*Productmind/);
   assert.equal((sectionHtml.match(/class="[^"]*\bengineer-row\b[^"]*\bagent-grid-engineer-row\b[^"]*"/g) || []).length, 3);
-  assert.match(sectionHtml, /agent-section-body[\s\S]*Engineer One[\s\S]*Engineer Two[\s\S]*Engineer Three[\s\S]*\+ New Engineer/);
+  assert.match(sectionHtml, /agent-section-body[\s\S]*Engineer One[\s\S]*Engineer Two[\s\S]*Engineer Three/);
+  assert.doesNotMatch(sectionHtml, /\+ New Engineer|ghost-card--engineer/);
   assert.doesNotMatch(sectionHtml, /architect-header-row|agent-section-header-row/);
 });
 
@@ -19645,11 +19641,11 @@ test('task delta updates visible worker cycle state while preserving main-grid f
   assert.equal(currentButton.selectionEnd, 7);
 });
 
-test('main hierarchy preserves focused ghost-card state across websocket delta rerenders', () => {
+test('main hierarchy drops stale focused creation controls across websocket delta rerenders', () => {
   const cases = [
-    { label: 'worker ghost', focusKey: 'section-new-worker:torque:user', principal: '' },
-    { label: 'engineer ghost', focusKey: 'section-new-engineer:torque:architect:arch-a', principal: 'arch-a' },
-    { label: 'architect ghost', focusKey: 'agent-new-architect:torque', principal: '' },
+    { label: 'worker ghost', focusId: 'grid-control:section-new-worker:torque:user', focusKey: 'section-new-worker:torque:user', principal: '' },
+    { label: 'engineer ghost', focusId: 'grid-control:section-new-engineer:torque:architect:arch-a', focusKey: 'section-new-engineer:torque:architect:arch-a', principal: 'arch-a' },
+    { label: 'architect ghost', focusId: 'grid-control:agent-new-architect:torque', focusKey: 'agent-new-architect:torque', principal: '' },
   ];
 
   for (const item of cases) {
@@ -19666,19 +19662,7 @@ test('main hierarchy preserves focused ghost-card state across websocket delta r
       updateEventsAttentionBadge = function() {};
     `);
 
-    let currentGhost = null;
     let renderCount = 0;
-    function installGhostSurface() {
-      currentGhost = new FakeElement('');
-      currentGhost.dataset.focusKey = item.focusKey;
-      currentGhost.value = '';
-      currentGhost.selectionStart = 0;
-      currentGhost.selectionEnd = 0;
-      currentGhost.parentNode = main;
-      main.children = [currentGhost];
-      main.setQuerySelector('[data-focus-key="' + item.focusKey + '"]', currentGhost);
-    }
-
     Object.defineProperty(main, 'innerHTML', {
       configurable: true,
       get() {
@@ -19687,11 +19671,11 @@ test('main hierarchy preserves focused ghost-card state across websocket delta r
       set(value) {
         this._innerHTML = value;
         renderCount += 1;
-        installGhostSurface();
       },
     });
 
     runInContext(context, `
+      focusedItemId = ${JSON.stringify(item.focusId)};
       _handleFullState({
         seq: 1,
         groups: { torque: ['arch-a'] },
@@ -19716,10 +19700,9 @@ test('main hierarchy preserves focused ghost-card state across websocket delta r
       });
     `);
 
-    currentGhost.value = item.label + ' draft';
-    currentGhost.selectionStart = 1;
-    currentGhost.selectionEnd = 5;
-    document.activeElement = currentGhost;
+    assert.notEqual(jsonValue(context, `focusedItemId`), item.focusId, item.label + ' should not remain focusable');
+    assert.doesNotMatch(main.innerHTML, new RegExp('data-focus-key="' + item.focusKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '"'));
+    assert.doesNotMatch(main.innerHTML, /ghost-card/);
 
     runInContext(context, `
       _handleDelta({
@@ -19743,11 +19726,9 @@ test('main hierarchy preserves focused ghost-card state across websocket delta r
     `);
 
     assert.equal(renderCount, 2, item.label);
-    assert.equal(currentGhost.focused, true, item.label + ' focus should survive rerender');
-    assert.equal(currentGhost.value, item.label + ' draft');
-    assert.equal(currentGhost.selectionStart, 1);
-    assert.equal(currentGhost.selectionEnd, 5);
-    assert.match(main.innerHTML, new RegExp('data-focus-key="' + item.focusKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '"'));
+    assert.notEqual(jsonValue(context, `focusedItemId`), item.focusId, item.label + ' should stay off removed controls');
+    assert.doesNotMatch(main.innerHTML, new RegExp('data-focus-key="' + item.focusKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '"'));
+    assert.doesNotMatch(main.innerHTML, /ghost-card/);
   }
 });
 
@@ -20251,18 +20232,15 @@ test('main grid keyboard navigation traverses logical rows across sections', () 
 
   runInContext(context, `focusedItemId = 'eng-user-a'; render();`);
 
-  // Full stratified nav rows: architect bands first, then creation, orphan engineers, and orphan workers.
+  // Full stratified nav rows: architect bands first, then orphan engineers, and orphan workers.
   assert.deepEqual(jsonValue(context, `window._navGridRows.map(function(row) { return { type: row.rowType, items: row.items.map(function(item) { return item.id; }) }; })`), [
     { type: 'engineer-row', items: ['arch-a', 'eng-a', 'worker-a1', 'worker-a2'] },
-    { type: 'section-creation-row', items: ['grid-control:section-new-engineer:torque:architect:arch-a'] },
     { type: 'engineer-row', items: ['arch-b', 'eng-b', 'worker-b1'] },
-    { type: 'section-creation-row', items: ['grid-control:section-new-engineer:torque:architect:arch-b'] },
-    { type: 'architect-creation-row', items: ['grid-control:agent-new-architect:torque'] },
     { type: 'engineer-row', items: ['eng-user-a', 'worker-user-a1', 'worker-user-a2'] },
     { type: 'engineer-row', items: ['eng-user-b', 'worker-user-b1'] },
-    { type: 'section-creation-row', items: ['grid-control:section-new-engineer:torque:user'] },
-    { type: 'standalone-workers-row', items: ['loose-1', 'loose-2', 'grid-control:section-new-worker:torque:user'] },
+    { type: 'standalone-workers-row', items: ['loose-1', 'loose-2'] },
   ]);
+  assert.deepEqual(jsonValue(context, `window._navCreationControls`), []);
 
   runInContext(context, `moveFocusHorizontal(1);`);
   assert.equal(jsonValue(context, `focusedItemId`), 'worker-user-a1');
@@ -20271,21 +20249,21 @@ test('main grid keyboard navigation traverses logical rows across sections', () 
   runInContext(context, `moveFocusDown();`);
   assert.equal(jsonValue(context, `focusedItemId`), 'worker-user-b1');
   runInContext(context, `moveFocusDown();`);
-  assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:section-new-engineer:torque:user');
+  assert.equal(jsonValue(context, `focusedItemId`), 'loose-2');
 
-  // Arrow-up from the first orphan engineer traverses the preceding creation rows.
-  runInContext(context, `focusedItemId = 'eng-user-a'; render();`);
+  // Arrow-up from the first orphan engineer traverses only real agent rows.
+  runInContext(context, `_focusNavId('eng-user-a', { preserveColumn: false });`);
   runInContext(context, `moveFocusUp();`);
-  assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:agent-new-architect:torque');
+  assert.equal(jsonValue(context, `focusedItemId`), 'arch-b');
   runInContext(context, `moveFocusUp();`);
-  assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:section-new-engineer:torque:architect:arch-b');
+  assert.equal(jsonValue(context, `focusedItemId`), 'arch-a');
 
   // Architect cards are real row items; horizontal navigation enters their engineer row.
   runInContext(context, `focusedItemId = 'arch-a'; render();`);
   runInContext(context, `moveFocusHorizontal(1);`);
   assert.equal(jsonValue(context, `focusedItemId`), 'eng-a');
   runInContext(context, `moveFocusDown();`);
-  assert.equal(jsonValue(context, `focusedItemId`), 'grid-control:section-new-engineer:torque:architect:arch-a');
+  assert.equal(jsonValue(context, `focusedItemId`), 'eng-b');
   assert.equal(jsonValue(context, `String(state.selected_principal_id || '')`), '');
 });
 
@@ -20409,7 +20387,7 @@ test('main grid focus falls forward across websocket delta removals', () => {
 });
 
 
-test('main grid Enter activates focused creation ghost cards with scoped context', () => {
+test('grid-level + New dropdown exposes standalone creation flows', () => {
   const { context, document, sandbox } = createMainNavigationHarness();
 
   sandbox.state.groups = { torque: ['arch-a'] };
@@ -20427,46 +20405,56 @@ test('main grid Enter activates focused creation ghost cards with scoped context
     },
   };
 
+  const menuCalls = [];
+  context.showContextMenu = function(x, y, items) {
+    menuCalls.push({ x, y, items });
+  };
+
   runInContext(context, `
-    var engineerGhostCalls = [];
-    var workerGhostCalls = [];
-    var architectGhostCalls = [];
+    var engineerNewCalls = [];
+    var workerNewCalls = [];
+    var architectNewCalls = [];
     openAddEngineerForSection = function(group, architectId) {
-      engineerGhostCalls.push({ group: group, architectId: architectId || '' });
+      engineerNewCalls.push({ group: group, architectId: architectId || '' });
     };
     openAddWorkerForSection = function(group) {
-      workerGhostCalls.push({ group: group });
+      workerNewCalls.push({ group: group });
     };
     openAddArchitectForGroup = function(group) {
-      architectGhostCalls.push({ group: group });
+      architectNewCalls.push({ group: group });
     };
     render();
   `);
 
-  function pressEnter(focusedId) {
-    runInContext(context, `focusedItemId = ${JSON.stringify(focusedId)}; render();`);
-    const event = {
-      key: 'Enter',
-      preventDefault() { this.defaultPrevented = true; },
-    };
-    document.listeners.keydown(event);
-    assert.equal(event.defaultPrevented, true);
-  }
+  assert.match(document.getElementById('main').innerHTML, /data-agent-grid-toolbar[\s\S]*>\+ New<\/button>/);
+  assert.deepEqual(jsonValue(context, `window._navCreationControls`), []);
 
-  // Enter on creation ghosts invokes the scoped modals.
-  pressEnter('grid-control:section-new-engineer:torque:user');
-  pressEnter('grid-control:section-new-worker:torque:user');
-  // Switch the principal to arch-a so its + New Engineer control is rendered.
-  runInContext(context, `state.selected_principal_id = 'arch-a'; render();`);
-  pressEnter('grid-control:section-new-engineer:torque:architect:arch-a');
-  pressEnter('grid-control:agent-new-architect:torque');
+  context.openAgentGridNewMenu({
+    preventDefault() {},
+    stopPropagation() {},
+    clientX: 1,
+    clientY: 2,
+    currentTarget: {
+      getBoundingClientRect() { return { left: 33, bottom: 44 }; },
+    },
+  }, 'torque');
 
-  assert.deepEqual(jsonValue(context, `workerGhostCalls`), [{ group: 'torque' }]);
-  assert.deepEqual(jsonValue(context, `engineerGhostCalls`), [
-    { group: 'torque', architectId: '' },
-    { group: 'torque', architectId: 'arch-a' },
+  assert.equal(menuCalls.length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(menuCalls[0].items.map(item => item.label))), [
+    'New architect',
+    'New engineer',
+    'New worker',
   ]);
-  assert.deepEqual(jsonValue(context, `architectGhostCalls`), [{ group: 'torque' }]);
+  assert.equal(menuCalls[0].x, 33);
+  assert.equal(menuCalls[0].y, 48);
+
+  for (const item of menuCalls[0].items) vm.runInContext(item.action, context);
+
+  assert.deepEqual(jsonValue(context, `workerNewCalls`), [{ group: 'torque' }]);
+  assert.deepEqual(jsonValue(context, `engineerNewCalls`), [
+    { group: 'torque', architectId: '' },
+  ]);
+  assert.deepEqual(jsonValue(context, `architectNewCalls`), [{ group: 'torque' }]);
 });
 
 
