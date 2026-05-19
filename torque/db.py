@@ -413,6 +413,47 @@ def _decision_int(value, default: int = 0) -> int:
         return int(default or 0)
 
 
+def _mcp_dispatch_response_group(response: dict) -> str:
+    """Best-effort group inference for persisted Engineer dispatch responses."""
+    if not isinstance(response, dict):
+        return ""
+    for key in ("group", "group_name", "engineer_group"):
+        value = str(response.get(key, "") or "").strip()
+        if value:
+            return value
+    results = response.get("results")
+    if not isinstance(results, list):
+        return ""
+    groups = {
+        str(item.get("engineer_group", "") or item.get("group", "") or "").strip()
+        for item in results
+        if isinstance(item, dict)
+        and str(item.get("engineer_group", "") or item.get("group", "") or "").strip()
+    }
+    return next(iter(groups)) if len(groups) == 1 else ""
+
+
+def _decode_mcp_response_payload(response: dict) -> dict:
+    """Return the tool JSON inside an MCP result wrapper when present."""
+    if not isinstance(response, dict):
+        return {}
+    content = response.get("content")
+    if isinstance(content, list):
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            text = item.get("text")
+            if not isinstance(text, str) or not text.strip():
+                continue
+            try:
+                decoded = json.loads(text)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if isinstance(decoded, dict):
+                return decoded
+    return response
+
+
 def _decode_decision_row(row, cols) -> dict:
     decision = dict(zip(cols, row))
     decision["supersedes"] = (
@@ -2376,6 +2417,55 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         events.reverse()
         return events
 
+    def load_panel_events_window(
+        self,
+        since: float,
+        until: float,
+        group: str = "",
+        kinds: list[str] | tuple[str, ...] | set[str] | None = None,
+    ) -> list[dict]:
+        """Load durable panel events in a timestamp window, oldest first.
+
+        This intentionally does not apply the recent-events ring-buffer cap:
+        health/observability panels need bounded historical reads over the
+        selected window rather than the latest N UI events.
+        """
+        clauses = ["timestamp >= ?", "timestamp <= ?"]
+        params: list = [float(since or 0.0), float(until or 0.0)]
+        group = str(group or "").strip()
+        if group:
+            clauses.append("group_name = ?")
+            params.append(group)
+        clean_kinds = [
+            str(kind or "").strip()
+            for kind in (kinds or [])
+            if str(kind or "").strip()
+        ]
+        if clean_kinds:
+            placeholders = ",".join(["?"] * len(clean_kinds))
+            clauses.append(f"kind IN ({placeholders})")
+            params.extend(clean_kinds)
+        rows = self._conn.execute(
+            "SELECT id, timestamp, kind, cell_id, agent_name, "
+            "group_name, message, task_id FROM panel_events "
+            f"WHERE {' AND '.join(clauses)} "
+            "ORDER BY timestamp ASC, id ASC",
+            tuple(params),
+        ).fetchall()
+        return [
+            {
+                "id": r[0],
+                "timestamp": r[1],
+                "kind": r[2],
+                "cell_id": r[3],
+                "agent_name": r[4],
+                "group": r[5],
+                "message": r[6],
+                "task_id": r[7],
+            }
+            for r in rows
+        ]
+
     def get_panel_event_max_id(self) -> int:
         """Return the highest panel_events id, or 0 if empty."""
         row = self._conn.execute(
@@ -3748,6 +3838,133 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         cols = ["id", "agent_id", "task_id", "task_title",
                 "started_at", "completed_at", "outcome"]
         return [dict(zip(cols, r)) for r in rows]
+
+    def load_agent_tasks_window(
+        self,
+        since: float,
+        until: float,
+        group: str = "",
+    ) -> list[dict]:
+        """Load agent-task intervals overlapping a metrics window.
+
+        Rows are left-joined to current board task metadata so the caller can
+        scope and label utilization without adding new sampling tables.  A
+        missing ``completed_at`` is treated as still running at ``until`` for
+        overlap selection; the raw ``completed_at`` value is returned.
+        """
+        since = float(since or 0.0)
+        until = float(until or 0.0)
+        clauses = [
+            "agent_tasks.started_at <= ?",
+            "COALESCE(agent_tasks.completed_at, ?) >= ?",
+        ]
+        params: list = [until, until, since]
+        group = str(group or "").strip()
+        if group:
+            clauses.append("board_tasks.group_name = ?")
+            params.append(group)
+        rows = self._conn.execute(
+            "SELECT agent_tasks.id, agent_tasks.agent_id, "
+            "agent_tasks.task_id, agent_tasks.task_title, "
+            "agent_tasks.started_at, agent_tasks.completed_at, "
+            "agent_tasks.outcome, "
+            "board_tasks.group_name, board_tasks.action_name, "
+            "board_tasks.assigned_engineer_id, board_tasks.created_at, "
+            "board_tasks.updated_at, board_tasks.lane, "
+            "board_tasks.worktree_boundary "
+            "FROM agent_tasks "
+            "LEFT JOIN board_tasks ON board_tasks.id = agent_tasks.task_id "
+            f"WHERE {' AND '.join(clauses)} "
+            "ORDER BY agent_tasks.started_at ASC, agent_tasks.id ASC",
+            tuple(params),
+        ).fetchall()
+        cols = [
+            "id",
+            "agent_id",
+            "task_id",
+            "task_title",
+            "started_at",
+            "completed_at",
+            "outcome",
+            "group",
+            "action_name",
+            "assigned_engineer_id",
+            "created_at",
+            "updated_at",
+            "lane",
+            "worktree_boundary",
+        ]
+        out = []
+        for row in rows:
+            item = dict(zip(cols, row))
+            try:
+                item["worktree_boundary"] = json.loads(
+                    item.get("worktree_boundary", "{}") or "{}"
+                )
+            except (json.JSONDecodeError, TypeError):
+                item["worktree_boundary"] = {}
+            out.append(item)
+        return out
+
+    def load_mcp_dispatch_calls_window(
+        self,
+        since: float,
+        until: float,
+        group: str = "",
+    ) -> list[dict]:
+        """Load cached Engineer dispatch-tool responses in a time window.
+
+        ``mcp_idempotency`` only stores calls that carried an idempotency key,
+        so consumers must treat this as coverage-limited.  The optional
+        ``group`` argument is best-effort: when a response exposes a group, it
+        is filtered; unscoped responses are returned with ``group=''`` so the
+        caller can surface partial coverage instead of fabricating precision.
+        """
+        since = float(since or 0.0)
+        until = float(until or 0.0)
+        rows = self._conn.execute(
+            "SELECT idempotency_key, surface, tool_name, request_hash, "
+            "response_json, created_at, updated_at "
+            "FROM mcp_idempotency "
+            "WHERE surface = 'engineer' "
+            "AND tool_name IN (?, ?) "
+            "AND updated_at >= ? AND updated_at <= ? "
+            "ORDER BY updated_at ASC, created_at ASC",
+            (
+                "engineer_task_dispatch",
+                "engineer_batch_dispatch",
+                since,
+                until,
+            ),
+        ).fetchall()
+        requested_group = str(group or "").strip()
+        out = []
+        for row in rows:
+            try:
+                raw_response = json.loads(row[4] or "{}")
+            except (json.JSONDecodeError, TypeError):
+                raw_response = {}
+            if not isinstance(raw_response, dict):
+                raw_response = {}
+            response = _decode_mcp_response_payload(raw_response)
+            response_group = _mcp_dispatch_response_group(response)
+            if requested_group and response_group \
+                    and response_group != requested_group:
+                continue
+            out.append({
+                "idempotency_key": row[0],
+                "surface": row[1],
+                "tool_name": row[2],
+                "request_hash": row[3],
+                "response": response,
+                "raw_response": raw_response,
+                "response_json": row[4],
+                "created_at": row[5],
+                "updated_at": row[6],
+                "group": response_group,
+                "unscoped": not bool(response_group),
+            })
+        return out
 
     def load_all_agent_history_records(self) -> list[dict]:
         """Load all persisted agent history records."""

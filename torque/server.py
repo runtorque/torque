@@ -8184,6 +8184,18 @@ async def main(connection=None):
         if cmd == "doctor":
             return _handle_doctor_command(db)
 
+        if cmd == "get_system_health_metrics":
+            try:
+                await state.flush_db_writes()
+                if panel_log and hasattr(panel_log, "flush"):
+                    await panel_log.flush()
+                return state.system_health_metrics(
+                    window=data.get("window", "24h"),
+                    group=data.get("group", ""),
+                )
+            except ValueError as exc:
+                return {"type": "error", "message": str(exc)}
+
         if cmd == "supervisor_sessions_list":
             return await build_supervisor_sessions_payload(
                 bridge, state, _runtime_payload)

@@ -6,7 +6,7 @@ var _activePanelApp = '';   // '' = collapsed, 'board' = board open
 var _panelHeight = 0;       // persisted height in px (0 = use CSS default)
 var _panelStateRestored = false;  // true after first state message restores panel
 
-var _panelIds = ['panel-board', 'panel-actions', 'panel-templates', 'panel-history', 'panel-context', 'panel-events', 'panel-agent', 'panel-supervisor'];
+var _panelIds = ['panel-board', 'panel-actions', 'panel-templates', 'panel-history', 'panel-context', 'panel-events', 'panel-agent', 'panel-supervisor', 'panel-health'];
 var _embeddedPanelMinHeight = 180;
 var _defaultPanelMinHeight = 80;
 var _workspaceSidebarDefaultWidth = 340;
@@ -117,6 +117,9 @@ function _loadPanelApp(appName) {
   if (appName === 'supervisor' && typeof supervisorEnsureLoaded === 'function') {
     supervisorEnsureLoaded();
   }
+  if (appName === 'health' && typeof healthEnsureLoaded === 'function') {
+    healthEnsureLoaded({ force: true });
+  }
 }
 
 function _loadVisibleStandalonePanelApps() {
@@ -167,12 +170,16 @@ function _reloadGroupScopedPanelApp(appName) {
     if (typeof agentHistoryLoad === 'function') agentHistoryLoad();
     if (typeof renderHistoryPanel === 'function') renderHistoryPanel();
   }
+  if (appName === 'health') {
+    if (typeof healthActiveGroupChanged === 'function') healthActiveGroupChanged();
+    else if (typeof healthEnsureLoaded === 'function') healthEnsureLoaded({ force: true });
+  }
 }
 
 function _reloadVisibleGroupScopedPanelApps() {
   var seen = {};
   _visiblePanelAppsForGroupScopeReload().forEach(function(appName) {
-    if ((appName !== 'actions' && appName !== 'templates' && appName !== 'history') || seen[appName]) return;
+    if ((appName !== 'actions' && appName !== 'templates' && appName !== 'history' && appName !== 'health') || seen[appName]) return;
     seen[appName] = true;
     _reloadGroupScopedPanelApp(appName);
   });
@@ -284,6 +291,7 @@ function togglePanel(appName) {
     if (appName === 'engineer' && typeof renderAgentPanel === 'function') renderAgentPanel();
     if (appName === 'history' && typeof renderHistoryPanel === 'function') renderHistoryPanel();
     if (appName === 'supervisor' && typeof renderSupervisorPanel === 'function') renderSupervisorPanel({ force: true });
+    if (appName === 'health' && typeof renderHealthPanel === 'function') renderHealthPanel();
   }
   // Persist panel state to server
   send({ cmd: 'board_set_panel', active: _activePanelApp || '' });
@@ -311,6 +319,7 @@ function _restorePanelState() {
     if (detachedApp === 'engineer' && typeof renderAgentPanel === 'function') renderAgentPanel();
     if (detachedApp === 'history' && typeof renderHistoryPanel === 'function') renderHistoryPanel();
     if (detachedApp === 'supervisor' && typeof renderSupervisorPanel === 'function') renderSupervisorPanel({ force: true });
+    if (detachedApp === 'health' && typeof renderHealthPanel === 'function') renderHealthPanel();
     if (typeof torqueDetachedWindowBoundsChanged === 'function') {
       torqueDetachedWindowBoundsChanged();
     }
@@ -359,6 +368,7 @@ function _restorePanelState() {
     if (active === 'engineer' && typeof renderAgentPanel === 'function') renderAgentPanel();
     if (active === 'history' && typeof renderHistoryPanel === 'function') renderHistoryPanel();
     if (active === 'supervisor' && typeof renderSupervisorPanel === 'function') renderSupervisorPanel({ force: true });
+    if (active === 'health' && typeof renderHealthPanel === 'function') renderHealthPanel();
   }
   if (typeof _standaloneRestoreDetachedPanels === 'function') _standaloneRestoreDetachedPanels();
 }
