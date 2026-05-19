@@ -78,12 +78,56 @@ function _embeddedRuntimeEnabled() {
 
 
 var AGENT_FOCUS_SPLIT_KEY = 'engineer_panel_split_fraction';
+var AGENT_FOCUS_MODE_STORAGE_KEY = 'agent_focus_panel_mode';
+var AGENT_FOCUS_COLLAPSED_STORAGE_KEY = 'agent_focus_panel_collapsed';
 var AGENT_FOCUS_DEFAULT_FRACTION = 0.30;
 var AGENT_FOCUS_MIN_HEIGHT = 120;
 var AGENT_GRID_MIN_HEIGHT = 200;
+var AGENT_FOCUS_AUTO_MAX_VIEWPORT_FRACTION = 0.45;
 var _agentFocusResize = null;
 var _agentFocusResizeRaf = 0;
 var _agentFocusResizePendingHeight = 0;
+
+function _agentFocusStorageKey(name) {
+  const runtime = (state && state.runtime) || {};
+  const profile = String(runtime.profile || '');
+  const port = String(runtime.port || ((typeof location !== 'undefined' && location.host) || ''));
+  return 'torque.' + name + ':' + profile + ':' + port;
+}
+
+function _agentFocusReadStorage(name, fallback) {
+  if (typeof localStorage === 'undefined') return fallback;
+  try {
+    const value = localStorage.getItem(_agentFocusStorageKey(name));
+    return value === null || value === undefined ? fallback : value;
+  } catch (_e) {
+    return fallback;
+  }
+}
+
+function _agentFocusWriteStorage(name, value) {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(_agentFocusStorageKey(name), String(value));
+  } catch (_e) {}
+}
+
+function _agentFocusMode() {
+  return _agentFocusReadStorage(AGENT_FOCUS_MODE_STORAGE_KEY, 'auto') === 'manual'
+    ? 'manual'
+    : 'auto';
+}
+
+function _agentFocusSetMode(mode) {
+  _agentFocusWriteStorage(
+    AGENT_FOCUS_MODE_STORAGE_KEY,
+    mode === 'manual' ? 'manual' : 'auto'
+  );
+}
+
+function _agentFocusIsCollapsed() {
+  return _agentFocusReadStorage(AGENT_FOCUS_COLLAPSED_STORAGE_KEY, '0') === '1';
+}
 
 function _agentFocusClampFraction(value) {
   const n = Number(value);
@@ -144,6 +188,14 @@ function _agentFocusContainerHeight(parts) {
   return Math.max(0, Math.round(rect.height || 0));
 }
 
+function _agentFocusViewportHeight(totalHeight) {
+  const win = (typeof window !== 'undefined' && window) ? window : null;
+  const viewport = win ? Number(win.innerHeight) : 0;
+  return Number.isFinite(viewport) && viewport > 0
+    ? viewport
+    : Math.max(0, Number(totalHeight) || 0);
+}
+
 function _agentFocusClampHeight(height, totalHeight, handleHeight) {
   let next = Number(height);
   if (!Number.isFinite(next)) next = 0;
@@ -152,6 +204,52 @@ function _agentFocusClampHeight(height, totalHeight, handleHeight) {
   if (total <= 0) return Math.max(AGENT_FOCUS_MIN_HEIGHT, next);
   const maxFocus = Math.max(AGENT_FOCUS_MIN_HEIGHT, total - handle - AGENT_GRID_MIN_HEIGHT);
   return Math.max(AGENT_FOCUS_MIN_HEIGHT, Math.min(maxFocus, next));
+}
+
+function _agentFocusAutoMaxHeight(totalHeight, handleHeight) {
+  const total = Math.max(0, Number(totalHeight) || 0);
+  const handle = Math.max(0, Number(handleHeight) || 0);
+  const viewport = _agentFocusViewportHeight(total);
+  let cap = Math.max(
+    AGENT_FOCUS_MIN_HEIGHT,
+    Math.round((viewport || AGENT_FOCUS_MIN_HEIGHT) * AGENT_FOCUS_AUTO_MAX_VIEWPORT_FRACTION)
+  );
+  if (total > 0) {
+    cap = Math.min(cap, Math.max(AGENT_FOCUS_MIN_HEIGHT, total - handle - AGENT_GRID_MIN_HEIGHT));
+  }
+  return Math.max(AGENT_FOCUS_MIN_HEIGHT, cap);
+}
+
+function _agentFocusStylePx(el, prop) {
+  if (!el || typeof getComputedStyle !== 'function') return 0;
+  const raw = getComputedStyle(el)[prop];
+  const value = parseFloat(raw);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function _agentFocusContentHeight(parts) {
+  if (!parts || !parts.focusScroll) return AGENT_FOCUS_MIN_HEIGHT;
+  const children = parts.focusScroll.children || [];
+  if (children.length) {
+    let measured = _agentFocusStylePx(parts.focusScroll, 'paddingTop')
+      + _agentFocusStylePx(parts.focusScroll, 'paddingBottom');
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i];
+      if (!child) continue;
+      const rect = child.getBoundingClientRect ? child.getBoundingClientRect() : null;
+      const childHeight = rect && rect.height
+        ? rect.height
+        : (Number(child.offsetHeight) || Number(child.scrollHeight) || Number(child.clientHeight) || 0);
+      measured += Math.max(0, childHeight)
+        + _agentFocusStylePx(child, 'marginTop')
+        + _agentFocusStylePx(child, 'marginBottom');
+    }
+    if (measured > 0) return Math.max(AGENT_FOCUS_MIN_HEIGHT, Math.ceil(measured));
+  }
+  const scroll = Number(parts.focusScroll.scrollHeight) || 0;
+  const offset = Number(parts.focusScroll.offsetHeight) || 0;
+  const client = Number(parts.focusScroll.clientHeight) || 0;
+  return Math.max(AGENT_FOCUS_MIN_HEIGHT, Math.ceil(scroll || offset || client || 0));
 }
 
 function _agentFocusApplyHeight(height, opts) {
@@ -166,9 +264,48 @@ function _agentFocusApplyHeight(height, opts) {
   return clamped;
 }
 
+function _agentFocusApplyAutoHeight(parts, opts) {
+  opts = opts || {};
+  parts = parts || _agentFocusSplitParts();
+  if (!parts) return 0;
+  const total = opts.totalHeight || _agentFocusContainerHeight(parts);
+  const handle = opts.handleHeight || _agentFocusHandleHeight(parts);
+  const wanted = Math.min(
+    _agentFocusContentHeight(parts),
+    _agentFocusAutoMaxHeight(total, handle)
+  );
+  return _agentFocusApplyHeight(wanted, {
+    totalHeight: total,
+    handleHeight: handle,
+  });
+}
+
+function _agentFocusSyncCollapsedUi(parts, collapsed) {
+  if (!parts) return;
+  if (parts.split && parts.split.classList) {
+    parts.split.classList.toggle('agent-split--focus-collapsed', !!collapsed);
+  }
+  if (parts.handle) {
+    parts.handle.setAttribute('role', collapsed ? 'button' : 'separator');
+    parts.handle.setAttribute('aria-label', collapsed ? 'Expand focus panel' : 'Resize focus panel');
+    parts.handle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  }
+  const collapseButton = parts.focus && typeof parts.focus.querySelector === 'function'
+    ? parts.focus.querySelector('[data-agent-focus-collapse]')
+    : null;
+  if (collapseButton) collapseButton.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+}
+
 function _agentFocusApplyPersistedSplit() {
   const parts = _agentFocusSplitParts();
   if (!parts) return;
+  const collapsed = _agentFocusIsCollapsed();
+  _agentFocusSyncCollapsedUi(parts, collapsed);
+  if (collapsed) return;
+  if (_agentFocusMode() !== 'manual') {
+    _agentFocusApplyAutoHeight(parts);
+    return;
+  }
   const total = _agentFocusContainerHeight(parts);
   if (total <= 0) {
     parts.focus.style.flexBasis = (_agentFocusPersistedFraction() * 100) + '%';
@@ -180,6 +317,30 @@ function _agentFocusApplyPersistedSplit() {
     totalHeight: total,
     handleHeight: handle,
   });
+}
+
+function _agentFocusSetCollapsed(collapsed) {
+  collapsed = !!collapsed;
+  _agentFocusWriteStorage(AGENT_FOCUS_COLLAPSED_STORAGE_KEY, collapsed ? '1' : '0');
+  if (!collapsed) _agentFocusSetMode('auto');
+  const parts = _agentFocusSplitParts();
+  if (!parts) return;
+  _agentFocusSyncCollapsedUi(parts, collapsed);
+  if (!collapsed) _agentFocusApplyAutoHeight(parts);
+}
+
+function _agentFocusResizerClick(event) {
+  if (!_agentFocusIsCollapsed()) return;
+  if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  _agentFocusSetCollapsed(false);
+}
+
+function _agentFocusResizerKeydown(event) {
+  if (!_agentFocusIsCollapsed()) return;
+  const key = event && (event.key || event.code);
+  if (key !== 'Enter' && key !== ' ' && key !== 'Spacebar' && key !== 'Space') return;
+  if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  _agentFocusSetCollapsed(false);
 }
 
 function _agentFocusScheduleResizeHeight(height) {
@@ -204,6 +365,7 @@ function _agentFocusResizeStart(event) {
   const parts = _agentFocusSplitParts();
   if (!parts) return;
   if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  if (_agentFocusIsCollapsed()) return;
   const totalHeight = _agentFocusContainerHeight(parts);
   const handleHeight = _agentFocusHandleHeight(parts);
   const focusRect = parts.focus.getBoundingClientRect ? parts.focus.getBoundingClientRect() : { height: 0 };
@@ -244,6 +406,7 @@ function _agentFocusResizeEnd() {
   });
   const available = Math.max(1, (resize.totalHeight || 0) - (resize.handleHeight || 0));
   const fraction = _agentFocusClampFraction(applied / available);
+  _agentFocusSetMode('manual');
   if (state) state[AGENT_FOCUS_SPLIT_KEY] = fraction;
   if (typeof send === 'function') {
     send({ cmd: 'ui_set_engineer_panel_split', fraction: fraction });
@@ -2560,6 +2723,9 @@ function _renderAgentFocusPanelHtml() {
       + esc(agent.name || agent.id || 'Agent')
       + '</div>';
   }
+  html += '<button type="button" class="agent-focus-collapse-btn" data-agent-focus-collapse'
+    + ' onclick="_agentFocusSetCollapsed(true)" title="Collapse focus panel"'
+    + ' aria-label="Collapse focus panel" aria-expanded="' + (_agentFocusIsCollapsed() ? 'false' : 'true') + '">⌄</button>';
   html += '</div>';
   if (!agent) {
     html += '<div class="agent-focus-empty">Select an agent to view details and terminals.</div>';
@@ -2573,12 +2739,18 @@ function _renderAgentFocusPanelHtml() {
 }
 
 function _agentFocusShellHtml(gridHtml, focusHtml, tabsHtml) {
-  return '<div class="agent-split" data-agent-split>'
+  const collapsed = _agentFocusIsCollapsed();
+  return '<div class="agent-split' + (collapsed ? ' agent-split--focus-collapsed' : '') + '" data-agent-split>'
     + '<div id="agent-grid-pane" class="agents-grid-pane" data-agent-grid-pane>'
     + (gridHtml || '')
     + '</div>'
-    + '<div id="agent-focus-resizer" class="agent-focus-resizer" role="separator" aria-orientation="horizontal" tabindex="0" data-agent-focus-resizer onmousedown="_agentFocusResizeStart(event)">'
+    + '<div id="agent-focus-resizer" class="agent-focus-resizer" role="' + (collapsed ? 'button' : 'separator') + '"'
+    + ' aria-orientation="horizontal" aria-expanded="' + (collapsed ? 'false' : 'true') + '"'
+    + ' aria-label="' + (collapsed ? 'Expand focus panel' : 'Resize focus panel') + '" tabindex="0"'
+    + ' data-agent-focus-resizer onmousedown="_agentFocusResizeStart(event)" onclick="_agentFocusResizerClick(event)"'
+    + ' onkeydown="_agentFocusResizerKeydown(event)">'
     + '<div class="agent-focus-resizer-grip" aria-hidden="true"></div>'
+    + '<span class="agent-focus-reopen-label" data-agent-focus-reopen-label>Focus panel hidden — click to expand</span>'
     + '</div>'
     + '<section id="agent-focus-panel" class="agent-focus-panel" data-agent-focus-panel>'
     + '<div class="agent-focus-panel-scroll" data-agent-focus-scroll>'
@@ -2658,6 +2830,7 @@ function renderAgentFocusPanel(opts) {
   if (parts.focusScroll._torqueLastHtml === focusHtml || main._torqueLastFocusHtml === focusHtml) {
     parts.focusScroll._torqueLastHtml = focusHtml;
     main._torqueLastFocusHtml = focusHtml;
+    _agentFocusApplyPersistedSplit();
     return false;
   }
   const panelState = typeof _captureSurfaceState === 'function'
@@ -2671,6 +2844,7 @@ function renderAgentFocusPanel(opts) {
     _restoreSurfaceState(parts.focusScroll, panelState, { scrollSelectors: [':root', '.mcp-log'] });
     _restoreActiveDetailInputFocus();
   }
+  _agentFocusApplyPersistedSplit();
   return true;
 }
 

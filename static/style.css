@@ -999,6 +999,7 @@ main {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   cursor: ns-resize;
   border-top: 1px solid var(--border);
   border-bottom: 1px solid rgba(255,255,255,.04);
@@ -1017,12 +1018,39 @@ main {
   background: color-mix(in srgb, var(--text-dim) 55%, transparent);
   box-shadow: 0 3px 0 color-mix(in srgb, var(--text-dim) 28%, transparent);
 }
+.agent-focus-reopen-label {
+  display: none;
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .02em;
+}
+.agent-split--focus-collapsed .agent-focus-resizer {
+  flex-basis: 22px;
+  height: 22px;
+  cursor: pointer;
+  border-bottom-color: var(--border);
+  background: color-mix(in srgb, var(--bg-surface) 84%, var(--accent) 8%);
+}
+.agent-split--focus-collapsed .agent-focus-resizer:hover,
+.agent-split--focus-collapsed .agent-focus-resizer:focus-visible {
+  background: color-mix(in srgb, var(--bg-hover) 78%, var(--accent) 16%);
+}
+.agent-split--focus-collapsed .agent-focus-resizer-grip {
+  width: 32px;
+}
+.agent-split--focus-collapsed .agent-focus-reopen-label {
+  display: inline;
+}
 .agent-focus-panel {
   flex: 0 0 30%;
   min-height: 120px;
   min-width: 0;
   overflow: hidden;
   background: color-mix(in srgb, var(--bg-surface) 86%, var(--bg));
+}
+.agent-split--focus-collapsed .agent-focus-panel {
+  display: none;
 }
 .agent-focus-panel-scroll {
   height: 100%;
@@ -1051,12 +1079,36 @@ main {
   color: var(--text-dim);
 }
 .agent-focus-subtitle {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 11px;
   color: var(--text);
+}
+.agent-focus-collapse-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-left: auto;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--text-dim);
+  background: transparent;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+.agent-focus-collapse-btn:hover,
+.agent-focus-collapse-btn:focus-visible {
+  color: var(--text);
+  border-color: var(--border);
+  background: var(--bg-hover);
+  outline: none;
 }
 .agent-focus-empty {
   padding: 18px 10px;
