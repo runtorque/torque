@@ -140,6 +140,137 @@ class WorktreeStreamTests(unittest.TestCase):
         self.assertTrue(stream["partial_review_safe"])
         self.assertFalse(stream["branch_advanced"])
 
+    def test_pending_pr_stream_exposes_pr_metadata_without_looking_merged(self):
+        state = self._make_state()
+        worker = self._add_agent(state, status="idle")
+
+        product = self._task(
+            "TORQUE:1",
+            "Add PR merge flow",
+            agent_id=worker.id,
+            updated_at="2026-04-07T10:30:00+00:00",
+        )
+        review = self._task(
+            "TORQUE:1:1",
+            "Review PR merge flow",
+            lane="Done",
+            action_name="feature/review",
+            parent_task_id=product.id,
+            pipeline_root_id=product.id,
+            pipeline_depth=1,
+            agent_id=worker.id,
+            created_at="2026-04-07T11:00:00+00:00",
+            updated_at="2026-04-07T11:30:00+00:00",
+            boundary={
+                "version": "1",
+                "repo_root": "/repo",
+                "branch": "torque/worker",
+                "status": "open",
+                "recorded_at": "2026-04-07T11:30:00+00:00",
+                "commit_sha": "reviewed-head",
+                "recorded_by_agent_id": worker.id,
+                "pr": {
+                    "provider": "github",
+                    "remote": "origin",
+                    "base_branch": "main",
+                    "head_branch": "torque/worker",
+                    "head_sha": "reviewed-head",
+                    "url": "https://github.com/acme/repo/pull/123",
+                    "number": 123,
+                    "state": "auto_merge_enabled",
+                    "merge_state": "BLOCKED",
+                },
+            },
+        )
+        state.board_tasks[product.id] = product
+        state.board_tasks[review.id] = review
+
+        stream = self.streams_mod.compute_worktree_stream(
+            state,
+            repo_root="/repo",
+            branch="torque/worker",
+        )
+
+        self.assertEqual(stream["state"], "ready_to_merge")
+        self.assertEqual(stream["merge_state"], "ready")
+        self.assertEqual(stream["latest_boundary_status"], "open")
+        self.assertEqual(stream["latest_reviewed_commit_sha"], "reviewed-head")
+        self.assertEqual(stream["latest_merged_commit_sha"], "")
+        self.assertEqual(
+            stream["pr_url"],
+            "https://github.com/acme/repo/pull/123",
+        )
+        self.assertEqual(stream["pr_state"], "auto_merge_enabled")
+        self.assertEqual(stream["pr_head_sha"], "reviewed-head")
+        self.assertEqual(stream["pr"]["merge_state"], "BLOCKED")
+
+    def test_merged_pr_stream_keeps_reviewed_sha_and_surfaces_merge_sha(self):
+        state = self._make_state()
+        worker = self._add_agent(state, status="idle")
+
+        product = self._task(
+            "TORQUE:1",
+            "Add PR merge flow",
+            lane="Done",
+            agent_id=worker.id,
+        )
+        review = self._task(
+            "TORQUE:1:1",
+            "Review PR merge flow",
+            lane="Done",
+            action_name="feature/review",
+            parent_task_id=product.id,
+            pipeline_root_id=product.id,
+            pipeline_depth=1,
+            agent_id=worker.id,
+            created_at="2026-04-07T11:00:00+00:00",
+            updated_at="2026-04-07T11:30:00+00:00",
+            boundary={
+                "version": "1",
+                "repo_root": "/repo",
+                "branch": "torque/worker",
+                "status": "merged",
+                "recorded_at": "2026-04-07T11:30:00+00:00",
+                "commit_sha": "reviewed-head",
+                "merged_at": "2026-04-07T12:00:00+00:00",
+                "merge_commit_sha": "squash-merge-sha",
+                "recorded_by_agent_id": worker.id,
+                "pr": {
+                    "provider": "github",
+                    "remote": "origin",
+                    "base_branch": "main",
+                    "head_branch": "torque/worker",
+                    "head_sha": "reviewed-head",
+                    "url": "https://github.com/acme/repo/pull/123",
+                    "number": 123,
+                    "state": "merged",
+                    "merge_state": "CLEAN",
+                    "merged_at": "2026-04-07T12:00:00+00:00",
+                    "merge_commit_sha": "squash-merge-sha",
+                },
+            },
+        )
+        state.board_tasks[product.id] = product
+        state.board_tasks[review.id] = review
+
+        stream = self.streams_mod.compute_worktree_stream(
+            state,
+            repo_root="/repo",
+            branch="torque/worker",
+        )
+
+        self.assertEqual(stream["state"], "merged")
+        self.assertEqual(stream["merge_state"], "merged")
+        self.assertEqual(stream["latest_boundary_status"], "merged")
+        self.assertEqual(stream["latest_reviewed_commit_sha"], "reviewed-head")
+        self.assertEqual(stream["latest_merged_commit_sha"], "squash-merge-sha")
+        self.assertEqual(
+            stream["pr_url"],
+            "https://github.com/acme/repo/pull/123",
+        )
+        self.assertEqual(stream["pr_state"], "merged")
+        self.assertEqual(stream["pr_head_sha"], "reviewed-head")
+
     def test_multiple_product_tasks_on_one_branch_collapse_into_one_stream(self):
         state = self._make_state()
 

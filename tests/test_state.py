@@ -238,6 +238,47 @@ class MatrixStateCleanupTests(unittest.TestCase):
         if self.state_mod.orjson is not None:
             self.assertNotIn(": ", raw)
 
+    def test_worktree_boundary_normalization_preserves_pr_metadata(self):
+        boundary = self.state_mod._normalize_worktree_boundary({
+            "repo_root": "/repo",
+            "branch": "torque/worker",
+            "status": "open",
+            "commit_sha": "reviewed-head",
+            "pr": {
+                "provider": "github",
+                "remote": "origin",
+                "base_branch": "main",
+                "head_branch": "torque/worker",
+                "head_sha": "reviewed-head",
+                "url": "https://github.com/acme/repo/pull/123",
+                "number": "123",
+                "state": "auto_merge_enabled",
+                "merge_state": "BLOCKED",
+                "created_at": "2026-04-07T10:30:00+00:00",
+                "updated_at": "2026-04-07T10:30:00+00:00",
+                "requested_cleanup": {
+                    "close_agent_on_merge": True,
+                    "remove_worktree_on_merge": False,
+                    "auto_move_to_done": True,
+                    "preserve_merge_diff": False,
+                },
+            },
+        })
+
+        self.assertEqual(boundary["commit_sha"], "reviewed-head")
+        self.assertEqual(boundary["pr"]["number"], 123)
+        self.assertEqual(boundary["pr"]["state"], "auto_merge_enabled")
+        self.assertEqual(boundary["pr"]["merge_state"], "BLOCKED")
+        self.assertEqual(
+            boundary["pr"]["requested_cleanup"],
+            {
+                "close_agent_on_merge": True,
+                "remove_worktree_on_merge": False,
+                "auto_move_to_done": True,
+                "preserve_merge_diff": False,
+            },
+        )
+
     def test_load_seeds_architect_peer_message_caches_from_db(self):
         from torque.db import TorqueDB
 

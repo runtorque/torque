@@ -11,9 +11,8 @@ from datetime import datetime, timezone
 from .config import log
 from .state import task_counts_as_done
 from .worktree_boundaries import (
+    attach_pr_metadata_to_latest_open_boundary,
     branch_boundary_tasks,
-    latest_boundary_task,
-    task_boundary,
 )
 
 
@@ -297,7 +296,7 @@ def _pr_result_metadata(
         "number": number,
         "head_sha": head_sha,
         "base_branch": str(base_branch or "").strip(),
-        "branch": str(branch or "").strip(),
+        "head_branch": str(branch or "").strip(),
         "remote": str(remote or "").strip(),
         "state": str(
             source.get("state") or pr_result.get("state") or ""
@@ -322,38 +321,27 @@ def _pr_result_metadata(
 
 
 def _record_pr_metadata_on_latest_boundary(state, cell,
-                                           pr_metadata: dict) -> dict | None:
+                                           pr_metadata: dict,
+                                           requested_cleanup: dict | None = None,
+                                           ) -> dict | None:
     """Attach PR state to the latest open branch boundary without closing it."""
     if not state or not cell or not pr_metadata:
         return None
     repo_root = cell.worktree_repo_root or cell.git_root or ""
-    latest = latest_boundary_task(
+    latest = attach_pr_metadata_to_latest_open_boundary(
         state.board_tasks.values(),
         repo_root=repo_root,
         branch=cell.worktree_branch or "",
-        statuses={"open"},
+        pr_metadata=pr_metadata,
+        requested_cleanup=requested_cleanup,
     )
     if not latest:
         return None
 
-    boundary = dict(task_boundary(latest))
-    boundary["pull_request"] = dict(pr_metadata)
-    # Duplicate the high-signal fields at the boundary top level so the next
-    # frontend pass can consume them without having to understand the full
-    # GitHub helper payload.
-    boundary["pr_url"] = pr_metadata.get("url", "")
-    boundary["pr_number"] = pr_metadata.get("number")
-    boundary["pr_head_sha"] = pr_metadata.get("head_sha", "")
-    boundary["pr_state"] = pr_metadata.get("state", "")
-    boundary["pr_merge_state"] = pr_metadata.get("merge_state", "")
-    boundary["pr_pending"] = bool(pr_metadata.get("pending"))
-    boundary["pr_status"] = pr_metadata.get("status", "")
-    boundary["pr_updated_at"] = pr_metadata.get("updated_at", "")
-    latest.worktree_boundary = boundary
     latest.updated_at = datetime.now(timezone.utc).isoformat()
     state._emit("task_upsert", **asdict(latest))
     state._db_save_task(latest)
-    return boundary
+    return latest.worktree_boundary
 
 
 def _pr_merge_failure_allows_auto(merge_result: dict) -> bool:

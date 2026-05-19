@@ -1,7 +1,10 @@
 from types import SimpleNamespace
+import json
 import unittest
 
 from torque.worktree_boundaries import (
+    attach_pr_metadata_to_latest_open_boundary,
+    boundary_pr_metadata,
     boundary_summary,
     branch_boundary_tasks,
     clear_stale_successor_references,
@@ -137,6 +140,78 @@ class WorktreeBoundaryTests(unittest.TestCase):
         )
 
         self.assertEqual([t.id for t in tasks], ["task-a"])
+
+    def test_attach_pr_metadata_to_latest_open_boundary_preserves_json_shape(self):
+        older = _task(
+            "task-a",
+            boundary={
+                "repo_root": "/repo",
+                "branch": "torque/worker",
+                "status": "open",
+                "recorded_at": "2026-04-07T10:00:00+00:00",
+            },
+        )
+        latest = _task(
+            "task-b",
+            boundary={
+                "repo_root": "/repo",
+                "branch": "torque/worker",
+                "base_branch": "main",
+                "status": "open",
+                "recorded_at": "2026-04-07T11:00:00+00:00",
+                "commit_sha": "reviewed-head",
+            },
+        )
+
+        updated = attach_pr_metadata_to_latest_open_boundary(
+            [older, latest],
+            repo_root="/repo",
+            branch="torque/worker",
+            pr_metadata={
+                "provider": "github",
+                "remote": "origin",
+                "base_branch": "main",
+                "head_branch": "torque/worker",
+                "head_sha": "reviewed-head",
+                "url": "https://github.com/acme/repo/pull/123",
+                "number": "123",
+                "status": "pending",
+                "merge_state": "BLOCKED",
+            },
+            requested_cleanup={
+                "close_agent_on_merge": True,
+                "remove_worktree_on_merge": False,
+                "auto_move_to_done": True,
+                "preserve_merge_diff": False,
+            },
+            now="2026-04-07T12:00:00+00:00",
+        )
+
+        self.assertIs(updated, latest)
+        self.assertNotIn("pr", older.worktree_boundary)
+        pr = latest.worktree_boundary["pr"]
+        self.assertEqual(pr["provider"], "github")
+        self.assertEqual(pr["remote"], "origin")
+        self.assertEqual(pr["base_branch"], "main")
+        self.assertEqual(pr["head_branch"], "torque/worker")
+        self.assertEqual(pr["head_sha"], "reviewed-head")
+        self.assertEqual(pr["number"], 123)
+        self.assertEqual(pr["state"], "auto_merge_enabled")
+        self.assertEqual(pr["merge_state"], "BLOCKED")
+        self.assertEqual(pr["created_at"], "2026-04-07T12:00:00+00:00")
+        self.assertEqual(pr["updated_at"], "2026-04-07T12:00:00+00:00")
+        self.assertEqual(
+            pr["requested_cleanup"],
+            {
+                "close_agent_on_merge": True,
+                "remove_worktree_on_merge": False,
+                "auto_move_to_done": True,
+                "preserve_merge_diff": False,
+            },
+        )
+
+        round_tripped = json.loads(json.dumps(latest.worktree_boundary))
+        self.assertEqual(boundary_pr_metadata(round_tripped), pr)
 
     def test_latest_boundary_base_branch_uses_latest_matching_boundary(self):
         older = _task(
@@ -436,3 +511,60 @@ class WorktreeBoundaryTests(unittest.TestCase):
         self.assertEqual(review.worktree_boundary["status"], "merged")
         self.assertEqual(unrelated.labels, ["ready"])
         self.assertEqual(unrelated.worktree_boundary, {})
+
+    def test_mark_branch_boundaries_merged_updates_existing_pr_metadata(self):
+        review = _task(
+            "task-review",
+            labels=["reviewed"],
+            boundary={
+                "version": "1",
+                "repo_root": "/repo",
+                "branch": "torque/worker",
+                "base_branch": "main",
+                "commit_sha": "reviewed-head",
+                "status": "open",
+                "recorded_at": "2026-04-07T10:00:00+00:00",
+                "pr": {
+                    "provider": "github",
+                    "remote": "origin",
+                    "base_branch": "main",
+                    "head_branch": "torque/worker",
+                    "head_sha": "reviewed-head",
+                    "url": "https://github.com/acme/repo/pull/123",
+                    "number": 123,
+                    "state": "auto_merge_enabled",
+                    "merge_state": "BLOCKED",
+                    "created_at": "2026-04-07T10:30:00+00:00",
+                    "updated_at": "2026-04-07T10:30:00+00:00",
+                    "requested_cleanup": {
+                        "close_agent_on_merge": True,
+                        "remove_worktree_on_merge": False,
+                        "auto_move_to_done": True,
+                        "preserve_merge_diff": False,
+                    },
+                },
+            },
+        )
+
+        updated = mark_branch_boundaries_merged(
+            [review],
+            repo_root="/repo",
+            branch="torque/worker",
+            merge_sha="squash-sha",
+            merged_at="2026-04-07T11:00:00+00:00",
+            pr_metadata={"merge_state": "CLEAN"},
+        )
+
+        self.assertEqual([task.id for task in updated], [review.id])
+        boundary = review.worktree_boundary
+        self.assertEqual(boundary["status"], "merged")
+        self.assertEqual(boundary["commit_sha"], "reviewed-head")
+        self.assertEqual(boundary["merge_commit_sha"], "squash-sha")
+        pr = boundary["pr"]
+        self.assertEqual(pr["state"], "merged")
+        self.assertEqual(pr["merge_state"], "CLEAN")
+        self.assertEqual(pr["merge_commit_sha"], "squash-sha")
+        self.assertEqual(pr["merged_at"], "2026-04-07T11:00:00+00:00")
+        self.assertEqual(pr["updated_at"], "2026-04-07T11:00:00+00:00")
+        self.assertEqual(pr["head_sha"], "reviewed-head")
+        self.assertEqual(pr["requested_cleanup"]["close_agent_on_merge"], True)
