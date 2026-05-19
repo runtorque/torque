@@ -111,11 +111,17 @@ The metric is volatile and not a durable audit log; use
 | Tool | What it does |
 |---|---|
 | `engineer_diff` | Structured diff: `summary_only`, `stat_only`, `paths`, or full text. Start with `summary_only=true`. |
-| `engineer_merge` | Server-side merge of a worktree branch into its base. Returns conflict context if conflicts are detected. |
+| `engineer_merge` | Default PR-based merge: push the worktree branch, create/reuse a GitHub PR, request a squash merge, sync the local base, then run cleanup after the merge is confirmed. Returns conflict context or `pending: true` when checks/reviews block the PR. Use `force_direct=true` only for the explicit local fallback. |
 | `engineer_rebase` | Rebase a conflicted worktree branch onto its base. Aborts on conflict and returns details. |
-| `engineer_create_pr` | Push and open a GitHub PR via `gh`. |
+| `engineer_create_pr` | Push and open a GitHub PR via `gh`; create-only, with no merge attempt or cleanup. |
 | `engineer_worktree_checkpoint` | Snapshot a worktree before a risky operation. |
 | `engineer_worktree_remove` | Remove a worktree after merge or cleanup. |
+
+`engineer_merge` stores PR metadata on the latest open worktree boundary.
+Cleanup flags are recorded there while the PR is pending, but cleanup is
+executed only after an actual merge. Torque V1 does not poll GitHub in the
+background; rerun `engineer_merge` after branch-protection checks pass to
+refresh status and finalize the boundary.
 
 ### Agent control
 

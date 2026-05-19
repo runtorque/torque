@@ -94,12 +94,13 @@ architect_decision_link
   for cohesive multi-task work where same-hands continuity beats fresh
   context per task.
 - **Continuity caveat**: merges are usually a stream boundary.
-  `engineer_merge` defaults to closing the worker after merge
-  (`close_agent_on_merge: true`). For planned same-worker sequences,
-  expect the engineer to either preserve the worker with
-  `close_agent_on_merge: false` or defer merge until all sequential
-  tasks complete; a default merge mid-sequence severs worker
-  continuity and the next task needs a fresh dispatch.
+  `engineer_merge` creates/reuses a GitHub PR and requests a squash
+  merge by default. Post-merge cleanup follows group settings or
+  explicit flags and runs only after the PR actually merges, not at PR
+  creation or while branch protection is pending. For planned
+  same-worker sequences, expect the engineer to preserve the worker
+  with explicit cleanup flags or defer merge until all sequential tasks
+  complete.
 - **User asks** are blocking product/scope decisions only. Use
   `architect_ask(question=..., description=...)` when proceeding would
   materially depend on the user's choice; it creates a visible

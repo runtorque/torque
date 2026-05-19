@@ -170,7 +170,7 @@ The Engineer's `engineer_*` MCP toolkit is broad — board reads, task dispatch,
 
 - **Board and planning** — `engineer_board_summary`, `engineer_session_map`, `engineer_task_show`, `engineer_agent_show`, `engineer_actions_list`.
 - **Dispatch** — `engineer_task_dispatch`, `engineer_batch_dispatch`, `engineer_task_resolve`.
-- **Review and merge** — `engineer_diff`, `engineer_merge`, `engineer_rebase`, `engineer_create_pr`.
+- **Review and merge** — `engineer_diff`, `engineer_merge` (default GitHub PR + squash merge), `engineer_rebase`, `engineer_create_pr`.
 - **Worktree** — `engineer_worktree_checkpoint`, `engineer_worktree_remove`.
 - **Communication** — `engineer_agent_message`, `engineer_note`, `engineer_ask`, `engineer_resume`.
 - **Recovery** — `engineer_journal`, `engineer_journal_read`, `engineer_events`, `engineer_notifications`.
@@ -187,6 +187,24 @@ The Engineer's system prompt steers it toward a few habits worth understanding (
 - **Clean up worktrees and sessions after merge.** Don't leak them.
 
 These are tuned in Group Settings → Engineer → Operating Style.
+
+### Merge discipline
+
+`engineer_merge` now defaults to the full GitHub path: push the branch, create
+or reuse a PR, request a squash merge, fast-forward the local base, then run
+post-merge cleanup. `engineer_create_pr` is create-only; it does not merge or
+clean up.
+
+Use `force_direct=true` only as an explicit local fallback, for example in a
+repo without a usable GitHub remote/`gh` auth or when the operator deliberately
+wants to bypass PR review. It still runs the usual local merge safety gates
+unless the Engineer also passes the separate force flags.
+
+When branch protection or required CI keeps the PR open, `engineer_merge`
+returns `pending: true` and records the PR on the stream boundary. V1 has no
+background PR poller, so the Engineer should not treat that as shipped: wait for
+GitHub, then rerun `engineer_merge` (or inspect the PR) to finalize base sync,
+boundary state, and cleanup. Cleanup is post-merge only, never post-PR-create.
 
 ### Dispatch-shape affordance
 
