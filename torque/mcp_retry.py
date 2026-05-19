@@ -69,6 +69,7 @@ _SCOPED_WRITE_SUFFIXES = {
     "decision_link",
     "journal",
     "engineer_message",
+    "peer_message",
     "message_architect",
     "reply",
     "agent_message",
