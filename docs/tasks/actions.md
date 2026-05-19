@@ -2,8 +2,9 @@
 
 An action is a reusable prompt template, defined in YAML at `.torque/actions/foo.yaml` (project) or `~/.torque/actions/foo.yaml` (user). Actions standardize what you tell an agent. They make pipelines possible. They turn a prompt you'd otherwise type 50 times into a parameterized template you write once.
 
-This page is the operational reference for the action format. The two deeper chapters live separately:
+This page is the operational guide for actions. The exact schema and two deeper chapters live separately:
 
+- **[Action YAML format](../reference/action-yaml-format.md)** — field-by-field YAML reference, the reserved `torque` namespace, namespacing, transitions, and examples.
 - **[Templates](templates.md)** — the Jinja2 layer of the `prompt:` field, plus the `torque` context namespace that lets prompts adapt to the live agent state.
 - **[Pipelines](pipelines.md)** — the `transitions:` field, target routing, depth limits, and the LOC review gate.
 
