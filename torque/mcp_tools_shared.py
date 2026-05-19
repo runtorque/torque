@@ -11,6 +11,7 @@ graph enforcement lives in these MCP tool surfaces.
 """
 
 import copy
+import hashlib
 import json
 import re
 import time
@@ -82,6 +83,9 @@ _ARCHITECT_EVENTS_RECENT_MESSAGE_LIMIT = 120
 _ARCHITECT_EVENTS_RECENT_RESPONSE_LIMIT = 10_000
 _ARCHITECT_TASK_CHAIN_NODE_LIMIT = 50
 _ARCHITECT_TASK_LIST_DEFAULT_LIMIT = 100
+_ARCHITECT_PEER_MESSAGE_LENGTH_LIMIT = 16 * 1024
+_ARCHITECT_PEER_INBOX_DEFAULT_LIMIT = 20
+_ARCHITECT_PEER_INBOX_MAX_LIMIT = 100
 _DISPATCH_SHAPE_VALID_BATCH_STATUSES = {
     "dispatched",
     "queued",
@@ -505,6 +509,8 @@ _ARCHITECT_READ_TOOL_NAMES = frozenset({
     "mcp_calls",
     "pending_hire_list",
     "pending_hire_status",
+    "peer_inbox",
+    "peer_list",
     "session_map",
     "specialization_show",
     "specializations_list",
@@ -1174,6 +1180,414 @@ def _resolve_architect_for_engineer(state, caller_id: str,
     return architect, ""
 
 
+def _resolve_architect_peer(state, caller_id: str,
+                            architect_ident: str) -> tuple[object | None, str]:
+    """Resolve a same-group Architect peer for a send/reply mutation."""
+    architect_ident = str(architect_ident or "").strip()
+    if not architect_ident:
+        return None, "architect_id is required"
+    caller = state.agents.get(str(caller_id or "").strip())
+    caller_group = str(getattr(caller, "group", "") or "").strip()
+    architect_id = _resolve_agent_including_tombstoned(state, architect_ident)
+    if not architect_id:
+        return None, f"Architect not found: {architect_ident}"
+    if architect_id == str(caller_id or "").strip():
+        return None, "cannot message self"
+    architect = state.agents.get(architect_id)
+    if (
+        not architect
+        or getattr(architect, "cell_type", "") != "agent"
+        or str(getattr(architect, "kind", "") or "").strip() != "architect"
+    ):
+        return None, f"Architect not found: {architect_ident}"
+    if _agent_is_tombstoned(state, architect):
+        return None, "architect is tombstoned"
+    peer_group = str(getattr(architect, "group", "") or "").strip()
+    if not caller_group or peer_group != caller_group:
+        return None, "architect not found in scope"
+    return architect, ""
+
+
+def _resolve_architect_peer_filter(
+        state,
+        caller_id: str,
+        architect_ident: str) -> tuple[str, str]:
+    """Resolve an optional inbox peer filter without hiding old threads."""
+    architect_ident = str(architect_ident or "").strip()
+    if not architect_ident:
+        return "", ""
+    caller = state.agents.get(str(caller_id or "").strip())
+    caller_group = str(getattr(caller, "group", "") or "").strip()
+    architect_id = _resolve_agent_including_tombstoned(state, architect_ident)
+    if not architect_id:
+        return "", f"Architect not found: {architect_ident}"
+    if architect_id == str(caller_id or "").strip():
+        return "", "peer_architect_id cannot be self"
+    architect = state.agents.get(architect_id)
+    if (
+        not architect
+        or getattr(architect, "cell_type", "") != "agent"
+        or str(getattr(architect, "kind", "") or "").strip() != "architect"
+    ):
+        return "", f"Architect not found: {architect_ident}"
+    peer_group = str(getattr(architect, "group", "") or "").strip()
+    if not caller_group or peer_group != caller_group:
+        return "", "architect not found in scope"
+    return architect_id, ""
+
+
+def _architect_current_task_summary(state, cell) -> tuple[str, str]:
+    current_task_id = str(getattr(cell, "current_task_id", "") or "").strip()
+    task = state.board_tasks.get(current_task_id) if current_task_id else None
+    if not task:
+        for candidate in state.board_tasks.values():
+            if str(getattr(candidate, "agent_id", "") or "").strip() == str(
+                    getattr(cell, "id", "") or "").strip():
+                task = candidate
+                current_task_id = str(getattr(candidate, "id", "") or "")
+                break
+    return current_task_id, str(getattr(task, "task", "") or "") if task else ""
+
+
+def _architect_peer_item(state, cell) -> dict:
+    current_task_id, current_task = _architect_current_task_summary(state, cell)
+    return {
+        "id": str(getattr(cell, "id", "") or ""),
+        "slug": str(getattr(cell, "slug", "") or ""),
+        "name": str(getattr(cell, "name", "") or ""),
+        "group": str(getattr(cell, "group", "") or ""),
+        "status": str(getattr(cell, "status", "") or ""),
+        "dismissed_at": _agent_dismissed_at(cell),
+        "current_task_id": current_task_id,
+        "current_task": current_task,
+    }
+
+
+def _architect_peer_list_json(
+        state,
+        caller_id: str,
+        caller_group: str,
+        args: dict) -> tuple[str, bool]:
+    include_dismissed, bool_error = _optional_bool_arg(
+        args,
+        "include_dismissed",
+        False,
+    )
+    if bool_error:
+        return bool_error, True
+    architects = []
+    for cell in state.iter_agents(include_tombstoned=False):
+        if str(getattr(cell, "id", "") or "").strip() == str(caller_id or "").strip():
+            continue
+        if (
+            getattr(cell, "cell_type", "") != "agent"
+            or str(getattr(cell, "kind", "") or "").strip() != "architect"
+            or str(getattr(cell, "group", "") or "").strip() != caller_group
+        ):
+            continue
+        if _agent_dismissed_at(cell) and not include_dismissed:
+            continue
+        architects.append(_architect_peer_item(state, cell))
+    architects.sort(key=lambda item: (
+        str(item.get("name", "") or "").lower(),
+        str(item.get("id", "") or ""),
+    ))
+    return _compact_json({"type": "architect_peers", "architects": architects}), False
+
+
+def _peer_context_task_snapshot(task) -> dict:
+    return {
+        "id": str(getattr(task, "id", "") or ""),
+        "slug": str(getattr(task, "slug", "") or ""),
+        "title": _summary_task_title(task),
+        "lane": str(getattr(task, "lane", "") or ""),
+        "status": str(getattr(task, "status", "") or ""),
+        "labels": list(getattr(task, "labels", []) or []),
+        "assigned_engineer_id": _effective_assigned_engineer_id(task),
+        "created_by_architect_id": str(
+            getattr(task, "created_by_architect_id", "") or ""
+        ),
+        "updated_at": str(getattr(task, "updated_at", "") or ""),
+    }
+
+
+def _peer_context_engineer_snapshot(state, engineer) -> dict:
+    current_task_id, current_task = _architect_current_task_summary(state, engineer)
+    active_assigned = 0
+    open_assigned = 0
+    for task in state.board_tasks.values():
+        if _effective_assigned_engineer_id(task) != str(
+                getattr(engineer, "id", "") or "").strip():
+            continue
+        if not board_task_is_closed(task):
+            open_assigned += 1
+        if str(getattr(task, "lane", "") or "") in {"To Do", "In Progress"}:
+            active_assigned += 1
+    return {
+        "id": str(getattr(engineer, "id", "") or ""),
+        "slug": str(getattr(engineer, "slug", "") or ""),
+        "name": str(getattr(engineer, "name", "") or ""),
+        "status": str(getattr(engineer, "status", "") or ""),
+        "dismissed_at": _agent_dismissed_at(engineer),
+        "hired_by_architect_id": str(
+            getattr(engineer, "hired_by_architect_id", "") or ""
+        ),
+        "current_task_id": current_task_id,
+        "current_task": current_task,
+        "open_assigned_task_count": open_assigned,
+        "active_assigned_task_count": active_assigned,
+    }
+
+
+def _decision_excerpt(text: str, limit: int = 240) -> str:
+    value = " ".join(str(text or "").split())
+    if len(value) <= limit:
+        return value
+    return value[:limit - 1].rstrip() + "…"
+
+
+def _peer_context_decision_snapshot(decision: dict) -> dict:
+    return {
+        "id": str(decision.get("id", "") or ""),
+        "title": str(decision.get("title", "") or ""),
+        "status": str(decision.get("status", "") or ""),
+        "rationale_excerpt": _decision_excerpt(
+            str(decision.get("rationale", "") or "")
+        ),
+        "linked_task_ids": list(decision.get("linked_task_ids", []) or []),
+        "linked_engineer_ids": list(decision.get("linked_engineer_ids", []) or []),
+        "updated_at": int(decision.get("updated_at", 0) or 0),
+    }
+
+
+def _normalize_architect_peer_context(
+        state,
+        caller_id: str,
+        caller_group: str,
+        args: dict) -> tuple[dict, str]:
+    visible_tasks = _filter_tasks_for_caller(state, "architect", caller_id)
+    task_ids = []
+    task_snapshots = []
+    for task_ident in _dedupe_strings(args.get("context_task_ids", [])):
+        task_id = _resolve_task(state, task_ident)
+        if not task_id or task_id not in visible_tasks:
+            return {}, f"Task not found: {task_ident}"
+        task = state.board_tasks.get(task_id)
+        if not task or str(getattr(task, "group", "") or "").strip() != caller_group:
+            return {}, f"Task not found: {task_ident}"
+        task_ids.append(task_id)
+        task_snapshots.append(_peer_context_task_snapshot(task))
+
+    engineer_ids = []
+    engineer_snapshots = []
+    for engineer_ident in _dedupe_strings(args.get("context_engineer_ids", [])):
+        engineer_id, engineer_error = _resolve_architect_engineer(
+            state,
+            caller_id,
+            engineer_ident,
+        )
+        if not engineer_id:
+            return {}, engineer_error
+        engineer = state.agents.get(engineer_id)
+        engineer_ids.append(engineer_id)
+        engineer_snapshots.append(_peer_context_engineer_snapshot(state, engineer))
+
+    decision_ids = []
+    decision_snapshots = []
+    for decision_ident in _dedupe_strings(args.get("context_decision_ids", [])):
+        decision_id = str(decision_ident or "").strip()
+        decision = state.load_decision(decision_id) if decision_id else None
+        if (
+            not decision
+            or str(decision.get("architect_id", "") or "").strip()
+            != str(caller_id or "").strip()
+        ):
+            return {}, f"Decision not found: {decision_ident}"
+        decision_ids.append(decision_id)
+        decision_snapshots.append(_peer_context_decision_snapshot(decision))
+
+    return {
+        "context_task_ids": task_ids,
+        "context_engineer_ids": engineer_ids,
+        "context_decision_ids": decision_ids,
+        "context_summary": str(args.get("context_summary", "") or "").strip(),
+        "context_snapshot": {
+            "tasks": task_snapshots,
+            "engineers": engineer_snapshots,
+            "decisions": decision_snapshots,
+        },
+    }, ""
+
+
+def _validate_architect_peer_message_length(
+        message: str,
+        context_summary: str = "") -> str:
+    size = len(str(message or "").encode("utf-8")) + len(
+        str(context_summary or "").encode("utf-8")
+    )
+    if size > _ARCHITECT_PEER_MESSAGE_LENGTH_LIMIT:
+        return (
+            "message and context_summary must be at most "
+            f"{_ARCHITECT_PEER_MESSAGE_LENGTH_LIMIT} bytes combined"
+        )
+    return ""
+
+
+def _peer_message_id_from_idempotency_key(idempotency_key: str) -> str:
+    key = str(idempotency_key or "").strip()
+    if not key:
+        return ""
+    digest = hashlib.sha256(
+        ("agent-peer-message\0" + key).encode("utf-8")
+    ).hexdigest()
+    return "msg-" + digest[:12]
+
+
+def _agent_peer_message_row_to_entry(row: dict, agent_id: str) -> dict:
+    sender_id = str(row.get("sender_id", "") or "").strip()
+    recipient_id = str(row.get("recipient_id", "") or "").strip()
+    sender_kind = str(row.get("sender_kind", "") or "").strip() or "architect"
+    recipient_kind = str(row.get("recipient_kind", "") or "").strip() or "architect"
+    direction = "sent" if str(agent_id or "").strip() == sender_id else "received"
+    peer_id = recipient_id if direction == "sent" else sender_id
+    peer_kind = recipient_kind if direction == "sent" else sender_kind
+    created_at = float(row.get("created_at", row.get("timestamp", 0)) or 0)
+    delivery_state = str(row.get("delivery_state", "") or "").strip() or "buffered"
+    action = (
+        "architect_peer_reply"
+        if str(row.get("reply_to_id", "") or "").strip()
+        else "architect_peer_message"
+    )
+    context = {
+        "task_ids": list(row.get("context_task_ids", []) or []),
+        "engineer_ids": list(row.get("context_engineer_ids", []) or []),
+        "decision_ids": list(row.get("context_decision_ids", []) or []),
+        "summary": str(row.get("context_summary", "") or ""),
+        "snapshot": dict(row.get("context_snapshot", {}) or {}),
+    }
+    return {
+        "id": str(row.get("id", "") or ""),
+        "thread_id": str(row.get("thread_id", "") or ""),
+        "reply_to_id": str(row.get("reply_to_id", "") or ""),
+        "direction": direction,
+        "action": action,
+        "sender_id": sender_id,
+        "sender_kind": sender_kind,
+        "recipient_id": recipient_id,
+        "recipient_kind": recipient_kind,
+        "peer_id": peer_id,
+        "peer_kind": peer_kind,
+        "message": str(row.get("message", "") or ""),
+        "timestamp": created_at,
+        "ack_required": bool(row.get("ack_required", False)),
+        "delivery_state": delivery_state,
+        "delivery_reason": str(row.get("delivery_reason", "") or ""),
+        "delivered_at": float(row.get("delivered_at", 0) or 0),
+        "context": context,
+        "context_task_ids": context["task_ids"],
+        "context_engineer_ids": context["engineer_ids"],
+        "context_decision_ids": context["decision_ids"],
+        "context_summary": context["summary"],
+        "context_snapshot": context["snapshot"],
+    }
+
+
+def _thread_requires_architect_reply(messages: list[dict],
+                                     caller_id: str) -> bool:
+    latest_outgoing = 0.0
+    latest_incoming_ack = 0.0
+    caller_id = str(caller_id or "").strip()
+    for row in messages:
+        ts = float(row.get("created_at", row.get("timestamp", 0)) or 0)
+        if str(row.get("sender_id", "") or "").strip() == caller_id:
+            latest_outgoing = max(latest_outgoing, ts)
+        elif bool(row.get("ack_required", False)):
+            latest_incoming_ack = max(latest_incoming_ack, ts)
+    return latest_incoming_ack > latest_outgoing
+
+
+def _architect_peer_inbox_json(
+        state,
+        caller_id: str,
+        args: dict) -> tuple[str, bool]:
+    try:
+        limit = int(args.get("limit", _ARCHITECT_PEER_INBOX_DEFAULT_LIMIT)
+                    or _ARCHITECT_PEER_INBOX_DEFAULT_LIMIT)
+    except (TypeError, ValueError):
+        limit = _ARCHITECT_PEER_INBOX_DEFAULT_LIMIT
+    limit = max(1, min(limit, _ARCHITECT_PEER_INBOX_MAX_LIMIT))
+    try:
+        since_value = float(args.get("since", 0) or 0)
+    except (TypeError, ValueError):
+        return "since must be a number", True
+    requires_reply, requires_reply_error = _optional_bool_arg(
+        args,
+        "requires_reply",
+        False,
+    )
+    if requires_reply_error:
+        return requires_reply_error, True
+    peer_id, peer_error = _resolve_architect_peer_filter(
+        state,
+        caller_id,
+        str(args.get("peer_architect_id", "") or "").strip(),
+    )
+    if peer_error:
+        return peer_error, True
+    thread_id = str(args.get("thread_id", "") or "").strip()
+    if not getattr(state, "db", None):
+        return _compact_json({"type": "architect_peer_inbox", "threads": []}), False
+    row_limit = min(max(limit * 20, limit), 1000)
+    rows = state.db.load_agent_peer_messages_for_agent(
+        caller_id,
+        limit=row_limit,
+        since=since_value,
+        peer_id=peer_id,
+        thread_id=thread_id,
+    )
+    grouped: dict[str, list[dict]] = {}
+    for row in rows:
+        grouped.setdefault(str(row.get("thread_id", "") or ""), []).append(row)
+    threads = []
+    for group_thread_id, messages in grouped.items():
+        messages.sort(
+            key=lambda row: (
+                float(row.get("created_at", 0) or 0),
+                str(row.get("id", "") or ""),
+            )
+        )
+        requires = _thread_requires_architect_reply(messages, caller_id)
+        if requires_reply and not requires:
+            continue
+        last = messages[-1]
+        entry_for_caller = _agent_peer_message_row_to_entry(last, caller_id)
+        peer_architect_id = entry_for_caller["peer_id"]
+        peer = state.agents.get(peer_architect_id)
+        threads.append({
+            "thread_id": group_thread_id,
+            "peer_architect_id": peer_architect_id,
+            "peer_name": str(getattr(peer, "name", "") or "").strip()
+            or peer_architect_id,
+            "last_message_at": float(last.get("created_at", 0) or 0),
+            "requires_reply": requires,
+            "messages": [
+                _agent_peer_message_row_to_entry(row, caller_id)
+                for row in messages
+            ],
+        })
+    threads.sort(
+        key=lambda item: (
+            float(item.get("last_message_at", 0) or 0),
+            str(item.get("thread_id", "") or ""),
+        ),
+        reverse=True,
+    )
+    return _compact_json({
+        "type": "architect_peer_inbox",
+        "threads": threads[:limit],
+    }), False
+
+
 def _append_cross_kind_message(cell, entry: dict) -> None:
     if not cell:
         return
@@ -1367,6 +1781,151 @@ def _deliver_architect_engineer_message(state, sender, recipient, *,
     state._emit_agent(sender)
     state._emit_agent(recipient)
     return shared
+
+
+def _load_existing_peer_message_for_idempotency(state, message_id: str) -> dict | None:
+    message_id = str(message_id or "").strip()
+    if not message_id or not getattr(state, "db", None):
+        return None
+    return state.db.load_agent_peer_message(message_id)
+
+
+def _save_architect_peer_message(state, sender, recipient, *,
+                                 action: str,
+                                 message: str,
+                                 reply_to_id: str = "",
+                                 thread_id: str = "",
+                                 ack_required: bool = False,
+                                 context: dict | None = None,
+                                 idempotency_key: str = "") -> tuple[dict, bool]:
+    """Persist a canonical Architect peer message and project UI caches.
+
+    Returns ``(row, created)``.  When an idempotency-derived message id already
+    exists the stored row is returned and no audit side effects are repeated.
+    """
+    message_text = str(message or "").strip()
+    if not message_text:
+        raise ValueError("message is required")
+    message_id = _peer_message_id_from_idempotency_key(idempotency_key)
+    created = False
+    if not message_id:
+        message_id = "msg-" + uuid.uuid4().hex[:12]
+        created = True
+    existing = _load_existing_peer_message_for_idempotency(state, message_id)
+    if existing:
+        state.append_peer_message_to_caches(existing)
+        return existing, False
+    if not created:
+        created = True
+    conversation_id = str(thread_id or "").strip() or message_id
+    context = dict(context or {})
+    row = {
+        "id": message_id,
+        "thread_id": conversation_id,
+        "reply_to_id": str(reply_to_id or "").strip(),
+        "group_name": str(getattr(sender, "group", "") or "").strip(),
+        "sender_id": sender.id,
+        "sender_kind": "architect",
+        "recipient_id": recipient.id,
+        "recipient_kind": "architect",
+        "message": message_text,
+        "created_at": time.time(),
+        "ack_required": bool(ack_required),
+        "context_task_ids": list(context.get("context_task_ids", []) or []),
+        "context_engineer_ids": list(context.get("context_engineer_ids", []) or []),
+        "context_decision_ids": list(context.get("context_decision_ids", []) or []),
+        "context_summary": str(context.get("context_summary", "") or ""),
+        "context_snapshot": dict(context.get("context_snapshot", {}) or {}),
+        "delivery_state": "buffered",
+        "delivery_reason": "",
+    }
+    saved = state.save_peer_message(row) if getattr(state, "db", None) else None
+    if not saved:
+        raise ValueError("failed to save peer message")
+    state.history_record_message(
+        sender.id,
+        action,
+        message_text,
+        mark_progress=False,
+    )
+    state.history_record_message(
+        recipient.id,
+        action,
+        message_text,
+        mark_progress=False,
+    )
+    return saved, created
+
+
+async def _inject_architect_peer_message(handle_command, state, sender,
+                                         recipient, row: dict,
+                                         message: str) -> dict:
+    """Inject an Architect peer message and persist delivery state."""
+    message_id = str((row or {}).get("id", "") or "").strip()
+    if _agent_dismissed_at(recipient):
+        updated = state.update_peer_message_delivery(
+            message_id,
+            "buffered",
+            reason="recipient_dismissed",
+        )
+        return {
+            "state": str((updated or row).get("delivery_state", "buffered") or "buffered"),
+            "reason": str((updated or row).get("delivery_reason", "recipient_dismissed") or ""),
+        }
+    if not recipient or not handle_command:
+        updated = state.update_peer_message_delivery(
+            message_id,
+            "buffered",
+            reason="no_session",
+        )
+        return {
+            "state": str((updated or row).get("delivery_state", "buffered") or "buffered"),
+            "reason": str((updated or row).get("delivery_reason", "no_session") or ""),
+        }
+    try:
+        result = await handle_command({
+            "cmd": "inject_mcp_message",
+            "agent_id": getattr(recipient, "id", ""),
+            "message": message,
+            "sender_name": str(getattr(sender, "name", "") or "").strip(),
+            "sender_kind": "architect",
+            "message_id": message_id,
+            "ack_required": bool((row or {}).get("ack_required", False)),
+        })
+    except Exception:
+        log.exception(
+            "Failed to inject Architect peer message into %s",
+            getattr(recipient, "id", ""),
+        )
+        updated = state.update_peer_message_delivery(
+            message_id,
+            "failed",
+            reason="inject_failed",
+        )
+        return {
+            "state": str((updated or row).get("delivery_state", "failed") or "failed"),
+            "reason": str((updated or row).get("delivery_reason", "inject_failed") or ""),
+        }
+
+    if isinstance(result, dict) and result.get("type") == "error":
+        updated = state.update_peer_message_delivery(
+            message_id,
+            "failed",
+            reason=str(result.get("message", "") or "inject_failed"),
+        )
+    elif bool(result and result.get("delivered")):
+        updated = state.update_peer_message_delivery(message_id, "delivered")
+    else:
+        updated = state.update_peer_message_delivery(
+            message_id,
+            "buffered",
+            reason=str((result or {}).get("reason", "") or "no_session"),
+        )
+    current = updated or row
+    return {
+        "state": str(current.get("delivery_state", "buffered") or "buffered"),
+        "reason": str(current.get("delivery_reason", "") or ""),
+    }
 
 
 async def _inject_mcp_message(handle_command, sender, recipient,
@@ -2031,6 +2590,17 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             _engineer_group,
             args,
         )
+
+    if tool_name == "peer_list" and caller_kind == "architect":
+        return _architect_peer_list_json(
+            real_state,
+            caller_id,
+            _engineer_group,
+            args,
+        )
+
+    if tool_name == "peer_inbox" and caller_kind == "architect":
+        return _architect_peer_inbox_json(real_state, caller_id, args)
 
     if tool_name == "mcp_calls":
         target_agent = str(args.get("agent_id", "") or args.get("cell_id", "") or "").strip()
@@ -4305,6 +4875,74 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             "engineer_id": engineer.id,
         }), False
 
+    if tool_name == "peer_message" and caller_kind == "architect":
+        recipient, recipient_error = _resolve_architect_peer(
+            real_state,
+            caller_id,
+            str(args.get("architect_id", "") or "").strip(),
+        )
+        if not recipient:
+            return recipient_error, True
+        architect = real_state.agents.get(str(caller_id or "").strip())
+        message = str(args.get("message", "") or "").strip()
+        if not message:
+            return "message is required", True
+        ack_required, ack_error = _optional_bool_arg(args, "ack_required")
+        if ack_error:
+            return ack_error, True
+        context, context_error = _normalize_architect_peer_context(
+            real_state,
+            caller_id,
+            _engineer_group,
+            args,
+        )
+        if context_error:
+            return context_error, True
+        length_error = _validate_architect_peer_message_length(
+            message,
+            context.get("context_summary", ""),
+        )
+        if length_error:
+            return length_error, True
+        try:
+            saved, created = _save_architect_peer_message(
+                real_state,
+                architect,
+                recipient,
+                action="architect_peer_message",
+                message=message,
+                ack_required=ack_required,
+                context=context,
+                idempotency_key=idempotency_key,
+            )
+        except ValueError as exc:
+            return str(exc), True
+        if created:
+            delivery = await _inject_architect_peer_message(
+                handle_command,
+                real_state,
+                architect,
+                recipient,
+                saved,
+                message,
+            )
+            current = real_state.db.load_agent_peer_message(saved["id"])
+            if current:
+                saved = current
+        else:
+            delivery = {
+                "state": str(saved.get("delivery_state", "buffered") or "buffered"),
+                "reason": str(saved.get("delivery_reason", "") or ""),
+            }
+        return json.dumps({
+            "type": "ok",
+            "message_id": saved["id"],
+            "thread_id": saved["thread_id"],
+            "recipient_architect_id": recipient.id,
+            "ack_required": bool(saved.get("ack_required", False)),
+            "delivery": delivery,
+        }), False
+
     if tool_name == "message_architect" and caller_kind == "engineer":
         architect_ident = str(args.get("architect_id", "") or "").strip()
         if not architect_ident:
@@ -4349,13 +4987,26 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         peer_id = str(entry.get("peer_id", "") or "").strip()
         peer = real_state.agents.get(peer_id)
         if caller_kind == "architect":
-            engineer_id, engineer_error = _resolve_architect_hired_engineer(
-                real_state, caller_id, peer_id
-            )
-            if not engineer_id:
-                return engineer_error, True
-            peer = real_state.agents.get(engineer_id)
-            action = "architect_reply"
+            peer_kind = str(entry.get("peer_kind", "") or "").strip()
+            if peer_kind == "architect":
+                peer, peer_error = _resolve_architect_peer(
+                    real_state,
+                    caller_id,
+                    peer_id,
+                )
+                if not peer:
+                    return peer_error, True
+                action = "architect_peer_reply"
+            elif peer_kind in {"", "engineer"}:
+                engineer_id, engineer_error = _resolve_architect_hired_engineer(
+                    real_state, caller_id, peer_id
+                )
+                if not engineer_id:
+                    return engineer_error, True
+                peer = real_state.agents.get(engineer_id)
+                action = "architect_reply"
+            else:
+                return "Message peer kind is not replyable", True
         else:
             architect, architect_error = _resolve_architect_for_engineer(
                 real_state, caller_id, peer_id
@@ -4368,10 +5019,43 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         if not message:
             return "message is required", True
         ack_required = False
-        if caller_kind == "engineer":
+        if caller_kind == "engineer" or (
+                caller_kind == "architect" and action == "architect_peer_reply"):
             ack_required, ack_error = _optional_bool_arg(args, "ack_required")
             if ack_error:
                 return ack_error, True
+        if caller_kind == "architect" and action == "architect_peer_reply":
+            length_error = _validate_architect_peer_message_length(message)
+            if length_error:
+                return length_error, True
+            try:
+                saved, created = _save_architect_peer_message(
+                    real_state,
+                    caller,
+                    peer,
+                    action=action,
+                    message=message,
+                    reply_to_id=str(entry.get("id", "") or "").strip(),
+                    thread_id=str(entry.get("thread_id", "") or "").strip(),
+                    ack_required=ack_required,
+                    idempotency_key=idempotency_key,
+                )
+            except ValueError as exc:
+                return str(exc), True
+            if created:
+                await _inject_architect_peer_message(
+                    handle_command,
+                    real_state,
+                    caller,
+                    peer,
+                    saved,
+                    message,
+                )
+            return json.dumps({
+                "type": "ok",
+                "message_id": saved["id"],
+                "thread_id": saved["thread_id"],
+            }), False
         delivered = _deliver_architect_engineer_message(
             real_state,
             caller,

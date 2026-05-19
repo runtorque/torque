@@ -40,29 +40,33 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.state._db_save_groups()
         self.handle_calls = []
 
-    def _add_architect(self, agent_id: str, name: str):
+    def _add_architect(self, agent_id: str, name: str, *, group: str = "torque"):
+        self.state.groups.setdefault(group, [])
         cell = self.state_mod.AgentCell(
             id=agent_id,
             name=name,
             slug=name.lower(),
-            group="torque",
+            group=group,
             cell_type="agent",
             kind="architect",
             status="running",
             persistent=True,
         )
         self.state.agents[cell.id] = cell
-        self.state.groups["torque"].append(cell.id)
+        self.state.groups[group].append(cell.id)
         self.state._db_save_agent(cell)
         self.state._db_save_groups()
         return cell
 
-    def _add_engineer(self, agent_id: str, name: str, *, hired_by_architect_id: str = ""):
+    def _add_engineer(self, agent_id: str, name: str, *,
+                      hired_by_architect_id: str = "",
+                      group: str = "torque"):
+        self.state.groups.setdefault(group, [])
         cell = self.state_mod.AgentCell(
             id=agent_id,
             name=name,
             slug=name.lower().replace(" ", "-"),
-            group="torque",
+            group=group,
             cell_type="agent",
             kind="engineer",
             status="running",
@@ -70,7 +74,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             hired_by_architect_id=hired_by_architect_id,
         )
         self.state.agents[cell.id] = cell
-        self.state.groups["torque"].append(cell.id)
+        self.state.groups[group].append(cell.id)
         self.state._db_save_agent(cell)
         self.state._db_save_groups()
         return cell
@@ -2370,6 +2374,205 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             hired.mcp_messages[0]["thread_id"],
             architect_reply["thread_id"],
         )
+
+    async def test_architect_peer_tools_happy_path_context_inbox_and_reply(self):
+        architect = self._add_architect("arch-1", "Architect")
+        peer = self._add_architect("arch-2", "Peer")
+        peer.session_id = "peer-session"
+        hired = self._add_engineer(
+            "eng-hired", "Hired", hired_by_architect_id=architect.id
+        )
+        task = self._add_task(
+            "task-peer-1",
+            "Peer context task",
+            assigned_engineer_id=hired.id,
+            created_by_architect_id=architect.id,
+        )
+        decision = self.db.save_decision({
+            "id": "decision-1",
+            "architect_id": architect.id,
+            "title": "Use direct peer messages",
+            "rationale": "Keeps coordination off the board",
+            "status": "accepted",
+            "linked_task_ids": [task.id],
+            "linked_engineer_ids": [hired.id],
+        })
+
+        list_text, list_error = await self._call(
+            "architect_peer_list",
+            {},
+            architect.id,
+        )
+        self.assertFalse(list_error, list_text)
+        listed = json.loads(list_text)
+        self.assertEqual(
+            [item["id"] for item in listed["architects"]],
+            [peer.id],
+        )
+
+        message_text, message_error = await self._call(
+            "architect_peer_message",
+            {
+                "architect_id": peer.id,
+                "message": "Can you sanity-check this API boundary?",
+                "ack_required": True,
+                "context_task_ids": [task.id],
+                "context_engineer_ids": [hired.id],
+                "context_decision_ids": [decision["id"]],
+                "context_summary": "API ownership is ambiguous.",
+            },
+            architect.id,
+        )
+        self.assertFalse(message_error, message_text)
+        sent = json.loads(message_text)
+        self.assertEqual(sent["type"], "ok")
+        self.assertEqual(sent["recipient_architect_id"], peer.id)
+        self.assertEqual(sent["delivery"]["state"], "delivered")
+        persisted = self.db.load_agent_peer_message(sent["message_id"])
+        self.assertEqual(persisted["context_task_ids"], [task.id])
+        self.assertEqual(persisted["context_engineer_ids"], [hired.id])
+        self.assertEqual(persisted["context_decision_ids"], [decision["id"]])
+        self.assertEqual(
+            persisted["context_snapshot"]["decisions"][0]["title"],
+            "Use direct peer messages",
+        )
+        self.assertEqual(architect.mcp_messages[0]["action"], "architect_peer_message")
+        self.assertEqual(architect.mcp_messages[0]["direction"], "sent")
+        self.assertEqual(peer.mcp_messages[0]["direction"], "received")
+        self.assertTrue(peer.mcp_messages[0]["ack_required"])
+        injects = [
+            call for call in self.handle_calls
+            if call.get("cmd") == "inject_mcp_message"
+        ]
+        self.assertEqual(len(injects), 1)
+        self.assertEqual(injects[-1]["agent_id"], peer.id)
+        self.assertTrue(injects[-1]["ack_required"])
+
+        inbox_text, inbox_error = await self._call(
+            "architect_peer_inbox",
+            {"requires_reply": True},
+            peer.id,
+        )
+        self.assertFalse(inbox_error, inbox_text)
+        inbox = json.loads(inbox_text)
+        self.assertEqual(inbox["type"], "architect_peer_inbox")
+        self.assertEqual(len(inbox["threads"]), 1)
+        self.assertEqual(inbox["threads"][0]["thread_id"], sent["thread_id"])
+        self.assertTrue(inbox["threads"][0]["requires_reply"])
+        self.assertEqual(
+            inbox["threads"][0]["messages"][0]["context"]["task_ids"],
+            [task.id],
+        )
+
+        reply_text, reply_error = await self._call(
+            "architect_reply",
+            {
+                "message_id": sent["message_id"],
+                "message": "Looks good; please confirm after review.",
+                "ack_required": True,
+            },
+            peer.id,
+        )
+        self.assertFalse(reply_error, reply_text)
+        reply = json.loads(reply_text)
+        self.assertEqual(reply["thread_id"], sent["thread_id"])
+        self.assertEqual(architect.mcp_messages[0]["action"], "architect_peer_reply")
+        self.assertEqual(architect.mcp_messages[0]["direction"], "received")
+        self.assertTrue(architect.mcp_messages[0]["ack_required"])
+
+        answered_text, answered_error = await self._call(
+            "architect_peer_inbox",
+            {"requires_reply": True},
+            peer.id,
+        )
+        self.assertFalse(answered_error, answered_text)
+        self.assertEqual(json.loads(answered_text)["threads"], [])
+
+    async def test_architect_peer_scoping_rules_and_dismissed_buffering(self):
+        architect = self._add_architect("arch-1", "Architect")
+        peer = self._add_architect("arch-2", "Peer")
+        dismissed_peer = self._add_architect("arch-dismissed", "Dismissed")
+        dismissed_peer.dismissed_at = 99
+        dismissed_peer.session_id = "should-not-inject"
+        self.state._db_save_agent(dismissed_peer)
+        other_group_architect = self._add_architect(
+            "arch-other-group",
+            "Other Group",
+            group="other",
+        )
+        tombstoned = self._add_architect("arch-tomb", "Tomb")
+        tombstoned.deleted_at = 123.0
+        self.state._db_save_agent(tombstoned)
+        engineer = self._add_engineer("eng-1", "Engineer")
+
+        default_list_text, default_list_error = await self._call(
+            "architect_peer_list",
+            {},
+            architect.id,
+        )
+        self.assertFalse(default_list_error, default_list_text)
+        self.assertEqual(
+            [item["id"] for item in json.loads(default_list_text)["architects"]],
+            [peer.id],
+        )
+
+        dismissed_list_text, dismissed_list_error = await self._call(
+            "architect_peer_list",
+            {"include_dismissed": True},
+            architect.id,
+        )
+        self.assertFalse(dismissed_list_error, dismissed_list_text)
+        self.assertEqual(
+            [item["id"] for item in json.loads(dismissed_list_text)["architects"]],
+            [dismissed_peer.id, peer.id],
+        )
+
+        for target, expected in [
+            (architect.id, "cannot message self"),
+            (other_group_architect.id, "architect not found in scope"),
+            (tombstoned.id, "architect is tombstoned"),
+            (engineer.id, f"Architect not found: {engineer.id}"),
+        ]:
+            text, is_error = await self._call(
+                "architect_peer_message",
+                {"architect_id": target, "message": "hello"},
+                architect.id,
+            )
+            self.assertTrue(is_error, target)
+            self.assertEqual(text, expected)
+
+        architect.dismissed_at = 77
+        self.state._db_save_agent(architect)
+        dismissed_text, dismissed_error = await self._call(
+            "architect_peer_message",
+            {"architect_id": peer.id, "message": "blocked"},
+            architect.id,
+        )
+        self.assertTrue(dismissed_error)
+        self.assertEqual(json.loads(dismissed_text)["reason"], "architect_dismissed")
+        architect.dismissed_at = 0
+        self.state._db_save_agent(architect)
+
+        buffered_text, buffered_error = await self._call(
+            "architect_peer_message",
+            {"architect_id": dismissed_peer.id, "message": "read on rehire"},
+            architect.id,
+        )
+        self.assertFalse(buffered_error, buffered_text)
+        buffered = json.loads(buffered_text)
+        self.assertEqual(buffered["delivery"], {
+            "state": "buffered",
+            "reason": "recipient_dismissed",
+        })
+        persisted = self.db.load_agent_peer_message(buffered["message_id"])
+        self.assertEqual(persisted["delivery_state"], "buffered")
+        self.assertEqual(persisted["delivery_reason"], "recipient_dismissed")
+        injects = [
+            call for call in self.handle_calls
+            if call.get("cmd") == "inject_mcp_message"
+            and call.get("agent_id") == dismissed_peer.id
+        ]
+        self.assertEqual(injects, [])
 
     async def test_architect_decisions_are_scoped_to_owner(self):
         architect = self._add_architect("arch-1", "Architect")

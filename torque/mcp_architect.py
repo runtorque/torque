@@ -556,6 +556,97 @@ _ARCHITECT_TOOL_SPECS = [
         },
     },
     {
+        "name": "architect_peer_list",
+        "description": (
+            "List same-group Architect peers that can receive direct "
+            "Architect peer messages."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "include_dismissed": {
+                    "type": "boolean",
+                    "description": "Include dismissed same-group Architects.",
+                },
+            },
+        },
+    },
+    {
+        "name": "architect_peer_message",
+        "description": (
+            "Send a durable same-group direct message to another Architect."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "architect_id": {
+                    "type": "string",
+                    "description": "Recipient Architect id/slug/name.",
+                },
+                "message": {
+                    "type": "string",
+                    "description": "Message content (combined with context_summary max ~16 KiB).",
+                },
+                "ack_required": {
+                    "type": "boolean",
+                    "description": "Whether this message requires a reply.",
+                },
+                "context_task_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional same-group task ids/aliases to snapshot.",
+                },
+                "context_engineer_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional visible same-group Engineer ids/slugs/names to snapshot.",
+                },
+                "context_decision_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional caller-owned decision ids to snapshot.",
+                },
+                "context_summary": {
+                    "type": "string",
+                    "description": "Optional concise context summary.",
+                },
+            },
+            "required": ["architect_id", "message"],
+        },
+    },
+    {
+        "name": "architect_peer_inbox",
+        "description": (
+            "Read durable same-group Architect peer message threads involving "
+            "this Architect."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "peer_architect_id": {
+                    "type": "string",
+                    "description": "Optional peer Architect id/slug/name filter.",
+                },
+                "thread_id": {
+                    "type": "string",
+                    "description": "Optional thread id filter.",
+                },
+                "requires_reply": {
+                    "type": "boolean",
+                    "description": "Only return threads with an unanswered incoming ack-required message.",
+                },
+                "since": {
+                    "type": "number",
+                    "description": "Optional unix timestamp lower bound.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum threads to return (default 20, max 100).",
+                },
+            },
+        },
+    },
+    {
         "name": "architect_engineer_journal_read",
         "description": (
             "Read recent journal entries from a hired engineer."
@@ -606,7 +697,10 @@ _ARCHITECT_TOOL_SPECS = [
     },
     {
         "name": "architect_reply",
-        "description": "Reply to an existing architect↔engineer message thread.",
+        "description": (
+            "Reply to an existing Architect↔Engineer or Architect↔Architect "
+            "message thread."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -617,6 +711,13 @@ _ARCHITECT_TOOL_SPECS = [
                 "message": {
                     "type": "string",
                     "description": "Reply content.",
+                },
+                "ack_required": {
+                    "type": "boolean",
+                    "description": (
+                        "For Architect peer replies, whether this follow-up "
+                        "requires a reply."
+                    ),
                 },
             },
             "required": ["message_id", "message"],

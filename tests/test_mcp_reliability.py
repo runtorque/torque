@@ -140,6 +140,7 @@ class MCPRetryHelperTests(unittest.IsolatedAsyncioTestCase):
             "architect_task_move",
             "architect_ask",
             "architect_engineer_message",
+            "architect_peer_message",
             "architect_reply",
             "architect_decision_create",
             "architect_decision_update",
@@ -238,6 +239,82 @@ class MCPIdempotencyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(calls), 1)
         health = self.db.load_mcp_health_summary(since=0)
         self.assertEqual(health["totals"].get("dedupe"), 1)
+
+    async def test_architect_peer_message_retry_does_not_duplicate_row(self):
+        arch_a = AgentCell(
+            id="arch-a",
+            name="Architect A",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+        )
+        arch_b = AgentCell(
+            id="arch-b",
+            name="Architect B",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+            session_id="session-b",
+        )
+        self.state.groups["g"] = [arch_a.id, arch_b.id]
+        self.state.agents[arch_a.id] = arch_a
+        self.state.agents[arch_b.id] = arch_b
+        self.db.save_groups_and_members(self.state.groups, {})
+        self.db.save_agent(arch_a)
+        self.db.save_agent(arch_b)
+        calls = []
+
+        async def handle_command(payload):
+            calls.append(dict(payload))
+            return {"type": "ok", "delivered": True}
+
+        body = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "architect_peer_message",
+                "arguments": {
+                    "architect_id": arch_b.id,
+                    "message": "Please review this boundary.",
+                    "ack_required": True,
+                    IDEMPOTENCY_ARG: "peer-idem-1",
+                },
+            },
+        }
+
+        first, status = await self.mcp.dispatch_mcp_rpc_body(
+            body,
+            cell_id=arch_a.id,
+            handle_command=handle_command,
+            state=self.state,
+        )
+        self.assertEqual(status, 200)
+        self.assertFalse(first["result"]["isError"])
+        first_payload = json.loads(first["result"]["content"][0]["text"])
+
+        retry = dict(body)
+        retry["id"] = 2
+        second, status = await self.mcp.dispatch_mcp_rpc_body(
+            retry,
+            cell_id=arch_a.id,
+            handle_command=handle_command,
+            state=self.state,
+        )
+
+        self.assertEqual(status, 200)
+        second_payload = json.loads(second["result"]["content"][0]["text"])
+        self.assertEqual(second_payload["message_id"], first_payload["message_id"])
+        self.assertEqual(
+            self.db._conn.execute(
+                "SELECT COUNT(*) FROM agent_peer_messages"
+            ).fetchone()[0],
+            1,
+        )
+        self.assertEqual(
+            [call["cmd"] for call in calls],
+            ["inject_mcp_message"],
+        )
 
     async def test_reusing_idempotency_key_for_different_write_is_rejected(self):
         async def handle_command(_payload):
