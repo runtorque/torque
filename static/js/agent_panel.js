@@ -40,6 +40,9 @@ var _agentPanelWorkerTaskIdCacheByAgent = {};
 var _agentPanelDecisionListCacheByArchitect = {};
 var _agentPanelDecisionRowsCacheByArchitect = {};
 var _agentPanelMessageListCacheByArchitect = {};
+var _agentPanelArchitectPeerListByArchitect = {};
+var _agentPanelArchitectPeerListRequestedByArchitect = {};
+var _agentPanelArchitectPeerComposeDrafts = {};
 var _agentPanelArchitectJournalByArchitect = {};
 var _agentPanelArchitectJournalLoadingById = {};
 var _agentPanelArchitectJournalLastFetchById = {};
@@ -95,6 +98,16 @@ function _agentPanelAttr(value) {
 
 function _agentPanelEventAttr(value) {
   return _agentPanelAttr(value);
+}
+
+function _agentPanelJsString(value) {
+  return JSON.stringify(String(value == null ? '' : value));
+}
+
+function _agentPanelDomIdToken(value) {
+  return String(value == null ? '' : value)
+    .replace(/[^a-zA-Z0-9_-]/g, '-')
+    .replace(/^-+|-+$/g, '') || 'agent';
 }
 
 function _agentPanelKind(agent) {
@@ -366,6 +379,152 @@ function _agentPanelMessageActionLabel(action) {
   action = String(action || '').trim();
   if (!action) return 'message';
   return action.replace(/_/g, ' ');
+}
+
+function _agentPanelMessageIsPeer(message) {
+  var action = String((message && message.action) || '').trim();
+  return action === 'architect_peer_message' || action === 'architect_peer_reply';
+}
+
+function _agentPanelMessageContext(message) {
+  message = message || {};
+  var context = (message.context && typeof message.context === 'object')
+    ? message.context
+    : {};
+  return {
+    task_ids: Array.isArray(message.context_task_ids)
+      ? message.context_task_ids
+      : (Array.isArray(context.task_ids) ? context.task_ids : []),
+    engineer_ids: Array.isArray(message.context_engineer_ids)
+      ? message.context_engineer_ids
+      : (Array.isArray(context.engineer_ids) ? context.engineer_ids : []),
+    decision_ids: Array.isArray(message.context_decision_ids)
+      ? message.context_decision_ids
+      : (Array.isArray(context.decision_ids) ? context.decision_ids : []),
+    summary: String(
+      message.context_summary != null ? message.context_summary : (context.summary || '')
+    ),
+  };
+}
+
+function _agentPanelFirstLine(value, limit) {
+  var text = String(value || '').trim().split(/\r?\n/)[0] || '';
+  limit = Math.max(8, Number(limit || 56) || 56);
+  if (text.length <= limit) return text;
+  return text.slice(0, limit - 1).trimEnd() + '…';
+}
+
+function _agentPanelTaskLabel(taskId) {
+  var id = String(taskId || '').trim();
+  var task = id && state && state.board_tasks ? state.board_tasks[id] : null;
+  if (!task) return id;
+  return id + ' · ' + _agentPanelFirstLine(task.task || task.title || '', 46);
+}
+
+function _agentPanelAgentLabel(agentId) {
+  var id = String(agentId || '').trim();
+  var agent = _agentPanelAgentForId(id);
+  if (!agent) return id;
+  return _agentPanelAgentDisplayName(agent, id);
+}
+
+function _agentPanelDecisionForId(decisionId) {
+  var id = String(decisionId || '').trim();
+  if (!id) return null;
+  var stores = [];
+  if (state && state.decisions) stores.push(state.decisions);
+  if (state && state.architect_decisions && state.architect_decisions !== state.decisions) {
+    stores.push(state.architect_decisions);
+  }
+  for (var i = 0; i < stores.length; i++) {
+    var store = stores[i] || {};
+    if (store[id]) return store[id];
+  }
+  return null;
+}
+
+function _agentPanelDecisionLabel(decisionId) {
+  var id = String(decisionId || '').trim();
+  var decision = _agentPanelDecisionForId(id);
+  if (!decision) return id;
+  return id + ' · ' + _agentPanelFirstLine(decision.title || 'Decision', 46);
+}
+
+function _agentPanelRenderContextChips(kind, values, labelFn) {
+  values = Array.isArray(values) ? values.filter(function(value) {
+    return String(value || '').trim();
+  }) : [];
+  if (!values.length) return '';
+  var limit = 3;
+  var html = '';
+  for (var i = 0; i < Math.min(limit, values.length); i++) {
+    html += '<span class="agent-panel-message-context-chip agent-panel-message-context-'
+      + _agentPanelAttr(kind) + '">'
+      + '<span class="agent-panel-message-context-kind">'
+      + _agentPanelEsc(kind) + '</span>'
+      + _agentPanelEsc(labelFn ? labelFn(values[i]) : values[i])
+      + '</span>';
+  }
+  if (values.length > limit) {
+    html += '<span class="agent-panel-message-context-more">+'
+      + (values.length - limit) + ' more</span>';
+  }
+  return html;
+}
+
+function _agentPanelPeerNameGroup(agent, message) {
+  message = message || {};
+  var peerId = String(message.peer_id || '').trim();
+  if (!peerId) {
+    var direction = _agentPanelMessageDirection(agent, message);
+    peerId = direction === 'out'
+      ? String(message.recipient_id || '').trim()
+      : String(message.sender_id || '').trim();
+  }
+  var peer = _agentPanelAgentForId(peerId);
+  var name = peer ? _agentPanelAgentDisplayName(peer, peerId) : peerId;
+  var group = String(
+    (peer && peer.group) || message.group || (agent && agent.group) || ''
+  ).trim();
+  return {
+    id: peerId,
+    name: name || 'Peer',
+    group: group,
+  };
+}
+
+function _agentPanelMessagePeerAffordances(agent, message) {
+  if (!_agentPanelMessageIsPeer(message)) return '';
+  var peer = _agentPanelPeerNameGroup(agent, message);
+  var html = '<span class="agent-panel-message-peer" title="Peer Architect">'
+    + _agentPanelEsc(peer.name)
+    + (peer.group ? ' · ' + _agentPanelEsc(peer.group) : '')
+    + '</span>';
+  if (message && message.ack_required) {
+    html += '<span class="agent-panel-message-ack">Ack required</span>';
+  }
+  return html;
+}
+
+function _agentPanelMessageContextPreview(message) {
+  if (!_agentPanelMessageIsPeer(message)) return '';
+  var context = _agentPanelMessageContext(message);
+  var chips = '';
+  chips += _agentPanelRenderContextChips('task', context.task_ids, _agentPanelTaskLabel);
+  chips += _agentPanelRenderContextChips('engineer', context.engineer_ids, _agentPanelAgentLabel);
+  chips += _agentPanelRenderContextChips('decision', context.decision_ids, _agentPanelDecisionLabel);
+  var summary = String(context.summary || '').trim();
+  if (!chips && !summary) return '';
+  var html = '<div class="agent-panel-message-context-preview">';
+  if (summary) {
+    html += '<div class="agent-panel-message-context-summary">'
+      + _agentPanelEsc(summary) + '</div>';
+  }
+  if (chips) {
+    html += '<div class="agent-panel-message-context-chips">' + chips + '</div>';
+  }
+  html += '</div>';
+  return html;
 }
 
 function _agentPanelAnchorItems(container) {
@@ -1260,6 +1419,17 @@ function _agentPanelInvalidateArchitectMessageCache(agentId) {
   delete _agentPanelMessageListCacheByArchitect[key];
 }
 
+function _agentPanelInvalidateArchitectPeerListCache(architectId) {
+  var key = String(architectId || '').trim();
+  if (!key) {
+    _agentPanelArchitectPeerListByArchitect = {};
+    _agentPanelArchitectPeerListRequestedByArchitect = {};
+    return;
+  }
+  delete _agentPanelArchitectPeerListByArchitect[key];
+  delete _agentPanelArchitectPeerListRequestedByArchitect[key];
+}
+
 function _agentPanelInvalidateArchitectJournalCache(architectId) {
   var key = String(architectId || '').trim();
   if (!key) {
@@ -1560,6 +1730,258 @@ function _agentPanelArchitectMessageList(agent) {
     items: messages,
   };
   return messages;
+}
+
+function _agentPanelArchitectPeerListFromState(agent) {
+  var architectId = String((agent && agent.id) || '').trim();
+  var group = String((agent && agent.group) || '').trim();
+  var peers = [];
+  if (!architectId || !state || !state.agents) return peers;
+  for (var id in state.agents) {
+    var peer = state.agents[id];
+    if (!peer || String(peer.id || id) === architectId) continue;
+    if (String(peer.cell_type || '') !== 'agent') continue;
+    if (String(peer.kind || '') !== 'architect') continue;
+    if (group && String(peer.group || '') !== group) continue;
+    if (typeof _isTombstonedAgent === 'function' && _isTombstonedAgent(peer)) continue;
+    peers.push({
+      id: peer.id || id,
+      name: _agentPanelAgentDisplayName(peer, peer.id || id),
+      slug: peer.slug || '',
+      group: peer.group || group,
+      status: peer.status || '',
+      dismissed: Number(peer.dismissed_at || 0) > 0,
+    });
+  }
+  peers.sort(function(a, b) {
+    return String(a.name || a.id).toLowerCase()
+      .localeCompare(String(b.name || b.id).toLowerCase())
+      || String(a.id || '').localeCompare(String(b.id || ''));
+  });
+  return peers;
+}
+
+function _agentPanelEnsureArchitectPeerList(agent) {
+  var architectId = String((agent && agent.id) || '').trim();
+  if (!architectId || _agentPanelArchitectPeerListRequestedByArchitect[architectId]) return;
+  if (typeof send !== 'function') return;
+  _agentPanelArchitectPeerListRequestedByArchitect[architectId] = true;
+  send({
+    cmd: 'architect_peer_list',
+    architect_id: architectId,
+  });
+}
+
+function _agentPanelArchitectPeerList(agent) {
+  var architectId = String((agent && agent.id) || '').trim();
+  _agentPanelEnsureArchitectPeerList(agent);
+  var cached = architectId ? _agentPanelArchitectPeerListByArchitect[architectId] : null;
+  if (Array.isArray(cached)) return cached.slice();
+  return _agentPanelArchitectPeerListFromState(agent);
+}
+
+function agentPanelReceiveArchitectPeerList(msg) {
+  msg = msg || {};
+  var architectId = String(
+    msg.architect_id || msg.caller_architect_id || msg.caller_id || ''
+  ).trim();
+  if (!architectId) {
+    var focused = _resolveFocusedAgent();
+    if (focused && _agentPanelKind(focused) === 'architect') {
+      architectId = String(focused.id || '').trim();
+    }
+  }
+  if (!architectId) return;
+  var peers = Array.isArray(msg.architects) ? msg.architects : [];
+  _agentPanelArchitectPeerListByArchitect[architectId] = peers.map(function(peer) {
+    return Object.assign({}, peer || {});
+  });
+  var focusedAgent = _resolveFocusedAgent();
+  if (focusedAgent
+      && String(focusedAgent.id || '') === architectId
+      && _agentPanelActiveTab('architect') === 'messages') {
+    if (typeof _agentPanelRefreshCurrentTab === 'function'
+        && _agentPanelRefreshCurrentTab()) return;
+    if (typeof renderAgentPanel === 'function') renderAgentPanel();
+  }
+}
+
+function _agentPanelPeerDraft(architectId) {
+  var key = String(architectId || '').trim();
+  if (!_agentPanelArchitectPeerComposeDrafts[key]) {
+    _agentPanelArchitectPeerComposeDrafts[key] = {
+      peer_id: '',
+      message: '',
+      ack_required: false,
+      context_task_ids: '',
+      context_engineer_ids: '',
+      context_decision_ids: '',
+      context_summary: '',
+    };
+  }
+  return _agentPanelArchitectPeerComposeDrafts[key];
+}
+
+function _agentPanelSplitContextIds(value) {
+  var seen = {};
+  return String(value || '')
+    .split(/[,\n]/)
+    .map(function(item) { return item.trim(); })
+    .filter(function(item) {
+      if (!item || seen[item]) return false;
+      seen[item] = true;
+      return true;
+    });
+}
+
+function agentPanelPeerComposeInput(architectId, field, value) {
+  var draft = _agentPanelPeerDraft(architectId);
+  field = String(field || '');
+  if (field === 'peer_id'
+      || field === 'message'
+      || field === 'context_task_ids'
+      || field === 'context_engineer_ids'
+      || field === 'context_decision_ids'
+      || field === 'context_summary') {
+    draft[field] = String(value || '');
+  }
+}
+
+function agentPanelPeerComposeToggle(architectId, checked) {
+  _agentPanelPeerDraft(architectId).ack_required = !!checked;
+}
+
+function _agentPanelPeerComposePayload(architectId) {
+  var draft = _agentPanelPeerDraft(architectId);
+  return {
+    cmd: 'architect_peer_message',
+    architect_id: String(architectId || ''),
+    peer_architect_id: String(draft.peer_id || '').trim(),
+    recipient_architect_id: String(draft.peer_id || '').trim(),
+    message: String(draft.message || '').trim(),
+    ack_required: !!draft.ack_required,
+    context_task_ids: _agentPanelSplitContextIds(draft.context_task_ids),
+    context_engineer_ids: _agentPanelSplitContextIds(draft.context_engineer_ids),
+    context_decision_ids: _agentPanelSplitContextIds(draft.context_decision_ids),
+    context_summary: String(draft.context_summary || '').trim(),
+  };
+}
+
+function agentPanelPeerComposeSubmit(evt, architectId) {
+  if (evt && typeof evt.preventDefault === 'function') evt.preventDefault();
+  if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
+  var payload = _agentPanelPeerComposePayload(architectId);
+  if (!payload.architect_id || !payload.peer_architect_id) {
+    if (typeof _showToast === 'function') _showToast('Choose a peer Architect', 'warning');
+    return false;
+  }
+  if (!payload.message) {
+    if (typeof _showToast === 'function') _showToast('Message is required', 'warning');
+    return false;
+  }
+  payload.architect_id = payload.peer_architect_id;
+  delete payload.peer_architect_id;
+  delete payload.recipient_architect_id;
+  payload.sender_architect_id = String(architectId || '');
+  payload.idempotency_key = 'ui-peer-' + String(architectId || '')
+    + '-' + Date.now() + '-' + Math.random().toString(16).slice(2);
+  if (typeof send === 'function') send(payload);
+  var draft = _agentPanelPeerDraft(architectId);
+  draft.message = '';
+  draft.ack_required = false;
+  draft.context_task_ids = '';
+  draft.context_engineer_ids = '';
+  draft.context_decision_ids = '';
+  draft.context_summary = '';
+  if (typeof _showToast === 'function') _showToast('Peer message queued', 'success');
+  if (typeof _agentPanelRefreshCurrentTab === 'function'
+      && _agentPanelRefreshCurrentTab()) return false;
+  if (typeof renderAgentPanel === 'function') renderAgentPanel();
+  return false;
+}
+
+function _agentPanelArchitectPeerComposeHtml(agent) {
+  var architectId = String((agent && agent.id) || '').trim();
+  if (!architectId) return '';
+  var draft = _agentPanelPeerDraft(architectId);
+  var peers = _agentPanelArchitectPeerList(agent);
+  var safeId = _agentPanelDomIdToken(architectId);
+  var architectIdJs = _agentPanelJsString(architectId);
+  var html = '<form class="agent-panel-peer-compose" onsubmit="'
+    + _agentPanelEventAttr('return agentPanelPeerComposeSubmit(event,' + architectIdJs + ')')
+    + '">';
+  html += '<div class="agent-panel-peer-compose-head">';
+  html += '<label class="agent-panel-peer-compose-field">'
+    + '<span>Peer Architect</span>'
+    + '<select id="agent-panel-peer-select-' + _agentPanelAttr(safeId) + '"'
+    + ' class="agent-panel-peer-select"'
+    + ' onchange="' + _agentPanelEventAttr('agentPanelPeerComposeInput('
+      + architectIdJs + ', "peer_id", this.value)') + '">';
+  html += '<option value="">Select peer…</option>';
+  for (var i = 0; i < peers.length; i++) {
+    var peer = peers[i] || {};
+    var peerId = String(peer.id || '').trim();
+    if (!peerId) continue;
+    html += '<option value="' + _agentPanelAttr(peerId) + '"'
+      + (String(draft.peer_id || '') === peerId ? ' selected' : '') + '>'
+      + _agentPanelEsc(peer.name || peer.slug || peerId)
+      + (peer.group ? ' · ' + _agentPanelEsc(peer.group) : '')
+      + '</option>';
+  }
+  html += '</select></label>';
+  html += '<label class="agent-panel-peer-compose-ack">'
+    + '<input id="agent-panel-peer-ack-' + _agentPanelAttr(safeId) + '" type="checkbox"'
+    + (draft.ack_required ? ' checked' : '')
+    + ' onchange="' + _agentPanelEventAttr('agentPanelPeerComposeToggle('
+      + architectIdJs + ', this.checked)') + '">'
+    + '<span>Ack required</span></label>';
+  html += '</div>';
+  if (!peers.length) {
+    html += '<div class="agent-panel-peer-compose-empty">No same-group peer Architects available.</div>';
+  }
+  html += '<textarea id="agent-panel-peer-body-' + _agentPanelAttr(safeId) + '"'
+    + ' class="agent-panel-peer-compose-body" rows="3"'
+    + ' placeholder="Message another Architect…"'
+    + ' oninput="' + _agentPanelEventAttr('agentPanelPeerComposeInput('
+      + architectIdJs + ', "message", this.value)') + '">'
+    + _agentPanelEsc(draft.message || '') + '</textarea>';
+  var contextOpen = !!(
+    draft.context_task_ids
+    || draft.context_engineer_ids
+    || draft.context_decision_ids
+    || draft.context_summary
+  );
+  html += '<details class="agent-panel-peer-context"'
+    + (contextOpen ? ' open' : '') + '>';
+  html += '<summary>Attach context</summary>';
+  html += '<div class="agent-panel-peer-context-grid">';
+  html += '<label><span>Task IDs</span><input id="agent-panel-peer-tasks-'
+    + _agentPanelAttr(safeId) + '" value="' + _agentPanelAttr(draft.context_task_ids || '') + '"'
+    + ' placeholder="TORQUE:123, TORQUE:124"'
+    + ' oninput="' + _agentPanelEventAttr('agentPanelPeerComposeInput('
+      + architectIdJs + ', "context_task_ids", this.value)') + '"></label>';
+  html += '<label><span>Engineer IDs</span><input id="agent-panel-peer-engineers-'
+    + _agentPanelAttr(safeId) + '" value="' + _agentPanelAttr(draft.context_engineer_ids || '') + '"'
+    + ' placeholder="eng-1, eng-2"'
+    + ' oninput="' + _agentPanelEventAttr('agentPanelPeerComposeInput('
+      + architectIdJs + ', "context_engineer_ids", this.value)') + '"></label>';
+  html += '<label><span>Decision IDs</span><input id="agent-panel-peer-decisions-'
+    + _agentPanelAttr(safeId) + '" value="' + _agentPanelAttr(draft.context_decision_ids || '') + '"'
+    + ' placeholder="decision-1"'
+    + ' oninput="' + _agentPanelEventAttr('agentPanelPeerComposeInput('
+      + architectIdJs + ', "context_decision_ids", this.value)') + '"></label>';
+  html += '<label class="agent-panel-peer-context-summary"><span>Summary</span>'
+    + '<textarea id="agent-panel-peer-summary-' + _agentPanelAttr(safeId) + '" rows="2"'
+    + ' placeholder="Why this context matters…"'
+    + ' oninput="' + _agentPanelEventAttr('agentPanelPeerComposeInput('
+      + architectIdJs + ', "context_summary", this.value)') + '">'
+    + _agentPanelEsc(draft.context_summary || '') + '</textarea></label>';
+  html += '</div></details>';
+  html += '<div class="agent-panel-peer-compose-actions">'
+    + '<button type="submit" class="engineer-row-btn agent-panel-peer-send">Send peer message</button>'
+    + '</div>';
+  html += '</form>';
+  return html;
 }
 
 function _agentPanelInlineThreadMessageList(agent) {
@@ -2624,8 +3046,9 @@ function _agentPanelArchitectDecisionsHtml(agent) {
   return html;
 }
 
-function _agentPanelMessagesHtml(agent, messages, note) {
+function _agentPanelMessagesHtml(agent, messages, note, options) {
   messages = Array.isArray(messages) ? messages : [];
+  options = options || {};
   var html = '<div class="agent-panel-messages-tab">';
   html += '<div class="agent-panel-message-header">';
   html += '<div class="agent-panel-message-heading">';
@@ -2636,6 +3059,7 @@ function _agentPanelMessagesHtml(agent, messages, note) {
     html += '<div class="agent-panel-message-note">' + _agentPanelEsc(note) + '</div>';
   }
   html += '</div>';
+  if (options.composeHtml) html += options.composeHtml;
   if (!messages.length) {
     html += '<div class="agent-panel-event-empty">No messages yet.</div>';
     html += '</div>';
@@ -2664,11 +3088,13 @@ function _agentPanelMessagesHtml(agent, messages, note) {
         + _agentPanelEsc(direction === 'in' ? 'In' : 'Out') + '</span>';
       rowHtml += '<span class="agent-panel-message-action">'
         + _agentPanelEsc(_agentPanelMessageActionLabel(action)) + '</span>';
+      rowHtml += _agentPanelMessagePeerAffordances(agent, message);
       rowHtml += '</div>';
       rowHtml += '<span class="agent-panel-message-time">'
         + _agentPanelEsc(_agentPanelTimestamp(message.timestamp)) + '</span>';
       rowHtml += '</div>';
       rowHtml += '<div class="agent-panel-message-body">' + _agentPanelEsc(body) + '</div>';
+      rowHtml += _agentPanelMessageContextPreview(message);
       rowHtml += '</div>';
       return rowHtml;
     },
@@ -2680,7 +3106,9 @@ function _agentPanelMessagesHtml(agent, messages, note) {
 function _agentPanelArchitectMessages(agent) {
   return _agentPanelMessagesHtml(
     agent,
-    _agentPanelArchitectMessageList(agent)
+    _agentPanelArchitectMessageList(agent),
+    '',
+    { composeHtml: _agentPanelArchitectPeerComposeHtml(agent) }
   );
 }
 

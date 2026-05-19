@@ -522,6 +522,8 @@ function connect() {
       if (typeof agentPanelReceiveCellEvents === 'function') agentPanelReceiveCellEvents(msg);
     } else if (msg.type === 'mcp_calls') {
       if (typeof agentPanelReceiveMcpCalls === 'function') agentPanelReceiveMcpCalls(msg);
+    } else if (msg.type === 'architect_peers') {
+      if (typeof agentPanelReceiveArchitectPeerList === 'function') agentPanelReceiveArchitectPeerList(msg);
     } else if (msg.type === 'agent_message_history') {
       if (!state.agent_message_history) state.agent_message_history = {};
       state.agent_message_history[msg.agent_id] = Array.isArray(msg.history)
@@ -634,6 +636,9 @@ function _handleFullState(msg) {
   }
   if (typeof _agentPanelInvalidateArchitectMessageCache === 'function') {
     _agentPanelInvalidateArchitectMessageCache();
+  }
+  if (typeof _agentPanelInvalidateArchitectPeerListCache === 'function') {
+    _agentPanelInvalidateArchitectPeerListCache();
   }
   _applyRuntimeMode();
   if (typeof _standalonePanelSetLayoutFromState === 'function'
@@ -963,6 +968,22 @@ function _markSurface(flags) {
   }
 }
 
+function _peerMessageDeltaAgentIds(op) {
+  const ids = [];
+  const add = function(value) {
+    value = String(value || '').trim();
+    if (value && ids.indexOf(value) < 0) ids.push(value);
+  };
+  add(op && op.agent_id);
+  add(op && op.sender_id);
+  add(op && op.recipient_id);
+  const message = (op && op.message) || {};
+  add(message.agent_id);
+  add(message.sender_id);
+  add(message.recipient_id);
+  return ids;
+}
+
 function _deltaSurfaceInvalidations(ops, hints) {
   const flags = _blankSurfaceInvalidations();
   // TORQUE:236 v13 instrumentation: when window.__torqueDebugRender is true,
@@ -1092,6 +1113,14 @@ function _deltaSurfaceInvalidations(ops, hints) {
         if (_archLifeFocused && _archLifeId
             && String(_archLifeFocused.id || '') === _archLifeId) {
           _markSurface(flags, 'engineer');
+        }
+        break;
+      }
+      case 'peer_message_upsert': {
+        const _pmFocused = _focusedEngineerAgent();
+        const _pmIds = _peerMessageDeltaAgentIds(op);
+        if (_pmFocused && _pmIds.indexOf(String(_pmFocused.id || '')) >= 0) {
+          _markSurface(flags, 'focus', 'engineer');
         }
         break;
       }
@@ -1803,6 +1832,7 @@ function _collectSessionMapInvalidationGroups(ops, hints) {
       case 'journal_delete':
       case 'agent_digest_update':
       case 'engineer_settings_update':
+      case 'peer_message_upsert':
         group = op.group || '';
         break;
       case 'agent_remove':
@@ -1916,6 +1946,7 @@ function _opTouchesGroup(op, group, hint) {
     case 'engineer_streams':
     case 'engineer_streams_update':
     case 'engineer_settings_update':
+    case 'peer_message_upsert':
       return (op.group || '') === group;
     default:
       return true;
@@ -1948,6 +1979,15 @@ function _applyDelta(ops) {
           _agentPanelInvalidateArchitectMessageCache(id);
           if (previousAgent && previousAgent.id && previousAgent.id !== id) {
             _agentPanelInvalidateArchitectMessageCache(previousAgent.id);
+          }
+        }
+        if (typeof _agentPanelInvalidateArchitectPeerListCache === 'function') {
+          var prevKind = String((previousAgent && previousAgent.kind) || '');
+          var nextKind = String((state.agents[id] && state.agents[id].kind) || '');
+          var groupChanged = previousAgent
+            && String(previousAgent.group || '') !== String((state.agents[id] && state.agents[id].group) || '');
+          if (prevKind === 'architect' || nextKind === 'architect' || groupChanged) {
+            _agentPanelInvalidateArchitectPeerListCache();
           }
         }
         break;
@@ -1989,6 +2029,41 @@ function _applyDelta(ops) {
           if (!Number.isFinite(historyLimit) || historyLimit < 1) historyLimit = 100;
           if (state.agent_message_history[historyAgentId].length > historyLimit) {
             state.agent_message_history[historyAgentId].length = historyLimit;
+          }
+        }
+        break;
+      }
+
+      case 'peer_message_upsert': {
+        var peerMessage = Object.assign({}, op.message || op.entry || {});
+        delete peerMessage.op;
+        var peerAgentIds = String(op.agent_id || '').trim()
+          ? [String(op.agent_id || '').trim()]
+          : _peerMessageDeltaAgentIds(op);
+        if (!peerAgentIds.length && peerMessage.peer_id) {
+          peerAgentIds.push(String(peerMessage.peer_id || ''));
+        }
+        if (!state.agents) state.agents = {};
+        for (var pmi = 0; pmi < peerAgentIds.length; pmi++) {
+          var peerAgentId = String(peerAgentIds[pmi] || '');
+          var peerAgent = state.agents[peerAgentId];
+          if (!peerAgent) continue;
+          if (!Array.isArray(peerAgent.mcp_messages)) peerAgent.mcp_messages = [];
+          var peerMessageId = String(peerMessage.id || op.id || '');
+          var replacedPeerMessage = false;
+          if (peerMessageId) {
+            for (var pmj = 0; pmj < peerAgent.mcp_messages.length; pmj++) {
+              if (String((peerAgent.mcp_messages[pmj] || {}).id || '') === peerMessageId) {
+                peerAgent.mcp_messages[pmj] = Object.assign({}, peerAgent.mcp_messages[pmj], peerMessage);
+                replacedPeerMessage = true;
+                break;
+              }
+            }
+          }
+          if (!replacedPeerMessage) peerAgent.mcp_messages.unshift(Object.assign({}, peerMessage));
+          if (peerAgent.mcp_messages.length > 50) peerAgent.mcp_messages.length = 50;
+          if (typeof _agentPanelInvalidateArchitectMessageCache === 'function') {
+            _agentPanelInvalidateArchitectMessageCache(peerAgentId);
           }
         }
         break;

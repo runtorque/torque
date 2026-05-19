@@ -999,6 +999,30 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             "Legacy user task",
             assigned_engineer_id=user_engineer.id,
         )
+        self.state.save_peer_message({
+            "id": "peer-summary-1",
+            "thread_id": "peer-summary-1",
+            "group_name": "torque",
+            "sender_id": other_architect.id,
+            "sender_kind": "architect",
+            "recipient_id": architect.id,
+            "recipient_kind": "architect",
+            "message": "Please confirm this architecture split.",
+            "created_at": 42.0,
+            "ack_required": True,
+        })
+        self.state.save_peer_message({
+            "id": "peer-summary-2",
+            "thread_id": "peer-summary-2",
+            "group_name": "torque",
+            "sender_id": architect.id,
+            "sender_kind": "architect",
+            "recipient_id": other_architect.id,
+            "recipient_kind": "architect",
+            "message": "FYI on the UI surface.",
+            "created_at": 43.0,
+            "ack_required": False,
+        })
         self.state.groups["other"] = []
         self.state._db_save_groups()
         self._add_task("task-other-group", "Other group task", group="other")
@@ -1017,6 +1041,9 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         summary = json.loads(text)
         self.assertEqual(summary["tasks_total"], 5)
         self.assertEqual(summary["lanes"]["Backlog"], 5)
+        self.assertEqual(summary["peer_messages"]["recent_count"], 2)
+        self.assertEqual(summary["peer_messages"]["requires_reply_count"], 1)
+        self.assertEqual(summary["peer_messages"]["oldest_unanswered_at"], 42.0)
         self.assertFalse(summary["tasks"]["truncated"])
         task_items = {
             item["id"]: item for item in summary["tasks"]["items"]
