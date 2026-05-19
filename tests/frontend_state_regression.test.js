@@ -16794,12 +16794,14 @@ function attachAgentSplitDom(main, document, focusHtml) {
   const handle = new FakeElement('agent-focus-resizer');
   const focus = new FakeElement('agent-focus-panel');
   const focusScroll = new FakeElement('agent-focus-panel-scroll');
+  const collapse = new FakeElement('agent-focus-collapse');
   split.getBoundingClientRect = () => ({ top: 0, bottom: 608, left: 0, right: 320, width: 320, height: 608 });
   handle.getBoundingClientRect = () => ({ top: 300, bottom: 308, left: 0, right: 320, width: 320, height: 8 });
   focus.getBoundingClientRect = () => ({ top: 428, bottom: 608, left: 0, right: 320, width: 320, height: 180 });
   focus.offsetHeight = 180;
   focusScroll.innerHTML = focusHtml || '';
   focusScroll._torqueLastHtml = focusHtml || '';
+  focus.setQuerySelector('[data-agent-focus-collapse]', collapse);
   split.appendChild(grid);
   split.appendChild(handle);
   split.appendChild(focus);
@@ -16814,7 +16816,7 @@ function attachAgentSplitDom(main, document, focusHtml) {
   document.register('agent-grid-pane', grid);
   document.register('agent-focus-resizer', handle);
   document.register('agent-focus-panel', focus);
-  return { split, grid, handle, focus, focusScroll };
+  return { split, grid, handle, focus, focusScroll, collapse };
 }
 
 test('agent focus split renders in toolbelt and standalone modes', () => {
@@ -16832,6 +16834,8 @@ test('agent focus split renders in toolbelt and standalone modes', () => {
     assert.match(main.innerHTML, /data-agent-split/);
     assert.match(main.innerHTML, /id="agent-grid-pane"/);
     assert.match(main.innerHTML, /id="agent-focus-resizer"[^>]*role="separator"[^>]*aria-orientation="horizontal"/);
+    assert.match(main.innerHTML, /data-agent-focus-collapse/);
+    assert.match(main.innerHTML, /data-agent-focus-reopen-label/);
     assert.match(main.innerHTML, /id="agent-focus-panel"/);
     assert.match(main.innerHTML, /Select an agent to view details and terminals\./);
   }
@@ -16970,6 +16974,73 @@ test('agent focus split resize clamps and persists a fraction once on mouseup', 
   runInContext(context, `state.engineer_panel_split_fraction = 0.5; _agentFocusApplyPersistedSplit();`);
   const focus = document.getElementById('agent-focus-panel');
   assert.equal(focus.style.flexBasis, '304px');
+});
+
+test('agent focus split auto-sizes to content until the viewport cap', () => {
+  const { context, document } = createMainRenderHarness();
+  const main = document.getElementById('main');
+  const parts = attachAgentSplitDom(main, document, '');
+
+  parts.focusScroll.scrollHeight = 190;
+  runInContext(context, `_agentFocusApplyPersistedSplit();`);
+  assert.equal(parts.focus.style.flexBasis, '190px');
+  assert.equal(parts.focus.style.height, '190px');
+  assert.equal(jsonValue(context, `_agentFocusMode()`), 'auto');
+
+  parts.focusScroll.scrollHeight = 500;
+  runInContext(context, `_agentFocusApplyPersistedSplit();`);
+  assert.equal(parts.focus.style.flexBasis, '274px',
+    'auto mode caps the panel near 45vh so large details do not push out the grid');
+});
+
+test('agent focus split collapse persists and the handle reopens at content-fit height', () => {
+  const { context, document } = createMainRenderHarness();
+  const main = document.getElementById('main');
+  const parts = attachAgentSplitDom(main, document, '');
+  parts.focusScroll.scrollHeight = 180;
+
+  runInContext(context, `_agentFocusSetCollapsed(true);`);
+  assert.equal(jsonValue(context, `_agentFocusIsCollapsed()`), true);
+  assert.equal(parts.split.classList.contains('agent-split--focus-collapsed'), true);
+  assert.equal(parts.handle.getAttribute('role'), 'button');
+  assert.equal(parts.handle.getAttribute('aria-expanded'), 'false');
+
+  let prevented = false;
+  context.__expandEvent = { preventDefault() { prevented = true; } };
+  runInContext(context, `_agentFocusResizerClick(__expandEvent);`);
+
+  assert.equal(prevented, true);
+  assert.equal(jsonValue(context, `_agentFocusIsCollapsed()`), false);
+  assert.equal(jsonValue(context, `_agentFocusMode()`), 'auto');
+  assert.equal(parts.split.classList.contains('agent-split--focus-collapsed'), false);
+  assert.equal(parts.handle.getAttribute('role'), 'separator');
+  assert.equal(parts.handle.getAttribute('aria-expanded'), 'true');
+  assert.equal(parts.focus.style.flexBasis, '180px');
+});
+
+test('agent focus split renders persisted collapsed handle in grid and canvas views', () => {
+  for (const viewMode of ['grid', 'canvas']) {
+    const { context, document, sandbox } = createMainRenderHarness();
+    if (viewMode === 'canvas') loadScript(context, 'static/js/canvas.js');
+    const main = document.getElementById('main');
+    sandbox.state.runtime = { mode: 'standalone', embedded_terminal: true };
+    sandbox.state.groups = { alpha: ['agent-1'] };
+    sandbox.state.group_settings = { alpha: { collapsed_default: false } };
+    sandbox.state.children = { 'agent-1': [] };
+    sandbox.state.agents = {
+      'agent-1': { id: 'agent-1', name: 'Agent One', group: 'alpha', cell_type: 'agent', kind: 'worker', status: 'idle' },
+    };
+
+    runInContext(context, `_agentFocusSetCollapsed(true);`);
+    if (viewMode === 'canvas') runInContext(context, `_torqueRenderAgentCanvas();`);
+    else runInContext(context, `render();`);
+
+    assert.match(main.innerHTML, /agent-split--focus-collapsed/);
+    assert.match(main.innerHTML, /id="agent-focus-resizer"[^>]*role="button"/);
+    assert.match(main.innerHTML, /Focus panel hidden — click to expand/);
+    if (viewMode === 'canvas') assert.match(main.innerHTML, /class="agent-canvas"/);
+    else assert.match(main.innerHTML, /class="agent-grid/);
+  }
 });
 
 test('embedded runtime reuses the shared group, cell, and terminal UI', () => {
