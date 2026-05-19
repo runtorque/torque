@@ -382,6 +382,13 @@ test('engineer session map renders deterministic stream and recovery sections', 
             gate_reason: 'Run manual smoke',
             recommended_next_action: 'run_manual_validation',
             latest_reviewed_commit_sha: 'abc1234567',
+            pr_url: 'https://github.com/acme/repo/pull/42',
+            pr_state: 'auto_merge_enabled',
+            pr: {
+              url: 'https://github.com/acme/repo/pull/42',
+              number: 42,
+              state: 'auto_merge_enabled',
+            },
             product_task_ids: ['TORQUE:1'],
             workflow_task_ids: ['TORQUE:1:1'],
             recent_visibility_items: [
@@ -441,6 +448,9 @@ test('engineer session map renders deterministic stream and recovery sections', 
   assert.match(html, /Polish modal/);
   assert.match(html, /modal-polish/);
   assert.match(html, /Awaiting validation/);
+  assert.match(html, /https:\/\/github\.com\/acme\/repo\/pull\/42/);
+  assert.match(html, /#42/);
+  assert.match(html, /Auto-merge pending/);
   assert.match(html, /Run manual validation/);
   assert.match(html, /Pending asks/);
   assert.match(html, /Approve release plan/);

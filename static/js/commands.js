@@ -794,7 +794,7 @@ function _showWorktreeSubmenu(id) {
   html += `<button onclick="closeContextMenu();worktreeCheckpoint('${id}')">Checkpoint</button>`;
   html += `<button onclick="closeContextMenu();worktreeHistory('${id}')">History\u2026</button>`;
   html += `<button onclick="closeContextMenu();worktreeCreatePR('${id}')">Create PR</button>`;
-  html += `<button onclick="closeContextMenu();worktreeMerge('${id}')">Merge to Main</button>`;
+  html += `<button onclick="closeContextMenu();worktreeMerge('${id}')">Create PR + Merge</button>`;
   html += `<div class="ctx-sep"></div>`;
   html += `<button class="danger" onclick="closeContextMenu();worktreeRemove('${id}')">Delete Worktree</button>`;
   menu.innerHTML = html;
@@ -852,29 +852,31 @@ async function _confirmWorktreeMerge(id, message) {
   const cell = state.agents[id];
   if (!cell) return false;
   const base = cell.worktree_base_branch || 'main';
-  const squash = cell.worktree_merge_squash !== false;
   const mergeDefaults = _worktreeMergeDialogDefaults(cell);
   const result = await showConfirm(
-    `${squash ? 'Squash merge' : 'Merge'} "${cell.name}" into ${base}?`,
+    `Create PR and squash-merge "${cell.name}" into ${base}? Cleanup options run only after the PR merges, not when the PR is created.`,
     {
-      label: 'Merge', variant: 'btn-green',
+      label: 'Create PR + Merge', variant: 'btn-green',
       checkboxes: [
-        { key: 'close_agent_on_merge', label: 'Close agent after merge', checked: mergeDefaults.close },
-        { key: 'remove_worktree_on_merge', label: 'Delete worktree after merge', checked: mergeDefaults.remove },
-        { key: 'preserve_merge_diff', label: 'Preserve merge diff on boundary task', checked: mergeDefaults.preserveDiff },
-        { key: 'clear_context', label: 'Clear context after merge', checked: false },
+        { key: 'close_agent_on_merge', label: 'Close agent after PR merge', checked: mergeDefaults.close },
+        { key: 'remove_worktree_on_merge', label: 'Delete worktree after PR merge', checked: mergeDefaults.remove },
+        { key: 'preserve_merge_diff', label: 'Preserve merge diff on boundary task after PR merge', checked: mergeDefaults.preserveDiff },
+        { key: 'clear_context', label: 'Clear context after PR merge', checked: false },
+        { key: 'force_direct', label: 'Advanced: force direct local merge (skip PR workflow)', checked: false },
       ],
     }
   );
   if (result) {
-    send({
+    const payload = {
       cmd: 'worktree_merge', id,
       message: message || '',
       close_agent_on_merge: result.close_agent_on_merge || false,
       remove_worktree_on_merge: result.remove_worktree_on_merge || false,
       preserve_merge_diff: result.preserve_merge_diff || false,
       clear_context: result.clear_context || false,
-    });
+    };
+    if (result.force_direct) payload.force_direct = true;
+    send(payload);
     return true;
   }
   return false;

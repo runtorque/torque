@@ -104,6 +104,96 @@ function _agentPanelJsString(value) {
   return JSON.stringify(String(value == null ? '' : value));
 }
 
+function _agentPanelNormalizePrState(value, pending) {
+  var state = String(value || '').trim().toLowerCase();
+  if (!state && pending === true) return 'auto_merge_enabled';
+  var aliases = {
+    created: 'open',
+    failed: 'blocked',
+    merge_failed: 'blocked',
+    pending: 'auto_merge_enabled',
+  };
+  return aliases[state] || state;
+}
+
+function _agentPanelPrMetaFromSource(source) {
+  if (!source || typeof source !== 'object') return {};
+  var raw = source.pr;
+  if (!raw || typeof raw !== 'object') raw = source.pull_request;
+  if (!raw || typeof raw !== 'object') raw = {};
+  var pending = null;
+  if (Object.prototype.hasOwnProperty.call(raw, 'pending')) pending = !!raw.pending;
+  else if (Object.prototype.hasOwnProperty.call(source, 'pr_pending')) pending = !!source.pr_pending;
+
+  var rawState = _agentPanelNormalizePrState(raw.state, pending);
+  var statusState = _agentPanelNormalizePrState(raw.status || source.pr_status, pending);
+  var state = rawState || statusState || _agentPanelNormalizePrState(source.pr_state, pending);
+  if ((statusState === 'auto_merge_enabled' || statusState === 'blocked' || statusState === 'merged')
+      && (!rawState || rawState === 'open')) {
+    state = statusState;
+  }
+
+  var number = raw.number;
+  if ((number == null || number === '') && source.pr_number != null && source.pr_number !== '') {
+    number = source.pr_number;
+  }
+  var pr = {
+    url: String(raw.url || source.pr_url || '').trim(),
+    number: number != null && number !== '' ? number : '',
+    state: state,
+    merge_state: String(raw.merge_state || source.pr_merge_state || '').trim(),
+  };
+  return (pr.url || pr.number !== '' || pr.state || pr.merge_state) ? pr : {};
+}
+
+function _agentPanelPrStateLabel(pr) {
+  var state = _agentPanelNormalizePrState(pr && pr.state, pr && pr.pending);
+  var labels = {
+    auto_merge_enabled: 'Auto-merge pending',
+    open: 'PR open',
+    blocked: 'PR blocked',
+    merged: 'PR merged',
+    closed: 'PR closed',
+    draft: 'PR draft',
+  };
+  if (labels[state]) return labels[state];
+  if (!state && pr && (pr.url || pr.number !== '')) return 'PR open';
+  if (!state) return '';
+  return 'PR ' + state.replace(/[_-]+/g, ' ');
+}
+
+function _agentPanelPrStateClass(pr) {
+  var state = _agentPanelNormalizePrState(pr && pr.state, pr && pr.pending);
+  if (state === 'auto_merge_enabled') return 'pending';
+  if (state === 'merged') return 'merged';
+  if (state === 'blocked' || state === 'closed') return 'blocked';
+  if (state === 'open' || state === 'draft') return 'open';
+  return 'unknown';
+}
+
+function _agentPanelRenderPrValue(pr) {
+  if (!pr || typeof pr !== 'object') return '';
+  if (!pr.url && pr.number === '' && !pr.state && !pr.merge_state) return '';
+  var label = pr.number !== '' && pr.number != null ? ('#' + pr.number) : 'Pull request';
+  var stateLabel = _agentPanelPrStateLabel(pr);
+  var html = '<span class="agent-panel-pr-inline">';
+  if (pr.url) {
+    html += '<a class="agent-panel-pr-link" href="' + _agentPanelEsc(pr.url)
+      + '" target="_blank" rel="noopener noreferrer"'
+      + ' onclick="event.stopPropagation()" title="' + _agentPanelEsc(pr.url) + '">'
+      + _agentPanelEsc(label) + '</a>';
+  } else {
+    html += '<span class="agent-panel-pr-link-muted">' + _agentPanelEsc(label) + '</span>';
+  }
+  if (stateLabel) {
+    html += '<span class="agent-panel-pr-state agent-panel-pr-state-'
+      + _agentPanelEsc(_agentPanelPrStateClass(pr)) + '">'
+      + _agentPanelEsc(stateLabel) + '</span>';
+  }
+  html += '</span>';
+  return html;
+}
+
 function _agentPanelDomIdToken(value) {
   return String(value == null ? '' : value)
     .replace(/[^a-zA-Z0-9_-]/g, '-')
@@ -5761,6 +5851,10 @@ function _agentPanelLegacyRenderSessionMapBoundaries(summary) {
       html += '<span class="agent-panel-verification-item-meta">' + _esc(item.branch.replace(/^torque\//, '')) + '</span>';
     }
     html += '</div>';
+    var prHtml = _agentPanelRenderPrValue(_agentPanelPrMetaFromSource(item));
+    if (prHtml) {
+      html += '<div class="agent-panel-verification-item-meta">PR: ' + prHtml + '</div>';
+    }
     if (item.foreground_task_title) {
       html += '<div class="agent-panel-verification-item-meta">Current: '
         + _esc(item.foreground_task_title) + '</div>';
@@ -5969,6 +6063,7 @@ function _agentPanelLegacyRenderOpenStreamCard(stream, index) {
   var gateReason = _engineerStreamGateReason(stream);
   var nextAction = _engineerStreamActionLabel(stream);
   var latestCommit = _engineerStreamLatestReviewedCommit(stream);
+  var prHtml = _agentPanelRenderPrValue(_agentPanelPrMetaFromSource(stream));
   var productTasks = _engineerStreamTaskItems(stream, 'product');
   var workflowTasks = _engineerStreamTaskItems(stream, 'workflow');
   var visibilityItems = _engineerStreamVisibilityItems(stream);
@@ -5995,6 +6090,9 @@ function _agentPanelLegacyRenderOpenStreamCard(stream, index) {
   var metaHtml = '';
   if (latestCommit) {
     metaHtml += _agentPanelLegacyRenderStreamMetaRow('Reviewed', latestCommit);
+  }
+  if (prHtml) {
+    metaHtml += _agentPanelLegacyRenderStreamMetaHtmlRow('PR', prHtml);
   }
   if (gateReason) {
     metaHtml += _agentPanelLegacyRenderStreamMetaRow('Gate', gateReason);
@@ -6035,6 +6133,11 @@ function _agentPanelLegacyRenderOpenStreamCard(stream, index) {
 function _agentPanelLegacyRenderStreamMetaRow(label, value) {
   return '<div class="agent-panel-stream-meta-label">' + _esc(label) + '</div>'
     + '<div class="agent-panel-stream-meta-value">' + _esc(value) + '</div>';
+}
+
+function _agentPanelLegacyRenderStreamMetaHtmlRow(label, htmlValue) {
+  return '<div class="agent-panel-stream-meta-label">' + _esc(label) + '</div>'
+    + '<div class="agent-panel-stream-meta-value">' + String(htmlValue || '') + '</div>';
 }
 
 function _agentPanelLegacyRenderStreamTaskGroup(title, kind, tasks, summarizeOnly) {
@@ -6427,6 +6530,13 @@ function _agentPanelLegacyRenderBoundarySummary(group) {
       branch: overview.branch || '',
       current_task: overview.current_task ? overview.current_task.task : '',
       latest_boundary_task: overview.latest_boundary_task.task || '',
+      pr: (typeof _worktreePrMetadataFromBoundary === 'function')
+        ? _worktreePrMetadataFromBoundary(
+            (typeof _taskBoundaryMeta === 'function')
+              ? _taskBoundaryMeta(overview.latest_boundary_task)
+              : ((overview.latest_boundary_task && overview.latest_boundary_task.worktree_boundary) || {})
+          )
+        : {},
       queued_followers: overview.queued_followers || [],
       started_followers: overview.started_followers || [],
       partial_review_safe: !!overview.partial_review_safe,
@@ -6457,6 +6567,10 @@ function _agentPanelLegacyRenderBoundarySummary(group) {
       html += '<span class="agent-panel-verification-item-meta">' + _esc(item.branch.replace(/^torque\//, '')) + '</span>';
     }
     html += '</div>';
+    var prHtml = _agentPanelRenderPrValue(_agentPanelPrMetaFromSource(item));
+    if (prHtml) {
+      html += '<div class="agent-panel-verification-item-meta">PR: ' + prHtml + '</div>';
+    }
     if (item.current_task) {
       html += '<div class="agent-panel-verification-item-meta">Current: ' + _esc(item.current_task) + '</div>';
     }

@@ -4606,6 +4606,75 @@ test('renderAgentDetails shows branch boundary status and queued follow-ups', ()
   assert.match(html, /Implement follow-up/);
 });
 
+test('renderAgentDetails shows boundary PR state without losing expanded draft state', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/render.js');
+  runInContext(context, `render = function() {};`);
+
+  context.state.agents = {
+    'agent-1': {
+      id: 'agent-1',
+      name: 'Worker',
+      group: 'alpha',
+      cell_type: 'agent',
+      status: 'running',
+      worktree_path: '/repo/.torque/worktrees/worker',
+      worktree_repo_root: '/repo',
+      worktree_branch: 'torque/worker',
+      mcp_messages: [],
+    },
+  };
+  context.state.board_tasks = {
+    boundary: {
+      id: 'boundary',
+      group: 'alpha',
+      task: 'Review PR merge flow',
+      lane: 'Done',
+      agent_id: 'agent-1',
+      worktree_boundary: {
+        repo_root: '/repo',
+        branch: 'torque/worker',
+        status: 'open',
+        recorded_at: '2026-04-07T10:00:00+00:00',
+        pr: {
+          provider: 'github',
+          url: 'https://github.com/acme/repo/pull/7',
+          number: 7,
+          state: 'auto_merge_enabled',
+        },
+      },
+    },
+    current: {
+      id: 'current',
+      group: 'alpha',
+      task: 'Implement follow-up',
+      description: 'Original task description',
+      lane: 'In Progress',
+      agent_id: 'agent-1',
+      resume_after_boundary_task_id: 'boundary',
+    },
+  };
+
+  let html = runInContext(context, `renderAgentDetails(state.agents["agent-1"])`);
+  assert.match(html, /Review PR merge flow/);
+  assert.match(html, /https:\/\/github\.com\/acme\/repo\/pull\/7/);
+  assert.match(html, />#7<\/a>/);
+  assert.match(html, /Auto-merge pending/);
+
+  runInContext(context, `_toggleAgentDetailTask('agent-1')`);
+  runInContext(context, `agentDetailEditDescription('agent-1', 'current')`);
+  runInContext(context, `agentDetailDescriptionInput('agent-1', 'current', 'Draft while PR metadata updates')`);
+
+  html = runInContext(context, `renderAgentDetails(state.agents["agent-1"])`);
+  assert.match(html, /Draft while PR metadata updates/);
+  assert.match(html, /Auto-merge pending/);
+
+  html = runInContext(context, `renderAgentDetails(state.agents["agent-1"])`);
+  assert.match(html, /Draft while PR metadata updates/);
+  assert.match(html, /Auto-merge pending/);
+});
+
 test('renderAgentDetails expands task details and preserves the expanded state across rerenders', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);
@@ -14371,6 +14440,13 @@ test('renderAgentPanel shows branch review-point summary in Session Map view', (
             branch: 'torque/worker',
             latest_boundary_task: 'Stable review point',
             partial_review_safe: false,
+            pr_url: 'https://github.com/acme/repo/pull/12',
+            pr_state: 'auto_merge_enabled',
+            pr: {
+              url: 'https://github.com/acme/repo/pull/12',
+              number: 12,
+              state: 'auto_merge_enabled',
+            },
             foreground_task_title: 'Implement follow-up',
             queued_followups: [{ title: 'Queue release notes' }],
           },
@@ -14386,6 +14462,9 @@ test('renderAgentPanel shows branch review-point summary in Session Map view', (
   assert.match(panel.innerHTML, /Branch review points/);
   assert.match(panel.innerHTML, /Stable review point/);
   assert.match(panel.innerHTML, /Branch advanced/);
+  assert.match(panel.innerHTML, /https:\/\/github\.com\/acme\/repo\/pull\/12/);
+  assert.match(panel.innerHTML, /#12/);
+  assert.match(panel.innerHTML, /Auto-merge pending/);
   assert.match(panel.innerHTML, /Current: Implement follow-up/);
   assert.match(panel.innerHTML, /Queued next: Queue release notes/);
 });

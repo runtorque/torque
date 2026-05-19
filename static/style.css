@@ -2059,6 +2059,38 @@ body.runtime-embedded .agent-focus-header {
   border: none;
   cursor: pointer;
 }
+.detail-pr,
+.detail-pr-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.detail-pr-link {
+  color: var(--accent);
+  text-decoration: none;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.detail-pr-link:hover { text-decoration: underline; }
+.detail-pr-link-muted { color: var(--text-dim); }
+.detail-pr-state-pending {
+  color: var(--amber);
+  background: rgba(227, 179, 65, 0.14);
+}
+.detail-pr-state-open {
+  color: var(--accent);
+  background: rgba(88,166,255,.12);
+}
+.detail-pr-state-merged {
+  color: var(--green);
+  background: rgba(63,185,80,.12);
+}
+.detail-pr-state-blocked {
+  color: var(--red);
+  background: rgba(248,81,73,.12);
+}
 .detail-dir { color: var(--text-dim); }
 .detail-ahead { color: var(--green); font-size: 9px; }
 .detail-behind { color: var(--amber); font-size: 9px; }
@@ -8687,6 +8719,44 @@ button.agent-panel-hierarchy-crumb:focus-visible {
   font-size: 10px;
   color: var(--text);
   word-break: break-word;
+}
+.agent-panel-pr-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.agent-panel-pr-link {
+  color: var(--accent);
+  text-decoration: none;
+}
+.agent-panel-pr-link:hover { text-decoration: underline; }
+.agent-panel-pr-link-muted { color: var(--text-dim); }
+.agent-panel-pr-state {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 1px 6px;
+  font-size: 8px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.agent-panel-pr-state-pending {
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 15%, transparent);
+}
+.agent-panel-pr-state-open {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+.agent-panel-pr-state-merged {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 15%, transparent);
+}
+.agent-panel-pr-state-blocked {
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 15%, transparent);
 }
 .agent-panel-stream-task-group {
   display: flex;
