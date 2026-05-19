@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from .state import board_task_is_closed
+from .state import (
+    ARCHIVED_LANE,
+    board_task_is_closed,
+    task_is_engineer_message_followup,
+)
 from .task_health import (
     HEALTH_IDLE_RISK,
     HEALTH_STALLED,
@@ -14,6 +18,11 @@ ENGINEER_HINT_RESEND_COOLDOWN_SECS = 30 * 60
 ENGINEER_HINT_GROUP_CLEANUP_MIN = 2
 ENGINEER_HINT_GROUP_READY_TO_MERGE_MIN = 2
 ENGINEER_HINT_GROUP_IDLE_RISK_MIN = 2
+ENGINEER_HINT_DISPATCH_SHAPE_WINDOW = 20
+ENGINEER_HINT_DISPATCH_SHAPE_MIN_SAMPLE = 10
+ENGINEER_HINT_DISPATCH_SHAPE_MIN_HINTABLE_SERIAL = 8
+ENGINEER_HINT_DISPATCH_SHAPE_SERIAL_RATIO = 0.80
+ENGINEER_HINT_DISPATCH_SHAPE_READY_TASK_MIN = 2
 
 _MAX_PREVIEW_ITEMS = 3
 _SEVERE_LONG_RUNNING_STATES = {
@@ -63,6 +72,7 @@ def compute_engineer_hints(state, group: str, *, engineer_id: str = "",
             task_to_stream_id=task_to_stream_id,
         )
     )
+    hints.extend(_dispatch_shape_hints(state, group, engineer_id=engineer_id))
     hints.sort(
         key=lambda item: (
             -int(item.get("priority", 0) or 0),
@@ -71,6 +81,119 @@ def compute_engineer_hints(state, group: str, *, engineer_id: str = "",
         )
     )
     return hints
+
+
+def _dispatch_shape_hints(state, group: str, *, engineer_id: str) -> list[dict]:
+    target_engineer_id = _dispatch_shape_engineer_id(
+        state,
+        group,
+        engineer_id=engineer_id,
+    )
+    summarizer = getattr(state, "engineer_dispatch_shape_summary", None)
+    if not target_engineer_id or not callable(summarizer):
+        return []
+    summary = summarizer(
+        target_engineer_id,
+        group=group,
+        window=ENGINEER_HINT_DISPATCH_SHAPE_WINDOW,
+    )
+    total = _safe_int(summary.get("total"))
+    if total < ENGINEER_HINT_DISPATCH_SHAPE_MIN_SAMPLE:
+        return []
+    hintable_serial = _safe_int(summary.get("hintable_serial"))
+    if hintable_serial < ENGINEER_HINT_DISPATCH_SHAPE_MIN_HINTABLE_SERIAL:
+        return []
+    if total <= 0 or (
+            hintable_serial / total
+            < ENGINEER_HINT_DISPATCH_SHAPE_SERIAL_RATIO):
+        return []
+
+    ready_tasks = _dispatch_shape_ready_tasks(
+        state,
+        group,
+        engineer_id=target_engineer_id,
+    )
+    if len(ready_tasks) < ENGINEER_HINT_DISPATCH_SHAPE_READY_TASK_MIN:
+        return []
+
+    counts = summary.get("counts") if isinstance(summary.get("counts"), dict) else {}
+    serial_count = _safe_int(counts.get("serial"))
+    batch_count = _safe_int(counts.get("batch"))
+    warm_cluster_count = _safe_int(counts.get("warm_cluster"))
+    window = _safe_int(
+        summary.get("window"),
+        default=ENGINEER_HINT_DISPATCH_SHAPE_WINDOW,
+    ) or ENGINEER_HINT_DISPATCH_SHAPE_WINDOW
+    fingerprint_target = target_engineer_id or group
+    return [{
+        "kind": "dispatch_shape_distribution",
+        "priority": 25,
+        "fingerprint": f"dispatch_shape:serial-heavy:{fingerprint_target}",
+        "message": (
+            f"Dispatch shape: last {window} direct dispatches were "
+            f"{serial_count} serial / {batch_count} batch / "
+            f"{warm_cluster_count} warm cluster. For the next independent "
+            "wave, consider engineer_batch_dispatch."
+        ),
+        "agent_ids": [],
+        "task_ids": [
+            str(getattr(task, "id", "") or "").strip()
+            for task in ready_tasks[:ENGINEER_HINT_DISPATCH_SHAPE_READY_TASK_MIN]
+        ],
+        "stream_ids": [],
+    }]
+
+
+def _dispatch_shape_engineer_id(state, group: str, *, engineer_id: str) -> str:
+    engineer_id = str(engineer_id or "").strip()
+    if engineer_id:
+        return engineer_id
+    getter = getattr(state, "get_engineer_for_group", None)
+    engineer = getter(group) if callable(getter) else None
+    return str(getattr(engineer, "id", "") or "").strip()
+
+
+def _dispatch_shape_ready_tasks(state, group: str, *,
+                                engineer_id: str) -> list:
+    lane_order = {
+        lane: idx
+        for idx, lane in enumerate(getattr(state, "board_lanes", []) or [])
+    }
+    ready_tasks = []
+    board_deps_met = getattr(state, "board_deps_met", None)
+    for task in state.board_tasks.values():
+        if str(getattr(task, "group", "") or "").strip() != group:
+            continue
+        lane = str(getattr(task, "lane", "") or "").strip()
+        if lane in {"In Progress", "Done", ARCHIVED_LANE}:
+            continue
+        if board_task_is_closed(task):
+            continue
+        if str(getattr(task, "agent_id", "") or "").strip():
+            continue
+        assigned_engineer_id = str(
+            getattr(task, "assigned_engineer_id", "") or ""
+        ).strip()
+        if engineer_id and assigned_engineer_id \
+                and assigned_engineer_id != engineer_id:
+            continue
+        labels = set(getattr(task, "labels", []) or [])
+        if "torque:human" in labels:
+            continue
+        if task_is_engineer_message_followup(task):
+            continue
+        if callable(board_deps_met) and not board_deps_met(task):
+            continue
+        ready_tasks.append(task)
+    ready_tasks.sort(
+        key=lambda task: (
+            lane_order.get(str(getattr(task, "lane", "") or ""), len(lane_order)),
+            int(getattr(task, "position", 0) or 0),
+            _task_label(task).lower(),
+            str(getattr(task, "id", "") or ""),
+        )
+    )
+    return ready_tasks
 
 
 def _merged_cleanup_hints(state, group: str, *, engineer_id: str) -> list[dict]:
@@ -384,3 +507,10 @@ def _format_duration(seconds: int) -> str:
     if rem_minutes:
         return f"{hours}h {rem_minutes}m"
     return f"{hours}h"
+
+
+def _safe_int(value, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
