@@ -11,9 +11,9 @@ ENGINEER_TOOLS = [
             "task-health rollups, current non-blocking Engineer hints, and "
             "key label counts without embedding full task lists. Also "
             "includes compact computed stream summaries derived from "
-            "branch/worktree state. When owned-agent restriction is "
-            "enabled, hint and agent rollups only include agents this "
-            "Engineer can control."
+            "branch/worktree state and recent dispatch-shape metrics. When "
+            "owned-agent restriction is enabled, hint and agent rollups only "
+            "include agents this Engineer can control."
         ),
         "inputSchema": {"type": "object", "properties": {}},
     },
@@ -26,8 +26,9 @@ ENGINEER_TOOLS = [
             "gates, unhealthy tasks, verification gates, branch-boundary "
             "state, active agents, queued follow-up work, recent "
             "decision/plan/checkpoint journal entries, and current "
-            "deterministic hints. Prefer this when you need synthesis "
-            "without rereading the full journal tail."
+            "deterministic hints, plus recent dispatch-shape metrics. Prefer "
+            "this when you need synthesis without rereading the full journal "
+            "tail."
         ),
         "inputSchema": {"type": "object", "properties": {}},
     },

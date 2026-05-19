@@ -125,6 +125,46 @@ class EngineerSessionMapScopingTests(unittest.TestCase):
         self.assertNotIn(cells["engineer_b"].id, agent_ids)
         self.assertNotIn(cells["worker_b"].id, agent_ids)
 
+    def test_session_map_includes_caller_dispatch_shapes(self):
+        state, cells = self._make_scoped_state()
+        state.record_engineer_dispatch_shape(
+            cells["engineer_a"].id,
+            group="torque",
+            source_tool="engineer_task_dispatch",
+            shape="serial",
+            task_ids=["task-serial"],
+            hintable=True,
+        )
+        state.record_engineer_dispatch_shape(
+            cells["engineer_a"].id,
+            group="torque",
+            source_tool="engineer_batch_dispatch",
+            shape="batch",
+            task_ids=["task-batch-a", "task-batch-b"],
+            task_count=2,
+        )
+        state.record_engineer_dispatch_shape(
+            cells["engineer_b"].id,
+            group="torque",
+            source_tool="engineer_task_dispatch",
+            shape="warm_cluster",
+            task_ids=["other-task"],
+        )
+
+        session_map = self.session_map_mod.build_engineer_session_map(
+            state,
+            "torque",
+            engineer_cell=cells["engineer_a"],
+            item_limit=20,
+        )
+
+        self.assertEqual(
+            session_map["dispatch_shapes"]["counts"],
+            {"serial": 1, "batch": 1, "warm_cluster": 0},
+        )
+        self.assertEqual(session_map["dispatch_shapes"]["hintable_serial"], 1)
+        self.assertEqual(session_map["dispatch_shapes"]["derives_total"], 0)
+
     def test_verification_omits_checkpoints_for_merged_worktree_tasks(self):
         state, cells = self._make_scoped_state()
         BoardTask = self.state_mod.BoardTask

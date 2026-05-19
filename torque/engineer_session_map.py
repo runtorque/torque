@@ -89,6 +89,11 @@ def build_engineer_session_map(state, group: str, *, engineer_cell=None,
         engineer_cell=engineer_cell,
         limit=item_limit,
     )
+    dispatch_shapes = _build_dispatch_shapes(
+        state,
+        group,
+        engineer_cell=engineer_cell,
+    )
 
     lane_counts = {
         lane_name: 0
@@ -132,6 +137,7 @@ def build_engineer_session_map(state, group: str, *, engineer_cell=None,
         "agents": agents,
         "queued_follow_up": queued_follow_up,
         "journal": journal,
+        "dispatch_shapes": dispatch_shapes,
         "hints": hints,
     }
 
@@ -520,6 +526,16 @@ def _build_hints(state, group: str, *, engineer_cell, limit: int) -> dict:
         "items": hints[:limit],
         "truncated": len(hints) > limit,
     }
+
+
+def _build_dispatch_shapes(state, group: str, *, engineer_cell) -> dict:
+    engineer_id = str(getattr(engineer_cell, "id", "") or "").strip()
+    if not engineer_id:
+        return {}
+    summarizer = getattr(state, "engineer_dispatch_shape_summary", None)
+    if not callable(summarizer):
+        return {}
+    return summarizer(engineer_id, group=group, window=20)
 
 
 def _stream_state_counts(streams: list[dict]) -> dict[str, int]:

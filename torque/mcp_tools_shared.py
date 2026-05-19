@@ -126,6 +126,22 @@ def _record_engineer_dispatch_shape(state, **kwargs):
         return None
 
 
+def _engineer_dispatch_shape_summary(
+        state,
+        engineer_id: str,
+        *,
+        group: str = "",
+        window: int = 20) -> dict:
+    summarizer = getattr(state, "engineer_dispatch_shape_summary", None)
+    if not callable(summarizer):
+        return {}
+    try:
+        return summarizer(engineer_id, group=group, window=window)
+    except Exception:
+        log.exception("Failed to summarize engineer dispatch shape metric")
+        return {}
+
+
 def _has_task_dispatch_launch_overrides(args: dict) -> bool:
     return any(
         bool(str(args.get(key, "") or "").strip())
@@ -2403,6 +2419,13 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             "items": hints[:10],
             "truncated": len(hints) > 10,
         }
+        if caller_kind == "engineer":
+            summary["dispatch_shapes"] = _engineer_dispatch_shape_summary(
+                real_state,
+                _engineer_cell.id if _engineer_cell else "",
+                group=_engineer_group,
+                window=20,
+            )
         if include_created_by:
             return _architect_board_summary_json(
                 summary,

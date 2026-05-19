@@ -576,6 +576,89 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(parsed["group"], "g")
         self.assertEqual(calls, [])
 
+    async def test_engineer_board_summary_includes_caller_dispatch_shapes(self):
+        state = self.state_mod.MatrixState()
+        engineer = self.state_mod.AgentCell(
+            id="engineer-1",
+            name="Engineer One",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+        )
+        other_engineer = self.state_mod.AgentCell(
+            id="engineer-2",
+            name="Engineer Two",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+        )
+        state.agents[engineer.id] = engineer
+        state.agents[other_engineer.id] = other_engineer
+        state.groups["g"] = [engineer.id, other_engineer.id]
+        state.board_lanes = ["Backlog", "To Do", "In Progress", "Done"]
+        state.record_engineer_dispatch_shape(
+            engineer.id,
+            group="g",
+            source_tool="engineer_task_dispatch",
+            shape="serial",
+            task_ids=["task-serial"],
+            hintable=True,
+        )
+        state.record_engineer_dispatch_shape(
+            engineer.id,
+            group="g",
+            source_tool="engineer_batch_dispatch",
+            shape="batch",
+            task_ids=["task-batch-a", "task-batch-b"],
+            task_count=2,
+        )
+        state.record_engineer_dispatch_shape(
+            engineer.id,
+            group="g",
+            source_tool="torque_derive",
+            shape="warm_cluster",
+            task_ids=["task-derive"],
+        )
+        state.record_engineer_dispatch_shape(
+            other_engineer.id,
+            group="g",
+            source_tool="engineer_task_dispatch",
+            shape="warm_cluster",
+            task_ids=["other-task"],
+        )
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        handler = self.mcp_mod.create_mcp_handler(fake_handle_command, state)
+        response = await handler(
+            FakeRequest(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "engineer_board_summary",
+                        "arguments": {},
+                    },
+                },
+                headers={"X-Torque-Cell-Id": engineer.id},
+            )
+        )
+
+        self.assertFalse(response.payload["result"]["isError"])
+        parsed = json.loads(response.payload["result"]["content"][0]["text"])
+        self.assertEqual(
+            parsed["dispatch_shapes"]["counts"],
+            {"serial": 1, "batch": 1, "warm_cluster": 0},
+        )
+        self.assertEqual(parsed["dispatch_shapes"]["hintable_serial"], 1)
+        self.assertEqual(parsed["dispatch_shapes"]["derives_total"], 1)
+        self.assertEqual(
+            parsed["dispatch_shapes"]["derives_by_shape"],
+            {"serial": 0, "batch": 0, "warm_cluster": 1},
+        )
+
     def _parse_functions_block(self, text):
         self.assertTrue(text.startswith("<functions>"), text)
         self.assertTrue(text.endswith("</functions>"), text)
