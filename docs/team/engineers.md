@@ -186,6 +186,23 @@ The Engineer's system prompt steers it toward a few habits worth understanding (
 
 These are tuned in Group Settings → Engineer → Operating Style.
 
+### Dispatch-shape affordance
+
+Torque also gives the Engineer a soft batch-affordance hint when its recent
+dispatch shape looks serial-heavy. `engineer_board_summary` and
+`engineer_session_map` include a volatile `dispatch_shapes` summary for the
+calling Engineer, split into `serial`, `batch`, and `warm_cluster` counts.
+
+The hint is intentionally narrow. It can appear only when the 20-event window
+contains at least 10 direct dispatches, at least 8 of them are hintable serial
+new-Worker starts, those hintable serial starts are at least 80% of the direct
+dispatch sample, and at least two ready unassigned tasks remain. "Hintable"
+excludes existing-agent recovery, per-task launch overrides, worker
+`torque_derive` handoffs, and batch dispatches. The resulting hint is advisory:
+for the next independent wave, consider `engineer_batch_dispatch`; keep using
+serial dispatch when dependencies, review boundaries, risky overlap, or launch
+overrides make it the cleaner shape.
+
 ## Recovering after `/clear` — a worked walkthrough
 
 The journal and the session map make recovery deterministic. Here's exactly what an Engineer does after `/clear` (or after a daemon restart, or after a long pause).

@@ -61,9 +61,9 @@ Visible only to agents with `kind: engineer`. All operations are scoped to the c
 
 | Tool | What it does |
 |---|---|
-| `engineer_board_summary` | Compact overview of lanes, pending asks, blocked tasks, agent state. The first call in any orchestration loop. |
+| `engineer_board_summary` | Compact overview of lanes, pending asks, blocked tasks, agent state, hints, and the caller's recent `dispatch_shapes`. The first call in any orchestration loop. |
 | `engineer_board_list` | Full lane-grouped task list with optional filters. |
-| `engineer_session_map` | Deterministic structured snapshot of streams, asks, queued follow-ups, NEXT/PRODUCT/WORKFLOW context per stream. The orientation surface for recovery. |
+| `engineer_session_map` | Deterministic structured snapshot of streams, asks, queued follow-ups, NEXT/PRODUCT/WORKFLOW context per stream, hints, and the caller's recent `dispatch_shapes`. The orientation surface for recovery. |
 | `engineer_task_show` | Full details for one task, including pipeline chain and artifact metadata. |
 | `engineer_task_chain` | Walk the derivation chain for a task. (Used internally; usually you want `engineer_task_show`.) |
 | `engineer_agents_list` | Quick view of all agents in the group. |
@@ -72,6 +72,20 @@ Visible only to agents with `kind: engineer`. All operations are scoped to the c
 | `engineer_action_show` | Inspect one action's YAML, variables, transitions, gates. |
 | `engineer_streams_list` | List active streams. |
 | `engineer_stream_show` | Show one stream's full state. |
+
+`dispatch_shapes` is an advisory, in-memory read model scoped to the
+calling Engineer. It summarizes the last 20 recent dispatch-shape events:
+
+| Field | Meaning |
+|---|---|
+| `counts.serial` | Direct serial dispatches, usually one `engineer_task_dispatch` to a new Worker. Single-entry batch dispatches also count as serial. |
+| `counts.batch` | Multi-entry `engineer_batch_dispatch` calls with no shared `agent_group` cluster. |
+| `counts.warm_cluster` | Existing-agent reuse or batch entries grouped onto one warm agent. |
+| `hintable_serial` | Serial new-agent dispatches with no per-task launch overrides; used only for low-noise batch-affordance hints. |
+| `derives_total` / `derives_by_shape` | Worker `torque_derive` handoffs, counted separately from direct Engineer dispatches. |
+
+The metric is volatile and not a durable audit log; use
+`engineer_mcp_calls` when you need raw call history.
 
 ### Task editing
 
