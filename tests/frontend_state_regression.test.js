@@ -4958,6 +4958,7 @@ test('decision and pending-hire deltas invalidate the main surface', () => {
     events: false,
     engineer: true,
     templates: false,
+    health: false,
     focus: true,
   });
   assert.deepEqual(jsonValue(context, `state.pending_hires["hire-1"]`), {
@@ -4987,6 +4988,7 @@ test('decision and pending-hire deltas invalidate the main surface', () => {
     events: false,
     engineer: true,
     templates: false,
+    health: false,
     focus: true,
   });
   assert.equal(

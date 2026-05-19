@@ -3893,12 +3893,14 @@ body.runtime-embedded .standalone-panel-zone-body > #panel-templates,
 body.runtime-embedded .standalone-panel-zone-body > #panel-context,
 body.runtime-embedded .standalone-panel-zone-body > #panel-events,
 body.runtime-embedded .standalone-panel-zone-body > #panel-agent,
+body.runtime-embedded .standalone-panel-zone-body > #panel-health,
 body.runtime-embedded .standalone-float-body > #panel-board,
 body.runtime-embedded .standalone-float-body > #panel-actions,
 body.runtime-embedded .standalone-float-body > #panel-templates,
 body.runtime-embedded .standalone-float-body > #panel-context,
 body.runtime-embedded .standalone-float-body > #panel-events,
-body.runtime-embedded .standalone-float-body > #panel-agent {
+body.runtime-embedded .standalone-float-body > #panel-agent,
+body.runtime-embedded .standalone-float-body > #panel-health {
   height: 100%;
   width: 100%;
   min-height: 0;
@@ -10275,4 +10277,185 @@ body.runtime-embedded .taskbar-app[data-app="supervisor"] { display: inline-flex
 .canvas-add-inline:hover {
   border-color: var(--accent);
   color: var(--text);
+}
+
+/* ------------------------------------------------------------------ */
+/* Health panel                                                        */
+/* ------------------------------------------------------------------ */
+#panel-health {
+  height: calc(100% - 5px);
+  min-height: 0;
+  overflow: auto;
+}
+.health-panel {
+  min-height: 100%;
+  padding: 14px;
+  box-sizing: border-box;
+  color: var(--text);
+}
+.health-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg-surface) 86%, var(--bg));
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.health-toolbar h2 {
+  margin: 0;
+  font-size: 15px;
+}
+.health-toolbar p {
+  margin: 3px 0 0;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.health-toolbar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.health-toolbar select {
+  min-width: 88px;
+}
+.health-active-group {
+  color: var(--text-dim);
+  font-size: 11px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 8px;
+}
+.health-results {
+  margin-top: 12px;
+}
+.health-meta,
+.health-coverage {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-dim);
+  font-size: 11px;
+  margin-bottom: 10px;
+}
+.health-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+.health-card {
+  min-height: 118px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  background: var(--bg-cell);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 4%, transparent);
+}
+.health-card-title {
+  color: var(--text-dim);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.health-card-value {
+  margin-top: 8px;
+  font-size: 24px;
+  font-weight: 700;
+}
+.health-card-detail {
+  min-height: 16px;
+  margin-top: 4px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.health-sparkline {
+  display: block;
+  width: 100%;
+  height: 34px;
+  margin-top: 10px;
+  color: var(--accent);
+  opacity: 0.9;
+}
+.health-card-review .health-sparkline { color: var(--amber); }
+.health-card-merge .health-sparkline { color: var(--green); }
+.health-card-doa .health-sparkline { color: var(--red); }
+.health-card-util .health-sparkline { color: #a371f7; }
+.health-section {
+  margin-top: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg-surface) 82%, var(--bg));
+  padding: 12px;
+}
+.health-section h3 {
+  margin: 0 0 10px;
+  font-size: 13px;
+}
+.health-age-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.health-age-table th,
+.health-age-table td {
+  border-top: 1px solid var(--border);
+  padding: 7px 6px;
+  text-align: left;
+  vertical-align: top;
+}
+.health-age-table thead th {
+  border-top: 0;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+.health-age-buckets {
+  color: var(--text-dim);
+  word-break: break-word;
+}
+.health-pill {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 8px;
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 12%, transparent);
+}
+.health-pill-warn {
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 12%, transparent);
+}
+.health-notes {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.health-notes li { margin: 4px 0; }
+.health-loading,
+.health-empty,
+.health-error {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--bg-surface) 70%, transparent);
+}
+.health-error {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 45%, var(--border));
+}
+@media (max-width: 720px) {
+  .health-panel { padding: 10px; }
+  .health-toolbar { align-items: stretch; }
+  .health-toolbar > div { flex: 1 1 100%; }
+  .health-card-grid { grid-template-columns: 1fr; }
+  .health-age-table { font-size: 10px; }
 }

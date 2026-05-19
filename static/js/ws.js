@@ -365,6 +365,10 @@ function connect() {
       if (typeof supervisorReceiveSessions === 'function') {
         supervisorReceiveSessions(msg);
       }
+    } else if (msg.type === 'system_health_metrics') {
+      if (typeof healthReceiveMetrics === 'function') {
+        healthReceiveMetrics(msg);
+      }
     } else if (msg.type === 'daemon_stop') {
       if (typeof _daemonStopRequestedByUser !== 'undefined'
           && _daemonStopRequestedByUser
@@ -495,6 +499,15 @@ function connect() {
     } else if (msg.type === 'memory_entry') {
       if (typeof handleContextEntry === 'function') handleContextEntry(msg);
     } else if (msg.type === 'error') {
+      if (typeof healthReceiveMetrics === 'function'
+          && typeof healthState !== 'undefined'
+          && healthState
+          && healthState.loading
+          && ((typeof _panelAppVisible === 'function' && _panelAppVisible('health'))
+            || (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'health'))) {
+        healthReceiveMetrics(msg);
+        return;
+      }
       var systemPromptErrorHandled = false;
       if (typeof _showSystemPromptPreviewError === 'function') {
         systemPromptErrorHandled = _showSystemPromptPreviewError(msg);
@@ -827,6 +840,9 @@ function _handleDelta(msg) {
     activeSurfaces.forEach(function(surface) {
       if (surface) invalidations[surface] = true;
     });
+    if (typeof healthActiveGroupChanged === 'function') {
+      healthActiveGroupChanged();
+    }
   } else {
     activeSurfaces.forEach(function(surface) {
       if (surface
@@ -937,6 +953,7 @@ function _blankSurfaceInvalidations() {
     events: false,
     engineer: false,
     templates: false,
+    health: false,
   };
 }
 

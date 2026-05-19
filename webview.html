@@ -1283,6 +1283,7 @@
   <div id="panel-events" class="panel-hidden"></div>
   <div id="panel-agent" class="panel-hidden"></div>
   <div id="panel-supervisor" class="panel-hidden"></div>
+  <div id="panel-health" class="panel-hidden"></div>
 </div>
 
 <!-- Taskbar (dock for panel apps) -->
@@ -1303,6 +1304,7 @@
   <button class="taskbar-app" data-app="engineer" onclick="togglePanel('engineer')">&#x2696; Agent</button>
   <button class="taskbar-app" data-app="events" onclick="togglePanel('events')">&#x26A0; Events</button>
   <button class="taskbar-app" data-app="supervisor" onclick="togglePanel('supervisor')">&#9635; Supervisor</button>
+  <button class="taskbar-app" data-app="health" onclick="togglePanel('health')">&#9829; Health</button>
   <div class="taskbar-spacer"></div>
   <button id="taskbar-restore-layout" class="taskbar-aux-btn"
           onclick="restoreStandaloneLayoutDefaults()"
@@ -1440,6 +1442,7 @@
 <script src="/static/js/context.js"></script>
 <script src="/static/js/agent_panel.js"></script>
 <script src="/static/js/supervisor.js"></script>
+<script src="/static/js/health.js"></script>
 <script src="/static/js/panel_manager.js"></script>
 <script src="/static/js/log_viewer.js"></script>
 <script src="/static/onboarding/welcome.js"></script>
