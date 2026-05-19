@@ -7,10 +7,10 @@
  * agents (engineers without an architect, workers without an engineer)
  * collect under a "Standalone" pseudo-tree at the bottom.
  *
- * Right-click context menus surface the create flow:
+ * Right-click context menus surface the create flow plus the same per-agent
+ * actions offered by the grid view:
  *   empty canvas -> + Architect / + Engineer / + Worker
  *   architect    -> + Engineer (hired by this architect)
- *   engineer     -> + Worker
  *
  * Terminals do not appear on this canvas (deliberate; they live in the
  * existing drawer / standalone strip).
@@ -600,45 +600,52 @@ function _canvasShowEmptyMenu(x, y, groupName) {
   ]);
 }
 
-function _canvasShowCardMenu(x, y, kind, id, groupName) {
-  const items = [];
-  const g = esc(groupName);
+function _canvasFallbackCardMenuItems(id) {
   const safeId = esc(id);
+  return [
+    { label: 'Edit…', action: `openEditCell('${safeId}')` },
+    { label: 'Focus', action: `focusAgent('${safeId}')` },
+    { separator: true },
+    { label: 'Delete', action: `removeAgent('${safeId}')`, danger: true },
+  ];
+}
+
+function _canvasInsertAfterFirst(items, label, item) {
+  const idx = items.findIndex(function(candidate) {
+    return candidate && candidate.label === label;
+  });
+  if (idx >= 0) items.splice(idx + 1, 0, item);
+  else items.unshift(item);
+}
+
+function _canvasShowCardMenu(x, y, kind, id, groupName) {
   const cell = state.agents ? state.agents[id] : null;
-  const pause = cell ? _canvasPauseState(cell) : { applicable: false, paused: false, toggleAction: '' };
-  if (kind === 'architect') {
-    items.push({ label: '+ Engineer here', action: `openAddEngineerForSection('${g}', '${safeId}')` });
-    items.push({ separator: true });
-    items.push({ label: 'Focus', action: `focusAgent('${safeId}')` });
-    items.push({ label: 'Rename…', action: `openEditCell('${safeId}')` });
-    if (pause.applicable) {
-      items.push({
-        label: pause.paused ? 'Resume event delivery' : 'Pause event delivery',
-        action: pause.toggleAction,
-      });
-    }
-    items.push({ separator: true });
-    items.push({ label: 'Remove', action: `removeAgent('${safeId}')`, danger: true });
-  } else if (kind === 'engineer') {
-    // Engineers create workers themselves via task dispatch; no
-    // user-facing '+ Worker here' option.
-    items.push({ label: 'Focus', action: `focusAgent('${safeId}')` });
-    items.push({ label: 'Rename…', action: `openEditCell('${safeId}')` });
-    if (pause.applicable) {
-      items.push({
-        label: pause.paused ? 'Resume event delivery' : 'Pause event delivery',
-        action: pause.toggleAction,
-      });
-    }
-    items.push({ separator: true });
-    items.push({ label: 'Remove', action: `removeAgent('${safeId}')`, danger: true });
-  } else if (kind === 'worker') {
-    items.push({ label: 'Focus', action: `focusAgent('${safeId}')` });
-    items.push({ label: 'Rename…', action: `openEditCell('${safeId}')` });
-    items.push({ separator: true });
-    items.push({ label: 'Remove', action: `removeAgent('${safeId}')`, danger: true });
-  }
+  if (!cell) return;
+  const cellKind = cell.kind || kind || '';
+  const items = (typeof _cellContextMenuItems === 'function')
+    ? _cellContextMenuItems(id).slice()
+    : _canvasFallbackCardMenuItems(id);
   if (items.length === 0) return;
+
+  const g = esc(groupName || cell.group || '');
+  const safeId = esc(id);
+  const pause = cell ? _canvasPauseState(cell) : { applicable: false, paused: false, toggleAction: '' };
+  const dismissed = (typeof _isLifecycleDismissedCell === 'function')
+    ? _isLifecycleDismissedCell(cell)
+    : false;
+
+  if (cellKind === 'architect') {
+    items.unshift(
+      { label: '+ Engineer here', action: `openAddEngineerForSection('${g}', '${safeId}')` },
+      { separator: true }
+    );
+  }
+  if (pause.applicable && !dismissed) {
+    _canvasInsertAfterFirst(items, 'Focus', {
+      label: pause.paused ? 'Resume event delivery' : 'Pause event delivery',
+      action: pause.toggleAction,
+    });
+  }
   showContextMenu(x, y, items);
 }
 
@@ -648,4 +655,3 @@ function _canvasAddEngineerForArchitect(architectId) {
     openAddEngineerForSection(group, architectId);
   }
 }
-

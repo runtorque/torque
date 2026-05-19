@@ -926,11 +926,9 @@ function onGroupTabContextMenu(e, group) {
   ]);
 }
 
-function onCellContextMenu(e, id) {
-  e.preventDefault();
-  e.stopPropagation();
+function _cellContextMenuItems(id) {
   const cell = state.agents[id];
-  if (!cell) return;
+  if (!cell) return [];
   const gs = (state.group_settings || {})[cell.group] || {};
   const isDesignatedEngineer = gs.engineer_agent_id === id;
   const isDismissedEngineer = _isEngineerDismissedCell(cell);
@@ -1003,6 +1001,14 @@ function onCellContextMenu(e, id) {
   items.push({ separator: true });
   items.push({ label: `Copy ID: ${id.slice(0, 8)}\u2026`, action: `copyAgentId('${id}')` });
   items.push({ label: 'Delete', action: `removeAgent('${id}')`, danger: true });
+  return items;
+}
+
+function onCellContextMenu(e, id) {
+  e.preventDefault();
+  e.stopPropagation();
+  const items = _cellContextMenuItems(id);
+  if (!items.length) return;
   showContextMenu(e.clientX, e.clientY, items);
 }
 
