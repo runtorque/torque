@@ -158,6 +158,10 @@ from .server_supervisor import (
 )
 from .server_worktrees import (
     _generate_merge_message,
+    _pr_merge_failure_allows_auto,
+    _pr_result_metadata,
+    _record_pr_metadata_on_latest_boundary,
+    _split_merge_message_for_pr,
     _worktree_diff_updater,
     _worktree_full_diff,
     _worktree_merge_diff_snapshot,
@@ -510,6 +514,724 @@ def _maybe_auto_move_merged_task_to_done(
             decision["reason"] or "no-op",
         )
     return decision
+
+
+def _worktree_merge_error(aid: str, message: str, **extra) -> dict:
+    result = {
+        "type": "worktree_merge",
+        "id": aid,
+        "ok": False,
+        "error": message,
+    }
+    result.update(extra)
+    return result
+
+
+async def _preflight_worktree_merge_gates(
+    *,
+    state: MatrixState,
+    cell,
+    worktree_mgr: WorktreeManager,
+    aid: str,
+    data: dict,
+    latest_boundary_state_for_cell,
+    boundary_reason_message,
+    panel_event=None,
+) -> dict:
+    """Run shared local merge gates before either direct or PR merge paths."""
+    if not (cell and cell.worktree_path and cell.worktree_branch):
+        return {
+            "ok": False,
+            "result": _worktree_merge_error(aid, "Agent has no worktree."),
+        }
+
+    boundary_state = await latest_boundary_state_for_cell(cell)
+    dirty = await worktree_mgr.has_uncommitted_changes(cell)
+    if dirty:
+        return {
+            "ok": False,
+            "boundary_state": boundary_state,
+            "result": _worktree_merge_error(
+                aid,
+                "Commit or checkpoint changes before merging.",
+            ),
+        }
+
+    if boundary_state.get("latest") and not boundary_state.get("clean"):
+        return {
+            "ok": False,
+            "boundary_state": boundary_state,
+            "result": _worktree_merge_error(
+                aid,
+                boundary_reason_message(
+                    boundary_state.get("reason", ""),
+                    boundary_state.get("latest"),
+                ),
+            ),
+        }
+
+    sibling_gate = await _sibling_branch_divergence_gate_for_merge(
+        state,
+        cell,
+        worktree_mgr,
+        aid,
+        data,
+    )
+    if sibling_gate:
+        return {
+            "ok": False,
+            "boundary_state": boundary_state,
+            "result": sibling_gate,
+        }
+
+    stale_base = await worktree_mgr.stale_base_info(cell)
+    if stale_base.get("stale") and not _stale_base_force_enabled(data):
+        return {
+            "ok": False,
+            "boundary_state": boundary_state,
+            "stale_base": stale_base,
+            "result": _stale_base_merge_result(aid, stale_base),
+        }
+
+    stale_base_override_event = None
+    if stale_base.get("stale") and _stale_base_force_enabled(data):
+        stale_base_override_event = (
+            _emit_stale_base_override_workflow_breach(
+                state,
+                panel_event,
+                cell,
+                stale_base,
+            )
+        )
+
+    precheck = await worktree_mgr.check_merge_conflicts(cell)
+    if not precheck.get("clean"):
+        result = _worktree_merge_error(
+            aid,
+            precheck.get("error", "Conflicts detected"),
+        )
+        _attach_stale_base(result, stale_base)
+        return {
+            "ok": False,
+            "boundary_state": boundary_state,
+            "stale_base": stale_base,
+            "precheck": precheck,
+            "workflow_breach": stale_base_override_event,
+            "result": result,
+        }
+
+    overwrite_paths = (
+        await worktree_mgr.merge_untracked_overwrite_paths(
+            cell.worktree_repo_root or cell.git_root or "",
+            cell.worktree_base_branch or "",
+            precheck.get("tree_sha", ""),
+        )
+    )
+    if overwrite_paths:
+        result = _worktree_merge_error(
+            aid,
+            _untracked_overwrite_message(
+                overwrite_paths,
+                operation="merge",
+                location="the checked-out base repo",
+            ),
+            overwrite_paths=overwrite_paths,
+        )
+        _attach_stale_base(result, stale_base)
+        return {
+            "ok": False,
+            "boundary_state": boundary_state,
+            "stale_base": stale_base,
+            "precheck": precheck,
+            "workflow_breach": stale_base_override_event,
+            "result": result,
+        }
+
+    return {
+        "ok": True,
+        "boundary_state": boundary_state,
+        "stale_base": stale_base,
+        "precheck": precheck,
+        "workflow_breach": stale_base_override_event,
+    }
+
+
+async def _capture_worktree_merge_preserve_diff(
+    *,
+    state: MatrixState,
+    cell,
+    worktree_mgr: WorktreeManager,
+    data: dict,
+) -> tuple[bool, object | None, dict | None]:
+    preserve_merge_diff = _worktree_merge_preserve_diff_enabled(
+        state,
+        cell,
+        data,
+    )
+    boundary_task_for_diff = None
+    merge_diff_snapshot = None
+    if preserve_merge_diff:
+        boundary_task_for_diff = _latest_open_boundary_task_for_cell(
+            state,
+            cell,
+        )
+        if boundary_task_for_diff:
+            merge_diff_snapshot = await _worktree_merge_diff_snapshot(
+                cell,
+                worktree_mgr,
+            )
+    return preserve_merge_diff, boundary_task_for_diff, merge_diff_snapshot
+
+
+def _capture_worktree_merge_resume_targets(
+    state: MatrixState,
+    cell,
+) -> list[dict]:
+    pre_merge_queued_followups = [
+        t for t in state.board_tasks.values()
+        if t.agent_id == cell.id
+        and t.lane in {"Backlog", "To Do"}
+    ]
+    merge_resume_targets = []
+    for followup in pre_merge_queued_followups:
+        merge_resume_targets.extend(
+            _capture_auto_resume_targets(
+                state,
+                task=followup,
+                group=cell.group,
+            )
+        )
+    return merge_resume_targets
+
+
+async def _finalize_successful_worktree_merge(
+    *,
+    state: MatrixState,
+    cell,
+    aid: str,
+    data: dict,
+    merge_sha: str,
+    stale_base: dict | None,
+    preserve_merge_diff: bool,
+    boundary_task_for_diff,
+    merge_diff_snapshot: dict | None,
+    merge_resume_targets: list[dict] | None,
+    mark_branch_boundaries_merged,
+    cleanup_after_merge,
+    broadcast_toast,
+    bridge,
+    worktree_mgr: WorktreeManager,
+    handle_command,
+    panel_event,
+) -> dict:
+    """Apply all local side effects after a direct or PR merge succeeds."""
+    mark_branch_boundaries_merged(cell, merge_sha)
+    state.cleanup_stale_boundary_successors()
+    preserve_diff_warning = ""
+    if preserve_merge_diff:
+        preserve_diff_warning = (
+            _persist_preserved_merge_diff_warning_only(
+                state,
+                cell,
+                boundary_task_for_diff,
+                merge_diff_snapshot,
+                merge_commit_sha=merge_sha,
+            )
+        )
+    cell.worktree_checkpoints = 0
+    cell.worktree_merged = True
+    cell.worktree_changed_files = []
+    state.history_update_agent(cell, status="merged")
+    state._emit_agent(cell)
+    await broadcast_toast(
+        f'"{cell.name}" merged to {cell.worktree_base_branch}',
+        "success",
+    )
+    if preserve_diff_warning:
+        await broadcast_toast(preserve_diff_warning, "warning")
+
+    reviewer_cleanup = (
+        await _cleanup_shipped_reviewers_for_merged_cell(
+            state,
+            cell,
+            cleanup_after_merge,
+        )
+    )
+    legacy_close_flag = bool(data.get("close_on_merge"))
+    explicit_close = "close_agent_on_merge" in data
+    explicit_remove = "remove_worktree_on_merge" in data
+    if explicit_close or explicit_remove:
+        close_flag = bool(data.get("close_agent_on_merge"))
+        remove_flag = bool(data.get("remove_worktree_on_merge"))
+    elif legacy_close_flag:
+        close_flag = True
+        remove_flag = True
+    else:
+        close_flag, remove_flag = merge_cleanup_flags(
+            state.get_group_settings(cell.group).worktree_merge_cleanup
+        )
+    queued_followups = [
+        t for t in state.board_tasks.values()
+        if t.agent_id == cell.id
+        and t.lane in {"Backlog", "To Do"}
+    ]
+    if queued_followups:
+        close_flag = False
+        remove_flag = False
+    _maybe_auto_move_merged_task_to_done(
+        state,
+        cell,
+        enabled=bool(data.get("auto_move_to_done", True)),
+        cleanup_requested=bool(close_flag or remove_flag),
+    )
+    # Unlink completed/archive-closed tasks from this agent so they don't
+    # re-appear in future merge messages. Tasks stay on the board as history.
+    for t in list(state.board_tasks.values()):
+        if t.agent_id == cell.id and task_is_closed(t):
+            t.agent_id = ""
+            state._emit("task_upsert", **asdict(t))
+            state._db_save_task(t)
+
+    clear_flag = bool(data.get("clear_context"))
+    if queued_followups or close_flag or remove_flag:
+        clear_flag = False
+    cleanup = {
+        "close_agent": close_flag,
+        "remove_worktree": remove_flag,
+        "agent_closed": False,
+        "worktree_removed": False,
+        "errors": [],
+    }
+    if clear_flag and not close_flag and not remove_flag and cell.session_id:
+        await bridge.send_text(cell.session_id, "/clear\r")
+        cell.tasks_dispatched = 0
+        state._emit_agent(cell)
+        state._db_save_agent(cell)
+        log.info("Cleared context for '%s' after merge", cell.name)
+    if close_flag or remove_flag:
+        cleanup = await cleanup_after_merge(
+            cell,
+            close_agent=close_flag,
+            remove_worktree=remove_flag,
+        )
+    elif cell.worktree_path:
+        # Reset worktree branch to base tip so new work starts fresh (avoids
+        # re-merging already-merged commits).
+        valid = await worktree_mgr.validate(cell)
+        if valid:
+            ok = await worktree_mgr.reset_to_base(cell)
+            if ok:
+                cell.worktree_checkpoints = await worktree_mgr.count_commits(cell)
+                cell.worktree_dirty = False
+                cell.worktree_diff = {}
+                if queued_followups:
+                    cell.worktree_merged = False
+                state._emit_agent(cell)
+            else:
+                log.warning("Post-merge reset failed for '%s'", cell.name)
+
+    if reviewer_cleanup.get("agents"):
+        cleanup["reviewer_cleanup"] = reviewer_cleanup
+        cleanup["errors"].extend(reviewer_cleanup.get("errors", []))
+
+    result = {
+        "type": "worktree_merge",
+        "id": aid,
+        "ok": True,
+        "sha": merge_sha,
+        "cleanup": cleanup,
+    }
+    _attach_stale_base(result, stale_base)
+    if queued_followups:
+        await _maybe_auto_resume_targets(
+            state,
+            handle_command,
+            panel_event,
+            targets=merge_resume_targets or [],
+            group=cell.group,
+        )
+        await _pump_auto_dispatch_queue(
+            state,
+            handle_command,
+            panel_event,
+            group=cell.group,
+        )
+    return result
+
+
+async def _run_direct_worktree_merge(
+    *,
+    state: MatrixState,
+    cell,
+    aid: str,
+    data: dict,
+    worktree_mgr: WorktreeManager,
+    latest_boundary_state_for_cell,
+    boundary_reason_message,
+    mark_branch_boundaries_merged,
+    cleanup_after_merge,
+    broadcast_toast,
+    bridge,
+    handle_command,
+    panel_event,
+) -> dict:
+    gates = await _preflight_worktree_merge_gates(
+        state=state,
+        cell=cell,
+        worktree_mgr=worktree_mgr,
+        aid=aid,
+        data=data,
+        latest_boundary_state_for_cell=latest_boundary_state_for_cell,
+        boundary_reason_message=boundary_reason_message,
+        panel_event=panel_event,
+    )
+    if not gates.get("ok"):
+        result = gates.get("result") or _worktree_merge_error(
+            aid,
+            "Merge preflight failed.",
+        )
+        if gates.get("workflow_breach") and isinstance(result, dict):
+            result["workflow_breach"] = gates["workflow_breach"]
+        return result
+
+    squash = cell.worktree_merge_squash
+    msg = str(data.get("message", "") or "").strip()
+    if not msg:
+        msg = await _generate_merge_message(
+            cell,
+            worktree_mgr,
+            squash,
+            state=state,
+        )
+    preserve_merge_diff, boundary_task_for_diff, merge_diff_snapshot = (
+        await _capture_worktree_merge_preserve_diff(
+            state=state,
+            cell=cell,
+            worktree_mgr=worktree_mgr,
+            data=data,
+        )
+    )
+    merge_resume_targets = _capture_worktree_merge_resume_targets(state, cell)
+    merge_result = await worktree_mgr.server_merge(cell, msg, squash=squash)
+    if merge_result.get("ok"):
+        result = await _finalize_successful_worktree_merge(
+            state=state,
+            cell=cell,
+            aid=aid,
+            data=data,
+            merge_sha=merge_result["sha"],
+            stale_base=gates.get("stale_base"),
+            preserve_merge_diff=preserve_merge_diff,
+            boundary_task_for_diff=boundary_task_for_diff,
+            merge_diff_snapshot=merge_diff_snapshot,
+            merge_resume_targets=merge_resume_targets,
+            mark_branch_boundaries_merged=mark_branch_boundaries_merged,
+            cleanup_after_merge=cleanup_after_merge,
+            broadcast_toast=broadcast_toast,
+            bridge=bridge,
+            worktree_mgr=worktree_mgr,
+            handle_command=handle_command,
+            panel_event=panel_event,
+        )
+    else:
+        result = _worktree_merge_error(
+            aid,
+            merge_result.get("error", "Merge failed"),
+        )
+        _attach_stale_base(result, gates.get("stale_base"))
+    if gates.get("workflow_breach") and isinstance(result, dict):
+        result["workflow_breach"] = gates["workflow_breach"]
+    return result
+
+
+async def _run_pr_worktree_merge(
+    *,
+    state: MatrixState,
+    cell,
+    aid: str,
+    data: dict,
+    worktree_mgr: WorktreeManager,
+    latest_boundary_state_for_cell,
+    boundary_reason_message,
+    mark_branch_boundaries_merged,
+    cleanup_after_merge,
+    broadcast_toast,
+    bridge,
+    handle_command,
+    panel_event,
+) -> dict:
+    if not (cell and cell.worktree_path and cell.worktree_branch):
+        return _worktree_merge_error(aid, "Agent has no worktree.")
+
+    wt = cell.worktree_path
+    repo_root = cell.worktree_repo_root or cell.git_root or ""
+    branch = cell.worktree_branch or ""
+    base_branch = cell.worktree_base_branch or "main"
+
+    preflight = await worktree_mgr.github_preflight(wt)
+    if not preflight.get("ok"):
+        return _worktree_merge_error(
+            aid,
+            preflight.get("error", "GitHub PR preflight failed."),
+            mode="pull_request",
+            phase=preflight.get("phase", "github_preflight"),
+        )
+
+    remote_info = await worktree_mgr.github_select_remote(wt)
+    if not remote_info.get("ok"):
+        return _worktree_merge_error(
+            aid,
+            remote_info.get("error", "GitHub remote selection failed."),
+            mode="pull_request",
+            phase=remote_info.get("phase", "github_remote"),
+        )
+    remote = remote_info.get("remote", "origin") or "origin"
+
+    base_sync = await worktree_mgr.github_sync_remote_base(
+        wt,
+        repo_root or wt,
+        remote,
+        base_branch,
+    )
+    if not base_sync.get("ok"):
+        return _worktree_merge_error(
+            aid,
+            base_sync.get("error", "Remote base sync failed."),
+            mode="pull_request",
+            phase=base_sync.get("phase", "remote_base_sync"),
+            remote_base_sync=base_sync,
+        )
+
+    gates = await _preflight_worktree_merge_gates(
+        state=state,
+        cell=cell,
+        worktree_mgr=worktree_mgr,
+        aid=aid,
+        data=data,
+        latest_boundary_state_for_cell=latest_boundary_state_for_cell,
+        boundary_reason_message=boundary_reason_message,
+        panel_event=panel_event,
+    )
+    if not gates.get("ok"):
+        result = gates.get("result") or _worktree_merge_error(
+            aid,
+            "Merge preflight failed.",
+        )
+        if isinstance(result, dict):
+            result["mode"] = "pull_request"
+            if gates.get("workflow_breach"):
+                result["workflow_breach"] = gates["workflow_breach"]
+        return result
+
+    squash = True
+    msg = str(data.get("message", "") or "").strip()
+    if not msg:
+        msg = await _generate_merge_message(
+            cell,
+            worktree_mgr,
+            squash,
+            state=state,
+        )
+    fallback_title = f"Squash merge: {branch or cell.name}"
+    title, body = _split_merge_message_for_pr(msg, fallback_title=fallback_title)
+
+    preserve_merge_diff, boundary_task_for_diff, merge_diff_snapshot = (
+        await _capture_worktree_merge_preserve_diff(
+            state=state,
+            cell=cell,
+            worktree_mgr=worktree_mgr,
+            data=data,
+        )
+    )
+    merge_resume_targets = _capture_worktree_merge_resume_targets(state, cell)
+
+    pushed = await worktree_mgr.github_push_branch(wt, remote, branch)
+    if not pushed.get("ok"):
+        result = _worktree_merge_error(
+            aid,
+            pushed.get("error", "Failed to push worktree branch."),
+            mode="pull_request",
+            phase=pushed.get("phase", "push_branch"),
+        )
+        if gates.get("workflow_breach"):
+            result["workflow_breach"] = gates["workflow_breach"]
+        return result
+
+    pr_result = await worktree_mgr.github_create_or_reuse_pr(
+        wt,
+        branch,
+        base_branch,
+        title=title,
+        body=body,
+    )
+    if not pr_result.get("ok"):
+        result = _worktree_merge_error(
+            aid,
+            pr_result.get("error", "Failed to create pull request."),
+            mode="pull_request",
+            phase=pr_result.get("phase", "pr_create"),
+        )
+        if gates.get("workflow_breach"):
+            result["workflow_breach"] = gates["workflow_breach"]
+        return result
+
+    pr_metadata = _pr_result_metadata(
+        pr_result=pr_result,
+        remote=remote,
+        base_branch=base_branch,
+        branch=branch,
+        status="created",
+    )
+    _record_pr_metadata_on_latest_boundary(state, cell, pr_metadata)
+
+    head_sha = str(pr_result.get("head_sha") or "").strip()
+    if not head_sha:
+        current_head = getattr(worktree_mgr, "current_head", None)
+        if callable(current_head):
+            head_sha = await current_head(cell) or ""
+    merge_result = await worktree_mgr.github_request_squash_merge(
+        wt,
+        pr_result.get("number") or pr_result.get("url", ""),
+        head_sha,
+        subject=title,
+        body=body,
+    )
+    if (
+        not merge_result.get("ok")
+        and not bool(data.get("disable_auto_merge"))
+        and _pr_merge_failure_allows_auto(merge_result)
+    ):
+        merge_result = await worktree_mgr.github_request_squash_merge(
+            wt,
+            pr_result.get("number") or pr_result.get("url", ""),
+            head_sha,
+            subject=title,
+            body=body,
+            auto=True,
+            url=pr_result.get("url", ""),
+        )
+
+    pending = bool(merge_result.get("pending"))
+    pr_metadata = _pr_result_metadata(
+        pr_result=pr_result,
+        merge_result=merge_result,
+        remote=remote,
+        base_branch=base_branch,
+        branch=branch,
+        pending=pending,
+        status=(
+            "merged"
+            if merge_result.get("ok") and not pending
+            else "pending" if pending else "merge_failed"
+        ),
+    )
+    _record_pr_metadata_on_latest_boundary(state, cell, pr_metadata)
+
+    if pending:
+        result = {
+            "type": "worktree_merge",
+            "id": aid,
+            "ok": True,
+            "mode": "pull_request",
+            "pending": True,
+            "merged": False,
+            "url": pr_metadata.get("url", ""),
+            "pr_url": pr_metadata.get("url", ""),
+            "pr": pr_metadata,
+            "message": "Pull request is open with auto-merge pending.",
+        }
+        _attach_stale_base(result, gates.get("stale_base"))
+        if gates.get("workflow_breach"):
+            result["workflow_breach"] = gates["workflow_breach"]
+        return result
+
+    if not merge_result.get("ok"):
+        result = _worktree_merge_error(
+            aid,
+            merge_result.get("error", "Pull request merge failed."),
+            mode="pull_request",
+            phase=merge_result.get("phase", "pr_merge"),
+            url=pr_metadata.get("url", ""),
+            pr_url=pr_metadata.get("url", ""),
+            pr=pr_metadata,
+        )
+        _attach_stale_base(result, gates.get("stale_base"))
+        if gates.get("workflow_breach"):
+            result["workflow_breach"] = gates["workflow_breach"]
+        return result
+
+    merge_sha = str(merge_result.get("merge_commit_sha") or "").strip()
+    if not merge_sha:
+        merge_sha = str(pr_metadata.get("merge_commit_sha") or "").strip()
+    if not merge_sha:
+        result = _worktree_merge_error(
+            aid,
+            "Pull request merged but GitHub did not report a merge commit SHA.",
+            mode="pull_request",
+            phase="pr_merge",
+            url=pr_metadata.get("url", ""),
+            pr_url=pr_metadata.get("url", ""),
+            pr=pr_metadata,
+        )
+        if gates.get("workflow_breach"):
+            result["workflow_breach"] = gates["workflow_breach"]
+        return result
+
+    post_merge_sync = await worktree_mgr.github_sync_remote_base(
+        wt,
+        repo_root or wt,
+        remote,
+        base_branch,
+    )
+    if not post_merge_sync.get("ok"):
+        result = _worktree_merge_error(
+            aid,
+            post_merge_sync.get(
+                "error",
+                "Pull request merged but local base sync failed.",
+            ),
+            mode="pull_request",
+            phase=post_merge_sync.get("phase", "remote_base_sync"),
+            url=pr_metadata.get("url", ""),
+            pr_url=pr_metadata.get("url", ""),
+            pr=pr_metadata,
+            sha=merge_sha,
+            remote_base_sync=post_merge_sync,
+        )
+        if gates.get("workflow_breach"):
+            result["workflow_breach"] = gates["workflow_breach"]
+        return result
+
+    result = await _finalize_successful_worktree_merge(
+        state=state,
+        cell=cell,
+        aid=aid,
+        data=data,
+        merge_sha=merge_sha,
+        stale_base=gates.get("stale_base"),
+        preserve_merge_diff=preserve_merge_diff,
+        boundary_task_for_diff=boundary_task_for_diff,
+        merge_diff_snapshot=merge_diff_snapshot,
+        merge_resume_targets=merge_resume_targets,
+        mark_branch_boundaries_merged=mark_branch_boundaries_merged,
+        cleanup_after_merge=cleanup_after_merge,
+        broadcast_toast=broadcast_toast,
+        bridge=bridge,
+        worktree_mgr=worktree_mgr,
+        handle_command=handle_command,
+        panel_event=panel_event,
+    )
+    result.update({
+        "mode": "pull_request",
+        "pending": False,
+        "merged": True,
+        "url": pr_metadata.get("url", ""),
+        "pr_url": pr_metadata.get("url", ""),
+        "pr": pr_metadata,
+    })
+    if gates.get("workflow_breach"):
+        result["workflow_breach"] = gates["workflow_breach"]
+    return result
 
 
 def _latest_open_boundary_task_for_cell(state: MatrixState, cell):
@@ -872,6 +1594,7 @@ async def _sibling_branch_divergence_gate_for_merge(
 
 _WORKFLOW_BREACH_SUBKINDS = frozenset({
     "escape_clause_skip",
+    "force_direct_merge",
     "stale_base_catch",
     "stale_base_override",
     "manual",
@@ -9928,337 +10651,73 @@ async def main(connection=None):
             elif cmd == "worktree_merge":
                 cell = state.agents.get(data.get("id", ""))
                 aid = data.get("id", "")
-                stale_base_override_event = None
-                if cell and cell.worktree_path and cell.worktree_branch:
-                    boundary_state = await _latest_boundary_state_for_cell(
-                        cell
+                force_direct = bool(data.get("force_direct"))
+                direct_merge_breach_event = None
+                direct_merge_warning = (
+                    "Direct local worktree merge was forced; the default "
+                    "workflow is GitHub PR squash merge."
+                )
+                if force_direct and cell:
+                    direct_merge_breach_event = _emit_workflow_breach_event(
+                        state,
+                        _panel_event,
+                        subkind="force_direct_merge",
+                        source="operator",
+                        task=_workflow_breach_active_task_for_worker(
+                            state,
+                            cell,
+                        ),
+                        worker=cell,
+                        context=direct_merge_warning,
                     )
-                    # Block merge if worktree has uncommitted changes
-                    dirty = await worktree_mgr.has_uncommitted_changes(
-                        cell)
-                    if dirty:
-                        result = {
-                            "type": "worktree_merge", "id": aid,
-                            "ok": False,
-                            "error": "Commit or checkpoint changes "
-                                     "before merging.",
-                        }
-                    elif boundary_state.get("latest") \
-                            and not boundary_state.get("clean"):
-                        result = {
-                            "type": "worktree_merge",
-                            "id": aid,
-                            "ok": False,
-                            "error": _boundary_reason_message(
-                                boundary_state.get("reason", ""),
-                                boundary_state.get("latest"),
-                            ),
-                        }
-                    else:
-                        sibling_gate = (
-                            await _sibling_branch_divergence_gate_for_merge(
-                                state,
-                                cell,
-                                worktree_mgr,
-                                aid,
-                                data,
+
+                if force_direct:
+                    result = await _run_direct_worktree_merge(
+                        state=state,
+                        cell=cell,
+                        aid=aid,
+                        data=data,
+                        worktree_mgr=worktree_mgr,
+                        latest_boundary_state_for_cell=(
+                            _latest_boundary_state_for_cell
+                        ),
+                        boundary_reason_message=_boundary_reason_message,
+                        mark_branch_boundaries_merged=(
+                            _mark_branch_boundaries_merged
+                        ),
+                        cleanup_after_merge=_cleanup_after_merge,
+                        broadcast_toast=_broadcast_toast,
+                        bridge=bridge,
+                        handle_command=handle_command,
+                        panel_event=_panel_event,
+                    )
+                    if isinstance(result, dict):
+                        result["force_direct"] = True
+                        result["warning"] = direct_merge_warning
+                        if direct_merge_breach_event:
+                            result["workflow_breach"] = (
+                                direct_merge_breach_event
                             )
-                        )
-                        if sibling_gate:
-                            result = sibling_gate
-                            return result
-                        stale_base = await worktree_mgr.stale_base_info(cell)
-                        if stale_base.get("stale") \
-                                and not _stale_base_force_enabled(data):
-                            result = _stale_base_merge_result(
-                                aid, stale_base
-                            )
-                            return result
-                        if stale_base.get("stale") \
-                                and _stale_base_force_enabled(data):
-                            stale_base_override_event = (
-                                _emit_stale_base_override_workflow_breach(
-                                    state,
-                                    _panel_event,
-                                    cell,
-                                    stale_base,
-                                )
-                            )
-                        precheck = await worktree_mgr.check_merge_conflicts(
-                            cell
-                        )
-                        if not precheck.get("clean"):
-                            result = {
-                                "type": "worktree_merge",
-                                "id": aid,
-                                "ok": False,
-                                "error": precheck.get(
-                                    "error", "Conflicts detected"
-                                ),
-                            }
-                            _attach_stale_base(result, stale_base)
-                        else:
-                            overwrite_paths = (
-                                await worktree_mgr.merge_untracked_overwrite_paths(
-                                    cell.worktree_repo_root
-                                    or cell.git_root
-                                    or "",
-                                    cell.worktree_base_branch or "",
-                                    precheck.get("tree_sha", ""),
-                                )
-                            )
-                            if overwrite_paths:
-                                result = {
-                                    "type": "worktree_merge",
-                                    "id": aid,
-                                    "ok": False,
-                                    "error": _untracked_overwrite_message(
-                                        overwrite_paths,
-                                        operation="merge",
-                                        location="the checked-out base repo",
-                                    ),
-                                    "overwrite_paths": overwrite_paths,
-                                }
-                            else:
-                                squash = cell.worktree_merge_squash
-                                msg = data.get("message", "").strip()
-                                if not msg:
-                                    msg = await _generate_merge_message(
-                                        cell, worktree_mgr, squash,
-                                        state=state)
-                                preserve_merge_diff = (
-                                    _worktree_merge_preserve_diff_enabled(
-                                        state,
-                                        cell,
-                                        data,
-                                    )
-                                )
-                                boundary_task_for_diff = None
-                                merge_diff_snapshot = None
-                                if preserve_merge_diff:
-                                    boundary_task_for_diff = (
-                                        _latest_open_boundary_task_for_cell(
-                                            state,
-                                            cell,
-                                        )
-                                    )
-                                    if boundary_task_for_diff:
-                                        merge_diff_snapshot = (
-                                            await _worktree_merge_diff_snapshot(
-                                                cell,
-                                                worktree_mgr,
-                                            )
-                                        )
-                                pre_merge_queued_followups = [
-                                    t for t in state.board_tasks.values()
-                                    if t.agent_id == cell.id
-                                    and t.lane in {"Backlog", "To Do"}
-                                ]
-                                merge_resume_targets = []
-                                for followup in pre_merge_queued_followups:
-                                    merge_resume_targets.extend(
-                                        _capture_auto_resume_targets(
-                                            state,
-                                            task=followup,
-                                            group=cell.group,
-                                        )
-                                    )
-                                merge_result = \
-                                    await worktree_mgr.server_merge(
-                                        cell, msg, squash=squash)
-                                if merge_result["ok"]:
-                                    _mark_branch_boundaries_merged(
-                                        cell, merge_result["sha"]
-                                    )
-                                    state.cleanup_stale_boundary_successors()
-                                    preserve_diff_warning = ""
-                                    if preserve_merge_diff:
-                                        preserve_diff_warning = (
-                                            _persist_preserved_merge_diff_warning_only(
-                                                state,
-                                                cell,
-                                                boundary_task_for_diff,
-                                                merge_diff_snapshot,
-                                                merge_commit_sha=merge_result["sha"],
-                                            )
-                                        )
-                                    cell.worktree_checkpoints = 0
-                                    cell.worktree_merged = True
-                                    cell.worktree_changed_files = []
-                                    state.history_update_agent(
-                                        cell, status="merged")
-                                    state._emit_agent(cell)
-                                    await _broadcast_toast(
-                                        f'"{cell.name}" merged to '
-                                        f"{cell.worktree_base_branch}",
-                                        "success")
-                                    if preserve_diff_warning:
-                                        await _broadcast_toast(
-                                            preserve_diff_warning,
-                                            "warning",
-                                        )
-                                    reviewer_cleanup = (
-                                        await _cleanup_shipped_reviewers_for_merged_cell(
-                                            state,
-                                            cell,
-                                            _cleanup_after_merge,
-                                        )
-                                    )
-                                    legacy_close_flag = bool(
-                                        data.get("close_on_merge"))
-                                    explicit_close = (
-                                        "close_agent_on_merge" in data
-                                    )
-                                    explicit_remove = (
-                                        "remove_worktree_on_merge" in data
-                                    )
-                                    if explicit_close or explicit_remove:
-                                        close_flag = bool(
-                                            data.get("close_agent_on_merge"))
-                                        remove_flag = bool(
-                                            data.get("remove_worktree_on_merge"))
-                                    elif legacy_close_flag:
-                                        close_flag = True
-                                        remove_flag = True
-                                    else:
-                                        close_flag, remove_flag = (
-                                            merge_cleanup_flags(
-                                                state.get_group_settings(
-                                                    cell.group
-                                                ).worktree_merge_cleanup
-                                            )
-                                        )
-                                    queued_followups = [
-                                        t for t in state.board_tasks.values()
-                                        if t.agent_id == cell.id
-                                        and t.lane in {"Backlog", "To Do"}
-                                    ]
-                                    if queued_followups:
-                                        close_flag = False
-                                        remove_flag = False
-                                    _maybe_auto_move_merged_task_to_done(
-                                        state,
-                                        cell,
-                                        enabled=bool(
-                                            data.get(
-                                                "auto_move_to_done",
-                                                True,
-                                            )
-                                        ),
-                                        cleanup_requested=bool(
-                                            close_flag or remove_flag
-                                        ),
-                                    )
-                                    # Unlink completed/archive-closed tasks
-                                    # from this agent so they don't re-appear
-                                    # in future merge messages. Tasks stay on
-                                    # the board as a historical record.
-                                    for t in list(
-                                            state.board_tasks.values()):
-                                        if t.agent_id == cell.id \
-                                                and task_is_closed(t):
-                                            t.agent_id = ""
-                                            state._emit(
-                                                "task_upsert", **asdict(t))
-                                            state._db_save_task(t)
-                                    clear_flag = bool(
-                                        data.get("clear_context"))
-                                    if queued_followups or close_flag \
-                                            or remove_flag:
-                                        clear_flag = False
-                                    cleanup = {
-                                        "close_agent": close_flag,
-                                        "remove_worktree": remove_flag,
-                                        "agent_closed": False,
-                                        "worktree_removed": False,
-                                        "errors": [],
-                                    }
-                                    if clear_flag and not close_flag \
-                                            and not remove_flag \
-                                            and cell.session_id:
-                                        await bridge.send_text(
-                                            cell.session_id, "/clear\r")
-                                        cell.tasks_dispatched = 0
-                                        state._emit_agent(cell)
-                                        state._db_save_agent(cell)
-                                        log.info(
-                                            "Cleared context for '%s' "
-                                            "after merge", cell.name)
-                                    if close_flag or remove_flag:
-                                        cleanup = await _cleanup_after_merge(
-                                            cell,
-                                            close_agent=close_flag,
-                                            remove_worktree=remove_flag,
-                                        )
-                                    elif cell.worktree_path:
-                                        # Reset worktree branch to base tip
-                                        # so new work starts fresh (avoids
-                                        # re-merging already-merged commits)
-                                        valid = await \
-                                            worktree_mgr.validate(cell)
-                                        if valid:
-                                            ok = await worktree_mgr\
-                                                .reset_to_base(cell)
-                                            if ok:
-                                                cell.worktree_checkpoints =\
-                                                    await worktree_mgr\
-                                                    .count_commits(cell)
-                                                cell.worktree_dirty = False
-                                                cell.worktree_diff = {}
-                                                if queued_followups:
-                                                    cell.worktree_merged = False
-                                                state._emit_agent(cell)
-                                            else:
-                                                log.warning(
-                                                    "Post-merge reset "
-                                                    "failed for '%s'",
-                                                    cell.name)
-                                    if reviewer_cleanup.get("agents"):
-                                        cleanup["reviewer_cleanup"] = (
-                                            reviewer_cleanup
-                                        )
-                                        cleanup["errors"].extend(
-                                            reviewer_cleanup.get(
-                                                "errors", []
-                                            )
-                                        )
-                                    result = {
-                                        "type": "worktree_merge",
-                                        "id": aid, "ok": True,
-                                        "sha": merge_result["sha"],
-                                        "cleanup": cleanup,
-                                    }
-                                    _attach_stale_base(result, stale_base)
-                                    if queued_followups:
-                                        await _maybe_auto_resume_targets(
-                                            state,
-                                            handle_command,
-                                            _panel_event,
-                                            targets=merge_resume_targets,
-                                            group=cell.group,
-                                        )
-                                        await _pump_auto_dispatch_queue(
-                                            state,
-                                            handle_command,
-                                            _panel_event,
-                                            group=cell.group,
-                                        )
-                                else:
-                                    result = {
-                                        "type": "worktree_merge",
-                                        "id": aid, "ok": False,
-                                        "error": merge_result.get(
-                                            "error", "Merge failed"),
-                                    }
-                                    _attach_stale_base(result, stale_base)
                 else:
-                    result = {
-                        "type": "worktree_merge", "id": aid,
-                        "ok": False,
-                        "error": "Agent has no worktree.",
-                    }
-                if stale_base_override_event and isinstance(result, dict):
-                    result["workflow_breach"] = stale_base_override_event
+                    result = await _run_pr_worktree_merge(
+                        state=state,
+                        cell=cell,
+                        aid=aid,
+                        data=data,
+                        worktree_mgr=worktree_mgr,
+                        latest_boundary_state_for_cell=(
+                            _latest_boundary_state_for_cell
+                        ),
+                        boundary_reason_message=_boundary_reason_message,
+                        mark_branch_boundaries_merged=(
+                            _mark_branch_boundaries_merged
+                        ),
+                        cleanup_after_merge=_cleanup_after_merge,
+                        broadcast_toast=_broadcast_toast,
+                        bridge=bridge,
+                        handle_command=handle_command,
+                        panel_event=_panel_event,
+                    )
 
             # -- Board commands (Phase 5) --
             elif cmd == "board_add_task":
