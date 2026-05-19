@@ -1594,9 +1594,9 @@ class MatrixState:
         # Browser/Tauri UI state mirrored through ui_state so standalone,
         # desktop, and detached-window sessions restore after daemon restart.
         self.active_group: str = ""
-        # Agent panel principals-row filter. Empty string means "user" (the
-        # default). When set to an architect id, the grid filters to that
-        # architect's engineers + their workers.
+        # Legacy principal selector state mirrored through ui_state for older
+        # clients/sessions. Empty string means "user"; architect ids are
+        # persisted but no longer filter the agent grid.
         self.selected_principal_id: str = ""
         # Browser-local selectedAgentId mirrored through ui_state so detached
         # windows can hydrate the same Agent/Context panel focus.
