@@ -238,6 +238,99 @@ def _short_sha(sha: str) -> str:
     return str(sha or "").strip()[:8]
 
 
+_GITHUB_PR_VIEW_FIELDS = ",".join([
+    "url",
+    "number",
+    "headRefOid",
+    "state",
+    "mergeCommit",
+    "mergedAt",
+    "mergeStateStatus",
+    "mergeable",
+    "reviewDecision",
+    "statusCheckRollup",
+])
+_PR_NUMBER_RE = re.compile(r"/pull/(\d+)(?:$|[/?#])")
+
+
+def _worktree_ok(phase: str, **extra) -> dict:
+    result = {"ok": True, "phase": phase}
+    result.update(extra)
+    return result
+
+
+def _worktree_error(phase: str, error: str, **extra) -> dict:
+    result = {"ok": False, "phase": phase, "error": error}
+    result.update(extra)
+    return result
+
+
+def _decode_process_output(raw: bytes | str | None) -> str:
+    if raw is None:
+        return ""
+    if isinstance(raw, bytes):
+        return raw.decode("utf-8", errors="replace").strip()
+    return str(raw).strip()
+
+
+def _extract_pr_number_from_url(url: str) -> int | None:
+    match = _PR_NUMBER_RE.search(str(url or "").strip())
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
+
+def _merge_commit_sha_from_pr_data(data: dict) -> str:
+    merge_commit = data.get("mergeCommit") if isinstance(data, dict) else None
+    if isinstance(merge_commit, dict):
+        return str(
+            merge_commit.get("oid")
+            or merge_commit.get("sha")
+            or merge_commit.get("id")
+            or ""
+        ).strip()
+    if merge_commit:
+        return str(merge_commit).strip()
+    return ""
+
+
+def _pr_result_from_view_data(data: dict, *, phase: str = "pr_view",
+                              existing: bool | None = None) -> dict:
+    data = data if isinstance(data, dict) else {}
+    url = str(data.get("url") or "").strip()
+    number = data.get("number")
+    if number in {"", None}:
+        number = _extract_pr_number_from_url(url)
+    try:
+        number = int(number) if number not in {"", None} else None
+    except (TypeError, ValueError):
+        number = None
+    result = _worktree_ok(
+        phase,
+        url=url,
+        number=number,
+        head_sha=str(data.get("headRefOid") or "").strip(),
+        merge_commit_sha=_merge_commit_sha_from_pr_data(data),
+        state=str(data.get("state") or "").strip(),
+        merged_at=str(data.get("mergedAt") or "").strip(),
+        merge_state=str(data.get("mergeStateStatus") or "").strip(),
+        mergeable=data.get("mergeable"),
+        review_decision=data.get("reviewDecision"),
+    )
+    if "statusCheckRollup" in data:
+        result["status_check_rollup"] = data.get("statusCheckRollup")
+    if existing is not None:
+        result["existing"] = existing
+    return result
+
+
+def _is_github_remote_url(url: str) -> bool:
+    return "github.com" in str(url or "").lower()
+
+
 def format_stale_base_warning(info: dict | None, *,
                               rebase_command: str = "") -> str:
     """Return the loud operator warning for a branch forked behind base."""
@@ -2321,93 +2414,564 @@ class WorktreeManager:
             log.debug("count_behind failed for '%s'", cell.name)
         return 0
 
+    async def _run_capture(self, *cmd: str,
+                           cwd: str | None = None) -> dict:
+        """Run a subprocess and capture stdout/stderr as text."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=cwd or None,
+            )
+            stdout, stderr = await proc.communicate()
+            return {
+                "returncode": proc.returncode,
+                "stdout": _decode_process_output(stdout),
+                "stderr": _decode_process_output(stderr),
+                "cmd": list(cmd),
+                "cwd": cwd or "",
+            }
+        except FileNotFoundError as exc:
+            return {
+                "returncode": 127,
+                "stdout": "",
+                "stderr": str(exc),
+                "cmd": list(cmd),
+                "cwd": cwd or "",
+                "missing": True,
+            }
+        except Exception as exc:
+            log.debug("command failed: %s", " ".join(cmd), exc_info=True)
+            return {
+                "returncode": 1,
+                "stdout": "",
+                "stderr": str(exc),
+                "cmd": list(cmd),
+                "cwd": cwd or "",
+            }
+
+    async def _run_gh(self, worktree_path: str, *args: str) -> dict:
+        """Run ``gh`` with *worktree_path* as cwd.
+
+        GitHub CLI does not provide git's ``-C`` flag on all supported
+        versions. Running with ``cwd`` preserves the intended repo context
+        without depending on an unsupported global flag.
+        """
+        return await self._run_capture("gh", *args, cwd=worktree_path)
+
+    async def github_preflight(self, worktree_path: str) -> dict:
+        """Verify GitHub CLI availability, auth, and repo context."""
+        phase = "github_preflight"
+        if not worktree_path:
+            return _worktree_error(phase, "No worktree path provided.")
+
+        version = await self._run_capture("gh", "--version")
+        if version.get("returncode") != 0:
+            return _worktree_error(
+                phase,
+                "GitHub CLI (gh) is not installed or not executable.",
+            )
+
+        auth = await self._run_gh(worktree_path, "auth", "status")
+        if auth.get("returncode") != 0:
+            err = auth.get("stderr") or auth.get("stdout") \
+                or "gh auth status failed"
+            return _worktree_error(
+                phase,
+                f"GitHub CLI authentication failed: {err}",
+            )
+
+        repo = await self._run_gh(
+            worktree_path,
+            "repo",
+            "view",
+            "--json",
+            "nameWithOwner,url",
+        )
+        if repo.get("returncode") != 0:
+            err = repo.get("stderr") or repo.get("stdout") \
+                or "gh repo view failed"
+            return _worktree_error(
+                phase,
+                f"Not a GitHub repository or cannot inspect repo: {err}",
+            )
+
+        try:
+            data = json.loads(repo.get("stdout") or "{}")
+        except json.JSONDecodeError:
+            return _worktree_error(
+                phase,
+                "gh repo view returned invalid JSON.",
+            )
+        return _worktree_ok(
+            phase,
+            name_with_owner=str(data.get("nameWithOwner") or "").strip(),
+            url=str(data.get("url") or "").strip(),
+        )
+
+    async def github_select_remote(self, worktree_path: str) -> dict:
+        """Select the GitHub remote to use for PR push/merge operations."""
+        phase = "github_remote"
+        if not worktree_path:
+            return _worktree_error(phase, "No worktree path provided.")
+        remotes = await self._run_capture(
+            "git", "-C", worktree_path, "remote", "-v"
+        )
+        if remotes.get("returncode") != 0:
+            err = remotes.get("stderr") or remotes.get("stdout") \
+                or "git remote -v failed"
+            return _worktree_error(phase, f"Failed to inspect remotes: {err}")
+
+        first_urls: dict[str, str] = {}
+        order: list[str] = []
+        for raw_line in (remotes.get("stdout") or "").splitlines():
+            parts = raw_line.split()
+            if len(parts) < 2:
+                continue
+            name, url = parts[0], parts[1]
+            if name not in first_urls:
+                first_urls[name] = url
+                order.append(name)
+
+        github_remotes = [
+            name for name in order if _is_github_remote_url(first_urls[name])
+        ]
+        if not github_remotes:
+            return _worktree_error(
+                phase,
+                "PR-based merge requires a GitHub remote; none found.",
+            )
+        remote = "origin" if "origin" in github_remotes else github_remotes[0]
+        return _worktree_ok(
+            phase,
+            remote=remote,
+            url=first_urls.get(remote, ""),
+        )
+
+    async def github_sync_remote_base(self, worktree_path: str, repo_root: str,
+                                      remote: str,
+                                      base_branch: str) -> dict:
+        """Fetch and fast-forward the local base branch to remote base."""
+        phase = "remote_base_sync"
+        worktree_path = str(worktree_path or "").strip()
+        repo_root = str(repo_root or "").strip() or worktree_path
+        remote = str(remote or "").strip()
+        base_branch = str(base_branch or "").strip()
+        if not worktree_path or not repo_root or not remote or not base_branch:
+            return _worktree_error(
+                phase,
+                "Worktree path, repo root, remote, and base branch are required.",
+            )
+
+        remote_ref = f"refs/remotes/{remote}/{base_branch}"
+        fetch_refspec = f"+refs/heads/{base_branch}:{remote_ref}"
+        fetch = await self._run_capture(
+            "git", "-C", worktree_path,
+            "fetch", "--prune", remote, fetch_refspec,
+        )
+        if fetch.get("returncode") != 0:
+            err = fetch.get("stderr") or fetch.get("stdout") \
+                or "git fetch failed"
+            return _worktree_error(
+                phase,
+                f"Failed to fetch {remote}/{base_branch}: {err}",
+                remote=remote,
+                base_branch=base_branch,
+            )
+
+        base = await self._run_capture(
+            "git", "-C", repo_root, "rev-parse", base_branch
+        )
+        if base.get("returncode") != 0 or not base.get("stdout"):
+            err = base.get("stderr") or base.get("stdout") \
+                or f"Cannot resolve {base_branch}"
+            return _worktree_error(phase, err, remote=remote,
+                                   base_branch=base_branch)
+        base_sha = base.get("stdout", "").splitlines()[0].strip()
+
+        remote_head = await self._run_capture(
+            "git", "-C", repo_root, "rev-parse", remote_ref
+        )
+        if remote_head.get("returncode") != 0 or not remote_head.get("stdout"):
+            err = remote_head.get("stderr") or remote_head.get("stdout") \
+                or f"Cannot resolve {remote_ref}"
+            return _worktree_error(phase, err, remote=remote,
+                                   base_branch=base_branch)
+        remote_sha = remote_head.get("stdout", "").splitlines()[0].strip()
+
+        if base_sha == remote_sha:
+            return _worktree_ok(
+                phase,
+                remote=remote,
+                base_branch=base_branch,
+                base_sha=base_sha,
+                remote_sha=remote_sha,
+                synced=False,
+            )
+
+        ff = await self._run_capture(
+            "git", "-C", repo_root,
+            "merge-base", "--is-ancestor", base_branch, remote_ref,
+        )
+        if ff.get("returncode") != 0:
+            return _worktree_error(
+                phase,
+                f"Local {base_branch} cannot be fast-forwarded to "
+                f"{remote}/{base_branch}; resolve divergence before PR merge.",
+                remote=remote,
+                base_branch=base_branch,
+                base_sha=base_sha,
+                remote_sha=remote_sha,
+            )
+
+        current = await self._run_capture(
+            "git", "-C", repo_root, "symbolic-ref", "--short", "HEAD"
+        )
+        checked_out = current.get("stdout", "") \
+            if current.get("returncode") == 0 else ""
+        if checked_out == base_branch:
+            sync = await self._run_capture(
+                "git", "-C", repo_root,
+                "merge", "--ff-only", remote_ref,
+            )
+        else:
+            sync = await self._run_capture(
+                "git", "-C", repo_root,
+                "update-ref", f"refs/heads/{base_branch}",
+                remote_sha, base_sha,
+            )
+        if sync.get("returncode") != 0:
+            err = sync.get("stderr") or sync.get("stdout") \
+                or "base sync failed"
+            return _worktree_error(
+                phase,
+                err,
+                remote=remote,
+                base_branch=base_branch,
+                base_sha=base_sha,
+                remote_sha=remote_sha,
+            )
+
+        return _worktree_ok(
+            phase,
+            remote=remote,
+            base_branch=base_branch,
+            base_sha=remote_sha,
+            previous_base_sha=base_sha,
+            remote_sha=remote_sha,
+            synced=True,
+        )
+
+    async def github_push_branch(self, worktree_path: str, remote: str,
+                                 branch: str) -> dict:
+        """Push a worktree branch to the selected remote."""
+        phase = "push_branch"
+        if not worktree_path or not remote or not branch:
+            return _worktree_error(
+                phase,
+                "Worktree path, remote, and branch are required.",
+            )
+        push = await self._run_capture(
+            "git", "-C", worktree_path,
+            "push", "-u", remote, branch,
+        )
+        if push.get("returncode") != 0:
+            err = push.get("stderr") or push.get("stdout") \
+                or "git push failed"
+            return _worktree_error(
+                phase,
+                f"Failed to push branch: {err}",
+                remote=remote,
+                branch=branch,
+            )
+        return _worktree_ok(phase, remote=remote, branch=branch)
+
+    async def github_pr_view(self, worktree_path: str,
+                             selector: str | int) -> dict:
+        """Return structured GitHub PR status from ``gh pr view``."""
+        phase = "pr_view"
+        selector_text = str(selector or "").strip()
+        if not worktree_path or not selector_text:
+            return _worktree_error(
+                phase,
+                "Worktree path and PR selector are required.",
+            )
+        view = await self._run_gh(
+            worktree_path,
+            "pr",
+            "view",
+            selector_text,
+            "--json",
+            _GITHUB_PR_VIEW_FIELDS,
+        )
+        if view.get("returncode") != 0:
+            err = view.get("stderr") or view.get("stdout") \
+                or "gh pr view failed"
+            return _worktree_error(phase, err)
+        try:
+            data = json.loads(view.get("stdout") or "{}")
+        except json.JSONDecodeError:
+            return _worktree_error(phase, "gh pr view returned invalid JSON.")
+        return _pr_result_from_view_data(data, phase=phase)
+
+    async def github_pr_status(self, worktree_path: str,
+                               selector: str | int) -> dict:
+        """Alias for callers that need an explicit PR status helper."""
+        return await self.github_pr_view(worktree_path, selector)
+
+    async def github_create_or_reuse_pr(self, worktree_path: str, branch: str,
+                                        base_branch: str, title: str = "",
+                                        body: str = "") -> dict:
+        """Create a PR for *branch*, or reuse an existing open PR."""
+        phase = "pr_create"
+        if not worktree_path or not branch:
+            return _worktree_error(
+                phase,
+                "Worktree path and branch are required.",
+            )
+        base_branch = base_branch or "main"
+
+        existing = await self.github_pr_view(worktree_path, branch)
+        if existing.get("ok") \
+                and str(existing.get("state") or "").upper() == "OPEN":
+            existing.update({"phase": phase, "existing": True})
+            return existing
+
+        create = await self._run_gh(
+            worktree_path,
+            "pr",
+            "create",
+            "--base",
+            base_branch,
+            "--head",
+            branch,
+            "--title",
+            title or branch,
+            "--body",
+            body or "",
+        )
+        if create.get("returncode") != 0:
+            err = create.get("stderr") or create.get("stdout") \
+                or "gh pr create failed"
+            if "already exists" in err.lower():
+                reused = await self.github_pr_view(worktree_path, branch)
+                if reused.get("ok"):
+                    reused.update({"phase": phase, "existing": True})
+                    return reused
+            return _worktree_error(phase, f"Failed to create PR: {err}")
+
+        url = (create.get("stdout") or "").splitlines()[-1].strip()
+        created = await self.github_pr_view(worktree_path, branch)
+        if created.get("ok"):
+            created.update({"phase": phase, "existing": False})
+            if url and not created.get("url"):
+                created["url"] = url
+            return created
+
+        number = _extract_pr_number_from_url(url)
+        return _worktree_ok(
+            phase,
+            url=url,
+            number=number,
+            head_sha="",
+            existing=False,
+        )
+
+    async def github_request_squash_merge(self, worktree_path: str,
+                                          pr_number: int | str,
+                                          head_sha: str,
+                                          subject: str = "",
+                                          body: str = "",
+                                          auto: bool = False,
+                                          url: str = "") -> dict:
+        """Request a GitHub squash merge guarded by the expected head SHA."""
+        phase = "pr_merge"
+        pr_selector = str(pr_number or "").strip()
+        head_sha = str(head_sha or "").strip()
+        if not worktree_path or not pr_selector or not head_sha:
+            return _worktree_error(
+                phase,
+                "Worktree path, PR number, and head SHA are required.",
+                url=url,
+                number=pr_number,
+                head_sha=head_sha,
+                pending=False,
+            )
+
+        cmd = [
+            "pr",
+            "merge",
+            pr_selector,
+            "--squash",
+            "--match-head-commit",
+            head_sha,
+        ]
+        if subject:
+            cmd.extend(["--subject", subject])
+        cmd.extend(["--body", body or ""])
+        if auto:
+            cmd.append("--auto")
+
+        merge = await self._run_gh(worktree_path, *cmd)
+        if merge.get("returncode") != 0:
+            err = merge.get("stderr") or merge.get("stdout") \
+                or "gh pr merge failed"
+            status = await self.github_pr_view(worktree_path, pr_selector)
+            result = _worktree_error(
+                phase,
+                f"Failed to squash-merge PR: {err}",
+                url=url or status.get("url", ""),
+                number=status.get("number", pr_number),
+                head_sha=head_sha,
+                merge_commit_sha=status.get("merge_commit_sha", ""),
+                merge_state=status.get("merge_state", ""),
+                pending=False,
+            )
+            if status.get("ok"):
+                result["pr_status"] = status
+            return result
+
+        status = await self.github_pr_view(worktree_path, pr_selector)
+        if not status.get("ok"):
+            return _worktree_error(
+                phase,
+                "Squash merge command succeeded, but PR status could not be "
+                f"verified: {status.get('error', 'unknown error')}",
+                url=url,
+                number=pr_number,
+                head_sha=head_sha,
+                pending=False,
+            )
+
+        merged = bool(status.get("merged_at")) \
+            or status.get("state") == "MERGED" \
+            or bool(status.get("merge_commit_sha"))
+        if merged:
+            return _worktree_ok(
+                phase,
+                url=status.get("url") or url,
+                number=status.get("number", pr_number),
+                head_sha=head_sha,
+                merge_commit_sha=status.get("merge_commit_sha", ""),
+                merge_state=status.get("merge_state", ""),
+                pending=False,
+                pr_status=status,
+            )
+
+        if auto:
+            return _worktree_ok(
+                phase,
+                url=status.get("url") or url,
+                number=status.get("number", pr_number),
+                head_sha=head_sha,
+                merge_commit_sha="",
+                merge_state=status.get("merge_state", ""),
+                pending=True,
+                pr_status=status,
+            )
+
+        return _worktree_error(
+            phase,
+            "Squash merge command completed but the PR is not merged.",
+            url=status.get("url") or url,
+            number=status.get("number", pr_number),
+            head_sha=head_sha,
+            merge_commit_sha=status.get("merge_commit_sha", ""),
+            merge_state=status.get("merge_state", ""),
+            pending=False,
+            pr_status=status,
+        )
+
+    async def github_delete_remote_branch(self, worktree_path: str,
+                                          remote: str,
+                                          branch: str) -> dict:
+        """Delete a remote branch after a confirmed successful PR merge."""
+        phase = "remote_branch_delete"
+        if not worktree_path or not remote or not branch:
+            return _worktree_error(
+                phase,
+                "Worktree path, remote, and branch are required.",
+            )
+        delete = await self._run_capture(
+            "git", "-C", worktree_path, "push", remote, "--delete", branch
+        )
+        if delete.get("returncode") != 0:
+            err = delete.get("stderr") or delete.get("stdout") \
+                or "remote branch delete failed"
+            lowered = err.lower()
+            if "remote ref does not exist" in lowered \
+                    or "not found" in lowered:
+                return _worktree_ok(
+                    phase,
+                    remote=remote,
+                    branch=branch,
+                    deleted=False,
+                )
+            return _worktree_error(
+                phase,
+                f"Failed to delete remote branch: {err}",
+                remote=remote,
+                branch=branch,
+            )
+        return _worktree_ok(
+            phase,
+            remote=remote,
+            branch=branch,
+            deleted=True,
+        )
+
     async def create_pr(self, cell, title: str = "",
                         body: str = "") -> dict:
         """Push the worktree branch and create a GitHub PR.
 
-        Returns dict with 'url' on success or 'error' on failure.
+        Returns structured GitHub PR metadata on success or an ``error`` on
+        failure.  This compatibility wrapper keeps the existing create-PR
+        command path while exposing smaller primitives for the PR-based merge
+        flow.
         """
         if not cell.worktree_path or not cell.worktree_branch:
-            return {"error": "No worktree branch found for this agent."}
+            return _worktree_error(
+                "create_pr",
+                "No worktree branch found for this agent.",
+            )
 
         wt = cell.worktree_path
         branch = cell.worktree_branch
         base = cell.worktree_base_branch or "main"
 
-        # Check gh CLI is available
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "gh", "--version",
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            await proc.communicate()
-            if proc.returncode != 0:
-                return {"error": "GitHub CLI (gh) is not installed."}
-        except FileNotFoundError:
-            return {"error": "GitHub CLI (gh) is not installed."}
+        preflight = await self.github_preflight(wt)
+        if not preflight.get("ok"):
+            return preflight
 
-        # Check this is a GitHub repo
-        proc = await asyncio.create_subprocess_exec(
-            "gh", "-C", wt, "repo", "view", "--json", "name",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        _, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            err = stderr.decode().strip()
-            if "not a git repository" in err.lower():
-                return {"error": "Not a git repository."}
-            return {"error": f"Not a GitHub repository: {err}"}
+        remote_info = await self.github_select_remote(wt)
+        if not remote_info.get("ok"):
+            return remote_info
 
         # Check branch has commits ahead of base
         count = await self.count_commits(cell)
         if count == 0:
-            return {"error": f"Branch {branch} has no commits ahead "
-                             f"of {base}."}
+            return _worktree_error(
+                "create_pr",
+                f"Branch {branch} has no commits ahead of {base}.",
+            )
 
-        # Push the branch
-        proc = await asyncio.create_subprocess_exec(
-            "git", "-C", wt, "push", "-u", "origin", branch,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        pushed = await self.github_push_branch(
+            wt, remote_info.get("remote", "origin"), branch
         )
-        _, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            err = stderr.decode().strip()
-            return {"error": f"Failed to push branch: {err}"}
+        if not pushed.get("ok"):
+            return pushed
 
-        # Create PR
-        cmd = ["gh", "-C", wt, "pr", "create",
-               "--base", base,
-               "--head", branch,
-               "--title", title or branch,
-               "--body", body or ""]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        pr = await self.github_create_or_reuse_pr(
+            wt, branch, base, title=title, body=body
         )
-        stdout, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            err = stderr.decode().strip()
-            if "already exists" in err.lower():
-                # PR already exists — try to get its URL
-                p2 = await asyncio.create_subprocess_exec(
-                    "gh", "-C", wt, "pr", "view", branch,
-                    "--json", "url", "-q", ".url",
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.DEVNULL,
-                )
-                out2, _ = await p2.communicate()
-                if p2.returncode == 0 and out2.decode().strip():
-                    return {"url": out2.decode().strip(),
-                            "existing": True}
-            return {"error": f"Failed to create PR: {err}"}
+        if not pr.get("ok"):
+            return pr
 
-        url = stdout.decode().strip()
-        log.info("Created PR for '%s': %s", cell.name, url)
-        return {"url": url}
+        log.info("%s PR for '%s': %s",
+                 "Reused" if pr.get("existing") else "Created",
+                 cell.name, pr.get("url", ""))
+        return pr
 
     async def _ensure_gitignore(self, repo_root: str):
         """Add .torque/worktrees/ to .gitignore if not already present.
