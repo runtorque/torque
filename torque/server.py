@@ -8489,19 +8489,94 @@ async def main(connection=None):
         tasks.sort(key=lambda t: t.get("started_at") or 0, reverse=True)
         return tasks
 
+    def _live_history_status(cell, record: dict | None = None) -> str:
+        """Return the history status implied by the current live cell."""
+        existing = str((record or {}).get("status", "") or "").strip()
+        if state.agent_is_tombstoned(cell):
+            return "merged" if existing == "merged" else "removed"
+        if bool(getattr(cell, "worktree_merged", False)):
+            return "merged"
+        status = str(getattr(cell, "status", "") or "").strip()
+        kind = str(getattr(cell, "kind", "") or "").strip()
+        if status and status != "stopped":
+            return "active"
+        if bool(getattr(cell, "persistent", False)) and kind in {"architect", "engineer"}:
+            return "active"
+        return existing or "active"
+
     def _enrich_history_record(record: dict) -> dict:
-        """Overlay live task counts for active agents."""
+        """Overlay live metadata and task counts for active agents."""
         if not record:
             return record
+        record = dict(record)
         cell = state.agents.get(record.get("id", ""))
         if cell and cell.cell_type == "agent":
             live_count = max(
                 int(cell.tasks_dispatched or 0),
                 len(_current_board_tasks_for_agent(cell.id)),
             )
+            record.update({
+                "name": cell.name or record.get("name", ""),
+                "slug": cell.slug or record.get("slug", ""),
+                "group": cell.group or record.get("group", ""),
+                "agent_type": cell.agent_type or record.get("agent_type", ""),
+                "template": cell.template or record.get("template", ""),
+                "worktree_branch": (
+                    cell.worktree_branch or record.get("worktree_branch", "")
+                ),
+                "kind": str(getattr(cell, "kind", "") or "").strip(),
+                "status": _live_history_status(cell, record),
+            })
             record["total_tasks"] = max(
                 int(record.get("total_tasks") or 0), live_count)
         return record
+
+    def _live_history_record(cell, base: dict | None = None) -> dict:
+        """Synthesize/refresh a history row from a live agent cell."""
+        base = dict(base or {})
+        live_count = max(
+            int(getattr(cell, "tasks_dispatched", 0) or 0),
+            len(_current_board_tasks_for_agent(cell.id)),
+        )
+        return {
+            "id": cell.id,
+            "name": cell.name,
+            "slug": cell.slug,
+            "group": cell.group,
+            "agent_type": cell.agent_type,
+            "template": cell.template,
+            "created_at": base.get("created_at")
+                or getattr(cell, "last_activity_at", 0)
+                or getattr(cell, "last_heartbeat_at", 0),
+            "removed_at": base.get("removed_at"),
+            "worktree_branch": cell.worktree_branch
+                or base.get("worktree_branch", ""),
+            "total_tokens_in": int(base.get("total_tokens_in") or 0),
+            "total_tokens_out": int(base.get("total_tokens_out") or 0),
+            "total_tasks": max(int(base.get("total_tasks") or 0), live_count),
+            "status": _live_history_status(cell, base),
+            "kind": str(getattr(cell, "kind", "") or "").strip(),
+        }
+
+    def _sort_history_records(records: list[dict]) -> list[dict]:
+        return sorted(
+            records,
+            key=lambda r: (
+                0 if r.get("status") == "active" else 1,
+                -(float(r.get("created_at") or 0)),
+            ),
+        )
+
+    def _history_records_with_live_agents(records: list[dict]) -> list[dict]:
+        """Merge live agents so stale persisted status can't hide them."""
+        by_id = {str(r.get("id", "") or ""): _enrich_history_record(r)
+                 for r in records}
+        for cell in state.agents.values():
+            if getattr(cell, "cell_type", "") != "agent":
+                continue
+            base = by_id.get(cell.id) or db.load_agent_history_detail(cell.id)
+            by_id[cell.id] = _live_history_record(cell, base)
+        return list(by_id.values())
 
     def _save_task_record(task) -> None:
         if not task:
@@ -9182,8 +9257,15 @@ async def main(connection=None):
             limit = min(int(data.get("limit", 50)), 200)
             offset = int(data.get("offset", 0))
             records = db.load_agent_history(
-                status_filter=status_filter, limit=limit, offset=offset)
-            records = [_enrich_history_record(r) for r in records]
+                status_filter=status_filter,
+                limit=min(max(limit + offset, limit), 200),
+                offset=0)
+            records = _history_records_with_live_agents(records)
+            if status_filter:
+                records = [
+                    r for r in records if r.get("status") == status_filter
+                ]
+            records = _sort_history_records(records)[offset:offset + limit]
             return {"type": "agent_history_list",
                     "records": records}
 
@@ -9193,6 +9275,9 @@ async def main(connection=None):
                 return {"type": "error",
                         "message": "agent_id required"}
             record = db.load_agent_history_detail(agent_id)
+            live_cell = state.agents.get(agent_id)
+            if live_cell and live_cell.cell_type == "agent":
+                record = _live_history_record(live_cell, record)
             if not record:
                 return {"type": "error",
                         "message": "Agent not found in history"}
