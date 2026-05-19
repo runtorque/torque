@@ -284,11 +284,17 @@ test('legacy selectPrincipal persists compatibility state without filtering the 
 
 test('stratified grid CSS defines strata, architect bands, wrapping workers, and no full-width empty engineer override', () => {
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+  const paneBlock = (css.match(/\.agents-grid-pane\s*\{[^}]*\}/) || [''])[0];
+  const toolbarBlock = (css.match(/\.agent-grid-toolbar\s*\{[^}]*\}/) || [''])[0];
 
   assert.match(css, /\.agent-grid-stratified\s*\{[\s\S]*overflow-x:\s*auto;/);
   assert.match(css, /\.agent-strata\s*\{[\s\S]*flex-direction:\s*column;/);
   assert.doesNotMatch(css, /\.agent-strata-heading\s*\{/);
-  assert.match(css, /\.agent-grid-toolbar\s*\{[\s\S]*justify-content:\s*flex-end;/);
+  assert.match(paneBlock, /position:\s*relative;/);
+  assert.match(toolbarBlock, /justify-content:\s*flex-end;/);
+  assert.match(toolbarBlock, /position:\s*absolute;/);
+  assert.match(toolbarBlock, /top:\s*var\(--agents-grid-pane-pad-y\);/);
+  assert.match(toolbarBlock, /right:\s*var\(--agents-grid-pane-pad-x\);/);
   assert.match(css, /\.agent-grid-new-btn\s*\{[\s\S]*border-radius:\s*999px;/);
   assert.match(css, /\.agent-band--architect\s*\{[\s\S]*grid-template-columns:\s*var\(--agent-architect-column-width\)\s+minmax\(var\(--agent-engineer-column-width\),\s*1fr\)/);
   const architectBandBlocks = [...css.matchAll(/\.agent-band--architect\s*\{[^}]*\}/g)].map(match => match[0]);

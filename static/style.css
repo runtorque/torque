@@ -867,22 +867,30 @@ main {
   min-width: 0;
 }
 .agents-grid-pane {
+  --agents-grid-pane-pad-x: 8px;
+  --agents-grid-pane-pad-y: 8px;
   flex: 1 1 auto;
   min-height: 200px;
   min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 8px;
+  position: relative;
+  padding: var(--agents-grid-pane-pad-y) var(--agents-grid-pane-pad-x);
 }
 .agents-grid-pane > .empty {
   min-height: 100%;
 }
 .agent-grid-toolbar {
+  position: absolute;
+  top: var(--agents-grid-pane-pad-y);
+  right: var(--agents-grid-pane-pad-x);
+  z-index: 20;
   display: flex;
   justify-content: flex-end;
   align-items: center;
   min-width: 0;
-  padding: 0 0 6px;
+  max-width: calc(100% - (var(--agents-grid-pane-pad-x) * 2));
+  padding: 0;
 }
 .agent-grid-new-btn {
   display: inline-flex;
@@ -1153,7 +1161,9 @@ body.runtime-embedded .agent-group-tabs-host {
   padding: 8px 12px 0;
 }
 body.runtime-embedded .agents-grid-pane {
-  padding: 12px 12px 10px;
+  --agents-grid-pane-pad-x: 12px;
+  --agents-grid-pane-pad-y: 12px;
+  padding: var(--agents-grid-pane-pad-y) var(--agents-grid-pane-pad-x) 10px;
 }
 body.runtime-embedded .agent-focus-panel-scroll {
   padding: 0 6px 8px;
