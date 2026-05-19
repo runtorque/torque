@@ -1055,7 +1055,7 @@ function onCellContextMenu(e, id) {
 /* Legacy principal selector compatibility shim.
    The grid no longer filters by principal; state.selected_principal_id is
    still persisted/sent so older clients/servers can round-trip the field.
-   Architect ids focus/select that real architect card. The user principal
+   Architect ids focus/select that real architect agent card. The user principal
    leaves the current agent selection alone and focuses a useful orphan
    section item/control when one is available. */
 function selectPrincipal(principalId, groupName) {
@@ -1123,16 +1123,10 @@ function _principalLegacyUserFocusId(groupName) {
   return '';
 }
 
-function _principalRowFocusId(groupName, principalId) {
-  const id = String(principalId || '').trim();
-  const group = String(groupName || '').trim();
-  return 'principal:' + group + ':' + (id || 'user');
-}
-
 function _principalFocusGroupFallback() {
-  // Derive a sensible group when the caller omits one — prefer the currently
-  // focused principal's group, else the focused agent's group, else the
-  // first group in the nav order.
+  // Derive a sensible group when the caller omits one — prefer current
+  // nav metadata, else the focused agent's group, else the first group in
+  // the nav order.
   const meta = (typeof window !== 'undefined' && window._navGridItemMeta)
     ? window._navGridItemMeta[focusedItemId]
     : null;

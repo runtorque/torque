@@ -234,7 +234,7 @@ test('grid-level + New menu opens standalone architect, engineer, and worker flo
   ]);
 });
 
-test('navigation model has no principals row and includes all visible strata in visual order', () => {
+test('navigation model includes all visible strata in visual order without legacy principal rows', () => {
   const { context, sandbox } = createHarness();
   seedMixedAgents(sandbox);
   sandbox.state.selected_principal_id = 'arch-a';
@@ -306,4 +306,7 @@ test('stratified grid CSS defines strata, architect bands, wrapping workers, and
   assert.doesNotMatch(css, /\.agent-grid \.engineer-row\.engineer-row--empty-workers\s*\{[^}]*display:\s*block/s);
   assert.doesNotMatch(css, /\.agent-grid \.engineer-row\.engineer-row--empty-workers \.engineer-row-anchor\s*\{[^}]*width:\s*100%/s);
   assert.match(css, /body\.runtime-embedded \.agent-grid\s*\{[\s\S]*--agent-architect-column-width:\s*106px;/);
+  assert.doesNotMatch(css, /\.principals-row\s*\{/);
+  assert.doesNotMatch(css, /\.principal-card(?:[\s.#:{-]|$)/);
+  assert.doesNotMatch(css, /--agent-principal-card-height/);
 });

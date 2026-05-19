@@ -162,9 +162,9 @@ function _resolveFocusedAgent() {
   if (state.agents[focusedItemId]) {
     return _agentPanelAgentVisibleInCurrentMode(state.agents[focusedItemId]);
   }
-  // Principal-row focus ids (`principal:<group>:<architect-id|user>`) aren't
-  // direct agent lookups — resolve them to the architect agent so the panel
-  // shows the architect's tabs instead of the empty state.
+  // Legacy principal focus ids (`principal:<group>:<architect-id|user>`)
+  // are persisted by older sessions, but no longer appear in the grid nav
+  // model. Resolve them so stale focus still opens a useful panel.
   var meta = (typeof _navMeta === 'function') ? _navMeta(focusedItemId) : null;
   if (meta && meta.type === 'principal') {
     var pid = String(meta.principalId || '');

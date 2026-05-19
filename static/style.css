@@ -67,8 +67,6 @@ textarea,
 [contenteditable="true"],
 .agent-card-line,
 .agent-card-trunc,
-.principal-card-body,
-.principal-card-kind,
 .agent-section-user-name,
 .agent-section-user-badge,
 .group-name,
@@ -170,7 +168,6 @@ main {
   --agent-engineer-column-width: 77px;
   --agent-card-height: 96px;
   --agent-user-card-height: 74px;
-  --agent-principal-card-height: var(--agent-card-height);
   --agent-engineer-card-height: var(--agent-card-height);
   --agent-worker-card-height: var(--agent-card-height);
 }
@@ -237,7 +234,6 @@ body.runtime-embedded main {
   --agent-engineer-column-width: 106px;
   --agent-card-height: 108px;
   --agent-user-card-height: 80px;
-  --agent-principal-card-height: var(--agent-card-height);
   --agent-engineer-card-height: var(--agent-card-height);
   --agent-worker-card-height: var(--agent-card-height);
 }
@@ -356,13 +352,11 @@ body.runtime-embedded #standalone-float-layer {
 .group.collapsed .group-body { grid-template-rows: 0fr; }
 .group-body-inner {
   overflow: hidden;
-  /* Hoisted from .agent-grid so .principals-row (sibling of .agent-grid)
-     can also resolve the architect column width. */
+  /* Grid sizing tokens shared by nested agent-grid layout surfaces. */
   --agent-architect-column-width: 77px;
   --agent-engineer-column-width: 77px;
   --agent-card-height: 96px;
   --agent-user-card-height: 74px;
-  --agent-principal-card-height: var(--agent-card-height);
   --agent-engineer-card-height: var(--agent-card-height);
   --agent-worker-card-height: var(--agent-card-height);
 }
@@ -371,7 +365,6 @@ body.runtime-embedded .group-body-inner {
   --agent-engineer-column-width: 106px;
   --agent-card-height: 108px;
   --agent-user-card-height: 80px;
-  --agent-principal-card-height: var(--agent-card-height);
   --agent-engineer-card-height: var(--agent-card-height);
   --agent-worker-card-height: var(--agent-card-height);
 }
@@ -1182,7 +1175,6 @@ body.runtime-embedded .agent-focus-header {
   --agent-grid-card-height: 96px;
   --agent-card-height: var(--agent-grid-card-height);
   --agent-user-card-height: 74px;
-  --agent-principal-card-height: var(--agent-card-height);
   --agent-engineer-card-height: var(--agent-card-height);
   --agent-worker-card-height: var(--agent-card-height);
   --agent-ghost-card-height: calc(var(--agent-grid-card-height) / 4);
@@ -1462,273 +1454,16 @@ body.runtime-embedded .agent-focus-header {
   background: transparent;
   border-color: var(--border);
 }
-/* ------------------------------------------------------------------ */
-/* Principals row — User + architects filter selector                  */
-/* ------------------------------------------------------------------ */
-.principals-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: stretch;
-  gap: 7px;
-  padding: 4px 8px 6px;
-  min-width: 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 62%, transparent);
-  margin-bottom: 4px;
-}
-.principal-card {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: center;
-  gap: 1px;
-  width: var(--agent-architect-column-width);
-  min-height: var(--agent-principal-card-height, 96px);
-  /* Top padding clears the 16px-tall absolute-positioned controls (top:2 + 16
-     = y:18) so the name doesn't collide with the close + pause buttons. */
-  padding: 22px 6px 10px;
-  box-sizing: border-box;
-  background: color-mix(in srgb, var(--bg-cell) 68%, transparent);
-  border: 1px solid color-mix(in srgb, var(--border) 66%, transparent);
-  border-radius: var(--radius);
-  color: var(--text);
-  cursor: pointer;
-  transition: background .15s, border-color .15s, opacity .15s;
-}
-.principal-card.dim {
-  opacity: .55;
-}
-.principal-card.dismissed {
-  opacity: .5;
-  filter: grayscale(.35);
-  border-color: color-mix(in srgb, var(--text-dim) 44%, transparent);
-  box-shadow: none;
-}
-.principal-card--user {
-  min-height: var(--agent-user-card-height, 74px);
-  /* User card has no controls, so it doesn't need the controls-clearance
-     padding-top that the other principal cards use. */
-  padding-top: 10px;
-}
-.principal-card.dim:hover,
-.principal-card.dim:focus-visible {
-  opacity: 1;
-  background: color-mix(in srgb, var(--bg-cell) 82%, transparent);
-  outline: none;
-}
-.principal-card.selected {
-  border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
-  background: color-mix(in srgb, var(--accent) 12%, var(--bg-cell));
-}
-.principal-card.focused {
-  outline: 2px solid var(--accent);
-  outline-offset: -1px;
-}
-.principal-card-body,
-.agent-card-body {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: flex-start;
-  gap: 4px;
-  min-width: 0;
-  min-height: 0;
-  flex: 1 1 auto;
-}
-.principal-card--user .principal-card-body {
-  justify-content: center;
-  flex: 0 1 auto;
-}
-.principal-card-name {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 9px;
-  font-weight: 700;
-  text-align: left;
-}
-.principal-card-line,
-.agent-card-line {
-  min-width: 0;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text-dim);
-  font-size: 8px;
-  line-height: 1.18;
-  text-align: left;
-}
-.principal-card-kind {
-  position: absolute;
-  right: 3px;
-  bottom: 2px;
-  padding: 0 4px;
-  border: 1px solid color-mix(in srgb, var(--text-dim) 34%, transparent);
-  border-radius: 999px;
-  color: var(--text-dim);
-  font-size: 6.5px;
-  font-weight: 700;
-  line-height: 1.4;
-  letter-spacing: 0;
-  text-transform: none;
-}
-.principal-card--architect .principal-card-kind {
-  color: #1f1300;
-  background: color-mix(in srgb, var(--amber) 82%, white);
-  border-color: color-mix(in srgb, var(--amber) 58%, transparent);
-}
-.principal-card-kind--dismissed {
-  color: var(--text-dim);
-  background: color-mix(in srgb, var(--text-dim) 13%, transparent);
-  border-color: color-mix(in srgb, var(--text-dim) 24%, transparent);
-}
-.principal-card-kind--owner {
-  color: var(--text-dim);
-  background: color-mix(in srgb, var(--bg) 58%, transparent);
-}
-.principal-card-badge {
-  position: absolute;
-  left: 3px;
-  bottom: 2px;
-  padding: 0 4px;
-  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
-  border-radius: 999px;
-  color: var(--text-dim);
-  font-size: 6.5px;
-  font-weight: 700;
-  line-height: 1.4;
-  letter-spacing: .03em;
-  background: color-mix(in srgb, var(--bg) 50%, transparent);
-  max-width: calc(100% - 8px);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.principal-card-new {
-  align-self: stretch;
-  /* Override .ghost-card height so the wrapped "+ New Architect" button on its
-     own row preserves the populated principal-card height instead of collapsing
-     to the short ghost-card height. (TORQUE:209) */
-  height: auto;
-  min-height: var(--agent-card-height, 96px);
-}
+/* Legacy standalone worker ghost sizing. */
 .standalone-worker-card-new {
   align-self: stretch;
   height: auto;
   min-height: var(--agent-worker-card-height, 96px);
 }
 @media (max-width: 400px) {
-  .principal-card-new {
-    min-height: var(--agent-card-height, 96px);
-  }
   .standalone-worker-card-new {
     min-height: var(--agent-worker-card-height, 96px);
   }
-}
-.principal-card-controls {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-.principal-card-close,
-.principal-card-pause {
-  width: 16px;
-  height: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  font-size: 10px;
-  line-height: 1;
-  text-align: center;
-  border-radius: 3px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--text-dim);
-  /* Always show the close + pause symbols. Backgrounds appear only on
-     hover (see :hover rules below). */
-  opacity: 1;
-  transition: color .15s, background .15s, border-color .15s;
-  pointer-events: auto;
-  cursor: pointer;
-}
-.principal-card-close:hover { background: var(--red); color: #fff; }
-.principal-card-pause.running:hover,
-.principal-card-pause.running:focus-visible { color: var(--green); }
-.principal-card-pause.paused:hover,
-.principal-card-pause.paused:focus-visible { color: var(--amber); }
-.principal-card-pause:hover,
-.principal-card-pause:focus-visible {
-  background: color-mix(in srgb, currentColor 14%, transparent);
-  border-color: color-mix(in srgb, currentColor 70%, transparent);
-  outline: none;
-}
-.principal-card-status {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: var(--text-dim);
-  flex: 0 0 auto;
-  opacity: .75;
-}
-.principal-card-status.working { background: var(--green); }
-.principal-card-status.idle { background: var(--text-dim); }
-.principal-card-status.attention { background: var(--amber); }
-.principal-card-status.disconnected { background: var(--red); }
-.principal-card-status.dismissed {
-  width: 12px;
-  height: 12px;
-  top: 2px;
-  right: 2px;
-  background: var(--text-dim);
-}
-.principal-card-status.dismissed::after {
-  content: "–";
-  position: absolute;
-  inset: 0;
-  color: var(--bg);
-  font-size: 10px;
-  font-weight: 800;
-  line-height: 12px;
-  text-align: center;
-}
-@media (max-width: 400px) {
-  .principals-row {
-    gap: 5px;
-    padding: 3px 6px 5px;
-  }
-  .principal-card {
-    min-height: var(--agent-card-height, 96px);
-    padding: 12px 5px 11px;
-  }
-  .principal-card--user {
-    min-height: var(--agent-user-card-height, 74px);
-  }
-}
-.principal-card-ask-link {
-  display: inline;
-  margin: 0;
-  padding: 0 2px;
-  border: none;
-  border-radius: 3px;
-  background: transparent;
-  color: var(--amber);
-  font: inherit;
-  font-weight: 700;
-  cursor: pointer;
-}
-.principal-card-ask-link:hover,
-.principal-card-ask-link:focus-visible {
-  background: color-mix(in srgb, var(--amber) 14%, transparent);
-  outline: none;
 }
 .agent-card-provider {
   position: absolute;
@@ -2067,7 +1802,7 @@ body.runtime-embedded .agent-focus-header {
   color: var(--text-dim);
   border: 1px solid transparent;
   background: transparent;
-  /* Always-visible (matches .cell-close + .principal-card-pause). */
+  /* Always-visible to match neighboring card controls. */
   opacity: 1;
   transition: color .15s, border-color .15s, background .15s;
   pointer-events: auto;
@@ -2726,7 +2461,6 @@ body.runtime-embedded .agent-grid {
   --agent-grid-card-height: 108px;
   --agent-card-height: var(--agent-grid-card-height);
   --agent-user-card-height: 80px;
-  --agent-principal-card-height: var(--agent-card-height);
   --agent-engineer-card-height: var(--agent-card-height);
   --agent-worker-card-height: var(--agent-card-height);
   gap: 8px;
@@ -2755,7 +2489,6 @@ body.runtime-embedded .cell.worker {
 body.runtime-embedded .cell.engineer {
   min-height: var(--agent-card-height, 108px);
 }
-body.runtime-embedded .principal-card--user,
 body.runtime-embedded .agent-section-user-card {
   min-height: var(--agent-user-card-height, 80px);
 }
@@ -3561,10 +3294,9 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 [draggable="true"] { cursor: grab; }
 [draggable="true"]:active { cursor: grabbing; }
 /* Agent grid cards are click-first (open agent panel) and drag-secondary;
-   show pointer to match architect/user principal cards. The grabbing
-   cursor still appears on :active drag. Engineer/worker/terminal cards
-   render with class `.cell` (see render.js renderAgentCell), and the
-   terminal-drawer rows render with `.term-row`. */
+   show pointer while preserving the grabbing cursor on :active drag.
+   Engineer/worker/terminal cards render with class `.cell` (see render.js
+   renderAgentCell), and the terminal-drawer rows render with `.term-row`. */
 .cell[draggable="true"],
 .term-row[draggable="true"] { cursor: pointer; }
 .cell[draggable="true"]:active,
