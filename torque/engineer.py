@@ -297,6 +297,14 @@ Operational rules:
    work, and stagger merge-heavy work that touches the same areas.
    `engineer_merge` creates/reuses a GitHub PR and requests a squash
    merge by default; cleanup happens only after the PR actually merges.
+   When calling `engineer_merge`, author `pr_title` and `pr_body` for the
+   PR unless the change is a textbook ≤30 LOC fix.  The title should be a
+   short imperative, such as "Fix history panel search focus and add
+   architect filter", not "Merge worker branch" or only a task ID.  The body
+   should be 1-3 Markdown paragraphs covering what changed at a high level,
+   why it addresses the linked task(s), and what was tested; reference
+   `TORQUE:NNN` IDs where applicable and leave implementation minutiae to
+   the diff.
    Use `force_direct=true` only for an explicit local fallback.  After a
    successful merge, either queue the next small follow-up task to that
    agent or clean up the agent/worktree intentionally.

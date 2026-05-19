@@ -1796,11 +1796,192 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             url="",
         ):
             self.calls.append(
-                ("merge_pr", worktree_path, pr_number, head_sha, auto)
+                (
+                    "merge_pr",
+                    worktree_path,
+                    pr_number,
+                    head_sha,
+                    auto,
+                    subject,
+                    body,
+                    url,
+                )
             )
             if callable(self.merge_result):
                 return self.merge_result(auto)
             return dict(self.merge_result)
+
+    async def test_worktree_merge_pr_uses_engineer_title_body_for_pr_and_squash(self):
+        state, worker, _task = self._make_pr_merge_state()
+        worktree_mgr = self._FakePrWorktreeManager({
+            "ok": True,
+            "phase": "pr_merge",
+            "url": "https://github.com/acme/repo/pull/7",
+            "number": 7,
+            "head_sha": "head123",
+            "merge_commit_sha": "squash789",
+            "merge_state": "CLEAN",
+            "pending": False,
+            "pr_status": {"ok": True, "state": "MERGED"},
+        })
+
+        async def fake_cleanup_after_merge(*_args, **_kwargs):
+            return {"errors": []}
+
+        handle_command, restore = self._pr_handle_command(
+            state,
+            worker,
+            worktree_mgr,
+            fake_cleanup_after_merge,
+        )
+        try:
+            result = await handle_command({
+                "cmd": "worktree_merge",
+                "id": worker.id,
+                "pr_title": "Ship engineer-authored PR metadata",
+                "pr_body": (
+                    "Implements TORQUE:497 by passing authored PR metadata "
+                    "through merge."
+                ),
+                "close_agent_on_merge": True,
+            })
+        finally:
+            restore()
+
+        self.assertTrue(result["ok"])
+        create_calls = [call for call in worktree_mgr.calls
+                        if call[0] == "create_pr"]
+        self.assertEqual(create_calls[-1][4],
+                         "Ship engineer-authored PR metadata")
+        self.assertEqual(
+            create_calls[-1][5],
+            "Implements TORQUE:497 by passing authored PR metadata through merge.",
+        )
+        merge_calls = [call for call in worktree_mgr.calls
+                       if call[0] == "merge_pr"]
+        self.assertEqual(merge_calls[-1][5],
+                         "Ship engineer-authored PR metadata")
+        self.assertEqual(
+            merge_calls[-1][6],
+            (
+                "Implements TORQUE:497 by passing authored PR metadata "
+                "through merge.\n\n"
+                "PR: https://github.com/acme/repo/pull/7"
+            ),
+        )
+
+    async def test_worktree_merge_pr_falls_back_to_generated_title_body(self):
+        state, worker, _task = self._make_pr_merge_state()
+        worktree_mgr = self._FakePrWorktreeManager({
+            "ok": True,
+            "phase": "pr_merge",
+            "url": "https://github.com/acme/repo/pull/7",
+            "number": 7,
+            "head_sha": "head123",
+            "merge_commit_sha": "squash789",
+            "merge_state": "CLEAN",
+            "pending": False,
+            "pr_status": {"ok": True, "state": "MERGED"},
+        })
+
+        async def fake_cleanup_after_merge(*_args, **_kwargs):
+            return {"errors": []}
+
+        handle_command, restore = self._pr_handle_command(
+            state,
+            worker,
+            worktree_mgr,
+            fake_cleanup_after_merge,
+        )
+        try:
+            result = await handle_command({
+                "cmd": "worktree_merge",
+                "id": worker.id,
+                "close_agent_on_merge": True,
+            })
+        finally:
+            restore()
+
+        self.assertTrue(result["ok"])
+        create_calls = [call for call in worktree_mgr.calls
+                        if call[0] == "create_pr"]
+        self.assertEqual(create_calls[-1][4], "Squash merge: torque/worker")
+        self.assertEqual(create_calls[-1][5], "- Implement worker change")
+        merge_calls = [call for call in worktree_mgr.calls
+                       if call[0] == "merge_pr"]
+        self.assertEqual(merge_calls[-1][5], "Squash merge: torque/worker")
+        self.assertEqual(
+            merge_calls[-1][6],
+            "- Implement worker change\n\n"
+            "PR: https://github.com/acme/repo/pull/7",
+        )
+
+    async def test_worktree_merge_pr_mixes_provided_and_generated_fields(self):
+        async def run_merge(payload):
+            state, worker, _task = self._make_pr_merge_state()
+            worktree_mgr = self._FakePrWorktreeManager({
+                "ok": True,
+                "phase": "pr_merge",
+                "url": "https://github.com/acme/repo/pull/7",
+                "number": 7,
+                "head_sha": "head123",
+                "merge_commit_sha": "squash789",
+                "merge_state": "CLEAN",
+                "pending": False,
+                "pr_status": {"ok": True, "state": "MERGED"},
+            })
+
+            async def fake_cleanup_after_merge(*_args, **_kwargs):
+                return {"errors": []}
+
+            handle_command, restore = self._pr_handle_command(
+                state,
+                worker,
+                worktree_mgr,
+                fake_cleanup_after_merge,
+            )
+            try:
+                result = await handle_command({
+                    "cmd": "worktree_merge",
+                    "id": worker.id,
+                    "close_agent_on_merge": True,
+                    **payload,
+                })
+            finally:
+                restore()
+            self.assertTrue(result["ok"])
+            create_call = [call for call in worktree_mgr.calls
+                           if call[0] == "create_pr"][-1]
+            merge_call = [call for call in worktree_mgr.calls
+                          if call[0] == "merge_pr"][-1]
+            return create_call, merge_call
+
+        create_call, merge_call = await run_merge({
+            "pr_title": "Ship authored PR title",
+        })
+        self.assertEqual(create_call[4], "Ship authored PR title")
+        self.assertEqual(create_call[5], "- Implement worker change")
+        self.assertEqual(merge_call[5], "Ship authored PR title")
+        self.assertEqual(
+            merge_call[6],
+            "- Implement worker change\n\n"
+            "PR: https://github.com/acme/repo/pull/7",
+        )
+
+        create_call, merge_call = await run_merge({
+            "pr_body": "Covers TORQUE:497 and regression tests.",
+        })
+        self.assertEqual(create_call[4], "Squash merge: torque/worker")
+        self.assertEqual(
+            create_call[5],
+            "Covers TORQUE:497 and regression tests.",
+        )
+        self.assertEqual(merge_call[5], "Squash merge: torque/worker")
+        self.assertEqual(
+            merge_call[6],
+            "Covers TORQUE:497 and regression tests.\n\n"
+            "PR: https://github.com/acme/repo/pull/7",
+        )
 
     async def test_worktree_merge_pr_success_finalizes_with_github_squash_sha(self):
         state, worker, task = self._make_pr_merge_state()

@@ -157,6 +157,7 @@ from .server_supervisor import (
     build_supervisor_terminate_payload,
 )
 from .server_worktrees import (
+    _append_pr_url_to_squash_body,
     _generate_merge_message,
     _pr_merge_failure_allows_auto,
     _pr_result_metadata,
@@ -1067,7 +1068,14 @@ async def _run_pr_worktree_merge(
             state=state,
         )
     fallback_title = f"Squash merge: {branch or cell.name}"
-    title, body = _split_merge_message_for_pr(msg, fallback_title=fallback_title)
+    derived_title, derived_body = _split_merge_message_for_pr(
+        msg,
+        fallback_title=fallback_title,
+    )
+    pr_title = str(data.get("pr_title", "") or "").strip()
+    pr_body = str(data.get("pr_body", "") or "").strip()
+    title = pr_title or derived_title
+    body = pr_body or derived_body
 
     preserve_merge_diff, boundary_task_for_diff, merge_diff_snapshot = (
         await _capture_worktree_merge_preserve_diff(
@@ -1128,6 +1136,10 @@ async def _run_pr_worktree_merge(
         pr_metadata,
         requested_cleanup=requested_cleanup,
     )
+    squash_body = _append_pr_url_to_squash_body(
+        body,
+        str(pr_result.get("url") or pr_metadata.get("url") or ""),
+    )
 
     head_sha = str(pr_result.get("head_sha") or "").strip()
     if not head_sha:
@@ -1139,7 +1151,7 @@ async def _run_pr_worktree_merge(
         pr_result.get("number") or pr_result.get("url", ""),
         head_sha,
         subject=title,
-        body=body,
+        body=squash_body,
     )
     if (
         not merge_result.get("ok")
@@ -1151,7 +1163,7 @@ async def _run_pr_worktree_merge(
             pr_result.get("number") or pr_result.get("url", ""),
             head_sha,
             subject=title,
-            body=body,
+            body=squash_body,
             auto=True,
             url=pr_result.get("url", ""),
         )

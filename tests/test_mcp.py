@@ -745,6 +745,19 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("engineer group's currently active", max_desc)
         self.assertIn("not an agent_group", max_desc)
 
+    async def test_engineer_merge_schema_includes_pr_title_body(self):
+        tool = next(
+            t for t in self.mcp_mod.ENGINEER_TOOLS
+            if t["name"] == "engineer_merge"
+        )
+        props = tool["inputSchema"]["properties"]
+
+        self.assertIn("pr_title", props)
+        self.assertIn("pr_body", props)
+        self.assertIn("short imperative", props["pr_title"]["description"])
+        self.assertIn("Markdown", props["pr_body"]["description"])
+        self.assertIn("TORQUE:123", props["pr_body"]["description"])
+
     async def test_engineer_batch_dispatch_deferral_reports_group_and_refreshes_cap(self):
         state = self.state_mod.MatrixState()
         engineer = self.state_mod.AgentCell(

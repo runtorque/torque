@@ -5679,6 +5679,12 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         msg = args.get("message", "")
         if msg:
             payload["message"] = msg
+        pr_title = str(args.get("pr_title") or "").strip()
+        if pr_title:
+            payload["pr_title"] = pr_title
+        pr_body = str(args.get("pr_body") or "").strip()
+        if pr_body:
+            payload["pr_body"] = pr_body
         if "close_agent_on_merge" in args:
             payload["close_agent_on_merge"] = bool(
                 args.get("close_agent_on_merge")

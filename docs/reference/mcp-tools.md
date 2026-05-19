@@ -111,7 +111,7 @@ The metric is volatile and not a durable audit log; use
 | Tool | What it does |
 |---|---|
 | `engineer_diff` | Structured diff: `summary_only`, `stat_only`, `paths`, or full text. Start with `summary_only=true`. |
-| `engineer_merge` | Default PR-based merge: push the worktree branch, create/reuse a GitHub PR, request a squash merge, sync the local base, then run cleanup after the merge is confirmed. Returns conflict context or `pending: true` when checks/reviews block the PR. Use `force_direct=true` only for the explicit local fallback. |
+| `engineer_merge` | Default PR-based merge: push the worktree branch, create/reuse a GitHub PR, request a squash merge, sync the local base, then run cleanup after the merge is confirmed. Returns conflict context or `pending: true` when checks/reviews block the PR. Pass `pr_title` (short imperative PR title/squash subject) and `pr_body` (Markdown PR description/squash body covering what changed, why, task IDs, and tests). Use `force_direct=true` only for the explicit local fallback. |
 | `engineer_rebase` | Rebase a conflicted worktree branch onto its base. Aborts on conflict and returns details. |
 | `engineer_create_pr` | Push and open a GitHub PR via `gh`; create-only, with no merge attempt or cleanup. |
 | `engineer_worktree_checkpoint` | Snapshot a worktree before a risky operation. |

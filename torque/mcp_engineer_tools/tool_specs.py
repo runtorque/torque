@@ -1069,6 +1069,30 @@ ENGINEER_TOOLS = [
                         "auto-generated from completed tasks."
                     ),
                 },
+                "pr_title": {
+                    "type": "string",
+                    "description": (
+                        "GitHub PR title for the default PR/squash path. "
+                        "Author a short imperative title that describes what "
+                        "landed, not a generic branch/task-id-only label. "
+                        "Also used as the squash commit subject. If omitted, "
+                        "Torque derives a title from the merge message/task "
+                        "history."
+                    ),
+                },
+                "pr_body": {
+                    "type": "string",
+                    "description": (
+                        "GitHub PR body for the default PR/squash path; "
+                        "Markdown is allowed. Summarize what changed, why it "
+                        "addresses the linked task(s), and what was tested. "
+                        "Reference Torque task IDs such as TORQUE:123 where "
+                        "applicable. Also used as the squash commit body, "
+                        "with the PR URL appended during merge. If omitted, "
+                        "Torque derives a body from the merge message/task "
+                        "history."
+                    ),
+                },
                 "close_agent_on_merge": {
                     "type": "boolean",
                     "description": (
