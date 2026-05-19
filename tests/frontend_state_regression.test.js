@@ -20593,6 +20593,18 @@ test('standalone shell owns the full-width bottom dock rows and drag selector', 
   assert.match(css, /\.agent-group-tab-actions\s*\{[^}]*flex:\s*0 0 auto;[^}]*margin-left:\s*auto;/s);
 });
 
+test('history and supervisor panels fill standalone dock and float bodies', () => {
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+
+  [
+    /body\.runtime-embedded \.standalone-panel-zone-body > #panel-history,[\s\S]*body\.runtime-embedded \.standalone-panel-zone-body > #panel-supervisor,[\s\S]*body\.runtime-embedded \.standalone-float-body > #panel-history,[\s\S]*body\.runtime-embedded \.standalone-float-body > #panel-supervisor[\s\S]*\{[^}]*height:\s*100%;[^}]*width:\s*100%;[^}]*min-height:\s*0;[^}]*min-width:\s*0;/s,
+    /#panel-history\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;[^}]*height:\s*calc\(100% - 5px\);[^}]*min-height:\s*0;[^}]*min-width:\s*0;[^}]*overflow:\s*hidden;/s,
+    /\.agent-history-container\s*\{[^}]*flex:\s*1;[^}]*min-width:\s*0;[^}]*width:\s*100%;[^}]*overflow-y:\s*auto;/s,
+    /#panel-supervisor\s*\{[^}]*min-height:\s*0;[^}]*min-width:\s*0;[^}]*height:\s*100%;[^}]*width:\s*100%;/s,
+    /\.supervisor-panel\s*\{[^}]*min-height:\s*100%;[^}]*min-width:\s*0;[^}]*width:\s*100%;/s,
+  ].forEach((pattern) => assert.match(css, pattern));
+});
+
 test('standalone keeps the legacy bottom panel parking host fully collapsed', () => {
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
 
