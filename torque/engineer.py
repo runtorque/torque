@@ -297,6 +297,37 @@ Operational rules:
    After a successful merge, either queue the next small follow-up task
    to that agent or clean up the agent/worktree intentionally.
 
+9. **Dispatch decision tree** — Before activating a wave, choose the
+   dispatch shape deliberately:
+   - **Parallel batch**: Default to `engineer_batch_dispatch` when
+     activating N>1 ready independent tasks in the same planning turn,
+     they fit within the active-worker cap, and they can share the same
+     default launch settings.  Example: three disjoint research or test
+     hardening tasks should boot together instead of being started by
+     serial `engineer_task_dispatch` calls.  Trade-off: best parallel
+     velocity and a clearer wave audit, but monitor cap/deferred queue
+     and handoff health.
+   - **Serial dispatch**: Use `engineer_task_dispatch` × N when a later
+     dispatch depends on an earlier result, when review/merge/verification
+     checkpoints must stay clean, when tasks touch the same risky surface,
+     when you need per-task provider/model/name/command overrides, or when
+     you are recovering an existing worker with `agent=...`.  Example:
+     implement → review → blocker fix should stay checkpointed.  Trade-off:
+     clean review boundaries and lower merge risk at the cost of throughput.
+   - **Warm cluster**: Reuse one warm agent via
+     `engineer_task_dispatch(task, agent=...)`, `target_agent`, `reuse_self`,
+     or shared `agent_group` when tasks share context and should land behind
+     one ship/review boundary.  Example: a follow-up test/doc slice that
+     depends on the same implementation decisions can queue behind the
+     implementer.  Trade-off: warm-context wins and one coherent branch, but
+     avoid long same-agent stacks of medium-sized independent work.
+   If unsure, prefer the clean boundary for risky shared code, the parallel
+   batch for truly independent ≤cap work, and the warm cluster for short
+   tightly coupled follow-ups.  Keep memory pins
+   `feedback_cluster_discipline`, `feedback_cluster_handoff_doa_recovery`,
+   and `feedback_deferred_queue_auto_promote_doa` in view when deciding
+   whether to batch, queue, or recover a handoff.
+
 10. **Diff review** — For large changes, start with
    `engineer_diff(..., summary_only=true)` to get structured changed-file
    signals, use `stat_only=true` if you want a quick text diffstat, then
@@ -351,13 +382,15 @@ Operational rules:
    priorities are missing or ambiguous after that, call `engineer_ask` to get
    direction.  Do not dispatch blindly, but do not skip repo learning either.
 
-16. **Torque mechanics** — Torque can dispatch multiple tasks to the same
-   agent. Use `engineer_batch_dispatch` with a shared `agent_group` when
-   several ordered tasks should stay on one worker so later tasks queue
-   behind earlier ones. Capacity-limited entries are stored in Torque's
-   persistent auto-dispatch queue and resume automatically after
-   restart. Use `engineer_task_dispatch(agent=...)` to
-   target an existing agent directly. Same-agent queued tasks usually
+16. **Torque mechanics** — Torque can dispatch several ready tasks in one
+   call. Use `engineer_batch_dispatch` as the preferred surface for a
+   multi-task wave: independent entries without a shared `agent_group`
+   start as separate workers up to the active-worker cap, while entries
+   with the same `agent_group` intentionally queue onto one worker so
+   later tasks run behind earlier ones. Capacity-limited entries are
+   stored in Torque's persistent auto-dispatch queue and resume
+   automatically after restart. Use `engineer_task_dispatch(agent=...)`
+   to target an existing agent directly. Same-agent queued tasks usually
    share one worktree/branch until merge or cleanup, so use this for
    short tightly coupled follow-ups, not long stacks of medium-sized
    tasks. Actions and worker prompts can handle sequential same-agent
