@@ -5607,6 +5607,8 @@ def _architect_ui_tool_is_read(name: str) -> bool:
     return str(name or "").strip() in {
         "architect_decision_list",
         "architect_task_list",
+        "architect_peer_list",
+        "architect_peer_inbox",
     }
 
 
@@ -6560,7 +6562,12 @@ async def _dispatch_architect_ui_tool(name: str, args: dict,
     """Run an architect-scoped shared-core tool for the user-facing UI."""
     from .mcp_tools_shared import dispatch_scoped_tool
 
-    caller_id = str(args.get("architect_id", "") or "").strip()
+    caller_id = str(
+        args.get("sender_architect_id", "")
+        or args.get("caller_architect_id", "")
+        or args.get("architect_id", "")
+        or ""
+    ).strip()
     if not caller_id:
         return {"type": "error", "message": "architect_id is required"}
     caller = state.agents.get(caller_id)
@@ -6571,7 +6578,11 @@ async def _dispatch_architect_ui_tool(name: str, args: dict,
 
     async def _restricted_handle_command(_data: dict) -> dict:
         cmd = str((_data or {}).get("cmd", "") or "").strip()
-        if handle_command and cmd in {"board_update_task", "list_actions"}:
+        if handle_command and cmd in {
+                "board_update_task",
+                "inject_mcp_message",
+                "list_actions",
+        }:
             return await handle_command(dict(_data or {}))
         return {
             "type": "error",
@@ -9045,6 +9056,9 @@ async def main(connection=None):
                     "architect_decision_update",
                     "architect_decision_link",
                     "architect_decision_list",
+                    "architect_peer_inbox",
+                    "architect_peer_list",
+                    "architect_peer_message",
                     "architect_task_update",
             }:
                 result = await _dispatch_architect_ui_tool(

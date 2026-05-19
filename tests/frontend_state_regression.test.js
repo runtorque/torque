@@ -13357,6 +13357,29 @@ test('architect decision and message caches invalidate on relevant websocket del
 
   assert.match(panel.innerHTML, /Fresh architect message/);
   assert.doesNotMatch(panel.innerHTML, /Old architect message/);
+
+  runInContext(context, `_expectedSeq = 3;`);
+  context._handleDelta({
+    seq: 3,
+    ops: [{
+      op: 'peer_message_upsert',
+      agent_id: 'arch-1',
+      group: 'alpha',
+      message: {
+        id: 'peer-msg-1',
+        action: 'architect_peer_message',
+        message: 'Dedicated peer delta message',
+        timestamp: 30,
+        peer_id: 'arch-2',
+        peer_kind: 'architect',
+        direction: 'received',
+        ack_required: true,
+      },
+    }],
+  });
+
+  assert.match(panel.innerHTML, /Dedicated peer delta message/);
+  assert.match(panel.innerHTML, /Ack required/);
 });
 
 test('ws task deltas avoid rerendering worker worklog for unrelated assigned tasks', () => {

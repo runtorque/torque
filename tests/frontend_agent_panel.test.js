@@ -835,6 +835,170 @@ test('architect Messages tab renders full-height message cards instead of the co
   assert.doesNotMatch(panel.innerHTML, /class="mcp-text"/);
 });
 
+test('architect Messages tab renders peer-message affordances and context refs', () => {
+  const { context, panel } = createHarness();
+  context.state.agents = {
+    'arch-1': {
+      id: 'arch-1',
+      name: 'Planner',
+      kind: 'architect',
+      group: 'alpha',
+      cell_type: 'agent',
+      mcp_messages: [
+        {
+          id: 'peer-msg-1',
+          action: 'architect_peer_message',
+          message: 'Can you sanity-check the rollout?',
+          timestamp: 1712345688,
+          sender_id: 'arch-2',
+          sender_kind: 'architect',
+          recipient_id: 'arch-1',
+          recipient_kind: 'architect',
+          peer_id: 'arch-2',
+          peer_kind: 'architect',
+          direction: 'received',
+          ack_required: true,
+          context_task_ids: ['TORQUE:101'],
+          context_engineer_ids: ['eng-1'],
+          context_decision_ids: ['decision-1'],
+          context_summary: 'API ownership is ambiguous.',
+        },
+      ],
+    },
+    'arch-2': {
+      id: 'arch-2',
+      name: 'Peer Architect',
+      kind: 'architect',
+      group: 'alpha',
+      cell_type: 'agent',
+    },
+    'eng-1': {
+      id: 'eng-1',
+      name: 'Builder',
+      kind: 'engineer',
+      group: 'alpha',
+      cell_type: 'agent',
+    },
+  };
+  context.state.board_tasks = {
+    'TORQUE:101': {
+      id: 'TORQUE:101',
+      task: 'Roll out peer messaging',
+      group: 'alpha',
+    },
+  };
+  context.state.decisions = {
+    'decision-1': {
+      id: 'decision-1',
+      architect_id: 'arch-1',
+      title: 'Use direct peer messages',
+      status: 'accepted',
+    },
+  };
+  context.focusedItemId = 'arch-1';
+
+  context.agentPanelSelectTab('messages');
+
+  assert.match(panel.innerHTML, /Peer Architect · alpha/);
+  assert.match(panel.innerHTML, /Ack required/);
+  assert.match(panel.innerHTML, /API ownership is ambiguous\./);
+  assert.match(panel.innerHTML, /TORQUE:101 · Roll out peer messaging/);
+  assert.match(panel.innerHTML, /Builder/);
+  assert.match(panel.innerHTML, /decision-1 · Use direct peer messages/);
+});
+
+test('architect Messages compose sends peer message with ack-required and context attachments', () => {
+  const { context, panel, sendCalls } = createHarness();
+  context.state.agents = {
+    'arch-1': {
+      id: 'arch-1',
+      name: 'Planner',
+      kind: 'architect',
+      group: 'alpha',
+      cell_type: 'agent',
+      mcp_messages: [],
+    },
+    'arch-2': {
+      id: 'arch-2',
+      name: 'Peer Architect',
+      kind: 'architect',
+      group: 'alpha',
+      cell_type: 'agent',
+    },
+  };
+  context.focusedItemId = 'arch-1';
+  context.agentPanelSelectTab('messages');
+  assert.match(panel.innerHTML, /Send peer message/);
+
+  context.agentPanelPeerComposeInput('arch-1', 'peer_id', 'arch-2');
+  context.agentPanelPeerComposeInput('arch-1', 'message', 'Please review the API boundary.');
+  context.agentPanelPeerComposeToggle('arch-1', true);
+  context.agentPanelPeerComposeInput('arch-1', 'context_task_ids', 'TORQUE:1, TORQUE:2');
+  context.agentPanelPeerComposeInput('arch-1', 'context_engineer_ids', 'eng-1');
+  context.agentPanelPeerComposeInput('arch-1', 'context_decision_ids', 'decision-1');
+  context.agentPanelPeerComposeInput('arch-1', 'context_summary', 'Ownership is ambiguous.');
+  context.agentPanelPeerComposeSubmit({
+    preventDefault() {},
+    stopPropagation() {},
+  }, 'arch-1');
+
+  const peerMessageCalls = sendCalls.filter((call) => call.cmd === 'architect_peer_message');
+  assert.equal(peerMessageCalls.length, 1);
+  const sent = JSON.parse(JSON.stringify(peerMessageCalls[0]));
+  assert.equal(sent.sender_architect_id, 'arch-1');
+  assert.equal(sent.architect_id, 'arch-2');
+  assert.equal(sent.message, 'Please review the API boundary.');
+  assert.equal(sent.ack_required, true);
+  assert.deepEqual(sent.context_task_ids, ['TORQUE:1', 'TORQUE:2']);
+  assert.deepEqual(sent.context_engineer_ids, ['eng-1']);
+  assert.deepEqual(sent.context_decision_ids, ['decision-1']);
+  assert.equal(sent.context_summary, 'Ownership is ambiguous.');
+  assert.ok(/^ui-peer-arch-1-/.test(sent.idempotency_key));
+});
+
+test('architect Messages compose draft survives peer-message rerenders', () => {
+  const { context, panel } = createHarness();
+  context.state.agents = {
+    'arch-1': {
+      id: 'arch-1',
+      name: 'Planner',
+      kind: 'architect',
+      group: 'alpha',
+      cell_type: 'agent',
+      mcp_messages: [],
+    },
+    'arch-2': {
+      id: 'arch-2',
+      name: 'Peer Architect',
+      kind: 'architect',
+      group: 'alpha',
+      cell_type: 'agent',
+    },
+  };
+  context.focusedItemId = 'arch-1';
+  context.agentPanelSelectTab('messages');
+  context.agentPanelPeerComposeInput('arch-1', 'peer_id', 'arch-2');
+  context.agentPanelPeerComposeInput('arch-1', 'message', 'Draft survives deltas');
+  context.agentPanelPeerComposeToggle('arch-1', true);
+
+  context.state.agents['arch-1'].mcp_messages = [
+    {
+      id: 'peer-msg-new',
+      action: 'architect_peer_message',
+      message: 'Fresh peer update',
+      timestamp: 200,
+      peer_id: 'arch-2',
+      direction: 'received',
+    },
+  ];
+  context.renderAgentPanel();
+
+  assert.match(panel.innerHTML, /Draft survives deltas/);
+  assert.match(panel.innerHTML, /value="arch-2" selected/);
+  assert.match(panel.innerHTML, /agent-panel-peer-ack-arch-1" type="checkbox" checked/);
+  assert.match(panel.innerHTML, /Fresh peer update/);
+});
+
 test('worker Messages tab renders inline task thread entries', () => {
   const { context, panel } = createHarness();
   context.state.agents = {

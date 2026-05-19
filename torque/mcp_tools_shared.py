@@ -1567,7 +1567,11 @@ def _architect_peer_list_json(
         str(item.get("name", "") or "").lower(),
         str(item.get("id", "") or ""),
     ))
-    return _compact_json({"type": "architect_peers", "architects": architects}), False
+    return _compact_json({
+        "type": "architect_peers",
+        "architect_id": caller_id,
+        "architects": architects,
+    }), False
 
 
 def _peer_context_task_snapshot(task) -> dict:
@@ -1779,6 +1783,56 @@ def _thread_requires_architect_reply(messages: list[dict],
         elif bool(row.get("ack_required", False)):
             latest_incoming_ack = max(latest_incoming_ack, ts)
     return latest_incoming_ack > latest_outgoing
+
+
+def _architect_peer_message_summary(state, caller_id: str) -> dict:
+    """Return compact peer-message counts for architect_board_summary."""
+    caller_id = str(caller_id or "").strip()
+    summary = {
+        "requires_reply_count": 0,
+        "recent_count": 0,
+        "oldest_unanswered_at": 0,
+    }
+    if not caller_id or not getattr(state, "db", None):
+        return summary
+    rows = state.db.load_agent_peer_messages_for_agent(
+        caller_id,
+        limit=200,
+    )
+    summary["recent_count"] = len(rows)
+    grouped: dict[str, list[dict]] = {}
+    for row in rows:
+        grouped.setdefault(str(row.get("thread_id", "") or ""), []).append(row)
+    oldest_unanswered = 0.0
+    for messages in grouped.values():
+        messages.sort(
+            key=lambda row: (
+                float(row.get("created_at", 0) or 0),
+                str(row.get("id", "") or ""),
+            )
+        )
+        if not _thread_requires_architect_reply(messages, caller_id):
+            continue
+        summary["requires_reply_count"] += 1
+        latest_incoming_ack = 0.0
+        for row in messages:
+            if str(row.get("sender_id", "") or "").strip() == caller_id:
+                continue
+            if not bool(row.get("ack_required", False)):
+                continue
+            latest_incoming_ack = max(
+                latest_incoming_ack,
+                float(row.get("created_at", row.get("timestamp", 0)) or 0),
+            )
+        if latest_incoming_ack:
+            oldest_unanswered = (
+                latest_incoming_ack
+                if not oldest_unanswered
+                else min(oldest_unanswered, latest_incoming_ack)
+            )
+    if oldest_unanswered:
+        summary["oldest_unanswered_at"] = oldest_unanswered
+    return summary
 
 
 def _architect_peer_inbox_json(

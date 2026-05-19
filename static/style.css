@@ -8544,6 +8544,95 @@ button.agent-panel-hierarchy-crumb:focus-visible {
   padding: 8px;
   scrollbar-width: thin;
 }
+.agent-panel-peer-compose {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-cell) 88%, var(--accent) 12%);
+  flex-shrink: 0;
+}
+.agent-panel-peer-compose-head,
+.agent-panel-peer-compose-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.agent-panel-peer-compose-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+.agent-panel-peer-compose-field span,
+.agent-panel-peer-context label span {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.agent-panel-peer-select,
+.agent-panel-peer-compose-body,
+.agent-panel-peer-context input,
+.agent-panel-peer-context textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 10px;
+  line-height: 1.35;
+  padding: 5px 6px;
+}
+.agent-panel-peer-compose-body,
+.agent-panel-peer-context textarea {
+  resize: vertical;
+  min-height: 42px;
+}
+.agent-panel-peer-compose-ack {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.agent-panel-peer-compose-empty {
+  color: var(--text-dim);
+  font-size: 10px;
+}
+.agent-panel-peer-context {
+  border: 1px dashed color-mix(in srgb, var(--border) 75%, var(--accent) 25%);
+  border-radius: var(--radius);
+  padding: 5px 6px;
+}
+.agent-panel-peer-context summary {
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 600;
+}
+.agent-panel-peer-context-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 6px;
+}
+.agent-panel-peer-context-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.agent-panel-peer-context-summary {
+  grid-column: 1 / -1;
+}
+.agent-panel-peer-send {
+  margin-left: auto;
+}
 .agent-panel-message-card {
   padding: 8px;
   border: 1px solid var(--border);
@@ -8574,7 +8663,9 @@ button.agent-panel-hierarchy-crumb:focus-visible {
 }
 .agent-panel-message-sender,
 .agent-panel-message-direction,
-.agent-panel-message-action {
+.agent-panel-message-action,
+.agent-panel-message-peer,
+.agent-panel-message-ack {
   font-size: 9px;
   line-height: 1.4;
 }
@@ -8595,6 +8686,23 @@ button.agent-panel-hierarchy-crumb:focus-visible {
 .agent-panel-message-time {
   color: var(--text-dim);
 }
+.agent-panel-message-peer {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  border-radius: 999px;
+  padding: 0 5px;
+}
+.agent-panel-message-ack {
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--amber) 28%, transparent);
+  border-radius: 999px;
+  font-weight: 700;
+  padding: 0 5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
 .agent-panel-message-time {
   font-size: 9px;
   flex-shrink: 0;
@@ -8606,6 +8714,41 @@ button.agent-panel-hierarchy-crumb:focus-visible {
   color: var(--text);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+.agent-panel-message-context-preview {
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px dashed var(--border);
+}
+.agent-panel-message-context-summary {
+  color: var(--text-dim);
+  font-size: 10px;
+  line-height: 1.4;
+  margin-bottom: 5px;
+  white-space: pre-wrap;
+}
+.agent-panel-message-context-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.agent-panel-message-context-chip,
+.agent-panel-message-context-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  background: var(--bg);
+  font-size: 9px;
+  line-height: 1.4;
+  padding: 1px 6px;
+}
+.agent-panel-message-context-kind {
+  color: var(--accent);
+  font-weight: 700;
 }
 
 /* Journal entries */
