@@ -619,6 +619,10 @@ function taskBoardSyncTrackChanged() {
   _taskBoardSync.version = _taskBoardSync.version || 1;
   _taskBoardSync.provider = _taskBoardSync.provider || _taskCurrentExternalProvider() || 'github';
   _taskBoardSync.enabled = !!(cb && cb.checked);
+  if (!_taskBoardSync.enabled) {
+    _taskBoardSync.sync_state = 'idle';
+    _taskBoardSync.last_error = '';
+  }
   taskPersistDraft();
 }
 
@@ -629,6 +633,10 @@ function _taskBoardSyncPayloadForSubmit() {
     sync.version = sync.version || 1;
     sync.provider = sync.provider || _taskCurrentExternalProvider() || 'github';
     sync.enabled = !!cb.checked;
+    if (!sync.enabled) {
+      sync.sync_state = 'idle';
+      sync.last_error = '';
+    }
   }
   return sync;
 }

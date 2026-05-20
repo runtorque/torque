@@ -9,7 +9,11 @@ except ModuleNotFoundError:
 
 install_aiohttp_stub()
 
-from torque.server_board_sync import BoardSyncManager, board_sync_fields_trigger
+from torque.server_board_sync import (
+    BoardSyncManager,
+    board_sync_fields_trigger,
+    task_is_tracked_for_board_sync,
+)
 from torque.state import MatrixState
 
 
@@ -153,6 +157,56 @@ class BoardSyncManagerTests(unittest.IsolatedAsyncioTestCase):
                     fields=fields,
                 )
                 self.assertTrue(enqueued["queued"])
+
+    async def test_task_level_opt_out_blocks_tracking_and_auto_enqueue(self):
+        provider = FakeBoardSyncProvider()
+        state = make_state(auto_track=True)
+        task = state.board_add_task(
+            "Opted out",
+            "g",
+            id="task-opt-out",
+            provider="github",
+            external_id="owner/repo#1",
+            external_url="https://github.com/owner/repo/issues/1",
+            board_sync={
+                "version": 1,
+                "provider": "github",
+                "enabled": False,
+                "github": {
+                    "issue_number": 1,
+                    "issue_url": "https://github.com/owner/repo/issues/1",
+                },
+            },
+        )
+        manager = self.make_manager(state, provider)
+
+        self.assertFalse(task_is_tracked_for_board_sync(task))
+        auto_result = manager.enqueue_for_local_change(
+            task.id,
+            reason="task_update",
+            fields=["task", "provider", "external_url"],
+        )
+        explicit_result = manager.enqueue_task(
+            task.id,
+            reason="group_sync",
+            explicit=True,
+        )
+
+        self.assertFalse(auto_result["queued"])
+        self.assertEqual(auto_result["reason"], "task_opted_out")
+        self.assertFalse(explicit_result["queued"])
+        self.assertEqual(explicit_result["reason"], "task_opted_out")
+        self.assertEqual(state.board_tasks[task.id].board_sync["enabled"], False)
+        self.assertEqual(manager.queue.qsize(), 0)
+
+        forced_result = manager.enqueue_task(
+            task.id,
+            reason="manual_sync",
+            explicit=True,
+            force=True,
+        )
+        self.assertTrue(forced_result["queued"])
+        self.assertEqual(state.board_tasks[task.id].board_sync["enabled"], True)
 
     async def test_sync_state_transitions_successfully(self):
         provider = FakeBoardSyncProvider()

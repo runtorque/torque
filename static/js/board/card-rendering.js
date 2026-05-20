@@ -176,6 +176,7 @@ function _boardSyncStateMeta(task) {
     ? _boardTaskSync(task)
     : ((task && task.board_sync) || {});
   var stateName = String((sync && sync.sync_state) || '').toLowerCase();
+  if (sync && sync.enabled === false) stateName = 'untracked';
   if (!stateName && sync && (sync.last_push_at || sync.last_pull_at || sync.last_synced_hash)) {
     stateName = 'ok';
   }
@@ -184,12 +185,14 @@ function _boardSyncStateMeta(task) {
     queued: 'queued',
     syncing: 'syncing',
     error: 'error',
+    untracked: 'untracked',
     ok: 'ok',
   };
   var icons = {
     queued: '⏳',
     syncing: '↻',
     error: '!',
+    untracked: '○',
     ok: '✓',
   };
   if (!labels[stateName]) stateName = '';

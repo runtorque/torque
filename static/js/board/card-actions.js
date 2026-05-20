@@ -180,7 +180,7 @@ function _boardRenderCardMenu(taskId) {
     html += '<button onclick="event.stopPropagation();boardSyncTaskNow(\'' + taskId + '\')">Sync GitHub now</button>';
     html += '<button onclick="event.stopPropagation();boardPullPreview(\'' + taskId + '\')">Pull preview</button>';
     html += '<button onclick="event.stopPropagation();boardLinkExternal(\'' + taskId + '\')">Edit external link...</button>';
-    if (task.provider || task.external_id || task.external_url) {
+    if (hasGithubIssue || task.provider || task.external_id || task.external_url) {
       html += '<button onclick="event.stopPropagation();boardClearExternal(\'' + taskId + '\')">Unlink external issue</button>';
     }
   } else if (task.provider || task.external_id || task.external_url) {

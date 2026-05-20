@@ -223,6 +223,7 @@ test('card GitHub context menu exposes sync actions that send expected envelopes
   assert.match(menuHtml, /Push to GitHub/);
   assert.match(menuHtml, /Sync GitHub now/);
   assert.match(menuHtml, /Pull preview/);
+  assert.match(menuHtml, /Unlink external issue/);
 
   vm.runInContext('boardSyncTaskNow("task-1", { quiet: true }); boardPullPreview("task-1", { quiet: true });', context);
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls[0])), {
@@ -234,6 +235,71 @@ test('card GitHub context menu exposes sync actions that send expected envelopes
     cmd: 'board_pull_preview',
     args: { task: 'task-1' },
     task: 'task-1',
+  });
+});
+
+test('task modal track checkbox creates an explicit board sync opt-out payload', () => {
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadBoardSyncScripts(context);
+
+  ensure('task-external-provider-input').value = 'github';
+  ensure('task-board-sync-track-input').checked = false;
+  vm.runInContext(`
+    _taskBoardSync = {
+      version: 1,
+      provider: 'github',
+      enabled: true,
+      sync_state: 'error',
+      last_error: 'missing scope',
+      github: { issue_number: 123, issue_url: 'https://github.com/acme/widgets/issues/123' }
+    };
+    taskBoardSyncTrackChanged();
+    var untrackPayload = _taskBoardSyncPayloadForSubmit();
+  `, context);
+
+  assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(untrackPayload)', context)), {
+    version: 1,
+    provider: 'github',
+    enabled: false,
+    sync_state: 'idle',
+    last_error: '',
+    github: { issue_number: 123, issue_url: 'https://github.com/acme/widgets/issues/123' },
+  });
+});
+
+test('board sync-only GitHub links can be unlinked and opt out of tracking', () => {
+  const { sandbox } = createSandbox();
+  sandbox.state.board_tasks['sync-only'] = {
+    id: 'sync-only',
+    group: 'alpha',
+    lane: 'Backlog',
+    task: 'Sync-created link',
+    board_sync: {
+      provider: 'github',
+      enabled: true,
+      sync_state: 'idle',
+      github: {
+        issue_number: 456,
+        issue_url: 'https://github.com/acme/widgets/issues/456',
+      },
+    },
+  };
+  const context = vm.createContext(sandbox);
+  loadBoardSyncScripts(context);
+
+  vm.runInContext('_boardRenderCardMenu("sync-only"); boardClearExternal("sync-only");', context);
+  const menuHtml = sandbox.document.getElementById('ctx-menu').innerHTML;
+  assert.match(menuHtml, /Open GitHub issue/);
+  assert.match(menuHtml, /Unlink external issue/);
+  assert.deepEqual(JSON.parse(JSON.stringify(lastCall(sandbox))), {
+    cmd: 'external_link_task',
+    id: 'sync-only',
+    provider: '',
+    external_id: '',
+    external_url: '',
+    ref: '',
+    board_sync: { version: 1, enabled: false },
   });
 });
 

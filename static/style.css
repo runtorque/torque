@@ -4679,7 +4679,8 @@ body.runtime-embedded #panel-board .board-wide-lane-body {
   color: var(--green);
   background: color-mix(in srgb, var(--green) 16%, transparent);
 }
-.board-card-sync-state-none {
+.board-card-sync-state-none,
+.board-card-sync-state-untracked {
   color: var(--text-dim);
   background: color-mix(in srgb, var(--text-dim) 12%, transparent);
 }

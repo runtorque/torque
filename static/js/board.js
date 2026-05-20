@@ -3275,7 +3275,8 @@ function boardLinkExternal(taskId) {
   _closeCtxMenu();
   var task = _boardTasks()[taskId];
   if (!task) return;
-  var refDefault = task.external_url || ((task.provider && task.external_id)
+  var gh = _boardTaskGithubSync(task);
+  var refDefault = task.external_url || gh.issue_url || ((task.provider && task.external_id)
     ? (task.provider + ':' + task.external_id) : (task.external_id || ''));
   var ref = window.prompt('External reference or URL', refDefault);
   if (ref === null) return;
@@ -3298,6 +3299,10 @@ function boardClearExternal(taskId) {
     external_id: '',
     external_url: '',
     ref: '',
+    board_sync: {
+      version: 1,
+      enabled: false,
+    },
   });
 }
 

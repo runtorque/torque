@@ -112,6 +112,11 @@ def task_is_tracked_for_board_sync(task: BoardTask | None) -> bool:
         return False
     sync = getattr(task, "board_sync", {}) or {}
     if isinstance(sync, dict):
+        # Task-level opt-out is authoritative.  A task can remain linked to a
+        # GitHub issue (provider metadata/external_url preserved for display)
+        # while explicitly opting out of automatic board sync.
+        if sync.get("enabled") is False:
+            return False
         if _maybe_bool(sync.get("enabled")):
             return True
         if str(sync.get("provider", "") or "").strip():
@@ -262,6 +267,9 @@ class BoardSyncManager:
             return {"ok": False, "queued": False, "reason": "provider_disabled"}
         if not enabled:
             return {"ok": False, "queued": False, "reason": "sync_disabled"}
+        sync = getattr(task, "board_sync", {}) or {}
+        if isinstance(sync, dict) and sync.get("enabled") is False and not force:
+            return {"ok": False, "queued": False, "reason": "task_opted_out"}
         tracked = task_is_tracked_for_board_sync(task)
         auto_track = group_auto_tracks_new_tasks(settings)
         if not (force or explicit or tracked or auto_track):
@@ -619,6 +627,9 @@ class BoardSyncManager:
             async with target_lock:
                 task = self.state.board_tasks.get(tid)
                 if not task:
+                    return
+                sync = getattr(task, "board_sync", {}) or {}
+                if isinstance(sync, dict) and sync.get("enabled") is False and not item.explicit:
                     return
                 syncing = dict(getattr(task, "board_sync", {}) or {})
                 syncing.update({
