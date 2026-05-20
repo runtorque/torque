@@ -99,6 +99,7 @@ from .server_artifacts import (
     store_preserved_merge_diff,
     store_task_upload,
 )
+from .server_board_sync import BoardSyncManager
 from .task_ids import is_canonical_task_id, is_draft_task_token
 from .memory import (
     build_memory_entry,
@@ -946,6 +947,7 @@ async def _finalize_successful_worktree_merge(
     worktree_mgr: WorktreeManager,
     handle_command,
     panel_event,
+    board_sync_manager=None,
 ) -> dict:
     """Apply all local side effects after a direct or PR merge succeeds."""
     mark_branch_boundaries_merged(cell, merge_sha)
@@ -1001,12 +1003,17 @@ async def _finalize_successful_worktree_merge(
     if queued_followups:
         close_flag = False
         remove_flag = False
-    _maybe_auto_move_merged_task_to_done(
+    auto_done_decision = _maybe_auto_move_merged_task_to_done(
         state,
         cell,
         enabled=bool(data.get("auto_move_to_done", True)),
         cleanup_requested=bool(close_flag or remove_flag),
     )
+    if board_sync_manager and auto_done_decision.get("moved"):
+        board_sync_manager.enqueue_task(
+            auto_done_decision.get("task_id", ""),
+            reason="pr_merge_finalized",
+        )
     # Unlink completed/archive-closed tasks from this agent so they don't
     # re-appear in future merge messages. Tasks stay on the board as history.
     for t in list(state.board_tasks.values()):
@@ -1097,6 +1104,7 @@ async def _run_direct_worktree_merge(
     bridge,
     handle_command,
     panel_event,
+    board_sync_manager=None,
 ) -> dict:
     gates = await _preflight_worktree_merge_gates(
         state=state,
@@ -1161,6 +1169,7 @@ async def _run_direct_worktree_merge(
             worktree_mgr=worktree_mgr,
             handle_command=handle_command,
             panel_event=panel_event,
+            board_sync_manager=board_sync_manager,
         )
     else:
         result = _worktree_merge_error(
@@ -1188,6 +1197,7 @@ async def _run_pr_worktree_merge(
     bridge,
     handle_command,
     panel_event,
+    board_sync_manager=None,
 ) -> dict:
     if not (cell and cell.worktree_path and cell.worktree_branch):
         return _worktree_merge_error(aid, "Agent has no worktree.")
@@ -1543,6 +1553,7 @@ async def _run_pr_worktree_merge(
         worktree_mgr=worktree_mgr,
         handle_command=handle_command,
         panel_event=panel_event,
+        board_sync_manager=board_sync_manager,
     )
     result.update({
         "mode": "pull_request",
@@ -8360,6 +8371,14 @@ async def main(connection=None):
                 dead.add(ws_client)
         state._ws_clients -= dead
 
+    board_sync_manager = BoardSyncManager(
+        state,
+        panel_event=_panel_event,
+        toast=_broadcast_toast,
+    )
+    board_sync_manager.start()
+    log.info("Board sync manager started")
+
     # Persistent supervisor-health banner. Only populated in standalone
     # mode when the supervisor is unavailable / restarted. Latest state
     # is replayed to each newly connected WS client.
@@ -11160,6 +11179,7 @@ async def main(connection=None):
                             bridge=bridge,
                             handle_command=handle_command,
                             panel_event=_panel_event,
+                            board_sync_manager=board_sync_manager,
                         )
                         if isinstance(result, dict):
                             result["force_direct"] = True
@@ -11194,7 +11214,58 @@ async def main(connection=None):
                             bridge=bridge,
                             handle_command=handle_command,
                             panel_event=_panel_event,
+                            board_sync_manager=board_sync_manager,
                         )
+
+            # -- Board sync commands --
+            elif cmd == "board_sync_preflight":
+                if not board_sync_manager:
+                    result = {"type": "error", "message": "Board sync manager unavailable"}
+                else:
+                    result = await board_sync_manager.preflight(
+                        data.get("group", ""))
+
+            elif cmd == "board_sync_task":
+                if not board_sync_manager:
+                    result = {"type": "error", "message": "Board sync manager unavailable"}
+                else:
+                    sync_result = board_sync_manager.enqueue_task(
+                        data.get("task", data.get("id", "")),
+                        reason="explicit",
+                        explicit=True,
+                        force=True,
+                    )
+                    result = {
+                        "type": "board_sync_task",
+                        **sync_result,
+                    }
+
+            elif cmd == "board_sync_group":
+                if not board_sync_manager:
+                    result = {"type": "error", "message": "Board sync manager unavailable"}
+                else:
+                    result = board_sync_manager.enqueue_group(
+                        data.get("group", ""),
+                        explicit=True,
+                        force=bool(data.get("force", False)),
+                        reason="group_sync",
+                    )
+
+            elif cmd == "board_pull_preview":
+                if not board_sync_manager:
+                    result = {"type": "error", "message": "Board sync manager unavailable"}
+                else:
+                    result = await board_sync_manager.pull_preview(
+                        data.get("task", data.get("id", "")))
+
+            elif cmd == "board_pull_apply":
+                if not board_sync_manager:
+                    result = {"type": "error", "message": "Board sync manager unavailable"}
+                else:
+                    result = await board_sync_manager.pull_apply(
+                        data.get("task", data.get("id", "")),
+                        data.get("fields", []),
+                    )
 
             # -- Board commands (Phase 5) --
             elif cmd == "board_add_task":
@@ -11305,15 +11376,42 @@ async def main(connection=None):
                             "task_id": bt.id,
                             "title": bt.task,
                         }
+                        if board_sync_manager:
+                            board_sync_manager.enqueue_task(
+                                bt.id,
+                                reason="task_create",
+                            )
 
             elif cmd == "board_archive_task":
                 result = _handle_board_archive_command(state, data)
+                if not (isinstance(result, dict)
+                        and result.get("type") == "error"):
+                    if board_sync_manager:
+                        board_sync_manager.enqueue_task(
+                            data.get("id", ""),
+                            reason="task_archive",
+                        )
 
             elif cmd == "board_archive_tasks":
                 result = _handle_board_archive_tasks_command(state, data)
+                if not (isinstance(result, dict)
+                        and result.get("type") == "error"):
+                    for _sync_tid in data.get("ids", data.get("task_ids", [])):
+                        if board_sync_manager:
+                            board_sync_manager.enqueue_task(
+                                _sync_tid,
+                                reason="task_archive",
+                            )
 
             elif cmd == "board_unarchive_task":
                 result = _handle_board_unarchive_command(state, data)
+                if not (isinstance(result, dict)
+                        and result.get("type") == "error"):
+                    if board_sync_manager:
+                        board_sync_manager.enqueue_task(
+                            data.get("id", ""),
+                            reason="task_unarchive",
+                        )
 
             elif cmd == "board_update_task":
                 tid = _resolve_task_id(state, data.get("id", ""))
@@ -11356,6 +11454,12 @@ async def main(connection=None):
                     }
                 else:
                     state.board_update_task(tid, **fields)
+                    if board_sync_manager:
+                        board_sync_manager.enqueue_for_local_change(
+                            tid,
+                            reason="task_update",
+                            fields=fields.keys(),
+                        )
                     # Auto-dispatch if agent_id was set and agent is idle
                     _new_aid = fields.get("agent_id", "")
                     if _new_aid:
@@ -11492,6 +11596,11 @@ async def main(connection=None):
                             "external_id": bt.external_id,
                             "external_url": bt.external_url,
                         }
+                        if board_sync_manager:
+                            board_sync_manager.enqueue_task(
+                                bt.id,
+                                reason="external_import",
+                            )
                 except ExternalTicketError as exc:
                     result = {"type": "error", "message": str(exc)}
 
@@ -11514,6 +11623,11 @@ async def main(connection=None):
                         external_id=link["external_id"],
                         external_url=link["external_url"],
                     )
+                    if board_sync_manager:
+                        board_sync_manager.enqueue_task(
+                            tid,
+                            reason="external_link",
+                        )
                     result = {
                         "type": "external_unlinked"
                         if not link["provider"]
@@ -11614,12 +11728,34 @@ async def main(connection=None):
 
             elif cmd == "board_archive_task":
                 result = _handle_board_archive_command(state, data)
+                if not (isinstance(result, dict)
+                        and result.get("type") == "error"):
+                    if board_sync_manager:
+                        board_sync_manager.enqueue_task(
+                            data.get("id", ""),
+                            reason="task_archive",
+                        )
 
             elif cmd == "board_archive_tasks":
                 result = _handle_board_archive_tasks_command(state, data)
+                if not (isinstance(result, dict)
+                        and result.get("type") == "error"):
+                    for _sync_tid in data.get("ids", data.get("task_ids", [])):
+                        if board_sync_manager:
+                            board_sync_manager.enqueue_task(
+                                _sync_tid,
+                                reason="task_archive",
+                            )
 
             elif cmd == "board_unarchive_task":
                 result = _handle_board_unarchive_command(state, data)
+                if not (isinstance(result, dict)
+                        and result.get("type") == "error"):
+                    if board_sync_manager:
+                        board_sync_manager.enqueue_task(
+                            data.get("id", ""),
+                            reason="task_unarchive",
+                        )
 
             elif cmd == "remove_attachment":
                 tid = _resolve_task_id(state, data.get("task_id", ""))
@@ -11747,6 +11883,11 @@ async def main(connection=None):
                             data.get("position"),
                             clear_status=_mv_clear_status,
                         )
+                        if board_sync_manager:
+                            board_sync_manager.enqueue_task(
+                                _mv_id,
+                                reason="task_move",
+                            )
                         _mv_task_after = state.board_tasks.get(_mv_id)
                         result = {
                             "type": "task_moved",
@@ -11784,6 +11925,11 @@ async def main(connection=None):
                 state.board_reorder_task(
                     data.get("id", ""),
                     data.get("position", 0))
+                if board_sync_manager:
+                    board_sync_manager.enqueue_task(
+                        data.get("id", ""),
+                        reason="task_reorder",
+                    )
 
             elif cmd == "dispatch_task":
                 tid = _resolve_task_id(state, data.get("id", ""))
@@ -16136,6 +16282,7 @@ async def main(connection=None):
 
         await daemon_stop_event.wait()
     finally:
+        await board_sync_manager.stop()
         await _shutdown_daemon_runtime(
             terminal_clients=terminal_clients,
             ui_ws_clients=state._ws_clients,
