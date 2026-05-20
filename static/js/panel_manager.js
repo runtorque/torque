@@ -17,9 +17,9 @@ var _standalonePanelDefaults = {
   actions: 'right',
   templates: 'right',
   history: 'right',
-  context: 'right',
+  context: 'bottom',
   events: 'right',
-  engineer: 'bottom',
+  engineer: 'right',
   supervisor: 'bottom',
   health: 'right',
 };
@@ -423,23 +423,40 @@ function _standaloneRememberFloatFrame(layout, app, frame) {
   cache[app] = _standaloneClampFloatFrame(frame, frame);
 }
 
+function _standaloneDefaultTabsForZone(zoneName) {
+  var tabs = [];
+  for (var i = 0; i < _standalonePanelApps.length; i++) {
+    var app = _standalonePanelApps[i];
+    if ((_standalonePanelDefaults[app] || 'bottom') === zoneName) tabs.push(app);
+  }
+  return tabs;
+}
+
 function _standaloneDefaultLayout() {
+  var bottomTabs = _standaloneDefaultTabsForZone('bottom');
+  var rightTabs = _standaloneDefaultTabsForZone('right');
+  var bottomActive = bottomTabs.indexOf('context') >= 0
+    ? 'context'
+    : (bottomTabs[0] || '');
+  var rightActive = rightTabs.indexOf('engineer') >= 0
+    ? 'engineer'
+    : (rightTabs[0] || '');
   return {
     version: _standalonePanelLayoutVersion,
     bottom: {
       open: true,
       size: _standaloneDefaultBottomSize(),
-      tabs: ['board'],
-      active: 'board',
+      tabs: bottomTabs,
+      active: bottomActive,
     },
     right: {
       open: true,
       size: _standaloneDefaultRightSize(),
-      tabs: ['actions', 'templates', 'history', 'context', 'events'],
-      active: 'context',
+      tabs: rightTabs,
+      active: rightActive,
     },
     floats: {},
-    last_active: 'board',
+    last_active: bottomActive || rightActive || '',
   };
 }
 
@@ -557,13 +574,13 @@ function _migrateStandalonePanelLayoutFromLegacyState() {
       layout.bottom.size
     );
   }
-  if (active === 'engineer') {
-    layout.bottom.tabs = ['board', 'engineer'];
-    layout.bottom.active = 'engineer';
-    layout.last_active = 'engineer';
-  } else if (active && layout.right.tabs.indexOf(active) >= 0) {
-    layout.right.active = active;
-    layout.last_active = active;
+  if (active && _standalonePanelApps.indexOf(active) >= 0) {
+    var zoneName = _standalonePanelDefaults[active] || 'bottom';
+    if (layout[zoneName] && layout[zoneName].tabs.indexOf(active) >= 0) {
+      layout[zoneName].active = active;
+      layout[zoneName].open = true;
+      layout.last_active = active;
+    }
   } else {
     layout.last_active = layout.bottom.active;
   }

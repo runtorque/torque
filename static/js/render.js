@@ -290,9 +290,11 @@ function _agentFocusSyncCollapsedUi(parts, collapsed) {
     parts.handle.setAttribute('aria-label', collapsed ? 'Expand focus panel' : 'Resize focus panel');
     parts.handle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
   }
-  const collapseButton = parts.focus && typeof parts.focus.querySelector === 'function'
-    ? parts.focus.querySelector('[data-agent-focus-collapse]')
-    : null;
+  const collapseButton = parts.root && typeof parts.root.querySelector === 'function'
+    ? parts.root.querySelector('[data-agent-focus-collapse]')
+    : (parts.focus && typeof parts.focus.querySelector === 'function'
+      ? parts.focus.querySelector('[data-agent-focus-collapse]')
+      : null);
   if (collapseButton) collapseButton.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
 }
 
@@ -341,6 +343,16 @@ function _agentFocusResizerKeydown(event) {
   if (key !== 'Enter' && key !== ' ' && key !== 'Spacebar' && key !== 'Space') return;
   if (event && typeof event.preventDefault === 'function') event.preventDefault();
   _agentFocusSetCollapsed(false);
+}
+
+function _agentFocusCollapseFromRail(event) {
+  if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+  _agentFocusSetCollapsed(true);
+}
+
+function _agentFocusCollapseRailMousedown(event) {
+  if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
 }
 
 function _agentFocusScheduleResizeHeight(height) {
@@ -2556,9 +2568,6 @@ function _renderAgentFocusPanelHtml() {
       + esc(agent.name || agent.id || 'Agent')
       + '</div>';
   }
-  html += '<button type="button" class="agent-focus-collapse-btn" data-agent-focus-collapse'
-    + ' onclick="_agentFocusSetCollapsed(true)" title="Collapse focus panel"'
-    + ' aria-label="Collapse focus panel" aria-expanded="' + (_agentFocusIsCollapsed() ? 'false' : 'true') + '">⌄</button>';
   html += '</div>';
   if (!agent) {
     html += '<div class="agent-focus-empty">Select an agent to view details and terminals.</div>';
@@ -2583,6 +2592,13 @@ function _agentFocusShellHtml(gridHtml, focusHtml, tabsHtml) {
     + ' data-agent-focus-resizer onmousedown="_agentFocusResizeStart(event)" onclick="_agentFocusResizerClick(event)"'
     + ' onkeydown="_agentFocusResizerKeydown(event)">'
     + '<div class="agent-focus-resizer-grip" aria-hidden="true"></div>'
+    // Keep the collapse affordance in the same rail as the height grip so the
+    // Focus panel reads as a resize/collapse control cluster instead of a
+    // hidden header action. The collapsed rail below remains the re-open handle.
+    + '<button type="button" class="agent-focus-collapse-btn" data-agent-focus-collapse'
+    + ' onmousedown="_agentFocusCollapseRailMousedown(event)" onclick="_agentFocusCollapseFromRail(event)"'
+    + ' title="Collapse focus panel" aria-label="Collapse focus panel"'
+    + ' aria-expanded="' + (collapsed ? 'false' : 'true') + '">⌄ Collapse</button>'
     + '<span class="agent-focus-reopen-label" data-agent-focus-reopen-label>Focus panel hidden — click to expand</span>'
     + '</div>'
     + '<section id="agent-focus-panel" class="agent-focus-panel" data-agent-focus-panel>'
