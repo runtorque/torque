@@ -20,7 +20,7 @@ These settings apply to the group as a whole and serve as the base defaults for 
 
 ### Start collapsed on load
 
-When enabled, the group starts collapsed each time the Toolbelt webview loads. You can still expand it manually at any time.
+When enabled, the group starts collapsed each time the Torque workspace webview loads. You can still expand it manually at any time.
 
 ### Pin to active window
 

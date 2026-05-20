@@ -85,8 +85,8 @@ Torque supports reordering and reparenting from the UI:
 - Remove an agent when the task is done; child terminals are cleaned up with it
 - Use worktree checkpoints before risky changes if the agent has a managed worktree
 
-## Standalone Browser View
+## Browser and secondary Toolbelt views
 
-The browser view is the same live UI backed by the same daemon. In dual mode the Toolbelt and browser stay in sync. In standalone-only mode Torque skips Toolbelt registration and serves only the browser UI.
+The browser and Toolbelt views are the same live UI backed by the same daemon. In primary standalone/browser mode Torque skips Toolbelt registration and serves only the browser UI. In secondary Toolbelt dual mode, the Toolbelt and browser stay in sync.
 
 See [Operations](operations.md) for runtime modes.

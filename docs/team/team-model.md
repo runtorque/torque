@@ -40,7 +40,7 @@ For the why behind each layer, [Why Torque exists](../foundations/why-torque-exi
 
 ## How to read the grid
 
-The grid in the Toolbelt panel is the team made visible. Look at it as an org chart:
+The grid in the Torque workspace is the team made visible. Look at it as an org chart:
 
 ![The Toolbelt grid: User column far left, Architect (Loomer), Engineers row, Workers row, focus pane at bottom-left.](../images/grid.png)
 

@@ -18,45 +18,49 @@ Torque itself is the orchestrator; it doesn't ship the agents. You'll need at le
 git clone https://github.com/aleksanderarruda/iterm2-agent-orchestration.git
 cd iterm2-agent-orchestration
 make deps
-make install
-make cli
+make deploy
+make desktop-deps
 ```
 
-`make cli` installs `bin/torque` into `~/.local/bin/torque`. Make sure that directory is on your `PATH`.
+`make deploy` installs the primary standalone/desktop app files under
+`~/.torque/app` and installs the `torque` CLI symlink into
+`~/.local/bin/torque`. Make sure that directory is on your `PATH`.
 
 ## Start Torque
 
-1. Open iTerm2.
-2. Run **Scripts → torque**.
-3. Open **View → Show Toolbelt**.
-4. Enable **Torque** from the Toolbelt gear menu.
-
-The Torque panel should now appear in the Toolbelt sidebar. If it doesn't, check `~/Library/Application Support/iTerm2/Scripts/torque/torque/torque.log` for errors.
-
-## Open a wider browser view
-
-You can run the same UI in a browser alongside the Toolbelt:
+Start the primary desktop app:
 
 ```bash
-make open
+make run
 ```
 
-This is useful when you want the full board in one window and the Toolbelt for quick checks.
+The Torque workspace should appear in a native desktop window. If it doesn't,
+check `~/.torque/profiles/desktop/torque.log` for errors.
 
-For standalone-only mode (no Toolbelt registration, daemon controls iTerm2 externally):
+## Browser and Toolbelt alternatives
+
+For standalone browser mode:
 
 ```bash
 make standalone
 make open
 ```
 
-For the native desktop shell (`pywebview`), see [Operations](../operate/operations.md).
+For the secondary iTerm2 Toolbelt integration:
+
+```bash
+make deploy-toolbelt
+```
+
+Then open iTerm2, run **Scripts → torque**, open **View → Show Toolbelt**, and
+enable **Torque** from the Toolbelt gear menu. For more runtime modes, see
+[Operations](../operate/operations.md).
 
 ## Your first session
 
 This is the whole loop you're going to be doing for the rest of your life with Torque. Get comfortable with it.
 
-1. **Create a group.** Click **+ Group** in the Toolbelt and give it a name like `playground`. A group is just a container — think of it as one project area, one feature, one chunk of work you want to keep together.
+1. **Create a group.** Click **+ Group** in the Torque workspace and give it a name like `playground`. A group is just a container — think of it as one project area, one feature, one chunk of work you want to keep together.
 
 2. **Add a worker.** Inside the group, click **+ New** and choose Worker. A new iTerm2 tab opens running `claude` (or whatever the default boot command is). The worker's cell appears in the grid.
 
@@ -120,10 +124,13 @@ After pulling new changes:
 make deploy
 ```
 
-Then restart Torque from the **Scripts** menu in iTerm2.
+Then relaunch Torque with `make run` for the desktop app, or run
+`make standalone` followed by `make open` for browser-only mode. If you specifically use the iTerm2
+Toolbelt integration, run `make deploy-toolbelt` and restart Torque from the
+**Scripts** menu in iTerm2.
 
 !!! warning "Don't `make deploy` from inside a Torque-managed worker"
-    If you're operating inside a Torque worktree (a tab the daemon spawned), running `make deploy` will kill the very daemon you're talking to and leave the new instance with corrupted in-memory state. The Makefile and HTTP layer both refuse the operation when called from a worker context. See [Operations](../operate/operations.md) for safer alternatives.
+    If you're operating inside a Torque worktree (a tab the daemon spawned), running `make deploy`, `make deploy-toolbelt`, or `make stop` can kill the very daemon you're talking to and leave the new instance with corrupted in-memory state. The Makefile and HTTP layer both refuse the operation when called from a worker context. See [Operations](../operate/operations.md) for safer alternatives.
 
 ## Where to next
 

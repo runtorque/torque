@@ -2,31 +2,32 @@
 
 ## Project overview
 
-Torque is an iTerm2 Toolbelt plugin that manages AI agent and terminal sessions in a visual grid. It's a Python daemon (aiohttp server) that communicates with a webview UI over a local WebSocket. The primary UI is iTerm2's Toolbelt sidebar; a standalone browser mode also exists to support other terminal emulators in the future. The terminal backend is abstracted behind a `TerminalAdapter` protocol; the current implementation (`ITerm2Adapter` in `bridge.py`) controls iTerm2.
+Torque is a local agent-orchestration workspace that manages AI agent and terminal sessions in a visual grid. The primary operator surfaces are now the standalone/browser and desktop app modes; the iTerm2 Toolbelt is a supported secondary integration for operators who want Torque embedded next to their terminal tabs. It's a Python daemon (aiohttp server) that communicates with the webview UI over a local WebSocket. The terminal backend is abstracted behind a `TerminalAdapter` protocol; the current implementation (`ITerm2Adapter` in `bridge.py`) controls iTerm2.
 
 ## Key commands
 
 ```bash
-make deploy     # Stop old instance, install files, then restart from Scripts menu
-make stop       # Kill running instance on port 18932
-make check      # Show Python path, dep status, install status
-make open       # Open standalone UI in default browser (dual mode)
-make standalone # Launch daemon in standalone-only mode (no toolbelt)
+make deploy          # Primary: stop standalone/desktop daemon, install ~/.torque/app, refresh CLI
+make run             # Primary: launch the desktop app (standalone daemon, desktop profile)
+make standalone      # Primary browser mode: foreground standalone daemon (then make open)
+make deploy-toolbelt # Secondary: update iTerm2 Scripts Toolbelt install, then restart from Scripts menu
+make stop            # Kill running instance on TORQUE_PORT (18932 unless overridden)
+make check           # Show Python path, dep status, primary/toolbelt install status
+make open            # Open standalone/browser UI in default browser
 ```
 
-After `make deploy`, always restart from: **iTerm2 → Scripts menu → torque**
-For dual mode, also run `make open` to get a browser window alongside the toolbelt.
+After `make deploy`, relaunch the primary surface with `make run` (desktop) or `make standalone` + `make open` (browser-only). After `make deploy-toolbelt`, restart the secondary Toolbelt integration from **iTerm2 → Scripts menu → torque** and enable it from **View → Show Toolbelt** if needed.
 
-## Never `make deploy` mid-session
+## Never deploy/stop mid-session
 
-If you are a Torque worker or engineer running **inside the live daemon's Python runtime**, do NOT run `make deploy` (or `make stop`, or `make restart`) against the main daemon's port (18932 by default). `make stop` kills the daemon you are talking to, and the new boot inherits corrupted in-memory dispatch state (PTY subscriptions, pending-prompt queues, iTerm2 session cache).
+If you are a Torque worker or engineer running **inside the live daemon's Python runtime**, do NOT run `make deploy`, `make deploy-toolbelt`, `make stop`, or `make restart` against the daemon that spawned you. `make stop` kills the daemon you are talking to, and the new boot inherits corrupted in-memory dispatch state (PTY subscriptions, pending-prompt queues, session cache). This applies to the primary standalone/desktop deploy path and to the secondary iTerm2 Toolbelt deploy path.
 
 **Symptom if you ignore this:** every subsequent worker dispatch goes DOA. `codex` workers boot but receive no prompt (0 tokens, 0 worktree diff, 1 boot-event then silence). `claude-code` workers boot but every mutating tool auto-denies. `engineer_agent_message` wakes a DOA worker for one sub-call then it re-sticks. Only a user-initiated full restart recovers — observed class-bug, 6 workers across 2 engineers + 2 providers (perf wave 2026-04-22→23, TORQUE:165/:166).
 
-**Enforcement:** the Makefile refuses `make stop` / `make deploy` / `make restart` when `TORQUE_CELL_ID` is set OR pwd is under `.torque/worktrees/`. The HTTP `/api/cmd` lifecycle path also rejects `restart` / `stop` / `deploy` from worker-context requests carrying `TORQUE_CELL_ID` unless `force=true` is set. Override with `FORCE=1 make <target>` or HTTP `force=true` only when you have a specific reason and accept the runtime-corruption risk.
+**Enforcement:** the Makefile refuses `make stop` / `make deploy` / `make deploy-toolbelt` / `make restart` when `TORQUE_CELL_ID` is set OR pwd is under `.torque/worktrees/`. The HTTP `/api/cmd` lifecycle path also rejects `restart` / `stop` / `deploy` from worker-context requests carrying `TORQUE_CELL_ID` unless `force=true` is set. Override with `FORCE=1 make <target>` or HTTP `force=true` only when you have a specific reason and accept the runtime-corruption risk.
 
 **Alternatives:**
-- (a) Commit your change to main (engineer_merge or git merge), then ask the user to `make deploy` + restart from their own shell.
+- (a) Commit your change to main (engineer_merge or git merge), then ask the user to deploy/relaunch from their own shell (`make deploy && make run` for primary desktop/standalone, or `make deploy-toolbelt` + Scripts-menu restart for the Toolbelt).
 - (b) Test against a separate instance on a different port: `make standalone-bg TORQUE_PORT=18933 TORQUE_PROFILE=desktop` — doesn't touch 18932.
 - (c) Ship observability-only changes (e.g. `log.warning` at silent-drop sites) that take effect on the next natural restart without requiring mid-session deploy.
 
@@ -69,7 +70,7 @@ If you are a Torque worker or engineer running **inside the live daemon's Python
   - `static/js/main.js` — keyboard navigation (arrows within group, Tab/Shift+Tab between groups, Enter, Delete, N/G/T/R shortcuts), panel toggle (board + actions), boot, drag setup
 - **CLI** (`bin/torque`):
   - Standalone Python script (stdlib + PyYAML). Talks to daemon via HTTP `POST /api/cmd` for writes, reads SQLite directly for read-only commands (task/board list, show, lanes).
-  - `get_state_local(port)` — tries SQLite first (`~/Library/Application Support/iTerm2/Scripts/torque/torque/torque.db`), falls back to HTTP daemon. Used by all task/board commands.
+  - `get_state_local(port)` — tries SQLite first (profile data dirs under `~/.torque/profiles/<profile>/`, or the secondary iTerm2 Toolbelt DB when no standalone profile is selected), falls back to HTTP daemon. Used by all task/board commands.
   - Task commands: `create` (with `--action`/`--var`), `dispatch`, `show`, `list`, `edit` (opens `$EDITOR` with YAML or inline flags; `--action`/`--var` replace old `-i`/`-x`/`-k`), `move`, `assign`
   - Board commands: `list`, `add`, `move`, `remove`, `lanes`
   - AI agent reporting (`torque ai`, **humans + offline scripts only** — workers go through MCP tools per TORQUE:238 cutover): `done` (mark task complete, move to Done, trigger cascade completion up parent chain), `blocked "reason"` (set needs_attention, add `blocked` label), `error "msg"` (set error_message, add `error` label), `progress "msg"` (update activity_detail), `ready` (done + unlink agent + cascade), `context` (read-only dump of agent/task info, works offline), `derive "desc" -a ACTION` (keep parent task in In Progress with status from transition, create derived task, dispatch new agent — validates transition against action's `transitions` list, inherits worktree from parent agent, enforces depth limit; `--agent <slug>` dispatches to a specific existing agent instead of creating a new one; `--self` dispatches to the calling agent with a 3s delay; status propagates to root task), `ask "question"` (keep parent task in In Progress with "Awaiting Input" status, create derived task in Backlog with `human` label for HITL review). All `torque ai` commands auto-detect the calling agent via `TORQUE_CELL_ID` env var and auto-resolve the linked board task. Server-side: single `ai_report` command handles all actions atomically (the worker MCP tools `mcp__torque__torque_*` route through the same `ai_report` codepath via `torque/mcp.py`). Label conventions: `blocked`, `error`, `derived`, `human`, `depth-limit`. Cascade completion: when `done`/`ready` is called, walks up parent chain — if all children of an ancestor are Done, that ancestor moves to Done too.
@@ -150,32 +151,45 @@ Run the automated regression suite with `make test`; the target self-sanitizes
 `TORQUE_*` runtime variables inherited from worker/standalone shells.
 
 For manual runtime testing:
-1. `make deploy`
-2. Restart from Scripts menu
-3. Check `torque.log` in the install dir for errors:
+1. From a non-worker shell, `make deploy`
+2. Relaunch the primary app with `make run` (desktop) or `make standalone` + `make open` (browser)
+3. Check `torque.log` in the active profile data dir for errors:
    ```
-   ~/Library/Application\ Support/iTerm2/Scripts/torque/torque/torque.log
+   ~/.torque/profiles/desktop/torque.log      # make run / desktop profile
+   ~/.torque/profiles/standalone/torque.log   # make standalone
    ```
-4. Test in the Toolbelt panel: create groups, add agents, click agent to select → add child terminals, drag terminals between drawer and standalone, remove agent (cascade), relaunch, right-click → edit name/color, keyboard nav (arrows within group, Tab between groups, Cmd+Option+Arrows from terminal)
+4. Test in the primary desktop/browser UI: create groups, add agents, click agent to select → add child terminals, drag terminals between drawer and standalone, remove agent (cascade), relaunch, right-click → edit name/color, keyboard nav (arrows within group, Tab between groups, Cmd+Option+Arrows from terminal)
 5. Test global settings: click gear icon → Settings modal. General > Server: change default command, toggle filter by window, toggle focus new tabs (uncheck → create agent → verify previous tab keeps focus). General > Board: edit default lanes. Keybindings: rebind a key combo, verify it takes effect immediately. Save → restart daemon → confirm settings persist.
    - Test inline task creation: click `+ Add task` → auto-growing textarea appears. Type and Enter → task created. Escape → clears draft. Blur → draft preserved, clicking `+ Add task` again restores text.
    - Test task modal: task textarea auto-grows. Action variable textareas auto-grow. Edit task → action picker pre-selects stored action, vars pre-filled.
    - Test dispatch: task with action → agent receives rendered prompt. Delete action → dispatch → warning dialog → dispatch without action works.
    - Test action editor: open Actions panel → old-format actions should show coalesced `prompt` field. Create new action → `{{ TASK }}` validation on save. Edit prompt → variables auto-discovered below.
-6. Verify SQLite persistence: restart daemon, confirm state survives. Check `torque.db` exists in install dir.
+6. Verify SQLite persistence: restart daemon, confirm state survives. Check `torque.db` exists in the active profile data dir.
 7. Verify delta sync: open browser devtools → Network → WS tab, confirm messages are `type: "delta"` (not full state) after initial connect.
 8. Verify CLI offline reads: `make stop`, then `torque task list` — should work without daemon running.
-9. Test dual mode: with daemon running from Scripts menu, `make open` → browser window should show same state as toolbelt. Actions in either UI should be reflected in both.
-10. Test standalone mode: `make stop`, then `make standalone` → `make open` → daemon connects to iTerm2 externally, no toolbelt panel registered. Check log for "Standalone mode — toolbelt registration skipped" and "using PTY supervisor at <sock path>".
+9. Test secondary Toolbelt mode only when touching iTerm2 integration: `make deploy-toolbelt`, restart from Scripts menu, then `make open` → browser window should show the same state as the Toolbelt. Actions in either UI should be reflected in both.
+10. Test standalone browser mode: `make stop`, then `make standalone` → `make open` → daemon runs with no Toolbelt panel registered. Check log for "Standalone mode — toolbelt registration skipped" and "using PTY supervisor at <sock path>".
 11. Test PTY supervisor survival (standalone only): with a standalone daemon and an open xterm.js terminal, trigger a restart via the header's ↻ button or `POST /api/cmd {"cmd":"restart"}`. The browser's terminal WS should reconnect within ~15s and the shell should still be alive (its state preserved). Check `~/.torque/profiles/<profile>/pty_supervisor.log` for supervisor-side traces, and `pty_supervisor.pid` for the running supervisor pid. Recovery if the supervisor dies: `kill $(cat pty_supervisor.pid)` → `rm pty_supervisor.sock pty_supervisor.pid` → relaunch Torque; a red banner at the top of the UI reports `supervisor_unavailable` until it comes back.
 
 ## Install location
 
-Files are installed to:
+Primary standalone/desktop app files are installed to:
+```
+~/.torque/app/
+```
+Primary runtime data is profile-scoped:
+```
+~/.torque/profiles/desktop/torque.db       # make run / desktop profile
+~/.torque/profiles/desktop/torque.log
+~/.torque/profiles/standalone/torque.db    # make standalone
+~/.torque/profiles/standalone/torque.log
+```
+
+Secondary iTerm2 Toolbelt files are installed by `make deploy-toolbelt` to:
 ```
 ~/Library/Application Support/iTerm2/Scripts/torque/torque/
 ```
-Runtime data (created by the daemon, not installed by `make deploy`):
+Toolbelt runtime data (created by the daemon, not installed by `make deploy-toolbelt`):
 ```
 ~/Library/Application Support/iTerm2/Scripts/torque/torque/torque.db    # SQLite state
 ~/Library/Application Support/iTerm2/Scripts/torque/torque/torque.log   # daemon log

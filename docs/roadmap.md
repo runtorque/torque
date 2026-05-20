@@ -1,6 +1,6 @@
 # Roadmap
 
-Torque started as a tab manager. The vision is to make it a full **agent orchestrator** — one that manages agent lifecycles, coordinates multi-agent workflows, integrates with external tools, and turns iTerm2's Toolbelt into a mission control panel.
+Torque started as a tab manager. The vision is to make it a full **agent orchestrator** — one that manages agent lifecycles, coordinates multi-agent workflows, integrates with external tools, and turns the desktop/browser workspace (with iTerm2 Toolbelt support for terminal-native users) into a mission control panel.
 
 This roadmap is organized into phases. Earlier phases lay the foundation that later phases build on. Items within each phase are roughly ordered by priority.
 
