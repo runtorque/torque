@@ -3237,9 +3237,29 @@ body.runtime-embedded #modal-group .modal-summary {
   align-items: center;
   gap: 8px;
 }
-.board-sync-inline-row input {
+.board-sync-inline-row input,
+.board-sync-inline-row select {
   flex: 1 1 auto;
   min-width: 0;
+}
+.board-sync-project-summary {
+  min-height: 14px;
+  margin-top: 4px;
+  font-size: 10px;
+  line-height: 1.35;
+  color: var(--text-dim);
+}
+.board-sync-manual-project {
+  margin-top: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+.board-sync-manual-project summary {
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: 11px;
 }
 .board-sync-test-row {
   display: flex;

@@ -789,6 +789,8 @@ let _gsArchitectColor = '';
 let _gsInitialTab = 'group';
 let _gsInitialSubtab = '';
 let _gsBoardSyncPreflightMode = '';
+let _gsBoardSyncProjectOptions = [];
+let _gsBoardSyncProjectsLoadedKey = '';
 
 const DIGEST_VERBOSITY_TOOLTIP_HELP = 'Controls how much detail appears in digest events sent to this agent. Higher verbosity can wake the agent more often on coarse-event activity in the group.';
 
@@ -893,11 +895,67 @@ function _gsParseJsonMap(id, label) {
   }
 }
 
-function onGsBoardSyncProviderChange() {
+function _gsParseJsonMapSilent(id) {
+  const el = document.getElementById(id);
+  const raw = el ? String(el.value || '').trim() : '';
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {};
+    }
+    const out = {};
+    Object.keys(parsed).forEach(function(key) {
+      const k = String(key || '').trim();
+      const value = parsed[key];
+      const v = value === null || value === undefined ? '' : String(value).trim();
+      if (k && v) out[k] = v;
+    });
+    return out;
+  } catch (_err) {
+    return {};
+  }
+}
+
+function _gsBoardSyncProjectNumberValue() {
+  const el = document.getElementById('gs-board-sync-github-project-number');
+  return parseInt(el && el.value, 10) || 0;
+}
+
+function _gsBoardSyncProjectIdValue() {
+  const el = document.getElementById('gs-board-sync-github-project-id');
+  return el ? String(el.value || '').trim() : '';
+}
+
+function _gsBoardSyncGithubSettingsFromForm() {
+  return {
+    github_repo: document.getElementById('gs-board-sync-github-repo').value.trim(),
+    github_project_owner: document.getElementById('gs-board-sync-github-project-owner').value.trim(),
+    github_project_number: _gsBoardSyncProjectNumberValue(),
+    github_project_id: _gsBoardSyncProjectIdValue(),
+    github_project_status_field: document.getElementById('gs-board-sync-github-status-field').value.trim() || 'Status',
+    github_lane_status_map: _gsParseJsonMapSilent('gs-board-sync-github-lane-map'),
+  };
+}
+
+function _gsBoardSyncDraftSettings() {
+  const providerEl = document.getElementById('gs-board-sync-provider');
+  const provider = providerEl ? String(providerEl.value || 'none') : 'none';
+  return {
+    board_sync_provider: provider,
+    board_sync_enabled: document.getElementById('gs-board-sync-enabled').checked,
+    board_sync_github: _gsBoardSyncGithubSettingsFromForm(),
+  };
+}
+
+function onGsBoardSyncProviderChange(loadProjects) {
   const providerEl = document.getElementById('gs-board-sync-provider');
   const configEl = document.getElementById('gs-board-sync-github-config');
   const provider = providerEl ? String(providerEl.value || 'none') : 'none';
   if (configEl) configEl.style.display = provider === 'github' ? '' : 'none';
+  if (provider === 'github' && loadProjects !== false) {
+    _gsBoardSyncMaybeLoadProjects();
+  }
 }
 
 function _gsBoardSyncSetPreflightStatus(kind, message) {
@@ -932,12 +990,217 @@ function _gsBoardSyncPreflightErrorText(msg) {
   return text;
 }
 
+function _gsBoardSyncSetProjectStatus(kind, message) {
+  const el = document.getElementById('gs-board-sync-project-summary');
+  if (!el) return;
+  el.textContent = message || '';
+  el.className = 'board-sync-project-summary';
+  if (kind) el.classList.add('board-sync-preflight-' + kind);
+}
+
+function _gsBoardSyncProjectValue(project) {
+  if (!project || typeof project !== 'object') return '';
+  const owner = String(project.owner || '').trim();
+  const number = parseInt(project.number, 10) || 0;
+  const id = String(project.id || '').trim();
+  return owner + '#' + number + '#' + id;
+}
+
+function _gsBoardSyncProjectLabel(project) {
+  const number = parseInt(project.number, 10) || 0;
+  const name = String(project.name || project.title || '').trim() || 'Untitled project';
+  const owner = String(project.owner || '').trim() || 'unknown owner';
+  return '#' + number + ' · ' + name + ' · ' + owner;
+}
+
+function _gsBoardSyncFindProject(value) {
+  const wanted = String(value || '');
+  return (_gsBoardSyncProjectOptions || []).find(function(project) {
+    return _gsBoardSyncProjectValue(project) === wanted;
+  }) || null;
+}
+
+function _gsBoardSyncRenderProjectOptions() {
+  const select = document.getElementById('gs-board-sync-github-project-select');
+  if (!select) return;
+  const ownerEl = document.getElementById('gs-board-sync-github-project-owner');
+  const numberEl = document.getElementById('gs-board-sync-github-project-number');
+  const idEl = document.getElementById('gs-board-sync-github-project-id');
+  const selectedOwner = ownerEl ? String(ownerEl.value || '').trim() : '';
+  const selectedNumber = parseInt(numberEl && numberEl.value, 10) || 0;
+  const selectedId = idEl ? String(idEl.value || '').trim() : '';
+  select.innerHTML = '';
+
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = 'Select a GitHub Project…';
+  select.appendChild(placeholder);
+
+  let selectedValue = '';
+  (_gsBoardSyncProjectOptions || []).forEach(function(project) {
+    const option = document.createElement('option');
+    const value = _gsBoardSyncProjectValue(project);
+    option.value = value;
+    option.textContent = _gsBoardSyncProjectLabel(project);
+    option.dataset.owner = String(project.owner || '');
+    option.dataset.number = String(project.number || '');
+    option.dataset.projectId = String(project.id || '');
+    select.appendChild(option);
+    const sameId = selectedId && String(project.id || '') === selectedId;
+    const sameOwnerNumber = selectedNumber
+      && String(project.owner || '').toLowerCase() === selectedOwner.toLowerCase()
+      && parseInt(project.number, 10) === selectedNumber;
+    if (sameId || sameOwnerNumber) selectedValue = value;
+  });
+
+  if (!selectedValue && selectedOwner && selectedNumber) {
+    const manualProject = {
+      owner: selectedOwner,
+      number: selectedNumber,
+      id: selectedId,
+      name: 'Configured manually',
+    };
+    selectedValue = _gsBoardSyncProjectValue(manualProject);
+    const option = document.createElement('option');
+    option.value = selectedValue;
+    option.textContent = _gsBoardSyncProjectLabel(manualProject);
+    select.appendChild(option);
+  }
+  select.value = selectedValue;
+}
+
+function _gsBoardSyncProjectsKey() {
+  const providerEl = document.getElementById('gs-board-sync-provider');
+  const ownerEl = document.getElementById('gs-board-sync-github-project-owner');
+  const provider = providerEl ? String(providerEl.value || 'none') : 'none';
+  const owner = ownerEl ? String(ownerEl.value || '').trim() : '';
+  return [_settingsGroup || '', provider, owner].join('|');
+}
+
+function _gsBoardSyncMaybeLoadProjects(force) {
+  if (!_settingsGroup) return;
+  const providerEl = document.getElementById('gs-board-sync-provider');
+  const provider = providerEl ? String(providerEl.value || 'none') : 'none';
+  if (provider !== 'github') return;
+  const key = _gsBoardSyncProjectsKey();
+  if (!force && key && key === _gsBoardSyncProjectsLoadedKey) return;
+  gsBoardSyncReloadProjects();
+}
+
+function gsBoardSyncReloadProjects() {
+  if (!_settingsGroup) return;
+  const providerEl = document.getElementById('gs-board-sync-provider');
+  const provider = providerEl ? String(providerEl.value || 'none') : 'none';
+  if (provider !== 'github') {
+    _gsBoardSyncSetProjectStatus('error', 'Select GitHub as the provider to load projects.');
+    return;
+  }
+  const ownerEl = document.getElementById('gs-board-sync-github-project-owner');
+  const owner = ownerEl ? String(ownerEl.value || '').trim() : '';
+  _gsBoardSyncProjectsLoadedKey = _gsBoardSyncProjectsKey();
+  _gsBoardSyncSetProjectStatus('pending', 'Loading accessible GitHub Projects…');
+  send(_boardSyncCommandPayload('board_sync_list_projects', {
+    group: _settingsGroup,
+    provider: provider,
+    owner: owner,
+    settings: _gsBoardSyncDraftSettings(),
+  }));
+}
+
+function _handleBoardSyncProjects(msg) {
+  if (!msg || msg.type !== 'board_sync_list_projects') return;
+  const group = String(msg.group || '');
+  if (_settingsGroup && group && group !== _settingsGroup) return;
+  if (!msg.ok) {
+    _gsBoardSyncSetProjectStatus(
+      'error',
+      msg.error || 'Could not load GitHub Projects.'
+    );
+    return;
+  }
+  _gsBoardSyncProjectOptions = Array.isArray(msg.projects) ? msg.projects.slice() : [];
+  _gsBoardSyncRenderProjectOptions();
+  if (_gsBoardSyncProjectOptions.length) {
+    _gsBoardSyncSetProjectStatus(
+      'ok',
+      'Loaded ' + _gsBoardSyncProjectOptions.length + ' accessible project'
+        + (_gsBoardSyncProjectOptions.length === 1 ? '' : 's') + '.'
+    );
+  } else {
+    _gsBoardSyncSetProjectStatus(
+      'error',
+      'No accessible projects — verify gh auth scope or owner setting.'
+    );
+  }
+}
+
+function onGsBoardSyncProjectSelect() {
+  const select = document.getElementById('gs-board-sync-github-project-select');
+  if (!select) return;
+  const project = _gsBoardSyncFindProject(select.value);
+  if (!project) return;
+  document.getElementById('gs-board-sync-github-project-owner').value =
+    String(project.owner || '').trim();
+  document.getElementById('gs-board-sync-github-project-number').value =
+    parseInt(project.number, 10) || '';
+  const idEl = document.getElementById('gs-board-sync-github-project-id');
+  if (idEl) idEl.value = String(project.id || '').trim();
+  _gsBoardSyncPreflightMode = 'project-select';
+  _gsBoardSyncSetProjectStatus('pending', 'Resolving project Status options…');
+  _gsBoardSyncSetPreflightStatus('pending', 'Resolving GitHub Project…');
+  send(_boardSyncCommandPayload('board_sync_preflight', {
+    group: _settingsGroup,
+    provider: 'github',
+    settings: _gsBoardSyncDraftSettings(),
+  }));
+}
+
+function _gsBoardSyncApplyLaneMapSuggestion(msg) {
+  const textarea = document.getElementById('gs-board-sync-github-lane-map');
+  if (!textarea) return false;
+  if (String(textarea.value || '').trim()) return false;
+  const suggestion = msg && msg.lane_status_map_suggestion;
+  if (!suggestion || typeof suggestion !== 'object' || Array.isArray(suggestion)) {
+    return false;
+  }
+  const keys = Object.keys(suggestion).filter(function(key) {
+    return String(key || '').trim() && String(suggestion[key] || '').trim();
+  });
+  const unmatched = Array.isArray(msg.lane_status_map_unmatched_lanes)
+    ? msg.lane_status_map_unmatched_lanes.filter(Boolean)
+    : [];
+  if (!keys.length) {
+    if (unmatched.length) {
+      _gsBoardSyncSetProjectStatus(
+        'pending',
+        'No automatic lane matches. Map these lanes manually: '
+          + unmatched.join(', ') + '.'
+      );
+    }
+    return false;
+  }
+  const out = {};
+  keys.forEach(function(key) {
+    out[String(key).trim()] = String(suggestion[key]).trim();
+  });
+  textarea.value = JSON.stringify(out, null, 2);
+  const strategy = String(msg.lane_status_map_strategy || '').trim();
+  let message = strategy === 'position'
+    ? 'Auto-filled lane → status mapping by lane/status position.'
+    : 'Auto-filled matching lane → status names.';
+  if (unmatched.length) message += ' Review unmatched lanes: ' + unmatched.join(', ') + '.';
+  _gsBoardSyncSetProjectStatus(unmatched.length ? 'pending' : 'ok', message);
+  return true;
+}
+
 function testGroupBoardSyncConnection() {
   if (!_settingsGroup) return;
   _gsBoardSyncPreflightMode = 'test';
   _gsBoardSyncSetPreflightStatus('pending', 'Testing GitHub connection…');
   send(_boardSyncCommandPayload('board_sync_preflight', {
     group: _settingsGroup,
+    provider: document.getElementById('gs-board-sync-provider').value || 'none',
+    settings: _gsBoardSyncDraftSettings(),
   }));
 }
 
@@ -947,6 +1210,8 @@ function gsBoardSyncUseCurrentRepo() {
   _gsBoardSyncSetPreflightStatus('pending', 'Inspecting current GitHub repo…');
   send(_boardSyncCommandPayload('board_sync_preflight', {
     group: _settingsGroup,
+    provider: document.getElementById('gs-board-sync-provider').value || 'none',
+    settings: _gsBoardSyncDraftSettings(),
   }));
 }
 
@@ -962,6 +1227,19 @@ function _handleBoardSyncPreflight(msg) {
       const repoEl = document.getElementById('gs-board-sync-github-repo');
       if (repoEl) repoEl.value = repo;
     }
+    if (msg.project_owner) {
+      const ownerEl = document.getElementById('gs-board-sync-github-project-owner');
+      if (ownerEl) ownerEl.value = String(msg.project_owner || '');
+    }
+    if (msg.project_number) {
+      const numberEl = document.getElementById('gs-board-sync-github-project-number');
+      if (numberEl) numberEl.value = msg.project_number;
+    }
+    if (msg.project_id) {
+      const idEl = document.getElementById('gs-board-sync-github-project-id');
+      if (idEl) idEl.value = String(msg.project_id || '');
+    }
+    _gsBoardSyncApplyLaneMapSuggestion(msg);
     let success = 'GitHub connection OK';
     if (repo) success += ': ' + repo;
     if (msg.project_number || msg.project_id) success += ' · Project OK';
@@ -996,6 +1274,7 @@ function switchGsSubTab(pane, btn) {
   const target = btn.dataset.subtab;
   container.querySelectorAll('.gs-subpane').forEach(p =>
     p.classList.toggle('active', p.dataset.subpane === target));
+  if (target === 'group-sync') _gsBoardSyncMaybeLoadProjects();
 }
 
 function openGroupSettings(group, initialTab, initialSubtab) {
@@ -1764,14 +2043,19 @@ function _showGroupSettings(group, data) {
   document.getElementById('gs-board-sync-github-repo').value = syncGithub.github_repo || '';
   document.getElementById('gs-board-sync-github-project-owner').value = syncGithub.github_project_owner || '';
   document.getElementById('gs-board-sync-github-project-number').value = syncGithub.github_project_number || '';
+  document.getElementById('gs-board-sync-github-project-id').value = syncGithub.github_project_id || '';
   document.getElementById('gs-board-sync-github-status-field').value = syncGithub.github_project_status_field || 'Status';
   document.getElementById('gs-board-sync-github-lane-map').value = _gsStringifyJsonMap(syncGithub.github_lane_status_map);
   document.getElementById('gs-board-sync-github-close-via-pr').checked = syncGithub.github_close_issues_via_pr !== false;
   document.getElementById('gs-board-sync-github-create-labels').checked = !!syncGithub.github_create_missing_labels;
   document.getElementById('gs-board-sync-github-assignee-map').value = _gsStringifyJsonMap(syncGithub.github_assignee_map);
+  _gsBoardSyncProjectOptions = [];
+  _gsBoardSyncProjectsLoadedKey = '';
+  _gsBoardSyncRenderProjectOptions();
+  _gsBoardSyncSetProjectStatus('', '');
   _gsBoardSyncPreflightMode = '';
   _gsBoardSyncSetPreflightStatus('', '');
-  onGsBoardSyncProviderChange();
+  onGsBoardSyncProviderChange(false);
 
   /* -- Engineer tab -- */
   _populateProviderSelect('gs-engineer-provider', ws.engineer_provider || '', true);
@@ -1934,6 +2218,9 @@ function _showGroupSettings(group, data) {
         : 'gs-directory';
   const focusEl = document.getElementById(focusId);
   if (focusEl) focusEl.focus();
+  if (initialTab === 'group' && initialSubtab === 'group-sync') {
+    _gsBoardSyncMaybeLoadProjects();
+  }
 }
 
 function selectGsColor(hex) {
@@ -2045,6 +2332,7 @@ function submitGroupSettings() {
       github_repo: document.getElementById('gs-board-sync-github-repo').value.trim(),
       github_project_owner: document.getElementById('gs-board-sync-github-project-owner').value.trim(),
       github_project_number: boardSyncProjectNumber,
+      github_project_id: document.getElementById('gs-board-sync-github-project-id').value.trim(),
       github_project_status_field: document.getElementById('gs-board-sync-github-status-field').value.trim() || 'Status',
       github_lane_status_map: boardSyncLaneMap,
       github_close_issues_via_pr: document.getElementById('gs-board-sync-github-close-via-pr').checked,

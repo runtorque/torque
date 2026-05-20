@@ -63,7 +63,7 @@ def _as_json_items(data: Any) -> list[dict]:
         return [item for item in data if isinstance(item, dict)]
     if not isinstance(data, dict):
         return []
-    for key in ("items", "fields", "nodes"):
+    for key in ("items", "fields", "nodes", "projects"):
         value = data.get(key)
         if isinstance(value, list):
             return [item for item in value if isinstance(item, dict)]
@@ -488,6 +488,12 @@ class GitHubBoardSyncProvider:
         if not project.get("ok"):
             return project
         project_data = project.get("data") if isinstance(project.get("data"), dict) else {}
+        project_name = str(
+            project_data.get("title")
+            or project_data.get("name")
+            or ""
+        ).strip()
+        project_url = str(project_data.get("url") or "").strip()
         project_id = str(
             project_data.get("id")
             or project_data.get("node_id")
@@ -520,9 +526,12 @@ class GitHubBoardSyncProvider:
             project_owner=settings.project_owner,
             project_number=settings.project_number,
             project_id=project_id,
+            project_name=project_name,
+            project_url=project_url,
             status_field_id=str(field.get("id") or ""),
             status_field_name=str(field.get("name") or settings.status_field_name),
             status_options=self._status_options(field),
+            status_options_list=self._status_option_items(field),
         )
 
     @staticmethod
@@ -535,6 +544,14 @@ class GitHubBoardSyncProvider:
 
     @staticmethod
     def _status_options(field: dict) -> dict[str, str]:
+        return {
+            item["name"]: item["id"]
+            for item in GitHubBoardSyncProvider._status_option_items(field)
+            if item.get("name") and item.get("id")
+        }
+
+    @staticmethod
+    def _status_option_items(field: dict) -> list[dict]:
         settings = field.get("settings") or {}
         if isinstance(settings, str):
             settings = _safe_json_loads(settings, {})
@@ -543,15 +560,75 @@ class GitHubBoardSyncProvider:
         options = field.get("options") or settings.get("options") or []
         if isinstance(options, str):
             options = _safe_json_loads(options, [])
-        out = {}
+        out = []
         for option in options if isinstance(options, list) else []:
             if not isinstance(option, dict):
                 continue
             name = str(option.get("name") or "").strip()
             oid = str(option.get("id") or option.get("optionId") or "").strip()
             if name and oid:
-                out[name] = oid
+                out.append({"name": name, "id": oid})
         return out
+
+    async def list_projects(self, owner: str | None = None) -> list[dict]:
+        """Return GitHub Projects v2 visible to the authenticated gh user."""
+        owner_arg = str(owner or "").strip() or "@me"
+        listed = await self._json_gh(
+            "list_projects",
+            "project",
+            "list",
+            "--owner",
+            owner_arg,
+            "--format",
+            "json",
+            "--limit",
+            "100",
+        )
+        if not listed.get("ok"):
+            return [listed]
+        projects = []
+        for item in _as_json_items(listed.get("data")):
+            name = str(item.get("title") or item.get("name") or "").strip()
+            try:
+                number = int(item.get("number") or 0)
+            except (TypeError, ValueError):
+                number = 0
+            owner_value = item.get("owner")
+            if isinstance(owner_value, dict):
+                owner_value = (
+                    owner_value.get("login")
+                    or owner_value.get("name")
+                    or owner_value.get("id")
+                    or ""
+                )
+            owner_name = str(
+                item.get("owner_login")
+                or item.get("ownerLogin")
+                or item.get("ownerName")
+                or owner_value
+                or owner_arg
+                or ""
+            ).strip()
+            project_id = str(
+                item.get("id")
+                or item.get("node_id")
+                or item.get("nodeId")
+                or ""
+            ).strip()
+            url = str(item.get("url") or "").strip()
+            if not number and not project_id and not name:
+                continue
+            projects.append({
+                "ok": True,
+                "provider": self.name,
+                "number": number,
+                "name": name,
+                "title": name,
+                "owner": owner_name,
+                "id": project_id,
+                "url": url,
+            })
+        return projects
 
     async def push_task(self, task, group_settings) -> dict:
         settings = github_settings(group_settings)

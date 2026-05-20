@@ -492,6 +492,8 @@ function connect() {
       _showToast('External comment posted', 'info');
     } else if (msg.type === 'board_sync_preflight') {
       if (typeof _handleBoardSyncPreflight === 'function') _handleBoardSyncPreflight(msg);
+    } else if (msg.type === 'board_sync_list_projects') {
+      if (typeof _handleBoardSyncProjects === 'function') _handleBoardSyncProjects(msg);
     } else if (msg.type === 'board_sync_task') {
       if (typeof _handleBoardSyncTaskResponse === 'function') _handleBoardSyncTaskResponse(msg);
     } else if (msg.type === 'board_pull_preview') {

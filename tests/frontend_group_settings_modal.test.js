@@ -260,6 +260,8 @@ test('group settings markup renders board sync provider subtab and task sync mou
   assert.match(html, /data-subtab="group-sync"[\s\S]*>Sync provider<\/button>/);
   assert.match(html, /<select id="gs-board-sync-provider"[\s\S]*<option value="none">None<\/option>[\s\S]*<option value="github">GitHub<\/option>/);
   assert.match(html, /id="gs-board-sync-enabled"[\s\S]*Enable sync/);
+  assert.match(html, /id="gs-board-sync-github-project-select"[\s\S]*Reload projects/);
+  assert.match(html, /Specify project manually/);
   assert.match(html, /Lane → status mapping[\s\S]*id="gs-board-sync-github-lane-map"/);
   assert.match(html, /id="gs-board-sync-test"[\s\S]*Test connection/);
   assert.match(html, /id="task-board-sync-section"/);
@@ -1278,6 +1280,7 @@ test('Group Settings board sync fields populate, gate GitHub config, and submit 
         github_repo: "acme/widgets",
         github_project_owner: "acme",
         github_project_number: 42,
+        github_project_id: "PVT_42",
         github_project_status_field: "Pipeline",
         github_lane_status_map: { "Backlog": "Todo", "In Progress": "Doing" },
         github_close_issues_via_pr: false,
@@ -1295,12 +1298,17 @@ test('Group Settings board sync fields populate, gate GitHub config, and submit 
   assert.equal(ensure('gs-board-sync-github-repo').value, 'acme/widgets');
   assert.equal(ensure('gs-board-sync-github-project-owner').value, 'acme');
   assert.equal(ensure('gs-board-sync-github-project-number').value, 42);
+  assert.equal(ensure('gs-board-sync-github-project-id').value, 'PVT_42');
   assert.equal(ensure('gs-board-sync-github-status-field').value, 'Pipeline');
   assert.match(ensure('gs-board-sync-github-lane-map').value, /"Backlog": "Todo"/);
   assert.equal(ensure('gs-board-sync-github-close-via-pr').checked, false);
   assert.equal(ensure('gs-board-sync-github-create-labels').checked, true);
   assert.match(ensure('gs-board-sync-github-assignee-map').value, /"worker-1": "octocat"/);
   assert.equal(ensure('gs-board-sync-provider').focused, true);
+  assert.equal(
+    sandbox.sendCalls.filter((msg) => msg.cmd === 'board_sync_list_projects').length,
+    1,
+  );
 
   ensure('gs-board-sync-provider').value = 'none';
   vm.runInContext('onGsBoardSyncProviderChange()', context);
@@ -1311,6 +1319,7 @@ test('Group Settings board sync fields populate, gate GitHub config, and submit 
   ensure('gs-board-sync-github-repo').value = 'acme/torque';
   ensure('gs-board-sync-github-project-owner').value = 'octo-org';
   ensure('gs-board-sync-github-project-number').value = '7';
+  ensure('gs-board-sync-github-project-id').value = 'PVT_7';
   ensure('gs-board-sync-github-status-field').value = 'Status';
   ensure('gs-board-sync-github-lane-map').value = '{"Backlog":"Ready","Done":"Done"}';
   ensure('gs-board-sync-github-close-via-pr').checked = true;
@@ -1328,12 +1337,116 @@ test('Group Settings board sync fields populate, gate GitHub config, and submit 
     github_repo: 'acme/torque',
     github_project_owner: 'octo-org',
     github_project_number: 7,
+    github_project_id: 'PVT_7',
     github_project_status_field: 'Status',
     github_lane_status_map: { Backlog: 'Ready', Done: 'Done' },
     github_close_issues_via_pr: true,
     github_create_missing_labels: true,
     github_assignee_map: { 'worker-1': 'monalisa' },
   });
+});
+
+test('Group Settings board sync project dropdown reloads and selection resolves project draft', () => {
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+
+  vm.runInContext('_settingsGroup = "alpha";', context);
+  ensure('gs-board-sync-provider').value = 'github';
+  ensure('gs-board-sync-enabled').checked = false;
+  ensure('gs-board-sync-github-project-owner').value = '';
+  ensure('gs-board-sync-github-project-number').value = '';
+  ensure('gs-board-sync-github-project-id').value = '';
+
+  vm.runInContext('gsBoardSyncReloadProjects()', context);
+  let call = sandbox.sendCalls.at(-1);
+  assert.equal(call.cmd, 'board_sync_list_projects');
+  assert.equal(call.provider, 'github');
+  assert.equal(call.settings.board_sync_enabled, false);
+
+  vm.runInContext(`_handleBoardSyncProjects({
+    type: "board_sync_list_projects",
+    group: "alpha",
+    ok: true,
+    projects: [
+      { number: 7, name: "Roadmap", owner: "acme", id: "PVT_7", url: "https://github.com/orgs/acme/projects/7" }
+    ]
+  })`, context);
+
+  const select = ensure('gs-board-sync-github-project-select');
+  assert.equal(select.children.length, 2);
+  assert.equal(select.children[1].textContent, '#7 · Roadmap · acme');
+
+  select.value = 'acme#7#PVT_7';
+  vm.runInContext('onGsBoardSyncProjectSelect()', context);
+
+  assert.equal(ensure('gs-board-sync-github-project-owner').value, 'acme');
+  assert.equal(ensure('gs-board-sync-github-project-number').value, 7);
+  assert.equal(ensure('gs-board-sync-github-project-id').value, 'PVT_7');
+  call = sandbox.sendCalls.at(-1);
+  assert.equal(call.cmd, 'board_sync_preflight');
+  assert.equal(call.provider, 'github');
+  assert.equal(call.settings.board_sync_github.github_project_owner, 'acme');
+  assert.equal(call.settings.board_sync_github.github_project_number, 7);
+  assert.equal(call.settings.board_sync_github.github_project_id, 'PVT_7');
+});
+
+test('Group Settings board sync preflight auto-fills empty lane map but preserves custom map', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+
+  vm.runInContext('_settingsGroup = "alpha";', context);
+  context.document.getElementById('gs-board-sync-github-lane-map').value = '';
+  vm.runInContext(`_handleBoardSyncPreflight({
+    type: "board_sync_preflight",
+    group: "alpha",
+    ok: true,
+    repo: "acme/widgets",
+    project_number: 7,
+    project_id: "PVT_7",
+    lane_status_map_strategy: "position",
+    lane_status_map_suggestion: {
+      "Backlog": "Todo",
+      "In Progress": "Doing",
+      "Done": "Done"
+    },
+    lane_status_map_unmatched_lanes: []
+  })`, context);
+  assert.match(
+    context.document.getElementById('gs-board-sync-github-lane-map').value,
+    /"In Progress": "Doing"/,
+  );
+
+  context.document.getElementById('gs-board-sync-github-lane-map').value = '{"Backlog":"Ready"}';
+  vm.runInContext(`_handleBoardSyncPreflight({
+    type: "board_sync_preflight",
+    group: "alpha",
+    ok: true,
+    repo: "acme/widgets",
+    lane_status_map_strategy: "position",
+    lane_status_map_suggestion: { "Backlog": "Todo" },
+    lane_status_map_unmatched_lanes: []
+  })`, context);
+  assert.equal(
+    context.document.getElementById('gs-board-sync-github-lane-map').value,
+    '{"Backlog":"Ready"}',
+  );
+
+  context.document.getElementById('gs-board-sync-github-lane-map').value = '';
+  vm.runInContext(`_handleBoardSyncPreflight({
+    type: "board_sync_preflight",
+    group: "alpha",
+    ok: true,
+    repo: "acme/widgets",
+    lane_status_map_strategy: "name",
+    lane_status_map_suggestion: {},
+    lane_status_map_unmatched_lanes: ["Backlog", "In Progress"]
+  })`, context);
+  assert.match(
+    context.document.getElementById('gs-board-sync-project-summary').textContent,
+    /Map these lanes manually: Backlog, In Progress/,
+  );
 });
 
 test('_addWtSymlink trims outer slashes while preserving glob syntax', () => {

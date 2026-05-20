@@ -150,13 +150,16 @@ test('Group Settings Test connection sends board_sync_preflight envelope and sur
   const context = vm.createContext(sandbox);
   loadBoardSyncScripts(context);
 
+  ensure('gs-board-sync-provider').value = 'github';
+  ensure('gs-board-sync-enabled').checked = false;
+  ensure('gs-board-sync-github-repo').value = 'acme/widgets';
   vm.runInContext('_settingsGroup = "alpha"; testGroupBoardSyncConnection();', context);
 
-  assert.deepEqual(JSON.parse(JSON.stringify(lastCall(sandbox))), {
-    cmd: 'board_sync_preflight',
-    args: { group: 'alpha' },
-    group: 'alpha',
-  });
+  assert.equal(lastCall(sandbox).cmd, 'board_sync_preflight');
+  assert.equal(lastCall(sandbox).group, 'alpha');
+  assert.equal(lastCall(sandbox).provider, 'github');
+  assert.equal(lastCall(sandbox).settings.board_sync_enabled, false);
+  assert.equal(lastCall(sandbox).settings.board_sync_github.github_repo, 'acme/widgets');
   assert.equal(ensure('gs-board-sync-preflight-summary').textContent, 'Testing GitHub connection…');
 
   vm.runInContext(`_handleBoardSyncPreflight({
@@ -176,9 +179,11 @@ test('Group Settings Use current repo consumes board_sync_preflight repo respons
   const context = vm.createContext(sandbox);
   loadBoardSyncScripts(context);
 
+  ensure('gs-board-sync-provider').value = 'github';
   vm.runInContext('_settingsGroup = "alpha"; gsBoardSyncUseCurrentRepo();', context);
   assert.equal(lastCall(sandbox).cmd, 'board_sync_preflight');
-  assert.deepEqual(JSON.parse(JSON.stringify(lastCall(sandbox).args)), { group: 'alpha' });
+  assert.equal(lastCall(sandbox).provider, 'github');
+  assert.equal(lastCall(sandbox).args.group, 'alpha');
 
   vm.runInContext(`_handleBoardSyncPreflight({
     type: 'board_sync_preflight',

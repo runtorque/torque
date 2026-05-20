@@ -37,6 +37,8 @@ class FakeBoardSyncProvider:
             "fields": {"task": "New", "labels": ["new"]},
         }
         self.external_items = []
+        self.projects = []
+        self.project_owner_calls = []
         self.started = asyncio.Event()
         self.release = asyncio.Event()
         self.block_push = False
@@ -83,6 +85,10 @@ class FakeBoardSyncProvider:
 
     async def list_external_items(self, _settings):
         return list(self.external_items)
+
+    async def list_projects(self, owner=None):
+        self.project_owner_calls.append(owner)
+        return list(self.projects)
 
     async def append_closing_refs(self, pr_body, _linked_issues, _settings=None):
         return pr_body
@@ -332,6 +338,120 @@ class BoardSyncManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[0][0], "board_sync_preflight_failed")
         self.assertIn("not logged in", events[0][2])
         self.assertEqual(toasts[0][0], "error")
+
+    async def test_preflight_uses_draft_settings_without_enabled_gate_and_suggests_lane_map(self):
+        provider = FakeBoardSyncProvider()
+        provider.preflight_result = {
+            "ok": True,
+            "phase": "preflight",
+            "repo": "owner/repo",
+            "project_id": "PVT_1",
+            "status_options_list": [
+                {"name": "Ready", "id": "ready"},
+                {"name": "Todo", "id": "todo"},
+                {"name": "Doing", "id": "doing"},
+                {"name": "Done", "id": "done"},
+            ],
+        }
+        state = make_state()
+        state.update_group_settings(
+            "g",
+            board_sync_provider="none",
+            board_sync_enabled=False,
+            board_sync_github={},
+        )
+        manager = self.make_manager(state, provider)
+
+        result = await manager.preflight(
+            "g",
+            provider_name="github",
+            settings_overrides={
+                "board_sync_provider": "github",
+                "board_sync_enabled": False,
+                "board_sync_github": {
+                    "github_repo": "owner/repo",
+                    "github_project_owner": "owner",
+                    "github_project_number": 1,
+                    "github_lane_status_map": {},
+                },
+            },
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["provider"], "github")
+        self.assertEqual(result["lane_status_map_strategy"], "position")
+        self.assertEqual(
+            result["lane_status_map_suggestion"],
+            {
+                "Backlog": "Ready",
+                "To Do": "Todo",
+                "In Progress": "Doing",
+                "Done": "Done",
+            },
+        )
+
+    async def test_preflight_preserves_existing_lane_map_and_name_matches_mismatch(self):
+        provider = FakeBoardSyncProvider()
+        provider.preflight_result = {
+            "ok": True,
+            "phase": "preflight",
+            "status_options": {"Backlog": "backlog", "Done": "done"},
+        }
+        state = make_state()
+        state.update_group_settings(
+            "g",
+            board_sync_github={
+                "github_repo": "owner/repo",
+                "github_project_owner": "owner",
+                "github_project_number": 1,
+                "github_lane_status_map": {"In Progress": "Doing"},
+            },
+        )
+        manager = self.make_manager(state, provider)
+
+        preserved = await manager.preflight("g")
+        suggested = await manager.preflight(
+            "g",
+            settings_overrides={
+                "board_sync_github": {
+                    "github_lane_status_map": {},
+                },
+            },
+        )
+
+        self.assertTrue(preserved["lane_status_map_preserved"])
+        self.assertEqual(preserved["lane_status_map_suggestion"], {})
+        self.assertEqual(
+            suggested["lane_status_map_suggestion"],
+            {"Backlog": "Backlog", "Done": "Done"},
+        )
+        self.assertIn("To Do", suggested["lane_status_map_unmatched_lanes"])
+
+    async def test_list_projects_uses_owner_override_and_does_not_require_enabled_sync(self):
+        provider = FakeBoardSyncProvider()
+        provider.projects = [
+            {"number": 3, "name": "Roadmap", "owner": "acme", "id": "PVT_3"},
+        ]
+        state = make_state()
+        state.update_group_settings(
+            "g",
+            board_sync_provider="none",
+            board_sync_enabled=False,
+            board_sync_github={},
+        )
+        manager = self.make_manager(state, provider)
+
+        result = await manager.list_projects(
+            "g",
+            owner="acme",
+            provider_name="github",
+            settings_overrides={"board_sync_provider": "github"},
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["provider"], "github")
+        self.assertEqual(result["projects"][0]["name"], "Roadmap")
+        self.assertEqual(provider.project_owner_calls, ["acme"])
 
     async def test_pull_preview_and_apply_round_trip(self):
         provider = FakeBoardSyncProvider()
