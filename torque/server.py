@@ -11267,6 +11267,13 @@ async def main(connection=None):
                         data.get("fields", []),
                     )
 
+            elif cmd in ("board_import_preview", "board_pull_import_preview"):
+                if not board_sync_manager:
+                    result = {"type": "error", "message": "Board sync manager unavailable"}
+                else:
+                    result = await board_sync_manager.import_preview(
+                        data.get("group", ""))
+
             # -- Board commands (Phase 5) --
             elif cmd == "board_add_task":
                 # Apply per-group board defaults for fields not

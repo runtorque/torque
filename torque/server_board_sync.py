@@ -126,6 +126,34 @@ def board_sync_fields_trigger(fields: Iterable[str]) -> bool:
     return bool(_SYNC_RELEVANT_FIELDS.intersection({str(f) for f in fields or []}))
 
 
+def _normalize_match_value(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
+def _item_marker_task_id(item: dict) -> str:
+    marker = item.get("torque_marker") if isinstance(item.get("torque_marker"), dict) else {}
+    return str(
+        item.get("matched_task_id")
+        or item.get("task_id")
+        or marker.get("task_id")
+        or ""
+    ).strip()
+
+
+def _task_match_summary(task: BoardTask | None) -> dict:
+    if not task:
+        return {}
+    return {
+        "id": task.id,
+        "task": task.task,
+        "group": task.group,
+        "lane": task.lane,
+        "provider": task.provider,
+        "external_id": task.external_id,
+        "external_url": task.external_url,
+    }
+
+
 @dataclass
 class _QueueItem:
     task_id: str
@@ -453,6 +481,108 @@ class BoardSyncManager:
             "result": applied,
         }
 
+    async def import_preview(self, group: str) -> dict:
+        group = str(group or "").strip()
+        if not group:
+            result = {"ok": False, "type": "board_import_preview", "error": "group is required"}
+            await self._notify_failure("board_import_preview_failed", group, result["error"])
+            return result
+        if group not in self.state.groups:
+            result = {
+                "ok": False,
+                "type": "board_import_preview",
+                "group": group,
+                "error": "Group not found",
+            }
+            await self._notify_failure("board_import_preview_failed", group, result["error"])
+            return result
+        settings = self.state.get_group_settings(group)
+        provider_name = normalize_provider_name(
+            getattr(settings, "board_sync_provider", "")
+        )
+        if provider_name == "none":
+            return {
+                "ok": False,
+                "type": "board_import_preview",
+                "group": group,
+                "provider": provider_name,
+                "error": "Board sync provider is disabled",
+            }
+        if not bool(getattr(settings, "board_sync_enabled", False)):
+            return {
+                "ok": False,
+                "type": "board_import_preview",
+                "group": group,
+                "provider": provider_name,
+                "error": "Board sync is disabled",
+            }
+        provider = self.provider_factory(provider_name)
+        try:
+            raw_items = await provider.list_external_items(settings)
+        except Exception as exc:
+            log.exception("Board import preview failed for group %s", group)
+            raw_items = [{
+                "ok": False,
+                "phase": "list_external_items",
+                "provider": provider_name,
+                "error": str(exc) or type(exc).__name__,
+            }]
+        if not isinstance(raw_items, list):
+            raw_items = [{
+                "ok": False,
+                "phase": "list_external_items",
+                "provider": provider_name,
+                "error": "Provider returned invalid item list",
+            }]
+
+        errors = [
+            dict(item)
+            for item in raw_items
+            if isinstance(item, dict) and item.get("ok") is False
+        ]
+        unlinked = []
+        matched = []
+        for raw in raw_items:
+            if not isinstance(raw, dict) or raw.get("ok") is False:
+                continue
+            item = dict(raw)
+            match = self._match_external_item(item, provider_name)
+            if match:
+                matched_item = dict(item)
+                matched_item.update({
+                    "matched": True,
+                    "matched_by": match["matched_by"],
+                    "matched_task_id": match["task"].id,
+                    "matched_task": _task_match_summary(match["task"]),
+                })
+                matched.append(matched_item)
+            else:
+                item.setdefault("matched", False)
+                unlinked.append(item)
+
+        ok = not errors
+        result = {
+            "ok": ok,
+            "type": "board_import_preview",
+            "group": group,
+            "provider": provider_name,
+            "items": unlinked,
+            "unlinked_items": unlinked,
+            "matched": matched,
+            "matched_items": matched,
+            "item_count": len(unlinked),
+            "unlinked_count": len(unlinked),
+            "matched_count": len(matched),
+            "errors": errors,
+        }
+        if not ok:
+            await self._notify_failure(
+                "board_import_preview_failed",
+                group,
+                errors[0].get("error") or "Board import preview failed",
+            )
+        return result
+
     # -- Worker -------------------------------------------------------------
 
     async def _run(self) -> None:
@@ -609,6 +739,54 @@ class BoardSyncManager:
         if not bool(getattr(settings, "board_sync_enabled", False)):
             return task, settings, provider_name, "Board sync is disabled"
         return task, settings, provider_name, ""
+
+    def _match_external_item(self, item: dict, provider_name: str) -> dict:
+        provider_name = normalize_provider_name(
+            item.get("provider") or provider_name
+        )
+        external_id = _normalize_match_value(item.get("external_id"))
+        if not external_id:
+            repo = str(item.get("issue_repo") or "").strip()
+            number = str(item.get("issue_number") or "").strip()
+            if repo and number:
+                external_id = _normalize_match_value(f"{repo}#{number}")
+        external_url = _normalize_match_value(
+            item.get("external_url") or item.get("issue_url")
+        )
+        marker_task_id = _item_marker_task_id(item)
+        marker_resolved = self._resolve_task_id(marker_task_id) if marker_task_id else ""
+
+        if marker_resolved:
+            task = self.state.board_tasks.get(marker_resolved)
+            if task:
+                return {"matched_by": "torque_marker", "task": task}
+
+        for task in self.state.board_tasks.values():
+            task_provider = normalize_provider_name(getattr(task, "provider", ""))
+            if provider_name != "none" and task_provider not in {provider_name, "none"}:
+                continue
+            if external_id and _normalize_match_value(task.external_id) == external_id:
+                return {"matched_by": "external_id", "task": task}
+            if external_url and _normalize_match_value(task.external_url) == external_url:
+                return {"matched_by": "external_url", "task": task}
+
+            sync = getattr(task, "board_sync", {}) or {}
+            provider_sync = sync.get(provider_name) if isinstance(sync, dict) else None
+            provider_sync = provider_sync if isinstance(provider_sync, dict) else {}
+            sync_url = _normalize_match_value(
+                provider_sync.get("issue_url") or provider_sync.get("external_url")
+            )
+            sync_repo = str(provider_sync.get("issue_repo") or "").strip()
+            sync_number = str(provider_sync.get("issue_number") or "").strip()
+            sync_external_id = _normalize_match_value(
+                f"{sync_repo}#{sync_number}" if sync_repo and sync_number else ""
+            )
+            if external_id and sync_external_id == external_id:
+                return {"matched_by": "board_sync.external_id", "task": task}
+            if external_url and sync_url == external_url:
+                return {"matched_by": "board_sync.external_url", "task": task}
+
+        return {}
 
     def _lock_key(self, task: BoardTask, group_settings, provider_name: str) -> str:
         nested = _provider_nested_settings(group_settings, provider_name)

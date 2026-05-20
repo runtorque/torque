@@ -84,6 +84,15 @@ def _command_output(result: dict) -> str:
     return str(result.get("stderr") or result.get("stdout") or "").strip()
 
 
+def _github_external_id(repo: str, number: int) -> str:
+    repo = str(repo or "").strip()
+    try:
+        number = int(number or 0)
+    except (TypeError, ValueError):
+        number = 0
+    return f"{repo}#{number}" if repo and number else ""
+
+
 def _ok(phase: str, **extra) -> dict:
     payload = {"ok": True, "phase": phase}
     payload.update(extra)
@@ -94,6 +103,34 @@ def _error(phase: str, error: str, **extra) -> dict:
     payload = {"ok": False, "phase": phase, "error": str(error or "").strip()}
     payload.update(extra)
     return payload
+
+
+def _external_not_found_error(error: str) -> bool:
+    lower = str(error or "").lower()
+    return any(
+        needle in lower
+        for needle in (
+            "could not resolve to an issue",
+            "could not resolve to a node",
+            "not found",
+            "no issue matches",
+            "could not resolve",
+            "404",
+        )
+    )
+
+
+def _diff_items(changes: dict) -> list[dict]:
+    items = []
+    for field, change in (changes or {}).items():
+        if not isinstance(change, dict):
+            continue
+        items.append({
+            "field": field,
+            "local": change.get("local"),
+            "remote": change.get("remote"),
+        })
+    return items
 
 
 async def default_gh_runner(args: Sequence[str], cwd: str | None = None) -> dict:
@@ -860,10 +897,30 @@ class GitHubBoardSyncProvider:
         )
         repo = settings.repo or issue["issue_repo"]
         if not repo or not issue["issue_number"]:
-            return _error("pull_preview", "Task is not linked to a GitHub issue.")
+            return _error(
+                "pull_preview",
+                "Task is not linked to a GitHub issue.",
+                provider=self.name,
+                task_id=str(getattr(task, "id", "") or ""),
+                error_code="not_linked",
+            )
         viewed = await self._view_issue(repo, issue["issue_number"])
         if not viewed.get("ok"):
-            return viewed
+            error = str(viewed.get("error") or "GitHub issue could not be loaded.")
+            return _error(
+                "pull_preview",
+                error,
+                provider=self.name,
+                task_id=str(getattr(task, "id", "") or ""),
+                issue_repo=repo,
+                issue_number=issue["issue_number"],
+                issue_url=issue["issue_url"],
+                command=viewed.get("command", []),
+                error_code="external_not_found"
+                if _external_not_found_error(error)
+                else "provider_error",
+                provider_phase=viewed.get("phase", ""),
+            )
         issue_data = viewed.get("issue") or {}
         changes = {}
         title = str(issue_data.get("title") or "")
@@ -883,12 +940,17 @@ class GitHubBoardSyncProvider:
         local_labels = sorted(_user_labels(task))
         if remote_labels != local_labels:
             changes["labels"] = {"local": local_labels, "remote": remote_labels}
+        diff = _diff_items(changes)
         return _ok(
             "pull_preview",
             provider=self.name,
             task_id=str(getattr(task, "id", "") or ""),
             issue=issue_data,
+            external_id=_github_external_id(repo, issue["issue_number"]),
+            external_url=str(issue_data.get("url") or issue["issue_url"] or ""),
             changes=changes,
+            diff=diff,
+            diff_count=len(diff),
         )
 
     async def apply_pull(self, task, group_settings, fields: list[str]) -> dict:
@@ -906,13 +968,20 @@ class GitHubBoardSyncProvider:
             "apply_pull",
             provider=self.name,
             task_id=str(getattr(task, "id", "") or ""),
+            requested_fields=sorted(wanted),
+            applied_fields=sorted(apply_fields.keys()),
             fields=apply_fields,
         )
 
     async def list_external_items(self, group_settings) -> list[dict]:
         settings = github_settings(group_settings)
         if not settings.project_owner or not settings.project_number:
-            return [_error("list_external_items", "GitHub Project owner/number are not configured.")]
+            return [
+                _error(
+                    "list_external_items",
+                    "GitHub Project owner/number are not configured.",
+                )
+            ]
         items = await self._json_gh(
             "list_external_items",
             "project",
@@ -930,13 +999,74 @@ class GitHubBoardSyncProvider:
             content = item.get("content") if isinstance(item.get("content"), dict) else {}
             url = str(content.get("url") or "")
             ref = parse_github_issue_ref(external_url=url)
+            repo = ref["issue_repo"]
+            if not repo:
+                repository = content.get("repository")
+                if isinstance(repository, dict):
+                    repo = str(repository.get("nameWithOwner") or "").strip()
+                elif repository:
+                    repo = str(repository or "").strip()
+            number = ref["issue_number"]
+            if not number:
+                try:
+                    number = int(content.get("number") or 0)
+                except (TypeError, ValueError):
+                    number = 0
+            if repo and number and not url:
+                url = f"https://github.com/{repo}/issues/{number}"
+            detail = {}
+            if repo and number and not str(content.get("body") or item.get("body") or ""):
+                try:
+                    viewed = await self._view_issue(repo, number)
+                except Exception:
+                    viewed = {}
+                if viewed.get("ok"):
+                    detail = viewed.get("issue") if isinstance(viewed.get("issue"), dict) else {}
+            body = str(content.get("body") or item.get("body") or detail.get("body") or "")
+            marker = parse_torque_sync_marker(body)
+            raw_labels = (
+                content.get("labels")
+                or item.get("labels")
+                or detail.get("labels")
+                or []
+            )
+            labels = sorted(
+                str(label.get("name") or label)
+                for label in raw_labels
+                if (
+                    (isinstance(label, dict) and str(label.get("name") or ""))
+                    or (not isinstance(label, dict) and str(label or ""))
+                )
+            )
+            title = str(content.get("title") or item.get("title") or detail.get("title") or "")
+            url = url or str(detail.get("url") or "")
+            external_id = _github_external_id(repo, number)
             out.append({
                 "provider": self.name,
                 "project_item_id": str(item.get("id") or item.get("itemId") or ""),
-                "title": str(content.get("title") or item.get("title") or ""),
-                "issue_repo": ref["issue_repo"],
-                "issue_number": ref["issue_number"],
+                "title": title,
+                "description": strip_torque_sync_footer(body),
+                "body": body,
+                "labels": labels,
+                "state": str(
+                    content.get("state")
+                    or item.get("state")
+                    or detail.get("state")
+                    or ""
+                ),
+                "status": str(
+                    item.get("status")
+                    or item.get(settings.status_field_name)
+                    or ""
+                ),
+                "content_type": str(content.get("type") or item.get("type") or ""),
+                "issue_repo": repo,
+                "issue_number": number,
                 "issue_url": url,
+                "external_id": external_id,
+                "external_url": url,
+                "torque_marker": marker,
+                "matched_task_id": marker.get("task_id", ""),
             })
         return out
 

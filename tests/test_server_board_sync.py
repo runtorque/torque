@@ -32,6 +32,7 @@ class FakeBoardSyncProvider:
             "phase": "apply_pull",
             "fields": {"task": "New", "labels": ["new"]},
         }
+        self.external_items = []
         self.started = asyncio.Event()
         self.release = asyncio.Event()
         self.block_push = False
@@ -68,15 +69,16 @@ class FakeBoardSyncProvider:
 
     async def apply_pull(self, _task, _settings, fields):
         result = dict(self.apply_result)
-        result["fields"] = {
-            key: value
-            for key, value in self.apply_result["fields"].items()
-            if key in set(fields)
-        }
+        if "fields" in self.apply_result:
+            result["fields"] = {
+                key: value
+                for key, value in self.apply_result["fields"].items()
+                if key in set(fields)
+            }
         return result
 
     async def list_external_items(self, _settings):
-        return []
+        return list(self.external_items)
 
     async def append_closing_refs(self, pr_body, _linked_issues, _settings=None):
         return pr_body
@@ -303,3 +305,148 @@ class BoardSyncManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(refreshed.labels, ["new"])
         self.assertEqual(refreshed.board_sync["sync_state"], "idle")
         self.assertIn("last_pull_at", refreshed.board_sync)
+
+    async def test_pull_preview_does_not_mutate_and_apply_selected_fields_only(self):
+        provider = FakeBoardSyncProvider()
+        provider.preview = {
+            "ok": True,
+            "phase": "pull_preview",
+            "changes": {
+                "task": {"local": "Old", "remote": "New"},
+                "description": {"local": "Local body", "remote": "Remote body"},
+                "labels": {"local": ["old"], "remote": ["new"]},
+            },
+            "diff": [
+                {"field": "task", "local": "Old", "remote": "New"},
+                {"field": "description", "local": "Local body", "remote": "Remote body"},
+                {"field": "labels", "local": ["old"], "remote": ["new"]},
+            ],
+        }
+        provider.apply_result = {
+            "ok": True,
+            "phase": "apply_pull",
+            "fields": {
+                "task": "New",
+                "description": "Remote body",
+                "labels": ["new"],
+            },
+        }
+        state = make_state()
+        task = state.board_add_task(
+            "Old",
+            "g",
+            id="task-selected",
+            description="Local body",
+            labels=["old"],
+            provider="github",
+            external_id="owner/repo#1",
+            board_sync={"provider": "github", "sync_state": "idle"},
+        )
+        manager = self.make_manager(state, provider)
+
+        preview = await manager.pull_preview(task.id)
+        after_preview = state.board_tasks[task.id]
+        self.assertEqual(after_preview.task, "Old")
+        self.assertEqual(after_preview.description, "Local body")
+        self.assertEqual(after_preview.labels, ["old"])
+        applied = await manager.pull_apply(task.id, ["description"])
+
+        self.assertTrue(preview["ok"])
+        self.assertEqual(preview["diff"][0]["field"], "task")
+        self.assertTrue(applied["ok"])
+        self.assertEqual(applied["applied_fields"], ["description"])
+        refreshed = state.board_tasks[task.id]
+        self.assertEqual(refreshed.task, "Old")
+        self.assertEqual(refreshed.description, "Remote body")
+        self.assertEqual(refreshed.labels, ["old"])
+
+    async def test_pull_apply_missing_external_issue_surfaces_structured_error(self):
+        provider = FakeBoardSyncProvider()
+        provider.apply_result = {
+            "ok": False,
+            "phase": "pull_preview",
+            "provider": "github",
+            "error": "GraphQL: Could not resolve to an Issue",
+            "error_code": "external_not_found",
+            "provider_phase": "issue_view",
+        }
+        state = make_state()
+        task = state.board_add_task(
+            "Old",
+            "g",
+            id="task-missing",
+            provider="github",
+            external_id="owner/repo#404",
+            board_sync={"provider": "github", "sync_state": "idle"},
+        )
+        manager = self.make_manager(state, provider)
+
+        result = await manager.pull_apply(task.id, ["task"])
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["type"], "board_pull_apply")
+        self.assertEqual(result["error_code"], "external_not_found")
+        self.assertEqual(state.board_tasks[task.id].task, "Old")
+
+    async def test_import_preview_matches_existing_tasks_and_returns_unlinked(self):
+        provider = FakeBoardSyncProvider()
+        provider.external_items = [
+            {
+                "provider": "github",
+                "external_id": "owner/repo#1",
+                "external_url": "https://github.com/owner/repo/issues/1",
+                "title": "Already linked by id",
+            },
+            {
+                "provider": "github",
+                "external_id": "owner/repo#2",
+                "external_url": "https://github.com/owner/repo/issues/2",
+                "title": "Already linked by url",
+            },
+            {
+                "provider": "github",
+                "external_id": "owner/repo#3",
+                "external_url": "https://github.com/owner/repo/issues/3",
+                "title": "Already linked by marker",
+                "torque_marker": {"task_id": "task-marker"},
+            },
+            {
+                "provider": "github",
+                "external_id": "owner/repo#4",
+                "external_url": "https://github.com/owner/repo/issues/4",
+                "title": "Import me",
+            },
+        ]
+        state = make_state()
+        state.board_add_task(
+            "Linked id",
+            "g",
+            id="task-id",
+            provider="github",
+            external_id="owner/repo#1",
+        )
+        state.board_add_task(
+            "Linked url",
+            "g",
+            id="task-url",
+            provider="github",
+            external_url="https://github.com/owner/repo/issues/2",
+        )
+        state.board_add_task(
+            "Linked marker",
+            "g",
+            id="task-marker",
+        )
+        manager = self.make_manager(state, provider)
+
+        result = await manager.import_preview("g")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["unlinked_count"], 1)
+        self.assertEqual(result["items"][0]["external_id"], "owner/repo#4")
+        self.assertEqual(result["matched_count"], 3)
+        self.assertEqual(
+            {item["matched_by"] for item in result["matched"]},
+            {"external_id", "external_url", "torque_marker"},
+        )
+        self.assertEqual(len(state.board_tasks), 3)
