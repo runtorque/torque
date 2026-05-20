@@ -911,6 +911,76 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(data["lanes"]["Backlog"], 1)
         self.assertEqual(data["pending_message_followups"], 1)
 
+    async def test_engineer_board_reads_include_board_sync_state(self):
+        state = self._make_state()
+        alice = self._add_engineer(state, "eng-alice", "Alice")
+        task = self._add_task(
+            state,
+            "task-synced",
+            "Synced task",
+            assigned_engineer_id=alice.id,
+            board_sync={
+                "provider": "github",
+                "sync_state": "error",
+                "last_error": "project item missing",
+                "github": {"project_item_id": "hidden-from-compact-state"},
+            },
+        )
+
+        async def fake_handle_command(_payload):
+            self.fail("read tool should not call handle_command")
+
+        summary_text, summary_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_board_summary",
+            {},
+            fake_handle_command,
+            state,
+            caller_id=alice.id,
+        )
+        self.assertFalse(summary_error, summary_text)
+        summary = json.loads(summary_text)
+        self.assertEqual(summary["board_sync"]["count"], 1)
+        self.assertEqual(summary["board_sync"]["error_count"], 1)
+        self.assertEqual(
+            summary["board_sync"]["items"][0],
+            {
+                "id": task.id,
+                "title": "Synced task",
+                "provider": "github",
+                "sync_state": "error",
+                "last_error": "project item missing",
+            },
+        )
+
+        show_text, show_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_task_show",
+            {"task": task.id},
+            fake_handle_command,
+            state,
+            caller_id=alice.id,
+        )
+        self.assertFalse(show_error, show_text)
+        self.assertEqual(
+            json.loads(show_text)["board_sync"],
+            {
+                "provider": "github",
+                "sync_state": "error",
+                "last_error": "project item missing",
+            },
+        )
+
+        list_text, list_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_board_list",
+            {},
+            fake_handle_command,
+            state,
+            caller_id=alice.id,
+        )
+        self.assertFalse(list_error, list_text)
+        listed = json.loads(list_text)["lanes"]["Backlog"][0]
+        self.assertEqual(listed["board_sync"]["provider"], "github")
+        self.assertNotIn("github", listed["board_sync"])
+
     async def test_engineer_task_show_refreshes_silence_secs_at_read_time(self):
         state = self._make_state()
         engineer, _worker, task, base_ts = self._attach_stale_health_fixture(state)

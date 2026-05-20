@@ -3847,6 +3847,195 @@ def cmd_board_comment(args):
     print(data.get("message", "External comment posted"))
 
 
+def _board_sync_nested_error(data):
+    if not isinstance(data, dict) or data.get("ok") is not False:
+        return ""
+    return (
+        data.get("error")
+        or data.get("message")
+        or data.get("reason")
+        or "Board sync command failed"
+    )
+
+
+def _check_board_sync_result(data):
+    error = _board_sync_nested_error(data)
+    if error:
+        die(error)
+    return data
+
+
+def _print_json(data):
+    print(json.dumps(data, indent=2))
+
+
+def _board_sync_target_error(args):
+    task = str(getattr(args, "task", "") or "").strip()
+    group = str(getattr(args, "group", "") or "").strip()
+    if bool(task) == bool(group):
+        return "Provide exactly one target: TASK or --group GROUP"
+    return ""
+
+
+def _print_board_sync_preflight(data):
+    group = data.get("group", "")
+    provider = data.get("provider", "") or "none"
+    phase = data.get("phase", "")
+    detail = f" ({phase})" if phase else ""
+    print(f"Board sync preflight passed for {group} [{provider}]{detail}")
+
+
+def _print_board_sync_push(data, *, group=""):
+    if group:
+        queued = int(data.get("queued_count", 0) or 0)
+        skipped = int(data.get("skipped_count", 0) or 0)
+        print(f"Queued board sync for {queued} task(s) in {group}")
+        if skipped:
+            print(f"Skipped {skipped} task(s)")
+        return
+
+    task_id = data.get("task_id", "") or "task"
+    if data.get("queued"):
+        suffix = " (coalesced)" if data.get("coalesced") else ""
+        print(f"Queued board sync for {task_id}{suffix}")
+    else:
+        print(f"Board sync not queued for {task_id}: {data.get('reason', 'unknown')}")
+
+
+def _preview_change_count(preview):
+    changes = preview.get("changes") if isinstance(preview, dict) else None
+    return len(changes) if isinstance(changes, dict) else 0
+
+
+def _print_board_pull_preview(data):
+    task_id = data.get("task_id", "") or "task"
+    provider = data.get("provider", "") or "none"
+    changes = data.get("changes") if isinstance(data.get("changes"), dict) else {}
+    print(f"Board pull preview for {task_id} [{provider}]: {len(changes)} change(s)")
+    for field, change in changes.items():
+        if isinstance(change, dict):
+            local = change.get("local")
+            remote = change.get("remote")
+            print(f"  {field}: {local!r} -> {remote!r}")
+        else:
+            print(f"  {field}: {change!r}")
+
+
+def _print_board_pull_preview_group(data):
+    group = data.get("group", "")
+    previews = data.get("previews", []) if isinstance(data.get("previews"), list) else []
+    print(f"Board pull preview for {len(previews)} task(s) in {group}")
+    for preview in previews:
+        task_id = preview.get("task_id", "") or preview.get("id", "") or "task"
+        if preview.get("ok") is False:
+            error = preview.get("error") or preview.get("message") \
+                or preview.get("reason") or "failed"
+            print(f"  {task_id}: error: {error}")
+        else:
+            print(f"  {task_id}: {_preview_change_count(preview)} change(s)")
+
+
+def _group_task_ids_for_sync_preview(port, group):
+    state_data = get_state_local(port)
+    group = resolve_group(state_data, group)
+    return group, [
+        task["id"]
+        for task in state_data.get("board_tasks", {}).values()
+        if task.get("group") == group
+    ]
+
+
+def cmd_board_sync_test(args):
+    resp = api_call(
+        "board_sync_preflight",
+        port=args.port,
+        group=args.group,
+    )
+    data = _check_board_sync_result(check_ok(resp))
+    if args.json:
+        _print_json(data)
+    else:
+        _print_board_sync_preflight(data)
+
+
+def cmd_board_sync_push(args):
+    error = _board_sync_target_error(args)
+    if error:
+        die(error)
+    group = str(getattr(args, "group", "") or "").strip()
+    if group:
+        resp = api_call(
+            "board_sync_group",
+            port=args.port,
+            group=group,
+        )
+        data = _check_board_sync_result(check_ok(resp))
+        if args.json:
+            _print_json(data)
+        else:
+            _print_board_sync_push(data, group=group)
+        return
+
+    state_data = get_state_local(args.port)
+    task = resolve_task(state_data, args.task)
+    resp = api_call(
+        "board_sync_task",
+        port=args.port,
+        task=task["id"],
+    )
+    data = _check_board_sync_result(check_ok(resp))
+    if args.json:
+        _print_json(data)
+    else:
+        _print_board_sync_push(data)
+
+
+def cmd_board_sync_pull(args):
+    if not getattr(args, "preview", False):
+        die("Only pull previews are supported; pass --preview")
+    error = _board_sync_target_error(args)
+    if error:
+        die(error)
+
+    group = str(getattr(args, "group", "") or "").strip()
+    if group:
+        group, task_ids = _group_task_ids_for_sync_preview(args.port, group)
+        if not task_ids:
+            die(f"No tasks found for group \"{group}\"")
+        previews = []
+        for task_id in task_ids:
+            data = check_ok(api_call(
+                "board_pull_preview",
+                port=args.port,
+                task=task_id,
+            ))
+            previews.append(data)
+        result = {
+            "type": "board_pull_preview_group",
+            "ok": all(p.get("ok", False) for p in previews),
+            "group": group,
+            "count": len(previews),
+            "previews": previews,
+        }
+        if args.json:
+            _print_json(result)
+        else:
+            _print_board_pull_preview_group(result)
+        return
+
+    state_data = get_state_local(args.port)
+    task = resolve_task(state_data, args.task)
+    data = _check_board_sync_result(check_ok(api_call(
+        "board_pull_preview",
+        port=args.port,
+        task=task["id"],
+    )))
+    if args.json:
+        _print_json(data)
+    else:
+        _print_board_pull_preview(data)
+
+
 def cmd_board_move(args):
     st = get_state_local(args.port)
     match = resolve_task(st, args.identifier)
@@ -5427,6 +5616,43 @@ def build_parser():
     p.add_argument("comment", nargs="?", help="Comment text")
     p.add_argument("-m", "--message", help="Comment text")
     p.set_defaults(func=cmd_board_comment)
+
+    sync = brd_sub.add_parser(
+        "sync",
+        help="Structured external board sync",
+    )
+    sync.set_defaults(func=None, _sub_parser=sync)
+    sync_sub = sync.add_subparsers(dest="board_sync_cmd")
+
+    p = sync_sub.add_parser(
+        "test",
+        help="Run board sync provider preflight checks",
+    )
+    p.add_argument("-g", "--group", required=True,
+                   help="Group whose board sync settings should be tested")
+    p.set_defaults(func=cmd_board_sync_test)
+
+    p = sync_sub.add_parser(
+        "push",
+        help="Push one task or a whole group to the external board",
+    )
+    p.add_argument("task", nargs="?",
+                   help="Task ID, slug, or title to push")
+    p.add_argument("-g", "--group",
+                   help="Queue all tasks in this group")
+    p.set_defaults(func=cmd_board_sync_push)
+
+    p = sync_sub.add_parser(
+        "pull",
+        help="Preview external board changes for one task or group",
+    )
+    p.add_argument("--preview", action="store_true", required=True,
+                   help="Preview remote changes without applying them")
+    p.add_argument("task", nargs="?",
+                   help="Task ID, slug, or title to preview")
+    p.add_argument("-g", "--group",
+                   help="Preview all tasks in this group")
+    p.set_defaults(func=cmd_board_sync_pull)
 
     p = brd_sub.add_parser("move", help="Move a task to a lane")
     p.add_argument("identifier", help="Task ID, slug, or title")

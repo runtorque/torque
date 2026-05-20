@@ -1182,6 +1182,61 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             {real_task.id, followup.id},
         )
 
+    async def test_architect_board_reads_include_board_sync_state(self):
+        architect = self._add_architect("arch-1", "Architect")
+        task = self._add_task(
+            "task-synced",
+            "Synced task",
+            created_by_architect_id=architect.id,
+            board_sync={
+                "provider": "github",
+                "sync_state": "queued",
+                "last_error": "",
+                "github": {"project_item_id": "not-exposed-in-compact-state"},
+            },
+        )
+
+        summary_text, summary_error = await self._call(
+            "architect_board_summary",
+            {},
+            architect.id,
+        )
+        self.assertFalse(summary_error, summary_text)
+        summary_item = json.loads(summary_text)["tasks"]["items"][0]
+        self.assertEqual(
+            summary_item["board_sync"],
+            {
+                "provider": "github",
+                "sync_state": "queued",
+                "last_error": "",
+            },
+        )
+
+        show_text, show_error = await self._call(
+            "architect_task_show",
+            {"task": task.id},
+            architect.id,
+        )
+        self.assertFalse(show_error, show_text)
+        self.assertEqual(
+            json.loads(show_text)["board_sync"],
+            {
+                "provider": "github",
+                "sync_state": "queued",
+                "last_error": "",
+            },
+        )
+
+        list_text, list_error = await self._call(
+            "architect_task_list",
+            {},
+            architect.id,
+        )
+        self.assertFalse(list_error, list_text)
+        listed = json.loads(list_text)["tasks"][0]
+        self.assertEqual(listed["board_sync"]["sync_state"], "queued")
+        self.assertNotIn("github", listed["board_sync"])
+
     async def test_architect_board_summary_reports_peer_message_counts_for_caller(self):
         architect = self._add_architect("arch-1", "Architect")
         peer = self._add_architect("arch-2", "Peer")
