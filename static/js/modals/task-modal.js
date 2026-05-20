@@ -608,6 +608,11 @@ function _taskExternalFieldsChanged() {
   taskPersistDraft();
 }
 
+function _taskGroupChanged() {
+  _renderTaskBoardSyncSection();
+  taskPersistDraft();
+}
+
 function taskBoardSyncTrackChanged() {
   var cb = document.getElementById('task-board-sync-track-input');
   _taskBoardSync = _taskCloneBoardSync(_taskBoardSync);
@@ -652,10 +657,11 @@ function _taskReadDraftFromDom() {
   var providerEl = document.getElementById('task-external-provider-input');
   var externalIdEl = document.getElementById('task-external-id-input');
   var externalUrlEl = document.getElementById('task-external-url-input');
+  var syncTrackEl = document.getElementById('task-board-sync-track-input');
   var verificationModeEl = document.getElementById('task-verification-mode-input');
   var verificationStateEl = document.getElementById('task-verification-state-input');
   var verificationNotesEl = document.getElementById('task-verification-notes-input');
-  return {
+  var draft = {
     lane: modal ? (modal.dataset.lane || '') : '',
     task: taskEl ? taskEl.value : '',
     title_escaped_percents: _taskTitleEscapedPercents.slice(),
@@ -677,13 +683,14 @@ function _taskReadDraftFromDom() {
     provider: providerEl ? providerEl.value : _taskExternalProvider,
     external_id: externalIdEl ? externalIdEl.value : _taskExternalId,
     external_url: externalUrlEl ? externalUrlEl.value : _taskExternalUrl,
-    board_sync_enabled: (document.getElementById('task-board-sync-track-input') || {}).checked,
     verification_mode: verificationModeEl ? verificationModeEl.value : '',
     verification_state: verificationStateEl ? verificationStateEl.value : '',
     verification_notes: verificationNotesEl ? verificationNotesEl.value : '',
     verification_summary: _taskVerificationSummaryFromDom(),
     draft_id: _taskDraftId || '',
   };
+  if (syncTrackEl) draft.board_sync_enabled = syncTrackEl.checked;
+  return draft;
 }
 
 function taskPersistDraft() {
@@ -735,6 +742,12 @@ function _taskOpenModal(config) {
   _taskExternalProvider = draft && draft.provider !== undefined ? draft.provider : (config.provider || '');
   _taskExternalId = draft && draft.external_id !== undefined ? draft.external_id : (config.externalId || '');
   _taskExternalUrl = draft && draft.external_url !== undefined ? draft.external_url : (config.externalUrl || '');
+  _taskBoardSync = _taskCloneBoardSync(config.boardSync || {});
+  if (draft && Object.prototype.hasOwnProperty.call(draft, 'board_sync_enabled')) {
+    _taskBoardSync.version = _taskBoardSync.version || 1;
+    _taskBoardSync.provider = _taskBoardSync.provider || _taskExternalProvider || 'github';
+    _taskBoardSync.enabled = !!draft.board_sync_enabled;
+  }
   _taskArtifactEditIndex = -1;
   _taskArtifactDraft = null;
 
@@ -822,6 +835,7 @@ function _taskOpenModal(config) {
   _populateTaskGroupSelect(group);
   if (groupEl) groupEl.value = group;
   modal.dataset.lane = draft && draft.lane !== undefined ? draft.lane : (config.lane || '');
+  _renderTaskBoardSyncSection();
 
   _taskModalWaiting = true;
   _taskTemplateWaiting = true;
@@ -1155,6 +1169,7 @@ function openEditTask(taskId) {
     provider: t.provider || '',
     externalId: t.external_id || '',
     externalUrl: t.external_url || '',
+    boardSync: t.board_sync || {},
     scheduledInput: _taskScheduledInputValue(t.scheduled_at),
     verificationMode: t.verification_mode || '',
     verificationState: t.verification_state || '',
@@ -1244,6 +1259,7 @@ function submitTask() {
     msg.provider = _taskExternalProvider;
     msg.external_id = _taskExternalId;
     msg.external_url = _taskExternalUrl;
+    if (_taskBoardSyncVisible()) msg.board_sync = _taskBoardSyncPayloadForSubmit();
     msg.artifacts = _taskArtifacts.slice();
     if (shouldIncludeVerification) {
       msg.verification_mode = verificationMode;

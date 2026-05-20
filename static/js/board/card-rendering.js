@@ -152,6 +152,90 @@ function _boardCardIndentLevel(depth) {
   return Math.min(level, 3);
 }
 
+function _boardGithubIssueNumber(task) {
+  if (!task) return 0;
+  var gh = typeof _boardTaskGithubSync === 'function' ? _boardTaskGithubSync(task) : {};
+  var number = parseInt((gh && gh.issue_number) || 0, 10);
+  if (number) return number;
+  var externalId = String(task.external_id || '');
+  var match = externalId.match(/#(\d+)$/);
+  if (match) return parseInt(match[1], 10) || 0;
+  var externalUrl = String(task.external_url || '');
+  match = externalUrl.match(/\/issues\/(\d+)(?:[/?#].*)?$/);
+  return match ? (parseInt(match[1], 10) || 0) : 0;
+}
+
+function _boardGithubIssueUrl(task) {
+  if (!task) return '';
+  var gh = typeof _boardTaskGithubSync === 'function' ? _boardTaskGithubSync(task) : {};
+  return String((gh && gh.issue_url) || task.external_url || '').trim();
+}
+
+function _boardSyncStateMeta(task) {
+  var sync = typeof _boardTaskSync === 'function'
+    ? _boardTaskSync(task)
+    : ((task && task.board_sync) || {});
+  var stateName = String((sync && sync.sync_state) || '').toLowerCase();
+  if (!stateName && sync && (sync.last_push_at || sync.last_pull_at || sync.last_synced_hash)) {
+    stateName = 'ok';
+  }
+  if (stateName === 'idle') stateName = 'ok';
+  var labels = {
+    queued: 'queued',
+    syncing: 'syncing',
+    error: 'error',
+    ok: 'ok',
+  };
+  var icons = {
+    queued: '⏳',
+    syncing: '↻',
+    error: '!',
+    ok: '✓',
+  };
+  if (!labels[stateName]) stateName = '';
+  var title = stateName ? ('GitHub sync ' + labels[stateName]) : 'GitHub sync not run';
+  if (sync && sync.last_error) title += ': ' + sync.last_error;
+  return {
+    state: stateName || 'none',
+    label: labels[stateName] || 'not synced',
+    icon: icons[stateName] || '○',
+    title: title,
+  };
+}
+
+function _boardExternalGithubChipHtml(task) {
+  if (!task) return '';
+  var provider = String(task.provider || '').toLowerCase();
+  var sync = typeof _boardTaskSync === 'function'
+    ? _boardTaskSync(task)
+    : ((task && task.board_sync) || {});
+  var syncProvider = String((sync && sync.provider) || '').toLowerCase();
+  var isGithub = provider === 'github' || syncProvider === 'github'
+    || (typeof _boardTaskHasGithubLink === 'function' && _boardTaskHasGithubLink(task));
+  if (!isGithub && !(task.provider || task.external_id)) return '';
+  if (!isGithub) {
+    var extLabel = (task.provider ? task.provider + ': ' : '') + (task.external_id || 'linked');
+    return '<span class="board-card-label board-card-template" title="Linked external ticket">' + esc(extLabel) + '</span>';
+  }
+  var issueNumber = _boardGithubIssueNumber(task);
+  var issueUrl = _boardGithubIssueUrl(task);
+  var syncMeta = _boardSyncStateMeta(task);
+  var label = issueNumber ? ('#' + issueNumber) : (task.external_id || 'GitHub');
+  var title = 'GitHub issue';
+  if (issueNumber) title += ' #' + issueNumber;
+  title += ' · ' + syncMeta.title;
+  var content = '<span class="board-card-github-icon" aria-hidden="true">🔗</span>'
+    + '<span>' + esc(label) + '</span>'
+    + '<span class="board-card-sync-state board-card-sync-state-' + esc(syncMeta.state)
+    + '" title="' + esc(syncMeta.title) + '">' + esc(syncMeta.icon) + '</span>';
+  if (issueUrl) {
+    return '<a class="board-card-label board-card-external-chip board-card-github-chip" href="' + esc(issueUrl) + '"'
+      + ' onclick="event.stopPropagation();window.open(this.href);return false"'
+      + ' title="' + esc(title) + '">' + content + '</a>';
+  }
+  return '<span class="board-card-label board-card-external-chip board-card-github-chip" title="' + esc(title) + '">' + content + '</span>';
+}
+
 function _boardStaleDoneTaskIds(model) {
   var tasks = model && model.scopedWithoutArchived
     ? model.scopedWithoutArchived
@@ -857,11 +941,17 @@ function _renderBoardCard(t, childrenOf, depth, renderState) {
       + ' onclick="event.stopPropagation();openTaskArtifactBrowser(\'' + t.id + '\')">'
       + '&#x1F4CE; ' + artifactCount + '</span>';
   }
-  if (t.provider || t.external_id) {
-    var extLabel = (t.provider ? t.provider + ': ' : '') + (t.external_id || 'linked');
-    meta += '<span class="board-card-label board-card-template" title="Linked external ticket">' + esc(extLabel) + '</span>';
+  var externalChip = _boardExternalGithubChipHtml(t);
+  if (externalChip) {
+    meta += externalChip;
   }
-  if (t.external_url) {
+  var syncForExternal = typeof _boardTaskSync === 'function'
+    ? _boardTaskSync(t)
+    : ((t && t.board_sync) || {});
+  var externalIsGithub = String(t.provider || '').toLowerCase() === 'github'
+    || String((syncForExternal && syncForExternal.provider) || '').toLowerCase() === 'github'
+    || (typeof _boardTaskHasGithubLink === 'function' && _boardTaskHasGithubLink(t));
+  if (t.external_url && !externalIsGithub) {
     meta += '<a class="board-card-pr-link" href="' + esc(t.external_url)
       + '" onclick="event.stopPropagation();window.open(this.href);return false"'
       + ' title="' + esc(t.external_url) + '">&#x1F517;</a>';

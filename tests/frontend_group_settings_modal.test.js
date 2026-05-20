@@ -102,7 +102,7 @@ function createSandbox() {
   });
   const paneByName = Object.fromEntries(gsPanes.map((pane) => [pane.dataset.pane, pane]));
   const subtabNamesByPane = {
-    group: ['group-general', 'group-worker-defaults', 'group-terminals', 'group-advanced'],
+    group: ['group-general', 'group-worker-defaults', 'group-terminals', 'group-sync', 'group-advanced'],
     workers: ['worker-execution', 'worker-worktree', 'worker-notifications'],
     engineer: ['engineer-general', 'engineer-behavior', 'engineer-system'],
     architect: ['architect-general', 'architect-behavior', 'architect-system'],
@@ -251,6 +251,20 @@ test('group settings renders system prompt preview controls for Engineer and Arc
   );
   assert.match(html, /id="modal-system-prompt-preview"[\s\S]*class="modal modal-tall preview-popup"/);
   assert.match(css, /body\.standalone-mode\s+\.preview-popup\s*{\s*max-width:\s*min\(80vw,\s*1180px\);/);
+});
+
+test('group settings markup renders board sync provider subtab and task sync mount', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+
+  assert.match(html, /data-subtab="group-sync"[\s\S]*>Sync provider<\/button>/);
+  assert.match(html, /<select id="gs-board-sync-provider"[\s\S]*<option value="none">None<\/option>[\s\S]*<option value="github">GitHub<\/option>/);
+  assert.match(html, /id="gs-board-sync-enabled"[\s\S]*Enable sync/);
+  assert.match(html, /Lane → status mapping[\s\S]*id="gs-board-sync-github-lane-map"/);
+  assert.match(html, /id="gs-board-sync-test"[\s\S]*Test connection/);
+  assert.match(html, /id="task-board-sync-section"/);
+  assert.match(css, /\.task-board-sync-card/);
+  assert.match(css, /\.board-card-github-chip/);
 });
 
 test('group settings renders engineer merge mode selector', () => {
@@ -1247,6 +1261,79 @@ test('group settings no longer renders the legacy no-engineer placeholder copy',
     (msg) => msg.cmd !== 'list_specializations',
   );
   assert.deepEqual(JSON.parse(JSON.stringify(callsWithoutSpecFetch)), []);
+});
+
+test('Group Settings board sync fields populate, gate GitHub config, and submit payload', () => {
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+  seedProviders(context, sandbox._cachedProviders);
+
+  vm.runInContext('_gsInitialSubtab = "group-sync"', context);
+  vm.runInContext(`_showGroupSettings("alpha", {
+    settings: {
+      board_sync_provider: "github",
+      board_sync_enabled: true,
+      board_sync_github: {
+        github_repo: "acme/widgets",
+        github_project_owner: "acme",
+        github_project_number: 42,
+        github_project_status_field: "Pipeline",
+        github_lane_status_map: { "Backlog": "Todo", "In Progress": "Doing" },
+        github_close_issues_via_pr: false,
+        github_create_missing_labels: true,
+        github_assignee_map: { "worker-1": "octocat" }
+      }
+    },
+    engineer_settings: {},
+    profiles: ["Default"]
+  })`, context);
+
+  assert.equal(ensure('gs-board-sync-provider').value, 'github');
+  assert.equal(ensure('gs-board-sync-enabled').checked, true);
+  assert.equal(ensure('gs-board-sync-github-config').style.display, '');
+  assert.equal(ensure('gs-board-sync-github-repo').value, 'acme/widgets');
+  assert.equal(ensure('gs-board-sync-github-project-owner').value, 'acme');
+  assert.equal(ensure('gs-board-sync-github-project-number').value, 42);
+  assert.equal(ensure('gs-board-sync-github-status-field').value, 'Pipeline');
+  assert.match(ensure('gs-board-sync-github-lane-map').value, /"Backlog": "Todo"/);
+  assert.equal(ensure('gs-board-sync-github-close-via-pr').checked, false);
+  assert.equal(ensure('gs-board-sync-github-create-labels').checked, true);
+  assert.match(ensure('gs-board-sync-github-assignee-map').value, /"worker-1": "octocat"/);
+  assert.equal(ensure('gs-board-sync-provider').focused, true);
+
+  ensure('gs-board-sync-provider').value = 'none';
+  vm.runInContext('onGsBoardSyncProviderChange()', context);
+  assert.equal(ensure('gs-board-sync-github-config').style.display, 'none');
+
+  ensure('gs-board-sync-provider').value = 'github';
+  ensure('gs-board-sync-enabled').checked = false;
+  ensure('gs-board-sync-github-repo').value = 'acme/torque';
+  ensure('gs-board-sync-github-project-owner').value = 'octo-org';
+  ensure('gs-board-sync-github-project-number').value = '7';
+  ensure('gs-board-sync-github-status-field').value = 'Status';
+  ensure('gs-board-sync-github-lane-map').value = '{"Backlog":"Ready","Done":"Done"}';
+  ensure('gs-board-sync-github-close-via-pr').checked = true;
+  ensure('gs-board-sync-github-create-labels').checked = true;
+  ensure('gs-board-sync-github-assignee-map').value = '{"worker-1":"monalisa"}';
+
+  vm.runInContext('submitGroupSettings()', context);
+
+  const groupCall = sandbox.sendCalls.find(
+    (msg) => msg.cmd === 'update_group_settings');
+  assert.ok(groupCall, 'update_group_settings should be sent');
+  assert.equal(groupCall.settings.board_sync_provider, 'github');
+  assert.equal(groupCall.settings.board_sync_enabled, false);
+  assert.deepEqual(JSON.parse(JSON.stringify(groupCall.settings.board_sync_github)), {
+    github_repo: 'acme/torque',
+    github_project_owner: 'octo-org',
+    github_project_number: 7,
+    github_project_status_field: 'Status',
+    github_lane_status_map: { Backlog: 'Ready', Done: 'Done' },
+    github_close_issues_via_pr: true,
+    github_create_missing_labels: true,
+    github_assignee_map: { 'worker-1': 'monalisa' },
+  });
 });
 
 test('_addWtSymlink trims outer slashes while preserving glob syntax', () => {

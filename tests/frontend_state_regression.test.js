@@ -3452,6 +3452,46 @@ test('_renderBoardCard hides redundant group chips and only shows execution badg
   assert.equal((html.match(/board-card-health-stalled/g) || []).length, 1);
 });
 
+test('_renderBoardCard renders GitHub issue chip with compact sync state', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadBoardScripts(context);
+
+  context.state.board_tasks = {
+    gh: {
+      id: 'gh',
+      group: 'alpha',
+      task: 'Sync task with GitHub',
+      lane: 'In Progress',
+      position: 1,
+      provider: 'github',
+      external_id: 'acme/widgets#123',
+      external_url: 'https://github.com/acme/widgets/issues/123',
+      board_sync: {
+        provider: 'github',
+        enabled: true,
+        sync_state: 'error',
+        last_error: 'missing project scope',
+        github: {
+          issue_number: 123,
+          issue_url: 'https://github.com/acme/widgets/issues/123',
+        },
+      },
+    },
+  };
+
+  const html = runInContext(context, `
+    _renderBoardCard(state.board_tasks.gh, {}, 0)
+  `);
+
+  assert.match(html, /board-card-github-chip/);
+  assert.match(html, />#123<\/span>/);
+  assert.match(html, /board-card-sync-state-error/);
+  assert.match(html, /missing project scope/);
+  assert.doesNotMatch(html, /github: acme\/widgets#123/);
+  assert.doesNotMatch(html, /board-card-pr-link/);
+});
+
 test('_renderBoardCard caps subordinate indentation at depth 3', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);
@@ -12126,6 +12166,47 @@ test('standalone task invalidation is scoped by group and active context selecti
   });
 });
 
+test('standalone board_sync-only task deltas invalidate the board surface', () => {
+  const { context, sandbox, flushRaf } = createStandaloneDeltaBatchHarness(['board']);
+  runInContext(context, `
+    state.board_tasks = {
+      'task-1': {
+        id: 'task-1',
+        task: 'Sync badge target',
+        group: 'alpha',
+        lane: 'In Progress',
+        position: 1,
+        board_sync: { provider: 'github', enabled: true, sync_state: 'queued' }
+      }
+    };
+  `);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'task_upsert',
+      id: 'task-1',
+      group: 'alpha',
+      board_sync: {
+        provider: 'github',
+        enabled: true,
+        sync_state: 'syncing',
+      },
+    }],
+  });
+  flushRaf();
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 0,
+    board: 1,
+    actions: 0,
+    context: 0,
+    events: 0,
+    engineer: 0,
+    templates: 0,
+  });
+});
+
 test('standalone ask task and attention agent deltas narrow events invalidation', () => {
   const { context, sandbox, flushRaf } = createStandaloneDeltaBatchHarness(['events']);
   runInContext(context, `
@@ -15438,6 +15519,7 @@ test('openEditTask populates modal state from the task and preserves editable ve
   document.register('task-external-provider-input');
   document.register('task-external-id-input');
   document.register('task-external-url-input');
+  document.register('task-board-sync-section');
   document.register('task-verification-mode-input');
   document.register('task-verification-state-input');
   document.register('task-verification-tests-input');
@@ -15473,6 +15555,19 @@ test('openEditTask populates modal state from the task and preserves editable ve
       provider: 'github',
       external_id: 'openai/example#42',
       external_url: 'https://github.com/openai/example/issues/42',
+      board_sync: {
+        provider: 'github',
+        enabled: true,
+        sync_state: 'error',
+        last_push_at: '2099-01-02T00:00:00.000Z',
+        last_pull_at: '2099-01-03T00:00:00.000Z',
+        last_error: 'missing project scope',
+        github: {
+          issue_number: 42,
+          issue_url: 'https://github.com/openai/example/issues/42',
+          project_item_id: 'PVTI_42',
+        },
+      },
       verification_mode: 'deploy',
       verification_state: 'pending',
       verification_notes: 'Smoke after deploy',
@@ -15484,6 +15579,14 @@ test('openEditTask populates modal state from the task and preserves editable ve
         human_validation_pending: 'Confirm the modal in production',
       },
       created_by: 'architect:arch-1',
+    },
+  };
+  context.state.group_settings = {
+    beta: {
+      board_sync_github: {
+        github_project_owner: 'openai',
+        github_project_number: 3,
+      },
     },
   };
 
@@ -15509,6 +15612,12 @@ test('openEditTask populates modal state from the task and preserves editable ve
     document.getElementById('task-external-url-input').value,
     'https://github.com/openai/example/issues/42',
   );
+  assert.equal(document.getElementById('task-board-sync-section').style.display, '');
+  assert.match(document.getElementById('task-board-sync-section').innerHTML, /GitHub sync/);
+  assert.match(document.getElementById('task-board-sync-section').innerHTML, /#42/);
+  assert.match(document.getElementById('task-board-sync-section').innerHTML, /PVTI_42/);
+  assert.match(document.getElementById('task-board-sync-section').innerHTML, /missing project scope/);
+  assert.match(document.getElementById('task-board-sync-section').innerHTML, /Pull preview/);
   assert.equal(document.getElementById('task-verification-mode-input').value, 'deploy');
   assert.equal(document.getElementById('task-verification-state-input').value, 'pending');
   assert.equal(

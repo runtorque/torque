@@ -161,7 +161,29 @@ function _boardRenderCardMenu(taskId) {
   }
 
   html += '<div class="ctx-sep"></div>';
-  if (task.provider || task.external_id || task.external_url) {
+  var groupSyncSettings = state && state.group_settings && task.group
+    ? (state.group_settings[task.group] || {})
+    : {};
+  var githubSyncAvailable = (
+    (typeof _boardTaskHasGithubLink === 'function' && _boardTaskHasGithubLink(task))
+    || String(groupSyncSettings.board_sync_provider || '').toLowerCase() === 'github'
+  );
+  if (githubSyncAvailable) {
+    var gh = typeof _boardTaskGithubSync === 'function' ? _boardTaskGithubSync(task) : {};
+    var hasGithubIssue = !!(task.external_url || task.external_id || gh.issue_number || gh.issue_url);
+    if (hasGithubIssue) {
+      html += '<button onclick="event.stopPropagation();boardOpenGithubIssue(\'' + taskId + '\')">Open GitHub issue</button>';
+    } else {
+      html += '<button onclick="event.stopPropagation();boardSyncTaskNow(\'' + taskId + '\')">Create GitHub issue</button>';
+    }
+    html += '<button onclick="event.stopPropagation();boardSyncTaskNow(\'' + taskId + '\')">Push to GitHub</button>';
+    html += '<button onclick="event.stopPropagation();boardSyncTaskNow(\'' + taskId + '\')">Sync GitHub now</button>';
+    html += '<button onclick="event.stopPropagation();boardPullPreview(\'' + taskId + '\')">Pull preview</button>';
+    html += '<button onclick="event.stopPropagation();boardLinkExternal(\'' + taskId + '\')">Edit external link...</button>';
+    if (task.provider || task.external_id || task.external_url) {
+      html += '<button onclick="event.stopPropagation();boardClearExternal(\'' + taskId + '\')">Unlink external issue</button>';
+    }
+  } else if (task.provider || task.external_id || task.external_url) {
     html += '<button onclick="event.stopPropagation();boardOpenExternal(\'' + taskId + '\')">Open external issue</button>';
     html += '<button onclick="event.stopPropagation();boardPushExternalStatus(\'' + taskId + '\')">Push status...</button>';
     html += '<button onclick="event.stopPropagation();boardPostExternalComment(\'' + taskId + '\')">Post comment...</button>';

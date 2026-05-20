@@ -1198,7 +1198,7 @@
     <div id="task-artifact-editor" class="task-artifact-editor"></div>
     <label>Group <span class="label-req">*</span></label>
     <select id="task-group-select"
-            onchange="taskPersistDraft()"
+            onchange="_taskGroupChanged()"
             onkeydown="if(event.key==='Escape')closeModals();"></select>
     <label>Action
       <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Optionally attach an action. The action's prompt wraps the task text with instructions and context.">?</span>

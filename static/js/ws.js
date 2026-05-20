@@ -490,6 +490,14 @@ function connect() {
       _showToast('External status pushed', 'info');
     } else if (msg.type === 'external_comment_posted') {
       _showToast('External comment posted', 'info');
+    } else if (msg.type === 'board_sync_preflight') {
+      if (typeof _handleBoardSyncPreflight === 'function') _handleBoardSyncPreflight(msg);
+    } else if (msg.type === 'board_sync_task') {
+      if (typeof _handleBoardSyncTaskResponse === 'function') _handleBoardSyncTaskResponse(msg);
+    } else if (msg.type === 'board_pull_preview') {
+      if (typeof _handleBoardPullPreview === 'function') _handleBoardPullPreview(msg);
+    } else if (msg.type === 'board_pull_apply') {
+      if (typeof _handleBoardPullApply === 'function') _handleBoardPullApply(msg);
     } else if (msg.type === 'pipelines') {
       if (typeof tplReceivePipelines !== 'undefined') tplReceivePipelines(msg);
     } else if (msg.type === 'global_settings') {
@@ -1403,6 +1411,7 @@ function _taskDeltaInvalidatesBoard(previous, next, op) {
     'verification_summary',
     'attachments',
     'artifacts',
+    'board_sync',
     'provider',
     'external_id',
     'external_url',
