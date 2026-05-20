@@ -45,6 +45,15 @@ torque board move fix-login -l Done             # move task between lanes
 
 Derived tasks also carry `parent_task_id`, `pipeline_depth`, and `pipeline_root_id`. → [Tasks and threads](threads.md)
 
+## External board sync
+
+Groups can sync tasks to GitHub Issues and Projects v2. Configure
+**Group Settings → Group → Sync provider**, then use a card menu or task modal
+to create/push the issue, open it, opt in/out of tracking, or run a pull
+preview. Synced cards show compact GitHub state; the task modal shows issue and
+project links, last push/pull times, and the last structured error. Pull
+previews apply only the fields you select. → [Board sync operator guide](../operate/board-sync.md)
+
 ## Creating tasks
 
 **From the board UI**: click **+ Add task** at the top of any lane. An auto-growing textarea appears.
@@ -194,4 +203,5 @@ Archived tasks move to the **Archived** lane and disappear from filters that don
 - [Actions](actions.md) — the prompt templates dispatch uses.
 - [Pipelines](pipelines.md) — the transitions between actions that produce the thread shape.
 - [Worktrees](worktrees.md) — branch isolation per dispatched task.
+- [Board sync operator guide](../operate/board-sync.md) — GitHub Issues/Projects sync setup and operation.
 - [CLI reference](../reference/cli.md) — every `torque task` subcommand.

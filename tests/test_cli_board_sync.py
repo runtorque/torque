@@ -46,6 +46,28 @@ class CliBoardSyncTests(unittest.TestCase):
         self.assertTrue(pull_args.preview)
         self.assertEqual(pull_args.task, "task-1")
 
+        group_settings_args = parser.parse_args([
+            "group", "settings", "backend", "-s",
+            "board_sync_provider=github",
+            "board_sync_enabled=true",
+            "board_sync_github={}",
+        ])
+        self.assertEqual(group_settings_args.set, [
+            "board_sync_provider=github",
+            "board_sync_enabled=true",
+            "board_sync_github={}",
+        ])
+
+        json_pull_args = parser.parse_args([
+            "--json", "board", "sync", "pull", "--preview", "--group", "torque",
+        ])
+        self.assertTrue(json_pull_args.json)
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            parser.parse_args([
+                "board", "sync", "pull", "--preview", "--group", "torque",
+                "--json",
+            ])
+
     def test_board_sync_test_calls_preflight(self):
         calls = []
 
@@ -240,6 +262,11 @@ class CliBoardSyncTests(unittest.TestCase):
             "torque board sync test -g backend",
             "torque board sync push fix-login",
             "torque board sync pull --preview fix-login",
+            "torque --json board sync pull --preview --group backend",
         ):
             self.assertIn(command, docs)
-
+        self.assertIn("torque group settings backend -s \\", docs)
+        self.assertNotIn(
+            "torque board sync pull --preview --group backend --json",
+            docs,
+        )

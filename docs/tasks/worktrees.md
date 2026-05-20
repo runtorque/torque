@@ -21,10 +21,10 @@ When pipelines hand off across agents, the worktree is **inherited** — the rev
 Worktrees are enabled per group in [Group settings](../operate/group-settings.md):
 
 1. Open Group Settings (gear icon on the group header).
-2. Go to the **Agents** tab.
-3. Check **Git worktree per agent**.
+2. Go to **Workers → Worktree**.
+3. Check **Git worktree per worker**.
 
-Once enabled, every new agent created in that group gets its own worktree, and the agent's working directory is set to the worktree path.
+Once enabled, every new worker created in that group gets its own worktree, and the worker's working directory is set to the worktree path.
 
 ```bash
 torque group settings backend -s git_worktree=true
@@ -154,6 +154,14 @@ Torque tracks the merge result and verifies it landed:
 
 - **Regular merge** — detected via `git merge-base --is-ancestor`.
 - **Squash merge** — default for PR merges; direct-local squash fallback is detected by simulating with `git merge-tree --write-tree`, falling back to "did the base branch advance and pick up these file changes."
+
+If the group is configured with the GitHub board-sync provider, PR merges can
+close linked GitHub issues automatically. With **Close linked issues via PR
+body** enabled, Torque appends missing `Closes #123` /
+`Closes owner/repo#123` references to the created or reused PR body. This only
+applies to the PR path (`engineer_merge_mode=pr`, or `engineer-choice` without
+`force_direct=true`); direct-local merges do not have a PR body to carry closing
+refs. → [Board sync](../operate/board-sync.md#pr-closing-references)
 
 ![A worktree post-merge: the agent cell shows the merged status, branch indicator changes, queue resets for any follow-up work.](../images/merged.png)
 

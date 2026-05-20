@@ -87,6 +87,12 @@ calling Engineer. It summarizes the last 20 recent dispatch-shape events:
 The metric is volatile and not a durable audit log; use
 `engineer_mcp_calls` when you need raw call history.
 
+Board sync state in these read tools is intentionally compact: provider,
+enabled/tracked state, sync_state, issue URL/number, last push/pull timestamps,
+and last_error. Provider-private payloads such as full GitHub project metadata
+are omitted from list/summary surfaces; use the task modal or CLI JSON for
+operator sync actions.
+
 ### Task editing
 
 | Tool | What it does |
@@ -122,6 +128,12 @@ Cleanup flags are recorded there while the PR is pending, but cleanup is
 executed only after an actual merge. Torque V1 does not poll GitHub in the
 background; rerun `engineer_merge` after branch-protection checks pass to
 refresh status and finalize the boundary.
+
+For GitHub board-sync groups, the PR path also appends missing linked-issue
+closing refs to the created or reused PR body when
+`board_sync_github.github_close_issues_via_pr` is enabled. Same-repo issues use
+`Closes #123`; cross-repo issues use `Closes owner/repo#123`. Direct-local
+merge mode cannot close issues this way because no PR body is written.
 
 ### Agent control
 
