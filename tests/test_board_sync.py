@@ -405,5 +405,123 @@ class GitHubPushTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(runner.calls, [])
 
 
+class GitHubPullTests(unittest.IsolatedAsyncioTestCase):
+    async def test_pull_preview_returns_field_diff_without_mutating_task(self):
+        task = BoardTask(
+            id="TORQUE:510",
+            task="Local title",
+            description="Local body",
+            group="Torque",
+            labels=["local"],
+            provider="github",
+            external_id="owner/repo#123",
+        )
+        provider = GitHubBoardSyncProvider(FakeGhRunner([
+            gh_ok(issue_view(
+                title="Remote title",
+                body=(
+                    "Remote body\n\n---\nSynced from Torque task TORQUE:510.\n"
+                    "<!-- torque-sync:v1 task_id=TORQUE:510 -->"
+                ),
+            ) | {"labels": [{"name": "bug"}, {"name": "remote"}]}),
+        ]))
+
+        preview = await provider.pull_task(task, github_settings())
+
+        self.assertTrue(preview["ok"])
+        self.assertEqual(preview["diff_count"], 3)
+        self.assertEqual(preview["changes"]["task"]["remote"], "Remote title")
+        self.assertEqual(preview["changes"]["description"]["remote"], "Remote body")
+        self.assertEqual(preview["changes"]["labels"]["remote"], ["bug", "remote"])
+        self.assertIn(
+            {"field": "task", "local": "Local title", "remote": "Remote title"},
+            preview["diff"],
+        )
+        self.assertEqual(task.task, "Local title")
+        self.assertEqual(task.description, "Local body")
+        self.assertEqual(task.labels, ["local"])
+
+    async def test_pull_apply_returns_only_selected_remote_fields(self):
+        task = BoardTask(
+            id="TORQUE:511",
+            task="Local title",
+            description="Local body",
+            group="Torque",
+            labels=["local"],
+            provider="github",
+            external_id="owner/repo#123",
+        )
+        provider = GitHubBoardSyncProvider(FakeGhRunner([
+            gh_ok(issue_view(
+                title="Remote title",
+                body="Remote body",
+            ) | {"labels": [{"name": "remote"}]}),
+        ]))
+
+        applied = await provider.apply_pull(
+            task,
+            github_settings(),
+            ["description"],
+        )
+
+        self.assertTrue(applied["ok"])
+        self.assertEqual(applied["requested_fields"], ["description"])
+        self.assertEqual(applied["applied_fields"], ["description"])
+        self.assertEqual(applied["fields"], {"description": "Remote body"})
+
+    async def test_pull_apply_missing_issue_returns_structured_error(self):
+        task = BoardTask(
+            id="TORQUE:512",
+            task="Gone",
+            provider="github",
+            external_id="owner/repo#404",
+        )
+        provider = GitHubBoardSyncProvider(FakeGhRunner([
+            gh_fail("GraphQL: Could not resolve to an Issue with the number of 404."),
+        ]))
+
+        result = await provider.apply_pull(task, github_settings(), ["task"])
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["phase"], "pull_preview")
+        self.assertEqual(result["provider_phase"], "issue_view")
+        self.assertEqual(result["error_code"], "external_not_found")
+        self.assertEqual(result["issue_number"], 404)
+
+    async def test_project_item_list_includes_import_matching_metadata(self):
+        body = (
+            "Remote project body\n\n---\nSynced from Torque task TORQUE:513.\n"
+            "<!-- torque-sync:v1 task_id=TORQUE:513 group=Torque -->"
+        )
+        provider = GitHubBoardSyncProvider(FakeGhRunner([
+            gh_ok({
+                "items": [{
+                    "id": "PVTI_1",
+                    "status": "Todo",
+                    "content": {
+                        "type": "Issue",
+                        "number": 55,
+                        "title": "Remote issue",
+                        "body": body,
+                        "url": "https://github.com/owner/repo/issues/55",
+                        "repository": {"nameWithOwner": "owner/repo"},
+                        "labels": [{"name": "bug"}],
+                        "state": "OPEN",
+                    },
+                }]
+            }),
+        ]))
+
+        items = await provider.list_external_items(github_settings())
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["external_id"], "owner/repo#55")
+        self.assertEqual(items[0]["external_url"], "https://github.com/owner/repo/issues/55")
+        self.assertEqual(items[0]["description"], "Remote project body")
+        self.assertEqual(items[0]["labels"], ["bug"])
+        self.assertEqual(items[0]["torque_marker"]["task_id"], "TORQUE:513")
+        self.assertEqual(items[0]["matched_task_id"], "TORQUE:513")
+
+
 if __name__ == "__main__":
     unittest.main()
