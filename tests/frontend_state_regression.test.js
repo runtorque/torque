@@ -302,6 +302,8 @@ const PANEL_ROOT_IDS = [
   'panel-context',
   'panel-events',
   'panel-agent',
+  'panel-supervisor',
+  'panel-health',
 ];
 
 function createSandbox(overrides = {}) {
@@ -896,7 +898,7 @@ function createMainHarness(overrides = {}) {
   const harnessOptions = overrides.__mainHarnessOptions || {};
   const sandboxOverrides = Object.assign({}, overrides);
   delete sandboxOverrides.__mainHarnessOptions;
-  const taskbarButtons = ['board', 'actions', 'templates', 'history', 'context', 'events', 'engineer'].map((app) => {
+  const taskbarButtons = ['board', 'actions', 'templates', 'history', 'context', 'events', 'engineer', 'supervisor', 'health'].map((app) => {
     const button = new FakeElement();
     button.dataset.app = app;
     return button;
@@ -945,6 +947,8 @@ function createMainHarness(overrides = {}) {
     'panel-context',
     'panel-events',
     'panel-agent',
+    'panel-supervisor',
+    'panel-health',
     'add-name-input',
     'add-cmd-input',
     'add-dir-input',
@@ -16976,7 +16980,7 @@ function attachAgentSplitDom(main, document, focusHtml) {
   focus.offsetHeight = 180;
   focusScroll.innerHTML = focusHtml || '';
   focusScroll._torqueLastHtml = focusHtml || '';
-  focus.setQuerySelector('[data-agent-focus-collapse]', collapse);
+  main.setQuerySelector('[data-agent-focus-collapse]', collapse);
   split.appendChild(grid);
   split.appendChild(handle);
   split.appendChild(focus);
@@ -17009,7 +17013,10 @@ test('agent focus split renders in toolbelt and standalone modes', () => {
     assert.match(main.innerHTML, /data-agent-split/);
     assert.match(main.innerHTML, /id="agent-grid-pane"/);
     assert.match(main.innerHTML, /id="agent-focus-resizer"[^>]*role="separator"[^>]*aria-orientation="horizontal"/);
-    assert.match(main.innerHTML, /data-agent-focus-collapse/);
+    assert.match(
+      main.innerHTML,
+      /id="agent-focus-resizer"[\s\S]*data-agent-focus-collapse[\s\S]*⌄ Collapse[\s\S]*id="agent-focus-panel"/,
+    );
     assert.match(main.innerHTML, /data-agent-focus-reopen-label/);
     assert.match(main.innerHTML, /id="agent-focus-panel"/);
     assert.match(main.innerHTML, /Select an agent to view details and terminals\./);
@@ -17197,11 +17204,21 @@ test('agent focus split collapse persists and the handle reopens at content-fit 
   const parts = attachAgentSplitDom(main, document, '');
   parts.focusScroll.scrollHeight = 180;
 
-  runInContext(context, `_agentFocusSetCollapsed(true);`);
+  let collapsePrevented = false;
+  let collapseStopped = false;
+  context.__collapseEvent = {
+    preventDefault() { collapsePrevented = true; },
+    stopPropagation() { collapseStopped = true; },
+  };
+  runInContext(context, `_agentFocusCollapseFromRail(__collapseEvent);`);
+
+  assert.equal(collapsePrevented, true);
+  assert.equal(collapseStopped, true);
   assert.equal(jsonValue(context, `_agentFocusIsCollapsed()`), true);
   assert.equal(parts.split.classList.contains('agent-split--focus-collapsed'), true);
   assert.equal(parts.handle.getAttribute('role'), 'button');
   assert.equal(parts.handle.getAttribute('aria-expanded'), 'false');
+  assert.equal(parts.collapse.getAttribute('aria-expanded'), 'false');
 
   let prevented = false;
   context.__expandEvent = { preventDefault() { prevented = true; } };
@@ -17213,6 +17230,7 @@ test('agent focus split collapse persists and the handle reopens at content-fit 
   assert.equal(parts.split.classList.contains('agent-split--focus-collapsed'), false);
   assert.equal(parts.handle.getAttribute('role'), 'separator');
   assert.equal(parts.handle.getAttribute('aria-expanded'), 'true');
+  assert.equal(parts.collapse.getAttribute('aria-expanded'), 'true');
   assert.equal(parts.focus.style.flexBasis, '180px');
 });
 
@@ -20802,12 +20820,33 @@ test('standalone layout restore migrates legacy panel state into bottom and righ
   `);
 
   assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().bottom.size`), 310);
-  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().bottom.active`), 'board');
+  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().bottom.active`), 'context');
   assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.active`), 'events');
   assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.open`), true);
 });
 
-test('standalone opens unplaced Supervisor panel in the bottom dock by default', () => {
+test('standalone panel defaults place Context in the bottom dock and Agent in the right rail', () => {
+  const { context, document } = createPanelHarness();
+  document.body.classList.add('runtime-embedded');
+  context.isEmbeddedTerminalMode = function() { return true; };
+
+  runInContext(context, `
+    state = {
+      runtime: { embedded_terminal: true },
+      standalone_panel_layout: {},
+    };
+    _restoreStandalonePanelState();
+  `);
+
+  assert.equal(jsonValue(context, `_standalonePanelDefaults.context`), 'bottom');
+  assert.equal(jsonValue(context, `_standalonePanelDefaults.engineer`), 'right');
+  assert.equal(jsonValue(context, `_standalonePanelPlacement('context')`), 'bottom');
+  assert.equal(jsonValue(context, `_standalonePanelPlacement('engineer')`), 'right');
+  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().bottom.active`), 'context');
+  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.active`), 'engineer');
+});
+
+test('standalone restore includes Supervisor panel in the bottom dock by default', () => {
   const { context, document, sandbox } = createPanelHarness();
   document.body.classList.add('runtime-embedded');
   context.isEmbeddedTerminalMode = function() { return true; };
@@ -20824,7 +20863,7 @@ test('standalone opens unplaced Supervisor panel in the bottom dock by default',
   context.togglePanel('supervisor');
 
   assert.equal(jsonValue(context, `_standalonePanelPlacement('supervisor')`), 'bottom');
-  assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout().bottom.tabs`), ['board', 'supervisor']);
+  assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout().bottom.tabs`), ['board', 'context', 'supervisor']);
   assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().bottom.active`), 'supervisor');
   assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.tabs.includes('supervisor')`), false);
   assert.equal(sandbox.sendCalls.length, 1);
@@ -21005,15 +21044,15 @@ test('standalone first full-state restore persists responsive defaults once', ()
     cmd: 'standalone_set_panel_layout',
     layout: {
       version: 1,
-      bottom: { open: true, size: 306, tabs: ['board'], active: 'board' },
+      bottom: { open: true, size: 306, tabs: ['board', 'context', 'supervisor'], active: 'context' },
       right: {
         open: true,
         size: 320,
-        tabs: ['actions', 'templates', 'history', 'context', 'events'],
-        active: 'context',
+        tabs: ['actions', 'templates', 'history', 'events', 'engineer', 'health'],
+        active: 'engineer',
       },
       floats: {},
-      last_active: 'board',
+      last_active: 'context',
     },
   });
 });
@@ -21161,16 +21200,20 @@ test('restoreStandaloneLayoutDefaults resets width and ignores legacy state', ()
   assert.equal(jsonValue(context, `_workspaceSidebarWidth`), 784);
   assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout()`), {
     version: 1,
-    bottom: { open: true, size: 306, tabs: ['board'], active: 'board' },
+    bottom: { open: true, size: 306, tabs: ['board', 'context', 'supervisor'], active: 'context' },
     right: {
       open: true,
       size: 320,
-      tabs: ['actions', 'templates', 'history', 'context', 'events'],
-      active: 'context',
+      tabs: ['actions', 'templates', 'history', 'events', 'engineer', 'health'],
+      active: 'engineer',
     },
     floats: {},
-    last_active: 'board',
+    last_active: 'context',
   });
+  assert.deepEqual(
+    jsonValue(context, `_standalonePanelCurrentLayout().bottom.tabs.concat(_standalonePanelCurrentLayout().right.tabs).sort()`),
+    ['actions', 'board', 'context', 'engineer', 'events', 'health', 'history', 'supervisor', 'templates']
+  );
   assert.deepEqual(jsonValue(context, `sendCalls`), [
     {
       cmd: 'ui_set_workspace_sidebar_width',
@@ -21180,15 +21223,15 @@ test('restoreStandaloneLayoutDefaults resets width and ignores legacy state', ()
       cmd: 'standalone_set_panel_layout',
       layout: {
         version: 1,
-        bottom: { open: true, size: 306, tabs: ['board'], active: 'board' },
+        bottom: { open: true, size: 306, tabs: ['board', 'context', 'supervisor'], active: 'context' },
         right: {
           open: true,
           size: 320,
-          tabs: ['actions', 'templates', 'history', 'context', 'events'],
-          active: 'context',
+          tabs: ['actions', 'templates', 'history', 'events', 'engineer', 'health'],
+          active: 'engineer',
         },
         floats: {},
-        last_active: 'board',
+        last_active: 'context',
       },
     },
   ]);
@@ -21656,7 +21699,14 @@ test('standalone full-state rerender keeps panel roots attached', () => {
 
   assert.deepEqual(attachedStandalonePanelIds(document), PANEL_ROOT_IDS);
   assert.deepEqual(standaloneZoneBodyPanelIds(document, 'standalone-right-rail'), ['panel-actions', 'panel-context']);
-  assert.deepEqual(parkedStandalonePanelIds(document), ['panel-templates', 'panel-history', 'panel-events', 'panel-agent']);
+  assert.deepEqual(parkedStandalonePanelIds(document), [
+    'panel-templates',
+    'panel-history',
+    'panel-events',
+    'panel-agent',
+    'panel-supervisor',
+    'panel-health',
+  ]);
 });
 
 test('standalone layout ui_update loads and rerenders newly visible Actions', () => {
@@ -21740,7 +21790,14 @@ test('standalone layout ui_update keeps panel roots attached across rerenders', 
 
   assert.deepEqual(attachedStandalonePanelIds(document), PANEL_ROOT_IDS);
   assert.deepEqual(standaloneZoneBodyPanelIds(document, 'standalone-right-rail'), ['panel-actions', 'panel-context']);
-  assert.deepEqual(parkedStandalonePanelIds(document), ['panel-templates', 'panel-history', 'panel-events', 'panel-agent']);
+  assert.deepEqual(parkedStandalonePanelIds(document), [
+    'panel-templates',
+    'panel-history',
+    'panel-events',
+    'panel-agent',
+    'panel-supervisor',
+    'panel-health',
+  ]);
 });
 
 test('standalone bottom-dock drop moves a panel to the shell-owned dock and preserves roots across rerenders', () => {
