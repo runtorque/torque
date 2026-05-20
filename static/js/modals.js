@@ -156,7 +156,7 @@ function onGsProviderChange() {
   const input = document.getElementById('gs-agent-boot-cmd');
   row.classList.remove('hidden');
   if (v === '__custom__') {
-    label.textContent = 'Boot command';
+    label.textContent = 'Default boot command';
     input.placeholder = 'e.g. my-agent-cli';
   } else {
     label.textContent = 'Command override';
@@ -811,13 +811,48 @@ function _getEngineerRestrictToCreatedAgentsFromPermission() {
   return !document.getElementById('gs-engineer-restrict-to-created-agents').checked;
 }
 
+function _normalizeGsSelection(tab, subtab) {
+  const rawTab = String(tab || 'group').trim() || 'group';
+  const rawSubtab = String(subtab || '').trim();
+  let nextTab = rawTab;
+  let nextSubtab = rawSubtab;
+
+  // Back-compat for any callers or saved links that still use the previous
+  // Agents tab names after the UI split: terminal defaults moved into Group,
+  // while worker execution settings became the Workers tab.
+  if (rawTab === 'agents') nextTab = 'workers';
+  if (rawTab === 'terminals') {
+    nextTab = 'group';
+    nextSubtab = rawSubtab || 'group-terminals';
+  }
+  if (rawSubtab === 'agent-terminals') {
+    nextTab = 'group';
+    nextSubtab = 'group-terminals';
+  } else if (rawSubtab === 'agent-general') {
+    nextSubtab = 'worker-execution';
+  } else if (rawSubtab === 'agent-worktree') {
+    nextSubtab = 'worker-worktree';
+  } else if (rawSubtab === 'agent-notifications') {
+    nextSubtab = 'worker-notifications';
+  }
+
+  if (nextSubtab.indexOf('group-') === 0) nextTab = 'group';
+  if (nextSubtab.indexOf('worker-') === 0) nextTab = 'workers';
+  if (!['group', 'workers', 'engineer', 'architect'].includes(nextTab)) {
+    nextTab = 'group';
+  }
+  return { tab: nextTab, subtab: nextSubtab };
+}
+
 function switchGsTab(name) {
+  name = _normalizeGsSelection(name, '').tab;
   document.querySelectorAll('.gs-tab').forEach(t =>
     t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.gs-pane').forEach(p =>
     p.classList.toggle('active', p.dataset.pane === name));
   // Reset sub-tabs to first when switching main tabs
   const pane = document.querySelector(`.gs-pane[data-pane="${name}"]`);
+  if (!pane) return;
   if (pane) {
     const firstSub = pane.querySelector('.gs-subtab');
     if (firstSub) switchGsSubTab(name, firstSub);
@@ -835,8 +870,9 @@ function switchGsSubTab(pane, btn) {
 
 function openGroupSettings(group, initialTab, initialSubtab) {
   _settingsGroup = group;
-  _gsInitialTab = initialTab || 'group';
-  _gsInitialSubtab = initialSubtab || '';
+  const selection = _normalizeGsSelection(initialTab || 'group', initialSubtab || '');
+  _gsInitialTab = selection.tab;
+  _gsInitialSubtab = selection.subtab;
   send({ cmd: 'get_group_settings', group });
 }
 
@@ -1539,7 +1575,7 @@ function _showGroupSettings(group, data) {
   _gsColor = s.tab_color || '';
   _renderSwatches('gs-color-swatches', _gsColor, 'selectGsColor');
 
-  /* -- Agents tab -- */
+  /* -- Group > Worker defaults + Workers tab -- */
   document.getElementById('gs-agent-directory').value = s.agent_directory || '';
   document.getElementById('gs-agent-shell').value = s.agent_shell || '';
   _populateProviderSelect('gs-agent-provider', s.agent_provider || '', false);
@@ -1573,7 +1609,7 @@ function _showGroupSettings(group, data) {
   _gsAgentColor = s.agent_tab_color || '';
   _renderSwatches('gs-agent-color-swatches', _gsAgentColor, 'selectGsAgentColor', true);
 
-  /* -- Terminals sub-tab -- */
+  /* -- Group > Terminals sub-tab -- */
   document.getElementById('gs-terminal-prefix').value = s.terminal_name_prefix || '';
   document.getElementById('gs-terminal-boot-cmd').value = s.terminal_boot_command || '';
   document.getElementById('gs-terminal-cmd-args').value = s.terminal_command_args || '';
@@ -1723,8 +1759,9 @@ function _showGroupSettings(group, data) {
   onGsArchitectProviderChange();
   _resetGsArchitectSections();
 
-  const initialTab = _gsInitialTab || 'group';
-  const initialSubtab = _gsInitialSubtab || '';
+  const selection = _normalizeGsSelection(_gsInitialTab || 'group', _gsInitialSubtab || '');
+  const initialTab = selection.tab;
+  const initialSubtab = selection.subtab;
   switchGsTab(initialTab);
   if (initialSubtab) {
     const btn = document.querySelector(`.gs-pane[data-pane="${initialTab}"] .gs-subtab[data-subtab="${initialSubtab}"]`);
@@ -1737,7 +1774,13 @@ function _showGroupSettings(group, data) {
     ? 'gs-engineer-provider'
     : initialTab === 'architect'
       ? 'gs-architect-provider'
-      : 'gs-directory';
+      : initialTab === 'workers'
+        ? 'gs-agent-directory'
+        : initialSubtab === 'group-worker-defaults'
+          ? 'gs-agent-provider'
+          : initialSubtab === 'group-terminals'
+            ? 'gs-terminal-prefix'
+            : 'gs-directory';
   const focusEl = document.getElementById(focusId);
   if (focusEl) focusEl.focus();
 }
@@ -1788,7 +1831,7 @@ function submitGroupSettings() {
     max_agents: parseInt(document.getElementById('gs-max-agents').value) || 0,
     collapsed_default: document.getElementById('gs-collapsed').checked,
     filter_by_window: document.getElementById('gs-filter-window').checked,
-    /* Agents */
+    /* Group-wide worker defaults + worker execution */
     agent_directory: document.getElementById('gs-agent-directory').value.trim(),
     agent_profile: document.getElementById('gs-agent-profile').value,
     agent_shell: document.getElementById('gs-agent-shell').value,
