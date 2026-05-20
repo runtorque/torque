@@ -14217,6 +14217,42 @@ test('agent Messages tab owns a full-height scroll region and preserves full bod
   );
 });
 
+test('renderAgentCell status dot follows running/idle/error status for awareness agents', () => {
+  const { context } = createMainRenderHarness();
+  context.state.children = {};
+  context.state.board_tasks = {};
+
+  const baseAgent = {
+    id: 'worker-status',
+    name: 'Worker Status',
+    kind: 'worker',
+    group: 'alpha',
+    cell_type: 'agent',
+    agent_type: 'codex',
+    activity: '',
+    last_event_at: 123,
+  };
+
+  const runningHtml = context.renderAgentCell({
+    ...baseAgent,
+    status: 'running',
+  });
+  assert.match(runningHtml, /class="cell-status working"/);
+  assert.match(runningHtml, /title="Worker Status \(running\)"/);
+
+  const idleHtml = context.renderAgentCell({
+    ...baseAgent,
+    status: 'idle',
+  });
+  assert.match(idleHtml, /class="cell-status idle"/);
+
+  const errorHtml = context.renderAgentCell({
+    ...baseAgent,
+    status: 'error',
+  });
+  assert.match(errorHtml, /class="cell-status disconnected"/);
+});
+
 test('renderAgentCell shows per-engineer and architect digest pause controls with state-driven classes', () => {
   const { context } = createEngineerHarness();
   context.state.group_settings = {
