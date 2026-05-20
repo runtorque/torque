@@ -122,6 +122,7 @@ from .external_tickets import (
     post_ticket_comment,
     push_ticket_status,
 )
+from .board_sync import get_provider as get_board_sync_provider
 from .mcp import create_mcp_handler, dispatch_mcp_rpc_body
 from .mcp_retry import api_request_hash, is_api_write_command, replay_failed_writes
 from .identity import (
@@ -159,6 +160,7 @@ from .server_supervisor import (
 )
 from .server_worktrees import (
     _append_pr_url_to_squash_body,
+    _collect_linked_github_issues,
     _generate_merge_message,
     _pr_merge_failure_allows_auto,
     _pr_result_metadata,
@@ -168,6 +170,7 @@ from .server_worktrees import (
     _worktree_full_diff,
     _worktree_merge_diff_snapshot,
 )
+from .worktree_streams import compute_worktree_stream
 from .server_prompts import (
     build_dispatch_postscript,
     build_torque_system_prompt,
@@ -538,6 +541,184 @@ def _engineer_merge_mode_for_cell(state: MatrixState, cell) -> str:
             "engineer_merge_mode",
             "pr",
         )
+    )
+
+
+def _github_pr_closing_refs_enabled(group_settings) -> bool:
+    """Return whether GitHub linked issues should close through PR bodies."""
+    provider = str(
+        getattr(group_settings, "board_sync_provider", "none") or "none"
+    ).strip().lower()
+    if provider != "github":
+        return False
+    github_settings = getattr(group_settings, "board_sync_github", {}) or {}
+    if not isinstance(github_settings, dict):
+        return True
+    return bool(github_settings.get("github_close_issues_via_pr", True))
+
+
+def _add_task_with_pipeline_relatives(
+    *,
+    state: MatrixState,
+    task_ids: set[str],
+    task_id: str,
+) -> None:
+    """Add a task plus parent/root relatives to ``task_ids``."""
+    task_id = str(task_id or "").strip()
+    if not task_id or task_id not in state.board_tasks:
+        return
+
+    current_id = task_id
+    visited: set[str] = set()
+    while current_id and current_id not in visited:
+        visited.add(current_id)
+        current = state.board_tasks.get(current_id)
+        if not current:
+            break
+        task_ids.add(current_id)
+        parent_id = str(getattr(current, "parent_task_id", "") or "").strip()
+        if parent_id:
+            current_id = parent_id
+            continue
+        break
+
+    current = state.board_tasks.get(task_id)
+    root_id = str(getattr(current, "pipeline_root_id", "") or "").strip() \
+        if current else ""
+    if root_id and root_id in state.board_tasks:
+        task_ids.add(root_id)
+
+
+def _active_pr_closing_ref_tasks(state: MatrixState, cell) -> list[BoardTask]:
+    """Return branch/product/boundary tasks whose GitHub issues this PR closes."""
+    if not state or not cell:
+        return []
+
+    task_ids: set[str] = set()
+    current_id = str(getattr(cell, "current_task_id", "") or "").strip()
+    if current_id:
+        _add_task_with_pipeline_relatives(
+            state=state,
+            task_ids=task_ids,
+            task_id=current_id,
+        )
+
+    current = state.agent_current_task(getattr(cell, "id", ""))
+    if current:
+        _add_task_with_pipeline_relatives(
+            state=state,
+            task_ids=task_ids,
+            task_id=getattr(current, "id", ""),
+        )
+
+    for task in state.board_tasks.values():
+        if getattr(task, "agent_id", "") != getattr(cell, "id", ""):
+            continue
+        if getattr(task, "lane", "") in {"Backlog", "To Do", ARCHIVED_LANE}:
+            continue
+        _add_task_with_pipeline_relatives(
+            state=state,
+            task_ids=task_ids,
+            task_id=getattr(task, "id", ""),
+        )
+
+    repo_root = str(
+        getattr(cell, "worktree_repo_root", "")
+        or getattr(cell, "git_root", "")
+        or ""
+    ).strip()
+    branch = str(getattr(cell, "worktree_branch", "") or "").strip()
+    if repo_root and branch:
+        for task in branch_boundary_tasks(
+            state.board_tasks.values(),
+            repo_root=repo_root,
+            branch=branch,
+            statuses={"open"},
+        ):
+            _add_task_with_pipeline_relatives(
+                state=state,
+                task_ids=task_ids,
+                task_id=getattr(task, "id", ""),
+            )
+
+        try:
+            stream = compute_worktree_stream(
+                state,
+                repo_root=repo_root,
+                branch=branch,
+                group=getattr(cell, "group", "") or "",
+                stream_agent_ids={getattr(cell, "id", "")},
+                branch_exists_cache={
+                    (os.path.realpath(os.path.expanduser(repo_root)), branch):
+                    True
+                },
+            ) or {}
+        except Exception:
+            log.exception(
+                "Failed to compute worktree stream for PR closing refs "
+                "on branch '%s'",
+                branch,
+            )
+            stream = {}
+        queued_ids = {
+            str(task_id or "").strip()
+            for task_id in stream.get("queued_task_ids", []) or []
+            if str(task_id or "").strip()
+        }
+        stream_ids = set()
+        for key in (
+            "product_task_ids",
+            "started_task_ids",
+            "workflow_task_ids",
+        ):
+            stream_ids.update(
+                str(task_id or "").strip()
+                for task_id in stream.get(key, []) or []
+                if str(task_id or "").strip()
+            )
+        for key in ("foreground_task_id", "latest_boundary_task_id"):
+            task_id = str(stream.get(key, "") or "").strip()
+            if task_id:
+                stream_ids.add(task_id)
+        for task_id in stream_ids - queued_ids:
+            _add_task_with_pipeline_relatives(
+                state=state,
+                task_ids=task_ids,
+                task_id=task_id,
+            )
+
+    ordered = []
+    for task in state.board_tasks.values():
+        if getattr(task, "id", "") in task_ids:
+            ordered.append(task)
+    return ordered
+
+
+def _linked_github_issues_for_pr(
+    state: MatrixState,
+    cell,
+    *,
+    base_repo: str = "",
+) -> list[dict]:
+    """Collect de-duplicated linked GitHub issues for a PR merge."""
+    tasks = _active_pr_closing_ref_tasks(state, cell)
+    return _collect_linked_github_issues(tasks, base_repo=base_repo)
+
+
+async def _append_github_closing_refs_to_pr_body(
+    *,
+    body: str,
+    linked_issues: list[dict],
+    group_settings,
+) -> str:
+    """Append provider-rendered GitHub closing refs to a PR body."""
+    if not linked_issues:
+        return body or ""
+    provider = get_board_sync_provider("github")
+    return await provider.append_closing_refs(
+        body or "",
+        linked_issues,
+        group_settings,
     )
 
 
@@ -1090,6 +1271,32 @@ async def _run_pr_worktree_merge(
     title = pr_title or derived_title
     body = pr_body or derived_body
 
+    group_settings = state.get_group_settings(getattr(cell, "group", "") or "")
+    close_issues_via_pr = _github_pr_closing_refs_enabled(group_settings)
+    linked_issues: list[dict] = []
+    if close_issues_via_pr:
+        github_group_settings = getattr(
+            group_settings,
+            "board_sync_github",
+            {},
+        ) or {}
+        if not isinstance(github_group_settings, dict):
+            github_group_settings = {}
+        base_repo = (
+            str(preflight.get("name_with_owner") or "").strip()
+            or str(github_group_settings.get("github_repo", "")).strip()
+        )
+        linked_issues = _linked_github_issues_for_pr(
+            state,
+            cell,
+            base_repo=base_repo,
+        )
+        body = await _append_github_closing_refs_to_pr_body(
+            body=body,
+            linked_issues=linked_issues,
+            group_settings=group_settings,
+        )
+
     preserve_merge_diff, boundary_task_for_diff, merge_diff_snapshot = (
         await _capture_worktree_merge_preserve_diff(
             state=state,
@@ -1135,6 +1342,47 @@ async def _run_pr_worktree_merge(
         if gates.get("workflow_breach"):
             result["workflow_breach"] = gates["workflow_breach"]
         return result
+
+    if close_issues_via_pr and linked_issues and pr_result.get("existing"):
+        existing_body = str(pr_result.get("body") or "")
+        updated_existing_body = await _append_github_closing_refs_to_pr_body(
+            body=existing_body,
+            linked_issues=linked_issues,
+            group_settings=group_settings,
+        )
+        if updated_existing_body != existing_body:
+            edit_selector = (
+                pr_result.get("number")
+                or pr_result.get("url")
+                or branch
+            )
+            edit_result = await worktree_mgr.github_pr_edit_body(
+                wt,
+                edit_selector,
+                updated_existing_body,
+            )
+            if not edit_result.get("ok"):
+                result = _worktree_merge_error(
+                    aid,
+                    edit_result.get(
+                        "error",
+                        "Failed to update pull request body.",
+                    ),
+                    mode="pull_request",
+                    phase=edit_result.get("phase", "pr_edit_body"),
+                    url=pr_result.get("url", ""),
+                    pr_url=pr_result.get("url", ""),
+                )
+                if gates.get("workflow_breach"):
+                    result["workflow_breach"] = gates["workflow_breach"]
+                return result
+            pr_result.update({
+                key: value
+                for key, value in edit_result.items()
+                if key not in {"phase"}
+            })
+            pr_result["body"] = updated_existing_body
+            pr_result["body_updated"] = True
 
     pr_metadata = _pr_result_metadata(
         pr_result=pr_result,

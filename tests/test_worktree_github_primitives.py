@@ -179,6 +179,7 @@ class WorktreeGithubPrimitiveTests(unittest.IsolatedAsyncioTestCase):
         created = {
             "url": "https://github.com/acme/repo/pull/9",
             "number": 9,
+            "body": "Body",
             "headRefOid": "def456",
             "state": "OPEN",
         }
@@ -214,7 +215,61 @@ class WorktreeGithubPrimitiveTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result["existing"])
         self.assertEqual(result["url"], created["url"])
         self.assertEqual(result["number"], 9)
+        self.assertEqual(result["body"], "Body")
         self.assertEqual(result["head_sha"], "def456")
+        self.assertEqual(remaining, [])
+
+    async def test_github_pr_edit_body_updates_existing_pr_body(self):
+        updated = {
+            "url": "https://github.com/acme/repo/pull/7",
+            "number": 7,
+            "body": "Body\n\nLinked Torque issues:\n- Closes #12",
+            "headRefOid": "abc123",
+            "state": "OPEN",
+        }
+        body = updated["body"]
+        fake, _calls, remaining = self._fake_exec([
+            (
+                [
+                    "gh", "pr", "edit", "7",
+                    "--body", body,
+                ],
+                FakeProcess(),
+            ),
+            (
+                self._gh_pr_view_matcher("7"),
+                FakeProcess(stdout=json.dumps(updated)),
+            ),
+        ])
+
+        with patch("torque.worktree.asyncio.create_subprocess_exec",
+                   side_effect=fake):
+            result = await self.mgr.github_pr_edit_body("/wt", 7, body)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["phase"], "pr_edit_body")
+        self.assertEqual(result["body"], body)
+        self.assertEqual(result["number"], 7)
+        self.assertEqual(remaining, [])
+
+    async def test_github_pr_edit_body_failure_is_structured(self):
+        fake, _calls, remaining = self._fake_exec([
+            (
+                [
+                    "gh", "pr", "edit", "7",
+                    "--body", "Body",
+                ],
+                FakeProcess(returncode=1, stderr="permission denied"),
+            ),
+        ])
+
+        with patch("torque.worktree.asyncio.create_subprocess_exec",
+                   side_effect=fake):
+            result = await self.mgr.github_pr_edit_body("/wt", 7, "Body")
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["phase"], "pr_edit_body")
+        self.assertIn("permission denied", result["error"])
         self.assertEqual(remaining, [])
 
     async def test_request_squash_merge_reports_immediate_merge(self):

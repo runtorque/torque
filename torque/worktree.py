@@ -241,6 +241,7 @@ def _short_sha(sha: str) -> str:
 _GITHUB_PR_VIEW_FIELDS = ",".join([
     "url",
     "number",
+    "body",
     "headRefOid",
     "state",
     "mergeCommit",
@@ -312,6 +313,7 @@ def _pr_result_from_view_data(data: dict, *, phase: str = "pr_view",
         phase,
         url=url,
         number=number,
+        body=str(data.get("body") or ""),
         head_sha=str(data.get("headRefOid") or "").strip(),
         merge_commit_sha=_merge_commit_sha_from_pr_data(data),
         state=str(data.get("state") or "").strip(),
@@ -2719,6 +2721,40 @@ class WorktreeManager:
                                selector: str | int) -> dict:
         """Alias for callers that need an explicit PR status helper."""
         return await self.github_pr_view(worktree_path, selector)
+
+    async def github_pr_edit_body(self, worktree_path: str,
+                                  selector: str | int,
+                                  body: str = "") -> dict:
+        """Update an existing GitHub PR body via ``gh pr edit --body``."""
+        phase = "pr_edit_body"
+        selector_text = str(selector or "").strip()
+        if not worktree_path or not selector_text:
+            return _worktree_error(
+                phase,
+                "Worktree path and PR selector are required.",
+            )
+
+        edit = await self._run_gh(
+            worktree_path,
+            "pr",
+            "edit",
+            selector_text,
+            "--body",
+            body or "",
+        )
+        if edit.get("returncode") != 0:
+            err = edit.get("stderr") or edit.get("stdout") \
+                or "gh pr edit failed"
+            return _worktree_error(
+                phase,
+                f"Failed to update PR body: {err}",
+            )
+
+        status = await self.github_pr_view(worktree_path, selector_text)
+        if status.get("ok"):
+            status.update({"phase": phase, "body": body or ""})
+            return status
+        return _worktree_ok(phase, selector=selector_text, body=body or "")
 
     async def github_create_or_reuse_pr(self, worktree_path: str, branch: str,
                                         base_branch: str, title: str = "",
