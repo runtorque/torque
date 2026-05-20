@@ -1010,7 +1010,7 @@ function _gsBoardSyncProjectLabel(project) {
   const number = parseInt(project.number, 10) || 0;
   const name = String(project.name || project.title || '').trim() || 'Untitled project';
   const owner = String(project.owner || '').trim() || 'unknown owner';
-  return '#' + number + ' · ' + name + ' · ' + owner;
+  return owner + ' · #' + (number || '?') + ' — ' + name;
 }
 
 function _gsBoardSyncFindProject(value) {
@@ -1071,10 +1071,12 @@ function _gsBoardSyncRenderProjectOptions() {
 
 function _gsBoardSyncProjectsKey() {
   const providerEl = document.getElementById('gs-board-sync-provider');
+  const repoEl = document.getElementById('gs-board-sync-github-repo');
   const ownerEl = document.getElementById('gs-board-sync-github-project-owner');
   const provider = providerEl ? String(providerEl.value || 'none') : 'none';
+  const repo = repoEl ? String(repoEl.value || '').trim() : '';
   const owner = ownerEl ? String(ownerEl.value || '').trim() : '';
-  return [_settingsGroup || '', provider, owner].join('|');
+  return [_settingsGroup || '', provider, repo, owner].join('|');
 }
 
 function _gsBoardSyncMaybeLoadProjects(force) {
@@ -1121,15 +1123,22 @@ function _handleBoardSyncProjects(msg) {
   _gsBoardSyncProjectOptions = Array.isArray(msg.projects) ? msg.projects.slice() : [];
   _gsBoardSyncRenderProjectOptions();
   if (_gsBoardSyncProjectOptions.length) {
+    const owners = Array.isArray(msg.owners) ? msg.owners.filter(Boolean) : [];
+    let loadedMessage = 'Loaded ' + _gsBoardSyncProjectOptions.length + ' accessible project'
+      + (_gsBoardSyncProjectOptions.length === 1 ? '' : 's');
+    if (owners.length) loadedMessage += ' from ' + owners.join(', ');
+    loadedMessage += '.';
+    if (Array.isArray(msg.errors) && msg.errors.length) {
+      loadedMessage += ' Some owners could not be checked.';
+    }
     _gsBoardSyncSetProjectStatus(
       'ok',
-      'Loaded ' + _gsBoardSyncProjectOptions.length + ' accessible project'
-        + (_gsBoardSyncProjectOptions.length === 1 ? '' : 's') + '.'
+      loadedMessage
     );
   } else {
     _gsBoardSyncSetProjectStatus(
       'error',
-      'No accessible projects — verify gh auth scope or owner setting.'
+      'No accessible projects — verify gh auth scope or try Other owner…'
     );
   }
 }

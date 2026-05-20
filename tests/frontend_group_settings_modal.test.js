@@ -261,7 +261,9 @@ test('group settings markup renders board sync provider subtab and task sync mou
   assert.match(html, /<select id="gs-board-sync-provider"[\s\S]*<option value="none">None<\/option>[\s\S]*<option value="github">GitHub<\/option>/);
   assert.match(html, /id="gs-board-sync-enabled"[\s\S]*Enable sync/);
   assert.match(html, /id="gs-board-sync-github-project-select"[\s\S]*Reload projects/);
-  assert.match(html, /Specify project manually/);
+  assert.match(html, /<details class="board-sync-manual-project">\s*<summary>Other owner…<\/summary>/);
+  assert.match(html, /Project owner\s*<span class="label-hint">optional advanced fallback<\/span>/);
+  assert.doesNotMatch(html, /<details class="board-sync-manual-project"[^>]*open/);
   assert.match(html, /Lane → status mapping[\s\S]*id="gs-board-sync-github-lane-map"/);
   assert.match(html, /id="gs-board-sync-test"[\s\S]*Test connection/);
   assert.match(html, /id="task-board-sync-section"/);
@@ -1354,6 +1356,7 @@ test('Group Settings board sync project dropdown reloads and selection resolves 
   vm.runInContext('_settingsGroup = "alpha";', context);
   ensure('gs-board-sync-provider').value = 'github';
   ensure('gs-board-sync-enabled').checked = false;
+  ensure('gs-board-sync-github-repo').value = 'acme/torque';
   ensure('gs-board-sync-github-project-owner').value = '';
   ensure('gs-board-sync-github-project-number').value = '';
   ensure('gs-board-sync-github-project-id').value = '';
@@ -1362,20 +1365,26 @@ test('Group Settings board sync project dropdown reloads and selection resolves 
   let call = sandbox.sendCalls.at(-1);
   assert.equal(call.cmd, 'board_sync_list_projects');
   assert.equal(call.provider, 'github');
+  assert.equal(call.owner, '');
   assert.equal(call.settings.board_sync_enabled, false);
+  assert.equal(call.settings.board_sync_github.github_repo, 'acme/torque');
 
   vm.runInContext(`_handleBoardSyncProjects({
     type: "board_sync_list_projects",
     group: "alpha",
     ok: true,
+    owners: ["@me", "acme"],
     projects: [
+      { number: 5, name: "Personal", owner: "octocat", id: "PVT_5", url: "https://github.com/users/octocat/projects/5" },
       { number: 7, name: "Roadmap", owner: "acme", id: "PVT_7", url: "https://github.com/orgs/acme/projects/7" }
     ]
   })`, context);
 
   const select = ensure('gs-board-sync-github-project-select');
-  assert.equal(select.children.length, 2);
-  assert.equal(select.children[1].textContent, '#7 · Roadmap · acme');
+  assert.equal(select.children.length, 3);
+  assert.equal(select.children[1].textContent, 'octocat · #5 — Personal');
+  assert.equal(select.children[2].textContent, 'acme · #7 — Roadmap');
+  assert.match(ensure('gs-board-sync-project-summary').textContent, /from @me, acme/);
 
   select.value = 'acme#7#PVT_7';
   vm.runInContext('onGsBoardSyncProjectSelect()', context);

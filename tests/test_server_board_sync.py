@@ -38,6 +38,7 @@ class FakeBoardSyncProvider:
         }
         self.external_items = []
         self.projects = []
+        self.projects_by_owner = {}
         self.project_owner_calls = []
         self.started = asyncio.Event()
         self.release = asyncio.Event()
@@ -88,6 +89,8 @@ class FakeBoardSyncProvider:
 
     async def list_projects(self, owner=None):
         self.project_owner_calls.append(owner)
+        if self.projects_by_owner:
+            return list(self.projects_by_owner.get(owner, []))
         return list(self.projects)
 
     async def append_closing_refs(self, pr_body, _linked_issues, _settings=None):
@@ -429,9 +432,12 @@ class BoardSyncManagerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_list_projects_uses_owner_override_and_does_not_require_enabled_sync(self):
         provider = FakeBoardSyncProvider()
-        provider.projects = [
-            {"number": 3, "name": "Roadmap", "owner": "acme", "id": "PVT_3"},
-        ]
+        provider.projects_by_owner = {
+            "@me": [],
+            "acme": [
+                {"number": 3, "name": "Roadmap", "owner": "acme", "id": "PVT_3"},
+            ],
+        }
         state = make_state()
         state.update_group_settings(
             "g",
@@ -451,7 +457,49 @@ class BoardSyncManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["provider"], "github")
         self.assertEqual(result["projects"][0]["name"], "Roadmap")
-        self.assertEqual(provider.project_owner_calls, ["acme"])
+        self.assertEqual(result["owners"], ["@me", "acme"])
+        self.assertEqual(provider.project_owner_calls, ["@me", "acme"])
+
+    async def test_list_projects_auto_discovers_me_and_repo_owner_and_dedupes(self):
+        provider = FakeBoardSyncProvider()
+        provider.projects_by_owner = {
+            "@me": [
+                {"number": 5, "name": "Personal", "owner": "octocat", "id": "PVT_ME"},
+                {"number": 2, "name": "Shared", "owner": "runtorque", "id": "PVT_DUP"},
+            ],
+            "runtorque": [
+                {"number": 2, "name": "Shared", "owner": "runtorque", "id": "PVT_DUP"},
+                {"number": 9, "name": "Org Roadmap", "owner": "runtorque", "id": "PVT_ORG"},
+            ],
+        }
+        state = make_state()
+        state.update_group_settings(
+            "g",
+            board_sync_provider="none",
+            board_sync_enabled=False,
+            board_sync_github={},
+        )
+        manager = self.make_manager(state, provider)
+
+        result = await manager.list_projects(
+            "g",
+            provider_name="github",
+            settings_overrides={
+                "board_sync_provider": "github",
+                "board_sync_github": {
+                    "github_repo": "runtorque/torque",
+                    "github_project_owner": "",
+                },
+            },
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["owners"], ["@me", "runtorque"])
+        self.assertEqual(provider.project_owner_calls, ["@me", "runtorque"])
+        self.assertEqual(
+            [project["id"] for project in result["projects"]],
+            ["PVT_ME", "PVT_DUP", "PVT_ORG"],
+        )
 
     async def test_pull_preview_and_apply_round_trip(self):
         provider = FakeBoardSyncProvider()

@@ -83,6 +83,52 @@ def _provider_nested_settings(group_settings, provider_name: str) -> dict:
     return {}
 
 
+def _github_repo_owner(repo: object) -> str:
+    """Return the owner portion from a GitHub ``owner/repo``-style value."""
+    text = str(repo or "").strip()
+    if not text:
+        return ""
+    if text.startswith("git@github.com:"):
+        text = text.split(":", 1)[1]
+    marker = "github.com/"
+    if marker in text:
+        text = text.split(marker, 1)[1]
+    text = text.strip().strip("/")
+    if text.endswith(".git"):
+        text = text[:-4]
+    parts = [part.strip() for part in text.split("/") if part.strip()]
+    if len(parts) < 2:
+        return ""
+    return parts[0].lstrip("@")
+
+
+def _github_project_owner_queries(nested: dict, explicit_owner: str = "") -> list[str]:
+    """Owners to query for GitHub Projects in the config dropdown.
+
+    The default path should not require a manual owner.  Query the
+    authenticated user's projects first, then the configured repo owner, then
+    any advanced/manual owner value as a fallback.
+    """
+    owners: list[str] = []
+    seen: set[str] = set()
+
+    def add(owner: object) -> None:
+        value = str(owner or "").strip()
+        if not value:
+            return
+        key = value.lower()
+        if key in seen:
+            return
+        seen.add(key)
+        owners.append(value)
+
+    add("@me")
+    add(_github_repo_owner(nested.get("github_repo")))
+    add(explicit_owner)
+    add(nested.get("github_project_owner"))
+    return owners
+
+
 def _command_settings(group_settings, provider_name: str = "", overrides=None):
     """Return a temporary settings object for read-only helper commands.
 
@@ -471,48 +517,91 @@ class BoardSyncManager:
         provider_name = normalize_provider_name(
             getattr(settings, "board_sync_provider", "")
         )
-        if not owner:
-            nested = _provider_nested_settings(settings, provider_name)
-            owner = str(nested.get("github_project_owner") or "").strip()
+        nested = _provider_nested_settings(settings, provider_name)
+        if provider_name == "github":
+            owners = _github_project_owner_queries(nested, owner)
+        else:
+            if not owner:
+                owner = str(nested.get("github_project_owner") or "").strip()
+            owners = [owner] if owner else [""]
         provider = self.provider_factory(provider_name)
-        try:
-            raw_projects = await provider.list_projects(owner or None)
-        except Exception as exc:
-            log.exception("Board sync project list failed for group %s", group)
-            raw_projects = [{
-                "ok": False,
-                "phase": "list_projects",
-                "provider": provider_name,
-                "error": str(exc) or type(exc).__name__,
-            }]
-        if not isinstance(raw_projects, list):
-            raw_projects = [{
-                "ok": False,
-                "phase": "list_projects",
-                "provider": provider_name,
-                "error": "Provider returned invalid project list",
-            }]
+        raw_projects: list[dict] = []
+        for project_owner in owners:
+            try:
+                owner_projects = await provider.list_projects(project_owner or None)
+            except Exception as exc:
+                log.exception(
+                    "Board sync project list failed for group %s owner %s",
+                    group,
+                    project_owner or "@me",
+                )
+                owner_projects = [{
+                    "ok": False,
+                    "phase": "list_projects",
+                    "provider": provider_name,
+                    "owner": project_owner or "",
+                    "error": str(exc) or type(exc).__name__,
+                }]
+            if not isinstance(owner_projects, list):
+                owner_projects = [{
+                    "ok": False,
+                    "phase": "list_projects",
+                    "provider": provider_name,
+                    "owner": project_owner or "",
+                    "error": "Provider returned invalid project list",
+                }]
+            for item in owner_projects:
+                if not isinstance(item, dict):
+                    continue
+                project = dict(item)
+                project.setdefault("query_owner", project_owner or "")
+                if project.get("ok") is False:
+                    project.setdefault("owner", project_owner or "")
+                elif not str(project.get("owner") or "").strip():
+                    project["owner"] = project_owner or ""
+                raw_projects.append(project)
 
-        errors = [
-            dict(item)
-            for item in raw_projects
-            if isinstance(item, dict) and item.get("ok") is False
-        ]
-        projects = [
-            dict(item)
-            for item in raw_projects
-            if isinstance(item, dict) and item.get("ok") is not False
-        ]
+        errors: list[dict] = []
+        projects: list[dict] = []
+        seen_project_ids: set[str] = set()
+        seen_project_fallbacks: set[tuple[str, str, str]] = set()
+        for item in raw_projects:
+            if item.get("ok") is False:
+                errors.append(item)
+                continue
+            project_id = str(
+                item.get("id")
+                or item.get("node_id")
+                or item.get("nodeId")
+                or ""
+            ).strip()
+            if project_id:
+                project_key = project_id.lower()
+                if project_key in seen_project_ids:
+                    continue
+                seen_project_ids.add(project_key)
+            else:
+                fallback_key = (
+                    str(item.get("owner") or "").strip().lower(),
+                    str(item.get("number") or "").strip(),
+                    str(item.get("name") or item.get("title") or "").strip().lower(),
+                )
+                if fallback_key in seen_project_fallbacks:
+                    continue
+                seen_project_fallbacks.add(fallback_key)
+            projects.append(item)
+        ok = not errors or bool(projects)
         return {
-            "ok": not errors,
+            "ok": ok,
             "type": "board_sync_list_projects",
             "group": group,
             "provider": provider_name,
             "owner": owner or "",
+            "owners": owners,
             "projects": projects,
             "project_count": len(projects),
             "errors": errors,
-            **({"error": errors[0].get("error", "")} if errors else {}),
+            **({"error": errors[0].get("error", "")} if errors and not projects else {}),
         }
 
     async def pull_preview(self, task_id: str) -> dict:
