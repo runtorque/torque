@@ -460,9 +460,14 @@ Alias: `rm`
 
 Structured external-board synchronization. The legacy/manual external-ticket
 commands (`board import/link/open/push/comment`) remain available; `board sync`
-uses the configured board-sync provider for the group.
+uses the configured board-sync provider for the group. See the
+[operator guide](../operate/board-sync.md) for setup and recovery.
 
 ```bash
+torque group settings backend \
+  -s board_sync_provider=github \
+  -s board_sync_enabled=true \
+  -s 'board_sync_github={"github_repo":"owner/repo","github_project_owner":"org","github_project_number":12,"github_lane_status_map":{"Backlog":"Todo","In Progress":"In Progress","Done":"Done"}}'
 torque board sync test -g backend
 torque board sync push fix-login
 torque board sync push --group backend
@@ -478,8 +483,11 @@ torque board sync pull --preview --group backend
 | `board sync pull --preview TASK` | Preview remote changes for one task. |
 | `board sync pull --preview --group GROUP` | Preview remote changes for each task in a group. |
 
-Pull previews are read-only. An apply command is intentionally not exposed
-until previews are persisted by the daemon.
+The CLI pull command is read-only. To apply inbound fields, open the card or
+task modal in the UI, run **Pull preview**, select fields, and click **Apply
+selected**. Use `--json` to inspect structured `provider`, `phase`, and `error`
+fields when recovering auth, scope, repo, project, Status option, label, or
+rate-limit failures.
 
 ### board lanes
 

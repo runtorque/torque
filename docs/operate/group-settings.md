@@ -2,7 +2,9 @@
 
 Each group has configurable settings that act as defaults when creating agents and terminals. Open the settings modal by clicking the gear icon (++2699++) on the group header, or right-click the header and select **Settings...**.
 
-Settings are organized into three tabs: **Group**, **Agents**, and **Engineer**.
+Settings are organized into four tabs: **Group**, **Workers**, **Engineer**, and
+**Architect**. The Group tab contains sub-tabs for general defaults, worker
+defaults, terminals, sync provider configuration, and advanced actions.
 
 ## Group tab
 
@@ -26,9 +28,24 @@ When enabled, the group starts collapsed each time the Torque workspace webview 
 
 When enabled, the group only appears in iTerm2 windows where it has active sessions. If all sessions are closed, the group appears in every window so you can relaunch.
 
-## Agents tab
+### Sync provider
 
-These settings override the group defaults when creating agents specifically. Leave a field empty to inherit from the group tab.
+Use **Group → Sync provider** to configure external board sync for this group.
+V1 supports GitHub Issues plus Projects v2. Choose `github`, set
+`board_sync_enabled`, then provide `github_repo`,
+`github_project_owner`/`github_project_number`, the Project Status field name,
+and the lane → Status JSON map. The **Test connection** button runs the same
+preflight as `torque board sync test -g GROUP` and surfaces `gh` auth, missing
+`project` scope, repo, project, and Status-field failures.
+
+See [Board sync operator guide](board-sync.md) for setup, PR closing refs,
+manual pull preview/apply, limitations, and recovery.
+
+## Group → Worker defaults and Workers tab
+
+Worker-related settings are split between **Group → Worker defaults** (provider,
+role, model, reasoning effort) and the **Workers** tab (execution directory,
+worktrees, notifications). Leave a field empty to inherit from the group tab.
 
 | Setting | Description |
 |---------|-------------|
@@ -46,9 +63,9 @@ These settings override the group defaults when creating agents specifically. Le
 | **Session resume** | When supported by the provider, relaunch resumes the provider conversation instead of starting from scratch. |
 | **Idle timeout** | Minutes Torque waits before it may flag a quiet agent for attention. Set to `0` to disable. |
 
-### Git worktree per agent
+### Git worktree per worker
 
-When enabled, creating an agent automatically creates a new git worktree branched from the directory's repository. Each agent gets its own branch (`torque/{slug}-{short-id}`) and worktree path, so multiple agents can work on the same repo in parallel without conflicts. The worktree is cleaned up when the agent is removed.
+When enabled, creating a worker automatically creates a new git worktree branched from the directory's repository. Each worker gets its own branch (`torque/{slug}-{short-id}`) and worktree path, so multiple workers can work on the same repo in parallel without conflicts. The worktree is cleaned up when the worker is removed.
 
 See [Worktrees](../tasks/worktrees.md) for the full guide on checkpoints, rollback, and merge.
 
@@ -81,9 +98,10 @@ When worktrees are enabled, these settings control the execution environment:
 
 See [Agents & Sessions](../team/workers.md) for the end-to-end runtime model.
 
-## Agents → Terminals
+## Group → Terminals
 
-These settings override the group defaults when creating terminals specifically. They live inside the **Agents** tab, immediately after **General**.
+These settings override the group defaults when creating terminals specifically.
+They live under **Group → Terminals**.
 
 | Setting | Description |
 |---------|-------------|

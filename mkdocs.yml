@@ -58,6 +58,7 @@ nav:
       - Schedules: operate/schedules.md
       - Sessions: operate/sessions.md
       - Group Settings: operate/group-settings.md
+      - Board Sync: operate/board-sync.md
       - Keyboard Shortcuts: operate/keyboard-shortcuts.md
       - Operations: operate/operations.md
   - Reference:
