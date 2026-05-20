@@ -391,15 +391,18 @@
     <h2 id="gs-title">Group Settings</h2>
     <div class="gs-tabs">
       <button class="gs-tab active" data-tab="group" onclick="switchGsTab('group')">Group</button>
-      <button class="gs-tab" data-tab="agents" onclick="switchGsTab('agents')">Agents</button>
+      <button class="gs-tab" data-tab="workers" onclick="switchGsTab('workers')">Workers</button>
       <button class="gs-tab" data-tab="engineer" onclick="switchGsTab('engineer')">Engineer</button>
       <button class="gs-tab" data-tab="architect" onclick="switchGsTab('architect')">Architect</button>
     </div>
 
     <!-- Group tab -->
+    <!-- Option A: the Group section owns group-wide policy plus terminal defaults as sub-tabs; Workers is execution-scoped. -->
     <div class="gs-pane active" data-pane="group">
       <div class="gs-subtabs">
         <button class="gs-subtab active" data-subtab="group-general" onclick="switchGsSubTab('group',this)">General</button>
+        <button class="gs-subtab" data-subtab="group-worker-defaults" onclick="switchGsSubTab('group',this)">Worker defaults</button>
+        <button class="gs-subtab" data-subtab="group-terminals" onclick="switchGsSubTab('group',this)">Terminals</button>
         <button class="gs-subtab" data-subtab="group-advanced" onclick="switchGsSubTab('group',this)">Advanced</button>
       </div>
 
@@ -422,9 +425,7 @@
       <textarea id="gs-env-vars" rows="3" placeholder="FOO=bar&#10;BAZ=qux"></textarea>
       <label>Env file <span class="label-hint">sourced on session start</span></label>
       <input id="gs-env-file" placeholder=".env" autocomplete="off">
-      <label>Auto-create terminals</label>
-      <input id="gs-auto-terminals" type="number" min="0" max="10" value="0">
-      <label>Max agents <span class="label-hint">0 = unlimited</span></label>
+      <label>Max workers <span class="label-hint">0 = unlimited</span></label>
       <input id="gs-max-agents" type="number" min="0" max="100" value="0">
       <label class="gs-checkbox iterm2-only">
         <input id="gs-collapsed" type="checkbox"> Start collapsed on load
@@ -436,64 +437,28 @@
       </label>
       </div>
 
-      <!-- Advanced sub-tab -->
-      <div class="gs-subpane" data-subpane="group-advanced">
-        <label>Delete group</label>
-        <div class="label-hint task-modal-section-intro">Delete this group and its cells. This action uses the existing delete confirmation flow.</div>
-        <button type="button" class="btn-danger" onclick="deleteSettingsGroup()">Delete group</button>
-      </div>
-    </div>
-
-    <!-- Agents tab -->
-    <div class="gs-pane" data-pane="agents">
-      <div class="gs-subtabs">
-        <button class="gs-subtab active" data-subtab="agent-general" onclick="switchGsSubTab('agents',this)">General</button>
-        <button class="gs-subtab" data-subtab="agent-terminals" onclick="switchGsSubTab('agents',this)">Terminals</button>
-        <button class="gs-subtab" data-subtab="agent-worktree" onclick="switchGsSubTab('agents',this)">Worktree</button>
-        <button class="gs-subtab" data-subtab="agent-notifications" onclick="switchGsSubTab('agents',this)">Notifications</button>
-      </div>
-
-      <!-- General sub-tab -->
-      <div class="gs-subpane active" data-subpane="agent-general">
-        <label>Directory</label>
-        <input id="gs-agent-directory" placeholder="Same as group" autocomplete="off">
-        <label class="iterm2-only">Profile</label>
-        <select id="gs-agent-profile" class="iterm2-only"></select>
-        <label>Shell</label>
-        <select id="gs-agent-shell">
-          <option value="">Same as group</option>
-          <option value="zsh">zsh</option>
-          <option value="bash">bash</option>
-          <option value="fish">fish</option>
-        </select>
-        <label class="iterm2-only">Tab color</label>
-        <div class="color-swatches iterm2-only" id="gs-agent-color-swatches"></div>
-        <label>Agent CLI</label>
+      <!-- Worker defaults sub-tab -->
+      <div class="gs-subpane" data-subpane="group-worker-defaults">
+        <div class="label-hint task-modal-section-intro">Group-wide defaults applied to newly spawned workers. Per-worker execution behavior lives under the Workers tab.</div>
+        <label>Default worker provider</label>
         <select id="gs-agent-provider" onchange="onGsProviderChange()"></select>
-        <label>Default role</label>
+        <label>Default worker role</label>
         <select id="gs-default-agent-template"></select>
         <div id="gs-agent-boot-cmd-row" class="hidden">
-          <label>Boot command</label>
+          <label>Default boot command</label>
           <input id="gs-agent-boot-cmd" placeholder="e.g. my-agent-cli" autocomplete="off">
         </div>
-        <label>Default model</label>
+        <label>Default worker model</label>
         <input id="gs-agent-model" placeholder="Use provider default" autocomplete="off">
-        <label>Default reasoning effort</label>
+        <label>Default worker reasoning effort</label>
         <select id="gs-agent-reasoning-effort"></select>
-        <label>Additional environment <span class="label-hint">KEY=VALUE per line</span></label>
-        <textarea id="gs-agent-env-vars" rows="3" placeholder="FOO=bar&#10;BAZ=qux"></textarea>
-        <label>Env file</label>
-        <input id="gs-agent-env-file" placeholder="Inherits from group" autocomplete="off">
-        <label class="gs-checkbox">
-          <input id="gs-session-resume" type="checkbox" checked> Resume session on relaunch
-          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="When relaunching an agent, resume the previous conversation instead of starting fresh. Currently supported for Claude Code.">?</span>
-        </label>
-        <label>Idle timeout <span class="label-hint">minutes, 0 = disable</span></label>
-        <input id="gs-agent-idle-timeout" type="number" min="0" max="60" value="5">
       </div>
 
       <!-- Terminals sub-tab -->
-      <div class="gs-subpane" data-subpane="agent-terminals">
+      <div class="gs-subpane" data-subpane="group-terminals">
+        <div class="label-hint task-modal-section-intro">Terminal defaults for this group. Worker terminal/session behavior is configured separately under Workers.</div>
+        <label>Auto-create terminals</label>
+        <input id="gs-auto-terminals" type="number" min="0" max="10" value="0">
         <label>Name prefix</label>
         <input id="gs-terminal-prefix" placeholder="e.g. Shell" autocomplete="off">
         <label>Boot command</label>
@@ -529,11 +494,55 @@
         </label>
       </div>
 
-      <!-- Worktree sub-tab -->
-      <div class="gs-subpane" data-subpane="agent-worktree">
+      <!-- Advanced sub-tab -->
+      <div class="gs-subpane" data-subpane="group-advanced">
+        <label>Delete group</label>
+        <div class="label-hint task-modal-section-intro">Delete this group and its cells. This action uses the existing delete confirmation flow.</div>
+        <button type="button" class="btn-danger" onclick="deleteSettingsGroup()">Delete group</button>
+      </div>
+    </div>
+
+    <!-- Workers tab -->
+    <div class="gs-pane" data-pane="workers">
+      <div class="gs-subtabs">
+        <button class="gs-subtab active" data-subtab="worker-execution" onclick="switchGsSubTab('workers',this)">Execution</button>
+        <button class="gs-subtab" data-subtab="worker-worktree" onclick="switchGsSubTab('workers',this)">Worktree</button>
+        <button class="gs-subtab" data-subtab="worker-notifications" onclick="switchGsSubTab('workers',this)">Notifications</button>
+      </div>
+
+      <!-- Execution sub-tab -->
+      <div class="gs-subpane active" data-subpane="worker-execution">
+        <div class="label-hint task-modal-section-intro">Worker execution context defaults. Provider, model, command, and default role are group-wide policy under Group → Worker defaults.</div>
+        <label>Directory</label>
+        <input id="gs-agent-directory" placeholder="Same as group" autocomplete="off">
+        <label class="iterm2-only">Profile</label>
+        <select id="gs-agent-profile" class="iterm2-only"></select>
+        <label>Shell</label>
+        <select id="gs-agent-shell">
+          <option value="">Same as group</option>
+          <option value="zsh">zsh</option>
+          <option value="bash">bash</option>
+          <option value="fish">fish</option>
+        </select>
+        <label class="iterm2-only">Tab color</label>
+        <div class="color-swatches iterm2-only" id="gs-agent-color-swatches"></div>
+        <label>Additional environment <span class="label-hint">KEY=VALUE per line</span></label>
+        <textarea id="gs-agent-env-vars" rows="3" placeholder="FOO=bar&#10;BAZ=qux"></textarea>
+        <label>Env file</label>
+        <input id="gs-agent-env-file" placeholder="Inherits from group" autocomplete="off">
         <label class="gs-checkbox">
-          <input id="gs-worktree" type="checkbox" onchange="_toggleWorktreeFields()"> Git worktree per agent
-          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Create a new git worktree and branch for each agent, so they can work on the same repo in parallel without conflicts.">?</span>
+          <input id="gs-session-resume" type="checkbox" checked> Resume session on relaunch
+          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="When relaunching a worker, resume the previous conversation instead of starting fresh. Currently supported for Claude Code.">?</span>
+        </label>
+        <label>Idle timeout <span class="label-hint">minutes, 0 = disable</span></label>
+        <input id="gs-agent-idle-timeout" type="number" min="0" max="60" value="5">
+      </div>
+
+      <!-- Worktree sub-tab -->
+      <div class="gs-subpane" data-subpane="worker-worktree">
+        <label class="gs-checkbox">
+          <input id="gs-worktree" type="checkbox" onchange="_toggleWorktreeFields()"> Git worktree per worker
+          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Create a new git worktree and branch for each worker, so they can work on the same repo in parallel without conflicts.">?</span>
         </label>
         <div id="gs-wt-fields" style="display:none;padding-left:20px">
           <label>Worktree directory <span class="label-hint">relative to repo root</span></label>
@@ -542,11 +551,11 @@
           <input id="gs-wt-base-branch" placeholder="main" autocomplete="off">
           <label class="gs-checkbox">
             <input id="gs-wt-auto-checkpoint" type="checkbox"> Auto-checkpoint on stop
-            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Automatically commit all changes when an agent stops. Creates a checkpoint commit on the worktree branch.">?</span>
+            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Automatically commit all changes when a worker stops. Creates a checkpoint commit on the worktree branch.">?</span>
           </label>
           <label class="gs-checkbox">
             <input id="gs-wt-checkpoint-on-progress" type="checkbox"> Checkpoint on progress
-            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Automatically checkpoint when an agent reports progress or completes a task. Throttled to at most once per 5 minutes. Creates finer-grained save points for rollback.">?</span>
+            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Automatically checkpoint when a worker reports progress or completes a task. Throttled to at most once per 5 minutes. Creates finer-grained save points for rollback.">?</span>
           </label>
           <label class="gs-checkbox">
             <input id="gs-wt-merge-squash" type="checkbox" checked> Squash commits on merge
@@ -570,13 +579,13 @@
           </label>
           <textarea id="gs-wt-merge-instructions" rows="2" placeholder="e.g. Use a conventional commit message"></textarea>
           <label>Default post-merge cleanup
-            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="What Torque should do by default after a successful merge when no explicit cleanup choice is provided. Same-agent queued follow-up tasks still keep the agent and worktree alive.">?</span>
+            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="What Torque should do by default after a successful merge when no explicit cleanup choice is provided. Same-worker queued follow-up tasks still keep the worker and worktree alive.">?</span>
           </label>
           <select id="gs-wt-merge-cleanup">
-            <option value="keep">Keep agent and worktree</option>
-            <option value="close">Close agent only</option>
+            <option value="keep">Keep worker and worktree</option>
+            <option value="close">Close worker only</option>
             <option value="remove">Delete worktree only</option>
-            <option value="close_remove">Close agent and delete worktree</option>
+            <option value="close_remove">Close worker and delete worktree</option>
           </select>
           <label class="gs-checkbox">
             <input id="gs-wt-merge-preserve-diff" type="checkbox"> Preserve merge diff by default
@@ -601,10 +610,10 @@
       </div>
 
       <!-- Notifications sub-tab -->
-      <div class="gs-subpane" data-subpane="agent-notifications">
+      <div class="gs-subpane" data-subpane="worker-notifications">
         <label class="gs-checkbox">
-          <input id="gs-notifications" type="checkbox"> Enable macOS notifications
-          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Send macOS notifications when agents in this group finish, encounter errors, or need attention. Notifications are batched over 5 seconds.">?</span>
+          <input id="gs-notifications" type="checkbox"> Enable macOS worker notifications
+          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Send macOS notifications when workers in this group finish, encounter errors, or need attention. Notifications are batched over 5 seconds.">?</span>
         </label>
         <label class="gs-checkbox">
           <input id="gs-notify-finish" type="checkbox" checked> Notify on finish
@@ -679,7 +688,7 @@
           <option value="aggressive_auto_continue">Aggressive auto-continue</option>
         </select>
         <label>Default worker concurrency
-          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Used as the default max_concurrent value when the Engineer dispatches a wave without specifying one explicitly. Counts non-Engineer worker agents only.">?</span>
+            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Used as the default max_concurrent value when the Engineer dispatches a wave without specifying one explicitly. Counts non-Engineer workers only.">?</span>
         </label>
         <select id="gs-engineer-default-worker-concurrency">
           <option value="1">1 worker</option>
@@ -696,11 +705,11 @@
           <option value="balanced">Balanced waves</option>
           <option value="large">Fill available capacity</option>
         </select>
-        <label>Same-agent follow-up preference</label>
+        <label>Same-worker follow-up preference</label>
         <select id="gs-engineer-same-agent-follow-up-preference">
           <option value="balanced">Balanced</option>
-          <option value="prefer_same_agent">Prefer same agent</option>
-          <option value="prefer_fresh_agent">Prefer fresh agent</option>
+          <option value="prefer_same_agent">Prefer same worker</option>
+          <option value="prefer_fresh_agent">Prefer fresh worker</option>
         </select>
         <label>Notification noise
           <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Quick presets for how much digest noise Engineer should send. Detailed changes in System → Digest settings switch the preset to Custom.">?</span>
@@ -733,7 +742,7 @@
             <label class="gs-checkbox">
               <input id="gs-engineer-restrict-to-created-agents" type="checkbox" checked>
               Allow the Engineer to see workers created by other Engineers
-              <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="When enabled, this Engineer can see and control worker agents created by other Engineers. Human operators still see all agents on the board.">?</span>
+            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="When enabled, this Engineer can see and control workers created by other Engineers. Human operators still see all workers on the board.">?</span>
             </label>
             <label class="gs-checkbox">
               <input id="gs-engineer-can-override-worker-provider" type="checkbox" checked>

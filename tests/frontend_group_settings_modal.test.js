@@ -90,20 +90,20 @@ function createSandbox() {
     return elements.get(id);
   }
 
-  const gsTabs = ['group', 'agents', 'engineer', 'architect'].map((name) => {
+  const gsTabs = ['group', 'workers', 'engineer', 'architect'].map((name) => {
     const el = new FakeElement(`tab-${name}`);
     el.dataset.tab = name;
     return el;
   });
-  const gsPanes = ['group', 'agents', 'engineer', 'architect'].map((name) => {
+  const gsPanes = ['group', 'workers', 'engineer', 'architect'].map((name) => {
     const el = new FakeElement(`pane-${name}`);
     el.dataset.pane = name;
     return el;
   });
   const paneByName = Object.fromEntries(gsPanes.map((pane) => [pane.dataset.pane, pane]));
   const subtabNamesByPane = {
-    group: ['group-general', 'group-advanced'],
-    agents: ['agent-general', 'agent-terminals', 'agent-worktree', 'agent-notifications'],
+    group: ['group-general', 'group-worker-defaults', 'group-terminals', 'group-advanced'],
+    workers: ['worker-execution', 'worker-worktree', 'worker-notifications'],
     engineer: ['engineer-general', 'engineer-behavior', 'engineer-system'],
     architect: ['architect-general', 'architect-behavior', 'architect-system'],
   };
@@ -688,21 +688,35 @@ test('group settings resets Engineer and Architect sub-tabs to General when reop
   assert.equal(ensure('gs-engineer-can-override-worker-provider').checked, true);
 });
 
-test('engineer and architect group settings use three scoped sub-tabs', () => {
+test('group settings uses Group/Workers split plus scoped Engineer and Architect sub-tabs', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   const topStrip = html.slice(
     html.indexOf('<div class="gs-tabs">'),
     html.indexOf('    <!-- Group tab -->'),
   );
   const topTabs = Array.from(topStrip.matchAll(/data-tab="([^"]+)"/g), (match) => match[1]);
-  assert.deepEqual(topTabs, ['group', 'agents', 'engineer', 'architect']);
+  assert.deepEqual(topTabs, ['group', 'workers', 'engineer', 'architect']);
+  assert.doesNotMatch(topStrip, />Agents<\/button>/);
+  assert.match(topStrip, />Workers<\/button>/);
 
   assert.match(
     html,
-    /<div class="gs-pane active" data-pane="group">[\s\S]*?data-subtab="group-general"[\s\S]*?data-subtab="group-advanced"/,
+    /<div class="gs-pane active" data-pane="group">[\s\S]*?data-subtab="group-general"[\s\S]*?data-subtab="group-worker-defaults"[\s\S]*?data-subtab="group-terminals"[\s\S]*?data-subtab="group-advanced"/,
   );
   assert.match(html, /data-subpane="group-general"/);
+  assert.match(html, /data-subpane="group-worker-defaults"/);
+  assert.match(html, /data-subpane="group-terminals"/);
   assert.match(html, /data-subpane="group-advanced"/);
+
+  assert.match(
+    html,
+    /<div class="gs-pane" data-pane="workers">[\s\S]*?data-subtab="worker-execution"[\s\S]*?data-subtab="worker-worktree"[\s\S]*?data-subtab="worker-notifications"/,
+  );
+  assert.match(html, /data-subpane="worker-execution"/);
+  assert.match(html, /data-subpane="worker-worktree"/);
+  assert.match(html, /data-subpane="worker-notifications"/);
+  assert.doesNotMatch(html, /data-pane="agents"/);
+  assert.doesNotMatch(html, /data-subtab="agent-terminals"/);
 
   assert.match(
     html,
@@ -746,6 +760,43 @@ test('engineer and architect group settings use three scoped sub-tabs', () => {
   assert.ok(architectSystem < html.indexOf('id="gs-architect-directory"'));
   assert.ok(architectSystem < html.indexOf('id="gs-architect-digest-verbosity"'));
   assert.ok(html.indexOf('id="gs-architect-digest-verbosity"') < html.indexOf('id="gs-architect-push-interval"'));
+});
+
+test('group settings places worker policy defaults and terminals under Group, leaving Workers execution-scoped', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  const groupStart = html.indexOf('<div class="gs-pane active" data-pane="group">');
+  const workersStart = html.indexOf('<div class="gs-pane" data-pane="workers">');
+  const engineerStart = html.indexOf('<div class="gs-pane" data-pane="engineer">');
+  assert.notEqual(groupStart, -1);
+  assert.notEqual(workersStart, -1);
+  assert.notEqual(engineerStart, -1);
+
+  const groupPane = html.slice(groupStart, workersStart);
+  const workersPane = html.slice(workersStart, engineerStart);
+  const workerDefaults = groupPane.indexOf('data-subpane="group-worker-defaults"');
+  const terminals = groupPane.indexOf('data-subpane="group-terminals"');
+  const advanced = groupPane.indexOf('data-subpane="group-advanced"');
+  assert.ok(workerDefaults < groupPane.indexOf('id="gs-agent-provider"'));
+  assert.ok(workerDefaults < groupPane.indexOf('id="gs-default-agent-template"'));
+  assert.ok(workerDefaults < groupPane.indexOf('id="gs-agent-model"'));
+  assert.ok(workerDefaults < terminals);
+  assert.ok(terminals < groupPane.indexOf('id="gs-auto-terminals"'));
+  assert.ok(terminals < groupPane.indexOf('id="gs-terminal-prefix"'));
+  assert.ok(terminals < advanced);
+  assert.match(groupPane, /Default worker provider/);
+  assert.match(groupPane, /Default worker role/);
+  assert.match(groupPane, /Default worker model/);
+
+  assert.match(workersPane, /data-subpane="worker-execution"/);
+  assert.match(workersPane, /id="gs-agent-directory"/);
+  assert.match(workersPane, /id="gs-session-resume"/);
+  assert.match(workersPane, /id="gs-agent-idle-timeout"/);
+  assert.match(workersPane, /id="gs-worktree"/);
+  assert.match(workersPane, /id="gs-notifications"/);
+  assert.match(workersPane, /Enable macOS worker notifications/);
+  assert.doesNotMatch(workersPane, /id="gs-agent-provider"/);
+  assert.doesNotMatch(workersPane, /id="gs-agent-model"/);
+  assert.doesNotMatch(workersPane, /id="gs-terminal-prefix"/);
 });
 
 test('engineer System sub-tab groups permissions and digest settings', () => {
@@ -864,10 +915,10 @@ test('group settings Advanced sub-tab owns Delete group action', () => {
   assert.equal(html.indexOf('data-pane="advanced"'), -1);
 
   const groupPaneIndex = html.indexOf('data-pane="group"');
-  const agentsPaneIndex = html.indexOf('data-pane="agents"');
+  const workersPaneIndex = html.indexOf('data-pane="workers"');
   assert.notEqual(groupPaneIndex, -1);
-  assert.notEqual(agentsPaneIndex, -1);
-  const groupPane = html.slice(groupPaneIndex, agentsPaneIndex);
+  assert.notEqual(workersPaneIndex, -1);
+  const groupPane = html.slice(groupPaneIndex, workersPaneIndex);
   const groupGeneralIndex = groupPane.indexOf('data-subpane="group-general"');
   const groupAdvancedIndex = groupPane.indexOf('data-subpane="group-advanced"');
   assert.notEqual(groupGeneralIndex, -1);
@@ -927,6 +978,7 @@ test('group settings sub-tab CSS remains reusable in narrow toolbelt layouts', (
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
 
   assert.match(html, /<div class="gs-pane active" data-pane="group">\s*<div class="gs-subtabs">/);
+  assert.match(html, /<div class="gs-pane" data-pane="workers">\s*<div class="gs-subtabs">/);
   assert.match(html, /<div class="gs-pane" data-pane="engineer">\s*<div class="gs-subtabs">/);
   assert.match(html, /<div class="gs-pane" data-pane="architect">\s*<div class="gs-subtabs">/);
   assert.match(css, /\.gs-subtabs\s*\{[^}]*display:\s*flex;[^}]*border-bottom:\s*1px solid var\(--border\);/s);
@@ -1016,6 +1068,11 @@ test('submitGroupSettings sends group, engineer, and architect updates separatel
   vm.runInContext('_settingsGroup = "alpha"; _gsWtSymlinks = ["etl/**/node_modules"];', context);
   ensure('gs-directory').value = '/repo';
   ensure('gs-agent-directory').value = '/repo/agents';
+  ensure('gs-agent-profile').value = 'Ops';
+  ensure('gs-agent-shell').value = 'zsh';
+  ensure('gs-default-agent-template').value = 'careful-reviewer';
+  ensure('gs-agent-provider').value = 'codex';
+  ensure('gs-agent-boot-cmd').value = 'codex --worker';
   ensure('gs-terminal-prefix').value = 'Shell';
   ensure('gs-terminal-boot-cmd').value = 'npm run dev';
   ensure('gs-engineer-merge-mode').value = 'direct';
@@ -1025,6 +1082,12 @@ test('submitGroupSettings sends group, engineer, and architect updates separatel
   ensure('gs-engineer-boot-cmd').value = 'codex --model gpt-5';
   ensure('gs-agent-model').value = 'gpt-5';
   ensure('gs-agent-reasoning-effort').value = 'minimal';
+  ensure('gs-session-resume').checked = false;
+  ensure('gs-agent-idle-timeout').value = '15';
+  ensure('gs-notifications').checked = true;
+  ensure('gs-notify-finish').checked = false;
+  ensure('gs-notify-error').checked = true;
+  ensure('gs-notify-attention').checked = false;
   ensure('gs-engineer-model').value = 'gpt-5.1';
   ensure('gs-engineer-reasoning-effort').value = 'xhigh';
   ensure('gs-engineer-directory').value = '/repo/.torque/engineer';
@@ -1063,6 +1126,12 @@ test('submitGroupSettings sends group, engineer, and architect updates separatel
   assert.equal(sandbox.sendCalls.length, 3);
   assert.equal(sandbox.sendCalls[0].cmd, 'update_group_settings');
   assert.equal(sandbox.sendCalls[0].group, 'alpha');
+  assert.equal(sandbox.sendCalls[0].settings.agent_directory, '/repo/agents');
+  assert.equal(sandbox.sendCalls[0].settings.agent_profile, 'Ops');
+  assert.equal(sandbox.sendCalls[0].settings.agent_shell, 'zsh');
+  assert.equal(sandbox.sendCalls[0].settings.default_agent_template, 'careful-reviewer');
+  assert.equal(sandbox.sendCalls[0].settings.agent_provider, 'codex');
+  assert.equal(sandbox.sendCalls[0].settings.agent_boot_command, 'codex --worker');
   assert.equal(sandbox.sendCalls[0].settings.terminal_name_prefix, 'Shell');
   assert.equal(sandbox.sendCalls[0].settings.terminal_boot_command, 'npm run dev');
   assert.equal(sandbox.sendCalls[0].settings.engineer_merge_mode, 'direct');
@@ -1070,6 +1139,12 @@ test('submitGroupSettings sends group, engineer, and architect updates separatel
   assert.equal(sandbox.sendCalls[0].settings.worktree_merge_preserve_diff, true);
   assert.equal(sandbox.sendCalls[0].settings.agent_model, 'gpt-5');
   assert.equal(sandbox.sendCalls[0].settings.agent_reasoning_effort, 'minimal');
+  assert.equal(sandbox.sendCalls[0].settings.agent_session_resume, false);
+  assert.equal(sandbox.sendCalls[0].settings.agent_idle_timeout, 15);
+  assert.equal(sandbox.sendCalls[0].settings.notifications, true);
+  assert.equal(sandbox.sendCalls[0].settings.notify_on_finish, false);
+  assert.equal(sandbox.sendCalls[0].settings.notify_on_error, true);
+  assert.equal(sandbox.sendCalls[0].settings.notify_on_attention, false);
   assert.deepEqual(
     JSON.parse(JSON.stringify(sandbox.sendCalls[0].settings.worktree_symlinks)),
     ['etl/**/node_modules'],
@@ -1165,7 +1240,7 @@ test('group settings no longer renders the legacy no-engineer placeholder copy',
   assert.doesNotMatch(modalJs, legacyCopy);
   assert.doesNotMatch(html, /Hide other engineers' workers from this engineer/);
   assert.match(html, /Allow the Engineer to see workers created by other Engineers/);
-  assert.match(html, /Human operators still see all agents on the board/);
+  assert.match(html, /Human operators still see all workers on the board/);
   // _showGroupSettings fetches specializations to populate the
   // default-specializations picker; ignore that side request here.
   const callsWithoutSpecFetch = sandbox.sendCalls.filter(
