@@ -1271,7 +1271,7 @@ async def _run_pr_worktree_merge(
             squash,
             state=state,
         )
-    fallback_title = f"Squash merge: {branch or cell.name}"
+    fallback_title = f"Merge {cell.name or branch or 'worktree'} worktree"
     derived_title, derived_body = _split_merge_message_for_pr(
         msg,
         fallback_title=fallback_title,

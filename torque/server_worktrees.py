@@ -264,9 +264,35 @@ def _split_merge_message_for_pr(message: str, *,
         lines.pop(0)
     if not lines:
         return fallback_title, ""
+
     title = lines[0].strip() or fallback_title
-    body = "\n".join(lines[1:]).strip()
+    body_lines = lines[1:]
+    if _is_generic_merge_title(title):
+        title = _pr_title_from_body_lines(body_lines) or fallback_title
+    body = "\n".join(body_lines).strip()
     return title, body
+
+
+def _is_generic_merge_title(title: str) -> bool:
+    """Return true for git/GitHub-generated merge subjects."""
+    title = str(title or "").strip()
+    return (
+        title.startswith("Squash merge: ")
+        or title.startswith("Merge branch ")
+    )
+
+
+def _pr_title_from_body_lines(lines: list[str]) -> str:
+    """Derive a concise PR title from generated merge-message body lines."""
+    for line in lines:
+        candidate = str(line or "").strip()
+        if not candidate:
+            continue
+        if candidate.startswith(("- ", "* ")):
+            candidate = candidate[2:].strip()
+        if candidate and not _is_generic_merge_title(candidate):
+            return candidate
+    return ""
 
 
 def _append_pr_url_to_squash_body(body: str, pr_url: str) -> str:

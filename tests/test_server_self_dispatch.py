@@ -2122,16 +2122,69 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["ok"])
         create_calls = [call for call in worktree_mgr.calls
                         if call[0] == "create_pr"]
-        self.assertEqual(create_calls[-1][4], "Squash merge: torque/worker")
+        self.assertEqual(create_calls[-1][4], "Implement worker change")
+        self.assertNotEqual(create_calls[-1][4], "Squash merge: torque/worker")
         self.assertEqual(create_calls[-1][5], "- Implement worker change")
         merge_calls = [call for call in worktree_mgr.calls
                        if call[0] == "merge_pr"]
-        self.assertEqual(merge_calls[-1][5], "Squash merge: torque/worker")
+        self.assertEqual(merge_calls[-1][5], "Implement worker change")
+        self.assertNotEqual(merge_calls[-1][5], "Squash merge: torque/worker")
         self.assertEqual(
             merge_calls[-1][6],
             "- Implement worker change\n\n"
             "PR: https://github.com/acme/repo/pull/7",
         )
+
+    async def test_worktree_merge_pr_fallback_title_uses_done_task_title(self):
+        state, worker, task = self._make_pr_merge_state()
+        task.lane = "Done"
+        task.messages.append({
+            "action": "done",
+            "message": "Implemented the worker change.",
+        })
+        worktree_mgr = self._FakePrWorktreeManager({
+            "ok": True,
+            "phase": "pr_merge",
+            "url": "https://github.com/acme/repo/pull/7",
+            "number": 7,
+            "head_sha": "head123",
+            "merge_commit_sha": "squash789",
+            "merge_state": "CLEAN",
+            "pending": False,
+            "pr_status": {"ok": True, "state": "MERGED"},
+        })
+
+        async def fake_cleanup_after_merge(*_args, **_kwargs):
+            return {"errors": []}
+
+        handle_command, restore = self._pr_handle_command(
+            state,
+            worker,
+            worktree_mgr,
+            fake_cleanup_after_merge,
+        )
+        try:
+            result = await handle_command({
+                "cmd": "worktree_merge",
+                "id": worker.id,
+                "close_agent_on_merge": True,
+            })
+        finally:
+            restore()
+
+        self.assertTrue(result["ok"])
+        create_call = [call for call in worktree_mgr.calls
+                       if call[0] == "create_pr"][-1]
+        merge_call = [call for call in worktree_mgr.calls
+                      if call[0] == "merge_pr"][-1]
+        self.assertEqual(create_call[4], "Ship PR merged change")
+        self.assertNotEqual(create_call[4], "Squash merge: torque/worker")
+        self.assertEqual(
+            create_call[5],
+            "- Ship PR merged change\n  Implemented the worker change.",
+        )
+        self.assertEqual(merge_call[5], "Ship PR merged change")
+        self.assertNotEqual(merge_call[5], "Squash merge: torque/worker")
 
     async def test_worktree_merge_pr_mixes_provided_and_generated_fields(self):
         async def run_merge(payload):
@@ -2188,12 +2241,14 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         create_call, merge_call = await run_merge({
             "pr_body": "Covers TORQUE:497 and regression tests.",
         })
-        self.assertEqual(create_call[4], "Squash merge: torque/worker")
+        self.assertEqual(create_call[4], "Implement worker change")
+        self.assertNotEqual(create_call[4], "Squash merge: torque/worker")
         self.assertEqual(
             create_call[5],
             "Covers TORQUE:497 and regression tests.",
         )
-        self.assertEqual(merge_call[5], "Squash merge: torque/worker")
+        self.assertEqual(merge_call[5], "Implement worker change")
+        self.assertNotEqual(merge_call[5], "Squash merge: torque/worker")
         self.assertEqual(
             merge_call[6],
             "Covers TORQUE:497 and regression tests.\n\n"
