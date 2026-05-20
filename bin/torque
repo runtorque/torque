@@ -699,7 +699,7 @@ def api_call(cmd, port=DEFAULT_PORT, **kwargs):
                     f"  ({exc.reason})"
                 )
             die(f"Cannot connect to Torque daemon on localhost:{port}\n"
-                f"  Is it running? Start with: make run (or Scripts menu → torque)\n"
+                f"  Is it running? Start with: make run (Toolbelt: Scripts menu → torque)\n"
                 f"  ({exc.reason})")
 
 

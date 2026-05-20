@@ -129,7 +129,7 @@ Then relaunch Torque with `make run` for the desktop app, or run
 Toolbelt integration, run `make deploy-toolbelt` and restart Torque from the
 **Scripts** menu in iTerm2.
 
-!!! warning "Don't `make deploy` from inside a Torque-managed worker"
+!!! warning "Don't deploy or stop from inside a Torque-managed worker"
     If you're operating inside a Torque worktree (a tab the daemon spawned), running `make deploy`, `make deploy-toolbelt`, or `make stop` can kill the very daemon you're talking to and leave the new instance with corrupted in-memory state. The Makefile and HTTP layer both refuse the operation when called from a worker context. See [Operations](../operate/operations.md) for safer alternatives.
 
 ## Where to next

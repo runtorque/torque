@@ -5,6 +5,7 @@ MAIN_SCRIPT    := torque.py
 AUTOLAUNCH_DIR := $(ITERM2_SCRIPTS)/AutoLaunch
 PRIMARY_APP_DIR ?= $(HOME)/.torque/app
 PRIMARY_PORT    ?= 18933
+TOOLBELT_PORT   ?= 18932
 
 # Global iTerm2 Python environment (used to bootstrap the project env)
 GLOBAL_ENV     := $(shell ls -d $(HOME)/.config/iterm2/AppSupport/iterm2env-[0-9]* 2>/dev/null \
@@ -138,8 +139,9 @@ autolaunch: install
 	ln -sf "$(SCRIPT_DIR)/$(MAIN_SCRIPT)" "$(AUTOLAUNCH_DIR)/$(MAIN_SCRIPT)"
 	@echo "Auto-launch symlink created."
 
-## uninstall: Remove installed files and autolaunch symlink
+## uninstall: Remove primary app files, secondary Toolbelt files, and autolaunch symlink
 uninstall:
+	rm -rf "$(PRIMARY_APP_DIR)"
 	rm -f "$(SCRIPT_DIR)/$(MAIN_SCRIPT)" "$(SCRIPT_DIR)/torque_desktop.py" "$(SCRIPT_DIR)/webview.html" "$(SCRIPT_DIR)/state.json" "$(SCRIPT_DIR)/torque.db" "$(SCRIPT_DIR)/.torque_source_repo_root"
 	rm -f "$(AUTOLAUNCH_DIR)/$(MAIN_SCRIPT)"
 	@echo "Uninstalled."
@@ -147,7 +149,7 @@ uninstall:
 ## deps: Install runtime dependencies into Torque's Python environment
 deps:
 	@if [ -z "$(ITERM2_PYTHON)" ]; then \
-		echo "Error: iTerm2 Python not found. Run make install first."; \
+		echo "Error: iTerm2 Python not found. Enable the iTerm2 Python API or run make install-toolbelt once to bootstrap it."; \
 		exit 1; \
 	fi
 	"$(ITERM2_PYTHON)" -m pip install aiohttp jinja2 pyyaml orjson
@@ -168,7 +170,7 @@ run: desktop
 ## run-toolbelt: Launch the secondary iTerm2 Toolbelt script in the background
 run-toolbelt:
 	@if [ -z "$(ITERM2_PYTHON)" ]; then \
-		echo "Error: iTerm2 Python not found. Run make install first."; \
+		echo "Error: iTerm2 Python not found. Run make deploy-toolbelt first."; \
 		exit 1; \
 	fi
 	@pid_file="$(SCRIPT_DIR)/torque.pid"; \
@@ -242,8 +244,10 @@ deploy: _check_not_in_worker
 	@echo "Primary deploy stops port $(or $(TORQUE_PORT),$(PRIMARY_PORT)); set TORQUE_PORT to deploy another standalone profile."
 	@echo "Browser-only mode remains available with: make standalone (then make open)"
 
-## deploy-toolbelt: Stop old instance, install iTerm2 Toolbelt files, prompt to restart
-deploy-toolbelt: stop install
+## deploy-toolbelt: Stop old Toolbelt instance, install iTerm2 files, prompt to restart
+deploy-toolbelt: _check_not_in_worker
+	@$(MAKE) --no-print-directory stop TORQUE_PORT="$(TOOLBELT_PORT)"
+	@$(MAKE) --no-print-directory install
 	@echo ""
 	@echo "Secondary iTerm2 Toolbelt deploy complete."
 	@echo "Now restart via: iTerm2 → Scripts menu → torque"
@@ -421,6 +425,7 @@ open:
 ## check: Verify prerequisites
 check:
 	@echo "iTerm2 Python: $(or $(ITERM2_PYTHON),NOT FOUND)"
+	@echo "Torque Python: $(TORQUE_PYTHON)"
 	@if [ -n "$(ITERM2_PYTHON)" ]; then \
 		echo "aiohttp:"; \
 		"$(ITERM2_PYTHON)" -c "import aiohttp; print('  installed:', aiohttp.__version__)" 2>/dev/null \

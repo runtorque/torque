@@ -45,4 +45,4 @@ prompt: |
 
   When the small fix is in and tests pass, call `torque_done(message="brief summary")` directly. No re-review derivation is required for this task — the reviewer's `pre_approved: true` transition is the structural bypass.
 
-  Do NOT deploy, run `make deploy`, or restart services. Only write code and commit.
+  Do NOT deploy, run `make deploy`/`make deploy-toolbelt`, or restart services. Only write code and commit.

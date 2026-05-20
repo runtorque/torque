@@ -7,9 +7,10 @@ Please also read and follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Development environment
 
-Start with the setup path in the [README](README.md#start-here) and the
-[Getting Started guide](docs/getting-started.md). The primary supported
-development target is macOS with iTerm2 and the iTerm2 Python API enabled.
+Start with the setup path in the [README](README.md#quickstart) and the
+[Getting Started guide](docs/foundations/getting-started.md). The primary
+supported development target is macOS desktop/standalone operation with iTerm2
+and the iTerm2 Python API enabled for terminal control.
 
 The canonical install path is:
 
@@ -17,16 +18,18 @@ The canonical install path is:
 git clone https://github.com/aleksanderarruda/iterm2-agent-orchestration.git
 cd iterm2-agent-orchestration
 make deps
-make install
-make cli
+make deploy
+make desktop-deps
 ```
 
 Useful local commands:
 
-- `make check` verifies the installed iTerm2 Python environment and runtime deps.
+- `make check` verifies the primary app copy, optional Toolbelt install, and runtime deps.
+- `make run` launches the primary desktop app.
 - `make standalone` starts a browser-only Torque server backed by iTerm2.
 - `make open` opens the web UI for the current Torque port.
 - `make desktop-deps` installs the optional native desktop shell dependency.
+- `make deploy-toolbelt` refreshes the secondary iTerm2 Toolbelt install.
 
 Torque has no frontend build step: edit `webview.html`, `static/js/*`, and
 `static/style.css` directly. Script order in `webview.html` matters. When
