@@ -2949,17 +2949,21 @@ function _renderMainGrid(opts, renderMode) {
 function agentStatusClass(a) {
   /* Attention overrides everything */
   if (a.needs_attention) return 'attention';
+  const status = String(a.status || '').trim().toLowerCase();
   /* Disconnected (tab closed) */
-  if (a.status === 'stopped') return 'disconnected';
-  /* For awareness agents, activity is the source of truth */
+  if (status === 'stopped' || status === 'error') return 'disconnected';
+  /*
+   * A live session is working even when an awareness adapter has not emitted
+   * a transient activity value yet (for example while Codex is thinking
+   * before its first tool hook).  The hover tooltip already uses status, so
+   * keep the dot aligned with that source of truth.
+   */
+  if (status === 'running') return 'working';
+  /* For legacy awareness-agent deltas, activity can still indicate work */
   if (a.agent_type) {
     if (a.activity) return 'working';
-    /* No activity — idle if we've heard from the agent before;
-       otherwise it just started and hasn't sent its first event yet */
-    if (a.last_event_at > 0) return 'idle';
   }
   /* Non-awareness agents / agents that haven't sent events yet */
-  if (a.status === 'running') return 'working';
   return 'idle';
 }
 
