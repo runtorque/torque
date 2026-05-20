@@ -1919,6 +1919,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
             "g",
             worktree_merge_cleanup="???",
             worktree_merge_preserve_diff=True,
+            engineer_merge_mode="direct",
         )
 
         ws = state.engineer_settings["g"]
@@ -1932,6 +1933,25 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertTrue(ws.restrict_to_created_agents)
         self.assertEqual(gs.worktree_merge_cleanup, "keep")
         self.assertTrue(gs.worktree_merge_preserve_diff)
+        self.assertEqual(gs.engineer_merge_mode, "direct")
+
+        state.update_group_settings("g", engineer_merge_mode="not-real")
+        self.assertEqual(state.group_settings["g"].engineer_merge_mode, "pr")
+
+    def test_group_settings_engineer_merge_mode_defaults_and_snapshots(self):
+        state = self.state_mod.MatrixState()
+        state.groups["g"] = []
+
+        self.assertEqual(
+            self.state_mod.GroupSettings().engineer_merge_mode,
+            "pr",
+        )
+        state.update_group_settings("g", engineer_merge_mode="engineer-choice")
+
+        self.assertEqual(
+            state.to_dict()["group_settings"]["g"]["engineer_merge_mode"],
+            "engineer-choice",
+        )
 
     def test_history_record_dispatch_persists_engineer_worklog_and_survives_reload(self):
         from torque.db import TorqueDB

@@ -552,6 +552,19 @@
             <input id="gs-wt-merge-squash" type="checkbox" checked> Squash commits on merge
             <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Squash all worktree commits into a single commit when merging to main. Keeps the main branch history clean.">?</span>
           </label>
+          <label>Engineer merge mode
+            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Locks engineer_merge to Pull request, Direct local, or Engineer choice. Lock overrides and disallowed attempts are recorded as workflow-breach audit events.">?</span>
+          </label>
+          <select id="gs-engineer-merge-mode">
+            <option value="pr">Pull request (default)</option>
+            <option value="direct">Direct local</option>
+            <option value="engineer-choice">Engineer choice</option>
+          </select>
+          <div class="label-hint">
+            Pull request rejects force_direct=true. Direct local bypasses the
+            PR path. Engineer choice keeps the current default-PR plus
+            force_direct escape hatch.
+          </div>
           <label>Additional merge instructions
             <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Extra instructions appended to the merge prompt sent to Claude. Use this to customize merge behavior, e.g. 'Use a conventional commit message' or 'Run tests after merging'.">?</span>
           </label>

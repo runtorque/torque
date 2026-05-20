@@ -576,6 +576,24 @@ class TorqueDBTests(unittest.TestCase):
             [],
         )
 
+    def test_engineer_merge_mode_round_trips_and_defaults_to_pr(self):
+        self.db.save_groups({"g": [], "h": []}, {"g": "g", "h": "h"})
+        self.db.save_group_settings(
+            "g",
+            GroupSettings(engineer_merge_mode="engineer-choice"),
+        )
+        self.db.save_group_settings("h", GroupSettings())
+
+        loaded = self.db.load_all()
+        self.assertEqual(
+            loaded["group_settings"]["g"]["engineer_merge_mode"],
+            "engineer-choice",
+        )
+        self.assertEqual(
+            loaded["group_settings"]["h"]["engineer_merge_mode"],
+            "pr",
+        )
+
     def test_default_engineer_specializations_migration_adds_column(self):
         # Simulate an older DB by dropping the column then re-running init.
         legacy_path = Path(self.tmp.name) / "legacy-default-specs.db"
@@ -605,6 +623,30 @@ class TorqueDBTests(unittest.TestCase):
             )
         }
         self.assertIn("default_engineer_specializations", columns)
+
+    def test_engineer_merge_mode_migration_adds_column(self):
+        legacy_path = Path(self.tmp.name) / "legacy-engineer-merge-mode.db"
+        legacy = TorqueDB(legacy_path)
+        legacy.init()
+        legacy._conn.execute("DROP TABLE group_settings")
+        legacy._conn.execute(
+            "CREATE TABLE group_settings ("
+            "group_name TEXT PRIMARY KEY, "
+            "engineer_agent_id TEXT NOT NULL DEFAULT '')"
+        )
+        legacy._conn.commit()
+        legacy.close()
+
+        migrated = TorqueDB(legacy_path)
+        self.addCleanup(migrated.close)
+        migrated.init()
+        columns = {
+            row[1]
+            for row in migrated._conn.execute(
+                "PRAGMA table_info(group_settings)"
+            )
+        }
+        self.assertIn("engineer_merge_mode", columns)
 
     def test_load_all_roundtrips_json_and_boolean_fields(self):
         cell = AgentCell(
@@ -655,6 +697,7 @@ class TorqueDBTests(unittest.TestCase):
                 worktree_merge_squash=False,
                 worktree_merge_cleanup="close_remove",
                 worktree_merge_preserve_diff=True,
+                engineer_merge_mode="direct",
             ),
         )
         self.db.save_board_task(
@@ -806,6 +849,10 @@ class TorqueDBTests(unittest.TestCase):
         )
         self.assertTrue(
             loaded["group_settings"]["g"]["worktree_merge_preserve_diff"],
+        )
+        self.assertEqual(
+            loaded["group_settings"]["g"]["engineer_merge_mode"],
+            "direct",
         )
         self.assertEqual(
             loaded["board_tasks"]["task-1"]["action_vars"],

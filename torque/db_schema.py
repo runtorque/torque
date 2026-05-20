@@ -96,6 +96,7 @@ CREATE TABLE IF NOT EXISTS group_settings (
     worktree_merge_instructions TEXT NOT NULL DEFAULT '',
     worktree_merge_cleanup      TEXT NOT NULL DEFAULT 'keep',
     worktree_merge_preserve_diff INTEGER NOT NULL DEFAULT 0,
+    engineer_merge_mode         TEXT NOT NULL DEFAULT 'pr',
     worktree_symlinks           TEXT NOT NULL DEFAULT '[]',
     agent_session_resume        INTEGER NOT NULL DEFAULT 1,
     agent_idle_timeout          INTEGER NOT NULL DEFAULT 0,
@@ -1212,6 +1213,15 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
         conn.execute(
             "ALTER TABLE group_settings ADD COLUMN "
             "worktree_merge_preserve_diff INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
+    # Migrate: add engineer_merge_mode column to group_settings
+    try:
+        conn.execute(
+            "SELECT engineer_merge_mode FROM group_settings LIMIT 0")
+    except sqlite3.OperationalError:
+        conn.execute(
+            "ALTER TABLE group_settings ADD COLUMN "
+            "engineer_merge_mode TEXT NOT NULL DEFAULT 'pr'")
         conn.commit()
     # Migrate: add engineer_agent_id column to group_settings
     try:

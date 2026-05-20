@@ -200,6 +200,12 @@ repo without a usable GitHub remote/`gh` auth or when the operator deliberately
 wants to bypass PR review. It still runs the usual local merge safety gates
 unless the Engineer also passes the separate force flags.
 
+Group Settings → Agents → Worktree can lock the merge mode for the group:
+**Pull request** rejects `force_direct=true`, **Direct local** bypasses the PR
+path even if you omit `force_direct`, and **Engineer choice** leaves the
+fallback available. In normal operation, call `engineer_merge` without
+`force_direct` and let the group setting enforce the workflow.
+
 When branch protection or required CI keeps the PR open, `engineer_merge`
 returns `pending: true` and records the PR on the stream boundary. V1 has no
 background PR poller, so the Engineer should not treat that as shipped: wait for

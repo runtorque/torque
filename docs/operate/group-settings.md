@@ -66,6 +66,7 @@ When worktrees are enabled, these settings control the execution environment:
 | **Auto-checkpoint on stop** | Create a checkpoint commit when the agent session ends. |
 | **Checkpoint on progress / done** | Create throttled checkpoints when the agent reports progress or completion. |
 | **Squash on merge** | Prefer squash merge for the explicit direct-local fallback. The default `engineer_merge` path creates/reuses a GitHub PR and requests a squash merge regardless of this setting. |
+| **Engineer merge mode** | Locks `engineer_merge` for this group. **Pull request** (default) requires the PR workflow and rejects `force_direct=true`; **Direct local** bypasses the PR path for every engineer merge; **Engineer choice** keeps the default PR workflow with `force_direct=true` as an explicit local fallback. Disallowed attempts and lock overrides are recorded as workflow-breach audit events. |
 | **Merge instructions** | Extra text Torque appends to merge prompts. |
 | **Default post-merge cleanup** | What Torque should do by default after a successful merge when no explicit cleanup choice is provided. For PR merges, cleanup runs after the PR actually merges, not when the PR is created or left pending. |
 | **Preserve merge diff by default** | Save the full pre-merge patch as a diff artifact on the latest open branch-boundary task. |

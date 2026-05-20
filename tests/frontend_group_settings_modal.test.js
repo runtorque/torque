@@ -253,6 +253,16 @@ test('group settings renders system prompt preview controls for Engineer and Arc
   assert.match(css, /body\.standalone-mode\s+\.preview-popup\s*{\s*max-width:\s*min\(80vw,\s*1180px\);/);
 });
 
+test('group settings renders engineer merge mode selector', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+
+  assert.match(html, /<label>Engineer merge mode[\s\S]*<select id="gs-engineer-merge-mode">/);
+  assert.match(html, /<option value="pr">Pull request \(default\)<\/option>/);
+  assert.match(html, /<option value="direct">Direct local<\/option>/);
+  assert.match(html, /<option value="engineer-choice">Engineer choice<\/option>/);
+  assert.match(html, /workflow-breach audit events/);
+});
+
 test('system prompt preview popup sends unsaved form state and closes as nested modal', () => {
   const { sandbox, ensure } = createSandbox();
   const context = vm.createContext(sandbox);
@@ -268,6 +278,7 @@ test('system prompt preview popup sends unsaved form state and closes as nested 
   ensure('gs-agent-directory').value = '/repo';
   ensure('gs-agent-profile').value = 'Ops';
   ensure('gs-agent-shell').value = 'zsh';
+  ensure('gs-engineer-merge-mode').value = 'direct';
   ensure('gs-wt-merge-cleanup').value = 'close_remove';
   ensure('gs-engineer-provider').value = 'codex';
   ensure('gs-engineer-boot-cmd').value = 'codex --engineer';
@@ -294,6 +305,7 @@ test('system prompt preview popup sends unsaved form state and closes as nested 
   assert.equal(call.group, 'alpha');
   assert.equal(call.settings.custom_instructions, 'UNSAVED engineer instructions');
   assert.equal(call.settings.autonomy_mode, 'aggressive_auto_continue');
+  assert.equal(call.group_settings.engineer_merge_mode, 'direct');
   assert.deepEqual(JSON.parse(JSON.stringify(call.group_settings.default_engineer_specializations)), ['ui']);
   assert.equal(ensure('modal-system-prompt-preview').classList.contains('visible'), true);
   assert.equal(ensure('modal-system-prompt-preview').classList.contains('modal-nested'), true);
@@ -503,6 +515,7 @@ test('group settings modal populates engineer fields and honors engineer tab dee
       agent_provider: "codex",
       agent_model: "gpt-5.1",
       agent_reasoning_effort: "minimal",
+      engineer_merge_mode: "engineer-choice",
       worktree_merge_cleanup: "close_remove",
       worktree_merge_preserve_diff: true
     },
@@ -578,6 +591,7 @@ test('group settings modal populates engineer fields and honors engineer tab dee
   assert.equal(ensure('gs-engineer-notification-preset').value, 'custom');
   assert.equal(ensure('gs-engineer-digest-verbosity').value, 'detailed');
   assert.equal(ensure('gs-engineer-escalation-style').value, 'keep_moving');
+  assert.equal(ensure('gs-engineer-merge-mode').value, 'engineer-choice');
   assert.equal(ensure('gs-wt-merge-cleanup').value, 'close_remove');
   assert.equal(ensure('gs-wt-merge-preserve-diff').checked, true);
   assert.equal(
@@ -1004,6 +1018,7 @@ test('submitGroupSettings sends group, engineer, and architect updates separatel
   ensure('gs-agent-directory').value = '/repo/agents';
   ensure('gs-terminal-prefix').value = 'Shell';
   ensure('gs-terminal-boot-cmd').value = 'npm run dev';
+  ensure('gs-engineer-merge-mode').value = 'direct';
   ensure('gs-wt-merge-cleanup').value = 'remove';
   ensure('gs-wt-merge-preserve-diff').checked = true;
   ensure('gs-engineer-provider').value = 'codex';
@@ -1050,6 +1065,7 @@ test('submitGroupSettings sends group, engineer, and architect updates separatel
   assert.equal(sandbox.sendCalls[0].group, 'alpha');
   assert.equal(sandbox.sendCalls[0].settings.terminal_name_prefix, 'Shell');
   assert.equal(sandbox.sendCalls[0].settings.terminal_boot_command, 'npm run dev');
+  assert.equal(sandbox.sendCalls[0].settings.engineer_merge_mode, 'direct');
   assert.equal(sandbox.sendCalls[0].settings.worktree_merge_cleanup, 'remove');
   assert.equal(sandbox.sendCalls[0].settings.worktree_merge_preserve_diff, true);
   assert.equal(sandbox.sendCalls[0].settings.agent_model, 'gpt-5');

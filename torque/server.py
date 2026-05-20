@@ -48,6 +48,7 @@ from .state import (
     merge_cleanup_flags,
     normalize_architect_review_gate_thresholds,
     normalize_default_worker_concurrency,
+    normalize_engineer_merge_mode,
     task_counts_as_done,
     task_is_closed,
 )
@@ -526,6 +527,18 @@ def _worktree_merge_error(aid: str, message: str, **extra) -> dict:
     }
     result.update(extra)
     return result
+
+
+def _engineer_merge_mode_for_cell(state: MatrixState, cell) -> str:
+    if not cell:
+        return "pr"
+    return normalize_engineer_merge_mode(
+        getattr(
+            state.get_group_settings(getattr(cell, "group", "")),
+            "engineer_merge_mode",
+            "pr",
+        )
+    )
 
 
 async def _preflight_worktree_merge_gates(
@@ -1657,6 +1670,7 @@ async def _sibling_branch_divergence_gate_for_merge(
 _WORKFLOW_BREACH_SUBKINDS = frozenset({
     "escape_clause_skip",
     "force_direct_merge",
+    "merge_mode_locked",
     "stale_base_catch",
     "stale_base_override",
     "manual",
@@ -10798,73 +10812,141 @@ async def main(connection=None):
             elif cmd == "worktree_merge":
                 cell = state.agents.get(data.get("id", ""))
                 aid = data.get("id", "")
-                force_direct = bool(data.get("force_direct"))
+                requested_force_direct = bool(data.get("force_direct"))
+                merge_mode = _engineer_merge_mode_for_cell(state, cell)
                 direct_merge_breach_event = None
                 direct_merge_warning = (
                     "Direct local worktree merge was forced; the default "
                     "workflow is GitHub PR squash merge."
                 )
-                if force_direct and cell:
-                    direct_merge_breach_event = _emit_workflow_breach_event(
-                        state,
-                        _panel_event,
-                        subkind="force_direct_merge",
-                        source="operator",
-                        task=_workflow_breach_active_task_for_worker(
+                forced_by_direct_mode_warning = (
+                    "Group setting engineer_merge_mode='direct' forced a "
+                    "direct local worktree merge; the PR workflow was bypassed."
+                )
+                if merge_mode == "pr" and requested_force_direct:
+                    message = (
+                        "Group setting engineer_merge_mode='pr' forbids "
+                        "force_direct=true. Adjust setting or omit force_direct."
+                    )
+                    workflow_breach = None
+                    if cell:
+                        workflow_breach = _emit_workflow_breach_event(
                             state,
-                            cell,
-                        ),
-                        worker=cell,
-                        context=direct_merge_warning,
+                            _panel_event,
+                            subkind="merge_mode_locked",
+                            source="operator",
+                            task=_workflow_breach_active_task_for_worker(
+                                state,
+                                cell,
+                            ),
+                            worker=cell,
+                            context=message,
+                        )
+                    result = _worktree_merge_error(
+                        aid,
+                        message,
+                        phase="merge_mode_locked",
+                        code="force_direct_disallowed",
                     )
-
-                if force_direct:
-                    result = await _run_direct_worktree_merge(
-                        state=state,
-                        cell=cell,
-                        aid=aid,
-                        data=data,
-                        worktree_mgr=worktree_mgr,
-                        latest_boundary_state_for_cell=(
-                            _latest_boundary_state_for_cell
-                        ),
-                        boundary_reason_message=_boundary_reason_message,
-                        mark_branch_boundaries_merged=(
-                            _mark_branch_boundaries_merged
-                        ),
-                        cleanup_after_merge=_cleanup_after_merge,
-                        broadcast_toast=_broadcast_toast,
-                        bridge=bridge,
-                        handle_command=handle_command,
-                        panel_event=_panel_event,
-                    )
-                    if isinstance(result, dict):
-                        result["force_direct"] = True
-                        result["warning"] = direct_merge_warning
-                        if direct_merge_breach_event:
-                            result["workflow_breach"] = (
-                                direct_merge_breach_event
-                            )
+                    result["message"] = message
+                    if workflow_breach:
+                        result["workflow_breach"] = workflow_breach
                 else:
-                    result = await _run_pr_worktree_merge(
-                        state=state,
-                        cell=cell,
-                        aid=aid,
-                        data=data,
-                        worktree_mgr=worktree_mgr,
-                        latest_boundary_state_for_cell=(
-                            _latest_boundary_state_for_cell
-                        ),
-                        boundary_reason_message=_boundary_reason_message,
-                        mark_branch_boundaries_merged=(
-                            _mark_branch_boundaries_merged
-                        ),
-                        cleanup_after_merge=_cleanup_after_merge,
-                        broadcast_toast=_broadcast_toast,
-                        bridge=bridge,
-                        handle_command=handle_command,
-                        panel_event=_panel_event,
+                    force_direct = (
+                        requested_force_direct
+                        or merge_mode == "direct"
                     )
+                    if (
+                            merge_mode == "engineer-choice"
+                            and requested_force_direct
+                            and cell):
+                        direct_merge_breach_event = (
+                            _emit_workflow_breach_event(
+                                state,
+                                _panel_event,
+                                subkind="force_direct_merge",
+                                source="operator",
+                                task=_workflow_breach_active_task_for_worker(
+                                    state,
+                                    cell,
+                                ),
+                                worker=cell,
+                                context=direct_merge_warning,
+                            )
+                        )
+                    elif (
+                            merge_mode == "direct"
+                            and not requested_force_direct
+                            and cell):
+                        direct_merge_breach_event = (
+                            _emit_workflow_breach_event(
+                                state,
+                                _panel_event,
+                                subkind="merge_mode_locked",
+                                source="operator",
+                                task=_workflow_breach_active_task_for_worker(
+                                    state,
+                                    cell,
+                                ),
+                                worker=cell,
+                                context=forced_by_direct_mode_warning,
+                            )
+                        )
+
+                    if force_direct:
+                        result = await _run_direct_worktree_merge(
+                            state=state,
+                            cell=cell,
+                            aid=aid,
+                            data=data,
+                            worktree_mgr=worktree_mgr,
+                            latest_boundary_state_for_cell=(
+                                _latest_boundary_state_for_cell
+                            ),
+                            boundary_reason_message=_boundary_reason_message,
+                            mark_branch_boundaries_merged=(
+                                _mark_branch_boundaries_merged
+                            ),
+                            cleanup_after_merge=_cleanup_after_merge,
+                            broadcast_toast=_broadcast_toast,
+                            bridge=bridge,
+                            handle_command=handle_command,
+                            panel_event=_panel_event,
+                        )
+                        if isinstance(result, dict):
+                            result["force_direct"] = True
+                            if merge_mode == "direct":
+                                result["engineer_merge_mode"] = "direct"
+                                if not requested_force_direct:
+                                    result["warning"] = (
+                                        forced_by_direct_mode_warning
+                                    )
+                            else:
+                                result["warning"] = direct_merge_warning
+                            if direct_merge_breach_event:
+                                result["workflow_breach"] = (
+                                    direct_merge_breach_event
+                                )
+                    else:
+                        result = await _run_pr_worktree_merge(
+                            state=state,
+                            cell=cell,
+                            aid=aid,
+                            data=data,
+                            worktree_mgr=worktree_mgr,
+                            latest_boundary_state_for_cell=(
+                                _latest_boundary_state_for_cell
+                            ),
+                            boundary_reason_message=_boundary_reason_message,
+                            mark_branch_boundaries_merged=(
+                                _mark_branch_boundaries_merged
+                            ),
+                            cleanup_after_merge=_cleanup_after_merge,
+                            broadcast_toast=_broadcast_toast,
+                            bridge=bridge,
+                            handle_command=handle_command,
+                            panel_event=_panel_event,
+                        )
 
             # -- Board commands (Phase 5) --
             elif cmd == "board_add_task":
