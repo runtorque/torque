@@ -42,7 +42,7 @@ For the why behind each layer, [Why Torque exists](../foundations/why-torque-exi
 
 The grid in the Torque workspace is the team made visible. Look at it as an org chart:
 
-![The Toolbelt grid: User column far left, Architect (Loomer), Engineers row, Workers row, focus pane at bottom-left.](../images/grid.png)
+![The Torque workspace grid: User column far left, Architect (Loomer), Engineers row, Workers row, focus pane at bottom-left.](../images/grid.png)
 
 - **The User column** is the leftmost cell. That's the slot for things you spawn yourself outside of any role hierarchy — a scratch agent, a one-off terminal, your manual probes.
 - **The Architect** is the next cell, distinct in its border color. There's at most one per project area, and it's persistent.

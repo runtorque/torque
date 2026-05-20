@@ -14,7 +14,7 @@ Torque currently manages terminals. It doesn't know what the agents inside them 
 
 ### Claude Code Hooks Integration ✅
 
-Torque receives real-time events from Claude Code via HTTP hooks (`POST /events`). The toolbelt shows live activity: thinking, tool calls with details ("Editing server.py", "Running: npm test"), errors, and permission prompts. Agent type is auto-detected from the boot command. Hooks are merged into `.claude/settings.local.json` without affecting user config.
+Torque receives real-time events from Claude Code via HTTP hooks (`POST /events`). The workspace shows live activity: thinking, tool calls with details ("Editing server.py", "Running: npm test"), errors, and permission prompts. Agent type is auto-detected from the boot command. Hooks are merged into `.claude/settings.local.json` without affecting user config.
 
 Session resume is supported — Torque captures Claude Code's session ID and relaunches with `claude --resume` so conversations survive tab closes and redeployments.
 
@@ -64,20 +64,20 @@ Auto-checkpoint on agent stop (opt-in per group). Manual checkpoint via context 
 ### Remaining Work
 
 - **Auto-PR lifecycle** — abstract PR provider interface + GitHub implementation. "Create PR" context menu, auto-PR on stop, PR URL tracking.
-- **Diff viewer modal** — read-only diff view in the toolbelt.
+- **Diff viewer modal** — read-only diff view in the workspace.
 - **Multi-repo support** — groundwork laid with `worktree_repo_root` field, full implementation deferred.
 
 ---
 
 ## Phase 3 — CLI & Remote Control
 
-Torque shouldn't only be usable from the toolbelt. This phase adds programmatic access.
+Torque shouldn't only be usable from the visual workspace. This phase adds programmatic access.
 
 > **Status**: CLI implemented.
 
 ### `torque` CLI ✅
 
-A single-file Python CLI (`bin/torque`, stdlib only) that talks to the Torque daemon over a REST API (`POST /api/cmd`). The server's `handle_command` function is shared between the WebSocket (toolbelt) and REST (CLI) paths — same code, zero drift.
+A single-file Python CLI (`bin/torque`, stdlib only) that talks to the Torque daemon over a REST API (`POST /api/cmd`). The server's `handle_command` function is shared between the WebSocket UI and REST (CLI) paths — same code, zero drift.
 
 Commands cover the full surface: `status`, `group`, `agent`, `terminal`, `send`, `worktree`, and `logs`. Context-aware — auto-detects the current group, parent agent, and window from `$ITERM_SESSION_ID` when run inside a Torque-managed session.
 
@@ -146,7 +146,7 @@ Actions support `task` (main description), `instructions`, `context`, `criteria`
 
 Torque searches two locations: project-local `.torque/actions/` (takes precedence) and user-global `~/.torque/actions/`. When both contain an action with the same name, the project one wins for dispatch; the user one is marked as "overridden" in the editor. The task modal action picker is the UI path for creating action-based tasks with variables.
 
-An **Actions panel** in the taskbar provides a full editor for creating and managing actions without leaving iTerm2. It shows project and user actions in separate dropdown groups with directory paths, and includes a structured form with Jinja2 syntax highlighting (expressions, filters, strings, parentheses), auto-expanding textareas, scope picker (project vs user), and auto-discovered variable display.
+An **Actions panel** in the taskbar provides a full editor for creating and managing actions without leaving the Torque workspace. It shows project and user actions in separate dropdown groups with directory paths, and includes a structured form with Jinja2 syntax highlighting (expressions, filters, strings, parentheses), auto-expanding textareas, scope picker (project vs user), and auto-discovered variable display.
 
 CLI: `torque action list`, `torque action show <name>`, `torque action create <name>`. Seven starter actions ship: `implement`, `fix`, `review`, `investigate`, `test`, `refactor`, `migrate`.
 
@@ -227,7 +227,7 @@ Cards show group badge, label badges, attachment counts, and linked agent name. 
 
 ### Taskbar ✅
 
-A dock at the bottom of the toolbelt for "panel apps". Currently hosts two apps: **Board** (Kanban task board) and **Actions** (action editor with Jinja2 highlighting). Future apps (logs viewer, cost dashboard, diff viewer) plug into the same dock. Clicking an app toggles its panel open/closed. Only one panel app is visible at a time.
+A dock at the bottom of the workspace for "panel apps". Currently hosts two apps: **Board** (Kanban task board) and **Actions** (action editor with Jinja2 highlighting). Future apps (logs viewer, cost dashboard, diff viewer) plug into the same dock. Clicking an app toggles its panel open/closed. Only one panel app is visible at a time.
 
 ### Provider Integrations
 
@@ -322,7 +322,7 @@ At scale, you need to know what's happening and what it costs.
 
 ### Token Metering & Budget Caps
 
-Track API token usage per agent, per task, per day. Set hard limits ("stop after $5") or soft warnings. Show burn rate on each agent cell. Aggregated cost dashboard in the toolbelt.
+Track API token usage per agent, per task, per day. Set hard limits ("stop after $5") or soft warnings. Show burn rate on each agent cell. Aggregated cost dashboard in the workspace.
 
 ### Observability Dashboard
 
@@ -370,13 +370,13 @@ Important when agents run untrusted code or when operating in a shared environme
 
 ---
 
-## Phase 10 — Toolbelt UX
+## Phase 10 — Workspace UX
 
-The toolbelt is Torque's primary interface. It should scale from 1 agent to 50.
+The desktop/browser workspace is Torque's primary interface, with the Toolbelt as a secondary embedded surface. It should scale from 1 agent to 50.
 
 ### Command Palette
 
-`Cmd+K` style fuzzy finder in the toolbelt. Type to search: "start bug fix", "show agent 3 diff", "open Linear settings". Fast access to everything without navigating menus.
+`Cmd+K` style fuzzy finder in the workspace. Type to search: "start bug fix", "show agent 3 diff", "open Linear settings". Fast access to everything without navigating menus.
 
 ### Minimap & Timeline
 
@@ -384,11 +384,11 @@ Compressed view of all agent activity over time. See at a glance what's running,
 
 ### Agent Chat
 
-Send a follow-up message to a running agent directly from the toolbelt without switching to its terminal tab. Quick corrections and guidance without context switching.
+Send a follow-up message to a running agent directly from the workspace without switching to its terminal tab. Quick corrections and guidance without context switching.
 
 ### Diff Viewer
 
-Inline diff viewer in the toolbelt. See what an agent has changed, approve or reject hunks, leave comments. Lightweight code review without leaving iTerm2.
+Inline diff viewer in the workspace. See what an agent has changed, approve or reject hunks, leave comments. Lightweight code review without leaving Torque.
 
 ---
 
@@ -398,5 +398,5 @@ These apply across all phases:
 
 - **Backward compatibility** — each phase should be independently useful. Users who only want tab management shouldn't be forced into worktree workflows.
 - **Configuration over convention** — features are opt-in. Torque works out of the box with zero config, and each capability is enabled as needed.
-- **Performance** — the toolbelt runs in a WKWebView. The UI must stay snappy even with dozens of agents. Heavy work (git operations, API calls, recording) happens in the Python daemon.
+- **Performance** — the UI can run in a native desktop shell, browser, or Toolbelt WKWebView. It must stay snappy even with dozens of agents. Heavy work (git operations, API calls, recording) happens in the Python daemon.
 - **Dogfooding** — Torque should be used to build Torque. Each phase should be tested by using Torque to coordinate the agents implementing the next phase.
