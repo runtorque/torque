@@ -474,6 +474,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
             provider="github",
             external_id="123",
             external_url="https://example.test/tasks/123",
+            board_sync={"provider": "github", "sync_state": "queued"},
             health_state="attention",
             health_since="2026-04-22T12:00:00+00:00",
             health_details={"reason": "large"},
@@ -532,6 +533,8 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertEqual(task["external_id"], "123")
         self.assertEqual(
             task["external_url"], "https://example.test/tasks/123")
+        self.assertEqual(
+            task["board_sync"], {"provider": "github", "sync_state": "queued"})
         self.assertEqual(task["health_since"], "2026-04-22T12:00:00+00:00")
         self.assertEqual(task["health_details"], {"reason": "large"})
         self.assertEqual(task["verification_notes"], "needs smoke")

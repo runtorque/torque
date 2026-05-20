@@ -115,6 +115,7 @@ _AGENT_INSERT_SQL = """
 _GS_JSON_FIELDS = {
     "env_vars", "agent_env_vars", "terminal_env_vars",
     "board_default_labels", "worktree_symlinks",
+    "board_sync_github",
     "architect_review_gate_thresholds",
     "architect_enabled_events",
     "default_engineer_specializations",
@@ -126,6 +127,7 @@ _GS_BOOL_FIELDS = {
     "worktree_auto_checkpoint", "checkpoint_on_progress",
     "worktree_merge_squash", "worktree_merge_preserve_diff",
     "agent_session_resume",
+    "board_sync_enabled",
     "notifications", "notify_on_finish", "notify_on_error",
     "notify_on_attention", "terminal_always_custom_dialog",
     "terminal_close_on_disconnect", "architect_suppress_empty_digests",
@@ -4483,6 +4485,9 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                                                 "worktree_symlinks",
                                                 "default_engineer_specializations",
                                                 "architect_enabled_events"} else {}
+                    if k == "board_sync_github" and k in d \
+                            and not isinstance(d[k], dict):
+                        d[k] = {}
                 # Decode booleans
                 for k in _GS_BOOL_FIELDS:
                     if k in d:

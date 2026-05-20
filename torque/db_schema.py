@@ -120,6 +120,9 @@ CREATE TABLE IF NOT EXISTS group_settings (
     board_default_labels        TEXT NOT NULL DEFAULT '[]',
     board_default_lane          TEXT NOT NULL DEFAULT '',
     board_default_action        TEXT NOT NULL DEFAULT '',
+    board_sync_provider         TEXT NOT NULL DEFAULT 'none',
+    board_sync_enabled          INTEGER NOT NULL DEFAULT 0,
+    board_sync_github           TEXT NOT NULL DEFAULT '{}',
     engineer_agent_id             TEXT NOT NULL DEFAULT '',
     default_engineer_specializations TEXT NOT NULL DEFAULT '[]',
     architect_boot_command        TEXT NOT NULL DEFAULT '',
@@ -166,6 +169,7 @@ CREATE TABLE IF NOT EXISTS board_tasks (
     provider       TEXT NOT NULL DEFAULT '',
     external_id    TEXT NOT NULL DEFAULT '',
     external_url   TEXT NOT NULL DEFAULT '',
+    board_sync     TEXT NOT NULL DEFAULT '{}',
     status         TEXT NOT NULL DEFAULT '',
     attachments    TEXT NOT NULL DEFAULT '[]',
     messages_thread TEXT NOT NULL DEFAULT '[]',
@@ -1056,6 +1060,14 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
             "ALTER TABLE board_tasks ADD COLUMN attachments "
             "TEXT NOT NULL DEFAULT '[]'")
         conn.commit()
+    # Migrate: add board-sync metadata column to board_tasks.
+    try:
+        conn.execute("SELECT board_sync FROM board_tasks LIMIT 0")
+    except sqlite3.OperationalError:
+        conn.execute(
+            "ALTER TABLE board_tasks ADD COLUMN board_sync "
+            "TEXT NOT NULL DEFAULT '{}'")
+        conn.commit()
     # Migrate: add task health columns to board_tasks
     for col, default in [
         ("health_state", "'healthy'"),
@@ -1176,6 +1188,19 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
             conn.execute(
                 f"ALTER TABLE group_settings ADD COLUMN "
                 f"{col} TEXT NOT NULL DEFAULT {default}")
+            conn.commit()
+    # Migrate: add board-sync group settings.
+    for col, col_type, default in (
+        ("board_sync_provider", "TEXT", "'none'"),
+        ("board_sync_enabled", "INTEGER", "0"),
+        ("board_sync_github", "TEXT", "'{}'"),
+    ):
+        try:
+            conn.execute(f"SELECT {col} FROM group_settings LIMIT 0")
+        except sqlite3.OperationalError:
+            conn.execute(
+                f"ALTER TABLE group_settings ADD COLUMN {col} "
+                f"{col_type} NOT NULL DEFAULT {default}")
             conn.commit()
     # Migrate: add env_file columns to group_settings
     for col in ("env_file", "agent_env_file", "terminal_env_file"):

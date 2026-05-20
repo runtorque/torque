@@ -154,6 +154,7 @@ class Stage6CleanupMigrationTests(unittest.TestCase):
         self.assertNotIn("template", agent_columns)
         self.assertNotIn("created_by_engineer_id", agent_columns)
         self.assertNotIn("engineer_owner_id", task_columns)
+        self.assertIn("board_sync", task_columns)
         self.assertEqual(
             migrated._conn.execute(
                 "SELECT kind, role, owner_engineer_id FROM agents WHERE id='worker-1'"
@@ -162,9 +163,10 @@ class Stage6CleanupMigrationTests(unittest.TestCase):
         )
         self.assertEqual(
             migrated._conn.execute(
-                "SELECT assigned_engineer_id FROM board_tasks WHERE id='TASK:1'"
+                "SELECT assigned_engineer_id, board_sync "
+                "FROM board_tasks WHERE id='TASK:1'"
             ).fetchone(),
-            ("engineer-1",),
+            ("engineer-1", "{}"),
         )
 
     def test_upgrade_guard_refuses_unmigrated_pre_stage1_rows(self):

@@ -258,6 +258,12 @@ def db_read_board_tasks():
                     d.get("worktree_boundary", "{}"))
             except (json.JSONDecodeError, TypeError):
                 d["worktree_boundary"] = {}
+            try:
+                d["board_sync"] = json.loads(d.get("board_sync", "{}"))
+            except (json.JSONDecodeError, TypeError):
+                d["board_sync"] = {}
+            if not isinstance(d["board_sync"], dict):
+                d["board_sync"] = {}
             tasks[d["id"]] = d
         return tasks
     return _db_read(_query)
@@ -374,6 +380,12 @@ def db_read_state():
                         d.get("worktree_boundary", "{}"))
                 except (json.JSONDecodeError, TypeError):
                     d["worktree_boundary"] = {}
+                try:
+                    d["board_sync"] = json.loads(d.get("board_sync", "{}"))
+                except (json.JSONDecodeError, TypeError):
+                    d["board_sync"] = {}
+                if not isinstance(d["board_sync"], dict):
+                    d["board_sync"] = {}
                 tasks[d["id"]] = d
 
         # Schedules

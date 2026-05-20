@@ -32,6 +32,7 @@ _BOARD_TASK_COLUMNS = (
     "provider",
     "external_id",
     "external_url",
+    "board_sync",
     "parent_task_id",
     "pipeline_depth",
     "pipeline_root_id",
@@ -89,6 +90,7 @@ def _serialize_board_task(task):
     artifacts = json.dumps(d.pop("artifacts", []))
     verification_summary = json.dumps(d.pop("verification_summary", {}))
     worktree_boundary = json.dumps(d.pop("worktree_boundary", {}))
+    board_sync = json.dumps(d.pop("board_sync", {}))
     group_name = d.pop("group", d.pop("group_name", ""))
     assigned_engineer_id = (
         d.get("assigned_engineer_id", "")
@@ -122,6 +124,7 @@ def _serialize_board_task(task):
         d.get("provider", ""),
         d.get("external_id", ""),
         d.get("external_url", ""),
+        board_sync,
         d.get("parent_task_id", ""),
         d.get("pipeline_depth", 0),
         d.get("pipeline_root_id", ""),
@@ -181,6 +184,9 @@ def decode_board_task_row(row, cols):
         {},
     )
     d["worktree_boundary"] = _json_loads(d.get("worktree_boundary", "{}"), {})
+    d["board_sync"] = _json_loads(d.get("board_sync", "{}"), {})
+    if not isinstance(d["board_sync"], dict):
+        d["board_sync"] = {}
     d.setdefault(
         "engineer_owner_id",
         str(d.get("assigned_engineer_id", "") or ""),
