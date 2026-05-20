@@ -8371,14 +8371,6 @@ async def main(connection=None):
                 dead.add(ws_client)
         state._ws_clients -= dead
 
-    board_sync_manager = BoardSyncManager(
-        state,
-        panel_event=_panel_event,
-        toast=_broadcast_toast,
-    )
-    board_sync_manager.start()
-    log.info("Board sync manager started")
-
     # Persistent supervisor-health banner. Only populated in standalone
     # mode when the supervisor is unavailable / restarted. Latest state
     # is replayed to each newly connected WS client.
@@ -15638,6 +15630,14 @@ async def main(connection=None):
             kind=kind, cell_id=cell_id, agent_name=agent_name,
             group=group, message=message, task_id=task_id)
         state._emit("event_append", **pe)
+
+    board_sync_manager = BoardSyncManager(
+        state,
+        panel_event=_panel_event,
+        toast=_broadcast_toast,
+    )
+    board_sync_manager.start()
+    log.info("Board sync manager started")
 
     async def _replay_failed_write(write: dict):
         endpoint = str(write.get("endpoint", "") or "")
