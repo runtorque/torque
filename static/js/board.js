@@ -3351,7 +3351,7 @@ function boardSyncTaskNow(taskId, opts) {
   if (opts.keepMenu !== true) _closeCtxMenu();
   if (!taskId) return;
   send(_boardBoardSyncPayload('board_sync_task', { task: taskId }));
-  if (!opts.quiet && typeof _showToast === 'function') {
+  if (opts.showQueuedImmediately && !opts.quiet && typeof _showToast === 'function') {
     _showToast('GitHub sync queued', 'info');
   }
 }
