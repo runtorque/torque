@@ -442,7 +442,7 @@ test('board search behaves identically in toolbelt-mode runtime', () => {
 
 /* -- Card-level eager fields render without hydrate -------------------- */
 
-test('compact cards expose eager v2 fields for deps / external / boundary', () => {
+test('compact cards expose eager v2 fields for deps / external / sync / boundary', () => {
   const { context } = createCompactSandbox({
     state: {
       snapshot_protocol: 'compact-v1',
@@ -453,6 +453,11 @@ test('compact cards expose eager v2 fields for deps / external / boundary', () =
           provider: 'github',
           external_id: '42',
           external_url: 'https://example.test/issues/42',
+          board_sync: {
+            provider: 'github',
+            sync_state: 'error',
+            last_error: 'missing project scope',
+          },
           worktree_boundary: {
             repo_root: '/repo', branch: 'feature/x', status: 'open',
           },
@@ -470,6 +475,9 @@ test('compact cards expose eager v2 fields for deps / external / boundary', () =
   eq(card.depends_on, ['t-root']);
   assert.equal(card.provider, 'github');
   assert.equal(card.external_url, 'https://example.test/issues/42');
+  assert.equal(card.board_sync.provider, 'github');
+  assert.equal(card.board_sync.sync_state, 'error');
+  assert.equal(card.board_sync.last_error, 'missing project scope');
   assert.equal(card.worktree_boundary.status, 'open');
   assert.equal(card.resume_after_boundary_task_id, 't-boundary');
   assert.equal(card.messages.length, 1);

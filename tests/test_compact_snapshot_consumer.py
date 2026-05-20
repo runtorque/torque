@@ -46,6 +46,7 @@ COMPACT_CARD_FIELDS = {
     "provider",
     "external_id",
     "external_url",
+    "board_sync",
     "health_state",
     "health_since",
     "health_details",
@@ -106,6 +107,7 @@ class CompactSnapshotConsumerTests(unittest.TestCase):
             provider="github",
             external_id="123",
             external_url="https://example.test/tasks/123",
+            board_sync={"provider": "github", "sync_state": "idle"},
             status="on-review",
             health_state="attention",
             health_since="2026-04-22T12:00:00+00:00",
@@ -191,6 +193,8 @@ class CompactSnapshotConsumerTests(unittest.TestCase):
         self.assertEqual(card["external_id"], "123")
         self.assertEqual(
             card["external_url"], "https://example.test/tasks/123")
+        self.assertEqual(
+            card["board_sync"], {"provider": "github", "sync_state": "idle"})
         self.assertEqual(card["health_since"], "2026-04-22T12:00:00+00:00")
         self.assertEqual(card["health_details"], {"reason": "recent_activity"})
         self.assertEqual(card["verification_notes"], "needs smoke")

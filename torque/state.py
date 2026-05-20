@@ -176,6 +176,8 @@ _WORKTREE_MERGE_CLEANUP_MODES = {
     "close_remove",
 }
 _DEFAULT_WORKTREE_MERGE_CLEANUP = "keep"
+_BOARD_SYNC_PROVIDERS = {"none", "github"}
+_BOARD_SYNC_STATES = {"idle", "queued", "syncing", "error"}
 _ENGINEER_MERGE_MODES = {
     "pr",
     "direct",
@@ -241,6 +243,7 @@ COMPACT_BOARD_TASK_FIELDS = (
     "provider",
     "external_id",
     "external_url",
+    "board_sync",
     "health_state",
     "health_since",
     "health_details",
@@ -721,10 +724,13 @@ class BoardTask:
     created_at: str = ""        # ISO 8601
     updated_at: str = ""        # ISO 8601
     lane_entered_at: str = ""   # ISO 8601 of most recent transition into lane
-    # Provider fields (unused in v1, ready for sync)
+    # Provider link fields
     provider: str = ""          # "jira", "linear", "github"
     external_id: str = ""       # e.g. "PROJ-123"
     external_url: str = ""      # link back to provider
+    # Board sync metadata. Common sync state is top-level; provider-specific
+    # adapter data lives under the provider key (for example ``github``).
+    board_sync: dict = field(default_factory=dict)
     # Pipeline fields (Phase 4b)
     parent_task_id: str = ""    # task this was derived from (empty for root tasks)
     pipeline_depth: int = 0     # 0 for root, auto-incremented from parent
@@ -1160,6 +1166,113 @@ def _normalize_verification_summary(summary) -> dict:
     return out
 
 
+def _json_safe_copy(value, default):
+    """Return a JSON-compatible deep copy, falling back to ``default``."""
+    try:
+        return json.loads(json.dumps(value))
+    except (TypeError, ValueError):
+        return copy.deepcopy(default)
+
+
+def _normalize_board_sync_provider(provider) -> str:
+    value = str(provider or "none").strip().lower()
+    return value if value in _BOARD_SYNC_PROVIDERS else "none"
+
+
+def _normalize_board_sync_github_settings(settings) -> dict:
+    """Normalize nested GitHub board-sync group settings.
+
+    The field is intentionally sparse: missing keys mean "use provider
+    defaults" so default group settings do not grow noisy non-empty payloads.
+    """
+    source = _json_safe_copy(settings, {})
+    if not isinstance(source, dict):
+        return {}
+    out: dict = {}
+    text_keys = (
+        "github_repo",
+        "github_project_owner",
+        "github_project_id",
+        "github_project_status_field",
+        "github_sync_default",
+    )
+    for key in text_keys:
+        if key not in source:
+            continue
+        value = source.get(key, "")
+        if value is None:
+            value = ""
+        if not isinstance(value, str):
+            value = str(value)
+        value = value.strip()
+        if value:
+            out[key] = value
+    if "github_project_number" in source:
+        try:
+            out["github_project_number"] = max(
+                0,
+                int(source.get("github_project_number") or 0),
+            )
+        except (TypeError, ValueError):
+            out["github_project_number"] = 0
+    for key in ("github_lane_status_map", "github_assignee_map"):
+        if key in source:
+            value = source.get(key)
+            out[key] = value if isinstance(value, dict) else {}
+    for key in ("github_close_issues_via_pr",
+                "github_create_missing_labels"):
+        if key in source:
+            out[key] = bool(source.get(key))
+    return out
+
+
+def _normalize_board_sync(sync) -> dict:
+    """Normalize task-scoped board-sync metadata.
+
+    The column stores common sync state at the top level and provider-specific
+    data under a provider key (``github`` for V1). Unknown JSON-compatible
+    keys are preserved so future adapters can extend the payload without a
+    migration.
+    """
+    source = _json_safe_copy(sync, {})
+    if not isinstance(source, dict):
+        return {}
+    provider = str(source.get("provider", "") or "").strip().lower()
+    if provider:
+        source["provider"] = provider
+        if provider in source and not isinstance(source.get(provider), dict):
+            source.pop(provider, None)
+    elif "provider" in source:
+        source.pop("provider", None)
+    if "version" in source:
+        try:
+            source["version"] = max(1, int(source.get("version") or 1))
+        except (TypeError, ValueError):
+            source.pop("version", None)
+    if "enabled" in source:
+        source["enabled"] = bool(source.get("enabled"))
+    for key in (
+            "last_push_at",
+            "last_pull_at",
+            "last_seen_provider_updated_at",
+            "last_synced_hash",
+            "last_error"):
+        if key in source:
+            value = source.get(key, "")
+            if value is None:
+                value = ""
+            if not isinstance(value, str):
+                value = str(value)
+            source[key] = value.strip()
+    if "sync_state" in source:
+        state = str(source.get("sync_state", "") or "").strip().lower()
+        if state in _BOARD_SYNC_STATES:
+            source["sync_state"] = state
+        else:
+            source.pop("sync_state", None)
+    return source
+
+
 def board_task_is_archived(task: Optional[BoardTask]) -> bool:
     return bool(task and task.lane == ARCHIVED_LANE)
 
@@ -1431,6 +1544,9 @@ class GroupSettings:
     board_default_labels: list[str] = field(default_factory=list)  # default labels for new tasks
     board_default_lane: str = ""  # default lane for new tasks (empty = first lane)
     board_default_action: str = ""  # default action for new tasks
+    board_sync_provider: str = "none"  # none | github (future providers reserved)
+    board_sync_enabled: bool = False
+    board_sync_github: dict = field(default_factory=dict)  # GitHub adapter settings
     # Engineer
     engineer_agent_id: str = ""  # designated engineer agent for this group
     default_engineer_specializations: list[str] = field(default_factory=list)  # ordered, applied at engineer creation
@@ -4132,6 +4248,19 @@ class MatrixState:
                             normalize_engineer_merge_mode(
                                 filtered["engineer_merge_mode"])
                         )
+                    if "board_sync_provider" in filtered:
+                        filtered["board_sync_provider"] = (
+                            _normalize_board_sync_provider(
+                                filtered["board_sync_provider"])
+                        )
+                    if "board_sync_enabled" in filtered:
+                        filtered["board_sync_enabled"] = bool(
+                            filtered["board_sync_enabled"])
+                    if "board_sync_github" in filtered:
+                        filtered["board_sync_github"] = (
+                            _normalize_board_sync_github_settings(
+                                filtered["board_sync_github"])
+                        )
                     self._normalize_architect_settings_mapping(
                         filtered,
                         strict=False,
@@ -4189,6 +4318,9 @@ class MatrixState:
                     raw.get("messages_thread", [])
                 )
                 _normalize_verification_fields(raw)
+                raw["board_sync"] = _normalize_board_sync(
+                    raw.get("board_sync", {})
+                )
                 raw["worktree_boundary"] = _normalize_worktree_boundary(
                     raw.get("worktree_boundary", {})
                 )
@@ -4619,6 +4751,12 @@ class MatrixState:
                     value = normalize_worktree_merge_cleanup(value)
                 elif key == "engineer_merge_mode":
                     value = normalize_engineer_merge_mode(value)
+                elif key == "board_sync_provider":
+                    value = _normalize_board_sync_provider(value)
+                elif key == "board_sync_enabled":
+                    value = bool(value)
+                elif key == "board_sync_github":
+                    value = _normalize_board_sync_github_settings(value)
                 elif key in {"agent_model", "agent_reasoning_effort"}:
                     value = str(value or "").strip()
                 elif key in (
@@ -6876,6 +7014,8 @@ class MatrixState:
             kwargs["messages_thread"] = _normalize_messages_thread(
                 kwargs["messages_thread"]
             )
+        if "board_sync" in kwargs:
+            kwargs["board_sync"] = _normalize_board_sync(kwargs["board_sync"])
         _normalize_verification_fields(kwargs)
         bt = BoardTask(
             id=tid,
@@ -6947,6 +7087,8 @@ class MatrixState:
             fields["messages_thread"] = _normalize_messages_thread(
                 fields["messages_thread"]
             )
+        if "board_sync" in fields:
+            fields["board_sync"] = _normalize_board_sync(fields["board_sync"])
         _normalize_verification_fields(fields)
         valid = set(BoardTask.__dataclass_fields__) - {"id", "slug", "created_at"}
         old_lane = task.lane

@@ -648,6 +648,59 @@ class TorqueDBTests(unittest.TestCase):
         }
         self.assertIn("engineer_merge_mode", columns)
 
+    def test_board_sync_schema_migration_adds_columns(self):
+        legacy_path = Path(self.tmp.name) / "legacy-board-sync.db"
+        legacy = TorqueDB(legacy_path)
+        legacy.init()
+        legacy.save_board_task(
+            BoardTask(id="task-1", task="Legacy sync task", group="g")
+        )
+        legacy._conn.execute("DROP TABLE group_settings")
+        legacy._conn.execute(
+            "CREATE TABLE group_settings ("
+            "group_name TEXT PRIMARY KEY, "
+            "engineer_agent_id TEXT NOT NULL DEFAULT '')"
+        )
+        task_columns = [
+            row[1]
+            for row in legacy._conn.execute("PRAGMA table_info(board_tasks)")
+            if row[1] != "board_sync"
+        ]
+        quoted_columns = ", ".join(f'"{col}"' for col in task_columns)
+        legacy._conn.execute(
+            f"CREATE TABLE board_tasks_without_board_sync "
+            f"AS SELECT {quoted_columns} FROM board_tasks"
+        )
+        legacy._conn.execute("DROP TABLE board_tasks")
+        legacy._conn.execute(
+            "ALTER TABLE board_tasks_without_board_sync RENAME TO board_tasks"
+        )
+        legacy._conn.commit()
+        legacy.close()
+
+        migrated = TorqueDB(legacy_path)
+        self.addCleanup(migrated.close)
+        migrated.init()
+
+        task_columns = {
+            row[1]
+            for row in migrated._conn.execute("PRAGMA table_info(board_tasks)")
+        }
+        settings_columns = {
+            row[1]
+            for row in migrated._conn.execute("PRAGMA table_info(group_settings)")
+        }
+        self.assertIn("board_sync", task_columns)
+        self.assertTrue({
+            "board_sync_provider",
+            "board_sync_enabled",
+            "board_sync_github",
+        }.issubset(settings_columns))
+        row = migrated._conn.execute(
+            "SELECT board_sync FROM board_tasks LIMIT 1"
+        ).fetchone()
+        self.assertEqual(json.loads(row[0]), {})
+
     def test_load_all_roundtrips_json_and_boolean_fields(self):
         cell = AgentCell(
             id="agent-1",
@@ -698,6 +751,19 @@ class TorqueDBTests(unittest.TestCase):
                 worktree_merge_cleanup="close_remove",
                 worktree_merge_preserve_diff=True,
                 engineer_merge_mode="direct",
+                board_sync_provider="github",
+                board_sync_enabled=True,
+                board_sync_github={
+                    "github_repo": "owner/repo",
+                    "github_project_owner": "owner",
+                    "github_project_number": 5,
+                    "github_project_status_field": "Status",
+                    "github_lane_status_map": {"In Progress": "Doing"},
+                    "github_sync_default": "linked",
+                    "github_close_issues_via_pr": True,
+                    "github_create_missing_labels": False,
+                    "github_assignee_map": {"engineer-1": "octocat"},
+                },
             ),
         )
         self.db.save_board_task(
@@ -724,6 +790,32 @@ class TorqueDBTests(unittest.TestCase):
                 parent_task_id="parent-1",
                 pipeline_depth=2,
                 pipeline_root_id="root-1",
+                provider="github",
+                external_id="owner/repo#123",
+                external_url="https://github.com/owner/repo/issues/123",
+                board_sync={
+                    "version": 1,
+                    "provider": "github",
+                    "enabled": True,
+                    "github": {
+                        "issue_repo": "owner/repo",
+                        "issue_number": 123,
+                        "issue_node_id": "I_kw",
+                        "issue_url": "https://github.com/owner/repo/issues/123",
+                        "project_owner": "owner",
+                        "project_number": 5,
+                        "project_id": "PVT_kw",
+                        "project_item_id": "PVTI_kw",
+                        "status_field_id": "PVTSSF_kw",
+                        "status_option_id": "option-id",
+                    },
+                    "last_push_at": "2026-05-20T15:00:00+00:00",
+                    "last_pull_at": "",
+                    "last_seen_provider_updated_at": "2026-05-20T14:58:00Z",
+                    "last_synced_hash": "sha256",
+                    "sync_state": "idle",
+                    "last_error": "",
+                },
                 status="Reviewing",
                 scheduled_at="2026-04-07T10:00:00+00:00",
                 messages=[{"action": "progress", "message": "Working"}],
@@ -855,6 +947,21 @@ class TorqueDBTests(unittest.TestCase):
             "direct",
         )
         self.assertEqual(
+            loaded["group_settings"]["g"]["board_sync_provider"],
+            "github",
+        )
+        self.assertTrue(loaded["group_settings"]["g"]["board_sync_enabled"])
+        self.assertEqual(
+            loaded["group_settings"]["g"]["board_sync_github"]["github_repo"],
+            "owner/repo",
+        )
+        self.assertEqual(
+            loaded["group_settings"]["g"]["board_sync_github"][
+                "github_lane_status_map"
+            ],
+            {"In Progress": "Doing"},
+        )
+        self.assertEqual(
             loaded["board_tasks"]["task-1"]["action_vars"],
             {"TEST_COMMAND": "python3 -m unittest"},
         )
@@ -877,6 +984,20 @@ class TorqueDBTests(unittest.TestCase):
         self.assertEqual(
             loaded["board_tasks"]["task-1"]["suggested_action"],
             "feature/review",
+        )
+        self.assertEqual(
+            loaded["board_tasks"]["task-1"]["board_sync"]["provider"],
+            "github",
+        )
+        self.assertEqual(
+            loaded["board_tasks"]["task-1"]["board_sync"]["github"][
+                "issue_number"
+            ],
+            123,
+        )
+        self.assertEqual(
+            loaded["board_tasks"]["task-1"]["board_sync"]["sync_state"],
+            "idle",
         )
         self.assertEqual(
             loaded["board_tasks"]["task-1"]["lane_entered_at"],
