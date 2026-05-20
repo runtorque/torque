@@ -42,7 +42,7 @@ prompt: |
 
   If you encounter something the plan didn't account for, handle it pragmatically. Only deviate from the plan when the plan is clearly wrong, and document what you changed and why in the derive description.
 
-  Do NOT deploy, run `make deploy`, or restart services. Only write code and commit.
+  Do NOT deploy, run `make deploy`/`make deploy-toolbelt`, or restart services. Only write code and commit.
 
   ## Closeout reminder
 

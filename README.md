@@ -81,20 +81,20 @@ get started.
 git clone git@github.com:runtorque/torque.git
 cd torque
 make deps
-make install
-make cli
+make deploy
 make desktop-deps
-torque desktop
+make run
 ```
 
-The desktop shell installs `pywebview` into the bundled Python runtime and
-starts a native window on its own profile and port (defaults: `desktop`
-profile, port `18933`), so it does not collide with anything else you might
-be running.
+`make deploy` installs the primary standalone/desktop app files under
+`~/.torque/app` and refreshes the CLI symlink. `make run` starts a native
+desktop window on its own profile and port (defaults: `desktop` profile, port
+`18933`), so it does not collide with any Toolbelt instance you might also
+run.
 
 ### Standalone browser mode
 
-From the cloned repo, after `make deps` has been run once:
+From the cloned repo, after `make deploy` has been run once:
 
 ```bash
 make standalone
@@ -112,7 +112,7 @@ Toolbelt sidebar so it sits next to your terminal sessions.
 
 ```bash
 make deps
-make install
+make deploy-toolbelt
 make cli
 ```
 
@@ -121,6 +121,10 @@ Then in iTerm2:
 1. Open **Scripts → torque** to launch the daemon.
 2. Open **View → Show Toolbelt**.
 3. Enable **Torque** from the Toolbelt gear menu.
+
+Use `make deploy-toolbelt` again after pulling changes when you specifically
+want to refresh the iTerm2 Scripts copy. The general `make deploy` target is
+for the primary standalone/desktop app.
 
 For more install variants and runtime modes, see
 [Getting Started](docs/foundations/getting-started.md) and

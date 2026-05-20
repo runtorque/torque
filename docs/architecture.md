@@ -1,6 +1,6 @@
 # Architecture
 
-Torque is a local orchestration system. A long-running Python daemon manages state, agents, and worktrees; a lightweight web UI in iTerm2's Toolbelt (or a browser, or a native desktop window) renders that state and dispatches commands; SQLite is the source of truth for persistence.
+Torque is a local orchestration system. A long-running Python daemon manages state, agents, and worktrees; a lightweight web UI renders that state in the primary desktop/browser surfaces or, secondarily, inside iTerm2's Toolbelt; SQLite is the source of truth for persistence.
 
 This page describes the major components and how they fit together. For the user-facing concepts (groups, agents, tasks, threads, pipelines), start with [What is Torque?](foundations/what-is-torque.md).
 
@@ -107,13 +107,23 @@ When enabled per group, every Worker gets a git worktree at `.torque/worktrees/<
 
 ## Runtime modes
 
-The same daemon serves three deployment shapes:
+The same daemon serves several deployment shapes:
 
-- **Toolbelt only** — registered in iTerm2's Python API, UI rendered into the Toolbelt sidebar.
-- **Toolbelt + browser** — Toolbelt as primary UI, `make open` opens a browser window connected to the same daemon.
-- **Standalone (browser-only)** — daemon runs without Toolbelt registration, controls iTerm2 externally. Used to support other terminal emulators in future and to run headless development setups.
+- **Native desktop** — the primary app surface. `make run` launches a native
+  shell backed by a standalone-mode daemon on port `18933` with data under
+  `~/.torque/profiles/desktop`.
+- **Standalone browser** — `make standalone` runs the daemon without Toolbelt
+  registration and `make open` opens the browser UI. This is the primary
+  browser-only path and supports headless development setups.
+- **iTerm2 Toolbelt** — the secondary integration. `make deploy-toolbelt`
+  copies the app into iTerm2's Scripts project and the UI renders in the
+  Toolbelt sidebar.
+- **Toolbelt + browser** — when the Toolbelt daemon is running, `make open`
+  opens a browser window connected to the same daemon.
 
-A native desktop shell (`pywebview`) launches a separate standalone-mode daemon on a different port (`18933`) with its own data directory (`~/.torque/profiles/desktop`) so it can't accidentally attach to the live Toolbelt instance.
+The desktop and standalone paths use profile-scoped data directories under
+`~/.torque/profiles/` so they don't accidentally attach to a live Toolbelt
+instance.
 
 → [Operations](operate/operations.md)
 

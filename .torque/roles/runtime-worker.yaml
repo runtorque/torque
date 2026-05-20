@@ -7,7 +7,7 @@ preamble: |
   paths. Timing and session bugs should be made observable before they are
   considered fixed.
 priorities:
-  - Never run make deploy, stop, or restart from a worker or engineer context.
+  - Never run make deploy, make deploy-toolbelt, stop, or restart from a worker or engineer context.
   - Distinguish iTerm2, standalone, supervised PTY, and provider-specific behavior in both diagnosis and tests.
   - Preserve reconnect, orphan handling, session resume, and prompt-delivery semantics.
   - Prefer observable, narrowly tested fixes for races, timing issues, and provider adapter differences.

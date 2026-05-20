@@ -3,6 +3,9 @@ ITERM2_PROJECT := $(ITERM2_SCRIPTS)/torque
 SCRIPT_DIR     := $(ITERM2_PROJECT)/torque
 MAIN_SCRIPT    := torque.py
 AUTOLAUNCH_DIR := $(ITERM2_SCRIPTS)/AutoLaunch
+PRIMARY_APP_DIR ?= $(HOME)/.torque/app
+PRIMARY_PORT    ?= 18933
+TOOLBELT_PORT   ?= 18932
 
 # Global iTerm2 Python environment (used to bootstrap the project env)
 GLOBAL_ENV     := $(shell ls -d $(HOME)/.config/iterm2/AppSupport/iterm2env-[0-9]* 2>/dev/null \
@@ -14,6 +17,7 @@ PROJECT_PYTHON := $(shell ls "$(ITERM2_PROJECT)"/iterm2env/versions/3.*/bin/pyth
 GLOBAL_PYTHON  := $(shell ls $(HOME)/.config/iterm2/AppSupport/iterm2env*/versions/*/bin/python3 \
                     2>/dev/null | sort -V | tail -1)
 ITERM2_PYTHON  := $(or $(PROJECT_PYTHON),$(GLOBAL_PYTHON))
+TORQUE_PYTHON  := $(or $(TORQUE_PYTHON_EXECUTABLE),$(ITERM2_PYTHON),python3)
 
 PERF_MATRIX    ?= 10,20,30
 PERF_DURATION  ?= 15
@@ -24,9 +28,9 @@ PERF_PYTHON    ?= $(PERF_VENV)/bin/python
 # Test recipes must not inherit Torque runtime/agent env from worker shells.
 SANITIZE_TORQUE_TEST_ENV = env $$(env | sed -n 's/^\(TORQUE_[A-Za-z0-9_]*\)=.*/-u \1/p')
 
-.PHONY: install uninstall run deps desktop-deps check stop deploy autolaunch cli standalone standalone-bg desktop desktop-attach tauri-dev tauri-build tauri-build-mac open lint lint-tauri-permissions test perf-deps perf-baseline perf-delta
+.PHONY: install install-standalone install-toolbelt uninstall run run-toolbelt deps desktop-deps check stop deploy deploy-toolbelt autolaunch cli standalone standalone-bg desktop desktop-attach tauri-dev tauri-build tauri-build-mac open lint lint-tauri-permissions test perf-deps perf-baseline perf-delta
 
-## install: Set up the iTerm2 script project and copy all files
+## install: Set up the secondary iTerm2 Toolbelt script project and copy all files
 install:
 	@# -- Ensure project directory exists --
 	@mkdir -p "$(SCRIPT_DIR)/torque"
@@ -100,22 +104,52 @@ install:
 	@echo "  2. Show Toolbelt: View → Show Toolbelt (⌘⇧B)"
 	@echo "  3. Check 'Torque' in the Toolbelt gear menu"
 
+## install-toolbelt: Alias for the secondary iTerm2 Toolbelt install
+install-toolbelt: install
+
+## install-standalone: Copy the primary standalone/desktop app files to ~/.torque/app
+install-standalone:
+	@mkdir -p "$(PRIMARY_APP_DIR)/torque"
+	@mkdir -p "$(PRIMARY_APP_DIR)/static/js"
+	cp torque.py "$(PRIMARY_APP_DIR)/$(MAIN_SCRIPT)"
+	cp torque_desktop.py "$(PRIMARY_APP_DIR)/torque_desktop.py"
+	cp webview.html "$(PRIMARY_APP_DIR)/webview.html"
+	@find torque -type f -name '*.py' -print0 | while IFS= read -r -d '' src; do \
+		dest="$(PRIMARY_APP_DIR)/$$src"; \
+		mkdir -p "$$(dirname "$$dest")"; \
+		cp "$$src" "$$dest"; \
+	done
+	@find static -type f -print0 | while IFS= read -r -d '' src; do \
+		dest="$(PRIMARY_APP_DIR)/$$src"; \
+		mkdir -p "$$(dirname "$$dest")"; \
+		cp "$$src" "$$dest"; \
+	done
+	@if repo_root=$$(git rev-parse --show-toplevel 2>/dev/null); then \
+		printf '%s\n' "$$repo_root" > "$(PRIMARY_APP_DIR)/.torque_source_repo_root"; \
+	else \
+		rm -f "$(PRIMARY_APP_DIR)/.torque_source_repo_root"; \
+	fi
+	@echo ""
+	@echo "Installed primary standalone/desktop app files to $(PRIMARY_APP_DIR)"
+	@echo "Runtime data uses ~/.torque/profiles/<profile>/ (for example desktop or standalone)."
+
 ## autolaunch: Symlink for auto-start on iTerm2 launch
 autolaunch: install
 	@mkdir -p "$(AUTOLAUNCH_DIR)"
 	ln -sf "$(SCRIPT_DIR)/$(MAIN_SCRIPT)" "$(AUTOLAUNCH_DIR)/$(MAIN_SCRIPT)"
 	@echo "Auto-launch symlink created."
 
-## uninstall: Remove installed files and autolaunch symlink
+## uninstall: Remove primary app files, secondary Toolbelt files, and autolaunch symlink
 uninstall:
+	rm -rf "$(PRIMARY_APP_DIR)"
 	rm -f "$(SCRIPT_DIR)/$(MAIN_SCRIPT)" "$(SCRIPT_DIR)/torque_desktop.py" "$(SCRIPT_DIR)/webview.html" "$(SCRIPT_DIR)/state.json" "$(SCRIPT_DIR)/torque.db" "$(SCRIPT_DIR)/.torque_source_repo_root"
 	rm -f "$(AUTOLAUNCH_DIR)/$(MAIN_SCRIPT)"
 	@echo "Uninstalled."
 
-## deps: Install runtime dependencies into iTerm2's Python environment
+## deps: Install runtime dependencies into Torque's Python environment
 deps:
 	@if [ -z "$(ITERM2_PYTHON)" ]; then \
-		echo "Error: iTerm2 Python not found. Run make install first."; \
+		echo "Error: iTerm2 Python not found. Enable the iTerm2 Python API or run make install-toolbelt once to bootstrap it."; \
 		exit 1; \
 	fi
 	"$(ITERM2_PYTHON)" -m pip install aiohttp jinja2 pyyaml orjson
@@ -123,17 +157,20 @@ deps:
 
 ## desktop-deps: Install optional native desktop-shell dependency
 desktop-deps:
-	@if [ -z "$(ITERM2_PYTHON)" ]; then \
-		echo "Error: iTerm2 Python not found. Run make install first."; \
+	@if [ -z "$(TORQUE_PYTHON)" ]; then \
+		echo "Error: Torque Python not found. Run make deps first or set TORQUE_PYTHON_EXECUTABLE."; \
 		exit 1; \
 	fi
-	"$(ITERM2_PYTHON)" -m pip install pywebview
-	@echo "Installed pywebview into: $(ITERM2_PYTHON)"
+	"$(TORQUE_PYTHON)" -m pip install pywebview
+	@echo "Installed pywebview into: $(TORQUE_PYTHON)"
 
-## run: Launch the script in the background (iTerm2 must be running with Python API enabled)
-run:
+## run: Launch the primary desktop app (native shell backed by standalone daemon)
+run: desktop
+
+## run-toolbelt: Launch the secondary iTerm2 Toolbelt script in the background
+run-toolbelt:
 	@if [ -z "$(ITERM2_PYTHON)" ]; then \
-		echo "Error: iTerm2 Python not found. Run make install first."; \
+		echo "Error: iTerm2 Python not found. Run make deploy-toolbelt first."; \
 		exit 1; \
 	fi
 	@pid_file="$(SCRIPT_DIR)/torque.pid"; \
@@ -174,7 +211,7 @@ stop: _check_not_in_worker
 ## worktree or with TORQUE_CELL_ID set. The main daemon is the process being killed;
 ## running this from a worker corrupts the in-memory dispatch pipeline on the
 ## next boot. Override with FORCE=1 only after reading the failure-mode notes in
-## CLAUDE.md → "Never `make deploy` mid-session".
+## CLAUDE.md → "Never deploy/stop mid-session".
 .PHONY: _check_not_in_worker
 _check_not_in_worker:
 	@if [ -n "$$FORCE" ]; then \
@@ -182,27 +219,40 @@ _check_not_in_worker:
 	fi; \
 	if [ -n "$$TORQUE_CELL_ID" ]; then \
 		echo "Error: TORQUE_CELL_ID=$$TORQUE_CELL_ID is set — you are inside a Torque worker."; \
-		echo "       \`make stop\`/\`make deploy\` would kill the daemon you are talking to."; \
-		echo "       See CLAUDE.md → 'Never \`make deploy\` mid-session'."; \
+		echo "       \`make stop\`/\`make deploy\`/\`make deploy-toolbelt\` would kill the daemon you are talking to."; \
+		echo "       See CLAUDE.md → 'Never deploy/stop mid-session'."; \
 		echo "       If you really mean it: FORCE=1 make <target>"; \
 		exit 1; \
 	fi; \
 	case "$$(pwd)" in \
 	*.torque/worktrees/*) \
 		echo "Error: pwd is under .torque/worktrees/ — you are inside a Torque worker worktree."; \
-		echo "       \`make stop\`/\`make deploy\` would kill the daemon that spawned you."; \
-		echo "       See CLAUDE.md → 'Never \`make deploy\` mid-session'."; \
+		echo "       \`make stop\`/\`make deploy\`/\`make deploy-toolbelt\` would kill the daemon that spawned you."; \
+		echo "       See CLAUDE.md → 'Never deploy/stop mid-session'."; \
 		echo "       If you really mean it: FORCE=1 make <target>"; \
 		exit 1; \
 		;; \
 	esac
 
-## deploy: Stop old instance, install new files, prompt to restart
-deploy: stop install
+## deploy: Stop the primary standalone/desktop daemon and install app files
+deploy: _check_not_in_worker
+	@$(MAKE) --no-print-directory stop TORQUE_PORT="$(or $(TORQUE_PORT),$(PRIMARY_PORT))"
+	@$(MAKE) --no-print-directory install-standalone cli
 	@echo ""
-	@echo "Now restart via: make run (or Scripts menu → torque)"
+	@echo "Primary standalone/desktop deploy complete."
+	@echo "Relaunch the primary app with: make run"
+	@echo "Primary deploy stops port $(or $(TORQUE_PORT),$(PRIMARY_PORT)); set TORQUE_PORT to deploy another standalone profile."
+	@echo "Browser-only mode remains available with: make standalone (then make open)"
 
-## restart: Deploy and launch in one step
+## deploy-toolbelt: Stop old Toolbelt instance, install iTerm2 files, prompt to restart
+deploy-toolbelt: _check_not_in_worker
+	@$(MAKE) --no-print-directory stop TORQUE_PORT="$(TOOLBELT_PORT)"
+	@$(MAKE) --no-print-directory install
+	@echo ""
+	@echo "Secondary iTerm2 Toolbelt deploy complete."
+	@echo "Now restart via: iTerm2 → Scripts menu → torque"
+
+## restart: Deploy the primary app and launch it in one step
 restart: deploy run
 
 ## cli: Install the torque CLI to ~/.local/bin (add to PATH if needed)
@@ -218,10 +268,10 @@ cli:
 		echo "    export PATH=\"\$$HOME/.local/bin:\$$PATH\"";; \
 	esac
 
-## standalone: Run Torque in standalone-only mode in the foreground
-standalone: install
-	@if [ -z "$(ITERM2_PYTHON)" ]; then \
-		echo "Error: iTerm2 Python not found. Run make install first."; \
+## standalone: Run Torque in standalone-only browser mode in the foreground
+standalone: install-standalone
+	@if [ -z "$(TORQUE_PYTHON)" ]; then \
+		echo "Error: Torque Python not found. Run make deps first or set TORQUE_PYTHON_EXECUTABLE."; \
 		exit 1; \
 	fi
 	@profile="$(or $(TORQUE_PROFILE),standalone)"; \
@@ -240,12 +290,12 @@ standalone: install
 	env TORQUE_STANDALONE=1 TORQUE_PORT="$(or $(TORQUE_PORT),18932)" \
 		TORQUE_PROFILE="$$profile" \
 		TORQUE_DATA_DIR="$(TORQUE_DATA_DIR)" \
-		"$(ITERM2_PYTHON)" "$(SCRIPT_DIR)/$(MAIN_SCRIPT)"
+		"$(TORQUE_PYTHON)" "$(PRIMARY_APP_DIR)/$(MAIN_SCRIPT)"
 
 ## standalone-bg: Best-effort detached standalone launch
-standalone-bg: install
-	@if [ -z "$(ITERM2_PYTHON)" ]; then \
-		echo "Error: iTerm2 Python not found. Run make install first."; \
+standalone-bg: install-standalone
+	@if [ -z "$(TORQUE_PYTHON)" ]; then \
+		echo "Error: Torque Python not found. Run make deps first or set TORQUE_PYTHON_EXECUTABLE."; \
 		exit 1; \
 	fi
 	@pid_file="$(SCRIPT_DIR)/standalone.pid"; \
@@ -263,7 +313,7 @@ standalone-bg: install
 	nohup env TORQUE_STANDALONE=1 TORQUE_PORT="$(or $(TORQUE_PORT),18932)" \
 		TORQUE_PROFILE="$$profile" \
 		TORQUE_DATA_DIR="$(TORQUE_DATA_DIR)" \
-		"$(ITERM2_PYTHON)" "$(SCRIPT_DIR)/$(MAIN_SCRIPT)" \
+		"$(TORQUE_PYTHON)" "$(PRIMARY_APP_DIR)/$(MAIN_SCRIPT)" \
 		>> "$$data_dir/torque.log" 2>&1 < /dev/null & \
 	pid=$$!; \
 	echo "$$pid" > "$$pid_file"; \
@@ -271,9 +321,9 @@ standalone-bg: install
 	echo "Open http://127.0.0.1:$(or $(TORQUE_PORT),18932)/ in a browser"
 
 ## desktop: Run Torque in a native pywebview window backed by a standalone server
-desktop:
-	@if [ -z "$(ITERM2_PYTHON)" ]; then \
-		echo "Error: iTerm2 Python not found. Run make install first."; \
+desktop: install-standalone
+	@if [ -z "$(TORQUE_PYTHON)" ]; then \
+		echo "Error: Torque Python not found. Run make deps first or set TORQUE_PYTHON_EXECUTABLE."; \
 		exit 1; \
 	fi
 	@profile="$(or $(TORQUE_PROFILE),desktop)"; \
@@ -297,12 +347,12 @@ desktop:
 		TORQUE_PROFILE="$$profile" \
 		TORQUE_DATA_DIR="$$data_dir" \
 		TORQUE_DESKTOP_MODE="spawn" \
-		"$(ITERM2_PYTHON)" "$(CURDIR)/torque_desktop.py"
+		"$(TORQUE_PYTHON)" "$(PRIMARY_APP_DIR)/torque_desktop.py"
 
 ## desktop-attach: Attach the native shell to an existing matching standalone Torque server
-desktop-attach:
-	@if [ -z "$(ITERM2_PYTHON)" ]; then \
-		echo "Error: iTerm2 Python not found. Run make install first."; \
+desktop-attach: install-standalone
+	@if [ -z "$(TORQUE_PYTHON)" ]; then \
+		echo "Error: Torque Python not found. Run make deps first or set TORQUE_PYTHON_EXECUTABLE."; \
 		exit 1; \
 	fi
 	@profile="$(or $(TORQUE_PROFILE),desktop)"; \
@@ -326,7 +376,7 @@ desktop-attach:
 		TORQUE_PROFILE="$$profile" \
 		TORQUE_DATA_DIR="$$data_dir" \
 		TORQUE_DESKTOP_MODE="attach" \
-		"$(ITERM2_PYTHON)" "$(CURDIR)/torque_desktop.py"
+		"$(TORQUE_PYTHON)" "$(PRIMARY_APP_DIR)/torque_desktop.py"
 
 ## tauri-dev: Run Tauri shell in dev mode (live reload, daemon spawned). Equivalent of `make desktop`.
 tauri-dev:
@@ -375,6 +425,7 @@ open:
 ## check: Verify prerequisites
 check:
 	@echo "iTerm2 Python: $(or $(ITERM2_PYTHON),NOT FOUND)"
+	@echo "Torque Python: $(TORQUE_PYTHON)"
 	@if [ -n "$(ITERM2_PYTHON)" ]; then \
 		echo "aiohttp:"; \
 		"$(ITERM2_PYTHON)" -c "import aiohttp; print('  installed:', aiohttp.__version__)" 2>/dev/null \
@@ -390,11 +441,15 @@ check:
 			|| echo "  NOT installed"; \
 	fi
 	@echo "Project dir:  $(ITERM2_PROJECT)"
+	@echo "Primary app:  $(PRIMARY_APP_DIR)"
 	@echo "iterm2env:    $(shell test -e "$(ITERM2_PROJECT)/iterm2env" && echo 'yes' || echo 'no')"
 	@echo "setup.cfg:    $(shell test -f "$(ITERM2_PROJECT)/setup.cfg" && echo 'yes' || echo 'no')"
+	@test -f "$(PRIMARY_APP_DIR)/$(MAIN_SCRIPT)" \
+		&& echo "Primary app installed: yes" \
+		|| echo "Primary app installed: no (run: make deploy)"
 	@test -f "$(SCRIPT_DIR)/$(MAIN_SCRIPT)" \
-		&& echo "Installed:    yes" \
-		|| echo "Installed:    no (run: make install)"
+		&& echo "Toolbelt installed: yes" \
+		|| echo "Toolbelt installed: no (run: make deploy-toolbelt)"
 
 ## lint: Run repository lint checks
 lint: lint-tauri-permissions

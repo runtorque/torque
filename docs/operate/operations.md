@@ -4,13 +4,52 @@ This page covers the operator-facing side of Torque: how it runs, how to update 
 
 ## Runtime Modes
 
-### Toolbelt mode
+### Native desktop shell
 
-This is the default mode. Torque runs from iTerm2's Scripts menu and registers its UI in the Toolbelt.
+This is the primary day-to-day mode. Torque runs in a real native window
+through `pywebview`, backed by a standalone daemon:
+
+```bash
+make deploy
+make desktop-deps
+make run
+```
+
+By default, the desktop shell starts its own standalone Torque server with
+desktop-specific runtime values so it does **not** accidentally attach to a
+Toolbelt daemon:
+
+- profile: `desktop`
+- port: `18933`
+- data dir: `~/.torque/profiles/desktop`
+
+### Standalone browser mode
+
+Run Torque without Toolbelt registration and open the UI in a browser:
+
+```bash
+make standalone
+make open
+```
+
+This still controls the configured terminal backend, but the UI is served only
+in the browser. Runtime data defaults to `~/.torque/profiles/standalone`.
+
+### iTerm2 Toolbelt mode
+
+The iTerm2 Toolbelt integration is now secondary. It embeds the same UI next
+to your terminal tabs for operators who prefer that workflow:
+
+```bash
+make deploy-toolbelt
+```
+
+Then restart from **iTerm2 -> Scripts -> torque**, open **View -> Show
+Toolbelt**, and enable **Torque** from the Toolbelt gear menu.
 
 ### Dual mode
 
-Run Torque normally in the Toolbelt, then open the same UI in a browser:
+Run Torque in the Toolbelt, then open the same daemon in a browser:
 
 ```bash
 make open
@@ -18,36 +57,10 @@ make open
 
 Both clients talk to the same daemon and stay in sync.
 
-### Standalone-only mode
+### Desktop attach mode
 
-Run Torque without Toolbelt registration:
-
-```bash
-make standalone
-make open
-```
-
-This still controls iTerm2, but the UI is only served in the browser.
-
-### Native desktop shell
-
-Run Torque in a real native window through `pywebview`:
-
-```bash
-make desktop-deps
-torque desktop
-```
-
-By default, the desktop shell starts its own standalone Torque server with
-desktop-specific runtime values so it does **not** accidentally attach to the
-Toolbelt daemon:
-
-- profile: `desktop`
-- port: `18933`
-- data dir: `~/.torque/profiles/desktop`
-
-If you already have a matching standalone server and want to reuse it, attach
-explicitly:
+If you already have a matching standalone server and want the native shell to
+reuse it, attach explicitly:
 
 ```bash
 torque desktop --attach --profile desktop --port 18933
@@ -67,18 +80,27 @@ window closes. Attach mode only owns the window.
 
 ## Install and Update
 
-Initial install:
+Initial primary standalone/desktop install:
 
 ```bash
 make deps
-make install
-make cli
+make deploy
+make desktop-deps
 ```
 
 Update after pulling new changes:
 
 ```bash
 make deploy
+```
+
+Then relaunch with `make run` for the desktop app, or `make standalone` +
+`make open` for browser-only mode.
+
+Secondary iTerm2 Toolbelt update:
+
+```bash
+make deploy-toolbelt
 ```
 
 Then restart from **Scripts -> torque**.
@@ -90,13 +112,23 @@ Useful maintenance targets:
 - `make autolaunch`
 - `make uninstall`
 - `make restart`
+- `make run`
+- `make standalone`
+- `make deploy-toolbelt`
 - `make desktop-deps`
 - `make desktop`
 - `make desktop-attach`
 
 ## Logs
 
-Torque writes its daemon log to:
+Primary standalone/desktop logs live in the active profile data dir:
+
+```text
+~/.torque/profiles/desktop/torque.log
+~/.torque/profiles/standalone/torque.log
+```
+
+The secondary Toolbelt log remains at:
 
 ```text
 ~/Library/Application Support/iTerm2/Scripts/torque/torque/torque.log
@@ -124,7 +156,14 @@ These settings live in [Group Settings](group-settings.md).
 
 ## Runtime State
 
-Persistent state lives in SQLite:
+Persistent state lives in SQLite. Primary standalone/desktop profiles use:
+
+```text
+~/.torque/profiles/desktop/torque.db
+~/.torque/profiles/standalone/torque.db
+```
+
+The secondary Toolbelt profile uses:
 
 ```text
 ~/Library/Application Support/iTerm2/Scripts/torque/torque/torque.db
@@ -138,6 +177,8 @@ Read-only CLI commands can fall back to SQLite directly, which is why commands l
 
 ```bash
 make stop
+# for the default desktop port:
+make stop TORQUE_PORT=18933
 ```
 
 ### Toolbelt panel missing
@@ -145,8 +186,9 @@ make stop
 Make sure:
 
 1. iTerm2's Python API is enabled
-2. Torque was started from **Scripts -> torque**
-3. The Toolbelt entry is enabled from the gear menu
+2. You deployed with `make deploy-toolbelt`
+3. Torque was started from **Scripts -> torque**
+4. The Toolbelt entry is enabled from the gear menu
 
 ### CLI cannot talk to the daemon
 
@@ -156,16 +198,18 @@ Check:
 - the port matches `TORQUE_PORT`
 - the log file contains no startup error
 
-### Browser view does not update
+### Browser or desktop view does not update
 
-The browser and Toolbelt both use the same WebSocket stream. If one view is stale, refresh it and check the daemon log before assuming the frontend is the problem.
+The browser, desktop shell, and Toolbelt all use the same WebSocket stream
+within a given daemon. If one view is stale, refresh it and check the daemon
+log before assuming the frontend is the problem.
 
 ### Native desktop shell will not launch
 
 Check these first:
 
 1. Run `make check` and confirm `pywebview` is installed.
-2. Remember that `pywebview` must be installed in the **runtime launching the desktop shell**. On a standard Torque install, that means the iTerm2-managed Python environment used by `torque desktop`.
+2. Remember that `pywebview` must be installed in the **runtime launching the desktop shell**. On a standard source install, `make desktop-deps` installs it into Torque's Python runtime (the iTerm2-managed Python by default, or `TORQUE_PYTHON_EXECUTABLE` when set).
 3. If you passed `--python` or `TORQUE_DESKTOP_PYTHON`, install `pywebview` into that interpreter too.
 4. If attach mode fails, confirm the target server is standalone and that its `TORQUE_PROFILE`, `TORQUE_PORT`, and `TORQUE_DATA_DIR` match the desktop shell values exactly.
 
@@ -187,9 +231,9 @@ Common runtime variables:
 
 ## Platform Expectations
 
-- **Validated now:** macOS + iTerm2, including the native `pywebview` shell.
+- **Validated now:** macOS desktop/standalone operation with iTerm2 as the current terminal-control backend.
 - **Browser-only smoke:** the served UI path can also be exercised in a browser, but that does not prove native-window behavior.
-- **Not yet a supported operator target:** Linux and Windows. `pywebview` is cross-platform, but Torque still depends on iTerm2 integration and has not been validated there yet.
+- **Not yet a supported operator target:** Linux and Windows. `pywebview` is cross-platform, but Torque still depends on the iTerm2 adapter for terminal control and has not been validated there yet.
 
 ## Related Docs
 

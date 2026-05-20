@@ -108,7 +108,7 @@ Each of these maps to a state transition the daemon validates server-side. A Wor
 
 ## When you'd spawn a Worker yourself
 
-Most Workers are spawned by an Engineer (or by `torque task dispatch`). But you can also spawn one directly from the Toolbelt's **+ New** menu when you want a scratch agent — for a one-off question, a quick exploration, or a task you want to drive interactively.
+Most Workers are spawned by an Engineer (or by `torque task dispatch`). But you can also spawn one directly from the workspace **+ New** menu when you want a scratch agent — for a one-off question, a quick exploration, or a task you want to drive interactively.
 
 User-spawned Workers:
 

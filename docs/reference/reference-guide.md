@@ -21,7 +21,7 @@ The full command surface lives in [CLI Reference](cli.md). This table groups the
 | Job | Common commands |
 |---|---|
 | Check whether Torque is up | `torque status`, `make check`, `torque logs -f` |
-| Install or update Torque | `make deps`, `make install`, `make deploy`, `make stop` |
+| Install or update Torque | `make deps`, `make deploy`, `make deploy-toolbelt`, `make stop` |
 | Start or open the UI | `make run`, `make standalone`, `make open`, `torque desktop`, `make desktop-attach` |
 | Create or inspect agents | `torque agent add`, `torque agent relaunch`, `torque agent remove`, `torque status <agent>` |
 | Work with tasks | `torque task create`, `torque task dispatch`, `torque task list`, `torque task show`, `torque task move`, `torque task resolve` |
@@ -66,14 +66,18 @@ Torque has a few settings surfaces. The details live in the linked pages; this s
 
 ## File locations and logs
 
-These paths matter when Torque is installed into iTerm2's Scripts directory.
+Primary standalone/desktop installs use `~/.torque/app` for app files and
+profile-specific data dirs for runtime state. The iTerm2 Scripts paths only
+matter for the secondary Toolbelt integration.
 
 | Item | Path |
 |---|---|
-| Installed Torque project | `~/Library/Application Support/iTerm2/Scripts/torque/torque/` |
-| Daemon log | `~/Library/Application Support/iTerm2/Scripts/torque/torque/torque.log` |
-| SQLite state database | `~/Library/Application Support/iTerm2/Scripts/torque/torque/torque.db` |
-| Auto-launch symlink directory | `~/Library/Application Support/iTerm2/Scripts/AutoLaunch/` |
+| Primary app files | `~/.torque/app/` |
+| Desktop profile log / DB | `~/.torque/profiles/desktop/torque.log`, `~/.torque/profiles/desktop/torque.db` |
+| Standalone profile log / DB | `~/.torque/profiles/standalone/torque.log`, `~/.torque/profiles/standalone/torque.db` |
+| Secondary Toolbelt install | `~/Library/Application Support/iTerm2/Scripts/torque/torque/` |
+| Secondary Toolbelt log / DB | `~/Library/Application Support/iTerm2/Scripts/torque/torque/torque.log`, `~/Library/Application Support/iTerm2/Scripts/torque/torque/torque.db` |
+| Toolbelt auto-launch symlink directory | `~/Library/Application Support/iTerm2/Scripts/AutoLaunch/` |
 
 Use `torque logs` to read the daemon log without remembering the full path.
 
@@ -86,16 +90,16 @@ These are operator notes, not implementation details.
 | Verify prerequisites | `make check` |
 | Install or refresh dependencies in iTerm2's Python | `make deps` |
 | Install the optional native desktop-shell dependency | `make desktop-deps` |
-| Copy the current repo into the iTerm2 Scripts install | `make install` |
-| Replace the installed copy after pulling changes | `make deploy` |
+| Install/update the primary standalone/desktop app copy | `make deploy` |
+| Copy the current repo into the secondary iTerm2 Scripts install | `make deploy-toolbelt` or `make install` |
 | Stop the daemon listening on port `18932` | `make stop` |
-| Run Torque directly | `make run` |
+| Run the primary desktop app | `make run` |
 | Open the standalone/browser view | `make standalone`, then `make open` |
 | Open the native desktop shell | `torque desktop` or `make desktop` |
 | Attach the native shell to an existing standalone server | `torque desktop --attach` or `make desktop-attach` |
 
 !!! note
-    `make deploy` updates the installed copy and stops the old daemon, but you still need to relaunch Torque from the Scripts menu or run `make run`.
+    `make deploy` updates the primary app copy and stops the primary desktop port (`18933` by default), but you still need to relaunch Torque with `make run` or `make standalone` + `make open`. Use `make deploy-toolbelt` when you specifically want to refresh the iTerm2 Toolbelt copy, then restart from the Scripts menu.
 
 ## User-facing behavior versus implementation notes
 

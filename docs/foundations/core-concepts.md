@@ -4,7 +4,7 @@ A single-page glossary of every term Torque uses. Each entry links to the page w
 
 ## Group
 
-A container for agents and terminals. Represents one unit of work — a feature, a project area, a bug fix. Each group can have its own settings, its own Engineer, and its own default worktree behavior. Groups appear as collapsible cards in the Toolbelt.
+A container for agents and terminals. Represents one unit of work — a feature, a project area, a bug fix. Each group can have its own settings, its own Engineer, and its own default worktree behavior. Groups appear as collapsible cards in the Torque workspace (desktop, browser, or Toolbelt).
 
 → [Group settings](../operate/group-settings.md)
 
