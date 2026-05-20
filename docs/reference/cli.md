@@ -464,10 +464,10 @@ uses the configured board-sync provider for the group. See the
 [operator guide](../operate/board-sync.md) for setup and recovery.
 
 ```bash
-torque group settings backend \
-  -s board_sync_provider=github \
-  -s board_sync_enabled=true \
-  -s 'board_sync_github={"github_repo":"owner/repo","github_project_owner":"org","github_project_number":12,"github_lane_status_map":{"Backlog":"Todo","In Progress":"In Progress","Done":"Done"}}'
+torque group settings backend -s \
+  board_sync_provider=github \
+  board_sync_enabled=true \
+  'board_sync_github={"github_repo":"owner/repo","github_project_owner":"org","github_project_number":12,"github_lane_status_map":{"Backlog":"Todo","In Progress":"In Progress","Done":"Done"}}'
 torque board sync test -g backend
 torque board sync push fix-login
 torque board sync push --group backend
@@ -485,9 +485,10 @@ torque board sync pull --preview --group backend
 
 The CLI pull command is read-only. To apply inbound fields, open the card or
 task modal in the UI, run **Pull preview**, select fields, and click **Apply
-selected**. Use `--json` to inspect structured `provider`, `phase`, and `error`
-fields when recovering auth, scope, repo, project, Status option, label, or
-rate-limit failures.
+selected**. Use the top-level `--json` flag (for example,
+`torque --json board sync pull --preview --group backend`) to inspect structured
+`provider`, `phase`, and `error` fields when recovering auth, scope, repo,
+project, Status option, label, or rate-limit failures.
 
 ### board lanes
 

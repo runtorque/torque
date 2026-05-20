@@ -28,7 +28,7 @@ passes.
 | Project Status field name | Single-select field name, usually `Status`. |
 | Lane → status mapping | JSON map from Torque lane names to Project Status option names. |
 | Close linked issues via PR body | Add PR closing refs; enabled by default. |
-| Create missing labels / Assignee map | Optional label creation and Torque ID/slug → GitHub login JSON. |
+| Create missing labels / Assignee map | Optional label creation and Torque agent/engineer ID → GitHub login JSON. |
 
 For scripted setup, use `torque group settings ... -s board_sync_provider=github`
 with a JSON `board_sync_github` value. See [CLI reference](../reference/cli.md#board-sync).
@@ -53,7 +53,7 @@ torque board sync test -g backend
 torque board sync push fix-login
 torque board sync push --group backend
 torque board sync pull --preview fix-login
-torque board sync pull --preview --group backend --json
+torque --json board sync pull --preview --group backend
 ```
 
 Pull preview is operator-gated. The UI shows a local-vs-GitHub diff; select
@@ -61,11 +61,12 @@ fields and click **Apply selected**. CLI pull is preview/read-only.
 
 ## PR closing references
 
-When GitHub board sync is enabled and **Close linked issues via PR body** is on,
-`engineer_merge` on the PR path appends a `Linked Torque issues` section with
-missing `Closes #123` or `Closes owner/repo#123` refs. Existing closing refs are
-not duplicated. This requires `engineer_merge_mode=pr` or `engineer-choice`
-without `force_direct=true`; direct-local merges have no PR body to update.
+When the group is configured with the GitHub board-sync provider and **Close
+linked issues via PR body** is on, `engineer_merge` on the PR path appends a
+`Linked Torque issues` section with missing `Closes #123` or
+`Closes owner/repo#123` refs. Existing closing refs are not duplicated. This
+requires `engineer_merge_mode=pr` or `engineer-choice` without
+`force_direct=true`; direct-local merges have no PR body to update.
 
 ## Limits and recovery
 

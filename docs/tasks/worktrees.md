@@ -155,12 +155,13 @@ Torque tracks the merge result and verifies it landed:
 - **Regular merge** — detected via `git merge-base --is-ancestor`.
 - **Squash merge** — default for PR merges; direct-local squash fallback is detected by simulating with `git merge-tree --write-tree`, falling back to "did the base branch advance and pick up these file changes."
 
-If the group also has GitHub board sync enabled, PR merges can close linked
-GitHub issues automatically. With **Close linked issues via PR body** enabled,
-Torque appends missing `Closes #123` / `Closes owner/repo#123` references to the
-created or reused PR body. This only applies to the PR path
-(`engineer_merge_mode=pr`, or `engineer-choice` without `force_direct=true`);
-direct-local merges do not have a PR body to carry closing refs. → [Board sync](../operate/board-sync.md#pr-closing-references)
+If the group is configured with the GitHub board-sync provider, PR merges can
+close linked GitHub issues automatically. With **Close linked issues via PR
+body** enabled, Torque appends missing `Closes #123` /
+`Closes owner/repo#123` references to the created or reused PR body. This only
+applies to the PR path (`engineer_merge_mode=pr`, or `engineer-choice` without
+`force_direct=true`); direct-local merges do not have a PR body to carry closing
+refs. → [Board sync](../operate/board-sync.md#pr-closing-references)
 
 ![A worktree post-merge: the agent cell shows the merged status, branch indicator changes, queue resets for any follow-up work.](../images/merged.png)
 
