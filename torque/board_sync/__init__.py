@@ -64,6 +64,9 @@ class BoardSyncProvider(Protocol):
     async def list_external_items(self, group_settings: "GroupSettings") -> list[dict]:
         """List provider/project items that could be imported or linked."""
 
+    async def list_projects(self, owner: str | None = None) -> list[dict]:
+        """List provider projects available to the current operator."""
+
     async def append_closing_refs(
         self,
         pr_body: str,
@@ -115,6 +118,9 @@ class _StructuredErrorProvider:
 
     async def list_external_items(self, _group_settings) -> list[dict]:
         return [self._result("list_external_items")]
+
+    async def list_projects(self, _owner: str | None = None) -> list[dict]:
+        return [self._result("list_projects")]
 
     async def append_closing_refs(
         self,

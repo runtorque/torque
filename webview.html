@@ -516,10 +516,20 @@
                 <input id="gs-board-sync-github-repo" autocomplete="off" placeholder="owner/repo">
                 <button type="button" class="btn-secondary" id="gs-board-sync-use-current-repo" onclick="gsBoardSyncUseCurrentRepo()">Use current repo</button>
               </div>
-              <label>Project owner</label>
-              <input id="gs-board-sync-github-project-owner" autocomplete="off" placeholder="org or user login">
-              <label>Project number</label>
-              <input id="gs-board-sync-github-project-number" type="number" min="0" step="1" placeholder="e.g. 12">
+              <label>Project</label>
+              <div class="board-sync-inline-row">
+                <select id="gs-board-sync-github-project-select" onchange="onGsBoardSyncProjectSelect()"></select>
+                <button type="button" class="btn-secondary" id="gs-board-sync-reload-projects" onclick="gsBoardSyncReloadProjects()">Reload projects</button>
+              </div>
+              <div id="gs-board-sync-project-summary" class="board-sync-project-summary" aria-live="polite"></div>
+              <input id="gs-board-sync-github-project-id" type="hidden">
+              <details class="board-sync-manual-project">
+                <summary>Specify project manually</summary>
+                <label>Project owner</label>
+                <input id="gs-board-sync-github-project-owner" autocomplete="off" placeholder="org or user login">
+                <label>Project number</label>
+                <input id="gs-board-sync-github-project-number" type="number" min="0" step="1" placeholder="e.g. 12">
+              </details>
               <label>Project Status field name</label>
               <input id="gs-board-sync-github-status-field" autocomplete="off" placeholder="Status">
             </div>

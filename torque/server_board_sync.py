@@ -9,15 +9,16 @@ helpers for the WebSocket command surface.
 from __future__ import annotations
 
 import asyncio
+import copy
 import inspect
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Awaitable, Callable, Iterable
 
 from .board_sync import get_provider, normalize_provider_name
 from .config import log
-from .state import BoardTask, MatrixState
+from .state import ARCHIVED_LANE, BoardTask, MatrixState
 
 PanelEventCallback = Callable[[str, str, str, str, str, str], None]
 ToastCallback = Callable[[str, str], Awaitable[None] | None]
@@ -80,6 +81,51 @@ def _provider_nested_settings(group_settings, provider_name: str) -> dict:
         if isinstance(value, dict):
             return value
     return {}
+
+
+def _command_settings(group_settings, provider_name: str = "", overrides=None):
+    """Return a temporary settings object for read-only helper commands.
+
+    Group Settings helpers are often used before the modal is saved.  The
+    frontend can pass the current form values as ``overrides`` so provider
+    preflight/listing commands inspect the user's draft configuration without
+    mutating persisted group settings.
+    """
+    settings = replace(group_settings)
+    settings.board_sync_github = copy.deepcopy(
+        getattr(group_settings, "board_sync_github", {}) or {}
+    )
+    overrides = overrides if isinstance(overrides, dict) else {}
+    if provider_name:
+        settings.board_sync_provider = normalize_provider_name(provider_name)
+    if "board_sync_provider" in overrides:
+        settings.board_sync_provider = normalize_provider_name(
+            overrides.get("board_sync_provider")
+        )
+    if "provider" in overrides:
+        settings.board_sync_provider = normalize_provider_name(
+            overrides.get("provider")
+        )
+    if "board_sync_enabled" in overrides:
+        settings.board_sync_enabled = _maybe_bool(
+            overrides.get("board_sync_enabled")
+        )
+    nested = overrides.get("board_sync_github")
+    if isinstance(nested, dict):
+        merged = dict(settings.board_sync_github)
+        merged.update(copy.deepcopy(nested))
+        settings.board_sync_github = merged
+    # Accept direct GitHub keys too; useful for lightweight CLI/API callers.
+    direct = {
+        key: copy.deepcopy(value)
+        for key, value in overrides.items()
+        if str(key).startswith("github_")
+    }
+    if direct:
+        merged = dict(settings.board_sync_github)
+        merged.update(direct)
+        settings.board_sync_github = merged
+    return settings
 
 
 def group_auto_tracks_new_tasks(group_settings) -> bool:
@@ -339,7 +385,13 @@ class BoardSyncManager:
 
     # -- Explicit command helpers -----------------------------------------
 
-    async def preflight(self, group: str) -> dict:
+    async def preflight(
+        self,
+        group: str,
+        *,
+        provider_name: str = "",
+        settings_overrides=None,
+    ) -> dict:
         group = str(group or "").strip()
         if not group:
             result = {"ok": False, "type": "board_sync_preflight", "error": "group is required"}
@@ -349,7 +401,11 @@ class BoardSyncManager:
             result = {"ok": False, "type": "board_sync_preflight", "group": group, "error": "Group not found"}
             await self._notify_failure("board_sync_preflight_failed", group, result["error"])
             return result
-        settings = self.state.get_group_settings(group)
+        settings = _command_settings(
+            self.state.get_group_settings(group),
+            provider_name=provider_name,
+            overrides=settings_overrides,
+        )
         provider_name = normalize_provider_name(
             getattr(settings, "board_sync_provider", "")
         )
@@ -370,6 +426,7 @@ class BoardSyncManager:
             "provider": provider_name,
             **(provider_result if isinstance(provider_result, dict) else {"result": provider_result}),
         }
+        self._attach_lane_status_suggestion(result, settings)
         if result.get("ok"):
             self._emit_panel(
                 "board_sync_preflight_ok",
@@ -383,6 +440,80 @@ class BoardSyncManager:
                 result.get("error") or "Board sync preflight failed",
             )
         return result
+
+    async def list_projects(
+        self,
+        group: str,
+        *,
+        owner: str = "",
+        provider_name: str = "",
+        settings_overrides=None,
+    ) -> dict:
+        group = str(group or "").strip()
+        if not group:
+            return {
+                "ok": False,
+                "type": "board_sync_list_projects",
+                "error": "group is required",
+            }
+        if group not in self.state.groups:
+            return {
+                "ok": False,
+                "type": "board_sync_list_projects",
+                "group": group,
+                "error": "Group not found",
+            }
+        settings = _command_settings(
+            self.state.get_group_settings(group),
+            provider_name=provider_name,
+            overrides=settings_overrides,
+        )
+        provider_name = normalize_provider_name(
+            getattr(settings, "board_sync_provider", "")
+        )
+        if not owner:
+            nested = _provider_nested_settings(settings, provider_name)
+            owner = str(nested.get("github_project_owner") or "").strip()
+        provider = self.provider_factory(provider_name)
+        try:
+            raw_projects = await provider.list_projects(owner or None)
+        except Exception as exc:
+            log.exception("Board sync project list failed for group %s", group)
+            raw_projects = [{
+                "ok": False,
+                "phase": "list_projects",
+                "provider": provider_name,
+                "error": str(exc) or type(exc).__name__,
+            }]
+        if not isinstance(raw_projects, list):
+            raw_projects = [{
+                "ok": False,
+                "phase": "list_projects",
+                "provider": provider_name,
+                "error": "Provider returned invalid project list",
+            }]
+
+        errors = [
+            dict(item)
+            for item in raw_projects
+            if isinstance(item, dict) and item.get("ok") is False
+        ]
+        projects = [
+            dict(item)
+            for item in raw_projects
+            if isinstance(item, dict) and item.get("ok") is not False
+        ]
+        return {
+            "ok": not errors,
+            "type": "board_sync_list_projects",
+            "group": group,
+            "provider": provider_name,
+            "owner": owner or "",
+            "projects": projects,
+            "project_count": len(projects),
+            "errors": errors,
+            **({"error": errors[0].get("error", "")} if errors else {}),
+        }
 
     async def pull_preview(self, task_id: str) -> dict:
         task, settings, provider_name, error = self._task_provider_context(task_id)
@@ -798,6 +929,86 @@ class BoardSyncManager:
                 return {"matched_by": "board_sync.external_url", "task": task}
 
         return {}
+
+    def _attach_lane_status_suggestion(self, result: dict, group_settings) -> None:
+        if not result.get("ok"):
+            return
+        status_names = self._status_option_names(result)
+        if not status_names:
+            return
+        nested = _provider_nested_settings(
+            group_settings,
+            getattr(group_settings, "board_sync_provider", ""),
+        )
+        existing = nested.get("github_lane_status_map")
+        if isinstance(existing, dict) and existing:
+            result["lane_status_map_preserved"] = True
+            result["lane_status_map_suggestion"] = {}
+            return
+
+        lanes = [
+            str(lane or "").strip()
+            for lane in (getattr(self.state, "board_lanes", []) or [])
+            if str(lane or "").strip()
+            and str(lane or "").strip() != ARCHIVED_LANE
+        ]
+        if not lanes:
+            return
+        mapping: dict[str, str] = {}
+        strategy = "name"
+        if len(status_names) == len(lanes):
+            strategy = "position"
+            mapping = {
+                lane: status_names[index]
+                for index, lane in enumerate(lanes)
+            }
+        else:
+            by_name = {
+                _normalize_match_value(name): name
+                for name in status_names
+            }
+            for lane in lanes:
+                matched = by_name.get(_normalize_match_value(lane))
+                if matched:
+                    mapping[lane] = matched
+        unmatched = [lane for lane in lanes if lane not in mapping]
+        result["lane_status_map_suggestion"] = mapping
+        result["lane_status_map_strategy"] = strategy
+        result["lane_status_map_unmatched_lanes"] = unmatched
+        result["lane_status_map_matched_count"] = len(mapping)
+        result["lane_status_map_lanes"] = lanes
+        result["lane_status_map_statuses"] = status_names
+
+    @staticmethod
+    def _status_option_names(result: dict) -> list[str]:
+        raw_list = result.get("status_options_list")
+        names: list[str] = []
+        if isinstance(raw_list, list):
+            for item in raw_list:
+                if isinstance(item, dict):
+                    name = str(item.get("name") or "").strip()
+                else:
+                    name = str(item or "").strip()
+                if name:
+                    names.append(name)
+        if names:
+            return names
+        raw_options = result.get("status_options")
+        if isinstance(raw_options, dict):
+            return [
+                str(name or "").strip()
+                for name in raw_options.keys()
+                if str(name or "").strip()
+            ]
+        if isinstance(raw_options, list):
+            for item in raw_options:
+                if isinstance(item, dict):
+                    name = str(item.get("name") or "").strip()
+                else:
+                    name = str(item or "").strip()
+                if name:
+                    names.append(name)
+        return names
 
     def _lock_key(self, task: BoardTask, group_settings, provider_name: str) -> str:
         nested = _provider_nested_settings(group_settings, provider_name)

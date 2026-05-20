@@ -40,6 +40,9 @@ class FakeBoardSyncProvider:
     async def list_external_items(self, group_settings):
         return [{"ok": True, "phase": "list_external_items"}]
 
+    async def list_projects(self, owner=None):
+        return [{"ok": True, "phase": "list_projects", "owner": owner or "@me"}]
+
     async def append_closing_refs(self, pr_body, linked_issues, group_settings=None):
         return pr_body + " fake"
 
@@ -145,6 +148,7 @@ class BoardSyncProtocolTests(unittest.IsolatedAsyncioTestCase):
             ["task"],
         )
         self.assertEqual((await adapter.list_external_items(settings))[0]["ok"], True)
+        self.assertEqual((await adapter.list_projects("owner"))[0]["owner"], "owner")
         self.assertTrue((await adapter.append_closing_refs("body", [])).endswith("fake"))
 
     async def test_factory_returns_github_and_structured_errors(self):
@@ -244,6 +248,50 @@ class GitHubPreflightTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["repo"], "owner/repo")
         self.assertEqual(result["project_id"], "PVT_kw")
         self.assertEqual(result["status_options"]["Doing"], "opt-doing")
+        self.assertEqual(result["status_options_list"][0]["name"], "Doing")
+
+    async def test_list_projects_defaults_to_current_user_and_normalizes_metadata(self):
+        provider = GitHubBoardSyncProvider(FakeGhRunner([
+            gh_ok({
+                "projects": [
+                    {
+                        "number": 7,
+                        "title": "Roadmap",
+                        "id": "PVT_7",
+                        "url": "https://github.com/orgs/acme/projects/7",
+                        "owner": {"login": "acme"},
+                    },
+                    {
+                        "number": 8,
+                        "name": "Personal",
+                        "node_id": "PVT_8",
+                        "ownerLogin": "octocat",
+                    },
+                ]
+            }),
+        ]))
+
+        projects = await provider.list_projects(None)
+
+        self.assertEqual(projects[0]["name"], "Roadmap")
+        self.assertEqual(projects[0]["owner"], "acme")
+        self.assertEqual(projects[0]["id"], "PVT_7")
+        self.assertEqual(projects[1]["owner"], "octocat")
+        self.assertEqual(
+            provider.runner.calls[0][0],
+            ["project", "list", "--owner", "@me", "--format", "json", "--limit", "100"],
+        )
+
+    async def test_list_projects_returns_structured_error_on_gh_failure(self):
+        provider = GitHubBoardSyncProvider(FakeGhRunner([
+            gh_fail("missing project scope"),
+        ]))
+
+        projects = await provider.list_projects("acme")
+
+        self.assertFalse(projects[0]["ok"])
+        self.assertEqual(projects[0]["phase"], "list_projects")
+        self.assertIn("missing project scope", projects[0]["error"])
 
 
 class GitHubBodyAndClosingRefTests(unittest.IsolatedAsyncioTestCase):

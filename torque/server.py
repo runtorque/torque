@@ -11215,7 +11215,29 @@ async def main(connection=None):
                     result = {"type": "error", "message": "Board sync manager unavailable"}
                 else:
                     result = await board_sync_manager.preflight(
-                        data.get("group", ""))
+                        data.get("group", ""),
+                        provider_name=data.get("provider", ""),
+                        settings_overrides=(
+                            data.get("settings")
+                            or data.get("group_settings")
+                            or {}
+                        ),
+                    )
+
+            elif cmd == "board_sync_list_projects":
+                if not board_sync_manager:
+                    result = {"type": "error", "message": "Board sync manager unavailable"}
+                else:
+                    result = await board_sync_manager.list_projects(
+                        data.get("group", ""),
+                        owner=data.get("owner", ""),
+                        provider_name=data.get("provider", ""),
+                        settings_overrides=(
+                            data.get("settings")
+                            or data.get("group_settings")
+                            or {}
+                        ),
+                    )
 
             elif cmd == "board_sync_task":
                 if not board_sync_manager:
