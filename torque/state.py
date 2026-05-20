@@ -176,6 +176,12 @@ _WORKTREE_MERGE_CLEANUP_MODES = {
     "close_remove",
 }
 _DEFAULT_WORKTREE_MERGE_CLEANUP = "keep"
+_ENGINEER_MERGE_MODES = {
+    "pr",
+    "direct",
+    "engineer-choice",
+}
+_DEFAULT_ENGINEER_MERGE_MODE = "pr"
 _ENGINEER_WORKLOG_LIMIT = 200
 _ENGINEER_STREAM_CARD_LIMIT = 10
 _ENGINEER_STREAM_CONTEXT_LIMIT = 5
@@ -567,6 +573,13 @@ def normalize_worktree_merge_cleanup(value) -> str:
     if value in _WORKTREE_MERGE_CLEANUP_MODES:
         return value
     return _DEFAULT_WORKTREE_MERGE_CLEANUP
+
+
+def normalize_engineer_merge_mode(value) -> str:
+    value = str(value or "").strip().lower()
+    if value in _ENGINEER_MERGE_MODES:
+        return value
+    return _DEFAULT_ENGINEER_MERGE_MODE
 
 
 def merge_cleanup_flags(mode: str) -> tuple[bool, bool]:
@@ -1391,6 +1404,7 @@ class GroupSettings:
     worktree_merge_instructions: str = ""  # additional instructions appended to merge prompt
     worktree_merge_cleanup: str = "keep"  # keep | close | remove | close_remove
     worktree_merge_preserve_diff: bool = False  # save the pre-merge patch on the latest boundary task
+    engineer_merge_mode: str = "pr"  # pr | direct | engineer-choice
     worktree_symlinks: list[str] = field(default_factory=list)  # repo-relative paths or glob patterns to symlink from repo root
     agent_session_resume: bool = True  # resume session on relaunch
     agent_idle_timeout: int = 0  # minutes before flagging agent as stuck (0=disable)
@@ -4113,6 +4127,11 @@ class MatrixState:
                             normalize_worktree_merge_cleanup(
                                 filtered["worktree_merge_cleanup"])
                         )
+                    if "engineer_merge_mode" in filtered:
+                        filtered["engineer_merge_mode"] = (
+                            normalize_engineer_merge_mode(
+                                filtered["engineer_merge_mode"])
+                        )
                     self._normalize_architect_settings_mapping(
                         filtered,
                         strict=False,
@@ -4598,6 +4617,8 @@ class MatrixState:
             if key in valid:
                 if key == "worktree_merge_cleanup":
                     value = normalize_worktree_merge_cleanup(value)
+                elif key == "engineer_merge_mode":
+                    value = normalize_engineer_merge_mode(value)
                 elif key in {"agent_model", "agent_reasoning_effort"}:
                     value = str(value or "").strip()
                 elif key in (

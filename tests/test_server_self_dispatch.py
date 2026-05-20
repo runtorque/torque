@@ -1321,6 +1321,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
     async def test_worktree_merge_auto_moves_sole_linked_task_to_done(self):
         state = self.state_mod.MatrixState()
         state.add_group("g")
+        state.update_group_settings("g", engineer_merge_mode="engineer-choice")
         worker = self.state_mod.AgentCell(
             id="worker-1",
             name="Worker",
@@ -1443,6 +1444,7 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
     async def test_worktree_merge_drains_bound_followup_queue_immediately(self):
         state = self.state_mod.MatrixState()
         state.add_group("g")
+        state.update_group_settings("g", engineer_merge_mode="engineer-choice")
         worker = self.state_mod.AgentCell(
             id="worker-1",
             name="Worker",
@@ -1699,8 +1701,9 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         )
 
     class _FakePrWorktreeManager:
-        def __init__(self, merge_result):
+        def __init__(self, merge_result, direct_result=None):
             self.merge_result = merge_result
+            self.direct_result = direct_result or {"ok": True, "sha": "direct123"}
             self.calls = []
             self.sync_calls = 0
 
@@ -1754,6 +1757,24 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
         ):
             self.calls.append(("untracked_overwrite",))
             return []
+
+        async def server_merge(self, cell, message, squash=True):
+            self.calls.append(("server_merge", cell.id, message, squash))
+            if callable(self.direct_result):
+                return self.direct_result(squash)
+            return dict(self.direct_result)
+
+        async def validate(self, _cell):
+            self.calls.append(("validate",))
+            return False
+
+        async def reset_to_base(self, _cell):
+            self.calls.append(("reset_to_base",))
+            return True
+
+        async def count_commits(self, _cell):
+            self.calls.append(("count_commits",))
+            return 0
 
         async def list_checkpoints(self, _cell):
             self.calls.append(("list_checkpoints",))
@@ -1810,6 +1831,202 @@ class ServerVerifyHandlerTests(unittest.IsolatedAsyncioTestCase):
             if callable(self.merge_result):
                 return self.merge_result(auto)
             return dict(self.merge_result)
+
+    async def test_worktree_merge_mode_pr_rejects_force_direct(self):
+        state, worker, _task = self._make_pr_merge_state()
+        state.update_group_settings("g", engineer_merge_mode="pr")
+        worktree_mgr = self._FakePrWorktreeManager({
+            "ok": True,
+            "phase": "pr_merge",
+            "url": "https://github.com/acme/repo/pull/7",
+            "number": 7,
+            "head_sha": "head123",
+            "merge_commit_sha": "squash789",
+            "merge_state": "CLEAN",
+            "pending": False,
+            "pr_status": {"ok": True, "state": "MERGED"},
+        })
+        panel_events = []
+
+        handle_command = self._extract_handle_command(
+            state,
+            _panel_event=lambda *args, **kwargs: panel_events.append(
+                (args, kwargs)
+            ),
+            worktree_mgr=worktree_mgr,
+        )
+
+        result = await handle_command({
+            "cmd": "worktree_merge",
+            "id": worker.id,
+            "force_direct": True,
+        })
+
+        self.assertEqual(result["type"], "worktree_merge")
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["phase"], "merge_mode_locked")
+        self.assertEqual(result["code"], "force_direct_disallowed")
+        self.assertIn("engineer_merge_mode='pr'", result["message"])
+        self.assertEqual(
+            result["workflow_breach"]["subkind"],
+            "merge_mode_locked",
+        )
+        self.assertEqual(panel_events[0][0][0], "workflow_breach")
+        self.assertEqual(worktree_mgr.calls, [])
+
+    async def test_worktree_merge_mode_direct_without_force_uses_direct_path(self):
+        state, worker, _task = self._make_pr_merge_state()
+        state.update_group_settings("g", engineer_merge_mode="direct")
+        worktree_mgr = self._FakePrWorktreeManager(
+            {
+                "ok": True,
+                "phase": "pr_merge",
+                "url": "https://github.com/acme/repo/pull/7",
+                "number": 7,
+                "head_sha": "head123",
+                "merge_commit_sha": "squash789",
+                "merge_state": "CLEAN",
+                "pending": False,
+                "pr_status": {"ok": True, "state": "MERGED"},
+            },
+            direct_result={"ok": True, "sha": "direct456"},
+        )
+
+        async def fake_cleanup_after_merge(*_args, **_kwargs):
+            return {"errors": []}
+
+        handle_command, restore = self._pr_handle_command(
+            state,
+            worker,
+            worktree_mgr,
+            fake_cleanup_after_merge,
+        )
+        try:
+            result = await handle_command({
+                "cmd": "worktree_merge",
+                "id": worker.id,
+            })
+        finally:
+            restore()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["sha"], "direct456")
+        self.assertTrue(result["force_direct"])
+        self.assertEqual(result["engineer_merge_mode"], "direct")
+        self.assertIn("engineer_merge_mode='direct'", result["warning"])
+        self.assertEqual(
+            result["workflow_breach"]["subkind"],
+            "merge_mode_locked",
+        )
+        self.assertIn("server_merge", [call[0] for call in worktree_mgr.calls])
+        self.assertNotIn("create_pr", [call[0] for call in worktree_mgr.calls])
+
+    async def test_worktree_merge_mode_direct_with_force_uses_direct_path(self):
+        state, worker, _task = self._make_pr_merge_state()
+        state.update_group_settings("g", engineer_merge_mode="direct")
+        worktree_mgr = self._FakePrWorktreeManager(
+            {"ok": True, "phase": "pr_merge"},
+            direct_result={"ok": True, "sha": "direct789"},
+        )
+
+        async def fake_cleanup_after_merge(*_args, **_kwargs):
+            return {"errors": []}
+
+        handle_command, restore = self._pr_handle_command(
+            state,
+            worker,
+            worktree_mgr,
+            fake_cleanup_after_merge,
+        )
+        try:
+            result = await handle_command({
+                "cmd": "worktree_merge",
+                "id": worker.id,
+                "force_direct": True,
+            })
+        finally:
+            restore()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["sha"], "direct789")
+        self.assertTrue(result["force_direct"])
+        self.assertEqual(result["engineer_merge_mode"], "direct")
+        self.assertNotIn("workflow_breach", result)
+        self.assertIn("server_merge", [call[0] for call in worktree_mgr.calls])
+        self.assertNotIn("create_pr", [call[0] for call in worktree_mgr.calls])
+
+    async def test_worktree_merge_mode_engineer_choice_preserves_pr_default(self):
+        state, worker, _task = self._make_pr_merge_state()
+        state.update_group_settings("g", engineer_merge_mode="engineer-choice")
+        worktree_mgr = self._FakePrWorktreeManager({
+            "ok": True,
+            "phase": "pr_merge",
+            "url": "https://github.com/acme/repo/pull/7",
+            "number": 7,
+            "head_sha": "head123",
+            "merge_commit_sha": "squash789",
+            "merge_state": "CLEAN",
+            "pending": False,
+            "pr_status": {"ok": True, "state": "MERGED"},
+        })
+
+        async def fake_cleanup_after_merge(*_args, **_kwargs):
+            return {"errors": []}
+
+        handle_command, restore = self._pr_handle_command(
+            state,
+            worker,
+            worktree_mgr,
+            fake_cleanup_after_merge,
+        )
+        try:
+            result = await handle_command({
+                "cmd": "worktree_merge",
+                "id": worker.id,
+            })
+        finally:
+            restore()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["mode"], "pull_request")
+        self.assertIn("create_pr", [call[0] for call in worktree_mgr.calls])
+        self.assertNotIn("server_merge", [call[0] for call in worktree_mgr.calls])
+
+    async def test_worktree_merge_mode_engineer_choice_force_direct_stays_direct(self):
+        state, worker, _task = self._make_pr_merge_state()
+        state.update_group_settings("g", engineer_merge_mode="engineer-choice")
+        worktree_mgr = self._FakePrWorktreeManager(
+            {"ok": True, "phase": "pr_merge"},
+            direct_result={"ok": True, "sha": "direct-choice"},
+        )
+
+        async def fake_cleanup_after_merge(*_args, **_kwargs):
+            return {"errors": []}
+
+        handle_command, restore = self._pr_handle_command(
+            state,
+            worker,
+            worktree_mgr,
+            fake_cleanup_after_merge,
+        )
+        try:
+            result = await handle_command({
+                "cmd": "worktree_merge",
+                "id": worker.id,
+                "force_direct": True,
+            })
+        finally:
+            restore()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["sha"], "direct-choice")
+        self.assertTrue(result["force_direct"])
+        self.assertEqual(
+            result["workflow_breach"]["subkind"],
+            "force_direct_merge",
+        )
+        self.assertIn("server_merge", [call[0] for call in worktree_mgr.calls])
+        self.assertNotIn("create_pr", [call[0] for call in worktree_mgr.calls])
 
     async def test_worktree_merge_pr_uses_engineer_title_body_for_pr_and_squash(self):
         state, worker, _task = self._make_pr_merge_state()

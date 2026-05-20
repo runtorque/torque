@@ -854,6 +854,7 @@ function _groupSettingsPromptPreviewPayload() {
     agent_profile: document.getElementById('gs-agent-profile').value,
     agent_shell: document.getElementById('gs-agent-shell').value,
     agent_tab_color: _gsAgentColor,
+    engineer_merge_mode: document.getElementById('gs-engineer-merge-mode').value,
     worktree_merge_cleanup: document.getElementById('gs-wt-merge-cleanup').value,
     default_engineer_specializations: (_gsEngineerSpecs || []).slice(),
   };
@@ -1553,6 +1554,7 @@ function _showGroupSettings(group, data) {
   document.getElementById('gs-wt-auto-checkpoint').checked = s.worktree_auto_checkpoint || false;
   document.getElementById('gs-wt-checkpoint-on-progress').checked = s.checkpoint_on_progress || false;
   document.getElementById('gs-wt-merge-squash').checked = s.worktree_merge_squash === true;
+  _setSelectValue('gs-engineer-merge-mode', s.engineer_merge_mode, 'pr');
   document.getElementById('gs-wt-merge-instructions').value = s.worktree_merge_instructions || '';
   _setSelectValue('gs-wt-merge-cleanup', s.worktree_merge_cleanup, 'keep');
   document.getElementById('gs-wt-merge-preserve-diff').checked = !!s.worktree_merge_preserve_diff;
@@ -1804,6 +1806,7 @@ function submitGroupSettings() {
     worktree_auto_checkpoint: document.getElementById('gs-wt-auto-checkpoint').checked,
     checkpoint_on_progress: document.getElementById('gs-wt-checkpoint-on-progress').checked,
     worktree_merge_squash: document.getElementById('gs-wt-merge-squash').checked,
+    engineer_merge_mode: document.getElementById('gs-engineer-merge-mode').value,
     worktree_merge_instructions: document.getElementById('gs-wt-merge-instructions').value.trim(),
     worktree_merge_cleanup: document.getElementById('gs-wt-merge-cleanup').value,
     worktree_merge_preserve_diff: document.getElementById('gs-wt-merge-preserve-diff').checked,

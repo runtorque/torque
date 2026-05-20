@@ -134,6 +134,7 @@ class EngineerPromptTests(unittest.TestCase):
             ),
             group_settings=SimpleNamespace(
                 worktree_merge_cleanup="close_remove",
+                engineer_merge_mode="direct",
             ),
         )
 
@@ -153,6 +154,8 @@ class EngineerPromptTests(unittest.TestCase):
             "Default post-merge cleanup: Close agent session and remove worktree",
             prompt,
         )
+        self.assertIn("Engineer merge mode: Direct local only", prompt)
+        self.assertIn("locked to direct local merge", prompt)
         self.assertIn("prefer `engineer_note` with a proposed wave", prompt)
         self.assertIn("Shape Torque digests as detailed by default.", prompt)
 

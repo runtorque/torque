@@ -25,6 +25,7 @@ from .state import (
     normalize_engineer_autonomy_mode,
     normalize_engineer_digest_verbosity,
     normalize_engineer_escalation_style,
+    normalize_engineer_merge_mode,
     normalize_engineer_same_agent_follow_up_preference,
     normalize_engineer_wave_size_preference,
     normalize_worktree_merge_cleanup,
@@ -449,6 +450,15 @@ def _merge_cleanup_label(mode: str) -> str:
     return labels.get(mode, "Keep agent session and worktree")
 
 
+def _engineer_merge_mode_label(mode: str) -> str:
+    labels = {
+        "pr": "Pull request only",
+        "direct": "Direct local only",
+        "engineer-choice": "Engineer choice",
+    }
+    return labels.get(mode, "Pull request only")
+
+
 def _wave_size_preference_label(mode: str) -> str:
     labels = {
         "small": "Small reviewable waves",
@@ -560,6 +570,20 @@ def _escalation_policy_lines(mode: str) -> list[str]:
     ]
 
 
+def _engineer_merge_mode_policy_lines(mode: str) -> list[str]:
+    if mode == "direct":
+        return [
+            "- `engineer_merge` is locked to direct local merge by group setting; call it without `force_direct` unless explicitly asked, and Torque will bypass the PR path.",
+        ]
+    if mode == "engineer-choice":
+        return [
+            "- `engineer_merge` may use the default PR path or `force_direct=true` when an explicit local fallback is appropriate.",
+        ]
+    return [
+        "- `engineer_merge` is locked to the PR path by group setting; do not pass `force_direct=true` unless the setting changes.",
+    ]
+
+
 def _build_policy_section(engineer_settings=None, group_settings=None) -> str:
     mode = normalize_engineer_autonomy_mode(
         getattr(engineer_settings, "autonomy_mode", "")
@@ -582,6 +606,9 @@ def _build_policy_section(engineer_settings=None, group_settings=None) -> str:
     cleanup_mode = normalize_worktree_merge_cleanup(
         getattr(group_settings, "worktree_merge_cleanup", "keep")
     )
+    merge_mode = normalize_engineer_merge_mode(
+        getattr(group_settings, "engineer_merge_mode", "pr")
+    )
     restrict_to_created_agents = bool(
         getattr(engineer_settings, "restrict_to_created_agents", False)
     )
@@ -594,6 +621,7 @@ def _build_policy_section(engineer_settings=None, group_settings=None) -> str:
         f"{_same_agent_follow_up_preference_label(same_agent)}",
         f"Digest verbosity: {_digest_verbosity_label(digest_verbosity)}",
         f"Escalation style: {_escalation_style_label(escalation_style)}",
+        f"Engineer merge mode: {_engineer_merge_mode_label(merge_mode)}",
         f"Default post-merge cleanup: {_merge_cleanup_label(cleanup_mode)}",
         "Owned-agent restriction: "
         + ("Enabled" if restrict_to_created_agents else "Disabled"),
@@ -615,6 +643,7 @@ def _build_policy_section(engineer_settings=None, group_settings=None) -> str:
             "- After a successful merge with no explicit cleanup flags, "
             f"default to: {_merge_cleanup_label(cleanup_mode)}."
         ),
+        *_engineer_merge_mode_policy_lines(merge_mode),
     ]
     if restrict_to_created_agents:
         lines.extend([

@@ -757,6 +757,10 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("short imperative", props["pr_title"]["description"])
         self.assertIn("Markdown", props["pr_body"]["description"])
         self.assertIn("TORQUE:123", props["pr_body"]["description"])
+        self.assertIn(
+            "engineer_merge_mode",
+            props["force_direct"]["description"],
+        )
 
     async def test_engineer_batch_dispatch_deferral_reports_group_and_refreshes_cap(self):
         state = self.state_mod.MatrixState()
