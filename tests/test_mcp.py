@@ -746,8 +746,33 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("not an agent_group", max_desc)
 
     async def test_engineer_merge_schema_includes_pr_title_body(self):
+        state = self.state_mod.MatrixState()
+        engineer = self.state_mod.AgentCell(
+            id="engineer-1",
+            name="Engineer",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+        )
+        state.agents[engineer.id] = engineer
+
+        async def fake_handle_command(_payload):
+            self.fail("tools/list should not dispatch commands")
+
+        response, status = await self.mcp_mod.dispatch_mcp_rpc_body(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/list",
+                "params": {},
+            },
+            cell_id=engineer.id,
+            handle_command=fake_handle_command,
+            state=state,
+        )
+        self.assertEqual(status, 200)
         tool = next(
-            t for t in self.mcp_mod.ENGINEER_TOOLS
+            t for t in response["result"]["tools"]
             if t["name"] == "engineer_merge"
         )
         props = tool["inputSchema"]["properties"]
