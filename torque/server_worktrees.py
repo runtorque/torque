@@ -9,6 +9,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 
 from .config import log
+from .board_sync.github import parse_github_issue_ref
 from .state import task_counts_as_done
 from .worktree_boundaries import (
     attach_pr_metadata_to_latest_open_boundary,
@@ -278,6 +279,61 @@ def _append_pr_url_to_squash_body(body: str, pr_url: str) -> str:
     if body:
         return f"{body}\n\n{suffix}"
     return suffix
+
+
+def _github_issue_from_linked_task(task, *, base_repo: str = "") -> dict | None:
+    """Return GitHub issue metadata for a linked Torque task, if any."""
+    if str(getattr(task, "provider", "") or "").strip().lower() != "github":
+        return None
+
+    external_id = str(getattr(task, "external_id", "") or "").strip()
+    external_url = str(getattr(task, "external_url", "") or "").strip()
+    board_sync = getattr(task, "board_sync", {}) or {}
+    parsed = parse_github_issue_ref(
+        external_id=external_id,
+        external_url=external_url,
+        board_sync=board_sync if isinstance(board_sync, dict) else {},
+    )
+    repo = str(parsed.get("issue_repo", "") or "").strip()
+    number = parsed.get("issue_number")
+    try:
+        number = int(number or 0)
+    except (TypeError, ValueError):
+        number = 0
+    if not repo or not number:
+        return None
+
+    return {
+        "provider": "github",
+        "task_id": str(getattr(task, "id", "") or "").strip(),
+        "task_title": str(getattr(task, "task", "") or "").strip(),
+        "external_id": external_id,
+        "external_url": external_url,
+        "board_sync": board_sync if isinstance(board_sync, dict) else {},
+        "issue_repo": repo,
+        "issue_number": number,
+        "issue_url": str(parsed.get("issue_url", "") or "").strip(),
+        "base_repo": str(base_repo or "").strip(),
+    }
+
+
+def _collect_linked_github_issues(tasks, *, base_repo: str = "") -> list[dict]:
+    """Collect de-duplicated GitHub issues linked from the supplied tasks."""
+    issues: list[dict] = []
+    seen: set[tuple[str, int]] = set()
+    for task in tasks or []:
+        issue = _github_issue_from_linked_task(task, base_repo=base_repo)
+        if not issue:
+            continue
+        key = (
+            str(issue.get("issue_repo", "") or "").strip().lower(),
+            int(issue.get("issue_number") or 0),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        issues.append(issue)
+    return issues
 
 
 def _pr_result_metadata(

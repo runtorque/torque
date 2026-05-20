@@ -1089,3 +1089,322 @@ class EngineerBindingValidationTests(unittest.TestCase):
 
         self.assertEqual(engineer_id, "")
         self.assertEqual(error, "no engineer with id=eng-missing exists")
+
+
+class ServerPrClosingRefsTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        install_aiohttp_stub()
+        self.state_mod = importlib.import_module("torque.state")
+        self.state_mod = importlib.reload(self.state_mod)
+        self.server_mod = importlib.import_module("torque.server")
+        self.server_mod = importlib.reload(self.server_mod)
+
+    class _FakePrWorktreeManager:
+        def __init__(self, *, existing=False, existing_body=""):
+            self.existing = existing
+            self.existing_body = existing_body
+            self.create_calls = []
+            self.edit_calls = []
+            self.merge_calls = []
+
+        async def github_preflight(self, worktree_path):
+            return {
+                "ok": True,
+                "phase": "github_preflight",
+                "name_with_owner": "acme/repo",
+                "url": "https://github.com/acme/repo",
+            }
+
+        async def github_select_remote(self, worktree_path):
+            return {"ok": True, "phase": "github_remote", "remote": "origin"}
+
+        async def github_sync_remote_base(
+            self,
+            worktree_path,
+            repo_root,
+            remote,
+            base_branch,
+        ):
+            return {"ok": True, "phase": "remote_base_sync", "synced": True}
+
+        async def has_uncommitted_changes(self, _cell):
+            return False
+
+        async def stale_base_info(self, _cell):
+            return {"stale": False}
+
+        async def check_merge_conflicts(self, _cell):
+            return {"clean": True, "tree_sha": "tree-sha"}
+
+        async def merge_untracked_overwrite_paths(
+            self,
+            _repo_root,
+            _base_branch,
+            _tree_sha,
+        ):
+            return []
+
+        async def list_checkpoints(self, _cell):
+            return [{"message": "Implement linked GitHub issue", "body": ""}]
+
+        async def github_push_branch(self, worktree_path, remote, branch):
+            return {"ok": True, "phase": "push_branch"}
+
+        async def github_create_or_reuse_pr(
+            self,
+            worktree_path,
+            branch,
+            base_branch,
+            title="",
+            body="",
+        ):
+            self.create_calls.append({
+                "worktree_path": worktree_path,
+                "branch": branch,
+                "base_branch": base_branch,
+                "title": title,
+                "body": body,
+            })
+            return {
+                "ok": True,
+                "phase": "pr_create",
+                "url": "https://github.com/acme/repo/pull/7",
+                "number": 7,
+                "body": self.existing_body if self.existing else body,
+                "head_sha": "head123",
+                "state": "OPEN",
+                "merge_state": "CLEAN",
+                "existing": self.existing,
+            }
+
+        async def github_pr_edit_body(self, worktree_path, selector, body):
+            self.edit_calls.append({
+                "worktree_path": worktree_path,
+                "selector": selector,
+                "body": body,
+            })
+            self.existing_body = body
+            return {
+                "ok": True,
+                "phase": "pr_edit_body",
+                "url": "https://github.com/acme/repo/pull/7",
+                "number": 7,
+                "body": body,
+                "head_sha": "head123",
+                "state": "OPEN",
+            }
+
+        async def github_request_squash_merge(
+            self,
+            worktree_path,
+            pr_number,
+            head_sha,
+            subject="",
+            body="",
+            auto=False,
+            url="",
+        ):
+            self.merge_calls.append({
+                "worktree_path": worktree_path,
+                "pr_number": pr_number,
+                "head_sha": head_sha,
+                "subject": subject,
+                "body": body,
+                "auto": auto,
+                "url": url,
+            })
+            return {
+                "ok": True,
+                "phase": "pr_merge",
+                "url": "https://github.com/acme/repo/pull/7",
+                "number": 7,
+                "head_sha": "head123",
+                "merge_state": "BLOCKED",
+                "pending": True,
+                "pr_status": {
+                    "ok": True,
+                    "state": "OPEN",
+                    "merge_state": "BLOCKED",
+                },
+            }
+
+    def _make_state(self, *, close_issues=True, external_id="acme/repo#12"):
+        state = self.state_mod.MatrixState()
+        state.add_group("g")
+        state.update_group_settings(
+            "g",
+            engineer_merge_mode="pr",
+            board_sync_provider="github",
+            board_sync_github={
+                "github_close_issues_via_pr": close_issues,
+            },
+        )
+        worker = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            status="running",
+            worktree_path="/tmp/worker",
+            worktree_branch="torque/worker",
+            worktree_base_branch="main",
+            worktree_repo_root="/repo",
+            current_task_id="TORQUE:1:1",
+        )
+        state.agents[worker.id] = worker
+        state.groups["g"].append(worker.id)
+
+        product = state.board_add_task(
+            "Linked product task",
+            "g",
+            lane="Done",
+            id="TORQUE:1",
+            provider="github",
+            external_id=external_id,
+            external_url=(
+                "https://github.com/"
+                f"{external_id.split('#', 1)[0]}/issues/"
+                f"{external_id.split('#', 1)[1]}"
+            ),
+        )
+        review = state.board_add_task(
+            "Review linked product task",
+            "g",
+            lane="In Progress",
+            id="TORQUE:1:1",
+            parent_task_id=product.id,
+            pipeline_root_id=product.id,
+            agent_id=worker.id,
+            action_name="feature/review",
+        )
+        review.worktree_boundary = {
+            "version": "1",
+            "branch": worker.worktree_branch,
+            "repo_root": worker.worktree_repo_root,
+            "base_branch": worker.worktree_base_branch,
+            "commit_sha": "head123",
+            "kind": "marker",
+            "status": "open",
+            "recorded_at": "2026-05-19T18:00:00+00:00",
+            "recorded_by_agent_id": worker.id,
+        }
+        return state, worker, product, review
+
+    async def _run_pr_merge(self, state, worker, worktree_mgr, data=None):
+        async def latest_boundary_state(_cell):
+            return {
+                "latest": {"task_id": "TORQUE:1:1"},
+                "clean": {"task_id": "TORQUE:1:1"},
+                "reason": "",
+            }
+
+        async def noop_async(*_args, **_kwargs):
+            return None
+
+        return await self.server_mod._run_pr_worktree_merge(
+            state=state,
+            cell=worker,
+            aid=worker.id,
+            data=data or {},
+            worktree_mgr=worktree_mgr,
+            latest_boundary_state_for_cell=latest_boundary_state,
+            boundary_reason_message=lambda reason, _boundary=None: reason,
+            mark_branch_boundaries_merged=lambda *_args, **_kwargs: None,
+            cleanup_after_merge=noop_async,
+            broadcast_toast=noop_async,
+            bridge=None,
+            handle_command=noop_async,
+            panel_event=None,
+        )
+
+    async def test_generated_pr_body_includes_same_repo_closing_ref(self):
+        state, worker, _product, _review = self._make_state()
+        mgr = self._FakePrWorktreeManager()
+
+        result = await self._run_pr_merge(state, worker, mgr)
+
+        self.assertTrue(result["ok"])
+        create_body = mgr.create_calls[0]["body"]
+        self.assertIn("Linked Torque issues:", create_body)
+        self.assertIn("- Closes #12", create_body)
+        self.assertNotIn("acme/repo#12", create_body)
+        self.assertIn("- Closes #12", mgr.merge_calls[0]["body"])
+        self.assertIn("PR: https://github.com/acme/repo/pull/7",
+                      mgr.merge_calls[0]["body"])
+
+    async def test_user_supplied_pr_body_gets_closing_refs_appended(self):
+        state, worker, _product, _review = self._make_state()
+        mgr = self._FakePrWorktreeManager()
+
+        await self._run_pr_merge(
+            state,
+            worker,
+            mgr,
+            {"pr_body": "Operator-authored body."},
+        )
+
+        create_body = mgr.create_calls[0]["body"]
+        self.assertTrue(create_body.startswith("Operator-authored body."))
+        self.assertIn("- Closes #12", create_body)
+
+    async def test_reused_pr_body_is_edited_to_add_missing_closing_refs(self):
+        state, worker, _product, _review = self._make_state()
+        mgr = self._FakePrWorktreeManager(
+            existing=True,
+            existing_body="Existing PR body.",
+        )
+
+        await self._run_pr_merge(state, worker, mgr)
+
+        self.assertEqual(len(mgr.edit_calls), 1)
+        self.assertEqual(mgr.edit_calls[0]["selector"], 7)
+        self.assertIn("Existing PR body.", mgr.edit_calls[0]["body"])
+        self.assertIn("- Closes #12", mgr.edit_calls[0]["body"])
+
+    async def test_duplicate_closing_refs_are_not_appended_on_rerun(self):
+        state, worker, _product, _review = self._make_state()
+        mgr = self._FakePrWorktreeManager(
+            existing=True,
+            existing_body="Existing PR body.\n\nFixes #12",
+        )
+
+        await self._run_pr_merge(
+            state,
+            worker,
+            mgr,
+            {"pr_body": "Operator body.\n\nFixes #12"},
+        )
+
+        create_body = mgr.create_calls[0]["body"]
+        self.assertEqual(create_body.lower().count("#12"), 1)
+        self.assertEqual(mgr.edit_calls, [])
+
+    async def test_disabled_setting_skips_closing_ref_injection(self):
+        state, worker, _product, _review = self._make_state(close_issues=False)
+        mgr = self._FakePrWorktreeManager(
+            existing=True,
+            existing_body="Existing PR body.",
+        )
+        original = self.server_mod.get_board_sync_provider
+        self.server_mod.get_board_sync_provider = mock.Mock(
+            side_effect=AssertionError("provider should not be called")
+        )
+        try:
+            await self._run_pr_merge(state, worker, mgr)
+        finally:
+            self.server_mod.get_board_sync_provider = original
+
+        self.assertNotIn("Closes", mgr.create_calls[0]["body"])
+        self.assertEqual(mgr.edit_calls, [])
+
+    async def test_cross_repo_refs_render_with_owner_repo_prefix(self):
+        state, worker, _product, _review = self._make_state(
+            external_id="other/project#34",
+        )
+        mgr = self._FakePrWorktreeManager()
+
+        await self._run_pr_merge(state, worker, mgr)
+
+        create_body = mgr.create_calls[0]["body"]
+        self.assertIn("- Closes other/project#34", create_body)
+        self.assertNotIn("- Closes #34", create_body)
