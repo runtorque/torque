@@ -17,6 +17,7 @@ let _taskSystemLabels = [];     // torque:* labels (read-only, preserved on save
 let _taskExternalProvider = '';
 let _taskExternalId = '';
 let _taskExternalUrl = '';
+let _taskBoardSync = {};
 let _taskModalDrafts = {};      // keyed by create/edit mode to survive reopen
 let _taskDraftScope = 'create'; // separates plain create drafts from clone flows
 var _labelDropdownIdx = -1;
@@ -459,6 +460,186 @@ function _taskVerificationSummaryValue(summary, key) {
   return summary[key];
 }
 
+function _taskCloneBoardSync(sync) {
+  if (!sync || typeof sync !== 'object') return {};
+  try {
+    return JSON.parse(JSON.stringify(sync));
+  } catch (_e) {
+    return Object.assign({}, sync);
+  }
+}
+
+function _taskCurrentExternalProvider() {
+  var providerEl = document.getElementById('task-external-provider-input');
+  return String(providerEl ? providerEl.value : _taskExternalProvider || '').trim().toLowerCase();
+}
+
+function _taskCurrentGroupValue() {
+  var groupEl = document.getElementById('task-group-select');
+  return String(groupEl ? groupEl.value : '').trim();
+}
+
+function _taskGroupSyncSettings(group) {
+  if (!group || !state || !state.group_settings) return {};
+  return state.group_settings[group] || {};
+}
+
+function _taskGithubProjectUrl(group, sync) {
+  var gs = _taskGroupSyncSettings(group);
+  var cfg = (gs.board_sync_github && typeof gs.board_sync_github === 'object')
+    ? gs.board_sync_github
+    : {};
+  var gh = sync && sync.github && typeof sync.github === 'object' ? sync.github : {};
+  var owner = String(gh.project_owner || cfg.github_project_owner || '').trim();
+  var number = String(gh.project_number || cfg.github_project_number || '').trim();
+  if (!owner || !number || !gh.project_item_id) return '';
+  return 'https://github.com/orgs/' + encodeURIComponent(owner) + '/projects/' + encodeURIComponent(number);
+}
+
+function _taskGithubIssueNumberFromSync(sync) {
+  var gh = sync && sync.github && typeof sync.github === 'object' ? sync.github : {};
+  var number = parseInt(gh.issue_number || 0, 10);
+  if (number) return number;
+  var externalId = String((document.getElementById('task-external-id-input') || {}).value || _taskExternalId || '');
+  var match = externalId.match(/#(\d+)$/);
+  if (match) return parseInt(match[1], 10) || 0;
+  var externalUrl = String((document.getElementById('task-external-url-input') || {}).value || _taskExternalUrl || '');
+  match = externalUrl.match(/\/issues\/(\d+)(?:[/?#].*)?$/);
+  return match ? (parseInt(match[1], 10) || 0) : 0;
+}
+
+function _taskFormatSyncTime(value) {
+  if (!value) return '—';
+  try {
+    var d = new Date(value);
+    if (!isNaN(d.getTime())) return d.toLocaleString();
+  } catch (_e) {}
+  return String(value);
+}
+
+function _taskBoardSyncVisible() {
+  var provider = _taskCurrentExternalProvider();
+  var sync = _taskBoardSync || {};
+  return provider === 'github'
+    || String(sync.provider || '').toLowerCase() === 'github'
+    || !!sync.enabled;
+}
+
+function _taskBoardSyncStatusLabel(sync) {
+  var stateName = String((sync && sync.sync_state) || '').toLowerCase();
+  if (stateName === 'queued') return 'queued';
+  if (stateName === 'syncing') return 'syncing';
+  if (stateName === 'error') return 'error';
+  if (sync && (sync.last_push_at || sync.last_pull_at || sync.last_synced_hash)) return 'ok';
+  return 'not synced';
+}
+
+function _renderTaskBoardSyncSection() {
+  var el = document.getElementById('task-board-sync-section');
+  if (!el) return;
+  var visible = _taskBoardSyncVisible();
+  el.style.display = visible ? '' : 'none';
+  if (!visible) {
+    el.innerHTML = '';
+    return;
+  }
+  var snapshot = (typeof _captureSurfaceState === 'function')
+    ? _captureSurfaceState(el, { scrollSelectors: [':root'] })
+    : null;
+  var sync = _taskBoardSync || {};
+  var gh = sync.github && typeof sync.github === 'object' ? sync.github : {};
+  var issueNumber = _taskGithubIssueNumberFromSync(sync);
+  var issueUrl = String(gh.issue_url || _taskExternalUrl || '').trim();
+  var projectUrl = _taskGithubProjectUrl(_taskCurrentGroupValue(), sync);
+  var projectItem = String(gh.project_item_id || '').trim();
+  var checked = sync.enabled !== false && (
+    !!sync.enabled
+    || String(sync.provider || '').toLowerCase() === 'github'
+    || _taskCurrentExternalProvider() === 'github'
+  );
+  var disabled = !_taskEditId ? ' disabled' : '';
+  var html = '';
+  html += '<div class="task-board-sync-card">';
+  html += '<div class="task-board-sync-title">GitHub sync</div>';
+  html += '<div class="task-board-sync-readonly-grid">';
+  html += '<div><span>Issue</span><strong>';
+  if (issueNumber && issueUrl) {
+    html += '<a href="' + esc(issueUrl) + '" onclick="event.stopPropagation();window.open(this.href);return false">#' + esc(issueNumber) + '</a>';
+  } else {
+    html += issueNumber ? ('#' + esc(issueNumber)) : '—';
+  }
+  html += '</strong></div>';
+  html += '<div><span>Project item</span><strong>';
+  if (projectItem && projectUrl) {
+    html += '<a href="' + esc(projectUrl) + '" onclick="event.stopPropagation();window.open(this.href);return false">' + esc(projectItem) + '</a>';
+  } else {
+    html += projectItem ? esc(projectItem) : '—';
+  }
+  html += '</strong></div>';
+  html += '<div><span>Last push</span><strong>' + esc(_taskFormatSyncTime(sync.last_push_at)) + '</strong></div>';
+  html += '<div><span>Last pull</span><strong>' + esc(_taskFormatSyncTime(sync.last_pull_at)) + '</strong></div>';
+  html += '<div><span>Status</span><strong>' + esc(_taskBoardSyncStatusLabel(sync)) + '</strong></div>';
+  html += '</div>';
+  if (sync.last_error) {
+    html += '<div class="task-board-sync-error">' + esc(sync.last_error) + '</div>';
+  }
+  html += '<label class="gs-checkbox task-board-sync-track">';
+  html += '<input id="task-board-sync-track-input" type="checkbox"' + (checked ? ' checked' : '') + ' onchange="taskBoardSyncTrackChanged()"' + disabled + '> Track this task for GitHub sync';
+  html += '</label>';
+  html += '<div class="task-board-sync-actions">';
+  html += '<button type="button" class="btn-secondary" onclick="taskModalSyncNow()"' + disabled + '>Sync now</button>';
+  html += '<button type="button" class="btn-secondary" onclick="taskModalPullPreview()"' + disabled + '>Pull preview</button>';
+  html += '</div>';
+  if (!_taskEditId) {
+    html += '<div class="label-hint">Save the task before running manual sync.</div>';
+  }
+  html += '</div>';
+  el.innerHTML = html;
+  if (typeof _restoreSurfaceState === 'function') {
+    _restoreSurfaceState(el, snapshot, { scrollSelectors: [':root'] });
+  }
+}
+
+function _taskExternalFieldsChanged() {
+  _taskExternalProvider = (document.getElementById('task-external-provider-input') || {}).value || '';
+  _taskExternalId = (document.getElementById('task-external-id-input') || {}).value || '';
+  _taskExternalUrl = (document.getElementById('task-external-url-input') || {}).value || '';
+  _renderTaskBoardSyncSection();
+  taskPersistDraft();
+}
+
+function taskBoardSyncTrackChanged() {
+  var cb = document.getElementById('task-board-sync-track-input');
+  _taskBoardSync = _taskCloneBoardSync(_taskBoardSync);
+  _taskBoardSync.version = _taskBoardSync.version || 1;
+  _taskBoardSync.provider = _taskBoardSync.provider || _taskCurrentExternalProvider() || 'github';
+  _taskBoardSync.enabled = !!(cb && cb.checked);
+  taskPersistDraft();
+}
+
+function _taskBoardSyncPayloadForSubmit() {
+  var sync = _taskCloneBoardSync(_taskBoardSync);
+  var cb = document.getElementById('task-board-sync-track-input');
+  if (cb) {
+    sync.version = sync.version || 1;
+    sync.provider = sync.provider || _taskCurrentExternalProvider() || 'github';
+    sync.enabled = !!cb.checked;
+  }
+  return sync;
+}
+
+function taskModalSyncNow() {
+  if (!_taskEditId) return;
+  if (typeof boardSyncTaskNow === 'function') boardSyncTaskNow(_taskEditId, { quiet: false });
+  else send(_boardSyncCommandPayload('board_sync_task', { task: _taskEditId }));
+}
+
+function taskModalPullPreview() {
+  if (!_taskEditId) return;
+  if (typeof boardPullPreview === 'function') boardPullPreview(_taskEditId);
+  else send(_boardSyncCommandPayload('board_pull_preview', { task: _taskEditId }));
+}
+
 function _taskReadDraftFromDom() {
   var modal = document.getElementById('modal-task');
   var taskEl = document.getElementById('task-task-input');
@@ -496,6 +677,7 @@ function _taskReadDraftFromDom() {
     provider: providerEl ? providerEl.value : _taskExternalProvider,
     external_id: externalIdEl ? externalIdEl.value : _taskExternalId,
     external_url: externalUrlEl ? externalUrlEl.value : _taskExternalUrl,
+    board_sync_enabled: (document.getElementById('task-board-sync-track-input') || {}).checked,
     verification_mode: verificationModeEl ? verificationModeEl.value : '',
     verification_state: verificationStateEl ? verificationStateEl.value : '',
     verification_notes: verificationNotesEl ? verificationNotesEl.value : '',

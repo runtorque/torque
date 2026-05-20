@@ -403,6 +403,7 @@
         <button class="gs-subtab active" data-subtab="group-general" onclick="switchGsSubTab('group',this)">General</button>
         <button class="gs-subtab" data-subtab="group-worker-defaults" onclick="switchGsSubTab('group',this)">Worker defaults</button>
         <button class="gs-subtab" data-subtab="group-terminals" onclick="switchGsSubTab('group',this)">Terminals</button>
+        <button class="gs-subtab" data-subtab="group-sync" onclick="switchGsSubTab('group',this)">Sync provider</button>
         <button class="gs-subtab" data-subtab="group-advanced" onclick="switchGsSubTab('group',this)">Advanced</button>
       </div>
 
@@ -492,6 +493,57 @@
           <input id="gs-terminal-close-on-disconnect" type="checkbox"> Close on disconnect
           <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Automatically delete the terminal from Torque when its iTerm2 tab is closed.">?</span>
         </label>
+      </div>
+
+      <!-- Sync provider sub-tab -->
+      <div class="gs-subpane" data-subpane="group-sync">
+        <div class="label-hint task-modal-section-intro">Configure external board sync for this group. V1 supports GitHub Issues + Projects; additional providers can occupy this selector later.</div>
+        <label>Board sync provider</label>
+        <select id="gs-board-sync-provider" onchange="onGsBoardSyncProviderChange()">
+          <option value="none">None</option>
+          <option value="github">GitHub</option>
+        </select>
+        <label class="gs-checkbox">
+          <input id="gs-board-sync-enabled" type="checkbox"> Enable sync
+          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Provider selection and enablement are separate: configure GitHub here, then turn sync on when ready.">?</span>
+        </label>
+        <div id="gs-board-sync-github-config" class="board-sync-provider-config" style="display:none">
+          <div class="gs-settings-section">
+            <div class="gs-settings-section-title">GitHub repository and project</div>
+            <div class="gs-settings-section-body">
+              <label>Repository <span class="label-hint">owner/repo</span></label>
+              <div class="board-sync-inline-row">
+                <input id="gs-board-sync-github-repo" autocomplete="off" placeholder="owner/repo">
+                <button type="button" class="btn-secondary" id="gs-board-sync-use-current-repo" onclick="gsBoardSyncUseCurrentRepo()">Use current repo</button>
+              </div>
+              <label>Project owner</label>
+              <input id="gs-board-sync-github-project-owner" autocomplete="off" placeholder="org or user login">
+              <label>Project number</label>
+              <input id="gs-board-sync-github-project-number" type="number" min="0" step="1" placeholder="e.g. 12">
+              <label>Project Status field name</label>
+              <input id="gs-board-sync-github-status-field" autocomplete="off" placeholder="Status">
+            </div>
+          </div>
+          <div class="gs-settings-section">
+            <div class="gs-settings-section-title">GitHub mapping and behavior</div>
+            <div class="gs-settings-section-body">
+              <label>Lane → status mapping <span class="label-hint">JSON object</span></label>
+              <textarea id="gs-board-sync-github-lane-map" rows="4" spellcheck="false" placeholder='{"Backlog":"Todo","In Progress":"In Progress","Done":"Done"}'></textarea>
+              <label class="gs-checkbox">
+                <input id="gs-board-sync-github-close-via-pr" type="checkbox"> Close linked issues via PR body
+              </label>
+              <label class="gs-checkbox">
+                <input id="gs-board-sync-github-create-labels" type="checkbox"> Create missing labels in GitHub
+              </label>
+              <label>Assignee map <span class="label-hint">Torque ID/slug → GitHub login JSON</span></label>
+              <textarea id="gs-board-sync-github-assignee-map" rows="4" spellcheck="false" placeholder='{"worker-1":"octocat","backend-engineer":"hubot"}'></textarea>
+            </div>
+          </div>
+        </div>
+        <div class="board-sync-test-row">
+          <button type="button" class="btn-secondary" id="gs-board-sync-test" onclick="testGroupBoardSyncConnection()">Test connection</button>
+          <span id="gs-board-sync-preflight-summary" class="board-sync-preflight-summary" aria-live="polite"></span>
+        </div>
       </div>
 
       <!-- Advanced sub-tab -->
@@ -1172,18 +1224,19 @@
         <label>External provider</label>
         <input id="task-external-provider-input" autocomplete="off"
                placeholder="e.g. github, jira, linear"
-               oninput="taskPersistDraft()"
+               oninput="_taskExternalFieldsChanged()"
                onkeydown="if(event.key==='Escape')closeModals();">
         <label>External ID</label>
         <input id="task-external-id-input" autocomplete="off"
                placeholder="e.g. owner/repo#123 or PROJ-123"
-               oninput="taskPersistDraft()"
+               oninput="_taskExternalFieldsChanged()"
                onkeydown="if(event.key==='Escape')closeModals();">
         <label>External URL</label>
         <input id="task-external-url-input" autocomplete="off"
                placeholder="https://…"
-               oninput="taskPersistDraft()"
+               oninput="_taskExternalFieldsChanged()"
                onkeydown="if(event.key==='Escape')closeModals();">
+        <div id="task-board-sync-section" class="task-board-sync-section" style="display:none"></div>
       </div>
     </details>
     <details class="task-modal-section">
@@ -1267,6 +1320,19 @@
     <div class="modal-actions">
       <button class="btn-secondary" onclick="copyPromptPreview()" id="prompt-preview-copy-btn">Copy</button>
       <button class="btn-cancel" onclick="document.getElementById('modal-prompt-preview').classList.remove('visible')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Board pull preview modal -->
+<div class="overlay" id="modal-board-pull-preview" onclick="if(event.target===this)closeBoardPullPreview()">
+  <div class="modal modal-tall board-pull-preview-modal" role="dialog" aria-modal="true" aria-labelledby="board-pull-preview-title">
+    <h2 id="board-pull-preview-title">Pull Preview</h2>
+    <div id="board-pull-preview-summary" class="modal-summary"></div>
+    <div id="board-pull-preview-changes" class="board-pull-preview-changes"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" id="board-pull-preview-apply-btn" onclick="applyBoardPullPreview()">Apply selected</button>
+      <button class="btn-cancel" onclick="closeBoardPullPreview()">Close</button>
     </div>
   </div>
 </div>

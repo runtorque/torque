@@ -788,6 +788,7 @@ let _gsEngineerColor = '';
 let _gsArchitectColor = '';
 let _gsInitialTab = 'group';
 let _gsInitialSubtab = '';
+let _gsBoardSyncPreflightMode = '';
 
 const DIGEST_VERBOSITY_TOOLTIP_HELP = 'Controls how much detail appears in digest events sent to this agent. Higher verbosity can wake the agent more often on coarse-event activity in the group.';
 
@@ -842,6 +843,135 @@ function _normalizeGsSelection(tab, subtab) {
     nextTab = 'group';
   }
   return { tab: nextTab, subtab: nextSubtab };
+}
+
+function _boardSyncCommandPayload(cmd, args) {
+  const payload = {
+    cmd: cmd,
+    args: Object.assign({}, args || {}),
+  };
+  args = args || {};
+  for (const key in args) payload[key] = args[key];
+  return payload;
+}
+
+function _gsStringifyJsonMap(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return '';
+  const keys = Object.keys(value);
+  if (!keys.length) return '';
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch (_e) {
+    return '';
+  }
+}
+
+function _gsParseJsonMap(id, label) {
+  const el = document.getElementById(id);
+  const raw = el ? String(el.value || '').trim() : '';
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('Expected a JSON object.');
+    }
+    const out = {};
+    Object.keys(parsed).forEach(function(key) {
+      const k = String(key || '').trim();
+      if (!k) return;
+      const value = parsed[key];
+      if (value === null || value === undefined) return;
+      const v = String(value).trim();
+      if (v) out[k] = v;
+    });
+    return out;
+  } catch (err) {
+    const message = label + ' must be a valid JSON object.';
+    if (typeof _showToast === 'function') _showToast(message, 'error');
+    if (el && typeof el.focus === 'function') el.focus();
+    return null;
+  }
+}
+
+function onGsBoardSyncProviderChange() {
+  const providerEl = document.getElementById('gs-board-sync-provider');
+  const configEl = document.getElementById('gs-board-sync-github-config');
+  const provider = providerEl ? String(providerEl.value || 'none') : 'none';
+  if (configEl) configEl.style.display = provider === 'github' ? '' : 'none';
+}
+
+function _gsBoardSyncSetPreflightStatus(kind, message) {
+  const el = document.getElementById('gs-board-sync-preflight-summary');
+  if (!el) return;
+  el.textContent = message || '';
+  el.className = 'board-sync-preflight-summary';
+  if (kind) el.classList.add('board-sync-preflight-' + kind);
+}
+
+function _gsBoardSyncPreflightErrorText(msg) {
+  const phase = String((msg && msg.phase) || '').trim();
+  const raw = String(
+    (msg && (msg.error || msg.message || msg.reason))
+      || 'Board sync preflight failed.'
+  ).trim();
+  let text = raw || 'Board sync preflight failed.';
+  const lower = text.toLowerCase();
+  if (phase === 'project_scope'
+      || lower.indexOf('project scope') >= 0
+      || lower.indexOf("'project' scope") >= 0
+      || lower.indexOf('gh auth refresh -s project') >= 0) {
+    if (text.indexOf('gh auth refresh -s project') < 0) {
+      text += ' Run: gh auth refresh -s project';
+    }
+  } else if (phase === 'repo'
+      || lower.indexOf('repository') >= 0
+      || lower.indexOf('repo') >= 0
+      || lower.indexOf('not found') >= 0) {
+    text += ' Check the repo field or click “Use current repo”.';
+  }
+  return text;
+}
+
+function testGroupBoardSyncConnection() {
+  if (!_settingsGroup) return;
+  _gsBoardSyncPreflightMode = 'test';
+  _gsBoardSyncSetPreflightStatus('pending', 'Testing GitHub connection…');
+  send(_boardSyncCommandPayload('board_sync_preflight', {
+    group: _settingsGroup,
+  }));
+}
+
+function gsBoardSyncUseCurrentRepo() {
+  if (!_settingsGroup) return;
+  _gsBoardSyncPreflightMode = 'use-current-repo';
+  _gsBoardSyncSetPreflightStatus('pending', 'Inspecting current GitHub repo…');
+  send(_boardSyncCommandPayload('board_sync_preflight', {
+    group: _settingsGroup,
+  }));
+}
+
+function _handleBoardSyncPreflight(msg) {
+  if (!msg || msg.type !== 'board_sync_preflight') return;
+  const group = String(msg.group || '');
+  if (_settingsGroup && group && group !== _settingsGroup) return;
+  const mode = _gsBoardSyncPreflightMode;
+  _gsBoardSyncPreflightMode = '';
+  if (msg.ok) {
+    const repo = String(msg.repo || msg.repository || '').trim();
+    if (mode === 'use-current-repo' && repo) {
+      const repoEl = document.getElementById('gs-board-sync-github-repo');
+      if (repoEl) repoEl.value = repo;
+    }
+    let success = 'GitHub connection OK';
+    if (repo) success += ': ' + repo;
+    if (msg.project_number || msg.project_id) success += ' · Project OK';
+    _gsBoardSyncSetPreflightStatus('ok', success);
+    if (typeof _showToast === 'function') _showToast('Board sync connection OK', 'success');
+    return;
+  }
+  const errorText = _gsBoardSyncPreflightErrorText(msg);
+  _gsBoardSyncSetPreflightStatus('error', errorText);
+  if (typeof _showToast === 'function') _showToast(errorText, 'error');
 }
 
 function switchGsTab(name) {
@@ -1624,6 +1754,25 @@ function _showGroupSettings(group, data) {
   _gsTerminalColor = s.terminal_tab_color || '';
   _renderSwatches('gs-terminal-color-swatches', _gsTerminalColor, 'selectGsTerminalColor', true);
 
+  /* -- Group > Sync provider sub-tab -- */
+  const syncProvider = s.board_sync_provider || 'none';
+  const syncGithub = (s.board_sync_github && typeof s.board_sync_github === 'object')
+    ? s.board_sync_github
+    : {};
+  _setSelectValue('gs-board-sync-provider', syncProvider, 'none');
+  document.getElementById('gs-board-sync-enabled').checked = !!s.board_sync_enabled;
+  document.getElementById('gs-board-sync-github-repo').value = syncGithub.github_repo || '';
+  document.getElementById('gs-board-sync-github-project-owner').value = syncGithub.github_project_owner || '';
+  document.getElementById('gs-board-sync-github-project-number').value = syncGithub.github_project_number || '';
+  document.getElementById('gs-board-sync-github-status-field').value = syncGithub.github_project_status_field || 'Status';
+  document.getElementById('gs-board-sync-github-lane-map').value = _gsStringifyJsonMap(syncGithub.github_lane_status_map);
+  document.getElementById('gs-board-sync-github-close-via-pr').checked = syncGithub.github_close_issues_via_pr !== false;
+  document.getElementById('gs-board-sync-github-create-labels').checked = !!syncGithub.github_create_missing_labels;
+  document.getElementById('gs-board-sync-github-assignee-map').value = _gsStringifyJsonMap(syncGithub.github_assignee_map);
+  _gsBoardSyncPreflightMode = '';
+  _gsBoardSyncSetPreflightStatus('', '');
+  onGsBoardSyncProviderChange();
+
   /* -- Engineer tab -- */
   _populateProviderSelect('gs-engineer-provider', ws.engineer_provider || '', true);
   document.getElementById('gs-engineer-boot-cmd').value = ws.engineer_boot_command || '';
@@ -1778,9 +1927,11 @@ function _showGroupSettings(group, data) {
         ? 'gs-agent-directory'
         : initialSubtab === 'group-worker-defaults'
           ? 'gs-agent-provider'
-          : initialSubtab === 'group-terminals'
-            ? 'gs-terminal-prefix'
-            : 'gs-directory';
+      : initialSubtab === 'group-terminals'
+        ? 'gs-terminal-prefix'
+        : initialSubtab === 'group-sync'
+          ? 'gs-board-sync-provider'
+        : 'gs-directory';
   const focusEl = document.getElementById(focusId);
   if (focusEl) focusEl.focus();
 }
@@ -1818,6 +1969,20 @@ function selectGsArchitectColor(hex) {
 
 function submitGroupSettings() {
   if (!_settingsGroup) return;
+  const boardSyncLaneMap = _gsParseJsonMap(
+    'gs-board-sync-github-lane-map',
+    'Lane → status mapping'
+  );
+  if (boardSyncLaneMap === null) return;
+  const boardSyncAssigneeMap = _gsParseJsonMap(
+    'gs-board-sync-github-assignee-map',
+    'Assignee map'
+  );
+  if (boardSyncAssigneeMap === null) return;
+  const boardSyncProjectNumber = parseInt(
+    document.getElementById('gs-board-sync-github-project-number').value,
+    10
+  ) || 0;
 
   const settings = {
     /* Group */
@@ -1873,6 +2038,19 @@ function submitGroupSettings() {
     terminal_env_file: document.getElementById('gs-terminal-env-file').value.trim(),
     terminal_always_custom_dialog: document.getElementById('gs-terminal-always-custom').checked,
     terminal_close_on_disconnect: document.getElementById('gs-terminal-close-on-disconnect').checked,
+    /* Board sync */
+    board_sync_provider: document.getElementById('gs-board-sync-provider').value || 'none',
+    board_sync_enabled: document.getElementById('gs-board-sync-enabled').checked,
+    board_sync_github: {
+      github_repo: document.getElementById('gs-board-sync-github-repo').value.trim(),
+      github_project_owner: document.getElementById('gs-board-sync-github-project-owner').value.trim(),
+      github_project_number: boardSyncProjectNumber,
+      github_project_status_field: document.getElementById('gs-board-sync-github-status-field').value.trim() || 'Status',
+      github_lane_status_map: boardSyncLaneMap,
+      github_close_issues_via_pr: document.getElementById('gs-board-sync-github-close-via-pr').checked,
+      github_create_missing_labels: document.getElementById('gs-board-sync-github-create-labels').checked,
+      github_assignee_map: boardSyncAssigneeMap,
+    },
     default_engineer_specializations: (_gsEngineerSpecs || []).slice(),
   };
   const engineerSettings = {
