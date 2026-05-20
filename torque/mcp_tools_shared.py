@@ -242,6 +242,48 @@ def _summary_task_title(task) -> str:
     return first_line[:_ARCHITECT_BOARD_SUMMARY_TITLE_LIMIT - 1].rstrip() + "…"
 
 
+def _task_board_sync_inline_state(task) -> dict:
+    """Return the compact board-sync state exposed by MCP read surfaces."""
+    sync = getattr(task, "board_sync", {}) or {}
+    if not isinstance(sync, dict) or not sync:
+        return {}
+    payload = {
+        "provider": str(sync.get("provider", "") or ""),
+        "sync_state": str(sync.get("sync_state", "") or ""),
+        "last_error": str(sync.get("last_error", "") or ""),
+    }
+    return payload if any(payload.values()) else {}
+
+
+def _attach_task_board_sync_inline_state(item: dict, task) -> dict:
+    board_sync = _task_board_sync_inline_state(task)
+    if board_sync:
+        item["board_sync"] = board_sync
+    return item
+
+
+def _board_sync_summary_payload(tasks) -> dict:
+    items = []
+    for task in tasks:
+        board_sync = _task_board_sync_inline_state(task)
+        if not board_sync:
+            continue
+        items.append({
+            "id": getattr(task, "id", "") or "",
+            "title": _summary_task_title(task),
+            **board_sync,
+        })
+    if not items:
+        return {}
+    error_count = sum(1 for item in items if item.get("sync_state") == "error")
+    return {
+        "count": len(items),
+        "error_count": error_count,
+        "items": items[:10],
+        "truncated": len(items) > 10,
+    }
+
+
 def _architect_board_summary_task_item(task, *, created_by: str) -> dict:
     item = {
         "id": task.id,
@@ -260,6 +302,7 @@ def _architect_board_summary_task_item(task, *, created_by: str) -> dict:
     ).strip()
     if suggested_specialization:
         item["suggested_specialization"] = suggested_specialization
+    _attach_task_board_sync_inline_state(item, task)
     return item
 
 
@@ -3385,6 +3428,9 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 "truncated": len(boundary_items) > 10,
             },
         }
+        board_sync_summary = _board_sync_summary_payload(actionable_visible_tasks)
+        if board_sync_summary:
+            summary["board_sync"] = board_sync_summary
         if include_created_by:
             summary["peer_messages"] = _architect_peer_message_summary(
                 real_state,
@@ -3524,6 +3570,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 item["created_by"] = _task_created_by_classifier(t)
             if agent_hidden:
                 item["agent_hidden"] = True
+            _attach_task_board_sync_inline_state(item, t)
             lane_tasks.append(item)
 
         # Order lanes by board_lanes order
@@ -3551,6 +3598,9 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         d.update(_task_health_payload_for_response(state, task))
         d["title"] = task.task
         d["action"] = task.action_name
+        board_sync = _task_board_sync_inline_state(task)
+        if board_sync:
+            d["board_sync"] = board_sync
         awareness_block = build_engineer_deliverable_awareness(task)
         if awareness_block:
             d["deliverable_awareness"] = awareness_block
@@ -3602,6 +3652,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                     item["created_by"] = _task_created_by_classifier(ct)
                 if agent_hidden:
                     item["agent_hidden"] = True
+                _attach_task_board_sync_inline_state(item, ct)
                 d["pipeline_chain"].append(item)
         return json.dumps(d), False
 

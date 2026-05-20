@@ -10,6 +10,8 @@ ENGINEER_TOOLS = [
             "Includes lane counts, active agent status, pending asks, "
             "task-health rollups, current non-blocking Engineer hints, and "
             "key label counts without embedding full task lists. Also "
+            "includes compact board_sync state for tasks currently tracked "
+            "by an external board provider. "
             "includes compact computed stream summaries derived from "
             "branch/worktree state and recent dispatch-shape metrics. When "
             "owned-agent restriction is enabled, hint and agent rollups only "
@@ -126,7 +128,8 @@ ENGINEER_TOOLS = [
             "Supports optional filters by lane, label, task health, or "
             "text search. Returns a summary of each task including "
             "title, slug, lane, labels, action, assigned agent, and "
-            "health and linked external ticket metadata."
+            "health, linked external ticket metadata, and board_sync state "
+            "when present."
         ),
         "inputSchema": {
             "type": "object",
@@ -161,7 +164,8 @@ ENGINEER_TOOLS = [
             "Show full details for a task by ID or legacy alias. "
             "Returns title, description, labels, action, action variables, "
             "pipeline info, verification metadata, assigned agent, "
-            "linked external ticket metadata, attachments/artifacts, "
+            "linked external ticket metadata, board_sync state, "
+            "attachments/artifacts, "
             "and activity messages. "
             "For pipeline tasks, automatically includes the chain summary."
         ),

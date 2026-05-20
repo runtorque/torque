@@ -456,6 +456,31 @@ torque board remove fix-login
 
 Alias: `rm`
 
+### board sync
+
+Structured external-board synchronization. The legacy/manual external-ticket
+commands (`board import/link/open/push/comment`) remain available; `board sync`
+uses the configured board-sync provider for the group.
+
+```bash
+torque board sync test -g backend
+torque board sync push fix-login
+torque board sync push --group backend
+torque board sync pull --preview fix-login
+torque board sync pull --preview --group backend
+```
+
+| Command | Description |
+|---|---|
+| `board sync test -g GROUP` | Run provider preflight checks for a group. |
+| `board sync push TASK` | Queue one task for provider sync. |
+| `board sync push --group GROUP` | Queue every task in a group for provider sync. |
+| `board sync pull --preview TASK` | Preview remote changes for one task. |
+| `board sync pull --preview --group GROUP` | Preview remote changes for each task in a group. |
+
+Pull previews are read-only. An apply command is intentionally not exposed
+until previews are persisted by the daemon.
+
 ### board lanes
 
 List all lanes with task counts.

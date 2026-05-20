@@ -61,10 +61,10 @@ Visible only to agents with `kind: engineer`. All operations are scoped to the c
 
 | Tool | What it does |
 |---|---|
-| `engineer_board_summary` | Compact overview of lanes, pending asks, blocked tasks, agent state, hints, and the caller's recent `dispatch_shapes`. The first call in any orchestration loop. |
-| `engineer_board_list` | Full lane-grouped task list with optional filters. |
+| `engineer_board_summary` | Compact overview of lanes, pending asks, blocked tasks, agent state, hints, tracked `board_sync` state, and the caller's recent `dispatch_shapes`. The first call in any orchestration loop. |
+| `engineer_board_list` | Full lane-grouped task list with optional filters; includes compact `board_sync` state when present. |
 | `engineer_session_map` | Deterministic structured snapshot of streams, asks, queued follow-ups, NEXT/PRODUCT/WORKFLOW context per stream, hints, and the caller's recent `dispatch_shapes`. The orientation surface for recovery. |
-| `engineer_task_show` | Full details for one task, including pipeline chain and artifact metadata. |
+| `engineer_task_show` | Full details for one task, including pipeline chain, compact `board_sync` state, and artifact metadata. |
 | `engineer_task_chain` | Walk the derivation chain for a task. (Used internally; usually you want `engineer_task_show`.) |
 | `engineer_agents_list` | Quick view of all agents in the group. |
 | `engineer_agent_show` | Deep inspection of one agent: session, worktree, tasks, terminals, task-boundary metadata for shared-agent branches. |
@@ -182,9 +182,9 @@ Visible only to agents with `kind: architect`. Group-scoped, with further per-Ar
 
 | Tool | What it does |
 |---|---|
-| `architect_board_summary` | Compact board overview with task excerpts, `created_by` attribution, and peer-message counts. |
-| `architect_task_list` | Tasks with label/lane/engineer/creator/archived filters. AND semantics on labels. |
-| `architect_task_show` | Full details for one task. |
+| `architect_board_summary` | Compact board overview with task excerpts, `created_by` attribution, compact `board_sync` state, and peer-message counts. |
+| `architect_task_list` | Tasks with label/lane/engineer/creator/archived filters and compact `board_sync` state when present. AND semantics on labels. |
+| `architect_task_show` | Full details for one task, including compact `board_sync` state when present. |
 | `architect_task_chain` | Full derived-task tree for a pipeline with summary stats. |
 | `architect_events_recent` | Recent coarse architect-scoped panel events (`task_done`, `agent_error`, `engineer_hired`, peer messages, etc.). |
 | `architect_mcp_calls` | Recent MCP call history filtered to the Architect's scope. |

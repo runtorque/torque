@@ -36,7 +36,8 @@ _ARCHITECT_TOOL_SPECS = [
         "description": (
             "Return a compact board overview for this architect's group, "
             "including task creator attribution and a bounded lightweight "
-            "task summary excerpt plus peer-message attention counts."
+            "task summary excerpt, board_sync state when present, and "
+            "peer-message attention counts."
         ),
         "inputSchema": {
             "type": "object",
@@ -145,7 +146,8 @@ _ARCHITECT_TOOL_SPECS = [
     {
         "name": "architect_task_show",
         "description": (
-            "Show full details for one task the architect can see."
+            "Show full details for one task the architect can see, including "
+            "board_sync state when present."
         ),
         "inputSchema": {
             "type": "object",
@@ -163,7 +165,8 @@ _ARCHITECT_TOOL_SPECS = [
         "description": (
             "List tasks in this architect's group with optional backlog "
             "filters for labels, lane, assigned engineer, creator, and "
-            "archived state. Label filters use AND semantics."
+            "archived state. Includes board_sync state when present. Label "
+            "filters use AND semantics."
         ),
         "inputSchema": {
             "type": "object",
