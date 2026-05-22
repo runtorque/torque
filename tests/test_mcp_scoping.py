@@ -518,6 +518,12 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
                         "number": 7,
                         "status": "pending",
                     },
+                    "auto_force_push": True,
+                    "push": {
+                        "auto_force_push": True,
+                        "force_with_lease": True,
+                        "reason": "remote_merged_to_base",
+                    },
                     "message": "Pull request is open with auto-merge pending.",
                 }
             self.fail(f"Unexpected command: {payload}")
@@ -539,6 +545,9 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(payload["merged"])
         self.assertEqual(payload["sha"], "")
         self.assertEqual(payload["pr"]["number"], 7)
+        self.assertTrue(payload["auto_force_push"])
+        self.assertEqual(payload["push"]["reason"], "remote_merged_to_base")
+        self.assertTrue(payload["push"]["force_with_lease"])
         self.assertEqual(
             [call["cmd"] for call in calls],
             ["worktree_check_merge", "worktree_merge"],

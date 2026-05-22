@@ -1,5 +1,9 @@
+import asyncio
 import json
+import subprocess
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from torque.worktree import WorktreeManager
@@ -40,6 +44,58 @@ class WorktreeGithubPrimitiveTests(unittest.IsolatedAsyncioTestCase):
             return response
 
         return fake, calls, expected
+
+    def _git(self, *args, cwd=None, check=True):
+        proc = subprocess.run(
+            ["git", *args],
+            cwd=cwd,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if check and proc.returncode != 0:
+            self.fail(
+                f"git {' '.join(args)} failed\n"
+                f"stdout={proc.stdout}\nstderr={proc.stderr}"
+            )
+        return proc
+
+    def _seed_squash_remote_case(self, tmpdir, *, squash_remote=True):
+        root = Path(tmpdir)
+        remote = root / "remote.git"
+        repo = root / "repo"
+        self._git("init", "--bare", str(remote))
+        self._git("clone", str(remote), str(repo))
+        self._git("config", "user.email", "tester@example.com", cwd=repo)
+        self._git("config", "user.name", "Tester", cwd=repo)
+        (repo / "base.txt").write_text("base\n")
+        self._git("add", "base.txt", cwd=repo)
+        self._git("commit", "-m", "base", cwd=repo)
+        self._git("branch", "-M", "main", cwd=repo)
+        self._git("push", "-u", "origin", "main", cwd=repo)
+
+        self._git("switch", "-c", "feature", cwd=repo)
+        (repo / "feature.txt").write_text("feature\n")
+        self._git("add", "feature.txt", cwd=repo)
+        self._git("commit", "-m", "feature work", cwd=repo)
+        self._git("push", "-u", "origin", "feature", cwd=repo)
+        remote_old = self._git(
+            "rev-parse", "origin/feature", cwd=repo
+        ).stdout.strip()
+
+        self._git("switch", "main", cwd=repo)
+        if squash_remote:
+            self._git("merge", "--squash", "feature", cwd=repo)
+            self._git("commit", "-m", "squash feature", cwd=repo)
+            self._git("push", "origin", "main", cwd=repo)
+        main_tip = self._git("rev-parse", "main", cwd=repo).stdout.strip()
+
+        self._git("switch", "-C", "feature", "main", cwd=repo)
+        (repo / "next.txt").write_text("next\n")
+        self._git("add", "next.txt", cwd=repo)
+        self._git("commit", "-m", "next work", cwd=repo)
+        local_tip = self._git("rev-parse", "feature", cwd=repo).stdout.strip()
+        return repo, remote_old, main_tip, local_tip
 
     async def test_github_preflight_missing_gh_reports_preflight_phase(self):
         fake, _calls, remaining = self._fake_exec([
@@ -145,6 +201,205 @@ class WorktreeGithubPrimitiveTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result["ok"])
         self.assertEqual(result["phase"], "push_branch")
         self.assertIn("rejected", result["error"])
+        self.assertEqual(remaining, [])
+
+    async def test_push_branch_auto_force_with_lease_after_squash_reset(self):
+        with tempfile.TemporaryDirectory(prefix="torque-push-safe-") as tmp:
+            repo, remote_old, main_tip, local_tip = await asyncio.to_thread(
+                self._seed_squash_remote_case,
+                tmp,
+                squash_remote=True,
+            )
+
+            initial = await self.mgr.github_push_branch(
+                str(repo), "origin", "feature"
+            )
+            self.assertFalse(initial["ok"])
+            self.assertIn("non-fast-forward", initial["error"])
+            # In the reused-branch case the old remote PR head is not an
+            # ancestor of the reset local branch; it is safe because the
+            # remote branch's tree is already incorporated into remote main.
+            self.assertNotEqual(
+                (
+                    await asyncio.to_thread(
+                        self._git,
+                        "merge-base",
+                        "--is-ancestor",
+                        remote_old,
+                        local_tip,
+                        cwd=repo,
+                        check=False,
+                    )
+                ).returncode,
+                0,
+            )
+            self.assertEqual(
+                (
+                    await asyncio.to_thread(
+                        self._git,
+                        "merge-base",
+                        "--is-ancestor",
+                        main_tip,
+                        local_tip,
+                        cwd=repo,
+                        check=False,
+                    )
+                ).returncode,
+                0,
+            )
+
+            result = await self.mgr.github_force_push_branch_with_lease_if_safe(
+                str(repo),
+                "origin",
+                "feature",
+                base_branch="main",
+                push_error=initial,
+            )
+
+            self.assertTrue(result["ok"], result)
+            self.assertTrue(result["auto_force_push"])
+            self.assertTrue(result["force_with_lease"])
+            self.assertEqual(result["auto_force_reason"], "remote_merged_to_base")
+            self.assertEqual(result["force_lease_sha"], remote_old)
+            remote_after = (
+                await asyncio.to_thread(
+                    self._git,
+                    "ls-remote",
+                    "origin",
+                    "refs/heads/feature",
+                    cwd=repo,
+                )
+            ).stdout.split()[0]
+            self.assertEqual(remote_after, local_tip)
+
+    async def test_push_branch_auto_force_rejects_unmerged_remote_work(self):
+        with tempfile.TemporaryDirectory(prefix="torque-push-unsafe-") as tmp:
+            repo, remote_old, _main_tip, _local_tip = await asyncio.to_thread(
+                self._seed_squash_remote_case,
+                tmp,
+                squash_remote=False,
+            )
+
+            initial = await self.mgr.github_push_branch(
+                str(repo), "origin", "feature"
+            )
+            self.assertFalse(initial["ok"])
+            self.assertIn("non-fast-forward", initial["error"])
+
+            result = await self.mgr.github_force_push_branch_with_lease_if_safe(
+                str(repo),
+                "origin",
+                "feature",
+                base_branch="main",
+                push_error=initial,
+            )
+
+            self.assertFalse(result["ok"])
+            self.assertTrue(result["non_fast_forward"])
+            self.assertFalse(result["auto_force_push"])
+            self.assertFalse(result["safety_gate_passed"])
+            self.assertIn("refusing auto force-push", result["error"])
+            remote_after = (
+                await asyncio.to_thread(
+                    self._git,
+                    "ls-remote",
+                    "origin",
+                    "refs/heads/feature",
+                    cwd=repo,
+                )
+            ).stdout.split()[0]
+            self.assertEqual(remote_after, remote_old)
+
+    async def test_push_branch_auto_force_allows_remote_ancestor_of_local(self):
+        fake, _calls, remaining = self._fake_exec([
+            (
+                ["git", "-C", "/wt", "status", "--porcelain"],
+                FakeProcess(),
+            ),
+            (
+                [
+                    "git", "-C", "/wt",
+                    "fetch", "--no-tags", "origin",
+                    "+refs/heads/feature:refs/remotes/origin/feature",
+                ],
+                FakeProcess(),
+            ),
+            (
+                [
+                    "git", "-C", "/wt",
+                    "fetch", "--no-tags", "origin",
+                    "+refs/heads/main:refs/remotes/origin/main",
+                ],
+                FakeProcess(),
+            ),
+            (
+                [
+                    "git", "-C", "/wt",
+                    "rev-parse", "--verify",
+                    "refs/remotes/origin/feature^{commit}",
+                ],
+                FakeProcess(stdout="remote-sha\n"),
+            ),
+            (
+                [
+                    "git", "-C", "/wt",
+                    "rev-parse", "--verify", "feature^{commit}",
+                ],
+                FakeProcess(stdout="local-sha\n"),
+            ),
+            (
+                [
+                    "git", "-C", "/wt",
+                    "rev-parse", "--verify",
+                    "refs/remotes/origin/main^{commit}",
+                ],
+                FakeProcess(stdout="base-sha\n"),
+            ),
+            (
+                [
+                    "git", "-C", "/wt",
+                    "merge-base", "--is-ancestor",
+                    "base-sha", "local-sha",
+                ],
+                FakeProcess(),
+            ),
+            (
+                [
+                    "git", "-C", "/wt",
+                    "merge-base", "--is-ancestor",
+                    "remote-sha", "local-sha",
+                ],
+                FakeProcess(),
+            ),
+            (
+                [
+                    "git", "-C", "/wt",
+                    "push",
+                    "--force-with-lease=refs/heads/feature:remote-sha",
+                    "-u", "origin", "feature",
+                ],
+                FakeProcess(),
+            ),
+        ])
+        initial = {
+            "ok": False,
+            "phase": "push_branch",
+            "error": "rejected (non-fast-forward)",
+        }
+
+        with patch("torque.worktree.asyncio.create_subprocess_exec",
+                   side_effect=fake):
+            result = await self.mgr.github_force_push_branch_with_lease_if_safe(
+                "/wt",
+                "origin",
+                "feature",
+                base_branch="main",
+                push_error=initial,
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["auto_force_reason"], "remote_ancestor_of_local")
+        self.assertTrue(result["auto_force_push"])
         self.assertEqual(remaining, [])
 
     async def test_create_or_reuse_pr_reuses_existing_pr(self):

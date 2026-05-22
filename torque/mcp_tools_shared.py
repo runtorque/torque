@@ -3333,6 +3333,10 @@ def _worktree_merge_success_payload(result: dict | None, cell) -> dict:
         payload["url"] = str(result.get("url") or "").strip()
     if isinstance(result.get("pr"), dict):
         payload["pr"] = result["pr"]
+    if result.get("auto_force_push"):
+        payload["auto_force_push"] = True
+    if isinstance(result.get("push"), dict):
+        payload["push"] = result["push"]
     if "force_direct" in result:
         payload["force_direct"] = bool(result.get("force_direct"))
     if result.get("warning"):
