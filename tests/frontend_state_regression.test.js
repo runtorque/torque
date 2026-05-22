@@ -5864,6 +5864,59 @@ test('_renderBoardCard includes compact quick-edit controls for focused root car
   assert.match(html, /Priority: High/);
 });
 
+test('board assignee quick editor offers only live agents while preserving current dead label', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/render.js');
+  loadBoardScripts(context);
+
+  context.state.agents = {
+    'agent-live': {
+      id: 'agent-live',
+      name: 'Live Worker',
+      group: 'alpha',
+      cell_type: 'agent',
+    },
+    'agent-deleted': {
+      id: 'agent-deleted',
+      name: 'Deleted Worker',
+      group: 'alpha',
+      cell_type: 'agent',
+      deleted_at: 123456,
+    },
+    'agent-dismissed': {
+      id: 'agent-dismissed',
+      name: 'Dismissed Engineer',
+      group: 'alpha',
+      cell_type: 'agent',
+      kind: 'engineer',
+      dismissed_at: 123456,
+    },
+  };
+  context.state.board_tasks = {
+    'task-1': {
+      id: 'task-1',
+      group: 'alpha',
+      task: 'Ship release',
+      labels: [],
+      agent_id: 'agent-deleted',
+    },
+  };
+
+  runInContext(context, `
+    _boardFocusedTask = 'task-1';
+    _boardQuickEditTask = 'task-1';
+    _boardQuickEditKind = 'assignee';
+  `);
+  const html = runInContext(context, `_renderBoardCard(state.board_tasks["task-1"], {}, 0)`);
+  const editorHtml = html.match(/<div class="board-card-quick-editor"[\s\S]*?<\/div>/)[0];
+
+  assert.match(html, /Deleted Worker/, 'current dead assignee label should remain visible on the card');
+  assert.match(editorHtml, /Live Worker/);
+  assert.doesNotMatch(editorHtml, /Deleted Worker/);
+  assert.doesNotMatch(editorHtml, /Dismissed Engineer/);
+});
+
 test('boardToggleBatchEdit requests actions for single-group selections', () => {
   const { context } = createBoardHarness();
   context.state.board_tasks = {
