@@ -3,6 +3,107 @@
 var _chatSelectedThreadId = '';
 var _chatExpandedContextById = {};
 
+var _CHAT_RESPONSIVE_NARROW_MAX_WIDTH = 640;
+
+function _chatResponsiveEntryWidth(entry) {
+  if (!entry) return 0;
+  if (entry.contentRect && Number.isFinite(Number(entry.contentRect.width))) {
+    return Number(entry.contentRect.width);
+  }
+  var borderBox = entry.borderBoxSize;
+  if (Array.isArray(borderBox)) borderBox = borderBox[0];
+  if (borderBox && Number.isFinite(Number(borderBox.inlineSize))) {
+    return Number(borderBox.inlineSize);
+  }
+  return 0;
+}
+
+function _chatMeasuredPanelWidth(shell, root) {
+  var candidates = [];
+  if (root) candidates.push(root);
+  if (shell) candidates.push(shell);
+  for (var i = 0; i < candidates.length; i++) {
+    var el = candidates[i];
+    if (!el) continue;
+    if (typeof el.getBoundingClientRect === 'function') {
+      var rect = el.getBoundingClientRect();
+      var rectWidth = rect && Number(rect.width || 0);
+      if (Number.isFinite(rectWidth) && rectWidth > 0) return rectWidth;
+    }
+    var clientWidth = Number(el.clientWidth || 0);
+    if (Number.isFinite(clientWidth) && clientWidth > 0) return clientWidth;
+    var offsetWidth = Number(el.offsetWidth || 0);
+    if (Number.isFinite(offsetWidth) && offsetWidth > 0) return offsetWidth;
+  }
+  return 0;
+}
+
+function _chatCaptureLayoutScroll(shell) {
+  if (!shell) return null;
+  var list = _chatShellPart(shell, '[data-chat-thread-list]', 'list');
+  var messages = _chatShellPart(shell, '[data-chat-message-list]', 'messages');
+  return {
+    thread: _chatCaptureScrollAnchor(list, 'data-chat-thread-id'),
+    messages: _chatCaptureScrollAnchor(messages, 'data-chat-message-id'),
+  };
+}
+
+function _chatRestoreLayoutScroll(shell, capture) {
+  if (!shell || !capture) return;
+  var list = _chatShellPart(shell, '[data-chat-thread-list]', 'list');
+  var messages = _chatShellPart(shell, '[data-chat-message-list]', 'messages');
+  _chatRestoreScrollAnchor(list, 'data-chat-thread-id', capture.thread);
+  _chatRestoreScrollAnchor(messages, 'data-chat-message-id', capture.messages);
+}
+
+function _chatScheduleLayoutScrollRestore(shell, capture) {
+  if (!shell || !capture) return;
+  var restore = function() { _chatRestoreLayoutScroll(shell, capture); };
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(restore);
+  } else if (typeof setTimeout === 'function') {
+    setTimeout(restore, 0);
+  } else {
+    restore();
+  }
+}
+
+function _chatApplyResponsiveLayout(shell, width) {
+  if (!shell) return false;
+  width = Number(width || 0);
+  if (!Number.isFinite(width) || width <= 0) return false;
+  var layout = width <= _CHAT_RESPONSIVE_NARROW_MAX_WIDTH ? 'narrow' : 'wide';
+  var current = shell.getAttribute ? String(shell.getAttribute('data-chat-layout') || '') : '';
+  if (current === layout) return false;
+  var capture = _chatCaptureLayoutScroll(shell);
+  if (shell.setAttribute) shell.setAttribute('data-chat-layout', layout);
+  if (shell.classList && typeof shell.classList.toggle === 'function') {
+    shell.classList.toggle('chat-panel-narrow', layout === 'narrow');
+    shell.classList.toggle('chat-panel-wide', layout !== 'narrow');
+  }
+  _chatScheduleLayoutScrollRestore(shell, capture);
+  return true;
+}
+
+function _chatEnsureResponsiveLayout(shell, root) {
+  if (!shell) return;
+  root = root || (shell.parentNode || null);
+  shell._chatResponsiveRoot = root;
+  if (!shell._chatResponsiveObserver && typeof ResizeObserver === 'function') {
+    shell._chatResponsiveObserver = new ResizeObserver(function(entries) {
+      var width = _chatResponsiveEntryWidth(entries && entries[0]);
+      if (!width) width = _chatMeasuredPanelWidth(shell, shell._chatResponsiveRoot);
+      _chatApplyResponsiveLayout(shell, width);
+    });
+    try {
+      shell._chatResponsiveObserver.observe(root || shell);
+    } catch (e) {
+      try { shell._chatResponsiveObserver.observe(shell); } catch (_e) { /* ignore observer failures */ }
+    }
+  }
+  _chatApplyResponsiveLayout(shell, _chatMeasuredPanelWidth(shell, root));
+}
+
 function _chatEsc(value) {
   if (typeof _agentPanelEsc === 'function') return _agentPanelEsc(value);
   if (typeof esc === 'function') return esc(value);
@@ -268,6 +369,7 @@ function _chatEnsurePanelShell(root) {
   };
   root._chatShell = shell;
   root.appendChild(shell);
+  _chatEnsureResponsiveLayout(shell, root);
   return (root.querySelector ? root.querySelector('[data-chat-panel]') : null) || shell;
 }
 
@@ -557,4 +659,5 @@ function renderChatPanel() {
     messages.scrollTop = Math.max(0, Number(messages.scrollHeight || 0));
   }
   if (root.setAttribute) root.setAttribute('data-chat-rendered-thread-id', selectedId || '');
+  _chatEnsureResponsiveLayout(shell, root);
 }
