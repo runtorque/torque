@@ -2257,6 +2257,58 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(replayed_row['delivery_state'], 'delivered')
         self.assertEqual(replayed_row['delivery_reason'], '')
 
+    async def test_user_agent_message_buffers_dismissed_agent_until_wake(self):
+        state = self._make_state()
+        engineer = self.state_mod.AgentCell(
+            id='engineer-1',
+            name='Engineer',
+            group='g',
+            cell_type='agent',
+            kind='engineer',
+            session_id='session-eng',
+            dismissed_at=123,
+        )
+        state.agents[engineer.id] = engineer
+        state.groups['g'] = [engineer.id]
+        sent = []
+
+        async def fake_send_prompt(cell, prompt, **kwargs):
+            sent.append((cell.id, prompt, kwargs))
+
+            async def _delivered():
+                return None
+
+            return asyncio.create_task(_delivered())
+
+        result = await self.server_mod._handle_user_agent_message_command(
+            {
+                'cmd': 'user_agent_message',
+                'agent_id': engineer.id,
+                'message': 'Context for when you return.',
+                'idempotency_key': 'dismissed-submit',
+            },
+            state,
+            fake_send_prompt,
+        )
+
+        self.assertEqual(result['delivery_state'], 'buffered')
+        self.assertEqual(result['delivery_reason'], 'agent_dismissed')
+        self.assertEqual(sent, [])
+
+        engineer.dismissed_at = 0
+        replayed = await self.server_mod._replay_buffered_cross_kind_messages(
+            state,
+            bridge=None,
+            target=engineer,
+            send_prompt=fake_send_prompt,
+        )
+
+        self.assertEqual(replayed, 1)
+        self.assertEqual(sent[0][0], engineer.id)
+        replayed_row = self.db.load_direct_message(result['message_id'])
+        self.assertEqual(replayed_row['delivery_state'], 'delivered')
+        self.assertEqual(replayed_row['delivery_reason'], '')
+
     async def test_user_agent_message_send_failure_stays_buffered_with_reason(self):
         state = self._make_state()
         engineer = self.state_mod.AgentCell(
@@ -2293,6 +2345,61 @@ class ServerEngineerMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             state.direct_messages_by_agent[engineer.id][0]['delivery_reason'],
             'terminal unavailable',
         )
+
+    async def test_user_agent_message_aliases_prompt_unavailable_and_idempotency_conflict(self):
+        state = self._make_state()
+        worker = self.state_mod.AgentCell(
+            id='agent-1',
+            name='Worker',
+            group='g',
+            cell_type='agent',
+            kind='worker',
+            session_id='session-1',
+        )
+        state.agents[worker.id] = worker
+        state.groups['g'] = [worker.id]
+
+        result = await self.server_mod._handle_user_agent_message_command(
+            {
+                'cmd': 'user_agent_message',
+                'cell_id': worker.id,
+                'text': 'Alias payload should persist.',
+                'thread_id': 'custom-thread',
+                'reply_to_id': 'agent-reply-1',
+                'idempotency_key': 'alias-submit',
+            },
+            state,
+            send_prompt=None,
+        )
+        conflict = await self.server_mod._handle_user_agent_message_command(
+            {
+                'cmd': 'user_agent_message',
+                'target_agent_id': worker.id,
+                'message': 'Different payload must be rejected.',
+                'idempotency_key': 'alias-submit',
+            },
+            state,
+            send_prompt=None,
+        )
+
+        self.assertEqual(result['type'], 'ok')
+        self.assertEqual(result['delivery_state'], 'buffered')
+        self.assertEqual(result['delivery_reason'], 'send_prompt_unavailable')
+        self.assertEqual(result['reply_to_id'], 'agent-reply-1')
+        row = self.db.load_direct_message(result['message_id'])
+        self.assertEqual(row['message'], 'Alias payload should persist.')
+        self.assertEqual(row['thread_id'], result['thread_id'])
+        self.assertEqual(row['reply_to_id'], 'agent-reply-1')
+        self.assertEqual(row['delivery_state'], 'buffered')
+        self.assertEqual(row['delivery_reason'], 'send_prompt_unavailable')
+        self.assertEqual(conflict['type'], 'error')
+        self.assertIn('idempotency key was reused', conflict['message'])
+        count = self.db._conn.execute(
+            "SELECT COUNT(*) FROM agent_peer_messages WHERE sender_kind='user' "
+            "AND recipient_id=?",
+            (worker.id,),
+        ).fetchone()[0]
+        self.assertEqual(count, 1)
 
     async def test_user_agent_message_idempotency_dedupes_browser_retry(self):
         state = self._make_state()

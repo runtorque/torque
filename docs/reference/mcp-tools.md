@@ -35,6 +35,14 @@ to answer a `## Message from the User` injection or send user-visible context
 without blocking work. Use `torque_ask` only when progress must stop for a
 human decision or approval.
 
+Direct messages render in the below-terminal panel for the agent the operator
+is viewing. Replies from that panel are injected back into the agent as a
+`## Message from the User` block; agents should answer through their
+`*_message_user` tool, not by relying on free-text terminal output. Blocking
+asks still use `torque_ask`/`engineer_ask`/`architect_ask` and keep their
+Backlog/pending-question semantics, but Torque mirrors asks and ask replies into
+the same panel for chronology.
+
 ### Identity and context
 
 | Tool | What it does |
@@ -268,7 +276,11 @@ blocking ask badge comes from `blocking=true`.
 All three persist `sender_kind=<calling agent kind>` and `recipient_kind=user`,
 emit a `direct_message_upsert` delta, return `type`, `message_id`, `thread_id`,
 `reply_to_id`, delivery/read metadata, and never create a Backlog ask task.
-V1 normalizes user↔agent messages to one thread per viewed agent.
+V1 normalizes user↔agent messages to one thread per viewed agent. User replies
+from the panel use `user_agent_message(agent_id|cell_id|target_agent_id,
+message|text, thread_id?, reply_to_id?, idempotency_key?)`; the send is
+persisted first, queued non-interruptively, and buffered for replay when the
+agent is down, dismissed, or temporarily unavailable.
 
 #### Architect peer messaging signatures
 
