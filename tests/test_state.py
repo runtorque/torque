@@ -430,10 +430,15 @@ class MatrixStateCleanupTests(unittest.TestCase):
             [op["op"] for op in state._delta_ops],
             ["agent_upsert", "agent_upsert", "agent_peer_thread_upsert"],
         )
-        thread = state.agent_peer_threads["msg-peer-2"]
+        pair_key = "agent-pair:arch-a:arch-b"
+        self.assertEqual(state._delta_ops[-1]["thread_id"], pair_key)
+        thread = state.agent_peer_threads[pair_key]
+        self.assertEqual(thread["thread_id"], pair_key)
         self.assertEqual(thread["title"], "Architect A ↔ Architect B")
+        self.assertEqual(thread["participant_ids"], ["arch-a", "arch-b"])
         self.assertEqual(thread["message_count"], 1)
         self.assertEqual(thread["last_message_id"], "msg-peer-2")
+        self.assertEqual(thread["messages"][0]["thread_id"], "msg-peer-2")
         self.assertFalse(thread["truncated"])
 
         updated = state.update_peer_message_delivery(
@@ -452,9 +457,10 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertFalse(sender_entry["buffered"])
         self.assertEqual(sender_entry["delivered_at"], 250.0)
         self.assertEqual(
-            state.agent_peer_threads["msg-peer-2"]["pending_delivery_count"],
+            state.agent_peer_threads[pair_key]["pending_delivery_count"],
             0,
         )
+        self.assertEqual(state._delta_ops[-1]["thread_id"], pair_key)
         self.assertEqual(
             [op["op"] for op in state._delta_ops],
             [
@@ -466,6 +472,87 @@ class MatrixStateCleanupTests(unittest.TestCase):
                 "agent_peer_thread_upsert",
             ],
         )
+
+    def test_agent_peer_threads_merge_pair_threads_and_emit_pair_key_deltas(self):
+        from torque.db import TorqueDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = TorqueDB(Path(tmp.name) / "torque.db")
+        db.init()
+        self.addCleanup(db.close)
+
+        state = self.state_mod.MatrixState(db=db)
+        state.agents["arch-a"] = self.state_mod.AgentCell(
+            id="arch-a",
+            name="Torqly",
+            group="g",
+            kind="architect",
+            cell_type="agent",
+        )
+        state.agents["eng-a"] = self.state_mod.AgentCell(
+            id="eng-a",
+            name="Courier",
+            group="g",
+            kind="engineer",
+            cell_type="agent",
+        )
+
+        state.save_peer_message({
+            "id": "pair-msg-1",
+            "thread_id": "thread-arch-to-eng",
+            "group_name": "g",
+            "sender_id": "arch-a",
+            "sender_kind": "architect",
+            "recipient_id": "eng-a",
+            "recipient_kind": "engineer",
+            "message": "Need review.",
+            "created_at": 10.0,
+            "ack_required": True,
+            "delivery_state": "delivered",
+        })
+        state.save_peer_message({
+            "id": "pair-msg-2",
+            "thread_id": "thread-eng-to-arch",
+            "reply_to_id": "pair-msg-1",
+            "group_name": "g",
+            "sender_id": "eng-a",
+            "sender_kind": "engineer",
+            "recipient_id": "arch-a",
+            "recipient_kind": "architect",
+            "message": "Acknowledged.",
+            "created_at": 20.0,
+            "ack_required": True,
+            "delivery_state": "buffered",
+        })
+
+        pair_key = "agent-pair:arch-a:eng-a"
+        self.assertEqual(list(state.agent_peer_threads), [pair_key])
+        peer_ops = [
+            op for op in state._delta_ops
+            if op["op"] == "agent_peer_thread_upsert"
+        ]
+        self.assertEqual([op["thread_id"] for op in peer_ops], [pair_key, pair_key])
+        self.assertTrue(all(op["thread"]["thread_id"] == pair_key for op in peer_ops))
+
+        thread = state.agent_peer_threads[pair_key]
+        self.assertEqual(thread["title"], "Courier ↔ Torqly")
+        self.assertEqual(thread["participant_ids"], ["arch-a", "eng-a"])
+        self.assertEqual(thread["last_activity_at"], 20.0)
+        self.assertEqual(thread["last_message_id"], "pair-msg-2")
+        self.assertEqual(thread["message_count"], 2)
+        self.assertEqual(thread["ack_required_count"], 2)
+        self.assertEqual(thread["pending_delivery_count"], 1)
+        self.assertFalse(thread["truncated"])
+        self.assertEqual(
+            [message["id"] for message in thread["messages"]],
+            ["pair-msg-1", "pair-msg-2"],
+        )
+        self.assertEqual(
+            [message["thread_id"] for message in thread["messages"]],
+            ["thread-arch-to-eng", "thread-eng-to-arch"],
+        )
+        self.assertEqual(thread["messages"][1]["reply_to_id"], "pair-msg-1")
 
     def test_load_seeds_direct_message_caches_from_db(self):
         from torque.db import TorqueDB
@@ -608,6 +695,24 @@ class MatrixStateCleanupTests(unittest.TestCase):
                 "delivery_state": "buffered" if idx >= 104 else "delivered",
                 "delivered_at": 0 if idx >= 104 else float(idx),
             })
+        for idx in range(106, 108):
+            sender = arch_a if idx % 2 else eng_a
+            recipient = eng_a if idx % 2 else arch_a
+            db.save_agent_peer_message({
+                "id": f"long-alt-{idx:03d}",
+                "thread_id": "thread-long-alt",
+                "group_name": "g",
+                "sender_id": sender.id,
+                "sender_kind": sender.kind,
+                "sender_name": "stale sender name",
+                "recipient_id": recipient.id,
+                "recipient_kind": recipient.kind,
+                "recipient_name": "stale recipient name",
+                "message": f"alternate thread message {idx}",
+                "created_at": float(idx),
+                "delivery_state": "delivered",
+                "delivered_at": float(idx),
+            })
         db.save_agent_peer_message({
             "id": "new-thread-message",
             "thread_id": "thread-new",
@@ -647,10 +752,12 @@ class MatrixStateCleanupTests(unittest.TestCase):
         snapshot = state.to_dict()["agent_peer_threads"]
         compact = state.to_dict_compact()["agent_peer_threads"]
 
-        self.assertEqual(list(snapshot), ["thread-new", "thread-long"])
-        self.assertEqual(list(compact), ["thread-new", "thread-long"])
-        long_thread = snapshot["thread-long"]
-        self.assertEqual(long_thread["thread_id"], "thread-long")
+        long_pair_key = "agent-pair:arch-a:eng-a"
+        arch_pair_key = "agent-pair:arch-a:arch-b"
+        self.assertEqual(list(snapshot), [arch_pair_key, long_pair_key])
+        self.assertEqual(list(compact), [arch_pair_key, long_pair_key])
+        long_thread = snapshot[long_pair_key]
+        self.assertEqual(long_thread["thread_id"], long_pair_key)
         self.assertEqual(long_thread["group"], "g")
         self.assertEqual(long_thread["title"], "Architect A ↔ Engineer One")
         self.assertEqual(long_thread["participant_ids"], ["arch-a", "eng-a"])
@@ -658,21 +765,34 @@ class MatrixStateCleanupTests(unittest.TestCase):
             [participant["name"] for participant in long_thread["participants"]],
             ["Architect A", "Engineer One"],
         )
-        self.assertEqual(long_thread["message_count"], 105)
+        self.assertEqual(long_thread["message_count"], 107)
         self.assertEqual(long_thread["ack_required_count"], 1)
         self.assertEqual(long_thread["pending_delivery_count"], 2)
         self.assertEqual(long_thread["requires_reply_participant_ids"], ["eng-a"])
         self.assertTrue(long_thread["truncated"])
         self.assertEqual(len(long_thread["messages"]), 100)
-        self.assertEqual(long_thread["messages"][0]["id"], "long-006")
-        self.assertEqual(long_thread["messages"][-1]["id"], "long-105")
-        self.assertEqual(long_thread["last_message_id"], "long-105")
+        self.assertEqual(long_thread["messages"][0]["id"], "long-008")
+        self.assertEqual(long_thread["messages"][-1]["id"], "long-alt-107")
+        self.assertEqual(long_thread["messages"][-1]["thread_id"], "thread-long-alt")
+        self.assertEqual(long_thread["last_message_id"], "long-alt-107")
         self.assertEqual(long_thread["last_message"]["action"], "architect_message")
         self.assertEqual(
-            snapshot["thread-new"]["title"],
-            "Architect B ↔ Architect A",
+            snapshot[arch_pair_key]["title"],
+            "Architect A ↔ Architect B",
         )
-        self.assertNotIn("thread-worker", snapshot)
+        self.assertEqual(snapshot[arch_pair_key]["thread_id"], arch_pair_key)
+        self.assertEqual(snapshot[arch_pair_key]["messages"][0]["thread_id"], "thread-new")
+        state._delta_ops.clear()
+        self.assertEqual(state.seed_agent_peer_threads(emit=True), 2)
+        self.assertEqual(
+            [op["thread_id"] for op in state._delta_ops],
+            [arch_pair_key, long_pair_key],
+        )
+        self.assertTrue(all(
+            op["thread"]["thread_id"] == op["thread_id"]
+            for op in state._delta_ops
+        ))
+        self.assertNotIn("agent-pair:arch-a:worker-1", snapshot)
         self.assertNotIn("direct-user-arch", snapshot)
 
     def test_save_direct_message_updates_cache_and_read_deltas(self):

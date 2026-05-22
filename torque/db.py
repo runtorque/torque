@@ -3850,6 +3850,43 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         ).fetchall()
         return [_decode_agent_peer_message_row(row) for row in rows]
 
+    def load_agent_peer_chat_messages_for_pair(
+        self,
+        first_agent_id: str,
+        second_agent_id: str,
+        *,
+        limit: int = 5000,
+        include_archived: bool = False,
+    ) -> list[dict]:
+        """Load one V1 agent↔agent chat participant-pair oldest first."""
+        first_agent_id = str(first_agent_id or "").strip()
+        second_agent_id = str(second_agent_id or "").strip()
+        if not first_agent_id or not second_agent_id:
+            return []
+        limit = max(1, min(int(limit or 5000), 10000))
+        where = [
+            "((sender_id=? AND recipient_id=?) "
+            "OR (sender_id=? AND recipient_id=?))",
+            _AGENT_PEER_CHAT_WHERE,
+        ]
+        params: list = [
+            first_agent_id,
+            second_agent_id,
+            second_agent_id,
+            first_agent_id,
+        ]
+        if not include_archived:
+            where.append("archived_at=0")
+        params.append(limit)
+        rows = self._conn.execute(
+            "SELECT " + ", ".join(_AGENT_PEER_MESSAGE_COLUMNS) + " "
+            "FROM agent_peer_messages WHERE "
+            + " AND ".join(where)
+            + " ORDER BY created_at ASC, id ASC LIMIT ?",
+            tuple(params),
+        ).fetchall()
+        return [_decode_agent_peer_message_row(row) for row in rows]
+
     def load_agent_peer_chat_thread(
         self,
         thread_id: str,

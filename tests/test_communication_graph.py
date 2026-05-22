@@ -329,8 +329,10 @@ class CommunicationGraphTests(unittest.IsolatedAsyncioTestCase):
                 "message_id": payload["message_id"],
             }],
         )
-        self.assertIn(payload["thread_id"], self.state.agent_peer_threads)
-        thread = self.state.agent_peer_threads[payload["thread_id"]]
+        pair_key = f"agent-pair:{architect.id}:{engineer.id}"
+        self.assertIn(pair_key, self.state.agent_peer_threads)
+        thread = self.state.agent_peer_threads[pair_key]
+        self.assertEqual(thread["messages"][0]["thread_id"], payload["thread_id"])
         self.assertEqual(thread["last_message_id"], payload["message_id"])
         self.assertEqual(thread["pending_delivery_count"], 0)
         self.assertEqual(thread["messages"][0]["action"], "architect_message")
