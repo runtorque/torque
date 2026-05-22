@@ -535,6 +535,7 @@ function attachTerminalWorkspaceDom(document) {
   const topbar = new FakeElement('terminal-topbar');
   const tabs = new FakeElement('terminal-tabs');
   const stage = new FakeElement('terminal-stage');
+  const directMessages = new FakeElement('terminal-direct-messages-slot');
   const compose = new FakeElement('terminal-compose-slot');
   const statusbar = new FakeElement('terminal-statusbar');
   const surface = new FakeElement('terminal-surface');
@@ -542,6 +543,7 @@ function attachTerminalWorkspaceDom(document) {
   topbar.classList.add('terminal-topbar');
   tabs.classList.add('terminal-tabs');
   stage.classList.add('terminal-stage');
+  directMessages.classList.add('terminal-direct-messages-slot');
   compose.classList.add('terminal-compose-slot');
   statusbar.classList.add('terminal-statusbar');
   surface.classList.add('terminal-surface');
@@ -549,6 +551,7 @@ function attachTerminalWorkspaceDom(document) {
   shell.appendChild(topbar);
   shell.appendChild(tabs);
   shell.appendChild(stage);
+  shell.appendChild(directMessages);
   shell.appendChild(compose);
   shell.appendChild(statusbar);
   stage.appendChild(surface);
@@ -556,11 +559,12 @@ function attachTerminalWorkspaceDom(document) {
   shell.setQuerySelector('.terminal-topbar', topbar);
   shell.setQuerySelector('.terminal-tabs', tabs);
   shell.setQuerySelector('.terminal-stage', stage);
+  shell.setQuerySelector('.terminal-direct-messages-slot', directMessages);
   shell.setQuerySelector('.terminal-compose-slot', compose);
   shell.setQuerySelector('.terminal-statusbar', statusbar);
   stage.setQuerySelector('.terminal-surface', surface);
   document.setSelector('#terminal-workspace .terminal-statusbar', statusbar);
-  return { workspace, shell, topbar, tabs, stage, compose, statusbar, surface };
+  return { workspace, shell, topbar, tabs, stage, directMessages, compose, statusbar, surface };
 }
 
 function runInContext(context, code) {
@@ -8672,6 +8676,184 @@ test('embedded terminal keeps visual inset on xterm so FitAddon rows match the v
   assert.match(runtimeXtermRule[0], /padding:\s*10px 8px;/);
 });
 
+test('embedded terminal direct-message panel is placed below stage and resolves child terminals to parent agent', () => {
+  const { context, document, sandbox } = createEmbeddedTerminalHarness({
+    loadRenderHelpers: true,
+  });
+  const dom = attachTerminalWorkspaceDom(document);
+  document.body.classList.add('runtime-embedded');
+  sandbox.state.runtime = { embedded_terminal: true };
+  sandbox.state.groups = { alpha: ['agent-1', 'term-1'] };
+  sandbox.state.group_settings = { alpha: {} };
+  sandbox.state.children = { 'agent-1': ['term-1'] };
+  sandbox.state.agents = {
+    'agent-1': {
+      id: 'agent-1',
+      name: 'Builder',
+      group: 'alpha',
+      cell_type: 'agent',
+      kind: 'worker',
+      session_id: 'sess-agent',
+      status: 'running',
+    },
+    'term-1': {
+      id: 'term-1',
+      name: 'Builder shell',
+      group: 'alpha',
+      cell_type: 'terminal',
+      parent_id: 'agent-1',
+      session_id: 'sess-term',
+      status: 'running',
+    },
+  };
+  sandbox.state.direct_messages_by_agent = {
+    'agent-1': [{
+      message_id: 'dm-1',
+      thread_id: 'user-agent:user:agent-1',
+      message: 'hello parent thread',
+      sender_id: 'user',
+      sender_kind: 'user',
+      recipient_id: 'agent-1',
+      recipient_kind: 'worker',
+      created_at: '2026-05-22T12:00:00Z',
+    }],
+  };
+
+  runInContext(context, `
+    selectedTerminalId = 'term-1';
+    selectedAgentId = 'agent-1';
+    _embeddedTerminalSessionKey = 'term-1:sess-term';
+    renderTerminalWorkspace();
+  `);
+
+  assert.equal(dom.shell.children.indexOf(dom.directMessages), dom.shell.children.indexOf(dom.stage) + 1);
+  assert.equal(dom.shell.children.indexOf(dom.compose), dom.shell.children.indexOf(dom.directMessages) + 1);
+  assert.match(dom.directMessages.innerHTML, /class="terminal-direct-messages"/);
+  assert.match(dom.directMessages.innerHTML, /hello parent thread/);
+  assert.match(dom.directMessages.innerHTML, /data-agent-id="agent-1"/);
+  assert.equal(dom.directMessages.hidden, false);
+});
+
+test('embedded terminal direct-message panel renders blocking asks, ask replies, and selected messages together', () => {
+  const { context, document, sandbox } = createEmbeddedTerminalHarness({
+    loadRenderHelpers: true,
+  });
+  const dom = attachTerminalWorkspaceDom(document);
+  document.body.classList.add('runtime-embedded');
+  sandbox.state.runtime = { embedded_terminal: true };
+  sandbox.state.groups = { alpha: ['agent-1'] };
+  sandbox.state.group_settings = { alpha: {} };
+  sandbox.state.children = { 'agent-1': [] };
+  sandbox.state.agents = {
+    'agent-1': {
+      id: 'agent-1',
+      name: 'Builder',
+      group: 'alpha',
+      cell_type: 'agent',
+      kind: 'worker',
+      session_id: 'sess-1',
+      status: 'running',
+    },
+  };
+  sandbox.state.direct_messages_by_agent = {
+    'agent-1': [
+      {
+        message_id: 'dm-plain',
+        message_type: 'message',
+        message: 'Plain hello',
+        sender_id: 'agent-1',
+        sender_kind: 'worker',
+        sender_name: 'Builder',
+        recipient_id: 'user',
+        recipient_kind: 'user',
+        created_at: 10,
+      },
+      {
+        message_id: 'dm-ask',
+        message_type: 'ask',
+        blocking: true,
+        ack_required: true,
+        message: 'Need approval?',
+        sender_id: 'agent-1',
+        sender_kind: 'worker',
+        recipient_id: 'user',
+        recipient_kind: 'user',
+        created_at: 11,
+      },
+      {
+        message_id: 'dm-reply',
+        reply_to_id: 'dm-ask',
+        message_type: 'ask_reply',
+        message: 'Approved',
+        sender_id: 'user',
+        sender_kind: 'user',
+        recipient_id: 'agent-1',
+        recipient_kind: 'worker',
+        created_at: 12,
+      },
+    ],
+  };
+
+  runInContext(context, `
+    selectedTerminalId = 'agent-1';
+    _terminalDirectMessageSelectedByAgent['agent-1'] = 'dm-ask';
+    renderTerminalWorkspace();
+  `);
+
+  assert.match(dom.directMessages.innerHTML, /Plain hello/);
+  assert.match(dom.directMessages.innerHTML, /Blocking ask/);
+  assert.match(dom.directMessages.innerHTML, />Reply<\/button>/);
+  assert.match(dom.directMessages.innerHTML, /Ask reply/);
+  assert.match(dom.directMessages.innerHTML, /terminal-direct-message--ask selected/);
+});
+
+test('embedded terminal direct-message scroll restore uses anchor item unless already at live tail', () => {
+  const { context, document } = createEmbeddedTerminalHarness({
+    loadRenderHelpers: true,
+  });
+  const dom = attachTerminalWorkspaceDom(document);
+  const list = new FakeElement('dm-list');
+  list.classList.add('terminal-direct-messages-list');
+  list.dataset.agentId = 'agent-1';
+  dom.directMessages.appendChild(list);
+  dom.workspace.setQuerySelector('.terminal-direct-messages-list', list);
+
+  const beforeOld = new FakeElement('dm-old');
+  beforeOld.dataset.terminalDmAnchor = 'dm-old';
+  beforeOld.offsetTop = 40;
+  beforeOld.offsetHeight = 24;
+  const beforeAnchor = new FakeElement('dm-anchor');
+  beforeAnchor.dataset.terminalDmAnchor = 'dm-anchor';
+  beforeAnchor.offsetTop = 140;
+  beforeAnchor.offsetHeight = 24;
+  list.setQuerySelectorAll('[data-terminal-dm-anchor]', [beforeOld, beforeAnchor]);
+  list.scrollTop = 100;
+  list.clientHeight = 100;
+  list.scrollHeight = 500;
+
+  const anchoredSnapshot = runInContext(context, `_captureTerminalWorkspaceState(document.getElementById('terminal-workspace'), null);`);
+
+  const afterAnchor = new FakeElement('dm-anchor-new');
+  afterAnchor.dataset.terminalDmAnchor = 'dm-anchor';
+  afterAnchor.offsetTop = 220;
+  afterAnchor.offsetHeight = 24;
+  list.setQuerySelectorAll('[data-terminal-dm-anchor]', [afterAnchor]);
+  list.scrollTop = 0;
+  context.__anchoredSnapshot = anchoredSnapshot;
+  runInContext(context, `_restoreTerminalWorkspaceState(document.getElementById('terminal-workspace'), __anchoredSnapshot, null);`);
+  assert.equal(list.scrollTop, 180);
+
+  list.scrollTop = 400;
+  list.clientHeight = 100;
+  list.scrollHeight = 500;
+  const tailSnapshot = runInContext(context, `_captureTerminalWorkspaceState(document.getElementById('terminal-workspace'), null);`);
+  list.scrollTop = 0;
+  list.scrollHeight = 650;
+  context.__tailSnapshot = tailSnapshot;
+  runInContext(context, `_restoreTerminalWorkspaceState(document.getElementById('terminal-workspace'), __tailSnapshot, null);`);
+  assert.equal(list.scrollTop, 550);
+});
+
 test('embedded terminal compose renders only for standalone runtime and preserves drafts across rerenders', () => {
   const { context, document, sandbox } = createEmbeddedTerminalHarness({
     loadRenderHelpers: true,
@@ -8747,7 +8929,7 @@ test('embedded terminal compose renders only for standalone runtime and preserve
   assert.doesNotMatch(dom.workspace.innerHTML, /terminal-compose/);
 });
 
-test('embedded terminal compose submits on Enter, allows Shift+Enter, and clears on Escape', () => {
+test('embedded terminal agent-targeted compose submits durable direct message on Enter and clears on Escape', () => {
   const { context, document, sandbox, terminals } = createEmbeddedTerminalHarness({
     loadRenderHelpers: true,
   });
@@ -8763,6 +8945,7 @@ test('embedded terminal compose submits on Enter, allows Shift+Enter, and clears
       name: 'Builder',
       group: 'alpha',
       cell_type: 'agent',
+      kind: 'worker',
       session_id: 'sess-1',
       status: 'running',
     },
@@ -8798,11 +8981,12 @@ test('embedded terminal compose submits on Enter, allows Shift+Enter, and clears
   context.__enterEvt = enterEvt;
   runInContext(context, `terminalComposeKeydown(__enterEvt, 'agent-1');`);
 
-  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [{
-    cmd: 'send_user_message',
-    cell_id: 'agent-1',
-    text: 'hello agent',
-  }]);
+  assert.equal(sandbox.sendCalls.length, 1);
+  assert.equal(sandbox.sendCalls[0].cmd, 'user_agent_message');
+  assert.equal(sandbox.sendCalls[0].agent_id, 'agent-1');
+  assert.equal(sandbox.sendCalls[0].message, 'hello agent');
+  assert.equal(sandbox.sendCalls[0].thread_id, 'user-agent:user:agent-1');
+  assert.match(sandbox.sendCalls[0].idempotency_key, /^terminal-direct:agent-1:/);
   assert.equal(enterEvt.preventDefaultCalled, true);
   assert.equal(enterEvt.stopPropagationCalled, true);
   assert.equal(input.value, '');
@@ -8841,6 +9025,62 @@ test('embedded terminal compose submits on Enter, allows Shift+Enter, and clears
   assert.equal(escapeEvt.stopPropagationCalled, true);
   assert.equal(input.value, '');
   assert.equal(button.disabled, true);
+});
+
+test('embedded terminal raw terminal compose still submits send_user_message', () => {
+  const { context, document, sandbox } = createEmbeddedTerminalHarness({
+    loadRenderHelpers: true,
+  });
+  const dom = attachTerminalWorkspaceDom(document);
+  document.body.classList.add('runtime-embedded');
+  sandbox.state.runtime = { embedded_terminal: true };
+  sandbox.state.groups = { alpha: ['term-1'] };
+  sandbox.state.group_settings = { alpha: {} };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'term-1': {
+      id: 'term-1',
+      name: 'Raw shell',
+      group: 'alpha',
+      cell_type: 'terminal',
+      session_id: 'sess-term',
+      status: 'running',
+    },
+  };
+  runInContext(context, `
+    selectedTerminalId = 'term-1';
+    _embeddedTerminalSessionKey = 'term-1:sess-term';
+    renderTerminalWorkspace();
+  `);
+
+  const input = document.register('terminal-compose-input-term-1');
+  input.classList.add('terminal-compose-input');
+  input.dataset.cellId = 'term-1';
+  const button = document.register('terminal-compose-submit-term-1');
+  button.classList.add('terminal-compose-submit');
+  dom.compose.appendChild(input);
+  dom.compose.appendChild(button);
+  dom.compose.setQuerySelector('.terminal-compose-input', input);
+  dom.compose.setQuerySelector('.terminal-compose-submit', button);
+  dom.workspace.setQuerySelector('.terminal-compose-input', input);
+
+  input.value = 'raw terminal text';
+  runInContext(context, `terminalComposeInput(document.getElementById('terminal-compose-input-term-1'));`);
+  const enterEvt = {
+    key: 'Enter',
+    shiftKey: false,
+    preventDefault() {},
+    stopPropagation() {},
+  };
+  context.__rawEnterEvt = enterEvt;
+  runInContext(context, `terminalComposeKeydown(__rawEnterEvt, 'term-1');`);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [{
+    cmd: 'send_user_message',
+    cell_id: 'term-1',
+    text: 'raw terminal text',
+  }]);
+  assert.equal(dom.directMessages.hidden, true);
 });
 
 test('embedded terminal compose recalls message history per agent with arrows and restores draft on Escape', () => {
@@ -11444,6 +11684,120 @@ test('direct message deltas update per-agent cache without peer-message state', 
     engineer: 0,
     templates: 0,
   });
+});
+
+test('direct message delta for viewed terminal agent invalidates main render so panel can refresh', () => {
+  const { context, sandbox, flushRaf } = createStandaloneDeltaBatchHarness(['engineer']);
+  runInContext(context, `
+    state.agents = {
+      'worker-1': {
+        id: 'worker-1',
+        name: 'Worker',
+        group: 'alpha',
+        cell_type: 'agent',
+        kind: 'worker',
+        session_id: 'sess-worker'
+      }
+    };
+    selectedTerminalId = 'worker-1';
+  `);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'direct_message_upsert',
+      message_id: 'direct-worker-1',
+      agent_id: 'worker-1',
+      group: 'alpha',
+      message: {
+        message_id: 'direct-worker-1',
+        thread_id: 'user-agent:user:worker-1',
+        message: 'panel should refresh',
+        created_at: '2026-05-22T12:34:00Z',
+        sender_id: 'user',
+        sender_kind: 'user',
+        recipient_id: 'worker-1',
+        recipient_kind: 'worker',
+      },
+    }],
+  });
+  flushRaf();
+
+  assert.equal(
+    jsonValue(context, `state.direct_messages_by_agent['worker-1'][0].message_id`),
+    'direct-worker-1',
+  );
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 1,
+    board: 0,
+    actions: 0,
+    context: 0,
+    events: 0,
+    engineer: 0,
+    templates: 0,
+  });
+});
+
+test('incoming direct_message_upsert refreshes the real terminal direct-message panel', () => {
+  const { sandbox, document } = createSandbox();
+  const workspace = document.register('terminal-workspace');
+  workspace.classList.add('active');
+  document.body.classList.add('runtime-embedded');
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/ws.js');
+  loadScript(context, 'static/js/render.js');
+  loadScript(context, 'static/js/terminal.js');
+  const dom = attachTerminalWorkspaceDom(document);
+
+  runInContext(context, `
+    render = function() { renderTerminalWorkspace(); };
+    updateEventsAttentionBadge = function() {};
+    _expectedSeq = 1;
+    state.runtime = { embedded_terminal: true };
+    state.groups = { alpha: ['worker-1'] };
+    state.group_settings = { alpha: {} };
+    state.children = { 'worker-1': [] };
+    state.agents = {
+      'worker-1': {
+        id: 'worker-1',
+        name: 'Worker',
+        group: 'alpha',
+        cell_type: 'agent',
+        kind: 'worker',
+        session_id: '',
+        status: 'stopped'
+      }
+    };
+    selectedTerminalId = 'worker-1';
+    selectedAgentId = 'worker-1';
+    renderTerminalWorkspace();
+  `);
+  assert.doesNotMatch(dom.directMessages.innerHTML, /delta hello/);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'direct_message_upsert',
+      message_id: 'delta-dm-1',
+      agent_id: 'worker-1',
+      group: 'alpha',
+      message: {
+        message_id: 'delta-dm-1',
+        thread_id: 'user-agent:user:worker-1',
+        message: 'delta hello',
+        message_type: 'message',
+        created_at: '2026-05-22T12:45:00Z',
+        sender_id: 'worker-1',
+        sender_kind: 'worker',
+        sender_name: 'Worker',
+        recipient_id: 'user',
+        recipient_kind: 'user',
+      },
+    }],
+  });
+
+  assert.match(dom.directMessages.innerHTML, /delta hello/);
+  assert.match(dom.directMessages.innerHTML, /terminal-direct-message--agent-to-user/);
 });
 
 test('mcp_call_append for non-focused agent does NOT invalidate engineer panel (TORQUE:236 v4)', () => {
