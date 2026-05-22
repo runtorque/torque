@@ -945,6 +945,13 @@ test('group settings Advanced sub-tab owns Delete group action', () => {
   assert.match(groupPane, /data-subtab="group-general"[\s\S]*data-subtab="group-advanced"/);
 
   const advancedPane = groupPane.slice(groupAdvancedIndex);
+  assert.match(advancedPane, /Guidance hint cadence/);
+  assert.match(
+    advancedPane,
+    /<input id="gs-guidance-hint-cadence" type="number" min="0" max="100" step="1" value="4">/,
+  );
+  assert.match(advancedPane, /show on the 1st occurrence, then every N agent messages/);
+  assert.match(advancedPane, /0 = every message/);
   assert.match(advancedPane, /Delete group/);
   assert.match(advancedPane, /class="btn-danger"/);
   assert.match(advancedPane, /deleteSettingsGroup\(\)/);
@@ -956,6 +963,34 @@ test('group settings Advanced sub-tab owns Delete group action', () => {
   assert.match(render, /title="Group settings"[^`]*\\u2699/);
   assert.match(render, /openActiveGroupSettings\(event\)[\s\S]*&#9881;/);
   assert.doesNotMatch(main, /openActiveGroupMenu|&#8942;|Delete group/);
+});
+
+test('Group Settings guidance hint cadence reads persisted value and submits parsed int', () => {
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+  seedProviders(context, sandbox._cachedProviders);
+
+  vm.runInContext('_gsInitialSubtab = "group-advanced"', context);
+  vm.runInContext(`_showGroupSettings("alpha", {
+    settings: {
+      guidance_hint_cadence: 0
+    },
+    engineer_settings: {},
+    profiles: ["Default"]
+  })`, context);
+
+  assert.equal(ensure('gs-guidance-hint-cadence').value, 0);
+  assert.equal(ensure('gs-guidance-hint-cadence').focused, true);
+
+  sandbox.sendCalls.length = 0;
+  ensure('gs-guidance-hint-cadence').value = '17';
+  vm.runInContext('submitGroupSettings()', context);
+
+  const groupCall = sandbox.sendCalls.find(
+    (msg) => msg.cmd === 'update_group_settings');
+  assert.ok(groupCall, 'update_group_settings should be sent');
+  assert.equal(groupCall.settings.guidance_hint_cadence, 17);
 });
 
 test('group settings sub-tab switching preserves scroll focus and inline draft state', () => {

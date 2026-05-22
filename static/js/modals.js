@@ -2226,6 +2226,8 @@ function _showGroupSettings(group, data) {
         ? 'gs-terminal-prefix'
         : initialSubtab === 'group-sync'
           ? 'gs-board-sync-provider'
+        : initialSubtab === 'group-advanced'
+          ? 'gs-guidance-hint-cadence'
         : 'gs-directory';
   const focusEl = document.getElementById(focusId);
   if (focusEl) focusEl.focus();
