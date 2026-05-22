@@ -126,6 +126,7 @@ _GS_BOOL_FIELDS = {
     "collapsed_default", "filter_by_window", "git_worktree",
     "worktree_auto_checkpoint", "checkpoint_on_progress",
     "worktree_merge_squash", "worktree_merge_preserve_diff",
+    "worktree_symlink_gitignored_paths",
     "agent_session_resume",
     "board_sync_enabled",
     "notifications", "notify_on_finish", "notify_on_error",

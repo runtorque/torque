@@ -664,6 +664,10 @@
           <label>Symlinks <span class="label-hint">symlinked from repo root</span>
             <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Repo-relative exact paths or glob patterns to symlink into each new worktree. Recursive `**` is supported (for example `etl/**/node_modules`). Only existing matches inside the repo root are linked, and escape paths like `..` are ignored.">?</span>
           </label>
+          <label class="gs-checkbox">
+            <input id="gs-wt-symlink-gitignored" type="checkbox"> Symlink gitignored paths
+            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Use Git ignore rules to symlink ignored files and directories into each new worktree. Torque skips its own .torque runtime directory and never replaces paths that already exist in the worktree.">?</span>
+          </label>
           <div id="gs-wt-symlinks-list" class="wt-symlinks-chips"></div>
           <div style="display:flex;gap:4px;align-items:center">
             <input id="gs-wt-symlink-input" placeholder="e.g. etl/**/node_modules" autocomplete="off" style="flex:1"

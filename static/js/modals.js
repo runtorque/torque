@@ -2012,6 +2012,7 @@ function _showGroupSettings(group, data) {
   document.getElementById('gs-wt-merge-instructions').value = s.worktree_merge_instructions || '';
   _setSelectValue('gs-wt-merge-cleanup', s.worktree_merge_cleanup, 'keep');
   document.getElementById('gs-wt-merge-preserve-diff').checked = !!s.worktree_merge_preserve_diff;
+  document.getElementById('gs-wt-symlink-gitignored').checked = !!s.worktree_symlink_gitignored_paths;
   _gsWtSymlinks = (s.worktree_symlinks || []).slice();
   _renderWtSymlinks();
   _toggleWorktreeFields();
@@ -2322,6 +2323,7 @@ function submitGroupSettings() {
     worktree_merge_instructions: document.getElementById('gs-wt-merge-instructions').value.trim(),
     worktree_merge_cleanup: document.getElementById('gs-wt-merge-cleanup').value,
     worktree_merge_preserve_diff: document.getElementById('gs-wt-merge-preserve-diff').checked,
+    worktree_symlink_gitignored_paths: document.getElementById('gs-wt-symlink-gitignored').checked,
     worktree_symlinks: _gsWtSymlinks.slice(),
     agent_session_resume: document.getElementById('gs-session-resume').checked,
     agent_idle_timeout: parseInt(document.getElementById('gs-agent-idle-timeout').value) || 0,

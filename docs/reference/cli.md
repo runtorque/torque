@@ -109,6 +109,7 @@ torque group settings backend                              # show settings
 torque group settings backend -s git_worktree=true         # enable worktrees
 torque group settings backend -s agent_boot_command=claude  # set boot command
 torque group settings backend -s 'worktree_symlinks=["etl/**/node_modules",".venv"]'
+torque group settings backend -s worktree_symlink_gitignored_paths=true
 ```
 
 Pass `-s KEY=VALUE` to update. Multiple `-s` flags are supported. Boolean values use `true`/`false`.

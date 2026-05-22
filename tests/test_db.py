@@ -1016,6 +1016,39 @@ class TorqueDBTests(unittest.TestCase):
         }
         self.assertIn("default_engineer_specializations", columns)
 
+    def test_worktree_symlink_gitignored_paths_migration_adds_column(self):
+        legacy_path = Path(self.tmp.name) / "legacy-gitignored-symlinks.db"
+        legacy = TorqueDB(legacy_path)
+        legacy.init()
+        legacy._conn.execute("DROP TABLE group_settings")
+        legacy._conn.execute(
+            "CREATE TABLE group_settings ("
+            "group_name TEXT PRIMARY KEY, "
+            "engineer_agent_id TEXT NOT NULL DEFAULT '')"
+        )
+        legacy._conn.execute(
+            "INSERT INTO group_settings (group_name, engineer_agent_id) "
+            "VALUES ('g', 'eng-1')"
+        )
+        legacy._conn.commit()
+        legacy.close()
+
+        migrated = TorqueDB(legacy_path)
+        self.addCleanup(migrated.close)
+        migrated.init()
+        columns = {
+            row[1]
+            for row in migrated._conn.execute(
+                "PRAGMA table_info(group_settings)"
+            )
+        }
+        self.assertIn("worktree_symlink_gitignored_paths", columns)
+        row = migrated._conn.execute(
+            "SELECT worktree_symlink_gitignored_paths FROM group_settings "
+            "WHERE group_name='g'"
+        ).fetchone()
+        self.assertEqual(row[0], 0)
+
     def test_engineer_merge_mode_migration_adds_column(self):
         legacy_path = Path(self.tmp.name) / "legacy-engineer-merge-mode.db"
         legacy = TorqueDB(legacy_path)
@@ -1171,6 +1204,7 @@ class TorqueDBTests(unittest.TestCase):
                 agent_reasoning_effort="high",
                 board_default_labels=["ready"],
                 worktree_symlinks=["shared/config.yml"],
+                worktree_symlink_gitignored_paths=True,
                 agent_session_resume=False,
                 worktree_merge_squash=False,
                 worktree_merge_cleanup="close_remove",
@@ -1350,6 +1384,9 @@ class TorqueDBTests(unittest.TestCase):
         self.assertEqual(
             loaded["group_settings"]["g"]["worktree_symlinks"],
             ["shared/config.yml"],
+        )
+        self.assertTrue(
+            loaded["group_settings"]["g"]["worktree_symlink_gitignored_paths"],
         )
         self.assertFalse(loaded["group_settings"]["g"]["worktree_merge_squash"])
         self.assertEqual(

@@ -31,6 +31,7 @@ torque group settings backend -s git_worktree=true
 torque group settings backend -s worktree_base_branch=main
 torque group settings backend -s worktree_auto_checkpoint=true
 torque group settings backend -s 'worktree_symlinks=["etl/**/node_modules",".venv"]'
+torque group settings backend -s worktree_symlink_gitignored_paths=true
 ```
 
 ### Settings reference
@@ -46,6 +47,7 @@ torque group settings backend -s 'worktree_symlinks=["etl/**/node_modules",".ven
 | **Default post-merge cleanup** | Default cleanup behavior after the branch is actually merged when no explicit choice is given. |
 | **Preserve merge diff by default** | Save the full pre-merge patch as a diff artifact on the latest open boundary task. |
 | **Symlink paths** | Repo-relative paths or globs to mirror into each worktree as symlinks (e.g. `etl/**/node_modules`). Useful for shared caches. |
+| **Symlink gitignored paths** | Opt-in setting that asks Git for ignored files/directories and symlinks them into new worktrees. Torque skips `.torque/` runtime state and never replaces paths that already exist in the worktree. |
 
 ## How a worktree is created
 

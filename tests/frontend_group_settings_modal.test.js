@@ -1135,6 +1135,7 @@ test('submitGroupSettings sends group, engineer, and architect updates separatel
   ensure('gs-engineer-merge-mode').value = 'direct';
   ensure('gs-wt-merge-cleanup').value = 'remove';
   ensure('gs-wt-merge-preserve-diff').checked = true;
+  ensure('gs-wt-symlink-gitignored').checked = true;
   ensure('gs-engineer-provider').value = 'codex';
   ensure('gs-engineer-boot-cmd').value = 'codex --model gpt-5';
   ensure('gs-agent-model').value = 'gpt-5';
@@ -1194,6 +1195,7 @@ test('submitGroupSettings sends group, engineer, and architect updates separatel
   assert.equal(sandbox.sendCalls[0].settings.engineer_merge_mode, 'direct');
   assert.equal(sandbox.sendCalls[0].settings.worktree_merge_cleanup, 'remove');
   assert.equal(sandbox.sendCalls[0].settings.worktree_merge_preserve_diff, true);
+  assert.equal(sandbox.sendCalls[0].settings.worktree_symlink_gitignored_paths, true);
   assert.equal(sandbox.sendCalls[0].settings.agent_model, 'gpt-5');
   assert.equal(sandbox.sendCalls[0].settings.agent_reasoning_effort, 'minimal');
   assert.equal(sandbox.sendCalls[0].settings.agent_session_resume, false);
@@ -1510,6 +1512,27 @@ test('_addWtSymlink trims outer slashes while preserving glob syntax', () => {
     ['etl/**/node_modules'],
   );
   assert.equal(ensure('gs-wt-symlink-input').value, '');
+});
+
+test('worktree gitignored symlink checkbox renders and loads from settings', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  assert.match(html, /id="gs-wt-symlink-gitignored"/);
+  assert.match(html, /Symlink gitignored paths/);
+
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+
+  vm.runInContext(`_showGroupSettings("alpha", {
+    settings: {
+      worktree_symlink_gitignored_paths: true,
+      worktree_symlinks: []
+    },
+    engineer_settings: {},
+    profiles: ["Default"]
+  })`, context);
+
+  assert.equal(ensure('gs-wt-symlink-gitignored').checked, true);
 });
 
 test('GS Engineer tab loads default_engineer_specializations from settings', () => {
