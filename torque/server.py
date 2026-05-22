@@ -20,6 +20,7 @@ from typing import Optional
 
 import aiohttp
 from aiohttp import web
+from . import cloud_hooks
 from . import config as torque_config
 from . import profiling
 from .config import (
@@ -34,6 +35,7 @@ from .config import (
 )
 from .db import TorqueDB, canonical_user_agent_thread_id
 from .deploy_state import capture_deploy_boot_state
+from .remote_ingress import ingest_remote_user_agent_message
 from .direct_message_mirrors import (
     ask_owner_recipient_is_user,
     ask_task_labels_for_owner_recipient,
@@ -5087,6 +5089,7 @@ async def _shutdown_daemon_runtime(
     panel_log,
     event_ingest_drainer,
     event_ingest_client,
+    cloud_connector_runtime=None,
     bridge,
     runner,
     state,
@@ -5118,6 +5121,10 @@ async def _shutdown_daemon_runtime(
         await event_ingest_client.aclose()
     except Exception:
         log.exception("Event ingest client shutdown failed")
+    try:
+        await cloud_hooks.stop_cloud_connector(cloud_connector_runtime)
+    except Exception:
+        log.exception("Cloud connector shutdown drain failed")
     try:
         await bridge.shutdown()
     except Exception:
@@ -8628,6 +8635,7 @@ async def _handle_restart_agent_command(
 async def main(connection=None):
     log.info("Torque starting (port=%d)", WS_PORT)
     profiling.configure_asyncio(asyncio.get_running_loop())
+    cloud_connector_runtime = None
     db = TorqueDB(DB_FILE)
     db.init()
     log.info("SQLite database opened at %s", DB_FILE)
@@ -9416,6 +9424,14 @@ async def main(connection=None):
             background=background,
             prime_input_ready=prime_input_ready,
             settled_submit=settled_submit,
+        )
+
+    async def _ingest_remote_user_agent_message(payload: dict) -> dict:
+        return await ingest_remote_user_agent_message(
+            payload,
+            state=state,
+            send_prompt=_send_agent_prompt,
+            handler=_handle_user_agent_message_command,
         )
 
     # -- Persistent system prompt ---------------------------------------------
@@ -16617,6 +16633,28 @@ async def main(connection=None):
     log.info("Task scheduler and auto-dispatch queue pump started")
     log.info("Startup checkpoint: scheduler tasks scheduled")
 
+    cloud_connector_runtime = await cloud_hooks.start_cloud_connector(
+        cloud_hooks.CloudConnectorContext(
+            state=state,
+            remote_user_agent_message=_ingest_remote_user_agent_message,
+            register_direct_message_observer=(
+                cloud_hooks.register_direct_message_observer
+            ),
+            profile=str(os.environ.get("TORQUE_PROFILE", "") or ""),
+            data_dir=str(DATA_DIR),
+            config={
+                "module": torque_config.CLOUD_CONNECTOR_MODULE,
+                "enabled": torque_config.CLOUD_CONNECTOR_ENABLED,
+            },
+        )
+    )
+    if cloud_connector_runtime.enabled and not cloud_connector_runtime.started:
+        log.warning(
+            "Cloud connector not started (module=%s, error=%s)",
+            cloud_connector_runtime.module_name,
+            cloud_connector_runtime.error,
+        )
+
     # -- HTTP / WS routes ---------------------------------------------------
 
     async def handle_index(_request):
@@ -17228,6 +17266,7 @@ async def main(connection=None):
             panel_log=panel_log,
             event_ingest_drainer=event_ingest_drainer,
             event_ingest_client=event_ingest_client,
+            cloud_connector_runtime=cloud_connector_runtime,
             bridge=bridge,
             runner=runner,
             state=state,

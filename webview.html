@@ -1526,6 +1526,10 @@
 </div>
 
 <!-- JS (order matters: constants → compact → ws → render → commands/native/markdown → modals → board core/modules → main) -->
+<!-- Enterprise frontend injection seam. Community builds keep this manifest
+     empty, so remote/EE panels fail closed unless enterprise assets replace or
+     extend it before panel_manager.js runs. -->
+<script id="torque-ee-frontend-manifest" type="application/json">{"version":1,"panels":[]}</script>
 <script src="/static/js/constants.js"></script>
 <script src="/static/js/compact.js"></script>
 <script src="/static/js/ws.js"></script>

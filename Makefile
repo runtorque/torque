@@ -28,7 +28,7 @@ PERF_PYTHON    ?= $(PERF_VENV)/bin/python
 # Test recipes must not inherit Torque runtime/agent env from worker shells.
 SANITIZE_TORQUE_TEST_ENV = env $$(env | sed -n 's/^\(TORQUE_[A-Za-z0-9_]*\)=.*/-u \1/p')
 
-.PHONY: install install-standalone install-toolbelt uninstall run run-toolbelt deps desktop-deps check stop deploy deploy-toolbelt autolaunch cli standalone standalone-bg desktop desktop-attach tauri-dev tauri-build tauri-build-mac open lint lint-tauri-permissions test perf-deps perf-baseline perf-delta
+.PHONY: install install-standalone install-toolbelt uninstall run run-toolbelt deps desktop-deps check stop deploy deploy-toolbelt autolaunch cli standalone standalone-bg desktop desktop-attach tauri-dev tauri-build tauri-build-mac open lint lint-tauri-permissions assert-community-package test perf-deps perf-baseline perf-delta
 
 ## install: Set up the secondary iTerm2 Toolbelt script project and copy all files
 install:
@@ -452,11 +452,15 @@ check:
 		|| echo "Toolbelt installed: no (run: make deploy-toolbelt)"
 
 ## lint: Run repository lint checks
-lint: lint-tauri-permissions
+lint: lint-tauri-permissions assert-community-package
 
 ## lint-tauri-permissions: Ensure every registered Tauri command has a local permission
 lint-tauri-permissions:
 	@python3 scripts/lint_tauri_permissions.py
+
+## assert-community-package: Ensure community install artifacts exclude ee/
+assert-community-package:
+	@python3 scripts/assert_community_package_excludes_ee.py
 
 ## test: Run the automated regression suite
 test: lint

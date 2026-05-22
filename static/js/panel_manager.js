@@ -25,6 +25,7 @@ var _standalonePanelDefaults = {
   supervisor: 'bottom',
   health: 'right',
 };
+var _standaloneExternalPanelRootIds = {};
 var _standalonePanelLayoutVersion = 1;
 var _standalonePanelLayout = null;
 var _standalonePanelSyncing = false;
@@ -43,6 +44,67 @@ var _standaloneDefaultFloatHeight = 320;
 var _standaloneFloatMargin = 12;
 var _standaloneDetachedRestoreAttempted = false;
 var _detachedWindowInfo = _detectDetachedWindowInfo();
+
+function _standaloneSafeExternalPanelId(value) {
+  var text = String(value || '').trim();
+  return /^[a-z][a-z0-9_-]{0,63}$/.test(text) ? text : '';
+}
+
+function _standaloneSafeExternalRootId(value) {
+  var text = String(value || '').trim();
+  return /^[A-Za-z][A-Za-z0-9_-]{0,95}$/.test(text) ? text : '';
+}
+
+function _standaloneExternalPanelZone(value) {
+  var zone = String(value || '').trim();
+  return (zone === 'bottom' || zone === 'right') ? zone : 'right';
+}
+
+function _standaloneReadEEFrontendManifest() {
+  if (typeof window !== 'undefined'
+      && window
+      && window.TorqueEEFrontendManifest
+      && typeof window.TorqueEEFrontendManifest === 'object') {
+    return window.TorqueEEFrontendManifest;
+  }
+  if (typeof document === 'undefined' || !document || !document.getElementById) {
+    return null;
+  }
+  var el = document.getElementById('torque-ee-frontend-manifest');
+  if (!el) return null;
+  var text = String(el.textContent || el.innerText || '').trim();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    if (typeof console !== 'undefined' && console && console.warn) {
+      console.warn('Ignoring invalid Torque EE frontend manifest', err);
+    }
+    return null;
+  }
+}
+
+function _standaloneApplyEEFrontendManifest(manifest) {
+  if (!manifest || typeof manifest !== 'object') return 0;
+  var panels = Array.isArray(manifest.panels) ? manifest.panels : [];
+  var added = 0;
+  for (var i = 0; i < panels.length; i++) {
+    var item = panels[i];
+    if (!item || typeof item !== 'object') continue;
+    var id = _standaloneSafeExternalPanelId(item.id);
+    if (!id || _standalonePanelApps.indexOf(id) >= 0) continue;
+    var title = String(item.title || id).trim() || id;
+    var rootId = _standaloneSafeExternalRootId(item.root_id || item.rootId || ('panel-' + id));
+    _standalonePanelApps.push(id);
+    _standalonePanelTitles[id] = title;
+    _standalonePanelDefaults[id] = _standaloneExternalPanelZone(item.default_zone || item.defaultZone);
+    if (rootId) _standaloneExternalPanelRootIds[id] = rootId;
+    added++;
+  }
+  return added;
+}
+
+_standaloneApplyEEFrontendManifest(_standaloneReadEEFrontendManifest());
 
 function _detectDetachedWindowInfo() {
   if (typeof URLSearchParams === 'undefined' || typeof location === 'undefined') {
@@ -77,6 +139,7 @@ function _standalonePanelsEnabled() {
 
 function _standalonePanelRootId(app) {
   if (app === 'engineer') return 'panel-agent';
+  if (_standaloneExternalPanelRootIds[app]) return _standaloneExternalPanelRootIds[app];
   return 'panel-' + app;
 }
 
