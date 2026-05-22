@@ -558,6 +558,14 @@
 
       <!-- Advanced sub-tab -->
       <div class="gs-subpane" data-subpane="group-advanced">
+        <div class="gs-settings-section">
+          <div class="gs-settings-section-title">Guidance hints</div>
+          <div class="gs-settings-section-body">
+            <label>Guidance hint cadence</label>
+            <input id="gs-guidance-hint-cadence" type="number" min="0" max="100" step="1" value="4">
+            <div class="label-hint task-modal-section-intro">Recurring guidance hints (for example the user-message reply-tool hint and the engineer identity anchor) show on the 1st occurrence, then every N agent messages. 0 = every message.</div>
+          </div>
+        </div>
         <label>Delete group</label>
         <div class="label-hint task-modal-section-intro">Delete this group and its cells. This action uses the existing delete confirmation flow.</div>
         <button type="button" class="btn-danger" onclick="deleteSettingsGroup()">Delete group</button>

@@ -2017,6 +2017,8 @@ function _showGroupSettings(group, data) {
   _toggleWorktreeFields();
   document.getElementById('gs-session-resume').checked = s.agent_session_resume !== false;
   document.getElementById('gs-agent-idle-timeout').value = s.agent_idle_timeout != null ? s.agent_idle_timeout : 0;
+  document.getElementById('gs-guidance-hint-cadence').value =
+    s.guidance_hint_cadence != null ? s.guidance_hint_cadence : 4;
   document.getElementById('gs-notifications').checked = s.notifications || false;
   document.getElementById('gs-notify-finish').checked = s.notify_on_finish !== false;
   document.getElementById('gs-notify-error').checked = s.notify_on_error !== false;
@@ -2224,6 +2226,8 @@ function _showGroupSettings(group, data) {
         ? 'gs-terminal-prefix'
         : initialSubtab === 'group-sync'
           ? 'gs-board-sync-provider'
+        : initialSubtab === 'group-advanced'
+          ? 'gs-guidance-hint-cadence'
         : 'gs-directory';
   const focusEl = document.getElementById(focusId);
   if (focusEl) focusEl.focus();
@@ -2279,6 +2283,10 @@ function submitGroupSettings() {
     document.getElementById('gs-board-sync-github-project-number').value,
     10
   ) || 0;
+  const guidanceHintCadence = parseInt(
+    document.getElementById('gs-guidance-hint-cadence').value,
+    10
+  );
 
   const settings = {
     /* Group */
@@ -2317,6 +2325,7 @@ function submitGroupSettings() {
     worktree_symlinks: _gsWtSymlinks.slice(),
     agent_session_resume: document.getElementById('gs-session-resume').checked,
     agent_idle_timeout: parseInt(document.getElementById('gs-agent-idle-timeout').value) || 0,
+    guidance_hint_cadence: Number.isNaN(guidanceHintCadence) ? 4 : guidanceHintCadence,
     notifications: document.getElementById('gs-notifications').checked,
     notify_on_finish: document.getElementById('gs-notify-finish').checked,
     notify_on_error: document.getElementById('gs-notify-error').checked,
