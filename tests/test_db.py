@@ -621,6 +621,113 @@ class TorqueDBTests(unittest.TestCase):
             ["direct-buffered"],
         )
 
+    def test_agent_peer_chat_loaders_apply_v1_topology_filter(self):
+        def save(message_id, *, sender_kind, recipient_kind,
+                 thread_id="thread-chat", created_at=1.0, **extra):
+            self.db.save_agent_peer_message({
+                "id": message_id,
+                "thread_id": thread_id,
+                "group_name": "g",
+                "sender_id": f"{sender_kind}-{message_id}",
+                "sender_kind": sender_kind,
+                "sender_name": sender_kind.title(),
+                "recipient_id": f"{recipient_kind}-{message_id}",
+                "recipient_kind": recipient_kind,
+                "recipient_name": recipient_kind.title(),
+                "message": message_id,
+                "created_at": created_at,
+                **extra,
+            })
+
+        save(
+            "chat-arch-eng",
+            sender_kind="architect",
+            recipient_kind="engineer",
+            created_at=10.0,
+            ack_required=True,
+        )
+        save(
+            "chat-eng-arch",
+            sender_kind="engineer",
+            recipient_kind="architect",
+            created_at=11.0,
+        )
+        save(
+            "chat-arch-arch",
+            sender_kind="architect",
+            recipient_kind="architect",
+            thread_id="thread-architects",
+            created_at=12.0,
+        )
+        save(
+            "excluded-arch-worker",
+            sender_kind="architect",
+            recipient_kind="worker",
+            created_at=13.0,
+        )
+        save(
+            "excluded-worker-arch",
+            sender_kind="worker",
+            recipient_kind="architect",
+            created_at=14.0,
+        )
+        save(
+            "excluded-eng-eng",
+            sender_kind="engineer",
+            recipient_kind="engineer",
+            created_at=15.0,
+        )
+        save(
+            "excluded-ask",
+            sender_kind="architect",
+            recipient_kind="engineer",
+            created_at=16.0,
+            message_type="ask",
+        )
+        save(
+            "excluded-blocking",
+            sender_kind="engineer",
+            recipient_kind="architect",
+            created_at=17.0,
+            blocking=True,
+        )
+        self.db.save_direct_message({
+            "id": "excluded-user-direct",
+            "group_name": "g",
+            "sender_id": "user",
+            "sender_kind": "user",
+            "recipient_id": "arch-1",
+            "recipient_kind": "architect",
+            "message": "user note",
+            "created_at": 18.0,
+        })
+
+        recent = self.db.load_recent_agent_peer_chat_messages()
+
+        self.assertEqual(
+            [row["id"] for row in recent],
+            ["chat-arch-arch", "chat-eng-arch", "chat-arch-eng"],
+        )
+        self.assertTrue(recent[-1]["ack_required"])
+        self.assertEqual(
+            [
+                row["id"]
+                for row in self.db.load_agent_peer_chat_messages_for_thread(
+                    "thread-chat"
+                )
+            ],
+            ["chat-arch-eng", "chat-eng-arch"],
+        )
+        self.assertEqual(
+            [
+                row["id"]
+                for row in self.db.load_recent_agent_peer_chat_messages(
+                    group_name="missing"
+                )
+            ],
+            [],
+        )
+
     def test_agent_peer_messages_deterministic_ids_are_idempotent(self):
         row = {
             "id": "msg-deterministic",
