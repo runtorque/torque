@@ -308,6 +308,63 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls, [{"cmd": "worktree_checkpoint",
                                   "id": reviewer.id}])
 
+    async def test_engineer_worktree_remove_reports_verified_failure(self):
+        state = self._make_state()
+        alice = self._add_engineer(state, "eng-alice", "Alice")
+        worker = self._add_worker(state, "worker-a", "Alice Worker", alice.id)
+        worker.worktree_path = "/tmp/worker-a"
+        worker.worktree_branch = "torque/alice/worker-a"
+        worker.worktree_base_branch = "main"
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            self.assertEqual(payload["cmd"], "worktree_remove")
+            return {
+                "type": "error",
+                "message": (
+                    "Worktree removal did not take; path or git worktree "
+                    "entry is still present"
+                ),
+                "worktree_remove": {
+                    "type": "worktree_remove",
+                    "id": worker.id,
+                    "ok": False,
+                    "worktree_removed": False,
+                    "message": (
+                        "Worktree removal did not take; path or git "
+                        "worktree entry is still present"
+                    ),
+                    "mismatches": ["reported_removed_but_present"],
+                    "post_state": {
+                        "path_exists": True,
+                        "worktree_listed": True,
+                    },
+                },
+            }
+
+        text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_worktree_remove",
+            {"agent": worker.id},
+            fake_handle_command,
+            state,
+            caller_id=alice.id,
+        )
+
+        self.assertTrue(is_error)
+        payload = json.loads(text)
+        self.assertEqual(payload["type"], "error")
+        self.assertIn("did not take", payload["message"])
+        self.assertEqual(
+            payload["worktree_remove"]["mismatches"],
+            ["reported_removed_but_present"],
+        )
+        self.assertEqual(
+            payload["worktree_remove"]["post_state"],
+            {"path_exists": True, "worktree_listed": True},
+        )
+        self.assertEqual(calls, [{"cmd": "worktree_remove", "id": worker.id}])
+
     async def test_engineer_merge_refuses_stale_base_unless_forced(self):
         state = self._make_state()
         alice = self._add_engineer(state, "eng-alice", "Alice")

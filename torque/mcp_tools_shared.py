@@ -6342,10 +6342,43 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             "cmd": "worktree_remove",
             "id": agent_id,
         })
+        if result and result.get("type") == "error" \
+                and isinstance(result.get("worktree_remove"), dict):
+            payload = {
+                "type": "error",
+                "message": result.get("message", "Unknown error"),
+                "worktree_remove": result.get("worktree_remove"),
+            }
+            return json.dumps(payload), True
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
-        return json.dumps({"type": "ok",
-                          "message": "Worktree removed"}), False
+        if result and not result.get("worktree_removed", False):
+            payload = {
+                "type": "error",
+                "message": result.get(
+                    "message",
+                    "Worktree removal did not remove the git worktree",
+                ),
+                "worktree_remove": result,
+            }
+            return json.dumps(payload), True
+        if result and result.get("ok") is False:
+            payload = {
+                "type": "error",
+                "message": result.get(
+                    "message",
+                    "Worktree removed but cleanup was incomplete",
+                ),
+                "worktree_remove": result,
+            }
+            return json.dumps(payload), True
+        payload = {
+            "type": "ok",
+            "message": (result or {}).get("message", "Worktree removed"),
+        }
+        if isinstance(result, dict):
+            payload["worktree_remove"] = result
+        return json.dumps(payload), False
 
     if tool_name == "worktree_checkpoint":
         agent_ident = args.get("agent", "")

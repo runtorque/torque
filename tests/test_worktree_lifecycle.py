@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 from torque.worktree import WorktreeManager
 
@@ -48,6 +49,18 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 f"git {' '.join(args)} failed: {stderr.decode().strip()}"
             )
         return stdout.decode().strip()
+
+    async def _git_code(self, *args, cwd=None):
+        proc = await asyncio.create_subprocess_exec(
+            "git",
+            "-C",
+            str(cwd or self.repo_root),
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        return proc.returncode, stdout.decode().strip(), stderr.decode().strip()
 
     def _make_cell(self, agent_id="agent-123", name="Worker"):
         return SimpleNamespace(
@@ -110,11 +123,21 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         cell.worktree_dirty = True
         cell.worktree_diff = {"files": 1}
         cell.worktree_checkpoints = 2
+        branch = cell.worktree_branch
 
         removed = await self.mgr.remove(cell)
 
         self.assertTrue(removed)
         self.assertFalse(Path(wt_path).exists())
+        worktree_list = await self._git("worktree", "list", "--porcelain")
+        self.assertNotIn(str(wt_path), worktree_list)
+        branch_code, _, _ = await self._git_code(
+            "show-ref",
+            "--verify",
+            "--quiet",
+            f"refs/heads/{branch}",
+        )
+        self.assertNotEqual(branch_code, 0)
         self.assertEqual(cell.worktree_path, "")
         self.assertEqual(cell.worktree_branch, "")
         self.assertEqual(cell.worktree_repo_root, "")
@@ -122,6 +145,49 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(cell.worktree_dirty)
         self.assertEqual(cell.worktree_diff, {})
         self.assertEqual(cell.worktree_checkpoints, 0)
+
+    async def test_remove_path_result_detects_git_success_noop(self):
+        cell = self._make_cell()
+        wt_path = await self.mgr.create(cell, str(self.repo_root), base_branch="main")
+        self.assertIsNotNone(wt_path)
+        branch = cell.worktree_branch
+        real_create_subprocess_exec = asyncio.create_subprocess_exec
+
+        class FakeProc:
+            returncode = 0
+
+            async def communicate(self):
+                return b"", b""
+
+        async def fake_create_subprocess_exec(*cmd, **kwargs):
+            if tuple(cmd[:5]) == (
+                    "git",
+                    "-C",
+                    str(self.repo_root),
+                    "worktree",
+                    "remove"):
+                return FakeProc()
+            return await real_create_subprocess_exec(*cmd, **kwargs)
+
+        with mock.patch(
+                "torque.worktree.asyncio.create_subprocess_exec",
+                new=fake_create_subprocess_exec):
+            result = await self.mgr.remove_path_result(
+                str(self.repo_root),
+                wt_path,
+                branch=branch,
+                name=cell.name,
+            )
+
+        self.assertFalse(result["ok"])
+        self.assertFalse(result["worktree_removed"])
+        self.assertIn("reported_removed_but_present", result["mismatches"])
+        self.assertTrue(Path(wt_path).exists())
+        worktree_list = await self._git("worktree", "list", "--porcelain")
+        self.assertIn(str(wt_path), worktree_list)
+
+        # Clean up the real worktree now that the no-op was detected.
+        self.assertTrue(await self.mgr.remove(cell))
 
     async def test_create_worktree_expands_glob_symlink_patterns(self):
         cell = self._make_cell()
