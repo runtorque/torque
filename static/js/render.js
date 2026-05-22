@@ -345,15 +345,12 @@ function _agentFocusResizerKeydown(event) {
   _agentFocusSetCollapsed(false);
 }
 
-function _agentFocusCollapseFromRail(event) {
+function _agentFocusCollapseFromHeader(event) {
   if (event && typeof event.preventDefault === 'function') event.preventDefault();
   if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
   _agentFocusSetCollapsed(true);
 }
 
-function _agentFocusCollapseRailMousedown(event) {
-  if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
-}
 
 function _agentFocusScheduleResizeHeight(height) {
   _agentFocusResizePendingHeight = height;
@@ -2571,7 +2568,11 @@ function _renderAgentFocusPanelHtml() {
       + esc(agent.name || agent.id || 'Agent')
       + '</div>';
   }
-  html += '</div>';
+  html += '<button type="button" class="agent-focus-collapse-btn" data-agent-focus-collapse'
+    + ' onclick="_agentFocusCollapseFromHeader(event)"'
+    + ' title="Collapse focus panel" aria-label="Collapse focus panel"'
+    + ' aria-expanded="true">⌃</button>'
+    + '</div>';
   if (!agent) {
     html += '<div class="agent-focus-empty">Select an agent to view details and terminals.</div>';
     return html;
@@ -2595,13 +2596,6 @@ function _agentFocusShellHtml(gridHtml, focusHtml, tabsHtml) {
     + ' data-agent-focus-resizer onmousedown="_agentFocusResizeStart(event)" onclick="_agentFocusResizerClick(event)"'
     + ' onkeydown="_agentFocusResizerKeydown(event)">'
     + '<div class="agent-focus-resizer-grip" aria-hidden="true"></div>'
-    // Keep the collapse affordance in the same rail as the height grip so the
-    // Focus panel reads as a resize/collapse control cluster instead of a
-    // hidden header action. The collapsed rail below remains the re-open handle.
-    + '<button type="button" class="agent-focus-collapse-btn" data-agent-focus-collapse'
-    + ' onmousedown="_agentFocusCollapseRailMousedown(event)" onclick="_agentFocusCollapseFromRail(event)"'
-    + ' title="Collapse focus panel" aria-label="Collapse focus panel"'
-    + ' aria-expanded="' + (collapsed ? 'false' : 'true') + '">⌄ Collapse</button>'
     + '<span class="agent-focus-reopen-label" data-agent-focus-reopen-label>Focus panel hidden — click to expand</span>'
     + '</div>'
     + '<section id="agent-focus-panel" class="agent-focus-panel" data-agent-focus-panel>'

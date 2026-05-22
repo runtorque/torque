@@ -18604,9 +18604,15 @@ test('agent focus split renders in toolbelt and standalone modes', () => {
     assert.match(main.innerHTML, /data-agent-split/);
     assert.match(main.innerHTML, /id="agent-grid-pane"/);
     assert.match(main.innerHTML, /id="agent-focus-resizer"[^>]*role="separator"[^>]*aria-orientation="horizontal"/);
+    assert.doesNotMatch(main.innerHTML, /⌄ Collapse/);
+    assert.doesNotMatch(
+      main.innerHTML,
+      /id="agent-focus-resizer"[\s\S]*data-agent-focus-collapse[\s\S]*id="agent-focus-panel"/,
+      'collapse button should not share the resize rail with the drag grip',
+    );
     assert.match(
       main.innerHTML,
-      /id="agent-focus-resizer"[\s\S]*data-agent-focus-collapse[\s\S]*⌄ Collapse[\s\S]*id="agent-focus-panel"/,
+      /class="agent-focus-header"[\s\S]*data-agent-focus-collapse[\s\S]*aria-label="Collapse focus panel"[\s\S]*>⌃<\/button>/,
     );
     assert.match(main.innerHTML, /data-agent-focus-reopen-label/);
     assert.match(main.innerHTML, /id="agent-focus-panel"/);
@@ -18789,7 +18795,7 @@ test('agent focus split auto-size measures intrinsic content below current scrol
   assert.equal(parts.focus.style.height, '120px');
 });
 
-test('agent focus split collapse persists and the handle reopens at content-fit height', () => {
+test('agent focus header collapse persists and the handle reopens at content-fit height', () => {
   const { context, document } = createMainRenderHarness();
   const main = document.getElementById('main');
   const parts = attachAgentSplitDom(main, document, '');
@@ -18801,7 +18807,7 @@ test('agent focus split collapse persists and the handle reopens at content-fit 
     preventDefault() { collapsePrevented = true; },
     stopPropagation() { collapseStopped = true; },
   };
-  runInContext(context, `_agentFocusCollapseFromRail(__collapseEvent);`);
+  runInContext(context, `_agentFocusCollapseFromHeader(__collapseEvent);`);
 
   assert.equal(collapsePrevented, true);
   assert.equal(collapseStopped, true);
