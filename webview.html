@@ -401,7 +401,7 @@
     <div class="gs-pane active" data-pane="group">
       <div class="gs-subtabs">
         <button class="gs-subtab active" data-subtab="group-general" onclick="switchGsSubTab('group',this)">General</button>
-        <button class="gs-subtab" data-subtab="group-worker-defaults" onclick="switchGsSubTab('group',this)">Worker defaults</button>
+        <button class="gs-subtab" data-subtab="group-worker-defaults" onclick="switchGsSubTab('group',this)">Agents</button>
         <button class="gs-subtab" data-subtab="group-terminals" onclick="switchGsSubTab('group',this)">Terminals</button>
         <button class="gs-subtab" data-subtab="group-sync" onclick="switchGsSubTab('group',this)">Sync provider</button>
         <button class="gs-subtab" data-subtab="group-advanced" onclick="switchGsSubTab('group',this)">Advanced</button>
@@ -438,7 +438,7 @@
       </label>
       </div>
 
-      <!-- Worker defaults sub-tab -->
+      <!-- Agents (worker defaults) sub-tab -->
       <div class="gs-subpane" data-subpane="group-worker-defaults">
         <div class="label-hint task-modal-section-intro">Group-wide defaults applied to newly spawned workers. Per-worker execution behavior lives under the Workers tab.</div>
         <label>Default worker provider</label>
@@ -582,7 +582,7 @@
 
       <!-- Execution sub-tab -->
       <div class="gs-subpane active" data-subpane="worker-execution">
-        <div class="label-hint task-modal-section-intro">Worker execution context defaults. Provider, model, command, and default role are group-wide policy under Group → Worker defaults.</div>
+        <div class="label-hint task-modal-section-intro">Worker execution context defaults. Provider, model, command, and default role are group-wide policy under Group → Agents.</div>
         <label>Directory</label>
         <input id="gs-agent-directory" placeholder="Same as group" autocomplete="off">
         <label class="iterm2-only">Profile</label>
