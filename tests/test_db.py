@@ -13,7 +13,7 @@ try:
 except ModuleNotFoundError:
     from tests.helpers import install_aiohttp_stub
 
-from torque.db import TorqueDB
+from torque.db import TorqueDB, canonical_user_agent_thread_id
 
 install_aiohttp_stub()
 from torque.state import (
@@ -219,11 +219,16 @@ class TorqueDBTests(unittest.TestCase):
             "group_name",
             "sender_id",
             "sender_kind",
+            "sender_name",
             "recipient_id",
             "recipient_kind",
+            "recipient_name",
             "message",
+            "message_type",
             "created_at",
             "ack_required",
+            "blocking",
+            "source_task_id",
             "context_task_ids",
             "context_engineer_ids",
             "context_decision_ids",
@@ -232,6 +237,7 @@ class TorqueDBTests(unittest.TestCase):
             "delivery_state",
             "delivery_reason",
             "delivered_at",
+            "read_at",
             "archived_at",
         ])
         indexes = {
@@ -280,6 +286,82 @@ class TorqueDBTests(unittest.TestCase):
             if str(row[1]).startswith("idx_agent_peer_messages_")
         ]
         self.assertEqual(len(indexes), len(set(indexes)))
+
+    def test_agent_peer_messages_migrates_direct_message_columns_idempotently(self):
+        legacy_path = Path(self.tmp.name) / "legacy-direct-message-cols.db"
+        conn = sqlite3.connect(str(legacy_path))
+        conn.execute(
+            """
+            CREATE TABLE agent_peer_messages (
+                id                   TEXT PRIMARY KEY,
+                thread_id            TEXT NOT NULL,
+                reply_to_id          TEXT NOT NULL DEFAULT '',
+                group_name           TEXT NOT NULL DEFAULT '',
+                sender_id            TEXT NOT NULL,
+                sender_kind          TEXT NOT NULL,
+                recipient_id         TEXT NOT NULL,
+                recipient_kind       TEXT NOT NULL,
+                message              TEXT NOT NULL,
+                created_at           REAL NOT NULL,
+                ack_required         INTEGER NOT NULL DEFAULT 0,
+                context_task_ids     TEXT NOT NULL DEFAULT '[]',
+                context_engineer_ids TEXT NOT NULL DEFAULT '[]',
+                context_decision_ids TEXT NOT NULL DEFAULT '[]',
+                context_summary      TEXT NOT NULL DEFAULT '',
+                context_snapshot     TEXT NOT NULL DEFAULT '{}',
+                delivery_state       TEXT NOT NULL DEFAULT 'buffered',
+                delivery_reason      TEXT NOT NULL DEFAULT '',
+                delivered_at         REAL NOT NULL DEFAULT 0,
+                archived_at          REAL NOT NULL DEFAULT 0
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO agent_peer_messages "
+            "(id, thread_id, sender_id, sender_kind, recipient_id, "
+            "recipient_kind, message, created_at) VALUES (?,?,?,?,?,?,?,?)",
+            (
+                "legacy-msg",
+                "legacy-thread",
+                "arch-a",
+                "architect",
+                "arch-b",
+                "architect",
+                "legacy body",
+                1.0,
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        migrated = TorqueDB(legacy_path)
+        migrated.init()
+        migrated.close()
+        migrated_again = TorqueDB(legacy_path)
+        self.addCleanup(migrated_again.close)
+        migrated_again.init()
+
+        columns = {
+            row[1]
+            for row in migrated_again._conn.execute(
+                "PRAGMA table_info(agent_peer_messages)"
+            ).fetchall()
+        }
+        self.assertTrue({
+            "message_type",
+            "blocking",
+            "source_task_id",
+            "sender_name",
+            "recipient_name",
+            "read_at",
+        }.issubset(columns))
+        loaded = migrated_again.load_agent_peer_message("legacy-msg")
+        self.assertEqual(loaded["message_type"], "message")
+        self.assertFalse(loaded["blocking"])
+        self.assertEqual(loaded["source_task_id"], "")
+        self.assertEqual(loaded["sender_name"], "")
+        self.assertEqual(loaded["recipient_name"], "")
+        self.assertEqual(loaded["read_at"], 0)
 
     def test_agent_peer_messages_round_trip_query_and_delivery_helpers(self):
         base = {
@@ -376,6 +458,70 @@ class TorqueDBTests(unittest.TestCase):
             ],
             [],
         )
+
+    def test_direct_messages_user_sender_round_trip_and_read_state(self):
+        saved = self.db.save_direct_message({
+            "id": "direct-1",
+            "group_name": "g",
+            "sender_id": "user",
+            "sender_kind": "user",
+            "sender_name": "User",
+            "recipient_id": "worker-1",
+            "recipient_kind": "worker",
+            "recipient_name": "Worker One",
+            "message": "Please check status.",
+            "message_type": "message",
+            "created_at": 10.0,
+            "blocking": False,
+            "delivery_state": "buffered",
+        })
+
+        self.assertEqual(saved["id"], "direct-1")
+        self.assertEqual(
+            saved["thread_id"],
+            canonical_user_agent_thread_id("worker-1"),
+        )
+        self.assertEqual(saved["sender_kind"], "user")
+        self.assertEqual(saved["recipient_kind"], "worker")
+        self.assertEqual(saved["sender_name"], "User")
+        self.assertEqual(saved["recipient_name"], "Worker One")
+        self.assertEqual(saved["message_type"], "message")
+        self.assertFalse(saved["blocking"])
+        self.assertEqual(saved["source_task_id"], "")
+        self.assertEqual(saved["read_at"], 0)
+
+        self.assertEqual(
+            [
+                row["id"]
+                for row in self.db.load_direct_messages_for_agent("worker-1")
+            ],
+            ["direct-1"],
+        )
+        self.assertEqual(
+            [
+                row["id"]
+                for row in self.db.load_buffered_direct_messages("worker-1")
+            ],
+            ["direct-1"],
+        )
+
+        read = self.db.mark_direct_message_read(
+            "direct-1",
+            read_at=20.0,
+            reader_id="worker-1",
+        )
+        self.assertEqual(read["read_at"], 20.0)
+        self.assertEqual(read["delivery_state"], "buffered")
+        self.assertEqual(read["delivered_at"], 0)
+
+        delivered = self.db.update_direct_message_delivery(
+            "direct-1",
+            "delivered",
+            delivered_at=30.0,
+        )
+        self.assertEqual(delivered["read_at"], 20.0)
+        self.assertEqual(delivered["delivery_state"], "delivered")
+        self.assertEqual(delivered["delivered_at"], 30.0)
 
     def test_agent_peer_messages_deterministic_ids_are_idempotent(self):
         row = {
