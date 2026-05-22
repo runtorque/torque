@@ -19526,14 +19526,12 @@ function attachAgentSplitDom(main, document, focusHtml) {
   const handle = new FakeElement('agent-focus-resizer');
   const focus = new FakeElement('agent-focus-panel');
   const focusScroll = new FakeElement('agent-focus-panel-scroll');
-  const collapse = new FakeElement('agent-focus-collapse');
   split.getBoundingClientRect = () => ({ top: 0, bottom: 608, left: 0, right: 320, width: 320, height: 608 });
   handle.getBoundingClientRect = () => ({ top: 300, bottom: 308, left: 0, right: 320, width: 320, height: 8 });
   focus.getBoundingClientRect = () => ({ top: 428, bottom: 608, left: 0, right: 320, width: 320, height: 180 });
   focus.offsetHeight = 180;
   focusScroll.innerHTML = focusHtml || '';
   focusScroll._torqueLastHtml = focusHtml || '';
-  main.setQuerySelector('[data-agent-focus-collapse]', collapse);
   split.appendChild(grid);
   split.appendChild(handle);
   split.appendChild(focus);
@@ -19548,7 +19546,7 @@ function attachAgentSplitDom(main, document, focusHtml) {
   document.register('agent-grid-pane', grid);
   document.register('agent-focus-resizer', handle);
   document.register('agent-focus-panel', focus);
-  return { split, grid, handle, focus, focusScroll, collapse };
+  return { split, grid, handle, focus, focusScroll };
 }
 
 test('agent focus split renders in toolbelt and standalone modes', () => {
@@ -19566,16 +19564,13 @@ test('agent focus split renders in toolbelt and standalone modes', () => {
     assert.match(main.innerHTML, /data-agent-split/);
     assert.match(main.innerHTML, /id="agent-grid-pane"/);
     assert.match(main.innerHTML, /id="agent-focus-resizer"[^>]*role="separator"[^>]*aria-orientation="horizontal"/);
+    assert.match(main.innerHTML, /id="agent-focus-resizer"[^>]*aria-label="Resize or collapse focus panel"/);
+    assert.match(main.innerHTML, /id="agent-focus-resizer"[^>]*onmousedown="_agentFocusResizeStart\(event\)"[^>]*onclick="_agentFocusResizerClick\(event\)"/);
     assert.doesNotMatch(main.innerHTML, /⌄ Collapse/);
-    assert.doesNotMatch(
-      main.innerHTML,
-      /id="agent-focus-resizer"[\s\S]*data-agent-focus-collapse[\s\S]*id="agent-focus-panel"/,
-      'collapse button should not share the resize rail with the drag grip',
-    );
-    assert.match(
-      main.innerHTML,
-      /class="agent-focus-header"[\s\S]*data-agent-focus-collapse[\s\S]*aria-label="Collapse focus panel"[\s\S]*>⌃<\/button>/,
-    );
+    assert.doesNotMatch(main.innerHTML, /⌃/);
+    assert.doesNotMatch(main.innerHTML, /agent-focus-collapse-btn/);
+    assert.doesNotMatch(main.innerHTML, /data-agent-focus-collapse/);
+    assert.doesNotMatch(main.innerHTML, /_agentFocusCollapseFromHeader/);
     assert.match(main.innerHTML, /data-agent-focus-reopen-label/);
     assert.match(main.innerHTML, /id="agent-focus-panel"/);
     assert.match(main.innerHTML, /Select an agent to view details and terminals\./);
@@ -19704,13 +19699,16 @@ test('agent focus split resize clamps and persists a fraction once on mouseup', 
   runInContext(context, `_agentFocusResizeStart({ clientY: 300, preventDefault: function() {} });`);
   document.listeners.mousemove({ clientY: 120 });
   assert.equal(sandbox.sendCalls.length, 0, 'dragging must not persist per pixel');
-  document.listeners.mouseup({});
+  document.listeners.mouseup({ clientY: 120 });
 
   assert.equal(sandbox.sendCalls.length, 1);
   assert.equal(sandbox.sendCalls[0].cmd, 'ui_set_engineer_panel_split');
   assert.ok(sandbox.sendCalls[0].fraction > 0.30);
   assert.ok(sandbox.sendCalls[0].fraction <= 0.75);
   assert.equal(jsonValue(context, `state.engineer_panel_split_fraction`), sandbox.sendCalls[0].fraction);
+  runInContext(context, `_agentFocusResizerClick({ preventDefault: function() { this.defaultPrevented = true; } });`);
+  assert.equal(jsonValue(context, `_agentFocusIsCollapsed()`), false,
+    'synthetic click after a drag must not collapse the focus panel');
 
   runInContext(context, `state.engineer_panel_split_fraction = 0.5; _agentFocusApplyPersistedSplit();`);
   const focus = document.getElementById('agent-focus-panel');
@@ -19757,27 +19755,34 @@ test('agent focus split auto-size measures intrinsic content below current scrol
   assert.equal(parts.focus.style.height, '120px');
 });
 
-test('agent focus header collapse persists and the handle reopens at content-fit height', () => {
-  const { context, document } = createMainRenderHarness();
+test('agent focus resize rail click toggles collapse and reopens at content-fit height', () => {
+  const { context, document, sandbox } = createMainRenderHarness();
   const main = document.getElementById('main');
   const parts = attachAgentSplitDom(main, document, '');
   parts.focusScroll.scrollHeight = 180;
 
-  let collapsePrevented = false;
-  let collapseStopped = false;
-  context.__collapseEvent = {
-    preventDefault() { collapsePrevented = true; },
-    stopPropagation() { collapseStopped = true; },
+  let resizeStartPrevented = false;
+  let collapseClickPrevented = false;
+  context.__resizeStartEvent = {
+    button: 0,
+    clientY: 300,
+    preventDefault() { resizeStartPrevented = true; },
   };
-  runInContext(context, `_agentFocusCollapseFromHeader(__collapseEvent);`);
+  context.__collapseClickEvent = {
+    preventDefault() { collapseClickPrevented = true; },
+  };
+  runInContext(context, `_agentFocusResizeStart(__resizeStartEvent);`);
+  document.listeners.mouseup({ clientY: 300 });
+  runInContext(context, `_agentFocusResizerClick(__collapseClickEvent);`);
 
-  assert.equal(collapsePrevented, true);
-  assert.equal(collapseStopped, true);
+  assert.equal(resizeStartPrevented, true);
+  assert.equal(collapseClickPrevented, true);
+  assert.equal(sandbox.sendCalls.length, 0, 'single-click collapse must not persist a resize');
   assert.equal(jsonValue(context, `_agentFocusIsCollapsed()`), true);
   assert.equal(parts.split.classList.contains('agent-split--focus-collapsed'), true);
   assert.equal(parts.handle.getAttribute('role'), 'button');
+  assert.equal(parts.handle.getAttribute('aria-label'), 'Expand focus panel');
   assert.equal(parts.handle.getAttribute('aria-expanded'), 'false');
-  assert.equal(parts.collapse.getAttribute('aria-expanded'), 'false');
 
   let prevented = false;
   context.__expandEvent = { preventDefault() { prevented = true; } };
@@ -19788,8 +19793,8 @@ test('agent focus header collapse persists and the handle reopens at content-fit
   assert.equal(jsonValue(context, `_agentFocusMode()`), 'auto');
   assert.equal(parts.split.classList.contains('agent-split--focus-collapsed'), false);
   assert.equal(parts.handle.getAttribute('role'), 'separator');
+  assert.equal(parts.handle.getAttribute('aria-label'), 'Resize or collapse focus panel');
   assert.equal(parts.handle.getAttribute('aria-expanded'), 'true');
-  assert.equal(parts.collapse.getAttribute('aria-expanded'), 'true');
   assert.equal(parts.focus.style.flexBasis, '180px');
 });
 
