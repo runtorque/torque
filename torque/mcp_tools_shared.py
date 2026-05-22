@@ -1087,6 +1087,11 @@ def _load_recent_architect_peer_rows(
     cell = getattr(state, "agents", {}).get(architect_id)
     rows = []
     for entry in list(getattr(cell, "mcp_messages", []) or []):
+        if "user" in {
+            str((entry or {}).get("sender_kind", "") or "").strip(),
+            str((entry or {}).get("recipient_kind", "") or "").strip(),
+        }:
+            continue
         if str((entry or {}).get("action", "") or "").strip() not in {
             "architect_peer_message",
             "architect_peer_reply",

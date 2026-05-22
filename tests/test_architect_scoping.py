@@ -2703,6 +2703,18 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(injects[-1]["agent_id"], peer.id)
         self.assertTrue(injects[-1]["ack_required"])
 
+        self.db.save_direct_message({
+            "id": "direct-user-peer",
+            "group_name": peer.group,
+            "sender_id": "user",
+            "sender_kind": "user",
+            "recipient_id": peer.id,
+            "recipient_kind": "architect",
+            "message": "user direct messages must not pollute peer inbox",
+            "created_at": 999.0,
+            "ack_required": True,
+            "delivery_state": "buffered",
+        })
         inbox_text, inbox_error = await self._call(
             "architect_peer_inbox",
             {"requires_reply": True},

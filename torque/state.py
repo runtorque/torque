@@ -1047,6 +1047,8 @@ def _peer_message_cache_entry(row: dict, agent_id: str) -> dict | None:
     """Project a canonical peer-message row into AgentCell.mcp_messages."""
     if not isinstance(row, dict):
         return None
+    if _is_user_direct_message_row(row):
+        return None
     agent_id = str(agent_id or "").strip()
     sender_id = str(row.get("sender_id", "") or "").strip()
     recipient_id = str(row.get("recipient_id", "") or "").strip()

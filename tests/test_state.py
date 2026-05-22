@@ -319,6 +319,18 @@ class MatrixStateCleanupTests(unittest.TestCase):
             "context_task_ids": ["TORQUE:1"],
             "context_snapshot": {"tasks": [{"id": "TORQUE:1"}]},
         })
+        db.save_direct_message({
+            "id": "direct-user-arch-a",
+            "thread_id": "caller-thread-is-normalized",
+            "group_name": "g",
+            "sender_id": "user",
+            "sender_kind": "user",
+            "recipient_id": arch_a.id,
+            "recipient_kind": "architect",
+            "message": "direct user note",
+            "created_at": 124.0,
+            "delivery_state": "buffered",
+        })
 
         state = self.state_mod.MatrixState(db=db)
         state.load()
@@ -336,6 +348,18 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertEqual(
             recipient_entry["context"]["snapshot"]["tasks"][0]["id"],
             "TORQUE:1",
+        )
+        self.assertEqual(
+            [entry["id"] for entry in state.agents[arch_a.id].mcp_messages],
+            ["msg-peer-1"],
+        )
+        self.assertEqual(
+            state.direct_messages_by_agent[arch_a.id][0]["id"],
+            "direct-user-arch-a",
+        )
+        self.assertEqual(
+            state.direct_messages_by_agent[arch_a.id][0]["thread_id"],
+            "user-agent:user:arch-a",
         )
 
     def test_save_peer_message_updates_caches_and_delivery_deltas(self):

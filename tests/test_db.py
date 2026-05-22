@@ -524,6 +524,88 @@ class TorqueDBTests(unittest.TestCase):
         self.assertEqual(delivered["delivery_state"], "delivered")
         self.assertEqual(delivered["delivered_at"], 30.0)
 
+    def test_direct_and_peer_buffered_helpers_do_not_cross_return_rows(self):
+        self.db.save_agent_peer_message({
+            "id": "peer-buffered",
+            "thread_id": "peer-thread",
+            "group_name": "g",
+            "sender_id": "arch-b",
+            "sender_kind": "architect",
+            "recipient_id": "arch-a",
+            "recipient_kind": "architect",
+            "message": "peer buffered",
+            "created_at": 10.0,
+            "delivery_state": "buffered",
+        })
+        self.db.save_direct_message({
+            "id": "direct-buffered",
+            "thread_id": "ignored-user-thread",
+            "group_name": "g",
+            "sender_id": "user",
+            "sender_kind": "user",
+            "recipient_id": "arch-a",
+            "recipient_kind": "architect",
+            "message": "direct buffered",
+            "created_at": 11.0,
+            "delivery_state": "buffered",
+        })
+
+        self.assertEqual(
+            [
+                row["id"]
+                for row in self.db.load_buffered_agent_peer_messages("arch-a")
+            ],
+            ["peer-buffered"],
+        )
+        self.assertEqual(
+            [
+                row["id"]
+                for row in self.db.load_buffered_direct_messages("arch-a")
+            ],
+            ["direct-buffered"],
+        )
+        self.assertEqual(
+            [
+                row["id"]
+                for row in self.db.load_agent_peer_messages_for_agent("arch-a")
+            ],
+            ["peer-buffered"],
+        )
+        self.assertEqual(
+            [
+                row["id"]
+                for row in self.db.load_direct_messages_for_agent("arch-a")
+            ],
+            ["direct-buffered"],
+        )
+        self.assertEqual(
+            [
+                row["id"]
+                for row in self.db.load_recent_agent_peer_messages_for_group("g")
+            ],
+            ["peer-buffered"],
+        )
+        self.assertEqual(
+            [
+                row["id"]
+                for row in self.db.load_agent_peer_messages_for_thread(
+                    "peer-thread",
+                    agent_id="arch-a",
+                )
+            ],
+            ["peer-buffered"],
+        )
+        self.assertEqual(
+            [
+                row["id"]
+                for row in self.db.load_direct_messages_for_thread(
+                    canonical_user_agent_thread_id("arch-a"),
+                    agent_id="arch-a",
+                )
+            ],
+            ["direct-buffered"],
+        )
+
     def test_agent_peer_messages_deterministic_ids_are_idempotent(self):
         row = {
             "id": "msg-deterministic",

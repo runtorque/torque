@@ -167,6 +167,8 @@ _AGENT_PEER_MESSAGE_JSON_LIST_FIELDS = (
     "context_decision_ids",
 )
 _AGENT_PEER_MESSAGE_DELIVERY_STATES = {"buffered", "delivered", "failed"}
+_AGENT_PEER_MESSAGE_NON_USER_WHERE = "(sender_kind!='user' AND recipient_kind!='user')"
+_AGENT_PEER_MESSAGE_USER_WHERE = "(sender_kind='user' OR recipient_kind='user')"
 
 
 def _json_text_list(value) -> list[str]:
@@ -3631,7 +3633,10 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         if not agent_id:
             return []
         limit = max(1, min(int(limit or 100), 1000))
-        where = ["(sender_id=? OR recipient_id=?)"]
+        where = [
+            "(sender_id=? OR recipient_id=?)",
+            _AGENT_PEER_MESSAGE_NON_USER_WHERE,
+        ]
         params: list = [agent_id, agent_id]
         peer_id = str(peer_id or "").strip()
         if peer_id:
@@ -3702,7 +3707,10 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         if not agent_id:
             return []
         limit = max(1, min(int(limit or 100), 1000))
-        where = ["(sender_id=? OR recipient_id=?)"]
+        where = [
+            "(sender_id=? OR recipient_id=?)",
+            _AGENT_PEER_MESSAGE_USER_WHERE,
+        ]
         params: list = [agent_id, agent_id]
         peer_id = str(peer_id or "").strip()
         peer_kind = str(peer_kind or "").strip()
@@ -3751,7 +3759,7 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         if not thread_id:
             return []
         limit = max(1, min(int(limit or 1000), 5000))
-        where = ["thread_id=?"]
+        where = ["thread_id=?", _AGENT_PEER_MESSAGE_NON_USER_WHERE]
         params: list = [thread_id]
         agent_id = str(agent_id or "").strip()
         if agent_id:
@@ -3778,12 +3786,27 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         include_archived: bool = False,
     ) -> list[dict]:
         """Load one direct-message thread oldest first."""
-        return self.load_agent_peer_messages_for_thread(
-            thread_id,
-            agent_id=agent_id,
-            limit=limit,
-            include_archived=include_archived,
-        )
+        thread_id = str(thread_id or "").strip()
+        if not thread_id:
+            return []
+        limit = max(1, min(int(limit or 1000), 5000))
+        where = ["thread_id=?", _AGENT_PEER_MESSAGE_USER_WHERE]
+        params: list = [thread_id]
+        agent_id = str(agent_id or "").strip()
+        if agent_id:
+            where.append("(sender_id=? OR recipient_id=?)")
+            params.extend([agent_id, agent_id])
+        if not include_archived:
+            where.append("archived_at=0")
+        params.append(limit)
+        rows = self._conn.execute(
+            "SELECT " + ", ".join(_AGENT_PEER_MESSAGE_COLUMNS) + " "
+            "FROM agent_peer_messages WHERE "
+            + " AND ".join(where)
+            + " ORDER BY created_at ASC, id ASC LIMIT ?",
+            tuple(params),
+        ).fetchall()
+        return [_decode_agent_peer_message_row(row) for row in rows]
 
     def load_buffered_agent_peer_messages(
         self,
@@ -3800,6 +3823,7 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "SELECT " + ", ".join(_AGENT_PEER_MESSAGE_COLUMNS) + " "
             "FROM agent_peer_messages "
             "WHERE recipient_id=? AND delivery_state='buffered' "
+            f"AND {_AGENT_PEER_MESSAGE_NON_USER_WHERE} "
             "AND archived_at=0 "
             "ORDER BY created_at ASC, id ASC LIMIT ?",
             (recipient_id, limit),
@@ -3813,10 +3837,20 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         limit: int = 100,
     ) -> list[dict]:
         """Load buffered direct messages for one recipient, oldest first."""
-        return self.load_buffered_agent_peer_messages(
-            recipient_id,
-            limit=limit,
-        )
+        recipient_id = str(recipient_id or "").strip()
+        if not recipient_id:
+            return []
+        limit = max(1, min(int(limit or 100), 1000))
+        rows = self._conn.execute(
+            "SELECT " + ", ".join(_AGENT_PEER_MESSAGE_COLUMNS) + " "
+            "FROM agent_peer_messages "
+            "WHERE recipient_id=? AND delivery_state='buffered' "
+            f"AND {_AGENT_PEER_MESSAGE_USER_WHERE} "
+            "AND archived_at=0 "
+            "ORDER BY created_at ASC, id ASC LIMIT ?",
+            (recipient_id, limit),
+        ).fetchall()
+        return [_decode_agent_peer_message_row(row) for row in rows]
 
     def load_recent_agent_peer_messages_for_group(
         self,
@@ -3830,7 +3864,7 @@ class TorqueDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         if not group_name:
             return []
         limit = max(1, min(int(limit or 100), 1000))
-        where = ["group_name=?"]
+        where = ["group_name=?", _AGENT_PEER_MESSAGE_NON_USER_WHERE]
         params: list = [group_name]
         if not include_archived:
             where.append("archived_at=0")
