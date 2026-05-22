@@ -19,7 +19,11 @@ PERSISTENT_CELL_EVENT_KINDS = {"architect", "engineer"}
 WORKER_BOOT_DOA_EVENT = "worker_boot_doa"
 WORKER_BOOT_DOA_DEFAULT_SECONDS = 90.0
 WORKER_BOOT_DOA_ENV = "TORQUE_WORKER_BOOT_DOA_SECONDS"
-WORKER_BOOT_DOA_IGNORED_AGENT_EVENTS = {"session_start", "heartbeat"}
+WORKER_BOOT_DOA_IGNORED_AGENT_EVENTS = {
+    "session_start",
+    "heartbeat",
+    "context_update",
+}
 WORKER_BOOT_DOA_IGNORED_PANEL_EVENTS = {
     "agent_started",
     "task_dispatched",
@@ -76,17 +80,22 @@ def _cell_kind(cell) -> str:
     return str(getattr(cell, "kind", "") or "").strip()
 
 
-def _apply_context_window(cell, data: dict | None, timestamp: float | None) -> bool:
+def _apply_context_window(cell, data: dict | None, timestamp: float | None,
+                          *, clear_on_empty: bool = False) -> bool:
     context_window = normalize_context_window_usage(
         (data or {}).get("context_window"),
         now=timestamp,
     )
-    if not context_window:
+    if context_window:
+        if getattr(cell, "context_window", {}) == context_window:
+            return False
+        cell.context_window = context_window
+        return True
+    if clear_on_empty and getattr(cell, "context_window", {}):
+        cell.context_window = {}
+        return True
+    else:
         return False
-    if getattr(cell, "context_window", {}) == context_window:
-        return False
-    cell.context_window = context_window
-    return True
 
 
 def _effective_owner_engineer_id(cell) -> str:
@@ -859,7 +868,12 @@ class EventBus:
             cell.mark_progress(event.timestamp)
         else:
             cell.mark_heartbeat(event.timestamp)
-        context_window_changed = _apply_context_window(cell, d, event.timestamp)
+        context_window_changed = _apply_context_window(
+            cell,
+            d,
+            event.timestamp,
+            clear_on_empty=et == "session_start",
+        )
 
         if et == "session_start":
             cell.activity = ""

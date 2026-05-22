@@ -193,9 +193,10 @@ def _torque_statusline_command(working_dir: str) -> str:
     return "python3 " + shlex.quote(str(_statusline_proxy_file(working_dir)))
 
 
-def _statusline_proxy_source(original_file: Path) -> str:
+def _statusline_proxy_source(original_file: Path, event_url: str) -> str:
     """Return the Torque-managed Claude statusLine proxy script."""
     original_path = json.dumps(str(original_file))
+    event_url_literal = json.dumps(str(event_url or _torque_hook_url()))
     return dedent(f"""\
         #!/usr/bin/env python3
         import hashlib
@@ -206,6 +207,7 @@ def _statusline_proxy_source(original_file: Path) -> str:
         import urllib.request
 
         ORIGINAL_FILE = {original_path}
+        EVENT_URL = {event_url_literal}
 
 
         def _load_original():
@@ -235,9 +237,8 @@ def _statusline_proxy_source(original_file: Path) -> str:
                 "event_id", hashlib.sha256(body_for_hash).hexdigest()
             )
             body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-            port = (os.environ.get("TORQUE_PORT") or "18932").strip() or "18932"
             request = urllib.request.Request(
-                f"http://localhost:{{port}}/events",
+                EVENT_URL,
                 data=body,
                 headers={{
                     "Content-Type": "application/json",
@@ -307,6 +308,7 @@ def _install_statusline_proxy(working_dir: str, settings: dict) -> None:
     """Install Torque's Claude statusLine proxy, preserving project-local config."""
     original_file = _statusline_original_file(working_dir)
     proxy_file = _statusline_proxy_file(working_dir)
+    event_url = _torque_hook_url()
     existing = settings.get("statusLine")
 
     if not _is_torque_statusline_entry(existing):
@@ -323,7 +325,7 @@ def _install_statusline_proxy(working_dir: str, settings: dict) -> None:
         )
 
     proxy_file.parent.mkdir(parents=True, exist_ok=True)
-    proxy_file.write_text(_statusline_proxy_source(original_file))
+    proxy_file.write_text(_statusline_proxy_source(original_file, event_url))
     os.chmod(proxy_file, 0o755)
     settings["statusLine"] = {
         "type": "command",

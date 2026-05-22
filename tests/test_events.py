@@ -514,6 +514,81 @@ asyncio.run(main())
             ["session_start", "context_update"],
         )
 
+    async def test_session_start_without_context_clears_stale_context_window(self):
+        state = self._make_state()
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            agent_type="codex",
+            agent_session_id="provider-session-1",
+            context_window={
+                "source": "codex_transcript",
+                "model": "gpt-5.4",
+                "session_id": "provider-session-1",
+                "used_tokens": 90,
+                "limit_tokens": 100,
+                "used_pct": 90.0,
+            },
+        )
+        state.agents[cell.id] = cell
+
+        event_log = self.events_mod.EventLog()
+        bus = self.events_mod.EventBus(state, event_log)
+
+        await bus.emit(
+            self.base_mod.AgentEvent(
+                cell_id=cell.id,
+                timestamp=126.0,
+                event_type="session_start",
+                data={"session_id": "provider-session-2"},
+            )
+        )
+
+        self.assertEqual(cell.agent_session_id, "provider-session-2")
+        self.assertEqual(cell.context_window, {})
+        self.assertEqual(event_log.get(cell.id)[0].event_type, "session_start")
+
+    async def test_session_start_with_malformed_context_clears_stale_context_window(self):
+        state = self._make_state()
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            agent_type="codex",
+            context_window={
+                "source": "codex_transcript",
+                "session_id": "provider-session-1",
+                "used_tokens": 90,
+                "limit_tokens": 100,
+                "used_pct": 90.0,
+            },
+        )
+        state.agents[cell.id] = cell
+
+        bus = self.events_mod.EventBus(state, self.events_mod.EventLog())
+
+        await bus.emit(
+            self.base_mod.AgentEvent(
+                cell_id=cell.id,
+                timestamp=127.0,
+                event_type="session_start",
+                data={
+                    "session_id": "provider-session-2",
+                    "context_window": {
+                        "source": "codex_transcript",
+                        "session_id": "provider-session-2",
+                        "used_tokens": 50,
+                        "limit_tokens": 0,
+                    },
+                },
+            )
+        )
+
+        self.assertEqual(cell.context_window, {})
+
     async def test_session_end_applies_context_window_update(self):
         state = self._make_state()
         cell = self.state_mod.AgentCell(
@@ -611,6 +686,66 @@ asyncio.run(main())
         self.assertEqual(events[-1]["kind"], "worker_boot_doa")
         self.assertEqual(events[-1]["cell_id"], cell.id)
         self.assertEqual(events[-1]["task_id"], task.id)
+
+    def test_worker_boot_doa_ignores_context_update_telemetry(self):
+        state = self._make_state()
+        cell = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            kind="worker",
+            status="running",
+            current_task_id="task-1",
+            owner_engineer_id="eng-1",
+        )
+        task = self.state_mod.BoardTask(
+            id="task-1",
+            task="Implement feature",
+            group="g",
+            lane="In Progress",
+            agent_id=cell.id,
+        )
+        state.agents[cell.id] = cell
+        state.board_tasks[task.id] = task
+        event_log = self.events_mod.EventLog()
+        panel_log = self.events_mod.PanelEventLog()
+        event_log.append(
+            self.base_mod.AgentEvent(
+                cell_id=cell.id,
+                timestamp=100.0,
+                event_type="session_start",
+                data={},
+            )
+        )
+        event_log.append(
+            self.base_mod.AgentEvent(
+                cell_id=cell.id,
+                timestamp=120.0,
+                event_type="context_update",
+                data={
+                    "context_window": {
+                        "source": "claude_statusline",
+                        "used_tokens": 50,
+                        "limit_tokens": 200,
+                    },
+                },
+            )
+        )
+
+        changed = self.events_mod.emit_worker_boot_doa_if_inactive(
+            state,
+            event_log,
+            panel_log,
+            cell,
+            started_at=100.0,
+            timeout_seconds=60.0,
+            now=161.0,
+        )
+
+        self.assertTrue(changed)
+        self.assertTrue(cell.needs_attention)
+        self.assertEqual(panel_log.get_recent()[-1]["kind"], "worker_boot_doa")
 
     def test_worker_boot_doa_suppressed_after_post_boot_activity(self):
         state = self._make_state()
