@@ -1,3 +1,8 @@
+CREATE TABLE IF NOT EXISTS relay_meta (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS relay_instances (
   id TEXT PRIMARY KEY,
   owner_user_id TEXT NOT NULL DEFAULT '',
@@ -15,9 +20,16 @@ CREATE TABLE IF NOT EXISTS relay_messages (
   source_json TEXT NOT NULL DEFAULT '{}',
   target_json TEXT NOT NULL DEFAULT '{}',
   payload_json TEXT NOT NULL DEFAULT '{}',
+  envelope_json TEXT NOT NULL DEFAULT '{}',
+  envelope_hash TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
+  delivery_state TEXT NOT NULL DEFAULT 'pending',
   delivered_at TEXT NOT NULL DEFAULT '',
-  acked_at TEXT NOT NULL DEFAULT ''
+  acked_at TEXT NOT NULL DEFAULT '',
+  failed_at TEXT NOT NULL DEFAULT '',
+  delivery_attempts INTEGER NOT NULL DEFAULT 0,
+  last_delivery_error TEXT NOT NULL DEFAULT '',
+  last_delivery_epoch INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_relay_messages_daemon_created
@@ -25,3 +37,8 @@ CREATE INDEX IF NOT EXISTS idx_relay_messages_daemon_created
 
 CREATE INDEX IF NOT EXISTS idx_relay_messages_daemon_direction_created
   ON relay_messages (daemon_id, direction, created_at ASC, id ASC);
+
+CREATE INDEX IF NOT EXISTS idx_relay_messages_pending
+  ON relay_messages (daemon_id, direction, acked_at, created_at ASC, id ASC);
+
+INSERT OR REPLACE INTO relay_meta (key, value) VALUES ('schema_version', '2');

@@ -1,5 +1,12 @@
-import { makeRelayEnvelope, parseRelayEnvelope, type JsonObject, type JsonValue, type RelayEnvelope } from "../../core/protocol.js";
+import {
+  makeErrorEnvelope,
+  makeRelayEnvelope,
+  parseRelayEnvelope,
+  type RelayEnvelope,
+} from "../../core/protocol.js";
 import type { RelaySocket } from "../../core/ports.js";
+import { toJsonObject } from "../../core/runtime.js";
+import { errorMessage } from "../../core/errors.js";
 import { StandaloneRegistryCoordinator } from "../standalone/registryCoordinator.js";
 
 export type DurableObjectSessionAttachment = {
@@ -7,6 +14,7 @@ export type DurableObjectSessionAttachment = {
   daemonId: string;
   clientId: string;
   connectionId: string;
+  epoch: number;
 };
 
 export class DaemonRendezvousDurableObject {
@@ -18,11 +26,21 @@ export class DaemonRendezvousDurableObject {
   }
 
   async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    if (request.method === "POST" && url.pathname.match(/^\/internal\/route-to-daemon\/([^/]+)$/)) {
+      await this.rehydrateFromHibernatedSockets();
+      const match = url.pathname.match(/^\/internal\/route-to-daemon\/([^/]+)$/);
+      const daemonId = decodeURIComponent(match?.[1] || "");
+      const envelope = parseRelayEnvelope(await request.json());
+      const delivery = await this.registry.sendToDaemon(daemonId, envelope);
+      return json({ type: "ok", delivery });
+    }
+
     if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
       return new Response("Expected WebSocket", { status: 426 });
     }
-    this.rehydrateFromHibernatedSockets();
-    const route = parseDurableObjectWsRoute(new URL(request.url));
+    await this.rehydrateFromHibernatedSockets();
+    const route = parseDurableObjectWsRoute(url);
     if (!route) return new Response("Not found", { status: 404 });
 
     const pair = new WebSocketPair();
@@ -33,6 +51,7 @@ export class DaemonRendezvousDurableObject {
       daemonId: route.daemonId,
       clientId: route.clientId,
       connectionId,
+      epoch: 0,
     };
     server.serializeAttachment?.(attachment);
     this.state.acceptWebSocket(server);
@@ -41,18 +60,35 @@ export class DaemonRendezvousDurableObject {
   }
 
   async webSocketMessage(ws: WebSocket, message: ArrayBuffer | string): Promise<void> {
-    this.rehydrateFromHibernatedSockets();
+    await this.rehydrateFromHibernatedSockets();
     const attachment = socketAttachment(ws);
     if (!attachment) {
       ws.close(1011, "missing_session_attachment");
       return;
     }
-    const text = typeof message === "string" ? message : new TextDecoder().decode(message);
-    const envelope = parseRelayEnvelope(JSON.parse(text));
-    if (attachment.role === "daemon") {
-      await this.registry.broadcastToClients(attachment.daemonId, envelope);
-    } else {
-      await this.registry.sendToDaemon(attachment.daemonId, envelope);
+    let envelope: RelayEnvelope | null = null;
+    try {
+      const text = typeof message === "string" ? message : new TextDecoder().decode(message);
+      envelope = parseRelayEnvelope(JSON.parse(text));
+      if (attachment.role === "daemon") {
+        if (!await this.registry.isCurrentDaemonConnection(attachment.daemonId, attachment.connectionId, attachment.epoch)) {
+          ws.close(4001, "stale_daemon_connection");
+          return;
+        }
+        await this.registry.broadcastToClients(attachment.daemonId, envelope);
+      } else {
+        await this.registry.sendToDaemon(attachment.daemonId, envelope);
+      }
+    } catch (error) {
+      const err = makeErrorEnvelope({
+        daemon_id: attachment.daemonId || "relay",
+        source: { kind: "relay", id: "cloudflare-do" },
+        target: { kind: attachment.role === "daemon" ? "daemon" : "remote-client", id: attachment.role === "daemon" ? attachment.daemonId : attachment.clientId || attachment.connectionId },
+        code: "durable_object_message_error",
+        message: errorMessage(error),
+        ref_id: envelope?.id,
+      });
+      withSuppressedSend(ws, err);
     }
   }
 
@@ -65,10 +101,20 @@ export class DaemonRendezvousDurableObject {
     await this.webSocketClose(ws);
   }
 
+  async rehydrateHibernatedSocketsForTest(): Promise<void> {
+    await this.rehydrateFromHibernatedSockets();
+  }
+
+  snapshotForTest(daemonId: string) {
+    return this.registry.snapshot(daemonId);
+  }
+
   private async attachSocket(ws: WebSocket, attachment: DurableObjectSessionAttachment): Promise<void> {
     const socket = new CloudflareRelaySocket(attachment.connectionId, ws);
     if (attachment.role === "daemon") {
       const result = await this.registry.attachDaemon({ daemonId: attachment.daemonId, socket });
+      attachment.epoch = result.epoch;
+      ws.serializeAttachment?.(attachment);
       socket.sendControl("ready", result);
     } else {
       const result = await this.registry.attachClient({
@@ -76,17 +122,19 @@ export class DaemonRendezvousDurableObject {
         clientId: attachment.clientId,
         socket,
       });
+      attachment.epoch = result.epoch;
+      ws.serializeAttachment?.(attachment);
       socket.sendControl("ready", result);
     }
   }
 
-  private rehydrateFromHibernatedSockets(): void {
+  private async rehydrateFromHibernatedSockets(): Promise<void> {
     if (this.rehydrated) return;
     this.rehydrated = true;
     for (const ws of this.state.getWebSockets()) {
       const attachment = socketAttachment(ws);
       if (!attachment) continue;
-      void this.attachSocket(ws, attachment);
+      await this.attachSocket(ws, attachment);
     }
   }
 }
@@ -136,20 +184,17 @@ function socketAttachment(ws: WebSocket): DurableObjectSessionAttachment | null 
   return value;
 }
 
-function toJsonObject(value: Record<string, unknown>): JsonObject {
-  const output: JsonObject = {};
-  for (const [key, item] of Object.entries(value)) {
-    if (item === undefined) continue;
-    output[key] = toJsonValue(item);
+function withSuppressedSend(ws: WebSocket, envelope: RelayEnvelope): void {
+  try {
+    ws.send(JSON.stringify(envelope));
+  } catch {
+    // Best-effort protocol errors must not crash the Durable Object.
   }
-  return output;
 }
 
-function toJsonValue(value: unknown): JsonValue {
-  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    return value;
-  }
-  if (Array.isArray(value)) return value.map(toJsonValue);
-  if (value && typeof value === "object") return toJsonObject(value as Record<string, unknown>);
-  return String(value);
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json; charset=utf-8" },
+  });
 }

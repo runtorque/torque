@@ -3,7 +3,9 @@ import type {
   AttachClientArgs,
   AttachDaemonArgs,
   AttachResult,
+  RelayBroadcastResult,
   RelayCoordinator,
+  RelayDeliveryResult,
   RelaySocket,
   RendezvousSnapshot,
 } from "../../core/ports.js";
@@ -91,24 +93,42 @@ export class StandaloneRegistryCoordinator implements RelayCoordinator {
     }
   }
 
-  async sendToDaemon(daemonId: string, envelope: RelayEnvelope): Promise<boolean> {
+  isCurrentDaemonConnection(daemonId: string, connectionId: string, epoch?: number): boolean {
     const slot = this.daemonsById.get(String(daemonId || "").trim());
     if (!slot) return false;
-    await slot.socket.sendEnvelope(envelope);
+    if (slot.connectionId !== String(connectionId || "").trim()) return false;
+    if (epoch !== undefined && Number(epoch || 0) !== slot.epoch) return false;
     return true;
   }
 
-  async broadcastToClients(daemonId: string, envelope: RelayEnvelope): Promise<number> {
-    const ids = this.clientConnectionsByDaemonId.get(String(daemonId || "").trim());
-    if (!ids || ids.size === 0) return 0;
-    let sent = 0;
+  async sendToDaemon(daemonId: string, envelope: RelayEnvelope): Promise<RelayDeliveryResult> {
+    const slot = this.daemonsById.get(String(daemonId || "").trim());
+    if (!slot) {
+      return { delivered: false, reason: "daemon_offline", epoch: this.epochsByDaemonId.get(daemonId) || 0 };
+    }
+    await slot.socket.sendEnvelope(envelope);
+    return { delivered: true, connectionId: slot.connectionId, epoch: slot.epoch };
+  }
+
+  async broadcastToClients(daemonId: string, envelope: RelayEnvelope): Promise<RelayBroadcastResult> {
+    const id = String(daemonId || "").trim();
+    const ids = this.clientConnectionsByDaemonId.get(id);
+    if (!ids || ids.size === 0) {
+      return { delivered: 0, connectionIds: [], epoch: this.epochsByDaemonId.get(id) || 0, reason: "no_clients" };
+    }
+    const connectionIds: string[] = [];
     for (const connectionId of Array.from(ids)) {
       const client = this.clientsByConnectionId.get(connectionId);
       if (!client) continue;
       await client.socket.sendEnvelope(envelope);
-      sent += 1;
+      connectionIds.push(connectionId);
     }
-    return sent;
+    return {
+      delivered: connectionIds.length,
+      connectionIds,
+      epoch: this.epochsByDaemonId.get(id) || 0,
+      reason: connectionIds.length ? undefined : "no_clients",
+    };
   }
 
   snapshot(daemonId: string): RendezvousSnapshot {
