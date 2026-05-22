@@ -626,6 +626,90 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             self.assertNotIn('url = "http://127.0.0.1', installed)
             self.assertNotIn('env_http_headers = { "X-Torque-Cell-Id"', installed)
 
+    def test_codex_parse_stop_attaches_context_window_from_transcript(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "rollout.jsonl"
+            transcript.write_text(
+                "\n".join([
+                    "not-json",
+                    json.dumps({
+                        "type": "event_msg",
+                        "payload": {
+                            "type": "token_count",
+                            "info": {
+                                "total_token_usage": {"total_tokens": 1000},
+                                "last_token_usage": {
+                                    "input_tokens": 100,
+                                    "cached_input_tokens": 20,
+                                    "output_tokens": 10,
+                                    "reasoning_output_tokens": 5,
+                                    "total_tokens": 110,
+                                },
+                                "model_context_window": 1000,
+                            },
+                        },
+                    }),
+                    json.dumps({
+                        "type": "event_msg",
+                        "payload": {
+                            "type": "token_count",
+                            "info": {
+                                "total_token_usage": {"total_tokens": 1799981},
+                                "last_token_usage": {
+                                    "input_tokens": 147293,
+                                    "cached_input_tokens": 139648,
+                                    "output_tokens": 439,
+                                    "reasoning_output_tokens": 16,
+                                    "total_tokens": 147732,
+                                },
+                                "model_context_window": 258400,
+                            },
+                        },
+                    }),
+                ]) + "\n"
+            )
+
+            event = CodexAdapter().parse_event(
+                {
+                    "hook_event_name": "Stop",
+                    "session_id": "codex-session-1",
+                    "model": "gpt-5.4",
+                    "transcript_path": str(transcript),
+                    "last_assistant_message": "done",
+                },
+                SimpleNamespace(id="agent-1"),
+            )
+
+        self.assertIsNotNone(event)
+        self.assertEqual(event.event_type, "session_end")
+        context_window = event.data["context_window"]
+        self.assertEqual(context_window["source"], "codex_transcript")
+        self.assertEqual(context_window["model"], "gpt-5.4")
+        self.assertEqual(context_window["session_id"], "codex-session-1")
+        self.assertEqual(context_window["used_tokens"], 147732)
+        self.assertEqual(context_window["limit_tokens"], 258400)
+        self.assertEqual(context_window["input_tokens"], 147293)
+        self.assertEqual(context_window["output_tokens"], 439)
+        self.assertEqual(context_window["cached_input_tokens"], 139648)
+        self.assertEqual(context_window["reasoning_output_tokens"], 16)
+        self.assertEqual(context_window["session_total_tokens"], 1799981)
+        self.assertAlmostEqual(context_window["used_pct"], 57.17, places=2)
+
+    def test_codex_context_window_transcript_parse_is_defensive(self):
+        event = CodexAdapter().parse_event(
+            {
+                "hook_event_name": "SessionStart",
+                "session_id": "codex-session-1",
+                "model": "gpt-5.4",
+                "transcript_path": "/path/that/does/not/exist.jsonl",
+            },
+            SimpleNamespace(id="agent-1"),
+        )
+
+        self.assertIsNotNone(event)
+        self.assertEqual(event.event_type, "session_start")
+        self.assertNotIn("context_window", event.data)
+
     def test_generic_adapter_is_noop_for_template_specific_flags(self):
         adapter = GenericAdapter()
         self.assertEqual(adapter.inject_system_prompt("/tmp", "ignored"), "")

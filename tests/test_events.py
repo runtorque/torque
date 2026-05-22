@@ -438,6 +438,115 @@ asyncio.run(main())
         self.assertEqual(seen, ["agent-1"])
         self.assertEqual(event_log.get(cell.id)[0].event_type, "session_start")
 
+    async def test_context_window_updates_do_not_mutate_session_tokens(self):
+        state = self._make_state()
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            agent_type="codex",
+            session_tokens_in=7,
+            session_tokens_out=11,
+        )
+        state.agents[cell.id] = cell
+
+        event_log = self.events_mod.EventLog()
+        bus = self.events_mod.EventBus(state, event_log)
+
+        await bus.emit(
+            self.base_mod.AgentEvent(
+                cell_id=cell.id,
+                timestamp=123.0,
+                event_type="session_start",
+                data={
+                    "session_id": "provider-session-1",
+                    "context_window": {
+                        "source": "codex_transcript",
+                        "model": "gpt-5.4",
+                        "session_id": "provider-session-1",
+                        "used_tokens": "50",
+                        "limit_tokens": "200",
+                    },
+                },
+            )
+        )
+        self.assertEqual(cell.context_window["used_tokens"], 50)
+        self.assertEqual(cell.context_window["limit_tokens"], 200)
+        self.assertEqual(cell.context_window["used_pct"], 25.0)
+        self.assertEqual(cell.context_window["updated_at"], 123.0)
+
+        await bus.emit(
+            self.base_mod.AgentEvent(
+                cell_id=cell.id,
+                timestamp=124.0,
+                event_type="context_update",
+                data={
+                    "context_window": {
+                        "source": "codex_transcript",
+                        "model": "gpt-5.4",
+                        "session_id": "provider-session-1",
+                        "used_tokens": 147732,
+                        "limit_tokens": 258400,
+                        "input_tokens": 147293,
+                        "output_tokens": 439,
+                        "cached_input_tokens": 139648,
+                        "reasoning_output_tokens": 16,
+                        "session_total_tokens": 1799981,
+                    },
+                },
+            )
+        )
+
+        self.assertEqual(cell.context_window["used_tokens"], 147732)
+        self.assertEqual(cell.context_window["limit_tokens"], 258400)
+        self.assertAlmostEqual(cell.context_window["used_pct"], 57.17, places=2)
+        self.assertEqual(cell.context_window["input_tokens"], 147293)
+        self.assertEqual(cell.context_window["output_tokens"], 439)
+        self.assertEqual(cell.context_window["cached_input_tokens"], 139648)
+        self.assertEqual(cell.context_window["reasoning_output_tokens"], 16)
+        self.assertEqual(cell.context_window["session_total_tokens"], 1799981)
+        self.assertEqual(cell.last_event_text, "Context usage updated")
+        self.assertEqual(cell.session_tokens_in, 7)
+        self.assertEqual(cell.session_tokens_out, 11)
+        self.assertEqual(
+            [event.event_type for event in event_log.get(cell.id)],
+            ["session_start", "context_update"],
+        )
+
+    async def test_session_end_applies_context_window_update(self):
+        state = self._make_state()
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            agent_type="codex",
+            status="running",
+        )
+        state.agents[cell.id] = cell
+
+        bus = self.events_mod.EventBus(state, self.events_mod.EventLog())
+        await bus.emit(
+            self.base_mod.AgentEvent(
+                cell_id=cell.id,
+                timestamp=125.0,
+                event_type="session_end",
+                data={
+                    "summary": "done",
+                    "context_window": {
+                        "source": "codex_transcript",
+                        "used_tokens": 9,
+                        "limit_tokens": 10,
+                    },
+                },
+            )
+        )
+
+        self.assertEqual(cell.status, "idle")
+        self.assertEqual(cell.last_summary, "done")
+        self.assertEqual(cell.context_window["used_pct"], 90.0)
+
     def test_worker_boot_doa_escalates_when_worker_posts_no_activity(self):
         state = self._make_state()
         cell = self.state_mod.AgentCell(
