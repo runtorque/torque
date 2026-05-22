@@ -471,6 +471,7 @@ class TorqueDBTests(unittest.TestCase):
             "recipient_name": "Worker One",
             "message": "Please check status.",
             "message_type": "message",
+            "thread_id": "caller-supplied-thread-is-normalized",
             "created_at": 10.0,
             "blocking": False,
             "delivery_state": "buffered",

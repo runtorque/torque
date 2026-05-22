@@ -224,9 +224,9 @@ def canonical_user_agent_thread_id(agent_id: str, *, user_id: str = "user") -> s
     """Return the canonical V1 thread id for one user↔agent lane.
 
     The V1 direct-message panel renders one conversation per viewed agent.
-    Rows involving the synthetic user participant and no explicit thread id
-    are therefore grouped under this stable thread id.  Agent↔agent peer
-    messages keep their existing caller-supplied/default message-id threads.
+    Rows involving the synthetic user participant are therefore grouped under
+    this stable thread id.  Agent↔agent peer messages keep their existing
+    caller-supplied/default message-id threads.
     """
     aid = str(agent_id or "").strip()
     uid = str(user_id or "user").strip() or "user"
@@ -274,9 +274,8 @@ def _normalize_agent_peer_message_record(record: dict) -> dict:
     ).strip()
     if delivery_state not in _AGENT_PEER_MESSAGE_DELIVERY_STATES:
         delivery_state = "buffered"
-    thread_id = str(source.get("thread_id", "") or "").strip()
-    if not thread_id:
-        thread_id = _direct_message_thread_id_for_participants(source)
+    direct_thread_id = _direct_message_thread_id_for_participants(source)
+    thread_id = direct_thread_id or str(source.get("thread_id", "") or "").strip()
     if not thread_id:
         thread_id = message_id
     group_name = str(
